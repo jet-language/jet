@@ -1,5 +1,5 @@
-// Source/ReceiptStore.rs: comparison claims use the exact framed invocation
-// context and canonical target closure. Terminal bits are host facts, not color.
+// Comparison claims use the exact framed invocation context and canonical target
+// closure. Terminal bits are host facts, not color.
 use {
     jet_foundation.[foundation_json_quote]
     jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
@@ -124,7 +124,7 @@ fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]
             next
         }
         jet_cli_receipt_frame(&tools, path.bytes())
-        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error("JET_COMPILER_IDENTITY is unset, so this compiler has no identity")) else -> {
+        digest :: if name == "jet" -> jet_cli_compiler_identity() ?? return Err(jet_cli_read_error(jet_cli_identity_missing().what)) else -> {
             if cli_files.read_bytes(path) == {
                 .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
                 .Err(_) -> "unreadable"
@@ -191,7 +191,8 @@ fn jet_cli_receipt_generated_paths(path: String, strict: Bool, paths: &[String])
 fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] JetCLIReadError! {
     absolute :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize input {target}: {jet_cli_io_error_text(err)}"))
     if !jet_cli_receipt_regular(target) -> return Err(jet_cli_read_error("receipt input is not a regular file: {target}"))
-    directory :: AuthorityResolver.authority_walk_root(absolute) ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
+    // The authority walk starts at the corpus file's directory, not the file.
+    directory :: AuthorityResolver.authority_walk_root(jet_cli_parent(absolute) ?? "/") ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
     paths := [String]{absolute}
     loop root in jet_cli_receipt_authority_roots(&cache, directory) {
         loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
@@ -240,14 +241,23 @@ fn jet_cli_receipt_canonical_member(input: JetCLIReceiptInput, cwd: String, memb
     &members.push(JetCLIReceiptInput{path: path, digest: input.digest})
 }
 
+// `members` are the hashed inputs in canonical order: cwd-relative paths with
+// their SHA-256 digests (the rows `input_sha256` covers).
 struct JetCLICanonicalTargetIdentity {
     input_sha256: String
     authority_root: String
+    members: [JetCLIReceiptInput]
 }
 fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity JetCLIReadError! {
     target_info :: cli_files.stat(target) ?? return Err(jet_cli_read_error("couldn't inspect canonical target `{target}`: {jet_cli_io_error_text(err)}"))
     if target_info.is_symlink -> return Err(jet_cli_read_error("canonical target `{target}` must not be a symlink"))
-    start :: AuthorityResolver.authority_walk_root(target) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
+    // The authority walk takes a directory: a file target (a comparison
+    // corpus) starts at the directory that holds it.
+    directory :: if target_info.is_dir -> target else -> {
+        absolute :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize canonical target `{target}`: {jet_cli_io_error_text(err)}"))
+        jet_cli_parent(absolute) ?? "/"
+    }
+    start :: AuthorityResolver.authority_walk_root(directory) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
     roots := [String]{}
     if jet_cli_find_workspace_root_checked(&cache, start) == {
         .Ok(found) -> { if found == .Val(root) -> &roots.push(root) }
@@ -283,5 +293,5 @@ fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: St
     &members.sort_by((left: JetCLIReceiptInput, right: JetCLIReceiptInput) -> left.path <=> right.path)
     text := ""
     loop member in members -> text = "{text}{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}\n"
-    Ok(JetCLICanonicalTargetIdentity{input_sha256: receipt_crypto.sha256(text.bytes()).hex(), authority_root: authority_root})
+    Ok(JetCLICanonicalTargetIdentity{input_sha256: receipt_crypto.sha256(text.bytes()).hex(), authority_root: authority_root, members: members})
 }

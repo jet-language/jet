@@ -1,7 +1,7 @@
 // Per-thread test state uses the scheduler's ONE dynamic TLS mechanism.
-// State136: print0, printFrames8, expect32, completed56, unmet80, timeouts88,
-// wholeSkip112, failureMessage120/failureDetail128. Lists are native word
-// headers; capture frames are [kind=1, previous owned E4 builder].
+// State144: print0, printFrames8, expect32, completed56, unmet80, timeouts88,
+// wholeSkip112, failureMessage120/failureDetail128, assertionStop136. Lists
+// are native word headers; capture frames are [kind=1, previous owned E4 builder].
 // Begin/take nesting preserves the outer builder without copying its bytes.
 // Thread detach invokes the registered destructor, including on cancellation.
 
@@ -45,8 +45,8 @@ fn test_state_ensure() -> I64 {
     jet_rt_test_capture_init()
     state := test_capture_state()
     if (state == I64{0}) {
-        state = jet_rt_alloc(I64{136}, I64{8})
-        thread_zero(state, I64{136})
+        state = jet_rt_alloc(I64{144}, I64{8})
+        thread_zero(state, I64{144})
         jet_rt_tls_set(test_stack_key, state)
     }
     state
@@ -71,7 +71,36 @@ fn test_capture_state_drop(state: I64) {
         jet_rt_free(trap_word(wrapping(stack + I64{16})), capacity * I64{8}, I64{8})
     }
     test_scope_state_drop(state)
-    jet_rt_free(state, I64{136}, I64{8})
+    jet_rt_free(state, I64{144}, I64{8})
+}
+
+// assertionStop136 tells the test harness whether the stop a test's root took
+// is a failed `assert`/`assert_eq`, a caught test failure, or an uncaught
+// runtime stop (panic, bounds, contract, sentry). Trap.jet trap_require_stop
+// marks an assertion 1 as it renders. Every stop record then settles the mark
+// (Scheduler.jet scheduler_stop_new): a rendered report under a pending mark
+// makes it 2, any other stop clears it. So only the assertion's own record
+// leaves 2. A thread with no test state has nothing to mark.
+fn test_stop_assertion_mark() {
+    state :: test_capture_state()
+    if (state != I64{0}) -> trap_store(wrapping(state + I64{136}), I64{1})
+}
+
+fn test_stop_assertion_settle(rendered: Bool) {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    cell :: wrapping(state + I64{136})
+    trap_store(cell, if (rendered && trap_word(cell) == I64{1}) -> I64{2} else -> I64{0})
+}
+
+// True when the last stop record was an assertion's report; clears the mark.
+fn test_stop_assertion_take() -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return false
+    cell :: wrapping(state + I64{136})
+    marked :: trap_word(cell) == I64{2}
+    trap_store(cell, I64{0})
+    marked
 }
 
 #Export(c) fn jet_rt_test_capture_take() -> I64 {

@@ -1,4 +1,4 @@
-// Link the real Jet runtime object with -Wl,--wrap=jet_rt_free.
+// Link the real Jet runtime object.
 // Define DATA_EVENT_U8_STRIDE for the runtime's single U8 epoch (packed = 1).
 #include <assert.h>
 #include <stdbool.h>
@@ -17,7 +17,7 @@ _Static_assert(sizeof(Event) == 16 && offsetof(Event, payload) == 8, "DataEvent 
 _Static_assert(sizeof(Sequence) == 24 && offsetof(Sequence, data) == 16, "native List");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern void jet_panic(Text *, int64_t, Text *);
@@ -51,13 +51,14 @@ extern Text *jet_rt_record_get_data_event_key(Event *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[32];
 static size_t watched_count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t size, int64_t align) {
     ++intercepted;
     for (size_t i = 0; i < watched_count; ++i) if (watched[i].pointer == pointer) {
         assert(size == watched[i].size && align == watched[i].align);
         assert(++watched[i].frees == 1);
     }
-    __real_jet_rt_free(pointer, size, align);
 }
 static void watch(void *pointer, int64_t size, int64_t align) {
     assert(watched_count < sizeof(watched) / sizeof(watched[0]));
@@ -81,7 +82,7 @@ static void drop_pair(Event *a, Event *b) {
     watched_count = 0; watch_event(a); watch_event(b);
     unsigned before = intercepted;
     jet_rt_handle_drop_data_event(a); jet_rt_handle_drop_data_event(b);
-    assert(intercepted > before); // A missing --wrap cannot silently pass.
+    assert(intercepted > before); // A missing observer cannot silently pass.
     for (size_t i = 0; i < watched_count; ++i) assert(watched[i].frees == 1);
     watched_count = 0;
 }
@@ -164,6 +165,7 @@ static void bytes_cases(void) {
     assert(!jet_rt_handle_eq_data_event(a,b)); drop_pair(a,b);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if (argc > 1 && strcmp(argv[1],"panic-reference") == 0) {
         const char file[] = "<core.prelude>", message[] = "record variant index out of range";

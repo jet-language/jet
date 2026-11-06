@@ -49,12 +49,15 @@ Compiler/JetFoundation/Source/Registry/CorePlatformSignatures.jet
 Compiler/JetFoundation/Source/Registry/CoreValueSignatures.jet
 Compiler/JetFoundation/Source/Registry/CoreSignatures.jet
 Compiler/JetFoundation/Source/Registry/WebCoreSignatures.jet
+Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet
+Compiler/JetFoundation/Source/Registry/OwnedTraits.jet
 Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
 Compiler/JetFoundation/Source/Policy/Policy.jet
 Compiler/JetFoundation/Source/Policy/LintPolicy.jet
 Compiler/JetFoundation/Source/Policy/PreludeMarkers.jet
 Compiler/JetFoundation/Source/Policy/MarkerSource.jet
+Compiler/JetFoundation/Source/Policy/Gates.jet
 Compiler/JetFoundation/Source/Evidence/Evidence.jet
 Compiler/JetFoundation/Source/Evidence/TestingComparison.jet
 Compiler/JetFoundation/Source/AST/Expressions.jet
@@ -65,8 +68,10 @@ Compiler/JetFoundation/Source/AST/Items.jet
 Compiler/JetFoundation/Source/AST/Comptime.jet
 Compiler/JetParser/Source/Parser/State.jet
 Compiler/JetParser/Source/Parser/Types.jet
+Compiler/JetParser/Source/Parser/Declarations/Effects.jet
 Compiler/JetParser/Source/Parser/Declarations/Foreign.jet
 Compiler/JetParser/Source/Parser/Declarations/ItemHeads.jet
+Compiler/JetParser/Source/Parser/Declarations/InBodyMarkers.jet
 Compiler/JetParser/Source/Parser/Declarations/Markers.jet
 Compiler/JetParser/Source/Parser/Declarations/Modules.jet
 Compiler/JetParser/Source/Parser/Declarations/Protocols.jet
@@ -81,6 +86,7 @@ Compiler/JetParser/Source/Parser/Items.jet
 Compiler/JetParser/Source/Parser/Entry.jet
 Compiler/JetParser/Source/Parser/ConfigProgram.jet
 Compiler/JetParser/Source/Parser/FencedNames.jet
+Compiler/JetParser/Source/Parser/ColonDeclarations.jet
 Compiler/JetParser/Source/Parser/ExpressionForms/DecisionTables.jet
 Compiler/JetParser/Source/Parser/ExpressionForms/ResultHandlers.jet
 Compiler/JetParser/Source/Parser/ExpressionForms/Loops.jet
@@ -106,7 +112,9 @@ Compiler/JetFoundation/Source/Names/Casing.jet
 Compiler/JetFoundation/Source/Facts/Body.jet
 Compiler/JetFoundation/Source/Outcome/ErrorReport.jet
 Compiler/JetFoundation/Source/Registry/BuildOptions.jet
+Compiler/JetFoundation/Source/Registry/TestSettings.jet
 Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet
+Compiler/JetFoundation/Source/Registry/RegistrationFacts.jet
 Compiler/JetFoundation/Source/Threads.jet
 Compiler/JetParser/Source/Formatter/Expressions.jet
 Compiler/JetParser/Source/Formatter/Formatter.jet
@@ -140,7 +148,6 @@ Jetpack/PackageModel/Source/Text/JsonTree.jet
 Jetpack/PackageModel/Source/Text/JsonBounded.jet
 Jetpack/PackageModel/Source/Platform/Platform.jet
 Jetpack/PackageModel/Source/Refs/RefSpec.jet
-Jetpack/PackageModel/Source/Refs/RefMigration.jet
 Jetpack/PackageModel/Source/Merge/FactLaw.jet
 Jetpack/PackageModel/Source/Merge/Merge.jet
 Jetpack/PackageModel/Source/Workspace/OverlayScan.jet
@@ -194,6 +201,7 @@ Jetpack/PackageModel/Source/Manifest/Blocks/Dependencies.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/Boundaries.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/Targets.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/BuildProfiles.jet
+Jetpack/PackageModel/Source/Manifest/Blocks/TestProfiles.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/Authority.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/Policy.jet
 Jetpack/PackageModel/Source/Policy/GatePolicy.jet
@@ -257,6 +265,7 @@ Jetpack/Publication/Source/Policy.jet
 Jetpack/Publication/Source/Registry/Metadata.jet
 Jetpack/Publication/Source/Registry/Verify.jet
 Jetpack/Publication/Source/Registry/Artifact.jet
+Jetpack/Publication/Source/Registry/Checkout.jet
 
 # == EnvModel ==
 Jetpack/EnvModel/Source/Environment/FactReaders.jet
@@ -267,6 +276,8 @@ Jetpack/EnvModel/Source/Environment/Presets.jet
 Jetpack/EnvModel/Source/Environment/PackageProfiles.jet
 Jetpack/EnvModel/Source/Environment/LanguagePacks.jet
 Jetpack/EnvModel/Source/Environment/Lifecycle.jet
+Jetpack/EnvModel/Source/Environment/DefinitionFingerprint.jet
+Jetpack/EnvModel/Source/Environment/EnvDirectiveScan.jet
 Jetpack/EnvModel/Source/Workspace/WorkspaceFile.jet
 Jetpack/EnvModel/Source/ModuleEval/Diagnostics.jet
 Jetpack/EnvModel/Source/ModuleEval/CompilerService.jet
@@ -327,8 +338,49 @@ Jetpack/TrustRoot/Source/Metadata.jet
 Jetpack/TrustRoot/Source/Canonical.jet
 Jetpack/TrustRoot/Source/TrustEngine.jet
 
-# == Engine (folders: Store, Trust, Provider, Environment, Recipe) ==
-# Store, Trust, Recipe, Provider and Environment use each other in a cycle; one area until #4589 breaks it.
+# == Trust ==
+Jetpack/Trust/Source/Text/TrustText.jet
+Jetpack/Trust/Source/SemanticLock/LockRecord.jet
+Jetpack/Trust/Source/SemanticLock/LockCodec.jet
+Jetpack/Trust/Source/SemanticLock/LockMerge.jet
+Jetpack/Trust/Source/SemanticLock/LockValidation.jet
+Jetpack/Trust/Source/SemanticLock/OverlayInvalidation.jet
+Jetpack/Trust/Source/SemanticLock/FlakeModel.jet
+Jetpack/Trust/Source/SemanticLock/FlakeScan.jet
+Jetpack/Trust/Source/SemanticLock/FlakeLock.jet
+Jetpack/Trust/Source/SemanticLock/FlakeGraph.jet
+Jetpack/Trust/Source/SemanticLock/LockStore.jet
+Jetpack/Trust/Source/Gate/TrustStore.jet
+Jetpack/Trust/Source/Gate/TrustCommandText.jet
+Jetpack/Trust/Source/Gate/EnvironmentHash.jet
+Jetpack/Trust/Source/Gate/TrustGate.jet
+Jetpack/Trust/Source/Pin/PinRead.jet
+Jetpack/Trust/Source/Pin/JetPin.jet
+Jetpack/Trust/Source/TrustError.jet
+
+# == Environment ==
+Jetpack/Environment/Source/EnvironmentError.jet
+Jetpack/Environment/Source/Shell/BrandedShell.jet
+Jetpack/Environment/Source/Shell/ShellPath.jet
+Jetpack/Environment/Source/Activation/ShellHook.jet
+Jetpack/Environment/Source/Activation/DefinitionFingerprint.jet
+Jetpack/Environment/Source/EnvFile/EnvDirectives.jet
+Jetpack/Environment/Source/ManagedFiles/FileSync.jet
+Jetpack/Environment/Source/RuntimePolicy/VerbPolicy.jet
+Jetpack/Environment/Source/RuntimePolicy/SandboxStatus.jet
+Jetpack/Environment/Source/Locks/ScriptLock.jet
+Jetpack/Environment/Source/Locks/BrowserLock.jet
+Jetpack/Environment/Source/Components/ComponentKit.jet
+Jetpack/Environment/Source/Workspace/MemberSelect.jet
+Jetpack/Environment/Source/Workspace/WorkspaceLockWrite.jet
+Jetpack/Environment/Source/Overlay/OverlayPatch.jet
+Jetpack/Environment/Source/Overlay/OverlayLockRecords.jet
+Jetpack/Environment/Source/Transition/PackageSourceEdit.jet
+Jetpack/Environment/Source/Transition/TransitionJournal.jet
+Jetpack/Environment/Source/Transition/TransitionPlan.jet
+
+# == Engine (folders: Store, Provider, Recipe) ==
+# Store, Recipe and Provider use each other in a cycle; one area until #4589 breaks it.
 Jetpack/Store/Source/Hangar/StoreError.jet
 Jetpack/Store/Source/Hangar/StoreText.jet
 Jetpack/Store/Source/Lease/ExecutableLeaseProtocol.jet
@@ -369,7 +421,6 @@ Jetpack/Store/Source/Lifecycle/RootModel.jet
 Jetpack/Store/Source/Lifecycle/RootWireFormat.jet
 Jetpack/Store/Source/Lifecycle/RootJournal.jet
 Jetpack/Store/Source/Lifecycle/ExternalRoots.jet
-Jetpack/Store/Source/Lifecycle/LegacyHangarMigration.jet
 Jetpack/Store/Source/Lifecycle/Quarantine.jet
 Jetpack/Store/Source/Lifecycle/GarbageCollection.jet
 Jetpack/Store/Source/Lifecycle/HangarOptimize.jet
@@ -399,25 +450,6 @@ Jetpack/Store/Source/Explain/PackageExplain.jet
 Jetpack/Store/Source/Explain/ExplainProfiles.jet
 Jetpack/Store/Source/Explain/PackageWhy.jet
 Jetpack/Store/Source/ArtifactStore/NativeRuntimePack.jet
-
-Jetpack/Trust/Source/Text/TrustText.jet
-Jetpack/Trust/Source/SemanticLock/LockRecord.jet
-Jetpack/Trust/Source/SemanticLock/LockCodec.jet
-Jetpack/Trust/Source/SemanticLock/LockMerge.jet
-Jetpack/Trust/Source/SemanticLock/LockValidation.jet
-Jetpack/Trust/Source/SemanticLock/OverlayInvalidation.jet
-Jetpack/Trust/Source/SemanticLock/FlakeModel.jet
-Jetpack/Trust/Source/SemanticLock/FlakeScan.jet
-Jetpack/Trust/Source/SemanticLock/FlakeLock.jet
-Jetpack/Trust/Source/SemanticLock/FlakeGraph.jet
-Jetpack/Trust/Source/SemanticLock/LockStore.jet
-Jetpack/Trust/Source/Gate/TrustStore.jet
-Jetpack/Trust/Source/Gate/TrustCommandText.jet
-Jetpack/Trust/Source/Gate/EnvironmentHash.jet
-Jetpack/Trust/Source/Gate/TrustGate.jet
-Jetpack/Trust/Source/Pin/PinRead.jet
-Jetpack/Trust/Source/Pin/JetPin.jet
-Jetpack/Trust/Source/TrustError.jet
 
 Jetpack/Provider/Source/Core/Realized.jet
 Jetpack/Provider/Source/Core/HardenedCommands.jet
@@ -455,6 +487,7 @@ Jetpack/Provider/Source/Federation/ProviderDocument.jet
 Jetpack/Provider/Source/Toolchain/CcToolchainDescriptor.jet
 Jetpack/Provider/Source/Toolchain/CcToolchainHangar.jet
 Jetpack/Provider/Source/Toolchain/CcToolchainAcquisition.jet
+Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet
 Jetpack/Provider/Source/Registries/RegistryFetch.jet
 Jetpack/Provider/Source/Registries/CranProvider.jet
 Jetpack/Provider/Source/Registries/LuaRocksProvider.jet
@@ -469,26 +502,8 @@ Jetpack/Provider/Source/PackageFetch/Registry.jet
 Jetpack/Provider/Source/PackageFetch/Git.jet
 Jetpack/Provider/Source/PackageFetch/Fetch.jet
 
-Jetpack/Environment/Source/EnvironmentError.jet
-Jetpack/Environment/Source/Shell/BrandedShell.jet
-Jetpack/Environment/Source/Shell/NixProjection.jet
-Jetpack/Environment/Source/Shell/ShellEnv.jet
-Jetpack/Environment/Source/Activation/ShellHook.jet
-Jetpack/Environment/Source/Activation/DefinitionFingerprint.jet
-Jetpack/Environment/Source/EnvFile/EnvDirectives.jet
-Jetpack/Environment/Source/ManagedFiles/FileSync.jet
-Jetpack/Environment/Source/RuntimePolicy/VerbPolicy.jet
-Jetpack/Environment/Source/RuntimePolicy/SandboxStatus.jet
-Jetpack/Environment/Source/Locks/ScriptLock.jet
-Jetpack/Environment/Source/Locks/BrowserLock.jet
-Jetpack/Environment/Source/Components/ComponentKit.jet
-Jetpack/Environment/Source/Workspace/MemberSelect.jet
-Jetpack/Environment/Source/Workspace/WorkspaceLockWrite.jet
-Jetpack/Environment/Source/Overlay/OverlayPatch.jet
-Jetpack/Environment/Source/Overlay/OverlayLockRecords.jet
-Jetpack/Environment/Source/Transition/PackageSourceEdit.jet
-Jetpack/Environment/Source/Transition/TransitionJournal.jet
-Jetpack/Environment/Source/Transition/TransitionPlan.jet
+Jetpack/Store/Source/Shell/NixProjection.jet
+Jetpack/Store/Source/Shell/ShellEnv.jet
 Jetpack/Recipe/Source/Build/RecipeDiagnostics.jet
 Jetpack/Recipe/Source/Build/ConfinedFs.jet
 Jetpack/Recipe/Source/Build/Fetch.jet
@@ -592,6 +607,7 @@ Jetpack/CLI/Source/Commands/ImageCommand.jet
 Jetpack/CLI/Source/Commands/UpdateCommand.jet
 Jetpack/CLI/Source/Commands/DiscoveryCommands.jet
 Jetpack/CLI/Source/Commands/ExplainCommand.jet
+Jetpack/CLI/Source/Commands/TransitionCommand.jet
 Jetpack/CLI/Source/Dispatch/VerbDispatch.jet
 Jetpack/CLI/Source/Build/BuildTypes.jet
 Jetpack/CLI/Source/Build/Model.jet
@@ -605,6 +621,7 @@ Jetpack/CLI/Source/Build/Executor.jet
 Jetpack/CLI/Source/Hosts/BuildPluginPackage.jet
 Jetpack/CLI/Source/Hosts/BuildPluginHost.jet
 Jetpack/CLI/Source/Hosts/CompilerExtensionHost.jet
+Jetpack/CLI/Source/Hosts/PackageDependencyHost.jet
 Jetpack/CLI/Source/Entry/Run.jet
 Jetpack/CLI/Source/Entry/Main.jet
 Jetpack/CLI/Source/Realize/ChannelResolution.jet

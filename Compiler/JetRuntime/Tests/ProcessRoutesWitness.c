@@ -39,16 +39,26 @@ static void adapters(void){
  assert(s->wire==wire);equal(s->wire,"policy");
  int fd=open("/tmp",O_RDONLY|O_DIRECTORY|O_CLOEXEC);assert(fd>=0);
  struct { unsigned char before; bool value; unsigned char after; } supported={0x5a,false,0xa5};
+ // The route consumes the spec it is given (a clone of s, as the compiler
+ // passes a spec another holder keeps) and returns it with the new row.
+ Spec *given=jet_rt_handle_clone_process_spec(s);
  Spec *attached=NULL;int64_t assigned=-2,error=-3;
- jet_process_spec_with_directory_raw(s,fd,100,true,&attached,&supported.value,&assigned,&error);
+ jet_process_spec_with_directory_raw(given,fd,100,true,&attached,&supported.value,&assigned,&error);
  assert(supported.before==0x5a&&supported.after==0xa5&&supported.value&&error==0&&assigned>=100);
- assert(!s->directories&&attached->directories->len==1);
+ assert(attached==given&&!s->directories&&attached->directories->len==1);
  Directory *row=attached->directories->data;assert(row->owner&&row->child==100&&row->as_cwd==1);
  assert(fcntl((int)assigned,F_GETFD)&FD_CLOEXEC);
- Spec *clone=jet_rt_handle_clone_process_spec(attached);assert(jet_rt_handle_eq_process_spec(attached,clone));
- jet_rt_handle_drop_process_spec(attached);assert(fcntl((int)assigned,F_GETFD)>=0);
- jet_rt_handle_drop_process_spec(clone);errno=0;assert(fcntl((int)assigned,F_GETFD)==-1&&errno==EBADF);
- Spec *failed=NULL;jet_process_spec_with_directory_raw(s,-1,100,false,&failed,&supported.value,&assigned,&error);
+ // A second pass moves the first row into the returned spec: each passed
+ // descriptor keeps one owner and closes once.
+ Spec *chained=NULL;int64_t second=-2;
+ jet_process_spec_with_directory_raw(attached,fd,101,false,&chained,&supported.value,&second,&error);
+ assert(chained==attached&&error==0&&second>=101&&chained->directories->len==2);
+ Spec *clone=jet_rt_handle_clone_process_spec(chained);assert(jet_rt_handle_eq_process_spec(chained,clone));
+ jet_rt_handle_drop_process_spec(chained);assert(fcntl((int)assigned,F_GETFD)>=0&&fcntl((int)second,F_GETFD)>=0);
+ jet_rt_handle_drop_process_spec(clone);
+ errno=0;assert(fcntl((int)assigned,F_GETFD)==-1&&errno==EBADF);
+ errno=0;assert(fcntl((int)second,F_GETFD)==-1&&errno==EBADF);
+ Spec *failed=NULL;jet_process_spec_with_directory_raw(jet_rt_handle_clone_process_spec(s),-1,100,false,&failed,&supported.value,&assigned,&error);
  assert(supported.value&&assigned==-1&&error==EBADF&&!failed->directories&&jet_rt_handle_eq_process_spec(s,failed));
  jet_rt_handle_drop_process_spec(failed);jet_rt_handle_drop_process_spec(s);close(fd);
  jet_rt_string_drop(arg);jet_rt_string_drop(name);jet_rt_string_drop(ignored);jet_rt_string_drop(value);jet_rt_string_drop(wire);

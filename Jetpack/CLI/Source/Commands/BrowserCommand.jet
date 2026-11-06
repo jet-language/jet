@@ -47,7 +47,7 @@ fn cli_browser_project_root() -[FS, Env]> String Never! {
 fn cli_browser_flag_value(parsed: CLIParsed, name: String) -> String? Never! {
     parsed_value :: if name == {
         BROWSER_FLAG_BINARY -> parsed.flags.browser_binary
-        BROWSER_FLAG_VERSION -> parsed.flags.browser_version
+        BROWSER_FLAG_VERSION -> parsed.flags.version
         BROWSER_FLAG_PROTOCOL -> parsed.flags.browser_protocol
         else -> None
     }
@@ -88,7 +88,7 @@ fn cli_browser_lock(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Time, 
 
 fn cli_browser_provision(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(1) ?? {
-        theme.error("`jetpack browser provision` needs a package ref", "provision realizes one browser package and locks its binary into `.jet/lock`.", "try `jetpack browser provision chromium@nixpkgs`.")
+        theme.error("`jetpack browser provision` needs a package ref", "provision realizes one browser package and locks its binary into `.jet/lock`.", "try `jetpack browser provision chromium@jetpack`.")
         return EXIT_USAGE
     }
     spec :: cli_classify_or_report(&cache, theme, raw) ?? return EXIT_USAGE
@@ -118,10 +118,13 @@ fn cli_browser_provision(verification: &StoreVerification, cache: &WorkspaceDecl
         theme.error("`{spec.raw}` realized with no output to lock", "browser provision needs a package output that contains an engine binary.", "pick chromium, firefox, or webkit from a realizable source.")
         return EXIT_USAGE
     }
-    output :: lease.stable_path(lease.original_output()) ?? {
+    // The lock pins a durable binary for later processes, so it names the
+    // sealed output itself once the lease revalidates it.
+    lease.validate() ?? {
         store_report_integrity(theme, lease.consumption_failure(err))
         return EXIT_USAGE
     }
+    output :: lease.original_output()
     binary :: env_browser_find_engine_binary(output, engine) ?? {
         theme.error("could not find the browser binary in the realized package", err.message(), "the package must ship an executable under bin/.")
         return EXIT_USAGE

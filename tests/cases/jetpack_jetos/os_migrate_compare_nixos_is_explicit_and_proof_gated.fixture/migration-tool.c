@@ -77,10 +77,10 @@ static int run_qemu(int argc, char **argv) {
     const char *collision = getenv("JET_TEST_COLLIDE_PUBLISH");
     if (collision) {
         char path[PATH_MAX];
-        snprintf(path, sizeof(path), "%s/.nixos-comparison-publish-halcyon-gnome-%d", collision, getppid());
+        snprintf(path, sizeof(path), "%s/.nixos-comparison-publish-devhost-gnome-%d", collision, getppid());
         mkdir(path, 0700);
     }
-    write_file(serial, "NIXOS_COMPARISON_PROOF:{\"host\":\"halcyon-gnome\",\"os_release\":\"NixOS\",\"prompt\":\"NixOS comparison $ \",\"banner\":\"NixOS comparison guest\",\"proof\":\"live-desktop\"}\n");
+    write_file(serial, "NIXOS_COMPARISON_PROOF:{\"host\":\"devhost-gnome\",\"os_release\":\"NixOS\",\"prompt\":\"NixOS comparison $ \",\"banner\":\"NixOS comparison guest\",\"proof\":\"live-desktop\"}\n");
 
     int client = accept(server, NULL, NULL);
     FILE *stream = fdopen(client, "r+");

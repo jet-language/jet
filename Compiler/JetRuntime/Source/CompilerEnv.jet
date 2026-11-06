@@ -1,8 +1,8 @@
-// FSIoEnvOsTesting.rs:840-875 / EnvInit.rs:38-65 are the frozen policy:
-// flatten name,value in stored order, preserve OS encoded bytes, never sort or
-// decode Unicode. Lower/Routes.jet:706-749 requires compact nested List<U8>:
-// every header is [len,cap,data], inner stride 1 and outer stride 24. Each
-// result owns independent buffers (including when the logical table changes).
+// The Rust originals are the frozen policy: flatten name,value in stored order,
+// preserve OS encoded bytes, never sort or decode Unicode.
+// Lower/Routes.jet:706-749 requires compact nested List<U8>: every header is
+// [len,cap,data], inner stride 1 and outer stride 24. Each result owns
+// independent buffers (including when the logical table changes).
 fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
     length :: pairs * I64{2}
     data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{24}, I64{8})
@@ -13,6 +13,7 @@ fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_logical_env_columns(output: I64) {
+    rt_test_reads_text(I64{65}, I64{0})
     jet_rt_logical_env_seed()
     shared_acquire(logical_env_root, false)
     pairs := I64{0}
@@ -34,6 +35,7 @@ fn compiler_env_columns_storage(pairs: I64, output: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_startup_env_columns(output: I64) {
+    rt_test_reads_text(I64{65}, I64{0})
     host_environment_require()
     data :: compiler_env_columns_storage(host_env_length, output)
     at := I64{0}

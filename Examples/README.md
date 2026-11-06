@@ -34,6 +34,16 @@ An example that binds a fixed TCP port declares `host-port: N` in its `.case`;
 both runners hold that port's host-wide lock while it runs, so concurrent runs
 on one host take turns instead of failing to bind.
 
+An example that reads files by their repository path, such as
+[`path.jet`](features/io/path.jet) walking `Examples/features/io`, declares
+`repo-cwd: <reason>` once, before any steps, in its `.case`. The testkit then
+runs the built program from the root of its staged source copy, which keeps
+the repository layout, instead of from the project directory. The checkout is
+never written, and `file:` assertions stay relative to the project.
+`run-feature-examples.mjs` already runs such an example from the repository
+root, or from a staged copy with the same layout, and ignores the header. Only
+goldens take the header; a `tests/cases` case refuses it.
+
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 
@@ -81,9 +91,9 @@ used as the stem, so `topic/example/run.jet` maps to
 an example with no native golden is skipped rather than given an invented
 result.
 
-The native checker uses `.out`, `.err.out`, and `.stderr.out`. Dedicated web,
-harness, test, fuzz, and input-specific checks consume the other suffixes
-listed below:
+The native checker uses `.out`, `.err.out`, and `.stderr.out`; the testkit
+golden suite also checks `.test.out`. Dedicated web, harness, fuzz, and
+input-specific checks consume the other suffixes listed below:
 
 | Fixture | Meaning |
 | --- | --- |
@@ -93,7 +103,7 @@ listed below:
 | `<stem>.web.out` | Web-target output used by the corresponding web fixture. |
 | `<stem>.harness.out` | Harness-managed output. |
 | `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
-| `<stem>.test.out` | Test-command output. |
+| `<stem>.test.out` | `jet test` stdout, checked by the testkit golden suite on every tier after the run passes. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
 | `<stem>.ast.out` / `<stem>.mir.out` / `<stem>.lir.out` | `jet emit --ast`/`--mir`/`--lir` stdout, checked by the native feature runner after the run passes. |
 
@@ -101,7 +111,7 @@ Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the testkit golden suite (`Tools/testkit/Golden.jet`) and the
+These rules apply to the testkit golden suite (`Compiler/JetTestKit/Source/Golden.jet`) and the
 native feature runner (`Tools/agent/run-feature-examples.mjs`). Native parity additionally
 requires an executed reference with the same exit and both output streams;
 an emit-only reference does not establish runtime parity.
@@ -170,6 +180,6 @@ files are the evidence; this manifest does not duplicate the collection API.
   checker.
 - [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
-- [`Tools/testkit/Golden.jet`](../Tools/testkit/Golden.jet) and
+- [`Compiler/JetTestKit/Source/Golden.jet`](../Compiler/JetTestKit/Source/Golden.jet) and
   [`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
   are the source of truth for the two golden layouts.

@@ -1,0 +1,17 @@
+# tests/diagnostics_coverage.rs::ffi_runtime_stop_keeps_one_jet_source_frame at tests/diagnostics_coverage.rs:484; hand-port
+# Claim: a foreign function that panics stops the program as a runtime stop (exit 70) rendered as `Stop [E3014]` with one Jet source frame `--> ffi.jet:7 in run`, the source line, and no rustc text (tests/diagnostics_coverage.rs:498-502)
+# The original fed the renderer a synthetic E3014 row (Outcome::jet_render_runtime_stop, internal API); this case drives a real foreign panic at ffi.jet:7 in run through the public CLI.
+# Not ported: report.source == "runtime" (internal field); exit 70 is the public runtime-stop signal
+requires: tool:rustc
+fixture: ffi_runtime_stop_keeps_one_jet_source_frame.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build ffi.jet
+exit: 0
+step: built
+exit: 70 # tests/diagnostics_coverage.rs:498 report.exit_code == 70
+stderr: ~ "Stop [E3014]" # tests/diagnostics_coverage.rs:499
+stderr: ~ "--> ffi.jet:7 in run" # tests/diagnostics_coverage.rs:500
+stderr: ~ "foreign_call(\"foreign failure\")" # tests/diagnostics_coverage.rs:501 the frame shows its source line
+stderr: !~ "rustc" # tests/diagnostics_coverage.rs:502

@@ -435,10 +435,15 @@ fn sema_marker_module_catalog_registry(applied: TAppliedRuleCatalog) -> SemaScop
     Val(catalog)
 }
 
-fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry) -> [Diagnostic] {
+// The marker laws of every module. A marker no rule, marker declaration or
+// derive provider names (E0927) is returned per module row in `unknown_rules`,
+// apart from the other reports: it does not stop registration, and the
+// module's declaration check reports it beside the body errors.
+fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleCatalog, catalog: SemaScopeMembersMarkerRegistry, unknown_rules: &[[Diagnostic]]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     loop module_row_index in 0..<graph.modules.len() {
         start :: diagnostics.len()
+        unknown := [Diagnostic]{}
         markers :: sema_marker_rules_collect_program(graph.modules[module_row_index].program)
         seen := [String:Bool]{}
         unresolved := [Marker]{}
@@ -458,7 +463,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
                 if {
                     resolved.status == "private" -> &diagnostics.push(sema_error("E0605", marker.name_span, "marker `#{marker.name}` is private to its declaring module", "a marker declared inside a `priv module` is usable only by that module's parent and its other children", "use a marker from a public module, or remove `priv` from the module"))
                     resolved.status == "ambiguous" -> &diagnostics.push(sema_error("E0086", marker.name_span, "this qualified marker has more than one declaring module", "a marker's import path must resolve to one module and one exported row", "give the modules distinct import aliases and qualify the marker with one of them"))
-                    resolved.status == "unknown" -> &diagnostics.push(sema_marker_rules_unknown_error(catalog, marker))
+                    resolved.status == "unknown" -> &unknown.push(sema_marker_rules_unknown_error(catalog, marker))
                     else -> {}
                 }
             } else if resolved.status == "unknown" {
@@ -488,7 +493,7 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
         if (unresolved.len() > 0 || source_declared) && !sema_module_is_core_source(graph.modules[module_row_index].module_identity) {
             program_registry :: sema_scope_members_build_marker_registry(graph, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program, applied)
             if program_registry == .Val(registry) {
-                if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, &diagnostics)
+                if unresolved.len() > 0 -> sema_marker_rules_validate_vocabulary(registry, graph.modules[module_row_index].program, unresolved, &unknown)
                 if source_declared -> sema_marker_rules_validate_user_sites(registry, graph.modules[module_row_index].program, &diagnostics)
                 sema_marker_rules_validate_repeatability(registry, graph.modules[module_row_index].program, &diagnostics)
                 repeat_checked = true
@@ -501,6 +506,8 @@ fn sema_marker_module_check(graph: SemaRegistrationGraph, applied: TAppliedRuleC
             if !repeat_checked -> sema_marker_rules_validate_repeatability(catalog, graph.modules[module_row_index].program, &diagnostics)
         }
         sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_row_index].source_segments)
+        sema_attach_diagnostic_source_locations(&unknown, 0, graph.modules[module_row_index].source_segments)
+        &unknown_rules.push(^unknown)
     }
     diagnostics
 }

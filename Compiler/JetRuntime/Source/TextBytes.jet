@@ -1,6 +1,5 @@
 // Native byte/text crossings for core.builtin.bytes/string_from_bytes(_lossy),
-// core.encoding.__utf8_validate/__string_byte/__bytes_into_text. Mirrors
-// Prelude/Core/StringBytes.rs and MathRandomTime.rs:1520-1530 over the
+// core.encoding.__utf8_validate/__string_byte/__bytes_into_text. Over the
 // current C carriers: a List<U8> argument is its borrowed (slot data, length)
 // pair at RT_HOST_U8_STRIDE; a List<U8> result is a fresh slot buffer written
 // to the out word, with the length returned (CAbiRoutes list_out).
@@ -83,7 +82,7 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     result
 }
 
-// StringBytes.rs jet_string_validate_utf8: Ok(()) or the Utf8Error text.
+// jet_string_validate_utf8: Ok(()) or the Utf8Error text.
 #Export(c) fn jet_string_validate_utf8(data: I64, length: I64, err: I64) -> I64 {
     message :: text_bytes_utf8_error(data, length)
     if (message == I64{0}) -> return I64{1}
@@ -91,8 +90,8 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     I64{0}
 }
 
-// MathRandomTime.rs jet_string_from_bytes: the validated copy, or UTF8Error
-// carrying the same message (the record owns its own message copy).
+// jet_string_from_bytes: the validated copy, or UTF8Error carrying the same
+// message (the record owns its own message copy).
 #Export(c) fn jet_string_from_bytes(data: I64, length: I64, ok: I64, err: I64) -> I64 {
     message :: text_bytes_utf8_error(data, length)
     if (message != I64{0}) {
@@ -122,12 +121,12 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     result
 }
 
-// StringBytes.rs jet_raw_bytes_into_text: Jet validated these bytes first;
-// the borrowed list is copied, never adopted.
+// jet_raw_bytes_into_text: Jet validated these bytes first; the borrowed list
+// is copied, never adopted.
 #Export(c) fn jet_raw_bytes_into_text(data: I64, length: I64) -> I64 { text_bytes_owned(data, length) }
 
-// MathRandomTime.rs jet_string_bytes: the UTF-8 bytes as a fresh List<U8>,
-// one block move into the packed buffer (not a store per byte).
+// jet_string_bytes: the UTF-8 bytes as a fresh List<U8>, one block move into
+// the packed buffer (not a store per byte).
 #Export(c) fn jet_string_bytes(value: I64, output: I64) -> I64 {
     length :: rt_text_len(value)
     if (length == I64{0}) {
@@ -153,8 +152,8 @@ fn text_bytes_owned(data: I64, length: I64) -> I64 {
     length
 }
 
-// StringBytes.rs jet_raw_string_byte: CAbiRoutes fixed::<u64> decodes the
-// exact Int index, then the compiler-checked byte is read without a bound.
+// jet_raw_string_byte: CAbiRoutes fixed::<u64> decodes the exact Int index,
+// then the compiler-checked byte is read without a bound.
 #Export(c) fn jet_raw_string_byte(value: I64, index: I64) -> I64 {
     at :: jet_int_owned_to_i64(index)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

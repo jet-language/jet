@@ -1,4 +1,4 @@
-// Real Jet runtime only; link -Wl,--wrap=jet_rt_free.
+// Real Jet runtime only.
 // WS_MESSAGE_U8_STRIDE must match composed RT_HOST_U8_STRIDE (canonical 1).
 #include <assert.h>
 #include <stdbool.h>
@@ -22,7 +22,7 @@ _Static_assert(sizeof(Failure)==16 && offsetof(Failure,reason)==8,"TaskFailureAB
 _Static_assert(sizeof(Lane)==32,"SimdLaneABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Bytes *jet_rt_bytes_unpack(const void *,int64_t);
@@ -64,10 +64,11 @@ extern Text *jet_rt_handle_display_f64x4(Lane *);
 static struct { void *pointer; int64_t size,align; unsigned frees; } watched[32];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t size,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(size==watched[i].size && align==watched[i].align);assert(++watched[i].frees==1); }
-    __real_jet_rt_free(p,size,align);
 }
 static void watch(void *p,int64_t size,int64_t align) { assert(count<32);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);watched[count].pointer=p;watched[count].size=size;watched[count].align=align;watched[count++].frees=0; }
 static void freed(unsigned before) { assert(intercepted>before);for(size_t i=0;i<count;++i) assert(watched[i].frees==1);count=0; }
@@ -84,7 +85,7 @@ static void unit_cases(const char *const *goldens,int64_t variants,int64_t *(*cl
     drop(NULL);
 }
 static void ws_error_cases(void) {
-    // Custom WsClient.rs:22-52, not derive Debug: raw operation, signed limit.
+    // Custom, not derive Debug: raw operation, signed limit.
     const char *goldens[]={"websocket URL is invalid","websocket handshake failed","websocket protocol error","websocket message exceeds -9223372036854775808 bytes","websocket I/O failed during read\"\n","websocket timed out","websocket is closed","websocket cancelled","this build target lacks websocket client connect"};
     for(int64_t kind=0;kind<9;++kind) {
         WsError *a=jet_rt_alloc(24,8);a->kind=kind;a->limit=kind==3?INT64_MIN:0;a->operation=kind==4?text("read\"\n"):NULL;
@@ -148,7 +149,7 @@ static Lane *lane(const uint64_t bits[4]) { Lane *result=jet_rt_alloc(32,8);memc
 static void lane_cases(void) {
     const uint64_t words[]={0,UINT64_C(0x8000000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x7ff0000000000000)};
     Lane *a=lane(words),*b=jet_rt_handle_clone_f64x4(a);assert(a!=b && memcmp(a,b,32)==0 && !jet_rt_handle_eq_f64x4(a,a) && !jet_rt_handle_eq_f64x4(a,b));
-    // Exact pinned rustc debug_tuple/array oracle, MathTaskMem.rs:397-407.
+    // Exact pinned rustc debug_tuple/array oracle.
     expect(jet_rt_handle_debug_f64x4(a),"F64x4([0.0, -0.0, NaN, inf])");
     watch(a,32,8);watch(b,32,8);unsigned before=intercepted;jet_rt_handle_drop_f64x4(a);jet_rt_handle_drop_f64x4(b);freed(before);
     a=jet_rt_alloc(32,8);a->lanes[0]=1.25;a->lanes[1]=1e-5;a->lanes[2]=1e20;a->lanes[3]=-1e-10;b=jet_rt_handle_clone_f64x4(a);
@@ -159,6 +160,7 @@ static void lane_cases(void) {
     watch(a,32,8);watch(b,32,8);before=intercepted;jet_rt_handle_drop_f64x4(a);jet_rt_handle_drop_f64x4(b);freed(before);jet_rt_handle_drop_f64x4(NULL);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc>1) { if(strcmp(argv[1],"wrong-failure-variant")==0) (void)jet_rt_record_get_jet_task_failure_panicked(jet_rt_record_new_jet_task_failure_cancelled());else return 2;assert(!"stop returned"); }
     const char *env[]={"invalid environment variable name","invalid environment variable value","environment contains a name or value that is not valid Unicode"},*status[]={"Running","Paused","CancelRequested"};

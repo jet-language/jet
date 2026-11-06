@@ -5,9 +5,9 @@ import { dirname, resolve } from "node:path";
 const root = dirname(new URL(import.meta.url).pathname);
 const srcPath = resolve(root, "pkg/input.jet");
 const raw = readFileSync(srcPath);
-const cmd = resolve("/home/nate/Projects/Github/jet/Tools/agent/jet-env");
+const cmd = resolve("$HOME/Projects/Github/jet/Tools/agent/jet-env");
 const proc = spawnSync(cmd, ["jet", "inspect", "compiler", "lex", srcPath], {
-  cwd: "/home/nate/Projects/Github/jet",
+  cwd: "$HOME/Projects/Github/jet",
   encoding: "utf8",
 });
 if (proc.status !== 0) throw new Error(proc.stderr);

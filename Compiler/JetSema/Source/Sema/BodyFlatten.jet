@@ -72,6 +72,7 @@ fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
     flat := BodyFlat{tree: body_tree_new(), arena: arena, into_arena: false}
     params :: body_flat_list_parameter(value.params, &flat)
     body :: body_flat_list_stmt(value.body, &flat)
+    pre :: body_flat_list_contract(value.pre, &flat)
     tree := ^flat.tree
     body_tree_finish(&tree)
     sema_body_fact_types(&tree, params, value.ret, value.kind, value.failure_carrier)
@@ -85,7 +86,6 @@ fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
         source_span: value.source_span,
         failure_carrier: value.failure_carrier,
         effects: value.effects,
-        target_applicability: value.target_applicability,
         web_bucket: value.web_bucket,
         web_marker: value.web_marker,
         visibility: value.visibility,
@@ -116,6 +116,8 @@ fn body_flat_function(value: TFunc, arena: BodyTree) -> FnBody Never! {
         kind: value.kind,
         origin_facts: value.origin_facts,
         typed_goals: value.typed_goals,
+        index_proofs: value.index_proofs,
+        pre: pre,
         tree: tree,
     }
 }
@@ -399,6 +401,7 @@ fn body_flat_contract(value: TContract, flat: &BodyFlat) -> BodyContract Never! 
         line: value.line,
         span: value.span,
         disposition: value.disposition,
+        site: value.site,
     }
 }
 
@@ -719,6 +722,7 @@ fn body_flat_handle_op(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Never!
         .DurationTotalSeconds -> BodyHandleOp.DurationTotalSeconds
         .DurationDifference -> BodyHandleOp.DurationDifference
         .TestSuiteRun -> BodyHandleOp.TestSuiteRun
+        .TestSetting -> BodyHandleOp.TestSetting
         .DurationAbs -> BodyHandleOp.DurationAbs
         .DurationNegated -> BodyHandleOp.DurationNegated
         .DurationSign -> BodyHandleOp.DurationSign
@@ -822,7 +826,6 @@ fn body_flat_handle_op_1(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
         .ChannelDelayMs -> BodyHandleOp.ChannelDelayMs
         .ChannelClose -> BodyHandleOp.ChannelClose
         .SenderSend -> BodyHandleOp.SenderSend
-        .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_flat_expr(f_handler, &flat), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
         .MathMethod(f_type_name, f_method) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method}
         .ReactiveGet -> BodyHandleOp.ReactiveGet
         .ReactiveSet -> BodyHandleOp.ReactiveSet
@@ -918,7 +921,7 @@ fn body_flat_handle_op_2(value: THandleOp, flat: &BodyFlat) -> BodyHandleOp Neve
 fn body_flat_require_kind(value: TRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
         .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_flat_expr(f_cond, &flat), msg: body_flat_opt_expr(f_msg, &flat)}
-        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat)}
+        .RequireEq(f_left, f_right, f_hook) -> BodyRequireKind.RequireEq{left: body_flat_expr(f_left, &flat), right: body_flat_expr(f_right, &flat), hook: f_hook}
         .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_flat_expr(f_msg, &flat)}
     }
 }
@@ -1250,6 +1253,7 @@ fn body_copy_contract(value: BodyContract, flat: &BodyFlat) -> BodyContract Neve
         line: value.line,
         span: value.span,
         disposition: value.disposition,
+        site: value.site,
     }
 }
 
@@ -1418,7 +1422,7 @@ fn body_copy_expr_kind(value: NodeKind, flat: &BodyFlat) -> NodeKind Never! {
         .SelectAfter(f_builder, f_duration, f_value) -> NodeKind.SelectAfter{builder: body_copy_expr(f_builder, &flat), duration: body_copy_expr(f_duration, &flat), value: body_copy_opt_expr(f_value, &flat)}
         .SelectWait(f_builder, f_nonblocking) -> NodeKind.SelectWait{builder: body_copy_expr(f_builder, &flat), nonblocking: f_nonblocking}
         .FnValue(f_kind) -> NodeKind.FnValue{kind: body_copy_fn_value_kind(f_kind, &flat)}
-        .Never(f_reason) -> NodeKind.Never{reason: f_reason}
+        .Never(f_reason, f_line) -> NodeKind.Never{reason: f_reason, line: f_line}
         .TypeTest(f_subject, f_target) -> NodeKind.TypeTest{subject: f_subject, target: f_target}
     }
 }
@@ -1589,6 +1593,7 @@ fn body_copy_handle_op(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp Nev
         .DurationTotalSeconds -> BodyHandleOp.DurationTotalSeconds
         .DurationDifference -> BodyHandleOp.DurationDifference
         .TestSuiteRun -> BodyHandleOp.TestSuiteRun
+        .TestSetting -> BodyHandleOp.TestSetting
         .DurationAbs -> BodyHandleOp.DurationAbs
         .DurationNegated -> BodyHandleOp.DurationNegated
         .DurationSign -> BodyHandleOp.DurationSign
@@ -1692,7 +1697,6 @@ fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp N
         .ChannelDelayMs -> BodyHandleOp.ChannelDelayMs
         .ChannelClose -> BodyHandleOp.ChannelClose
         .SenderSend -> BodyHandleOp.SenderSend
-        .HTTPRouterRegister(f_verb, f_handler, f_file, f_line, f_handler_param_names, f_contract_json) -> BodyHandleOp.HTTPRouterRegister{verb: f_verb, handler: body_copy_expr(f_handler, &flat), file: f_file, line: f_line, handler_param_names: f_handler_param_names, contract_json: f_contract_json}
         .MathMethod(f_type_name, f_method) -> BodyHandleOp.MathMethod{type_name: f_type_name, method: f_method}
         .ReactiveGet -> BodyHandleOp.ReactiveGet
         .ReactiveSet -> BodyHandleOp.ReactiveSet
@@ -1737,7 +1741,7 @@ fn body_copy_handle_op_1(value: BodyHandleOp, flat: &BodyFlat) -> BodyHandleOp N
 fn body_copy_require_kind(value: BodyRequireKind, flat: &BodyFlat) -> BodyRequireKind Never! {
     if value == {
         .Require(f_cond, f_msg) -> BodyRequireKind.Require{cond: body_copy_expr(f_cond, &flat), msg: body_copy_opt_expr(f_msg, &flat)}
-        .RequireEq(f_left, f_right) -> BodyRequireKind.RequireEq{left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat)}
+        .RequireEq(f_left, f_right, f_hook) -> BodyRequireKind.RequireEq{left: body_copy_expr(f_left, &flat), right: body_copy_expr(f_right, &flat), hook: f_hook}
         .Panic(f_msg) -> BodyRequireKind.Panic{msg: body_copy_expr(f_msg, &flat)}
     }
 }

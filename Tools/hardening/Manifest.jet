@@ -1,0 +1,604 @@
+// The hardening manifest: every Core surface row with its route, witness,
+// observable sink and status, the source snapshot it was computed from, and
+// the capability relation that `jet inspect claims` projects.
+//
+// The manifest is a pure function of the snapshot files. Generation sorts
+// every list and renders RFC 8785 canonical JSON, so two generations from one
+// tree are byte-identical, and any input change moves source_snapshot.hash.
+
+use {
+    json :: core.encoding.json
+    jet_foundation.[sha256_hex]
+}
+
+MANIFEST_SCHEMA :: "jet.hardening.surface.v1"
+RELATION_SCHEMA :: "jet.capability.relation.v1"
+RELATION_SOURCE :: "manifest.capability_relation.rows"
+MANIFEST_PATH :: ".jet/hardening-manifest.json"
+GENERATOR_ROOT :: "Tools/hardening"
+MODE :: "aot"
+STATUSES :: [String]{"covered", "excluded", "invalid", "missing", "unrouted"}
+DISPOSITIONS :: [String]{"planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"}
+REVISION_RULE :: "Regenerate with `jet run Tools/hardening/Main.jet -- --write .jet/hardening-manifest.json`. A change to any snapshot file changes source_snapshot.hash, and evidence recorded under an older hash is stale."
+
+struct Exclusion {
+    key: String
+    reason: String
+    owner: String
+    decision: String
+}
+
+struct SnapshotFile {
+    path: String
+    sha256: String
+}
+
+struct SnapshotPart {
+    name: String
+    hash: String
+}
+
+struct Snapshot {
+    hash: String
+    parts: [SnapshotPart]
+    files: [SnapshotFile]
+}
+
+struct WitnessFacts {
+    path: String
+    sha256: String
+    errors: [String]
+}
+
+struct ManifestRow {
+    surface: SurfaceRow
+    status: String
+    witness: WitnessFacts?
+    sink: Sink?
+    exclusion: Exclusion?
+}
+
+struct Orphan {
+    path: String
+    key: String
+}
+
+struct Manifest {
+    snapshot: Snapshot
+    rows: [ManifestRow]
+    exclusions: [Exclusion]
+    orphans: [Orphan]
+}
+
+fn digest(text: String) -> String Never! {
+    "sha256:{sha256_hex(text)}"
+}
+
+// The hash of a file list: one `path<TAB>sha256` line per file, by path.
+fn files_hash(files: [SnapshotFile]) -> String Never! {
+    lines := [String]{}
+    loop file in files -> &lines.push("{file.path}\t{file.sha256}\n")
+    digest(lines.join(""))
+}
+
+fn snapshot_entries(files: [SourceFile]) -> [SnapshotFile] Never! {
+    out := [SnapshotFile]{}
+    loop file in files -> &out.push(SnapshotFile{path: file.path.copy(), sha256: digest(file.text)})
+    &out.sort_by((left: SnapshotFile, right: SnapshotFile) -> left.path <=> right.path)
+    out
+}
+
+fn build_snapshot(inputs: Inputs) -> Snapshot Never! {
+    specials := [SourceFile]{SourceFile{path: SPECIAL_ROUTES_PATH, text: inputs.specials_text.copy()}}
+    loop file in inputs.special_files -> &specials.push(file.copy())
+    exclusions :: [SourceFile]{SourceFile{path: EXCLUSIONS_PATH, text: inputs.exclusions_text.copy()}}
+    parts :: [SnapshotPart]{
+        SnapshotPart{name: "core", hash: files_hash(snapshot_entries(inputs.core_sources))},
+        SnapshotPart{name: "exclusions", hash: files_hash(snapshot_entries(exclusions))},
+        SnapshotPart{name: "generator", hash: files_hash(snapshot_entries(inputs.generator_files))},
+        SnapshotPart{name: "registries", hash: files_hash(snapshot_entries(inputs.registry_files))},
+        SnapshotPart{name: "routes", hash: files_hash(snapshot_entries(inputs.route_files))},
+        SnapshotPart{name: "special_routes", hash: files_hash(snapshot_entries(specials))},
+        SnapshotPart{name: "witnesses", hash: files_hash(snapshot_entries(inputs.witnesses))},
+    }
+    files :: snapshot_entries(snapshot_files(inputs))
+    Snapshot{hash: files_hash(files), parts: parts, files: files}
+}
+
+// tests/conformance/exclusions.tsv: key, reason, owner, decision. Every
+// field is required, so an exclusion is always owner-ratified.
+fn parse_exclusions(text: String) -> [Exclusion] Err! {
+    out := [Exclusion]{}
+    loop (index, raw) in text.split("\n").to_list() {
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        fields :: raw.trim_end().split("\t").to_list()
+        if fields.len() != 4 -> return Err("{EXCLUSIONS_PATH}:{index + 1}: expected key, reason, owner and decision separated by tabs")
+        key :: fields[0].trim()
+        reason :: fields[1].trim()
+        owner :: fields[2].trim()
+        decision :: fields[3].trim()
+        if key == "" || reason == "" || owner == "" || decision == "" {
+            return Err("{EXCLUSIONS_PATH}:{index + 1}: an exclusion needs a key, reason, owner and decision")
+        }
+        loop old in out {
+            if old.key == key -> return Err("{EXCLUSIONS_PATH}:{index + 1}: duplicate exclusion `{key}`")
+        }
+        &out.push(Exclusion{key: key.copy(), reason: reason.copy(), owner: owner.copy(), decision: decision.copy()})
+    }
+    &out.sort_by((left: Exclusion, right: Exclusion) -> left.key <=> right.key)
+    Ok(out)
+}
+
+// tests/conformance/corpus/core/text/lower.jet witnesses `core.text.lower`.
+fn witness_key(path: String) -> String Never! {
+    relative :: path.slice(CORPUS_ROOT.len() + 1..<path.len() - 4)
+    relative.split("/").to_list().join(".")
+}
+
+fn exclusion_row_id(key: String) -> String Never! {
+    if key.contains(":") -> return key.copy()
+    "module:{key}"
+}
+
+// An unknown result type is treated as opaque: the witness must apply an
+// operation to it before observing, because nothing proves it prints a value.
+fn witness_class(result_class: String) -> String Never! {
+    if result_class == "unknown" -> return "opaque"
+    result_class.copy()
+}
+
+fn build_manifest(inputs: Inputs) -> Manifest Err! {
+    core :: parse_core(inputs.core_sources)
+    if core.errors.len() > 0 -> return Err("Core sources do not parse: {core.errors.join("; ")}")
+    specials :: parse_special_routes(inputs.specials_text) ?? return Err(err)
+    facts :: surface(core, specials, inputs.special_files, inputs.route_files)
+    if facts.errors.len() > 0 -> return Err(facts.errors.join("; "))
+    exclusions :: parse_exclusions(inputs.exclusions_text) ?? return Err(err)
+    row_index := [String: Int]{}
+    loop (index, row) in facts.rows -> row_index[row.id.copy()] = index
+    excluded := [String: Int]{}
+    loop (index, exclusion) in exclusions {
+        id :: exclusion_row_id(exclusion.key)
+        if row_index.get(id) == None -> return Err("{EXCLUSIONS_PATH}: `{exclusion.key}` names no surface row")
+        excluded[id.copy()] = index
+    }
+    witness_index := [String: Int]{}
+    orphans := [Orphan]{}
+    loop (index, file) in inputs.witnesses {
+        key :: witness_key(file.path)
+        id :: "module:{key}"
+        if row_index.get(id) == None {
+            &orphans.push(Orphan{path: file.path.copy(), key: key})
+            next
+        }
+        witness_index[id.copy()] = index
+    }
+    rows := [ManifestRow]{}
+    loop row in facts.rows {
+        witness := WitnessFacts?{None}
+        sink := Sink?{None}
+        status := "missing"
+        if witness_index.get(row.id) == .Val(at) {
+            file :: inputs.witnesses[at]
+            errors := [String]{}
+            if row.route != None && excluded.get(row.id) == None {
+                key :: row.id.slice(7..<row.id.len())
+                check :: inspect_witness(key, file.text, row.owner, row.member, witness_class(row.result_class))
+                errors = check.errors.copy()
+                sink = check.sink.copy()
+                status = if errors.len() == 0 -> "covered" else -> "invalid"
+            }
+            witness = Val(WitnessFacts{path: file.path.copy(), sha256: digest(file.text), errors: errors})
+        }
+        if row.route == None -> status = "unrouted"
+        exclusion := Exclusion?{None}
+        if excluded.get(row.id) == .Val(at) {
+            status = "excluded"
+            sink = None
+            exclusion = Val(exclusions[at].copy())
+        }
+        &rows.push(ManifestRow{surface: row.copy(), status: status, witness: witness, sink: sink, exclusion: exclusion})
+    }
+    Ok(Manifest{snapshot: build_snapshot(inputs), rows: rows, exclusions: exclusions, orphans: orphans})
+}
+
+fn status_disposition(status: String) -> String Never! {
+    if status == {
+        "covered" -> "implemented-unqualified"
+        "excluded" -> "owner-ratified-not-applicable"
+        "invalid" -> "failed"
+        "missing" -> "planned"
+        else -> "unsupported"
+    }
+}
+
+fn contains_text(list: [String], value: String) -> Bool Never! {
+    loop item in list {
+        if item == value -> return true
+    }
+    false
+}
+
+// The contract every manifest must keep, without reading the tree. A
+// covered row needs a route, an inspected witness and a type-aware sink; an
+// opaque result's sink needs a follow-up operation; an excluded row needs
+// the ratified exclusion it claims.
+fn validate_manifest(manifest: Manifest) -> [String] Never! {
+    errors := [String]{}
+    if manifest.snapshot.hash != files_hash(manifest.snapshot.files) {
+        &errors.push("source_snapshot.hash does not match its file list")
+    }
+    loop (index, row) in manifest.rows {
+        id :: row.surface.id
+        if index > 0 && manifest.rows[index - 1].surface.id >= id -> &errors.push("{id}: rows are not sorted by unique stable id")
+        if !contains_text(STATUSES, row.status) {
+            &errors.push("{id}: unknown status `{row.status}`")
+            next
+        }
+        if row.status == "covered" {
+            if row.surface.route == None -> &errors.push("{id}: covered row has no route")
+            if row.witness == None -> &errors.push("{id}: covered row has no witness")
+            if row.witness == .Val(facts) {
+                if facts.errors.len() > 0 -> &errors.push("{id}: covered row has a rejected witness")
+            }
+            if row.sink == None -> &errors.push("{id}: covered row names no observable sink")
+            if row.sink == .Val(sink) {
+                if sink.result_class != witness_class(row.surface.result_class) -> &errors.push("{id}: sink result class `{sink.result_class}` is not the row's `{witness_class(row.surface.result_class)}`")
+                if witness_class(row.surface.result_class) == "opaque" && sink.follow_up == "" -> &errors.push("{id}: opaque result is observed with no follow-up operation")
+                if sink.kind == "unit-effect" && row.surface.result_class != "unit" -> &errors.push("{id}: only a unit result may be observed by a later effect")
+                if sink.kind == "never-effect" && row.surface.result_class != "never" -> &errors.push("{id}: only a never result may be its own observation")
+                if sink.operation == "" -> &errors.push("{id}: sink names no observer")
+            }
+        }
+        if row.status == "invalid" {
+            ok := false
+            if row.witness == .Val(facts) -> ok = facts.errors.len() > 0
+            if !ok -> &errors.push("{id}: invalid row names no witness error")
+        }
+        if row.status == "missing" && row.surface.route == None -> &errors.push("{id}: missing row has no route; it is unrouted")
+        if row.status == "unrouted" && (row.surface.route != None || row.surface.problem == "") -> &errors.push("{id}: unrouted row must have no route and a stated problem")
+        if row.status != "covered" && row.sink != None -> &errors.push("{id}: only a covered row names a sink")
+        if row.status != "excluded" && row.exclusion != None -> &errors.push("{id}: only an excluded row carries an exclusion")
+        if row.status == "excluded" && row.exclusion == None -> &errors.push("{id}: excluded row has no exclusion")
+        if row.status == "excluded" {
+            if row.exclusion == .Val(claimed) {
+                found := false
+                loop exclusion in manifest.exclusions {
+                    if exclusion_row_id(exclusion.key) != id -> next
+                    found = exclusion.reason == claimed.reason && exclusion.owner == claimed.owner && exclusion.decision == claimed.decision && claimed.reason != "" && claimed.owner != "" && claimed.decision != ""
+                }
+                if !found -> &errors.push("{id}: exclusion does not match a ratified exclusions.tsv row")
+            }
+        }
+    }
+    loop exclusion in manifest.exclusions {
+        id :: exclusion_row_id(exclusion.key)
+        uses := 0
+        loop row in manifest.rows {
+            if row.surface.id == id && row.status == "excluded" -> uses += 1
+        }
+        if uses != 1 -> &errors.push("{id}: exclusion applies to {uses} rows")
+    }
+    errors
+}
+
+fn null_or_text(value: String) -> Dyn Never! {
+    if value == "" -> return Dyn.Null
+    Dyn.Text(value.copy())
+}
+
+fn route_dyn(route: Route?, problem: String) -> Dyn Never! {
+    if route == .Val(found) {
+        return Dyn.Object([String: Dyn]{
+            "kind": Dyn.Text(found.kind.copy()),
+            "line": Dyn.Int(found.line),
+            "path": Dyn.Text(found.path.copy()),
+            "symbol": Dyn.Text(found.symbol.copy()),
+        })
+    }
+    Dyn.Object([String: Dyn]{"kind": Dyn.Text("absent"), "problem": Dyn.Text(problem.copy())})
+}
+
+fn sink_dyn(sink: Sink?) -> Dyn Never! {
+    found :: sink ?? return Dyn.Null
+    Dyn.Object([String: Dyn]{
+        "follow_up": null_or_text(found.follow_up),
+        "kind": Dyn.Text(found.kind.copy()),
+        "operation": Dyn.Text(found.operation.copy()),
+        "result_class": Dyn.Text(found.result_class.copy()),
+        "type_aware": Dyn.Bool(true),
+        "via": null_or_text(found.via),
+    })
+}
+
+fn text_array(values: [String]) -> Dyn Never! {
+    out := [Dyn]{}
+    loop value in values -> &out.push(Dyn.Text(value.copy()))
+    Dyn.Array(out)
+}
+
+fn exclusion_dyn(exclusion: Exclusion?) -> Dyn Never! {
+    found :: exclusion ?? return Dyn.Null
+    Dyn.Object([String: Dyn]{
+        "decision": Dyn.Text(found.decision.copy()),
+        "owner": Dyn.Text(found.owner.copy()),
+        "reason": Dyn.Text(found.reason.copy()),
+    })
+}
+
+fn witness_dyn(witness: WitnessFacts?) -> Dyn Never! {
+    found :: witness ?? return Dyn.Null
+    Dyn.Object([String: Dyn]{
+        "errors": text_array(found.errors),
+        "path": Dyn.Text(found.path.copy()),
+        "sha256": Dyn.Text(found.sha256.copy()),
+    })
+}
+
+fn row_dyn(row: ManifestRow) -> Dyn Never! {
+    surface :: row.surface
+    tiers :: if row.status == "excluded" -> [String]{} else -> [String]{MODE}
+    reason :: if row.exclusion == .Val(found) -> found.reason.copy() else -> ""
+    Dyn.Object([String: Dyn]{
+        "applicable_tiers": text_array(tiers),
+        "exclusion": exclusion_dyn(row.exclusion),
+        "exclusion_reason": null_or_text(reason),
+        "kind": Dyn.Text(surface.kind.copy()),
+        "member": Dyn.Text(surface.member.copy()),
+        "owner": Dyn.Text(surface.owner.copy()),
+        "registry_aot": Dyn.Bool(surface.declared_aot),
+        "result_class": Dyn.Text(surface.result_class.copy()),
+        "result_type": null_or_text(surface.result_type),
+        "route": route_dyn(surface.route, surface.problem),
+        "sink": sink_dyn(row.sink),
+        "stable_id": Dyn.Text(surface.id.copy()),
+        "status": Dyn.Text(row.status.copy()),
+        "value_consuming": Dyn.Bool(row.status == "covered"),
+        "witness": witness_dyn(row.witness),
+    })
+}
+
+fn file_sha(snapshot: Snapshot, path: String) -> String Never! {
+    loop file in snapshot.files {
+        if file.path == path -> return file.sha256.copy()
+    }
+    ""
+}
+
+fn part_hash(snapshot: Snapshot, name: String) -> String Never! {
+    loop part in snapshot.parts {
+        if part.name == name -> return part.hash.copy()
+    }
+    ""
+}
+
+// The file a row's identity rests on: its route, else its witness, else
+// the registries that declare it.
+fn source_identity(row: ManifestRow, snapshot: Snapshot) -> Dyn Never! {
+    path := REGISTRY_DIR
+    sha := part_hash(snapshot, "registries")
+    if {
+        row.surface.route == .Val(route) -> {
+            known :: file_sha(snapshot, route.path)
+            if known != "" {
+                path = route.path.copy()
+                sha = known
+            }
+        }
+        row.witness == .Val(witness) -> {
+            path = witness.path.copy()
+            sha = witness.sha256.copy()
+        }
+    }
+    Dyn.Object([String: Dyn]{"digest": Dyn.Text(sha), "path": Dyn.Text(path)})
+}
+
+fn owner_link(row: ManifestRow) -> String Never! {
+    if row.exclusion == .Val(found) -> return found.decision.copy()
+    if row.witness == .Val(witness) -> return witness.path.copy()
+    if row.status == "missing" && row.surface.kind == "module_call" {
+        return "{CORPUS_ROOT}/{row.surface.owner.split(".").to_list().join("/")}/{row.surface.member}.jet"
+    }
+    if row.status == "unrouted" -> return SPECIAL_ROUTES_PATH
+    CORPUS_ROOT
+}
+
+fn status_object(status: String) -> Dyn Never! {
+    Dyn.Object([String: Dyn]{"status": Dyn.Text(status.copy())})
+}
+
+fn relation_row_dyn(row: ManifestRow, snapshot: Snapshot) -> Dyn Never! {
+    surface :: row.surface
+    disposition :: status_disposition(row.status)
+    link :: owner_link(row)
+    entries := [String: Dyn]{
+        "candidate_identity": status_object("unavailable"),
+        "capability_id": Dyn.Text(surface.id.copy()),
+        "contract": Dyn.Object([String: Dyn]{
+            "kind": Dyn.Text(surface.kind.copy()),
+            "member": Dyn.Text(surface.member.copy()),
+            "owner": Dyn.Text(surface.owner.copy()),
+            "result_class": Dyn.Text(surface.result_class.copy()),
+            "result_type": null_or_text(surface.result_type),
+        }),
+        "counted": Dyn.Bool(true),
+        "disposition": Dyn.Text(disposition.copy()),
+        "evidence": Dyn.Object([String: Dyn]{"status": Dyn.Text("not-run"), "witness": witness_dyn(row.witness)}),
+        "identity": Dyn.Object([String: Dyn]{"candidate": status_object("unavailable")}),
+        "mode": Dyn.Text(MODE),
+        "observable": Dyn.Object([String: Dyn]{"sink": sink_dyn(row.sink), "value_consuming": Dyn.Bool(row.status == "covered")}),
+        "oracle": Dyn.Object([String: Dyn]{"independent_expected_behavior": Dyn.Bool(false), "status": Dyn.Text("unavailable")}),
+        "owner": Dyn.Object([String: Dyn]{"link": Dyn.Text(link.copy())}),
+        "owner_link": Dyn.Text(link.copy()),
+        "route": route_dyn(surface.route, surface.problem),
+        "row_id": Dyn.Text("{surface.id}@{MODE}"),
+        "source_identity": source_identity(row, snapshot),
+        "status": Dyn.Text(disposition),
+    }
+    if row.exclusion != None -> entries["exclusion"] = exclusion_dyn(row.exclusion)
+    Dyn.Object(entries)
+}
+
+// Seal an object: its content_digest is the SHA-256 of its canonical JSON
+// without that member, the rule `jet inspect claims` checks.
+fn sealed(entries: [String: Dyn]) -> Dyn Err! {
+    unsealed :: json.canonical(Dyn.Object(entries.copy())) ?? return Err("cannot render canonical JSON: {err}")
+    out := entries.copy()
+    out["content_digest"] = Dyn.Text(digest(unsealed))
+    Ok(Dyn.Object(out))
+}
+
+fn relation_dyn(manifest: Manifest) -> Dyn Err! {
+    identities := [Dyn]{}
+    rows := [Dyn]{}
+    ids := [String]{}
+    counts := [String: Int]{}
+    loop name in DISPOSITIONS -> counts[name.copy()] = 0
+    loop row in manifest.rows {
+        &ids.push(row.surface.id.copy())
+        &identities.push(Dyn.Object([String: Dyn]{
+            "applicable_modes": text_array([String]{MODE}),
+            "capability_id": Dyn.Text(row.surface.id.copy()),
+            "source_identity": source_identity(row, manifest.snapshot),
+        }))
+        &rows.push(relation_row_dyn(row, manifest.snapshot))
+        disposition :: status_disposition(row.status)
+        counts[disposition.copy()] = (counts.get(disposition) ?? 0) + 1
+    }
+    by_disposition := [String: Dyn]{}
+    loop name in DISPOSITIONS -> by_disposition[name.copy()] = Dyn.Int(counts.get(name) ?? 0)
+    row_count :: rows.len()
+    id_count :: ids.len()
+    sealed([String: Dyn]{
+        "consumers": Dyn.Object([String: Dyn]{
+            "hardening": Dyn.Object([String: Dyn]{"relation": Dyn.Text(RELATION_SOURCE)}),
+            "inspect": Dyn.Object([String: Dyn]{"relation": Dyn.Text(RELATION_SOURCE)}),
+            "release": Dyn.Object([String: Dyn]{"candidate": Dyn.Text("row.candidate_identity"), "relation": Dyn.Text(RELATION_SOURCE)}),
+        }),
+        "denominator": Dyn.Object([String: Dyn]{
+            "counted_rows": Dyn.Int(row_count),
+            "dispositions": Dyn.Object(by_disposition),
+            "identity_count": Dyn.Int(id_count),
+            "identity_ids": text_array(ids),
+            "row_count": Dyn.Int(row_count),
+        }),
+        "identities": Dyn.Array(identities),
+        "revision_rule": Dyn.Text(REVISION_RULE),
+        "rows": Dyn.Array(rows),
+        "schema": Dyn.Text(RELATION_SCHEMA),
+        "schema_version": Dyn.Int(1),
+        "source_snapshot_hash": Dyn.Text(manifest.snapshot.hash.copy()),
+    })
+}
+
+fn count_where(manifest: Manifest, field: String, value: String) -> Int Never! {
+    count := 0
+    loop row in manifest.rows {
+        actual :: if field == "kind" -> row.surface.kind else -> row.status
+        if actual == value -> count += 1
+    }
+    count
+}
+
+fn manifest_dyn(manifest: Manifest) -> Dyn Err! {
+    rows := [Dyn]{}
+    ids := [String]{}
+    loop row in manifest.rows {
+        &rows.push(row_dyn(row))
+        &ids.push(row.surface.id.copy())
+    }
+    by_kind := [String: Dyn]{}
+    kinds :: [String]{"field", "module_call", "nominal_type", "receiver_method"}
+    loop kind in kinds -> by_kind[kind.copy()] = Dyn.Int(count_where(manifest, "kind", kind))
+    by_status := [String: Dyn]{}
+    loop status in STATUSES -> by_status[status.copy()] = Dyn.Int(count_where(manifest, "status", status))
+    exclusions := [Dyn]{}
+    loop exclusion in manifest.exclusions {
+        &exclusions.push(Dyn.Object([String: Dyn]{
+            "decision": Dyn.Text(exclusion.decision.copy()),
+            "owner": Dyn.Text(exclusion.owner.copy()),
+            "reason": Dyn.Text(exclusion.reason.copy()),
+            "stable_id": Dyn.Text(exclusion_row_id(exclusion.key)),
+        }))
+    }
+    orphans := [Dyn]{}
+    loop orphan in manifest.orphans -> &orphans.push(Dyn.Object([String: Dyn]{"key": Dyn.Text(orphan.key.copy()), "path": Dyn.Text(orphan.path.copy())}))
+    parts := [String: Dyn]{}
+    loop part in manifest.snapshot.parts -> parts[part.name.copy()] = Dyn.Text(part.hash.copy())
+    files := [Dyn]{}
+    loop file in manifest.snapshot.files -> &files.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(file.path.copy()), "sha256": Dyn.Text(file.sha256.copy())}))
+    relation :: relation_dyn(manifest) ?? return Err(err)
+    row_total :: manifest.rows.len()
+    file_total :: manifest.snapshot.files.len()
+    sealed([String: Dyn]{
+        "capability_relation": relation,
+        "denominator": Dyn.Object([String: Dyn]{
+            "by_kind": Dyn.Object(by_kind),
+            "by_status": Dyn.Object(by_status),
+            "row_ids_sha256": Dyn.Text(digest(ids.join("\n"))),
+            "rows": Dyn.Int(row_total),
+        }),
+        "exclusions": Dyn.Array(exclusions),
+        "generator": Dyn.Text(GENERATOR_ROOT),
+        "orphan_witnesses": Dyn.Array(orphans),
+        "rows": Dyn.Array(rows),
+        "schema": Dyn.Text(MANIFEST_SCHEMA),
+        "schema_version": Dyn.Int(1),
+        "source_snapshot": Dyn.Object([String: Dyn]{
+            "algorithm": Dyn.Text("sha256"),
+            "file_count": Dyn.Int(file_total),
+            "files": Dyn.Array(files),
+            "hash": Dyn.Text(manifest.snapshot.hash.copy()),
+            "parts": Dyn.Object(parts),
+        }),
+    })
+}
+
+// Canonical JSON plus a final newline: the exact bytes `--write` stores.
+fn render_manifest(manifest: Manifest) -> String Err! {
+    tree :: manifest_dyn(manifest) ?? return Err(err)
+    text :: json.canonical(tree) ?? return Err("cannot render canonical JSON: {err}")
+    Ok("{text}\n")
+}
+
+fn dyn_text(tree: Dyn, pointer: String) -> String Never! {
+    value :: json.pointer(tree, pointer) ?? return ""
+    if value == .Text(text) -> return text.copy()
+    ""
+}
+
+// Compare a stored manifest with a fresh generation of the tree. Equal
+// bytes pass. A different snapshot hash means the tree moved since the
+// manifest was written, so its evidence is stale; the same hash with other
+// bytes means the stored manifest was edited by hand.
+fn check_manifest_text(stored: String, fresh: Manifest, fresh_text: String) -> [String] Never! {
+    if stored == fresh_text -> return [String]{}
+    tree :: json.parse(stored) ?? return [String]{"stored manifest is not JSON: {err}"}
+    errors := [String]{}
+    stored_hash :: dyn_text(tree, "/source_snapshot/hash")
+    if stored_hash != fresh.snapshot.hash {
+        &errors.push("stale: stored source_snapshot.hash {stored_hash} is not the tree's {fresh.snapshot.hash}; evidence recorded under the old hash is stale")
+        loop part in fresh.snapshot.parts {
+            old :: dyn_text(tree, "/source_snapshot/parts/{part.name}")
+            if old != part.hash -> &errors.push("stale: snapshot part `{part.name}` changed")
+        }
+        return errors
+    }
+    stored_rows :: json.pointer(tree, "/rows") ?? Dyn.Null
+    if stored_rows == .Array(items) {
+        if items.len() != fresh.rows.len() -> &errors.push("stored manifest has {items.len()} rows; the tree has {fresh.rows.len()}")
+        loop (index, row) in fresh.rows {
+            if index >= items.len() -> break
+            stored_id :: dyn_text(items[index], "/stable_id")
+            if stored_id != row.surface.id {
+                &errors.push("row {index}: stored `{stored_id}`, the tree derives `{row.surface.id}`")
+                break
+            }
+            stored_status :: dyn_text(items[index], "/status")
+            if stored_status != row.status -> &errors.push("{row.surface.id}: stored status `{stored_status}`, the tree derives `{row.status}`")
+        }
+    }
+    &errors.push("stored manifest bytes differ from a fresh generation of the same snapshot")
+    errors
+}

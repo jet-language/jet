@@ -1,0 +1,20 @@
+# tests/cffi.rs::generated_c_nominals_share_the_imported_signature_owner at tests/cffi.rs:2506; hand-port
+# Claim: a `#Layout(c)` record generated into a C binding cache qualifies through the same `use` alias as the cache's imported functions, so `p.Point` and `p.echo` type-check together with no error (tests/cffi.rs:2522-2523)
+# Fixture: the cache text, C provider and package manifest verbatim from the original (helpers tests/cffi.rs:1286-1320); the C provider is built with cc and ar as the original did
+# Syntax migrated: `use c.points as p` is written `use p :: c.points`; the retired typed binding `result: p.Point :: p.echo(value)` becomes a `p.Point` parameter type on `field`, which keeps the same type-position check; the cache's `pub struct Point` drops the retired `pub` (E0411), as the C bindgen writes it today (HeaderParser.jet render_type_declarations)
+# Not ported: Loader::load_entry + Sema::check_bundle (internal Rust API); `jet check` runs the same loader and checker
+requires: tool:cc|gcc|clang
+requires: tool:ar
+fixture: generated_c_nominals_share_the_imported_signature_owner.fixture
+write: package.jet generated_c_nominals_share_the_imported_signature_owner.package.template
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+capture: cc = first-spawnable cc --version | gcc --version | clang --version
+step: {cap:cc} -c points.c -o points.o
+exit: 0
+step: ar rcs libpoints.a points.o
+exit: 0
+step: jet check main.jet
+exit: 0 # tests/cffi.rs:2522 no diagnostic has severity Error
+stderr: !~ "Error [" # tests/cffi.rs:2522 generated C record types must qualify with their imported functions

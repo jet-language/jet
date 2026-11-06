@@ -1,5 +1,5 @@
-// Ui.rs:302-317; C route inputs borrow owners and return a fresh cloned node.
-// Replacement drops only the clone's former metadata, never the input owner.
+// C route inputs borrow owners and return a fresh cloned node. Replacement
+// drops only the clone's former metadata, never the input owner.
 #Export(c) fn jet_ui_raw_accessibility_transfer(node: I64, accessibility: I64, present: U8) -> I64 {
     result :: jet_rt_handle_clone_jet_ui_node(node)
     previous :: ui_carrier_word(wrapping(result + UI_NODE_ACCESSIBILITY))
@@ -15,12 +15,12 @@
     result
 }
 
-// Ui.rs jet_ui_raw_node_transfer (CAbiRoutes.rs route): Jet packs the tags and
-// absent slots; this only unpacks them into a fresh Node160. Text and the
-// children List are borrowed (each child is cloned); exact Int carriers are
-// borrowed words. The wire carries no present optional slot: absent must be 63
-// (accessibility, IME, key, click, drop, shortcut). An off-contract carrier
-// is the reference's unreachable!/assert, a host defect.
+// jet_ui_raw_node_transfer (route): Jet packs the tags and absent slots; this
+// only unpacks them into a fresh Node160. Text and the children List are
+// borrowed (each child is cloned); exact Int carriers are borrowed words. The
+// wire carries no present optional slot: absent must be 63 (accessibility, IME,
+// key, click, drop, shortcut). An off-contract carrier is the reference's
+// unreachable!/assert, a host defect.
 fn ui_transfer_defect() {
     reason :: rt_static_text("invalid audited UI node carrier")
     jet_rt_unreachable(rt_text_data(reason), rt_text_len(reason))
@@ -71,5 +71,37 @@ fn ui_transfer_color(node: I64, offset: I64, kind_word: I64, word: I64) {
     ui_carrier_store(wrapping(node + UI_NODE_ACCESSIBILITY), I64{0})
     ui_carrier_store(wrapping(node + UI_NODE_SHORTCUT), I64{0})
     ui_carrier_store(wrapping(node + UI_NODE_KEY), I64{0})
+    node
+}
+// jet_ui_text_input (route): a TextInput node of the borrowed `state` text,
+// one scalar per column on one row, with its IME slot present as the
+// UIIMEMode variant word `ime` (0 Native, 1 Disabled).
+fn ui_text_scalars(text: I64) -> I64 {
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    count := I64{0}
+    loop at < length {
+        count += I64{1}
+        at += rt_text_width(wrapping(data + at))
+    }
+    count
+}
+#Export(c) fn jet_ui_text_input(state: I64, ime: I64) -> I64 {
+    if (ime < I64{0} || ime > I64{1}) -> ui_transfer_defect()
+    node :: jet_rt_alloc(UI_NODE_BYTES, I64{8})
+    offset := I64{0}
+    loop offset < UI_NODE_BYTES {
+        ui_carrier_store(wrapping(node + offset), I64{0})
+        offset += I64{8}
+    }
+    ui_carrier_store(wrapping(node + UI_NODE_LABEL), jet_rt_string_clone(state))
+    ui_carrier_store(wrapping(node + UI_NODE_WIDTH), rt_f64_bits(Float{ui_text_scalars(state)}))
+    ui_carrier_store(wrapping(node + UI_NODE_HEIGHT), rt_f64_bits(Float{1.0}))
+    ui_carrier_store(wrapping(node + UI_NODE_ROLE), UI_ROLE_TEXT_INPUT)
+    ui_carrier_store(wrapping(node + UI_NODE_KIND), UI_KIND_TEXT_INPUT)
+    ui_carrier_store(wrapping(node + UI_NODE_CHILDREN), data_sequence_new(I64{0}, UI_NODE_CHILD_BYTES))
+    ui_carrier_store(wrapping(node + UI_NODE_ABSENT_MASK), UI_NODE_OPTION_MASK.bit_and(I64{-1} - UI_NODE_SLOT_IME))
+    ui_carrier_store(wrapping(node + UI_NODE_IME), ime)
     node
 }

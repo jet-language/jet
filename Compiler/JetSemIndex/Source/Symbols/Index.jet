@@ -245,7 +245,7 @@ fn semantic_module_anchor(module_path: String?) -> SemanticVisibilityAnchor? Nev
     Val(SemanticVisibilityAnchor{module_path: path, offset: None, session_top_level: false})
 }
 
-// Rust Symbols.rs:312–372 visibility_key, including unscoped-local behavior.
+// visibility_key, including unscoped-local behavior.
 fn semantic_visibility_key(symbol: SemanticSymbol, anchor: SemanticVisibilityAnchor?) -> SemanticVisibilityKey? Never! {
     if symbol.identity.starts_with("session:binding:") -> return Val(SemanticVisibilityKey{rank: 0, depth: 0, declaration_offset: 0})
     if symbol.lexical_scope == .Val(scope) {
@@ -282,9 +282,9 @@ fn semantic_visibility_key(symbol: SemanticSymbol, anchor: SemanticVisibilityAnc
     Val(SemanticVisibilityKey{rank: 4, depth: 0, declaration_offset: 0})
 }
 
-// Rust Symbols.rs:374–411 canonical_symbol_name. The caller joins a loaded
-// display/alias to the actual registration/name index once, outside this helper.
-// The checked projection owns generated names, ambiguity and canonical spelling.
+// The caller joins a loaded display/alias to the actual registration/name index
+// once, outside this helper. The checked projection owns generated names,
+// ambiguity and canonical spelling.
 fn semantic_canonical_symbol_name(facts: NameFacts, module_index: Int?, name: String, owner: String?, span: SourceSpan?) -> String Never! {
     if module_index == None {
         if owner == .Val(path) -> return "{path}.{name}"

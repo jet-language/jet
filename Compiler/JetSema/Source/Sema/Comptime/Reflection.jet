@@ -57,7 +57,9 @@ use jet_foundation.[
     jet_target_layout_enum_c_tag,
     jet_target_layout_enum_facts_in_module,
     jet_target_layout_from_machine,
+    jet_target_layout_numeric_type,
     jet_target_layout_struct_facts_in_module,
+    jet_target_layout_type_facts,
     measure_expression,
     measure_kind,
     measure_signed_value,
@@ -797,9 +799,13 @@ fn sema_comptime_reflection_member_markers(markers: [Marker], registry: SemaScop
     infos
 }
 
+// One stored field or payload field, at `index` among its owner's fields. A
+// field row has no nested `fields`; those are an enum variant's payload rows
+// (sema_comptime_reflection_enum_variant_info).
 fn sema_comptime_reflection_field_info(
     name: String,
     ty: Type,
+    index: Int,
     markers: [Marker],
     is_pub: Bool,
     span: Span,
@@ -809,6 +815,8 @@ fn sema_comptime_reflection_field_info(
     sema_comptime_reflection_struct("FieldInfo", [SemaComptimeReflectionField]{
         SemaComptimeReflectionField{name: "name", value: TComptimeValue.String{value: name}},
         SemaComptimeReflectionField{name: "ty", value: TComptimeValue.String{value: type_name(ty)}},
+        SemaComptimeReflectionField{name: "index", value: TComptimeValue.Int{value: index}},
+        SemaComptimeReflectionField{name: "fields", value: TComptimeValue.List{values: [TComptimeValue]{}}},
         SemaComptimeReflectionField{name: "markers", value: TComptimeValue.List{values: sema_comptime_reflection_member_markers(markers, registry)}},
         SemaComptimeReflectionField{name: "dimensions", value: TComptimeValue.List{values: sema_comptime_reflection_type_dimensions(ty)}},
         SemaComptimeReflectionField{name: "facts", value: TComptimeValue.List{values: sema_comptime_reflection_type_fact_rows(path, ty)}},
@@ -1175,16 +1183,28 @@ fn sema_comptime_reflection_append_methods(methods: [Func], module_path: String,
     loop method in methods -> &values.push(sema_comptime_reflection_method_info(method, module_path, identity, registry))
 }
 
+// An inherent `impl Owner { ... }` block declares methods of `Owner` too; reflection lists them beside the body's own.
+fn sema_comptime_reflection_append_inherent_methods(items: [Item], owner: String, module_path: String, identity: String, registry: SemaScopeMembersMarkerRegistry, values: &[TComptimeValue]) {
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> if implementation.type_name == owner && implementation.trait_name == None -> sema_comptime_reflection_append_methods(implementation.methods, module_path, identity, registry, &values)
+            .CodeModule(code_module) -> if code_module.body == .Val(body) -> sema_comptime_reflection_append_inherent_methods(body, owner, module_path, identity, registry, &values)
+            .GenericModule(generic_module) -> sema_comptime_reflection_append_inherent_methods(generic_module.body, owner, module_path, identity, registry, &values)
+            else -> {}
+        }
+    }
+}
+
 fn sema_comptime_reflection_enum_variant_fields(definition: EnumDef, variant: Variant, registry: SemaScopeMembersMarkerRegistry) -> [TComptimeValue] Never! {
     if variant.payload == {
         .Unit -> return [TComptimeValue]{}
         .Single(ty, span) -> return [TComptimeValue]{
-            sema_comptime_reflection_field_info("value", ty, [Marker]{}, definition.is_pub, span, "{definition.name}.{variant.name}", registry),
+            sema_comptime_reflection_field_info("value", ty, 0, [Marker]{}, definition.is_pub, span, "{definition.name}.{variant.name}", registry),
         }
         .Named(fields) -> {
             result := [TComptimeValue]{}
-            loop field in fields {
-                &result.push(sema_comptime_reflection_field_info(field.name, field.ty, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry))
+            loop (index, field) in fields {
+                &result.push(sema_comptime_reflection_field_info(field.name, field.ty, index, [Marker]{}, definition.is_pub, field.name_span, "{definition.name}.{variant.name}.{field.name}", registry))
             }
             return result
         }
@@ -1263,6 +1283,15 @@ fn sema_comptime_reflection_distinct_layout(engine: TargetLayoutEngine) -> TComp
         None,
         [TComptimeValue]{},
     )
+}
+
+// A builtin scalar named as the subject (`U64.$layout`): its fixed target
+// bytes, the same numbers a declared field of that type is laid out with.
+fn sema_comptime_reflection_builtin_layout(graph: SemaRegistrationGraph, name: String) -> TComptimeValue? {
+    scalar :: if name == "Bool" -> Type.Bool else -> jet_target_layout_numeric_type(name) ?? return None
+    engine :: jet_target_layout_engine_with_registry([Item]{}, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, jet_target_layout_from_machine(graph.target_machine))
+    bytes :: jet_target_layout_type_facts(engine, scalar) ?? return None
+    Val(sema_comptime_reflection_layout_info("default", "builtin scalar", "builtin type", jet_target_layout_engine_target(engine), LayoutFacts{bytes: Val(bytes), fields: [FieldLayoutFacts]{}}, None, None, [TComptimeValue]{}))
 }
 
 fn sema_comptime_reflection_append_trait_contract(
@@ -1419,11 +1448,12 @@ fn sema_comptime_reflection_struct_type_info(
     facts := [TComptimeValue]{}
     loop field in definition.fields {
         if field.computed != None -> next
-        &reflection_fields.push(sema_comptime_reflection_field_info(field.name, field.ty, field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry))
+        &reflection_fields.push(sema_comptime_reflection_field_info(field.name, field.ty, reflection_fields.len(), field.serde_markers, field.is_pub, field.name_span, "{definition.name}.{field.name}", registry))
         &dimensions.extend(sema_comptime_reflection_type_dimensions(field.ty))
     }
     method_values := [TComptimeValue]{}
     sema_comptime_reflection_append_methods(definition.methods, registered_module.module_path, identity, registry, &method_values)
+    sema_comptime_reflection_append_inherent_methods(registered_module.program.items, definition.name, registered_module.module_path, identity, registry, &method_values)
     type_params := (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
     marker_views :: sema_comptime_reflection_marker_views(definition.type_markers, definition.serde_markers, definition.derives, registry)
     state_view :: sema_comptime_reflection_state_view(definition, graph)
@@ -1495,6 +1525,7 @@ fn sema_comptime_reflection_enum_type_info(
     methods := [TComptimeValue]{}
     sema_comptime_reflection_append_methods(definition.methods, registered_module.module_path, identity, registry, &methods)
     loop implementation in definition.trait_impls -> sema_comptime_reflection_append_methods(implementation.methods, registered_module.module_path, identity, registry, &methods)
+    sema_comptime_reflection_append_inherent_methods(registered_module.program.items, definition.name, registered_module.module_path, identity, registry, &methods)
     type_params := (loop parameter in definition.type_params -> sema_comptime_reflection_type_param_info(parameter))
     marker_views :: sema_comptime_reflection_marker_views(definition.type_markers, definition.serde_markers, definition.derives, registry)
     contracts :: sema_comptime_reflection_trait_contracts(registered_module.program, definition.name, definition.trait_impls, registered_module.module_path, identity, registry)
@@ -1606,7 +1637,8 @@ fn sema_comptime_reflection_type_info(
     }
     registry :: sema_scope_members_build_marker_registry(graph, module_identity, registered_module.program, catalog) ?? return None
     engine :: sema_comptime_reflection_layout_engine(graph)
-    identity := "{module_identity}::{type_name}"
+    // The public identity qualifies by module name, as FunctionInfo does; the internal module key is not user surface.
+    identity := "{registered_module.module_name}::{type_name}"
     if declaration == {
         .Struct(definition) -> {
             state_graph := SemaStateGraphFact?{None}

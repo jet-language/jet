@@ -1,0 +1,202 @@
+#!/usr/bin/env jet
+// Card #1414: the focused proof for the native peer boundary. Builds the
+// launcher (CompiledWorkloadPeerLauncher.jet) and its probe workload
+// (CompiledWorkloadPeerProbe.jet) with JET (JET_COMPILED_WORKLOAD_JET_BIN or
+// `jet` on PATH also work), then probes the exact filesystem, network,
+// process-tree, and result contracts. A host without the isolation primitive
+// must still prove the fail-closed contract.
+// Usage (from anywhere inside the checkout):
+//   jet Tools/ci/CompiledWorkloadPeerLauncherCheck.jet
+use {
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
+    term :: core.term
+    time :: core.time
+}
+
+TOOL :: "/Tools/ci/CompiledWorkloadPeerLauncherCheck.jet"
+CONTRACT :: "compiled-workload-peer-isolation-v1"
+LAUNCHER :: "CompiledWorkloadPeerLauncher"
+PROBE :: "CompiledWorkloadPeerProbe"
+SIGTERM :: 15
+
+#Error
+struct Problem {
+    message: String
+    impl Display { fn display(self) -> String { self.message.copy() } }
+    impl Debug { fn debug(self) -> String { self.message.copy() } }
+}
+
+fn problem(message: String) -> Problem Never! { Problem{message: message} }
+
+// One launcher run: a child that cannot start has no code and no output.
+struct Ran {
+    code: Int
+    signal: Int?
+    stdout: String
+    stderr: String
+}
+
+// The temporary tree the launcher confines, and a sibling it must not touch.
+struct Layout {
+    root: String
+    run_root: String
+    outside: String
+}
+
+fn run() {
+    root :: repo_root() ?? {
+        term.eprint("peer launcher self-test: {err.message}")
+        process.exit(1)
+        return
+    }
+    process.exit(main(root))
+}
+
+fn main(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
+    base :: scratch_root()
+    stamp :: time.unix_ns()
+    layout :: Layout{root: root, run_root: "{base}/compiled-workload-peer-launcher-{stamp}", outside: "{base}/compiled-workload-peer-launcher-{stamp}-outside"}
+    code :: if check(layout) == {
+        .Ok(message) -> {
+            term.print("peer launcher self-test: {message}")
+            0
+        }
+        .Err(failure) -> {
+            term.eprint("peer launcher self-test: {failure.message}")
+            1
+        }
+    }
+    files.remove_all(layout.run_root) ?? ()
+    files.remove_all(layout.outside) ?? ()
+    code
+}
+
+fn check(layout: Layout) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
+    files.create_dir_all(layout.run_root) ?? return Err(problem("`{layout.run_root}` cannot be created: {err}"))
+    files.create_dir_all(layout.outside) ?? return Err(problem("`{layout.outside}` cannot be created: {err}"))
+    jet :: jet_binary() ?? return Err(problem("JET is not set and no jet is on PATH to build the launcher"))
+    launcher :: build(layout, jet, LAUNCHER, "compiled-workload-peer-launcher") ?? return Err(err)
+    contract :: launch(process.cmd([String]{launcher.copy(), "--contract"}).cwd(layout.root))
+    if contract.code != 0 || contract.signal != None || contract.stdout.trim() != CONTRACT {
+        // An unavailable host must still prove the fail-closed contract. Linux
+        // hides its discovered primitive behind PATH; this catches a missing
+        // bwrap without ever launching an unisolated child. Other hosts always
+        // refuse.
+        missing_primitive(layout, launcher) ?? return Err(err)
+        escape :: launch(process.cmd(launch_args(layout, launcher, layout.outside, "disabled", [String]{launcher.copy()})).cwd(layout.run_root).env("PATH", ""))
+        rejected(escape, "cwd") ?? return Err(err)
+        return Ok("fail-closed unavailable host ({contract.stderr.trim()})")
+    }
+    if contract.stderr != "" -> return Err(problem("contract output is not exact: stdout={contract.stdout} stderr={contract.stderr}"))
+    probe :: build(layout, jet, PROBE, "compiled-workload-peer-probe") ?? return Err(err)
+
+    outside_file :: "{layout.outside}/marker"
+    write :: launch(probe_spec(layout, launcher, "disabled", probe, "write").env("PEER_OUTSIDE", outside_file))
+    if write.code != 0 || write.signal != None || write.stdout != "outside=blocked\n" -> return Err(problem("write policy mismatch: {shown(write)}"))
+    if !files.exists("{layout.run_root}/inside") || files.exists(outside_file) -> return Err(problem("write policy did not confine the writable tree"))
+
+    disabled :: launch(probe_spec(layout, launcher, "disabled", probe, "network"))
+    if disabled.code != 0 || disabled.signal != None || disabled.stdout != "loopback=blocked\nexternal=blocked\n" -> return Err(problem("disabled network mismatch: {shown(disabled)}"))
+    loopback :: launch(probe_spec(layout, launcher, "loopback-only", probe, "network"))
+    if loopback.code != 0 || loopback.signal != None || loopback.stdout != "loopback=allowed\nexternal=blocked\n" -> return Err(problem("loopback-only network mismatch: {shown(loopback)}"))
+
+    escape :: launch(process.cmd(launch_args(layout, launcher, layout.outside, "disabled", [String]{probe.copy(), "result"})).cwd(layout.run_root))
+    rejected(escape, "cwd") ?? return Err(err)
+    authority :: launch(probe_spec(layout, launcher, "internet", probe, "result"))
+    rejected(authority, "unsupported network authority") ?? return Err(err)
+
+    result :: launch(probe_spec(layout, launcher, "disabled", probe, "result"))
+    if result.code != 23 || result.signal != None || result.stdout != "stdout-exact\n" || result.stderr != "stderr-exact\n" -> return Err(problem("result propagation mismatch: {shown(result)}"))
+
+    marker :: "{layout.run_root}/descendant-marker"
+    descendant :: launch(probe_spec(layout, launcher, "disabled", probe, "descendant").env("PEER_MARKER", marker))
+    if descendant.code != 0 || descendant.signal != None || descendant.stdout != "spawned\n" -> return Err(problem("descendant launch mismatch: {shown(descendant)}"))
+    // The descendant would write its marker 600 ms after it started.
+    time.sleep(800ms)
+    if files.exists(marker) -> return Err(problem("descendant survived launcher exit"))
+
+    if !sys.is_windows() {
+        signal :: launch(probe_spec(layout, launcher, "disabled", probe, "signal"))
+        if signal.signal != Val(SIGTERM) -> return Err(problem("signal propagation mismatch: {shown(signal)}"))
+    }
+    missing_primitive(layout, launcher) ?? return Err(err)
+    Ok("filesystem, network, path, authority, result, signal, and descendant checks passed")
+}
+
+// `--contract` with an empty PATH names the primitive it could not find.
+fn missing_primitive(layout: Layout, launcher: String) Problem! -[Env, Exec, Time.Wait]> {
+    missing :: launch(process.cmd([String]{launcher.copy(), "--contract"}).cwd(layout.root).env("PATH", ""))
+    rejected(missing, if sys.is_linux() -> "bubblewrap" else -> "unavailable")
+}
+
+fn launch_args(layout: Layout, launcher: String, cwd: String, network: String, command: [String]) -> [String] Never! {
+    argv := [String]{launcher.copy(), "--contract={CONTRACT}", "--task-id", "peer-launcher-self-test", "--root", layout.run_root.copy(), "--cwd", cwd.copy(), "--network", network.copy(), "--external-write", "disabled", "--host", "ambient", "--"}
+    loop part in command -> &argv.push(part.copy())
+    argv
+}
+
+fn probe_spec(layout: Layout, launcher: String, network: String, probe: String, mode: String) -> ProcessSpec Never! {
+    process.cmd(launch_args(layout, launcher, layout.run_root, network, [String]{probe.copy(), mode.copy()})).cwd(layout.run_root)
+}
+
+fn launch(spec: ProcessSpec) -[Exec, Time.Wait]> Ran Never! {
+    receipt :: spec.output_limit(1048576).run() ?? return Ran{code: -1, signal: None, stdout: "", stderr: "could not start: {err}"}
+    Ran{code: receipt.code, signal: receipt.signal, stdout: receipt.output.copy(), stderr: receipt.errors.copy()}
+}
+
+fn rejected(ran: Ran, text: String) Problem! {
+    if ran.code == 0 && ran.signal == None -> return Err(problem("expected rejection containing {text}"))
+    output :: "{ran.stderr}{ran.stdout}"
+    if !output.contains(text) -> return Err(problem("rejection did not name {text}: {output}"))
+    Ok()
+}
+
+fn shown(ran: Ran) -> String Never! {
+    signal :: if ran.signal == .Val(number) -> "{number}" else -> "none"
+    "status={ran.code} signal={signal} stdout={ran.stdout} stderr={ran.stderr}"
+}
+
+// `jet build` writes `.jet/build/<stem>` beside the source; the copy lives in
+// the confined tree so the sandbox can execute it.
+fn build(layout: Layout, jet: String, stem: String, name: String) -[Env, Exec, FS, Time.Wait]> String Problem! {
+    source :: "{layout.root}/Tools/ci/{stem}.jet"
+    receipt :: process.cmd([String]{jet.copy(), "build", "--quiet", source}).cwd(layout.root).stdout(.Inherit).stderr(.Inherit).run() ?? return Err(problem("{stem} build could not start: {err}"))
+    if receipt.code != 0 || receipt.signal != None -> return Err(problem("{stem} build failed with {receipt.code}"))
+    suffix :: if sys.is_windows() -> ".exe" else -> ""
+    built :: "{layout.root}/Tools/ci/.jet/build/{stem}{suffix}"
+    target :: "{layout.run_root}/{name}{suffix}"
+    files.copy(built, target) ?? return Err(problem("`{built}` cannot be copied: {err}"))
+    files.set_mode(target, 493) ?? return Err(problem("`{target}` cannot be made executable: {err}"))
+    Ok(target)
+}
+
+fn jet_binary() -[Env, FS]> String? Never! {
+    explicit :: env_or("JET", env_or("JET_COMPILED_WORKLOAD_JET_BIN", ""))
+    if explicit != "" -> return Val(explicit)
+    process.which("jet")
+}
+
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The confined tree sits in the dev scratch root ($JET_SCRATCH_ROOT, else the
+// user cache's jet-dev), outside any tmpfs the sandbox mounts, so a write that
+// escapes it would land on the host.
+fn scratch_root() -[Env]> String Never! { env_or("JET_SCRATCH_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+
+// The checkout holding this script, or else the one around the working directory.
+fn repo_root() -[Env, FS]> String Problem! {
+    script :: sys.executable()
+    if script.ends_with(TOOL) -> return script.removesuffix(TOOL)
+    dir := files.cwd() ?? return Err(problem("the working directory cannot be read: {err}"))
+    loop {
+        if files.exists("{dir}{TOOL}") -> return dir
+        if dir == "/" || dir == "" -> return Err(problem("run from inside the Jet checkout"))
+        dir = files.dirname(dir)
+    }
+}

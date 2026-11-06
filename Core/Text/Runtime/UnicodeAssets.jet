@@ -45,7 +45,7 @@ fn pool(asset: [U8], kind: Int, stride: Int) -> View<U8> from asset {
     asset[pool_offset(asset)..<asset.len()]
 }
 
-// Rust UnicodeString.rs:18-30 jet_unicode_contains; shared range/tag lookup.
+// Shared range/tag lookup.
 fn range_row(table: View<U8>, cp: Int, stride: Int) -> Int? {
     if cp < 0 || cp > 1114111 || stride < 6 || table.len() % stride != 0 -> return None
     low := 0
@@ -87,8 +87,8 @@ fn asset_tag(asset: [U8], cp: Int, fallback: Int) -> Int Never! {
     range_tag(table, cp, fallback)
 }
 
-// Rust UnicodeString.rs:32-40 jet_unicode_mapping; return only an index extent.
-// Mapping scalars remain borrowed from the independent scalar-pool asset.
+// jet_unicode_mapping: return only an index extent. Mapping scalars remain
+// borrowed from the independent scalar-pool asset.
 fn mapping_row(index: View<U8>, cp: Int, stride: Int) -> Int? {
     if cp < 0 || cp > 1114111 || stride < 3 || index.len() % stride != 0 -> return None
     low := 0

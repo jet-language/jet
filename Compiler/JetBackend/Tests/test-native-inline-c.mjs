@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Run only against the native CLI with its admitted pack beside it. Two
-// #FFI(c) bodies share C state across translation units: the native driver
-// compiles both, proves the whole inline bridge with undefined symbols
-// refused, archives it and links it (FFI.rs emit_inline_build_rs). A body that
-// references a symbol no inline unit defines must be refused before linking.
+// Run only against the native CLI with its admitted pack beside it. Two #FFI(c)
+// bodies share C state across translation units: the native driver compiles
+// both, proves the whole inline bridge with undefined symbols refused, archives
+// it and links it (emit_inline_build_rs). A body that references a symbol no
+// inline unit defines must be refused before linking.
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";

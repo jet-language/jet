@@ -20,20 +20,27 @@
 // The entry `main`:
 //   JET_NATIVE_TEST_REPORT_PATH set: report the outcome file and exit
 //   (jet_rt_test_read, jet_rt_test_finish_wire; exit 1 when a test failed).
-//   Otherwise: call the package's `fn test(t: Test)` with a fresh suite, read
-//   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), spawn each selected
+//   Otherwise: call the package's `fn test(t: Test)` with a fresh suite; with
+//   TEST_SETTINGS_PLAN_ENV set that is `jet test`'s plan step (the calls
+//   have written their settings) and it exits 0. Then read
+//   JET_NATIVE_TEST_RECORDS_PATH (exit 103 without it), open it for the
+//   contract records (jet_rt_test_contracts_open), spawn each selected
 //   test (only `JET_NATIVE_TEST_ID`'s when set) and append its record
 //   `JET_NATIVE_TEST <id>\n<wire>\n`, streaming each serially or joining all
-//   after spawning; then, unfiltered, run each Check Output once.
+//   after spawning; then, unfiltered, run each Check Output once. A checked
+//   `#Pre`/`#Post` clause's first hold and every failure append
+//   `JET_NATIVE_CONTRACT <held> <length>\n<site>\n` to that file as they
+//   happen (JetRuntime TestContracts.jet).
 
 use {
-    jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
+    jet_foundation.[BodyScopeMemberKind, DeclTable, Span, TConstantDef, FnBody, TEST_SETTINGS_PLAN_ENV, TImplDef, TPanicLoc, TPanicLocal, TTypeDef, Type, measure_literal_value, name_rows_set]
     jet_sema.[SemaCheckedForeignFunction]
 }
 
 // One test the harness runs: its checked function `key`, the identity `id`
-// its outcome record carries, its report name and whether it must fail.
-struct IRTestCase { id: Int, key: String, name: String, expected_failure: Bool }
+// its outcome record carries, its report name, whether it must fail and the
+// canonical `#Test(faults: [...])` selectors it runs under (D-TESTFAULT1).
+struct IRTestCase { id: Int, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
 
 // A selected Check Output: its name and its checked zero-argument function.
 struct IROutputCheck { name: String, key: String }
@@ -49,6 +56,7 @@ fn ir_build_tests(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef]
     p := ir_program_new(^functions, decls, ^type_defs, ^impls, ^sources, ^constants)
     p.checks = checks
     p.sentries = true
+    p.contract_records = true
     ir_foreign_index(&p, ^foreign, decls)
     m := ir_module_for(p)
     failures := [IRBuildFailure]{}
@@ -56,6 +64,9 @@ fn ir_build_tests(functions: ^[FnBody], decls: DeclTable, type_defs: ^[TTypeDef]
     loop test in harness.tests {
         id :: ir_function_id(&m, p, test.key, [Type]{}) ?? -1
         if id < 0 -> &failures.push(IRBuildFailure{key: test.key, name: test.name, message: "the test function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
+        // D-DIAG-CORE-NAME1: a stop in the body names the test as its source
+        // does, not by its checked key (`<module>::test::<name>@<span>`).
+        if id >= 0 -> m.functions[id].name = "test \"{test.name}\""
         &bodies.push(id)
     }
     check_ids := [Int]{}
@@ -395,8 +406,17 @@ fn ir_test_unit(m: &IRModule, p: IRProgram, test: IRTestCase, body: Int, failure
     expected :: ir_test_bool(&m, &b, test.expected_failure)
     code :: ir_temp(&m, &b, pointer_row)
     ir_emit(&b.f, IROp.FunctionAddress, code, invoke, -1, -1, b.line)
-    symbol :: if m.functions[body].param_count > 0 -> "jet_rt_test_property" else -> "jet_rt_test_unit"
-    outcome :: ir_runtime(&m, &b, symbol, [Int]{name, expected, env, code}, pointer_row)
+    property :: m.functions[body].param_count > 0
+    outcome := -1
+    if test.faults.len() > 0 {
+        selectors :: ir_test_text(&m, &b, test.faults.join("\n"))
+        flag :: ir_test_bool(&m, &b, property)
+        outcome = ir_runtime(&m, &b, "jet_rt_test_unit_faults", [Int]{name, expected, env, code, selectors, flag}, pointer_row)
+        ir_test_drop(&m, &b, selectors)
+    } else {
+        symbol :: if property -> "jet_rt_test_property" else -> "jet_rt_test_unit"
+        outcome = ir_runtime(&m, &b, symbol, [Int]{name, expected, env, code}, pointer_row)
+    }
     ir_test_drop(&m, &b, name)
     ir_emit(&b.f, IROp.Return, -1, outcome, -1, -1, b.line)
     ir_test_finish(&m, p, ^b, id, &failures)
@@ -550,7 +570,15 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
     ir_test_report(&m, &b, report_path)
     ir_emit(&b.f, IROp.Return, -1, -1, -1, -1, b.line)
     ir_end(&b.f, b.line)
-    if override >= 0 -> ir_test_call_override(&m, &b, override)
+    if override >= 0 {
+        ir_test_call_override(&m, &b, override)
+        plan :: ir_test_env(&m, &b, TEST_SETTINGS_PLAN_ENV)
+        planning :: ir_test_present(&m, &b, plan)
+        ir_test_drop(&m, &b, plan)
+        ir_open_if(&b.f, planning, b.line)
+        ir_test_exit(&m, &b, 0)
+        ir_end(&b.f, b.line)
+    }
     records_path :: ir_test_env(&m, &b, "JET_NATIVE_TEST_RECORDS_PATH")
     present :: ir_test_present(&m, &b, records_path)
     missing :: ir_temp(&m, &b, bool_row)
@@ -558,6 +586,9 @@ fn ir_test_main(m: &IRModule, p: IRProgram, harness: IRTestHarness, bodies: [Int
     ir_open_if(&b.f, missing, b.line)
     ir_test_exit(&m, &b, 103)
     ir_end(&b.f, b.line)
+    // The checked contract clauses append their first hold and first failure
+    // to the same records file (BuildContracts.jet ir_contract).
+    _ :: ir_runtime(&m, &b, "jet_rt_test_contracts_open", [Int]{records_path}, -1)
     selected :: ir_test_env(&m, &b, "JET_NATIVE_TEST_ID")
     filtered :: ir_test_present(&m, &b, selected)
     tasks :: ir_temp(&m, &b, pointer_row)

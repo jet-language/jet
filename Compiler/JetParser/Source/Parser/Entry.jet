@@ -40,7 +40,6 @@ use {
         TOKEN_BLOCK_COMMENT,
         TOKEN_COLON,
         TOKEN_COMMA,
-        TOKEN_COLON_COLON,
         TOKEN_COLON_EQ,
         TOKEN_DOT,
         TOKEN_EOF,
@@ -162,16 +161,25 @@ fn parser_parse_lexed_lines_threads(input: ^Lexed, source: [U8], line_starts: [I
     parser_parse_runs_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, runs, allow_environment_reads, threads)
 }
 
-// The item-run route: the cut scan per run on the threads; a stream with
-// fences takes the one-run route from here.
+// The item-run route: colon declaration heads take the keyword-first order
+// (parser_colon_declarations), then the cut scan runs per run on the threads;
+// a stream with fences takes the one-run route from here. The run bounds
+// index the lexer's tokens, so a stream the pre-pass lengthened (a module
+// instance gains its keyword) is scanned as one run.
 fn parser_parse_runs_threads(input: ^[Token], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], runs: [Int], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     tables := ^tables_input
     diagnostics := ^lexer_diagnostics
-    scan := parser_chunk_bounds_runs(^input, tables, source, runs, threads)
+    lexed_count :: input.len()
+    declared := parser_colon_declarations(^input, tables, &diagnostics)
+    run_bounds :: if declared.len() == lexed_count -> runs else -> [Int]{0, declared.len()}
+    scan := parser_chunk_bounds_runs(^declared, tables, source, run_bounds, threads)
     fences :: scan.fences
     bounds := ^scan.bounds
     tokens := ^scan.tokens
-    if fences -> return parser_parse_tokens_threads(^tokens, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+    if fences {
+        prepared := parser_prepare_declared(^tokens, &tables)
+        return parser_parse_expansion_threads(^prepared, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+    }
     parser_parse_bounds_threads(^tokens, bounds, ^tables, ^diagnostics, source_end, line_starts, source, allow_environment_reads)
 }
 
@@ -180,7 +188,7 @@ fn parser_parse_runs_threads(input: ^[Token], tables_input: ^TokenTables, lexer_
 fn parser_parse_bounds_threads(input: ^[Token], bounds: [Int], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool) -> ParseResult {
     tables := ^tables_input
     diagnostics := ^lexer_diagnostics
-    prepared := ParserFenceExpansion{tokens: ^input, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+    prepared := ParserFenceExpansion{tokens: ^input, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, retired: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
     parser_parse_chunked(^prepared, bounds, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
 }
@@ -189,8 +197,14 @@ fn parser_parse_bounds_threads(input: ^[Token], bounds: [Int], tables_input: ^To
 // scan on this thread.
 fn parser_parse_tokens_threads(input: ^[Token], tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
     tables := ^tables_input
-    diagnostics := ^lexer_diagnostics
     prepared := parser_prepare_tokens(^input, &tables)
+    parser_parse_expansion_threads(^prepared, ^tables, ^lexer_diagnostics, source_end, line_starts, source, allow_environment_reads, threads)
+}
+
+fn parser_parse_expansion_threads(input: ^ParserFenceExpansion, tables_input: ^TokenTables, lexer_diagnostics: ^[Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, threads: CompilerThreads) -> ParseResult {
+    tables := ^tables_input
+    diagnostics := ^lexer_diagnostics
+    prepared := ^input
     bounds :: if prepared.diagnostics.len() > 0 -> [Int]{} else -> parser_chunk_bounds(prepared.tokens, tables, source, threads)
     if bounds.len() <= 2 -> return parser_parse_prepared(^prepared, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
     parser_parse_chunked(^prepared, bounds, diagnostics, source_end, line_starts, source, allow_environment_reads, ^tables)
@@ -219,17 +233,19 @@ fn parse_tokens(tokens: [Token], tables: TokenTables) -> ParseResult {
 
 // Fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
+// The retired spellings (E0397) follow the lexer's diagnostics.
 fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^TokenTables) -> ParseResult {
     prepared := ^input
+    leading := lexer_diagnostics
+    loop diagnostic in prepared.retired -> &leading.push(diagnostic)
     if prepared.diagnostics.len() > 0 {
-        diagnostics := [Diagnostic]{}
-        loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
+        diagnostics := ^leading
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
     tokens := ^prepared.tokens
     prepared.tokens = [Token]{}
-    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
+    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: ^leading, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
@@ -306,7 +322,7 @@ fn parser_chunk_head_kind(kind: Int) -> Bool Never! {
 // (parser_finish_statement consumed the terminator) and the next begins
 // where its item loop would. The stream stays whole when the parser reads
 // whole-file state: an authored `;` (E0373 reports once per file), a file rule
-// (`#PubFile`, `#NoPrelude`, `#HTML`, `#Target`, `#Policy` set program
+// (`#NoPrelude`, `#HTML`, `#Target`, `#Policy` set program
 // fields that later rules read), or unbalanced delimiters.
 fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threads: CompilerThreads) -> [Int] Never! {
     whole :: [Int]{0, tokens.len()}
@@ -320,7 +336,7 @@ fn parser_chunk_bounds(tokens: [Token], tables: TokenTables, source: [U8], threa
 // The name ids of the file rules (parser_chunk_bounds).
 fn parser_chunk_file_rules(tables: TokenTables) -> [Int] Never! {
     file_rules := [Int]{}
-    file_rule_names :: [String]{"PubFile", "PublicFile", "NoPrelude", "HTML", "Html", "Target", "Policy"}
+    file_rule_names :: [String]{"NoPrelude", "HTML", "Target", "Policy"}
     loop rule in file_rule_names {
         if name_find(tables.names, rule) == .Val(name) -> &file_rules.push(name_index(name))
     }
@@ -550,6 +566,7 @@ fn parser_parse_chunked(input: ^ParserFenceExpansion, bounds: [Int], lexer_diagn
     program := ast_program()
     diagnostics := [Diagnostic]{}
     loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
+    loop diagnostic in prepared.retired -> &diagnostics.push(diagnostic)
     block_spans := [Span]{}
     else_arms := [ElseArmSpan]{}
     block_policy_declarations := [PolicyDeclaration]{}
@@ -844,7 +861,6 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 if declaration.valid -> &program.user_policy_declarations.push(declaration.value)
             }
             parser_section_label_ahead(&state) -> parser_report_section_label(&state)
-            parser_foreign_top_word_ahead(&state) -> parser_report_foreign_top_word(&state)
             parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
             parser_policy_file_decl_ahead(&state) -> parser_parse_policy_file_decl(&state, &program)
             parser_unattached_marker_at_end(&state) -> {
@@ -918,6 +934,10 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 }
                 if state.position == before -> parser_bump(&state)
             }
+            parser_unknown_top_word_ahead(&state) -> {
+                parser_report_unknown_word(&state, true)
+                parser_sync_top(&state)
+            }
             else -> {
                 // Rust resynchronizes a failed script line like a block line
                 // and steps over a token the line could not consume.
@@ -937,26 +957,6 @@ fn parser_parse_program(state: &JetParserState) -> Program {
         }
     }
     program
-}
-
-// Foreign top-level words that teach the Jet spelling: `namespace` (E0323)
-// and `unsafe` (E0031). `unsafe extern rust` keeps its block.
-fn parser_foreign_top_word_ahead(state: &JetParserState) -> Bool Never! {
-    token :: parser_current(&state)
-    if token.kind != TOKEN_IDENT -> return false
-    word :: parser_value(state, token)
-    word == "namespace" || word == "unsafe"
-}
-
-fn parser_report_foreign_top_word(state: &JetParserState) {
-    word :: parser_bump(&state)
-    if parser_value(state, word) == "namespace" {
-        parser_add_error_code(&state, "E0323", word.span, "in-file grouping uses `module name {{ }}`, not `namespace`", "Jet has one spelling for in-file grouping: a named `module` block", "write `module mygroup {{ fn foo() {{ … }} }}` instead")
-        parser_sync_top(&state)
-        return
-    }
-    parser_add_error_code(&state, "E0031", word.span, "Jet doesn't use `unsafe` to call Rust crates", "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`", "write: extern rust \"crate@version\" {{ fn name(...) T = \"rust::path\"; }}")
-    if parser_current_kind(&state) != TOKEN_KW_EXTERN -> parser_sync_top(&state)
 }
 
 // Imported group heads cannot reveal their file members until the loader has
@@ -1019,27 +1019,37 @@ fn parser_marked_module_binding_ahead(state: &JetParserState) -> Bool Never! {
     }
     if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
     next :: parser_kind_at(&state, offset + 1)
-    if next != TOKEN_COLON_COLON && next != TOKEN_COLON_EQ -> return false
+    if next != TOKEN_COLON && next != TOKEN_COLON_EQ -> return false
     name :: parser_lookahead(&state, offset)
     bytes :: parser_value(state, name).bytes()
     bytes.len() > 0 && ((bytes[0] >= 97 && bytes[0] <= 122) || bytes[0] == 95)
 }
 
 // File rules bare
-// `#PubFile`/`#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]`
-// list of them. The retired `#PublicFile`/`#Html` spellings are read to teach.
+// `#NoPrelude`/`#HTML(…)`, a file-level `#Target(…)`, or a `#[…]` list of them.
+// D-MARK-TARGET1/D-OSTARGET1: `#Target(Wasm|JS)` attaches only to the `fn` or
+// `module` it heads (the Target row's sites); before any other item it is the
+// file ceiling. `#Target(OS.X)` attaches to the `impl` it heads.
 fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(&state)
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
     rule :: parser_value(state, name)
-    if rule == "PubFile" || rule == "PublicFile" || rule == "NoPrelude" || rule == "HTML" || rule == "Html" -> return true
-    rule == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
+    if rule == "NoPrelude" || rule == "HTML" -> return true
+    if rule != "Target" -> return false
+    if parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state) -> return true
+    !parser_target_names_os_at(&state, 1) && !parser_hash_leads_to_function_or_module(&state)
+}
+
+// `#Target(OS.…)`: an OS gate, never a web ceiling. `name_offset` is the
+// offset of the `Target` name.
+fn parser_target_names_os_at(state: &JetParserState, name_offset: Int) -> Bool Never! {
+    parser_kind_at(&state, name_offset + 1) == TOKEN_LPAREN && parser_kind_at(&state, name_offset + 2) == TOKEN_IDENT && parser_value_at(&state, name_offset + 2) == "OS"
 }
 
 fn parser_is_file_rule(name: String) -> Bool Never! {
-    name == "PubFile" || name == "NoPrelude" || name == "Target" || name == "HTML" || name == "Html"
+    name == "NoPrelude" || name == "Target" || name == "HTML"
 }
 
 // Rust `marker_list_is_file_rules`: a `#[…]` list whose every entry is a file
@@ -1137,11 +1147,6 @@ fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: M
     hash :: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
-        // The retired file marker; E0418 deletes it.
-        "PubFile" | "PublicFile" -> {
-            deletion :: parser_deletion_edit(state, marker.span)
-            parser_add_error_code_edit(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker", deletion)
-        }
         "NoPrelude" -> {
             if program.no_prelude {
                 parser_report_repeated_file_marker(&state, "NoPrelude", repeat_span)
@@ -1243,8 +1248,8 @@ fn parser_report_grouped_target_conflict(state: &JetParserState, marker: Marker)
 // the visibility of everything below it; E0415 rejects the label itself.
 fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
     if parser_kind_at(&state, 1) != TOKEN_COLON -> return false
-    token :: parser_current(&state)
-    token.kind == TOKEN_KW_PUB || token.kind == TOKEN_KW_PRIV || (token.kind == TOKEN_IDENT && parser_value(state, token) == "private")
+    kind :: parser_current_kind(&state)
+    kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV
 }
 
 fn parser_report_section_label(state: &JetParserState) {
@@ -1257,17 +1262,22 @@ fn parser_report_section_label(state: &JetParserState) {
 
 fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
-    token :: parser_current(&state)
     if {
         parser_item_declaration_ahead_at(&state, 0) -> true
         parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
-        kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> true
+        kind == TOKEN_KW_PUB -> parser_pub_use_ahead(&state)
+        kind == TOKEN_KW_PRIV -> true
         parser_type_alias_ahead_at(&state, 0) -> true
-        token.kind == TOKEN_IDENT && parser_value(state, token) == "private" -> parser_foreign_private_ahead(&state)
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
     }
+}
+
+// `pub use` (or `pub(package) use`) is the re-export spelling; `pub` starts
+// no other declaration.
+fn parser_pub_use_ahead(state: &JetParserState) -> Bool Never! {
+    parser_current_kind(&state) == TOKEN_KW_PUB && (parser_kind_at(&state, 1) == TOKEN_KW_USE || (parser_kind_at(&state, 1) == TOKEN_LPAREN && parser_kind_at(&state, 4) == TOKEN_KW_USE))
 }
 
 fn parser_is_item_keyword(kind: Int) -> Bool Never! {
@@ -1306,10 +1316,10 @@ fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: S
     parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
 }
 
-// After `#Static` / `#Inline`, a constant binding `NAME :: …` is a declaration.
+// After `#Static` / `#Inline`, a constant binding `NAME: …` is a declaration.
 fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     token :: parser_lookahead(&state, offset)
-    if token.kind != TOKEN_IDENT || parser_kind_at(&state, offset + 1) != TOKEN_COLON_COLON -> return false
+    if token.kind != TOKEN_IDENT || parser_kind_at(&state, offset + 1) != TOKEN_COLON -> return false
     parser_constant_name(parser_value(state, token))
 }
 
@@ -1317,10 +1327,29 @@ fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never!
 // markers and before the item are skipped, so `#[A, B]` on its own line still
 // attaches to the item below.
 fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
+    offset :: parser_hash_item_offset(&state)
+    if offset < 0 -> return false
+    kind :: parser_kind_at(&state, offset)
+    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_type_alias_ahead_at(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
+}
+
+// The marker run ahead heads a function (`fn`, `pub fn`, `comptime fn`) or a
+// `module`.
+fn parser_hash_leads_to_function_or_module(state: &JetParserState) -> Bool Never! {
+    offset := parser_hash_item_offset(&state)
+    if offset < 0 -> return false
+    if parser_kind_at(&state, offset) == TOKEN_KW_PUB || parser_kind_at(&state, offset) == TOKEN_KW_PRIV -> offset += 1
+    kind :: parser_kind_at(&state, offset)
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_MODULE || parser_prep_verb_ahead(&state, offset, TOKEN_KW_FN)
+}
+
+// The offset of the item after the marker run at the cursor (newline
+// terminators skipped), or -1 when a marker in the run is malformed.
+fn parser_hash_item_offset(state: &JetParserState) -> Int Never! {
     offset := 0
     loop {
         loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
-        if parser_item_declaration_ahead_at(&state, offset) -> return true
+        if parser_item_declaration_ahead_at(&state, offset) -> return offset
         if parser_kind_at(&state, offset) != TOKEN_HASH -> break
         offset += 1
         if parser_kind_at(&state, offset) == TOKEN_LBRACKET {
@@ -1338,7 +1367,7 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
             next
         }
         if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
-        if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
+        if parser_kind_at(&state, offset) != TOKEN_IDENT -> return -1
         offset += 1
         loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
         if parser_kind_at(&state, offset) == TOKEN_LPAREN {
@@ -1356,6 +1385,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
         }
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
-    kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_type_alias_ahead_at(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
+    offset
 }

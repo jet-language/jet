@@ -1,0 +1,227 @@
+// The project environment boundary: the check that refuses a program with
+// E1355 before it loads when it needs its project's declared environment
+// and runs outside it. A program that imports a package its
+// nearest `package.jet` declares needs that project's declared environment
+// active; outside a package, an inline-versioned import does. Local modules,
+// path dependencies (source in this checkout) and Core never need it.
+// `jet dev`, `jet test` and `jet run --no-prepare` refuse such a program
+// outside its verified environment (E1355). `jet` reads only source,
+// package facts and `env.jet` here; it never resolves a package or creates
+// project state, because acquisition and activation belong to `jetpack`
+// (D-VERDICT-2188-1).
+use {
+    cli_files :: core.files
+    cli_sys :: core.sys
+    jet_driver.[JET_DRIVER_EXIT_USER_ERROR, JetDriverAuthorizedSourceFile]
+    jet_env_model.[
+        env_file_declares_environment, env_hook_definition_fingerprint_with_selections,
+        env_hook_find_env_root, envmodel_evaluate_env_with_selections, envmodel_is_module_surface,
+    ]
+    jet_foundation.[ImportDecl, diagnostic_with_detail]
+    jet_pkg_model.[
+        DepSource, ManifestEntry, RefSource, WorkspaceDeclarationCache,
+        pkg_manifest_diagnostic_from_row, pkg_package_facts_for_root,
+    ]
+    jetpack_foundation.[
+        DEFAULT_ENTRY_FILE, ENV_FILE, ENV_HOOK_ACTIVE_DIR_VAR, ENV_HOOK_ACTIVE_HASH_VAR, FILE_EXT,
+        JETPACK_ENV_MARKER,
+    ]
+}
+
+// The E1355 refusal for `start` (the command's file or directory target)
+// when it consumes a declared package outside the project's verified
+// environment; None otherwise. `jet_argv` is the invocation as typed.
+fn jet_cli_env_boundary_refusal(typed: String, jet_argv: [String], color: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
+    // The typed spelling when it names a file or directory, else `<typed>.jet`.
+    start :: if !cli_files.is_dir(typed) && !cli_files.is_file(typed) && cli_files.is_file("{typed}.{FILE_EXT}") -> "{typed}.{FILE_EXT}" else -> typed
+    preset := String?{None}
+    environment := String?{None}
+    index := 0
+    loop index < jet_argv.len() {
+        argument :: jet_argv[index]
+        if argument == "--" -> break
+        if {
+            argument.starts_with("--preset=") -> preset = Val(argument.removeprefix("--preset="))
+            argument == "--preset" && index + 1 < jet_argv.len() -> {
+                index += 1
+                preset = Val(jet_argv[index])
+            }
+            argument.starts_with("--env=") -> environment = Val(argument.removeprefix("--env="))
+            argument == "--env" && index + 1 < jet_argv.len() -> {
+                index += 1
+                environment = Val(jet_argv[index])
+            }
+            else -> {}
+        }
+        index += 1
+    }
+    search :: if cli_files.is_dir(start) -> start else -> jet_cli_parent(start) ?? "."
+    root :: env_hook_find_env_root(cli_files.realpath(search) ?? search) ?? return None
+    declared :: jet_cli_declared_environment(root, environment) ?? return None
+    import :: jet_cli_project_package_import(start, root) ?? return None
+    if jet_cli_environment_active(root, preset, environment) -> return None
+    command :: "jet {jet_argv.join(" ")}"
+    report :: pkg_manifest_diagnostic_from_row("E1355", [ManifestEntry]{
+        ManifestEntry{key: "environment", value: declared},
+        ManifestEntry{key: "command", value: command},
+    }, None)
+    Val(JetCLIPlan.Refused{report: diagnostic_with_detail(^report, " Import: `use {import}` is the package import that requires this environment."), color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
+}
+
+// Whether `flag` is a jet word, before the first standalone `--`.
+fn jet_cli_flag_before_separator(jet_argv: [String], flag: String) -> Bool Never! {
+    loop argument in jet_argv {
+        if argument == "--" -> return false
+        if argument == flag -> return true
+    }
+    false
+}
+
+// The environment `root`'s `env.jet` declares, without realizing it. A
+// malformed typed environment still declares the boundary; `jetpack` reports
+// its source diagnostic.
+fn jet_cli_declared_environment(root: String, requested: String?) -[FS, Env, Exec]> String? Never! {
+    source :: cli_files.read(cli_files.join(root, ENV_FILE)) ?? return None
+    if envmodel_is_module_surface(source) {
+        if envmodel_evaluate_env_with_selections(source, root, None, requested) == {
+            .Ok(plan) -> {
+                if plan.active_environment == .Val(name) -> return Val("env.{name}")
+                if plan.environment_names.len() == 0 -> return None
+                return Val("env.{plan.environment_names[0]}")
+            }
+            .Err(_) -> return Val("env")
+        }
+    }
+    if env_file_declares_environment(source) -> return Val("env")
+    None
+}
+
+// The prompt hook's activation marks the same root with the definition
+// fingerprint `jet` recomputes for the same selections.
+fn jet_cli_environment_active(root: String, preset: String?, environment: String?) -[FS, Env, Exec]> Bool Never! {
+    marker :: cli_sys.get(JETPACK_ENV_MARKER) ?? return false
+    if marker == "" || marker == "0" -> return false
+    active_root :: cli_sys.get(ENV_HOOK_ACTIVE_DIR_VAR) ?? return false
+    if (cli_files.realpath(active_root) ?? active_root) != (cli_files.realpath(root) ?? root) -> return false
+    active_hash :: cli_sys.get(ENV_HOOK_ACTIVE_HASH_VAR) ?? return false
+    if active_hash == "" -> return false
+    expected :: env_hook_definition_fingerprint_with_selections(root, preset, environment) ?? return false
+    expected == active_hash
+}
+
+// The first import in the program graph from
+// `start` that needs the environment. A directory target reads every
+// package source; a file follows its local imports.
+fn jet_cli_project_package_import(start: String, environment_root: String) -[FS, Env]> String? Never! {
+    directory :: cli_files.is_dir(start)
+    search :: if directory -> start else -> jet_cli_parent(start) ?? "."
+    project_root := environment_root
+    dependencies := [String]{}
+    allow_inline := true
+    cache := WorkspaceDeclarationCache.new()
+    if jet_cli_find_package_root_checked(&cache, cli_files.realpath(search) ?? search) == .Ok(found) {
+        if found == .Val(root) {
+            if pkg_package_facts_for_root(&cache, root) == .Ok(loaded) {
+                if loaded == .Val(facts) {
+                    project_root = root
+                    allow_inline = false
+                    loop name in facts.deps.keys() {
+                        source :: facts.deps.get(name) ?? next
+                        // A path dependency is source in this checkout.
+                        if source == .Provider(provider, _) && provider == RefSource.Path -> next
+                        &dependencies.push(name)
+                    }
+                }
+            }
+        }
+    }
+    canonical_root :: cli_files.realpath(project_root) ?? project_root
+    sources := [JetDriverAuthorizedSourceFile]{}
+    _ := jet_cli_discover_sources(canonical_root, &sources)
+    pending := [String]{}
+    if directory {
+        loop file in sources -> &pending.push(file.path)
+    } else {
+        &pending.push(start)
+    }
+    visited := [String]{}
+    loop pending.len() > 0 {
+        file :: &pending.pop() ?? break
+        identity :: cli_files.realpath(file) ?? file
+        if visited.contains(identity) -> next
+        &visited.push(identity)
+        program :: jet_cli_parsed_program(cli_files.read(file) ?? next) ?? next
+        loop import in program.imports {
+            if jet_cli_package_import_name(import, dependencies, allow_inline) == .Val(name) -> return Val(name)
+        }
+        loop import in program.imports {
+            if jet_cli_local_import_target(identity, import, canonical_root, sources) == .Val(target) -> &pending.push(target)
+        }
+    }
+    None
+}
+
+// The import's display text when it names a
+// declared package (or carries an inline version outside a package).
+fn jet_cli_package_import_name(import: ImportDecl, dependencies: [String], allow_inline: Bool) -> String? Never! {
+    if import.kind == {
+        .Module(name, _) -> {
+            if allow_inline && import.inline_version == .Val(version) -> return Val("{name}#{version.text}")
+            head :: name.split(".").to_list()[0]
+            if head == "core" || !dependencies.contains(head) -> return None
+            Val(name)
+        }
+        .Unqualified(module_alias, _, items, _, _) -> {
+            head :: module_alias.split(".").to_list()[0]
+            if head == "core" || !dependencies.contains(head) -> return None
+            if items.len() == 0 -> return Val(module_alias)
+            Val("{module_alias}.{items[0].original}")
+        }
+        .File(_, _) -> None
+    }
+}
+
+// The project source a local import loads. A
+// file import resolves beside `importing` and stays under `root`; a module
+// import names the one source `<name>.jet` or `<name>/run.jet`.
+fn jet_cli_local_import_target(importing: String, import: ImportDecl, root: String, sources: [JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
+    if import.kind == {
+        .File(path, _) -> {
+            if path.contains("..") -> return None
+            target := jet_cli_parent(importing) ?? "."
+            loop part in path.split("/") {
+                if part != "" && part != "." -> target = "{target}/{part}"
+            }
+            suffix :: ".{FILE_EXT}"
+            if !target.ends_with(suffix) -> target = "{jet_cli_strip_extension(target)}{suffix}"
+            resolved :: cli_files.realpath(target) ?? return None
+            base :: if root.ends_with("/") -> root else -> "{root}/"
+            if resolved != root && !resolved.starts_with(base) -> return None
+            Val(resolved)
+        }
+        .Module(name, _) -> {
+            if name == "core" || name.starts_with("core.") -> return None
+            direct :: "{name}.{FILE_EXT}"
+            found := String?{None}
+            loop file in sources {
+                file_name :: jet_cli_file_name(file.relative_path)
+                matches :: file_name == direct || (file_name == DEFAULT_ENTRY_FILE && jet_cli_file_name(jet_cli_relative_parent(file.relative_path)) == name)
+                if !matches -> next
+                if found != None -> return None
+                found = Val(file.path)
+            }
+            found
+        }
+        .Unqualified(_, _, _, _, _) -> None
+    }
+}
+
+// `path` with the extension of its last component dropped; a name with no
+// dot, or only a leading dot, is kept whole.
+fn jet_cli_strip_extension(path: String) -> String Never! {
+    name :: jet_cli_file_name(path)
+    parts :: name.split(".").to_list()
+    if parts.len() < 2 || parts[0] == "" -> return path.copy()
+    stem :: name.slice(0..<(name.len() - parts[parts.len() - 1].len() - 1))
+    "{path.slice(0..<(path.len() - name.len()))}{stem}"
+}

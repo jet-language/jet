@@ -1,0 +1,23 @@
+use game :: core.game
+
+struct Position {
+    x: Int
+}
+
+fn advance(position: &Position, by: Int) {
+    position.x += by
+}
+
+fn run() {
+    scene := game.Scene.new("frame-order")
+    position := Position{x: 0}
+    scene.on_frame((frame) -> {
+        advance(&position, 10) ?? panic("advance")
+        print("first frame={frame.index} x={position.x}")
+    })
+    scene.on_frame((frame) -> {
+        advance(&position, 1) ?? panic("advance")
+        print("second frame={frame.index} x={position.x}")
+    })
+    game.run(scene).drop("the callbacks' prints are the record under test")
+}

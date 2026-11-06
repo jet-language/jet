@@ -39,10 +39,10 @@ fn jet_cli_gate_append_build_facts(ledger: &GateLedger, facts: [EffectiveFact]) 
     gate_ledger_sort(&ledger)
 }
 
-// GateWriters.rs `append_package_writers`: the entry package's `authority:`
-// block and `build.allow`, then its lock's authority (else each locked
-// package's effect grants), workspace build grants and forced overrides, as
-// external rows. Rows are pushed in the Rust BTreeMap order (sorted keys).
+// `append_package_writers`: the entry package's `authority:` block and
+// `build.allow`, then its lock's authority (else each locked package's effect
+// grants), workspace build grants and forced overrides, as external rows. Rows
+// are pushed in the Rust BTreeMap order (sorted keys).
 fn jet_cli_gate_append_package_writers(ledger: &GateLedger, snapshot: JetDriverAuthorizedSourceSnapshot) {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
@@ -88,9 +88,9 @@ fn jet_cli_gate_append_package_writers(ledger: &GateLedger, snapshot: JetDriverA
     }
 }
 
-// GateWriters.rs `append_authority_entries` over one `authority:` block
-// written at `source`. Its own bound is `authority.allow`/`authority.deny`
-// (#5070), the rest keep their Rust subjects.
+// `append_authority_entries` over one `authority:` block written at `source`.
+// Its own bound is `authority.allow`/`authority.deny` (#5070), the rest keep
+// their Rust subjects.
 fn jet_cli_gate_append_authority(ledger: &GateLedger, authority: PackageAuthority, source: String) {
     held :: "{source} authority"
     granted :: "{source} authority.grants"
@@ -140,7 +140,7 @@ fn jet_cli_gate_trust_label(decision: TrustDecision) -> String Never! {
     }
 }
 
-// GateWriters.rs `effect_names`: `primary`, else `fallback`, else `none`.
+// `effect_names`: `primary`, else `fallback`, else `none`.
 fn jet_cli_gate_effect_names(primary: [String], fallback: [String]) -> String Never! {
     effects :: if primary.len() > 0 -> primary else -> fallback
     if effects.len() == 0 -> return "none"

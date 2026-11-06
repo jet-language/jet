@@ -1,6 +1,6 @@
-// Behavioral ports of CmdFlash.rs. tests/target_machines.rs validates target
-// construction/audits but has no FlashPlan/FlashReceipt oracle or CLI launch.
-// These controlled in-memory fixtures prove policy only, never device flashing.
+// Behavioral ports. The Rust original validates target construction/audits but
+// has no FlashPlan/FlashReceipt oracle or CLI launch. These controlled
+// in-memory fixtures prove policy only, never device flashing.
 use {
     jet_foundation.[
         CanonicalJSON, CanonicalJSONField, ByteSize, MemoryKind, TargetMachine,
@@ -642,10 +642,9 @@ fn flash_test_no_path() -> Path? Never! { None }
     }
 }
 
-// Rust-computed oracles: CLI-36/oracle.py extracts CmdFlash.rs:378-436,
-// 478-619,1233-1242,1338-1377 verbatim plus PerformanceBudget.rs:1-271
-// and the real SHA256.rs, compiled with rustc (no Cargo). Fixture above is
-// synthetic: tests/target_machines.rs contains no Flash receipt/plan cases.
+// Rust-computed oracles: CLI-36/oracle.py extracts verbatim plus and the real,
+// compiled with rustc (no Cargo). Fixture above is synthetic: contains no Flash
+// receipt/plan cases.
 #Test("flash plan identity and success failure receipt digests match Rust") {
     plan :: flash_test_plan()
     assert_eq(sha256_hex(jet_cli_flash_plan_identity(plan)), "1459f83d21b5bc686b503b5aceafeb165fdbd0acd4a5859ae399d59647ae5128")

@@ -27,7 +27,7 @@ fn cli_cmd_hangar(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         "ingest" -> cli_hangar_ingest(&verification, theme, parsed)
         "doctor" -> cli_hangar_doctor(&verification, theme, parsed)
         "path" -> cli_hangar_path(theme, parsed)
-        "du" -> if parsed.positional.contains("--all") -> cli_hangar_du_all(theme, parsed) else -> cli_hangar_du(&verification, theme, parsed)
+        "du" -> if parsed.flags.hangar_all -> cli_hangar_du_all(theme, parsed) else -> cli_hangar_du(&verification, theme, parsed)
         "verify" -> cli_hangar_verify(&verification, theme, parsed)
         "referrers" -> cli_hangar_referrers(&verification, theme, parsed)
         "register-external-root" -> cli_hangar_register_external_root(&verification, theme, parsed)
@@ -195,7 +195,7 @@ fn cli_hangar_ingest(verification: &StoreVerification, theme: Theme, parsed: CLI
     if name == "" {
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs `--name`", "every hangar object has a package name in its record.", "pass `--name <pkg>`.")
     }
-    version :: cli_flag_value(parsed, "--version") ?? ""
+    version :: parsed.flags.version ?? ""
     platform_artifact_kind :: cli_flag_value(parsed, "--platform-artifact-kind") ?? ""
     dir :: cli_positional_path_after(parsed, "ingest") ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "`hangar ingest` needs a source directory", "atomic staged ingest copies a local tree into the hangar.", "run `jetpack hangar ingest <dir> --name <pkg>`.")
@@ -235,12 +235,10 @@ fn cli_hangar_ingest(verification: &StoreVerification, theme: Theme, parsed: CLI
 // `jetpack hangar doctor [--repair]` — verify objects and repair cache
 // drift. Exits 1 while findings remain.
 fn cli_hangar_doctor(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Net, Env, Time, Time.Wait]> Int Never! {
-    loop index in 1..<parsed.positional.len() {
-        if parsed.positional[index] != "--repair" {
-            return cli_hangar_report_error(theme, parsed, "E1340", "`hangar doctor` accepts only `--repair`", "doctor scans the complete Hangar and has no object selector.", "run `jetpack hangar doctor` or `jetpack hangar doctor --repair`.")
-        }
+    if parsed.positional.len() > 1 {
+        return cli_hangar_report_error(theme, parsed, "E1340", "`hangar doctor` takes no arguments", "doctor scans the complete Hangar and has no object selector.", "run `jetpack hangar doctor` or `jetpack hangar doctor --repair`.")
     }
-    repair :: parsed.positional.contains("--repair")
+    repair :: parsed.flags.hangar_repair
     report :: store_hangar_doctor(&verification, pkg_resolve_roots(), repair, parsed.flags.offline) ?? {
         return cli_hangar_report_error(theme, parsed, "E1340", "could not inspect the Hangar", err.message(), "repair the Hangar root or journal, then retry doctor.")
     }
@@ -443,16 +441,14 @@ fn cli_optional_text_tree(value: String?) -> Dyn Never! {
     }
 }
 
-// The value of `--name <value>` or `--name=<value>` among the positionals.
+// The value of `--name <value>` among the positionals.
 fn cli_flag_value(parsed: CLIParsed, name: String) -> String? Never! {
     args :: parsed.positional
-    prefix :: "{name}="
     loop index in 0..<args.len() {
         if args[index] == name {
             if index + 1 < args.len() -> return Val(args[index + 1])
             return None
         }
-        if args[index].starts_with(prefix) -> return Val(args[index].removeprefix(prefix))
     }
     None
 }

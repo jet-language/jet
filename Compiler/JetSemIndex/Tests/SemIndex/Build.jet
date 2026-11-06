@@ -1,6 +1,6 @@
-// Rust Build.rs:1–513 row queries and target alignment. The leaf tests use
-// retained rows, not a fabricated checked graph. The checked fixture/oracle
-// pairs below are unregistered until C4/S6–S8/S20/CP-NAMES provide the real walk.
+// Row queries and target alignment. The leaf tests use retained rows, not a
+// fabricated checked graph. The checked fixture/oracle pairs below are
+// unregistered until C4/S6–S8/S20/CP-NAMES provide the real walk.
 
 fn semindex_build_test_hover(path: String, start: Int, end: Int, text: String) -> HoverEntry Never! {
     HoverEntry{span: Span{start: start, end: end}, module_path: path, text: text}
@@ -238,7 +238,6 @@ fn semindex_build_test_reference(kind: String, path: String, start: Int, end: In
 // accepting actual checked products, deliberately not passing #Tests around
 // prefilled facts. C4 must load/check the fixture before invoking each oracle.
 
-// tests/semindex.rs:369–400 (arithmetic_policy.jet).
 fn semindex_build_test_arithmetic_source() -> String Never! {
     "fn run() {{\n    #Arithmetic(.Wrapping) {{\n        value :: U8{{250}} + U8{{10}}\n    }}\n}}\n"
 }
@@ -259,7 +258,7 @@ fn semindex_build_test_semindex_projects_arithmetic_policy_and_exact_scope(db: S
     }
 }
 
-// tests/semindex.rs:403–450 (terminal_state_graph.jet), including dossier wires.
+// (terminal_state_graph.jet), including dossier wires.
 fn semindex_build_test_terminal_source() -> String Never! {
     "\nstruct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn close() -> Door -> Door{{}}\n    #Transition(Closed, Open) fn open(self: ^Door) -> Door -> self\n    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door -> self\n}}\nfn run() {{}}\n"
 }
@@ -285,7 +284,6 @@ fn semindex_build_test_semindex_projects_terminal_and_reachability_graph(index: 
     assert(dossier_json.contains("\"terminal\":true"))
 }
 
-// tests/semindex.rs:453–483 (terminal_state_hover.jet).
 fn semindex_build_test_terminal_hover_source() -> String Never! {
     "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n"
 }
@@ -299,8 +297,8 @@ fn semindex_build_test_semindex_hover_projects_terminal_and_reachability_facts(d
     assert(closed && orphan)
 }
 
-// tests/semindex.rs:537–564 uses Examples/features/tooling/output_callable.jet
-// as checked by the Driver (including its Output-binding lowering, not a local
+// The Rust original uses Examples/features/tooling/output_callable.jet as
+// checked by the Driver (including its Output-binding lowering, not a local
 // rewrite of APP into app).
 fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemIndex, json: String) {
     found := false
@@ -321,7 +319,7 @@ fn semindex_build_test_semindex_reconstructs_checked_output_callable(index: SemI
     loop field in ([String]{"\"outputs\":[{{", "\"entry\":{{\"identity\"", "\"failure_contract\":\"!Err\"", "\"failure_source\":\"implicit default !Err\"", "\"authority\":\"safe-jet\"", "\"effects\":[\"IO\"]"}) -> assert(json.contains(field))
 }
 
-// lib.rs:762–816 (main.jet), exact equivalent generic applications.
+// (main.jet), exact equivalent generic applications.
 fn semindex_build_test_generic_source() -> String Never! {
     "module boxed<T>(n: Int) {{ fn value() -> Int {{ return n }} }}\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {{}}\n"
 }
@@ -354,7 +352,7 @@ fn semindex_build_test_generic_instance_identity_reaches_index_and_symbol_databa
     assert_eq(count, 1)
 }
 
-// lib.rs:829–895, actual two-module import/receiver fixtures.
+// Actual two-module import/receiver fixtures.
 fn semindex_build_test_reference_library_source() -> String Never! { "fn report() {{ print(\"library\") }}\n" }
 fn semindex_build_test_reference_main_source() -> String Never! {
     "use api :: \"./library\"\nuse alias_report :: api.report\n\nstruct Worker {{ value: Int }}\nimpl Worker {{\n    fn step(self) {{ print(\"worker\") }}\n}}\nstruct Other {{ value: Int }}\nimpl Other {{\n    fn step(self) {{ print(\"other\") }}\n}}\n\nfn run() {{\n    api.report()\n    alias_report()\n    worker :: Worker{{value: 1}}\n    worker.step()\n    other :: Other{{value: 2}}\n    other.step()\n}}\n"
@@ -403,7 +401,7 @@ fn semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_
     assert_eq(targets.len(), 2)
 }
 
-// tests/semindex.rs:1164–1189: the same file is checked before and after.
+// The same file is checked before and after.
 fn semindex_build_test_ancestry_before_source() -> String Never! { "fn score(n: Int) -> Int {{ return n + 1 }}\nfn run() {{ print(score(1)) }}\n" }
 fn semindex_build_test_ancestry_after_source() -> String Never! { "fn score(n: Float, bonus: Float) -> Float {{ return n * bonus }}\nfn run() {{ print(score(1.0, 2.0)) }}\n" }
 fn semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_shape(before: SemIndex, after: SemIndex) {
@@ -423,7 +421,6 @@ fn semindex_build_test_definition_ancestry_identity_ignores_signature_and_body_s
     assert(found)
 }
 
-// tests/semindex.rs:1201–1223 (inferred_effect_signature.jet).
 fn semindex_build_test_inferred_effects_source() -> String Never! { "fn announce() {{ print(\"hello\") }}\nfn run() {{ announce() }}\n" }
 fn semindex_build_test_semindex_projects_omitted_inferred_effects(index: SemIndex) {
     if index.effect_of("announce") == {
@@ -447,7 +444,6 @@ fn semindex_build_test_semindex_projects_omitted_inferred_effects(index: SemInde
     }
 }
 
-// tests/semindex.rs:1316–1339 (rename_anchor_identity.jet).
 fn semindex_build_test_rename_source() -> String Never! { "fn helper() -> Int {{ return 1 }}\nfn run() {{ print(helper()) }}\n" }
 fn semindex_build_test_semindex_rename_sites_keep_definition_identity_in_json(index: SemIndex, json: String) {
     found := false

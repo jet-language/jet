@@ -1,7 +1,7 @@
-// Native compiler math routes, parity: Jet-only (Rust frozen).
-// MathRandomFns.rs and MathLibPure.rs delegate these operations to f64's
-// platform intrinsics/libm. Import that same C operation, never approximate
-// transcendental functions or unfuse mul_add. The runtime link supplies libm.
+// Native compiler math routes, parity: Jet-only (Rust frozen). The Rust
+// originals delegate these operations to f64's platform intrinsics/libm. Import
+// that same C operation, never approximate transcendental functions or unfuse
+// mul_add. The runtime link supplies libm.
 #Import(c) fn compiler_math_acos(x: Float) -> Float = "acos"
 #Import(c) fn compiler_math_acosh(x: Float) -> Float = "acosh"
 #Import(c) fn compiler_math_asin(x: Float) -> Float = "asin"
@@ -54,8 +54,8 @@
 #Export(c) fn jet_std_math_ln_1p(x: Float) -> Float { compiler_math_ln_1p(x) }
 #Export(c) fn jet_std_math_log10(x: Float) -> Float { compiler_math_log10(x) }
 #Export(c) fn jet_std_math_log2(x: Float) -> Float { compiler_math_log2(x) }
-// Float `**` (Power.rs jet_pow: f64::powf). Native programs call this export:
-// the runtime pack's platform libm is private to the pack.
+// Float `**` (jet_pow: f64::powf). Native programs call this export: the
+// runtime pack's platform libm is private to the pack.
 #Export(c) fn jet_std_math_pow(x: Float, y: Float) -> Float { compiler_math_pow(x, y) }
 #Export(c) fn jet_std_math_sin(x: Float) -> Float { compiler_math_sin(x) }
 #Export(c) fn jet_std_math_sinh(x: Float) -> Float { compiler_math_sinh(x) }
@@ -77,7 +77,7 @@
 #Export(c) fn jet_std_math_is_finite(x: Float) -> Bool {
     (rt_f64_bits(x).bit_and(I64{9223372036854775807})) < I64{9218868437227405312}
 }
-// MathLibPure.rs partial_cmp: equal zeros; all NaNs equal and after numbers.
+// partial_cmp: equal zeros; all NaNs equal and after numbers.
 #Export(c) fn jet_std_math_cmp(a: Float, b: Float) -> I64 {
     if (a < b) -> return I64{-1}
     if (a == b) -> return I64{0}

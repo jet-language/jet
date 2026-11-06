@@ -157,7 +157,8 @@ fn run() {
     gray :: grayscale(image)
     gray_pixels :: compute.to_list(gray.pixels)
     if gray.width != 2 || gray.height != 2 || gray.channels != 1 -> panic("gray metadata")
-    if gray_pixels != ([Float]{0.3, 0.59, 0.11, 1.0}) -> panic("gray pixels")
+    // A white pixel sums the weights left to right, as grayscale does.
+    if gray_pixels != ([Float]{0.3, 0.59, 0.11, 0.3 + 0.59 + 0.11}) -> panic("gray pixels")
 
     output :: encode_ppm(resized)
     temp :: files.temp_dir("arrays-image") ?? panic("image output directory")

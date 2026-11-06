@@ -73,10 +73,7 @@ fn term_input_fill(retry: Bool, ebadf_eof: Bool) -> I64 {
     rt_text_store(wrapping(root + I64{24}), I64{0})
     jet_rt_stdout_flush()
     loop {
-        got := I64{0}
-        #Unsafe("the stdin buffer lends TERM_INPUT_CAPACITY writable bytes for a raw Linux read") {
-            got = os_syscall_i64(I64{0}, I64{0}, buffer, TERM_INPUT_CAPACITY, I64{0}, I64{0}, I64{0})
-        }
+        got :: rt_prove_stdin_read(buffer, TERM_INPUT_CAPACITY)
         if (got == I64{-4} && retry) -> next
         if (got == I64{-9} && ebadf_eof) -> return I64{0}
         if (got > I64{0}) -> rt_text_store(wrapping(root + I64{24}), got)
@@ -97,16 +94,12 @@ fn term_input_take(into: I64, capacity: I64) -> I64 {
         return count
     }
     jet_rt_stdout_flush()
-    got := I64{0}
-    #Unsafe("into lends `capacity` writable bytes for a raw Linux read of stdin") {
-        got = os_syscall_i64(I64{0}, I64{0}, into, capacity, I64{0}, I64{0}, I64{0})
-    }
-    got
+    rt_prove_stdin_read(into, capacity)
 }
 
-// Terminal8Raw.rs:19 and IoLineStream.rs:79: locked stdin read_to_string,
-// publishing either owned UTF-8 text or empty text plus an owned IO error.
-// Tuple<String, Option<String>>: text, optional-error tag and payload slots.
+// Locked stdin read_to_string, publishing either owned UTF-8 text or empty text
+// plus an owned IO error. Tuple<String, Option<String>>: text, optional-error
+// tag and payload slots.
 #Export(c) fn jet_terminal8_read_all(output: I64, error_tag: I64, error: I64) {
     if (jet_scheduler_native_propagate() != I64{0}) -> return
     value :: jet_rt_string_builder_new()

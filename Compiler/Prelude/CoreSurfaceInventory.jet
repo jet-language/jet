@@ -5,13 +5,19 @@
 // `fixed_sig <module> { member, ... }` names the Core members with a typed
 // fixed signature. Members that Core.jet does not export become ledger rows
 // of kind `fixed_sig`.
-// `methods <Container> { method, ... }` names the built-in receiver and
-// static methods a ledger container ships. A method name may contain spaces.
-//
-// The rows were frozen at the Rust-removal cutover from the bootstrap
-// checker's `core_fixed_sig_raw` table and its `builtin_method_return`
-// dispatch tree. Update them by hand when one of these members is added or
-// removed.
+// `receivers <Container> { source, ... }` names the Jet tables a ledger
+// container's receiver and static methods come from; the ledger reads the
+// method names from those tables, so this file never copies them:
+//   builtin:<BuiltinMethodReceiver>   BUILTIN_METHOD_ROWS (Registry/BuiltinMethods.jet)
+//   collection:<CollectionReceivers>  COLLECTION_OPERATIONS (Collections.jet); a
+//                                     Sequence row serves List and Iter
+//   static:[<module>.]<owner>         BUILTIN_STATIC_ROWS (Registry/BuiltinStatics.jet)
+//   numeric:conversions               BUILTIN_NUMERIC_SOURCES (Registry/BuiltinStatics.jet)
+//   type:<core module>.<Type>         the type's methods in its Core source
+// `methods <Container> { method, ... }` names only the methods sema checks in
+// code with no table to read (the handle families). Each name must be spelled
+// in Compiler/JetSema/Source and must not already come from the container's
+// receivers row.
 
 fixed_sig app { auth, auth_oauth, auth_routes, auth_show, live_stats, sync }
 fixed_sig core.archive { adler32, compress, compress_file, compress_text, crc32, create, decompress, decompress_file, decompress_text, deflate, gunzip, inflate, list, tar_add, tar_get, tar_names_json, unzip, zip_close, zip_decompress, zip_extract, zip_names_json, zip_next, zip_open, zip_read, zip_write }
@@ -32,7 +38,7 @@ fixed_sig core.encoding.binary { calcsize, iter_unpack, pack, pack_f64be, pack_f
 fixed_sig core.encoding.cbor { reader, writer }
 fixed_sig core.encoding.csv { parse, reader, rows, to_string, writer }
 fixed_sig core.encoding.hex { a2b_base64, a2b_hex, a2b_qp, a2b_uu, b2a_base64, b2a_hex, b2a_qp, b2a_uu, crc32, crc_hqx, decode, dump, encode, encode_prefixed, encode_sep, encode_upper, hexlify, is_hex, unhexlify }
-fixed_sig core.encoding.json { __bytes_into_text, __bytes_view, __coerce_emit, __coerce_now, __edition, __flush, __object_entries_view, __object_from_entries, __read_byte, __read_into, __string_byte, __text_cells_enter, __text_cells_leave, __text_into_bytes, __typed_text, __utf8_validate, __write_bytes, __write_text, canonical, decode, dump, dumps, events, loads, parse, reader, to_string, to_string_pretty, writer }
+fixed_sig core.encoding.json { __bytes_into_text, __bytes_view, __coerce_emit, __coerce_now, __edition, __etf_strings_enter, __etf_strings_leave, __flush, __object_entries_view, __object_from_entries, __read_byte, __read_into, __string_byte, __text_cells_enter, __text_cells_leave, __text_into_bytes, __typed_text, __utf8_validate, __write_bytes, __write_text, canonical, decode, dump, dumps, events, loads, parse, reader, to_string, to_string_pretty, writer }
 fixed_sig core.encoding.jsonl { append_line, count_rows, dumps, first, loads, parse, reader, to_string, writer }
 fixed_sig core.encoding.toml { load, loads, parse, to_string }
 fixed_sig core.encoding.xml { attribute, canonical, content, parse, parse_bytes, parse_with, reader, root, to_bytes, to_string, writer }
@@ -62,7 +68,7 @@ fixed_sig core.regex { compile, compile_with, escape, expand, find, find_all, fi
 fixed_sig core.rt { __callback, __cancel, __coded_stop, __is_cancelled, __next_deadline, __receipt, callback }
 fixed_sig core.service { __active_endpoint, __authority_signing_key, __authority_validate, __endpoint_authority, __host_append_bytes, __host_close, __host_create_dirs, __host_current_dir, __host_entropy, __host_finish, __host_fsync, __host_path_kind, __host_pid, __host_read_bytes, __host_remove, __host_rename, __host_reserve, __host_set_mode, __host_sleep_ns, __host_sleep_wait_ns, __host_stat, __host_sync_parent, __host_wall_sample, __upgrade_receipt_display, append_event, chaos_fail, commit_snapshot, dead_letter_count, delivery_at_most_once, delivery_durable, delivery_state_show, directory_generation, directory_register, directory_resolve, drain_dead_letters, drain_worker, endpoint_show, event_count, fail_worker, group, handoff_generation, mailbox_depth, observe, partition_worker, receive, reconcile_worker, replay_events, restart_one_for_all, restart_one_for_one, restart_rest_for_one, restarts, restore_snapshot, rollback_generation, runtime, send, send_durable, set_delivery, set_restart, set_state_empty, set_state_event_log, set_state_snapshot, start, state_store, stop, tree, tree_show, upgrade_receipt, worker, workflow_activity, workflow_activity_complete, workflow_activity_retry, workflow_activity_wait, workflow_all, workflow_history, workflow_outcome, workflow_sleep, workflow_start, workflow_step }
 fixed_sig core.sync { counter_inc, counter_merge, counter_new, counter_value, list_merge, list_new, list_push, list_show, map_get, map_merge, map_new, map_set, map_show, text_edit, text_merge, text_metadata, text_new, text_set, text_show }
-fixed_sig core.sys { __atexit_os, __close_fd_os, __cpu_count, __current_dir, __dotenv_read, __env_columns, __env_key_compare, __env_remove, __env_set, __env_value, __errno_text, __executable, __family_os, __fork, __getegid, __geteuid, __getgid, __getpgid, __getpgrp, __getppid, __getpriority, __getsid, __getuid, __groups_count, __groups_fill, __host_env, __initgroups, __kill, __loadavg, __mkfifo, __pid_os, __pipe, __rlimit, __rusage, __set_current_dir, __set_rlimit, __setgid, __setpgid, __setpgrp, __setpriority, __setsid, __setuid, __startup_env_columns, __sync_os, __times, __umask, __utime, __wait, __waitpid, arch, atexit, close_fd, cpu_count, current_dir, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid }
+fixed_sig core.sys { __atexit_os, __close_fd_os, __cpu_count, __current_dir, __dotenv_read, __env_columns, __env_key_compare, __env_remove, __env_set, __env_value, __errno_text, __executable, __family_os, __fork, __getegid, __geteuid, __getgid, __getpgid, __getpgrp, __getppid, __getpriority, __getsid, __getuid, __groups_count, __groups_fill, __host_env, __initgroups, __interrupt_os, __kill, __loadavg, __mkfifo, __pid_os, __pipe, __rlimit, __rusage, __set_current_dir, __set_rlimit, __setgid, __setpgid, __setpgrp, __setpriority, __setsid, __setuid, __startup_env_columns, __sync_os, __times, __umask, __utime, __wait, __waitpid, arch, atexit, close_fd, cpu_count, current_dir, executable, exitcode, expand, family, fork, get, getegid, geteuid, getgid, getgroups, getpgid, getpgrp, getpid, getppid, getpriority, getsid, getuid, home_dir, hostname, initgroups, kill, loadavg, mkfifo, name, on_interrupt, pid, pipe, release, set, set_current_dir, setgid, setpgid, setpgrp, setpriority, setsid, setuid, stop, success, sync, temp_dir, times, umask, unset, uptime, username, utime, vars, version, wait, waitpid }
 fixed_sig core.tasks { __condition_notify_all, __condition_notify_one, __interval_ms, __task_cancelled, __task_paused, __yield_now, current_task, interval, timeout, yield_now }
 fixed_sig core.term { __stderr_terminal, __stdin_line, __stdio_bytes, __stdio_fault, __stdio_flush, __stdio_write, __stdout_terminal, __terminal8_color_mode, __terminal8_env, __terminal8_env_has, __terminal8_fault, __terminal8_key_bytes, __terminal8_line, __terminal8_machine_output, __terminal8_mode_enter, __terminal8_mode_leave, __terminal8_read_all, __terminal8_read_until, __terminal8_stderr_tty, __terminal8_stdin_tty, __terminal8_stdout_tty, __terminal8_stty, __terminal8_take, __terminal8_write_stderr, __terminal8_write_stdout, binread, binwrite, buffered, choose, confirm, input_secret, jet_term_is_terminal_raw, progress, read_all_input, read_key, read_until, readline, stderr, stdin, stdout, style, style_force, take, terminal_height, terminal_width }
 fixed_sig core.testing { __clear_failure, __evidence_read, __fault_should_fail, __record_failure, __suite_snapshot, __temp_create, __temp_facts, __temp_join, __temp_remove, __text_window, assert_equal, compare, fake_clock, fake_rng, status, world }
@@ -73,71 +79,76 @@ fixed_sig core.text.parse { capitalize, capwords, center, contains, count, encod
 fixed_sig core.text.wrap { dedent, expand_tabs, fill, hanging_indent, html_escape, html_unescape, indent, indent_with, shorten, wrap, wrap_paragraphs }
 fixed_sig core.time { __clock_mono_ns, __controlled_monotonic_ns, __embedded_zone_bytes, __host_monotonic_ns, __reject_uncontrolled, __sleep_ns, __wall_override_ms, __wall_sample, __world_monotonic_ns, __world_wall_ms, __zone_env, __zone_file_bytes, datetime, days_in_month, expired, from_iso_week, from_unix_ms, from_unix_nanoseconds, instant, is_leap_year, local_time, now_utc, parse, parse_iso_week_date, parse_rfc3339, parse_time, parse_zoned, period, period_days, period_months, period_years, remaining_ms, sleep, sleep_until, start, today, utc, zone, zoned, zoned_local }
 fixed_sig core.tui { __cap_env_bytes, ascii, capabilities, close_event, color_ansi16, color_ansi256, color_rgb, display_width, fill, focus_event, horizontal, interrupt_event, io_event, key_event, key_event_modifiers, layout, length, list, list_state, list_state_offset, list_state_select, list_state_selected, max, min, percent, resize_event, style, style_background, style_bold, style_dim, style_foreground, style_text, style_underline, table, timer_event, vertical }
-fixed_sig core.ui { __accessibility_transfer, __gtk_backend, __node_transfer, __null_backend, __shortcut_transfer, __tui_backend, aria_role_button, aria_role_container, aria_role_label, aria_role_text_input, box, constraint, desktop, gtk_backend, key_event, node, node_accessibility, node_color, node_role, node_shortcut, null_backend, phone, playground, playgrounds, point, preview, previews, rect, resize_event, size, tablet, text, text_input, tui_backend }
-fixed_sig core.ui.host { __capabilities, __open_file, __request_transfer, __save_file, accessibility, capabilities, file_filter, file_filter_text, fs_grant, open_file, open_request, save_file, save_request, shortcut }
-fixed_sig core.ui.host.accessibility { __attach, __project, attach, project }
-fixed_sig core.ui.host.clipboard { __read_text, __write_text, read_text, write_text }
-fixed_sig core.ui.host.drag_drop { __poll, poll }
-fixed_sig core.ui.host.ime { __poll, poll }
-fixed_sig core.ui.host.shortcuts { __dispatch, __register, binding, dispatch, register }
+fixed_sig core.ui { __accessibility_transfer, __gtk_backend, __node_transfer, __null_backend, __shortcut_transfer, __text_input, __tui_backend, aria_role_button, aria_role_container, aria_role_label, aria_role_text_input, box, constraint, desktop, gtk_backend, key_event, node, node_accessibility, node_color, node_role, node_shortcut, null_backend, phone, playground, playgrounds, point, preview, previews, rect, resize_event, size, tablet, text, text_input, tui_backend }
+fixed_sig core.ui.host { __capability, __clipboard_get, __clipboard_set, __dialog_request, __dialog_result, __event_pop, accessibility, capabilities, file_filter, file_filter_text, fs_grant, open_file, open_request, save_file, save_request, shortcut }
+fixed_sig core.ui.host.accessibility { attach, project }
+fixed_sig core.ui.host.clipboard { read_text, write_text }
+fixed_sig core.ui.host.drag_drop { poll }
+fixed_sig core.ui.host.ime { poll }
+fixed_sig core.ui.host.shortcuts { binding, dispatch, register }
 fixed_sig core.units { from }
 fixed_sig core.watcher { __cancel, __event, __files, __is_active, __number, __poll, __port, __process_pid, __set, __set_add, __set_get, __set_len, __target, __text, files, port, process_pid, set }
 fixed_sig core.web { auth, auth_oauth, auth_routes, auth_show, live_stats, on, page, sync, value }
-fixed_sig core.web.browser { __begin_fixture, __cdp, __command, __file_size, __from_connection, __html_path, __is_file, __modified_ms, __path_join, __read_text, __session_started, __ws_set_timeout }
+fixed_sig core.web.browser { __ws_set_timeout }
 fixed_sig core.web.devserver { for_app }
 fixed_sig core.web.storage.local { clear, get, remove, set }
 fixed_sig core.web.storage.session { clear, get, remove, set }
 
 methods AsyncEvent { blocked_count, close, emit_async, listener_count, on, on_priority, once, queued_count, running_count }
-methods Bits { add, clear, count, has, is_empty, len, remove, to_list }
-methods Bytes { buffer, capacity, clear, clone, close, compare, contains, copy_to, ends_with, eof, equal, first, flush, from, get, get_buffer, index_of, is_ascii, is_empty, join, last_index_of, len, lines, new, next, parse, partition, position, read, read_byte, read_bytes, read_string, replace, rewind, seek, shutdown, split, starts_with, string, title, to_bytes, to_lower, to_string, to_title, to_upper, trim, trim_end, trim_start, with_capacity, write, write_byte, write_bytes, write_f32_be, write_f32_le, write_f64_be, write_f64_le, write_i16_be, write_i16_le, write_i32_be, write_i32_le, write_i64_be, write_i64_le, write_i8, write_to, write_u16_be, write_u16_le, write_u32_be, write_u32_le, write_u64_be, write_u64_le, write_u8 }
-methods Cache { add, add_new, capacity, clear, get, has_key, is_empty, keys, len, remove }
+receivers Bits { collection:Bits, static:Bits }
+receivers Bytes { builtin:Bytes, static:Bytes }
+receivers Cache { collection:Cache, static:Cache }
+receivers Cell { static:Cell }
 methods Cell { edit, get, get_or_set, guard_edit, guard_read, read, replace, set }
 methods CellGuard { edit, get, map, read, second, set, split }
-methods Clock { advance, now, tick, wait }
-methods Condition { notify_all, notify_one }
+receivers Clock { type:core.time.Clock }
+receivers Condition { type:core.tasks.Condition, static:Condition }
 methods core.compiler { action, add_asset_bundle, add_doc, add_executable, add_install, add_library, add_package, add_publish, add_test, build_profiles, cause, code, collisions, content_hash, contribute, debug_info, dependencies, description, diagnostics, edition, effects, embed, entry, error, extends, fetch, file, find, fingerprint, functions, generate, generated_lines, inferred_layer, items, jet, key, kind, layer, legacy, license, message, name, optimize, outputs, packages, panic, plan, plugin, probe, profiles, repository, revision, root_dependencies, schema_version, semantic_index, signing, small, source, source_kind, sources, syntax, target, targets, tokens, toolchain, value, version }
-methods core.crypto.vault { Passphrase, Recipient, from_bytes }
-methods core.files { extension, home, is_within, join, normalize, parent, stem, to_string, walk, write_atomic }
-methods core.math { abs, add, bit_count, bit_length, ceil, compare, count_ones, count_zeros, denominator, div, div_euclid, equal, floor, from_decimal, from_f32, from_float, from_fraction, from_i16, from_i32, from_i64, from_i8, from_int, from_radix, from_u16, from_u32, from_u64, from_u8, is_finite, is_infinite, is_nan, is_zero, leading_zeros, mul, numerator, parse, rem_euclid, reverse, round, sub, then, to_float, to_radix, to_string, trailing_zeros }
-methods core.net.tls { certificate_chain, cipher_suite, leaf, tls_version, verified_server_name }
-methods core.process { with, without, workspace }
+receivers core.crypto.vault { static:core.crypto.vault.WrappedVaultKey, static:core.crypto.vault.KeyUnlock }
+receivers core.math { builtin:Integer, builtin:Float, builtin:ExactInt, builtin:FixedInt, builtin:Scalar, builtin:Ordering, static:Int, static:Float, static:F64, static:Decimal, static:Fraction, numeric:conversions, type:core.math.Decimal, type:core.math.Fraction }
+receivers core.net.tls { type:core.net.tls.TLSStream }
+receivers core.process { static:Authority }
+methods core.process { with, without }
 methods core.reflect { call_edges, definitions, functions, has, has_marker, has_method, implements, is_active, packages, reaches_panic, references, structural_nodes, types, unsubscribe }
-methods core.regex { find, find_all, full_match, group, group_end, group_start, is_match, match, matches, name, replace, replace_all_with, replace_first, split, split_limit }
-methods core.sync { new }
+receivers core.regex { type:core.regex.Regex, type:core.regex.Match }
+receivers core.sync { builtin:Atomic, builtin:AtomicAdd, builtin:AtomicInt, static:Atomic }
 methods core.testing { run }
-methods core.time { hours, microseconds, milliseconds, minutes, nanoseconds, new, now, seconds, system }
+receivers core.time { static:Duration }
 methods core.time.expiring { new }
 methods DecisionHook { listener_count, on, on_priority, once, run }
-methods Derived { get }
+receivers Derived { type:core.web.store.Derived }
 methods DeterministicWorld { advance, history, now, wait_idle }
-methods DispatchReport { accepted, delivered_handlers, failures, state, trace }
+methods DispatchReport { accepted, delivered_handlers, state, trace }
 methods Duration { abs, difference, in, is_zero, negated, round, sign, total_in, total_seconds }
 methods Event { emit, listener_count, on, on_priority, once, trace }
 methods EventScope { active_count, cancel }
 methods EventTrace { delivered, dropped, queued, summary }
 methods Hook { listener_count, on, on_priority, once, run, trace }
-methods Iter { all, any, average, chunk_while, chunks, collect, compare, contains, count_by, count_where, counts, cycle, dedup, dedup_by, drop_last, each, edit_disjoint, filter, filter_map, find, first, flat_map, flatten, fold, group_by, indexed, indexes, intersperse, is_empty, is_sorted, is_sorted_by, join, last_index_of, len, loop n times, map, max, max_by, min, min_by, next, para_filter, para_fold, para_map, para_partition, partition, position, product, reduce, repeat, scan, shuffle, skip, skip_while, sort_by, sort_by_desc, split, step_by, sum, take, take_while, to_list, to_set, try_collect, unzip, update_first, windows, zip, zip_pad, zip_short }
-methods List { all, any, append, average, binary_search, binary_search_by, chunk_while, chunks, clear, compare, concat, contains, count, count_by, count_where, counts, cycle, dedup, dedup_by, difference, drop_last, each, edit_disjoint, ends_with, equal, extend, filter, filter_map, find, first, flat_map, flatten, fold, get, get_disjoint_write, group_by, index, index_of, indexed, indexes, insert, intersection, intersperse, is_empty, is_sorted, is_sorted_by, join, last, last_index_of, lazy, len, loop n times, map, max, max_by, min, min_by, min_max, min_max_by, para_filter, para_fold, para_map, para_partition, partition, pop, position, product, push, random, reduce, remove, repeat, replace, reverse, scan, shuffle, skip, skip_while, slice, sort, sort_by, sort_by_desc, sort_desc, split, split_write, starts_with, step_by, sum, take, take_while, to_set, try_collect, try_push, try_reserve, union, unzip, update_first, view, windows, zip, zip_pad, zip_short }
-methods Map { add, add_new, all, any, clear, contains_value, each, equal, filter, first, flat_map, fold, from_keys, fromkeys, get, has_key, intersection, is_empty, items, keys, len, map, max, merge, min, new, pop, pop_first, remove, replace, setdefault, slice, to_list, top_n, try_insert, update, values }
+receivers Iter { collection:Iter }
+methods Iter { zip, zip_pad, zip_short }
+receivers List { collection:List, static:List }
+methods List { para_filter, para_fold, para_map, para_partition, view, zip, zip_pad, zip_short }
+receivers Map { collection:Map, static:Map }
 methods Option { map, or_err, why }
+receivers Pool { static:Pool }
 methods Pool { add, ids, remove }
-methods PriorityQueue { clear, is_empty, len, peek, pop, push, remove, to_sorted_list }
-methods Queue { capacity, clear, contains, delete, get, init, is_empty, join, len, new, peek_back, peek_front, pop_back, pop_front, push_back, push_front, reverse, split, to_list }
-methods Rank { add, clear, difference, first, has, intersection, is_disjoint, is_empty, is_subset, is_superset, last, len, new, remove, symmetric_difference, to_list, union }
+receivers PriorityQueue { collection:PriorityQueue, static:PriorityQueue }
+receivers Queue { collection:Queue, static:Queue }
+receivers Rank { collection:Rank, static:Rank }
 methods Receiver { close, delay_ms, is_cancelled, is_interval, is_ready, is_timer, receive, try_receive }
-methods Rng { bool, bytes, exponential, float, float_range, int, normal, pick, sample, shuffle, split, weighted_pick }
+receivers Rng { type:core.math.random.RNG }
 methods Sender { close, send }
-methods Set { add, all, capacity, clear, difference, difference_update, discard, each, equal, filter, first, flat_map, fold, has, intersection, intersection_update, is_disjoint, is_empty, is_subset, is_superset, isdisjoint, issubset, issuperset, len, map, max, min, new, pop, remove, replace, shuffle, sort, symmetric_difference, symmetric_difference_update, take, to_list, to_set, union, update, values }
+receivers Set { collection:Set, static:Set }
+receivers Shared { static:Shared }
 methods Shared { capture, downgrade, edit, guard_edit, guard_read, read, same, strong_count, try_replace }
-methods SharedGuard { SharedGuard, map, second, split, wait }
+methods SharedGuard { map, second, split, wait }
 methods SharedSnapshot { value }
 methods SharedWeak { upgrade }
 methods Signal { get, set }
-methods String { after, before, bytes, capitalize, casefold, center, chars, compare, contains, count, count_bytes, cut_last, encode, ends_with, endswith, equal, expandtabs, find, from_bytes, from_bytes_lossy, hash, index, index_of, is_alphabetic, is_ascii, is_empty, is_lower, is_numeric, is_upper, is_whitespace, isalnum, isalpha, isascii, isdecimal, isdigit, isidentifier, islower, isnumeric, isprintable, isspace, istitle, isupper, last_index_of, len, lines, ljust, lower, lstrip, match, matches, normalize, pad_end, pad_start, parse, partition, removeprefix, removesuffix, repeat, replace, reverse, rfind, rindex, rjust, rpartition, rsplit, rstrip, slice, split, split_once, splitlines, starts_with, startswith, strip, swapcase, title, to_ascii_lower, to_ascii_upper, to_float, to_int, to_lower, to_string, to_title, to_upper, trim, trim_end, trim_start, try_push, upper, zfill }
+receivers String { builtin:String, static:String }
 methods Subscription { is_active, unsubscribe }
-methods Tally { add, any, count, has, is_empty, len, remove }
+receivers Tally { collection:Tally, static:Tally }
 methods Task { cancel, detach, join, pause, resume, trace }
-methods View { contains, first, fold, get, index_of, is_empty, join, last, len, map }
-methods WatchHandle { cancel, events, is_active, on, once, poll, summary }
-methods WatchSet { add, events, poll, summary }
+receivers View { collection:View }
+receivers WatchHandle { type:core.watcher.WatchHandle }
+receivers WatchSet { type:core.watcher.WatchSet }

@@ -1,4 +1,3 @@
-// Rust: crates/jet-devserver/src/WatchService.rs:1
 // Unified typed dependency graph, event waits, deterministic invalidation and transactional replacement.
 use {
     fs :: std.fs
@@ -20,10 +19,8 @@ use {
     core.sys.target.[selected_os]
 }
 
-// Rust: crates/jet-devserver/src/WatchService.rs:22
 enum RootKind {
     Import; Asset; HTML; Style; Manifest; Lock; Generated; BuildInput; TargetFact
-    // Rust: crates/jet-devserver/src/WatchService.rs:34
     fn as_str(self) -> String { if self == {
         .Import -> "import"
         .Asset -> "asset"
@@ -36,10 +33,8 @@ enum RootKind {
         .TargetFact -> "target_fact"
     } }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:53
 struct PathStamp {
     exists: Bool; mtime: SystemTime?; len: U64?; digest: String?
-    // Rust: crates/jet-devserver/src/WatchService.rs:60
     fn capture(path: OSPath) -> PathStamp {
         if fs.metadata(path) == {
             .Ok(meta) -> {
@@ -49,7 +44,6 @@ struct PathStamp {
             .Err(_) -> PathStamp{exists: false, mtime: None, len: None, digest: None}
         }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:87
     fn changed_since(self, newer: PathStamp) -> Bool {
         if self.exists != newer.exists -> return true
         if (_0: self.digest.as_ref(), _1: newer.digest.as_ref()) == {
@@ -59,26 +53,20 @@ struct PathStamp {
         }
     }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:104
 struct WatchWake {
     sender: mpsc.Sender<()>
-    // Rust: crates/jet-devserver/src/WatchService.rs:108
     fn wake(self) -> () { _ :: self.sender.send(_) }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:113
 struct EventWaiter {
     receiver: mpsc.Receiver<()>; wake: WatchWake; native: Watcher?
-    // Rust: crates/jet-devserver/src/WatchService.rs:121
     fn new(paths: [OSPath]) -> EventWaiter {
         (sender, receiver) :: mpsc.channel()
         native :: if selected_os() == "linux" -> Watcher.new(^paths, sender.clone()) else -> None
         EventWaiter{receiver, wake: WatchWake{sender}, native}
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:135
     fn refresh(self, paths: [OSPath]) -> () {
         if selected_os() == "linux" { if self.native == .Val(native) -> native.refresh(^paths) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:144
     fn wait(self, timeout: Duration?) -> Bool {
         if selected_os() == "linux" && self.native.is_some() {
             return if timeout == {
@@ -90,7 +78,6 @@ struct EventWaiter {
         _ :: self.receiver.recv_timeout(timeout)
         true
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:163
     fn coalesce(self, timeout: Duration) -> () {
         if selected_os() == "linux" && self.native.is_some() {
             deadline :: Instant.now() + timeout
@@ -103,52 +90,34 @@ struct EventWaiter {
         }
         thread.sleep(timeout)
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:179
     fn wake_handle(self) -> WatchWake { self.wake.clone() }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:195
 IN_NONBLOCK :: I32{0x800}
-// Rust: crates/jet-devserver/src/WatchService.rs:196
 IN_CLOEXEC :: I32{0x80000}
-// Rust: crates/jet-devserver/src/WatchService.rs:197
 IN_MASK :: U32{(0x00000002).bit_or(0x00000004).bit_or(0x00000008).bit_or(0x00000040).bit_or(0x00000080).bit_or(0x00000100).bit_or(0x00000200).bit_or(0x00000400).bit_or(0x00000800).bit_or(0x00004000)}
-// Rust: crates/jet-devserver/src/WatchService.rs:207
 POLLIN :: I16{0x001}
-// Rust: crates/jet-devserver/src/WatchService.rs:208
 POLLERR :: I16{0x008}
-// Rust: crates/jet-devserver/src/WatchService.rs:209
 POLLHUP :: I16{0x010}
-// Rust: crates/jet-devserver/src/WatchService.rs:210
 POLLNVAL :: I16{0x020}
-// Rust: crates/jet-devserver/src/WatchService.rs:213
 #Repr("C")
 struct PollFd { fd: I32; events: I16; revents: I16 }
 // GATE #4494: Linux libc event descriptor ABI, only called under selected_os Linux dispatch.
-// Rust: crates/jet-devserver/src/WatchService.rs:220
 #FFI(c)
 fn close(fd: I32) -> I32
-// Rust: crates/jet-devserver/src/WatchService.rs:221
 #FFI(c)
 fn inotify_add_watch(fd: I32, pathname: Ptr<I8>, mask: U32) -> I32
-// Rust: crates/jet-devserver/src/WatchService.rs:222
 #FFI(c)
 fn inotify_init1(flags: I32) -> I32
-// Rust: crates/jet-devserver/src/WatchService.rs:223
 #FFI(c)
 fn pipe(fds: Ptr<I32>) -> I32
-// Rust: crates/jet-devserver/src/WatchService.rs:224
 #FFI(c)
 fn poll(fds: Ptr<PollFd>, nfds: USize, timeout: I32) -> I32
-// Rust: crates/jet-devserver/src/WatchService.rs:225
 #FFI(c)
 fn read(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
-// Rust: crates/jet-devserver/src/WatchService.rs:226
 #FFI(c)
 fn write(fd: I32, buffer: Ptr<U8>, count: USize) -> ISize
-// Rust: crates/jet-devserver/src/WatchService.rs:229
 struct Watcher {
     paths: Arc<Mutex<[OSPath]>>; control_write: I32; stop: Arc<AtomicBool>; join: JoinHandle<()>?
-    // Rust: crates/jet-devserver/src/WatchService.rs:237
     fn new(paths: [OSPath], sender: mpsc.Sender<()>) -> Watcher? {
         pipes := [I32{0}, I32{0}]
         if pipe(&pipes.as_mut_ptr()) != 0 -> return None
@@ -160,16 +129,13 @@ struct Watcher {
         join :: thread.Builder.new().name("jet-watch-events").spawn(() -> run(pipes[0], ^thread_paths, ^thread_stop, ^sender)).ok()
         if join == .Val(join) -> .Val(Watcher{paths, control_write: pipes[1], stop, join: .Val(join)}) else -> None
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:275
     fn refresh(self, paths: [OSPath]) -> () {
         paths :: normalize_paths(^paths); current := self.paths.lock().unwrap_or_else((e) -> e.into_inner())
         if current == paths -> return
         current = ^paths; drop(^current); self.signal()
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:286
     fn signal(self) -> () { byte :: [U8{1}]; _ :: write(self.control_write, byte.as_ptr(), byte.len()) }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:293
 impl Watcher.Drop {
     fn drop(self: Watcher) -> () {
         self.stop.store(true, Ordering.Release); self.signal()
@@ -177,9 +143,7 @@ impl Watcher.Drop {
         _ :: close(self.control_write)
     }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:305
 fn normalize_paths(paths: [OSPath]) -> [OSPath] { paths := ^paths; &paths.sort(); &paths.dedup(); ^paths }
-// Rust: crates/jet-devserver/src/WatchService.rs:311
 fn existing_directory(path: OSPath) -> OSPath? {
     candidate := if path.is_dir() -> path.to_path_buf() else -> path.parent().unwrap_or(OSPath(".")).to_path_buf()
     loop {
@@ -190,7 +154,6 @@ fn existing_directory(path: OSPath) -> OSPath? {
         } else { return None }
     }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:331
 fn build_notify_fd(paths: [OSPath]) -> I32 {
     fd :: inotify_init1(IN_NONBLOCK.bit_or(IN_CLOEXEC))
     if fd < 0 -> return -1
@@ -203,7 +166,6 @@ fn build_notify_fd(paths: [OSPath]) -> I32 {
     }
     if watched == 0 { _ :: close(fd); -1 } else { fd }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:360
 fn run(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, sender: mpsc.Sender<()>) -> () {
     notify_fd := { paths :: paths.lock().unwrap_or_else((e) -> e.into_inner()); build_notify_fd(paths) }
     loop {
@@ -233,93 +195,68 @@ fn run(control_read: I32, paths: Arc<Mutex<[OSPath]>>, stop: Arc<AtomicBool>, se
     if notify_fd >= 0 -> _ :: close(notify_fd)
     _ :: close(control_read)
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:439
 enum ChangeKind { Created; Modified; Deleted; Renamed; Stale }
-// Rust: crates/jet-devserver/src/WatchService.rs:450
 struct InvalidationReceipt {
     generation: U64; changed: [OSPath]; closure: [OSPath]; kinds: [String]; change_kinds: [String]
     content_digests: [String?]; dev_entries: [DevWatchEntry]; edit_to_visible_ms: U128?
-    // Rust: crates/jet-devserver/src/WatchService.rs:488
     fn render(self) -> String {
         elapsed :: self.edit_to_visible_ms.map((ms) -> "{ms}").unwrap_or("null")
         "{{\"generation\":{self.generation},\"changed\":[{join_paths(self.changed)}],\"closure\":[{join_paths(self.closure)}],\"kinds\":[{join_quoted(self.kinds)}],\"change_kinds\":[{join_quoted(self.change_kinds)}],\"content_digests\":[{join_optional_quoted(self.content_digests)}],\"dev_entries\":[{join_dev_entries(self.dev_entries)}],\"edit_to_visible_ms\":{elapsed}}}"
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:503
     fn game_dev_entries(self) -> [DevWatchEntry] { &self.dev_entries }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:468
 struct DevWatchEntry {
     path: OSPath; change_kind: String; game_kind: JetGameChangeKind
     old_digest: String?; new_digest: String?; old_schema_id: String?; new_schema_id: String?
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:478
 struct WatchNode { path: OSPath; kind: RootKind; stamp: PathStamp; is_dir: Bool }
-// Rust: crates/jet-devserver/src/WatchService.rs:508
 fn join_optional_quoted(items: [String?]) -> String {
     items.iter().map((item) -> item.as_ref().map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")).collect().join(",")
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:520
 fn join_quoted(items: [String]) -> String { items.iter().map((item) -> "\"{foundation_json_escape(item)}\"").collect().join(",") }
-// Rust: crates/jet-devserver/src/WatchService.rs:528
 fn join_dev_entries(entries: [DevWatchEntry]) -> String {
     entries.iter().map((entry) -> {
         optional :: (value: String?) -> value.map((value) -> "\"{foundation_json_escape(value)}\"").unwrap_or("null")
         "{{\"path\":\"{foundation_json_escape(entry.path.display().to_string())}\",\"change_kind\":\"{entry.change_kind}\",\"game_kind\":\"{entry.game_kind.as_str()}\",\"old_digest\":{optional(entry.old_digest.as_ref())},\"new_digest\":{optional(entry.new_digest.as_ref())},\"old_schema_id\":{optional(entry.old_schema_id.as_ref())},\"new_schema_id\":{optional(entry.new_schema_id.as_ref())}}}"
     }).collect().join(",")
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:553
 fn join_paths(paths: [OSPath]) -> String { paths.iter().map((p) -> "\"{foundation_json_escape(p.display().to_string())}\"").collect().join(",") }
-// Rust: crates/jet-devserver/src/WatchService.rs:564
 struct WatchGraph {
     nodes: [OSPath:WatchNode]; asset_roots: [OSPath:Bool]; runtime_input_roots: [OSPath:Bool]
     game_paths: [OSPath:JetGameChangeKind]; game_schema_ids: [OSPath:(String?, String?)]
     reverse: [OSPath:[OSPath:Bool]]; forward: [OSPath:[OSPath:Bool]]; entry: OSPath?
     fn default() -> WatchGraph { WatchGraph{nodes: {}, asset_roots: {}, runtime_input_roots: {}, game_paths: {}, game_schema_ids: {}, reverse: {}, forward: {}, entry: None} }
-    // Rust: crates/jet-devserver/src/WatchService.rs:583
     fn new() -> WatchGraph { WatchGraph.default() }
-    // Rust: crates/jet-devserver/src/WatchService.rs:587
     fn entry(self) -> OSPath? { self.entry.as_ref() }
-    // Rust: crates/jet-devserver/src/WatchService.rs:591
     fn node_count(self) -> USize { self.nodes.len() }
-    // Rust: crates/jet-devserver/src/WatchService.rs:595
     fn nodes(self) -> Iterator<WatchNode> {
         paths := self.nodes.keys().cloned().collect(); &paths.sort()
         paths.into_iter().map((path) -> &self.nodes[path])
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:599
     fn reverse_edges(self) -> [OSPath:[OSPath:Bool]] { &self.reverse }
-    // Rust: crates/jet-devserver/src/WatchService.rs:603
     fn upsert(self: WatchGraph, path: OSPath, kind: RootKind) -> () { &self.upsert_with_dir_hint(^path, kind, false) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:607
     fn upsert_with_dir_hint(self: WatchGraph, path: OSPath, kind: RootKind, dir_hint: Bool) -> () {
         is_dir :: dir_hint || path.is_dir(); stamp :: PathStamp.capture(path)
         &self.nodes.insert(path.clone(), WatchNode{path: ^path, kind, stamp, is_dir})
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:621
     fn link(self: WatchGraph, from: OSPath, to: OSPath) -> () {
         &self.forward.entry(from.clone()).or_default().insert(to.clone(), true)
         &self.reverse.entry(^to).or_default().insert(^from, true)
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:629
     fn set_entry(self: WatchGraph, entry: OSPath) -> () { self.entry = .Val(entry.clone()); &self.upsert(^entry, .Import) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:636
     fn register_asset_root(self: WatchGraph, path: OSPath) -> () {
         path :: canonicalize_loose(path); &self.asset_roots.insert(path.clone(), true)
         visited := [OSPath:Bool]{}; &self.add_asset_tree(path, &visited)
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:643
     fn asset_roots(self) -> [OSPath:Bool] { &self.asset_roots }
-    // Rust: crates/jet-devserver/src/WatchService.rs:649
     fn register_game_path(self: WatchGraph, path: OSPath, kind: JetGameChangeKind) -> () {
         path :: canonicalize_loose(path); &self.game_paths.insert(path.clone(), kind)
         if !self.nodes.contains_key(path) -> &self.upsert(path, .BuildInput)
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:659
     fn register_game_path_with_schema_ids(self: WatchGraph, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
         path :: canonicalize_loose(path); &self.register_game_path(path.clone(), kind)
         &self.game_schema_ids.insert(path, (_0: ^old_schema_id, _1: ^new_schema_id))
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:672
     fn game_kind_for(self, path: OSPath) -> JetGameChangeKind? {
         self.game_paths.get(path).copied().or_else(() -> self.nodes.get(path).and_then((node) -> if node.kind == {
             .Import -> .Val(.Script)
@@ -327,14 +264,11 @@ struct WatchGraph {
             else -> None
         }))
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:684
     fn game_schema_ids_for(self, path: OSPath) -> (String?, String?) { self.game_schema_ids.get(path).cloned().unwrap_or((_0: None, _1: None)) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:694
     fn discover_runtime_input_trees(self: WatchGraph) -> () {
         roots := self.runtime_input_roots.keys().cloned().collect(); &roots.sort(); visited := [OSPath:Bool]{}
         loop root in roots { &self.add_new_runtime_tree(root, &visited) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:702
     fn add_new_runtime_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
         path :: canonicalize_loose(path)
         if visited.contains_key(path) -> return
@@ -354,12 +288,10 @@ struct WatchGraph {
         &children.sort()
         loop child in children { &self.add_new_runtime_tree(child, &visited) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:760
     fn discover_asset_tree(self: WatchGraph) -> () {
         roots := self.asset_roots.keys().cloned().collect(); &roots.sort(); visited := [OSPath:Bool]{}
         loop root in roots { &self.add_new_asset_tree(root, &visited) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:768
     fn add_new_asset_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
         path :: canonicalize_loose(path)
         if visited.contains_key(path) -> return
@@ -372,7 +304,6 @@ struct WatchGraph {
         children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
         &children.sort(); loop child in children { &self.add_new_asset_tree(child, &visited) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:809
     fn add_asset_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
         path :: canonicalize_loose(path)
         if visited.contains_key(path) -> return
@@ -381,7 +312,6 @@ struct WatchGraph {
         children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
         &children.sort(); loop child in children { &self.add_asset_tree(child, &visited) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:830
     fn closure_of(self, seeds: [OSPath]) -> [OSPath] {
         seen := [OSPath:Bool]{}; queue := VecDeque.new()
         loop seed in seeds {
@@ -399,11 +329,8 @@ struct WatchGraph {
         }
         result := seen.keys().cloned().collect(); &result.sort(); ^result
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:852
     fn watched_paths(self) -> [OSPath] { paths := self.nodes.keys().cloned().collect(); &paths.sort(); ^paths }
-    // Rust: crates/jet-devserver/src/WatchService.rs:856
     fn refresh_stamps(self: WatchGraph) -> () { loop node in &self.nodes.values_mut() { node.stamp = PathStamp.capture(node.path) } }
-    // Rust: crates/jet-devserver/src/WatchService.rs:863
     fn classify(path: OSPath) -> RootKind {
         name :: path.file_name().and_then((n) -> n.to_str()).unwrap_or("").to_ascii_lowercase()
         if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return .Manifest
@@ -421,7 +348,6 @@ struct WatchGraph {
             else -> if name.starts_with("target.") || name.contains("target_fact") -> .TargetFact else -> .BuildInput
         }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:910
     fn from_entry(entry: OSPath, deps: [OSPath]) -> WatchGraph Diagnostic! {
         graph := WatchGraph.new(); entry :: canonicalize_loose(entry); &graph.set_entry(entry.clone()); html_paths := [OSPath]{}
         entry_dir :: entry.parent().unwrap_or(OSPath("."))
@@ -448,7 +374,6 @@ struct WatchGraph {
         &graph.scan_html_references(html_paths); &graph.scan_runtime_inputs()
         Ok(^graph)
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:976
     fn scan_runtime_inputs(self: WatchGraph) -> () {
         sources :: self.nodes().filter((node) -> node.kind == RootKind.Import || node.path.extension().and_then((e) -> e.to_str()).is_some_and((e) -> e.eq_ignore_ascii_case("jet"))).map((node) -> node.path.clone()).collect()
         base :: self.entry.as_ref().and_then((path) -> path.parent()).unwrap_or(OSPath("."))
@@ -464,9 +389,7 @@ struct WatchGraph {
         visited := [OSPath:Bool]{}; paths := inputs.keys().cloned().collect(); &paths.sort()
         loop input in paths { &self.add_runtime_input_tree(input, &visited, inputs[input]) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1019
     fn add_runtime_input_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool) -> () { &self.add_runtime_input_node(path, &visited, dir_hint, true) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1028
     fn add_runtime_input_node(self: WatchGraph, path: OSPath, visited: [OSPath:Bool], dir_hint: Bool, register_root: Bool) -> () {
         path :: canonicalize_loose(path)
         if visited.contains_key(path) -> return
@@ -479,11 +402,9 @@ struct WatchGraph {
         children := fs.read_dir(path).into_iter().flatten().filter_map((item) -> item.ok().map((item) -> item.path())).collect()
         &children.sort(); loop child in children { &self.add_runtime_input_node(child, &visited, false, false) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1077
     fn scan_html_references(self: WatchGraph, roots: [OSPath]) -> () {
         visited := [OSPath:Bool]{}; loop root in roots { &self.add_reference_tree(root, &visited) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1085
     fn add_reference_tree(self: WatchGraph, path: OSPath, visited: [OSPath:Bool]) -> () {
         path :: canonicalize_loose(path)
         if visited.contains_key(path) -> return
@@ -497,7 +418,6 @@ struct WatchGraph {
             }
         }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1110
     fn discover(entry: OSPath) -> WatchGraph Diagnostic! {
         entry_str :: entry.to_string_lossy()
         deps :: if Loader.load_entry_with_overlays_and_dependencies(entry_str, [], false) == {
@@ -518,17 +438,13 @@ struct WatchGraph {
     }
 }
 
-// Rust: crates/jet-devserver/src/WatchService.rs:1142
 fn canonicalize_loose(path: OSPath) -> OSPath {
     fs.canonicalize(path).unwrap_or_else((_) -> if path.is_absolute() -> path.to_path_buf() else -> env.current_dir().unwrap_or(OSPath(".")).join(path))
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1155
 struct RuntimeFileInput { path: String; is_dir: Bool }
-// Rust: crates/jet-devserver/src/WatchService.rs:1160
 RUNTIME_FILE_INPUT_METHODS :: [(_0: "copy", _1: false), (_0: "copy_dir", _1: true), (_0: "exists", _1: false), (_0: "is_dir", _1: true), (_0: "list_dir", _1: true),
     (_0: "read", _1: false), (_0: "read_bytes", _1: false), (_0: "walk", _1: true), (_0: "walk_parallel", _1: true), (_0: "glob", _1: false), (_0: "stat", _1: false),
     (_0: "fixture", _1: false), (_0: "golden", _1: false), (_0: "corpus", _1: true), (_0: "corpus_entries", _1: true)]
-// Rust: crates/jet-devserver/src/WatchService.rs:1177
 fn runtime_file_inputs(source: String) -> [RuntimeFileInput] {
     inputs := [String:Bool]{}; bytes :: source.as_bytes()
     loop (method, is_dir) in RUNTIME_FILE_INPUT_METHODS {
@@ -555,7 +471,6 @@ fn runtime_file_inputs(source: String) -> [RuntimeFileInput] {
     paths := inputs.keys().cloned().collect(); &paths.sort()
     paths.into_iter().map((path) -> {is_dir: inputs[path], path}).collect()
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1235
 fn quoted_literal(source: String, start: USize) -> (String, USize)? {
     bytes :: source.as_bytes()
     if bytes.get(start) == .Val(quote) {
@@ -571,7 +486,6 @@ fn quoted_literal(source: String, start: USize) -> (String, USize)? {
     }
     None
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1253
 fn local_reference_path(base: OSPath, raw: String) -> OSPath? {
     raw := raw.trim() // #4303
     if raw.split((ch) -> ch == '?' || ch == '#').next() == .Val(first) {
@@ -586,7 +500,6 @@ fn local_reference_path(base: OSPath, raw: String) -> OSPath? {
     }
     None
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1279
 fn referenced_paths(path: OSPath, source: String) -> [String] {
     references := [String]{}; extension :: path.extension().and_then((e) -> e.to_str()).map((e) -> e.to_ascii_lowercase())
     if extension == "html" || extension == "htm" {
@@ -598,9 +511,7 @@ fn referenced_paths(path: OSPath, source: String) -> [String] {
     }
     ^references
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1300
 fn is_attribute_name_byte(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == 95 || byte == 45 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1304
 fn extract_values_after(source: String, keyword: String, delimiter: U8?, optional_parentheses: Bool, split_srcset: Bool, out: &[String]) -> () {
     lower :: source.to_ascii_lowercase(); bytes :: lower.as_bytes(); offset := USize{0}
     loop {
@@ -644,45 +555,31 @@ fn extract_values_after(source: String, keyword: String, delimiter: U8?, optiona
     }
 }
 
-// Rust: crates/jet-devserver/src/WatchService.rs:1408
 struct WatchSession {
     graph: WatchGraph; generation: U64; applied_generation: U64; coalesce: Duration; edit_started: Instant?; events: EventWaiter
-    // Rust: crates/jet-devserver/src/WatchService.rs:1418
     fn open(entry: OSPath) -> WatchSession Diagnostic! {
         graph :: WatchGraph.discover(entry); events :: EventWaiter.new(graph.watched_paths())
         Ok(WatchSession{graph, generation: 0, applied_generation: 0, coalesce: Duration.from_millis(WATCH_COALESCE_MS), edit_started: None, events})
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1431
     fn from_graph(graph: WatchGraph) -> WatchSession {
         events :: EventWaiter.new(graph.watched_paths())
         WatchSession{graph: ^graph, generation: 0, applied_generation: 0, coalesce: Duration.from_millis(WATCH_COALESCE_MS), edit_started: None, events}
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1446
     fn reopen(self: &WatchSession, entry: OSPath) Diagnostic! {
         graph :: WatchGraph.discover(entry); self.events.refresh(graph.watched_paths())
         self.graph = ^graph; self.generation = 0; self.applied_generation = 0; self.edit_started = None
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1455
     fn register_asset_root(self: WatchSession, path: OSPath) -> () { &self.graph.register_asset_root(^path); self.events.refresh(self.graph.watched_paths()) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1460
     fn register_game_path(self: WatchSession, path: OSPath, kind: JetGameChangeKind) -> () { &self.graph.register_game_path(^path, kind); self.events.refresh(self.graph.watched_paths()) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1465
     fn register_game_path_with_schema_ids(self: WatchSession, path: OSPath, kind: JetGameChangeKind, old_schema_id: String?, new_schema_id: String?) -> () {
         &self.graph.register_game_path_with_schema_ids(^path, kind, ^old_schema_id, ^new_schema_id); self.events.refresh(self.graph.watched_paths())
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1477
     fn graph(self) -> WatchGraph { &self.graph }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1481
     fn graph_mut(self: WatchSession) -> WatchGraph { &self.graph }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1485
     fn generation(self) -> U64 { self.generation }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1489
     fn mark_edit_started(self: WatchSession) -> () { self.edit_started = .Val(Instant.now()) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1495
     fn wait_for_change_for(self: WatchSession, timeout: Duration?) -> Bool { self.events.refresh(self.graph.watched_paths()); self.events.wait(timeout) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1500
     fn wake_handle(self) -> WatchWake { self.events.wake_handle() }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1506
     fn poll(self: WatchSession) -> InvalidationReceipt? {
         &self.graph.discover_asset_tree(); &self.graph.discover_runtime_input_trees(); self.events.refresh(self.graph.watched_paths())
         changed := [OSPath]{}; change_kinds := [ChangeKind]{}
@@ -740,7 +637,6 @@ struct WatchSession {
             change_kinds: settled_kinds.iter().map((kind) -> change_kind_name(kind)).collect(),
             content_digests: ^settled_digests, dev_entries, edit_to_visible_ms})
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1679
     fn settle(self, paths: [OSPath]) -> () {
         deadline :: Instant.now() + Duration.from_millis(WATCH_SETTLE_MAX_MS)
         previous := paths.iter().map((path) -> PathStamp.capture(path)).collect()
@@ -756,7 +652,6 @@ struct WatchSession {
             previous = ^current
         }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1709
     fn acknowledge_with_dependencies(self: &WatchSession, receipt: InvalidationReceipt, dependencies: [OSPath]) Diagnostic! {
         if self.graph.entry().map((path) -> path.to_path_buf()) == .Val(entry) {
             desired_imports := [OSPath:Bool]{}
@@ -776,7 +671,6 @@ struct WatchSession {
             self.events.refresh(self.graph.watched_paths())
         } else { &self.acknowledge(receipt) }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1747
     fn acknowledge(self: &WatchSession, receipt: InvalidationReceipt) Diagnostic! {
         if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
         if self.graph.entry().map((p) -> p.to_path_buf()) == .Val(entry) {
@@ -792,10 +686,8 @@ struct WatchSession {
             loop path in discovered.runtime_input_roots.keys() { &self.graph.runtime_input_roots.insert(path.clone(), true) }
         }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1774
     fn recover(self: WatchSession) -> () { &self.graph.refresh_stamps(); self.edit_started = None }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1780
 fn detect_renames(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGraph) -> () {
     deleted :: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Deleted).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
     created :: changed.iter().enumerate().filter((pair) -> change_kinds[pair._0] == ChangeKind.Created).map((pair) -> (_0: pair._0, _1: pair._1.clone())).collect()
@@ -806,7 +698,6 @@ fn detect_renames(changed: [OSPath], change_kinds: [ChangeKind], graph: WatchGra
         }
     }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1813
 fn make_dev_entries(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKind], root_kinds: [RootKind], old_digests: [String?], new_digests: [String?]) -> [DevWatchEntry] {
     paths.iter().enumerate().filter_map((pair) -> {
         (index, path) :: pair
@@ -818,7 +709,6 @@ fn make_dev_entries(graph: WatchGraph, paths: [OSPath], change_kinds: [ChangeKin
         } else { None }
     }).collect()
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1847
 fn change_kind_name(kind: ChangeKind) -> String { if kind == {
     .Created -> "created"
     .Modified -> "modified"
@@ -826,7 +716,6 @@ fn change_kind_name(kind: ChangeKind) -> String { if kind == {
     .Renamed -> "renamed"
     .Stale -> "stale"
 } }
-// Rust: crates/jet-devserver/src/WatchService.rs:1861
 // Persist remains at the shared runtime-heap owner.
 use {
     jet_foundation.Persist.[PersistEntry, PersistIdentity, PersistOutcome, PersistRejectReason, PersistStore]
@@ -836,46 +725,33 @@ use {
     jetpack_foundation.[PACKAGE_FILE]
     core.files.[OSPath]
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1869
 struct SessionSnapshot {
     generation: U64; artifact_token: String; source_id: String; build_id: String; revision: String; world_id: String; persist: PersistStore
-    // Rust: crates/jet-devserver/src/WatchService.rs:1883
     fn new(generation: U64, artifact_token: String, persist: PersistStore) -> SessionSnapshot {
         SessionSnapshot{generation, artifact_token: ^artifact_token, source_id: "", build_id: "", revision: "", world_id: "", persist: ^persist}
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1895
     fn with_lineage(self: SessionSnapshot, source_id: String, build_id: String, revision: String, world_id: String) -> SessionSnapshot {
         self := ^self; self.source_id = ^source_id; self.build_id = ^build_id; self.revision = ^revision; self.world_id = ^world_id; ^self
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1909
     fn with_persist(self: SessionSnapshot, persist: PersistStore) -> SessionSnapshot { self := ^self; self.persist = ^persist; ^self }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1914
     fn lineage_valid(self) -> Bool { [self.source_id, self.build_id, self.revision, self.world_id].iter().all((value) -> !value.is_empty() && !value.chars().any((c) -> c.is_control())) }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1923
 enum HotReplacePolicy { Swap; Restart; Pin
     fn default() -> HotReplacePolicy { .Swap }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:1931
 enum HotReplacePhase { Begun; Paused; Preflighted; Staged; Committed; RolledBack }
-// Rust: crates/jet-devserver/src/WatchService.rs:1941
 struct HotReplaceTxn {
     prior: SessionSnapshot; shared_prior: PersistStore; candidate: SessionSnapshot?; decisions: [PersistOutcome]
     policy: HotReplacePolicy; phase: HotReplacePhase; failure: String?
-    // Rust: crates/jet-devserver/src/WatchService.rs:1951
     fn begin(prior: SessionSnapshot) -> HotReplaceTxn { HotReplaceTxn.begin_with_policy(^prior, .Swap) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1955
     fn begin_with_policy(prior: SessionSnapshot, policy: HotReplacePolicy) -> HotReplaceTxn {
         HotReplaceTxn{shared_prior: Persist.shared_clone(), prior: ^prior, candidate: None, decisions: [], policy, phase: .Begun, failure: None}
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1967
     fn policy(self) -> HotReplacePolicy { self.policy }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1972
     fn pause(self: &HotReplaceTxn) Err! {
         if self.phase != HotReplacePhase.Begun -> return Err("hot replacement pause is out of order")
         self.phase = .Paused
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:1983
     fn preflight(self: &HotReplaceTxn, candidate: SessionSnapshot) Err! {
         if self.phase != HotReplacePhase.Paused -> return Err("hot replacement preflight requires a paused world")
         if self.policy == HotReplacePolicy.Restart -> return &self.reject("explicit restart requested; swap was not attempted")
@@ -896,12 +772,10 @@ struct HotReplaceTxn {
         if rejected == .Val(reason) -> return &self.reject("hot replacement preflight rejected: {reason}")
         self.candidate = .Val(candidate.clone()); self.phase = .Preflighted
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2040
     fn stage(self: &HotReplaceTxn) Err! {
         if self.phase != HotReplacePhase.Preflighted || self.candidate.is_none() -> return Err("hot replacement stage requires successful preflight")
         self.phase = .Staged
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2050
     fn commit(self: HotReplaceTxn) -> Result<SessionSnapshot, (SessionSnapshot, String)> {
         self := ^self
         if self.phase != HotReplacePhase.Staged {
@@ -919,38 +793,24 @@ struct HotReplaceTxn {
             .Err((_0: ^self.prior, _1: "hot replacement candidate disappeared"))
         }
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2075
     fn rollback(self: HotReplaceTxn, reason: String) -> SessionSnapshot {
         self.failure = .Val(^reason); Persist.shared_replace(self.shared_prior.clone()); self.phase = .RolledBack; self.prior.clone()
     }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2082
     fn reject(self: &HotReplaceTxn, reason: String) Err! { self.failure = .Val(reason.clone()); Err(^reason) }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2088
     fn phase(self) -> HotReplacePhase { self.phase }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2092
     fn decisions(self) -> [PersistOutcome] { &self.decisions }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2096
     fn candidate(self) -> SessionSnapshot? { self.candidate.as_ref() }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2100
     fn prior(self) -> SessionSnapshot { &self.prior }
 }
-// Rust: crates/jet-devserver/src/WatchService.rs:2108
 WATCH_POLL_INTERVAL_MS :: U64{5}
-// Rust: crates/jet-devserver/src/WatchService.rs:2112
 WATCH_COALESCE_MS :: U64{4}
-// Rust: crates/jet-devserver/src/WatchService.rs:2117
 WATCH_SETTLE_MAX_MS :: U64{250}
-// Rust: crates/jet-devserver/src/WatchService.rs:2120
 EDIT_TO_VISIBLE_BUDGET_MS :: U128{2000}
-// Rust: crates/jet-devserver/src/WatchService.rs:2123
 fn within_budget(receipt: InvalidationReceipt) -> Bool { receipt.edit_to_visible_ms.map((ms) -> ms <= EDIT_TO_VISIBLE_BUDGET_MS).unwrap_or(true) }
-// Rust: crates/jet-devserver/src/WatchService.rs:2132
 fn any_stamp_changed(graph: WatchGraph) -> Bool { graph.nodes().any((node) -> { now :: PathStamp.capture(node.path); node.stamp.changed_since(now) }) }
-// Rust: crates/jet-devserver/src/WatchService.rs:2142
 struct SessionBroker {
     source_transactions: Mutex<()>
     fn default() -> SessionBroker { SessionBroker{source_transactions: Mutex.new(_)} }
-    // Rust: crates/jet-devserver/src/WatchService.rs:2147
     fn lock_source_transaction(self) -> MutexGuard<()> { self.source_transactions.lock().unwrap() }
 }
 

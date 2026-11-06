@@ -1,0 +1,21 @@
+// `jet dev`'s change stamp on a real filesystem.
+use {
+    jet_cli.[jet_cli_dev_stamp]
+    cli_sys :: core.sys
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_time :: core.time
+}
+
+#Test("the jet dev stamp sees a second edit within the same second") {
+    root :: "{cli_sys.temp_dir()}/jet-dev-stamp-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test root")
+    // Start in the first half of a wall-clock second, so both writes share it.
+    loop cli_time.unix_ns() % 1000000000 >= 500000000 -> cli_time.sleep(10ms)
+    cli_files.write("{root}/app.jet", "fn run() {{ print(1) }}\n") ?? panic("first source")
+    first :: jet_cli_dev_stamp(root, [String]{})
+    cli_time.sleep(50ms)
+    cli_files.write("{root}/app.jet", "fn run() {{ print(2) }}\n") ?? panic("edited source")
+    assert(jet_cli_dev_stamp(root, [String]{}) != first)
+    cli_files.remove_all(root) ?? panic("dev stamp cleanup")
+}

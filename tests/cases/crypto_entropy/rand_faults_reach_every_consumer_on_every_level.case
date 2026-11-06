@@ -1,0 +1,37 @@
+# D-TESTFAULT1 Rand faults: `#Test(faults: [Rand])` fails every entropy draw
+# the clean run reaches, one rerun per draw. Raw bytes, keygen, the seal
+# nonce/salt/key draws, the password salt and UUID v4 each return their typed
+# unavailable failure, and the outcome agrees on every optimization level.
+# The negative control stops each consumer on its failure: every test fails
+# and its report names the injected fault, so a schedule that stopped
+# reaching a draw would turn a FAIL into a pass here.
+fixture: rand_faults_reach_every_consumer_on_every_level.fixture
+env: NO_COLOR=1
+step o0: jet test --show-default --capture=all --serial --optimize=none run.jet
+exit: 0
+stdout: = "raw_entropy_failure_is_unavailable: pass\nkeygen_entropy_failure_is_unavailable: pass\nnonce_entropy_failure_seals_nothing: pass\nsalt_entropy_failure_hashes_nothing: pass\nuuid_entropy_failure_is_typed: pass\n5 passed, 0 failed, 0 skipped\n"
+step: jet test --show-default --capture=all --serial --optimize=basic run.jet
+exit: == o0
+stdout: == o0
+stderr: == o0
+step: jet test --show-default --capture=all --serial --optimize=full run.jet
+exit: == o0
+stdout: == o0
+stderr: == o0
+step u0: jet test --show-default --capture=all --serial --optimize=none unhandled.jet
+exit: 1
+stdout: = "raw_stops_on_entropy_failure: FAIL\nkeygen_stops_on_entropy_failure: FAIL\nseal_stops_on_entropy_failure: FAIL\npassword_salt_stops_on_entropy_failure: FAIL\nuuid_stops_on_entropy_failure: FAIL\n0 passed, 5 failed, 0 skipped\n"
+stderr: ~ "fault injected: Rand call 1" # each failure report heads with the injected fault before its E3001 stop
+stderr: ~ "raw entropy failure not handled" # the raw consumer's stop
+stderr: ~ "keygen entropy failure not handled" # the keygen consumer's stop
+stderr: ~ "seal entropy failure not handled" # the seal consumer's stop
+stderr: ~ "salt entropy failure not handled" # the password salt consumer's stop
+stderr: ~ "uuid entropy failure not handled" # the UUID v4 consumer's stop
+step: jet test --show-default --capture=all --serial --optimize=basic unhandled.jet
+exit: == u0
+stdout: == u0
+stderr: == u0
+step: jet test --show-default --capture=all --serial --optimize=full unhandled.jet
+exit: == u0
+stdout: == u0
+stderr: == u0

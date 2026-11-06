@@ -1,6 +1,6 @@
-Error [jet.ApplicationAuthorityDenied]: Application authority is undecided for `FS`
- Why: required_effects=FS, IO, Panic; granted_effects=Exec, IO, Mem.Alloc; denied_effects=; denied_required_effects=none; undecided_effects=FS; authority=application default
- Fix: Declare the complete row `allow: [FS, IO]` under `authority` in a leading `package { … }` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal
+Error [jet.ApplicationAuthorityDenied]: Application authority is undecided for `FS.Write`
+ Why: This program writes files, and the default for a file with no package block has not allowed that yet.
+ Fix: run `jet run --allow=FS.Write tests/ui/e1803_script_inline_authority.jet` (or `-A`/`--allow-all` for every effect) to allow it for this run, or declare `allow: [FS.Write]` under `authority` in a leading `package { … }` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal
  Denial: authority
  Scope chain: application default
 More: jet-lang.dev/e/E1803

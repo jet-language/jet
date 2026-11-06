@@ -159,24 +159,26 @@ enum NixShellScratch {
     NotCreated
 }
 
-// Typed host facts for the Jet-native shell projection. The variable map is
-// only the child-process adapter; paths and markers stay typed until then.
+// Typed host facts for the Jet-native shell projection. The variable maps
+// are only the child-process adapter; paths and markers stay typed until
+// then. Paths inside realized outputs are lease text the shell renders for
+// the child its leases are passed to.
 struct NativeEnvironmentProjection {
     project_root: String
     native_bin_dirs: [String]
-    tzdir: String?
-    loader_paths: [String]
+    tzdir: LeaseText?
+    loader_paths: [LeaseText]
     activation: NativeActivation
     nix_shell_scratch: NixShellScratch
 
-    fn from_realized(project_root: String, realized: [(name: String, output: String)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+    fn from_realized(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
         loop tool in dev_tools {
             directory :: files.dirname(tool.binary)
             if !native_bin_dirs.contains(directory) -> &native_bin_dirs.push(directory)
         }
-        tzdir := String?{None}
-        loader_paths := [String]{}
+        tzdir := LeaseText?{None}
+        loader_paths := [LeaseText]{}
         loop fact in CLI_NATIVE_OUTPUT_FACTS {
             path :: cli_native_output_path(realized, fact) ?? next
             if fact.variable == {
@@ -190,7 +192,7 @@ struct NativeEnvironmentProjection {
         if sys.name() == "linux" {
             inherited :: inherited_loader_path ?? ""
             loop path in inherited.split(pkg_path_separator_for_os(sys.name())) {
-                if path != "" -> &loader_paths.push(path)
+                if path != "" -> &loader_paths.push(LeaseText.plain(path))
             }
         }
         // Jetpack never creates Nix shell scratch directories; the marker
@@ -210,18 +212,24 @@ struct NativeEnvironmentProjection {
         if self.nix_shell_scratch == {
             .NotCreated -> vars["JET_NIX_TMP_CLEANED"] = "1"
         }
+        vars
+    }
+
+    // The variables naming paths inside realized outputs.
+    fn lease_vars(self) -[Env]> [String: LeaseText] Never! {
+        vars := [String: LeaseText]{}
         if self.tzdir == .Val(tzdir) -> vars["TZDIR"] = tzdir
         if sys.name() == "linux" && self.loader_paths.len() > 0 {
-            vars["LD_LIBRARY_PATH"] = self.loader_paths.join(pkg_path_separator_for_os(sys.name()))
+            vars["LD_LIBRARY_PATH"] = LeaseText.join(self.loader_paths, pkg_path_separator_for_os(sys.name()))
         }
         vars
     }
 }
 
-fn cli_native_output_path(realized: [(name: String, output: String)], fact: NativeOutputFact) -[Env]> String? Never! {
+fn cli_native_output_path(realized: [(name: String, output: LeaseText)], fact: NativeOutputFact) -[Env]> LeaseText? Never! {
     if !fact.platform.applies() -> return None
     loop pair in realized {
-        if pair.name == fact.package -> return Val(files.join(pair.output, fact.relative))
+        if pair.name == fact.package -> return Val(pair.output.child(fact.relative))
     }
     None
 }
@@ -248,7 +256,7 @@ fn cli_native_dev_tool_bindings() -[Env]> [String: String] Never! {
 
 // Native projection for the repository dev-shell contract, derived from
 // the project root, the admitted dev tools, and realized package outputs.
-fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: String)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
+fn cli_native_environment_projection(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
     NativeEnvironmentProjection.from_realized(project_root, realized, dev_tools, inherited_loader_path)
 }
 
@@ -326,11 +334,11 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
             }
         }
     }
-    provider_vars := [String: [String]]{}
+    provider_vars := [String: [LeaseText]]{}
     provider_var_order := [String]{}
     nix_vars := [String: String]{}
     realized_refs := [String]{}
-    realized_outputs := [(name: String, output: String)]{}
+    realized_outputs := [(name: String, output: LeaseText)]{}
     holes := [NixBridgeNeed]{}
     failed := false
     unavailable := false
@@ -348,7 +356,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
     compose_started :: time.start()
     if phase_timing -> term.eprint("TIMING compose-preamble: {time.elapsed(compose_started)}")
     loop spec in plan.refs {
-        if live_tty -> &live.set_aggregate_status("Resolving {spec.package}", completed_steps, total_steps)
+        if live_tty -> &live.set_aggregate_status("Resolving", completed_steps, total_steps)
         style :: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
         warm_hit :: cli_take_warm_realization(&warm_pool, spec.raw)
         step_outcome :: if warm_hit == {
@@ -370,23 +378,22 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
                 if live_mode && line != "" -> &live.finish(line)
                 completed_steps += 1
                 if needs_stats -> &ready_stats.record(entry, state)
-                leased_output :: lease.stable_path(entry.out) ?? {
+                // The child names the output below the descriptor its lease
+                // passes; this process reads metadata through the held handle.
+                leased_output :: lease.child_path(entry.out) ?? {
                     &live.clear()
                     theme.error_coded("E1335", "the realized package output could not be confined to its executable lease", "{err}", "re-realize the package so Jetpack can hand only its verified lease to the child")
                     failed = true
                     next
                 }
-                // A `library` package realizes with an empty `bin` (U10) and
-                // contributes nothing to PATH.
-                if lease.projected_bin_dir_after_validation() == .Val(bin) -> &bin_dirs.push(bin)
                 invalid_metadata := String?{None}
                 loop meta in CLI_PROVIDER_METADATA_FILES {
-                    raw :: files.read(files.join(leased_output, meta.file)) ?? next
+                    raw :: lease.read_output(meta.file) ?? next
                     value :: raw.trim()
                     if value == "" -> next
                     if cli_resolve_provider_paths(leased_output, meta.file, value) == {
                         .Val(resolved) -> {
-                            values := provider_vars.get(meta.variable) ?? [String]{}
+                            values := provider_vars.get(meta.variable) ?? [LeaseText]{}
                             if values.len() == 0 -> &provider_var_order.push(meta.variable)
                             &values.push(resolved)
                             provider_vars[meta.variable] = values
@@ -427,7 +434,6 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         if adapter_outcome == {
             .Val(realized) -> {
                 if needs_stats -> &ready_stats.record(realized.entry, realized.state)
-                if realized.lease.projected_bin_dir() == .Val(bin) -> &bin_dirs.push(bin)
                 &realized_refs.push(realized.entry.reference)
                 &cache_leases.push(^realized.lease)
             }
@@ -449,6 +455,9 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
             loop dir in bin_dirs {
                 if files.is_file(files.join(dir, command)) -> present = true
             }
+            loop lease in cache_leases {
+                if lease.executable_for(command) != None -> present = true
+            }
             if !present -> &missing_language_tools.push("{pack.name}:{tool}")
         }
     }
@@ -462,14 +471,6 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         loop dir in projection.bin_dirs() -> &bin_dirs.push(dir)
     }
     composed_vars := [String: String]{}
-    loop name in provider_var_order {
-        values :: provider_vars.get(name) ?? next
-        composed_vars[name] = if name == {
-            "LUA_PATH" | "LUA_CPATH" -> "{values.join(";")};;"
-            "GEM_HOME" -> values[0]
-            else -> values.join(pkg_path_separator_for_os(sys.name()))
-        }
-    }
     // The Nix compatibility provider contributes the fixed builder facts it
     // recorded at realization; PATH stays composed from verified packages.
     loop entry in nix_vars -> composed_vars[entry.key] = entry.value
@@ -503,10 +504,29 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         }
         loop entry in hooks -> composed_vars[entry.key] = entry.value
     }
+    // Provider metadata paths are the lowest layer: any declared value of
+    // the same name replaces them.
+    lease_vars := [String: LeaseText]{}
+    loop name in provider_var_order {
+        if composed_vars.has_key(name) -> next
+        values :: provider_vars.get(name) ?? next
+        lease_vars[name] = if name == {
+            "LUA_PATH" | "LUA_CPATH" -> LeaseText.join(values, ";").append(";;")
+            "GEM_HOME" -> values[0]
+            else -> LeaseText.join(values, pkg_path_separator_for_os(sys.name()))
+        }
+    }
     // The native projection applies last so the Jet-owned root, markers, and
     // generated output paths cannot be shadowed by dotenv or preset values.
     if native_projection == .Val(projection) {
-        loop entry in projection.env_vars() -> composed_vars[entry.key] = entry.value
+        loop entry in projection.env_vars() {
+            composed_vars[entry.key] = entry.value
+            &lease_vars.remove(entry.key).drop("a provider path may not name this variable")
+        }
+        loop entry in projection.lease_vars() {
+            lease_vars[entry.key] = entry.value
+            &composed_vars.remove(entry.key).drop("a declared value may not name this variable")
+        }
     }
     if project_scope && !warm_complete {
         if cli_seal_project_producer_records(&verification, roots, plan.project_root, ready_stats) == {
@@ -530,6 +550,7 @@ fn cli_compose_env_scoped_with_warm(verification: &StoreVerification, theme: The
         prompt_path: plan.prompt_path,
         prompt_strip: plan.prompt_strip,
         cache_leases: cache_leases,
+        lease_vars: lease_vars,
     }
     Ok((env: env, stats: ready_stats))
 }
@@ -710,13 +731,13 @@ fn cli_dotenv_valid_name(name: String) -> Bool Never! {
 
 // Relative provider metadata paths resolve inside the realized output;
 // absolute legacy paths stay as written, and a parent escape is refused.
-fn cli_resolve_provider_paths(entry_out: String, file: String, value: String) -[Env]> String? Never! {
-    if !cli_is_provider_metadata_file(file) -> return Val(value)
+fn cli_resolve_provider_paths(entry_out: LeaseText, file: String, value: String) -[Env]> LeaseText? Never! {
+    if !cli_is_provider_metadata_file(file) -> return Val(LeaseText.plain(value))
     separator :: if file == "lua-path" || file == "lua-cpath" -> ";" else -> pkg_path_separator_for_os(sys.name())
-    resolved := [String]{}
+    resolved := [LeaseText]{}
     loop path in value.split(separator) {
         if files.is_absolute(path) {
-            &resolved.push(path)
+            &resolved.push(LeaseText.plain(path))
             next
         }
         parts :: path.split("/").to_list()
@@ -726,10 +747,9 @@ fn cli_resolve_provider_paths(entry_out: String, file: String, value: String) -[
             if part != "" -> components += 1
         }
         if components == 0 -> return None
-        joined :: if entry_out.ends_with("/") -> "{entry_out}{path}" else -> "{entry_out}/{path}"
-        &resolved.push(joined)
+        &resolved.push(entry_out.child(path))
     }
-    Val(resolved.join(separator))
+    Val(LeaseText.join(resolved, separator))
 }
 
 fn cli_is_provider_metadata_file(file: String) -> Bool Never! {

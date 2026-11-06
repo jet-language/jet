@@ -71,7 +71,13 @@ fn run() {
 
     // These are measured host facts from the callback receipt. They do not
     // certify hardware scheduling, audio-device delivery, or a hard WCET.
-    print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} callbacks:{receipt.completed_callbacks} completed_frames:{receipt.completed_frames} missed:{receipt.missed} max_lateness_ns:{receipt.max_lateness_ns}")
-    print("control_loop=1kHz ticks:{control.ticks} missed:{control.missed} jitter_us=min:{control.min_jitter_us},max:{control.max_jitter_us},sum:{control.sum_jitter_us}")
+    // Counts and latencies vary per host, so the example checks how they
+    // relate and prints the relations, not the measurements.
+    whole_blocks :: receipt.completed_frames == receipt.completed_callbacks * receipt.requested_frames
+    lateness_measured :: receipt.max_lateness_ns >= 0
+    jitter_ordered :: control.min_jitter_us <= control.max_jitter_us
+    misses_bounded :: control.missed >= 0 && control.missed <= control.ticks
+    print("audio_callback=cancelled rate:{receipt.requested_rate_hz} frames:{receipt.requested_frames} whole_blocks:{whole_blocks} lateness_measured:{lateness_measured}")
+    print("control_loop=1kHz ticks:{control.ticks} jitter_ordered:{jitter_ordered} misses_bounded:{misses_bounded}")
     print("receipt cancelled:{stream.is_cancelled()} joined:{receipt.end_identity > 0}")
 }

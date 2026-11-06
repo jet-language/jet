@@ -16,7 +16,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { stateRoot } from "../../Tools/agent/roots.mjs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilerSliceDrift } from "./compiler-slice.mjs";
@@ -48,7 +48,7 @@ const rootTag = createHash("sha256")
   .digest("hex")
   .slice(0, 10);
 const scratchDir = resolve(
-  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(homedir(), ".cache/jet-dev/jetpack-bootstrap", `${workerName}-${rootTag}`),
+  process.env.JETPACK_BOOTSTRAP_SCRATCH ?? resolve(stateRoot(), "jetpack-bootstrap", `${workerName}-${rootTag}`),
   mode,
 );
 const projectDir = resolve(scratchDir, "project");
@@ -216,12 +216,10 @@ async function readManifest(name) {
 // Registration/inventory still sees the fixed entry in ordinary modes, but
 // only the internal publication artifact emits it.
 const registeredSources = await readManifest("sources.list");
-// The compiler slice is closed under the compiler's packages; a use that only an
-// unlisted slice-package member file declares fails the assembly.
+// The compiler slice is closed under the compiler's packages and reaches no
+// compiler package outside it; any drift fails the assembly.
 const sliceDrift = compilerSliceDrift(sourceRootDir);
-const sliceFailures = sliceDrift.filter((problem) => !problem.includes("outside the compiler slice"));
-if (sliceFailures.length > 0) fail(`the Jetpack compiler slice drifted from the compiler's packages:\n${sliceFailures.map((problem) => `  ${problem}`).join("\n")}`);
-for (const problem of sliceDrift.filter((problem) => problem.includes("outside the compiler slice"))) console.log(`note: ${problem}`);
+if (sliceDrift.length > 0) fail(`the Jetpack compiler slice drifted from the compiler's packages:\n${sliceDrift.map((problem) => `  ${problem}`).join("\n")}`);
 const sources = registeredSources.filter((entry) => mode === "publication" || entry.sourcePath !== PUBLICATION_ENTRY);
 if (mode === "publication" && registeredSources.filter((entry) => entry.sourcePath === PUBLICATION_ENTRY).length !== 1) {
   fail(`internal publication requires exactly one Engine registration of ${PUBLICATION_ENTRY}`);
@@ -333,7 +331,7 @@ function append(text) {
 // source map still matches). A repeated single-line Core import after its first
 // occurrence is blanked the same way (a duplicate import name is E0105), and
 // grouped Core member imports are deduplicated per member.
-const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_sema|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment|jetpack_secrets|jetpack_integrations)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
+const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_sema|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_build|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment|jetpack_secrets|jetpack_integrations)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
 const CORE_IMPORT = CORE_IMPORT_LINE;
 const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();

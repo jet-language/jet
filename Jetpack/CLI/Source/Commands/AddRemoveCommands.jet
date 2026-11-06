@@ -10,7 +10,7 @@ fn cli_cmd_add(verification: &StoreVerification, theme: Theme, parsed: CLIParsed
     cache := WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "add")
     raw :: parsed.positional.get(0) ?? {
-        theme.error("add what?", "`jetpack add` needs a ref or a starter component to add.", "try `jetpack add ripgrep@nixpkgs` or `jetpack add Button`.")
+        theme.error("add what?", "`jetpack add` needs a ref or a starter component to add.", "try `jetpack add ripgrep@jetpack` or `jetpack add Button`.")
         return EXIT_USAGE
     }
     if env_component_find(raw) == .Val(component) -> return cli_add_component(theme, component)
@@ -63,7 +63,7 @@ fn cli_add_record_ref(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: C
             channel :: LockedSourceChannel{name: source.name, channel: source.lock_channel, exact: exact}
             if pkg_lock_record_source_channel(dir, channel) == {
                 .Err(error) -> {
-                    theme.error_coded("E1206", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and rerun the add command")
+                    theme.error_coded("E1224", "couldn't write source channel `{source.name}` to the lock", error.message(), "fix the project lock permissions and rerun the add command")
                     return EXIT_USER_ERROR
                 }
                 .Ok(_) -> {}
@@ -179,7 +179,7 @@ fn cli_add_component(theme: Theme, component: StarterComponent) -[IO, FS, Env, T
 // `jetpack remove <ref>`: a confirmed env-file edit.
 fn cli_cmd_remove(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(0) ?? {
-        theme.error("remove what?", "`jetpack remove` needs a ref to remove.", "try `jetpack remove ripgrep@nixpkgs`.")
+        theme.error("remove what?", "`jetpack remove` needs a ref to remove.", "try `jetpack remove ripgrep@jetpack`.")
         return EXIT_USAGE
     }
     dir :: cli_current_dir()

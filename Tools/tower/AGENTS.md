@@ -128,6 +128,7 @@ tower papercut resolve <id> --by owner        # owner clears a handled papercut
 tower goal add --title "Self-compile in about 50 ms" [--body "…"] --by me
 tower goal update G1 --status achieved|dropped|active [--title …] [--body …] --by me
 tower goal log G1 --text "measured 410 ms" --by me
+tower goal remap --merge G7=G1 --renumber G3=G2 --by me  # merge goals; renumber the rest
 tower card update '#12' --goals G1,G2 --by me  # link goals; --goals '' clears them
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower decision list --open --drafts          # agent review: include drafts, hidden from owner views
@@ -172,9 +173,25 @@ name a commit reachable from `dev` or `master` (`durableRefs` in config), or
 the row declares a non-code closure with `--kind`: `decision` (names the
 ratified `D-…` that settles it), `duplicate` (names the `#N` it duplicates or
 merged into) or `obsolete` (the evidence is the reason). Evidence that cites
-only scratch output (`/mnt/jetscratch`, `~/.cache`, `/tmp`) is refused, and
-`--phase done` re-checks every row (`E_EVIDENCE`). The guard applies when the
-project root is a git work tree holding one of those branches.
+only scratch output (`$JET_SCRATCH_ROOT`, `$JET_STATE_ROOT`, `$JET_RUN_ROOT`,
+`~/.cache`, `/tmp`) is refused, and `--phase done` re-checks every row
+(`E_EVIDENCE`). The guard applies when the project root is a git work tree
+holding one of those branches.
+
+No board text names this machine's home, user, host, email, mounts or dev tool
+roots (#6564 c5). Every write is checked against the rule table in
+`app/personal-info.mjs`, which Tower builds from the machine it runs on. A write
+that adds a match is refused (`E_PERSONAL_INFO`), and the error shows the text
+to write instead, such as `$JET_SCRATCH_ROOT/lanes/X/run.log`,
+`$JET_STATE_ROOT/release` or `$JET_RUN_ROOT/lander.log`.
+Text already on the board does not block other writes. `tower redact` is a dry
+run that counts old matches per file, per section and per rule. `tower redact
+--apply --by X` rewrites them all in one write, ratified decisions included,
+and logs one `board.redact` event naming the rule table. On a board with
+nothing left to redact it writes nothing. This is the one change ratified
+text may take, because the owner ordered it and it keeps the meaning.
+`jet Tools/agent/LaneCheck.jet --personal-info` applies the same rules to every
+checked-in file, and every lane check runs it first.
 
 Flag a card `needsAcceptance` **only** when the owner must judge look-and-feel
 with their eyes: UI/UX/DX taste, visual presentation, copy polish, or a real
@@ -210,7 +227,7 @@ All linked cards done makes a milestone `review-ready`. Commit the frozen
 source, then open the closeout token before broad proof:
 
 ```
-Tools/agent/closeout-gate.mjs open <id> --by orchestrator
+jet Tools/agent/CloseoutGate.jet open <id> --by orchestrator
 tower milestone criteria <id> --meet 1 --evidence "built" --by orchestrator
 tower milestone criteria <id> --verify 1 --evidence "reviewed" --by reviewer
 tower milestone verify <id> --evidence "milestone review complete" --by reviewer
@@ -259,10 +276,24 @@ how old. Nothing about this needs an explicit command — it happens inside
 every write (`store.mutate`'s retire pass).
 
 ```
-tower archive status                # counts + sizes of history.json
+tower archive status                # counts + sizes of the archive
 tower archive show <id>             # an archived card or decision
 tower archive restore <id> --by owner   # bring one back to the live board
+tower archive shard [--apply --by X]    # move the archive into shards (dry run without --apply)
 ```
+
+GitHub warns about a file over 50 MB and refuses one over 100 MB, so a large
+archive is sharded (#6564 c7). `tower archive shard --apply` turns
+`history.json` into a small manifest and moves the records into
+`history/<kind>-NNN.json` files, each at most 8 MiB. Tower reads the shards
+back as one history; every reader and writer goes through
+`app/history-shards.mjs`, never the files directly. The manifest records each
+shard's item count, size and sha256, and a shard that does not match is
+refused (`E_INVALID`), never read as part of a history. A shard can be
+emptied but is never removed, and only the shards whose records changed are
+rewritten. Backups and the repair journal hold the archive's single-file
+text. A Tower older than the cutover refuses the sharded `history.json`
+(`history store.decisions must be an array`) rather than reading it as empty.
 
 `card show '#N'` / `decision show <id>` fall through to history
 automatically once something isn't live any more (the result carries
@@ -317,6 +348,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Building-release handoff | `card release` on a `building` card | `E_HANDOFF` | `--handoff "what's done, what's left, gotchas"` |
 | Card closure | non-owner closes a card with no criteria or an unsettled criterion | `E_CRITERIA` | add criteria and mark every row `met` or `verified` |
 | Durable evidence | non-owner meets, verifies or closes with a row whose evidence names no commit on `dev`/`master` or cites only scratch output | `E_EVIDENCE` | land the change and cite its commit, or `--kind` `decision`, `duplicate` or `obsolete` with the decision, card or reason |
+| Personal information | any write that adds this machine's home path, user or host name, git email or name, a mount such as `$JET_SCRATCH_ROOT`, or a tool root such as `$JET_STATE_ROOT` or `$JET_RUN_ROOT` | `E_PERSONAL_INFO` | write the neutral text the error shows (`~`, `$JET_SCRATCH_ROOT`, `$JET_STATE_ROOT`, `$JET_RUN_ROOT`, `user`, `devhost`); clean old text with `tower redact --apply --by X` |
 | Closure progression | any claim or brief while an active card has all criteria settled and no open gate | `E_CLOSE_READY` | close, reopen, or block the closure-ready card |
 | Milestone closeout | closeout begins before linked cards are done, or milestone verify lacks its token or verified criteria | `E_MILESTONE` | finish and close cards, freeze source, open token, run review |
 
@@ -349,9 +381,11 @@ blocks the same as an unfinished card.
 ## Committing the board (#6563 c4)
 
 The board is durable only once git has it. Every `config.boardBatch`-th write
-(default 25) commits `tower.json` and `history.json`, and nothing else, to
+(default 25) commits `tower.json` and `history.json`, with the shards under
+`history/` once the archive is sharded, and nothing else, to
 `config.boardBranch` (default `master`) while the write lock still holds the
-pair. The owner's `scratch/owner-scratch.md` is never committed. A board git
+pair. A shard git does not track yet is added by the commit that first holds
+it. The owner's `scratch/owner-scratch.md` is never committed. A board git
 does not track, or a checkout on another branch, is left alone. A failed
 commit never fails the write; the next batch retries.
 

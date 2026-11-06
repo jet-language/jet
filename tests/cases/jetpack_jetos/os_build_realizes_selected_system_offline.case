@@ -3,7 +3,7 @@ opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run d
 fixture: os_build_realizes_selected_system_offline.fixture
 mkdir: package-root
 copy: {root}/tests/fixtures/jetpack-config project
-step first: jet os build halcyon --name fixture-source-built --no-color --offline
+step first: jet os build devhost --name fixture-source-built --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin
@@ -11,10 +11,10 @@ exit: 0
 stderr.filter(where ~ "building system" && ~ " -> hello · resolving" && !~ "\u001b"): nonempty # original same-line no ANSI
 stderr: ~ "hello" # original package
 stderr: ~ "btop" # original package
-stderr: ~ "halcyon" # original host
+stderr: ~ "devhost" # original host
 stderr: ~ "generation" # original generation
 inventory before: package-root/hangar/lifecycle-db/journal
-step cached: jet os build halcyon --name fixture-source-built --no-color --offline
+step cached: jet os build devhost --name fixture-source-built --no-color --offline
 cwd: project
 env: JETPACK_ROOT={work}/package-root
 env: PATH=/usr/bin:/bin

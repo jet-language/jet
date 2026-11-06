@@ -165,7 +165,10 @@ fn run() {
     if corpus_bytes != 1_048_576 -> panic("corpus fixture size")
     if model.merges.len() != 12 -> panic("BPE did not run twelve rounds")
     if sample_tokens.len() == 0 -> panic("BPE encoder returned no tokens")
-    print("bpe bytes={corpus_bytes} words={model.words} merges={model.merges.len()} tokens={model.tokens} sample_tokens={sample_tokens.len()} elapsed_ms={bpe_millis}")
+    // Elapsed times vary per host; the example measures them but prints only
+    // the deterministic facts.
+    if bpe_millis < 0 -> panic("BPE clock ran backwards")
+    print("bpe bytes={corpus_bytes} words={model.words} merges={model.merges.len()} tokens={model.tokens} sample_tokens={sample_tokens.len()}")
 
     segmented :: "Café 👨‍👩‍👦. Привет κόσμε नमस्ते سلام! One. Two?"
     graphemes :: text.graphemes(segmented).len()
@@ -188,13 +191,18 @@ fn run() {
     scan :: scan_logs(log_path)
     if scan.bytes != 100_000_000 -> panic("100 MB scan size")
     if scan.matches != expected_matches -> panic("streaming scan match count")
-    print("scan bytes={scan.bytes} lines={scan.lines} matches={scan.matches} elapsed_ms={scan.millis}")
+    if scan.millis < 0 -> panic("scan clock ran backwards")
+    print("scan bytes={scan.bytes} lines={scan.lines} matches={scan.matches}")
 
+    // Shaping uses the host's fonts and HarfBuzz build, so glyph ids differ
+    // per host: the example checks that a present shaper returns glyph JSON.
     arabic_font :: discover_font("ar") ?? ""
     devanagari_font :: discover_font("hi") ?? ""
     arabic_shape :: if arabic_font == "" -> "unavailable:font" else -> shape_with_harfbuzz(arabic_font, "سلام")
     devanagari_shape :: if devanagari_font == "" -> "unavailable:font" else -> shape_with_harfbuzz(devanagari_font, "नमस्ते")
-    print("shape_arabic={arabic_shape}")
-    print("shape_devanagari={devanagari_shape}")
+    if !arabic_shape.starts_with("unavailable:") && !arabic_shape.starts_with("[") -> panic("Arabic shaping returned no glyph JSON")
+    if !devanagari_shape.starts_with("unavailable:") && !devanagari_shape.starts_with("[") -> panic("Devanagari shaping returned no glyph JSON")
+    print("shape_arabic=checked")
+    print("shape_devanagari=checked")
     print("text_probe_complete")
 }

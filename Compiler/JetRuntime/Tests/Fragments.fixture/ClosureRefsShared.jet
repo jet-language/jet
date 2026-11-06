@@ -40,8 +40,9 @@ fn closure_ref_test_worker(holder: Shared<ClosureRefTestHolder>) -> I64 {
     sum
 }
 
-#Export(c) fn jet_closure_ref_test_run() -> I64 {
-    holder :: closure_ref_test_holder()
+// A function that spawns tasks carries their cancellation, and a C export is
+// infallible, so the export handles the spawning helper's failure.
+fn closure_ref_test_all(holder: Shared<ClosureRefTestHolder>) -> I64 {
     sum := I64{0}
     task.group workers {
         results :: task.all {
@@ -65,4 +66,8 @@ fn closure_ref_test_worker(holder: Shared<ClosureRefTestHolder>) -> I64 {
         loop result in results -> sum += result
     }
     sum
+}
+
+#Export(c) fn jet_closure_ref_test_run() -> I64 {
+    closure_ref_test_all(closure_ref_test_holder()) ?? panic("closure workers failed")
 }

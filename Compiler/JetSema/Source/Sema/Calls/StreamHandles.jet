@@ -123,10 +123,10 @@ fn sema_stream_handle_encoding_error() -> Type Never! {
     Type.Named{name: "EncodingError"}
 }
 
-// `effect_name` is Rust's exact handle-method row: `method_calls.rs` records
-// only `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and
-// channel methods) for these receivers. Authority is checked where the
-// handle is acquired (`files.open`, `term.stdout`), not on each method.
+// `effect_name` is Rust's exact handle-method row: records only
+// `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and channel
+// methods) for these receivers. Authority is checked where the handle is
+// acquired (`files.open`, `term.stdout`), not on each method.
 fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
@@ -152,7 +152,7 @@ fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -
         return None
     }
     if owner == "MappedFile" {
-        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("start", Type.Int, AccessConvention.Read), sema_stream_handle_param("end", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLen, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
@@ -259,11 +259,11 @@ fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bo
     (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read"))
 }
 
-// Rust `file_handle_method_return` (method_calls.rs E2-M7) types the methods
-// of these handles without recording a receiver convention, so an unmarked
-// `reader.read(n)` or `writer.write_all(bytes)` needs no `&`, and a written
-// mark has no convention to be checked against. `text_cursor_method_return`
-// and `binary_reader_method_return` record none either, so `&c.skip_ws()` and
+// Rust `file_handle_method_return` (E2-M7) types the methods of these handles
+// without recording a receiver convention, so an unmarked `reader.read(n)` or
+// `writer.write_all(bytes)` needs no `&`, and a written mark has no convention
+// to be checked against. `text_cursor_method_return` and
+// `binary_reader_method_return` record none either, so `&c.skip_ws()` and
 // `&r.take(n)` keep their mark. `Stdout`/`Stderr` dispatch to their `&self`
 // source methods instead.
 fn sema_stream_handle_reports_no_receiver_convention(owner: String) -> Bool Never! {
@@ -340,8 +340,9 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         }
         if shift_argument == index {
             if checked.ty == .IntN(_, _) {
+                // D-BINREAD-LEN1=A: U64 and the signed widths stay explicit (E0112 at the call).
                 if !sema_stream_handle_integer_width(checked.ty) {
-                    &diagnostics.push(sema_type_mismatch(required, checked.ty, checked_args[index].span))
+                    &diagnostics.push(sema_stream_handle_argument_mismatch(callee, required, checked.ty, checked_args[index].span))
                     return None
                 }
                 converted :: sema_expr_numeric_conversion(checked, Type.Int, checked.span, sema_source_line_at(environment.source_segments, checked.span) ?? 0) ?? return None
@@ -450,7 +451,30 @@ fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, met
     checked_args :: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
     typed_args :: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    result :: sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
+    if result.value != None && sema_stream_handle_yields_view(spec.result_type) -> sema_stream_handle_publish_receiver_view(receiver, span, scopes, &state, &context)
+    result
+}
+
+// `MappedFile.window`/`window_len` return a `View<U8>` into the mapping the
+// receiver owns: the call publishes the receiver as the view's owner, the
+// same fact a view-returning function call publishes, so a binding of it is
+// a local window on that receiver. A receiver that names no place is a
+// temporary owner the statement drops.
+fn sema_stream_handle_yields_view(result_type: Type) -> Bool Never! {
+    if result_type == {
+        .Result(value, _) -> sema_stmt_view_access(value) != None
+        else -> sema_stmt_view_access(result_type) != None
+    }
+}
+
+fn sema_stream_handle_publish_receiver_view(receiver: Expr, span: Span, scopes: SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) Never! {
+    places :: sema_ownership_places_from_expr_in_state(receiver, scopes, &state)
+    temporaries := [Span]{}
+    if places.len() == 0 -> &temporaries.push(expr_span(receiver))
+    facts :: [SemaCallReturnViewFact]{SemaCallReturnViewFact{slot: [String]{}, access: AccessConvention.Read, places: places, sources: [ViewSourcePath]{}, temporaries: temporaries}}
+    sema_ownership_note_call_views(&state, span, facts)
+    &context.call_return_views.push(SemaCallReturnView{span: span, facts: facts})
 }
 
 fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {

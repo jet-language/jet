@@ -1,6 +1,6 @@
-// 2: Rust SchemaMigration.rs's E0910 diff, independent of I/O.
-// None is the status command's deliberately empty advisory registry; builds
-// supply the canonical populated scope environment after type registration.
+// 2: E0910 diff, independent of I/O. None is the status command's deliberately
+// empty advisory registry; builds supply the canonical populated scope
+// environment after type registration.
 use jet_foundation.[Diagnostic, Item, MigrationOp, Span, StructDef, Type, type_name, TTypeDef]
 
 fn sema_schema_published(definition: StructDef) -> Bool Never! {
@@ -24,7 +24,7 @@ fn sema_schema_decodable(ty: Type, environment: SemaScopeEnvironment?, program: 
         return sema_serde_type_is_admissible(scope, program, ty, SemaSerdeDirection.Decode)
     }
     // Empty TraitRegistry trusts named types, but still rejects structural
-    // types for which no decoder exists (CmdSchema.rs's advisory contract).
+    // types for which no decoder exists (advisory contract).
     if ty == {
         .Named(_) -> true
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) -> true
@@ -42,6 +42,9 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
     diagnostics := [Diagnostic]{}
     migrations := [String:[MigrationOp]]{}
     conversions := [(from_ty: String, to_ty: String)]{}
+    // A checked program holds each accepted `impl Old -> New` as its lowered
+    // routine (sema_error_conversion_items); a parsed one still holds the item.
+    functions := [String]{}
     loop item in items {
         if item == {
             .Migration(migration) -> {
@@ -50,6 +53,7 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
                 migrations[migration.type_name] = ^operations
             }
             .ErrorConv(conversion) -> &conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
+            .Func(function) -> &functions.push(function.name)
             else -> {}
         }
     }
@@ -143,7 +147,7 @@ fn check_schema_migrations(items: [Item], snapshots: [String:SchemaSnapshot], en
                 if converter == {
                     .Val(has_converter) -> {
                         if !has_converter {
-                            has_impl := false
+                            has_impl := functions.contains(sema_failure_declared_conversion_name(sema_error_conversion_leaf(old_ty), sema_error_conversion_leaf(new_ty)))
                             loop conversion in conversions { if conversion.from_ty == old_ty && conversion.to_ty == new_ty -> has_impl = true }
                             if !has_impl -> &diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
                         }

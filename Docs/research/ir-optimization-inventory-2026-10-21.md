@@ -46,7 +46,7 @@ statistic, medians move by up to ~2x between runs, so differences under ~10% are
 | text/split_join | 1.175 | 1.229 | 1.154 | 1.05 | 0.98 |
 | text/string_fresh | 1.467 | 1.460 | 1.451 | 1.00 | 0.99 |
 
-Receipt: `/mnt/jetscratch/lanes/IROpt/measure-old/{results.tsv,phases.tsv,README.md}`. The whole old O1+O2 LIR
+Receipt: `$JET_SCRATCH_ROOT/lanes/IROpt/measure-old/{results.tsv,phases.tsv,README.md}`. The whole old O1+O2 LIR
 pipeline is worth 0-16% on the scalar cells (collatz, fib, byte_scan, list_reuse) and nothing measurable on the
 rest; two cells are slower at O1/O2 than at O0 (map_filter_collect, sieve; beyond noise at their minimums). The
 old runtime cost sits in runtime calls the passes cannot see (TextPerf hotspots: `jet_string_bytes` copies, heap

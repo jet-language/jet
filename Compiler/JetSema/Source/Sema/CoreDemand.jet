@@ -1,0 +1,353 @@
+// Demand-checked Core bodies. A Core body matters to a compile only through
+// the checked bodies that reach it: its effects, memory facts and failure
+// contract flow to a caller along the call and function-value edges the
+// whole-program passes walk, and lowering keeps a top-level Core body only
+// when a kept body names it (ir_reachable_core_rows). Such a compile
+// registers every Core declaration as usual, but checks a Core module's
+// top-level function body only once a checked body names it
+// (sema_core_demand_body_keys, or a call-site fact). sema_core_demand_waves
+// checks the named bodies after the body pass, in waves until no checked
+// body names a new one.
+//
+// Some bodies stay checked up front, because a caller reaches them by owner
+// type, not by a key: trait-impl methods (generic dispatch reaches every
+// implementation of the trait), compiler-generated ones (their codec and
+// derive demand is separate), and methods named `close` (`close(^value)`
+// reaches its owner's `close` by name). A compile that lowers
+// (SemaRegistrationGraph.core_lowering_roots) also checks up front the
+// functions and methods lowering keeps by name or by owner type with no
+// keyed call in a checked body (the roots the driver lists). A `jet doc`
+// run, an incremental session, the entry module, and a program that opts in
+// to the web partition's checks (sema_web_partition_active) check every
+// body: a bucket closes over every call edge, an unnamed Core caller's too.
+use jet_foundation.[
+    BodyCallArg,
+    BodyTree,
+    CompilerThreads,
+    CompilerTraceSink,
+    DeclID,
+    DeclTable,
+    Diagnostic,
+    FnBody,
+    SymbolKind,
+    TTryConvert,
+    TTypeDef,
+    body_each_expr_child,
+    body_each_stmt_child,
+    body_node,
+    symbol_id,
+]
+
+// Indexes the deferred bodies of `graph` for one finalization: none unless
+// `enabled`. Called at the start of each finalization, so a later one over
+// the same graph demands afresh.
+fn sema_core_demand_index(graph: &SemaRegistrationGraph, enabled: Bool) {
+    graph.core_wave_rows = [String:Bool]{}
+    graph.core_checked = [String:Bool]{}
+    rows := [String:Int]{}
+    if enabled {
+        roots :: graph.core_lowering_roots ?? [String:Bool]{}
+        // Every method an impl that stays checked supplies; a nominal lists
+        // its impls' methods among its own.
+        eager := [String:Bool]{}
+        loop module_index in 0..<graph.modules.len() {
+            loop implementation in graph.modules[module_index].impls {
+                if sema_core_demand_impl_deferrable(implementation) -> next
+                loop method in implementation.methods -> eager[method.symbol.id.key] = true
+            }
+        }
+        loop module_index in 0..<graph.modules.len() {
+            identity :: graph.modules[module_index].module_identity
+            if !sema_module_is_core_source(identity) || identity == graph.entry_module_identity -> next
+            loop item in graph.modules[module_index].program.items {
+                if item == .Func(func) {
+                    key :: symbol_id(SymbolKind.Function, identity, "", func.name).key
+                    if roots.get(key) == None -> rows[key] = module_index
+                }
+            }
+            loop nominal in graph.modules[module_index].nominals {
+                loop method in nominal.methods {
+                    if method.declaration.compiler_generated || method.declaration.name == "close" || eager.get(method.symbol.id.key) != None || roots.get(method.symbol.id.key) != None -> next
+                    rows[method.symbol.id.key] = module_index
+                }
+            }
+            loop implementation in graph.modules[module_index].impls {
+                if !sema_core_demand_impl_deferrable(implementation) -> next
+                loop method in implementation.methods {
+                    if method.declaration.name != "close" && roots.get(method.symbol.id.key) == None -> rows[method.symbol.id.key] = module_index
+                }
+            }
+        }
+    }
+    graph.core_demand_rows = ^rows
+}
+
+// An inherent, authored impl: no trait, operator, delegation or generator.
+fn sema_core_demand_impl_deferrable(implementation: SemaRegistrationImpl) -> Bool Never! {
+    implementation.trait_name == None && implementation.operator_marker == None && implementation.delegation_field == None && !implementation.compiler_generated
+}
+
+// Whether the body of function `key` waits for demand: it is deferred and no
+// wave of this finalization has checked it.
+fn sema_core_demand_deferred(graph: SemaRegistrationGraph, key: String) -> Bool Never! {
+    if graph.core_demand_rows.len() == 0 -> return false
+    graph.core_demand_rows.get(key) != None && graph.core_checked.get(key) == None
+}
+
+// Whether top-level item `item_index` of module `module_index` waits for
+// demand (sema_core_demand_deferred).
+fn sema_check_registered_item_deferred(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        if graph.core_demand_rows.len() == 0 -> return false
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return sema_core_demand_deferred(graph, symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", func.name).key)
+        return false
+    }
+    panic("an owning registered-module pass lost its registration graph")
+}
+
+// Whether top-level item `item_index` of module `module_index` is a body the
+// current demand wave checks (graph.core_wave_rows).
+fn sema_check_registered_item_in_core_wave(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, item_index: Int) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        if graph.modules[module_index].program.items[item_index] == .Func(func) -> return graph.core_wave_rows.get(symbol_id(SymbolKind.Function, graph.modules[module_index].module_identity, "", func.name).key) != None
+        return false
+    }
+    panic("an owning registered-module pass lost its registration graph")
+}
+
+// Demand: after the body pass and the codec and derive waves, every deferred
+// Core body a checked body names is checked into its module's result. A
+// wave's bodies may name more, and may reach generated codecs and derived
+// methods, whose waves follow it; waves repeat until no body names a new
+// deferred one. A program that names no Core body runs none. A compile that
+// lowers also lowers what the driver joins to the checked modules after
+// finalization, the comptime closures (jet_driver_merge_checked_text_functions)
+// and the startup functions (jet_driver_add_startup_functions), so the first
+// wave demands what those name too.
+fn sema_core_demand_waves(owned: ^SemaRegistrationGraph, trail: &SemaGraphTrail, values: [SemaComptimeItemValue], comptime_functions: [SemaComptimeFunctionResult], checked_types: [TTypeDef], host_hooks: SemaHostHookAccess?, threads: CompilerThreads, trace_sink: CompilerTraceSink?, carried: &[SemaPassFacts], modules: &[SemaGraphModuleResult]) -> SemaRegistrationGraph {
+    graph := ^owned
+    if graph.core_demand_rows.len() == 0 -> return ^graph
+    seeds := [String]{}
+    if graph.core_lowering_roots != None {
+        loop result in comptime_functions {
+            if result.function == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, &seeds)
+            loop fact in result.call_facts {
+                if fact.callee == .Val(callee) -> &seeds.push(callee.key)
+            }
+        }
+        loop value in values {
+            if value.init == .Val(function) -> sema_core_demand_body_keys(function, graph.decls, &seeds)
+        }
+    }
+    // Per module: how many of its functions and call-site facts were read.
+    read_functions := [Int]{}
+    read_facts := [Int]{}
+    checked := 0
+    waves := 0
+    loop {
+        wave := [String:Bool]{}
+        affected := [Int]{}
+        loop key in seeds -> sema_core_demand_key(&graph, key, &wave, &affected)
+        seeds = [String]{}
+        sema_core_demand_named(&graph, modules, &read_functions, &read_facts, &wave, &affected)
+        if wave.len() == 0 -> break
+        &affected.sort()
+        checked += wave.len()
+        waves += 1
+        graph.core_wave_rows = ^wave
+        result := sema_finalize_check_modules(^graph, values, comptime_functions, checked_types, affected, true, host_hooks, threads, None, "sema.core_demand", trace_sink, &carried, &modules)
+        graph = ^result
+        graph.core_wave_rows = [String:Bool]{}
+        after_codec_graph := sema_codec_waves(^graph, &trail, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, &carried, &modules)
+        graph = sema_derive_waves(^after_codec_graph, values, comptime_functions, checked_types, host_hooks, threads, trace_sink, &carried, &modules)
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.sema.core_deferred", graph.core_demand_rows.len(), -1)
+        sink.progress("counters.sema.core_checked", checked, -1)
+        sink.progress("counters.sema.core_waves", waves, -1)
+    }
+    ^graph
+}
+
+// One demand wave's part of module `module_index` on this thread, nothing
+// prepared (sema_check_core_demand_module_lent): the serial pass a
+// per-function trace and an incremental session keep. Returns how many
+// checked functions it appended.
+fn sema_check_core_demand_module_in_shared(shared_state: Shared<SemaCheckShared>, host_hooks: SemaHostHookAccess?, module_index: Int, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, counter_phase: String, trace_sink: CompilerTraceSink?, result: &SemaGraphModuleResult) -> Int {
+    environment := sema_check_shared_take_environment(shared_state)
+    program := sema_check_shared_take_program(shared_state)
+    memory_plan := sema_check_shared_take_memory_plan(shared_state)
+    scopes := sema_check_module_summary_scopes(&environment, &program, host_hooks, memory_plan, module_index, comptime_functions, comptime_rows, None, counter_phase, trace_sink)
+    checked :: sema_check_core_demand_module_lent(&environment, program, host_hooks, memory_plan, module_index, ^scopes, sema_check_prepared_none(), comptime_functions, comptime_rows, pending_obligations, trace_sink, &result)
+    sema_check_shared_fill(shared_state, ^environment, ^program, ^memory_plan)
+    checked
+}
+
+// One demand wave's part of module `module_index`: the deferred bodies the
+// wave names (graph.core_wave_rows), checked against `owned_scopes`, the
+// module scope the body pass uses (sema_check_module_summary_scopes), with
+// `environment` entered in the module, top-level functions in item order and
+// then methods, and appended to the module's result from that pass with the
+// Prelude error conversions they newly demand, their diagnostics located in
+// the module's source as the body pass locates its own. A body a body wave
+// checked on a compiler thread (`prepared`, sema_check_body_wave_take) is
+// taken as it is, its methods only while the top-level checks leave the
+// module scope as it was, as the module check takes them; the rest are
+// checked here. Returns how many checked functions it appended.
+fn sema_check_core_demand_module_lent(environment: &SemaScopeEnvironment, program: SemaProgramTables, host_hooks: SemaHostHookAccess?, memory_plan: SemaFunctionMemoryPlan, module_index: Int, owned_scopes: ^SemaScopeTable, prepared: ^SemaPreparedBodies, comptime_functions: [SemaComptimeFunctionResult], comptime_rows: [String:Int], pending_obligations: Bool, trace_sink: CompilerTraceSink?, result: &SemaGraphModuleResult) -> Int {
+    scopes := ^owned_scopes
+    bodies := ^prepared
+    keep_going :: sema_check_registered_keep_going(environment, program)
+    item_count :: sema_check_registered_module_item_count(environment, program, module_index)
+    module_identity :: sema_check_registered_module_identity(environment, program, module_index)
+    before :: result.functions.len()
+    diagnostics_before :: result.diagnostics.len()
+    return_view_rows := [String:Int]{}
+    ready := ^bodies.bodies
+    queries := [Int:SemaBodyMemoQuery]{}
+    memo := SemaModuleMemo?{None}
+    scopes_changed := false
+    functions_checked := 0
+    prelude_demands := [Int:[SemaPreludeConversionDemand]]{}
+    // The functions already in the result made their conversion demands.
+    loop position in 0..<before -> prelude_demands[position] = [SemaPreludeConversionDemand]{}
+    loop item_index in 0..<item_count {
+        if !sema_check_registered_item_is_jet_function(environment, program, module_index, item_index) || !sema_check_registered_item_in_core_wave(environment, program, module_index, item_index) -> next
+        sema_check_registration_top_level(module_index, item_index, memory_plan, &environment, program, &scopes, &return_view_rows, &ready, &queries, &memo, host_hooks, comptime_functions, comptime_rows, &result, &prelude_demands, &scopes_changed, keep_going, pending_obligations, false, trace_sink, item_count, false, &functions_checked)
+    }
+    method_ready := [SemaPreparedBody]{}
+    if bodies.methods_prepared && !scopes_changed -> method_ready = ^bodies.methods
+    scanned := 0
+    loop job in sema_check_registered_method_jobs(environment, program, module_index, &scanned, false) {
+        if !sema_check_apply_method_job(module_index, memory_plan, job, &method_ready, &queries, None, &scopes, &environment, program, host_hooks, comptime_functions, comptime_rows, &result.diagnostics, &result.functions, &prelude_demands, &result.call_facts, &result.hardware_use, &result.comptime_requests, &result.name_references, &result.comptime_body_sources, &result.compute_facts, &result.failure_facts, &result.exact_int_reachable, &result.copy_events, &result.incomplete_reasons, keep_going, pending_obligations) -> result.complete = false
+    }
+    injected_from := result.functions.len()
+    if !sema_inject_prelude_error_conversions(module_identity, &environment, program, &scopes, host_hooks, &result.functions, prelude_demands, &result.diagnostics, &result.call_facts, &result.comptime_requests, &result.name_references, &result.incomplete_reasons, keep_going) -> result.complete = false
+    loop index in injected_from..<result.functions.len() -> &result.injected_function_keys.push(result.functions[index].key)
+    sema_check_registered_locate_diagnostics(environment, program, module_index, diagnostics_before, &result.diagnostics)
+    result.functions.len() - before
+}
+
+// Locates module `module_index`'s diagnostics from `start` in its source
+// (sema_attach_diagnostic_source_locations).
+fn sema_check_registered_locate_diagnostics(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, start: Int, diagnostics: &[Diagnostic]) {
+    if program.registration_graph == .Val(graph) -> return sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_index].source_segments)
+    panic("an owning registered-module pass lost its registration graph")
+}
+
+// The deferred bodies the functions and call-site facts of `modules` read
+// since the last call name, into `wave` (each marked checked) with their
+// modules in `affected`.
+fn sema_core_demand_named(graph: &SemaRegistrationGraph, modules: [SemaGraphModuleResult], read_functions: &[Int], read_facts: &[Int], wave: &[String:Bool], affected: &[Int]) {
+    loop read_functions.len() < modules.len() -> &read_functions.push(0)
+    loop read_facts.len() < modules.len() -> &read_facts.push(0)
+    keys := [String]{}
+    loop module_index in 0..<modules.len() {
+        loop position in read_functions[module_index]..<modules[module_index].functions.len() -> sema_core_demand_body_keys(modules[module_index].functions[position], graph.decls, &keys)
+        read_functions[module_index] = modules[module_index].functions.len()
+        loop position in read_facts[module_index]..<modules[module_index].call_facts.len() {
+            if modules[module_index].call_facts[position].callee == .Val(callee) -> &keys.push(callee.key)
+        }
+        read_facts[module_index] = modules[module_index].call_facts.len()
+    }
+    loop key in keys -> sema_core_demand_key(&graph, key, &wave, &affected)
+}
+
+// Demands the deferred body `key` names; a call at type arguments names its
+// generic declaration.
+fn sema_core_demand_key(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
+    sema_core_demand_add(&graph, key, &wave, &affected)
+    template :: sema_core_demand_template_key(key)
+    if template != key -> sema_core_demand_add(&graph, template, &wave, &affected)
+}
+
+fn sema_core_demand_add(graph: &SemaRegistrationGraph, key: String, wave: &[String:Bool], affected: &[Int]) {
+    if graph.core_checked.get(key) != None -> return
+    module_index :: graph.core_demand_rows.get(key) ?? return
+    graph.core_checked[key] = true
+    wave[key] = true
+    if !affected.contains(module_index) -> &affected.push(module_index)
+}
+
+// `key` without the type arguments of its last `<...>`, or `key` itself.
+fn sema_core_demand_template_key(key: String) -> String Never! {
+    bytes :: key.bytes()
+    if bytes.len() == 0 || Int.from_u8(bytes[bytes.len() - 1]) != 62 -> return key.copy()
+    depth := 0
+    position := bytes.len() - 1
+    loop position >= 0 {
+        byte :: Int.from_u8(bytes[position])
+        if byte == 62 -> depth += 1
+        if byte == 60 {
+            depth -= 1
+            if depth == 0 -> return key.slice(0, position)
+        }
+        position -= 1
+    }
+    key.copy()
+}
+
+// Every function key checked body `function` names: its direct and method
+// calls, index hooks, functions named as values, shared globals'
+// initializers and declared error conversions, in its parameter defaults and
+// body. The expressions are walked from a work list.
+fn sema_core_demand_body_keys(function: FnBody, decls: DeclTable, keys: &[String]) Never! {
+    pending := [Int]{}
+    loop parameter in function.params {
+        if parameter.default == .Val(value) -> &pending.push(value)
+    }
+    loop statement in function.body {
+        body_each_stmt_child(function.tree, function.tree.stmts[statement], (child: Int) -> &pending.push(child))
+    }
+    loop pending.len() > 0 {
+        expression :: &pending.pop() ?? break
+        sema_core_demand_expr_keys(function.tree, expression, decls, &keys)
+        body_each_expr_child(function.tree, body_node(function.tree, expression), (child: Int) -> &pending.push(child))
+    }
+}
+
+// The function keys one checked expression names directly.
+fn sema_core_demand_expr_keys(tree: BodyTree, expression: Int, decls: DeclTable, keys: &[String]) Never! {
+    if body_node(tree, expression).kind == {
+        .Call(callee, _, args) -> {
+            sema_core_demand_decl_key(decls, callee, &keys)
+            sema_core_demand_template_items(args, &keys)
+        }
+        .MethodCall(_, method, _, args) -> {
+            &keys.push(method.symbol.key)
+            sema_core_demand_template_items(args, &keys)
+        }
+        .StaticCall(_, _, method, _, args) -> {
+            &keys.push(method.symbol.key)
+            sema_core_demand_template_items(args, &keys)
+        }
+        .Index(_, _, _, _, checked_call, _) -> {
+            if checked_call == .Val(symbol) -> &keys.push(symbol.key)
+        }
+        .FnValue(kind) -> {
+            if kind == .NamedFn(function, _) {
+                if function == .Val(id) -> sema_core_demand_decl_key(decls, id, &keys)
+            }
+        }
+        .ConstRef(symbol) -> &keys.push(symbol.key)
+        .GlobalShared(initializer, _) -> sema_core_demand_decl_key(decls, initializer, &keys)
+        .Try(_, conversion, _) -> sema_core_demand_conversion_key(conversion, &keys)
+        .TryWithContext(_, _, conversion, _, _, _) -> sema_core_demand_conversion_key(conversion, &keys)
+        else -> {}
+    }
+}
+
+fn sema_core_demand_decl_key(decls: DeclTable, id: DeclID, keys: &[String]) Never! {
+    index :: id.row.index()
+    if index < decls.rows.len() -> &keys.push(decls.rows[id.row].key)
+}
+
+fn sema_core_demand_template_items(args: [BodyCallArg], keys: &[String]) Never! {
+    loop argument in args {
+        loop item in argument.template_items -> &keys.push(item.key)
+    }
+}
+
+fn sema_core_demand_conversion_key(conversion: TTryConvert, keys: &[String]) Never! {
+    if conversion == .Typed(key, _, _) -> &keys.push(key)
+}

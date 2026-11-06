@@ -2,8 +2,9 @@
 // Link/run only against an explicit fresh Jet-only runtime object/archive
 // (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o or a Rust provider).
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -23,21 +24,27 @@ if (mode === 'link') {
     const count = nm.stdout.split('\n').filter(line => line.startsWith(`${symbol} T `)).length;
     if (count !== 1) throw Error(`${symbol}: expected one strong native definition, got ${count}`);
   }
-  checked(nativeCCompiler, ['-O2',join(root,'Compiler/JetRuntime/Tests/main-fixture.c'),resolve(pack),'-lpthread','-ldl','-lm','-o',executable]);
+  // The runtime imports jet_rt_fault_report, which Jet's linker writes into
+  // each image; this platform link takes it from the shared report source.
+  const faultReport = faultReportObject(mkdtempSync(join(out,'fault-report-')));
+  checked(nativeCCompiler, ['-O2',join(root,'Compiler/JetRuntime/Tests/main-fixture.c'),resolve(pack),faultReport,'-lpthread','-ldl','-lm','-o',executable]);
 } else {
-  // Byte goldens derive from the reference entry/atexit ordering and the
-  // registered E3013 wire fragments (ObserveMessages/Channel.text(0)).
+  // Byte goldens follow the exit law (atexit handlers run in registration
+  // order, spec.md) and the registered E3013 wire fragments
+  // (ObserveMessages/Channel.text(0)). The handler queue belongs to the
+  // process: a worker's stop runs main's two handlers (registered before the
+  // spawn) and then its own two, before its report.
   const parked = (label, site) => `Stop [E3013]: Parked tasks remain at process exit: \n  ${label} (spawn site ${site})\n    state: blocked\n    wait target: channel receive\n Why: The scheduler reached process exit while one or more tasks were blocked on a wait target.\n Fix: Join each task or make its wait reachable before process exit.\nMore: jet-lang.dev/e/E3013\n`;
   const numeric = "Stop [E3010]: `divided by zero`\n  --> <core.prelude>:0\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n";
-  const normal = 'entryexit2exit1', restart = parked('restart-child',41);
+  const normal = 'entryexit1exit2', restart = parked('restart-child',41);
   const cases = [
     ['normal',0,normal], ['twice',0,normal + normal],
-    ['flush',0,'entryerrorexit2exit1'], ['explicit',73,normal],
+    ['flush',0,'entryerrorexit1exit2'], ['explicit',73,normal],
     ['parked',70,normal + parked('main-child',23)],
-    ['worker-fatal',70,normal + numeric],
+    ['worker-fatal',70,normal + 'exit1exit2' + numeric],
     ['second-fatal',70,normal + normal + numeric],
-    ['observe-enabled',0,'entry' + restart + restart + 'exit2exit1'],
-    ['observe-disabled',0,'entry' + restart + 'exit2exit1'],
+    ['observe-enabled',0,'entry' + restart + restart + 'exit1exit2'],
+    ['observe-disabled',0,'entry' + restart + 'exit1exit2'],
     ['concurrent-fatal',null,null],
   ];
   for (const [name,status,golden] of cases) {
@@ -51,7 +58,7 @@ if (mode === 'link') {
     writeFileSync(join(out,`${name}.receipt.json`),JSON.stringify({status:result.status,signal:result.signal,error:result.error?.message ?? null,expectedStatus:status,capture},null,2)+'\n');
     const bytes = readFileSync(capture);
     const matches = name === 'concurrent-fatal'
-      ? (result.status === 70 && bytes.equals(Buffer.from('entrywinner70'))) || (result.status === 71 && bytes.equals(Buffer.from('entrywinner71')))
+      ? (result.status === 70 && bytes.equals(Buffer.from(normal + 'winner70'))) || (result.status === 71 && bytes.equals(Buffer.from(normal + 'winner71')))
       : result.status === status && bytes.equals(Buffer.from(golden));
     if (result.error || result.signal || !matches) throw Error(`${name}: exit/merged stdout-stderr bytes differ from the entry golden`);
   }

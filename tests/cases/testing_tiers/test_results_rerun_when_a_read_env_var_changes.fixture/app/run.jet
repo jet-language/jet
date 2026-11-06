@@ -1,0 +1,14 @@
+use {
+    core.files
+    core.sys
+}
+
+fn run() {
+    print(sys.get("TEST_READS_GREETING") ?? "")
+}
+
+#Test("reads its greeting variable") {
+    files.append_all("runs.log", "ran\n") ?? panic("can't append runs.log")
+    greeting :: sys.get("TEST_READS_GREETING") ?? panic("TEST_READS_GREETING is unset")
+    assert(greeting.len() > 0)
+}

@@ -1,3 +1,3 @@
 {
-  outputs = { ... }: { nixosConfigurations.halcyon = { }; };
+  outputs = { ... }: { nixosConfigurations.devhost = { }; };
 }

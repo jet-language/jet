@@ -1,6 +1,5 @@
-// Source/CmdFill.rs: typed goal cards and proposals validated by the same
-// checker that checked the original module. The checked function's goal rows
-// own goal types.
+// Typed goal cards and proposals validated by the same checker that checked the
+// original module. The checked function's goal rows own goal types.
 use {
     cli_files :: core.files
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
@@ -61,7 +60,7 @@ fn jet_cli_fill_card(rows: [TTypedGoal], span: Span) -> String Never! {
 
 fn jet_cli_fill_expr(tree: BodyTree, expression: Int, rows: [TTypedGoal], goals: &[JetCLIFillGoal]) Never! {
     node :: body_node(tree, expression)
-    if node.kind == .Never(reason) && reason == "todo" {
+    if node.kind == .Never(reason, _) && reason == "todo" {
         &goals.push(JetCLIFillGoal{span: node.span, expected: jet_cli_fill_card(rows, node.span)})
     }
     body_each_expr_child(tree, node, (child: Int) -> jet_cli_fill_expr(tree, child, rows, &goals))

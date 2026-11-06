@@ -661,7 +661,7 @@ package {
 use inv :: cpp.inventory
 
 fn run() {
-    shelf := inv.Inventory.new(owner: "nate")?       // `:=`: add() writes the shelf
+    shelf := inv.Inventory.new(owner: "user")?       // `:=`: add() writes the shelf
     &shelf.add(item: "bolt", count: 3)?
     &shelf.add(item: "nut", count: 5)?
     print("{shelf.owner()}: {shelf.names()}")
@@ -675,7 +675,7 @@ fn run() {
 
 ```text
 $ jet run shop
-nate: ["bolt", "nut"]
+user: ["bolt", "nut"]
 refused: CppError(type: "std::invalid_argument", what: "count must be >= 0")
 10
 0.0

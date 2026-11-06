@@ -1,0 +1,133 @@
+// OWNED_TRAITS, generated from Compiler/Prelude/Traits.jet, is the one home of
+// the compiler-owned traits: its rows are consistent, and no compiler source
+// or syntax constant keeps a second list of them.
+use {
+    owned_traits_files :: core.files
+    jet_foundation.[OWNED_TRAITS, OwnedContract, owned_trait, owned_trait_auto_derive_marker, owned_trait_bundle, owned_trait_bundle_marker, owned_trait_codec, owned_trait_codec_marker, owned_trait_codec_names, owned_trait_commutative, owned_trait_family, owned_trait_literal, owned_trait_requires_listed, owned_trait_structural_names]
+}
+
+// The one file that may list the owned trait names.
+OWNED_TRAITS_ROWS :: "Compiler/JetFoundation/Source/Registry/OwnedTraitRows.jet"
+
+// The syntax registry, whose constants are spellings, not trait lists.
+OWNED_TRAITS_SYNTAX :: "Compiler/JetFoundation/Data/Syntax"
+
+// A name the table answers for: a trait, or a derive or bundle family marker.
+fn owned_traits_known(name: String) -> Bool Never! {
+    owned_trait(name) != None || owned_trait_family(name, false).len() > 0 || owned_trait_family(name, true).len() > 0
+}
+
+// The owned trait and family names one source line quotes, in order, each once.
+fn owned_traits_quoted(line: String) -> [String] Never! {
+    found := [String]{}
+    parts :: line.split("\"").to_list()
+    loop index in 0..<parts.len() {
+        if index % 2 == 0 -> next
+        if owned_traits_known(parts[index]) && !found.contains(parts[index]) -> &found.push(parts[index])
+    }
+    found
+}
+
+#Test("owned trait rows name each trait, hook, operator and method once") {
+    violations := [String]{}
+    names := [String]{}
+    hooks := [String]{}
+    symbols := [String]{}
+    loop owned in OWNED_TRAITS {
+        hooked := false
+        if names.contains(owned.name) -> &violations.push("`{owned.name}` has two rows")
+        &names.push(owned.name)
+        loop symbol in owned.operators {
+            if symbols.contains(symbol) -> &violations.push("`{owned.name}` repeats the operator `{symbol}`")
+            &symbols.push(symbol)
+        }
+        loop other in owned.requires {
+            if owned_trait(other) == None -> &violations.push("`{owned.name}` requires `{other}`, which has no row")
+        }
+        if owned.contract == {
+            .Operator(hook, _) -> {
+                if hooks.contains(hook) -> &violations.push("`{owned.name}` repeats the operator hook `{hook}`")
+                &hooks.push(hook)
+                hooked = true
+                if owned.operators.len() == 0 -> &violations.push("`{owned.name}` has a hook and no operator")
+            }
+            .Methods(methods, _, shares) -> {
+                seen := [String]{}
+                loop method in methods {
+                    if seen.contains(method.name) -> &violations.push("`{owned.name}` declares `{method.name}` twice")
+                    &seen.push(method.name)
+                }
+                if shares == .Val(other) && owned_trait(other) == None -> &violations.push("`{owned.name}` shares the associated types of `{other}`, which has no row")
+            }
+            else -> {}
+        }
+        if !hooked && owned.operators.len() > 0 -> &violations.push("`{owned.name}` has operators and no hook")
+        if owned.auto_derive_family == .Val(family) && owned_trait(family) != None -> &violations.push("`{owned.name}`'s derive family `{family}` is also a trait")
+        if owned.bundle_family == .Val(family) && owned_trait(family) != None -> &violations.push("`{owned.name}`'s bundle family `{family}` is also a trait")
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+#Test("the table answers the marker and contract questions its readers ask") {
+    assert(owned_trait_auto_derive_marker("Codable"))
+    assert(owned_trait_auto_derive_marker("Debug"))
+    assert(!owned_trait_auto_derive_marker("Display"))
+    assert_eq(owned_trait_family("Codable", false).join(" "), "Encode Decode")
+    assert_eq(owned_trait_bundle("CodableAsBase").join(" "), "Encode Decode")
+    assert_eq(owned_trait_bundle("Numeric").join(" "), "Numeric")
+    assert_eq(owned_trait_bundle("Debug").join(" "), "")
+    assert(owned_trait_codec("Decode"))
+    assert(!owned_trait_codec("Codable"))
+    assert(owned_trait_codec_marker("Codable"))
+    assert(!owned_trait_codec_marker("Debug"))
+    assert_eq(owned_trait_codec_names().join(" "), "Encode Decode")
+    assert_eq(owned_trait_structural_names().join(" "), "Equatable Comparable")
+    assert(owned_trait_literal("Literal.Float"))
+    assert(!owned_trait_literal("Add"))
+    assert(owned_trait_commutative("Mul"))
+    assert(!owned_trait_commutative("Sub"))
+    assert_eq(owned_trait_bundle_marker("Decode") ?? "", "CodableAsBase")
+    assert_eq(owned_trait_bundle_marker("Numeric") ?? "", "Numeric")
+    assert(owned_trait_bundle_marker("Equatable") == None)
+    assert_eq(owned_trait_requires_listed("Numeric"), "Add, Sub, Mul, and Comparable")
+}
+
+#Test("no compiler source lists the owned trait names outside OWNED_TRAITS") {
+    violations := [String]{}
+    entries :: owned_traits_files.walk("Compiler", None) ?? panic("walk Compiler: {err}")
+    loop entry in entries {
+        if entry.is_dir || !entry.path.ends_with(".jet") -> next
+        if !entry.path.contains("/Source/") && !entry.path.contains("/Data/") -> next
+        if entry.path.ends_with(OWNED_TRAITS_ROWS) -> next
+        source :: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
+        loop (index, line) in source.split("\n").to_list() {
+            if line.trim_start().starts_with("//") -> next
+            quoted :: owned_traits_quoted(line)
+            if quoted.len() >= 3 -> &violations.push("{entry.path}:{index + 1} lists {quoted.join(" ")}; ask OWNED_TRAITS instead")
+        }
+    }
+    assert_eq(violations.join("\n"), "")
+}
+
+// A syntax constant spelled as an owned trait is a second home for it. A
+// marker constant may share a trait's spelling only when the marker is not one
+// of the table's derive or bundle markers (`#Close(close)` is a foreign-handle
+// marker, not the trait).
+#Test("no syntax constant spells an owned trait or its markers") {
+    violations := [String]{}
+    entries :: owned_traits_files.walk(OWNED_TRAITS_SYNTAX, None) ?? panic("walk {OWNED_TRAITS_SYNTAX}: {err}")
+    loop entry in entries {
+        if entry.is_dir || !entry.path.ends_with(".jet") -> next
+        source :: owned_traits_files.read(entry.path) ?? panic("read {entry.path}: {err}")
+        loop (index, line) in source.split("\n").to_list() {
+            parts :: line.split(" :: \"").to_list()
+            if parts.len() < 2 || parts[0].contains(" ") || parts[0] == "" -> next
+            value :: parts[1].split("\"").to_list()[0]
+            if !owned_traits_known(value) -> next
+            marker :: parts[0].starts_with("MARKER_")
+            if marker && !owned_trait_auto_derive_marker(value) && owned_trait_bundle(value).len() == 0 -> next
+            &violations.push("{entry.path}:{index + 1} spells `{value}` as {parts[0]}; OWNED_TRAITS owns it")
+        }
+    }
+    assert_eq(violations.join("\n"), "")
+}

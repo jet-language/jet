@@ -140,7 +140,11 @@ fn run() {
             assert(resolved == expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved}, not {expected_num}: {output.output}")
         }
     }
-    laws :: [String]{"D-REPORT-LAW1=A", "D-REPORT-HOME1=A", "D-REPORT-MACHINE1=A", "D-REPORT-EDITOR1=A", "`jet.report/v2`"}
+    // The dated audit names the schema of its day, `jet.report/v1`; the 2026-09-11
+    // checkpoint 38b2b7df7b rewrote this literal to v2 with the schema bump but left
+    // the retained report as written, so the predicate could never hold. The live
+    // schema is JET_CLI_REPORT_SCHEMA in Compiler/JetCli/Source/Cli/Report.jet.
+    laws :: [String]{"D-REPORT-LAW1=A", "D-REPORT-HOME1=A", "D-REPORT-MACHINE1=A", "D-REPORT-EDITOR1=A", "`jet.report/v1`"}
     loop law in laws {
         assert(text.contains(law), "accessibility audit must name the canonical report law {law}")
     }

@@ -83,7 +83,8 @@ fn services_process_alive(state: ServiceProcessState) -[FS, Env]> Bool ServicesE
 
 // The start identity must match before liveness is even asked.
 fn services_process_matches_start_with(expected: String, identity: fn() -> String? ServicesError!, alive: fn() -> Bool ServicesError!) -> Bool ServicesError! {
-    actual :: identity() ?? return Ok(false)
+    found :: identity()
+    actual :: found ?? return Ok(false)
     if actual != expected -> return Ok(false)
     alive()
 }
@@ -94,7 +95,8 @@ fn services_process_matches_start(state: ServiceProcessState) -[FS, Env]> Bool S
 
 // Run `action` only while `expected` is still the process's start identity.
 fn services_run_if_start_identity_matches(expected: String, identity: fn() -> String? ServicesError!, action: fn() ServicesError!) -> Bool ServicesError! {
-    if identity() != Val(expected) -> return Ok(false)
+    found :: identity()
+    if found != Val(expected) -> return Ok(false)
     action()
     Ok(true)
 }

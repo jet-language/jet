@@ -1,7 +1,16 @@
-# Port of tests/inline_deps.rs::script_inline_dep_unresolved_is_e1253 (106-125); original predicates retained.
-# PENDING-SAME-HEAD: no reference snapshot/blessing.
+# Port of tests/inline_deps.rs::script_inline_dep_unresolved_is_e1253 (106-125), under D-JPK-SCRIPTDEP1=A:
+# `jet check` never fetches, so an unknown inline dependency is E1253; `jet run`
+# fetches it from the configured registry, here an absent one (E1235), and
+# leaves no lock or local copy behind.
 fixture: ghost.fixture
 env: JET_STORE_DIR={work}/.jet-test-cache
-step: jet run stats.jet
+step: jet check stats.jet
 exit: nonzero
-stderr: ~ E1253 # original predicate
+stderr: ~ E1253 # the code; tests/ui/inline_dep_unresolved owns the full report
+step: jet run stats.jet
+env: JET_REGISTRY_URL=file://{work}/absent.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+exit: nonzero
+stderr: ~ E1235 # the code; the unreachable-registry report text is covered by pkg/cli_publish_unreachable_registry_e1235
+file: stats.jet.lock absent
+file: .jet/inline-deps absent

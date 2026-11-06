@@ -9,6 +9,8 @@ package {
     }
 }
 
+use core
+
 // core.game — canonical scene/replay/backend handles.
 //
 // The runtime owns frame scheduling, input snapshots, and presentation.
@@ -17,3 +19,9 @@ package {
 // state; a plain source record cannot represent those runtime identities.
 module raylib
 
+// Runs the scene's frame loop and returns its transcript.
+// The qualified call is deliberate: inside this package it selects the
+// runtime's frame-loop leaf.
+fn run(scene: GameScene, replay: GameReplay? {None}, backend: GameBackend? {None}, frames: Int? {None}) -> String {
+    core.game.run(scene, replay, backend, frames)
+}

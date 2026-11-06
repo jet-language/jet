@@ -1,11 +1,10 @@
-// The semantic index builder (crates/jet-semindex/src/Build.rs): one walk
-// over the checked modules sema settled, recording definitions, use-site
-// references, call edges, members, arithmetic policy facts, structural
-// boundaries, and spelled bypasses, then the finalized index rows
-// (`SymbolDB::finalize_index`). Reference targets come from sema's name
-// references (the Rust name ledger's `reference` rows) and effect rows from
-// the checked functions (the Rust `SemIndexEffectFacts` summaries), so this
-// walk never runs a second checker. LSP hover and inlay text have no Jet
+// The semantic index builder: one walk over the checked modules sema settled,
+// recording definitions, use-site references, call edges, members, arithmetic
+// policy facts, structural boundaries, and spelled bypasses, then the finalized
+// index rows (`SymbolDB::finalize_index`). Reference targets come from sema's
+// name references (the Rust name ledger's `reference` rows) and effect rows
+// from the checked functions (the Rust `SemIndexEffectFacts` summaries), so
+// this walk never runs a second checker. LSP hover and inlay text have no Jet
 // consumer and are not produced.
 use {
     jet_driver.[
@@ -58,14 +57,13 @@ use {
     ]
 }
 
-// Build.rs `CallerFrame`.
 struct JetCLISemCallerFrame {
     name: String
     owner: String?
     identity: String
 }
 
-// Build.rs `SymbolDB` without the LSP hover/inlay projections.
+// `SymbolDB` without the LSP hover/inlay projections.
 struct JetCLISemDB {
     defs: [JetCLISemDef]
     refs: [JetCLISemRef]
@@ -81,8 +79,8 @@ struct JetCLISemDB {
     free_calls: [String: Bool]
 }
 
-// Build.rs `WalkCtx`. `display_prefix` is the code-module path the name
-// ledger prints before a nested declaration (`Inner.`).
+// `display_prefix` is the code-module path the name ledger prints before a
+// nested declaration (`Inner.`).
 struct JetCLISemWalk {
     module_path: String
     source: String
@@ -128,7 +126,7 @@ fn jet_cli_sem_db() -> JetCLISemDB Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Identities (Build.rs `root_identity` .. `local_identity`).
+// Identities (`root_identity`. `local_identity`).
 
 fn jet_cli_sem_root_identity(module_path: String) -> String Never! { "module:{module_path}" }
 fn jet_cli_sem_module_identity(scope: String, name: String) -> String Never! { "module:{scope}::{name}" }
@@ -168,8 +166,8 @@ fn jet_cli_sem_member(ctx: JetCLISemWalk, owner: String, name: String, identity:
 }
 
 // ---------------------------------------------------------------------------
-// Callable facts (Build.rs `fn_signature`, `parameter_defaults`,
-// `callable_policies`, `callable_kind`, `function_parameter_parts`).
+// Callable facts (`fn_signature`, `parameter_defaults`, `callable_policies`,
+// `callable_kind`, `function_parameter_parts`).
 
 fn jet_cli_sem_source_text(source: String, span: Span) -> String {
     bytes :: source.bytes()
@@ -228,7 +226,7 @@ fn jet_cli_sem_policy_argument(expr: Expr) -> String {
     }
 }
 
-// Build.rs `callable_policies`: the `#Policy(...)` chain on a function.
+// `callable_policies`: the `#Policy(...)` chain on a function.
 fn jet_cli_sem_callable_policies(markers: [Marker]) -> [CallablePolicy] {
     policies := [CallablePolicy]{}
     loop marker in markers {
@@ -255,7 +253,6 @@ fn jet_cli_sem_shown_return(function: Func) -> Type? Never! {
     failure_contract_shown_return(failure_contract_of_function(function.return_type, function.return_type_span))
 }
 
-// Build.rs `callable_kind`.
 fn jet_cli_sem_callable_kind(function: Func, source: String) -> JetCLISemKind {
     generic_names :: loop parameter in function.type_params -> parameter.name
     JetCLISemKind.Function{callable: JetCLISemCallable{
@@ -273,8 +270,8 @@ fn jet_cli_sem_callable_kind(function: Func, source: String) -> JetCLISemKind {
     }}
 }
 
-// Build.rs `function_parameter_parts`: the public call surface, with the
-// `*` and `/` zone separators as their own parts.
+// `function_parameter_parts`: the public call surface, with the `*` and `/`
+// zone separators as their own parts.
 fn jet_cli_sem_parameter_parts(params: [JetCLISemParam]) -> [String] Never! {
     parts := [String]{}
     star_done := false
@@ -296,7 +293,6 @@ fn jet_cli_sem_parameter_parts(params: [JetCLISemParam]) -> [String] Never! {
     parts
 }
 
-// Build.rs `fn_signature`.
 fn jet_cli_sem_fn_signature(name: String, callable: JetCLISemCallable, ret: Type?, view_provenance: ViewProvenanceMap?) -> String {
     parts := jet_cli_sem_parameter_parts(callable.params)
     parameter_index := 0
@@ -350,7 +346,6 @@ fn jet_cli_sem_fn_signature(name: String, callable: JetCLISemCallable, ret: Type
     "{signature}\nfailure: unavailable ({reason})"
 }
 
-// Build.rs `method_fact`.
 fn jet_cli_sem_method_fact(ctx: JetCLISemWalk, owner: String, function: Func, origin: String, origin_trait: String) -> JetCLISemMember {
     identity :: jet_cli_sem_callable_identity(ctx.scope_identity, Val(owner), function.name)
     kind :: jet_cli_sem_callable_kind(function, ctx.source)
@@ -360,7 +355,7 @@ fn jet_cli_sem_method_fact(ctx: JetCLISemWalk, owner: String, function: Func, or
 }
 
 // ---------------------------------------------------------------------------
-// References (Build.rs `scoped_ref`, `declaration_ref`).
+// References (`scoped_ref`, `declaration_ref`).
 
 fn jet_cli_sem_reference_kind(kind: String) -> String Never! {
     if kind == "type" -> return "struct"
@@ -457,7 +452,6 @@ fn jet_cli_sem_state_marker_refs_for_method(method: Func, db: &JetCLISemDB, ctx:
     }
 }
 
-// Build.rs `collect_state_marker_references`.
 fn jet_cli_sem_state_marker_refs(item: Item, db: &JetCLISemDB, ctx: JetCLISemWalk) {
     if item == {
         .Struct(definition) -> {
@@ -473,7 +467,7 @@ fn jet_cli_sem_state_marker_refs(item: Item, db: &JetCLISemDB, ctx: JetCLISemWal
 }
 
 // ---------------------------------------------------------------------------
-// Structural boundaries (Build.rs `record_node`, `structural_slot`).
+// Structural boundaries (`record_node`, `structural_slot`).
 
 fn jet_cli_sem_record_node(db: &JetCLISemDB, ctx: &JetCLISemWalk, class: String, shape: String, span: Span) -> Int? {
     if span.end < span.start -> return None
@@ -568,7 +562,6 @@ fn jet_cli_sem_type_node(db: &JetCLISemDB, ctx: &JetCLISemWalk, slot: String, ki
     jet_cli_sem_slot_leave(&ctx, saved)
 }
 
-// Build.rs `record_func_type_nodes`.
 fn jet_cli_sem_func_type_nodes(function: Func, db: &JetCLISemDB, ctx: &JetCLISemWalk) {
     saved :: jet_cli_sem_slot_enter(&db, &ctx, "params", "list")
     loop parameter in function.params -> _ := jet_cli_sem_record_node(&db, &ctx, "type", "type", parameter.ty_span)
@@ -622,7 +615,6 @@ fn jet_cli_sem_local_type_key(name: String, span: Span) -> String Never! {
     "{name}@{span.start}:{span.end}"
 }
 
-// Build.rs `item_span` and `item_shape`.
 fn jet_cli_sem_item_head(item: Item) -> NamedSpan Never! {
     if item == {
         .EffectDecl(x) -> NamedSpan{name: "EffectDecl", span: x.span}
@@ -702,8 +694,8 @@ fn jet_cli_sem_stmt_head(stmt: Stmt) -> NamedSpan {
     }
 }
 
-// Build.rs `structural_expr_span`: a call spans its name through its last
-// argument (plus the closing parenthesis).
+// `structural_expr_span`: a call spans its name through its last argument (plus
+// the closing parenthesis).
 fn jet_cli_sem_structural_expr_span(expr: Expr) -> Span {
     if expr == {
         .Call(call, _) -> {
@@ -719,7 +711,7 @@ fn jet_cli_sem_structural_expr_span(expr: Expr) -> Span {
 }
 
 // ---------------------------------------------------------------------------
-// The walk (Build.rs `collect_item`, `collect_stmt`, `collect_expr`).
+// The walk (`collect_item`, `collect_stmt`, `collect_expr`).
 
 fn jet_cli_sem_record_call(db: &JetCLISemDB, ctx: JetCLISemWalk, callee: String, span: Span) Never! {
     frame :: ctx.caller ?? return
@@ -979,7 +971,7 @@ fn jet_cli_sem_item(item: Item, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: 
     jet_cli_sem_pop_parent(&ctx, structural_id)
 }
 
-// The checked contract of one trait requirement (Build.rs `Item::Trait`).
+// The checked contract of one trait requirement.
 fn jet_cli_sem_trait_callable(sig: TraitMethodSig, source: String) -> JetCLISemCallable {
     JetCLISemCallable{
         params: jet_cli_sem_params(sig.params, source, true),
@@ -1022,7 +1014,6 @@ fn jet_cli_sem_local_def(name: String, span: Span, kind: String, mutable: Bool, 
     &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_local_identity(jet_cli_sem_active_scope(ctx), kind, name), name, name, span, JetCLISemKind.Local{mutable: mutable, ty: ty}))
 }
 
-// Build.rs `collect_loop_label_def` / `collect_loop_label_ref`.
 fn jet_cli_sem_label_def(label: NamedSpan?, db: &JetCLISemDB, ctx: JetCLISemWalk) Never! {
     value :: label ?? return
     jet_cli_sem_local_def(value.name, value.span, "loop_label", false, None, &db, ctx)
@@ -1162,7 +1153,6 @@ fn jet_cli_sem_bind_names(pattern: BindPattern) -> [NamedSpan] Never! {
     names
 }
 
-// Build.rs `collect_binding`.
 fn jet_cli_sem_binding(binding: Binding, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
     if binding.ty_span == .Val(span) -> jet_cli_sem_type_node(&db, &ctx, "type", "scalar", span)
     if binding.pattern == .Val(pattern) {
@@ -1395,8 +1385,8 @@ fn jet_cli_sem_module_alias(doc_module: JetDriverDocModule) -> String Never! {
     file
 }
 
-// Build.rs `add_import_alias_definitions`: one module definition per import
-// binding, sorted by module, span, and name.
+// `add_import_alias_definitions`: one module definition per import binding,
+// sorted by module, span, and name.
 fn jet_cli_sem_import_alias_defs(db: &JetCLISemDB, modules: [JetDriverDocModule]) {
     loop doc_module in modules {
         found := [JetCLISemDef]{}
@@ -1492,9 +1482,8 @@ fn jet_cli_sem_function_key(key: String) -> JetCLISemFunctionKey? Never! {
     Val(JetCLISemFunctionKey{module_identity: identity_parts.join(":"), local: local})
 }
 
-// Validation.rs `qualified_effect_facts` over the checked user functions:
-// every summary under `alias::key`, plus its short key when exactly one
-// module defines it.
+// `qualified_effect_facts` over the checked user functions: every summary under
+// `alias::key`, plus its short key when exactly one module defines it.
 fn jet_cli_sem_summaries(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
     summaries := [JetCLISemSummary]{}
     module_aliases := [String: String]{}
@@ -1591,8 +1580,8 @@ struct JetCLISemWitness {
     spans: [Span]
 }
 
-// JSON.rs `convert_effects` `witness`: the first call path that reaches
-// `effect` from `function`.
+// `convert_effects` `witness`: the first call path that reaches `effect` from
+// `function`.
 fn jet_cli_sem_witness(function: String, effect_name: String, summaries: [JetCLISemSummary], seen: [String], modules: [JetDriverDocModule]) -> JetCLISemWitness? {
     if seen.contains(function) -> return None
     // copy: `seen` stays with the caller (`seen` is a read parameter: no move out of it, E0201) and
@@ -1626,13 +1615,12 @@ fn jet_cli_sem_witness(function: String, effect_name: String, summaries: [JetCLI
     None
 }
 
-// JSON.rs `convert_effects`. Same rows, witnesses and order as a per-query
-// scan, at index cost: summary rows by key (first occurrence wins, as the
-// scan's first match), call facts grouped by caller in module order (the
-// scan's first fact), one path-scoped `visited` list pushed and popped
-// around each step (the scan copied it per step), and a stable merge sort of
-// the rows by function key before the output is built (the insertion sort
-// copied whole effect rows quadratically).
+// Same rows, witnesses and order as a per-query scan, at index cost: summary
+// rows by key (first occurrence wins, as the scan's first match), call facts
+// grouped by caller in module order (the scan's first fact), one path-scoped
+// `visited` list pushed and popped around each step (the scan copied it per
+// step), and a stable merge sort of the rows by function key before the output
+// is built (the insertion sort copied whole effect rows quadratically).
 fn jet_cli_sem_effects(summaries: [JetCLISemSummary], modules: [JetDriverDocModule]) -> [JetCLISemEffect] {
     index :: jet_cli_sem_index(summaries, modules)
     output := [JetCLISemEffect]{}
@@ -1768,8 +1756,8 @@ fn jet_cli_sem_witness_step(function: String, effect_name: String, summaries: [J
     None
 }
 
-// Build.rs `apply_inferred_effect_rows`: a function with no written row
-// shows its solved row, sourced at its name.
+// `apply_inferred_effect_rows`: a function with no written row shows its solved
+// row, sourced at its name.
 fn jet_cli_sem_apply_inferred_rows(db: &JetCLISemDB, doc_module: JetDriverDocModule, summaries: [JetCLISemSummary]) {
     prefix :: "{jet_cli_sem_module_alias(doc_module)}::"
     inline_keys := [String: String]{}
@@ -1820,7 +1808,6 @@ fn jet_cli_sem_inferred_row(definition: JetCLISemDef, doc_module: JetDriverDocMo
     Val(JetCLISemInferredRow{callable: ^updated, signature: signature})
 }
 
-// Build.rs `definition_matches_target`.
 fn jet_cli_sem_matches_target(definition: JetCLISemDef, target: JetCLISemAnchor) -> Bool Never! {
     if definition.module_path != target.module_path || definition.def_span.start != target.def_span.start || definition.def_span.end != target.def_span.end -> return false
     kind :: target.kind
@@ -1876,14 +1863,14 @@ fn jet_cli_sem_align_reference_targets(db: &JetCLISemDB) {
 }
 
 // Sema records a direct call's callee in the module's call facts, not in its
-// name references, so the walk leaves a called name without a target. The
-// call fact at the reference's span names the callee's checked key; its
-// function's one definition of that name in the callee's module is the target
-// (Build.rs resolves call names to their definitions the same way). Sema
-// records a fact only for a call it accepted, so a free call inside a body
-// that failed to check (a `fixture` root's unit) has none; its bare name then
-// resolves to its own module's definition of that name when that is the
-// module's only definition so named and it is a function.
+// name references, so the walk leaves a called name without a target. The call
+// fact at the reference's span names the callee's checked key; its function's
+// one definition of that name in the callee's module is the target (resolves
+// call names to their definitions the same way). Sema records a fact only for a
+// call it accepted, so a free call inside a body that failed to check (a
+// `fixture` root's unit) has none; its bare name then resolves to its own
+// module's definition of that name when that is the module's only definition so
+// named and it is a function.
 fn jet_cli_sem_call_targets(db: &JetCLISemDB, modules: [JetDriverDocModule]) {
     loop index in 0..<db.refs.len() {
         if db.refs[index].target != None -> next
@@ -1936,7 +1923,6 @@ fn jet_cli_sem_callee_anchor(db: JetCLISemDB, modules: [JetDriverDocModule], key
     None
 }
 
-// Build.rs `definition_kind`.
 fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
     if kind == {
         .Module -> "module"
@@ -1954,15 +1940,14 @@ fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
     }
 }
 
-// JSON.rs `convert_kind` `ret`: the effective failure route when checked,
-// else the written return type.
+// `convert_kind` `ret`: the effective failure route when checked, else the
+// written return type.
 fn jet_cli_sem_callable_ret(callable: JetCLISemCallable) -> String? Never! {
     if callable.failure_contract == .Val(contract) -> return Val(type_name(failure_contract_shown_type(contract)))
     ty :: callable.return_type ?? return None
     Val(type_name(ty))
 }
 
-// Build.rs `definition_signature`.
 fn jet_cli_sem_definition_signature(definition: JetCLISemDefinition) -> String {
     if definition.def.kind == {
         .Function(callable) -> {
@@ -1983,8 +1968,8 @@ fn jet_cli_sem_definition_signature(definition: JetCLISemDefinition) -> String {
     }
 }
 
-// Build.rs `normalize_definition`: source without whitespace or `//`
-// comments outside string literals.
+// `normalize_definition`: source without whitespace or `//` comments outside
+// string literals.
 fn jet_cli_sem_normalize_definition(source: String) -> String {
     bytes :: source.bytes()
     output := [U8]{}
@@ -2029,11 +2014,11 @@ struct JetCLISemDefinitionAt {
     index: Int
 }
 
-// Build.rs `build_definition_facts`: one fact per top-level item, for the
-// first non-local definition it declares. Each module's source bytes are read
-// once, and the item's definition is found by binary search over the non-local
-// definitions sorted by (module, start, listing order): the first one inside the
-// item is the earliest-starting, first-listed one.
+// `build_definition_facts`: one fact per top-level item, for the first non-local
+// definition it declares. Each module's source bytes are read once, and the
+// item's definition is found by binary search over the non-local definitions
+// sorted by (module, start, listing order): the first one inside the item is the
+// earliest-starting, first-listed one.
 fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetCLISemNode], modules: [JetDriverDocModule]) -> [JetCLISemDefinitionFact] {
     output := [JetCLISemDefinitionFact]{}
     source_slot := [String: Int]{}
@@ -2181,7 +2166,6 @@ fn jet_cli_sem_outputs(modules: [JetDriverDocModule]) -> [JetCLISemOutput] {
     output
 }
 
-// Build.rs `build_state_graphs`.
 fn jet_cli_sem_state_graphs(modules: [JetDriverDocModule]) -> [JetCLISemStateGraph] {
     output := [JetCLISemStateGraph]{}
     loop doc_module in modules {
@@ -2212,7 +2196,7 @@ fn jet_cli_sem_state_graphs(modules: [JetDriverDocModule]) -> [JetCLISemStateGra
     output
 }
 
-// JSON.rs `member_signatures`: sorted, deduplicated.
+// `member_signatures`: sorted, deduplicated.
 fn jet_cli_sem_member_signatures(members: [JetCLISemMember], owner: String, origin: String, trait_name: String) -> [String] {
     methods := [String]{}
     loop member in members {
@@ -2226,7 +2210,6 @@ fn jet_cli_sem_block_contract(block: TraitImplBlock, owner: String, members: [Je
     JetCLISemTraitContract{trait_name: block.trait_name, associated_types: associated, methods: jet_cli_sem_member_signatures(members, owner, "trait_impl", block.trait_name)}
 }
 
-// JSON.rs `collect_trait_contracts`.
 fn jet_cli_sem_collect_trait_contracts(items: [Item], owner: String, members: [JetCLISemMember], contracts: &[JetCLISemTraitContract]) {
     loop item in items {
         if item == {
@@ -2246,7 +2229,6 @@ fn jet_cli_sem_collect_trait_contracts(items: [Item], owner: String, members: [J
     }
 }
 
-// JSON.rs `find_declaration`.
 fn jet_cli_sem_find_declaration(items: [Item], span: Span) -> Item? {
     loop item in items {
         declaration := Span?{None}
@@ -2273,7 +2255,6 @@ fn jet_cli_sem_find_declaration(items: [Item], span: Span) -> Item? {
     None
 }
 
-// JSON.rs `convert_defs` / `contract_metadata`.
 fn jet_cli_sem_convert_defs(db: JetCLISemDB, modules: [JetDriverDocModule]) -> [JetCLISemDefinition] {
     output := [JetCLISemDefinition]{}
     loop def in db.defs {
@@ -2314,9 +2295,9 @@ fn jet_cli_sem_convert_defs(db: JetCLISemDB, modules: [JetDriverDocModule]) -> [
     output
 }
 
-// Build.rs `build_symbol_db` + `SymbolDB::finalize_index` (Build.rs
-// `build_index`): the semantic index of the checked user modules.
-// `effect_projection` is the application authority of the same program.
+// `build_symbol_db` + `SymbolDB::finalize_index`: the semantic index of the
+// checked user modules. `effect_projection` is the application authority of the
+// same program.
 fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLISemIndex {
     db := jet_cli_sem_db()
     module_paths := [String: String]{}
@@ -2400,10 +2381,10 @@ fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetC
     }
 }
 
-// jet-semindex lib.rs `open`: the semantic index of one checked compile
-// result, its effect projection the application authority of that program.
-// Every semantic consumer (semindex, doc, impact, find, help, expand, blame,
-// review, codemod) reads this one index.
+// jet-semindex `open`: the semantic index of one checked compile result, its
+// effect projection the application authority of that program. Every semantic
+// consumer (semindex, doc, impact, find, help, expand, blame, review, codemod)
+// reads this one index.
 fn jet_cli_checked_semindex(result: JetDriverCompileResult) -> JetCLISemIndex {
     jet_cli_build_semindex(result.doc_modules, jet_cli_application_authority(result, None))
 }

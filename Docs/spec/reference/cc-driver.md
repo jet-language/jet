@@ -18,21 +18,49 @@ graph.
 
 A toolchain descriptor names the C compiler, C++ compiler, linker, sysroot,
 host, target, ABI, version, and content digests. The action records those facts
-and the Hangar bundle identity. An acquisition record is metadata; it does not
-vendor a compiler in this repository.
+and the Hangar bundle identity. No compiler is vendored in this repository.
 
-On first use, Jetpack resolves the exact compiler and linker attributes from
-the official **signed Nix index**, verifies the signed output paths, admits the
-complete signed Nix closure through Hangar, and publishes a content-addressed
-descriptor with role digests and a closure receipt. A later invocation reuses
-that descriptor. `--offline` is valid only when the signed index and complete
-Hangar closure were already loaded; a missing or corrupt object is an error,
-not an invitation to use the host compiler.
+Each jet release publishes one C **toolchain pack** per host: static clang,
+lld and llvm-ar, compiler-rt for every covered target, the musl sources, and
+glibc headers with link stubs. `Tools/agent/cc-pack.nix` builds it
+reproducibly from pinned sources on the release machine, and the release
+refuses a pack whose SHA-256 differs from the one embedded in jet
+(`CC_PACK_ASSETS` in
+[`CcToolchainPack.jet`](../../../Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet)).
+Nix is used only there; a user machine needs no Nix. Because the hash lives in
+jet, updating jet updates the pack.
+
+On first use (`first use: fetching the C toolchain for jet <release> (111 MB)`)
+jet takes the pack from beside the running jetpack, which is where the combined
+`jet-<release>-<platform>-cc.tar.gz` archive puts it, else from the URL
+`JET_CC_PACK_URL` names (`https://`, or `file://` for a local mirror or test
+double, which also works offline), or else downloads it from the release. It
+verifies the hash before unpacking; a copy with the wrong hash is refused and
+deleted, and the error names the expected hash. The verified pack is unpacked
+and recorded in the Hangar (`first use: unpacking the C toolchain into the
+Hangar (first time only)`), and a Hangar hit never touches the network.
+`jet env fetch-toolchain` fetches the pack ahead of time. With `--offline`, or
+when network access is denied, a missing pack is one error that names both
+fixes: `jet env fetch-toolchain`, or the combined archive. A missing or corrupt
+object is an error, not an invitation to use the host compiler.
+
+The per-target libc is built lazily into its own Hangar entry: a glibc target
+copies the pack's headers and link stubs, and a musl target compiles `libc.a`
+with the pack's own clang the first time it is used (`building musl for
+<target> (first time only)`). The pack carries only libc. Any other library,
+including the C++ standard library, is a package dependency.
 
 The selected descriptor is part of the action key. Select its target with
-`--target=<triple>` when the target has an acquisition record. An unadmitted
-cross-target request fails before graph creation. There is no host fallback and
-there is **no PATH fallback** for the compiler, linker, or sysroot.
+`--target=<triple>`. The covered targets are `x86_64-linux-gnu`,
+`aarch64-linux-gnu`, `x86_64-linux-musl`, and `aarch64-linux-musl`, each also
+spelled in full (`aarch64-unknown-linux-musl`). The default is the host's
+`-gnu` target. An uncovered target is a usage error that names the covered
+targets, before graph creation. glibc targets link against glibc 2.42 headers
+and stubs and run on glibc 2.34 or newer; a dynamic glibc program names the
+target's standard loader (`/lib64/ld-linux-x86-64.so.2`,
+`/lib/ld-linux-aarch64.so.1`). musl targets link statically. There is no host
+fallback and there is **no PATH fallback** for the compiler, linker, or
+sysroot.
 
 `--sysroot`, `-B`, and `-fuse-ld` cannot replace the descriptor's sysroot or
 linker. The target descriptor owns those choices. `-c`, `-o`, `-MD`, `-MMD`,
@@ -57,13 +85,12 @@ host sysroot overrides, and out-of-scope paths fail before an output is
 accepted.
 
 `--fixtures` is an explicit fixture seam for tests. It is not production tool
-acquisition: production uses the signed Nix index and signed Nix cache.
+acquisition: production uses the toolchain pack.
 
 ## Reproducible acquisition checks
 
 A clean-machine check exercises acquisition, reuse, and the offline path with
-one compiler command. Use a separately provisioned signed index, public key,
-and Hangar closure on each machine:
+one compiler command. The machine needs no Nix and no host compiler:
 
 ```sh
 time jet cc --project-root="$project" --build-root="$build" \
@@ -75,18 +102,19 @@ time jet cc --offline --project-root="$project" --build-root="$build" \
 ```
 
 Record the descriptor from `jet cc -v`, the Hangar receipt, and the declared
-output digest. A valid comparison uses the same source, target, descriptor,
-and action inputs on both machines. A run that uses `--fixtures`, a host
-compiler, or an unsigned/unconfigured index is not this proof.
+output digest. A valid comparison uses the same jet release, source, target,
+descriptor, and action inputs on both machines. A run that uses `--fixtures`
+or a host compiler is not this proof.
 
-For an air-gapped transfer, export and verify the closure on a connected
-machine, transfer the archive and signed index/cache preload, verify again,
-then import before the offline build:
+For an air-gapped machine, either install jet from the combined
+`jet-<release>-<platform>-cc.tar.gz` archive, or fetch the pack on a connected
+machine and move the Hangar entries:
 
 ```sh
-jetpack hangar export <cc-toolchain-entry> --to cc-toolchain.hangar --yes
+jet env fetch-toolchain
+jetpack hangar export <cc-toolchain-pack-entry> --to cc-toolchain.hangar --yes
 jetpack hangar verify cc-toolchain.hangar
-# transport cc-toolchain.hangar and the signed index/cache preload
+# transport cc-toolchain.hangar
 jetpack hangar verify cc-toolchain.hangar
 jetpack hangar import cc-toolchain.hangar --yes
 jet cc --offline --project-root="$project" --build-root="$build" \
@@ -135,13 +163,13 @@ cmake --build "$cmake_build"
 
 The second Make/CMake build is the no-op case. Touching
 `include/config.h` checks header invalidation; editing either source checks
-source invalidation; changing the build root checks action identity. A
-cross-target request and each invalid input below must fail before creating its
-named output:
+source invalidation; changing the build root checks action identity. An
+uncovered cross-target request and each invalid input below must fail before
+creating its named output:
 
 ```sh
-"$cc" --offline --project-root="$make_src" --build-root="$make_build" \
-  --target=aarch64-unknown-linux-gnu -c -- "$make_src/main.c" \
+"$cc" --project-root="$make_src" --build-root="$make_build" \
+  --target=riscv64-unknown-linux-gnu -c -- "$make_src/main.c" \
   -o "$make_build/unsupported.o"
 "$cc" --project-root="$make_src" --build-root="$make_build" \
   --sysroot=/host -c -- "$make_src/main.c" -o "$make_build/host-sysroot.o"
@@ -151,6 +179,6 @@ named output:
   -c -- "$make_src/../outside.c" -o "$make_build/escape.o"
 ```
 
-The cross-target error names the absent signed acquisition record. The other
+The uncovered-target error (E2102) names every covered target. The other
 errors identify the unsupported override or scoped input. None may be repaired
 by consulting a host compiler or host filesystem.

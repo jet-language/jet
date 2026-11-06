@@ -1,23 +1,25 @@
 package {
     name: "gap"
+    authority: {
+        allow: [GPU]
+    }
 }
 
-use {
-    ime :: core.ui.host.ime
-    drag_drop :: core.ui.host.drag_drop
-}
+use compute :: core.compute
+
+fn loss(w: Tensor) -> Tensor { compute.mul(w.copy(), w) ?? panic("loss") }
 
 fn nine() {
-    event :: ime.poll() ?? panic("poll")
+    _slope :: compute.gradient(loss)
     print("made")
 }
 
-#Test("nine polls one IME event") {
+#Test("nine takes one gradient") {
     nine()
 }
 
 fn run() {
     nine()
-    dropped :: drag_drop.poll() ?? panic("drop")
+    _tangent :: compute.jvp(loss)
     print("made")
 }

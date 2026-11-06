@@ -1,4 +1,4 @@
-/* Real composed Jet object client, not a provider. Link --wrap=jet_rt_free.
+/* Real composed Jet object client, not a provider..
  * ReceiptABI native layouts; Rust source fields in ServiceAuthority.
  * Only light syntax checked by writer; normal output is the .stdout golden. */
 #include <assert.h>
@@ -15,7 +15,7 @@ _Static_assert(sizeof(Delivery)==80 && offsetof(Delivery,key)==40 && offsetof(De
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void jet_rt_free(void *,int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const char *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -49,13 +49,14 @@ static void watch(void *ptr,int64_t size,int64_t align) {
     for(size_t i=0;i<watch_count;++i) assert(watched[i].ptr!=ptr || watched[i].freed==1);
     watched[watch_count++]=(struct Watched){ptr,size,align,0};
 }
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     ++intercepted;
     for(size_t i=watch_count;i>0;--i) if(watched[i-1].ptr==ptr && watched[i-1].freed==0) {
         assert(watched[i-1].size==size && watched[i-1].align==align);
         watched[i-1].freed=1; break;
     }
-    __real_jet_rt_free(ptr,size,align);
 }
 static void watch_text(Text *t) {
     watch((char *)(t)-8,32,8);
@@ -123,6 +124,7 @@ static void delivery_cases(void) {
     jet_rt_handle_drop_jet_delivery_receipt(empty);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         if(!strcmp(argv[1],"bad-delivery-state")) { (void)delivery_new(6,0,false); }

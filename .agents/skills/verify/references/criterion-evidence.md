@@ -5,12 +5,12 @@ card, not this skill, supplies the command and acceptance boundary.
 
 1. Read the exact criterion, target, expected output/state, applicable tier, and
    owner gate. Confirm the tree is the integrated tree for that card.
-2. Run the one exact focused command named by the criterion through
-   `Tools/agent/jet-env` where it is a repository command. Exercise the real
+2. Run the one exact focused command named by the criterion with `jet`
+   directly where it is a repository command. Exercise the real
    CLI or UI path, not only a helper that resembles it. Do not add a nearby
    suite, duplicate proof, or unfiltered census for reassurance.
 3. For a runtime criterion, build a fresh current-source binary first with
-   `Tools/agent/jet-env cargo build`, then run the actual path. For a tier or
+   `jet build Compiler`, then run the actual path. For a tier or
    generated-artifact criterion, name and run that criterion's producer; a
    source check cannot stand in for it.
 4. Capture the complete observable evidence: command, target, exit/status,

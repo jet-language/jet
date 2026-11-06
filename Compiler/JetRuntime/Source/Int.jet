@@ -143,7 +143,7 @@ fn int_fits(value: I64, bound: U64) -> Bool {
     at := length
     loop at > (I64{0}) {
         at -= I64{1}
-        limb :: U64{int_limb(value, at)}
+        limb :: wrapping(U64{int_limb(value, at)})
         if (limb > bound || magnitude > (bound - limb) /% U64{1000000000}) { return false }
         magnitude = magnitude * U64{1000000000} + limb
     }
@@ -423,8 +423,8 @@ fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
         trap_native_index_range_root()
         return
     }
-    // ExactNumeric.rs:88-93 and NumericConversion.rs:115-116 own these
-    // raw reasons. Root rendering below remains byte-for-byte unchanged.
+    // The Rust originals own these raw reasons. Root rendering below remains
+    // byte-for-byte unchanged.
     if (reason < I64{0} || reason > I64{3}) {
         jet_rt_unreachable(I64{0}, I64{0})
         return
@@ -1022,10 +1022,10 @@ fn int_scale_f64(value: Float, power: I64) -> Float {
     result
 }
 
-// Core/InlineRange.rs jet_inline_range_from_int through the C adapter: the
-// borrowed exact Int checked against the inline refinement Int(lo..hi), the
-// carrier unchanged. An Int past I64 is outside every such interval, so it
-// takes the same Err text rather than the seed's narrowing message.
+// jet_inline_range_from_int through the C adapter: the borrowed exact Int
+// checked against the inline refinement Int(lo..hi), the carrier unchanged. An
+// Int past I64 is outside every such interval, so it takes the same Err text
+// rather than the seed's narrowing message.
 #Export(c) fn jet_inline_range_from_int(value: I64, lo: I64, hi: I64, output: I64, error: I64) -> I64 {
     low :: host_native_int(lo)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

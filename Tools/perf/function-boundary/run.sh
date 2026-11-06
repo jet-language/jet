@@ -7,9 +7,9 @@
 # usage: Tools/perf/function-boundary/run.sh [--jet PATH] [--runs N] [--cpu N]
 #            [--out DIR] [--levels O1,O2] [cell ...]
 # Defaults: --jet target-rel4/release/jet, --runs 7, --cpu 31,
-#           --out ~/.cache/jet-dev/scratch/function-boundary, all cells.
+#           --out $JET_SCRATCH_ROOT/function-boundary, all cells.
 # Builds and timings wait until MemAvailable >= FB_MEM_GATE_GB (default 30 GiB,
-# the AGENTS memory rule); Jet builds run in the capped small lane (laneS.sh)
+# the AGENTS memory rule); Jet builds run in the capped small lane (Lanes.jet small)
 # with FB_LANE_MEM (default 8G), one at a time.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
@@ -17,7 +17,8 @@ root=$(cd "$here/../../.." && pwd)
 jet=$root/target-rel4/release/jet
 runs=7
 cpu=31
-out=$HOME/.cache/jet-dev/scratch/function-boundary
+. "$root/Tools/agent/roots.sh"
+out=$JET_SCRATCH_ROOT/function-boundary
 levels=O1,O2
 cells=()
 while [ $# -gt 0 ]; do
@@ -60,7 +61,7 @@ build() {
     work=$out/work/$cell-$level
     rm -rf "$work"; mkdir -p "$work"; cp "$dir/main.jet" "$work/main.jet"
     mem_gate
-    (cd "$root" && LANES_MEM=${FB_LANE_MEM:-8G} bash Tools/agent/cache/laneS.sh Tools/agent/jet-env "$jet" build --quiet "${flag[@]}" "$work/main.jet") > "$out/$cell.$level.build.log" 2>&1
+    (cd "$root" && LANES_MEM=${FB_LANE_MEM:-8G} "$jet" Tools/agent/cache/Lanes.jet small Tools/agent/jet-env "$jet" build --quiet "${flag[@]}" "$work/main.jet") > "$out/$cell.$level.build.log" 2>&1
     if [ -x "$work/.jet/build/main" ]; then
       cp "$work/.jet/build/main" "$bin/$cell.jet-$level"
       cp "$work/.jet/build/main.rs" "$out/$cell.$level.generated.rs"

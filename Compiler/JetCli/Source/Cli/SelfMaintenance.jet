@@ -1,5 +1,5 @@
-// CmdDevTools.rs:3641-3825. These commands keep direct confirmation output,
-// even under --json/--quiet; only CLI diagnostic macros use machine mode.
+// These commands keep direct confirmation output, even under --json/--quiet;
+// only CLI diagnostic macros use machine mode.
 use {
     cli_files :: core.files
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
@@ -38,7 +38,7 @@ fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriver
     }
     cli_files.write(expected, actual) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{expected}`: {jet_cli_io_error_text(err)}", None, color, json)
     stdout := "wrote {file}\nwrote {expected}\n"
-    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then bless it with `node Tools/testkit/run.mjs ui --bless <fixture> --reason <why>`\n"
+    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then bless it with `jet test Compiler --profile ui -u --filter={file}`\n"
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -67,10 +67,11 @@ fn jet_cli_extract_fixture_paths(text: String) -> [String] Never! {
         }
         // Rust drops a literal whose trailing backslash passed EOF.
         if end <= bytes.len() {
-            literal :: text.slice(start..<end)
+            // Byte offsets: `String.slice` counts characters.
+            literal :: String.from_bytes(bytes[start..<end]) ?? ""
             before_start := if start > 40 -> start - 40 else -> 0
             loop before_start < index && bytes[before_start] >= 128 && bytes[before_start] < 192 -> before_start += 1
-            before :: text.slice(before_start..<index)
+            before :: String.from_bytes(bytes[before_start..<index]) ?? ""
             display :: before.contains("render_diagnostics(") || before.contains("render_all_colored(") || before.contains("render_all_json(")
             if !display && jet_cli_fixture_literal(literal) -> &paths.push(literal)
         }

@@ -3,8 +3,6 @@ use jet_foundation.[
     CallArg,
     Call,
     Diagnostic,
-    DiagnosticFixApplicability,
-    DiagnosticFixSafety,
     Expr,
     Func,
     Item,
@@ -31,10 +29,8 @@ use jet_foundation.[
     UnOp,
     diagnostic_from_registry,
     diagnostic_with_edit,
-    diagnostic_with_edit_grade,
     diagnostic_with_label,
     expr_span,
-    lint_by_name,
     symbol_id,
     type_name,
 ]
@@ -490,8 +486,8 @@ fn sema_marker_rules_marker_signature_bindings(marker: Marker, signature: TAppli
         return None
     }
     bindings := [SemaMarkerRuleArgumentBinding]{}
-    // Rust `rule_signature_bindings` (CheckerMarkers.rs:90 @ 6083377777): a
-    // bare `#Unsafe` binds nothing; its missing reason is E3112's, not E0930's.
+    // Rust `rule_signature_bindings`: a bare `#Unsafe` binds nothing; its
+    // missing reason is E3112's, not E0930's.
     if marker.name == "Unsafe" && marker.args.len() == 0 -> return Val(bindings)
     supplied := [Bool]{}
     loop _ in signature.params {
@@ -614,10 +610,10 @@ fn sema_marker_rules_signature_text(name: String, signature: TAppliedRuleSignatu
     "{name}({parts.join(", ")})"
 }
 
-// Rust `marker_argument_shape_error` (Policy.rs:1683 @ 6083377777) for a
-// registered rule, the declared-signature form for a source-declared one. The
-// span is Rust's marker span: the name through the closing `)`, without `#`.
-// A `#X :: true` line missing its Bool argument is the parentheses code.
+// Rust `marker_argument_shape_error` for a registered rule, the
+// declared-signature form for a source-declared one. The span is Rust's marker
+// span: the name through the closing `)`, without `#`. A `#X :: true` line
+// missing its Bool argument is the parentheses code.
 fn sema_marker_rules_signature_error(marker: Marker, signature: TAppliedRuleSignature, declared: Bool) -> Diagnostic {
     if sema_marker_rules_line_needs_bool(marker, signature) {
         diagnostic :: sema_error("E0943", marker.span, "`#{marker.name} :: true` gives `#{marker.name}` no arguments, but it needs a Bool", "`true` alone on a marker line applies the marker with its defaults, so a Bool argument is written in parentheses", "write `#{marker.name} :: (true)`")
@@ -1073,16 +1069,15 @@ fn sema_marker_rules_validate_argument_signature(marker: Marker, signature: TApp
     true
 }
 
-// Rust `validate_rule_signature` (CheckerMarkers.rs:933 @ 6083377777): a
-// builtin marker binds its arguments against its registered rule signature,
-// each argument checked in the scope of the site that carries it (E0930).
-// Rust's sites, each ported here: a local binding (`check_binding`,
-// bindings.rs:1448), a marked statement or block (statements.rs:1293,
-// sema_marker_rules_check_statement_facts), a `#Context` block
-// (statements.rs:3878, sema_marker_rules_check_context_fact), a function or
-// method (Registration.rs:804), and the static-product sites
-// (`resolve_static_rule_products`, sema_marker_rules_check_static_sites).
-// True when the arguments bind or no registered rule governs the marker.
+// Rust `validate_rule_signature`: a builtin marker binds its arguments against
+// its registered rule signature, each argument checked in the scope of the site
+// that carries it (E0930). Rust's sites, each ported here: a local binding
+// (`check_binding`), a marked statement or block
+// (sema_marker_rules_check_statement_facts), a `#Context` block
+// (sema_marker_rules_check_context_fact), a function or method, and the
+// static-product sites (`resolve_static_rule_products`,
+// sema_marker_rules_check_static_sites). True when the arguments bind or no
+// registered rule governs the marker.
 fn sema_marker_rules_check_rule_signature(marker: Marker, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if marker.declaration_module != None -> return true
     if program.registration_graph == .Val(graph) {
@@ -1119,15 +1114,14 @@ fn sema_marker_rules_check_rule_signatures(markers: [Marker], environment: SemaS
     valid
 }
 
-// Rust `take_statement_rule_fact` (CheckerMarkers.rs:994 @ 6083377777) then
-// `validate_rule_signature` (statements.rs:1280): the marker of a marked
-// statement or block is the module's Statement- or Block-site application
-// targeting the statement. `#Meta` is its binding's (Statements.jet) and
-// `#Context` its block's (sema_marker_rules_check_context_fact).
-// A marker with a site-dependent signature (`#HTML(path)` at the file site,
-// bare `#HTML { … }` at the block site; Rust `validate_registered_rule_marker`,
-// Parser/Items/marker_groups.rs @ 6083377777) is bare at its block site. The
-// block form's header is the checked text block's own law
+// Rust `take_statement_rule_fact` then `validate_rule_signature`: the marker of
+// a marked statement or block is the module's Statement- or Block-site
+// application targeting the statement. `#Meta` is its binding's
+// (Statements.jet) and `#Context` its block's
+// (sema_marker_rules_check_context_fact). A marker with a site-dependent
+// signature (`#HTML(path)` at the file site, bare `#HTML { … }` at the block
+// site; Rust `validate_registered_rule_marker`, @ 6083377777) is bare at its
+// block site. The block form's header is the checked text block's own law
 // (sema_stmt_check_scope_member, E0617).
 fn sema_marker_rules_check_statement_facts(target: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     if program.registration_graph == .Val(graph) {
@@ -1152,9 +1146,9 @@ fn sema_marker_rules_block_form_is_bare(registry: SemaScopeMembersMarkerRegistry
     registry.applied_rules[rule_index].sites.contains(sema_marker_rules_site_name(RuleSite.File)) && registry.applied_rules[rule_index].sites.contains(sema_marker_rules_site_name(RuleSite.Block))
 }
 
-// Rust `Stmt::ContextBlock` (statements.rs:3869 @ 6083377777): the block's
-// `#Context` application binds against `Context(allocator:, logger:,
-// deadline:)`. False when it does not bind; the field checks then stay quiet.
+// Rust `Stmt::ContextBlock`: the block's `#Context` application binds against
+// `Context(allocator:, logger:, deadline:)`. False when it does not bind; the
+// field checks then stay quiet.
 fn sema_marker_rules_check_context_fact(span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
     if program.registration_graph == .Val(graph) {
         if graph.marker_catalog == None -> return true
@@ -1168,11 +1162,11 @@ fn sema_marker_rules_check_context_fact(span: Span, environment: SemaScopeEnviro
     true
 }
 
-// Rust `resolve_static_rule_products` (CheckerMarkers.rs:438 @ 6083377777):
-// a marker at a static-product site (the file, a type, a constant, a field, a
-// variant, a test) binds its signature in the module's own scope, where its
-// arguments can name only module items. A test's written name, `faults:` and
-// `expected_fail:` are its `#Test` marker's arguments.
+// Rust `resolve_static_rule_products`: a marker at a static-product site (the
+// file, a type, a constant, a field, a variant, a test) binds its signature in
+// the module's own scope, where its arguments can name only module items. A
+// test's written name, `faults:` and `expected_fail:` are its `#Test` marker's
+// arguments.
 fn sema_marker_rules_check_static_sites(environment: SemaScopeEnvironment, program: SemaProgramTables, module_index: Int, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) {
     if program.registration_graph == .Val(graph) {
         if graph.marker_catalog == None -> return
@@ -1234,13 +1228,12 @@ fn sema_marker_rules_check_static_item(item: Item, environment: SemaScopeEnviron
     }
 }
 
-// Rust `check_binding` → `check_meta_attr` → `check_meta_attr_fields`
-// (CheckerCore/bindings.rs:1231/1446/1658 @ 6083377777): a local binding's
-// `#Meta(...)` repeats a field (E0346) or has an empty (E0348) or not plain
-// (E0347) category. It runs once the arguments bind to the signature. Rust
-// then rewrites a constant category to its value; here only a written
-// literal decides: a non-literal category that may name a comptime constant
-// is left alone, and only an interpolated string is certainly not plain text.
+// Rust `check_binding` → `check_meta_attr` → `check_meta_attr_fields`: a local
+// binding's `#Meta(...)` repeats a field (E0346) or has an empty (E0348) or not
+// plain (E0347) category. It runs once the arguments bind to the signature.
+// Rust then rewrites a constant category to its value; here only a written
+// literal decides: a non-literal category that may name a comptime constant is
+// left alone, and only an interpolated string is certainly not plain text.
 fn sema_marker_rules_check_local_meta(marker: Marker, diagnostics: &[Diagnostic]) {
     seen := [String:Bool]{}
     loop index in 0..<marker.args.len() {
@@ -1543,7 +1536,6 @@ fn sema_marker_rules_edit_distance(left: String, right: String) -> Int Never! {
 }
 
 fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, marker: Marker) -> Diagnostic {
-    if marker.name == "allow" -> return sema_marker_rules_allow_migration(marker)
     names := [String]{}
     loop rule in registry.applied_rules {
         sema_marker_rules_append_name(&names, rule.name)
@@ -1573,31 +1565,9 @@ fn sema_marker_rules_unknown_error(registry: SemaScopeMembersMarkerRegistry, mar
             }
         }
     }
-    fix := if {
-        // A retired rule names the form that replaced it.
-        marker.name == "Invariant" -> "`#Invariant` is retired: use `distinct Int(lo..hi)` for a named range or `Int(lo..hi)` inline"
-        nearest != "" && !ambiguous -> "did you mean `#{nearest}`?"
-        else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
-    }
+    fix := if nearest != "" && !ambiguous -> "did you mean `#{nearest}`?" else -> "check the spelling, or see Docs/spec/syntax-decisions.md for the full applied-rule list."
     diagnostic := sema_error("E0927", marker.name_span, "`#{marker.name}` isn't a known applied rule", "`{marker.name}` isn't registered as an applied rule — Jet rules are a closed, registered vocabulary (I7), not any PascalCase word.", fix)
-    if nearest != "" && !ambiguous && marker.name != "Invariant" -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
-}
-
-// `#allow(lint_name, "why")` became `#Allow(jet.LintName, "why")`: `jet fix`
-// renames the marker and carries a registered lint name to its type path.
-fn sema_marker_rules_allow_migration(marker: Marker) -> Diagnostic {
-    why :: "a lint allowance names its lint by the diagnostic's type path"
-    if marker.args.len() > 0 {
-        if marker.args[0] == .Expr(expr) {
-            if expr == .Ident(lint, span, _) {
-                if lint_by_name(lint) == .Val(row) {
-                    diagnostic :: sema_error("E0927", marker.name_span, "`#allow({lint}, …)` is now `#Allow({row.name}, …)`", why, "write `#Allow({row.name}, …)`")
-                    return diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: marker.name_span.start, end: span.end}, new_text: "Allow({row.name}"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving)
-                }
-            }
-        }
-    }
-    sema_error("E0927", marker.name_span, "`#allow` is now `#Allow`", why, "write `#Allow(jet.LintName, \"why this lint does not apply\")` with the lint's diagnostic type path")
+    if nearest != "" && !ambiguous -> diagnostic_with_edit(diagnostic, TextEdit{span: marker.name_span, new_text: nearest}) else -> diagnostic
 }
 
 fn sema_marker_rules_repeated_error(marker: Marker, first: Marker) -> Diagnostic {
@@ -1717,10 +1687,6 @@ fn sema_marker_rules_validate_vocabulary(registry: SemaScopeMembersMarkerRegistr
         application_row :: application_rows.get("{marker.name_span.start}:{marker.name_span.end}|{marker.name}") ?? -1
         site := if application_row >= 0 -> applications[application_row].site else -> None
         if sema_marker_rules_is_guest_marker(marker, site) {
-            next
-        }
-        if marker.name == "Align" {
-            &diagnostics.push(diagnostic_from_registry("E1118", Val(marker.span), "`#Align(…)` is not a supported layout marker.", "Jet puts alignment in the registered `#Layout(c, align(N))` rule so the layout kind and alignment remain one declaration fact.", "Replace `#Align(64)` with `#Layout(c, align(64))` on the struct declaration."))
             next
         }
         if sema_marker_rules_builtin_index(registry, marker) == None && !sema_marker_rules_marker_is_known(registry, marker) {

@@ -313,6 +313,18 @@ fn sema_pattern_payload(subject_ty: Type, variant: String, env: SemaScopeEnviron
     result
 }
 
+// A bare name `light == Red` compares against: when no binding has that name
+// but the subject's enum declares a case of it, the leading `.` of `.Red` is
+// missing (E0367), not the name. None when the name is no such case.
+fn sema_pattern_bare_case(subject_ty: Type, name: String, span: Span, env: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic? {
+    if name.len() == 0 || Int.from_u8(name.bytes()[0]) < 65 || Int.from_u8(name.bytes()[0]) > 90 -> return None
+    probe := [Diagnostic]{}
+    payload :: sema_pattern_payload(subject_ty, name, env, program, span, &probe)
+    if !payload.known || payload.group || payload.owner == None -> return None
+    written :: if payload.types.len() > 0 -> ".{name}(…)" else -> ".{name}"
+    Val(sema_error("E0367", span, "pattern `{name}` needs a leading `.`", "match patterns take a leading dot so the name isn't read as a variable or call", "write `{written}`"))
+}
+
 fn sema_pattern_fact(name: String, span: Span, ty: Type, mutable: Bool) -> TPatternBindingFact Never! {
     TPatternBindingFact{name: name, span: span, ty: ty, mutable: mutable, symbol_id: None}
 }
@@ -667,10 +679,9 @@ fn sema_pattern_struct(subject_ty: Type, fields: [StructPatField], rest: Span?, 
             &diagnostics.push(sema_error("E0326", span, "this pattern leaves out fields of `{nominal.symbol.name}`", "a destructure without `..` must name every field", "add `, ..` or name the remaining fields"))
             complete = false
         }
-        rest != None && names.len() >= nominal.fields.len() && nominal.fields.len() > 0 -> {
-            &diagnostics.push(sema_error("E0327", rest, "this `..` is redundant", "the pattern already names every field", "remove `..` or leave out a field"))
-            complete = false
-        }
+        // A redundant `..` still names every field, so the pattern stays
+        // checked and the surrounding checks run (Rust continues).
+        rest != None && names.len() >= nominal.fields.len() && nominal.fields.len() > 0 -> &diagnostics.push(sema_error("E0327", rest, "this `..` is redundant", "the pattern already names every field of `{nominal.symbol.name}`", "remove `..` or leave out at least one field"))
     }
     return SemaPatternValidation{shape: TPatternShape.Struct{fields: tree_fields, span: span}, enum_type: None, bindings: facts, complete: complete}
     }
@@ -1314,7 +1325,13 @@ fn sema_check_pattern(subject: TExpr, pattern: Pattern, position: TPatternPositi
             }
         }
     }
-    complete :: validation.complete && diagnostics.len() == before
+    // A redundant `..` (E0327) still leaves a complete pattern, so the match
+    // keeps checking past it as Rust did.
+    blocking := false
+    loop index in before..<diagnostics.len() {
+        if diagnostics[index].code != "E0327" -> blocking = true
+    }
+    complete :: validation.complete && !blocking
     checked :: if complete -> Val(SemaCheckedPattern{subject: subject, pattern: TPattern{shape: validation.shape, bindings: validation.bindings, enum_type: validation.enum_type, position: position, mutable: mutable, boxed: boxed}, bindings: validation.bindings}) else -> None
     SemaPatternCheck{complete: complete, checked: checked, bindings: validation.bindings}
 }

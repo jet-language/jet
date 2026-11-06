@@ -1,0 +1,21 @@
+# A ProcessSpec that already passes a directory, passed on with pass_to, moves
+# its rows into the new spec: the child sees both slots, every descriptor
+# closes once when the last spec ends, and the next round reuses the slots.
+fixture: chained_directory_passes_close_each_descriptor_once.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = chained_directory_passes_close_each_descriptor_once.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = chained_directory_passes_close_each_descriptor_once.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = chained_directory_passes_close_each_descriptor_once.out
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = chained_directory_passes_close_each_descriptor_once.out

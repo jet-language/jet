@@ -524,6 +524,18 @@ export function backupRequiredAt(parent, p, keep = 20, heldBackup = null) {
     if (error.code === 'ENOENT') throw new Error(`cannot back up missing file ${p}`);
     throw error;
   }
+  return backupBytesAt(parent, p, source, keep, heldBackup);
+}
+
+// The same rolling backup for bytes the caller already holds: a sharded
+// archive (history-shards.mjs) backs up its assembled single-file text.
+export function backupBytesAt(parent, p, source, keep = 20, heldBackup = null) {
+  const parentPath = resolve(dirname(p));
+  if (parentPath !== parent.expectedPath)
+    atomicFailure(`backup parent authority does not contain ${p}`);
+  const sourceName = basename(p);
+  parent.guard(`back up ${sourceName}`);
+  if (heldBackup) checkedChildAuthority(parent, heldBackup, 'backups', `back up ${sourceName}`);
   let backup;
   let ownsBackup = false;
   try {

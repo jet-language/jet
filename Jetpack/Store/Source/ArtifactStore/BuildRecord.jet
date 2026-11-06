@@ -40,8 +40,10 @@ struct BuildRecord {
         loop index in 0..<self.nodes.len() {
             if index != 0 -> &parts.push(",")
             node :: self.nodes[index]
+            // A negative or non-finite duration is written as the integer `0`
+            // (the Rust wire), not as the Float `0.0`.
             finite :: node.duration_ms - node.duration_ms == 0.0
-            duration :: if finite && node.duration_ms >= 0.0 -> node.duration_ms else -> Float{0.0}
+            duration :: if finite && node.duration_ms >= 0.0 -> "{node.duration_ms}" else -> "0"
             &parts.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"duration_ms\":{duration},\"why_ran\":{foundation_json_quote(node.why_ran)},\"inputs\":[")
             loop input_index in 0..<node.inputs.len() {
                 if input_index != 0 -> &parts.push(",")

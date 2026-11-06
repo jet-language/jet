@@ -6,13 +6,10 @@ use {
     jet_foundation.Devtools.[JetDevtoolsLifecycleState]
 }
 
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2040
 fn event(sequence: U64, panel_id: JetDevtoolsPanelId, kind: String, entity: String) -> TerminalHostEvent {
     TerminalHostEvent.new(panel_id, "session", "revision-a", sequence, sequence * 10, "src/main.jet", kind.to_string(), entity.to_string(), [TerminalHostFact.redacted("value")])
 }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2059
 fn panel_ids() -> [U64:JetDevtoolsPanelId] { [1: JetDevtoolsPanelId.Build] }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2063
 fn projection() -> DevtoolsProjection {
     envelope := JetDevtoolsEnvelope.new("session", 0)
     &envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", "{{\"accepted\":true}}", .Val("{{\"output\":\"ok\"}}")).unwrap())
@@ -24,7 +21,6 @@ fn projection() -> DevtoolsProjection {
         command_capabilities: DevtoolsCommandCapabilities{project_rebuild: false, project_rebuild_reason: .Val("terminal host test projection has no rebuild executor")},
         command_receipts: [], reset: true, truncation: false}
 }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2113
 #Test("sync_projection_preserves_canonical_identity_and_status") {
     capabilities :: TerminalHostCapabilities.new(false, false, true, 32, true, false, TerminalHostAccess.new(true, false, true))
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
@@ -44,7 +40,6 @@ fn projection() -> DevtoolsProjection {
     assert(&host.handle_key(.Character('r')) == TerminalAction.Ignored)
     assert(frame.lines.iter().all((line) -> strip_ansi(line).chars().count() <= 32))
 }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2150
 #Test("quiet_suppresses_text_without_dropping_typed_tree") {
     capabilities :: TerminalHostCapabilities.new(false, false, true, 20, false, true, TerminalHostAccess.interactive())
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
@@ -52,7 +47,6 @@ fn projection() -> DevtoolsProjection {
     assert(frame.lines.is_empty())
     assert_eq(frame.tree.panel_count, descriptors().len())
 }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2175
 #Test("same_facts_keep_nodes_stable_across_capabilities") {
     plain := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
     color := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
@@ -64,7 +58,6 @@ fn projection() -> DevtoolsProjection {
     assert(color_frame.text().contains(Char{27}))
     assert(color_frame.diff(plain_frame).metadata_changed)
 }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2199
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
     host := TerminalHost.default()
     &host.append_event(event(1, .Tests, "Tests", "fails")).unwrap()
@@ -72,7 +65,6 @@ fn projection() -> DevtoolsProjection {
     assert_eq(&host.handle_key(.Escape), TerminalAction.ReturnToPanel)
     assert(host.focus().item_key.is_none())
 }
-// Rust: crates/jet-devserver/src/TerminalHost.rs:2213
 #Test("diff_operations_are_ordered_and_bounded") {
     host := TerminalHost.default()
     &host.append_event(event(1, .Build, "Build", "one")).unwrap()

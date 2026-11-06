@@ -1,4 +1,4 @@
-// Source/CmdDevTools.rs lint --complexity and the JSON-aware --a11y host.
+// Lint --complexity and the JSON-aware --a11y host.
 use {
     cli_time :: core.time
     jet_driver.[
@@ -65,14 +65,14 @@ fn jet_cli_lint_max(raw: [String], color: Bool) -> JetCLIIntOption Never! {
     JetCLIIntOption.Value{value: None}
 }
 
-// An option error is returned before compiling, as Source/main.rs does.
+// An option error is returned before compiling.
 enum JetCLIIntOption {
     Value(value: Int?)
     Refused(output: JetDriverVerbOutput)
 }
 
 fn jet_cli_lint_max_error(text: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`--max={text}` isn't a non-negative integer", jet_cli_why("E2104"), "use `--max=<n>` with a non-negative integer", color), exit_code: JET_DRIVER_EXIT_USAGE}
+    jet_cli_report_output("", "E2104", "`--max={text}` isn't a non-negative integer", jet_cli_why("E2104"), "use `--max=<n>` with a non-negative integer", color, JET_DRIVER_EXIT_USAGE)
 }
 
 fn jet_cli_lint_architecture(file: String, color: Bool) -> JetCLIArchitectureInspection {

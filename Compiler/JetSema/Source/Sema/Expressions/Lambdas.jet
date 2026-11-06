@@ -480,7 +480,7 @@ fn sema_expression_lambda_add_effect_facts(source: &SemaCheckContext, first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
         if {
-            // Rust `direct_calls.rs`: a foreign body adds its one effect root.
+            // A foreign body adds its one effect root.
             fact.foreign_effect_root != None -> {
                 root :: fact.foreign_effect_root ?? ""
                 sema_expression_lambda_append_name(&direct, root)
@@ -988,7 +988,9 @@ fn sema_expression_lambda_collect_reference_keys(state: &SemaOwnershipState, fir
         reference :: state.references[index]
         if sema_expression_lambda_outer_binding_key(reference.def_key, frame, &scopes) != None {
             sema_expression_lambda_add_capture_key(&keys, reference.def_key)
-            if reference.kind == SemaOwnershipReferenceKind.Write {
+            // Rust `block_collect_captures`: a `#Reactive` body writes its
+            // registration's clone, so the lambda only reads the root.
+            if reference.kind == SemaOwnershipReferenceKind.Write && !sema_ownership_in_reactive_body(state, reference.use_span) {
                 sema_expression_lambda_add_capture_key(&mutable_keys, reference.def_key)
             }
         }
@@ -1327,8 +1329,11 @@ fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) 
     fallback.copy()
 }
 
-fn sema_expression_lambda_capture_diagnostic(name: String, ty: Type, span: Span) -> Diagnostic {
-    sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by a stored lambda", "this lambda would retain a borrowed value after the current access window ends", "make the parameter owned with the move marker `^`, or capture an owned copy")
+// Rust `infer_lambda`: a borrowed non-cloneable parameter captured by a
+// lambda that outlives the access, reported at the lambda.
+fn sema_expression_lambda_capture_diagnostic(name: String, ty: Type, task_body: Bool, span: Span) -> Diagnostic {
+    destination :: if task_body -> "a spawned task" else -> "a stored lambda"
+    sema_error("E0120", span, "`{name}` was not moved here, so it cannot be captured by {destination}", "this function can access the parameter, but it does not own the value; capture requires the move marker `^`", "make the parameter owned with the move marker `^`: `{name}: ^{type_name(ty)}`")
 }
 
 fn sema_expression_lambda_view_diagnostic(name: String, span: Span) -> Diagnostic {
@@ -1374,6 +1379,7 @@ fn sema_expression_lambda_merge_context_facts(source: &SemaCheckContext, target:
     }
     // A snapshot starts with no goal rows, so every row it holds is this lambda's.
     loop goal_index in 0..<source.typed_goals.len() -> &target.typed_goals.push(source.typed_goals[goal_index])
+    loop proof_index in 0..<source.index_proofs.len() -> &target.index_proofs.push(source.index_proofs[proof_index])
     sema_check_context_merge_expr_ids(source, &target)
 }
 
@@ -1438,10 +1444,10 @@ fn sema_expression_lambda_never_rail(ty: Type) -> Bool Never! {
     false
 }
 
-// Rust builtin_methods.rs collection callbacks: an expected `Fn` whose result
-// is open (`ret: None`) adopts the callback's own result, whether a lambda or
-// a named function value; the collection method then checks that result
-// against its own callback contract (`open_ret` skips E0108).
+// Collection callbacks: an expected `Fn` whose result is open (`ret: None`)
+// adopts the callback's own result, whether a lambda or a named function value;
+// the collection method then checks that result against its own callback
+// contract (`open_ret` skips E0108).
 fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lambda_escapes := context.lambda_escapes
     context.lambda_escapes = Val(false)
@@ -1451,9 +1457,13 @@ fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, envir
     shorthand :: sema_expr_subject_shorthand(expr, expected, context, &diagnostics)
     if shorthand != None -> context.subject_shorthand_depth += 1
     source :: if shorthand == .Val(lambda) -> Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED} else -> expr
+    // A bare member chain that isn't shorthand (the slot takes more than one
+    // parameter) keeps the slot type, so it reports the slot's arity instead
+    // of reading as a name.
+    keeps_slot :: open_result && shorthand == None && sema_expr_is_bare_member_chain(source)
     checked := if source == {
         .Lambda(lambda, _) -> sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, true)
-        else -> sema_check_expression(source, if open_result -> None else -> expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        else -> sema_check_expression(source, if open_result && !keeps_slot -> None else -> expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if shorthand != None -> context.subject_shorthand_depth -= 1
     context.lambda_escapes = previous_lambda_escapes
@@ -1679,9 +1689,9 @@ fn sema_expression_lambda_value_expected(value: Expr, body_expected: Type?, expe
     body_expected.copy()
 }
 
-// (Rust lambdas.rs:1075, E0113): an expression body whose own check rejected
-// it against the expected return with the generic E0108 is the lambda's
-// return mismatch, reported on the lambda with the body's own type.
+// (E0113): an expression body whose own check rejected it against the expected
+// return with the generic E0108 is the lambda's return mismatch, reported on
+// the lambda with the body's own type.
 fn sema_expression_lambda_return_replace_mismatch(required: Type, value: Expr, lambda_span: Span, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     mismatch_index :: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return
     probe_diagnostics := [Diagnostic]{}
@@ -1743,9 +1753,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
     }
     if lambda.effects != None -> expected_effects = lambda.effects
-    // Rust lambdas.rs: the arity mismatch is reported and the lambda is still
-    // checked under its own parameters, so the caller sees its real type and
-    // reports the argument mismatch against its own parameter.
+    // The arity mismatch is reported and the lambda is still checked under its
+    // own parameters, so the caller sees its real type and reports the argument
+    // mismatch against its own parameter.
     arity_reported := false
     if expected_params == .Val(required_params) && lambda.params.len() != required_params.len() {
         parameter_word :: if lambda.params.len() == 1 -> "parameter" else -> "parameters"
@@ -1763,6 +1773,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     lambda_parent_state := sema_ownership_state_snapshot(state)
     lambda_state := sema_ownership_state_snapshot(state)
     lambda_context := sema_check_context_snapshot(context)
+    // Rust `iter_borrowed` (E0507) stays active in a lambda body: a body that
+    // changes the collection an enclosing loop reads is refused there too.
+    lambda_context.iter_borrowed = context.iter_borrowed.copy()
     // (Rust `check_lambda`): this lambda is a `task` body when
     // the spawn named it and no callable is expected of it. The fact and the
     // propagation it harvests belong to this body alone, never a nested one.
@@ -1815,7 +1828,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {
             if index < required_params.len() && !type_identity_equal(sema_expr_expected_type(parameter_type, environment, program), sema_expr_expected_type(required_params[index], environment, program)) {
-                // Rust lambdas.rs:114 (E0113): a written lambda parameter type must equal the expected one.
+                // (E0113): a written lambda parameter type must equal the expected one.
                 &diagnostics.push(sema_error("E0113", parameter.ty_span ?? parameter.name_span, "this lambda parameter should be {sema_type_show(required_params[index])}, not {sema_type_show(parameter_type)}", "a written lambda parameter type must equal the expected parameter type", sema_type_fix_hint(required_params[index], parameter_type)))
                 return None
             }
@@ -2009,7 +2022,11 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             lambda_work.meta.loop_result_type = Val(result_type)
             body_result_ty = result_type
             if lambda_work.meta.requires_exhaustion_route && !lambda_work.meta.exhaustion_route_attached {
-                &diagnostics.push(sema_error("E0078", lambda_work.meta.exhaustion_span ?? lambda.span, "this finite value loop needs a written exhaustion route", "the source can end without a matching break, so the expression must state what exhaustion means", "add `?? fallback` after the closing `}}`, or use the labeled loop form for `next` or `break`"))
+                // The route is written after the loop's closing `}`, so the
+                // report points there: the body's span ends just past it.
+                body_span :: lambda_work.meta.exhaustion_span ?? lambda.span
+                closing :: Span{start: if body_span.end > body_span.start -> body_span.end - 1 else -> body_span.start, end: body_span.end}
+                &diagnostics.push(sema_error("E0078", closing, "this finite value loop needs a written exhaustion route", "the source can end without a matching break, so the expression must state what exhaustion means", "add `?? fallback` after the closing `}}`, or use the labeled loop form for `next` or `break`"))
                 return None
             }
         }
@@ -2163,8 +2180,19 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
             borrowed := binding.symbol.kind == SymbolKind.Parameter && binding.access != AccessConvention.Move
             if {
+                // Escaping captures: a task group may flow only through a
+                // direct `Group` parameter (E1110). Rust's lambda span ends
+                // where its expression body's span ends (a call's span is its
+                // name).
+                escapes && !task_body && capture_ty == (Type.Named{name: "Group"}) -> {
+                    escape_span :: if lambda.body == .Expr(body_value) -> Span{start: lambda.span.start, end: expr_span(body_value).end} else -> lambda.span
+                    &diagnostics.push(sema_error("E1110", escape_span, "`{binding.symbol.name}` is a `Group` and cannot escape in a lambda", "a task group is a scoped spawn authority that may flow only through a direct function or method parameter", "move this work to a function or method that takes `{binding.symbol.name}: Group` and call it directly"))
+                }
                 // The task's crossing prover refuses a captured Cell guard.
                 task_body && sema_cell_guard_contained(capture_ty) -> {}
+                // ... and a view it cannot materialize (E1102, at the task's
+                // use of it): a moved or write view here, an uncopyable one below.
+                task_body && is_view && (explicit_move || binding.mutable) -> {}
                 !escapes -> {
                     if explicit_move -> sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name) else -> sema_expression_lambda_append_name(&lambda_work.meta.frozen_captures, binding.symbol.name)
                 }
@@ -2178,13 +2206,14 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                         sema_check_unsupported(&context, "the copy of captured `{binding.symbol.name}` (`{type_name(capture_ty)}`) has no complete classification")
                         return None
                     }
-                    if !facts.accepted || !facts.materializes_view {
+                    if facts.accepted && facts.materializes_view {
+                        sema_expression_lambda_append_name(&lambda_work.meta.materialized_captures, binding.symbol.name)
+                        sema_expression_lambda_append_name(&lambda_work.meta.cloned_captures, binding.symbol.name)
+                        &lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
+                    } else if !task_body {
                         &diagnostics.push(sema_expression_lambda_view_diagnostic(binding.symbol.name, binding.symbol.span))
                         return None
                     }
-                    sema_expression_lambda_append_name(&lambda_work.meta.materialized_captures, binding.symbol.name)
-                    sema_expression_lambda_append_name(&lambda_work.meta.cloned_captures, binding.symbol.name)
-                    &lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
                 }
                 explicit_move -> {
                     sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name)
@@ -2201,8 +2230,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                             &lambda_context.copy_events.push(SemaCopyEvent{span: binding.symbol.span, facts: facts})
                         }
                         borrowed -> {
-                            &diagnostics.push(sema_expression_lambda_capture_diagnostic(binding.symbol.name, capture_ty, binding.symbol.span))
-                            return None
+                            &diagnostics.push(sema_expression_lambda_capture_diagnostic(binding.symbol.name, capture_ty, task_body, lambda.span))
+                            // A task still proves its result and detach
+                            // crossings (E1102, E1103), as Rust continues.
+                            if !task_body -> return None
                         }
                         else -> {
                             sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name)
@@ -2239,8 +2270,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
     }
     if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? ret_ty, ret_ty, environment, program) {
-        // The inferred carrier cannot fit a plain expected return: the
-        // failure has no route out of this callback (lambdas.rs E0403).
+        // The inferred carrier cannot fit a plain expected return: the failure
+        // has no route out of this callback (E0403).
         if lambda_work.meta.fallible_propagation && ret_ty == .Result(_, inferred_error) {
             body_span :: if lambda.body == .Expr(body_value) -> expr_span(body_value) else -> lambda.span
             &diagnostics.push(sema_failure_no_carrier(inferred_error, body_span, true))
@@ -2268,6 +2299,25 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     ret_slot := Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
+    // Rust `infer_lambda` (`check_aggregate_view_return`): an expression body
+    // whose result carries a view proves its owners as a `return` does, so a
+    // view into a local the enclosing function owns is E2305. The enclosing
+    // function's receiver and parameters stay stable sources; the check only
+    // reports, and leaves the lambda's recorded provenance as it was.
+    if lambda.body == .Expr(view_body) && program.registration_graph == .Val(view_graph) {
+        view_seen := [String:Bool]{}
+        if sema_check_type_contains_view(view_graph, environment.module_identity, ret_ty, &view_seen) {
+            saved_view_provenance := lambda_context.return_view_provenance.copy()
+            saved_view_receiver := lambda_context.return_view_receiver_key.copy()
+            saved_view_keys := lambda_context.return_view_parameter_keys.copy()
+            if lambda_context.return_view_receiver_key == "" -> lambda_context.return_view_receiver_key = context.return_view_receiver_key.copy()
+            loop key in context.return_view_parameter_keys -> &lambda_context.return_view_parameter_keys.push(key)
+            _ := sema_stmt_record_return_views(view_body, ret_ty, lambda_scopes, &lambda_state, &lambda_context, &diagnostics)
+            lambda_context.return_view_provenance = saved_view_provenance
+            lambda_context.return_view_receiver_key = saved_view_receiver
+            lambda_context.return_view_parameter_keys = saved_view_keys
+        }
+    }
     lambda_return_provenance := lambda_context.return_view_provenance
     lambda_work.meta.return_view_provenance = lambda_return_provenance
     // A lambda whose body adds no effect publishes the empty bound, so it
@@ -2354,12 +2404,12 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     Val(checked)
 }
 
-// Rust `fallible_lambda_value` (codegen lower/lambdas.rs): a callback whose
-// return is a `Result` carrier (its fn slot's, its written error type's, or
-// its inferred one) had its body checked against the success type, so every
-// success route hands back `Ok(value)`. A value already in a carrier keeps
-// it; one in the default `Err` carrier with the same success type takes the
-// callback's carrier. A `Never` value stops before it returns anything.
+// Rust `fallible_lambda_value` (codegen): a callback whose return is a `Result`
+// carrier (its fn slot's, its written error type's, or its inferred one) had
+// its body checked against the success type, so every success route hands back
+// `Ok(value)`. A value already in a carrier keeps it; one in the default `Err`
+// carrier with the same success type takes the callback's carrier. A `Never`
+// value stops before it returns anything.
 fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never! {
     if carrier == .Result(carrier_ok, _) {
         if value.ty == .Result(value_ok, value_err) {

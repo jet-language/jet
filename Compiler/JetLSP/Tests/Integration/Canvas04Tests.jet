@@ -9,7 +9,6 @@ use {
 // GATE #4494: native filesystem, links, threads and process execution.
 // GATE #4483: Unix-only link assertions dispatch on selected target family.
 
-// Rust: tests/canvas.rs:5332
 #Test("canvas_project_transactions_add_workspace_member") {
     dir :: temp_dir("project_add_workspace_member")
     fs.create_dir_all(dir.join("packages/app")).unwrap()
@@ -38,7 +37,6 @@ use {
     assert(after_project.contains("\"name\":\"tools\""), after_project)
 }
 
-// Rust: tests/canvas.rs:5398
 #Test("canvas_project_source_id_selects_file_graph_and_query") {
     dir :: temp_dir("project_source_id")
     fs.write(dir.join("package.jet"), "name: \"source_id\"\nversion: \"0.1.0\"\n").unwrap()
@@ -84,7 +82,6 @@ use {
     assert(err.contains("\"kind\":\"not_found\""), err)
 }
 
-// Rust: tests/canvas.rs:5495
 #Test("canvas_project_source_id_selects_debug_session_and_revision") {
     dir :: temp_dir("project_source_id_debug")
     fs.write(dir.join("package.jet"), "name: \"source_id_debug\"\nversion: \"0.1.0\"\n").unwrap()
@@ -108,7 +105,6 @@ use {
     assert_eq(fs.read_to_string(helper).unwrap(), src)
 }
 
-// Rust: tests/canvas.rs:5535
 #Test("canvas_project_source_id_rejects_existing_unprojected_file") {
     dir :: temp_dir("project_source_id_unprojected")
     fs.create_dir_all(dir.join("packages/app")).unwrap()
@@ -123,7 +119,6 @@ use {
     assert(err.contains("\"kind\":\"not_found\""), err)
 }
 
-// Rust: tests/canvas.rs:5565
 #Test("canvas_project_source_id_rejects_symlink_alias") {
     if core.sys.target.selected_family() == "unix" {
         dir :: temp_dir("project_source_id_symlink")
@@ -143,7 +138,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:5598
 #Test("canvas_project_source_id_rejects_hardlink_alias_without_reading") {
     if core.sys.target.selected_family() == "unix" {
         dir :: temp_dir("project_source_id_hardlink")
@@ -174,7 +168,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:5645
 #Test("canvas_rename_receipt_rejects_symlinked_metadata_directory") {
     if core.sys.target.selected_family() == "unix" {
         dir :: temp_dir("rename_receipt_symlink")
@@ -192,7 +185,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:5668
 #Test("canvas_protocol_doc_matches_v1_graph_and_edit_shape") {
     doc_path :: PathBuf.from(env.manifest_dir()).join("Docs/spec/reference/canvas-protocol.md")
     doc :: fs.read_to_string(doc_path).expect("Canvas protocol reference")
@@ -214,7 +206,6 @@ use {
     assert(err.contains("\"kind\":\"unsupported\""), err)
 }
 
-// Rust: tests/canvas.rs:5807
 #Test("canvas_editor_shell_matches_round3_contract") {
     html :: Canvas.canvas_html()
     js :: Canvas.canvas_js()
@@ -235,13 +226,11 @@ use {
     loop term in ["Graph actions", "Refused: E0204", "Source truth", "source-truth"] -> assert(!js.contains(term), js)
 }
 
-// Rust: tests/canvas.rs:5972
 #Test("canvas_debug_browser_state_is_revision_bound") {
     js :: Canvas.canvas_js()
     loop term in ["function releaseDebugSession", ".filter((b) => b.revision === requestedRevision)", "source was kept", "Debug state was bounded; source was kept"] -> assert(js.contains(term), js)
 }
 
-// Rust: tests/canvas.rs:5987
 #Test("canvas_details_are_descriptor_driven_and_dom_safe") {
     repo :: PathBuf.from(env.manifest_dir())
     inspector :: fs.read_to_string(repo.join("Compiler/JetCanvas/Source/CanvasAssets/js/inspector-connections.js")).expect("read inspector JavaScript")
@@ -262,7 +251,6 @@ use {
     assert(!project.contains("projectRail.innerHTML"), "project selection retained an HTML sink: {project}")
 }
 
-// Rust: tests/canvas.rs:6080
 #Test("canvas_javascript_assets_are_independently_syntax_checked_and_ordered") {
     ASSETS :: ["runtime-state.js", "session-workbench.js", "editing-history.js", "diagnostics-query.js", "drawing-palette.js", "project-navigation.js", "graph-rendering.js", "inspector-connections.js", "input-events.js", "transactions-catalog.js", "review.js", "bootstrap.js"]
     repo :: PathBuf.from(env.manifest_dir())
@@ -297,7 +285,6 @@ use {
     assert(glue.lines().count() < 60, "Javascript.jet must remain assembly glue")
 }
 
-// Rust: tests/canvas.rs:6160
 #Test("canvas_debug_session_projects_runtime_overlay_to_source_spans") {
     path :: write_fixture("debug_overlay", CANVAS_DEBUG_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -314,7 +301,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), src)
 }
 
-// Rust: tests/canvas.rs:6211
 #Test("canvas_debug_session_projects_live_runtime_snapshot") {
     path :: write_fixture("debug_live_overlay", CANVAS_DEBUG_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -325,7 +311,6 @@ use {
     loop field in ["\"state\":\"running\"", "\"debug_overlay\":\"running\"", "\"runtime_state\":\"live\"", "\"active_line\":", "\"active_node_id\":\"", "\"locals\":[", "\"name\":\"total\"", "\"type\":\"Int\"", "\"value\":\"1\"", "\"watches\":[", "\"call_stack\":[", "\"run()\"", "\"wire_path\":["] -> assert(out.contains(field), "live debug overlay missing {field}: {out}")
 }
 
-// Rust: tests/canvas.rs:6245
 #Test("canvas_debug_declines_unsteppable_programs_with_jet_diagnostics") {
     path :: write_fixture("debug_boundary", CANVAS_RAILS_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -339,7 +324,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), src)
 }
 
-// Rust: tests/canvas.rs:6263
 #Test("canvas_projects_nested_control_and_assignment_forms") {
     path :: write_fixture("coverage", CANVAS_COVERAGE_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -347,7 +331,6 @@ use {
     assert(!graph.contains("\"kind\":\"source\""), "supported control/assignment forms must not project as opaque source nodes: {graph}")
 }
 
-// Rust: tests/canvas.rs:6291
 #Test("canvas_projects_and_edits_every_unified_loop_clause") {
     path :: write_fixture("unified_loop_canvas", "fn run() {{\n    total := 0\n    loop item in [1, 2, 3], 2 {{\n        total += item\n    }}\n    loop i in 0..3, 2 {{\n        total += i\n    }}\n    counts := [String:Int]{{ \"one\": 1 }}\n    loop entry in counts {{\n        total += entry.value\n    }}\n    loop (key, value) in counts {{\n        total += value\n    }}\n    loop cursor := 0, cursor < 1 {{\n        total += cursor\n        cursor += 1\n    }}\n}}\n")
     graph :: Canvas.graph_json_for_file(path).expect("unified loop graph")
@@ -372,21 +355,18 @@ use {
     assert(after_headers.contains("loop cursor := 1, cursor < 2"), after_headers)
 }
 
-// Rust: tests/canvas.rs:6380
 #Test("canvas_projects_data_construction_as_nodes") {
     path :: write_fixture("data", CANVAS_DATA_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
     loop field in ["\"kind\":\"expr\"", "\"kind\":\"variant\"", "\"title\":\"construct\"", "\"title\":\"Pick\"", "Point{{x: n, y: n + 1}}"] -> assert(graph.contains(field), "data graph missing {field}: {graph}")
 }
 
-// Rust: tests/canvas.rs:6396
 #Test("canvas_projects_control_data_fallible_effect_proof_debug_rails") {
     path :: write_fixture("rails", CANVAS_RAILS_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
     loop field in ["\"rails\"", "\"control\"", "\"data\"", "\"fallible\"", "\"effect\"", "\"proof\"", "\"debug\"", "\"debug_overlay\":\"idle\"", "\"wire_kind\":\"fallible\"", "\"kind\":\"unsafe\""] -> assert(graph.contains(field), "rails graph missing {field}: {graph}")
 }
 
-// Rust: tests/canvas.rs:6420
 #Test("canvas_projects_and_source_edits_shield_region") {
     path :: write_fixture("shield_region", CANVAS_SHIELD_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("shield graph")
@@ -405,21 +385,18 @@ use {
     assert(graph.contains("\"title\":\"\\\"after\\\"\""), graph)
 }
 
-// Rust: tests/canvas.rs:6457
 #Test("canvas_projects_policy_region") {
     path :: write_fixture("policy_region", CANVAS_POLICY_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("policy graph")
     loop field in ["\"kind\":\"policy\"", "\"title\":\"#Policy(copies)\"", "\"source_span\":{{\"start\":", "\"title\":\"print\"", "\"title\":\"\\\"bounded\\\"\""] -> assert(graph.contains(field), "policy graph missing {field}: {graph}")
 }
 
-// Rust: tests/canvas.rs:6476
 #Test("canvas_projects_async_task_rail") {
     path :: write_fixture("task_rail", CANVAS_TASK_RAIL_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
     loop field in ["\"async\"", "\"kind\":\"structured_task_scope\"", "\"source\":\"task.group\""] -> assert(graph.contains(field), "task rail graph missing {field}: {graph}")
 }
 
-// Rust: tests/canvas.rs:6493
 #Test("canvas_projects_event_dispatchers_without_masquerading_runtime_facts") {
     path :: write_fixture("event_dispatchers", CANVAS_EVENT_DISPATCHER_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -430,14 +407,12 @@ use {
     assert_eq(count_occurrences(graph, "\"kind\":\"event_scope_cancel\""), 1, "unrelated Resource.cancel must not become an event fact: {graph}")
 }
 
-// Rust: tests/canvas.rs:6541
 #Test("canvas_does_not_project_unimported_event_named_calls") {
     path :: write_fixture("unimported_event_named_call", "struct Resource {{\n    id: Int\n\n    fn new(&self) {{}}\n}}\n\nfn run() {{\n    event := Resource{{ id: 1 }}\n    event.new()\n}}\n")
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
     assert(graph.contains("\"event_dispatchers\":[]"), graph)
 }
 
-// Rust: tests/canvas.rs:6561
 #Test("canvas_projects_event_dispatchers_from_imported_source_module") {
     dir :: temp_dir("imported_event_dispatcher")
     helper :: dir.join("helper.jet")
@@ -451,7 +426,6 @@ use {
     assert(entry_graph.contains("\"event_dispatchers\":[]"), entry_graph)
 }
 
-// Rust: tests/canvas.rs:6586
 #Test("canvas_event_dispatcher_edits_are_checked_and_stale_or_invalid_edits_keep_source") {
     path :: write_fixture("event_dispatcher_edits", CANVAS_EVENT_DISPATCHER_FIXTURE)
     before :: fs.read_to_string(path).unwrap()
@@ -477,7 +451,6 @@ use {
     assert(graph.contains("\"receiver_type\":\"Event<String>\""), graph)
 }
 
-// Rust: tests/canvas.rs:6628
 #Test("canvas_projects_trait_impl_authoring_and_writes_impl_stub") {
     path :: write_fixture("trait_interface", CANVAS_TRAIT_INTERFACE_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -503,7 +476,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), before_stale)
 }
 
-// Rust: tests/canvas.rs:6684
 #Test("canvas_refuses_trait_impl_guess_for_associated_types") {
     path :: write_fixture("trait_associated_type", CANVAS_TRAIT_ASSOC_TYPE_FIXTURE)
     before :: fs.read_to_string(path).unwrap()
@@ -514,7 +486,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), before)
 }
 
-// Rust: tests/canvas.rs:6698
 #Test("canvas_trait_impl_authoring_preserves_nested_scope_and_provenance") {
     path :: write_fixture("nested_trait_interface", CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
@@ -535,14 +506,12 @@ use {
     assert(graph.contains("\"scope\":\"ui\""), graph)
 }
 
-// Rust: tests/canvas.rs:6741
 #Test("canvas_projects_task_flow_authoring_facts") {
     path :: write_fixture("task_flow", CANVAS_TASK_FLOW_FIXTURE)
     graph :: Canvas.graph_json_for_file(path).expect("canvas graph")
     loop field in ["\"task_flows\"", "\"kind\":\"structured_task_scope\"", "\"kind\":\"channel_create\"", "\"kind\":\"task_spawn\"", "\"kind\":\"channel_send\"", "\"kind\":\"channel_receive\"", "\"rail\":\"async\"", "\"semantics\":\"core.tasks_source_truth\""] -> assert(graph.contains(field), "task flow missing {field}: {graph}")
 }
 
-// Rust: tests/canvas.rs:6760
 #Test("canvas_hardening_projection_suite_covers_blueprint_backlog_constructs") {
     cases :: [
         (_0: "control", _1: CANVAS_COVERAGE_FIXTURE, _2: ["\"kind\":\"loop\"", "\"kind\":\"branch\"", "\"kind\":\"function\"", "\"kind\":\"assign\"", "\"layout_hints\":{{\"algorithm\":\"source-order-v1\""]),
@@ -566,7 +535,6 @@ use {
     }
 }
 
-// Rust: tests/canvas.rs:6836
 #Test("canvas_source_span_mapping_survives_source_edits_without_drift") {
     path :: write_fixture("span_drift", CANVAS_FIXTURE)
     before :: fs.read_to_string(path).unwrap()
@@ -590,7 +558,6 @@ use {
     assert(err.contains("\"kind\":\"conflict\""), err)
 }
 
-// Rust: tests/canvas.rs:6880
 #Test("canvas_unsupported_and_invalid_actions_return_canvas_errors_without_rustc") {
     path :: write_fixture("unsupported_diagnostics", CANVAS_FIXTURE)
     before :: fs.read_to_string(path).unwrap()
@@ -616,7 +583,6 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), before)
 }
 
-// Rust: tests/canvas.rs:6918
 #Test("canvas_reconstructs_checked_output_callable_from_semindex") {
     path :: write_fixture("output_callable", "APP :: Output.Executable{{ name: \"demo\", entry: launch }}\n\nfn launch() {{ print(\"ok\") }}\n")
     graph :: Canvas.graph_json_for_file(path).expect("Output Canvas graph")

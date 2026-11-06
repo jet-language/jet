@@ -1,0 +1,38 @@
+# A fresh project's `jet test` prints its checked-in golden and exits 0 on every tier
+# (o0 `--optimize=none`, o1 `--optimize=basic`, o2 `--release`); once its test fails,
+# each tier prints the failing golden, reports the stop on stderr and exits 1.
+env: NO_COLOR=1
+step: jet new hello
+exit: 0
+step: jet test --optimize=none run.jet
+cwd: hello
+exit: 0
+stdout: = scaffold_test_pass.out
+step: jet test --optimize=basic run.jet
+cwd: hello
+exit: 0
+stdout: = scaffold_test_pass.out
+step: jet test --release run.jet
+cwd: hello
+exit: 0
+stdout: = scaffold_test_pass.out
+capture: failing = text file.replace("hello, world", "hello, jet") hello/run.jet
+write: hello/run.jet = "{cap:failing}"
+step: jet test --optimize=none run.jet
+cwd: hello
+exit: 1
+stdout: = scaffold_test_fail.out
+stderr: ~ "E3001" # the failed assert stops the test with E3001
+stderr: ~ "run.jet:6 in test" # the stop names the test's line
+step: jet test --optimize=basic run.jet
+cwd: hello
+exit: 1
+stdout: = scaffold_test_fail.out
+stderr: ~ "E3001" # the failed assert stops the test with E3001
+stderr: ~ "run.jet:6 in test" # the stop names the test's line
+step: jet test --release run.jet
+cwd: hello
+exit: 1
+stdout: = scaffold_test_fail.out
+stderr: ~ "E3001" # the failed assert stops the test with E3001
+stderr: ~ "run.jet:6 in test" # the stop names the test's line

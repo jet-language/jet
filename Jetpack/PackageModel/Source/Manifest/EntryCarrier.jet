@@ -28,12 +28,14 @@ fn pkg_inline_manifest_conflict(span: Span?) -> ManifestError Never! {
         "remove package.jet or remove the inline Package block")}
 }
 
-// #4394: checked authority currently discards the original native detail for
-// Missing/UTF-8 failures. Keep the original exact-detail regression enabled;
-// never reopen the pathname or invent an errno to hide that dependency.
+// E1331's Why is the typed read cause: the native open failure of a missing
+// entry, the native read failure, or Core's read-decode cause for bytes that
+// are not UTF-8 (the E1334 authority detail keeps the byte position).
 fn pkg_unreadable_entry(entry: String, error: AuthorityError) -> ManifestError Never! {
     detail :: if error == {
+        .Missing(_, cause) -> cause
         .IO(_, _, detail) -> detail
+        .NotText(_, _) -> "stream did not contain valid UTF-8"
         else -> error.message()
     }
     ManifestError{diagnostic: diagnostic_from_registry("E1331", None,
@@ -45,7 +47,7 @@ fn pkg_unreadable_entry(entry: String, error: AuthorityError) -> ManifestError N
 // as ordinary absence. Missing/read/decode failures retain E1331.
 fn pkg_entry_read_error(entry: String, error: AuthorityError) -> ManifestError Never! {
     if error == {
-        .Missing(_) | .IO(_, _, _) -> pkg_unreadable_entry(entry, error)
+        .Missing(_, _) | .IO(_, _, _) -> pkg_unreadable_entry(entry, error)
         else -> pkg_entry_authority_error(error)
     }
 }

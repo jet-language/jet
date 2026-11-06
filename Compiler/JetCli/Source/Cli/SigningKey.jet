@@ -1,8 +1,8 @@
 // `jet registry keygen [--registry <name>] [--force]` and `jet registry key
-// backup [<dest>] [--registry <name>]` (Source/main.rs `"keygen"`/`"key"`,
-// CmdSupply.rs `run_keygen`/`run_key_backup`; c146, D-PKGSIGN1): the Ed25519
-// package-signing key that `jet registry publish` signs with. The key files
-// and their owner-only writes belong to Jetpack/Publication (Sign.jet).
+// backup [<dest>] [--registry <name>]` (`"keygen"`/`"key"`,
+// `run_keygen`/`run_key_backup`; c146, D-PKGSIGN1): the Ed25519 package-signing
+// key that `jet registry publish` signs with. The key files and their
+// owner-only writes belong to Jetpack/Publication (Sign.jet).
 use {
     key_files :: core.files
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
@@ -73,5 +73,5 @@ fn jet_cli_key_backup(registry: String, dest: String, color: Bool) -[FS, Env]> J
 // `cli_error!("E2105", ...)`: the code's shared Why and Fix, exit 1.
 fn jet_cli_signing_failure(what: String, color: Bool) -> JetDriverVerbOutput Never! {
     shared :: jet_cli_diagnostic_copy("E2105")
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, shared.why, shared.fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E2105", what, shared.why, shared.fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }

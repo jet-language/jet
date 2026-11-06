@@ -1,5 +1,5 @@
 // Effect types (a struct's or enum's `impl Effect { … }` block) and the
-// retired `effect` declaration word.
+// `effect Root.Leaf` package leaf declaration.
 use {
     jet_foundation.[
         AccessConvention,
@@ -12,7 +12,6 @@ use {
         MarkerDecl,
         NamedSpan,
         Span,
-        TextEdit,
         Variant,
         expr_span,
     ]
@@ -177,39 +176,24 @@ fn parser_effect_fact_holds(expr: Expr, member: String?) -> Bool Never! {
     false
 }
 
-// The retired `effect Name` declaration. A re-declared Prelude effect is
-// deleted by its edit; a bare root is now a type implementing `Effect`. A
-// package leaf (`effect Log.Audit`) still declares a leaf.
+// `effect Root.Leaf` declares a package leaf. A root effect is a type with an
+// `impl Effect { … }` block, and a Prelude effect is already declared.
 fn parser_parse_effect_word(state: &JetParserState) -> EffectDecl? {
     start :: parser_bump(&state)
     name :: parser_effect_path_name(&state)
     parser_finish_statement(&state)
     head :: parser_cover(start.span, name.span)
-    prelude := false
-    loop row in EFFECT_VOCABULARY_ROWS {
-        if row.name == name.name -> prelude = true
-    }
-    if prelude {
-        line :: parser_effect_line_span(state, head)
-        parser_add_error_code_edit(&state, "E0381", head, "`effect {name.name}` re-declares a Prelude effect", "the Prelude declares `{name.name}` as a type implementing `Effect`, so every program already names it", "delete this declaration; `jet fix` removes it", TextEdit{span: line, new_text: ""})
-        return None
-    }
     if !name.name.contains(".") {
-        parser_add_error_code(&state, "E0381", head, "`effect {name.name}` is a retired declaration", "an effect is a type: a struct or enum whose `impl Effect {{ … }}` block says whether its work can be rolled back", "declare `struct {name.name} {{ impl Effect {{}} }}`")
+        parser_add_error_code(&state, "E0003", head, "`effect {name.name}` names no effect leaf", "an `effect` line declares a package leaf, `effect Root.Leaf`; a root effect is a struct or enum with an `impl Effect {{ … }}` block", "write `effect {name.name}.Leaf`, or declare `struct {name.name} {{ impl Effect {{}} }}`")
         return None
+    }
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.name == name.name {
+            parser_add_error_code(&state, "E0003", head, "`{name.name}` is already a Prelude effect", "the Prelude declares `{name.name}`, so every program already names it", "delete this line")
+            return None
+        }
     }
     Val(EffectDecl{name: name.name, name_span: name.span, irreversible: false, span: head})
-}
-
-// The whole line `span` sits on, with its line break.
-fn parser_effect_line_span(state: JetParserState, span: Span) -> Span Never! {
-    source :: state.sources[0]
-    start := span.start
-    loop start > 0 && Int.from_u8(source[start - 1]) != 10 -> start -= 1
-    end := span.end
-    loop end < source.len() && Int.from_u8(source[end]) != 10 -> end += 1
-    if end < source.len() -> end += 1
-    Span{start: start, end: end}
 }
 
 fn parser_effect_path_name(state: &JetParserState) -> NamedSpan {

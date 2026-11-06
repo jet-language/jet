@@ -7,19 +7,19 @@ write: tools/limine os_vm_prove_runs_qemu_and_records_guest_proof.limine.templat
 chmod: tools/limine 0755
 env: JETPACK_ROOT={work}/package-root
 env: PATH={work}/tools
-step: jet os vm prove halcyon --disk halcyon.qcow2 --name vm-live --no-color --offline
+step: jet os vm prove devhost --disk devhost.qcow2 --name vm-live --no-color --offline
 cwd: project
 exit: 0
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof.json ~ "\"state\":\"guest-passed\"" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof.json ~ "\"proof_tier\":\"plumbing\"" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof.json ~ "\"guest_proof_sha256\"" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json ~ "\"serial_report\"" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json ~ "halcyon" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json ~ "vm-live" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof-guest-proof.json ~ "\"qemu-system-x86_64\"" # original predicate
-file: package-root/systems/vm-proofs/halcyon-vm-live-vm-proof.run/boot-graphical-desktop.stdout ~ "JETOS_GUEST_PROOF" # original predicate
-step: jet os vm run halcyon --disk halcyon.qcow2 --no-color --offline
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof.json ~ "\"state\":\"guest-passed\"" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof.json ~ "\"proof_tier\":\"plumbing\"" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof.json ~ "\"guest_proof_sha256\"" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof-guest-proof.json ~ "\"serial_report\"" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof-guest-proof.json ~ "devhost" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof-guest-proof.json ~ "vm-live" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof-guest-proof.json ~ "\"qemu-system-x86_64\"" # original predicate
+file: package-root/systems/vm-proofs/devhost-vm-live-vm-proof.run/boot-graphical-desktop.stdout ~ "JETOS_GUEST_PROOF" # original predicate
+step: jet os vm run devhost --disk devhost.qcow2 --no-color --offline
 cwd: project
 exit: 0
-stderr: ~ "booting jetos VM halcyon generation vm-live" # original boot announcement
+stderr: ~ "booting jetos VM devhost generation vm-live" # original boot announcement
 stdout: ~ "JETOS_GUEST_PROOF" # original interactive QEMU marker

@@ -10,7 +10,6 @@ use {
 }
 // GATE #4494: actual filesystem and CLI child-process providers.
 
-// Rust: tests/semindex.rs:52
 #Test("semantic_visibility_prefers_live_and_local_bindings") {
     index :: SemanticSymbolIndex.new([
         fact("builtin:keyword:answer", "answer", "answer", SemanticSymbolKind.Keyword, SemanticProvenance.Builtin { module_ref: "syntax" }),
@@ -24,7 +23,6 @@ use {
     assert_eq(completions[0].identity, "session:binding:answer")
 }
 
-// Rust: tests/semindex.rs:98
 #Test("contextual_result_names_are_not_advertised_as_keywords") {
     path :: temp_fixture("contextual_result_names.jet", "fn run() {{}}\n")
     symbols :: open_symbols(path).expect("semantic symbols")
@@ -33,7 +31,6 @@ use {
     }
 }
 
-// Rust: tests/semindex.rs:113
 #Test("numeric_destination_conversions_and_parse_are_cataloged") {
     symbols :: SemanticSymbolIndex.language()
     assert(symbols.lookup_qualified("Int.parse").is_some())
@@ -46,7 +43,6 @@ use {
     assert(symbols.lookup_qualified("F64.from_u32").is_some())
 }
 
-// Rust: tests/semindex.rs:132
 #Test("source_distinct_and_unit_conversion_members_are_cataloged") {
     src :: "\n#Numeric UserID :: distinct Int\n#UnitFamily(Currency) {{ usd }}\n\nfn run() {{}}\n"
     path :: temp_fixture("source_numeric_members.jet", src)
@@ -60,7 +56,6 @@ use {
     assert(symbols.complete_visible_at("from_u", "UserID", SemanticVisibilityAnchor { module_path: path.to_string_lossy(), offset: user_offset, session_top_level: false }).iter().any(symbol -> symbol.qualified_name == "UserID.from_u8"))
 }
 
-// Rust: tests/semindex.rs:169
 #Test("checked_text_contract_is_one_tooling_fact") {
     src :: "\n#Error\nenum PatternError {{ Bad }}\n\nPattern :: distinct String\n\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n\n    fn check(text: String) PatternError! -[]> {{\n        return\n    }}\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\n\nfn run() {{}}\n"
     path :: temp_fixture("checked_text_contract.jet", src)
@@ -84,7 +79,6 @@ use {
     assert(index.dossier("Pattern").render_text().contains("trait contracts"))
 }
 
-// Rust: tests/semindex.rs:230
 #Test("affine_unit_point_and_delta_members_are_cataloged") {
     src :: "\n#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}}\n\nfn run() {{}}\n"
     path :: temp_fixture("source_affine_unit_members.jet", src)
@@ -94,7 +88,6 @@ use {
     assert(symbols.lookup_qualified("Celsius.from_float").is_none())
 }
 
-// Rust: tests/semindex.rs:252
 #Test("semantic_visibility_orders_items_imports_and_builtins") {
     builtin :: fact("builtin:keyword:answer", "answer", "answer", SemanticSymbolKind.Keyword, SemanticProvenance.Builtin { module_ref: "syntax" })
     import :: fact("import:test::api.answer::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session)
@@ -103,7 +96,6 @@ use {
     assert_eq(SemanticSymbolIndex.new([^builtin, ^import, item.clone()]).resolve_visible("answer").unwrap().identity, item.identity)
 }
 
-// Rust: tests/semindex.rs:293
 #Test("semantic_visibility_uses_current_module_context") {
     current := fact("fn:current::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Source { module_path: "current.jet" })
     current.module_path = "current.jet"
@@ -114,7 +106,6 @@ use {
     assert_eq(index.complete_visible_in("ans", none, "current.jet").len(), 1)
 }
 
-// Rust: tests/semindex.rs:331
 #Test("semantic_visibility_retains_explicit_qualified_alternatives") {
     index :: SemanticSymbolIndex.new([
         fact("method:List.answer", "answer", "List.answer", SemanticSymbolKind.Member, SemanticProvenance.Builtin { module_ref: "core" }),
@@ -127,13 +118,11 @@ use {
     assert(index.lookup_identity("method:Map.answer").is_some())
 }
 
-// Rust: tests/semindex.rs:363
 #Test("semindex_schema_version") {
     // This rule adds availability states to callable facts.
     assert_eq(SCHEMA_VERSION, 20)
 }
 
-// Rust: tests/semindex.rs:369
 #Test("semindex_projects_arithmetic_policy_and_exact_scope") {
     path :: temp_fixture("arithmetic_policy.jet", "fn run() {{\n    #Arithmetic(.Wrapping) {{\n        value :: U8{{250}} + U8{{10}}\n    }}\n}}\n")
     index :: open(path).expect("arithmetic policy indexes")
@@ -152,7 +141,6 @@ use {
     assert(hover.contains("scope = "), "{hover}")
 }
 
-// Rust: tests/semindex.rs:403
 #Test("semindex_projects_terminal_and_reachability_graph") {
     path :: temp_fixture("terminal_state_graph.jet", "\nstruct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn close() -> Door {{ Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -> Door {{ self }}\n    #Transition(Closed, Closed) fn hold(self: ^Door) -> Door {{ self }}\n}}\nfn run() {{}}\n")
     index :: open(path).expect("state graph indexes")
@@ -172,7 +160,6 @@ use {
     assert(dossier.to_json().contains("\"terminal\":true"))
 }
 
-// Rust: tests/semindex.rs:453
 #Test("semindex_hover_projects_terminal_and_reachability_facts") {
     path :: temp_fixture("terminal_state_hover.jet", "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
     (diagnostics, bundle, facts) :: check_file_with_effect_facts(path.to_str().unwrap(), none, false)
@@ -185,7 +172,6 @@ use {
     assert(orphan.text.contains("terminal; unreachable"), "{orphan}")
 }
 
-// Rust: tests/semindex.rs:486
 #Test("semindex_state_symbols_keep_their_struct_owner") {
     path :: temp_fixture("state_owner_symbols.jet", "\nstruct Door {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
     index :: open(path).expect("state symbols index")
@@ -204,7 +190,6 @@ use {
     assert(index.to_json().contains("\"name\":\"{closed_qualified_name}\""))
 }
 
-// Rust: tests/semindex.rs:537
 #Test("semindex_reconstructs_checked_output_callable") {
     path :: fixture("tooling/output_callable.jet")
     index :: open(path).expect("Output example indexes")
@@ -224,7 +209,6 @@ use {
     }
 }
 
-// Rust: tests/semindex.rs:567
 #Test("jet_inspect_semindex_reports_checked_output") {
     output :: Command.new(OSPath.from(env.binary_path("jet"))).args(["inspect", "semindex", fixture("tooling/output_callable.jet").to_str().unwrap(), "--json"]).output().expect("jet inspect semindex")
     assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
@@ -234,7 +218,6 @@ use {
     assert(json.contains("\"failure_source\":\"implicit default !Err\""), "{json}")
 }
 
-// Rust: tests/semindex.rs:592
 #Test("jet_inspect_semindex_reports_explicit_failure_contract") {
     path :: temp_fixture("inspect_explicit_failure.jet", "#Error\nenum Problem {{ Bad }}\nfn helper() -> Int Problem! {{ return Ok(1) }}\nfn run() {{}}\n")
     output :: Command.new(OSPath.from(env.binary_path("jet"))).args(["inspect", "semindex", path.to_str().unwrap(), "--json"]).output().expect("jet inspect semindex")
@@ -244,7 +227,6 @@ use {
     assert(json.contains("\"failure_source\":\"explicit !Problem\""), "{json}")
 }
 
-// Rust: tests/semindex.rs:612
 #Test("semantic_symbols_carry_shared_docs_and_provenance") {
     src :: "\n/// Scores one name.\n/// Example: score(\"Ada\")\nfn score(name: String) -> Int {{\n    return 1\n}}\n\nfn run() {{\n    local_total :: score(\"Ada\")\n    print(local_total)\n}}\n"
     path :: temp_fixture("semantic_docs.jet", src)
@@ -263,7 +245,6 @@ use {
     assert_eq(local[0].kind, SemanticSymbolKind.Local)
 }
 
-// Rust: tests/semindex.rs:649
 #Test("tracked_float_symbol_exposes_its_binding_site") {
     src :: "fn run() {{\n    #Track speed :: 3.5\n    origin :: comptime {{ speed.$origin }}\n    print(origin?.source ?? \"missing\")\n}}\n"
     path :: temp_fixture("tracked_float_binding.jet", src)
@@ -287,7 +268,6 @@ use {
     assert_eq(fact_symbol.kind, SemanticSymbolKind.Member)
 }
 
-// Rust: tests/semindex.rs:693
 #Test("semantic_symbols_keep_module_and_member_collisions_distinct") {
     src :: "\nmodule first {{\n    struct Item {{\n        value: Int\n    }}\n}}\n\nmodule second {{\n    struct Item {{\n        value: String\n    }}\n}}\n\nfn run() {{}}\n"
     path :: temp_fixture("semantic_collisions.jet", src)
@@ -300,7 +280,6 @@ use {
     assert_ne(values[0].identity, values[1].identity)
 }
 
-// Rust: tests/semindex.rs:724
 #Test("semantic_symbols_include_language_builtins") {
     path :: temp_fixture("semantic_builtins.jet", "fn run() {{}}\n")
     symbols :: open_symbols(path).expect("semantic symbols")
@@ -314,7 +293,6 @@ use {
     assert(symbols.complete("fil", "List").iter().any(s -> s.name == "filter"))
 }
 
-// Rust: tests/semindex.rs:743
 #Test("semantic_symbols_index_value_tail_callable") {
     path :: temp_fixture("value_tail_callable.jet", "\nfn label(value: Int) -> String {{\n    if value == {{\n        1 -> {{ \"one\" }}\n        else -> {{ \"other\" }}\n    }}\n}}\n\nfn run() {{\n    print(label(1))\n}}\n")
     symbols :: open_symbols(path).expect("value-tail callable should index")
@@ -323,7 +301,6 @@ use {
     assert(label.signature.contains("String"), "{label.signature}")
 }
 
-// Rust: tests/semindex.rs:774
 #Test("semantic_symbols_include_module_and_selected_imports") {
     root :: env.temp_dir().join("jet_semantic_imports_{process.id()}")
     _ :: fs.remove_dir_all(root)
@@ -340,7 +317,6 @@ use {
     _ :: fs.remove_dir_all(root).ok()
 }
 
-// Rust: tests/semindex.rs:799
 #Test("semindex_hello_json_shape") {
     idx :: open(fixture("basics/hello.jet")).expect("hello indexes")
     json :: idx.to_json()
@@ -355,7 +331,6 @@ use {
     assert(json.contains("\"run\""))
 }
 
-// Rust: tests/semindex.rs:814
 #Test("semindex_identity_stable_across_reorder") {
     a :: "\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
     b :: "\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
@@ -376,7 +351,6 @@ use {
     assert(before_ids.iter().any(id -> id.contains("method:") && id.contains("Point.sum")))
 }
 
-// Rust: tests/semindex.rs:923
 #Test("returned_view_provenance_is_structured_and_changes_signature_id") {
     path :: temp_fixture("view_provenance.jet", "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {{\n    if first {{ return left[0..1] }}\n    return right[0..1]\n}}\nfn run() {{}}\n")
     union :: open(path).expect("multi-source view provenance indexes")
@@ -407,7 +381,6 @@ use {
     assert_ne(union_signature, right_signature)
 }
 
-// Rust: tests/semindex.rs:979
 #Test("aggregate_view_provenance_preserves_slots_and_changes_signature_id") {
     source :: (right_owner: String) -> "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -> Pair {{\n    left_view :: left[0..1]\n    right_view :: {right_owner}[0..1]\n    return Pair.{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{}}\n"
     path :: temp_fixture("aggregate_view_provenance.jet", source("right"))
@@ -428,7 +401,6 @@ use {
     assert_ne(distinct_signature, changed_signature)
 }
 
-// Rust: tests/semindex.rs:1036
 #Test("semindex_structural_audit_reports_signature_change") {
     a :: "\nstruct Point {{\n    x: Int\n}}\n\nfn run() {{}}\n"
     b :: "\nstruct Point {{\n    x: Float\n}}\n\nfn run() {{}}\n"
@@ -442,7 +414,6 @@ use {
     assert(audit.changed.iter().any(id -> id.contains("Point")))
 }
 
-// Rust: tests/semindex.rs:1063
 #Test("semindex_structural_audit_tracks_callable_signature_changes") {
     a :: "\nfn score(name: String) -> Int {{\n    return 1\n}}\n\nfn run() {{}}\n"
     b :: "\nfn score(name: String, bonus: Int) -> Float {{\n    return 1.0\n}}\n\nfn run() {{}}\n"
@@ -456,7 +427,6 @@ use {
     assert(audit.changed.iter().any(id -> id.starts_with("fn:") && id.ends_with("::score")))
 }
 
-// Rust: tests/semindex.rs:1107
 #Test("semindex_unified_loop_slots_and_state_scope_are_structural") {
     src :: "fn run() {{\n    loop item in [1, 2, 3], 2 {{\n        print(item)\n    }}\n    loop cursor in 0..<1 {{\n        print(cursor)\n    }}\n}}\n"
     path :: temp_fixture("unified_loop_slots.jet", src)
@@ -473,7 +443,6 @@ use {
     assert(out_of_scope.iter().any(diagnostic -> diagnostic.code == "E0107" && diagnostic.what.contains("cursor")), "state binding must end with the loop: {out_of_scope}")
 }
 
-// Rust: tests/semindex.rs:1164
 #Test("definition_ancestry_identity_ignores_signature_and_body_shape") {
     path :: temp_fixture("ancestry_identity.jet", "fn score(n: Int) -> Int {{ return n + 1 }}\nfn run() {{ print(score(1)) }}\n")
     before :: open(path).expect("first fixture indexes")
@@ -486,7 +455,6 @@ use {
     assert_ne(before_score.content_id, after_score.content_id)
 }
 
-// Rust: tests/semindex.rs:1192
 #Test("semindex_effects_and_calls") {
     idx :: open(fixture("effects/effects.jet")).expect("effects indexes")
     assert(idx.lookup("report").is_some())
@@ -495,7 +463,6 @@ use {
     assert(!report_effects.inferred.is_empty() || !report_effects.direct.is_empty())
 }
 
-// Rust: tests/semindex.rs:1201
 #Test("semindex_projects_omitted_inferred_effects") {
     path :: temp_fixture("inferred_effect_signature.jet", "fn announce() {{ print(\"hello\") }}\nfn run() {{ announce() }}\n")
     index :: open(path).expect("inferred effects index")
@@ -511,7 +478,6 @@ use {
     assert_eq(run.provenance[0].spans.len(), 2)
 }
 
-// Rust: tests/semindex.rs:1226
 #Test("semindex_projects_inline_module_inferred_effects") {
     path :: temp_fixture("inline_inferred_effect_signature.jet", "module inner {{ fn announce() {{ print(\"hello\") }} }}\nfn run() {{ inner.announce() }}\n")
     symbols :: open_symbols(path).expect("inline inferred effects index")
@@ -520,7 +486,6 @@ use {
     assert(announce[0].signature.contains("-[IO]>"), "{announce[0].signature}")
 }
 
-// Rust: tests/semindex.rs:1242
 #Test("semindex_effect_provenance_covers_open_and_trait_dispatch") {
     path :: temp_fixture("effect_provenance_origins.jet", "trait Shape {{ fn area(self) -[IO]> Int }}\nfn dynamic(shape: Shape) -> Int {{ return shape.area() }}\nfn apply(f: fn() -> Int) -> Int {{ return f() }}\nfn stored(f: ^fn() -> Int) -> Int {{\n    g :: f\n    return g()\n}}\nfn run() {{}}\n")
     index :: open(path).expect("effect provenance index")
@@ -538,7 +503,6 @@ use {
     assert_eq(io.spans.len(), 2)
 }
 
-// Rust: tests/semindex.rs:1273
 #Test("semindex_via_contracts_have_provenance_without_invocation") {
     path :: temp_fixture("effect_via_provenance.jet", "fn bounded(act: fn() -[IO]>) -[via act]> {{}}\nfn open(act: fn()) -[via act]> {{}}\nfn run() {{}}\n")
     index :: open(path).expect("via provenance index")
@@ -552,7 +516,6 @@ use {
     assert(unbounded.provenance.iter().all(origin -> !origin.spans.is_empty()))
 }
 
-// Rust: tests/semindex.rs:1295
 #Test("semindex_preserves_via_effect_row_in_signatures") {
     path :: temp_fixture("effect_via.jet", "fn invoke(act: fn() -[IO]>) -[via act]> {{ act() }}\nfn run() {{}}\n")
     symbols :: open_symbols(path).expect("via function indexes")
@@ -560,13 +523,11 @@ use {
     assert_eq(invoke.signature, "fn invoke(act: fn() -[IO]>) -[via act]>")
 }
 
-// Rust: tests/semindex.rs:1310
 #Test("semindex_references") {
     idx :: open(fixture("basics/hello.jet")).expect("hello indexes")
     assert(!idx.references_to("print").is_empty())
 }
 
-// Rust: tests/semindex.rs:1316
 #Test("semindex_rename_sites_keep_definition_identity_in_json") {
     path :: temp_fixture("rename_anchor_identity.jet", "fn helper() -> Int {{ return 1 }}\nfn run() {{ print(helper()) }}\n")
     index :: open(path).expect("rename anchor index")
@@ -578,7 +539,6 @@ use {
     assert(index.to_json().contains("\"semantic_identity\":"))
 }
 
-// Rust: tests/semindex.rs:1342
 #Test("semindex_indexes_generated_fenced_range_names") {
     path :: temp_fixture("fenced_range_names.jet", "fn run() {{\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}}\n")
     idx :: open(path).expect("fenced range fixture indexes")
@@ -590,7 +550,6 @@ use {
     assert_eq(idx.references_to("t4").len(), 1)
 }
 
-// Rust: tests/semindex.rs:1360
 #Test("semindex_indexes_loop_label_definition_and_dot_exit_references") {
     path :: temp_fixture("loop_label_refs.jet", "fn run() {{\n    outer :: loop {{\n        if true {{ next(outer) }}\n        break(outer)\n    }}\n}}\n")
     idx :: open(path).expect("loop label fixture indexes")
@@ -602,7 +561,6 @@ use {
     assert_eq(idx.references_to("outer").len(), 2)
 }
 
-// Rust: tests/semindex.rs:1378
 #Test("semindex_dossier_stitches_scattered_members") {
     src :: "\ntrait DrawThing {{\n    fn render(self) -> String\n}}\n\nstruct Widget {{\n    title: String\n\n    fn label(self) -> String {{\n        return ~self.title\n    }}\n}}\n\nimpl Widget {{\n    fn size(self) -> Int {{\n        return 1\n    }}\n}}\n\nimpl Widget.DrawThing {{\n    fn render(self) -> String {{\n        return self.label()\n    }}\n}}\n\nfn run() {{\n    w :: Widget.{{title: \"ok\"}}\n    print(w.render())\n}}\n"
     path :: temp_fixture("dossier_scattered.jet", src)
@@ -619,7 +577,6 @@ use {
     assert(json.contains("\"inherent_impl\""))
 }
 
-// Rust: tests/semindex.rs:1435
 #Test("semindex_dossier_preserves_method_call_contract") {
     src :: "\nstruct Client {{\n    host: String\n}}\n\nimpl Client {{\n    fn connect(self, host: String, /, timeout seconds: Int{{30}}, *, tls enabled: Bool{{true}}, rest: ...String) -> String {{\n        return host\n    }}\n}}\n\nfn run() {{}}\n"
     path :: temp_fixture("dossier_method_contract.jet", src)
@@ -630,7 +587,6 @@ use {
     assert(connect.signature.contains("rest: ...String"), "{connect.signature}")
 }
 
-// Rust: tests/semindex.rs:1476
 #Test("semindex_dossier_bypass_facts") {
     // Every spelled bypass surfaces in the program-wide dossier.
     src :: "\nstruct Invoice {{\n    #Allow(jet.FloatMoney)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
@@ -655,7 +611,6 @@ use {
     assert(text.contains("jet.FloatMoney"))
 }
 
-// Rust: tests/semindex.rs:1555
 #Test("jet_semindex_cli_json_smoke") {
     bin :: OSPath.from(env.binary_path("jet"))
     path :: fixture("basics/hello.jet")
@@ -668,7 +623,6 @@ use {
     assert(text.contains("\"schema_version\":{SCHEMA_VERSION}"))
 }
 
-// Rust: tests/semindex.rs:1583
 #Test("shape6_inspect_routes_and_bare_snapshots") {
     bin :: OSPath.from(env.binary_path("jet"))
     help_output :: Command.new(bin).arg("help").output().unwrap()

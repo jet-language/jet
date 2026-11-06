@@ -1,0 +1,19 @@
+use jobs :: core.jobs
+
+#Job(.Dev) fn process(payload: String) { print("job:{payload}") }
+
+fn run() {
+    if jobs.queue() == {
+        .Err(error) -> {
+            print("refused: {error}")
+            return
+        }
+        .Ok(_) -> {}
+    }
+    queue := jobs.queue() ?? return
+    before :: queue.inspect(16, true) ?? return
+    print("before:{before.len()}")
+    &queue.enqueue(process, "run", key: "run-{before.len()}") ?? return
+    after :: queue.inspect(16, true) ?? return
+    print("after:{after.len()}")
+}

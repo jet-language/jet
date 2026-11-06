@@ -82,6 +82,8 @@ fn sema_call_registered_method_names(graph: SemaRegistrationGraph, nominal: Sema
     names
 }
 
+SEMA_CALL_SCALAR_OWNERS :: [String]{"Int", "Float", "Bool", "String", "Char", "F32", "F64", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64"}
+
 // `Owner.method(...)` where `Owner` is a registered type no scope binding
 // shadows and no static route resolved: the type exists, so the missing
 // member is reported, never the owner (E0311).
@@ -92,6 +94,18 @@ fn sema_call_static_missing_member(receiver: Expr, method: String, method_span: 
         else -> { return unhandled }
     }
     if sema_scope_resolve_index(scopes, owner) != None -> return unhandled
+    // A built-in scalar owner that no declaration takes over has no
+    // registered type; every documented static method on it resolved
+    // before this point.
+    scalar_owner := SEMA_CALL_SCALAR_OWNERS.contains(owner)
+    if scalar_owner && program.registration_graph == .Val(graph) {
+        scalar_owner = sema_type_graph_lookup_symbol(graph, environment.module_identity, owner) == None
+    }
+    if scalar_owner {
+        &diagnostics.push(sema_error("E0102", method_span, "`{owner}` has no static method `{method}`", "built-in types expose only their documented static methods", "call a documented static method on `{owner}`, or call `.{method}()` on a value that provides it"))
+        sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
     if program.registration_graph == .Val(graph) {
         found :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner) ?? return unhandled
         if sema_resolved_kind(graph, found) != SymbolKind.Type -> return unhandled
@@ -571,7 +585,8 @@ fn sema_call_builtin_static_call_arg(value: TExpr, argument: CallArg) -> TCallAr
 }
 
 // CoreCall rows lower through the registered Core route in the caller.
-fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, context: &SemaCheckContext) -> TExprKind? {
+// `line` is the call's source line, which a checked crossing stops at.
+fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args: [CallArg], bindings: [SemaInferenceBinding], span: Span, line: Int, context: &SemaCheckContext) -> TExprKind? {
     rest := [TExpr]{}
     loop index in 0..<values.len() {
         if index > 0 -> &rest.push(values[index])
@@ -594,8 +609,7 @@ fn sema_call_builtin_static_lowered(row: BuiltinStaticRow, values: [TExpr], args
         }
         .DurationNew(unit_name) -> Val(TExprKind.HandleMethod{receiver: values[0], operation: THandleOp.DurationNew{unit: unit_name, float: values[0].ty == Type.Float || values[0].ty == Type.Float32}, args: [TExpr]{}})
         .EmptyMap -> Val(TExprKind.MapLit{entries: [TMapEntry]{}})
-        // copy: `operation` is a payload of read parameter `row`, which keeps the original; field `operation` of the new TExprKind.NumericMethod owns this one
-        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: operation.copy()})
+        .Numeric(operation) -> Val(TExprKind.NumericMethod{receiver: values[0], operation: sema_call_numeric_at_line(operation, line)})
         .Precise(precise_type, function) -> Val(TExprKind.PreciseBuiltin{type_name: precise_type, function: function, args: values})
         .CoreCall(_, _) -> None
     }
@@ -709,7 +723,10 @@ fn sema_call_try_builtin_static(owner: String, module_name: String, method: Stri
         return SemaMethodSpecialCheck{handled: true, value: sema_call_core_tree(record, values, span, [Type]{}, widen_to_vec, result, fallibility, expected, environment, program, &diagnostics)}
     }
 
-    kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span, &context) ?? {
+    if row.lowering == .Numeric(operation) && operation == .CheckedIntToFloat(_, _, _) && values.len() == 1 {
+        if !sema_expr_float_literal_fits(values[0], result, values[0].span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    kind :: sema_call_builtin_static_lowered(row, values, ownership_args, bindings, span, sema_source_line_at(environment.source_segments, span) ?? 0, &context) ?? {
         &diagnostics.push(sema_error("E0104", span, "static method call `{callee}` could not be lowered", "the built-in static row has no checked-tree construction", "use a registered built-in static method"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -728,11 +745,6 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     }
     if !sema_expr_core_module_alias_visible(alias, scopes) -> return SemaMethodSpecialCheck{handled: false, value: None}
     module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if module_name == "core.crypto" && sema_call_retired_entropy_constructor(owner, method, span) == .Val(retired) {
-        &diagnostics.push(retired)
-        sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
     builtin := sema_call_try_builtin_static(owner, module_name, method, owner_type_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if builtin.handled -> return builtin
     // A capitalized `alias.Owner` that no route resolved names no static the
@@ -745,13 +757,6 @@ fn sema_call_try_builtin_static_field(base: Expr, owner: String, method: String,
     }
     sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaMethodSpecialCheck{handled: true, value: None}
-}
-
-// Rust `infer_method_call` entropy constructors use
-// `new_random`; the retired `generate` spelling is E1004.
-fn sema_call_retired_entropy_constructor(owner: String, method: String, span: Span) -> Diagnostic? Never! {
-    if method != "generate" || (owner != "SigningKey" && owner != "X25519SecretKey") -> return None
-    Val(sema_error("E1004", span, "`{owner}` has no `generate`", "constructors that draw entropy use `new_random`", "use `{owner}.new_random()`"))
 }
 
 // The ambient Perf type is an alternate spelling of the checked core.perf
@@ -869,10 +874,9 @@ fn sema_call_static_alias_target(graph: SemaRegistrationGraph, row: SemaRegistra
     Val(SemaStaticAliasTarget{symbol: target, owner_type_args: args})
 }
 
-// Rust options_rng.rs:19-135 check_option_lift2 (method_calls.rs:3559):
-// `Option.lift2(f, a, b)` is `f(a, b)` when both optionals are present and
-// absent otherwise. `a` and `b` are checked first, since `f`'s parameter types
-// are their payload types.
+// check_option_lift2: `Option.lift2(f, a, b)` is `f(a, b)` when both optionals
+// are present and absent otherwise. `a` and `b` are checked first, since `f`'s
+// parameter types are their payload types.
 fn sema_call_option_lift2(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 3 {
@@ -950,11 +954,6 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         if receiver == .Ident(name, _, _) {
             if name == "Perf" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_perf_static(method, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if name == "Option" && method == "lift2" && sema_scope_resolve_index(scopes, name) == None -> return sema_call_option_lift2(args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-            if sema_scope_resolve_index(scopes, name) == None && sema_call_retired_entropy_constructor(name, method, span) == .Val(retired) {
-                &diagnostics.push(retired)
-                sema_call_builtin_static_discard(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-                return SemaMethodSpecialCheck{handled: true, value: None}
-            }
             if sema_scope_resolve_index(scopes, name) == None && owner_type_args.len() == 0 && type_args.len() == 0 {
                 math := sema_call_try_math_static(name, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                 if math.handled -> return math
@@ -970,8 +969,8 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     if method == "new" && args.len() == 3 && type_name == "ExpiringSecret" && sema_module_is_core_source(owner_symbol.module_name) {
         if !sema_call_expiring_secret_new_accepts(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    // E2938 (D-FOUND-PLATFORM1=A, Rust method_calls.rs `UIShortcut.cmd`): the
-    // command-key constructor fixes its key before code generation.
+    // E2938 (D-FOUND-PLATFORM1=A, `UIShortcut.cmd`): the command-key
+    // constructor fixes its key before code generation.
     if method == "cmd" && args.len() == 1 && type_name == "UIShortcut" && sema_module_is_core_source(owner_symbol.module_name) {
         sema_call_ui_shortcut_cmd_key(args[0], &diagnostics)
     }
@@ -979,12 +978,14 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
     diagnostics_before := diagnostics.len()
     targets := [SemaStaticMethodTarget]{}
     generic_owner_method := false
+    owner_param_names := [String]{}
     if program.registration_graph == .Val(graph) {
         owner_row :: sema_type_graph_nominal_row(graph, owner_symbol.id.key)
         if owner_row == .Val(row) {
             owner :: graph.modules[row.module_index].nominals[row.row]
             targets = sema_call_static_registered_targets(graph, owner, method, static_args, type_args, args, expected, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics)
             generic_owner_method = owner.generic_params.len() > 0 && static_args.len() == 0 && sema_call_static_registered_method_exists(graph, owner, method, environment, program)
+            loop param in owner.generic_params -> &owner_param_names.push(param.name)
         }
     }
     if targets.len() == 0 && program.registration_graph == None {
@@ -995,6 +996,14 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         if diagnostics.len() > diagnostics_before -> return SemaMethodSpecialCheck{handled: true, value: None}
         distinct := sema_call_try_distinct_conversion(owner_symbol, type_name, method, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if distinct.handled -> return distinct
+        // D-METAREFLECT1: inside comptime, `T.reflect()` on a declared type is
+        // that type's TypeInfo handle, the record `$name`/`$fields` read from.
+        if method == "reflect" && args.len() == 0 && type_args.len() == 0 && static_args.len() == 0 && scopes.comptime_execution_depth > 0 {
+            if sema_fact_type_info(Val(owner_symbol), type_name, environment, program) == .Val(info) {
+                folded :: sema_tree_node(sema_fact_named("TypeInfo"), TExprKind.CtLit{value: sema_fact_declared_value(info)}, span)
+                return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(folded, expected, environment, program, &diagnostics)}
+            }
+        }
         // Declared statics win; a canonical Core or compiler owner then falls back to its built-in rows.
         if !generic_owner_method && sema_expr_canonical_type_binding(type_name, scopes) {
             builtin := sema_call_try_builtin_static(type_name, owner_symbol.module_name, method, static_args, type_args, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -1002,7 +1011,8 @@ fn sema_call_try_static_method(receiver: Expr, method: String, method_span: Span
         }
         if {
             generic_owner_method -> {
-                &diagnostics.push(sema_error("E0904", method_span, "cannot infer the owner type arguments for `{type_name}.{method}`", "static method lookup needs one concrete owner type before building `StaticCall`", "provide the owner's type arguments or add argument/expected-type evidence"))
+                written :: if owner_param_names.len() > 0 -> "{type_name}<{owner_param_names.join(", ")}>" else -> "{type_name}<…>"
+                &diagnostics.push(sema_error("E0904", method_span, "`{type_name}.{method}` needs its generic receiver type here", "constructor inputs and the surrounding expected type must determine one concrete receiver type", "write the full receiver, such as `{written}.{method}(...)`"))
             }
             else -> {
                 // Rust `check_static_method_call`: a declared method with a
@@ -1097,10 +1107,17 @@ fn sema_call_distinct_numeric_row(base: Type, method: String) -> BuiltinStaticRo
     None
 }
 
-fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow) -> TNumericOp? {
-    // copy: `operation` is a payload of read parameter `row`, which keeps the original; the Val carrier owns this one
-    if row.lowering == .Numeric(operation) -> return Val(operation.copy())
+fn sema_call_distinct_numeric_operation(row: BuiltinStaticRow, line: Int) -> TNumericOp? {
+    if row.lowering == .Numeric(operation) -> return Val(sema_call_numeric_at_line(operation, line))
     None
+}
+
+// A registry numeric operation placed at its call: a checked Int-to-Float
+// crossing reports the call's line when it stops.
+fn sema_call_numeric_at_line(operation: TNumericOp, line: Int) -> TNumericOp Never! {
+    if operation == .CheckedIntToFloat(source_signed, target_f32, _) -> return TNumericOp.CheckedIntToFloat{source_signed: source_signed, target_f32: target_f32, line: line}
+    // copy: `operation` is a payload of a read registry row, which keeps the original; the returned operation owns this one
+    operation.copy()
 }
 
 // A distinct over a non-numeric base is built by its base-named conversion
@@ -1148,7 +1165,7 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
         constructed :: sema_tree_node(success, TExprKind.DistinctCtor{argument: argument}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(constructed, expected, environment, program, context, &diagnostics)}
     }
-    operation :: sema_call_distinct_numeric_operation(row) ?? return sema_call_distinct_conversion_failed()
+    operation :: sema_call_distinct_numeric_operation(row, sema_source_line_at(environment.source_segments, span) ?? 0) ?? return sema_call_distinct_conversion_failed()
     // Rust `converted_literal`: an integer literal that fits the base is
     // known at compile time, so a range type checks it here.
     literal_in_range := false
@@ -1161,6 +1178,16 @@ fn sema_call_try_distinct_conversion(owner: Symbol, display_name: String, method
                 if literal < bounds.lo || literal > bounds.hi {
                     &diagnostics.push(sema_error("E0135", argument.span, "`{literal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{literal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
                 }
+            }
+        }
+        // A float literal past the bounds can never convert either; its
+        // conversion stays fallible, as any float source's does.
+        if args[0].expr == .Float(number, _, _, raw, _) {
+            if sema_expr_is_integer(facts.base) && (number < approx(bounds.lo) || number > approx(bounds.hi)) {
+                // A whole-number literal reads as the integer it converts to.
+                text :: raw ?? "{number}"
+                written :: if text.ends_with(".0") -> text.slice(0, text.len() - 2) else -> text
+                &diagnostics.push(sema_error("E0135", argument.span, "`{written}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{written}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
             }
         }
     }

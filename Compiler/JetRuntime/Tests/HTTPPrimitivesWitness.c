@@ -1,5 +1,5 @@
-// Real Jet-object client: link with -Wl,--wrap=jet_rt_free; no provider mocks.
-// HTTPMessage.rs195-270 supplies semantic values, not native layout.
+// Real Jet-object client:; no provider mocks.
+// The Rust original supplies semantic values, not native layout.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,7 +14,7 @@ _Static_assert(sizeof(Text)==24 && offsetof(Text,capacity)==16,"E4 text24");
 _Static_assert(sizeof(Word)==8,"EncodingABI word8");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 #define DECLARE_TEXT(T) \
@@ -34,12 +34,13 @@ DECLARE_WORD(JetHTTPStatus)
 DECLARE_WORD(JetHTTPVersion)
 static struct { void *p; int64_t n,a; unsigned freed; } watched[16];
 static size_t count;
-void __wrap_jet_rt_free(void *p,int64_t n,int64_t a) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t n,int64_t a) {
     for(size_t i=0;i<count;i++) if(watched[i].p==p) {
         assert(n==watched[i].n && a==watched[i].a);
         assert(++watched[i].freed==1);
     }
-    __real_jet_rt_free(p,n,a);
 }
 static void watch(void *p,int64_t n,int64_t a) {
     assert(p && count<16);
@@ -81,6 +82,7 @@ static void invalid_version(void) {
 #define TEXT_CASE(T,S) text_case(S,jet_rt_handle_clone_##T,jet_rt_handle_drop_##T,jet_rt_handle_eq_##T,jet_rt_handle_show_##T)
 #define WORD_CASE(T,N,S) word_case(N,S,jet_rt_handle_clone_##T,jet_rt_handle_drop_##T,jet_rt_handle_eq_##T,jet_rt_handle_show_##T)
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     TEXT_CASE(JetHTTPMethod,"GET"); TEXT_CASE(JetHTTPMethod,"PURGE");
     TEXT_CASE(JetHTTPHeaderName,"X-Mixed-Case");

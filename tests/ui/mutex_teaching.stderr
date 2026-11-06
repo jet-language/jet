@@ -1,8 +1,0 @@
-Error [jet.ForeignConcurrencyPrimitive]: `Mutex` is not a Jet API; use a channel, or `Shared<T>` with `Condition`
-  --> tests/ui/mutex_teaching.jet:2:5
-    |
-  2 |     Mutex(42)
-    |     ^^^^^
- Why: Tasks pass owned values over channels; when tasks must share memory, `Shared<T>` guards the state under a lock and `Condition` coordinates predicate waits
- Fix: Create `channel<T>()` and send owned values, or write `shared value` and edit it through `guard_edit()` (a guard can `wait` on a `Condition`)
-More: jet-lang.dev/e/E0041

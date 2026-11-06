@@ -1,8 +1,8 @@
-// Authority.rs:8-54 + JetStd/MappedFile.rs:196-324. One process registry of
-// canonical path keys and live mapping counts, guarded by the runtime mutex.
-// Map56: reserved0, FD72 owner8, owned original path16, owned canonical key24,
-// read-only mapped pointer32, length40, reserved48. The registry lease is held
-// until AFTER unmap/unlock/close. Empty maps hold the same descriptor and lease.
+// One process registry of canonical path keys and live mapping counts, guarded
+// by the runtime mutex. Map56: reserved0, FD72 owner8, owned original path16,
+// owned canonical key24, read-only mapped pointer32, length40, reserved48. The
+// registry lease is held until AFTER unmap/unlock/close. Empty maps hold the
+// same descriptor and lease.
 compiler_mapped_root := I64{0}
 // runtime-init: 4 when compiler_mapped_root
 #Export(c) fn jet_rt_compiler_mapped_init() {
@@ -20,7 +20,7 @@ fn compiler_mapped_key(path: I64) -> I64 {
         at += I64{1}
     }
     // Failed canonicalize falls back to the ORIGINAL spelling (not absolute or
-    // lexical normalization), exactly as Authority.rs's PathBuf fallback does.
+    // lexical normalization), exactly PathBuf fallback does.
     name :: fd_c_path(path)
     scratch :: jet_rt_alloc(I64{48}, I64{8})
     bytes :: jet_process_path_canonicalize_raw(name, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{16}))
@@ -155,4 +155,83 @@ fn compiler_mapped_unregister(key: I64) {
 }
 #Export(c) fn jet_std_fs_map_len(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40}))) }
 #Export(c) fn jet_std_fs_map_is_empty(map: I64) -> Bool { rt_text_word(wrapping(map + I64{40})) == I64{0} }
+// Byte windows lend the read-only mapped bytes the Map56 owner holds: the
+// route writes (data, length) and IR builds the View<U8> header over them,
+// which owns nothing. Bounds are the exact Int carriers; a boxed Int lies
+// outside any mapping.
+fn compiler_mapped_bound(value: I64) -> I64 {
+    if (int_inline(value) && value >= I64{0}) -> return value
+    I64{-1}
+}
+fn compiler_mapped_text(text: I64, value: I64) -> I64 {
+    shown :: jet_rt_int_to_string(value)
+    joined :: jet_rt_string_append(text, shown)
+    jet_rt_string_drop(shown)
+    joined
+}
+fn compiler_mapped_window_error(map: I64, first: I64, separator: I64, second: I64, error: I64) -> I64 {
+    cause := jet_rt_string_clone(rt_static_text("mapped window "))
+    cause = compiler_mapped_text(cause, first)
+    cause = jet_rt_string_append(cause, separator)
+    cause = compiler_mapped_text(cause, second)
+    cause = jet_rt_string_append(cause, rt_static_text(" is outside file length "))
+    length :: jet_int_owned_from_i64(rt_text_word(wrapping(map + I64{40})))
+    cause = compiler_mapped_text(cause, length)
+    compiler_fs_error(HOST_IO_KIND_OTHER, HOST_IO_OP_READ, rt_text_word(wrapping(map + I64{16})), I64{0}, cause, error)
+}
+fn compiler_mapped_lend(map: I64, start: I64, end: I64, output: I64, length: I64) -> I64 {
+    rt_text_store(output, wrapping(rt_text_word(wrapping(map + I64{32})) + start))
+    rt_text_store(length, end - start)
+    I64{1}
+}
+// `window(start, end)`: the half-open byte range start..<end.
+#Export(c) fn jet_std_fs_map_window_view(map: I64, start: I64, end: I64, output: I64, length: I64, error: I64) -> I64 {
+    first :: compiler_mapped_bound(start)
+    last :: compiler_mapped_bound(end)
+    if (first < I64{0} || last < first || last > rt_text_word(wrapping(map + I64{40}))) -> return compiler_mapped_window_error(map, start, rt_static_text(".."), end, error)
+    compiler_mapped_lend(map, first, last, output, length)
+}
+// `window_len(offset, length)`: `count` bytes from `offset`.
+#Export(c) fn jet_std_fs_map_window_len_view(map: I64, offset: I64, count: I64, output: I64, length: I64, error: I64) -> I64 {
+    first :: compiler_mapped_bound(offset)
+    size :: compiler_mapped_bound(count)
+    total :: rt_text_word(wrapping(map + I64{40}))
+    if (first < I64{0} || size < I64{0} || first > total || size > total - first) -> return compiler_mapped_window_error(map, offset, rt_static_text(" length "), count, error)
+    compiler_mapped_lend(map, first, first + size, output, length)
+}
+// The index of the first LF at or after `at`, or `total`.
+fn compiler_mapped_newline(base: I64, at: I64, total: I64) -> I64 {
+    cursor := at
+    loop cursor < total && rt_text_byte(wrapping(base + cursor)) != (I64{10}) {
+        cursor += I64{1}
+    }
+    cursor
+}
+// `lines()`: one 24-byte View<U8> header (length, 0, data) per line, the LF
+// and a CR before it excluded; a final unterminated line counts, an empty
+// trailing one does not. The List buffer is exactly count*24 bytes.
+#Export(c) fn jet_std_fs_map_lines_view(map: I64, output: I64) -> I64 {
+    base :: rt_text_word(wrapping(map + I64{32}))
+    total :: rt_text_word(wrapping(map + I64{40}))
+    count := I64{0}
+    at := I64{0}
+    loop at < total {
+        count += I64{1}
+        at = compiler_mapped_newline(base, at, total) + I64{1}
+    }
+    data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{24}, I64{8})
+    slot := data
+    at = I64{0}
+    loop at < total {
+        newline :: compiler_mapped_newline(base, at, total)
+        end :: if (newline > at && rt_text_byte(wrapping(base + newline - I64{1})) == I64{13}) -> newline - I64{1} else -> newline
+        rt_text_store(slot, end - at)
+        rt_text_store(wrapping(slot + I64{8}), I64{0})
+        rt_text_store(wrapping(slot + I64{16}), wrapping(base + at))
+        slot = wrapping(slot + I64{24})
+        at = newline + I64{1}
+    }
+    rt_text_store(output, data)
+    count
+}
 #Export(c) fn jet_rt_record_get_jet_mapped_file_path(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(wrapping(map + I64{16}))) }

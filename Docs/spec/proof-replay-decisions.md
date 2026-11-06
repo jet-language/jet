@@ -534,8 +534,9 @@ keeps unknown outside the solver's authority rather than disguising it as a
 compile result.
 
 **Consequence.** Formula bytes are one A-canonical JSON object plus LF with
-normalized affine inequalities. Terms combine and sort by UTF-8 variable ID;
-Boolean nodes flatten, deduplicate, and sort by canonical bytes; integer
+normalized affine inequalities. Terms combine and sort by UTF-8 variable ID.
+Boolean nodes flatten and deduplicate; atoms sort by the canonical bytes of
+their terms array, then by constant as a number, then by relation. Integer
 comparisons normalize to `le`, `eq`, or `ne`. The typed IR permits integer
 literals, affine addition/subtraction, literal multiplication, comparisons,
 and Boolean `and`/`or`/`not`. Variable multiplication, division, modulo,
@@ -568,9 +569,13 @@ no complete ProofReport or `.jetproof` and retains no partial proof.
 
 **Rule.** Backends return `proved`, `disproved`, or `unknown`. `proved` requires
 a certificate in solver evidence and an independent standard-library checker
-against the exact normalized obligation. Native-Presburger certificates use
-`assumption`, `and_intro`, `linear_contradiction`, and `split` nodes; the
-checker validates indexes, arithmetic, branch coverage, and every leaf.
+against the exact normalized obligation. A Native-Presburger certificate is
+`{"branches":[…],"kind":"branches"}`: one `{branchIndex, proof}` per branch of
+`assumptions && !claim`, in order. A proof is a `linear_contradiction` with
+`terms` (each an `inequalityIndex` and a positive `multiplier`) or a `split`
+on a `variable` at a `pivot` with `left` and `right` proofs. The checker
+rebuilds the branches and validates indexes, arithmetic, split coverage, and
+every leaf.
 Native-finite certificates carry `domainManifest`, `assignmentCount`, and
 `rollingResultSha256`. `certificateSha256` hashes A-canonical certificate JSON
 plus LF. `disproved` requires a concrete integer assignment that satisfies all
@@ -594,27 +599,40 @@ precedence. The owner copy remains verbatim:
 - Why `'these values satisfy every assumption but make the claim false: {values}'`;
 - Fix `'{origin-specific imperative fix}'`.
 
-The exact ratified render remains:
+The exact ratified render remains, with the canonical diagnostic
+constructor's sentence case and code quoted in backticks, as in every other
+diagnostic:
 
 ```text
-Error [jet.SolverCounterexample]: solver found a counterexample to function postcondition add_fee
-Why: cents = 1 and result = 1 satisfy the precondition but make result > cents false
-Fix: change add_fee so every return is greater than cents, or correct the #Post claim
+Error [jet.SolverCounterexample]: Solver found a counterexample to function postcondition `add_fee`
+Why: `cents = 1` and `result = 1` satisfy the precondition but make `result > cents` false
+Fix: Change `add_fee` so every return is greater than `cents`, or correct the `#Post` claim
 ```
 
 The diagnostic requires its registry row, exact CLI and UI snapshots,
 `jet explain`, generated reference, and I4 coverage. Raw backend text never
 reaches users. (D-PROVE-SOLVER1=A)
 
-The refinements fixture keeps formula hash
-`fef21cce571b7291308098d3395817087c4e7c7ded116b7fb70eec4d439813ba`,
-obligation ID
-`349a5f450e99f71374c2ce380fcaad6e9e41f110bca05b41180ac75bc4c6b351`, and
-solver evidence ID
-`37eb859ca3cb83056113d8a2d2a27624b1d35cd096b54ec469ae132c3f6a4339`.
-The native backend is `native-presburger`, version `1`, and the pinned proof
-uses `certificateSha256`
-`1daaaa1b6476b341d8e5a2682b9a13a632ec828f2a3c94a4596ab59ca8216454`.
+The refinements fixture is `fixture/refinements.jet`:
+
+```jet
+Index4 :: distinct Int(0..3)
+
+fn pick(xs: [String#4], i: Index4) -> String {
+    xs[i]
+}
+```
+
+Its one obligation is `fixed_index_bounds` at `xs[i]` (line 4, column 5). It
+keeps formula hash
+`fef21cce571b7291308098d3395817087c4e7c7ded116b7fb70eec4d439813ba` and
+obligation ID `528f3ade991c4e06bc2fff2029af670241162d3a1b14d42f2d4df3a8707010af`. The native backend is `native-presburger`,
+version `1`, and the pinned proof uses `certificateSha256`
+`1daaaa1b6476b341d8e5a2682b9a13a632ec828f2a3c94a4596ab59ca8216454`. The
+solver evidence ID is `jet prove`'s evidence ID of the row: target input,
+`solver`, member path, span text, and obligation ID. The case
+`tests/cases/prove/prove_solver_pins_the_fixed_index_proof.case` pins all
+three hashes.
 
 ```jet
 # src/bad_fee.jet

@@ -5,7 +5,8 @@
 
 fn cli_test_criterion_root() -[FS, Env]> String {
     home :: sys.get("HOME") ?? panic("HOME must be set")
-    root :: files.join(home, ".cache/jet-dev/scratch/jetpack-criterion1-root")
+    scratch :: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev"))
+    root :: files.join(scratch, "jetpack-criterion1-root")
     files.create_dir_all(root) ?? panic("create criterion root")
     root
 }

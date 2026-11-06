@@ -1,13 +1,12 @@
-// Native-private flat records. All offsets live in DataABI.jet.
-// Seed declaration/derive cites: DataPlot.rs:409-413,585-593,834-840,
-// 885-890,1046-1052,1080-1087,1181-1187. CAbiRoutes record constructors
-// clone borrowed text; getters own text clones; sequence reads lend.
-// Axis.ticks: CAbiRoutes.rs:9759-9766; SourceFacts.rows:10097-10116.
-// Both Rust fields are i64: raw private words, checked Int conversion only
-// at constructors, fresh exact Int owners only at getters; never Int drops.
+// Native-private flat records. All offsets live in DataABI.jet. Seed
+// declaration/derive cites. CAbiRoutes record constructors clone borrowed text;
+// getters own text clones; sequence reads lend. Axis.ticks;
+// SourceFacts.rows:10097-10116. Both Rust fields are i64: raw private words,
+// checked Int conversion only at constructors, fresh exact Int owners only at
+// getters; never Int drops.
 fn data_plot_flag(value: U8) -> I64 { if (value == U8{0}) -> I64{0} else -> I64{1} }
 fn data_plot_tag(value: I64, count: I64) -> I64 {
-    // CAbiRoutes.rs:11-13, ctor range_stop uses the shared arithmetic stop.
+    // Ctor range_stop uses the shared arithmetic stop.
     if (value < I64{0} || value >= count) -> trap_native_index_range_stop()
     value
 }

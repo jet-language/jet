@@ -6,7 +6,7 @@ test('process-edge literals preserve exact bytes, including signed UTF-8 words',
     assert.equal(trapLiteral('trap_msg_prelude_end').toString('utf8'), '`\n  --> <core.prelude>:0\n');
     assert.equal(trapLiteral('trap_msg_todo_expected').toString('utf8'), ' — expected ');
     assert.equal(schedulerLiteral('scheduler_msg_cancelled').toString('utf8'), 'task cancelled at a cooperative wait point');
-    assert.equal(schedulerLiteral('scheduler_msg_deadline_tail').toString('utf8'), '\n Why: This wait point observed the task context deadline from `#Context(deadline: …)`\n Fix: Raise the deadline budget or shorten the work before this wait point\nMore: jet-lang.dev/e/E3003');
+    assert.equal(schedulerLiteral('scheduler_msg_deadline_tail').toString('utf8'), '`.\n Why: A wait/IO point observed an active `#Context(deadline: …)` budget and the remaining time reached zero before the operation completed.\n Fix: Raise the deadline budget, shorten the work before the wait point, or remove/adjust the ambient deadline for this scope.\nMore: jet-lang.dev/e/E3003');
 });
 
 test('a missing generated report literal cannot become an empty golden', () => {

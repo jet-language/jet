@@ -211,7 +211,7 @@ fn forbidden(name: String) -> Bool { re.is_match(Regex{"_chk(?:_|$)"}, name) || 
         imports :: loop line in test_command(["nm", "-u", "--format=posix", object.copy()]).split("\n").to_list() if line != "" -> re.split(Regex{"\s+"}, line)[0]
         loop symbol in imports {
             if forbidden(symbol) -> &problems.push("{name}: forbidden import {symbol}")
-            if !platform.contains(symbol) && !provider.contains(symbol) && symbol != "__real_jet_rt_free" -> &problems.push("{name}: missing import {symbol}")
+            if !platform.contains(symbol) && !provider.contains(symbol) -> &problems.push("{name}: missing import {symbol}")
         }
     }
     files.rmtree(out) ?? panic("cannot remove {out}")

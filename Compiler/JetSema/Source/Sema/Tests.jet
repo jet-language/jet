@@ -12,9 +12,8 @@ use jet_foundation.[
     type_name,
 ]
 
-// (Rust BodyCheck.rs `property_param_generatable`): the parameter
-// types the property-test runner can synthesize inputs for: the scalar value
-// types plus `[T]`, `T?` and fixed lists of a generatable element.
+// The parameter types the property-test runner can synthesize inputs for: the
+// scalar value types plus `[T]`, `T?` and fixed lists of a generatable element.
 fn sema_property_param_generatable(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
@@ -62,8 +61,8 @@ fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, pr
     key := checked_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
-    // Rust Validation.rs names the synthetic body `__test_<name>`; a runtime
-    // stop inside the test reports that name (`in __test_<name>`).
+    // Names the synthetic body `__test_<name>`. A runtime stop inside the test
+    // names it `test "<name>"` (JetIR ir_build_tests).
     temporary_name := "{sema_test_synthetic_prefix()}{test.name ?? "anonymous"}"
     synthetic := ast_func(temporary_name, test.name_span, test.span)
     synthetic.params = test.params

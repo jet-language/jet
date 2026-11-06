@@ -51,7 +51,8 @@ fn inspection_root_fixture_missing(start: String) {
     cli_files.create_dir_all("{root}/manifest/sub") ?? panic("manifest fixture")
     cli_files.create_dir_all("{root}/inline/sub") ?? panic("inline fixture")
     cli_files.create_dir_all("{root}/missing/sub") ?? panic("missing fixture")
-    cli_files.write("{root}/manifest/package.jet", "package {{ name: \"manifest\" version: \"0.0.0\" edition: \"2026\" outputs: {{}} }}\n") ?? panic("manifest")
+    // package.jet holds bare manifest fields; `package {…}` is the inline form in a .jet file.
+    cli_files.write("{root}/manifest/package.jet", "name: \"manifest\"\nversion: \"0.0.0\"\nedition: \"2026\"\n") ?? panic("manifest")
     inspection_root_fixture_require_root("{root}/manifest/sub", "{root}/manifest")
     cli_files.write("{root}/inline/run.jet", "package {{ name: \"inline\" version: \"0.0.0\" edition: \"2026\" outputs: {{ app: .Executable{{entry: run}} }} }}\nfn run() {{}}\n") ?? panic("inline Package")
     inspection_root_fixture_require_root("{root}/inline/sub", "{root}/inline")

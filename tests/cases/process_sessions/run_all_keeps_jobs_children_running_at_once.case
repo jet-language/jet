@@ -1,0 +1,16 @@
+# process.run_all keeps up to `jobs` children running at once (#6583): eight
+# sleeping children under jobs 8 take about one sleep on O0 (jet run) and O2
+# (--release), and jobs 2 runs them in waves of two.
+requires: os:unix
+requires: tool:sleep
+fixture: run_all_keeps_jobs_children_running_at_once.fixture
+step: jet run run.jet
+exit: 0
+stdout: = run_all_keeps_jobs_children_running_at_once.out
+stderr: empty
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = run_all_keeps_jobs_children_running_at_once.out
+stderr: empty

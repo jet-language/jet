@@ -1,4 +1,3 @@
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1
 use {
     core.files.[OSPath]
     std.fmt.[format]
@@ -24,58 +23,41 @@ use {
     jet_foundation.[Diagnostic]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:43
 GRAPH_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:44
 // EDIT_SCHEMA_VERSION is owned by EditTransaction; callers import it there.
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:45
-DEBUG_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:46
+// DEBUG_SCHEMA_VERSION is owned by DebugSourceGit.
 QUERY_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:47
 ACTION_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:48
 PROJECT_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:49
 CORE_CATALOG_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:50
 PROOF_SCHEMA_VERSION :: U32{1}
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:51
 // Generated Canvas catalogs may exceed the default untrusted-input ceiling.
 CANVAS_PAYLOAD_LIMIT :: Usize{16 * 1024 * 1024}
 
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:61
 fn canvas_machine_output(action: String, ok: Bool, payload: String) -> String {
     payload := payload.trim() // #4303
     value :: parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT).ok().and_then((tree) -> StatusValue.from_data_tree(tree).ok()).unwrap_or_else(() -> StatusValue.String(payload.to_string()))
     StatusEnvelope.new(action, ok).with_field("canvas", value).json()
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:72
 fn canvas_machine_success(action: String, payload: String) -> String { canvas_machine_output(action, true, payload) }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:76
 fn canvas_machine_error(action: String, payload: String) -> String { canvas_machine_output(action, false, payload) }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:81
 fn graph_json_for_file(path: OSPath) -> String [Diagnostic]! {
     project_file(path).map((p) -> canvas_machine_success("canvas.graph", p.json))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:86
 fn graph_json_error_for_file(path: OSPath, diags: [Diagnostic]) -> String {
     src :: read_source_without_symlinks(path).unwrap_or_default()
     canvas_machine_error("canvas.graph", query_error("diagnostic", render_all(path.display().to_string(), src, diags)))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:98
 fn graph_json_for_entry_source(entry: OSPath, source_id: String?) -> String Err! {
     path :: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.graph", error))?
     graph_json_for_file(path).map_err((diags) -> graph_json_error_for_file(path, diags))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:109
 fn graph_json_for_entry_source_with_live_pid(entry: OSPath, source_id: String?, pid: U32) -> String Err! {
     snapshot :: LiveInspect.read(pid).map_err((message) -> canvas_machine_error("canvas.graph", query_error("live", message)))?
     runtime_events :: runtime_events_json(snapshot).map_err((error) -> canvas_machine_error("canvas.graph", error))?
     path :: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.graph", error))?
     project_file_with_runtime(path, .Some(runtime_events)).map((projection) -> canvas_machine_success("canvas.graph", projection.json)).map_err((diags) -> graph_json_error_for_file(path, diags))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:125
 fn runtime_events_json(snapshot: String) -> String Err! {
     rendered :: render_event_observations(snapshot).map_err((message) -> query_error("live", message))?
     events := [String]{}
@@ -87,11 +69,9 @@ fn runtime_events_json(snapshot: String) -> String Err! {
     }
     .Ok("{{\"source_truth\":\"executed_runtime_observations\",\"events\":[{events.join(",")}]}}")
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:169
 fn project_path_for_source_id(entry: OSPath, source_id: String) -> OSPath? {
     run_compiler_work(() -> project_path_for_source_id_on_compiler_stack(entry, source_id))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:176
 fn project_path_for_source_id_on_compiler_stack(entry: OSPath, source_id: String) -> OSPath? {
     wanted :: clean_project_rel_path(source_id).ok()?
     if OSPath.new(wanted).extension().and_then((e) -> e.to_str()) != .Some(Syntax.FILE_EXT) -> return .None
@@ -104,12 +84,10 @@ fn project_path_for_source_id_on_compiler_stack(entry: OSPath, source_id: String
     if candidate.is_file() && candidate.extension().and_then((e) -> e.to_str()) == .Some(.FILE_EXT) && validate_project_path(ctx.project_root, candidate, wanted).is_ok() && project_source_roots(ctx).iter().any((root) -> canonical_path(candidate).starts_with(canonical_path(root))) && ctx.parts.should_index(candidate) -> return .Some(candidate)
     .None
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:205
 fn resolve_entry_source_path(entry: OSPath, source_id: String?) -> OSPath Err! {
     id :: source_id ?? return .Ok(entry.to_path_buf())
     project_path_for_source_id(entry, id).ok_or_else(() -> query_error("not_found", "Canvas source_id must name a projected Jet source file"))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:217
 fn project_source_roots(ctx: ProjectContext) -> [OSPath] {
     if ctx.workspace_root == .Val(workspace_root) {
         if WorkspaceFile.load_checked(workspace_root) == .Some(.Ok(snapshot)) -> return snapshot.plan.members.into_iter().map((member) -> workspace_root.join(member.path)).collect()
@@ -118,7 +96,6 @@ fn project_source_roots(ctx: ProjectContext) -> [OSPath] {
     if ctx.ecosystem_root == .Val(root) -> return [root]
     [ctx.entry_path.parent().unwrap_or_else(() -> OSPath.new(".")).to_path_buf()]
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:241
 fn project_capabilities_json(packages: String, targets: String, environment: &EnvProjectJson) -> String {
     target_text :: "{packages}{targets}".to_ascii_lowercase()
     service :: !environment.services.is_empty() || target_text.contains("\"kind\":\"service\"") || target_text.contains("\"target\":\"service\"")
@@ -134,12 +111,10 @@ fn project_capabilities_json(packages: String, targets: String, environment: &En
     if designer -> capabilities.push("\"designer\":true")
     "{{{capabilities.join(",")}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:296
 fn project_json_for_entry(path: OSPath) -> String {
     payload :: run_compiler_work(() -> project_json_for_entry_inner(path))
     canvas_machine_success("canvas.project", payload)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:303
 fn project_json_for_entry_inner(path: OSPath) -> String {
     ctx :: project_context_for_entry(path)
     entry_rel :: rel_path(ctx.project_root, path)
@@ -159,11 +134,9 @@ fn project_json_for_entry_inner(path: OSPath) -> String {
     mode :: if ctx.workspace_root.is_some() { "workspace" } else if ctx.manifest_root.is_some() || ctx.ecosystem_root.is_some() { "package" } else { "single_file" }
     "{{\"protocol\":\"jet.canvas.project\",\"schema_version\":{PROJECT_SCHEMA_VERSION},\"project_root\":{json_str(ctx.project_root.display().to_string())},\"project_revision\":{json_str(ctx.project_revision)},\"entry\":{json_str(entry_rel)},\"mode\":{json_str(mode)},\"capabilities\":{capabilities_json},\"workspace\":{workspace_json},\"packages\":[{packages_json}],\"targets\":[{targets_json}],\"outputs\":[{targets_json}],\"envs\":[{env_projection.envs}],\"services\":[{env_projection.services}],\"files\":[{files_json}],\"parts\":[{parts_json}],\"part_conflicts\":[{part_conflicts_json}],\"locks\":[{locks_json}],\"diagnostics\":[{diagnostics}],\"source_control\":{{\"truth\":\"git-text\"}},\"state_policy\":{{\"semantic\":\"source\",\"local\":[\"tabs\",\"viewport\",\"selection\",\"breakpoints\",\"watches\",\"comment_boxes\",\"staged_nodes\"],\"shared_visual\":\"source-anchored-comments\"}}}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:411
 fn apply_project_transaction_json(path: OSPath, request: String) -> String Err! {
     run_compiler_work(() -> apply_project_transaction_json_inner(path, request)).map((payload) -> canvas_machine_success("canvas.project.edit", payload)).map_err((error) -> canvas_machine_error("canvas.project.edit", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:417
 fn apply_project_transaction_json_inner(path: OSPath, request: String) -> String Err! {
     ctx :: project_context_for_entry(path)
     if ctx.authority_diagnostic == .Val(diagnostic) -> return .Err(project_edit_error("stale", diagnostic.what))
@@ -187,11 +160,9 @@ fn apply_project_transaction_json_inner(path: OSPath, request: String) -> String
         _ -> .Err(project_edit_error("unsupported", "unknown Canvas project transaction operation"))
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:457
 fn query_json_for_file(path: OSPath, request: String) -> String Err! {
     run_compiler_work(() -> query_json_for_file_inner(path, request)).map((payload) -> canvas_machine_success("canvas.query", payload)).map_err((error) -> canvas_machine_error("canvas.query", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:463
 fn query_json_for_file_inner(path: OSPath, request: String) -> String Err! {
     src :: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
     revision :: required_query_string(request, "revision")?
@@ -218,11 +189,9 @@ fn query_json_for_file_inner(path: OSPath, request: String) -> String Err! {
         _ -> .Err(query_error("unsupported", "unknown Canvas query operation"))
     }
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:507
 fn query_json_for_entry(entry: OSPath, request: String) -> String Err! {
     run_compiler_work(() -> query_json_for_entry_inner(entry, request)).map((payload) -> canvas_machine_success("canvas.query", payload)).map_err((error) -> canvas_machine_error("canvas.query", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:513
 fn query_json_for_entry_inner(entry: OSPath, request: String) -> String Err! {
     source_id :: json_string_field(request, "source_id")
     path :: resolve_entry_source_path(entry, source_id)?
@@ -253,7 +222,6 @@ fn query_json_for_entry_inner(entry: OSPath, request: String) -> String Err! {
     }
     query_json_for_file_inner(path, request)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:588
 fn core_catalog_json_for_entry(entry: OSPath, query: String) -> String Err! {
     result :: (() -> {
         path :: resolve_entry_source_path(entry, .None)?
@@ -262,12 +230,10 @@ fn core_catalog_json_for_entry(entry: OSPath, query: String) -> String Err! {
     })()
     result.map((payload) -> canvas_machine_success("canvas.core_catalog", payload)).map_err((error) -> canvas_machine_error("canvas.core_catalog", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:601
 fn source_control_json_for_file(path: OSPath) -> String {
     payload :: source_control_json_for_file_inner(path)
     canvas_machine_success("canvas.source_control", payload)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:606
 fn source_control_json_for_file_inner(path: OSPath) -> String {
     src :: read_source_without_symlinks(path).unwrap_or_default()
     semantic_ops :: semantic_ops_json(path, src)
@@ -281,23 +247,19 @@ fn source_control_json_for_file_inner(path: OSPath) -> String {
     dirty :: !status.trim().is_empty() || !diff.trim().is_empty()
     "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{json_str(source_revision(src))},\"available\":true,\"dirty\":{if dirty { "true" } else { "false" }},\"status\":{json_str(status.trim())},\"diff\":{json_str(diff)},\"history\":[{history}],\"semantic_ops\":[{semantic_ops}]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:646
 fn semantic_ops_json(path: OSPath, source: String) -> String {
     source_hash :: SHA256.sha256_hex(source.as_bytes())
     semantic_ops_for_file(path, source_hash).iter().map(semantic_op_json).collect().join(",")
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:655
 fn semantic_op_json(op: SemanticOp) -> String {
     optional :: (value: String?) -> value.map(json_str).unwrap_or("null")
     targets :: op.targets.iter().map((target) -> "{{\"stable_id\":{json_str(target.stable_id)},\"before\":{json_str(target.before)},\"after\":{json_str(target.after)},\"kind\":{json_str(target.kind)},\"module_path\":{json_str(target.module_path)}}}").collect().join(",")
     "{{\"kind\":{json_str(op.kind)},\"rule_id\":{optional(op.rule_id)},\"from\":{optional(op.from)},\"to\":{optional(op.to)},\"node\":{optional(op.node)},\"match\":{optional(op.match_template)},\"replace\":{optional(op.replace_template)},\"targets\":[{targets}]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:691
 fn source_control_json_for_entry(path: OSPath) -> String {
     payload :: run_compiler_work(() -> source_control_json_for_entry_inner(path))
     canvas_machine_success("canvas.source_control", payload)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:696
 fn source_control_json_for_entry_inner(path: OSPath) -> String {
     ctx :: project_context_for_entry(path)
     root :: git_root(path)
@@ -331,15 +293,12 @@ fn source_control_json_for_entry_inner(path: OSPath) -> String {
     }).unwrap_or_default().lines().map(json_str).collect().join(",")
     "{{\"protocol\":\"jet.canvas.source_control\",\"schema_version\":1,\"ok\":true,\"revision\":{json_str(source_revision(entry_src))},\"project_revision\":{json_str(ctx.project_revision)},\"project_root\":{json_str(ctx.project_root.display().to_string())},\"available\":{if root.is_some() { "true" } else { "false" }},\"dirty\":{if dirty_files > 0 { "true" } else { "false" }},\"dirty_files\":{dirty_files},\"status\":{json_str(statuses.join("\n"))},\"diff\":{json_str("")},\"history\":[{history}],\"files\":[{files}]}}"
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:775
 fn proof_json_for_entry(entry: OSPath, source_id: String?) -> String Err! {
     proof_json_for_entry_with_receipt(entry, source_id, .None)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:779
 fn proof_json_for_entry_with_receipt(entry: OSPath, source_id: String?, command_receipt: String?) -> String Err! {
     proof_json_for_entry_with_receipt_inner(entry, source_id, command_receipt).map((payload) -> canvas_machine_success("canvas.proof", payload)).map_err((error) -> canvas_machine_error("canvas.proof", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:789
 fn proof_json_for_entry_with_receipt_inner(entry: OSPath, source_id: String?, command_receipt: String?) -> String Err! {
     path :: resolve_entry_source_path(entry, source_id)?
     src :: read_source_without_symlinks(path).map_err((e) -> query_error("io", e.to_string()))?
@@ -374,11 +333,9 @@ fn proof_json_for_entry_with_receipt_inner(entry: OSPath, source_id: String?, co
     budget_rejected :: budgets.rejected.iter().map(json_str).collect().join(",")
     .Ok("{{\"protocol\":\"jet.canvas.proof\",\"schema_version\":{PROOF_SCHEMA_VERSION},\"ok\":true,\"source_id\":{json_str(source_label)},\"source_path\":{json_str(path.display().to_string())},\"revision\":{json_str(revision)},\"check\":{check},\"source_control\":{{\"truth\":\"git-text\",\"available\":{git_available},\"dirty\":{git_dirty},\"status\":{json_str(git_status)}}},\"debug\":{{\"state\":\"local-only\",\"persistence\":\"local-source-span\"}},\"command_receipts\":{command_receipts},\"budget_reports\":{{\"mode\":\"read_only\",\"reports\":[{budget_reports}],\"rejected\":[{budget_rejected}]}},\"proof\":{proof}}}")
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:894
 fn command_receipt_json_for_entry(entry: OSPath, request: String) -> String Err! {
     command_receipt_json_for_entry_inner(entry, request).map((payload) -> canvas_machine_success("canvas.command_receipt", payload)).map_err((error) -> canvas_machine_error("canvas.command_receipt", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:900
 fn command_receipt_json_for_entry_inner(entry: OSPath, request: String) -> String Err! {
     source_id :: json_string_field(request, "source_id")
     source_path :: resolve_entry_source_path(entry, source_id)?
@@ -431,7 +388,6 @@ fn command_receipt_json_for_entry_inner(entry: OSPath, request: String) -> Strin
     command :: display.iter().map(json_str).collect().join(",")
     .Ok("{{\"protocol\":\"jet.canvas.command_receipt\",\"schema_version\":1,\"ok\":true,\"action_id\":{json_str(action_id)},\"title\":{json_str(label)},\"source_id\":{json_str(source_label)},\"revision\":{json_str(revision)},\"checked_revision\":{json_str(check_revision)},\"command\":[{command}],\"writes\":{json_str(writes)},\"success\":{if success { "true" } else { "false" }},\"exit_code\":{exit_code.map((c) -> c.to_string()).unwrap_or("null")},\"elapsed_ms\":{elapsed_ms},\"stdout\":{json_str(stdout)},\"stderr\":{json_str(stderr)},\"diagnostics\":[{diagnostics}]}}")
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1029
 fn run_jet_command(cwd: OSPath, args: [String]) -> Output Err! {
     if current_exe() == .Ok(exe) {
         command := Command.new(exe) // GATE #4494
@@ -446,11 +402,9 @@ fn run_jet_command(cwd: OSPath, args: [String]) -> Output Err! {
     command.args(args).current_dir(cwd)
     command_output_bounded(&command, MAX_CHILD_OUTPUT_BYTES).map_err((error) -> query_error("resource_limit", error.to_string()))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1046
 fn apply_transaction_json(path: OSPath, request: String) -> String Err! {
     apply_transaction_json_inner(path, request).map((payload) -> canvas_machine_success("canvas.edit", payload)).map_err((error) -> canvas_machine_error("canvas.edit", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1052
 fn apply_transaction_json_inner(path: OSPath, request: String) -> String Err! {
     path :: if {
         json_string_field(request, "source_id") == .Val(source_id) -> {
@@ -460,33 +414,27 @@ fn apply_transaction_json_inner(path: OSPath, request: String) -> String Err! {
     }
     edit_transaction.apply_transaction_json(path, request)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1066
 fn debug_session_json_for_entry(entry: OSPath, request: String) -> String Err! {
     sessions :: DebugSessions.one_shot()
     debug_session_json_for_entry_with_sessions(entry, request, sessions)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1074
 fn debug_session_json_for_entry_with_sessions(entry: OSPath, request: String, sessions: &DebugSessions) -> String Err! {
     source_id :: json_string_field(request, "source_id")
     path :: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.debug", error))?
     debug_session_json_for_file_with_sessions(path, request, sessions)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1088
 fn debug_session_json_for_entry_with_sessions_and_host(entry: OSPath, request: String, sessions: &DebugSessions, host: &PausedEvaluateHost) -> String Err! {
     source_id :: json_string_field(request, "source_id")
     path :: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.debug", error))?
     debug_session_json_for_file_with_sessions_inner(path, request, sessions, .Some(host)).map((payload) -> canvas_machine_success("canvas.debug", payload)).map_err((error) -> canvas_machine_error("canvas.debug", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1106
 fn debug_session_json_for_file(path: OSPath, request: String) -> String Err! {
     sessions :: DebugSessions.one_shot()
     debug_session_json_for_file_with_sessions(path, request, sessions)
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1111
 fn debug_session_json_for_file_with_sessions(path: OSPath, request: String, sessions: &DebugSessions) -> String Err! {
     debug_session_json_for_file_with_sessions_inner(path, request, sessions, .None).map((payload) -> canvas_machine_success("canvas.debug", payload)).map_err((error) -> canvas_machine_error("canvas.debug", error))
 }
-// Rust: crates/jet-devserver/src/Canvas/schema_api.rs:1121
 fn debug_session_json_for_file_with_sessions_inner(path: OSPath, request: String, sessions: &DebugSessions, paused_evaluate: (&PausedEvaluateHost)?) -> String Err! {
     paused_evaluate := paused_evaluate
     src :: if read_source_without_symlinks(path) is {

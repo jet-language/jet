@@ -1,10 +1,10 @@
-// crates/jet-semindex/src/JSON.rs:28–520: json_instance/json_output/
-// json_definition_fact, package_facts_json/workspace_overlay_policy_json and
-// their complete typed payload/authority/service/environment/config/member
-// helper family. PackageModel is the actual Jetpack aggregate, not a local
-// model, resolver, or JSON parser. Presentation preserves Rust field order,
-// explicit nulls, raw number spelling, authored paths and vector duplicates.
-// S18 alone owns json_strings/json_string_array (145–154) and json_span.
+// json_instance/json_output/ json_definition_fact,
+// package_facts_json/workspace_overlay_policy_json and their complete typed
+// payload/authority/service/environment/config/member helper family.
+// PackageModel is the actual Jetpack aggregate, not a local model, resolver, or
+// JSON parser. Presentation preserves Rust field order, explicit nulls, raw
+// number spelling, authored paths and vector duplicates. S18 alone owns
+// json_strings/json_string_array (145–154) and json_span.
 use {
     jet_foundation.[foundation_json_quote]
     semindex_package_text :: core.text
@@ -233,9 +233,9 @@ fn workspace_overlay_policy_json(policy: OverlayPolicy) -> String Never! {
     "{{\"allow_unfree\":{semindex_json_string_array(policy.allow_unfree)},\"build_deny\":{semindex_json_string_array(policy.build_deny)},\"build_grants\":[{grants.join(",")}],\"overlays\":[{overlays.join(",")}]}}"
 }
 
-// Typed counterpart of the full JSON.rs:28–520 helper family. Fixed schema
-// keys retain source order. Dynamic object keys use canonical insert, so
-// duplicate/non-printable keys refuse instead of collapsing into a Core map.
+// Typed counterpart of the full helper family. Fixed schema keys retain source
+// order. Dynamic object keys use canonical insert, so duplicate/non-printable
+// keys refuse instead of collapsing into a Core map.
 fn semindex_status_instance(value: InstanceFact) -> StatusValue Never! {
     provenance :: loop origins in value.argument_provenance -> semindex_status_strings(origins)
     applications :: loop application in value.applications -> StatusValue.Object(StatusFields.new()
@@ -272,9 +272,9 @@ fn semindex_status_output_payload(value: OutputPayload) -> StatusValue ReportErr
     if value == {
         .Null -> Ok(StatusValue.Null)
         .Bool(flag) -> Ok(StatusValue.Bool(flag))
-        // Rust JSON.rs:1116 parses the raw payload at the typed envelope
-        // boundary: canonical finite-f64 rendering and bounded-i64 refusal.
-        // The raw S17 presentation helper above remains lexical.
+        // The Rust original parses the raw payload at the typed envelope
+        // boundary: canonical finite-f64 rendering and bounded-i64 refusal. The
+        // raw S17 presentation helper above remains lexical.
         .Number(text) -> status_value_from_json_number_atom(text)
         .String(text) -> Ok(StatusValue.String(text))
         .Array(values) -> {

@@ -16,7 +16,7 @@ import { parseRuntimeExports, runtimeLifecycleList } from "../../../Tools/agent/
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, mode] = process.argv.slice(2);
 if (["rust-link", "rust-run"].includes(mode)) {
-  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: `${mode}: Rust-spawned attachment fixture (thread-rust-fixture.rs against the Rust native-pack rlib) retired (owner #38/#59; Tower #4923); no rustc invoked; no native replacement covers it` }));
+  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: `${mode}: Rust-spawned attachment fixture (a Rust thread fixture against the Rust native-pack rlib) retired (owner #38/#59; Tower #4923); no rustc invoked; no native replacement covers it` }));
   process.exit(2);
 }
 if (!output || !["assemble", "lower", "audit", "link", "run", "shared-link", "shared-run"].includes(mode)) {

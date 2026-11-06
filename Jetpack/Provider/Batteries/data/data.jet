@@ -52,7 +52,7 @@ use {
     }
 
     // Parse typed rows through the canonical core.data reader.
-    fn load_csv(text: String) -> [Observation] [FieldError]! {
+    fn load_csv(text: String) -> [Observation] DataError! {
         return core_data.csv<Observation>(text)
     }
 
@@ -164,13 +164,13 @@ use {
     // data, so the battery does not report a fabricated provider result.
     fn png_chunk(kind: [U8], payload: [U8]) -> [U8] {
         chunk := Bytes.new()
-        chunk.write_u32_be(U32{payload.len()})
-        chunk.write_bytes(kind)
-        chunk.write_bytes(payload)
+        &chunk.write_u32_be(U32{payload.len()})
+        &chunk.write_bytes(kind)
+        &chunk.write_bytes(payload)
         checksum_input := Bytes.new()
-        checksum_input.write_bytes(kind)
-        checksum_input.write_bytes(payload)
-        chunk.write_u32_be(U32{archive.crc32(checksum_input.to_bytes())})
+        &checksum_input.write_bytes(kind)
+        &checksum_input.write_bytes(payload)
+        &chunk.write_u32_be(U32{archive.crc32(checksum_input.to_bytes())})
         return chunk.to_bytes()
     }
 
@@ -195,26 +195,26 @@ use {
     // PNG compression preserves the archive codec's typed failure contract.
     fn plot_png(groups: [Group<String, Int>]) -> [U8] archive.ArchiveError! {
         ihdr := Bytes.new()
-        ihdr.write_u32_be(U32{64})
-        ihdr.write_u32_be(U32{32})
-        ihdr.write_u8(U8{8})
-        ihdr.write_u8(U8{0})
-        ihdr.write_u8(U8{0})
-        ihdr.write_u8(U8{0})
-        ihdr.write_u8(U8{0})
+        &ihdr.write_u32_be(U32{64})
+        &ihdr.write_u32_be(U32{32})
+        &ihdr.write_u8(U8{8})
+        &ihdr.write_u8(U8{0})
+        &ihdr.write_u8(U8{0})
+        &ihdr.write_u8(U8{0})
+        &ihdr.write_u8(U8{0})
 
         raw :: png_rows(groups)
         compressed :: archive.deflate(raw) ?? return Err(err)
         zlib := Bytes.new()
-        zlib.write_bytes([U8]{120, 156})
-        zlib.write_bytes(compressed)
-        zlib.write_u32_be(U32{archive.adler32(raw)})
+        &zlib.write_bytes([U8]{120, 156})
+        &zlib.write_bytes(compressed)
+        &zlib.write_u32_be(U32{archive.adler32(raw)})
 
         png := Bytes.new()
-        png.write_bytes([U8]{137, 80, 78, 71, 13, 10, 26, 10})
-        png.write_bytes(png_chunk("IHDR".bytes(), ihdr.to_bytes()))
-        png.write_bytes(png_chunk("IDAT".bytes(), zlib.to_bytes()))
-        png.write_bytes(png_chunk("IEND".bytes(), [U8]{}))
+        &png.write_bytes([U8]{137, 80, 78, 71, 13, 10, 26, 10})
+        &png.write_bytes(png_chunk("IHDR".bytes(), ihdr.to_bytes()))
+        &png.write_bytes(png_chunk("IDAT".bytes(), zlib.to_bytes()))
+        &png.write_bytes(png_chunk("IEND".bytes(), [U8]{}))
         return Ok(png.to_bytes())
     }
 

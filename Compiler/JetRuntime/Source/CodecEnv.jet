@@ -1,10 +1,9 @@
 // Typed environment config decode with a checked native Decode callback
-// (FSIoEnvOsTesting.rs:529-632 jet_std_env_decode over EnvConfig.rs, the
-// This rule rules): read the project-relative dotenv file, overlay the
-// logical environment, keep the prefixed allowed names, nest `__` segments,
-// rename by the target's checked env names, decode inside the text-cell scope
-// and frame every failure with its source variable. Word lists are the typed
-// CSV kernel's [len, cap, data] (CodecCSV.jet).
+// (jet_std_env_decode, the This rule rules): read the project-relative dotenv
+// file, overlay the logical environment, keep the prefixed allowed names, nest
+// `__` segments, rename by the target's checked env names, decode inside the
+// text-cell scope and frame every failure with its source variable. Word lists
+// are the typed CSV kernel's [len, cap, data] (CodecCSV.jet).
 
 fn env_lower(byte: I64) -> I64 { if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte }
 
@@ -66,7 +65,6 @@ fn env_contains(text: I64, byte: I64) -> I64 {
     I64{-1}
 }
 
-// EnvConfig.rs:129-131.
 fn env_name_valid(name: I64) -> Bool { rt_text_len(name) != I64{0} && env_contains(name, I64{61}) < I64{0} && env_contains(name, I64{0}) < I64{0} }
 
 // An empty allowlist admits every name.
@@ -81,8 +79,8 @@ fn env_allowed(allow: I64, name: I64) -> Bool {
     false
 }
 
-// EnvConfig.rs:133-144: quotes are stripped; otherwise ` #` starts a comment.
-// Consumes `value`; owned.
+// Quotes are stripped; otherwise ` #` starts a comment. Consumes `value`;
+// owned.
 fn env_dotenv_value(value: I64) -> I64 {
     data :: rt_text_data(value)
     length :: rt_text_len(value)
@@ -122,8 +120,8 @@ fn rt_text_width_before(data: I64, end: I64) -> I64 {
     end - start
 }
 
-// The ordered map EnvConfig.rs keys by the ASCII-uppercased name: each row is
-// [upper key, name, value], all owned; a repeated key replaces its row.
+// The ordered map keys by the ASCII-uppercased name: each row is [upper key,
+// name, value], all owned; a repeated key replaces its row.
 fn env_values_put(values: I64, name: I64, value: I64) {
     key :: env_copy(rt_text_data(name), rt_text_len(name), I64{1})
     at := I64{0}
@@ -193,8 +191,8 @@ fn env_dotenv_load(text: I64, allow: I64, values: I64) -> I64 {
     I64{0}
 }
 
-// The logical environment snapshot: pairs whose name and value are both
-// UTF-8 (FSIoEnvOsTesting.rs:567-571), valid and allowed, in stored order.
+// The logical environment snapshot: pairs whose name and value are both UTF-8,
+// valid and allowed, in stored order.
 fn env_process_load(allow: I64, values: I64) {
     jet_rt_logical_env_seed()
     snapshot :: csv_words_new()
@@ -294,8 +292,8 @@ fn env_renamed(names: I64, name: I64, rest: I64, rest_length: I64) -> I64 {
     I64{0}
 }
 
-// EnvConfig.rs jet_env_insert_tree over the borrowed runtime Dyn object
-// `tree`; consumes `value`.
+// jet_env_insert_tree over the borrowed runtime Dyn object `tree`; consumes
+// `value`.
 fn env_tree_insert(tree: I64, segments: I64, from: I64, value: I64) {
     entries :: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
     segment :: csv_words_get(segments, from)
@@ -330,7 +328,7 @@ fn env_tree_insert(tree: I64, segments: I64, from: I64, value: I64) {
     data_sequence_push(entries, segment, child, true)
 }
 
-// EnvConfig.rs:120-127: any `.`/`[`/`]` segment naming a secret.
+// Any `.`/`[`/`]` segment naming a secret.
 fn env_secret_path(path: I64) -> Bool {
     data :: rt_text_data(path)
     length :: rt_text_len(path)
@@ -348,7 +346,7 @@ fn env_secret_path(path: I64) -> Bool {
     false
 }
 
-// EnvConfig.rs:100-118: replaces one FieldError's reason in place.
+// Replaces one FieldError's reason in place.
 fn env_frame_error(error: I64, origins: I64) {
     path :: text_glue_word(wrapping(error + TEXT_FIELD_PATH))
     reason :: text_glue_word(wrapping(error + TEXT_FIELD_REASON))
@@ -375,7 +373,7 @@ fn env_frame_error(error: I64, origins: I64) {
     jet_rt_string_drop(reason)
 }
 
-// EnvConfig.rs:13-19: neither absolute nor containing a `..` component.
+// Neither absolute nor containing a `..` component.
 fn env_file_relative(file: I64) -> Bool {
     data :: rt_text_data(file)
     length :: rt_text_len(file)

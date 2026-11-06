@@ -12,8 +12,8 @@ typedef struct {Text *name,*description;H len,cap;State *data;} Metadata;
 typedef struct {Text *node;Metadata metadata;} Projection;
 _Static_assert(sizeof(Metadata)==40 && sizeof(Projection)==48,"private ABI");
 extern void jet_rt_alloc_init(void);
-extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern H jet_rt_alloc(H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,H);
 extern H ui_projection_witness_clone(H);
 extern void ui_projection_witness_drop(H);
@@ -21,8 +21,8 @@ extern bool ui_projection_witness_eq(H,H);
 static struct {H address,bytes,align;bool live;} ledger[256];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align){H address=__real_jet_rt_alloc(bytes,align);if(tracking){assert(address&&bytes>0&&allocations<256&&(uint64_t)address%(uint64_t)align==0);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;}return address;}
-void __wrap_jet_rt_free(H address,H bytes,H align){if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;__real_jet_rt_free(address,bytes,align);return;}assert(!"untracked or double free");}__real_jet_rt_free(address,bytes,align);}
+static void observe_alloc(H address, H bytes, H align) {if(tracking){assert(address&&bytes>0&&allocations<256&&(uint64_t)address%(uint64_t)align==0);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;}}
+static void observe_free(H address,H bytes,H align){if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}assert(!"untracked or double free");}}
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static H h(const void *p){return (H)(uintptr_t)p;}
 static Text *text(const char *s){return jet_rt_string_from_static(s,(H)strlen(s));}
@@ -36,4 +36,4 @@ static void cases(unsigned name,unsigned description,H n,uint64_t flag){
     if(n){--z->len;assert(!ui_projection_witness_eq(h(a),h(b)));++z->len;}if(n>1){State tmp=z->data[0];z->data[0]=z->data[1];z->data[1]=tmp;assert(!ui_projection_witness_eq(h(a),h(b)));tmp=z->data[0];z->data[0]=z->data[1];z->data[1]=tmp;}
     ui_projection_witness_drop(h(a));assert(ui_projection_witness_eq(h(b),h(b)));ui_projection_witness_drop(h(b));balanced();
 }
-int main(void){jet_rt_alloc_init();tracking=true;assert(ui_projection_witness_clone(0)==0&&ui_projection_witness_eq(0,0));for(unsigned name=0;name<3;++name)for(unsigned description=0;description<3;++description){cases(name,description,0,0);for(uint64_t flag=0;flag<256;++flag)cases(name,description,14,flag);}ui_projection_witness_drop(0);balanced();puts("UI AccessibilityProjection: NodeId identity, all metadata options/states, independent owners and exact-once frees ok");return 0;}
+int main(void){assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);jet_rt_alloc_init();tracking=true;assert(ui_projection_witness_clone(0)==0&&ui_projection_witness_eq(0,0));for(unsigned name=0;name<3;++name)for(unsigned description=0;description<3;++description){cases(name,description,0,0);for(uint64_t flag=0;flag<256;++flag)cases(name,description,14,flag);}ui_projection_witness_drop(0);balanced();puts("UI AccessibilityProjection: NodeId identity, all metadata options/states, independent owners and exact-once frees ok");return 0;}

@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 fn sema_policy_builtin(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -28,15 +28,24 @@ fn sema_policy_calls(function: Func) -> [Call] Never! {
     calls
 }
 
+// The policies each function is applied with, by name, each at its first
+// written use (a `#Policy(...)` argument or an `apply(policy(...), f)` site).
+fn sema_policy_note_use(names: &[NamedSpan], name: String, span: Span) Never! {
+    loop known in names {
+        if known.name == name -> return
+    }
+    &names.push(NamedSpan{name: name, span: span})
+}
+
 struct SemaPolicyUses {
-    uses: [String:[String]]
+    uses: [String:[NamedSpan]]
 
     fn visit(&self, expression: Expr) Never! {
         if expression == .Call(call, _) && call.name == "apply" && call.args.len() > 0 {
             if call.args[call.args.len() - 1].expr == .Ident(target, _, _) {
-                names := self.uses.get(target) ?? [String]{}
+                names := self.uses.get(target) ?? [NamedSpan]{}
                 loop index in 0..<(call.args.len() - 1) {
-                    if call.args[index].expr == .Call(policy, _) && !sema_policy_builtin(policy.name) && !names.contains(policy.name) -> &names.push(policy.name)
+                    if call.args[index].expr == .Call(policy, _) && !sema_policy_builtin(policy.name) -> sema_policy_note_use(&names, policy.name, policy.name_span)
                 }
                 self.uses[target] = names
             }
@@ -53,12 +62,12 @@ fn sema_policy_materialize(program: &Program, declarations: [UserPolicyDecl], mo
 
 // The policy wrappers `items` call for; each item is read in place.
 fn sema_policy_wrappers(items: [Item], declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) -> [Item] {
-    uses := [String:[String]]{}
+    uses := [String:[NamedSpan]]{}
     loop item in items {
         if item == .Func(function) {
             loop call in sema_policy_calls(function) {
-                names := uses.get(function.name) ?? [String]{}
-                if !names.contains(call.name) -> &names.push(call.name)
+                names := uses.get(function.name) ?? [NamedSpan]{}
+                sema_policy_note_use(&names, call.name, call.name_span)
                 uses[function.name] = names
             }
             visitor := SemaPolicyUses{uses: ^uses}
@@ -71,7 +80,8 @@ fn sema_policy_wrappers(items: [Item], declarations: [UserPolicyDecl], module_id
         if item == .Func(target) {
             names :: uses.get(target.name) ?? next
             signature :: sema_function_symbol_type(target, false, symbol_id(SymbolKind.Function, module_identity, "", target.name), source_file, origin, segments)
-            loop name in names {
+            loop used in names {
+                name :: used.name
                 declaration := UserPolicyDecl?{None}
                 loop candidate in declarations {
                     if candidate.name == name {
@@ -80,7 +90,7 @@ fn sema_policy_wrappers(items: [Item], declarations: [UserPolicyDecl], module_id
                     }
                 }
                 policy :: declaration ?? {
-                    &diagnostics.push(sema_error("E0355", target.name_span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `policy {name}(...) {{ wrap(call) {{ … }} }}"))
+                    &diagnostics.push(sema_error("E0355", used.span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `policy {name}(...) {{ wrap(call) {{ … }} }}`"))
                     next
                 }
                 wrapper := ast_func(sema_policy_wrapper_name(name, target.name), policy.name_span, policy.span)

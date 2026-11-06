@@ -439,6 +439,7 @@ ENV_HOOK_VERB :: "hook"
 ENV_TEST_VERB :: "test"
 ENV_SYNC_VERB :: "sync"
 ENV_INFO_VERB :: "info"
+ENV_FETCH_TOOLCHAIN_VERB :: "fetch-toolchain"
 // Shells the auto-activation hook supports.
 ENV_HOOK_SHELLS :: [String]{"bash", "zsh", "fish"}
 // A non-empty value disables prompt-hook activation.
@@ -616,6 +617,11 @@ USER_SUBCOMMAND :: "user"
 BROWSER_SUBCOMMAND :: "browser"
 BROWSER_ENGINES :: [String]{"chromium", "firefox", "webkit"}
 BROWSER_DEFAULT_PROTOCOL :: "bidi-2025.5"
+// `jet split env|package <name>|hosts <name>` and its reverse `jet fold
+// <file>`: reversible package source transitions; `--check` previews.
+TRANSITION_SPLIT_VERB :: "split"
+TRANSITION_FOLD_VERB :: "fold"
+TRANSITION_FLAG_CHECK :: "--check"
 // Every Jetpack verb, in dispatch order. JetOS's `os` verb is out of scope for
 // this port and is not listed.
 JETPACK_VERBS :: comptime { [String]{
@@ -646,7 +652,9 @@ JETPACK_VERBS :: comptime { [String]{
     USER_SUBCOMMAND,
     TOOL_SUBCOMMAND,
     PROFILE_SUBCOMMAND,
-    BROWSER_SUBCOMMAND
+    BROWSER_SUBCOMMAND,
+    TRANSITION_SPLIT_VERB,
+    TRANSITION_FOLD_VERB
 } }
 
 // ── CLI (jet_foundation::Syntax, effects_surface.rs, jetpack_config.rs) ──
@@ -669,22 +677,16 @@ TRUST_BYPASS_FLAG :: "--trust"
 ENV_FLAG_FLAKE :: "--flake"
 // U16: isolate the foreign projected shell from host variables.
 ENV_FLAG_PURE :: "--pure"
-// U16 ad-hoc packages on env/use, exact workspace
-// members on build/test/run.
+// U16 ad-hoc packages on env/use.
 ENV_FLAG_PACKAGE :: "-p"
 // Materialize without entering.
 ENV_FLAG_PREP :: "--prep"
-ENV_FLAG_PREP_UNKNOWN :: "--prepare"
 // Card #2214: expand environment acquisition plans to per-package facts.
 ENV_FLAG_EXPLAIN :: "--explain"
 // Select a declared environment preset.
 ENV_FLAG_PRESET :: "--preset"
-ENV_FLAG_PROFILE_UNKNOWN :: "--profile"
 // Select one `env.<name>` module.
 ENV_FLAG_ENV :: "--env"
-ENV_FLAG_ENV_UNKNOWN :: "--env-profile"
-// The environment formatter language for `jet fmt`.
-FMT_FLAG_LANG :: "--lang"
 // U27 open a shell in preserved failed build scratch.
 BUILD_FLAG_SHELL_ON_FAIL :: "--shell-on-fail"
 // `jet trust <verb>` and `--scope user|repo`.
@@ -709,11 +711,6 @@ BROWSER_VERBS :: comptime { [String]{BROWSER_VERB_LOCK, BROWSER_VERB_PROVISION, 
 BROWSER_FLAG_BINARY :: "--binary"
 BROWSER_FLAG_VERSION :: "--version"
 BROWSER_FLAG_PROTOCOL :: "--protocol"
-// Members with changed input hashes (plus dependents),
-// or changed since a git ref.
-WS_FLAG_AFFECTED :: "--affected"
-WS_FLAG_AFFECTED_SINCE :: "--affected-since"
-// The retired TOML config name, a migration sentinel only.
 
 // ── Services (jet_foundation::Syntax) ──
 // U12: per-service runtime state lives under `.jet/services/<name>/`.

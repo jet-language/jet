@@ -150,7 +150,7 @@ fn cli_format_tool_generation_meta(generation: Int, tools: [InstalledUserTool]) 
             name: tool.name,
             version: tool.version,
             source: tool.source,
-            reference: MigratedRef.persisted(tool.reference).canonical,
+            reference: tool.reference,
             output_hash: tool.output_hash,
             store_root: tool.store_root,
             bins: tool.bins,
@@ -279,11 +279,11 @@ fn cli_disk_file_bytes(path: String, excluded: String?) -[FS]> Int CLIError! {
 // Write a new generation for `tools` (projecting bins, recording metadata
 // and its witness, rooting targets) and publish it. A generation that never
 // completed is removed on failure.
-fn cli_write_tool_generation_locked(verification: &StoreVerification, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
+fn cli_write_tool_generation_locked(verification: &StoreVerification, tools: [InstalledUserTool], ^live: ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
     generation :: cli_tool_next_generation()
     generation_dir :: cli_tool_generation_dir(generation)
     files.create_dir(generation_dir)
-    if cli_tool_write_generation_body(&verification, generation, generation_dir, tools, live) == {
+    if cli_tool_write_generation_body(&verification, generation, generation_dir, tools, ^live) == {
         .Ok(written) -> Ok(written)
         .Err(error) -> {
             if !files.is_file(files.join(generation_dir, TOOL_PROFILE_COMPLETE_FILE)) -> files.remove_all(generation_dir).drop("an incomplete generation is best-effort removed")
@@ -292,9 +292,9 @@ fn cli_write_tool_generation_locked(verification: &StoreVerification, tools: [In
     }
 }
 
-fn cli_tool_write_generation_body(verification: &StoreVerification, generation: Int, generation_dir: String, tools: [InstalledUserTool], live: ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
+fn cli_tool_write_generation_body(verification: &StoreVerification, generation: Int, generation_dir: String, tools: [InstalledUserTool], ^live: ToolLiveInstall?) -[FS, Env, Exec, Time, Rand]> Int CLIError! {
     generation_tools := tools
-    cli_materialize_generation_bins(&verification, generation_dir, &generation_tools, live)
+    cli_materialize_generation_bins(&verification, generation_dir, &generation_tools, ^live)
     meta :: cli_format_tool_generation_meta(generation, generation_tools)
     cli_write_synced(files.join(generation_dir, TOOL_PROFILE_META_FILE), meta.bytes())
     cli_validate_generation_bins(&verification, generation, generation_tools)

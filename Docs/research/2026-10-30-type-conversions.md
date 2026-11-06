@@ -1,7 +1,7 @@
 # Type conversions: exact braces, named lossy options
 
 Date: 2026-10-30. Card #6313, with the #6318 narrowing and `Float.from_int`
-findings. Probes live in `/mnt/jetscratch/lanes/SurfaceDesign/probes/`
+findings. Probes live in `$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/`
 (`m6313`, `m6313b`, `m6313c`, `m6313p`, `m6318b`). Every probe printed the same
 output on o0, o1 and o2 with the dev compiler at abab9666d8.
 

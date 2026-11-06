@@ -11,7 +11,6 @@ use {
     core.files.[OSPath]
     core.encoding.[Dyn]
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:5926
 fn inject_canvas_session(asset: CanvasAsset, session_secret: String) -> CanvasAsset {
     asset := ^asset
     if asset.content_type == "text/html; charset=utf-8" {
@@ -22,31 +21,23 @@ fn inject_canvas_session(asset: CanvasAsset, session_secret: String) -> CanvasAs
     }
     return ^asset
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:5941
 fn method_not_allowed(stream: &impl Write) Err! {
     write_response(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed".bytes())
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:5950
 fn web_stream_path(path: String) -> Bool { path == "/__jet_web/stream" }
-// Rust: crates/jet-devserver/src/WebHost.rs:5957
 // Same Canvas handlers, not a second editor.
 fn source_tool_path(path: String) -> Bool {
     path == "/__jet_canvas/project".bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:5967
 fn devtools_path(path: String) -> Bool {
     path == "/__jet_devtools".bit_or("/__jet_devtools/workbench").bit_or("/__jet_devtools/commands").bit_or("/__jet_devtools/assets").bit_or("/__jet_devtools/state").bit_or("/__jet_devtools/reconnect").bit_or("/__jet_devtools/action").bit_or("/__jet_devtools/selection").bit_or("/__jet_devtools/cursor").bit_or("/__jet_devtools/swap").bit_or("/__jet_devtools/recording").bit_or("/__jet_devtools/error").bit_or("/__jet_devtools/paused/inspect").bit_or("/__jet_devtools/paused/evaluate").bit_or("/__jet_devtools/style").bit_or("/__jet_canvas/devtools").bit_or("/canvas/devtools").bit_or("/panel/devtools")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:5991
 fn is_application_control_path(path: String) -> Bool {
     devtools_path(path) || web_stream_path(path) || source_tool_path(path)
         || path == "/__jet_dev_status".bit_or("/__jet_dev_version").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6004
 WEB_ERROR_REQUEST_COUNTER :: AtomicU64.new(1) // GATE #4494: process-local atomic.
-// Rust: crates/jet-devserver/src/WebHost.rs:6009
 fn next_web_error_request_id() -> String { "werr-{WEB_ERROR_REQUEST_COUNTER.fetch_add(1, Ordering.SeqCst)}" }
-// Rust: crates/jet-devserver/src/WebHost.rs:6019
 fn paused_evaluate_error_status(error: PausedEvaluateHostError) -> String {
     if error == {
         .SessionUnavailable | .EvaluatorUnavailable -> "409 Conflict"
@@ -54,11 +45,9 @@ fn paused_evaluate_error_status(error: PausedEvaluateHostError) -> String {
         .Rejected(_) -> "403 Forbidden"
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6030
 fn session_response(session: ResidentDevSession) -> String {
     "{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{session.json()}}}"
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6037
 fn with_session(body: String, session: &ResidentDevSession) -> String {
     marker :: "\"canvas\":{{"
     index :: body.find(marker) ?? return ^body
@@ -71,7 +60,6 @@ fn with_session(body: String, session: &ResidentDevSession) -> String {
     decorated.push_str(body[insert_at..<body.len()])
     return ^decorated
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6052
 fn current_revision_for_request(canvas_file: String, request: String) -> String {
     source_id :: parse_json(request).ok().and_then((value) -> if value == {
         .Object(object) -> object.into_iter().find_map(((name, value)) -> {
@@ -85,13 +73,11 @@ fn current_revision_for_request(canvas_file: String, request: String) -> String 
     }).unwrap_or_default()
     return current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6075
 fn source_id_from_payload(payload: String) -> String {
     value :: if parse_json(payload) == {
         .Ok(value) -> value
         .Err(_) -> { return "" }
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:6080
     fn find(value: Dyn) -> String? {
         return if value == {
             .Object(object) -> {
@@ -110,12 +96,10 @@ fn source_id_from_payload(payload: String) -> String {
     }
     return find(&value).unwrap_or_default()
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6105
 fn current_revision_for_source_id(canvas_file: String, source_id: String?) -> String {
     source_path :: source_id.and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
     return Canvas.read_source_without_symlinks(&source_path).map((source) -> Canvas.source_revision(source)).unwrap_or_default()
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6116
 fn serve_static_from_root(stream: impl Write, root: OSPath, path: String, nonce: String, session_secret: String) -> U16 Err! {
     // The generated output root is the complete preview boundary. No source fallback.
     relative :: if static_relative_path(path) == {
@@ -162,28 +146,22 @@ fn serve_static_from_root(stream: impl Write, root: OSPath, path: String, nonce:
     write_response(stream, "200 OK", content_type, &bytes)?
     return .Ok(200)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6203
 fn read_source_without_symlinks(path: OSPath) -> String Err! { Canvas.read_source_without_symlinks(path) }
-// Rust: crates/jet-devserver/src/WebHost.rs:6207
 fn read_web_manifest(root: OSPath) -> String? {
     bytes :: read_static_file_bounded(root, &OSPath.new("web.manifest.json"), MAX_STATIC_RESPONSE_BYTES).ok()?
     return String.from_utf8(^bytes).ok()
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6217
 fn decode_html(bytes: [U8]) -> String Err! {
     String.from_utf8(^bytes).map_err((_) -> Error.new(ErrorKind.InvalidData, "static HTML is not valid UTF-8")) // GATE #4409
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6226
 fn html_raw_response_limit(script_capacity: USize) -> U64 {
     script_bytes :: U64.try_from(script_capacity).unwrap_or(U64.MAX)
     MAX_STATIC_RESPONSE_BYTES.saturating_sub(script_bytes.saturating_mul(2)) / 2
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6231
 fn html_script_fits_budget(script_capacity: USize) -> Bool {
     script_bytes :: U64.try_from(script_capacity).unwrap_or(U64.MAX)
     script_bytes.saturating_mul(2) <= MAX_STATIC_RESPONSE_BYTES
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6251
 fn live_reload_script(nonce: String, session_secret: String) -> String {
     perf_script :: if nonce.is_empty() { "" } else {
         format("""  var jetPerfNonce = "{}";
@@ -474,7 +452,6 @@ fn live_reload_script(nonce: String, session_secret: String) -> String {
 </script>
 """, poll_ms: LIVE_RELOAD_POLL_MS, perf_script: perf_script, session_secret: jet_foundation.JSON.json_escape(session_secret))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:6566
 fn inject_live_reload_with_script(html: String, script: String) -> String? {
     output_len :: html.len().checked_add(script.len())?
     // ASCII case-insensitive scan preserves byte offsets without a lowercase allocation.

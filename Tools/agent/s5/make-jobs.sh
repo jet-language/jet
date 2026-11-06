@@ -4,14 +4,16 @@
 set -euo pipefail
 SHA=${1:-}
 if [[ -n "$SHA" && ! "$SHA" =~ ^[a-f0-9]{40}$ ]]; then echo 'full source SHA required' >&2; exit 2; fi
-C=/mnt/jetscratch/candidates/RuntimeLead12/s5-r4
-Q=/home/nate/.cache/jet-dev/proofq/queue
+. "$(dirname "${BASH_SOURCE[0]}")/../roots.sh"
+ROOT=$JET_SCRATCH_ROOT
+C=$ROOT/candidates/RuntimeLead12/s5-r4
+Q=$JET_STATE_ROOT/proofq/queue
 P=Main-RuntimeLead12-s5
 HOST=${S5_SHARED_HOST_JOB:-Main-DevGreen-host-r2}
 PACK=${S5_SHARED_PACK_JOB:-Main-RuntimePackLead-native-pack-r1}
 mkdir -p "$C"
 if [[ -n "$SHA" ]]; then
-  SOURCE=/mnt/jetscratch/candidates/source-${SHA}/source
+  SOURCE=$ROOT/candidates/source-${SHA}/source
   node "$SOURCE/Tools/agent/s5/stage-frozen-inputs.mjs" "$SHA" "$SOURCE" "$C/inputs"
 fi
 job() {
@@ -29,6 +31,7 @@ job() {
     printf 'export S5_BUILD=%s/build S5_GATES=%s/gates S5_RUNTIME=%s/runtime S5_BOUNDARY=%s/boundary S5_INPUTS=%s/inputs\n' "$C" "$C" "$C" "$C" "$C"
     printf 'export S5_SHARED_HOST_JOB=%s S5_SHARED_PACK_JOB=%s\n' "$HOST" "$PACK"
     printf 'export PQ_JOB=%s-%s-r4\n' "$P" "$phase"
+    printf 'export JET_SCRATCH_ROOT=%s\n' "$ROOT"
     cat <<'PREFLIGHT'
 export S5_RUN_ID="${PQ_JOB}-$(date +%s%N)-$$"
 mkdir -p "$S5_OUT"
@@ -45,19 +48,16 @@ RECEIPT
   exit 0
 }
 if [[ ! "$JET_SHARED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]; then blocked 'Main must admit a full source pin'; fi
-export W="/mnt/jetscratch/candidates/source-${JET_SHARED_SOURCE_SHA}/source"
+export W="$JET_SCRATCH_ROOT/candidates/source-${JET_SHARED_SOURCE_SHA}/source"
 export S5_EXPECT_HEAD="$JET_SHARED_SOURCE_SHA" S5_SHARED_ARTIFACTS="${W%/source}/ARTIFACTS.json"
 export S5_SHARED_PACK_DIRECTORY="${W%/source}/runtime-pack"
 export COMPOSED_SHA="$JET_SHARED_SOURCE_SHA" JET_TOOLCHAIN_ROOT="$W"
 if [ ! -d "$W" ]; then blocked 'immutable source export absent'; fi
 cd "$W" || blocked 'cannot enter immutable source export'
-CARGO_TARGET_DIR="$(node --input-type=module -e 'const {assertPinnedSource,proofTargetDirectory}=await import("./Tools/agent/proof-source.mjs");assertPinnedSource(process.cwd(),process.argv[1]);console.log(proofTargetDirectory(process.argv[1]));' "$JET_SHARED_SOURCE_SHA")" || blocked 'immutable source guard or target derivation failed'
-export CARGO_TARGET_DIR
-if [ -z "$CARGO_TARGET_DIR" ]; then blocked 'per-SHA target directory absent'; fi
-mkdir -p "$CARGO_TARGET_DIR" || blocked 'cannot create per-SHA target directory'
+"${JET:-jet}" run -A Tools/agent/ProofSource.jet check "$W" "$JET_SHARED_SOURCE_SHA" >/dev/null || blocked 'immutable source guard failed'
 unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
 PREFLIGHT
-    printf 'export JET_SCRATCH_ROOT=/mnt/jetscratch JET_NO_SCCACHE=1 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=16\n'
+    printf 'export JET_NO_SCCACHE=1 CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=16\n'
     printf 'export TMPDIR=%s/tmp-%s JET_LOWER_TMPDIR=%s/tmp-%s JET_FRONT_TIMEOUT_MS=900000\n' "$C" "$phase" "$C" "$phase"
     printf 'export JET_PACK_MUSL_LIB=/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x86_64-unknown-linux-musl-1.2.5/lib\n'
     printf 'export %s\n' "$extra"

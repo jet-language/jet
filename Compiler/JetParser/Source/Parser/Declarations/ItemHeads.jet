@@ -2,9 +2,8 @@
 // `offset` is relative to the current token, so marker stacks can be inspected
 // without consuming them.
 use jet_lexer.[
-    TOKEN_COLON_COLON,
+    TOKEN_COLON,
     TOKEN_DOT,
-    TOKEN_EQ,
     TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_EXTERN,
@@ -31,7 +30,7 @@ fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool
         TOKEN_KW_MODULE -> {
             if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
             next_kind :: parser_kind_at(&state, offset + 2)
-            next_kind == TOKEN_DOT || next_kind == TOKEN_MINUS || next_kind == TOKEN_LBRACE || next_kind == TOKEN_SEMI || next_kind == TOKEN_LT || next_kind == TOKEN_LPAREN || next_kind == TOKEN_COLON_COLON
+            next_kind == TOKEN_DOT || next_kind == TOKEN_MINUS || next_kind == TOKEN_LBRACE || next_kind == TOKEN_SEMI || next_kind == TOKEN_LT || next_kind == TOKEN_LPAREN || next_kind == TOKEN_COLON
         }
         TOKEN_KW_EXTERN -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_value_at(&state, offset + 1) == "rust"
         TOKEN_KW_TAG -> true
@@ -47,14 +46,11 @@ fn parser_item_declaration_ahead_at(state: &JetParserState, offset: Int) -> Bool
         }
         TOKEN_IDENT -> {
             name :: parser_value_at(&state, offset)
-            if parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && parser_kind_at(&state, offset + 2) == TOKEN_IDENT && parser_value_at(&state, offset + 2) == "distinct" -> return true
+            if parser_kind_at(&state, offset + 1) == TOKEN_COLON && parser_kind_at(&state, offset + 2) == TOKEN_IDENT && parser_value_at(&state, offset + 2) == "distinct" -> return true
             if name == {
                 "state" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT || parser_kind_at(&state, offset + 1) == TOKEN_LBRACE
                 "protocol" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LBRACE
                 "migration" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LBRACE
-                // The retired `marker Name(…)`, `marker Name = #[…]` and
-                // `marker Name on …`, read to teach (parser_marker_decl_ahead).
-                "marker" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && (parser_kind_at(&state, offset + 2) == TOKEN_LPAREN || parser_kind_at(&state, offset + 2) == TOKEN_EQ || parser_kind_at(&state, offset + 2) == TOKEN_IDENT)
                 "fact" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LPAREN
                 else -> false
             }

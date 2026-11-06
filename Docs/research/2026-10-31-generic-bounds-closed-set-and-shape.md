@@ -12,7 +12,7 @@ offers instead.
 
 ## Probes
 
-The probes are in `/mnt/jetscratch/lanes/CardClose/p/b5983_*.jet`. Each one ran
+The probes are in `$JET_SCRATCH_ROOT/lanes/CardClose/p/b5983_*.jet`. Each one ran
 with `jet check` and `jet run`, using the wave-12 compiler
 (`q/sg/jet-w12-wave/jet`) with `JET_TOOLCHAIN_ROOT` set to the wave-12 tree.
 

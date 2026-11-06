@@ -1,11 +1,10 @@
-// FileLockRaw.rs Linux transports. Core/Files/Files.jet
-// owns validation, errors, identity retry and descriptor ownership; these
-// leaves report raw values, errno and the platform tag (1 = Linux).
-// Call24: value0, errno8, platform16. Identity56: device0, inode low8,
-// inode high16, regular24, reparse32, errno40, platform48. Wait40:
-// acquired0, timed_out8, errno16, platform24, deadline_ns32. Words are raw
-// i64; getters return exact Int. JetFileLockOwner is the shared FD72 (Rc<File>):
-// clone retains it, the final drop closes the descriptor without unlinking.
+// Core/Files/Files.jet owns validation, errors, identity retry and descriptor
+// ownership; these leaves report raw values, errno and the platform tag (1 =
+// Linux). Call24: value0, errno8, platform16. Identity56: device0, inode low8,
+// inode high16, regular24, reparse32, errno40, platform48. Wait40: acquired0,
+// timed_out8, errno16, platform24, deadline_ns32. Words are raw i64; getters
+// return exact Int. JetFileLockOwner is the shared FD72 (Rc<File>): clone
+// retains it, the final drop closes the descriptor without unlinking.
 fn fs_lock_call(value: I64, errno: I64) -> I64 {
     call :: jet_rt_alloc(I64{24}, I64{8})
     rt_text_store(call, value)
@@ -111,10 +110,10 @@ fn fs_lock_sleep(nanos: I64) {
     jet_rt_free(request, I64{16}, I64{8})
 }
 
-// Timed acquisition on the existing host monotonic sampler (RuntimePolicy.rs
-// 1ms polling capped to the remaining deadline). Zero initializes the
-// deadline once; source reopens after identity changes and carries it back.
-// Unbounded waits block in flock(LOCK_EX); EINTR always retries.
+// Timed acquisition on the existing host monotonic sampler (1ms polling capped
+// to the remaining deadline). Zero initializes the deadline once; source
+// reopens after identity changes and carries it back. Unbounded waits block in
+// flock(LOCK_EX); EINTR always retries.
 #Export(c) fn jet_fs_lock_wait_raw(fd: I64, timeout_ns: I64, bounded: Bool, deadline_ns: I64) -> I64 {
     native :: host_native_int(fd)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

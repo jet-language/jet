@@ -1,6 +1,6 @@
 # One ledger: the whole-language frame
 
-Status: proposal, 2026-09-01, revised after the beginner and rival-family review passes. Plan, cards, and ballots only. Nothing here is implemented. Every transcript marked **illustrative** shows what a command would print after its ballot is ratified and built; none of them runs today. Evidence rows cite the research lanes in `~/.cache/jet-dev/wla/lane{A..F}.md`, the review reports in `~/.cache/jet-dev/wla/reviews/`, and the repository at commit `8b9933668`.
+Status: proposal, 2026-09-01, revised after the beginner and rival-family review passes. Plan, cards, and ballots only. Nothing here is implemented. Every transcript marked **illustrative** shows what a command would print after its ballot is ratified and built; none of them runs today. Evidence rows cite the research lanes in `$JET_STATE_ROOT/wla/lane{A..F}.md`, the review reports in `$JET_STATE_ROOT/wla/reviews/`, and the repository at commit `8b9933668`.
 
 ## Executive summary
 

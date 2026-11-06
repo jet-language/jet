@@ -9,18 +9,31 @@ use {
 }
 
 // One selected native unit test: `id` is the identity its outcome record
-// carries (`JET_NATIVE_TEST <id>`); `key` its checked function.
-struct JetNativeTestCase { id: U64, key: String, name: String, expected_failure: Bool }
+// carries (`JET_NATIVE_TEST <id>`); `key` its checked function; `faults` its
+// canonical `#Test(faults: [...])` selectors.
+struct JetNativeTestCase { id: U64, key: String, name: String, expected_failure: Bool, faults: [String]{[]} }
 struct JetNativeTestRecord { function: U64, wire: String }
 struct JetNativeTestCursor { bytes: [U8], at: Int }
 struct JetNativeTestChild { test: JetNativeTestCase, child: ProcessChild, path: String }
 struct JetNativeTestRun { receipt: ProcessReceipt, output: String, errors: String }
+// One checked `#Pre`/`#Post` clause outcome a child observed: `held` or
+// failed, at `site` (`{marker}\t{line}\t{column}\t{file}`, JetIR
+// BuildContracts.jet ir_contract). A child appends each clause's first hold
+// and every failure (`JET_NATIVE_CONTRACT <held> <length>\n<site>\n`). A
+// serial run streams each test's record after the failures it made, so a
+// failure names its test (`test_id`, then `test` by name) and `last` marks
+// the final failure before that test's record: the one a contract stop of
+// that test is. A failure no test record follows has no test.
+struct JetNativeTestContract { held: Bool, site: String, test_id: U64?, test: String, last: Bool }
 // The outcome wires of one run (the selected tests' in their order, then any
-// unrun output check's) and the children's raw streams, not yet reported.
-struct JetNativeTestOutcomes { wires: [String], outputs: [String], errors: [String] }
+// unrun output check's), the children's raw streams, not yet reported, and
+// the contract outcomes every child observed, each once.
+struct JetNativeTestOutcomes { wires: [String], outputs: [String], errors: [String], contracts: [JetNativeTestContract] }
 // One outcome wire's fields: `flags` as the runtime sets them (ok=1,
-// expected_failure=2, skipped=4).
-struct JetNativeTestWire { flags: Int, name: String, stdout: String, stderr: String }
+// expected_failure=2, skipped=4, runtime_stop=8: the test ended at an
+// uncaught runtime stop, not a failed assertion); `cases` the generated cases
+// a property test ran (the header's fifth field), None for any other test.
+struct JetNativeTestWire { flags: Int, name: String, stdout: String, stderr: String, cases: Int?{None} }
 
 fn jet_native_test_line(cursor: &JetNativeTestCursor) -> String? Never! {
     start :: cursor.at
@@ -40,16 +53,46 @@ fn jet_native_test_byte_count(text: String) -> Int Err! {
     Ok(count)
 }
 
+// The header's fifth field: `-`, or the generated cases a property test ran.
+fn jet_native_test_cases(field: String) -> Int? Err! {
+    if field == "-" -> return Ok(None)
+    if field.len() == 0 -> return Err("native test outcome header has an unknown fifth field")
+    loop byte in field.bytes() {
+        if byte < (U8{48}) || byte > (U8{57}) -> return Err("native test outcome header has an unknown fifth field")
+    }
+    count :: Int.parse(field) ?? return Err("native test outcome case count is invalid")
+    Ok(Val(count))
+}
+
 // A killed writer can leave one incomplete final record. It contributes no
 // outcome; all complete records remain authoritative. Malformed complete
-// records are compiler/runtime protocol defects, never test failures.
-fn jet_cli_native_test_records(output: String, incomplete: Bool) -> [JetNativeTestRecord] Err! {
+// records are compiler/runtime protocol defects, never test failures. A
+// contract record (JetNativeTestContract) lands in `contracts`.
+fn jet_cli_native_test_records(output: String, incomplete: Bool, contracts: &[JetNativeTestContract]) -> [JetNativeTestRecord] Err! {
     cursor := JetNativeTestCursor{bytes: output.bytes(), at: 0}
     records := [JetNativeTestRecord]{}
+    // The failures since the last test record, by index in `contracts`.
+    pending := [Int]{}
     loop cursor.at < cursor.bytes.len() {
         identity :: jet_native_test_line(&cursor) ?? {
             if incomplete -> break
             return Err("native test identity line is truncated")
+        }
+        if identity.starts_with("JET_NATIVE_CONTRACT ") {
+            fields :: identity.split(" ").to_list()
+            if fields.len() != 3 || (fields[1] != "0" && fields[1] != "1") -> return Err("native contract record header is invalid")
+            length :: jet_native_test_byte_count(fields[2])
+            if length >= cursor.bytes.len() - cursor.at {
+                if incomplete -> break
+                return Err("native contract record is truncated")
+            }
+            end :: cursor.at + length
+            if cursor.bytes[end] != (U8{10}) -> return Err("native contract record terminator is absent")
+            site :: String.from_bytes(cursor.bytes.slice(cursor.at, end)) ?? return Err("native contract site is not UTF-8")
+            if fields[1] == "0" -> &pending.push(contracts.len())
+            &contracts.push(JetNativeTestContract{held: fields[1] == "1", site: site, test_id: None, test: "", last: false})
+            cursor.at = end + 1
+            next
         }
         if !identity.starts_with("JET_NATIVE_TEST ") -> return Err("native test output contains an unframed identity line")
         id_text :: identity.slice("JET_NATIVE_TEST ".len()..<identity.len())
@@ -63,12 +106,12 @@ fn jet_cli_native_test_records(output: String, incomplete: Bool) -> [JetNativeTe
         fields :: header.split(" ").to_list()
         if fields.len() != 5 -> return Err("native test outcome header has wrong arity")
         flags :: Int.parse(fields[0]) ?? return Err("native test outcome flags are invalid")
-        if flags < 0 || flags >= 8 -> return Err("native test outcome flags are invalid")
+        if flags < 0 || flags >= 16 -> return Err("native test outcome flags are invalid")
         name_length :: jet_native_test_byte_count(fields[1])
         stdout_length :: jet_native_test_byte_count(fields[2])
         stderr_length :: jet_native_test_byte_count(fields[3])
         length :: name_length + stdout_length + stderr_length
-        if fields[4] != "-" -> return Err("native test outcome header has an unknown fifth field")
+        _ :: jet_native_test_cases(fields[4])
         if length >= cursor.bytes.len() - cursor.at {
             if incomplete -> break
             return Err("native test outcome payload is truncated")
@@ -81,6 +124,8 @@ fn jet_cli_native_test_records(output: String, incomplete: Bool) -> [JetNativeTe
         if stdout_end < end && (Int.from_u8(cursor.bytes[stdout_end]).bit_and(192)) == 128 -> return Err("native test stdout boundary is not UTF-8")
         wire :: String.from_bytes(cursor.bytes.slice(start, end)) ?? return Err("native test outcome payload is not UTF-8")
         &records.push(JetNativeTestRecord{function: id, wire: wire})
+        jet_native_test_contracts_attribute(&contracts, pending, id)
+        pending = [Int]{}
         cursor.at = end + 1
     }
     Ok(records)
@@ -114,7 +159,7 @@ fn jet_cli_native_test_selection(tests: [TTestFact], functions: [FnBody], filter
             next
         }
         id :: U64.from_int(index + 1) ?? panic("test count fits U64")
-        &rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure}, module_name: module_name, start: test.span.start})
+        &rows.push(JetNativeTestRow{test: JetNativeTestCase{id: id, key: test.function.key, name: test.name, expected_failure: test.expected_failure, faults: test.faults}, module_name: module_name, start: test.span.start})
     }
     if faults.len() > 0 -> return Err(faults.join("\n"))
     &rows.sort_by((left: JetNativeTestRow, right: JetNativeTestRow) -> {
@@ -155,7 +200,9 @@ fn jet_native_test_merge(records: [JetNativeTestRecord], selected: [U64:Int], ou
 
 fn jet_native_test_failure(test: JetNativeTestCase, receipt: ProcessReceipt) -> String Never! {
     message := receipt.errors
-    if message.len() == 0 {
+    if receipt.timed_out {
+        message = "test exceeded its time limit and was stopped\n{receipt.errors}"
+    } else if message.len() == 0 {
         if receipt.signal == .Val(signal) {
             message = "native test executable terminated by signal {signal}"
         } else {
@@ -167,14 +214,52 @@ fn jet_native_test_failure(test: JetNativeTestCase, receipt: ProcessReceipt) -> 
     "0 {test.name.bytes().len()} {receipt.output.bytes().len()} {message.bytes().len()} -\n{test.name}{receipt.output}{message}"
 }
 
-fn jet_native_test_read_records(path: String, receipt: ProcessReceipt) -> [JetNativeTestRecord] Err! {
+fn jet_native_test_read_records(path: String, receipt: ProcessReceipt, contracts: &[JetNativeTestContract]) -> [JetNativeTestRecord] Err! {
     text :: native_test_files.read(path) ?? {
         native_test_files.remove(path).drop("the record read already failed")
         return Err("couldn't read native test records: {err}")
     }
     native_test_files.remove(path).drop("child records are process-private and one-shot")
     if receipt.signal == None && receipt.code == 103 -> return Err("native test record I/O failed: {receipt.errors}")
-    jet_cli_native_test_records(text, !receipt.success)
+    jet_cli_native_test_records(text, !receipt.success, &contracts)
+}
+
+// Ties the failures at `pending` (indexes in `contracts`, in record order) to
+// the test `id` whose record followed them; the final one is `last`.
+fn jet_native_test_contracts_attribute(contracts: &[JetNativeTestContract], pending: [Int], id: U64) Never! {
+    loop (index, at) in pending {
+        contracts[at].test_id = Val(id)
+        contracts[at].last = index == pending.len() - 1
+    }
+}
+
+// Each contract outcome once, in first-observed order, with each failure's
+// test named from `tests`: a clause rerun in a selected child repeats what its
+// batch already recorded.
+fn jet_native_test_contracts_unique(contracts: [JetNativeTestContract], tests: [JetNativeTestCase]) -> [JetNativeTestContract] Never! {
+    names := [U64:String]{}
+    loop test in tests -> names[test.id] = test.name.copy()
+    seen := [String:Bool]{}
+    unique := [JetNativeTestContract]{}
+    loop contract in contracts {
+        named := contract.copy()
+        if contract.test_id == .Val(id) -> named.test = names.get(id) ?? ""
+        key :: "{named.held}\n{named.site}\n{named.test}\n{named.last}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        &unique.push(named)
+    }
+    unique
+}
+
+// Where a run keeps its process-private record files: a memory-backed
+// directory (the per-user runtime directory, else /dev/shm), so a test run's
+// outcomes never reach the disk; `fallback` (the build directory) only on a
+// host with neither. The files are one-shot and removed once read.
+fn jet_cli_native_test_records_dir(fallback: String) -> String Never! {
+    if native_test_sys.get("XDG_RUNTIME_DIR") == .Val(runtime) && runtime.starts_with("/") && native_test_files.is_dir(runtime) -> return runtime
+    if native_test_files.is_dir("/dev/shm") -> return "/dev/shm"
+    fallback.copy()
 }
 
 // Memory each concurrently rerun test child may claim.
@@ -194,8 +279,15 @@ fn jet_cli_native_test_width(cores: Int, available: Int?) -> Int Never! {
 // (E3013 parked tasks at process exit, a teardown fault) fails that test with
 // the fatal text: the process outlived the body, so the record alone isn't
 // the test's whole outcome.
-fn jet_native_test_one(test: JetNativeTestCase, receipt: ProcessReceipt, path: String) -> String Err! {
-    records :: jet_native_test_read_records(path, receipt)
+fn jet_native_test_one(test: JetNativeTestCase, receipt: ProcessReceipt, path: String, contracts: &[JetNativeTestContract]) -> String Err! {
+    start :: contracts.len()
+    records :: jet_native_test_read_records(path, receipt, &contracts)
+    // A child that died before its record still ran only `test`.
+    left := [Int]{}
+    loop at in start..<contracts.len() {
+        if !contracts[at].held && contracts[at].test_id == None -> &left.push(at)
+    }
+    jet_native_test_contracts_attribute(&contracts, left, test.id)
     if records.len() > 1 -> return Err("selected native child returned multiple outcomes")
     if records.len() == 1 && records[0].function != test.id -> return Err("selected native child returned another test's outcome")
     if receipt.success {
@@ -213,32 +305,74 @@ fn jet_native_test_settle(outcomes: &[U64:String], streamed: [U64:String], id: U
     &outcomes.add(id, kept).drop("only missing tests are retried")
 }
 
+// One test run again alone. Under `jet prove --capture-sensitive` it reads
+// the stdin the batch already read, then end of input, so the user is never
+// asked to type twice; the runtime journals the rerun's reads like any other.
+fn jet_native_test_alone_run(spec: ProcessSpec) -> ProcessReceipt IOError! {
+    journal :: native_test_sys.get(JET_CLI_REPLAY_CAPTURE_ENV) ?? return spec.run()
+    child :: spec.stdin(.Stream).spawn() ?? return Err(err)
+    child.stdin.write_all(jet_cli_replay_journal_stdin(journal)).drop("a rerun that stops reading early reports why on stderr")
+    child.stdin.close()
+    child.wait()
+}
+
 // `spec` is the caller's already-configured test ProcessSpec, preserving every
 // JET_TEST_* / project / snapshot / tier option without mutating the parent env.
 // Raw child stdout/stderr never enter the separate framed outcome channel.
-fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String) -> JetNativeTestOutcomes Err! {
+// Under a `time_limit` every test runs alone in a child stopped at the limit;
+// output checks need the batch's state, so with checks the batch still runs,
+// bounded by the limit for each test and check, and only the tests it left
+// unreported rerun alone at the limit.
+fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_names: [String], unrun_check_report: fn() -> String Never!, serial: Bool, records_path: String, time_limit: Duration?) -> JetNativeTestOutcomes Err! {
     clean :: spec.env_remove("JET_NATIVE_TEST_ID").env_remove("JET_NATIVE_TEST_REPORT_PATH").env_remove("JET_NATIVE_TEST_RECORDS_PATH")
-    batch_path :: "{records_path}.batch"
-    native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
-    batch :: clean.env("JET_NATIVE_TEST_RECORDS_PATH", batch_path).run() ?? {
-        native_test_files.remove(batch_path).drop("native test spawn already failed")
-        return Err("couldn't run native tests: {err}")
-    }
-    outputs := [String]{batch.output}
-    errors := [String]{batch.errors}
+    // The spec each test that runs alone starts from.
+    alone := clean.env_remove("JET_NATIVE_TEST_ID")
+    if time_limit == .Val(limit) -> alone = alone.timeout(limit)
+    outputs := [String]{}
+    errors := [String]{}
     outcomes := [U64:String]{}
     selected := [U64:Int]{}
     loop (index, test) in tests -> &selected.add(test.id, index).drop("selected test functions are unique")
-    completed :: jet_native_test_read_records(batch_path, batch)
-    jet_native_test_merge(completed, selected, &outcomes)
+    observed := [JetNativeTestContract]{}
     missing := [JetNativeTestCase]{}
-    loop test in tests {
-        if outcomes.get(test.id) == None -> &missing.push(test)
+    batch_success := true
+    batch_errors := ""
+    if time_limit != None && check_names.len() == 0 {
+        loop test in tests -> &missing.push(test)
+    } else {
+        batch_path :: "{records_path}.batch"
+        native_test_files.write(batch_path, "") ?? return Err("couldn't create native test records: {err}")
+        batch_spec := clean.env("JET_NATIVE_TEST_RECORDS_PATH", batch_path)
+        if time_limit == .Val(limit) {
+            bound :: limit.in(.Milliseconds) ?? return Err("the test time limit is out of range")
+            batch_spec = batch_spec.timeout(Duration.milliseconds(bound * (tests.len() + check_names.len())) ?? return Err("the test batch time limit is out of range"))
+        }
+        batch :: batch_spec.run() ?? {
+            native_test_files.remove(batch_path).drop("native test spawn already failed")
+            return Err("couldn't run native tests: {err}")
+        }
+        &outputs.push(batch.output)
+        &errors.push(batch.errors)
+        batch_success = batch.success
+        batch_errors = batch.errors
+        completed :: jet_native_test_read_records(batch_path, batch, &observed)
+        // An unserial batch joins its tests after spawning them all, so its
+        // failures can't name a test.
+        if !serial {
+            loop at in 0..<observed.len() {
+                observed[at].test_id = None
+                observed[at].last = false
+            }
+        }
+        jet_native_test_merge(completed, selected, &outcomes)
+        loop test in tests {
+            if outcomes.get(test.id) == None -> &missing.push(test)
+        }
+        if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
     }
-    if missing.len() > 0 && batch.success -> return Err("native test executable completed without every selected outcome")
     // Every outcome streamed, then the batch died: no record names the
     // culprit, so each selected test reruns alone (jet_native_test_settle).
-    exit_fatal :: missing.len() == 0 && !batch.success
+    exit_fatal :: missing.len() == 0 && !batch_success
     streamed := [U64:String]{}
     if exit_fatal {
         loop test in tests {
@@ -247,16 +381,16 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
         }
         outcomes = [U64:String]{}
     }
-    fatal_attributed := batch.success
+    fatal_attributed := batch_success
     if serial {
         loop test in missing {
             path :: "{records_path}.{test.id}"
             native_test_files.write(path, "") ?? return Err("couldn't create selected native test records: {err}")
-            receipt :: clean.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).run() ?? {
+            receipt :: jet_native_test_alone_run(alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path)) ?? {
                 native_test_files.remove(path).drop("selected native test spawn already failed")
                 return Err("couldn't run native test {test.name}: {err}")
             }
-            wire :: jet_native_test_one(test, receipt, path)
+            wire :: jet_native_test_one(test, receipt, path, &observed)
             if !receipt.success -> fatal_attributed = true
             // A fatal receipt's raw streams already live inside its failure
             // outcome. Successful tests' uncaptured streams remain separate.
@@ -283,7 +417,7 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
                     spawn_error = Val("couldn't create selected native test records: {err}")
                     break
                 }
-                child :: clean.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).spawn() ?? {
+                child :: alone.env("JET_NATIVE_TEST_ID", "{test.id}").env("JET_NATIVE_TEST_RECORDS_PATH", path).spawn() ?? {
                     native_test_files.remove(path).drop("selected native test spawn already failed")
                     spawn_error = Val("couldn't run native test {test.name}: {err}")
                     break
@@ -297,7 +431,7 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
                     wait_error = Val("couldn't wait for native test {running.test.name}: {err}")
                     next
                 }
-                wire :: jet_native_test_one(running.test, receipt, running.path) ?? {
+                wire :: jet_native_test_one(running.test, receipt, running.path, &observed) ?? {
                     wait_error = Val(err.message)
                     next
                 }
@@ -322,9 +456,9 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
     loop test in tests -> &wires.push(outcomes.get(test.id) ?? return Err("native test aggregation lost an outcome"))
     if exit_fatal && !fatal_attributed {
         name :: "native test process exit"
-        &wires.push("0 {name.bytes().len()} 0 {batch.errors.bytes().len()} -\n{name}{batch.errors}")
+        &wires.push("0 {name.bytes().len()} 0 {batch_errors.bytes().len()} -\n{name}{batch_errors}")
     }
-    if !batch.success && check_names.len() > 0 {
+    if !batch_success && check_names.len() > 0 {
         report :: unrun_check_report()
         // The batch's state died with its process. Never rerun a check in the
         // fresh reporter and pretend that it observed the test-body state.
@@ -332,7 +466,7 @@ fn jet_cli_native_test_run(spec: ProcessSpec, tests: [JetNativeTestCase], check_
             &wires.push("0 {name.bytes().len()} 0 {report.bytes().len()} -\n{name}{report}")
         }
     }
-    Ok(JetNativeTestOutcomes{wires: wires, outputs: outputs, errors: errors})
+    Ok(JetNativeTestOutcomes{wires: wires, outputs: outputs, errors: errors, contracts: jet_native_test_contracts_unique(observed, tests)})
 }
 
 // The canonical report of `outcomes`, by the harness `spec` names.
@@ -349,7 +483,8 @@ fn jet_cli_native_test_report(spec: ProcessSpec, outcomes: JetNativeTestOutcomes
 }
 
 // The fields of one well-formed outcome wire (jet_cli_native_test_records
-// validated it): `flags nlen olen elen -\n` then the three byte runs.
+// validated it): `flags nlen olen elen cases\n` then the three byte runs,
+// where `cases` is `-` or a property test's case count.
 fn jet_cli_native_test_wire_parts(wire: String) -> JetNativeTestWire Err! {
     bytes :: wire.bytes()
     header_end := 0
@@ -367,15 +502,18 @@ fn jet_cli_native_test_wire_parts(wire: String) -> JetNativeTestWire Err! {
         name: String.from_bytes(bytes.slice(header_end + 1, name_end)) ?? return Err("native test name is not UTF-8"),
         stdout: String.from_bytes(bytes.slice(name_end, stdout_end)) ?? return Err("native test stdout is not UTF-8"),
         stderr: String.from_bytes(bytes.slice(stdout_end, stderr_end)) ?? return Err("native test stderr is not UTF-8"),
+        cases: jet_native_test_cases(fields[4]),
     })
 }
 
 fn jet_cli_native_test_wire(parts: JetNativeTestWire) -> String Never! {
-    "{parts.flags} {parts.name.bytes().len()} {parts.stdout.bytes().len()} {parts.stderr.bytes().len()} -\n{parts.name}{parts.stdout}{parts.stderr}"
+    cases :: if parts.cases == .Val(count) -> "{count}" else -> "-"
+    "{parts.flags} {parts.name.bytes().len()} {parts.stdout.bytes().len()} {parts.stderr.bytes().len()} {cases}\n{parts.name}{parts.stdout}{parts.stderr}"
 }
 
 #Test("native test records preserve UTF-8 and embedded newlines") {
-    records :: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 2 2 0 -\néx\n\n", false)
+    contracts := [JetNativeTestContract]{}
+    records :: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 2 2 0 -\néx\n\n", false, &contracts)
     assert_eq(records.len(), 1)
     assert_eq(records[0].function, U64{7})
     assert_eq(records[0].wire, "1 2 2 0 -\néx\n")
@@ -390,6 +528,21 @@ fn jet_cli_native_test_wire(parts: JetNativeTestWire) -> String Never! {
     assert_eq(jet_cli_native_test_wire(parts), "1 2 2 1 -\néx\ny")
 }
 
+#Test("native test wires carry a property's case count") {
+    parts :: jet_cli_native_test_wire_parts("1 1 0 0 200\na") ?? panic("a property wire parses")
+    assert_eq(parts.cases, Val(200))
+    assert_eq(jet_cli_native_test_wire(parts), "1 1 0 0 200\na")
+    contracts := [JetNativeTestContract]{}
+    records :: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 200\na\n", false, &contracts) ?? panic("a property record parses")
+    assert_eq(records.len(), 1)
+    signed := ""
+    if jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 +2\na\n", false, &contracts) == .Err(problem) -> signed = problem.message
+    assert_eq(signed, "native test outcome header has an unknown fifth field")
+    unknown := ""
+    if jet_cli_native_test_wire_parts("1 1 0 0 x\na") == .Err(problem) -> unknown = problem.message
+    assert_eq(unknown, "native test outcome header has an unknown fifth field")
+}
+
 #Test("fatal reruns run one child per core within the free memory") {
     assert_eq(jet_cli_native_test_width(16, None), 16)
     assert_eq(jet_cli_native_test_width(16, Val(5 * JET_NATIVE_TEST_CHILD_MEMORY + 1)), 5)
@@ -398,7 +551,47 @@ fn jet_cli_native_test_wire(parts: JetNativeTestWire) -> String Never! {
 }
 
 #Test("fatal native child retains only completed records") {
-    records :: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 -\na\nJET_NATIVE_TEST 8\n1 3 0 0 -\nb", true)
+    contracts := [JetNativeTestContract]{}
+    records :: jet_cli_native_test_records("JET_NATIVE_TEST 7\n1 1 0 0 -\na\nJET_NATIVE_TEST 8\n1 3 0 0 -\nb", true, &contracts)
     assert_eq(records.len(), 1)
     assert_eq(records[0].function, U64{7})
+}
+
+#Test("native contract records interleave with outcomes and survive a fatal child") {
+    contracts := [JetNativeTestContract]{}
+    output :: "JET_NATIVE_CONTRACT 1 15\nPre\t3\t7\ta b.jet\nJET_NATIVE_TEST 7\n9 1 0 0 -\na\nJET_NATIVE_CONTRACT 0 14\nPost\t4\t8\ta.jet\nJET_NATIVE_CONTRACT 0 9\nPre\t3"
+    records :: jet_cli_native_test_records(output, true, &contracts) ?? panic("complete records parse")
+    assert_eq(records.len(), 1)
+    assert_eq(records[0].wire, "9 1 0 0 -\na")
+    assert_eq(contracts.len(), 2)
+    assert(contracts[0].held)
+    assert_eq(contracts[0].site, "Pre\t3\t7\ta b.jet")
+    assert(!contracts[1].held)
+    assert_eq(contracts[1].site, "Post\t4\t8\ta.jet")
+    bad := ""
+    if jet_cli_native_test_records("JET_NATIVE_CONTRACT 2 1\nx\n", false, &contracts) == .Err(problem) -> bad = problem.message
+    assert_eq(bad, "native contract record header is invalid")
+    unique :: jet_native_test_contracts_unique([JetNativeTestContract]{contracts[0], contracts[1], contracts[0]}, [JetNativeTestCase]{})
+    assert_eq(unique.len(), 2)
+}
+
+#Test("a serial run ties each failure to the test whose record follows it") {
+    contracts := [JetNativeTestContract]{}
+    // Test 7 has a region catch one failure of `Pre 3`, then stops on
+    // another clause with the same text at `Pre 5`; test 8 fails `Pre 3`.
+    output :: "JET_NATIVE_CONTRACT 0 9\nPre\t3\t7\ta\nJET_NATIVE_CONTRACT 0 9\nPre\t5\t7\ta\nJET_NATIVE_TEST 7\n0 1 0 0 -\na\nJET_NATIVE_CONTRACT 0 9\nPre\t3\t7\ta\nJET_NATIVE_TEST 8\n0 1 0 0 -\nb\n"
+    records :: jet_cli_native_test_records(output, false, &contracts) ?? panic("complete records parse")
+    assert_eq(records.len(), 2)
+    assert_eq(contracts.len(), 3)
+    assert_eq(contracts[0].test_id, Val(U64{7}))
+    assert(!contracts[0].last)
+    assert_eq(contracts[1].test_id, Val(U64{7}))
+    assert(contracts[1].last)
+    assert_eq(contracts[2].test_id, Val(U64{8}))
+    assert(contracts[2].last)
+    tests :: [JetNativeTestCase]{JetNativeTestCase{id: U64{7}, key: "k7", name: "a", expected_failure: false}, JetNativeTestCase{id: U64{8}, key: "k8", name: "b", expected_failure: false}}
+    unique :: jet_native_test_contracts_unique(contracts, tests)
+    assert_eq(unique.len(), 3)
+    assert_eq(unique[1].test, "a")
+    assert_eq(unique[2].test, "b")
 }

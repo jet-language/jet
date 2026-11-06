@@ -1,6 +1,6 @@
 # Probe prim-tooling-hooks — Tooling hooks: syntax trees, build cache, replay, load runner
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -16,8 +16,8 @@ As a tool author: read a Jet file's lossless syntax tree through whatever `jet i
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/compilers-language-tooling/`, `~/.cache/jet-dev/dx2/editor-ide-extensions/`, `~/.cache/jet-dev/dx2/build-systems-monorepo/`, `~/.cache/jet-dev/dx2/testing-qa-automation/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/compilers-language-tooling/`, `$JET_STATE_ROOT/dx2/editor-ide-extensions/`, `$JET_STATE_ROOT/dx2/build-systems-monorepo/`, `$JET_STATE_ROOT/dx2/testing-qa-automation/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/prim-tooling-hooks/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-tooling-hooks/pkg/`. Gap ids start with `prim-tooling-hooks-G`.
+`$JET_STATE_ROOT/dx3/prim-tooling-hooks/probe.md`, `gaps.json`, and the code under `$JET_STATE_ROOT/dx3/prim-tooling-hooks/pkg/`. Gap ids start with `prim-tooling-hooks-G`.

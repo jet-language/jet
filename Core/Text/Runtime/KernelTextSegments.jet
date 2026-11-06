@@ -1,9 +1,8 @@
-// Rust Prelude/CoreLib/Top/Text.rs:563-694,779-885: owned UAX #29 word and
-// sentence segmentation over the pinned Unicode 17.0.0 Word_Break and
-// Sentence_Break JUCD assets. Scalars stream through the canonical UTF-8 seam;
-// boundaries are byte offsets into that one buffer, and each returned segment
-// is an owned String exactly as Rust materializes one String per segment.
-// Borrowed word views (Text.rs:699-763) remain held on #4392.
+// Owned UAX #29 word and sentence segmentation over the pinned Unicode 17.0.0
+// Word_Break and Sentence_Break JUCD assets. Scalars stream through the
+// canonical UTF-8 seam; boundaries are byte offsets into that one buffer, and
+// each returned segment is an owned String exactly as Rust materializes one
+// String per segment. Borrowed word views remain held on #4392.
 use {
     text_asset :: core.text.runtime.unicode_assets
     text_string :: core.text.runtime.kernel_unicode_string
@@ -14,7 +13,7 @@ use {
     text_numeric :: core.text.runtime.assets.unicode_numeric
 }
 
-// Rust Text.rs:563-581 Word_Break tags, generator WORD_TAGS order.
+// Word_Break tags, generator WORD_TAGS order.
 WB_CR :: 1
 WB_LF :: 2
 WB_NEWLINE :: 3
@@ -34,7 +33,7 @@ WB_NUMERIC :: 16
 WB_EXTENDNUMLET :: 17
 WB_WSEGSPACE :: 18
 
-// Rust Text.rs:779-792 Sentence_Break tags, generator SENTENCE_TAGS order.
+// Sentence_Break tags, generator SENTENCE_TAGS order.
 SB_CR :: 1
 SB_LF :: 2
 SB_EXTEND :: 3
@@ -240,7 +239,7 @@ fn sentence_breaks(units: [SentenceUnit]) -> [Bool] Never! {
     breaks
 }
 
-// Rust Text.rs:822-832 SB8 lookahead: ATerm Close* Sp* × (¬(OLetter|Upper|
+// SB8 lookahead: ATerm Close* Sp* × (¬(OLetter|Upper|
 // Lower|ParaSep|SATerm))* Lower.
 fn sentence_lower_follows(units: [SentenceUnit], from: Int) -> Bool Never! {
     k := from

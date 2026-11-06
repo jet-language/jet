@@ -1,16 +1,15 @@
-// Rust: Source/LSP/Features.rs:1–209,1050–1148. Sole hover/discovery owner.
+// Sole hover/discovery owner.
 use {
     jet_foundation.[Span]
     jet_lexer.[Token, TOKEN_IDENT]
     jet_semindex.[SymbolDB, SemanticSymbol]
     jetpack_provider.[PackageIndex, PackageIndexEntry, PackageOptionField]
     // PROVIDER-PENDING: original Syntax dictionary lookup/display/plain_text and
-    // SyntaxDictionaryKind (Rust crates/jet-foundation/src/Syntax.rs); not a local
-    // catalogue. This import is pending publication at that sole Foundation owner.
+    // SyntaxDictionaryKind; not a local catalogue. This import is pending
+    // publication at that sole Foundation owner.
     jet_foundation.Syntax
 }
 
-// Rust: Source/LSP/Features.rs:22
 fn lsp_semantic_hover(symbol: SemanticSymbol, requested_path: String) -> String Never! {
     parts := [String]{}
     if symbol.module_path != requested_path && symbol.kind == .Function -> &parts.push("from module `{symbol.module_path}`\n\n")
@@ -21,7 +20,6 @@ fn lsp_semantic_hover(symbol: SemanticSymbol, requested_path: String) -> String 
     parts.join("")
 }
 
-// Rust: Source/LSP/Features.rs:53
 fn lsp_append_checked_signature(hover: &String, checked_signature: String) Never! {
     lines := [String]{}
     loop line in checked_signature.lines() {
@@ -31,7 +29,6 @@ fn lsp_append_checked_signature(hover: &String, checked_signature: String) Never
     if !checked.is_empty() -> hover += "\n\n{checked}"
 }
 
-// Rust: Source/LSP/Features.rs:70
 fn lsp_state_graph_hover_at(db: SymbolDB, module_path: String, span: Span) -> String? Never! {
     loop hover in db.hover {
         if hover.module_path == module_path && hover.span == span && hover.text.starts_with("state `") && hover.text.contains(".State.") -> return Val(hover.text.copy())
@@ -39,7 +36,6 @@ fn lsp_state_graph_hover_at(db: SymbolDB, module_path: String, span: Span) -> St
     None
 }
 
-// Rust: Source/LSP/Features.rs:82
 fn lsp_compute_hover(db: SymbolDB, tokens: [Token], src: String, path: String, offset: Int) -> String? Never! {
     arithmetic :: db.arithmetic_hover_at(path, offset)
     if lsp_compiler_fact_at(tokens, offset) == .Val(fact) {
@@ -102,8 +98,8 @@ fn lsp_compute_hover(db: SymbolDB, tokens: [Token], src: String, path: String, o
     None
 }
 
-// Rust: Source/LSP/Features.rs:197. Pending original dictionary producer above;
-// never replace this branch with a guessed token catalogue or a null fallback.
+// Pending original dictionary producer above; never replace this branch with a
+// guessed token catalogue or a null fallback.
 fn lsp_syntax_token_hover(tokens: [Token], src: String, offset: Int) -> String? Never! {
     loop token in tokens {
         if token.span.start > offset || offset >= token.span.end || token.kind == TOKEN_IDENT -> next
@@ -114,7 +110,7 @@ fn lsp_syntax_token_hover(tokens: [Token], src: String, offset: Int) -> String? 
     None
 }
 
-// Rust: Source/LSP/Features.rs:1050. Actual local discovery data, not a catalogue.
+// Actual local discovery data, not a catalogue.
 fn lsp_compute_discovery_hover(src: String, offset: Int, discovery: PackageIndex) -> String? Never! {
     name :: lsp_identifier_at(src, offset) ?? return None
     if lsp_context_is_member_access(src, offset) == .Val(source) {
@@ -128,7 +124,6 @@ fn lsp_compute_discovery_hover(src: String, offset: Int, discovery: PackageIndex
     None
 }
 
-// Rust: Source/LSP/Features.rs:1076
 fn lsp_identifier_at(src: String, offset: Int) -> String? Never! {
     bytes :: src.bytes()
     cursor := offset.min(bytes.len())
@@ -144,23 +139,19 @@ fn lsp_identifier_at(src: String, offset: Int) -> String? Never! {
     Val(name.copy())
 }
 
-// Rust: Source/LSP/Features.rs:1095
 fn lsp_is_identifier_byte(byte: U8) -> Bool Never! {
     (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
 }
 
-// Rust: Source/LSP/Features.rs:1099
 fn lsp_package_hover(record: PackageIndexEntry) -> String Never! {
     version :: if record.version.is_empty() -> "-" else -> record.version
     "`{record.display_ref()}`\n\nref: `{record.reference}`\nversion: `{version}`\nplatforms: {record.platforms.join(", ")}\ntier: {record.tier}\nmaintainer liveness: {record.maintainer_liveness()}\nsource: local discovery index\n\n{record.docs}"
 }
 
-// Rust: Source/LSP/Features.rs:1120
 fn lsp_option_hover(field: PackageOptionField) -> String Never! {
     "Environment option `{field.name}`\n\nDefault: `{field.default}`\n\n{field.docs}\n\nSource: local discovery index"
 }
 
-// Rust: Source/LSP/Features.rs:1127
 fn lsp_find_ident_at(tokens: [Token], offset: Int) -> String? Never! {
     loop token in tokens {
         if token.span.start <= offset && offset <= token.span.end && token.kind == TOKEN_IDENT -> return Val(token.payload.text.copy())
@@ -168,7 +159,6 @@ fn lsp_find_ident_at(tokens: [Token], offset: Int) -> String? Never! {
     None
 }
 
-// Rust: Source/LSP/Features.rs:1138
 fn lsp_compiler_fact_at(tokens: [Token], offset: Int) -> String? Never! {
     loop token in tokens {
         if token.kind == TOKEN_IDENT && fact_read_kind(token.payload.text) != None && token.span.start <= offset && offset <= token.span.end -> return Val(token.payload.text.copy())

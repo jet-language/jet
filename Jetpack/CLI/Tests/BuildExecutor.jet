@@ -4,7 +4,8 @@
 
 fn build_test_root(label: String) -[FS, Env]> String Never! {
     home :: sys.get("HOME") ?? panic("build executor fixtures require HOME")
-    root :: files.join(home, ".cache/jet-dev/scratch/jet-build-executor-{label}-{sys.pid()}")
+    scratch :: sys.get("JET_SCRATCH_ROOT") ?? (sys.get("JET_STATE_ROOT") ?? files.join(sys.get("XDG_CACHE_HOME") ?? files.join(home, ".cache"), "jet-dev"))
+    root :: files.join(scratch, "jet-build-executor-{label}-{sys.pid()}")
     files.remove_all(root).drop("a stale build executor fixture may be absent")
     files.create_dir_all(root) ?? panic("create fixture root")
     files.canonicalize(root) ?? panic("canonical fixture root")
@@ -535,9 +536,12 @@ fn build_test_output_action(outputs: [String]) -[Rand]> HermeticBuildAction Neve
 
 #Test("cache observation: an event path inside $HOME/.cache is appended, a `..` path is refused") {
     home :: sys.get("HOME") ?? panic("build executor fixtures require HOME")
-    root :: build_test_root("observe")
-    // The same directory spelled under $HOME, as the prefix check sees it.
-    spelled :: files.join(home, ".cache/jet-dev/scratch/jet-build-executor-observe-{sys.pid()}")
+    // The event path must lie inside $HOME/.cache, so this fixture lives there,
+    // spelled under $HOME as the prefix check sees it.
+    spelled :: files.join(files.join(home, ".cache"), "jet-build-executor-observe-{sys.pid()}")
+    files.remove_all(spelled).drop("a stale build executor fixture may be absent")
+    files.create_dir_all(spelled) ?? panic("create fixture root")
+    root :: files.canonicalize(spelled) ?? panic("canonical fixture root")
     name :: "JET_COMPTIME_CACHE_OBSERVATION_PATH"
     previous :: sys.get(name)
     sys.set(name, "{spelled}/sub/../escaped.jsonl")

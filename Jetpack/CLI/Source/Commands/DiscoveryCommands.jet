@@ -113,7 +113,7 @@ fn cli_cmd_override(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, T
         return EXIT_USAGE
     }
     reference :: parsed.positional.get(1) ?? {
-        theme.error("override draft needs a package ref", "the ref names the package whose typed workspace policy should be drafted.", "write `jetpack override draft foo@nixpkgs --patch patches/foo.patch`.")
+        theme.error("override draft needs a package ref", "the ref names the package whose typed workspace policy should be drafted.", "write `jetpack override draft foo@jetpack --patch patches/foo.patch`.")
         return EXIT_USAGE
     }
     overlay := "local"
@@ -143,7 +143,7 @@ fn cli_cmd_override(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, T
             }
             "--allow-unfree" -> allow_unfree = true
             else -> {
-                theme.error("unknown override draft flag `{flag}`", "override drafts accept `--overlay`, `--provider`, `--channel`, `--patch`, and `--allow-unfree`.", "write `jetpack override draft foo@nixpkgs --patch patches/foo.patch`.")
+                theme.error("unknown override draft flag `{flag}`", "override drafts accept `--overlay`, `--provider`, `--channel`, `--patch`, and `--allow-unfree`.", "write `jetpack override draft foo@jetpack --patch patches/foo.patch`.")
                 return EXIT_USAGE
             }
         }

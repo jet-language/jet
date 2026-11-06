@@ -648,7 +648,7 @@ export function makeEffect(body) {
   };
 }
 
-/** Runtime-owned rendering effect; public `reactive.effect` returns its handle. */
+/** Runtime-owned rendering effect; public `reactive.autorun` returns its handle. */
 export function reactiveRender(body) {
   const scopeName = jetDomScopeName;
   // Re-enter the caller's DOM scope on every synchronous rerun so backend

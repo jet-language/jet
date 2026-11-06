@@ -1,7 +1,6 @@
 use jet_foundation.HotSwap.[HotSwapDecision, StateRetentionDecision]
 
 impl NativeSwapState {
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:1815
     fn reject(self: Self, plan: NativeSwapPlan, explanation: NativeSwapExplanation) -> NativeSwapReceipt {
         preserved_listeners := self.listeners.keys().cloned().collect[[String]]()
         preserved_listeners.sort()
@@ -14,14 +13,12 @@ impl NativeSwapState {
             preserved_listeners: ^preserved_listeners, reset_listeners: [], preserved_connections: ^preserved_connections,
             reset_connections: [], restart_boundary: plan.restart_boundary.copy(), explanation: .Val(^explanation) }
     }
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:1841
     fn fail(self: Self, explanation: NativeSwapExplanation) -> NativeSwapReceipt NativeSwapError! {
         receipt := self.rollback()
         receipt.outcome = if explanation.disposition == .Restart -> NativeSwapOutcome.RestartRequired else -> NativeSwapOutcome.Rejected
         receipt.explanation = .Val(^explanation)
         receipt
     }
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:1855
     fn validate_plan(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
         plan.validate_shape()
         source_id :: self.source().canonical()
@@ -66,7 +63,6 @@ impl NativeSwapState {
         self.validate_listener_handles(plan)
         self.validate_connection_handles(plan)
     }
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:2028
     fn validate_listener_handles(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
         source_id :: self.source().canonical()
         if !plan.preserve_listeners.is_empty() && plan.capability.listeners == .Never -> return .Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "listener preservation was requested but capability forbids it"))
@@ -77,7 +73,6 @@ impl NativeSwapState {
             if current.generation != handle.generation || !current.is_compatible() -> return .Err(NativeSwapError.input(source_id, .ListenerHandleStale, "listener handle `{handle.id}` does not match the resident generation"))
         }
     }
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:2072
     fn validate_connection_handles(self: &Self, plan: &NativeSwapPlan) NativeSwapError! {
         source_id :: self.source().canonical()
         if !plan.preserve_connections.is_empty() && plan.capability.connections == .Never -> return .Err(NativeSwapError.input(source_id, .CapabilityUnavailable, "connection preservation was requested but capability forbids it"))
@@ -92,17 +87,12 @@ impl NativeSwapState {
                 "connection `{handle.id}` names listener `{handle.listener_id}` without an explicit compatible listener handle"))
         }
     }
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:2131
     fn error(self: Self, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError { NativeSwapError.input(self.source().canonical(), fact, ^detail) }
-    // Rust: crates/jet-devserver/src/NativeSwap.rs:2135
     fn phase_error(self: Self, detail: String) -> NativeSwapError { self.error(.InvalidPhase, "{detail}; current phase={self.phase.as_str()}") }
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2145 `CodeRevision` is `NativeSwapCodeRevision`
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2147 `DataRevision` is `NativeSwapDataRevision`
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2149 `NativeSwapResidentState` is `NativeSwapState`
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2151 `NativeSwapFailure` is `NativeSwapError`
+// The Rust `CodeRevision` is `NativeSwapCodeRevision` `DataRevision` is `NativeSwapDataRevision`
+// `NativeSwapResidentState` is `NativeSwapState` `NativeSwapFailure` is `NativeSwapError`
 
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2153
 fn receipt_from_working(working: NativeSwapWorkingReceipt, outcome: NativeSwapOutcome, explanation: NativeSwapExplanation?) -> NativeSwapReceipt {
     NativeSwapReceipt { source: working.source.copy(), outcome, before: working.before.revision.copy(), after: working.after.revision.copy(),
         before_generation: working.before.generation, after_generation: working.after.generation,
@@ -110,7 +100,6 @@ fn receipt_from_working(working: NativeSwapWorkingReceipt, outcome: NativeSwapOu
         preserved_connections: working.preserved_connections.copy(), reset_connections: working.reset_connections.copy(),
         restart_boundary: working.restart_boundary.copy(), explanation: ^explanation }
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2174
 fn listener_map(source_id: String, executable: &NativeSwapExecutable, listeners: [NativeSwapListenerHandle]) -> [String:NativeSwapListenerHandle] NativeSwapError! {
     if listeners.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident listener count exceeds its bounded fact limit"))
     map := [String:NativeSwapListenerHandle]{}
@@ -123,7 +112,6 @@ fn listener_map(source_id: String, executable: &NativeSwapExecutable, listeners:
     }
     map
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2227
 fn connection_map(source_id: String, executable: &NativeSwapExecutable, connections: [NativeSwapConnectionHandle], listeners: &[String:NativeSwapListenerHandle]) -> [String:NativeSwapConnectionHandle] NativeSwapError! {
     if connections.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "resident connection count exceeds its bounded fact limit"))
     map := [String:NativeSwapConnectionHandle]{}
@@ -138,18 +126,15 @@ fn connection_map(source_id: String, executable: &NativeSwapExecutable, connecti
     }
     map
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2298
 fn validate_identity(value: String, label: String) Err! {
     if value.is_empty() -> return .Err("{label} must not be empty")
     if value.len() > MAX_NATIVE_SWAP_ID_BYTES -> return .Err("{label} exceeds {MAX_NATIVE_SWAP_ID_BYTES} bytes")
     if value.chars().any((character) -> character.is_control()) -> return .Err("{label} contains a control character")
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2314
 fn validate_source_identity(identity: &NativeSwapSourceIdentity, label: String) Err! {
     validate_identity(identity.source_id, "{label} source")
     validate_identity(identity.module_ref, "{label} module")
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2321
 fn validate_hot_swap_decision(source_id: String, source: &NativeSwapSourceIdentity, decision: &HotSwapDecision) NativeSwapError! {
     _ :: validate_identity(decision.module_ref, "hot-swap decision module") ?? return .Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
     if decision.module_ref != source.module_ref -> return .Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "hot-swap decision module `{decision.module_ref}` does not match source module `{source.module_ref}`"))
@@ -160,7 +145,6 @@ fn validate_hot_swap_decision(source_id: String, source: &NativeSwapSourceIdenti
         if seen.insert(fact.key, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "hot-swap retention key `{fact.key}` appears more than once"))
     }
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2370
 fn decision_restart_boundary(decision: HotSwapDecision) -> NativeSwapRestartBoundary {
     affected := normalized_facts(decision.changed_functions.copy())
     if affected.is_empty() -> affected.push(decision.module_ref.copy())
@@ -174,7 +158,6 @@ fn decision_restart_boundary(decision: HotSwapDecision) -> NativeSwapRestartBoun
     }
     NativeSwapRestartBoundary.required(.IncompatibleType, ^affected).with_state(^kept, ^reset)
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2387
 fn validate_listener_plan_facts(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapListenerHandle]) NativeSwapError! {
     if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its listener fact limit"))
     seen := [String:Bool]{}
@@ -185,7 +168,6 @@ fn validate_listener_plan_facts(source_id: String, expected_source: &NativeSwapS
         if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "listener handle `{handle.id}` appears more than once"))
     }
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2433
 fn validate_connection_plan_facts(source_id: String, expected_source: &NativeSwapSourceIdentity, handles: &[NativeSwapConnectionHandle]) NativeSwapError! {
     if handles.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap plan exceeds its connection fact limit"))
     seen := [String:Bool]{}
@@ -197,9 +179,7 @@ fn validate_connection_plan_facts(source_id: String, expected_source: &NativeSwa
         if seen.insert(handle.id, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "connection handle `{handle.id}` appears more than once"))
     }
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2486
 fn validate_revision(value: String, label: String) Err! { validate_identity(value, label) }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2490
 fn validate_fact_list(source_id: String, facts: &[String]) NativeSwapError! {
     if facts.len() > MAX_NATIVE_SWAP_FACTS -> return .Err(NativeSwapError.input(source_id, .FactLimit, "native swap fact list exceeds its bounded fact limit"))
     loop fact in facts {
@@ -210,9 +190,7 @@ fn validate_fact_list(source_id: String, facts: &[String]) NativeSwapError! {
         if seen.insert(fact, true).is_some() -> return .Err(NativeSwapError.input(source_id, .DuplicateIdentity, "native swap fact `{fact}` appears more than once"))
     }
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2520
 fn normalized_facts(facts: [String]) -> [String] { facts.sort(); facts }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2525
 fn bounded_text(value: String, limit: USize) -> String {
     output := ""
     loop character in value.chars() {
@@ -222,7 +200,6 @@ fn bounded_text(value: String, limit: USize) -> String {
     }
     output
 }
-// Rust: crates/jet-devserver/src/NativeSwap.rs:2539
 fn restart_or_reject(source_id: String, allows_restart: Bool, fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
     if allows_restart && fact.is_restartable() -> NativeSwapError.restart(source_id, fact, ^detail)
     else {

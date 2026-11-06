@@ -164,11 +164,11 @@ fn sema_expression_layout_discard_arguments(args: [CallArg], environment: SemaSc
 }
 
 fn sema_expression_layout_argument_mismatch(owner: String, method: String, expected: Type, actual: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0128", span, "`.{method}()` on `{owner}` expects a `{type_name(expected)}`, got `{type_name(actual)}`", "`{owner}.{method}(…)` operates on a `{type_name(expected)}`", "pass a `{type_name(expected)}` value"))
+    &diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a `{type_name(expected)}`, got `{type_name(actual)}`", "`{owner}.{method}(…)` operates on a `{type_name(expected)}`", "pass a `{type_name(expected)}` value"))
 }
 
 fn sema_expression_layout_axis_argument_mismatch(owner: String, method: String, actual: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0128", span, "`.{method}()` on `{owner}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{type_name(actual)}`", "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout {{ … }}` block", "pass a layout variable, not a plain value"))
+    &diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{type_name(actual)}`", "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout {{ … }}` block", "pass a layout variable, not a plain value"))
 }
 
 fn sema_expression_layout_method_params(types: [Type]) -> [SemaCallParam] Never! {

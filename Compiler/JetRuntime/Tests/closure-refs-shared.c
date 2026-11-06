@@ -7,8 +7,8 @@
 
 extern int64_t jet_closure_ref_test_run(void);
 extern void jet_rt_alloc_init(void);
-extern int64_t __real_jet_rt_alloc(int64_t size, int64_t align);
-extern void __real_jet_rt_free(int64_t pointer, int64_t size, int64_t align);
+extern void jet_rt_host_arguments(int64_t argc, int64_t argv, int64_t envp);
+extern int64_t jet_rt_alloc_check_observe(int64_t on_alloc, int64_t on_free);
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_barrier_t first_pair;
@@ -20,8 +20,10 @@ static void require(int condition, const char *message) {
     if (!condition) { fprintf(stderr, "closure-refs-shared: %s\n", message); abort(); }
 }
 
-int64_t __wrap_jet_rt_alloc(int64_t size, int64_t align) {
-    int64_t pointer = __real_jet_rt_alloc(size, align);
+// The checked heap reports every allocation and free here, the runtime's own
+// included (jet_rt_alloc_check_observe), so the box's release is seen
+// wherever the runtime makes it.
+static void observe_alloc(int64_t pointer, int64_t size, int64_t align) {
     if (size == 168) {
         pthread_mutex_lock(&lock);
         require(align == 8 && pointer != 0 && box == 0 && box_allocs == 0,
@@ -30,10 +32,9 @@ int64_t __wrap_jet_rt_alloc(int64_t size, int64_t align) {
         box_allocs++;
         pthread_mutex_unlock(&lock);
     }
-    return pointer;
 }
 
-void __wrap_jet_rt_free(int64_t pointer, int64_t size, int64_t align) {
+static void observe_free(int64_t pointer, int64_t size, int64_t align) {
     pthread_mutex_lock(&lock);
     if (pointer == box && box != 0) {
         require(size == 168 && align == 8 && box_frees == 0,
@@ -44,7 +45,6 @@ void __wrap_jet_rt_free(int64_t pointer, int64_t size, int64_t align) {
         require(size != 168, "unmatched closure-class free");
     }
     pthread_mutex_unlock(&lock);
-    __real_jet_rt_free(pointer, size, align);
 }
 
 // Inputs cross an actual C import, so no source-time constant folding can
@@ -70,7 +70,10 @@ void jet_closure_ref_test_enter(void) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv, char **envp) {
+    require(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1,
+            "checked-heap observer refused");
+    jet_rt_host_arguments((int64_t)argc, (int64_t)(uintptr_t)argv, (int64_t)(uintptr_t)envp);
     require(pthread_barrier_init(&first_pair, NULL, 2) == 0, "barrier init failed");
     jet_rt_alloc_init();
     int64_t checksum = jet_closure_ref_test_run();

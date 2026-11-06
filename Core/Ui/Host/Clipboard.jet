@@ -3,17 +3,22 @@ use {
     core.ui.host.[UIClipboardText, UIClipboardWrite, UIHostError]
 }
 
-// core.ui.host.clipboard — typed UTF-8 clipboard provider.
+// core.ui.host.clipboard — typed UTF-8 clipboard over the host provider's
+// clipboard text primitives (capability code 1).
 fn read_text() -[IO]> UIClipboardText UIHostError! {
-    #Unsafe("Core clipboard reads through the current retained provider; the raw host owns platform access") {
-        core.ui.host.clipboard.__read_text()
-    }
+    if !core.ui.host.__capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
+    text :: core.ui.host.__clipboard_get() ?? return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not read the clipboard"})
+    Ok(UIClipboardText{text: text, selection: None})
 }
 
 fn write_text(text: String) -[IO]> UIClipboardWrite UIHostError! {
-    #Unsafe("Core clipboard transfers the exact UTF-8 text to the current retained provider") {
-        core.ui.host.clipboard.__write_text(text)
+    if !core.ui.host.__capability(1) -> return Err(UIHostError.CapabilityUnavailable{capability: "Clipboard"})
+    if !core.ui.host.__clipboard_set(text) -> return Err(UIHostError.HostFailure{service: "Clipboard", message: "the provider could not write the clipboard"})
+    characters := 0
+    loop byte in text.bytes() {
+        if Int.from_u8(byte).bit_and(192) != 128 -> characters += 1
     }
+    Ok(UIClipboardWrite{characters: characters})
 }
 
 fn clear() -[IO]> UIClipboardWrite UIHostError! {

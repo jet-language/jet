@@ -46,6 +46,7 @@ use {
         X64_COMPTIME_STOP_MESSAGE,
         X64_COMPTIME_STOP_REQUIRE,
         X64_COMPTIME_STOP_SHIFT,
+        X64_COMPTIME_STOP_TODO,
         X64_COMPTIME_TEXT,
         X64_COMPTIME_WRITE,
         os_page_round,
@@ -153,6 +154,11 @@ struct JetEvalIRState {
     runtime_execution: Bool
     // config.eval_entry: ambient effects are refused as `jet eval` refuses them.
     eval_entry: Bool
+    // config.impure: a Tier-2 effect of an item inside `#Impure` is refused
+    // for the missing invocation gate (E3411); config.impure_gate: the gate
+    // was opened.
+    impure: Bool
+    impure_gate: Bool
     span: Span
     failure: JetEvalError?
     internal_problem: JetEvalInternalProblem?
@@ -518,7 +524,7 @@ fn jet_eval_native_run(program: &JetEvalNativeProgram, item: Int, args: [TCompti
     s := JetEvalIRState{
         child: X64ComptimeChild{}, pages: [[U8]]{}, page_rows: [Int:Int]{},
         budget: if program.runtime_execution -> -1 else -> config.fuel /% JET_EVAL_NATIVE_FUEL_PER_MS,
-        stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, span: span,
+        stdout: "", stderr: "", max_depth: config.max_call_depth, runtime_execution: program.runtime_execution, eval_entry: config.eval_entry, impure: config.impure, impure_gate: config.impure_gate, span: span,
         failure: None, internal_problem: None, exit_code: None,
         inputs: if config.comptime_input_adapter == .Val(adapter) -> Val(adapter.clone_input_adapter()) else -> None,
         compiler: if config.compiler_query_host == .Val(host) -> Val(host.clone_compiler_host()) else -> None,
@@ -723,6 +729,18 @@ fn jet_eval_native_stop(s: &JetEvalIRState, kind: Int, a: Int, b: Int, c: Int, d
         if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3010", Val(s.span), "`{message}`", "compile-time code stopped the build: a `panic`, a failed check or an unhandled failure in a `comptime` value is a compile error", "handle the failure inside the `comptime` block (`??` or an `.Ok`/`.Err` match), or fix the value the check rejects")})
         return
     }
+    // A reached `#Todo` (Trap.jet jet_todo_stop): the E3011 stop at its file
+    // and line, naming the type it stands for. A comptime value it reaches
+    // has no value to fold, so it stops the build.
+    if kind == X64_COMPTIME_STOP_TODO {
+        file :: jet_eval_ir_text(&s, a) ?? return
+        expected :: jet_eval_ir_text(&s, c) ?? return
+        what :: "`#Todo at {file}:{b} — expected {expected}`"
+        why :: if s.runtime_execution -> "this code is deliberately incomplete and reached a running program." else -> "compile-time code reached a `#Todo`, so the `comptime` value has no result: the code it stands for is deliberately incomplete."
+        fix :: if s.runtime_execution -> "implement the missing code before running the program." else -> "implement the missing code, or keep the `#Todo` out of the code a `comptime` value runs."
+        if s.failure == None -> s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Source, diagnostic: diagnostic_from_registry("E3011", Val(s.span), what, why, fix)})
+        return
+    }
     jet_eval_ir_problem(&s, "the comptime child stopped with kind {kind} ({a}, {b}, {c}, {d})")
 }
 
@@ -771,6 +789,15 @@ fn jet_eval_ir_effect_refused(s: &JetEvalIRState, what: String, nondeterministic
         entry :: diagnostic_registry_row("E3403") ?? panic("E3403 has no registry row")
         refusal :: diagnostic_from_registry("E3403", Val(s.span), entry.what.replace("{{what_text}}", what), entry.why, entry.fix)
         s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{what}, [String]{}, None)})
+        return
+    }
+    if s.impure && s.impure_gate {
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{what}` inside `#Impure` is a Tier-2 comptime effect, which compile-time evaluation does not run", "`--gate impure=allow` opens the gate, but the compile-time evaluator performs no host effect", "keep the call at runtime"))
+        return
+    }
+    if s.impure {
+        entry :: diagnostic_registry_row("E3411") ?? panic("E3411 has no registry row")
+        s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3411", Val(s.span), "`{what}` inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed", entry.why, entry.fix)})
         return
     }
     s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3410", Val(s.span), "`{what}` is a Tier-2 comptime effect — it requires a `#Impure` gate", "effectful Core APIs are not allowed in pure comptime evaluation", "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and pass `--gate impure=allow` to the build, or keep the call at runtime")})

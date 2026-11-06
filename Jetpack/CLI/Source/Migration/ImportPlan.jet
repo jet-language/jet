@@ -119,7 +119,7 @@ struct ImportPlan {
             // instead of becoming runtime dependencies.
             if !facts.is_lossless() -> next
             if (facts.text_fact("package.dependency_kind") ?? "runtime") != "runtime" -> next
-            out = "{out}    {dep.name}: {cli_import_canonical_package_ref(facts.qualified_reference())},\n"
+            out = "{out}    {dep.name}: {facts.qualified_reference()},\n"
         }
         "{out}}}\n"
     }
@@ -193,10 +193,6 @@ fn cli_merge_generated_file(existing: String?, generated: GeneratedFile) -> Stri
     current :: existing ?? return Ok(generated.contents)
     if current == generated.contents -> return Ok(generated.contents)
     Err(ImportConflict.UserEditedGeneratedLine{path: generated.path})
-}
-
-fn cli_import_canonical_package_ref(reference: String) -> String Never! {
-    MigratedRef.persisted(reference).canonical
 }
 
 // The finding path for a fact recorded at `source`: provider-internal

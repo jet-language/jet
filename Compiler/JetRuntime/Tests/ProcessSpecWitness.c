@@ -1,4 +1,4 @@
-// Real Jet providers only; link -Wl,--wrap=jet_rt_free. No Rust layout reads.
+// Real Jet providers only. No Rust layout reads.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,7 +16,7 @@ typedef struct {
 _Static_assert(sizeof(Spec)==144 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136, "native Spec144");
 _Static_assert(sizeof(List)==24 && sizeof(Policy)==24, "canonical nested carriers");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -30,33 +30,34 @@ extern bool jet_rt_handle_eq_process_spec(const Spec *,const Spec *);
 extern Text *jet_rt_handle_show_process_spec(const Spec *);
 extern const bool *jet_rt_handle_field_process_spec_env_clear(const Spec *);
 extern const bool *jet_rt_handle_field_process_spec_detached(const Spec *);
-extern Spec *jet_process_spec_arg(const Spec *,const Text *);
-extern Spec *jet_process_spec_args_extend(const Spec *,Text *const *,int64_t);
-extern Spec *jet_process_spec_cwd(const Spec *,const Text *);
-extern Spec *jet_process_spec_env(const Spec *,const Text *,const Text *);
-extern Spec *jet_process_spec_env_remove(const Spec *,const Text *);
-extern Spec *jet_process_spec_env_clear(const Spec *);
-extern Spec *jet_process_spec_detached(const Spec *);
-extern Spec *jet_process_spec_stdin(const Spec *,int64_t);
-extern Spec *jet_process_spec_stdout(const Spec *,int64_t);
-extern Spec *jet_process_spec_stderr(const Spec *,int64_t);
-extern Spec *jet_process_spec_output_limit(const Spec *,int64_t);
-extern Spec *jet_process_spec_memory_limit(const Spec *,int64_t);
-extern Spec *jet_process_spec_open_file_limit(const Spec *,int64_t);
-extern Spec *jet_process_spec_timeout(const Spec *,int64_t);
-extern Spec *jet_process_spec_cpu_time_limit(const Spec *,int64_t);
-extern Spec *jet_process_spec_terminal(const Spec *);
-extern Spec *jet_process_spec_terminal_with_policy(const Spec *,const Policy *);
+extern Spec *jet_process_spec_arg(Spec *,const Text *);
+extern Spec *jet_process_spec_args_extend(Spec *,Text *const *,int64_t);
+extern Spec *jet_process_spec_cwd(Spec *,const Text *);
+extern Spec *jet_process_spec_env(Spec *,const Text *,const Text *);
+extern Spec *jet_process_spec_env_remove(Spec *,const Text *);
+extern Spec *jet_process_spec_env_clear(Spec *);
+extern Spec *jet_process_spec_detached(Spec *);
+extern Spec *jet_process_spec_stdin(Spec *,int64_t);
+extern Spec *jet_process_spec_stdout(Spec *,int64_t);
+extern Spec *jet_process_spec_stderr(Spec *,int64_t);
+extern Spec *jet_process_spec_output_limit(Spec *,int64_t);
+extern Spec *jet_process_spec_memory_limit(Spec *,int64_t);
+extern Spec *jet_process_spec_open_file_limit(Spec *,int64_t);
+extern Spec *jet_process_spec_timeout(Spec *,int64_t);
+extern Spec *jet_process_spec_cpu_time_limit(Spec *,int64_t);
+extern Spec *jet_process_spec_terminal(Spec *);
+extern Spec *jet_process_spec_terminal_with_policy(Spec *,const Policy *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[256];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].p==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align);
         assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(count<256);
@@ -81,7 +82,10 @@ static void watch_spec(Spec *s) {
 static void done(void) { assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
 static void bytes(Text *t,const char *s) { assert(t->len==(int64_t)strlen(s)); assert(memcmp(t->data,s,(size_t)t->len)==0); }
-static void replace(Spec **s,Spec *next) { assert(*s!=next); jet_rt_handle_drop_process_spec(*s); *s=next; }
+// Builders consume the spec they are given and return it changed in place.
+static void replace(Spec **s,Spec *next) { assert(*s==next); }
+// The compiler passes a spec another holder keeps as its own clone.
+static Spec *own(const Spec *s) { return jet_rt_handle_clone_process_spec(s); }
 static void defaults(Spec *s) {
     assert(s->cmd->len==0 && !s->cwd && !s->env_clear && s->env_set->len==0 && s->env_remove->len==0);
     assert(!s->in && s->out==2 && s->err==2 && !s->timeout && *s->output==67108864);
@@ -94,7 +98,7 @@ static void clone_cases(void) {
     Spec *a=jet_std_process_cmd(NULL,0); defaults(a);
     Text *shown=jet_rt_handle_show_process_spec(a); bytes(shown,"ProcessSpec([])"); jet_rt_string_drop(shown);
     Text *arg=text("run"), *cwd=text("/secret"), *name=text("TOKEN"), *value=text("credential");
-    Spec *b=jet_process_spec_arg(a,arg); defaults(a); assert(b->cmd->len==1 && b->cmd->data[0]!=arg); bytes(b->cmd->data[0],"run");
+    Spec *b=jet_process_spec_arg(own(a),arg); defaults(a); assert(b!=a && b->cmd->len==1 && b->cmd->data[0]!=arg); bytes(b->cmd->data[0],"run");
     replace(&b,jet_process_spec_cwd(b,cwd)); replace(&b,jet_process_spec_env(b,name,value));
     replace(&b,jet_process_spec_env(b,name,arg)); assert(b->env_set->len==2); // duplicates preserve insertion order
     replace(&b,jet_process_spec_env_remove(b,name)); replace(&b,jet_process_spec_env_clear(b)); replace(&b,jet_process_spec_detached(b));
@@ -143,16 +147,16 @@ static void limits(void) {
     int64_t input[]={-1,0,1,hi,lo,above,below};
     int64_t expect[]={0,0,1,INT64_MAX,0,INT64_MAX,0};
     for(size_t i=0;i<7;++i) {
-        Spec *b=jet_process_spec_output_limit(a,input[i]); assert(*b->output==expect[i]); jet_rt_handle_drop_process_spec(b);
-        b=jet_process_spec_memory_limit(a,input[i]); assert(*b->memory==expect[i]); jet_rt_handle_drop_process_spec(b);
-        b=jet_process_spec_open_file_limit(a,input[i]); assert(*b->files==expect[i]); jet_rt_handle_drop_process_spec(b);
+        Spec *b=jet_process_spec_output_limit(own(a),input[i]); assert(*b->output==expect[i]); jet_rt_handle_drop_process_spec(b);
+        b=jet_process_spec_memory_limit(own(a),input[i]); assert(*b->memory==expect[i]); jet_rt_handle_drop_process_spec(b);
+        b=jet_process_spec_open_file_limit(own(a),input[i]); assert(*b->files==expect[i]); jet_rt_handle_drop_process_spec(b);
         defaults(a);
     }
     int64_t nanos[]={INT64_MIN,-1000001,-1,0,999999,1000000,1999999,INT64_MAX};
     for(size_t i=0;i<8;++i) {
         int64_t d=jet_int_owned_from_i64(nanos[i]); int64_t ms=nanos[i]/1000000; if(ms<0) ms=0;
-        Spec *b=jet_process_spec_timeout(a,d); assert(*b->timeout==ms); jet_rt_handle_drop_process_spec(b);
-        b=jet_process_spec_cpu_time_limit(a,d); assert(*b->cpu==ms); jet_rt_handle_drop_process_spec(b); jet_rt_int_drop(d);
+        Spec *b=jet_process_spec_timeout(own(a),d); assert(*b->timeout==ms); jet_rt_handle_drop_process_spec(b);
+        b=jet_process_spec_cpu_time_limit(own(a),d); assert(*b->cpu==ms); jet_rt_handle_drop_process_spec(b); jet_rt_int_drop(d);
     }
     jet_rt_int_drop(hi); jet_rt_int_drop(lo); jet_rt_int_drop(above); jet_rt_int_drop(below); jet_rt_handle_drop_process_spec(a);
 }
@@ -162,21 +166,22 @@ static void modes_and_debug(void) {
     Spec *a=jet_std_process_cmd(args,2); assert(a->cmd->data[0]!=input);
     Text *shown=jet_rt_handle_show_process_spec(a);
     bytes(shown,"ProcessSpec([\"\\0\\t\\n\\r\\\"\\\\'\\u{301}\", \"x\"])"); jet_rt_string_drop(shown);
-    Spec *extended=jet_process_spec_args_extend(a,args,2); assert(a->cmd->len==2 && extended->cmd->len==4);
+    Spec *extended=jet_process_spec_args_extend(own(a),args,2); assert(a->cmd->len==2 && extended->cmd->len==4);
     assert(extended->cmd->data[0]!=extended->cmd->data[2]); jet_rt_handle_drop_process_spec(extended);
-    extended=jet_process_spec_args_extend(a,NULL,9); assert(jet_rt_handle_eq_process_spec(a,extended)); jet_rt_handle_drop_process_spec(extended);
-    extended=jet_process_spec_args_extend(a,args,-1); assert(jet_rt_handle_eq_process_spec(a,extended)); jet_rt_handle_drop_process_spec(extended);
+    extended=jet_process_spec_args_extend(own(a),NULL,9); assert(jet_rt_handle_eq_process_spec(a,extended)); jet_rt_handle_drop_process_spec(extended);
+    extended=jet_process_spec_args_extend(own(a),args,-1); assert(jet_rt_handle_eq_process_spec(a,extended)); jet_rt_handle_drop_process_spec(extended);
     Spec *empty=jet_std_process_cmd(NULL,9); defaults(empty); jet_rt_handle_drop_process_spec(empty);
     empty=jet_std_process_cmd(args,-1); defaults(empty); jet_rt_handle_drop_process_spec(empty);
     for(int64_t mode=0;mode<3;++mode) {
-        Spec *b=jet_process_spec_stdin(a,mode); assert(b->in && *b->in==mode && !a->in); jet_rt_handle_drop_process_spec(b);
-        b=jet_process_spec_stdout(a,mode); assert(b->out==mode && a->out==2); jet_rt_handle_drop_process_spec(b);
-        b=jet_process_spec_stderr(a,mode); assert(b->err==mode && a->err==2); jet_rt_handle_drop_process_spec(b);
+        Spec *b=jet_process_spec_stdin(own(a),mode); assert(b->in && *b->in==mode && !a->in); jet_rt_handle_drop_process_spec(b);
+        b=jet_process_spec_stdout(own(a),mode); assert(b->out==mode && a->out==2); jet_rt_handle_drop_process_spec(b);
+        b=jet_process_spec_stderr(own(a),mode); assert(b->err==mode && a->err==2); jet_rt_handle_drop_process_spec(b);
     }
     assert(input->len==(int64_t)sizeof(raw) && !memcmp(input->data,raw,sizeof(raw)));
     jet_rt_handle_drop_process_spec(a); jet_rt_string_drop(input); jet_rt_string_drop(plain);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         Spec *s=jet_std_process_cmd(NULL,0);

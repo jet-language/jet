@@ -1,17 +1,8 @@
-Error [jet.ComptimeNetUnavailable]: `core.net.tcp_connect()` is not available at comptime
-  --> tests/ui/impure_net_stub.jet:6:22
+Error [jet.ComptimeNetUnavailable]: `core.net.tcp_connect()` is not available at comptime.
+  --> tests/ui/impure_net_stub.jet:6:32
     |
-  6 |         @conn :: net.tcp_connect("build.example.com:443")
-    |                      ^^^^^^^^^^^
- Why: Only `core.net.fetch(url, sha256:)` is supported at compile time
- Fix: Use `core.net.fetch(url, sha256: "<hash>")` for content-hash-pinned downloads
+  6 |         conn :: comptime { net.tcp_connect("build.example.com:443") }
+    |                                ^^^^^^^^^^^
+ Why: Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect.
+ Fix: Use `core.net.fetch(url, sha256: "…")` for content-hash-pinned downloads.
 More: jet-lang.dev/e/E3412
-
-Error [jet.UnknownName]: Nothing named `@conn` exists here
-  --> tests/ui/impure_net_stub.jet:7:28
-    |
-  7 |         print("connected: {@conn}")
-    |                            ^^^^^
- Why: A name must be declared before it's used
- Fix: Declare it first: `@conn :: ...`
-More: jet-lang.dev/e/E0107

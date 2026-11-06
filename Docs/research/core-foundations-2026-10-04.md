@@ -22,7 +22,7 @@ beautifully strcutured".
 Owner clarification relayed by Main the same day: the four named areas were
 examples, not the scope. This report therefore surveys every axis and gives one
 catalogue row per idea (section 3). Each idea that needs an owner choice has
-its own ballot draft under `~/.cache/jet-dev/ballots/READY/`.
+its own ballot draft under `$JET_STATE_ROOT/ballots/READY/`.
 
 Method. Counts come from `git grep`, `wc` and file reads at the current
 checkout on 2026-10-04. Decisions were read with the read-only Tower CLI
@@ -173,7 +173,7 @@ Order follows dependency: a row depends only on rows above it.
 | 13 | Typed compiler tables | Prelude "Jet" files use seven row grammars that are not Jet: tab-separated `diagnostic` rows (`Prelude/Diagnostics.jet:3-7`), `bootstrap … depends_on`, `module … exports { … }`, `source_module … owns { … }`, `dispatcher_row … | <Rust>`, `format_row` (`Prelude/Core.jet:7-16,241-253`) | Every table is ordinary typed Jet: a `prep` list of typed values (as `Registry/BuiltinStatics.jet:210` already does) or a declaration with `$` facts (as `Markers.jet` and `Facts.jet` already do) | Settled by D-META-ONE1=A ("exactly one parse path"), D-OPENTABLE1=D, D-FACTDECL1=A (impl; the row grammar is internal) | — |
 | 14 | Core is its own twin | `module X exports { … }` re-lists every `pub` name of each Core file; hand Rust signatures per Core call (`crates/jet-sema/src/Sema/CheckerCoreLib/`, 26,960 lines) | The interface record is generated from Core source; `Prelude/Core.jet` module and dispatcher rows retire as modules port | Settled by D-CORE-SOURCE-AUTHORITY1=A, D-OPENTABLE1=D (Core dispatcher and export classifier generated), SP12 | 1, 13 |
 | 15 | One effect list | `Effects.jet` lists 15 roots and leaves; `core.compiler.lang.Effect` lists 12 different ones (`Random` vs `Rand`, `Proc`, `Crypto`; `Core/compiler/lang.jet:25-38`) | Generate the enum from `Effects.jet` | Settled by D-EFFECT-ENUM1=A (impl) | 13 |
-| 16 | Effect scope marker | `#FX`, `#Abilities` and `#Caps` all exist as rows; the last two are retired teaching rows (`Markers.jet:163-167`) | Keep `#FX`; D-AUTHORITY-WORD2's `#Abilities` wording was superseded by D-ABILITY-NAME2 | Settled by D-ABILITY-NAME2=A (its option D, "confirm D-AUTHORITY-WORD2", was rejected). Record conflict with D-AUTHORITY-WORD2=E noted in `~/.cache/jet-dev/ballots/READY/NOTE-CORE-FOUNDATIONS-RECORDS.md` §1 | — |
+| 16 | Effect scope marker | `#FX`, `#Abilities` and `#Caps` all exist as rows; the last two are retired teaching rows (`Markers.jet:163-167`) | Keep `#FX`; D-AUTHORITY-WORD2's `#Abilities` wording was superseded by D-ABILITY-NAME2 | Settled by D-ABILITY-NAME2=A (its option D, "confirm D-AUTHORITY-WORD2", was rejected). Record conflict with D-AUTHORITY-WORD2=E noted in `$JET_STATE_ROOT/ballots/READY/NOTE-CORE-FOUNDATIONS-RECORDS.md` §1 | — |
 | 17 | Marker argument menus | `core.compiler.lang` enums are hand-copied menus (`Core/compiler/lang.jet:1-176`) | Generated from the registry rows | Settled by D-RULEARG-TYPES1=A (impl) | 13 |
 | 18 | Compile time runs compiled Core | `crates/jet-comptime/.../core_calls/` re-routes Core calls at compile time (6,443 lines, boundary report §2.1) | Comptime runs the O0 build of the same Core; the re-routes are deleted | Settled by D-EXEC1=A (compile-time code runs at O0 and calls the same compiled Core), D-META-ONE1=A; speed cards SP03, SP17 | 1 |
 | 19 | Per-type helper copies | 36 Core functions differ only by a type suffix, for example `identity_int`, `identity_float`, `min_int`, `max_int` (`Core/prelude/prelude.jet:21-50`) beside generic `keep<T>` | One generic function per meaning over `Numeric` or `Comparable` | Settled by D-TRAIT-OVERLOAD1=A ("a generic definition is the only way one name serves many types"), D-CORE-DOCTRINE1=A (impl) | 2 |
@@ -713,7 +713,7 @@ goldens and UI snapshots.
 
 ## 11. Ballot drafts and remaining follow-ups
 
-Drafts in `~/.cache/jet-dev/ballots/READY/`, each a short ballot with at most
+Drafts in `$JET_STATE_ROOT/ballots/READY/`, each a short ballot with at most
 three options and the recommendation listed first as A. Status on 2026-10-05,
 read from Tower:
 
@@ -749,7 +749,7 @@ Results of the follow-ups listed by the first pass:
   It is listed only in zero-use triage. Implementation: retire it.
 - **Record conflicts.** D-AUTHORITY-WORD2=E against D-ABILITY-NAME2=A, and
   three smaller items: rows 27, 28 and 30. All are written up in
-  `~/.cache/jet-dev/ballots/READY/NOTE-CORE-FOUNDATIONS-RECORDS.md`.
+  `$JET_STATE_ROOT/ballots/READY/NOTE-CORE-FOUNDATIONS-RECORDS.md`.
 
 ## 12. Sources
 
@@ -757,7 +757,7 @@ Read or downloaded 2026-10-04.
 
 Jet (this checkout): `AGENTS.md`; `Docs/spec/philosophy.md`;
 `Docs/research/compiler-corelib-boundary-2026-10-04.md`;
-`~/.cache/jet-dev/speed/SPEED-PLAN.md`; `crates/jet-foundation/src/Syntax.rs`
+`$JET_STATE_ROOT/speed/SPEED-PLAN.md`; `crates/jet-foundation/src/Syntax.rs`
 and `Syntax/*.rs`; `crates/jet-foundation/src/AST/types.rs`;
 `crates/jet-foundation/src/Generics.rs`; `crates/jet-codegen/src/Prelude/{Core,Markers,Effects,Facts,Derives,Diagnostics}.jet`;
 `Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet`;

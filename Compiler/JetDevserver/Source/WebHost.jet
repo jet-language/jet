@@ -1,5 +1,4 @@
 // Web dev-server state and terminal/browser parity. Browser swaps preserve module-owned state.
-// Rust: crates/jet-devserver/src/WebHost.rs:13
 use {
     fs :: std.fs
     std.io.[BufReader, IsTerminal, Write]
@@ -32,26 +31,16 @@ use {
     jetpack_foundation.[ColorChoice]
     core.encoding.[Dyn]
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:55
 APPLICATION_PORT_RANGE :: 8080..8089
-// Rust: crates/jet-devserver/src/WebHost.rs:56
 CANVAS_SESSION_BYTES :: 32
-// Rust: crates/jet-devserver/src/WebHost.rs:57
 MAX_CONNECTION_THREADS :: 64
-// Rust: crates/jet-devserver/src/WebHost.rs:62
 LIVE_RELOAD_POLL_MS :: 40
-// Rust: crates/jet-devserver/src/WebHost.rs:63
 CLIENT_TTL_MS :: Session.CLIENT_TTL_MS
-// Rust: crates/jet-devserver/src/WebHost.rs:64
 MAX_CLIENTS :: Session.MAX_CLIENTS
-// Rust: crates/jet-devserver/src/WebHost.rs:65
 REQUEST_DEADLINE :: Duration.from_secs(10)
-// Rust: crates/jet-devserver/src/WebHost.rs:66
 MAX_STATIC_RESPONSE_BYTES :: 64 * 1024 * 1024
-// Rust: crates/jet-devserver/src/WebHost.rs:67
 // GATE #4494: native atomics, locks, terminal IO, clock and listener ownership.
 PUBLICATION_COUNTER :: AtomicU64.new(0)
-// Rust: crates/jet-devserver/src/WebHost.rs:68
 fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! {
     root :: parse_json_with_limit(payload, JET_DEVTOOLS_MAX_ENVELOPE_BYTES) ?? return .Err("devtools envelope is not valid bounded JSON")
     object :: object_map(&root) ?? return .Err("devtools envelope must be an object")
@@ -76,7 +65,6 @@ fn decode_devtools_envelope(payload: String) -> JetDevtoolsDecodedEnvelope Err! 
     if object.contains_key("commands") -> return .Err("devtools command envelope requires direction")
     return .Events(decode_devtools_events(&object, session_id, started_at_ms)?)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:123
 fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsEnvelope Err! {
     events :: if object.get("events") == {
         .Val(.Array(v)) -> v
@@ -152,7 +140,6 @@ fn decode_devtools_events(object: [String:Dyn], session_id: String, started_at_m
     if object.contains_key("truncated") -> envelope.truncated = devtools_required_bool(object, "truncated")
     return envelope
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:261
 fn decode_devtools_command_envelope(object: [String:Dyn], session_id: String, started_at_ms: U64) -> JetDevtoolsCommandEnvelope Err! {
     expected :: ["protocol", "session_id", "started_at_ms", "direction", "commands"]
     if !devtools_has_exact_fields(object, &expected) -> return .Err("devtools command envelope has unexpected top-level fields")
@@ -202,7 +189,6 @@ fn decode_devtools_command_envelope(object: [String:Dyn], session_id: String, st
     envelope.validate()
     return envelope
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:423
 fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevtoolsEventBody? Err! {
     object :: object_map(fields) ?? return .Err("devtools event fields must be an object")
     if devtools_expected_fields(kind) == .Val(expected) {
@@ -328,7 +314,6 @@ fn decode_devtools_body(kind: String, _entity: String, fields: &Dyn) -> JetDevto
     }
     return .Val(body)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:738
 fn devtools_expected_fields(kind: String) -> [String]? {
     return if kind == {
         "Build" -> .Val(["status", "tier", "diagnostics", "kept", "reset"])
@@ -350,24 +335,19 @@ fn devtools_expected_fields(kind: String) -> [String]? {
         else -> .None
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:798
 fn object_map(value: Dyn) -> [String:Dyn]? {
     return if value == {
         .Object(fields) -> .Val(fields.iter().cloned().collect())
         else -> .None
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:805
 fn object_map_entries(fields: &[(String, Dyn)]) -> [String:Dyn] { return fields.iter().cloned().collect() }
-// Rust: crates/jet-devserver/src/WebHost.rs:811
 fn devtools_has_exact_fields(object: [String:Dyn], expected: [String]) -> Bool {
     return object.len() == expected.len() && object.keys().all((key) -> expected.iter().any((name) -> name == key))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:821
 fn devtools_exact_fields(object: &[String:Dyn], expected: &[String]) Err! {
     if !devtools_has_exact_fields(object, expected) -> return .Err("devtools event fields do not match the typed body")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:831
 fn devtools_required_game_launch_phases(object: [String:Dyn], key: String) -> [JetDevtoolsGameLaunchPhase] Err! {
     values :: if object.get(key) == {
         .Val(.Array(v)) -> v
@@ -382,7 +362,6 @@ fn devtools_required_game_launch_phases(object: [String:Dyn], key: String) -> [J
     }
     return phases
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:857
 fn devtools_required_string_array(object: [String:Dyn], key: String) -> [String] Err! {
     values :: if object.get(key) == {
         .Val(.Array(v)) -> v
@@ -398,11 +377,9 @@ fn devtools_required_string_array(object: [String:Dyn], key: String) -> [String]
     }
     return strings
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:875
 fn devtools_required_u16(object: [String:Dyn], key: String) -> U16 Err! {
     return U16.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u16 range")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:883
 fn devtools_optional_u64(object: [String:Dyn], key: String) -> U64? Err! {
     if object.get(key) == {
         .None | .Val(.Null) -> { return .None }
@@ -411,13 +388,11 @@ fn devtools_optional_u64(object: [String:Dyn], key: String) -> U64? Err! {
         else -> { return .Err("devtools event `{key}` must be an integer or null") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:897
 fn devtools_required_function(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity Err! {
     function :: object.get(key).and_then(object_map) ?? return .Err("devtools event `{key}` must be an object")
     source :: function.get("source").and_then(object_map) ?? return .Err("devtools event `{key}.source` must be an object")
     return JetDevtoolsFunctionIdentity.new(devtools_required_string(&function, "function_id"), devtools_required_string(&function, "name")?, JetDevtoolsSourceSpan.new(devtools_required_string(&source, "source_id")?, devtools_required_string(&source, "file")?, devtools_required_u32(&source, "start_line")?, devtools_required_u32(&source, "start_column")?, devtools_required_u32(&source, "end_line")?, devtools_required_u32(&source, "end_column")?))
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:923
 fn devtools_optional_function(object: [String:Dyn], key: String) -> JetDevtoolsFunctionIdentity? Err! {
     if object.get(key) == {
         .None | .Val(.Null) -> { return .None }
@@ -425,22 +400,18 @@ fn devtools_optional_function(object: [String:Dyn], key: String) -> JetDevtoolsF
         else -> { return .Err("devtools event `{key}` must be an object or null") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:934
 fn devtools_required_u32(object: [String:Dyn], key: String) -> U32 Err! {
     return U32.try_from(devtools_required_u64(object, key)?) ?? return .Err("devtools event `{key}` is outside the u32 range")
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:942
 fn devtools_required_string(object: [String:Dyn], key: String) -> String Err! {
     value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     return devtools_required_value_string(value, key)
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:958
 fn devtools_required_value_string(value: Dyn, key: String) -> String Err! {
     if value == {
         .Text(v) -> { if v.is_empty() -> return .Err("devtools envelope `{key}` must not be empty"); return v.clone() } else -> { return .Err("devtools envelope `{key}` must be a string") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:968
 fn devtools_optional_string(object: [String:Dyn], key: String) -> String? Err! {
     if object.get(key) == {
         .None | .Val(.Null) -> { return .None }
@@ -449,7 +420,6 @@ fn devtools_optional_string(object: [String:Dyn], key: String) -> String? Err! {
         else -> { return .Err("devtools envelope `{key}` must be a string or null") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:982
 fn devtools_required_u64(object: [String:Dyn], key: String) -> U64 Err! {
     value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     if value == {
@@ -457,7 +427,6 @@ fn devtools_required_u64(object: [String:Dyn], key: String) -> U64 Err! {
         else -> { return .Err("devtools envelope `{key}` must be an integer") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:996
 fn devtools_required_bool(object: [String:Dyn], key: String) -> Bool Err! {
     if object.get(key) == {
         .Val(.Bool(v)) -> { return v }
@@ -465,7 +434,6 @@ fn devtools_required_bool(object: [String:Dyn], key: String) -> Bool Err! {
         .None -> { return .Err("devtools envelope missing `{key}`") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1007
 fn devtools_required_object_json(object: [String:Dyn], key: String) -> String Err! {
     value :: object.get(key) ?? return .Err("devtools envelope missing `{key}`")
     if value == {
@@ -473,7 +441,6 @@ fn devtools_required_object_json(object: [String:Dyn], key: String) -> String Er
         else -> { return .Err("devtools envelope `{key}` must be an object") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1020
 fn devtools_lifecycle(value: String) -> JetDevtoolsLifecycleState Err! {
     return if value == {
         "starting" -> .Starting
@@ -485,7 +452,6 @@ fn devtools_lifecycle(value: String) -> JetDevtoolsLifecycleState Err! {
         else -> { return .Err("devtools envelope lifecycle is not recognized") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1032
 fn devtools_freshness_state(value: String) -> JetDevtoolsFreshnessState Err! {
     return if value == {
         "fresh" -> .Fresh
@@ -494,7 +460,6 @@ fn devtools_freshness_state(value: String) -> JetDevtoolsFreshnessState Err! {
         else -> { return .Err("devtools envelope freshness state is not recognized") }
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1041
 fn terminal_style_adapter(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
     is_tty :: std.io.stderr().is_terminal()
     capabilities :: TerminalCapabilityFacts.from_environment(std.env.var("TERM").ok().as_deref(), std.env.var("COLORTERM").ok().as_deref(), is_tty, std.env.var_os("NO_COLOR").is_some(), .Auto)
@@ -503,11 +468,8 @@ fn terminal_style_adapter(file: String) -> Arc<TerminalStyleHostAdapter> Err! {
     adapter.inject(^source)
     return adapter
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1063
 struct DevRevisionFacts { accepted: U64?; candidate: U64?; diagnostic: U64? }
-// Rust: crates/jet-devserver/src/WebHost.rs:1078
 struct DevStatusSnapshot { state: String; code: String; diagnostic: String; last_build_ms: U128; candidate: U64? }
-// Rust: crates/jet-devserver/src/WebHost.rs:1088
 struct DevStatus {
     version: AtomicU64; clients: Mutex<[String:Instant]>; state: Mutex<DevStatusSnapshot>
     browser_relay: Mutex<BrowserTrace.Relay?>; browser_trace_enabled: AtomicBool; command_receipt: Mutex<String?>
@@ -517,19 +479,16 @@ struct DevStatus {
     term_lock: Mutex<Unit>; last_block_lines: Mutex<Usize>; header_started: Mutex<Bool>
 }
 impl DevStatus {
-    // Rust: crates/jet-devserver/src/WebHost.rs:1145
     fn new(file: String, verbose: Bool) -> Self {
         is_tty :: std.io.stderr().is_terminal()
         color :: ColorChoice.Auto.resolve(is_tty)
         return Self.new_with_terminal(file, verbose, is_tty, color)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1154
     fn new_with_root(file: String, verbose: Bool, web_root: &OSPath) -> Self {
         status := Self.new(file, verbose)
         status.web_root = web_root.to_path_buf()
         return status
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1160
     fn new_with_terminal(file: String, verbose: Bool, is_tty: Bool, color: Bool) -> Self {
         return Self {
             version: AtomicU64.new(1), clients: Mutex.new({}),
@@ -541,29 +500,20 @@ impl DevStatus {
             term_lock: Mutex.new(_), last_block_lines: Mutex.new(0), header_started: Mutex.new(false)
         }
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1193
     fn set_port(self: Self, port: U16) -> Unit { self.port.store(U64{port}, .SeqCst) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1197
     fn set_canvas_port(self: Self, port: U16) -> Unit { self.canvas_port.store(U64{port}, .SeqCst) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1201
     fn set_canvas_enabled(self: Self, enabled: Bool) -> Unit { self.canvas_enabled.store(enabled, .SeqCst) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1205
     fn port(self: Self) -> U16 { return U16{self.port.load(.SeqCst)} }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1209
     fn canvas_port(self: Self) -> U16 { return U16{self.canvas_port.load(.SeqCst)} }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1213
     fn header_text_for(self: Self, snap: DevStatusSnapshot) -> (String, String) {
         if self.reconnecting.load(.SeqCst) -> return (_0: "reconnecting", _1: "waiting for connection")
         return header_words(snap.state, self.watched_file, snap.code, self.port(), self.client_count(), snap.last_build_ms)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1230
     fn format_line(self: Self, word: String, rest: String) -> String { return if self.color -> format_line_colored(word, rest) else -> format_line_plain(word, rest) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1238
     fn dashboard_detail_line(self: Self) -> String {
         if self.canvas_enabled.load(.SeqCst) -> return "         watching {self.watched_file} · Canvas http://localhost:{self.canvas_port()}/canvas · v verbose"
         return "         watching {self.watched_file} · v verbose"
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1253
     fn refresh(self: Self) -> Unit {
         if !self.active.load(.SeqCst) -> return
         snap :: self.state.lock().unwrap().clone()
@@ -591,7 +541,6 @@ impl DevStatus {
         if snap.state == "error" -> _ :: out.write_all("{snap.diagnostic}\n".as_bytes())
         _ :: out.flush()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1297
     fn write_block(self: Self, lines: [String]) -> Unit {
         guard :: self.term_lock.lock().unwrap()
         out := std.io.stderr()
@@ -604,7 +553,6 @@ impl DevStatus {
         _ :: out.flush()
         *prev = lines.len()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1318
     fn write_header_verbose(self: Self, line: String) -> Unit {
         guard :: self.term_lock.lock().unwrap()
         out := std.io.stderr()
@@ -622,7 +570,6 @@ impl DevStatus {
         } else { _ :: out.write_all("{Char{27}}7{Char{27}}[1;1H{Char{27}}[2K{line}\n{Char{27}}[2K{detail}{Char{27}}8".as_bytes()) }
         _ :: out.flush()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1342
     fn log_line(self: Self, text: String) -> Unit {
         if !self.active.load(.SeqCst) || !self.verbose() -> return
         guard :: self.term_lock.lock().unwrap()
@@ -630,16 +577,13 @@ impl DevStatus {
         if self.pin && self.controls_ready.load(.SeqCst) -> _ :: out.write_all("{text}{Char{13}}\n".as_bytes()) else -> _ :: out.write_all("{text}\n".as_bytes())
         _ :: out.flush()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1356
     fn log_rebuild(self: Self, ok: Bool, detail: String) -> Unit {
         arrow :: if ok -> "rebuilt" else -> "error"
         self.log_line("{clock_time()}  save {self.watched_file}  →  {arrow} {detail}")
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1367
     fn log_request(self: Self, method: String, path: String, code: U16, elapsed: Duration) -> Unit {
         self.log_line("{clock_time()}  {method}  {path:<20} {code}  {elapsed.as_millis()}ms")
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1378
     fn log_diagnostic(self: Self, code: String, diagnostic: String) -> Unit {
         if !self.active.load(.SeqCst) || !self.verbose() -> return
         guard :: self.term_lock.lock().unwrap()
@@ -649,9 +593,7 @@ impl DevStatus {
         } else { _ :: out.write_all("{diagnostic}\n".as_bytes()) }
         _ :: out.flush()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1394
     fn verbose(self: Self) -> Bool { return self.verbose.load(.SeqCst) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1401
     fn toggle_verbose(self: Self) -> Unit {
         verbose :: !self.verbose.fetch_xor(true, .SeqCst)
         if self.pin {
@@ -671,7 +613,6 @@ impl DevStatus {
         self.refresh()
         self.log_line(if verbose -> "verbose request/rebuild log enabled · press v to collapse" else -> "")
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1427
     fn disable_terminal_controls(self: Self) -> Unit {
         if !self.pin { self.controls_ready.store(false, .SeqCst); return }
         guard :: self.term_lock.lock().unwrap()
@@ -682,7 +623,6 @@ impl DevStatus {
         *started = false
         _ :: out.flush()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1447
     fn mark_building(self: Self) -> Unit {
         _ :: self.browser_relay.lock().unwrap().take()
         state := self.state.lock().unwrap()
@@ -691,7 +631,6 @@ impl DevStatus {
         drop(^state)
         self.refresh()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1462
     fn mark_ready(self: Self, elapsed_ms: U128, is_rebuild: Bool) -> Unit {
         browser_relay := self.browser_relay.lock().unwrap()
         if self.browser_trace_enabled.load(.SeqCst) {
@@ -707,7 +646,6 @@ impl DevStatus {
         self.refresh()
         if is_rebuild -> self.log_rebuild(true, format_build_time(elapsed_ms))
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1489
     fn mark_error(self: Self, code: String, diagnostic: String, is_rebuild: Bool) -> Unit {
         diagnostic_for_log :: diagnostic.clone()
         state := self.state.lock().unwrap()
@@ -718,26 +656,21 @@ impl DevStatus {
         self.refresh()
         if is_rebuild { self.log_rebuild(false, code); self.log_diagnostic(code, diagnostic_for_log) }
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1513
     fn next_candidate(self: Self) -> U64 {
         version :: self.version.load(.SeqCst)
         return if self.published.load(.SeqCst) -> version + 1 else -> version
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1522
     fn revision_facts_for(self: Self, snap: DevStatusSnapshot) -> DevRevisionFacts {
         return DevRevisionFacts { accepted: if self.published.load(.SeqCst) -> .Val(self.version.load(.SeqCst)) else -> .None, candidate: snap.candidate, diagnostic: if snap.state == "error" -> snap.candidate else -> .None }
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1537
     fn revision_facts(self: Self) -> DevRevisionFacts {
         snap :: self.state.lock().unwrap()
         return self.revision_facts_for(&snap)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1546
     fn web_error_facts(self: Self) -> WebErrorDevStatusFacts {
         snap :: self.state.lock().unwrap().clone()
         return WebErrorDevStatusFacts.new(^snap.state, ^snap.code, ^snap.diagnostic)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1551
     fn json(self: Self) -> String {
         snap :: self.state.lock().unwrap().clone()
         revisions :: self.revision_facts_for(&snap)
@@ -746,11 +679,8 @@ impl DevStatus {
         number :: (value: U64?) -> value.map_or_else(() -> "null", (n) -> n.to_string())
         return "{{" + "\"version\":" + self.version.load(.SeqCst).to_string() + ",\"state\":\"" + foundation_json_escape(word) + "\",\"message\":\"" + foundation_json_escape(message) + "\",\"file\":\"" + foundation_json_escape(self.watched_file) + "\",\"code\":\"" + foundation_json_escape(snap.code) + "\",\"diagnostic\":\"" + foundation_json_escape(snap.diagnostic) + "\",\"clients\":" + self.client_count().to_string() + ",\"last_build_ms\":" + snap.last_build_ms.to_string() + ",\"candidate\":" + number(revisions.candidate) + ",\"diagnostic_revision\":" + number(revisions.diagnostic) + ",\"accepted_revision\":" + number(revisions.accepted) + ",\"last_good_revision\":" + number(revisions.accepted) + "}}"
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1574
     fn activate(self: Self) -> Unit { self.active.store(true, .SeqCst); self.refresh() }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1579
     fn client_count(self: Self) -> U64 { _ :: self.prune_expired_clients(); return U64{self.clients.lock().unwrap().len()} }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1584
     fn note_client(self: Self, id: String) -> Unit {
         if !Session.client_id_is_valid(id) -> return
         pruned :: self.prune_expired_clients()
@@ -762,9 +692,7 @@ impl DevStatus {
         recovered :: self.reconnecting.swap(false, .SeqCst)
         if pruned || changed || recovered -> self.refresh()
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1602
     fn expire_clients(self: Self) -> Unit { if self.prune_expired_clients() -> self.refresh() }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1609
     fn prune_expired_clients(self: Self) -> Bool {
         cutoff :: Duration.from_millis(CLIENT_TTL_MS)
         now :: Instant.now()
@@ -777,7 +705,6 @@ impl DevStatus {
         if disconnected -> self.reconnecting.store(true, .SeqCst)
         return changed
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1624
     fn drop_client(self: Self, id: String) -> Unit {
         if !Session.client_id_is_valid(id) -> return
         clients := self.clients.lock().unwrap()
@@ -789,33 +716,26 @@ impl DevStatus {
             self.refresh()
         }
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1638
     fn record_command_receipt(self: Self, receipt: String) -> Unit { *self.command_receipt.lock().unwrap() = .Val(^receipt) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1642
     fn command_receipt(self: Self) -> String? { return self.command_receipt.lock().unwrap().clone() }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1646
     fn activate_browser_trace(self: &Self, manifest: String) Err! {
         relay :: BrowserTrace.Relay.new(manifest)
         *self.browser_relay.lock().unwrap() = .Val(^relay)
         self.browser_trace_enabled.store(true, .SeqCst)
         _ :: self.version.fetch_add(1, .SeqCst)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1654
     fn activate_requested_browser_trace(self: Self) -> Unit {
         if BrowserTrace.take_request() != .Ok(true) -> return
         if read_web_manifest(&self.web_root) == .Val(manifest) -> _ :: self.activate_browser_trace(manifest)
     }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1665
 struct CanvasHostOptions {
     host: String; port: U16?; transport: String; authority: String
     audit: Bool; output: String?; target: String?
 }
 impl CanvasHostOptions.Default {
-    // Rust: crates/jet-devserver/src/WebHost.rs:1676
     fn default() -> Self { return Self { host: "127.0.0.1", port: .None, transport: "http", authority: "loopback", audit: false, output: .None, target: .None } }
 }
-// Rust: crates/jet-devserver/src/WebHost.rs:1689
 struct WebHost {
     listener: Mutex<TcpListener?>; application_listener: Mutex<TcpListener?>; started: AtomicBool
     shutdown: Arc<AtomicBool>; server_threads: Mutex[[thread.JoinHandle[Unit]]]
@@ -827,20 +747,16 @@ struct WebHost {
     terminal_style: Arc<TerminalStyleHostAdapter>
 }
 impl WebHost {
-    // Rust: crates/jet-devserver/src/WebHost.rs:1720
     fn bind_with_policy(file: String, static_root: &OSPath, verbose: Bool, port: U16?, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         return Self.bind_application_only_with_policy(file, verbose, port, static_root.to_path_buf(), release_policy, true)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1742
     fn bind_static_with_policy(file: String, root: &OSPath, verbose: Bool, application_listener: TcpListener, session: Arc<ResidentDevSession>, release_policy: ReleaseDevtoolsPolicy) -> Self Err! {
         static_root :: fs.canonicalize(root) ?? return .Err("error: couldn't open static output `{root.display()}`: {err}")
         application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)
         if session.application_port() != application_port -> return .Err("error: shared devtools session application port {session.application_port()} does not match static preview port {application_port}")
         return Self.bind_application_only_with_listener(file, verbose, ^static_root, release_policy, false, ^application_listener, ^session)
     }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1780
     fn bind_application_preview_listener(port: U16?) -> TcpListener Err! { return bind_application_server(port) }
-    // Rust: crates/jet-devserver/src/WebHost.rs:1784
     fn bind_application_only_with_policy(file: String, verbose: Bool, port: U16?, static_root: OSPath, release_policy: ReleaseDevtoolsPolicy, web_swap_enabled: Bool) -> Self Err! {
         application_listener :: bind_application_server(port)
         application_port :: application_listener.local_addr().map((address) -> address.port()).unwrap_or(0)

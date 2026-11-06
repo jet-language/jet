@@ -5,116 +5,61 @@
 // verified Hangar object whose producer record names the compiler, C++
 // compiler, linker, sysroot, host, target, ABI, and every content digest.
 // The optional fixture manifest is only an acquisition input for tests and
-// offline bundles; the resulting object is still verified and recorded by the
-// ordinary Jetpack Store boundary.
+// offline bundles; the release toolchain comes from the C toolchain pack
+// (CcToolchainPack.jet). Either way the resulting object is still verified
+// and recorded by the ordinary Jetpack Store boundary.
 //
 // This file holds the descriptor model and every pure rule: target
-// selection, the pinned acquisition records, text/path/digest validation,
-// the source fingerprint, and the producer facts. Hangar verification lives in
-// CcToolchainHangar.jet and acquisition in CcToolchainAcquisition.jet.
+// selection, text/path/digest validation, the source fingerprint, and the
+// fixture producer facts. Hangar verification lives in CcToolchainHangar.jet,
+// acquisition in CcToolchainAcquisition.jet and the pack in
+// CcToolchainPack.jet.
 
 CC_TOOLCHAIN_PACKAGE :: "cc-toolchain"
 CC_TOOLCHAIN_SOURCE :: "jetpack"
 CC_TOOLCHAIN_RECIPE_ID :: "jet-cc-toolchain-v1"
 CC_TOOLCHAIN_PRODUCER :: "jet-cc"
-CC_TOOLCHAIN_NIX_PRODUCER :: "nix"
 CC_TOOLCHAIN_SCHEMA :: "1"
 CC_TOOLCHAIN_FIXTURE_MANIFEST :: "jet-cc-toolchain"
 CC_TOOLCHAIN_FIXTURE_LAYOUT :: "fixture-v1"
-CC_TOOLCHAIN_NIX_LAYOUT :: "nix-index-hangar-v1"
 CC_TOOLCHAIN_VIRTUAL_BASE :: "/jet/toolchains"
-CC_TOOLCHAIN_NIX_STORE_PREFIX :: "/nix/store/"
 CC_TOOLCHAIN_MAX_MANIFEST_BYTES :: 1048576
 CC_TOOLCHAIN_MAX_BUNDLE_NODES :: 250000
 CC_TOOLCHAIN_MAX_BUNDLE_BYTES :: 8589934592
-CC_TOOLCHAIN_MAX_NIX_OBJECTS :: 250000
-CC_TOOLCHAIN_MAX_MARKER_BYTES :: 16384
 CC_TOOLCHAIN_MAX_TARGET_BYTES :: 128
-CC_TOOLCHAIN_MAX_STORE_NAME_BYTES :: 256
-
-// This rule acquisition record.
-//
-// A small, reviewable description. The compiler and linker bytes are selected
-// from the exact signed Nix index records below; the Nix cache then admits
-// their complete signed closure into Hangar. No compiler payload is vendored
-// and no host executable is a fallback.
-struct CcNixAcquisitionRecord {
-    id: String
-    channel: String
-    revision: String
-    system: String
-    target: String
-    compiler_attr: [String]
-    linker_attr: [String]
-    compiler_path: String
-    cxx_path: String
-    linker_path: String
-    sysroot_marker: String
-    abi: String
-
-    // `nixpkgs:<channel>#<revision>:<system>`, the producer's immutable source.
-    fn immutable_source(self) -> String Never! {
-        "nixpkgs:{self.channel}#{self.revision}:{self.system}"
-    }
-
-    // The signed index key for one attrpath of this record.
-    fn index_key(self, attrpath: [String]) -> NixIndexKey Never! {
-        NixIndexKey{channel: self.channel, revision: self.revision, system: self.system, attrpath: attrpath}
-    }
-}
-
-// The first production record is scoped to the platform for which the signed
-// feed publishes both `gcc` and `lld` outputs. Another target needs another
-// signed index/cache record, not a host-PATH guess or a copied sysroot.
-CC_NIX_ACQUISITION_RECORDS :: comptime { [CcNixAcquisitionRecord]{
-    {
-        id: "jet-cc-nixos-unstable-e5bdc4a4-x86_64-linux-v1",
-        channel: "nixos-unstable",
-        revision: "e5bdc4a41d4c072fe1e3787eaa0320a384741d44",
-        system: "x86_64-linux",
-        target: "x86_64-unknown-linux-gnu",
-        compiler_attr: [String]{"gcc"},
-        linker_attr: [String]{"lld"},
-        compiler_path: "bin/gcc",
-        cxx_path: "bin/g++",
-        linker_path: "bin/ld.lld",
-        sysroot_marker: "nix-support/orig-libc-dev",
-        abi: "gnu"
-    }
-} }
 
 // How a descriptor's bytes are laid out in Hangar: one fixture bundle
-// directory, or separate signed Nix closure objects per role.
+// directory, or a target entry holding the sysroot whose tools live in the
+// C toolchain pack object.
 enum CcToolchainLayout {
     Fixture
-    NixIndexHangar
+    Pack
 
     fn label(self) -> String Never! {
         if self == {
             .Fixture -> CC_TOOLCHAIN_FIXTURE_LAYOUT
-            .NixIndexHangar -> CC_TOOLCHAIN_NIX_LAYOUT
+            .Pack -> CC_TOOLCHAIN_PACK_LAYOUT
         }
     }
 
     fn parse(text: String) -> CcToolchainLayout? Never! {
         if text == {
             CC_TOOLCHAIN_FIXTURE_LAYOUT -> Val(CcToolchainLayout.Fixture)
-            CC_TOOLCHAIN_NIX_LAYOUT -> Val(CcToolchainLayout.NixIndexHangar)
+            CC_TOOLCHAIN_PACK_LAYOUT -> Val(CcToolchainLayout.Pack)
             else -> None
         }
     }
 }
 
-// The mounted role roots of a Nix-layout toolchain under its virtual root.
+// The mounted role roots of a pack-layout toolchain under its virtual root:
+// the pack (compiler, linker and their resources) and the target sysroot.
 enum CcToolchainRole {
     Compiler
-    Linker
     Sysroot
 
     fn label(self) -> String Never! {
         if self == {
             .Compiler -> "compiler"
-            .Linker -> "linker"
             .Sysroot -> "sysroot"
         }
     }
@@ -122,15 +67,21 @@ enum CcToolchainRole {
 
 // The C toolchain failure carrier. `MissingDescriptor` is the one expected
 // miss: Hangar has no verified descriptor yet, so acquisition may proceed.
+// `UncoveredTarget` names a target no pack covers; `PackHashMismatch` is a
+// pack copy (origin, expected, actual) that was refused and deleted.
 #Error
 enum CcToolchainError {
     MissingDescriptor(String)
     Invalid(String)
+    UncoveredTarget(String)
+    PackHashMismatch(origin: String, expected: String, actual: String)
 
     fn message(self) -> String Never! {
         if self == {
             .MissingDescriptor(target) -> "Hangar has no verified C/C++ toolchain descriptor for target `{target}`"
             .Invalid(text) -> text
+            .UncoveredTarget(target) -> "jet's C toolchain does not cover target `{target}`; covered targets: {provider_cc_pack_covered_targets()}"
+            .PackHashMismatch(origin, expected, actual) -> "the C toolchain pack from {origin} has SHA-256 {actual}, but this jet expects {expected}; the copy was refused and deleted"
         }
     }
 
@@ -181,28 +132,19 @@ struct CcToolchainDescriptor {
     }
 
     fn virtual_bin(self) -> String Never! {
-        if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), "bin")
+        if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), "bin")
         files.join(self.virtual_root(), "bin")
     }
 
     fn sysroot_path(self) -> String Never! {
-        if self.is_nix_layout() -> return self.role_virtual_root(CcToolchainRole.Sysroot)
+        if self.is_pack_layout() -> return self.role_virtual_root(CcToolchainRole.Sysroot)
         files.join(self.virtual_root(), self.sysroot)
     }
 
-    // The virtual PATH value; a path that cannot be joined with the host
-    // separator falls back to the compiler bin directory alone.
-    fn virtual_path_env(self) -[Env]> String Never! {
-        paths := [String]{self.virtual_bin()}
-        if self.is_nix_layout() {
-            &paths.push(files.join(self.role_virtual_root(CcToolchainRole.Linker), "bin"))
-            loop mount in self.mounts -> &paths.push(files.join(mount.destination, "bin"))
-        }
-        separator :: pkg_path_separator_for_os(PlatformKey.host().os)
-        loop path in paths {
-            if path.contains(separator) -> return self.virtual_bin()
-        }
-        paths.join(separator)
+    // The pack clang's resource directory (builtin headers, compiler-rt and
+    // crtbegin/crtend); the binary's built-in default names its build tree.
+    fn resource_dir_path(self) -> String Never! {
+        files.join(self.role_virtual_root(CcToolchainRole.Compiler), CC_PACK_RESOURCE_DIR)
     }
 
     fn identity(self) -> String Never! {
@@ -213,8 +155,8 @@ struct CcToolchainDescriptor {
         provider_plain_cache_identity(self.source_fingerprint(), CC_TOOLCHAIN_RECIPE_ID, ctx)
     }
 
-    fn is_nix_layout(self) -> Bool Never! {
-        self.layout == CcToolchainLayout.NixIndexHangar
+    fn is_pack_layout(self) -> Bool Never! {
+        self.layout == CcToolchainLayout.Pack
     }
 
     fn role_virtual_root(self, role: CcToolchainRole) -> String Never! {
@@ -222,26 +164,18 @@ struct CcToolchainDescriptor {
     }
 
     fn compiler_virtual_path(self) -> String Never! {
-        if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.compiler)
+        if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.compiler)
         files.join(self.virtual_root(), self.compiler)
     }
 
     fn cxx_virtual_path(self) -> String Never! {
-        if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.cxx)
+        if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.cxx)
         files.join(self.virtual_root(), self.cxx)
     }
 
     fn linker_virtual_path(self) -> String Never! {
-        if self.is_nix_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Linker), self.linker)
+        if self.is_pack_layout() -> return files.join(self.role_virtual_root(CcToolchainRole.Compiler), self.linker)
         files.join(self.virtual_root(), self.linker)
-    }
-
-    // The digest of the mount whose source is the linker root, or the bundle.
-    fn linker_root_digest(self) -> String Never! {
-        loop mount in self.mounts {
-            if mount.source == self.linker_root -> return mount.digest
-        }
-        self.bundle_sha256
     }
 
     // The cache source identity: every field that names the toolchain bytes.
@@ -449,14 +383,16 @@ fn provider_cc_target_triple_for(host: PlatformKey) -> String Never! {
     }
 }
 
-// `native`/`host` select the host; any other target must be a short token of
-// ASCII letters, digits, `.`, `_`, and `-`.
+// `native`/`host` select the host and a covered target's short spelling
+// (`aarch64-linux-musl`) selects its canonical triple; any other target must
+// be a short token of ASCII letters, digits, `.`, `_`, and `-`.
 fn provider_cc_normalize_target(target: String) -[Env]> String CcToolchainError! {
     normalized :: if target == {
         "native" | "host" -> provider_cc_toolchain_host_target_triple()
         else -> target
     }
     if !provider_cc_is_target_token(normalized) -> return Err(CcToolchainError.Invalid("invalid C toolchain target `{normalized}`"))
+    if provider_cc_pack_target(normalized) == .Val(covered) -> return Ok(covered.triple)
     Ok(normalized)
 }
 
@@ -474,55 +410,11 @@ fn provider_cc_is_ascii_alnum(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-// The pinned acquisition record for a target, or a teaching error listing the
-// supported targets.
-fn provider_cc_acquisition_record(target: String) -[Env]> CcNixAcquisitionRecord CcToolchainError! {
-    normalized :: provider_cc_normalize_target(target)
-    supported := [String]{}
-    loop record in CC_NIX_ACQUISITION_RECORDS {
-        if record.target == normalized -> return Ok(record)
-        &supported.push(record.target)
-    }
-    Err(CcToolchainError.Invalid("no signed C/C++ toolchain acquisition record supports target `{normalized}`; supported targets: {supported.join(", ")}"))
-}
-
-// A Hangar Nix-layout record must repeat the pinned acquisition exactly.
-fn provider_cc_validate_pinned_nix_descriptor(producer: ProducerRecord, record: CcNixAcquisitionRecord) CcToolchainError! {
-    expected_source :: record.immutable_source()
-    if producer.immutable_source != expected_source {
-        return Err(CcToolchainError.Invalid("immutable source `{producer.immutable_source}` does not match pinned C/C++ record `{record.id}`"))
-    }
-    expected :: [(key: String, value: String)]{
-        (key: "cc.nix.record.id", value: record.id),
-        (key: "cc.nix.channel", value: record.channel),
-        (key: "cc.nix.revision", value: record.revision),
-        (key: "cc.nix.system", value: record.system),
-        (key: "cc.nix.compiler.attrpath", value: record.compiler_attr.join(".")),
-        (key: "cc.nix.linker.attrpath", value: record.linker_attr.join(".")),
-        (key: "cc.nix.sysroot.marker", value: record.sysroot_marker),
-        (key: "cc.manifest", value: record.id),
-        (key: "cc.compiler", value: record.compiler_path),
-        (key: "cc.cxx", value: record.cxx_path),
-        (key: "cc.linker", value: record.linker_path),
-        (key: "cc.abi", value: record.abi)
-    }
-    loop fact in expected {
-        if producer.facts.get(fact.key) != Val(fact.value) {
-            return Err(CcToolchainError.Invalid("fact `{fact.key}` does not match pinned C/C++ record `{record.id}`"))
-        }
-    }
-}
-
 // Whether a Hangar producer record was written by this provider, in either
 // layout.
 fn provider_cc_is_cc_record(producer: ProducerRecord) -> Bool Never! {
     layout :: producer.facts.get("cc.layout") ?? ""
-    if producer.provider == CC_TOOLCHAIN_PRODUCER -> return layout == CC_TOOLCHAIN_FIXTURE_LAYOUT
-    if producer.provider == CC_TOOLCHAIN_NIX_PRODUCER {
-        // workaround #5940(c): no `== Val(CONST)`.
-        return layout == CC_TOOLCHAIN_NIX_LAYOUT && (producer.facts.get("cc.producer") ?? "") == CC_TOOLCHAIN_PRODUCER
-    }
-    false
+    producer.provider == CC_TOOLCHAIN_PRODUCER && (layout == CC_TOOLCHAIN_FIXTURE_LAYOUT || layout == CC_TOOLCHAIN_PACK_LAYOUT)
 }
 
 // `Path::components` over a validated relative path: its normal parts, with
@@ -558,27 +450,6 @@ fn provider_cc_is_relative_path(path: String) -> Bool Never! {
     true
 }
 
-fn provider_cc_validate_nix_store_path(path: String) CcToolchainError! {
-    if !path.starts_with(CC_TOOLCHAIN_NIX_STORE_PREFIX) {
-        return Err(CcToolchainError.Invalid("`{path}` is not an absolute Nix store path"))
-    }
-    name :: path.removeprefix(CC_TOOLCHAIN_NIX_STORE_PREFIX)
-    raw :: name.bytes()
-    if raw.len() == 0 || raw.len() > CC_TOOLCHAIN_MAX_STORE_NAME_BYTES || name == "." || name == ".." {
-        return Err(CcToolchainError.Invalid("`{path}` is not a normalized Nix store path"))
-    }
-    loop byte in raw {
-        code :: Int.from_u8(byte)
-        if code == 47 || code == 92 || code == 0 -> return Err(CcToolchainError.Invalid("`{path}` is not a normalized Nix store path"))
-    }
-    loop byte in raw {
-        code :: Int.from_u8(byte)
-        if !provider_cc_is_ascii_alnum(code) && code != 46 && code != 95 && code != 43 && code != 45 {
-            return Err(CcToolchainError.Invalid("`{path}` contains an invalid Nix store name"))
-        }
-    }
-}
-
 // Version and ABI text: non-blank, with no control byte or path separator,
 // so it can never escape a publication path.
 fn provider_cc_validate_text_field(value: String, label: String) CcToolchainError! {
@@ -606,65 +477,6 @@ fn provider_cc_validate_sha256(value: String, label: String) CcToolchainError! {
 fn provider_cc_validate_tree_digest(value: String, label: String) CcToolchainError! {
     if !value.starts_with("sha256-") -> return Err(CcToolchainError.Invalid("{label} is not a Hangar SHA-256 digest"))
     provider_cc_validate_sha256(value.removeprefix("sha256-"), label)
-}
-
-// The Nix-layout producer facts: pinned record, signed index proofs, admitted
-// closure objects, role roots, and every mount.
-fn provider_cc_nix_facts(record: CcNixAcquisitionRecord, host: String, compiler_record: NixVerifiedIndexRecord, linker_record: NixVerifiedIndexRecord, compiler: AdmittedNixObject, linker: AdmittedNixObject, sysroot: AdmittedNixObject, sysroot_store_path: String, compiler_sha256: String, cxx_sha256: String, linker_sha256: String, mounts: [CcMount], references: [String], closure_receipt: String) -> [String: String] Never! {
-    facts := [String: String]{
-        "cc.schema": CC_TOOLCHAIN_SCHEMA,
-        "cc.producer": CC_TOOLCHAIN_PRODUCER,
-        "cc.layout": CC_TOOLCHAIN_NIX_LAYOUT,
-        "cc.host": host,
-        "cc.target": record.target,
-        "cc.version": provider_cc_nix_version(compiler_record, linker_record),
-        "cc.abi": record.abi,
-        "cc.compiler": record.compiler_path,
-        "cc.compiler.sha256": compiler_sha256,
-        "cc.cxx": record.cxx_path,
-        "cc.cxx.sha256": cxx_sha256,
-        "cc.linker": record.linker_path,
-        "cc.linker.sha256": linker_sha256,
-        "cc.sysroot": "sysroot",
-        "cc.sysroot.sha256": sysroot.hangar_digest,
-        "cc.bundle.sha256": compiler.hangar_digest,
-        "cc.compiler.root.sha256": compiler.hangar_digest,
-        "cc.cxx.root.sha256": compiler.hangar_digest,
-        "cc.linker.root.sha256": linker.hangar_digest,
-        "cc.sysroot.root.sha256": sysroot.hangar_digest,
-        "cc.mount.count": "{mounts.len()}",
-        "cc.nix.record.id": record.id,
-        "cc.nix.channel": record.channel,
-        "cc.nix.revision": record.revision,
-        "cc.nix.system": record.system,
-        "cc.nix.compiler.attrpath": record.compiler_attr.join("."),
-        "cc.nix.linker.attrpath": record.linker_attr.join("."),
-        "cc.nix.sysroot.marker": record.sysroot_marker,
-        "cc.nix.compiler.record": compiler_record.record.canonical_json(),
-        "cc.nix.linker.record": linker_record.record.canonical_json(),
-        "cc.nix.compiler.index.proof": compiler_record.proof.canonical_json(),
-        "cc.nix.linker.index.proof": linker_record.proof.canonical_json(),
-        "cc.nix.compiler.store_path": compiler.store_path,
-        "cc.nix.linker.store_path": linker.store_path,
-        "cc.nix.sysroot.store_path": sysroot_store_path,
-        "cc.nix.compiler.cache.proof": compiler.upstream_proof_sha256,
-        "cc.nix.linker.cache.proof": linker.upstream_proof_sha256,
-        "cc.nix.closure.receipt": closure_receipt,
-        "cc.manifest": record.id,
-        "cc.references": references.join(",")
-    }
-    loop index in 0..<mounts.len() {
-        facts["cc.mount.{index}.store_path"] = mounts[index].store_path
-        facts["cc.mount.{index}.digest"] = mounts[index].digest
-    }
-    build_facts :: provider_nix_build_facts_record()
-    loop fact in build_facts -> facts[fact.key] = fact.value
-    facts
-}
-
-// `gcc-<compiler version>+lld-<linker version>`.
-fn provider_cc_nix_version(compiler_record: NixVerifiedIndexRecord, linker_record: NixVerifiedIndexRecord) -> String Never! {
-    "gcc-{compiler_record.record.version}+lld-{linker_record.record.version}"
 }
 
 fn provider_cc_manifest_string(object: [String: Dyn], field: String) -> String CcToolchainError! {

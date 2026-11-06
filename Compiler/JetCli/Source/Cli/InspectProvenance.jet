@@ -1,10 +1,9 @@
-// `jet inspect provenance [<dependency>]` (CmdInspect.rs `run_provenance`):
-// the lock-backed dependency provenance records of the project, read from
-// `.jet/lock` (jet-pkg-model Lock.rs `load`/`parse` and
-// `LockedPackage::provenance_report`). A lock shape this port does not read
-// (workspace, browser, build-contribution, and Nix closure records, a root
-// authority row, a foreign source) is refused with E2104, never guessed; a
-// lock Rust cannot parse is no lockfile, as in `Lock::load`.
+// `jet inspect provenance [<dependency>]`: the lock-backed dependency
+// provenance records of the project, read from `.jet/lock` (jet-pkg-model
+// `load`/`parse` and `LockedPackage::provenance_report`). A lock shape this
+// port does not read (workspace, browser, build-contribution, and Nix closure
+// records, a root authority row, a foreign source) is refused with E2104, never
+// guessed; a lock Rust cannot parse is no lockfile, as in `Lock::load`.
 use {
     cli_files :: core.files
     jet_driver.[
@@ -18,13 +17,13 @@ use {
     jet_pkg_model.[ProvenanceRequirement]
 }
 
-// Lock.rs `MAX_LOCK_BYTES` (also the per-line limit).
+// `MAX_LOCK_BYTES` (also the per-line limit).
 JET_CLI_LOCK_MAX_BYTES :: 1048576
 
 // The lock sections whose records this port does not validate.
 JET_CLI_LOCK_UNPORTED_SECTIONS :: [String]{"[[workspace_member]]", "[[browser]]", "[[build.contribution]]", "[[workspace_overlay]]", "[[workspace_overlay_package]]", "[[workspace_build_grant]]"}
 
-// The facts of one Lock.rs `LockedPackage` the provenance report reads.
+// The facts of one `LockedPackage` the provenance report reads.
 struct JetCLILockPackage {
     name: String
     version: String
@@ -48,7 +47,7 @@ struct JetCLILockPackage {
     build: String?
 }
 
-// One `[[package]]` record while its lines are read (Lock.rs `PartialPkg`).
+// One `[[package]]` record while its lines are read.
 struct JetCLILockPartial {
     name: String?
     version: String?
@@ -70,7 +69,7 @@ struct JetCLILockPartial {
 
 enum JetCLILockLoad {
     Loaded(packages: [JetCLILockPackage])
-    // No lock, an unreadable one, or one Lock.rs `parse` rejects.
+    // No lock, an unreadable one, or one `parse` rejects.
     Missing
     Unported(shape: String)
 }
@@ -101,7 +100,6 @@ fn jet_cli_lock_trim_quotes(value: String) -> String Never! {
     value.slice(start..<end)
 }
 
-// Lock.rs `unescape_str`.
 fn jet_cli_lock_unescape(raw: String) -> String Never! {
     text := raw.trim()
     if text.len() >= 2 && text.starts_with("\"") && text.ends_with("\"") -> text = text.slice(1..<text.len() - 1)
@@ -127,7 +125,7 @@ fn jet_cli_lock_unescape(raw: String) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-// Lock.rs `parse_string_array`; None is its `invalid string array` error.
+// None is its `invalid string array` error.
 fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
     value :: raw.trim()
     if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 -> return None
@@ -174,9 +172,9 @@ fn jet_cli_lock_string_array(raw: String) -> [String]? Never! {
     Val(values)
 }
 
-// Lock.rs `kv_field`: the value of `key = …` among the comma-separated
-// parts of an inline table. The first part that starts with `key` but has
-// no `=` ends the search with None, as the Rust `?` does.
+// `kv_field`: the value of `key = …` among the comma-separated parts of an
+// inline table. The first part that starts with `key` but has no `=` ends the
+// search with None, as the Rust `?` does.
 fn jet_cli_lock_kv_field(inline: String, key: String) -> String? Never! {
     parts := [String]{}
     start := 0
@@ -209,8 +207,7 @@ fn jet_cli_lock_kv_field(inline: String, key: String) -> String? Never! {
     None
 }
 
-// Lock.rs `parse_source` and `parse_locked`: the inline table with its
-// braces trimmed.
+// `parse_source` and `parse_locked`: the inline table with its braces trimmed.
 fn jet_cli_lock_inline(raw: String) -> String Never! {
     text :: raw.trim()
     bytes :: text.bytes()
@@ -221,9 +218,9 @@ fn jet_cli_lock_inline(raw: String) -> String Never! {
     text.slice(start..<end).trim()
 }
 
-// Lock.rs `parse_source`, keeping only what the provenance report reads.
-// A Nix source cannot finish without the closure record this port refuses,
-// so it is the parse error Rust reports for a Nix package without one.
+// `parse_source`, keeping only what the provenance report reads. A Nix source
+// cannot finish without the closure record this port refuses, so it is the
+// parse error Rust reports for a Nix package without one.
 fn jet_cli_lock_source(raw: String) -> JetCLILockSource Never! {
     inline :: jet_cli_lock_inline(raw)
     if jet_cli_lock_kv_field(inline, "root") != None -> return JetCLILockSource.Parsed{root: true, source_hash: None}
@@ -240,7 +237,6 @@ fn jet_cli_lock_source(raw: String) -> JetCLILockSource Never! {
     JetCLILockSource.Missing
 }
 
-// Lock.rs `PartialPkg::finish`.
 fn jet_cli_lock_finish(partial: JetCLILockPartial, packages: &[JetCLILockPackage]) -> JetCLILockStep Never! {
     name :: partial.name ?? return JetCLILockStep.Missing
     version :: partial.version ?? return JetCLILockStep.Missing
@@ -279,7 +275,7 @@ fn jet_cli_lock_finish(partial: JetCLILockPartial, packages: &[JetCLILockPackage
     JetCLILockStep.Ok
 }
 
-// Lock.rs `canonicalize_lock` for one list: sorted, duplicates dropped.
+// `canonicalize_lock` for one list: sorted, duplicates dropped.
 fn jet_cli_lock_canonical(values: [String]) -> [String] Never! {
     sorted := values
     &sorted.sort()
@@ -306,8 +302,8 @@ fn jet_cli_lock_u32(text: String) -> Int? Never! {
     Val(value)
 }
 
-// Lock.rs `load` then `parse`, over the sections the provenance report
-// reads. `section` names the open `[[…]]` record ("" for none).
+// `load` then `parse`, over the sections the provenance report reads. `section`
+// names the open `[[…]]` record ("" for none).
 fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
     raw :: cli_files.read(jet_cli_entry_join(root, ".jet/lock")) ?? return JetCLILockLoad.Missing
     if raw.len() > JET_CLI_LOCK_MAX_BYTES -> return JetCLILockLoad.Missing
@@ -413,8 +409,8 @@ fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
         }
     }
     if version != Val(1) -> return JetCLILockLoad.Missing
-    // Lock.rs `canonicalize_last_preserving_order`: a replayed record replaces
-    // the earlier one of the same name.
+    // `canonicalize_last_preserving_order`: a replayed record replaces the
+    // earlier one of the same name.
     kept := [JetCLILockPackage]{}
     loop (index, package) in packages {
         replaced :: loop later in index + 1..<packages.len() {
@@ -425,13 +421,11 @@ fn jet_cli_lock_load(root: String) -[FS]> JetCLILockLoad Never! {
     JetCLILockLoad.Loaded{packages: kept}
 }
 
-// Lock.rs `ProvenanceField`.
 struct JetCLIProvenanceField {
     value: String
     status: String
 }
 
-// Lock.rs `DependencyProvenanceReport`.
 struct JetCLIProvenanceReport {
     name: String
     version: String
@@ -451,7 +445,6 @@ fn jet_cli_provenance_present(value: String?) -> String? Never! {
     Val(text)
 }
 
-// Lock.rs `LockedPackage::provenance_report`.
 fn jet_cli_provenance_report(package: JetCLILockPackage) -> JetCLIProvenanceReport Never! {
     absent :: "not recorded"
     locked_hash := package.content_hash
@@ -497,7 +490,6 @@ fn jet_cli_provenance_effects(effects: [String]) -> String Never! {
     effects.join(", ")
 }
 
-// CmdInspect.rs `render_provenance_text`.
 fn jet_cli_provenance_text(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
     out := "provenance\nrequire: {requirement}\n"
     loop (index, report) in reports {
@@ -519,7 +511,6 @@ fn jet_cli_provenance_field_value(field: JetCLIProvenanceField, evidence: Bool) 
     jet_cli_status_object(fields)
 }
 
-// CmdInspect.rs `render_provenance_json`.
 fn jet_cli_provenance_json(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
     packages :: loop report in reports -> jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("name", jet_cli_status_text(report.name)),
@@ -540,11 +531,11 @@ fn jet_cli_provenance_json(requirement: String, reports: [JetCLIProvenanceReport
     "{jet_cli_status_render("inspect.provenance", true, [JetCLIStatusField]{jet_cli_status_field("provenance", provenance)})}\n"
 }
 
-// CmdInspect.rs `run_provenance` up to the package facts: the manifest
-// root (or its one-line error), the lock (E1202 when absent or unreadable),
-// then the project entry whose package facts the host checks.
+// `run_provenance` up to the package facts: the manifest root (or its one-line
+// error), the lock (E1202 when absent or unreadable), then the project entry
+// whose package facts the host checks.
 fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    root :: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", JET_DRIVER_EXIT_USER_ERROR)
+    root :: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", "no package.jet found", "run `jet inspect provenance` inside a project", JET_DRIVER_EXIT_USER_ERROR)
     if jet_cli_lock_load(root) == {
         .Missing -> return jet_cli_inspect_b_report("E1202", "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again", color, json, JET_DRIVER_EXIT_USER_ERROR)
         .Unported(shape) -> return jet_cli_not_ported("inspect provenance <{shape}>", color)
@@ -568,9 +559,9 @@ fn jet_cli_inspect_provenance(args: [String], color: Bool, json: Bool, threads: 
     JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "provenance", file: entry, subject: target, json: json, color: color, threads: threads, notice: notices.join(""), project: true, root: root}}
 }
 
-// The host half of `run_provenance`: Loader.rs `package_facts_for_entry`
-// reads the entry's package facts. The Jet driver reads the same manifest
-// as it checks the entry, so the requirement is the checked entry root's
+// The host half of `run_provenance`: `package_facts_for_entry` reads the
+// entry's package facts. The Jet driver reads the same manifest as it checks
+// the entry, so the requirement is the checked entry root's
 // `authority.trust.require`; a project that does not check is refused.
 fn jet_cli_inspect_provenance_host(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if !cli_files.is_file(job.file) -> return jet_cli_not_ported_output("inspect provenance <unreadable project entry>", job.color)
@@ -613,7 +604,7 @@ fn jet_cli_inspect_provenance_report(job: JetCLIInspectJob, requirement: String)
             what :: "dependency `{target}` is not present in the lockfile"
             fix :: "use `jet inspect provenance` to list locked dependencies"
             if job.json -> return JetDriverVerbOutput{stdout: jet_cli_fail_json("E2104", what, jet_cli_why("E2104"), fix), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
-            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", what, jet_cli_why("E2104"), fix, job.color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return jet_cli_report_output("", "E2104", what, jet_cli_why("E2104"), fix, job.color, JET_DRIVER_EXIT_USER_ERROR)
         }
     }
     if job.json -> return JetDriverVerbOutput{stdout: jet_cli_provenance_json(requirement, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK}

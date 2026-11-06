@@ -1,7 +1,6 @@
 // Expression, type, pattern and literal printing: a 1:1 port of the Rust
-// formatter's crates/jet-parser/src/Formatter/Expressions.rs. Every Rust
-// `Fmt` method is `jfmt_<name>(f: &JetFmt, …)`; shared driver state and the
-// source scans live in Formatter.jet.
+// formatter's. Every Rust `Fmt` method is `jfmt_<name>(f: &JetFmt, …)`; shared
+// driver state and the source scans live in Formatter.jet.
 use {
     jet_foundation.[
         BinMatchPart,
@@ -1561,8 +1560,7 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
                 jfmt_fmt_err_constructor(&f, fields, span)
                 return
             }
-            // `Type{ … }` (named) or `{ … }` (inferred); also the
-            // E0320 auto-fix for the old `Type { … }`.
+            // `Type{ … }` (named) or `{ … }` (inferred).
             head_dropped :: inferred || (f.simplify && jfmt_struct_lit_head_is_redundant(f, type_name, type_args, import_ns))
             if !head_dropped -> jfmt_fmt_named_struct_head(&f, type_name, type_args, import_ns, Val(span))
             jfmt_fmt_struct_lit_body(&f, fields, span)
@@ -1581,8 +1579,6 @@ fn jfmt_fmt_expr(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(&f, ")")
         }
         .Absent(_, _) -> jfmt_write(&f, "None")
-        // Retired reduce selector, kept so `jet fmt` can teach its replacement.
-        .ReduceMarker(name, _, _) -> jfmt_write(&f, "#{name}")
         .Todo(_, _, _) -> jfmt_write(&f, "#Todo")
         // Card #1440: the synthesized end of an else-less table; never printed.
         .NoElse(_, _) -> {}

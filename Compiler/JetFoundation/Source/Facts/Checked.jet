@@ -85,8 +85,6 @@ struct ComponentSignatureDescriptor {
     result: ComponentTypeDescriptor
 }
 
-enum HTTPRouteMethod { Get Post Put Delete Patch Head Options }
-
 enum TypedHeadKind { SQL HTML Sh URL Path DateTime }
 
 // The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
@@ -357,6 +355,19 @@ struct TGCPromotionEdge {
 enum TContractKind { Pre Post }
 
 enum TContractDisposition { Check Proven Stripped }
+
+// Where a contract clause is declared: the file, line and column of its
+// condition. A `#Pre` clause is checked at each call site, so its checked
+// contract's `file`/`line` are the caller's; this stays the callee's clause
+// (the site of `jet prove`'s contract evidence, JetIR BuildContracts.jet).
+// `core` is true for a clause declared in Core: Core's implementation, not a
+// claim of the program under test.
+struct TContractSite {
+    file: String
+    line: Int
+    column: Int
+    core: Bool
+}
 
 struct TContractResult {
     carrier_ty: Type
@@ -746,6 +757,10 @@ enum TNumericOp {
     CastAs(dst_rust: String)
     CheckedIntToFloat(source_signed: Bool, target_f32: Bool, line: Int)
     CheckedIntToFixed(host_kind: Int, line: Int)
+    // A fixed-width integer, or an exact Int, converted to a fixed-width type
+    // that can't hold every source value: `outcome` is what a value outside
+    // the destination yields, and `line` is where its stop is reported.
+    FixedNarrow(outcome: TNarrowOutcome, line: Int)
     TryFrom(host_kind: Int)
     FloatToInt(host_kind: Int)
     FloatNarrow
@@ -753,6 +768,16 @@ enum TNumericOp {
     ToShow
     EuclideanDiv
     EuclideanRem
+}
+
+// What a narrowing integer conversion yields for a value the destination
+// can't hold: the E3010 stop, the low bits (`wrapping`), the nearest bound
+// (`saturating`), or no value (`checked`, whose result is `T?`).
+enum TNarrowOutcome {
+    Stop
+    Wrap
+    Saturate
+    Absent
 }
 
 struct TPanicLoc {
@@ -827,6 +852,16 @@ struct TOriginProjection {
 struct TTypedGoal {
     span: Span
     expected: String
+}
+
+// A fixed-list index sema proved in range from its index's bounds: the index
+// expression, the bounds `lo..hi` it read, and the list's length. The solver
+// re-proves each one (`fixed_index_bounds`).
+struct TIndexProof {
+    span: Span
+    lo: Int
+    hi: Int
+    len: Int
 }
 
 enum TContractResultMode { Direct ResultPayload OptionPayload }

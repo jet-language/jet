@@ -350,10 +350,10 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
     jet_rt_free(state, I64{72}, I64{8})
 }
 
-// Historical FileHandles.rs (958047768^, JetStd/FileHandles.rs) owns plain
-// std::fs::File in JetFsHeld, not a buffered writer. Its descriptor duplicates
-// therefore see every preceding write. Flush our private buffer before dup
-// to preserve that visibility; the new state never copies pending bytes.
+// Historical (958047768^) owns plain std::fs::File in JetFsHeld, not a buffered
+// writer. Its descriptor duplicates therefore see every preceding write. Flush
+// our private buffer before dup to preserve that visibility; the new state
+// never copies pending bytes.
 #Export(c) fn jet_fd_dup_raw(state: I64, errno: I64) -> I64 {
     fd_lock(state)
     result := fd_flush_locked(state)
@@ -370,6 +370,7 @@ fn fd_operation(state: I64, syscall: I64, a2: I64, a3: I64, errno: I64) {
 #Export(c) fn jet_fs_stat_raw(path: I64, follow: Bool, stat: I64, errno: I64) {
     name :: fd_c_path(path)
     result := I64{0}
+    rt_test_reads_path(I64{83}, I64{-100}, name)
     #Unsafe("the terminated borrowed path and 128-byte stat fact output are live for the syscall") {
         result = os_stat_facts_i64(if follow -> I64{4} else -> I64{6}, name, stat)
     }
@@ -436,6 +437,7 @@ fn fd_zero(result: I64, zero: I64) {
     fd_lock(directory)
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
+        rt_test_reads_open(fd_word(directory, I64{8}), name, bits)
         #Unsafe("the held directory and terminated source-approved single name stay live through openat") {
             result = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, bits.bit_or(I64{524288}), native_mode.bit_and(I64{4294967295}), I64{0}, I64{0})
         }
@@ -446,9 +448,9 @@ fn fd_zero(result: I64, zero: I64) {
     if (result < I64{0}) -> I64{0} else -> fd_new(result, path, (bits.bit_and(I64{3})) != I64{0})
 }
 
-// FileHandles.rs:711-758: a held-directory entry is statted without following
-// its final symlink and without requiring read access. Source resolves/validates
-// the plain final name; the empty name means stat the directory itself.
+// A held-directory entry is statted without following its final symlink and
+// without requiring read access. Source resolves/validates the plain final name;
+// the empty name means stat the directory itself.
 #Export(c) fn jet_fd_stat_at_raw(directory: I64, path: I64, stat: I64, error: I64) {
     if (rt_text_len(path) == I64{0}) {
         jet_fd_stat_raw(directory, stat, error)
@@ -458,6 +460,7 @@ fn fd_zero(result: I64, zero: I64) {
     fd_lock(directory)
     opened := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
+        rt_test_reads_path(I64{83}, fd_word(directory, I64{8}), name)
         #Unsafe("the held directory and terminated final name live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat; no read access or link traversal") {
             opened = os_syscall_i64(I64{257}, fd_word(directory, I64{8}), name, I64{2752512}, I64{0}, I64{0}, I64{0})
         }
@@ -484,8 +487,8 @@ fn fd_dup_number(state: I64) -> I64 {
 }
 
 // link(2): AT_EMPTY_PATH requires CAP_DAC_READ_SEARCH (otherwise ENOENT).
-// Historical FileHandles.rs::jet_fs_link_fd_at_raw passes 0x1000 once and
-// returns errno, with no /proc/self/fd + AT_SYMLINK_FOLLOW fallback. Match it.
+// Historical `jet_fs_link_fd_at_raw` passes 0x1000 once and returns errno, with
+// no /proc/self/fd + AT_SYMLINK_FOLLOW fallback. Match it.
 #Export(c) fn jet_fd_link_at_raw(source: I64, directory: I64, path: I64, errno: I64) {
     a :: fd_dup_number(source)
     if (a < I64{0}) {
@@ -578,9 +581,9 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     fd_error(result, errno)
 }
 
-// FileHandles.rs:988-1031: lgetxattr queries the path itself. Size query is
-// bytes=0,length=0. Source owns absence/Unsupported mapping, allocation and
-// ERANGE retry; this leaf reports exactly one syscall's count or POSIX error.
+// Lgetxattr queries the path itself. Size query is bytes=0,length=0. Source
+// owns absence/Unsupported mapping, allocation and ERANGE retry; this leaf
+// reports exactly one syscall's count or POSIX error.
 #Export(c) fn jet_fs_xattr_get_raw(path: I64, attribute: I64, bytes: I64, length: I64, error: I64) -> I64 {
     requested :: host_native_int(length)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
@@ -616,6 +619,7 @@ fn fd_created_finish(result: I64, output: I64, errno: I64) {
     fd_lock(directory)
     result := I64{-9}
     if (fd_word(directory, I64{16}) == I64{0}) {
+        rt_test_reads_path(I64{83}, fd_word(directory, I64{8}), name)
         #Unsafe("the held directory, terminated plain name and writable byte range are borrowed only through readlinkat") {
             result = os_syscall_i64(I64{267}, fd_word(directory, I64{8}), name, bytes, requested, I64{0}, I64{0})
         }

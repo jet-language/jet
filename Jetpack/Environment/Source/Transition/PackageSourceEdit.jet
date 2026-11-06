@@ -5,11 +5,14 @@
 // ConfigFacts before any byte is written. Offsets are UTF-8 byte offsets and
 // cuts happen only at ASCII delimiters, so every slice is whole scalars.
 
-TRANSITION_IDENTITY_FIELDS :: [String]{"name", "version", "jet", "edition", "license", "description", "repository", "target", "runtime"}
-TRANSITION_OPTIONAL_IDENTITY_FIELDS :: [String]{"jet", "edition", "license", "description", "repository", "target", "runtime"}
-TRANSITION_REJECTED_BLOCKS :: [String]{"packages", "build", "effects", "grants", "policy"}
-TRANSITION_TOP_LEVEL_BLOCKS :: [String]{"payload", "identity", "deps", "packages", "build", "effects", "grants", "policy", "dev_deps", "patch", "workspace"}
-TRANSITION_GIT_FIELDS :: [String]{"git", "tag", "branch", "rev"}
+use {
+    jet_pkg_model.[
+        MemberRef, PackageFacts, pkg_bytes_code, pkg_bytes_is_word, pkg_bytes_starts_with, pkg_bytes_text, pkg_debug_deps,
+        pkg_debug_environments, pkg_debug_opt_str, pkg_debug_outputs, pkg_debug_services, pkg_debug_str, pkg_debug_str_map,
+        pkg_sha256_hex,
+    ]
+    files :: core.files
+}
 
 // One top-level source entry: its raw text and, when it declares one, the
 // field it assigns (`name`, or `::name` for an inline `name :: Config{...}`).
@@ -87,12 +90,10 @@ fn env_transition_source_entries(source: String) -> [TransitionSourceEntry] Neve
     entries
 }
 
+// The field an entry assigns: `name` for `name: value`, or `::name` for an
+// inline `name: Config{...}` (also the retired `name :: Config{...}`).
 fn env_transition_source_field(raw: String) -> String? Never! {
     text :: env_transition_trim_semicolons(env_transition_strip_comments(raw).trim()).trim()
-    if text.split_once("::") == .Val(binding) {
-        left :: binding.before.trim()
-        if binding.after.trim_start().starts_with("Config") -> return Val("::{left}")
-    }
     bytes :: text.bytes()
     depth := 0
     quoted := false
@@ -114,12 +115,22 @@ fn env_transition_source_field(raw: String) -> String? Never! {
             123 | 91 | 40 -> depth += 1
             125 | 93 | 41 -> depth -= 1
             58 -> {
-                if depth == 0 -> return Val(pkg_bytes_text(bytes, 0, index).trim())
+                if depth == 0 {
+                    left :: pkg_bytes_text(bytes, 0, index).trim()
+                    value :: env_transition_config_value(pkg_bytes_text(bytes, index + 1, bytes.len()))
+                    if value.starts_with("Config") -> return Val("::{left}")
+                    return Val(left)
+                }
             }
             else -> {}
         }
     }
     None
+}
+
+// The value after a binding's `:`, past the second `:` of a retired `::`.
+fn env_transition_config_value(after: String) -> String Never! {
+    after.removeprefix(":").trim_start()
 }
 
 // The one entry that assigns `field`, and its value.
@@ -179,20 +190,21 @@ fn env_transition_require_output_declaration(entries: [TransitionSourceEntry], n
     loop entry in entries {
         if entry.field != Val(name) -> next
         value :: env_transition_field_value(entry.raw, name) ?? next
-        if value.trim_start().starts_with("Output ::") -> count += 1
+        if env_transition_config_value(value).starts_with("Output.") || value.trim_start().starts_with("Output ::") || value.trim_start().starts_with("Output: ") -> count += 1
     }
     if count != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
 }
 
-// The body of an inline `name :: Config{...}` entry.
+// The body of an inline `name: Config{...}` entry.
 fn env_transition_config_body(raw: String) -> String? Never! {
     clean :: env_transition_mask_comments(raw).bytes()
-    separator :: env_transition_find(clean, "::".bytes(), 0)
+    separator :: env_transition_find(clean, ":".bytes(), 0)
     if separator < 0 -> return None
-    value :: pkg_bytes_text(clean, separator + 2, clean.len()).trim()
+    width :: if separator + 1 < clean.len() && Int.from_u8(clean[separator + 1]) == 58 -> 2 else -> 1
+    value :: pkg_bytes_text(clean, separator + width, clean.len()).trim()
     if !value.starts_with("Config") -> return None
     bytes :: raw.bytes()
-    env_transition_record_body(pkg_bytes_text(bytes, separator + 2, bytes.len()))
+    env_transition_record_body(pkg_bytes_text(bytes, separator + width, bytes.len()))
 }
 
 // The text inside the first balanced `{...}` record of `value`.
@@ -333,129 +345,6 @@ fn env_transition_render_member_package(name: String, body: String) -> String Ne
     "name: {env_transition_quote(name)}\n{body.trim()}\n"
 }
 
-// Fold a migration-era `pkg.jet` (`payload:`/`identity:` wrapper, or the
-// legacy bare form) into the canonical `package.jet` root shape
-// (bare `name:`/`version:`, no wrapper). A
-// one-way text splice for upgrading old input; the typed parser reads every
-// `package.jet` once migration has run.
-fn env_transition_render_legacy_package_root(source: String) -> String EnvironmentError! {
-    env_transition_validate_legacy_manifest_fields(source)
-    entries :: env_transition_source_entries(env_transition_strip_comments(source))
-    identity := [String: String]{}
-    deps_value := String?{None}
-    loop entry in entries {
-        field :: entry.field ?? next
-        if field == "payload" || field == "identity" {
-            value :: env_transition_field_value(entry.raw, field) ?? ""
-            body :: env_transition_record_body(value) ?? ""
-            loop nested in env_transition_source_entries(body) {
-                nested_field :: nested.field ?? next
-                if env_transition_field_value(nested.raw, nested_field) == .Val(nested_value) -> identity[nested_field] = nested_value
-            }
-        } else if TRANSITION_IDENTITY_FIELDS.contains(field) {
-            if env_transition_field_value(entry.raw, field) == .Val(value) -> identity[field] = value
-        } else if field == "deps" {
-            deps_value = env_transition_field_value(entry.raw, field)
-        } else if TRANSITION_REJECTED_BLOCKS.contains(field) {
-            value :: env_transition_field_value(entry.raw, field) ?? ""
-            body :: env_transition_record_body(value) ?? ""
-            if body.trim() != "" {
-                return Err(env_transition_error("pkg.jet contains package, build, effects, policy, or target facts that need an explicit migration before jet init can fold it"))
-            }
-        }
-    }
-    lines := [String]{"name: {identity.get("name") ?? "\"\""}\n", "version: {identity.get("version") ?? "\"\""}\n"}
-    loop field in TRANSITION_OPTIONAL_IDENTITY_FIELDS {
-        if identity.get(field) == .Val(value) -> &lines.push("{field}: {value}\n")
-    }
-    &lines.push("deps: {{\n")
-    if deps_value == .Val(deps) {
-        if env_transition_record_body(deps) == .Val(body) {
-            loop entry in env_transition_source_entries(body) {
-                name :: entry.field ?? next
-                if env_transition_field_value(entry.raw, name) == .Val(value) -> &lines.push("    {name}: {value}\n")
-            }
-        }
-    }
-    &lines.push("}}\n")
-    Ok(lines.join(""))
-}
-
-fn env_transition_validate_legacy_manifest_fields(source: String) EnvironmentError! {
-    identity_blocks := 0
-    seen_fields := [String: Bool]{}
-    saw_top_level_identity := false
-    loop entry in env_transition_source_entries(env_transition_strip_comments(source)) {
-        field :: entry.field ?? return Err(env_transition_error("pkg.jet contains an unrepresentable declaration `{entry.raw.trim()}`; migration stops before writing"))
-        if seen_fields.has_key(field) {
-            return Err(env_transition_error("pkg.jet declares field `{field}` more than once; migration stops before writing"))
-        }
-        seen_fields[field] = true
-        if TRANSITION_IDENTITY_FIELDS.contains(field) {
-            if identity_blocks > 0 {
-                return Err(env_transition_error("pkg.jet mixes top-level identity fields with an identity block; migration stops before writing"))
-            }
-            saw_top_level_identity = true
-            next
-        }
-        if !TRANSITION_TOP_LEVEL_BLOCKS.contains(field) {
-            return Err(env_transition_error("pkg.jet contains unknown field `{field}`; migration stops before writing"))
-        }
-        if field == "payload" || field == "identity" {
-            if saw_top_level_identity {
-                return Err(env_transition_error("pkg.jet mixes an identity block with top-level identity fields; migration stops before writing"))
-            }
-            if identity_blocks > 0 {
-                return Err(env_transition_error("pkg.jet declares more than one identity block; migration stops before writing"))
-            }
-            identity_blocks += 1
-            value :: env_transition_field_value(entry.raw, field) ?? return Err(env_transition_error("{field} has no value; migration stops before writing"))
-            body :: env_transition_record_body(value) ?? return Err(env_transition_error("{field} is not a closed identity record; migration stops before writing"))
-            loop nested in env_transition_source_entries(body) {
-                nested_field :: nested.field ?? return Err(env_transition_error("pkg.jet identity contains an unrepresentable declaration `{nested.raw.trim()}`; migration stops before writing"))
-                if !TRANSITION_IDENTITY_FIELDS.contains(nested_field) {
-                    return Err(env_transition_error("pkg.jet identity contains unknown field `{nested_field}`; migration stops before writing"))
-                }
-            }
-            env_transition_validate_legacy_identity_body(body)
-        } else if field == "deps" {
-            value :: env_transition_field_value(entry.raw, field) ?? return Err(env_transition_error("deps has no value; migration stops before writing"))
-            env_transition_validate_legacy_dependency_block(value)
-        }
-    }
-}
-
-fn env_transition_validate_legacy_identity_body(body: String) EnvironmentError! {
-    seen := [String: Bool]{}
-    loop entry in env_transition_source_entries(body) {
-        field :: entry.field ?? return Err(env_transition_error("pkg.jet identity contains an unrepresentable declaration `{entry.raw.trim()}`; migration stops before writing"))
-        if seen.has_key(field) {
-            return Err(env_transition_error("pkg.jet identity declares field `{field}` more than once; migration stops before writing"))
-        }
-        seen[field] = true
-    }
-}
-
-fn env_transition_validate_legacy_dependency_block(value: String) EnvironmentError! {
-    body :: env_transition_record_body(value) ?? return Err(env_transition_error("pkg.jet deps is not a closed record; migration stops before writing"))
-    loop entry in env_transition_source_entries(body) {
-        name :: entry.field ?? return Err(env_transition_error("pkg.jet deps contains an unrepresentable declaration `{entry.raw.trim()}`; migration stops before writing"))
-        dependency :: env_transition_field_value(entry.raw, name) ?? return Err(env_transition_error("pkg.jet dependency `{name}` has no value; migration stops before writing"))
-        git_body :: env_transition_record_body(dependency) ?? next
-        seen := [String: Bool]{}
-        loop nested in env_transition_source_entries(git_body) {
-            field :: nested.field ?? return Err(env_transition_error("pkg.jet dependency `{name}` contains an unrepresentable declaration `{nested.raw.trim()}`; migration stops before writing"))
-            if !TRANSITION_GIT_FIELDS.contains(field) {
-                return Err(env_transition_error("pkg.jet dependency `{name}` contains unknown field `{field}`; migration stops before writing"))
-            }
-            if seen.has_key(field) {
-                return Err(env_transition_error("pkg.jet dependency `{name}` declares field `{field}` more than once; migration stops before writing"))
-            }
-            seen[field] = true
-        }
-    }
-}
-
 fn env_transition_quote(value: String) -> String Never! {
     "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }
@@ -510,7 +399,7 @@ fn env_transition_strip_comments(value: String) -> String Never! {
 }
 
 // Replace comments and string literals with same-length ASCII spaces. Byte
-// positions stay stable while role discovery and delimiter matching see only
+// positions stay stable while field scanning and delimiter matching see only
 // source tokens. Block comments nest, matching Jet's lexer boundary.
 fn env_transition_mask_comments(value: String) -> String Never! {
     bytes := value.bytes()
@@ -579,68 +468,6 @@ fn env_transition_mask_comments(value: String) -> String Never! {
         }
     }
     pkg_bytes_text(bytes, 0, bytes.len())
-}
-
-// Whether `start` begins a whole word in `clean` of `length` bytes.
-fn env_transition_word_bounded(clean: [U8], start: Int, length: Int) -> Bool Never! {
-    before_ok :: start == 0 || !pkg_bytes_is_word(pkg_bytes_code(clean, start - 1))
-    after_ok :: !pkg_bytes_is_word(pkg_bytes_code(clean, start + length))
-    before_ok && after_ok
-}
-
-// The body of the first `module <name> { ... }` declaration, if any.
-fn env_transition_module_body(source: String, module_name: String) -> String? EnvironmentError! {
-    marker :: "module {module_name}".bytes()
-    clean :: env_transition_mask_comments(source).bytes()
-    start := env_transition_find(clean, marker, 0)
-    loop start >= 0 && !env_transition_word_bounded(clean, start, marker.len()) {
-        start = env_transition_find(clean, marker, start + 1)
-    }
-    if start < 0 -> return Ok(None)
-    open :: env_transition_find(clean, "{{".bytes(), start + marker.len())
-    if open < 0 -> return Err(env_transition_error("module {module_name} is missing its body"))
-    close :: env_transition_matching_delimiter(clean, open, 123, 125) ?? return Err(env_transition_error("module {module_name} has an unclosed body"))
-    Ok(Val(pkg_bytes_text(source.bytes(), open + 1, close)))
-}
-
-// One `module env.<name> { ... }` declaration.
-struct TransitionEnvModule {
-    name: String
-    body: String
-}
-
-fn env_transition_env_modules(source: String) -> [TransitionEnvModule] EnvironmentError! {
-    raw :: source.bytes()
-    clean :: env_transition_mask_comments(source).bytes()
-    marker :: "module env.".bytes()
-    modules := [TransitionEnvModule]{}
-    search_from := 0
-    loop {
-        start :: env_transition_find(clean, marker, search_from)
-        if start < 0 -> break
-        before_ok :: start == 0 || !pkg_bytes_is_word(pkg_bytes_code(clean, start - 1))
-        if !before_ok {
-            search_from = start + marker.len()
-            next
-        }
-        name_start :: start + marker.len()
-        name_end := name_start
-        loop name_end < clean.len() && pkg_bytes_code(clean, name_end) != 123 && pkg_bytes_space_width(clean, name_end) == 0 {
-            name_end += 1
-        }
-        if name_end >= clean.len() -> return Err(env_transition_error("env.jet has no environment name"))
-        name :: pkg_bytes_text(clean, name_start, name_end).trim()
-        env_transition_validate_name(name, "Environment")
-        open :: env_transition_find(clean, "{{".bytes(), name_end)
-        if open < 0 -> return Err(env_transition_error("env.jet is missing its environment body"))
-        close :: env_transition_matching_delimiter(clean, open, 123, 125) ?? return Err(env_transition_error("env.jet has an unclosed environment body"))
-        &modules.push(TransitionEnvModule{name: name, body: pkg_bytes_text(raw, open + 1, close)})
-        search_from = close + 1
-    }
-    if modules.len() == 0 {
-        return Err(env_transition_error("env.jet has no module env.<name> declaration"))
-    }
-    Ok(modules)
 }
 
 // The checked fact graph, not its storage layout: Config paths, inline

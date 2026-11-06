@@ -1,6 +1,6 @@
-// Adapted ownership loops/borrowed field ABI from c1896f121/4d4c53097.
-// Ui.rs:64-101 determines semantics, including key and raw Option<i64>
-// callbacks. UiABI.jet is the only layout; no transfers, closures or refcounts.
+// Adapted ownership loops/borrowed field ABI from c1896f121/4d4c53097. The Rust
+// original determines semantics, including key and raw Option<i64> callbacks.
+// UiABI.jet is the only layout; no transfers, closures or refcounts.
 fn ui_node_children_clone(header: I64) -> I64 {
     length :: ui_carrier_word(wrapping(header + DATA_SEQUENCE_LENGTH))
     result :: data_sequence_new(length, UI_NODE_CHILD_BYTES)
@@ -161,6 +161,25 @@ fn ui_node_option_eq(left: I64, right: I64, a: I64, b: I64, slot: I64, offset: I
 #Export(c) fn jet_rt_handle_field_jet_ui_node_label(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(wrapping(value + UI_NODE_LABEL)), out) }
 #Export(c) fn jet_rt_handle_field_jet_ui_node_width(value: I64) -> I64 { value + UI_NODE_WIDTH }
 #Export(c) fn jet_rt_handle_field_jet_ui_node_height(value: I64) -> I64 { value + UI_NODE_HEIGHT }
+// The Option fields: presence, with an owned record (or the IME mode's
+// variant word) through `some`.
+#Export(c) fn jet_rt_handle_field_jet_ui_node_accessibility(value: I64, some: I64) -> I64 {
+    accessibility :: ui_carrier_word(wrapping(value + UI_NODE_ACCESSIBILITY))
+    if (accessibility == I64{0}) -> return I64{0}
+    ui_carrier_store(some, jet_rt_handle_clone_jet_ui_accessibility(accessibility))
+    I64{1}
+}
+#Export(c) fn jet_rt_handle_field_jet_ui_node_shortcut(value: I64, some: I64) -> I64 {
+    shortcut :: ui_carrier_word(wrapping(value + UI_NODE_SHORTCUT))
+    if (shortcut == I64{0}) -> return I64{0}
+    ui_carrier_store(some, jet_rt_handle_clone_jet_ui_shortcut(shortcut))
+    I64{1}
+}
+#Export(c) fn jet_rt_handle_field_jet_ui_node_ime(value: I64, some: I64) -> I64 {
+    if ((ui_carrier_word(wrapping(value + UI_NODE_ABSENT_MASK)).bit_and(UI_NODE_SLOT_IME)) != I64{0}) -> return I64{0}
+    ui_carrier_store(some, ui_carrier_word(wrapping(value + UI_NODE_IME)))
+    I64{1}
+}
 #Export(c) fn jet_rt_record_seq_list_rec_jet_ui_node_new(capacity: I64) -> I64 { data_sequence_new(capacity, UI_NODE_CHILD_BYTES) }
 #Export(c) fn jet_rt_record_seq_list_rec_jet_ui_node_len(value: I64) -> I64 { ui_carrier_word(wrapping(value + DATA_SEQUENCE_LENGTH)) }
 #Export(c) fn jet_rt_record_seq_list_rec_jet_ui_node_get(value: I64, index: I64) -> I64 { ui_carrier_word(data_sequence_slot(value, index, UI_NODE_CHILD_BYTES)) }

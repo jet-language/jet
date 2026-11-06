@@ -1,5 +1,5 @@
-// Ui.rs:1209-1866 and UiGtk.rs:1340-2074: the null, TUI and GTK renderer
-// backends, their Rect/Size/InputEvent records, buttons and the click slots.
+// The null, TUI and GTK renderer backends, their Rect/Size/InputEvent records,
+// buttons and the click slots.
 //
 // A backend handle is one refcounted State216 its clones share (Rust's
 // Arc<Mutex<State>>): refs0 kind8 (0 null, 1 TUI, 2 GTK), layout frame
@@ -141,8 +141,7 @@ fn ui_text_push_rect(target: I64, frame: I64) {
     ui_text_push_float(target, ui_float_at(wrapping(frame + I64{24})))
     ui_text_push_static(target, rt_static_text("}}"))
 }
-// TuiKernel.rs strip_ansi: an ESC starts an escape that ends after an ASCII
-// letter or '@'.
+// strip_ansi: an ESC starts an escape that ends after an ASCII letter or '@'.
 fn ui_tui_strip_ansi(text: I64) -> I64 {
     output :: jet_rt_string_builder_new()
     data :: rt_text_data(text)
@@ -163,8 +162,8 @@ fn ui_tui_strip_ansi(text: I64) -> I64 {
     }
     jet_rt_string_builder_finish(output)
 }
-// TuiKernel.rs ascii (Core/Tui ascii_scalar): box drawing and arrows map to
-// ASCII, any other non-ASCII scalar to '?'.
+// Ascii (Core/Tui ascii_scalar): box drawing and arrows map to ASCII, any other
+// non-ASCII scalar to '?'.
 fn ui_tui_ascii_scalar(n: I64) -> I64 {
     if (n == I64{0x2500} || n == I64{0x2501} || n == I64{0x2550}) -> return I64{45}
     if (n == I64{0x2502} || n == I64{0x2503} || n == I64{0x2551}) -> return I64{124}
@@ -176,13 +175,13 @@ fn ui_tui_ascii_scalar(n: I64) -> I64 {
     if (n < I64{128}) -> return n
     I64{63}
 }
-// TuiKernel.rs char_width (Core/Tui scalar_display_width).
+// char_width (Core/Tui scalar_display_width).
 fn ui_tui_char_width(n: I64) -> I64 {
     if (n < I64{32} || (n >= I64{0x7F} && n <= I64{0x9F}) || (n >= I64{0x0300} && n <= I64{0x036F}) || (n >= I64{0x0483} && n <= I64{0x0489}) || (n >= I64{0x0591} && n <= I64{0x05BD}) || (n >= I64{0x0610} && n <= I64{0x061A}) || (n >= I64{0x064B} && n <= I64{0x065F}) || (n >= I64{0x1AB0} && n <= I64{0x1AFF}) || (n >= I64{0x1DC0} && n <= I64{0x1DFF}) || (n >= I64{0x20D0} && n <= I64{0x20FF}) || (n >= I64{0xFE20} && n <= I64{0xFE2F})) -> return I64{0}
     if ((n >= I64{0x1100} && n <= I64{0x115F}) || (n >= I64{0x2329} && n <= I64{0x232A}) || (n >= I64{0x2E80} && n <= I64{0x303E}) || (n >= I64{0x3040} && n <= I64{0xA4CF}) || (n >= I64{0xAC00} && n <= I64{0xD7A3}) || (n >= I64{0xF900} && n <= I64{0xFAFF}) || (n >= I64{0xFE10} && n <= I64{0xFE19}) || (n >= I64{0xFE30} && n <= I64{0xFE6F}) || (n >= I64{0xFF00} && n <= I64{0xFF60}) || (n >= I64{0xFFE0} && n <= I64{0xFFE6}) || (n >= I64{0x1F300} && n <= I64{0x1FAFF})) -> return I64{2}
     I64{1}
 }
-// TuiKernel.rs display_width: the char widths of the ANSI-stripped text.
+// display_width: the char widths of the ANSI-stripped text.
 fn ui_tui_display_width(text: I64) -> I64 {
     stripped :: ui_tui_strip_ansi(text)
     data :: rt_text_data(stripped)
@@ -941,12 +940,13 @@ fn ui_button_node(label: I64) -> I64 {
     node
 }
 #Export(c) fn jet_ui_button(label: I64) -> I64 { ui_button_node(label) }
-// jet_ui_button_on_click: the label, the optional shortcut and accessible
-// label (borrowed Option boxes, null when absent) and the handler closure,
-// which the click slot takes over.
+// jet_ui_button_on_click: the label, the optional shortcut (a borrowed
+// UIShortcut record, null when absent), the optional accessible label (a
+// borrowed Option box, null when absent) and the handler closure, which the
+// click slot takes over.
 #Export(c) fn jet_ui_button_on_click(label: I64, shortcut: I64, accessible_label: I64, env: I64, invoke: I64, release: I64) -> I64 {
     node :: ui_button_node(label)
-    if (shortcut != I64{0}) -> ui_carrier_store(wrapping(node + UI_NODE_SHORTCUT), jet_rt_handle_clone_jet_ui_shortcut(ui_carrier_word(shortcut)))
+    if (shortcut != I64{0}) -> ui_carrier_store(wrapping(node + UI_NODE_SHORTCUT), jet_rt_handle_clone_jet_ui_shortcut(shortcut))
     if (accessible_label != I64{0}) {
         accessibility :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
         ui_carrier_store(wrapping(accessibility + UI_ACCESSIBILITY_NAME), jet_rt_string_clone(ui_carrier_word(accessible_label)))

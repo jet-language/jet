@@ -5,43 +5,49 @@
 //        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
-// ~/.local/share/jet-seeds, or $JET_SEEDS). The tool runs every check and
+// $JET_SEEDS, Tools/agent/roots.mjs). The tool runs every check and
 // reports all of them; it does not stop at the first failure:
 //   chain     chain.sh builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             under norust.sh, and must reach the fixed point (s2 == s3).
 //   pack      the runtime pack, rebuilt by s2 without Rust, must equal the chain's pack2 byte
 //             for byte.
+//   cc-pack   Tools/agent/cc-pack.nix builds this host's C toolchain pack from pinned sources
+//             (the only place Nix runs); its SHA-256 and size must equal CC_PACK_ASSETS in
+//             Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet, the hash jet embeds.
 //   jetpack   Jetpack/Bootstrap/check.sh (keep-going) with s2 on COMMIT must show no failure
 //             row the current release showed (recorded when it was cut, else rerun on its own
 //             tree), and must finish if the release's census did; `check.sh --hosted` builds
 //             the jetpack engine that ships beside jet.
-//   suites    testkit golden, ui and cases, run with the current release and with s2 on
-//             COMMIT's fixtures and compared per (suite, case, tier). A row the release
+//   suites    the golden, ui and cases test profiles (`jet test Compiler --profile <suite>`,
+//             run by s2 with `--compiler` naming the current release, then s2) on COMMIT's
+//             fixtures, compared per (suite, case, tier). A row the release
 //             passes and s2 fails twice is lost; a lost row needs a disposition line
 //             `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in --dispositions.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
-// The suites start only once the cheap checks (chain, pack, jetpack, testkit build) are
+// The suites start only once the cheap checks (chain, pack, jetpack) are
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
 // Pass: writes SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
-// IDENTITY, SOURCE, SHA256SUMS, current.env, RELEASE.json, RELEASE.md, MERGE_MSG, TAG_MSG,
-// evidence/ and the seed asset jet-a0_NNN-<platform>-<arch>.tar.gz (+ .sha256), then prints
-// the commands for Main: make it current (jet-use), merge it to master as
-// `Merge dev: a0_NNN <summary>`, tag it, push and publish the seed asset as the tag's GitHub
-// release (Docs/spec/contributing/bootstrap.md). Fail: SEEDS is unchanged; the evidence stays
+// IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS, current.env, RELEASE.json,
+// RELEASE.md, MERGE_MSG, TAG_MSG and
+// evidence/, then prints the commands for Main: make it current (jet-use), merge it to master
+// as `Merge dev: a0_NNN <summary>`, tag it, push, and publish it as the tag's GitHub release
+// with `jet run Tools/release/Main.jet -- candidate SEEDS/a0_NNN`, then `-- publish SEEDS/a0_NNN`.
+// Fail: SEEDS is unchanged; the evidence stays
 // in the work directory. The tool never repoints `current`, merges, tags, pushes or
 // publishes. One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
-// testkit shard gets --jobs entries at once (default: the slot's SLOT_MEMORY_MAX, 16G when
-// unset, split at 2 GiB per entry across the shards), because a kit left to size itself
-// reads the host's MemAvailable and every shard would claim all of it. --filter narrows
+// shard's `jet test` gets `--memory` (the slot's SLOT_MEMORY_MAX, 16G when unset, split
+// across the shards), because a pool left to size itself reads the host's MemAvailable
+// and every shard would claim all of it; --jobs N caps each pool at N entries at once.
+// --filter narrows
 // the suites for dry runs of the tool itself: such a
 // run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
 //
-// Environment: JET_SEEDS, JET_RELEASE_WORK (default ~/.cache/jet-dev/release),
-// JET_RELEASE_CHAIN (default ~/.cache/jet-dev/scratch/Main/chain.sh), JET_RELEASE_SLOT
-// (default ~/.cache/jet-dev/scratch/Main/build-slot.sh; empty runs without a slot),
+// Environment: the roots of Tools/agent/roots.mjs, JET_RELEASE_WORK (default
+// $JET_STATE_ROOT/release), JET_RELEASE_CHAIN (default Tools/agent/chain/chain.sh),
+// JET_RELEASE_SLOT (default Tools/agent/chain/build-slot.sh; empty runs without a slot),
 // JET_PACK_MUSL_LIB.
 // Exit: 0 released, 1 a check failed (nothing released), 2 the run could not start.
 import { createHash } from 'node:crypto';
@@ -52,8 +58,8 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { seedsRoot, stateRoot } from './roots.mjs';
 
-const HOME = process.env.HOME;
 const SCRIPT = fileURLToPath(import.meta.url);
 const REPO = resolve(dirname(SCRIPT), '../..');
 const SUITES = ['golden', 'ui', 'cases'];
@@ -62,14 +68,14 @@ const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x8
 // norust.sh, inline: drop every PATH directory holding cargo, rustc or rustup, refuse if one stays reachable.
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
 const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
-// Memory one running testkit entry may claim (Tools/testkit/run.jet kit_job_memory).
-const KIT_JOB_GIB = 2;
-
-// Entries each shard runs at once: --jobs, else the slot's memory cap split across shards.
-export function shardJobs(options, slotMemory = process.env.SLOT_MEMORY_MAX) {
-    if (options.jobs > 0) return options.jobs;
+// The pool settings of each of `shards` `jet test` runs sharing one slot: the slot's memory cap split across
+// them (each pool alone would size its budget from the whole cgroup room), and `--jobs` only when given; the
+// pool's default is one entry per core while their claims fit the budget.
+export function shardPool(options, shards, slotMemory = process.env.SLOT_MEMORY_MAX) {
     const gib = Number.parseInt(slotMemory ?? '', 10) > 0 ? Number.parseInt(slotMemory, 10) : 16;
-    return Math.max(1, Math.floor(gib / KIT_JOB_GIB / options.shards));
+    const pool = [`--memory=${Math.max(1, Math.floor(gib / shards))}G`];
+    if (options.jobs > 0) pool.push(`--jobs=${options.jobs}`);
+    return pool;
 }
 
 // ---- pure helpers (release-compiler.test.mjs) ----
@@ -112,6 +118,25 @@ export function seedAssetName(release, platform = process.platform, arch = proce
 // `jet c++`. They are hard links of `jet` (a real binary, not a wrapper); the CLI reads
 // argv[0] (JetCli Host.jet `jet_cli_alias_args`).
 export const COMPILER_ALIASES = ['jet-cc', 'jet-cxx', 'jet-c++'];
+// What a seed directory ships (SHA256SUMS covers them; jetpack is absent from some). RELEASE holds the
+// release name, which jet uses to download its own C toolchain pack from the release.
+export const SEED_FILES = ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY', 'RELEASE'];
+
+// The jet source that embeds each host's C toolchain pack (file, SHA-256, size) in CC_PACK_ASSETS.
+export const CC_PACK_SOURCE = 'Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet';
+
+// The CC_PACK_ASSETS rows of CC_PACK_SOURCE's text: [{ platform, file, sha256, size }].
+export function ccPackAssets(text) {
+    const start = text.indexOf('CC_PACK_ASSETS ::');
+    if (start < 0) return [];
+    const end = text.indexOf('} }', start);
+    const table = text.slice(start, end < 0 ? text.length : end);
+    return [...table.matchAll(/\{([^{}]*)\}/g)].map(match => {
+        const field = name => new RegExp(`\\b${name}:\\s*"([^"]*)"`).exec(match[1])?.[1] ?? '';
+        const size = /\bsize:\s*(\d+)/.exec(match[1]);
+        return { platform: field('platform'), file: field('file'), sha256: field('sha256'), size: size ? Number(size[1]) : 0 };
+    }).filter(row => row.file);
+}
 
 export function linkCompilerAliases(dir) {
     for (const alias of COMPILER_ALIASES) linkSync(join(dir, 'jet'), join(dir, alias));
@@ -288,9 +313,9 @@ function releaseInfo(seeds) {
 
 function preconditions(options) {
     const errors = [...options.errors];
-    const seeds = resolve(options.seeds || process.env.JET_SEEDS || join(HOME, '.local/share/jet-seeds'));
-    const workRoot = resolve(options.work || process.env.JET_RELEASE_WORK || join(HOME, '.cache/jet-dev/release'));
-    const chain = process.env.JET_RELEASE_CHAIN ?? join(HOME, '.cache/jet-dev/scratch/Main/chain.sh');
+    const seeds = resolve(options.seeds || seedsRoot());
+    const workRoot = resolve(options.work || process.env.JET_RELEASE_WORK || join(stateRoot(), 'release'));
+    const chain = process.env.JET_RELEASE_CHAIN ?? join(REPO, 'Tools/agent/chain/chain.sh');
     const musl = process.env.JET_PACK_MUSL_LIB ?? MUSL_DEFAULT;
     let sha = '';
     if (options.commit) {
@@ -364,7 +389,9 @@ async function chainStage(ctx, gate) {
     const stages = [...rows.values()].filter(row => row.stage !== 'verdict').map(row => `${row.stage} ${row.status}`).join(', ');
     if (problems.length) return gate.row('chain', 'FAIL', `${problems.join('; ')} (${stages})`);
     const sha = sha256File(s2);
-    ctx.candidate = { jet: s2, runtime: join(out, 's2/jet-runtime'), sha, identity: `${release.version}#${sha}`, jetpack: '' };
+    // RELEASE.json records both chain stages so Tools/release can check the fixed point from the seed alone.
+    const chain = { s2: `${release.version}#${sha}`, s3: `${release.version}#${sha256File(s3)}` };
+    ctx.candidate = { jet: s2, runtime: join(out, 's2/jet-runtime'), sha, identity: `${release.version}#${sha}`, jetpack: '', chain };
     gate.row('chain', 'PASS', `fixed point s2 == s3 (jet ${sha.slice(0, 16)}) from ${release.name}, no Rust (${stages}; ${verdict.note})`);
 }
 
@@ -375,6 +402,7 @@ async function packStage(ctx, gate) {
     copyFileSync(candidate.jet, join(dir, 'jet'));
     chmodSync(join(dir, 'jet'), 0o755);
     const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree };
+    // The pack compiles the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
     const argv = [...STACK, join(tree, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust', 'node', join(tree, 'Tools/packaging/prebuild-runtime.mjs'), join(dir, 'jet'), join(dir, 'jet-runtime'), '--repo', tree];
     const result = await run(argv, { cwd: tree, env, out: join(work, 'logs/pack.log'), timeout: 3600 });
     if (result.rc !== 0 || !existsSync(join(dir, 'jet-runtime'))) return gate.row('pack', 'FAIL', `the pack rebuild by s2 failed rc=${result.rc}: ${tail(join(work, 'logs/pack.log'))}`);
@@ -383,8 +411,32 @@ async function packStage(ctx, gate) {
     gate.row('pack', 'PASS', `rebuilt by s2 without Rust, byte-identical to pack2 (${files} files, ${result.wall}s)`);
 }
 
+// Why the pack built from pinned sources cannot ship with this jet, or '' when it can: its SHA-256 and
+// size must be the ones jet embeds, because jet refuses any other pack.
+export function ccPackProblem(expected, built) {
+    if (built.sha256 === expected.sha256 && built.size === expected.size) return '';
+    return `the C toolchain pack built from pinned sources is sha256 ${built.sha256} (${built.size} bytes), but jet embeds ${expected.sha256} (${expected.size} bytes) for ${expected.file}: update CC_PACK_ASSETS in ${CC_PACK_SOURCE}`;
+}
+
+// Builds this host's C toolchain pack with Tools/agent/cc-pack.nix (Nix runs only on the release
+// machine) and checks it against the hash jet embeds; assemble() ships it beside jet.
+async function ccPackStage(ctx, gate) {
+    const { work, tree } = ctx;
+    const platform = `${process.platform}-${process.arch}`;
+    const expected = ccPackAssets(readFileSync(join(tree, CC_PACK_SOURCE), 'utf8')).find(row => row.platform === platform);
+    if (!expected) return gate.row('cc-pack', 'FAIL', `${CC_PACK_SOURCE} embeds no C toolchain pack for ${platform}`);
+    const link = join(work, 'cc-pack-result'), log = join(work, 'logs/cc-pack.log');
+    const result = await run(['nix-build', join(tree, 'Tools/agent/cc-pack.nix'), '--out-link', link], { cwd: tree, env: ctx.env, out: log, timeout: 12 * 3600 });
+    const path = join(link, expected.file);
+    if (result.rc !== 0 || !existsSync(path)) return gate.row('cc-pack', 'FAIL', `nix-build Tools/agent/cc-pack.nix failed rc=${result.rc}: ${tail(log)}`);
+    const problem = ccPackProblem(expected, { sha256: sha256File(path), size: statSync(path).size });
+    if (problem) return gate.row('cc-pack', 'FAIL', problem);
+    ctx.ccPack = { path, file: expected.file };
+    gate.row('cc-pack', 'PASS', `${expected.file} rebuilt from pinned sources matches the hash jet embeds (${expected.sha256.slice(0, 16)}, ${expected.size} bytes, ${result.wall}s)`);
+}
+
 function bootstrapScratch(worker) {
-    const root = join(HOME, '.cache/jet-dev/jetpack-bootstrap');
+    const root = join(stateRoot(), 'jetpack-bootstrap');
     return existsSync(root) ? readdirSync(root).filter(name => name.startsWith(`${worker}-`)).map(name => join(root, name)) : [];
 }
 
@@ -394,7 +446,7 @@ async function jetpackCensus(ctx, side, jet, identity, root) {
     for (const dir of bootstrapScratch(worker)) rmSync(dir, { recursive: true, force: true });
     const env = { ...ctx.env, JET_KEEP_GOING: '1', JET_COMPILER_IDENTITY: identity, JET_TOOLCHAIN_ROOT: root, JETPACK_WORKER: worker, JET: jet };
     const log = join(ctx.work, `logs/jetpack-${side}.log`);
-    const result = await run([...STACK, join(root, 'Tools/agent/jet-env'), 'bash', 'Jetpack/Bootstrap/check.sh'], { cwd: root, env, out: log, timeout: 3600 });
+    const result = await run([...STACK, 'bash', 'Jetpack/Bootstrap/check.sh'], { cwd: root, env, out: log, timeout: 3600 });
     const errors = bootstrapScratch(worker).map(dir => join(dir, 'check-errors.txt')).find(existsSync);
     const receipt = bootstrapScratch(worker).map(dir => join(dir, 'check.receipt')).find(existsSync);
     // check.sh writes the receipt's `exit:` line last: without it the census is partial.
@@ -446,7 +498,7 @@ async function hostedStage(ctx, gate) {
     for (const dir of bootstrapScratch(worker)) rmSync(dir, { recursive: true, force: true });
     const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree, JETPACK_WORKER: worker, JET: candidate.jet };
     const log = join(work, 'logs/jetpack-hosted.log');
-    const result = await run([...STACK, join(tree, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust', 'bash', 'Jetpack/Bootstrap/check.sh', '--hosted'], { cwd: tree, env, out: log, timeout: 3 * 3600 });
+    const result = await run([...STACK, 'bash', '-c', NORUST, 'norust', 'bash', 'Jetpack/Bootstrap/check.sh', '--hosted'], { cwd: tree, env, out: log, timeout: 3 * 3600 });
     const receipt = bootstrapScratch(worker).map(dir => join(dir, 'hosted.receipt')).find(existsSync);
     const text = receipt ? readFileSync(receipt, 'utf8') : '';
     const binary = /^hosted-binary: (.+)$/m.exec(text)?.[1];
@@ -469,35 +521,27 @@ async function hostedStage(ctx, gate) {
     else gate.row('jetpack-engine', 'NOTE', `no jetpack engine (${ctx.release.name} ships none either): ${why}`);
 }
 
-async function testkitStage(ctx, gate) {
-    const { candidate, tree, work } = ctx;
-    const env = { ...ctx.env, JET_COMPILER_IDENTITY: candidate.identity, JET_TOOLCHAIN_ROOT: tree, JET: candidate.jet };
-    const result = await run([...STACK, join(tree, 'Tools/agent/jet-env'), candidate.jet, 'build', 'Tools/testkit/run.jet'], { cwd: tree, env, out: join(work, 'logs/testkit-build.log'), timeout: 3600 });
-    const kit = join(tree, 'Tools/testkit/.jet/build/run');
-    if (result.rc !== 0 || !existsSync(kit)) return gate.row('testkit', 'FAIL', `s2 could not build the testkit rc=${result.rc}: ${tail(join(work, 'logs/testkit-build.log'))}`);
-    ctx.kit = kit;
-    gate.row('testkit', 'PASS', `built by s2 (${result.wall}s)`);
-}
-
-// One side's run of one suite: --shards processes, merged. Resolves {rows} or {error}.
+// One side's run of one suite: --shards `jet test Compiler --profile <suite>` processes, merged. s2 runs
+// every one, and `--compiler` names the side's jet that builds and runs the rows; the jetpack beside that
+// jet serves them. Resolves {rows} or {error}.
 async function suiteRun(ctx, side, suite, extra = []) {
     const compiler = side === 'release'
-        ? { jet: ctx.release.jet, identity: ctx.release.identity, root: ctx.releaseTree, jetpack: ctx.release.jetpack }
-        : { jet: ctx.candidate.jet, identity: ctx.candidate.identity, root: ctx.tree, jetpack: ctx.candidate.jetpack };
+        ? { jet: ctx.release.jet, identity: ctx.release.identity, root: ctx.releaseTree }
+        : { jet: ctx.candidate.jet, identity: ctx.candidate.identity, root: ctx.tree };
     const retry = extra.length > 0;
     const shards = retry ? 1 : ctx.options.shards;
-    const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet };
     const runs = [];
     for (let index = 1; index <= shards; index++) {
         const tag = `${side}-${suite}${retry ? '-retry' : ''}-${index}`;
         const scratch = join(ctx.work, 'kit', `scratch-${tag}`);
         mkdirSync(scratch, { recursive: true });
-        const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.kit, suite, '--jet', compiler.jet, '--scratch', scratch, '--results', join(ctx.work, 'kit', `${tag}.json`)];
-        if (!retry) argv.push('--shard', `${index}/${shards}`);
-        argv.push('--jobs', String(retry ? shardJobs({ ...ctx.options, shards: 1 }) : shardJobs(ctx.options)));
-        if (ctx.options.filter && !retry) argv.push('--filter', ctx.options.filter);
-        if (ctx.options.timeout) argv.push('--timeout', String(ctx.options.timeout));
-        if (compiler.jetpack) argv.push('--jetpack', compiler.jetpack);
+        const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet, JET_TEST_SCRATCH_DIR: scratch };
+        // Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
+        const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.candidate.jet, 'test', join(ctx.tree, 'Compiler'), '--profile', suite, `--compiler=${compiler.jet}`, `--results=${join(ctx.work, 'kit', `${tag}.json`)}`];
+        if (!retry) argv.push(`--shard=${index}/${shards}`);
+        argv.push(...shardPool(ctx.options, shards));
+        if (ctx.options.filter && !retry) argv.push(`--filter=${ctx.options.filter}`);
+        if (ctx.options.timeout) argv.push(`--time-limit=${ctx.options.timeout}s`);
         argv.push(...extra);
         runs.push(run(argv, { cwd: ctx.tree, env, out: join(ctx.work, 'kit', `${tag}.log`), timeout: 12 * 3600 }).then(result => ({ tag, result })));
     }
@@ -534,7 +578,7 @@ async function suitesStage(ctx, gate) {
         if (compared.lost.length) {
             const ids = join(ctx.work, 'kit', `retry-${suite}.txt`);
             writeFileSync(ids, [...new Set(compared.lost.map(row => row.case))].map(id => `${id}\n`).join(''));
-            const again = await suiteRun(ctx, 'candidate', suite, ['--cases', ids]);
+            const again = await suiteRun(ctx, 'candidate', suite, [`--cases=${ids}`]);
             retried = again.rows;
             compared = compareSuites(release.rows, candidate.rows, retried, ctx.dispositions);
         }
@@ -603,6 +647,9 @@ function sumsOf(dir, names) {
     return `${lines.join('\n')}\n`;
 }
 
+// The chain and seed helpers publish-release.mjs shares.
+export { MUSL_DEFAULT, NORUST, STACK, fileHashes, sha256File, sumsOf };
+
 function assemble(ctx, gate, plan) {
     const { seeds, next, sha, candidate, release } = ctx;
     const gains = gainsOf(ctx);
@@ -621,6 +668,11 @@ function assemble(ctx, gate, plan) {
     exportCommit(sha, join(temp, 'toolchain'));
     const verified = `self-host chain from ${release.name} without Rust reaches the fixed point s2 == s3 (jet ${candidate.sha.slice(0, 16)}); runtime pack rebuilt by s2 is byte-identical; golden/ui/cases ${gains.suites} rows gained, ${lost.length} lost${lost.length ? ` (${[...new Set(lost.map(row => row.disposition.card))].join(', ')})` : ''}; ${ctx.jetpackSummary}${candidate.jetpack ? '; jetpack engine built by s2' : ''}`;
     writeFileSync(join(temp, 'IDENTITY'), `${candidate.identity}\n`);
+    writeFileSync(join(temp, 'RELEASE'), `${next}\n`);
+    // The C toolchain pack sits beside jet, where jet looks first; it stays out of SHA256SUMS
+    // because jet checks it against the hash it embeds.
+    copyFileSync(ctx.ccPack.path, join(temp, ctx.ccPack.file));
+    chmodSync(join(temp, ctx.ccPack.file), 0o644);
     writeFileSync(join(temp, 'SOURCE'), `${sha} (dev, ${next}: self-hosted s2 of ${sha.slice(0, 9)} from seed ${release.name}; ${verified}; release-compiler.mjs ${date})\n`);
     writeFileSync(join(temp, 'current.env'), [
         '# Newest verified self-hosted compiler (written by release-compiler.mjs; jet-use installs it).',
@@ -634,17 +686,12 @@ function assemble(ctx, gate, plan) {
     for (const name of ['RESULT', 'REPORT.md']) if (existsSync(join(ctx.work, 'chain', name))) copyFileSync(join(ctx.work, 'chain', name), join(temp, 'evidence', `chain-${name}`));
     writeFileSync(join(temp, 'RELEASE.json'), `${JSON.stringify({
         schema: 'jet-release/v1', name: next, commit: sha, verdict: 'PASS', scope, created: new Date().toISOString(),
-        identity: candidate.identity, seed: { name: release.name, identity: release.identity }, summary, gains,
+        identity: candidate.identity, target: `${process.platform}-${process.arch}`, chain: candidate.chain, seed: { name: release.name, identity: release.identity }, summary, gains,
         checks: gate.rows, lost: lost.map(({ suite, case: id, tier, was, now, disposition }) => ({ suite, case: id, tier, was, now, card: disposition.card, reason: disposition.reason })),
         merge: plan,
     }, null, 2)}\n`);
     writeFileSync(join(temp, 'RELEASE.md'), report(ctx, gate, 'PASS', plan));
-    writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, ['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY']));
-    const asset = seedAssetName(next);
-    const packed = spawnSync('tar', ['--sort=name', '--owner=0', '--group=0', '--numeric-owner', '--mtime=@0', '--use-compress-program=gzip -n', '-cf', asset,
-        ...['jet', ...COMPILER_ALIASES, 'jetpack', 'jet-runtime', 'IDENTITY', 'SHA256SUMS'].filter(name => existsSync(join(temp, name)))], { cwd: temp, encoding: 'utf8' });
-    if (packed.status !== 0) throw Error(`packing ${asset} failed: ${packed.stderr}`);
-    writeFileSync(join(temp, `${asset}.sha256`), `${sha256File(join(temp, asset))}  ${asset}\n`);
+    writeFileSync(join(temp, 'SHA256SUMS'), sumsOf(temp, SEED_FILES));
     if (existsSync(dest)) throw Error(`${dest} appeared while assembling; ${temp} is left for inspection`);
     renameSync(temp, dest);
     return { dest, summary, scope };
@@ -665,9 +712,9 @@ function printCommands(ctx, released, plan) {
     }
     lines.push(`  git tag -a ${ctx.next} -F ${dest}/TAG_MSG ${ctx.sha}`);
     if (plan.fastForward) {
-        const asset = join(dest, seedAssetName(ctx.next));
         lines.push(`  git push origin master ${ctx.next}`);
-        lines.push(`  gh release create ${ctx.next} --verify-tag --title ${ctx.next} -F ${dest}/TAG_MSG ${asset} ${asset}.sha256`);
+        lines.push(`  jet run Tools/release/Main.jet -- candidate ${dest}`);
+        lines.push(`  jet run Tools/release/Main.jet -- publish ${dest}`);
     } else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
     process.stdout.write(`${lines.join('\n')}\n`);
 }
@@ -687,12 +734,12 @@ async function release(options, pre) {
     writeFileSync(join(ctx.tree, '.chain-base'), `${sha}\n`);
     cpSync(release.toolchain, ctx.releaseTree, { recursive: true, verbatimSymlinks: true });
     await chainStage(ctx, gate);
+    await ccPackStage(ctx, gate);
     if (ctx.candidate) {
         await packStage(ctx, gate);
         await jetpackStage(ctx, gate);
         await hostedStage(ctx, gate);
-        await testkitStage(ctx, gate);
-    } else for (const check of ['pack', 'jetpack', 'jetpack-engine', 'testkit']) gate.row(check, 'BLOCKED', 'no s2: the chain failed');
+    } else for (const check of ['pack', 'jetpack', 'jetpack-engine']) gate.row(check, 'BLOCKED', 'no s2: the chain failed');
     writeFileSync(join(work, 'preflight.json'), `${JSON.stringify({ commit: sha, rows: gate.rows }, null, 2)}\n`);
     if (gate.failed().length === 0) await suitesStage(ctx, gate);
     else for (const suite of SUITES) gate.row(`suite:${suite}`, 'BLOCKED', 'not launched: the cheap checks above are not clean (preflight.json)');
@@ -728,7 +775,7 @@ async function main() {
         }
     }
     try {
-        const slot = process.env.JET_RELEASE_SLOT ?? join(HOME, '.cache/jet-dev/scratch/Main/build-slot.sh');
+        const slot = process.env.JET_RELEASE_SLOT ?? join(REPO, 'Tools/agent/chain/build-slot.sh');
         if (slot && existsSync(slot) && !process.env.SLOT_CPUS) {
             const inner = spawnSync('bash', [slot, process.execPath, SCRIPT, ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, JET_RELEASE_LOCK_HELD: '1' } });
             return inner.status ?? 1;

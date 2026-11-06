@@ -919,7 +919,6 @@ struct Func {
     unsafe_reason: String?
     unsafe_span: Span?
     is_pure: Bool
-    is_sanitizer: Bool
     scrub_tag: String?
     declared_effects: [EffectRowEntry]?
     effect_via: NamedSpan?
@@ -1156,8 +1155,7 @@ fn unit_family_distinct_defs(family: UnitFamilyDef) -> [DistinctDef] Never! {
             derives := [NamedSpan]{NamedSpan{name: if point -> "Comparable" else -> "Numeric", span: member.name_span}}
             quantity := QuantityInfo?{None}
             if family.resolved_dimension == .Val(dimension) {
-                &derives.push(NamedSpan{name: "Encode", span: member.name_span})
-                &derives.push(NamedSpan{name: "Decode", span: member.name_span})
+                loop codec in owned_trait_codec_names() -> &derives.push(NamedSpan{name: codec.copy(), span: member.name_span})
                 kind :: if {
                     !affine -> QuantityKind.Linear
                     point -> QuantityKind.Point
@@ -1428,7 +1426,6 @@ fn ast_func(name: String, name_span: Span, span: Span) -> Func Never! {
         unsafe_reason: None,
         unsafe_span: None,
         is_pure: false,
-        is_sanitizer: false,
         scrub_tag: None,
         declared_effects: None,
         effect_via: None,

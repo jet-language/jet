@@ -1,4 +1,4 @@
-// Real Jet-object client, link -Wl,--wrap=jet_rt_free. GeometryABI only.
+// Real Jet-object client. GeometryABI only.
 // IEEE derive truth tables: LinalgFns561-584, MathTaskMem83-93.
 #include <assert.h>
 #include <stdbool.h>
@@ -14,7 +14,7 @@ _Static_assert(sizeof(Transform)==64 && offsetof(Transform,from)==48,"Transform6
 _Static_assert(sizeof(Ray)==16 && offsetof(Ray,direction)==8,"Ray16");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t jet_int_owned_from_i64(int64_t);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern int64_t jet_int_add(int64_t,int64_t);
@@ -52,12 +52,13 @@ ARRAY_API(Vec2); ARRAY_API(Vec3); ARRAY_API(Vec4); ARRAY_API(Mat3); ARRAY_API(Ma
 static struct { void *pointer; int64_t bytes; unsigned frees; } watched[16];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) {
         assert(bytes==watched[i].bytes && align==8); assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes) {
     assert(p && count<16);
@@ -136,6 +137,7 @@ static void rays(void) {
     jet_rt_handle_drop_jet_coord2(go); jet_rt_handle_drop_jet_coord2(gd); done(); jet_rt_handle_drop_jet_ray2(NULL);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc>1) {
         int64_t hi=jet_int_owned_from_i64(INT64_MAX),over=jet_int_add(hi,1);

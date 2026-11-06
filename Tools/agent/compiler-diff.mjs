@@ -32,6 +32,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { copyFeatureProject, featureProjectRoot } from "./run-feature-examples.mjs";
+import { scratchRoot as sharedScratchRoot } from "./roots.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FEATURES = join(ROOT, "Examples/features");
@@ -194,7 +195,7 @@ export function goldenFailureExit(stem, stderr) {
   }
   // #1474: this source disables logging before log.fatal exits 1.
   if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
-  // Source-proved entry returns, matching kit_golden_failure_exit in Tools/testkit/Golden.jet;
+  // Source-proved entry returns, matching kit_golden_failure_exit in Compiler/JetTestKit/Source/Golden.jet;
   // fatal_exit explicitly calls process.exit(1), and an E1803 authority refusal
   // exits 1 before anything runs. An arbitrary Error prefix is not an exit oracle.
   switch (stem) {
@@ -218,7 +219,7 @@ export function goldenFailureExit(stem, stderr) {
   }
 }
 
-// Mirrors kit_golden_collect (Tools/testkit/Golden.jet): project roots own their descendants.
+// Mirrors kit_golden_collect (Compiler/JetTestKit/Source/Golden.jet): project roots own their descendants.
 export function collectGoldenEntries(exDir = FEATURES) {
   const entries = [];
   const push = (path, stem, shown) => entries.push({ path, stem, shown });
@@ -345,7 +346,6 @@ function uiCommands(source, file) {
   const arg = (directive) => lines.find((line) => line.startsWith(`// @${directive} `))?.slice(directive.length + 4).trim();
   const complexity = arg("complexity_cli");
   if (has("typed_settings_cli")) return [{ phase: "check", args: ["check", file, "--set", "cli_only=true"] }];
-  if (has("cli_e0043")) return [{ phase: "check", args: ["install"] }];
   if (has("cli_e2101")) return [{ phase: "check", args: ["bench"] }];
   if (has("cli_e1219")) return [{ phase: "build", args: ["build", file, "--profile=turbo"] }];
   if (has("cli_build")) return [{ phase: "build", args: ["build", file] }];
@@ -455,9 +455,7 @@ function isWithin(parent, child) {
 }
 
 function scratchRoot(options) {
-  const base = process.env.JET_TEST_SCRATCH_DIR
-    || (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
-  if (!options.root && !base) throw new Unavailable("no scratch root: pass --root or set JET_TEST_SCRATCH_DIR or HOME");
+  const base = process.env.JET_TEST_SCRATCH_DIR || sharedScratchRoot();
   const root = options.root ?? join(base, options.canary ? "compiler-diff-canary" : "compiler-diff");
   if (isWithin("/tmp", root)) throw new Unavailable(`scratch root ${root} is on RAM-backed /tmp; use a disk path`);
   if (isWithin(ROOT, root)) throw new Unavailable(`scratch root ${root} is inside the repository`);

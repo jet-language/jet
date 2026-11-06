@@ -37,6 +37,12 @@ use jet_foundation.[
     core_root_type,
     core_type_modules,
     foundation_named_type,
+    owned_trait,
+    owned_trait_arithmetic,
+    owned_trait_codec,
+    owned_trait_implies,
+    owned_trait_structural,
+    owned_trait_through_elements,
     sema_reserved_type_name,
     typed_head_kind_of,
     boundary_head_carrier_module,
@@ -135,6 +141,12 @@ fn sema_type_has_forbidden_never(ty: Type, allow_success_never: Bool) -> Bool Ne
         .Tuple(fields) -> sema_type_tuple_fields_have_forbidden_never(fields)
         else -> false
     }
+}
+
+// The report for a `Never` that `sema_type_has_forbidden_never` (or a
+// constructor naming `Never`) finds in a value position.
+fn sema_never_as_value(span: Span) -> Diagnostic {
+    sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type.")
 }
 
 fn sema_effect_bound_compatible(required: [EffectRowEntry]?, offered: [EffectRowEntry]?) -> Bool Never! {
@@ -295,6 +307,7 @@ fn sema_type_obligations_nested(required: Type, offered: Type) -> Bool Never! {
                     loop (index, required_param) in required_params {
                         if !sema_type_obligations_nested(required_param, offered_params[index]) -> return false
                     }
+                    if sema_fn_return_is_never(offered_ret) -> return true
                     return if required_ret == {
                         .Val(required_value) -> if offered_ret == {
                             .Val(offered_value) -> sema_type_obligations_nested(required_value, offered_value)
@@ -408,7 +421,10 @@ fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Never! 
                     loop (index, required_param) in required_params {
                         if !sema_type_carrier_compatible(required_param, offered_params[index]) -> return false
                     }
-                    return_compatible :: if required_ret == {
+                    // A callable that never returns (`-> Never`: it panics,
+                    // exits or loops) fits any return slot; no caller ever
+                    // reads its result.
+                    return_compatible :: if sema_fn_return_is_never(offered_ret) -> true else -> if required_ret == {
                         .Val(required_value) -> if offered_ret == {
                             .Val(offered_value) -> sema_type_carrier_compatible(required_value, offered_value) || sema_never_failing_return_fits(required_value, offered_value)
                             .None -> type_is_unit_callable_return(required_value)
@@ -425,6 +441,11 @@ fn sema_function_types_compatible(required: Type, offered: Type) -> Bool Never! 
         }
         else -> {}
     }
+    false
+}
+
+fn sema_fn_return_is_never(ret: Type?) -> Bool Never! {
+    if ret == .Val(value) -> return value == (Type.Named{name: "Never"})
     false
 }
 
@@ -661,7 +682,8 @@ fn sema_type_alias_cycles_check(graph: &SemaRegistrationGraph) Never! {
 
 // Whether `name`, written as a type in module row `caller`, names nothing:
 // no primitive, type parameter, associated type, compiler or Core carrier
-// the checker types itself, Core export, or declared or imported type
+// the checker types itself, compiler-owned bound trait, Core export, or
+// declared or imported type
 // (#6294). Core source, an incomplete graph and qualified spellings
 // (`json.Value`, which resolve through their own owner checks) are never
 // judged here.
@@ -669,8 +691,8 @@ fn sema_type_written_name_unknown(graph: SemaRegistrationGraph, caller: Int, nam
     if !graph.complete || caller < 0 || sema_module_is_core_source(graph.modules[caller].module_identity) -> return false
     if name == "" || name.contains(".") || name.contains(":") || name.contains("$") || generic_names.contains(name) -> return false
     if foundation_named_type(name) != (Type.Named{name: name}) -> return false
-    if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "Any" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" -> return false
-    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None -> return false
+    if name == "Self" || name == "Shared" || name == "Unit" || name == "Never" || name == "Err" || name == "Dyn" || name == "_" || name == "()" || name == "str" || name == "bytes" || name == "Complex" -> return false
+    if sema_reserved_type_name(name) || core_root_type(name) || sema_registration_core_builtin_is_name(name) || graph.compiler_builtin_rows.get(name) != None || sema_type_builtin_trait_symbol(name) != None -> return false
     if sema_process_handle_type(name) || sema_call_http_known_receiver_type(name) || sema_call_reflection_synthetic_printable(name) || sema_stream_handle_owner(Type.Named{name: name}) != None -> return false
     if sema_type_graph_lookup_symbol_at(graph, caller, name) != None || sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) != None -> return false
     // A standard or declared unit's type (`Meter`, an affine unit's `…Point`).
@@ -679,9 +701,9 @@ fn sema_type_written_name_unknown(graph: SemaRegistrationGraph, caller: Int, nam
     !sema_type_graph_declares_assoc_type(graph, name)
 }
 
-// The rest of Rust `core_type_known` (CheckerCoreLib/core_types.rs) and the
-// `is_core_generic` heads (CheckerCore/type_assign.rs): compiler-owned Core
-// carriers a program may write bare that no Core export row carries.
+// The rest of Rust `core_type_known` and the `is_core_generic` heads:
+// compiler-owned Core carriers a program may write bare that no Core export row
+// carries.
 SEMA_TYPE_CORE_KNOWN_NAMES :: [String]{
     "ArithmeticOperationInfo", "AttributionInfo", "Build", "CSV", "Camera", "ClassificationInfo", "Closed",
     "CompilerArithmeticOperation", "CompilerBuildProfile", "CompilerCall", "CompilerChecked", "CompilerDefinitionAnchor",
@@ -694,18 +716,18 @@ SEMA_TYPE_CORE_KNOWN_NAMES :: [String]{
     "Device", "DimensionAxis", "DimensionInfo", "EffectInfo", "ExactnessInfo", "ExactnessKind", "Expired", "FactInfo",
     "FactKind", "FactValue", "FfiCallbackEvent", "FfiCallbackRegistration", "FieldInfo", "FileLines", "FrameId",
     "FunctionInfo", "GameBackendType", "GameReplayType", "GameSceneType", "HTTPClientType", "HTTPCompressEncoding",
-    "HTTPCookieJar", "HTTPProxy", "HTTPRedirectPolicy", "HTTPRetryPolicy", "HVar", "JSON", "KeyedStream",
-    "LateEventDisposition", "LayoutFact", "LayoutField", "LayoutInfo", "LengthVar", "LogSpan", "MarkerArgInfo",
+    "HTTPCookieJar", "HTTPProxy", "HTTPRedirectPolicy", "HTTPRetryPolicy", "HVar", "JSON",
+    "LayoutFact", "LayoutField", "LayoutInfo", "LengthVar", "LogSpan", "MarkerArgInfo",
     "MarkerInfo", "Matrix", "MeasureInfo", "MethodInfo", "Mod", "ModGrant", "MovednessInfo", "NetReadyInterest",
     "NetShutdown", "NominalInfo", "ObligationInfo", "ObligationParamInfo", "OriginInfo", "PackageInfo", "ParamZone",
     "Ptr", "RealtimeReceipt", "ReduceOp", "Screen", "SendabilityInfo", "SharedRevisionError", "SharedSnapshot",
-    "SourceSpan", "StateInfo", "Stream", "StreamEventTime", "TLSClientConfig", "TLSClientConfigType",
+    "SourceSpan", "StateInfo", "Stream", "TLSClientConfig", "TLSClientConfigType",
     "TLSClientIdentity", "TLSClientIdentityType", "TLSRootCertificates", "TLSRootCertificatesType", "TOML",
     "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TransitionInfo", "TypeInfo", "TypeParamInfo",
     "UIPreviewAccessibility", "UIPreviewAuthority", "UIPreviewContext", "UIPreviewEffect", "UIPreviewInputOverride",
     "UIPreviewInputValue", "UIPreviewLifecycle", "UIPreviewSource", "UIPreviewTheme", "UIPreviewTraits",
     "UnitScaleProvenanceInfo", "VVar", "Vec", "View", "ViewMut", "ViewProvenanceInfo", "WatchKind", "WebContext",
-    "WebFormTypedValidation", "WebMount", "WebRouterCacheState", "Window", "World", "WsMessage", "YAML",
+    "WebFormTypedValidation", "WebMount", "WebRouterCacheState", "World", "WsMessage", "YAML",
 }
 
 // Whether any trait of the graph declares associated type `name`, which its
@@ -826,8 +848,8 @@ fn sema_type_unknown_written_names(graph: SemaRegistrationGraph, caller: Int, ty
 }
 
 // E0119 for the written parameter and return type names of module row
-// `caller`'s functions and methods. A module whose declarations reported
-// errors has no function check, where a signature is judged otherwise
+// `caller`'s functions and methods. A module whose declared member type names
+// nothing has no function check, where a signature is judged otherwise
 // (sema_check_failure_contract_type); its misspelled signature types still
 // report alongside the misspelled member (#6294, collect-all).
 fn sema_type_signature_unknown_names(graph: SemaRegistrationGraph, caller: Int, diagnostics: &[Diagnostic]) {
@@ -906,10 +928,10 @@ fn sema_type_resolve_declared_recursive(graph: SemaRegistrationGraph, ty: Type, 
     }
 }
 
-// Rust `resolve_measure` (Registration/Items.rs): a fixed length spelled by
-// a constant of the module that spells it (`[T#N]`, `[T#(N * 2)]`) is that
-// constant's integer. A name that isn't such a constant (a generic length, a
-// constant computed by code) stays symbolic.
+// Rust `resolve_measure`: a fixed length spelled by a constant of the module
+// that spells it (`[T#N]`, `[T#(N * 2)]`) is that constant's integer. A name
+// that isn't such a constant (a generic length, a constant computed by code)
+// stays symbolic.
 fn sema_type_resolve_measure(graph: SemaRegistrationGraph, measure: Measure, caller: Int, generic_params: [TGenericParam], depth: Int) -> Measure Never! {
     if measure == {
         .Symbol(kind, name) -> {
@@ -1228,13 +1250,11 @@ fn sema_type_graph_trait_symbol_at(graph: SemaRegistrationGraph, caller: Int, bo
 }
 
 // Rust Generics::BUILTIN_TRAITS / is_builtin_trait: a generic bound may name
-// a compiler-owned trait that no source module declares. Its identity is the
-// bare trait name with no owning module.
+// a compiler-owned trait that no source module declares (`bare_bound` in
+// OWNED_TRAITS). Its identity is the bare trait name with no owning module.
 fn sema_type_builtin_trait_symbol(name: String) -> Symbol? {
-    if name == {
-        "Printable" | "Equatable" | "Comparable" | "Serialize" | "Encode" | "Decode" | "Renderable" | "Close" | "Add" | "Sub" | "Mul" | "Div" | "Numeric" | "CheckedText" -> {}
-        else -> return None
-    }
+    owned :: owned_trait(name) ?? return None
+    if !owned.bare_bound -> return None
     Val(Symbol{id: symbol_id(SymbolKind.Trait, "", "", name), kind: SymbolKind.Trait, name: name, module_name: "", owner: None, span: Span{start: 0, end: 0}, ty: None, visibility: 2})
 }
 
@@ -1396,8 +1416,8 @@ fn sema_type_provider_close_owner(nominal: SemaRegistrationNominal) -> Bool Neve
 // trait block or derive of that trait name.
 fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     scalar_family :: bound_name != "Close" && bound_name != "CheckedText"
-    arithmetic :: bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Div"
-    structural :: bound_name == "Equatable" || bound_name == "Comparable"
+    arithmetic :: owned_trait_arithmetic(bound_name)
+    structural :: owned_trait_structural(bound_name)
     if actual_resolved == {
         .Int | .Float -> return Val(scalar_family)
         .Bool | .String | .Char -> return Val(scalar_family && !arithmetic && bound_name != "Numeric")
@@ -1429,10 +1449,13 @@ fn sema_type_builtin_bound_satisfied(graph: SemaRegistrationGraph, actual_resolv
             }
         }
         .TraitObject(bounds) -> return Val(bounds.contains(bound_name))
+        // A function value has no nominal row to carry an impl, and no
+        // compiler-owned bound trait is met by a function.
+        .Fn(_, _, _, _, _, _) -> return Val(false)
         .Tagged(_, inner) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Named(name) -> {
             if sema_type_name_is_generic(generic_params, name) -> return None
-            if (name == "Decimal" || name == "Fraction") && (bound_name == "Numeric" || bound_name == "Add" || bound_name == "Sub" || bound_name == "Mul" || bound_name == "Comparable") -> return Val(true)
+            if (name == "Decimal" || name == "Fraction") && owned_trait_implies("Numeric", bound_name) -> return Val(true)
             // `Duration` is the compiler-owned time carrier: its `==` and
             // ordering are built in, and it has no nominal row to carry an impl.
             if name == "Duration" && structural -> return Val(true)
@@ -1502,10 +1525,10 @@ fn sema_type_bound_satisfied_with_generics(graph: SemaRegistrationGraph, actual:
 fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
     actual_resolved :: sema_type_resolve_declared_recursive(graph, actual, caller, generic_params)
     // Demand: a checked codec bound requires the codecs of the
-    // types it is met at, so their generated bodies are checked; an
-    // Equatable/Comparable bound, their demand-checked derived methods.
-    if bound_name == "Encode" || bound_name == "Decode" -> sema_codec_demand_type(graph, bound_name, actual_resolved)
-    if bound_name == "Equatable" || bound_name == "Comparable" -> sema_derive_demand_type(graph, actual_resolved)
+    // types it is met at, so their generated bodies are checked; a
+    // structural bound, their demand-checked derived methods.
+    if owned_trait_codec(bound_name) -> sema_codec_demand_type(graph, bound_name, actual_resolved)
+    if owned_trait_structural(bound_name) -> sema_derive_demand_type(graph, actual_resolved)
     structural :: sema_type_codec_structural_bound(graph, actual_resolved, bound_name, caller, generic_params)
     if structural != None -> return structural
     generic_satisfied := sema_type_generic_bound_satisfied(graph, actual_resolved, bound_name, caller, generic_params)
@@ -1532,7 +1555,7 @@ fn sema_type_bound_satisfied_at(graph: SemaRegistrationGraph, actual: Type, boun
 // every member is (it codes through its structural enum); the dynamic `Dyn` is
 // the codec tree itself (Rust `TraitRegistry::type_implements_trait`).
 fn sema_type_codec_structural_bound(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
-    if bound_name != "Encode" && bound_name != "Decode" && bound_name != "Serialize" -> return None
+    if !owned_trait_through_elements(bound_name) -> return None
     if actual_resolved == {
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> return sema_type_bound_satisfied_at(graph, inner, bound_name, caller, generic_params)
         .Map(key, _, value) -> {

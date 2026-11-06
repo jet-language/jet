@@ -6,9 +6,10 @@ procedures without duplicating the project contract.
 
 Read [AGENTS.md](AGENTS.md) before changing the repository. It defines
 authority, source-of-truth boundaries, proof expectations, and the required
-working environment. Run repository commands through
-[`Tools/agent/jet-env`](Tools/agent/jet-env); the worker type-check lane is
-[`Tools/agent/lane-check.sh`](Tools/agent/lane-check.sh).
+working environment. Run repository commands with `jet` directly
+([Rebuilding Jet](Docs/spec/contributing/bootstrap.md) builds one from a fresh
+clone); the worker type-check lane is
+[`Tools/agent/LaneCheck.jet`](Tools/agent/LaneCheck.jet).
 
 [Tower](Docs/spec/contributing/issue-tracker.md) is the work ledger. Use the
 [vendored Tower skill](Tools/tower/skills/tower/SKILL.md) for board operations

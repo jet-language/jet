@@ -1,6 +1,5 @@
 use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, ident_prefix, imported_core_prefix]
 
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1173
 #Test("canvas_core_imports_preserve_module_alias_and_ignore_comments") {
     imports :: core_imports("// use fake :: core.fake\nuse output :: core.io // alias\nuse core.math\nfn run() -> {{}}\n")
     assert(imports.len() == 2)
@@ -11,7 +10,6 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
     assert(ident_prefix("output.trailing") == "output")
 }
 
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1147
 #Test("canvas_core_prefix_selects_longest_existing_import") {
     src :: "use base :: core\nuse output :: core.io\nuse files :: core.io.file\n"
     assert(imported_core_prefix(src, "core.io.file") == "files")
@@ -20,7 +18,6 @@ use jet_devserver.Canvas.EditActions.[core_import_insert_point, core_imports, id
     assert(imported_core_prefix(src, "other") == .None)
 }
 
-// Rust: crates/jet-devserver/src/Canvas/edit_actions.rs:1207
 #Test("canvas_core_import_insertion_preserves_header_and_use_block") {
     header :: "// heading\n\n"
     imports :: "use math :: core.math\nuse io :: core.io\n"

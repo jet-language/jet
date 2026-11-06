@@ -1,0 +1,16 @@
+# D-LIVEQUERY1 (#1158): DBScope.live binds one policy-checked SELECT in the
+# shared live registry; a write to its table, or a rollback of one, re-runs it,
+# and each re-run applies the scope's policy again. Same output on o0/o1/o2.
+fixture: db_scope_live_reruns_on_matching_writes_and_rollback_across_tiers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = db_scope_live_reruns_on_matching_writes_and_rollback_across_tiers.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

@@ -19,8 +19,10 @@ use jet_foundation.[
     TMethodRef,
     TextEdit,
     Type,
-    diagnostic_registry_row,
     diagnostic_with_edit,
+    owned_trait,
+    OwnedMethod,
+    symbol_id,
     type_name,
 ]
 
@@ -156,7 +158,7 @@ fn sema_call_not_callable(name: String, ty: Type, span: Span) -> Diagnostic {
 
 // Parentheses call functions and lambdas only. A value binding
 // of another type names its type and the instance methods its own
-// declaration body writes, as Rust `not_callable_value_diagnostic` does.
+// declaration body writes; methods a derive generates are not written there.
 fn sema_call_not_callable_value(name: String, ty: Type, program: SemaProgramTables, span: Span) -> Diagnostic {
     shown :: type_name(ty)
     nominal :: if ty == {
@@ -171,7 +173,7 @@ fn sema_call_not_callable_value(name: String, ty: Type, program: SemaProgramTabl
         loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             loop function in graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods {
                 receiver :: function.parameters.len() > 0 && function.parameters[0].symbol.name == "self"
-                if receiver && !methods.contains(function.symbol.name) -> &methods.push(function.symbol.name.copy())
+                if receiver && !function.declaration.compiler_generated && !methods.contains(function.symbol.name) -> &methods.push(function.symbol.name.copy())
             }
         }
     }
@@ -184,7 +186,7 @@ fn sema_call_generic_count_diagnostic(name: String, expected: Int, actual: Int, 
     sema_error("E0119", span, "`{name}` expects {expected} type argument{if expected == 1 -> "" else -> "s"}, got {actual}", "generic parameters and call-site type arguments have to line up", "provide exactly the declared type arguments")
 }
 
-// Rust direct_calls.rs (explicit call-site type arguments of a direct call).
+// (explicit call-site type arguments of a direct call).
 fn sema_call_direct_type_arg_count_diagnostic(name: String, expected: Int, actual: Int, span: Span) -> Diagnostic {
     plural :: if expected == 1 -> "" else -> "s"
     sema_error("E0119", span, "`{name}` expects {expected} type argument{plural}, got {actual}", "a generic call must provide one type for every declared type parameter", "write {name} with {expected} type argument{plural}")
@@ -235,7 +237,7 @@ fn sema_call_never_type_args_valid(signature: Type, generic_params: [SemaInferen
     loop index in 0..<type_args.len() {
         if type_args[index] == .Named(arg_name) {
             if arg_name == "Never" && !sema_call_type_names_failure_domain(signature, generic_params[index].name) {
-                &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type."))
+                &diagnostics.push(sema_never_as_value(span))
                 return false
             }
         }
@@ -258,6 +260,12 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
             // A binding whose type was already lost to a reported error is
             // poisoned: calling it adds no second report.
             if diagnostics.len() == 0 -> &diagnostics.push(sema_call_not_callable(name, Type.Named{name: "Unknown"}, span))
+            return None
+        }
+        // A distinct type is not a conversion function: its destination-owned
+        // conversion names the base, `UserID.from_int(value)`.
+        if symbol.kind == SymbolKind.Type && sema_scope_declaration_distinct(environment, program, symbol.id) == .Val(definition) {
+            &diagnostics.push(sema_error("E0753", span, "`{name}(value)` is not a distinct conversion", "explicit conversions are owned by the destination type and name their source", "write `{name}.{sema_call_distinct_base_method(definition.base)}(value)`"))
             return None
         }
         &diagnostics.push(sema_call_not_callable_value(name, ty, program, span))
@@ -303,10 +311,10 @@ fn sema_call_resolve_direct(name: String, type_args: [Type], environment: SemaSc
     SemaCallDirectTarget{symbol: symbol, signature: specialized, type_args: result.type_args, generic_params: generic_params, generic_substitutions: result.substitutions, generic_evidence: result.evidence}
 }
 
-// Rust direct_calls.rs:2354-2375: a call whose type-argument count doesn't
-// match leaves the callee's type parameters unbound, and its arguments are
-// still checked against the declared parameter types. The declared signature
-// when `type_args` is that mismatch, else None.
+// A call whose type-argument count doesn't match leaves the callee's type
+// parameters unbound, and its arguments are still checked against the declared
+// parameter types. The declared signature when `type_args` is that mismatch,
+// else None.
 fn sema_call_direct_type_arg_mismatch_signature(name: String, type_args: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? {
     if type_args.len() == 0 -> return None
     nearest :: sema_scope_resolve_index(scopes, name) ?? return None
@@ -435,12 +443,6 @@ fn sema_call_method_shape_matches(candidate: SemaCallMethodCandidate, method: St
     sema_call_bind_method(method, candidate.signature, candidate.receiver_offset, &probe, span, &probe_diagnostics) != None
 }
 
-fn sema_call_retired_raw_directory_error(receiver_type: Type, method: String, span: Span) -> Diagnostic? {
-    if receiver_type != Type.String || method != "read_dir" -> return None
-    row :: diagnostic_registry_row("E0340") ?? panic("E0340 must have a registry row")
-    Val(sema_error("E0340", span, row.what, row.why, row.fix))
-}
-
 fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg], span: Span, candidates: [SemaCallMethodCandidate], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     receiver_matches := [SemaCallMethodCandidate]{}
     loop candidate in candidates {
@@ -452,10 +454,6 @@ fn sema_call_resolve_method(receiver_type: Type, method: String, args: [CallArg]
         }
     }
     if receiver_matches.len() == 0 {
-        if sema_call_retired_raw_directory_error(receiver_type, method, span) == .Val(diagnostic) {
-            &diagnostics.push(diagnostic)
-            return None
-        }
         &diagnostics.push(sema_call_missing_method_diagnostic(receiver_type, method, args.len(), span, environment, program))
         return None
     }
@@ -582,10 +580,12 @@ fn sema_call_trait_method_candidate_from_registration(graph: SemaRegistrationGra
 fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type: Type, method: String, type_args: [Type], caller_module: String, caller_package: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> [SemaCallMethodCandidate] Never! {
     resolved_receiver :: sema_type_resolve_declared_with_generics(graph, receiver_type, caller_module, generic_params)
     trait_rows := [SemaRegistrationRowRef]{}
+    // Bounds naming a bare-bound compiler-owned trait, which has no row.
+    owned_bounds := [SymbolID]{}
     // A type parameter's bounds dispatch in the order they are written: the
     // first bound that declares the method answers it, so `...[Inspect, Edit]`
-    // calls `Inspect.touch` (Rust `tests/ownership.rs`
-    // `multi_trait_receiver_access_follows_first_match_dispatch_order`).
+    // calls `Inspect.touch`
+    // (`multi_trait_receiver_access_follows_first_match_dispatch_order`).
     first_match := false
     if resolved_receiver == {
         .TraitObject(bounds) -> {
@@ -609,8 +609,11 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
             current :: parameter ?? return [SemaCallMethodCandidate]{}
             first_match = true
             loop bound in current.bounds {
-                row :: sema_call_trait_row_for_symbol(graph, bound) ?? next
-                sema_call_trait_rows_push(graph, &trait_rows, row)
+                if sema_call_trait_row_for_symbol(graph, bound) == .Val(row) {
+                    sema_call_trait_rows_push(graph, &trait_rows, row)
+                } else {
+                    &owned_bounds.push(bound.copy())
+                }
             }
         }
     }
@@ -630,7 +633,70 @@ fn sema_call_trait_method_candidates(graph: SemaRegistrationGraph, receiver_type
         }
         if first_match && candidates.len() > 0 -> break
     }
+    if candidates.len() > 0 -> return candidates
+    loop bound in owned_bounds {
+        candidate :: sema_call_owned_trait_method_candidate(graph, bound, resolved_receiver, method, type_args, caller_module, generic_params, span, &diagnostics) ?? next
+        &candidates.push(candidate)
+        break
+    }
     candidates
+}
+
+// A type parameter bounded by a bare-bound compiler-owned trait (OWNED_TRAITS,
+// which no module declares, so it has no registered row) calls the method
+// that trait's row declares, its parameter and return types resolved where the
+// call is. The reference names the trait, so IR dispatches each instance's
+// call to its receiver's implementation (ir_method_key), and the call exposes
+// the declared success value as a registered trait method's does.
+fn sema_call_owned_trait_method_candidate(graph: SemaRegistrationGraph, bound: SymbolID, receiver_type: Type, method: String, type_args: [Type], caller_module: String, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
+    segments :: bound.key.split(":").to_list()
+    trait_name :: segments[segments.len() - 1]
+    builtin :: sema_type_builtin_trait_symbol(trait_name) ?? return None
+    if builtin.id.key != bound.key -> return None
+    owned :: owned_trait(trait_name) ?? return None
+    wanted := OwnedMethod?{None}
+    if owned.contract == .Methods(methods, _, _) {
+        loop declared in methods {
+            if declared.name == method {
+                wanted = Val(declared.copy())
+                break
+            }
+        }
+    }
+    found :: wanted ?? return None
+    if found.receiver == .Static -> return None
+    convention :: if found.receiver == {
+        .Fixed(access) -> access
+        else -> AccessConvention.Read
+    }
+    if type_args.len() > 0 {
+        &diagnostics.push(sema_error("E0119", span, "`{method}` is not generic", "trait method declarations do not carry independent type parameters", "remove the explicit method type arguments"))
+        return None
+    }
+    params := [Type]{receiver_type.copy()}
+    loop param in found.params -> &params.push(sema_type_resolve_declared_with_generics(graph, param.ty, caller_module, generic_params))
+    declared_return :: if found.returns == {
+        .Val(returned) -> if returned == {
+            .Result(ok, _) -> Val(ok.copy())
+            else -> Val(returned.copy())
+        }
+        .None -> None
+    }
+    ret :: if declared_return == {
+        .Val(returned) -> Val(sema_type_resolve_declared_with_generics(graph, returned, caller_module, generic_params))
+        .None -> None
+    }
+    SemaCallMethodCandidate{
+        method: TMethodRef{symbol: symbol_id(SymbolKind.Function, "", trait_name, method), name: method, mangled: false, trait_owner: Val(builtin.id.copy()), operator_identity: None},
+        signature: Type.Fn{params: ^params, ret: ret, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None},
+        receiver_type: Val(receiver_type.copy()),
+        receiver_convention: convention,
+        receiver_offset: 1,
+        type_args: [Type]{},
+        generic_params: [SemaInferenceTypeParam]{},
+        generic_substitutions: [SemaInferenceBinding]{},
+        generic_evidence: [SemaInferenceBoundEvidence]{},
+    }
 }
 
 // Rust `synthesize_impls` (default bodies, S62 `using` delegation): a

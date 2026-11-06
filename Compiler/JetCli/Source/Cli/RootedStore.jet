@@ -1,7 +1,6 @@
-// Rooted transactions over Core's held directories. The one
-// Jet implementation of the store primitives every CLI history writer shares:
-// Source/RecordIndex.rs `secure_create_dir`, `acquire_index_lock`,
-// `store_unlocked` and `read_bounded`, and Source/ReceiptStore.rs
+// Rooted transactions over Core's held directories. The one Jet implementation
+// of the store primitives every CLI history writer shares: `secure_create_dir`,
+// `acquire_index_lock`, `store_unlocked` and `read_bounded`, and
 // `publish_immutable_bytes` and `read_regular`. Every step names one part
 // relative to a directory held open from the canonical project root, never a
 // pathname, so a link or a renamed ancestor cannot redirect a read or a
@@ -12,24 +11,31 @@ use {
     cli_process :: core.process
 }
 
-// RecordIndex.rs RECORD_INDEX_LOCK_ATTEMPTS, retried 5 ms apart.
+// RECORD_INDEX_LOCK_ATTEMPTS, retried 5 ms apart.
 JET_CLI_ROOTED_LOCK_ATTEMPTS :: 2000
 // Fresh staging names one publication tries before it refuses.
 JET_CLI_ROOTED_STAGE_ATTEMPTS :: 64
 JET_CLI_ROOTED_READ_CHUNK :: 65536
 
 // One directory held below a canonical store root. `path` is display text;
-// every operation goes through the held handle.
+// every operation goes through the held handle. `durable` is the store's
+// class: a durable store (`open`) flushes every staged file before its rename
+// and the directory after it, so a published name survives a crash. A
+// per-machine cache (`open_cache`: the record index, `.jet/evidence`, and
+// evicted disposable artifacts) publishes by the same exclusive stage and one
+// rename but never flushes; its readers treat a torn file as absent and the
+// next writer rebuilds it.
 struct JetCLIRootedDirectory {
     path: String
     handle: cli_files.Directory
+    durable: Bool
 
     // Hold `parts` below the canonical absolute `root`, one part at a time,
-    // never following a link (RecordIndex.rs `secure_create_dir`). A missing
-    // part is created with mode 0o700 when `create`, and is an error
-    // otherwise (ask `present` first). A link or a non-directory part is an
-    // error, never a fallback. Bind the result with `??`: a held handle moved
-    // out of a match on the temporary result is not guaranteed to survive.
+    // never following a link. A missing part is created with mode 0o700 when
+    // `create`, and is an error otherwise (ask `present` first). A link or a
+    // non-directory part is an error, never a fallback. Bind the result with
+    // `??`: a held handle moved out of a match on the temporary result is not
+    // guaranteed to survive.
     fn open(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
         if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
         handle := jet_cli_rooted_open_root(root)
@@ -61,7 +67,15 @@ struct JetCLIRootedDirectory {
             if !held.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {shown}"))
             path = shown
         }
-        Ok(JetCLIRootedDirectory{path: path, handle: handle})
+        Ok(JetCLIRootedDirectory{path: path, handle: handle, durable: true})
+    }
+
+    // `open` for a per-machine cache store: the same held walk, publications
+    // without flushes.
+    fn open_cache(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
+        held := JetCLIRootedDirectory.open(root, parts, create) ?? return Err(err)
+        held.durable = false
+        Ok(held)
     }
 
     // Whether every part below `root` exists as a real directory; a link or a
@@ -129,12 +143,11 @@ struct JetCLIRootedDirectory {
         Ok(rows)
     }
 
-    // Hold this directory's exclusive advisory lock (RecordIndex.rs
-    // `acquire_index_lock`): contention is retried every 5 ms, 2000 times,
-    // then refused. The kernel releases the lock when its owner closes or the
-    // process ends, so no stale lock file is ever left behind to steal.
-    // Callers bind the owner to a local with `??`; it holds the lock until
-    // that local leaves scope.
+    // Hold this directory's exclusive advisory lock: contention is retried
+    // every 5 ms, 2000 times, then refused. The kernel releases the lock when
+    // its owner closes or the process ends, so no stale lock file is ever left
+    // behind to steal. Callers bind the owner to a local with `??`; it holds
+    // the lock until that local leaves scope.
     fn lock(self, what: String) -[FS, Time]> cli_files.AdvisoryLock JetCLIReadError! {
         attempt := 0
         loop {
@@ -152,8 +165,9 @@ struct JetCLIRootedDirectory {
     }
 
     // Stage `bytes` beside `name` under a fresh exclusive name
-    // (`.{name}.{pid}.{n}`), set `mode` exactly, and make the bytes durable.
-    // Returns the staged name; the caller publishes or removes it.
+    // (`.{name}.{pid}.{n}`) and set `mode` exactly; a durable store also
+    // flushes the bytes. Returns the staged name; the caller publishes or
+    // removes it.
     fn stage(self, name: String, bytes: [U8], mode: Int?) -[FS, Env, Time.Wait]> String JetCLIReadError! {
         jet_cli_rooted_validate_name(name)
         pid :: cli_process.current_pid()
@@ -167,7 +181,7 @@ struct JetCLIRootedDirectory {
                 }
                 return Err(jet_cli_read_error("could not stage `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(err)}"))
             }
-            if jet_cli_rooted_fill(&writer, bytes, mode) == .Err(error) {
+            if jet_cli_rooted_fill(&writer, bytes, mode, self.durable) == .Err(error) {
                 close(^writer)
                 self.discard(temp)
                 return Err(jet_cli_read_error("could not write `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(error)}"))
@@ -177,36 +191,56 @@ struct JetCLIRootedDirectory {
         }
     }
 
-    // Publish `bytes` as the immutable file `name` (ReceiptStore.rs
-    // `publish_immutable_bytes`): true when this call created it, false when
-    // the identical bytes were already published. Different existing bytes
-    // are an identity collision. Nothing ever replaces a published name.
+    // Publish `bytes` as the immutable file `name`: true when this call created
+    // it, false when the identical bytes were already published. In a durable
+    // store, different existing bytes are an identity collision and nothing
+    // ever replaces a published name. In a cache store they are a publication a
+    // crash tore, and this one replaces it.
     fn publish_immutable(self, name: String, bytes: [U8], mode: Int?, limit: Int) -[FS, Env, Time.Wait]> Bool JetCLIReadError! {
         temp :: self.stage(name, bytes, mode)
         shown :: jet_cli_rooted_join(self.path, name)
         if self.handle.rename(temp, name, if_exists: .Refuse) == .Err(error) {
-            self.discard(temp)
-            if !jet_cli_rooted_exists(error) -> return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(error)}"))
+            if !jet_cli_rooted_exists(error) {
+                self.discard(temp)
+                return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(error)}"))
+            }
             if self.read(name, limit) == {
                 .Ok(existing) -> {
                     if existing == .Val(published) {
-                        if published == bytes -> return Ok(false)
+                        if published == bytes {
+                            self.discard(temp)
+                            return Ok(false)
+                        }
                     } else {
+                        self.discard(temp)
                         return Err(jet_cli_read_error("`{shown}` disappeared while it was published"))
                     }
                 }
-                .Err(failure) -> return Err(failure)
+                .Err(failure) -> {
+                    self.discard(temp)
+                    return Err(failure)
+                }
             }
-            return Err(jet_cli_read_error("`{shown}` identity collision with different content"))
+            if self.durable {
+                self.discard(temp)
+                return Err(jet_cli_read_error("`{shown}` identity collision with different content"))
+            }
+            if self.handle.rename(temp, name, if_exists: .Replace) == .Err(failure) {
+                self.discard(temp)
+                return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(failure)}"))
+            }
+            return Ok(true)
         }
-        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        if self.durable {
+            self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        }
         Ok(true)
     }
 
-    // Atomically replace the regular file `name` with `bytes`
-    // (RecordIndex.rs `store_unlocked`): an existing link or non-file is
-    // refused, the staged bytes become visible by one rename, and the
-    // directory is flushed. Callers that read-modify-write hold `lock` first.
+    // Atomically replace the regular file `name` with `bytes`: an existing link
+    // or non-file is refused, the staged bytes become visible by one rename,
+    // and a durable store flushes the directory. Callers that read-modify-write
+    // hold `lock` first.
     fn replace(self, name: String, bytes: [U8], mode: Int?) JetCLIReadError! -[FS, Env, Time.Wait]> {
         jet_cli_rooted_validate_name(name)
         shown :: jet_cli_rooted_join(self.path, name)
@@ -223,7 +257,9 @@ struct JetCLIRootedDirectory {
             self.discard(temp)
             return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(error)}"))
         }
-        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        if self.durable {
+            self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        }
     }
 
     // Permission preservation for a checked source repair, never a link.
@@ -235,8 +271,7 @@ struct JetCLIRootedDirectory {
         Ok(info.mode)
     }
 
-    // Remove the regular file `name` (RecordIndex.rs
-    // `remove_disposable_artifact`); absence is not an error. A link or a
+    // Remove the regular file `name`; absence is not an error. A link or a
     // directory is refused, never followed or removed.
     fn remove(self, name: String) -[FS]> Bool JetCLIReadError! {
         jet_cli_rooted_validate_name(name)
@@ -250,7 +285,9 @@ struct JetCLIRootedDirectory {
             if error == .NotFound(_) -> return Ok(false)
             return Err(jet_cli_read_error("could not remove `{shown}`: {jet_cli_io_error_text(error)}"))
         }
-        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        if self.durable {
+            self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        }
         Ok(true)
     }
 
@@ -309,7 +346,7 @@ struct JetCLIRootedDirectory {
             held = held.open_directory(part) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
             path = jet_cli_rooted_join(path, part)
         }
-        Ok(JetCLIRootedDirectory{path: path, handle: held})
+        Ok(JetCLIRootedDirectory{path: path, handle: held, durable: self.durable})
     }
 
     // Best-effort removal of a staged name after a failed publication; the
@@ -328,10 +365,12 @@ struct JetCLIRootedEntry {
     size: Int
 }
 
-fn jet_cli_rooted_fill(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?) IOError! -[FS, Time.Wait]> {
+fn jet_cli_rooted_fill(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?, durable: Bool) IOError! -[FS, Time.Wait]> {
     writer.write_all(bytes)
     if mode == .Val(bits) -> writer.set_mode(bits)
-    writer.fsync()
+    if durable {
+        writer.fsync()
+    }
 }
 
 fn jet_cli_rooted_missing(error: IOError) -> Bool Never! {
@@ -377,8 +416,8 @@ fn jet_cli_rooted_join(base: String, name: String) -> String Never! {
     "{base}/{name}"
 }
 
-// Source/CmdCompile.rs::build_record_program: the invocation's selected entry,
-// made absolute/canonical when possible and root-relative only on a complete
+// `build_record_program`: the invocation's selected entry, made
+// absolute/canonical when possible and root-relative only on a complete
 // path-component prefix. This identity is shared by the writer and reader.
 fn jet_cli_build_record_program_at(file: String, workspace_root: String, cwd: String) -[FS, Env]> String Never! {
     joined :: if cli_files.is_absolute(file) -> file else -> jet_cli_entry_join(cwd, file)

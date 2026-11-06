@@ -1,9 +1,8 @@
 // Built-in derive providers are the ordinary Prelude declarations in
 // SEMA_PRELUDE_DERIVE_SOURCE (PreludeDerives.jet). Each selected capability
-// expands the provider's typed
-// template body for one declaration and enters registration as a
-// compiler-generated trait block, exactly like the Rust bootstrap's
-// `Registration/Derives.rs` + `Comptime::expand_derive_body`.
+// expands the provider's typed template body for one declaration and enters
+// registration as a compiler-generated trait block, exactly like the Rust
+// bootstrap's + `Comptime::expand_derive_body`.
 //
 // Expansion is linear in the template: `comptime if` selects its branch before
 // the branch is expanded, `comptime loop` pushes one binding onto the shared scope
@@ -76,6 +75,8 @@ use {
         diagnostic_registry_row,
         diagnostic_sentence_case_line,
         expr_span,
+        owned_trait_codec,
+        owned_trait_structural_names,
         type_name,
     ]
     jet_parser.[
@@ -1683,11 +1684,11 @@ fn sema_derive_expand_scoped(body: [DeriveBodyItem], scope: [NamedCtValue], repo
     Val(items)
 }
 
-// I4 (Rust `Bundle/Validation.rs` `author_facing_diagnostics`): a
-// compiler-generated derive body has no author and no user-typeable span; its
-// spans are offsets into `Prelude/Derives.jet`. Its advice is dropped; its
-// errors are kept and land on `anchor`, the derived type's name (the only
-// authored location the derive has), once per distinct problem.
+// I4 (`author_facing_diagnostics`): a compiler-generated derive body has no
+// author and no user-typeable span; its spans are offsets into
+// `Prelude/Derives.jet`. Its advice is dropped; its errors are kept and land on
+// `anchor`, the derived type's name (the only authored location the derive
+// has), once per distinct problem.
 fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnostics: &[Diagnostic]) {
     kept := [Diagnostic]{}
     loop diagnostic in generated {
@@ -1705,7 +1706,7 @@ fn sema_author_facing_diagnostics(anchor: Span, generated: [Diagnostic], diagnos
 }
 
 // ---------------------------------------------------------------------------
-// Built-in providers (Rust `Registration/Derives.rs`).
+// Built-in providers.
 
 fn sema_derive_builtin_providers() -> [DeriveDef] {
     parsed :: parse_source(SEMA_PRELUDE_DERIVE_SOURCE.bytes())
@@ -1911,12 +1912,13 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
             .Impl(definition) -> {
                 key :: sema_type_metadata_impl_key(definition.type_name, definition.trait_name ?? "")
                 index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), definition.is_generated_serde)
-                if definition.trait_name == None -> sema_derive_index_codec_methods(&index, definition.type_name, definition.methods)
+                if !sema_derive_is_codec_trait(definition.trait_name ?? "") -> sema_derive_index_codec_methods(&index, definition.type_name, definition.methods)
             }
             .Struct(definition) -> {
                 loop block in definition.trait_impls {
                     key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
                     index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                    if !sema_derive_is_codec_trait(block.trait_name) -> sema_derive_index_codec_methods(&index, definition.name, block.methods)
                 }
                 sema_derive_index_codec_methods(&index, definition.name, definition.methods)
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
@@ -1925,6 +1927,7 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
                 loop block in definition.trait_impls {
                     key :: sema_type_metadata_impl_key(definition.name, block.trait_name)
                     index.trait_impls[key] = sema_derive_impl_flags(index.trait_impls.get(key), block.compiler_generated)
+                    if !sema_derive_is_codec_trait(block.trait_name) -> sema_derive_index_codec_methods(&index, definition.name, block.methods)
                 }
                 sema_derive_index_codec_methods(&index, definition.name, definition.methods)
                 if index.nominals.get(definition.name) == None -> index.nominals[definition.name] = position
@@ -1937,6 +1940,12 @@ fn sema_derive_item_index(items: [Item]) -> SemaDeriveItemIndex {
         }
     }
     index
+}
+
+// An `Encode`/`Decode` impl is the codec itself; any other impl's `encode` or
+// `decode` (inherent or another trait's) is a member the codec would collide with.
+fn sema_derive_is_codec_trait(trait_name: String) -> Bool Never! {
+    trait_name == "Encode" || trait_name == "Decode"
 }
 
 fn sema_derive_index_codec_methods(index: &SemaDeriveItemIndex, type_name: String, methods: [Func]) {
@@ -1973,16 +1982,11 @@ struct SemaDeriveReadiness {
     relied_on: [Int]
 }
 
-// The codec traits are structural auto-derives too.
-fn sema_derive_codec_trait(trait_name: String) -> Bool Never! {
-    trait_name == "Encode" || trait_name == "Decode"
-}
-
 fn sema_derive_builtin_supports(name: String, trait_name: String) -> Bool {
     // Rust `implements_trait` for a codec: the scalars, the sealed dynamic
     // tree (`is_data_type_name`, the identity bridge), and the Core value
     // carriers whose Core source declares their codec (`sema_serde_type_is_admissible`).
-    if sema_derive_codec_trait(trait_name) {
+    if owned_trait_codec(trait_name) {
         if name == "Int" || name == "Float" || name == "Bool" || name == "String" || name == "Char" || name == "U8" -> return true
         if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return true
         return name == "Decimal" || name == "Date" || name == "LocalDate" || name == "LocalTime" || name == "DateTime" || name == "Duration" || name == "ZonedDateTime"
@@ -2034,7 +2038,7 @@ fn sema_derive_type_ready(readiness: &SemaDeriveReadiness, items: [Item], ty: Ty
     // Rust `auto_derive_type_ready`: a codec has no wire form for a Result,
     // a tuple, a tagged or quantity carrier, a compile-time measure, or a map
     // keyed by anything but `String`.
-    codec :: sema_derive_codec_trait(readiness.trait_name)
+    codec :: owned_trait_codec(readiness.trait_name)
     if ty == {
         .List(inner) | .Option(inner) | .FixedList(inner, _) -> if comparable -> sema_derive_native_ordering_ready(ty) else -> sema_derive_type_ready(&readiness, items, inner, type_params)
         .Result(ok, err) -> {
@@ -2171,9 +2175,6 @@ fn sema_derive_auto_selected(items: [Item], index: SemaDeriveItemIndex, trait_na
     }
     selected
 }
-fn sema_derive_builtin_traits() -> [String] {
-    [String]{"Equatable", "Comparable"}
-}
 
 // I3: compiler-owned capability requests use the same
 // typed derive-template engine as user-authored code. A struct or enum
@@ -2273,7 +2274,7 @@ fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equat
             available :: providers ?? [DeriveDef]{}
             owner_type :: sema_derive_owner_type(definition.name, definition.type_params)
             type_info :: sema_derive_struct_type_info(definition)
-            loop trait_name in sema_derive_builtin_traits() {
+            loop trait_name in owned_trait_structural_names() {
                 wanted :: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                 block :: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
@@ -2288,7 +2289,7 @@ fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equat
             available :: providers ?? [DeriveDef]{}
             owner_type :: sema_derive_owner_type(definition.name, definition.type_params)
             type_info :: sema_derive_enum_type_info(definition)
-            loop trait_name in sema_derive_builtin_traits() {
+            loop trait_name in owned_trait_structural_names() {
                 wanted :: (trait_name == "Equatable" && equatable) || (trait_name == "Comparable" && comparable)
                 if !wanted || sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                 block :: sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next
@@ -2305,7 +2306,7 @@ fn sema_derive_builtin_blocks(item: Item, facts: SemaDeriveItemIndex, auto_equat
             available :: providers ?? [DeriveDef]{}
             owner_type :: Type.Named{name: definition.name}
             type_info :: sema_derive_distinct_type_info(definition)
-            loop trait_name in sema_derive_builtin_traits() {
+            loop trait_name in owned_trait_structural_names() {
                 if trait_name == "Comparable" && !sema_derive_has_name(definition.derives, "Comparable") -> next
                 if sema_derive_has_trait_impl(facts, definition.name, trait_name) -> next
                 block := sema_derive_expand_builtin_provider(available, trait_name, definition.name, definition.name_span, owner_type, type_info, &diagnostics) ?? next

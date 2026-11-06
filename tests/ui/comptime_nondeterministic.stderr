@@ -1,17 +1,21 @@
 Error [jet.NondeterminismInPureEval]: `random.normal` is non-deterministic and cannot appear in a pure evaluation.
-  --> tests/ui/comptime_nondeterministic.jet:6:21
+  --> tests/ui/comptime_nondeterministic.jet:8:31
     |
-  6 |     @draw :: random.normal(0.0, 1.0)
-    |                     ^^^^^^
- Why: Pure evaluation must produce the same result on every machine (D-PURE2).
- Fix: Remove this call, or remove the enclosing function's explicit empty effect bound.
+  8 |     draw :: comptime { random.normal(0.0, 1.0) }
+    |                               ^^^^^^
+ Why: Pure evaluation must produce the same result on every machine.
+ Fix: Remove this call, or keep it at runtime outside the `comptime` value.
+ Denial: pure
+ Call chain: random.normal
 More: jet-lang.dev/e/E3403
 
 Error [jet.NondeterminismInPureEval]: `time.now` is non-deterministic and cannot appear in a pure evaluation.
-  --> tests/ui/comptime_nondeterministic.jet:7:20
+  --> tests/ui/comptime_nondeterministic.jet:9:30
     |
-  7 |     @stamp :: time.now()
-    |                    ^^^
- Why: Pure evaluation must produce the same result on every machine (D-PURE2).
- Fix: Remove this call, or remove the enclosing function's explicit empty effect bound.
+  9 |     stamp :: comptime { time.now() }
+    |                              ^^^
+ Why: Pure evaluation must produce the same result on every machine.
+ Fix: Remove this call, or keep it at runtime outside the `comptime` value.
+ Denial: pure
+ Call chain: time.now
 More: jet-lang.dev/e/E3403

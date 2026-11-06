@@ -11,8 +11,8 @@ struct LexicalEntry {
 LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
     { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
-    { spelling: "use {{ … }} / use alias :: path", meaning: "import block (#6542): one row per line, each a module path, `alias :: path`, a \"file\" path or `alias :: \"file\"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row; the retired `use path as alias`, `owner.[x as y]` and `owner.{{…}}` teach E0630", decision: "" },
-    { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991", decision: "D-COPY-WORD1=A" },
+    { spelling: "use {{ … }} / use alias :: path", meaning: "import block (#6542): one row per line, each a module path, `alias :: path`, a \"file\" path or `alias :: \"file\"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use {{ … }}` re-exports every row", decision: "" },
+    { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value", decision: "D-COPY-WORD1=A" },
     { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
     { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
     { spelling: "struct Name {{ impl Marker {{ group :: #[A, B] }} }}", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals", decision: "D-MARKER-GROUP1=A" },
@@ -23,13 +23,13 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
     { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
     { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
-    { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
+    { spelling: "@", meaning: "live link (D-MEMREF1); the retired compile-time `@NAME` constant, `@` template name splices and `@` fact spellings are not Jet syntax", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
     { spelling: KW_COMPTIME, meaning: "compile-time block `comptime {{ … }}`; `NAME :: comptime {{ value }}` is the only binding that forces compile time (a plain `NAME :: value` folds while building when it can); `@ {{ … }}` and `prep` are retired", decision: "D-PREP-SURFACE2=A" },
     { spelling: "comptime if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
     { spelling: "comptime loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
     { spelling: "comptime fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
     { spelling: "<comptime N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
-    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
+    { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
     { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`)", decision: "D-BUILD-FACT3=A; D-CACHE-CONTROL1=A" },
     { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A" },
     { spelling: "$phase", meaning: "total evaluation-site phase fact", decision: "D-PREP-SURFACE2=A; D-META-ROOT3=A" },
@@ -64,13 +64,13 @@ LEXICAL_LEDGER :: [LexicalEntry]{
     { spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1" },
     { spelling: "<:", meaning: "open a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
     { spelling: ":>", meaning: "close a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
-    { spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`", decision: "D-FENCE2=A" },
+    { spelling: "@[ … ]@", meaning: "retired fence spelling; the fence is `<: … :>`", decision: "D-FENCE2=A" },
 }
 
-/// Checked compiler metadata queries that
-/// has not yet given a `$` root. `$phase`, `$program` and `$package` are the
-/// fact roots in `Syntax/core_surface.rs`; type, function, method, closure and
-/// value facts are `$` members of their subject (`T.$fields`).
+/// Checked compiler metadata queries that has not yet given a `$` root.
+/// `$phase`, `$program` and `$package` are the fact roots; type, function,
+/// method, closure and value facts are `$` members of their subject
+/// (`T.$fields`).
 META_QUERY_SOURCE :: "@SOURCE"
 
 META_QUERY_TYPES :: "@TYPES"
@@ -88,8 +88,8 @@ COMPILER_ADVANCED_REGISTER_SPECIALIZATION :: "compiler.advanced.register_special
 /// A session is available only inside an authorized registered provider.
 COMPILER_ADVANCED_SESSION :: "compiler.advanced.session"
 
-/// The old standalone marker gets a dedicated teaching diagnostic;
-/// it is not part of the active marker registry.
+/// The old standalone marker; it is not part of the active marker registry
+/// and no rule accepts it.
 MARKER_ALIGN_LEGACY :: "Align"
 
 // The native library edge uses matching `#Import(c)` and
@@ -135,11 +135,6 @@ TYPE_TASK :: "Task"
 
 /// Builtin channel constructor.
 BUILTIN_CHANNEL :: "channel"
-
-/// Compiler-private runtime rows; the source constructor remains `channel<T>`.
-INTERNAL_CHANNEL_NEW_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 99, 104, 97, 110, 110, 101, 108, 46, 110, 101, 119})
-
-INTERNAL_CHANNEL_BOUNDED_METHOD :: String.from_bytes([U8]{0, 106, 101, 116, 46, 99, 104, 97, 110, 110, 101, 108, 46, 98, 111, 117, 110, 100, 101, 100})
 
 /// Receiver endpoint type is nameable in signatures.
 TYPE_RECEIVER :: "Receiver"

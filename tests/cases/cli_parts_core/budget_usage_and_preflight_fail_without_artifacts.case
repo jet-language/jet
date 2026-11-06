@@ -14,17 +14,25 @@ step: jet budget report
 exit: 2
 stdout: empty
 file: .jet absent
+# Under --json a refused command prints one jet.status/v1 line on stdout and
+# nothing on stderr (D-VERDICT-LOOP1, #6035 c44); the Rust test read an empty stdout.
 step: jet budget check --json --unknown
 exit: 2
-stdout: empty
+json: stdout doc $.schema = "jet.status/v1"
+json: stdout doc $.ok = false
+stderr: empty
 file: .jet absent
 step: jet budget check --unknown --json
 exit: 2
-stdout: empty
+json: stdout doc $.schema = "jet.status/v1"
+json: stdout doc $.ok = false
+stderr: empty
 file: .jet absent
 step: jet budget check --json --json
 exit: 2
-stdout: empty
+json: stdout doc $.schema = "jet.status/v1"
+json: stdout doc $.ok = false
+stderr: empty
 file: .jet absent
 step: jet budget check --annotations gitlab
 exit: 2

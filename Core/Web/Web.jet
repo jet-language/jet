@@ -11,7 +11,8 @@ package {
 
 use {
     core :: core
-    core.http.[HTTPRequest, HTTPResponse]
+    core.http.[HTTPRequest, HTTPResponse, HTTPRouter]
+    web_http :: core.http
     core.http.server.[HTTPMux]
     http_server :: core.http.server
     live_json :: core.encoding.json
@@ -749,14 +750,13 @@ fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
 }
 
 // `web.openapi(mux)` checks as `__openapi_mux(mux)` below (sema
-// sema_call_http_web_openapi_mux); a router argument stays here.
+// sema_call_http_web_openapi_mux); a router renders its route table the same way.
 fn openapi(router: HTTPRouter) -> String Never! {
-    inputs :: core.web.__openapi_inputs(router) ?? core.web.__contract_stop(err)
-    core.web.__openapi_render(^inputs, ^"Jet HTTP Router", ^"1", ^[OpenApiServer]{}) ?? core.web.__contract_stop(err)
+    __openapi_mux(web_http.__router_mux(router))
 }
 
-// D-WEBOPENAPI1=A for an HTTPMux (OpenAPI.rs `JetHTTPRouteSource for
-// JetHTTPMux` and `jet_web_openapi`): each route's checked contract is parsed
+// D-WEBOPENAPI1=A for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and
+// `jet_web_openapi`): each route's checked contract is parsed
 // (jet_openapi_contract_input) and checked against the route registered, then
 // the routes are canonicalized and checked as one document
 // (JetOpenApiDocument::with_openapi) and rendered (::json).
@@ -812,7 +812,7 @@ struct __OpenAPIPattern {
 }
 
 struct __OpenAPIRoute {
-    // Index into __openapi_methods(), OpenAPI.rs JetOpenApiHttpMethod order.
+    // Index into __openapi_methods(), JetOpenApiHttpMethod order.
     method: Int
     path: String
     names: [String]
@@ -954,9 +954,9 @@ fn __openapi_integer(fields: [(key: String, value: Dyn)], name: String) -> Int _
     }
 }
 
-// OpenAPI.rs jet_openapi_contract_schema then render_json: the schema
-// rendered canonically (object properties by name). Definition problems
-// (validate_definition) are collected in `errors` under `path`.
+// jet_openapi_contract_schema then render_json: the schema rendered canonically
+// (object properties by name). Definition problems (validate_definition) are
+// collected in `errors` under `path`.
 fn __openapi_schema(value: Dyn, path: String, errors: &[String]) -> String __OpenAPIFault! {
     fields :: __openapi_object(value) ?? return Err(err)
     if __openapi_member(fields, "type") == .Val(kind) -> return __openapi_typed_schema(kind, fields, path, &errors)
@@ -1094,8 +1094,8 @@ fn __openapi_security(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
     Ok(__OpenAPISecurity{scheme: scheme, scopes: scopes})
 }
 
-// OpenAPI.rs jet_openapi_contract_input and JetOpenApiRouteFact::from_input,
-// checked against the method and pattern the mux registered.
+// jet_openapi_contract_input and JetOpenApiRouteFact::from_input, checked
+// against the method and pattern the mux registered.
 fn __openapi_route_input(contract: String, method: String, pattern: String) -> __OpenAPIRoute __OpenAPIFault! {
     value :: live_json.parse(contract) ?? return Err(__openapi_fault("invalid checked OpenAPI route contract: {err.reason}"))
     fields :: __openapi_object(value) ?? return Err(err)
@@ -1136,7 +1136,7 @@ fn __openapi_route_input(contract: String, method: String, pattern: String) -> _
     Ok(__OpenAPIRoute{method: rank, path: parsed.path, names: parsed.names, catch_alls: parsed.catch_alls, operation_id: id, summary: summary, parameters: parameters, body: body, responses: responses, security: security})
 }
 
-// OpenAPI.rs jet_openapi_operation_id_for_path: FNV-1a 64 of
+// jet_openapi_operation_id_for_path: FNV-1a 64 of
 // `jet-openapi-operation-v1:<method>\0<path>`.
 fn __openapi_operation_id(method: Int, path: String) -> String Never! {
     name :: __openapi_methods()[method]
@@ -1163,7 +1163,6 @@ fn __openapi_compare_lists(left: [String], right: [String]) -> Ordering Never! {
     left.len() <=> right.len()
 }
 
-// OpenAPI.rs jet_openapi_canonicalize_route.
 fn __openapi_canonical(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     out := route
     &out.parameters.sort_by((left: __OpenAPIParameter, right: __OpenAPIParameter) -> {
@@ -1188,8 +1187,8 @@ fn __openapi_canonical(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     out
 }
 
-// OpenAPI.rs JetOpenApiDocument::with_openapi then ::json, with no security
-// schemes: a mux declares none.
+// JetOpenApiDocument::with_openapi then ::json, with no security schemes: a mux
+// declares none.
 fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) -> String __OpenAPIFault! {
     routes := [__OpenAPIRoute]{}
     loop input in inputs -> &routes.push(__openapi_canonical(input))
@@ -1280,7 +1279,7 @@ fn __openapi_document(inputs: [__OpenAPIRoute], title: String, version: String) 
     Ok("{{\"openapi\":\"3.1.0\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
 }
 
-// OpenAPI.rs jet_openapi_route_json and jet_openapi_parameter_json.
+// jet_openapi_route_json and jet_openapi_parameter_json.
 fn __openapi_route_json(route: __OpenAPIRoute) -> String Never! {
     out := "{{\"operationId\":{__app_json_string(route.operation_id)}"
     if route.summary == .Val(summary) -> out = "{out},\"summary\":{__app_json_string(summary)}"

@@ -1,1 +1,1 @@
-test -d vendor/greeter && grep -c greeter vendor/manifest.json
+test -d vendor/greeter && cat vendor/manifest.json

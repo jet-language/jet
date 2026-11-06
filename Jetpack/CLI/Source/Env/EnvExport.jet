@@ -183,12 +183,16 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
         theme.detail("environment activation was not published because a package lease has no durable parent-shell path")
         return Err(keep)
     }
+    vars :: env.parent_vars() ?? {
+        theme.detail("environment activation was not published because a package lease has no durable parent-shell path")
+        return Err(keep)
+    }
     activation :: EnvHookActivation{
         base_path: base_path,
         composed_path: composed_path,
         refs: env.refs.join(" "),
         root: root,
-        vars: env.vars,
+        vars: vars,
         unset: env.unset_vars,
         plan_hash: plan_hash,
     }

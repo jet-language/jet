@@ -9,6 +9,8 @@
     assert(pkg_capability_snapshot_parse("api_version = 4294967295\npackage = a\npublished_version = 1\n") != None)
     changed :: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 99\nfn z(v: Value)\nfn a() Int\n") ?? panic("changed")
     assert(pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first})) != pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{changed})))
+    colon :: pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 2.0.0\nread: fn(v: Value)\n") ?? panic("colon snapshot")
+    assert_eq(pkg_capability_snapshot_text([PackageCapabilitySnapshot]{colon}), "a\nread: fn(v: Value)")
 }
 #Test("fetch selected update closure excludes unrelated packages and terminates on repeated graph edges") {
     lock := LockFile.empty()

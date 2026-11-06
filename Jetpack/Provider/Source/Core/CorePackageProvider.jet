@@ -48,7 +48,10 @@ struct CoreProvider {
             .Val(found) -> {
                 source :: found.facts.source ?? "."
                 if !provider_is_contained_relative(source) -> return Err(ProviderError.CoreBuild("canonical Package source `{source}` escapes {found.root}"))
-                src_dir = files.join(found.root, source)
+                // The default `source: "."` is the member root itself: a
+                // trailing `.` component cannot be copied as a tree.
+                relative :: pkg_normalize_member_path(source)
+                src_dir = if relative == "." || relative == "" -> found.root else -> files.join(found.root, relative)
                 canonical_kind = Val(provider_canonical_package_kind(found.facts, spec.package) ?? provider_infer_package_kind(src_dir))
                 canonical_version = found.facts.version ?? ""
                 canonical = Val(found.facts)

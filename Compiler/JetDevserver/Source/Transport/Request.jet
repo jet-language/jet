@@ -17,7 +17,7 @@ enum DevserverTransportError {
     Net(error: NetError)
 }
 
-// Rust lib.rs:100–207. The sole framing/method/target/Host/size authority is
+// The sole framing/method/target/Host/size authority is
 // Core.http.parse_request. No devserver line reader or second HTTP parser.
 // Core's exact version law: HTTP/1.1 requires a single valid Host; HTTP/1.0
 // accepts an absent Host and validates it when present. Both require CRLF.
@@ -72,8 +72,8 @@ fn devserver_request_headers(parsed: Headers) -> [String:String] DevserverTransp
     Ok(headers)
 }
 
-// Rust lib.rs:96–98. Provider metadata, not a clock/read-content surrogate.
-// Core exposes the OS modification stamp in milliseconds; failures are None.
+// Provider metadata, not a clock/read-content surrogate. Core exposes the OS
+// modification stamp in milliseconds; failures are None.
 fn devserver_file_mtime(path: String) -[FS.Read]> Int? Never! {
     metadata :: devserver_files.stat(path) ?? return None
     Val(metadata.modified_ms)

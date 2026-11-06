@@ -1,0 +1,36 @@
+struct Counter {
+    value: Int?
+}
+
+fn bump_local() {
+    maybe := Int?{Val(1)}
+    if &maybe == {
+        .Val(n) -> n += 1
+        .None -> {}
+    }
+    print(maybe ?? 0)
+}
+
+fn bump_field() {
+    counter := Counter{value: Val(10)}
+    if &counter.value == {
+        .Val(n) -> n += 5
+        .None -> {}
+    }
+    print(counter.value ?? 0)
+}
+
+fn bump_param(slot: &Int?) {
+    if &slot == {
+        .Val(n) -> n *= 2
+        .None -> {}
+    }
+}
+
+fn run() {
+    bump_local()
+    bump_field()
+    held := Int?{Val(21)}
+    bump_param(&held)
+    print(held ?? 0)
+}

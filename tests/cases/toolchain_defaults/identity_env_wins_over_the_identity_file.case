@@ -1,0 +1,16 @@
+# Docs/spec/reference/environment.md: `JET_COMPILER_IDENTITY` wins over the `IDENTITY` file
+# beside `jet`. The file here holds no parseable identity, so reading it fails the check.
+env: NO_COLOR=1
+requires: os:unix
+copy: {jet} tool/jet
+chmod: tool/jet 0755
+write: tool/IDENTITY unparseable-identity.template
+copy: {root}/Examples/features/basics/hello.jet app/hello.jet
+step file: {work}/tool/jet check app/hello.jet
+unset: JET_COMPILER_IDENTITY
+exit: nonzero
+stdout+stderr: ~ "E0003" # the unparseable file identity is refused by code; the prose is the driver's
+step env: {work}/tool/jet check app/hello.jet
+env: JET_COMPILER_IDENTITY=jet@0.0.1#case-identity
+exit: 0
+stdout+stderr: ~ "has no problems" # the check's verdict line; the path varies with the work directory

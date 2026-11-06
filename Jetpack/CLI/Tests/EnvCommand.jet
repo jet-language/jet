@@ -33,3 +33,8 @@ fn cli_test_display(selections: [EnvironmentSelection]) -> [(name: String, versi
     assert_eq(cli_format_env_changes(current_display, current_display), None)
     files.remove_all(root).drop("test cleanup")
 }
+
+#Test("use names what it runs before running a command") {
+    assert_eq(cli_use_running_line([String]{"greet@jetpack"}, [String]{"greet"}), "running greet@jetpack -> greet (no args)")
+    assert_eq(cli_use_running_line([String]{"omp@releases#1.0.0", "jq@jetpack"}, [String]{"omp", "--version"}), "running omp@releases#1.0.0 jq@jetpack -> omp --version")
+}

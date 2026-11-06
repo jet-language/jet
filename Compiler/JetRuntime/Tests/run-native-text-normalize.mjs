@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [mode, output, object] = process.argv.slice(2);
 if (mode === "--seed") {
-  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: "--seed Rust NFC seed oracle (Text.rs normalization compiled by rustc) retired (owner #38/#59; Tower #4923): oracle scalars not regenerated; no rustc invoked" }));
+  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: "--seed Rust NFC seed oracle (the Rust Text normalization compiled by rustc) retired (owner #38/#59; Tower #4923): oracle scalars not regenerated; no rustc invoked" }));
   process.exit(2);
 }
 if (mode !== "--native" || !output || !object || process.argv.length !== 5) {

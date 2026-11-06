@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // Assemble the in-process linker unit (Tests/Fragments.fixture/LinkRuntime.jet
 // with Image/Archive.jet, Image/StaticLink.jet, Image/RuntimePack.jet,
-// Image/MemoryLink.jet, the ELF writer helpers they share with ELF.jet and
-// Object.jet, and the compiler-thread items of JetFoundation's Threads.jet)
-// as one package-free Jet file.
+// Image/MemoryLink.jet, Image/DebugPrune.jet, the fault report bytes of
+// X64/FaultReport.jet that each image link writes, the ELF writer helpers they
+// share with ELF.jet and Object.jet, and the compiler-thread items of
+// JetFoundation's Threads.jet) as one package-free Jet file.
 //
 // usage: node Compiler/JetBackend/Tests/run-link.mjs <outdir>
 // then:  cd <outdir> && jet run unit.jet -- [--pack | --image | --bind] <output> <input>...
@@ -58,6 +59,8 @@ function body(path) {
 const elf = "Compiler/JetBackend/Source/Image/ELF.jet";
 const object = "Compiler/JetBackend/Source/Image/Object.jet";
 const threads = "Compiler/JetFoundation/Source/Threads.jet";
+const dwarf = "Compiler/JetBackend/Source/Image/Dwarf.jet";
+const buildOptions = "Compiler/JetFoundation/Source/Registry/BuildOptions.jet";
 const parts = [
   `// [unit source: ELF writer items of ${elf} and ${object}]`,
   item(elf, "struct X64ExecutableResult {"),
@@ -73,11 +76,20 @@ const parts = [
   item(threads, "fn compiler_threads_admit("),
   item(threads, "fn compiler_threads_partition("),
   item(threads, "fn compiler_threads_failure_text("),
+  `// [unit source: the DWARF, build-option and hash items the link reads]`,
+  item(dwarf, "fn dwarf_uleb("),
+  item(dwarf, "fn dwarf_sleb("),
+  item(dwarf, "fn dwarf_patch_u32("),
+  item(dwarf, "fn dwarf_patch_length("),
+  item(buildOptions, "CHECKED_ALLOC_RUNTIME_EXPORTS ::"),
   "",
+  body("Compiler/JetFoundation/Source/Hash/SHA256.jet"),
   body("Compiler/JetBackend/Source/Image/Archive.jet"),
   body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
   body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
   body("Compiler/JetBackend/Source/Image/MemoryLink.jet"),
+  body("Compiler/JetBackend/Source/Image/DebugPrune.jet"),
+  body("Compiler/JetBackend/Source/X64/FaultReport.jet"),
   body(`Compiler/JetBackend/Tests/Fragments.fixture/${fixture}.jet`),
 ];
 mkdirSync(outDir, { recursive: true });

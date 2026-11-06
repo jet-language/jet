@@ -209,8 +209,8 @@ adversarial metadata validation. The scaffold retains `draft: true`; adding it d
 expose the ballot to the owner.
 
 ```sh
-mkdir -p ~/.cache/jet-dev
-tower decision scaffold '#12' --id D-CACHE1 --out ~/.cache/jet-dev/ballot.json
+mkdir -p $JET_STATE_ROOT
+tower decision scaffold '#12' --id D-CACHE1 --out $JET_STATE_ROOT/ballot.json
 ```
 The scaffold may seed `surface.trio.current` from the card probe and
 `surface.trio.wild` from cited evidence. The author still writes and checks
@@ -220,7 +220,7 @@ After authoring and review, submit the complete draft, then explicitly make it
 ready:
 
 ```sh
-tower decision add --file ~/.cache/jet-dev/ballot.json --by <agent>
+tower decision add --file $JET_STATE_ROOT/ballot.json --by <agent>
 tower decision update D-CACHE1 --ready --by <agent>
 tower decision show D-CACHE1 --json
 tower card show '#12' --json

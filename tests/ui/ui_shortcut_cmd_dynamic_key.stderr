@@ -6,3 +6,12 @@ Error [jet.InvalidShortcut]: Invalid UI shortcut literal `<expression>`: the key
  Why: `.cmd` is the checked command-key constructor, so its key is fixed before code generation and every tier receives the same shortcut metadata. During `jet check`, Jet reports this diagnostic.
  Fix: Write a non-empty plain string literal, for example `.cmd("s")`; use `core.ui.host.shortcut` for a dynamic key.
 More: jet-lang.dev/e/E2938
+
+Error [jet.UiServiceWithoutCapability]: UI host service `core.ui.host.shortcut` needs `UI.Shortcuts`.
+  --> tests/ui/ui_shortcut_cmd_dynamic_key.jet:3:57
+    |
+  3 | fn shortcut_for(key: String) -> UIShortcut { UIShortcut.cmd(key) }
+    |                                                         ^^^
+ Why: The typed host row crosses an operating-system service boundary, so every tier must receive the same explicit package capability instead of discovering permission at runtime. During `jet check`, Jet reports this diagnostic.
+ Fix: Add `UI.Shortcuts` to `authority.needs` in the package manifest, then rebuild.
+More: jet-lang.dev/e/E2937

@@ -1,4 +1,4 @@
-// Real native producer witness; link --wrap=jet_rt_free, never a fake Inner.
+// Real native producer witness, never a fake Inner.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -13,7 +13,8 @@ typedef struct { void *inner; int64_t index; } Handle;
 typedef struct { int64_t length,capacity; Text **data; } TextList;
 _Static_assert(sizeof(Expr)==288 && sizeof(Handle)==16 && sizeof(TextList)==24,"native Layout ABI");
 extern void jet_rt_alloc_init(void),jet_rt_thread_init(void),jet_rt_thread_attach(void),jet_rt_thread_detach(void),jet_rt_layout_init(void),jet_rt_tls_reset_attempt(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t),jet_rt_free(void *,int64_t,int64_t);
+extern void jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_new(const unsigned char *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Handle *jet_rt_layout_new(Text *),*jet_rt_layout_compare(Expr *,Expr *,int64_t),*jet_rt_layout_strength(Handle *,int64_t);
@@ -27,11 +28,12 @@ extern Expr *jet_rt_handle_clone_lin_expr(Expr *);
 extern void jet_rt_handle_drop_handle(Handle *),jet_rt_handle_drop_constraint(Handle *),jet_rt_handle_drop_lin_expr(Expr *);
 static void *watched[128];
 static unsigned watches,frees;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     for(unsigned i=0;i<watches;++i) if(p==watched[i]) {
         assert(bytes==152 && align==8); watched[i]=NULL; ++frees;
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(Handle *h) { assert(watches<128); watched[watches++]=h->inner; }
 static Text *text(const char *s) { return jet_rt_string_new((const unsigned char *)s,(int64_t)strlen(s)); }
@@ -118,6 +120,7 @@ static void multi_edit(void) {
     for(unsigned i=0;i<4;++i) assert(fabs(solved[0][i]-solved[1][i])<1e-7);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); jet_rt_thread_init(); jet_rt_layout_init();
     if(argc==3 && !strcmp(argv[1],"--fatal")) { fatal(argv[2]); return 9; }
     assert(argc==2); ownership(); multi_edit();

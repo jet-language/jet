@@ -17,10 +17,10 @@ use {
         UnitFamilyMember,
         UnitRatio,
         UnitScaleProvenance,
+        owned_trait_bundle,
     ]
     jet_lexer.[
         TOKEN_COLON,
-        TOKEN_COLON_COLON,
         TOKEN_COMMA,
         TOKEN_DOT,
         TOKEN_DOT_DOT,
@@ -45,16 +45,16 @@ use {
 }
 
 fn parser_distinct_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_value_at(&state, 2) == "distinct"
+    parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_value_at(&state, 2) == "distinct"
 }
 
-// Owner ruling (#6176): `Name :: …` at file or module scope is classified by
-// meaning; the name's casing never decides. `Name<T> :: …` and a right-hand
+// Owner ruling (#6176): `Name: …` at file or module scope is classified by
+// meaning; the name's casing never decides. `Name<T>: …` and a right-hand
 // side that reads only as a type (`[T]`, `*T`, `A | B`, `Box<T>`, `T?`) are
 // transparent type aliases. A bare path (`Other`, `random.RNG`, `other.MAX`)
 // parses as a constant binding and sema reclassifies it as an alias when the
-// path names a type (sema_alias_classify). `Name :: distinct Base` is a
-// nominal type. There is no `alias` keyword.
+// path names a type (sema_alias_classify). `Name: distinct Base` is a
+// nominal type. There is no `alias` keyword. A `:` inside `<…>` is a bound.
 fn parser_type_alias_ahead_at(state: &JetParserState, offset: Int) -> Bool {
     if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
     after := offset + 1
@@ -67,14 +67,14 @@ fn parser_type_alias_ahead_at(state: &JetParserState, offset: Int) -> Bool {
                 TOKEN_LT -> depth += 1
                 TOKEN_GT -> depth -= 1
                 TOKEN_SHR -> depth -= 2
-                TOKEN_EOF | TOKEN_SEMI | TOKEN_LBRACE | TOKEN_RBRACE | TOKEN_COLON_COLON -> return false
+                TOKEN_EOF | TOKEN_SEMI | TOKEN_LBRACE | TOKEN_RBRACE -> return false
                 else -> {}
             }
             after += 1
         }
         if depth < 0 -> return false
     }
-    if parser_kind_at(&state, after) != TOKEN_COLON_COLON -> return false
+    if parser_kind_at(&state, after) != TOKEN_COLON -> return false
     first :: after + 1
     if parser_kind_at(&state, first) == TOKEN_IDENT && parser_value_at(&state, first) == "distinct" -> return false
     if generic -> return true
@@ -82,10 +82,10 @@ fn parser_type_alias_ahead_at(state: &JetParserState, offset: Int) -> Bool {
     parser_type_only_rhs_at(&state, first)
 }
 
-// `Name :: path` whose right-hand side is a bare path: a constant binding until
+// `Name: path` whose right-hand side is a bare path: a constant binding until
 // sema reads what the path names (a type makes it an alias).
 fn parser_path_binding_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
-    parser_kind_at(&state, offset) == TOKEN_IDENT && parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && parser_bare_path_rhs_at(&state, offset + 2)
+    parser_kind_at(&state, offset) == TOKEN_IDENT && parser_kind_at(&state, offset + 1) == TOKEN_COLON && parser_bare_path_rhs_at(&state, offset + 2)
 }
 
 // `IDENT (. IDENT)*` ending the item: a path that may name a type or a value.
@@ -128,17 +128,11 @@ fn parser_unit_family_ahead(state: &JetParserState) -> Bool Never! {
     parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "UnitFamily" && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
+// The traits a distinct type's bundle markers re-expose from its base type.
 fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] Never! {
     derives := [NamedSpan]{}
     loop marker in markers {
-        if marker.name == {
-            "Numeric" | "Comparable" | "Printable" -> &derives.push(NamedSpan{name: marker.name, span: marker.name_span})
-            "CodableAsBase" -> {
-                &derives.push(NamedSpan{name: "Encode", span: marker.name_span})
-                &derives.push(NamedSpan{name: "Decode", span: marker.name_span})
-            }
-            else -> {}
-        }
+        loop name in owned_trait_bundle(marker.name) -> &derives.push(NamedSpan{name: name, span: marker.name_span})
     }
     derives
 }
@@ -146,8 +140,8 @@ fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] Never! {
 fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers) -> Item {
     start :: modifiers.start_span
     name :: parser_expect_name(&state, "as the distinct type name")
-    parser_expect(&state, TOKEN_COLON_COLON, "`::` after a distinct type name")
-    keyword :: parser_expect_name(&state, "after `::` in a distinct declaration")
+    parser_expect(&state, TOKEN_COLON, "`:` after a distinct type name")
+    keyword :: parser_expect_name(&state, "after `:` in a distinct declaration")
     if parser_value(state, keyword) != "distinct" {
         parser_add_error(&state, keyword.span, "expected `distinct` in a distinct type declaration", "nominal declarations use `Name :: distinct Base`", "write `Name :: distinct Int`")
     }

@@ -1,10 +1,9 @@
-// `jet inspect rights` (Source/CmdInspect.rs `run_rights`): every checked
-// callable's declared and inferred rights rows, walked against the selected
-// application authority by the one canonical walker (jet-foundation sema.rs
-// `RightsRow::walk`), with the semantic index's effect provenance for each
-// refusal. The facts are the checked program's own: the Doc-mode modules the
-// semantic index reads (SemIndexBuild.jet summaries and witnesses) and the
-// entry's application authority.
+// `jet inspect rights`: every checked callable's declared and inferred rights
+// rows, walked against the selected application authority by the one canonical
+// walker (jet-foundation `RightsRow::walk`), with the semantic index's effect
+// provenance for each refusal. The facts are the checked program's own: the
+// Doc-mode modules the semantic index reads (SemIndexBuild.jet summaries and
+// witnesses) and the entry's application authority.
 use {
     cli_files :: core.files
     jet_driver.[
@@ -25,13 +24,12 @@ use {
     ]
 }
 
-// sema.rs `RightsProvenance`.
 struct JetCLIRightsProvenance {
     source: String
     reason: String
 }
 
-// sema.rs `RightsRow`: `allow == None` is unbounded; denials win.
+// `RightsRow`: `allow == None` is unbounded; denials win.
 struct JetCLIRightsRow {
     kind: String
     allow: [String]?
@@ -39,7 +37,6 @@ struct JetCLIRightsRow {
     provenance: JetCLIRightsProvenance
 }
 
-// sema.rs `ScopeFrame`.
 struct JetCLIScopeFrame {
     scope: String
     name: String
@@ -47,7 +44,7 @@ struct JetCLIScopeFrame {
     provenance: JetCLIRightsProvenance
 }
 
-// sema.rs `RightsDenial` with its `DenialChain`.
+// `RightsDenial` with its `DenialChain`.
 struct JetCLIRightsDenial {
     right: String
     verdict: String
@@ -56,7 +53,6 @@ struct JetCLIRightsDenial {
     nearest: JetCLIScopeFrame?
 }
 
-// CmdInspect.rs `run_rights` `CallableView`.
 struct JetCLICallableView {
     key: String
     name: String
@@ -69,13 +65,13 @@ struct JetCLICallableView {
     inferred_seed: String?
 }
 
-// sema.rs `normalize_holds`: canonical rights as a sorted set.
+// `normalize_holds`: canonical rights as a sorted set.
 fn jet_cli_rights_normalize(rights: [String]) -> [String] Never! {
     canonical :: loop right in rights -> jet_cli_parse_right(right) ?? right.trim()
     jet_cli_sorted_set(canonical)
 }
 
-// sema.rs `expand_leaves`: each right with every known leaf it covers.
+// `expand_leaves`: each right with every known leaf it covers.
 fn jet_cli_rights_expand(rights: [String]) -> [String] Never! {
     expanded := [String]{}
     loop right in rights {
@@ -94,12 +90,10 @@ fn jet_cli_rights_row(kind: String, allow: [String]?, deny: [String], provenance
     JetCLIRightsRow{kind: kind, allow: normalized, deny: jet_cli_rights_normalize(deny), provenance: provenance}
 }
 
-// sema.rs `RightsRow::invocation`.
 fn jet_cli_rights_invocation(allow: [String], deny: [String], provenance: JetCLIRightsProvenance) -> JetCLIRightsRow Never! {
     jet_cli_rights_row("invocation", Val(jet_cli_rights_expand(allow)), jet_cli_rights_expand(deny), provenance)
 }
 
-// sema.rs `RightsRow::decide`.
 fn jet_cli_rights_decide(row: JetCLIRightsRow, right: String) -> String Never! {
     if jet_cli_covers_any(row.deny, right) -> return "denied"
     allow :: row.allow ?? return "allowed"
@@ -107,8 +101,8 @@ fn jet_cli_rights_decide(row: JetCLIRightsRow, right: String) -> String Never! {
     "missing"
 }
 
-// sema.rs `RightsRow::walk`: every reached right the row does not allow, in
-// set order, each with its denial chain.
+// `RightsRow::walk`: every reached right the row does not allow, in set order,
+// each with its denial chain.
 fn jet_cli_rights_walk(row: JetCLIRightsRow, effects: [String], call_chain: [String], scope_chain: [JetCLIScopeFrame]) -> [JetCLIRightsDenial] Never! {
     denials := [JetCLIRightsDenial]{}
     loop right in effects {
@@ -214,11 +208,11 @@ fn jet_cli_rights_declared(view: JetCLICallableView) -> JetCLIRightsRow Never! {
     jet_cli_rights_row("callable", None, [String]{}, provenance)
 }
 
-// The bundle's `package_guarantees.application_authority` (Loader.rs
-// `package_guarantees_for_manifest` over Authority.rs `from_policy`): a
-// manifest's written `authority` rows under `<manifest> authority`, its allow
-// row added to the beginner floor (D-AUTH-AMBIENT3=A), else the application
-// default; `required` is the entry's solved effect row.
+// The bundle's `package_guarantees.application_authority`
+// (`package_guarantees_for_manifest` over `from_policy`): a manifest's written
+// `authority` rows under `<manifest> authority`, its allow row added to the
+// beginner floor (D-AUTH-AMBIENT3=A), else the application default; `required`
+// is the entry's solved effect row.
 fn jet_cli_rights_authority(result: JetDriverCompileResult) -> JetCLIAuthority Never! {
     authority := jet_cli_application_authority(result, None)
     policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, inline_package: false, allow: None, deny: None}
@@ -310,8 +304,8 @@ fn jet_cli_rights_sorted(views: [JetCLICallableView]) -> [JetCLICallableView] Ne
     unique
 }
 
-// CmdInspect.rs `run_rights` over one checked program: `project` is the
-// project scope, `target` the entry the scope resolved.
+// `run_rights` over one checked program: `project` is the project scope,
+// `target` the entry the scope resolved.
 fn jet_cli_inspect_rights(result: JetDriverCompileResult, project: Bool, target: String, json: Bool) -[FS]> JetDriverVerbOutput {
     modules :: result.doc_modules
     views := [JetCLICallableView]{}

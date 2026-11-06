@@ -72,7 +72,7 @@
     pay_c :: files.join(third.entry.out, "payload")
     assert((files.stat(pay_c) ?? panic("stat")).links >= 2)
     // Registration already populated the shared pool; cleanup is idempotent.
-    report :: store_optimize_cas_pool(roots) ?? panic("optimize")
+    report :: store_optimize_cas_pool(&verification, roots) ?? panic("optimize")
     assert_eq(report.optimized_files, 0)
     assert(files.is_dir(roots.shared_cas_dir()))
     assert((files.stat(pay_c) ?? panic("stat")).links >= 2)
@@ -109,6 +109,36 @@
     store_test_drop_roots(roots)
 }
 
+#Test("store cas pool optimizer reseals an object whose seal held before sharing") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    hangar :: roots.hangar_dir()
+    source :: files.join(roots.root, "reseal-src")
+    files.create_dir_all(source) ?? panic("dir")
+    files.write(files.join(source, "payload"), "reseal-bytes") ?? panic("payload")
+    ingested :: store_ingest_tree(&verification, roots, store_test_path_request("reseal", "path:reseal", [String: String]{"out": source}, "")) ?? panic("ingest")
+    out :: ingested.entry.out
+    digest :: ingested.entry.envelope.output_hash
+    // A private byte-equal copy replaces the pool link, and the object is
+    // resealed over that copy, so only the optimizer can share it again.
+    payload :: files.join(out, "payload")
+    store_make_tree_writable_for_removal(out) ?? panic("writable")
+    files.remove(payload) ?? panic("unlink")
+    files.write(payload, "reseal-bytes") ?? panic("copy")
+    store_seal_node(out) ?? panic("seal tree")
+    store_write_seal(&verification, out, hangar, digest) ?? panic("seal")
+    assert_eq((files.stat(payload) ?? panic("stat")).links, 1)
+    report :: store_optimize_cas_pool(&verification, roots) ?? panic("optimize")
+    assert_eq(report.optimized_files, 1)
+    assert((files.stat(payload) ?? panic("stat")).links >= 2)
+    // A fresh owner has no memo, so it re-walks the tuples: the seal now
+    // names the shared link.
+    fresh := StoreVerification.new()
+    resealed :: store_check_seal(&fresh, out, hangar) ?? panic("check")
+    assert(resealed == Val((digest)))
+    store_test_drop_roots(roots)
+}
+
 fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) Never! {
     verified :: store_find_verified_by_reference(&verification, roots, reference, expectation) ?? panic("entry must verify")
     verified.lease.validate() ?? panic("validate")
@@ -123,7 +153,8 @@ fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots,
     files.create_dir_all(outside) ?? panic("outside")
     files.write(files.join(outside, "live"), "must survive") ?? panic("live")
     files.symlink(outside, files.join(hangar, "objects")) ?? panic("objects link")
-    if store_optimize_cas_pool(roots) == {
+    verification := StoreVerification.new()
+    if store_optimize_cas_pool(&verification, roots) == {
         .Ok(_) -> panic("a symlinked object pool must be refused")
         .Err(error) -> assert(error.message().contains("object pool"))
     }
@@ -169,8 +200,8 @@ fn store_test_validate_hit(verification: &StoreVerification, roots: HangarRoots,
     store_make_tree_writable_for_removal(entry.out) ?? panic("chmod")
     files.remove_all(entry.out) ?? panic("remove output")
     files.write(files.join(files.join(roots.hangar_dir(), entry.id), "meta.json"), entry.meta_json()) ?? panic("meta")
-    assert_eq((store_clean_plan(&verification, roots) ?? panic("plan")).quarantined_objects, 1)
-    assert_eq((store_clean(&verification, roots) ?? panic("clean")).quarantined_objects, 1)
+    assert_eq((store_clean_plan(&verification, roots) ?? panic("plan: {err.message()}")).quarantined_objects, 1)
+    assert_eq((store_clean(&verification, roots) ?? panic("clean: {err.message()}")).quarantined_objects, 1)
     assert(!files.exists(files.join(roots.hangar_dir(), entry.id)))
     assert_eq((files.list_dir(files.join(roots.hangar_dir(), "quarantine")) ?? panic("quarantine")).len(), 1)
     store_test_drop_roots(roots)

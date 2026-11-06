@@ -45,7 +45,7 @@ static uint64_t oracle(const char *input) {
 }
 // Frozen oracle: cheap.sh Tools/agent/jet-env rustc -V reported
 // rustc 1.97.1 (8bab26f4f 2026-07-14), built from a source tarball.
-// Probe: rustc --edition=2021 scratch/RtG1e/float-seed-probe.rs -o
+// Probe: a scratch Rust program built with rustc --edition=2021 as
 // scratch/RtG1e/float-seed-probe; float-seed-probe float-parse.seed.golden.
 // Each frame is decimal body length + '\n' + (UTF8 input hex<TAB>Ok/Err<TAB>
 // IEEE bits hex/error hex). Native parity uses this output, not Rust1.90.

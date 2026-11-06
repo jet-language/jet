@@ -11,7 +11,7 @@ const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const here=join(root,'Compiler/JetRuntime/Tests');
 const [mode,outArg,object]=process.argv.slice(2);
 if (mode === '--freeze') {
-  console.log(JSON.stringify({status: 'UNCOVERED', cardRequired: true, reason: '--freeze Rust seed oracle (cargo build of the Layout.rs reference) retired (owner #38/#59; Tower #4923): LayoutSeed.json is not regenerated; no cargo/rustc invoked'}));
+  console.log(JSON.stringify({status: 'UNCOVERED', cardRequired: true, reason: '--freeze Rust seed oracle (cargo build of the Rust layout reference) retired (owner #38/#59; Tower #4923): LayoutSeed.json is not regenerated; no cargo/rustc invoked'}));
   process.exit(2);
 }
 if(mode!=='--native'||!outArg||!object) throw Error('usage: run-native-layout.mjs --native OUT fresh-runtime.o');
@@ -43,7 +43,7 @@ literals();
 if(mode==='--native') {
   const frozen=JSON.parse(readFileSync(join(here,'LayoutSeed.json'),'utf8'));
   if(hash(vectors)!==frozen.vectors_sha256||hash(frozen.stdout)!==frozen.stdout_sha256) throw Error('frozen oracle/vector checksum mismatch');
-  run(nativeCCompiler,['-std=c11','-Wall','-Wextra','-Werror','-pedantic',join(here,'NativeLayoutWitness.c'),resolve(object),'-Wl,--wrap=jet_rt_free','-lm','-pthread','-o',join(out,'native-layout')],'native-link');
+  run(nativeCCompiler,['-std=c11','-Wall','-Wextra','-Werror','-pedantic',join(here,'NativeLayoutWitness.c'),resolve(object),'-lm','-pthread','-o',join(out,'native-layout')],'native-link');
   const actual=run(join(out,'native-layout'),[join(here,'LayoutVectors.txt')],'native-execute').trim().split('\n');
   if(actual.pop()!=='Layout6 ownership/registry/clone/drop OK') throw Error('ownership witness did not complete');
   const expected=frozen.stdout.trim().split('\n').filter(s=>!s.startsWith('p '));

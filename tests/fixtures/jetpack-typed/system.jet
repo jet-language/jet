@@ -7,15 +7,15 @@
 // bare typed values, quotes only for free-form strings). An `Image` is built
 // `from` a system and inherits its packages/services/options (U14).
 //
-// Constructors are inferred from the expected type (U18): `system.halcyon: { … }`
+// Constructors are inferred from the expected type (U18): `system.devhost: { … }`
 // elaborates to `System { … }`; each service `{ enable: true }` to `Service { … }`.
 //
-// Names in these positions may be kebab-case (S84) — `my-host`, `halcyon-iso` —
+// Names in these positions may be kebab-case (S84) — `my-host`, `devhost-iso` —
 // matching nixpkgs/npm package-name convention.
 //
 // This file is field-checked by the jetpack module evaluator; realize/activation
 // (`jet os switch`) realizes it.
-module halcyon {
+module devhost {
     sources: {
         default: NixOS/nixpkgs/nixos-24.05@github,
     }
@@ -27,7 +27,7 @@ module halcyon {
             openssh: { enable: true, ports: [22] },
         },
         options: [
-            network.hostName: halcyon,
+            network.hostName: devhost,
             filesystem.timeZone: "Europe/London",
             packages.shell: default.fish,
         ],
@@ -35,5 +35,5 @@ module halcyon {
 }
 
 module installer {
-    image.halcyon-iso: { from: system.my-host, format: iso }
+    image.devhost-iso: { from: system.my-host, format: iso }
 }

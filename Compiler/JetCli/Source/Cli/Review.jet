@@ -1,9 +1,9 @@
-// Source/CmdReview.rs: `jet review base.jet head.jet` joins what changed in
-// checked meaning (semantic operations aligned over jet_cli's one semantic
-// index, SemIndexBuild.jet, plus recorded codemod receipts), in authority
-// (each side's gate ledger with the package/lock writers, GateProjection.jet)
-// and in proof receipts. `--diagnostics` compares the checker diagnostics of
-// the two sides by occurrence identity instead.
+// `jet review base.jet head.jet` joins what changed in checked meaning
+// (semantic operations aligned over jet_cli's one semantic index,
+// SemIndexBuild.jet, plus recorded codemod receipts), in authority (each side's
+// gate ledger with the package/lock writers, GateProjection.jet) and in proof
+// receipts. `--diagnostics` compares the checker diagnostics of the two sides
+// by occurrence identity instead.
 use {
     cli_files :: core.files
     core.encoding.[Dyn]
@@ -18,8 +18,7 @@ use {
     ]
 }
 
-// SemanticOps.rs `ReviewSemanticOp`; `kind` and `alignment` hold the stable
-// names (`added`, `matched`, ...).
+// `kind` and `alignment` hold the stable names (`added`, `matched`...).
 struct JetCLIReviewOp {
     kind: String
     stable_id: String
@@ -42,7 +41,7 @@ struct JetCLIReviewInput {
     digest: String
 }
 
-// CmdReview.rs `AuthorityFact`, keyed; each list is a sorted set.
+// Each list is a sorted set.
 struct JetCLIReviewFact {
     key: String
     display: [String]
@@ -81,8 +80,8 @@ struct JetCLIReviewIdentity {
     target: String
 }
 
-// CmdReview.rs `DerivationClaim`. Its observation is present when it names
-// an event or (only without one) a counterexample.
+// Its observation is present when it names an event or (only without one) a
+// counterexample.
 struct JetCLIReviewDerivation {
     id: String
     subject: String
@@ -126,7 +125,7 @@ struct JetCLIReviewProof {
     digest: String
 }
 
-// CmdReview.rs `Receipt`; `claims` is sorted by key.
+// `claims` is sorted by key.
 struct JetCLIReviewReceipt {
     recorded: Bool
     claims: [JetCLIReviewClaim]
@@ -271,9 +270,9 @@ fn jet_cli_review_input_error(path: String, message: String, color: Bool, json: 
     jet_cli_review_error("E2105", "could not review `{path}`: {message}", "fix the checked input and run `jet review` again", color, json)
 }
 
-// `load_side`: the checked side with the package/lock and trust writers
-// added to its gate ledger (CmdGates.rs `append_external_writers` with no
-// invocation choices). A side with errors is refused.
+// `load_side`: the checked side with the package/lock and trust writers added
+// to its gate ledger (`append_external_writers` with no invocation choices). A
+// side with errors is refused.
 fn jet_cli_review_load(path: String) -> JetCLIReviewLoaded {
     if jet_cli_prepare_overlays(path, path, [JetCLIOverlay]{}, false, None, JetDriverCompileMode.Doc) == {
         .Refused(output) -> return JetCLIReviewLoaded.Refused{output: ^output}
@@ -339,7 +338,7 @@ fn jet_cli_review_side(path: String, result: JetDriverCompileResult) -> JetCLIRe
     }}
 }
 
-// ---- meaning (SemanticOps.rs review_semantic_ops*) ----
+// ---- meaning (review_semantic_ops*) ----
 
 // `fact_keys`: (kind, stable id), (kind, compiler identity) and (kind,
 // signature, module) as length-prefixed text, so no two keys collide.
@@ -689,7 +688,7 @@ fn jet_cli_review_meaning(before: JetCLISemIndex, after: JetCLISemIndex, receipt
     filtered
 }
 
-// ---- authority (CmdReview.rs authority_facts / authority_diff) ----
+// ---- authority (authority_facts / authority_diff) ----
 
 fn jet_cli_review_slot(facts: &[JetCLIReviewFact], slots: &[String:Int], key: String) -> Int Never! {
     if slots.get(key) == .Val(slot) -> return slot
@@ -816,7 +815,7 @@ fn jet_cli_review_authority_diff(before: [JetCLIReviewFact], after: [JetCLIRevie
     changes
 }
 
-// ---- receipts (CmdReview.rs read_receipt / receipt_diff) ----
+// ---- receipts (read_receipt / receipt_diff) ----
 
 fn jet_cli_review_text_field(object: Dyn, name: String) -> String? Never! {
     jet_cli_sem_json_text(object, name)
@@ -1504,7 +1503,7 @@ fn jet_cli_review_json(base: JetCLIReviewSide, head: JetCLIReviewSide, base_rece
     jet_cli_status_render("review", true, [JetCLIStatusField]{jet_cli_status_field("review", review)})
 }
 
-// ---- `--diagnostics` (CmdReview.rs run_diagnostic_review) ----
+// ---- `--diagnostics` (run_diagnostic_review) ----
 
 struct JetCLIReviewDiagnosticSide {
     path: String
@@ -1574,9 +1573,9 @@ fn jet_cli_review_diagnostics(argv: [String], json: Bool, color: Bool) -> JetDri
     jet_cli_ice("`jet review --diagnostics` lost a checked side")
 }
 
-// `load_diagnostic_side` over CmdInspect.rs `check_diagnostics`: the side
-// keeps its diagnostics even when it has errors. It is complete when the
-// checker got past loading; it is valid when complete and error-free.
+// `load_diagnostic_side` over `check_diagnostics`: the side keeps its
+// diagnostics even when it has errors. It is complete when the checker got past
+// loading; it is valid when complete and error-free.
 fn jet_cli_review_diagnostic_load(path: String) -> JetCLIReviewDiagnosticLoaded {
     source :: cli_files.read(path) ?? return JetCLIReviewDiagnosticLoaded.Failed{message: "could not read `{path}`: {jet_cli_io_error_text(err)}"}
     source_hash :: sha256_hex(source)

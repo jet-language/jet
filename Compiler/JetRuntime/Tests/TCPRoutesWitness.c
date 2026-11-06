@@ -160,7 +160,7 @@ static void handles(Listener *listener, Address *address) {
     assert(jet_net_sendfile(client, path, &count, &error) == 0);
     assert(error->payload->present && error->payload->code == 2);
     text_is(error->payload->address, filename);
-    failure(&error, 13, "tcp sendfile open", NULL);
+    failure(&error, 14, "tcp sendfile open", NULL);
     jet_rt_string_drop(path);
     assert(jet_net_tcp_read_bytes(server, 0, &bytes, &length, &error) == 1 && length == 0);
     assert(jet_net_tcp_read_bytes(server, -1, &bytes, &length, &error) == 0);

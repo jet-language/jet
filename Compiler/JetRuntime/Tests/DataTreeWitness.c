@@ -1,4 +1,4 @@
-// Link the real Jet runtime object with -Wl,--wrap=jet_rt_free.
+// Link the real Jet runtime object.
 // This client is not a runtime provider. Define DATA_TREE_U8_STRIDE to match
 // Collections.jet's single RT_HOST_U8_STRIDE epoch (canonical packed = 1).
 #include <assert.h>
@@ -20,7 +20,7 @@ _Static_assert(sizeof(Sequence) == 24 && offsetof(Sequence, data) == 16, "native
 _Static_assert(sizeof(Entry) == 16 && offsetof(Entry, value) == 8, "DataABI Entry");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern void jet_panic(Text *, int64_t, Text *);
@@ -63,13 +63,14 @@ extern void jet_rt_record_seq_entries_rec_dyn_push(Sequence *, Text *, Tree *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[256];
 static size_t watched_count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t size, int64_t align) {
     ++intercepted;
     for (size_t i = 0; i < watched_count; ++i) if (watched[i].pointer == pointer) {
         assert(size == watched[i].size && align == watched[i].align);
         assert(++watched[i].frees == 1);
     }
-    __real_jet_rt_free(pointer, size, align);
 }
 static void watch(void *pointer, int64_t size, int64_t align) {
     assert(watched_count < sizeof(watched) / sizeof(watched[0]));
@@ -103,7 +104,7 @@ static void drop_pair(Tree *a, Tree *b) {
     watch_tree(a); watch_tree(b);
     unsigned before = intercepted;
     jet_rt_handle_drop_dyn(a); jet_rt_handle_drop_dyn(b);
-    assert(intercepted > before); // A link missing --wrap cannot silently pass.
+    assert(intercepted > before); // A missing observer cannot silently pass.
     for (size_t i = 0; i < watched_count; ++i) assert(watched[i].frees == 1);
     watched_count = 0;
 }
@@ -204,6 +205,7 @@ static void sequence_cases(void) {
     ((unsigned char *)((Sequence *)b->payload)->data)[0] = 1; assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if (argc > 1 && (strcmp(argv[1], "list-capacity-negative") == 0 || strcmp(argv[1], "list-capacity-overflow") == 0)) {
         int64_t capacity = strcmp(argv[1], "list-capacity-negative") == 0 ? -1 : INT64_MAX / 8 + 1;

@@ -15,12 +15,11 @@
 // Closer code(box) closes its captured resource.
 // All closures have [refs,code,release] + captures; release frees the box.
 //
-// Private statuses (NOT diagnostics): 0 success/EOF; -1 BodyConsumed;
-// -5 Stopped; -6 owned source error detail.
-// Core alone validates limits and chooses typed errors/deferred-error behavior.
-// HTTPMessage.rs:675-717,749-805,884-898 define validation/take/drain/drop.
-// Scheduler.rs:941-945: Propagate observes a callee-delivered stop only; it
-// must not poll for a newly requested interrupt after initialized results.
+// Private statuses (NOT diagnostics): 0 success/EOF; -1 BodyConsumed; -5
+// Stopped; -6 owned source error detail. Core alone validates limits and
+// chooses typed errors/deferred-error behavior. The Rust original define
+// validation/take/drain/drop. Propagate observes a callee-delivered stop only;
+// it must not poll for a newly requested interrupt after initialized results.
 // Only a compiler/runtime defect reaches this assertion. Core source checks
 // public arguments first and constructs the same typed errors on every tier.
 fn http_body_require(condition: Bool) {
@@ -145,7 +144,7 @@ fn http_body_text_drop(text: I64) { jet_rt_string_drop(text) }
 }
 
 // Moves reader/closer closures and metadata. Only File Take uses bounded1;
-// Reader/Bridge length is advisory (HTTPMessage.rs:525-609). No FD is copied.
+// Reader/Bridge length is advisory. No FD is copied.
 #Export(c) fn jet_rt_http_body_from_reader(reader: I64, closer: I64, length_known: I64, length: I64, bounded: I64, content_type: I64) -> I64 {
     http_body_require(reader != I64{0} && length >= I64{0} && (bounded == I64{0} || length_known != I64{0}))
     body :: http_body_zero(I64{128})
@@ -234,7 +233,7 @@ fn http_body_close(body: I64) -> I64 {
 }
 
 // Core has already validated max and handles rejected arguments/deferred
-// TooLarge without invoking this leaf (HTTPMessage.rs:891-898).
+// TooLarge without invoking this leaf.
 fn http_body_claim(body: I64, max: I64) -> I64 {
     http_body_require(max > I64{0} && max <= I64{1073741824})
     chunks :: http_body_zero(I64{64})

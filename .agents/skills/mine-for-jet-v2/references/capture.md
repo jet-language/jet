@@ -9,7 +9,7 @@ the others. Popularity is context, never truth.
 `JET_SCRATCH_ROOT` defaults to the approved on-disk cache scratch location:
 
 ```sh
-export JET_SCRATCH_ROOT="${JET_SCRATCH_ROOT:-$HOME/.cache/jet-dev/scratch}"
+export JET_SCRATCH_ROOT="${JET_SCRATCH_ROOT:-$JET_STATE_ROOT/scratch}"
 ```
 
 Run commands through jet-env. Set and pass an explicit capture root:

@@ -1,11 +1,10 @@
-// Ports of the parser smoke tests from the deleted tests/grammar.rs (#6096).
+// Ports of the parser smoke tests from the deleted (#6096).
 use jet_foundation.[Program]
 
 fn grammar_smoke_parsed(source: String) -> Program { parser_test_program(source) }
 
-// tests/grammar.rs:722: a braced subjectless guard table is the `if` dispatch
-// AST with a synthetic `true` subject spanning the statement; as a value it is
-// an `if` expression.
+// A braced subjectless guard table is the `if` dispatch AST with a synthetic
+// `true` subject spanning the statement; as a value it is an `if` expression.
 #Test("parse_subjectless_guard_tables_reuse_if_dispatch") {
     program :: grammar_smoke_parsed("\nfn run() {{\n    ready :: false\n    stale :: true\n    if {{\n        ready -> print(\"ready\")\n        stale -> print(\"stale\")\n    }}\n    label :: if {{\n        ready -> \"ready\"\n        stale -> \"stale\"\n        else -> \"waiting\"\n    }}\n    if ready {{ print(label) }}\n}}\n")
     run :: parser_test_function(program, "run")
@@ -29,9 +28,9 @@ fn grammar_smoke_parsed(source: String) -> Program { parser_test_program(source)
  else -> false }, "a plain braced if is a dispatch statement")
 }
 
-// tests/grammar.rs:834: `[T]` and `[K:V]` are collection types and a list
-// literal item may end at a line boundary. The Rust input ended the item with an
-// authored `;`; canonical Jet has no explicit semicolons (E0373, State.jet
+// `[T]` and `[K:V]` are collection types and a list literal item may end at a
+// line boundary. The Rust input ended the item with an authored `;`; canonical
+// Jet has no explicit semicolons (E0373, State.jet
 // `parser_report_explicit_semicolon`), so the item ends at the line break.
 #Test("parse_bracket_collection_types_and_semicolon_list_items") {
     program :: grammar_smoke_parsed("\nfn shell() -> [JSON] {{\n    return [\n        JSON.Null\n    ]\n}}\n\nfn use_collections(items: [String], counts: [String:Int]) {{}}\n")

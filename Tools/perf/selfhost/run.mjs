@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { stateRoot } from "../../agent/roots.mjs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +13,7 @@ const MANIFEST = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
 const JET_ENV = join(REPO_ROOT, "Tools/agent/jet-env");
 const TIME_BIN = "/usr/bin/time";
 const SCRATCH_ROOT = resolve(
-  process.env.JET_SELFHOST_SCRATCH ?? join(homedir(), ".cache/jet-dev/selfhost"),
+  process.env.JET_SELFHOST_SCRATCH ?? join(stateRoot(), "selfhost"),
 );
 const ALLOWED_PHASES = new Set(["identity", "complexity", "check", "build", "run", "repair", "reasoning", "all"]);
 const ALLOWED_MODES = new Set(["check", "run", "run-interpret", "build", "run-release"]);

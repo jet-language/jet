@@ -1,10 +1,9 @@
-// D-PATCH1 (Rust CheckerPatchable.rs `inject_patchable_types`): a
-// `#Patchable` struct `T` gains the generated struct `T.Patch`, every stored
-// field wrapped `?` with default `None` (absent = no change), and the methods
-// `t.apply(patch) -> T`, static `T.diff(new, old) -> T.Patch` (the changed
-// fields of `new`, `None` where equal) and `patch.merge(other) -> T.Patch`
-// (`other` fills only the fields `patch` leaves `None`). A computed field
-// holds no "unchanged" sentinel, so it never enters the patch. A struct
+// D-PATCH1: a `#Patchable` struct `T` gains the generated struct `T.Patch`,
+// every stored field wrapped `?` with default `None` (absent = no change), and
+// the methods `t.apply(patch) -> T`, static `T.diff(new, old) -> T.Patch` (the
+// changed fields of `new`, `None` where equal) and `patch.merge(other) ->
+// T.Patch` (`other` fills only the fields `patch` leaves `None`). A computed
+// field holds no "unchanged" sentinel, so it never enters the patch. A struct
 // Checked refuses (E0336 generic, E0337 function-typed field) gains nothing.
 // The fragment lexes as generated code; its field types are the struct's own,
 // written over the parsed placeholders.

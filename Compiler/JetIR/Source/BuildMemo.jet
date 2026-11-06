@@ -1,16 +1,16 @@
-// `#Memo` result caching (D-MEMO1=A; the Rust Prelude/Memo.rs JetLru). A
-// memoized function keeps its results in a store of entries, most recently
-// used first, at most its bound (FnBody.memo_bound; memo_unbounded: none). An
-// entry is a heap block holding copies of the arguments (receiver first),
-// then a copy of the result. On entry the arguments are compared with each
-// entry's under the store's lock: a hit moves the entry first and returns a
-// copy of its result without running the body; a miss opens an entry with
-// copies of the arguments, and each return of the body files a copy of its
-// result there (ir_memo_file), dropping the entry the bound evicts. The
-// runtime (JetRuntime Memo.jet) only orders and counts the entry pointers;
-// the layout, comparison, copies and drops are built here. The store is the
-// function's zeroed static cell. No stop check runs while the lock is held:
-// a stop the comparison publishes is taken at the next check after unlock.
+// `#Memo` result caching (D-MEMO1=A; A memoized function keeps its results in a
+// store of entries, most recently used first, at most its bound
+// (FnBody.memo_bound; memo_unbounded: none). An entry is a heap block holding
+// copies of the arguments (receiver first), then a copy of the result. On entry
+// the arguments are compared with each entry's under the store's lock: a hit
+// moves the entry first and returns a copy of its result without running the
+// body; a miss opens an entry with copies of the arguments, and each return of
+// the body files a copy of its result there (ir_memo_file), dropping the entry
+// the bound evicts. The runtime (JetRuntime Memo.jet) only orders and counts
+// the entry pointers; the layout, comparison, copies and drops are built here.
+// The store is the function's zeroed static cell. No stop check runs while the
+// lock is held: a stop the comparison publishes is taken at the next check
+// after unlock.
 
 use jet_foundation.[DeclID, FnBody, Span, Type, decl_id_index, name_rows_set, name_rows_value]
 

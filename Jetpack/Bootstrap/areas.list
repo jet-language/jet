@@ -18,9 +18,15 @@ Nix: NixEval, PackageModel
 # depend on it without the engine. Package fetch ingests into the Store, so it lives in Engine
 # (Provider/Source/PackageFetch).
 Publication: PackageModel
-# Engine holds Store, Trust, Recipe, Provider and Environment: their sources use each other in a cycle
-# (Store reaches Provider, Trust and Environment), so they check as one unit until #4589 breaks it.
-Engine: PackageModel, TrustRoot, EnvModel, Nix, Publication
+# Trust is also the `jetpack_trust` package (Jetpack/Trust/package.jet), which jet_cli uses.
+Trust: Compiler front end, Foundation, PackageModel, EnvModel, TrustRoot
+# Environment (shell prompt, activation, managed files, locks, overlays, transitions) sits below
+# the engine so jet_cli can reach it without the Store; the composed ShellEnv holds Store cache
+# leases, so it lives in Store/Source/Shell.
+Environment: Compiler front end, Foundation, PackageModel, EnvModel, Trust
+# Engine holds Store, Recipe and Provider: their sources use each other in a cycle
+# (Store reaches Provider), so they check as one unit until #4589 breaks it.
+Engine: PackageModel, TrustRoot, EnvModel, Nix, Publication, Trust, Environment
 Secrets: Compiler front end, Foundation, PackageModel, EnvModel, Engine
 Services: Engine
 Image: Engine

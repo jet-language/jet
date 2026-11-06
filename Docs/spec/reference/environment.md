@@ -8,7 +8,7 @@ name checks are in [`tests/guards/syntax_reconciliation.jet`](../../../tests/gua
 the effect surface is
 [`EffectsSurface.jet`](../../../Compiler/JetFoundation/Data/Syntax/EffectsSurface.jet),
 and the verification defaults are in
-[`Tools/agent/verify-full.sh`](../../../Tools/agent/verify-full.sh).
+[`Tools/agent/VerifyFull.jet`](../../../Tools/agent/VerifyFull.jet).
 
 ## Naming convention
 
@@ -23,7 +23,9 @@ one exists instead of adding another spelling for the same job.
 
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
+| `JETPACK_BIN` | executable path | Names the `jetpack` engine that `jet`'s engine verbs (`fetch`, `add`, `env`, `trust`, …) run. The lookup order is `JETPACK_BIN`, then the `jetpack` beside the running `jet`, then `PATH`; a `JETPACK_BIN` that names no executable file refuses with E1228 instead of falling through. `jet test --jetpack=<path>` (the `jetpack` test setting) sets it for every corpus row it runs, which otherwise get the engine this order finds for the jet under test. The name predates the `JET_<AREA>_<SETTING>` convention; it matches the `JETPACK_BIN` that Jetpack's process claims already use. |
 | `JET_CACHE_DIR` | path | Overrides the compiler build-cache directory. |
+| `JET_CC_PACK_URL` | `https://` or `file://` URL | Names where `jet cc` and `jet env fetch-toolchain` fetch this jet's C toolchain pack when it is neither in the Hangar nor beside jet, instead of the jet release. The pack must still hash to the SHA-256 jet embeds; a `file://` pack is a local copy and works offline. |
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for `jet env hook`; suppresses automatic activation in the current shell and drops environment that hook already activated. |
 | `JET_FUZZ_CORPUS` | path | Overrides the fuzz corpus directory. |
@@ -31,7 +33,7 @@ one exists instead of adding another spelling for the same job.
 | `JET_FUZZ_SEED` | unsigned integer | Makes fuzz generation reproducible. |
 | `JET_FUZZ_TIME_MS` | non-negative integer | Sets the fuzz time budget in milliseconds. |
 | `JET_KEYS_DIR` | path | Overrides the signing-key directory used by publishing and secrets tooling. |
-| `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. |
+| `JET_PROP_SEED` | integer from 0 to 2^63-1 | Replays a property-test run with the seed its failure report printed. `jet prove` runs every property from this seed, else from one derived from the program's inputs, and names it in each property row as `effectiveSeed`. |
 | `JET_RAYLIB_CAPTURE` | path | Writes each frame that `core.game.raylib.end_drawing` presents to the path as a PAM (P7, RGB_ALPHA) image of the canvas. |
 | `JET_RAYLIB_DISPLAY` | `1` | Enables the real raylib display bridge; without it the bridge stays headless. |
 | `JET_REGISTRY_CACHE_DIR` | path | Overrides the local registry-index cache. |
@@ -53,14 +55,16 @@ one exists instead of adding another spelling for the same job.
 
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
-| `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`). When set, `Tools/agent/verify-full.sh` runs `Tools/agent/compiler-diff.mjs` (canary, then all corpora) against the reference compiler. |
+| `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`) that `Tools/agent/compiler-diff.mjs` compares against the reference compiler (canary, then all corpora). |
 | `JET_CANVAS_PREREQUISITES` | `strict` | Makes Canvas scenario verification fail instead of skip when a prerequisite is absent. |
 | `JET_PERF_MAP` | `1` | **Internal** profiling aid for `jet run` and `jet dev`: before a program runs from memory, jet writes `/tmp/perf-<pid>.map` from its image's symbol table, so `perf report` shows its function names (`Compiler/JetBackend/Source/Image/Loader.jet`, `x64_image_perf_map`). Unset, nothing is written. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
+| `JET_COMPILER_IDENTITY` | `name@version#build-id` | Names the running compiler's identity, which keys its receipts and versions its target layout. Unset, `jet` reads the one line of the `IDENTITY` file beside its executable; with neither, every compile refuses (E2105) and names both. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
 | `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `$JET`. |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
-| `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget; `Tools/agent/verify-full.sh` defaults it to 6. |
+| `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget. |
+| `JET_TOOLCHAIN_ROOT` | path | Names the Jet toolchain source tree, the directory holding `Core/` and `Compiler/Prelude/`, that the Core library bodies are read from. Unset, `jet` uses the nearest directory at or above the input that holds both, else its executable's directory when that holds both; with none, every compile refuses (E2105) and names the three places. |
 | `JET_UI_FILTER` | repository-relative fixture substring | Selects UI diagnostic or lint fixtures. |
 | `JET_UPDATE_GOLDEN` | `1` | Updates the existing expected channel for the selected golden example; requires `JET_GOLDEN_FILTER`. |
 | `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows, and the files `core.testing.snap` and `core.testing.golden` compare against (`jet test -u` sets it); review the diff immediately. |

@@ -1,10 +1,10 @@
-// CoreLib/Top/FileStream.rs open/writer leaves. JetFileReader and
-// JetFileWriter share the one FD72 carrier (HostFiles.jet): its private
-// 8192-byte writer buffer is BufWriter's, and its drop flushes (ignoring the
-// result) then closes, as BufWriter<File>'s drop does. Held-directory and path
-// opens both go through HostHeldDirectory.jet fs_open_at (jet_fs_open_at).
+// The Rust original open/writer leaves. JetFileReader and JetFileWriter share
+// the one FD72 carrier (HostFiles.jet): its private 8192-byte writer buffer is
+// BufWriter's, and its drop flushes (ignoring the result) then closes, as
+// BufWriter<File>'s drop does. Held-directory and path opens both go through
+// HostHeldDirectory.jet fs_open_at (jet_fs_open_at).
 
-// FileStream.rs "fault injected: FS.Write" checkpoint (IOError::other).
+// "fault injected: FS.Write" checkpoint (IOError::other).
 fn files_write_fault(path: I64, operation: I64, error: I64) -> Bool {
     if !jet_fault_should_fail(rt_static_text("FS.Write")) -> return false
     _ := host_io_other_take(operation, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Write")), error)
@@ -13,7 +13,7 @@ fn files_write_fault(path: I64, operation: I64, error: I64) -> Bool {
 
 fn files_writer_path(writer: I64) -> I64 { fd_word(writer, I64{24}) }
 
-// FileStream.rs:22: a held-directory member must be a regular file.
+// A held-directory member must be a regular file.
 #Export(c) fn jet_std_files_open_reader(handle: I64, name: I64, links: I64, output: I64, error: I64) -> I64 {
     if compiler_fs_fault(name, error) -> return I64{0}
     fd :: fs_open_at(handle, name, I64{0}, I64{0}, I64{-1}, links, error)
@@ -39,8 +39,8 @@ fn files_writer_path(writer: I64) -> I64 { fd_word(writer, I64{24}) }
     I64{1}
 }
 
-// FileStream.rs:75: fault, then the mapped-path refusal for a path open,
-// then access 2 (append) or 1 (truncate).
+// Fault, then the mapped-path refusal for a path open, then access 2 (append)
+// or 1 (truncate).
 #Export(c) fn jet_std_files_open_writer(handle: I64, name: I64, append: Bool, if_exists: I64, mode: I64, links: I64, output: I64, error: I64) -> I64 {
     if files_write_fault(name, HOST_IO_OP_WRITE, error) -> return I64{0}
     if (handle < I64{0} && jet_std_files_writer_refusal(name, error) != I64{0}) -> return I64{0}
@@ -52,7 +52,7 @@ fn files_writer_path(writer: I64) -> I64 { fd_word(writer, I64{24}) }
 
 #Export(c) fn jet_rt_handle_drop_jet_file_writer(writer: I64) { jet_fd_drop_raw(writer) }
 #Export(c) fn jet_std_file_writer_path(writer: I64) -> I64 { jet_fd_path_raw(writer) }
-// CAbiRoutes.rs handle field: out is a borrowed read/clone-only Text header.
+// The Rust original handle field: out is a borrowed read/clone-only Text header.
 #Export(c) fn jet_rt_handle_field_jet_file_writer_path(writer: I64, out: I64) { coll_copy(files_writer_path(writer), out, I64{24}) }
 
 FILES_WRITE_WHOLE_ZERO :: I64{-4097}
@@ -105,7 +105,6 @@ fn files_writer_write_list(writer: I64, data: I64, length: I64) -> I64 {
     failure
 }
 
-// FileStream.rs:229.
 #Export(c) fn jet_std_file_writer_write_all(writer: I64, data: I64, length: I64, error: I64) -> I64 {
     path :: files_writer_path(writer)
     if files_write_fault(path, HOST_IO_OP_WRITE, error) -> return I64{0}
@@ -114,7 +113,7 @@ fn files_writer_write_list(writer: I64, data: I64, length: I64) -> I64 {
     I64{1}
 }
 
-// FileStream.rs:132: the line, then "\n", both buffered.
+// The line, then "\n", both buffered.
 #Export(c) fn jet_std_file_writer_write_line(writer: I64, line: I64, error: I64) -> I64 {
     path :: files_writer_path(writer)
     if files_write_fault(path, HOST_IO_OP_WRITE, error) -> return I64{0}
@@ -136,7 +135,6 @@ fn files_writer_flush(writer: I64) -> I64 {
     if zero -> FILES_WRITE_BUFFERED_ZERO else -> I64{0} - code
 }
 
-// FileStream.rs:151.
 #Export(c) fn jet_std_file_writer_flush(writer: I64, error: I64) -> I64 {
     path :: files_writer_path(writer)
     if files_write_fault(path, HOST_IO_OP_WRITE, error) -> return I64{0}
@@ -145,7 +143,7 @@ fn files_writer_flush(writer: I64) -> I64 {
     I64{1}
 }
 
-// FileStream.rs:250: flush, then sync_all (fsync, EINTR retried); both Flush.
+// Flush, then sync_all (fsync, EINTR retried); both Flush.
 #Export(c) fn jet_std_file_writer_fsync(writer: I64, error: I64) -> I64 {
     path :: files_writer_path(writer)
     if files_write_fault(path, HOST_IO_OP_WRITE, error) -> return I64{0}
@@ -162,8 +160,8 @@ fn files_writer_flush(writer: I64) -> I64 {
     I64{1}
 }
 
-// FileStream.rs:273: fstat of the open file; buffered bytes are not counted.
-// The reader and writer share the FD72 carrier and jet_fs_stat_file's row.
+// Fstat of the open file; buffered bytes are not counted. The reader and writer
+// share the FD72 carrier and jet_fs_stat_file's row.
 #Export(c) fn jet_std_file_writer_stat(writer: I64, output: I64, length: I64, error: I64) -> I64 {
     jet_std_file_reader_stat(writer, output, length, error)
 }
@@ -184,8 +182,8 @@ fn files_push_octal(target: I64, value: I64) {
     }
 }
 
-// FileStream.rs:279 (unix): fault, 0..=0o7777 refusal, metadata (fstat),
-// then set_permissions (fchmod, EINTR retried); failures are Write.
+// (unix): fault, 0..=0o7777 refusal, metadata (fstat), then set_permissions
+// (fchmod, EINTR retried); failures are Write.
 #Export(c) fn jet_std_file_writer_set_mode(writer: I64, mode: I64, error: I64) -> I64 {
     path :: files_writer_path(writer)
     if files_write_fault(path, HOST_IO_OP_WRITE, error) -> return I64{0}

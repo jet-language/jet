@@ -15,6 +15,7 @@ use jet_foundation.[
     Span,
     SymbolKind,
     Type,
+    diagnostic_registry_row,
     expr_span,
     type_name,
 ]
@@ -182,7 +183,32 @@ fn sema_game_check_scene_method(receiver: Expr, receiver_value: TExpr, method: S
             return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
         callback_type := Type.Fn{params: [Type]{Type.Named{name: "GameFrame"}}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
-        callback :: sema_expression_lambda_host_callback_stored(args[0].expr, Val(callback_type), true, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        // The callback's checked calls give its serial frame schedule; the
+        // checked callback carries it into the scene's frame operation.
+        callback_source := args[0].expr
+        frame_refusal := String?{None}
+        frame_span := span
+        if args[0].expr == .Lambda(lambda, node) {
+            facts :: sema_frame_lambda_schedule(lambda, environment, program, scopes)
+            if facts.schedule != None {
+                scheduled := lambda
+                scheduled.meta.frame_schedule = facts.schedule
+                scheduled.meta.frame_schedule_explanation = facts.explanation
+                scheduled.meta.frame_schedule_derivation = facts.derivation
+                callback_source = Expr.Lambda{lambda: scheduled, id: node}
+            }
+            frame_refusal = facts.error
+            frame_span = lambda.span
+        }
+        diagnostics_before :: diagnostics.len()
+        callback :: sema_expression_lambda_host_callback_stored(callback_source, Val(callback_type), true, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        // A refusal is reported only for a callback that otherwise checks: an
+        // unresolved or ill-typed call has its own error already.
+        if frame_refusal == .Val(detail) && !sema_has_error_since(diagnostics, diagnostics_before) {
+            row :: diagnostic_registry_row("E2967") ?? panic("E2967 has no registry row")
+            &diagnostics.push(sema_error("E2967", frame_span, row.what.replace("{{detail}}", detail), row.why, row.fix))
+            return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        }
         if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
         schedule := FrameSchedule?{None}
         derivation := DerivationRef?{None}

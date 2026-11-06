@@ -1,7 +1,13 @@
-// Source/RecordIndex.rs. All candidate changes are transactional: failed
-// validation leaves the old snapshot intact. The stored form lives under
-// `<project>/.jet/records` and is read and published only through the rooted
-// store (RootedStore.jet), never by pathname.
+// All candidate changes are transactional: failed validation leaves the old
+// snapshot intact. The stored form lives under `<project>/.jet/records` and is
+// read and published only through the rooted store (RootedStore.jet), never by
+// pathname.
+use {
+    cli_files :: core.files
+    cli_process :: core.process
+    cli_sys :: core.sys
+}
+
 struct JetCLIRecordIndex {
     entries: [JetCLIRecordIndexEntry]
     budget: U64
@@ -60,8 +66,8 @@ fn jet_cli_record_links_to(entry: JetCLIRecordIndexEntry, target: JetCLIRecordIn
 }
 
 // Connected disposable groups cannot leave a protected record with a dangling
-// link. This is Source/RecordIndex.rs eviction_groups/apply_eviction, not a
-// separate recency policy: FIFO sequence, then artifact id, never timestamps.
+// link. This is eviction_groups/apply_eviction, not a separate recency policy:
+// FIFO sequence, then artifact id, never timestamps.
 fn jet_cli_record_index_evict(entries: &[JetCLIRecordIndexEntry], budget: U64) JetCLIReadError! {
     loop {
         total := U64{0}
@@ -246,12 +252,15 @@ fn jet_cli_record_index_remove_replay(index: &JetCLIRecordIndex, artifact_id: St
 
 // The persisted index is reloaded under the held directory lock before every
 // read/modify/write, so stale process snapshots cannot lose another producer.
+// The index is a per-machine cache stored without flushes (`open_cache`), so
+// an index that does not decode (a write a crash tore, or an empty file) is
+// absent, and the next store rebuilds it.
 fn jet_cli_record_index_load(project_root: String, budget: U64{268435456}) -[FS, Time.Wait]> JetCLIRecordIndex JetCLIReadError! {
     present :: JetCLIRootedDirectory.present(project_root, [String]{".jet", "records"}) ?? return Err(err)
     if !present -> return jet_cli_record_index_new(budget)
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, false) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, false) ?? return Err(err)
     if held.read("index.jsonl", 268435456) == {
-        .Val(raw) -> jet_cli_record_index_from_bytes(raw, budget)
+        .Val(raw) -> jet_cli_record_index_decode(raw, budget)
         .None -> jet_cli_record_index_new(budget)
         .Err(error) -> { return Err(error) }
     }
@@ -259,10 +268,15 @@ fn jet_cli_record_index_load(project_root: String, budget: U64{268435456}) -[FS,
 
 fn jet_cli_record_index_reload(held: JetCLIRootedDirectory, fallback: JetCLIRecordIndex) -[FS, Time.Wait]> JetCLIRecordIndex JetCLIReadError! {
     if held.read("index.jsonl", 268435456) == {
-        .Val(raw) -> jet_cli_record_index_from_bytes(raw, fallback.budget)
+        .Val(raw) -> jet_cli_record_index_decode(raw, fallback.budget)
         .None -> Ok(fallback)
         .Err(error) -> { return Err(error) }
     }
+}
+
+fn jet_cli_record_index_decode(raw: [U8], budget: U64) -> JetCLIRecordIndex JetCLIReadError! {
+    decoded :: jet_cli_record_index_from_bytes(raw, budget) ?? return jet_cli_record_index_new(budget)
+    Ok(decoded)
 }
 
 fn jet_cli_record_index_remove_disposable(project_root: String, path: String) JetCLIReadError! -[FS]> {
@@ -275,7 +289,7 @@ fn jet_cli_record_index_remove_disposable(project_root: String, path: String) Je
     name :: &parts.pop() ?? return Err(jet_cli_read_error("disposable artifact has no file name"))
     present :: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
     if !present -> return
-    held :: JetCLIRootedDirectory.open(project_root, parts, false) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, parts, false) ?? return Err(err)
     _ :: held.remove(name) ?? return Err(err)
 }
 
@@ -305,14 +319,14 @@ fn jet_cli_record_index_fresh_sequence(index: JetCLIRecordIndex, entry: ^JetCLIR
 }
 
 fn jet_cli_record_index_store(index: JetCLIRecordIndex, project_root: String) JetCLIReadError! -[FS, Env, Time]> {
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     previous :: jet_cli_record_index_reload(held, jet_cli_record_index_new(index.budget))
     jet_cli_record_index_store_held(index, held, project_root, previous.entries)
 }
 
 fn jet_cli_record_index_publish_and_store(index: &JetCLIRecordIndex, project_root: String, entry: ^JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous :: candidate.entries
@@ -330,7 +344,7 @@ fn jet_cli_record_index_publish_and_store(index: &JetCLIRecordIndex, project_roo
 }
 
 fn jet_cli_record_index_upsert_many_and_store(index: &JetCLIRecordIndex, project_root: String, entries: ^[JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous :: candidate.entries
@@ -347,7 +361,7 @@ fn jet_cli_record_index_upsert_many_and_store(index: &JetCLIRecordIndex, project
 }
 
 fn jet_cli_record_index_replace_and_store(index: &JetCLIRecordIndex, project_root: String, entry: JetCLIRecordIndexEntry) JetCLIReadError! -[FS, Env, Time]> {
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous :: candidate.entries
@@ -357,7 +371,7 @@ fn jet_cli_record_index_replace_and_store(index: &JetCLIRecordIndex, project_roo
 }
 
 fn jet_cli_record_index_save_replay_and_store(index: &JetCLIRecordIndex, project_root: String, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -[FS, Env, Time]> JetCLIRecordIndexEntry JetCLIReadError! {
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous :: candidate.entries
@@ -368,7 +382,7 @@ fn jet_cli_record_index_save_replay_and_store(index: &JetCLIRecordIndex, project
 }
 
 fn jet_cli_record_index_remove_replay_and_store(index: &JetCLIRecordIndex, project_root: String, artifact_id: String) -[FS, Env, Time]> JetCLIRecordIndexEntry JetCLIReadError! {
-    held :: JetCLIRootedDirectory.open(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
+    held :: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner :: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous :: candidate.entries
@@ -376,4 +390,52 @@ fn jet_cli_record_index_remove_replay_and_store(index: &JetCLIRecordIndex, proje
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
     index = ^candidate
     Ok(removed)
+}
+
+fn jet_cli_record_index_test_row(run: Int) -> JetCLIRecordIndexEntry Never! {
+    name :: "test:cccccccccccccccc:{run}:{run * 1000}"
+    JetCLIRecordIndexEntry{identity: JetCLIRecordIdentity{target_inputs_sha256: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", tool_version: "0.1.0", engine: "jet-test"}, kind: "evidence", artifact_id: name, path: ".jet/evidence/{name}.json", recorded_sequence: U64.from_int(run) ?? panic("a test run number is non-negative"), size: U64{1103}, capture: "safe", saved: false, consumed: [JetCLIRecordLink]{}, produced: [JetCLIRecordLink]{}}
+}
+
+// Validation sorts its own copy of the rows; the caller's rows stay intact
+// (a named-function `sort_by` comparator freed them).
+#Test("record index validation leaves the caller's rows intact") {
+    rows :: [JetCLIRecordIndexEntry]{jet_cli_record_index_test_row(1), jet_cli_record_index_test_row(2)}
+    jet_cli_record_snapshot_validate(rows) ?? panic("validate: {err.message}")
+    jet_cli_record_snapshot_validate(rows) ?? panic("validate again: {err.message}")
+    assert_eq(rows[1].path, ".jet/evidence/test:cccccccccccccccc:2:2000.json")
+}
+
+// `jet test` history appends one unprotected evidence row per run to an
+// index a previous run stored.
+#Test("record index appends disposable rows to a restored index") {
+    index := jet_cli_record_index_new() ?? panic("index")
+    loop run in 1..<4 {
+        fresh :: jet_cli_record_index_fresh_sequence(index, jet_cli_record_index_test_row(run)) ?? panic("fresh sequence {run}")
+        jet_cli_record_index_update(&index, fresh) ?? panic("append {run}")
+        bytes :: jet_cli_record_index_to_bytes(index) ?? panic("store {run}")
+        index = jet_cli_record_index_from_bytes(bytes) ?? panic("reload {run}")
+    }
+    assert_eq(index.entries.len(), 3)
+}
+
+#Test("record index publishes disposable rows into a stored index") {
+    root :: cli_files.join(cli_sys.temp_dir(), "jet-record-index-{cli_process.current_pid()}")
+    cli_files.remove_all(root).drop("a stale test root may be absent")
+    cli_files.create_dir_all(root) ?? panic("create record test root")
+    loop run in 1..<4 {
+        index := jet_cli_record_index_load(root) ?? panic("load {run}: {err.message}")
+        jet_cli_record_index_publish_and_store(&index, root, jet_cli_record_index_test_row(run)) ?? panic("publish {run}: {err.message}")
+    }
+    stored :: jet_cli_record_index_load(root) ?? panic("reload: {err.message}")
+    assert_eq(stored.entries.len(), 3)
+    // A cache index a crash tore reads as absent; the next store rebuilds it.
+    cli_files.write("{root}/.jet/records/index.jsonl", "{{\"capture\":\"sa") ?? panic("tear the index")
+    torn :: jet_cli_record_index_load(root) ?? panic("torn load: {err.message}")
+    assert_eq(torn.entries.len(), 0)
+    rebuilt := jet_cli_record_index_load(root) ?? panic("rebuild load: {err.message}")
+    jet_cli_record_index_publish_and_store(&rebuilt, root, jet_cli_record_index_test_row(4)) ?? panic("rebuild: {err.message}")
+    restored :: jet_cli_record_index_load(root) ?? panic("restored: {err.message}")
+    cli_files.remove_all(root).drop("the test root is scratch")
+    assert_eq(restored.entries.len(), 1)
 }

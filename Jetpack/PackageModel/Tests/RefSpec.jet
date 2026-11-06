@@ -1,7 +1,7 @@
 // Claims ported from crates/jet-pkg-model/src/RefSpec.rs #[cfg(test)].
 use {
     jet_pkg_model.[
-        ChannelPolicy, ChannelRef, MigratedRef, NamedSourceDecl, ProviderKind, ProviderRef, RefError,
+        ChannelPolicy, ChannelRef, NamedSourceDecl, ProviderKind, ProviderRef, RefError,
         RefSource, RefSpec, SourceTable, WorkspaceIndex, WorkspaceMember, pkg_canonical_locked_ref,
         pkg_with_default_source,
     ]
@@ -52,16 +52,11 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     })
 }
 
-#Test("retires nixpkgs public spelling but preserves persisted provenance") {
-    cases :: [(raw: String, replacement: String, persisted: String)]{
-        (raw: "ripgrep@nixpkgs", replacement: "ripgrep@jetpack", persisted: "ripgrep@nixpkgs"),
-        (raw: "ripgrep@nixpkgs#auto", replacement: "ripgrep@jetpack#auto", persisted: "ripgrep@nixpkgs#auto"),
-        (raw: "ripgrep#version=15.2.0@nixpkgs", replacement: "ripgrep@jetpack#version=15.2.0", persisted: "ripgrep@nixpkgs#version=15.2.0")
-    }
-    loop case in cases {
-        assert_eq(MigratedRef.public(case.raw).canonical, case.replacement)
-        assert_eq(MigratedRef.persisted(case.raw).canonical, case.persisted)
-        assert_eq(pkg_test_ref_error(case.raw), RefError.RetiredNixpkgs{raw: case.raw, replacement: case.replacement})
+#Test("nixpkgs is not a public source") {
+    refs :: [String]{"ripgrep@nixpkgs", "ripgrep@nixpkgs#auto", "ripgrep@nixpkgs#version=15.2.0"}
+    loop raw in refs {
+        assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
+        assert_eq(pkg_test_ref_error(raw).code(), Val("E1358"))
     }
 }
 
@@ -77,14 +72,10 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     assert_eq(pkg_test_classify("ripgrep"), pkg_test_classify("ripgrep@jetpack"))
 }
 
-#Test("nixpkgs public ref is an exact jetpack rewrite") {
-    assert_eq(pkg_test_ref_error("ripgrep@nixpkgs"), RefError.RetiredNixpkgs{raw: "ripgrep@nixpkgs", replacement: "ripgrep@jetpack"})
-}
-
 #Test("classifies github repo") {
-    spec :: pkg_test_classify("halcyonomega/my-fastfetch-jet-config@github")
+    spec :: pkg_test_classify("owner/my-fastfetch-jet-config@github")
     assert_eq(spec.source, RefSource.Github)
-    assert_eq(spec.package, "halcyonomega/my-fastfetch-jet-config")
+    assert_eq(spec.package, "owner/my-fastfetch-jet-config")
     assert_eq(spec.short_name(), "my-fastfetch-jet-config")
 }
 
@@ -168,9 +159,11 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     }
 }
 
-#Test("old provider first ref teaches the flip") {
-    assert_eq(pkg_test_ref_error("github@owner/repo"), RefError.ProviderFirst{raw: "github@owner/repo", replacement: "owner/repo@github"})
-    assert_eq(pkg_test_ref_error("path@../helpers"), RefError.ProviderFirst{raw: "path@../helpers", replacement: "../helpers"})
+#Test("provider first and path word refs are malformed") {
+    refs :: [String]{"github@owner/repo", "path@../helpers", "../helpers@path"}
+    loop raw in refs {
+        assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
+    }
 }
 
 #Test("package ref keeps version after source") {
@@ -212,11 +205,8 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("builtins resolve without declaration") {
-    if RefSpec.classify_in("fd@nixpkgs", SourceTable.empty()) == {
-        .Ok(_) -> panic("expected RetiredNixpkgs")
-        .Err(error) -> assert_eq(error, RefError.RetiredNixpkgs{raw: "fd@nixpkgs", replacement: "fd@jetpack"})
-    }
-    assert(RefSource.is_builtin("nixpkgs"))
+    assert_eq(pkg_test_classify_in("fd@jetpack", SourceTable.empty()).source, RefSource.Jetpack)
+    assert_eq(pkg_test_classify_in("owner/fd@github", SourceTable.empty()).source, RefSource.Github)
     assert(!RefSource.is_builtin("stable"))
 }
 
@@ -297,8 +287,8 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     assert_eq(parsed.target, "../helpers")
 }
 
-#Test("provider ref retires nixpkgs source spelling") {
-    assert_eq(pkg_test_provider_ref_error("nixpkgs-unstable@nixpkgs"), RefError.RetiredNixpkgs{raw: "nixpkgs-unstable@nixpkgs", replacement: "nixpkgs-unstable@jetpack"})
+#Test("provider ref rejects the nixpkgs source word") {
+    assert_eq(pkg_test_provider_ref_error("nixpkgs-unstable@nixpkgs"), RefError.Malformed("nixpkgs-unstable@nixpkgs"))
 }
 
 #Test("channel policies are checked and keep channel intent") {
@@ -317,26 +307,14 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
     assert_eq(automatic.channel, Val(ChannelRef.Latest))
 
     retired :: "omp#auto{REF_PROVIDER_AT}jetpack"
-    if pkg_test_provider_ref_error(retired) == {
-        .NonCanonical(_, replacement) -> assert_eq(replacement, "omp@jetpack#auto")
-        else -> panic("expected NonCanonical")
-    }
+    assert_eq(pkg_test_provider_ref_error(retired), RefError.Malformed(retired))
 }
 
 #Test("retired selector forms do not fall back to canonical parsers") {
-    cases :: [(raw: String, replacement: String)]{
-        (raw: "#auto omp@releases", replacement: "omp@releases#auto"),
-        (raw: "omp#v18.0.4@releases", replacement: "omp@releases#v18.0.4")
-    }
-    loop case in cases {
-        if pkg_test_ref_error(case.raw) == {
-            .NonCanonical(_, actual) -> assert_eq(actual, case.replacement)
-            else -> panic("expected NonCanonical from RefSpec")
-        }
-        if pkg_test_provider_ref_error(case.raw) == {
-            .NonCanonical(_, actual) -> assert_eq(actual, case.replacement)
-            else -> panic("expected NonCanonical from ProviderRef")
-        }
+    refs :: [String]{"#auto omp@releases", "omp#v18.0.4@releases"}
+    loop raw in refs {
+        assert_eq(pkg_test_ref_error(raw), RefError.Malformed(raw))
+        assert_eq(pkg_test_provider_ref_error(raw), RefError.Malformed(raw))
     }
 }
 
@@ -363,6 +341,6 @@ fn pkg_test_ws_index() -> WorkspaceIndex {
 }
 
 #Test("provider ref rejects provider first and path word") {
-    assert_eq(pkg_test_provider_ref_error("github@owner/repo"), RefError.ProviderFirst{raw: "github@owner/repo", replacement: "owner/repo@github"})
-    assert_eq(pkg_test_provider_ref_error("../helpers@path"), RefError.PathProviderRetired{raw: "../helpers@path", path: "../helpers"})
+    assert_eq(pkg_test_provider_ref_error("github@owner/repo"), RefError.Malformed("github@owner/repo"))
+    assert_eq(pkg_test_provider_ref_error("../helpers@path"), RefError.Malformed("../helpers@path"))
 }

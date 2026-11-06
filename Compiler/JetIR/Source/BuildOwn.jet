@@ -620,12 +620,25 @@ fn ir_drop_glue(m: &IRModule, p: IRProgram, row: Int) Never! {
             }
             if !ir_glue_drops(m, member.ty) -> next
             value :: ir_load_at(&m, &a, at, member.offset, member.ty)
-            ir_emit(&a.f, IROp.Drop, -1, value, -1, -1, a.line)
+            ir_drop_part(&m, &a, value)
         }
     }
     if a.error != "" -> ir_emit(&a.f, IROp.Unreachable, -1, -1, -1, -1, a.line)
     ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
     m.functions[id] = ^a.f
+}
+
+// Drops `value`, a member read out of its holder: a handle that moved out
+// (ir_move_member) left a null word, which holds nothing to drop.
+fn ir_drop_part(m: &IRModule, b: &IRBuilder, value: Int) Never! {
+    if !ir_is_handle(m, b.f.slot_type[value]) {
+        ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+        return
+    }
+    held :: ir_option_is_some(&m, &b, value)
+    ir_open_if(&b.f, held, b.line)
+    ir_emit(&b.f, IROp.Drop, -1, value, -1, -1, b.line)
+    ir_end(&b.f, b.line)
 }
 
 // Gives up one owner of the counted buffer `data` of the header row `row`
@@ -1393,6 +1406,54 @@ fn ir_close_temporary(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span
     b.fresh[slot] = false
     drops :: ir_has_drop(m, b, slot)
     ir_hold_statement_guard(&b, slot, glue, drops)
+}
+
+// `read` is a part of `base` (a field, a List element or a Map value), and
+// `base` is a fresh temporary (`make().rows.len()`, `make()[0]`) that ends
+// once the part is read. At the top level of the statement being built it
+// is held until the statement ends (ir_stmt) or an early exit leaves it
+// (ir_exit_statement_guards). Anywhere else the part is copied out
+// (ir_copy_value) and the temporary dropped now. A temporary that closes,
+// and a part with a drop and no clone, which a read moves out, are not
+// ended here.
+fn ir_end_read_base(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, read: Int, span: Span) -> Int Never! {
+    if read < 0 || !b.fresh[base] || !ir_has_drop(m, b, base) || b.views.get(base) != None || ir_lent(b, base) -> return read
+    if ir_has_drop(m, b, read) && ir_row_lacks_clone(&m, p, b.f.slot_type[read]) -> return read
+    if ir_close_glue(&m, p, &b, b.f.slot_type[base], false, span) >= 0 || ir_failed(b) -> return read
+    if b.statement_depth >= 0 && b.f.open.len() == b.statement_depth {
+        b.fresh[base] = false
+        ir_hold_statement_guard(&b, base, -1, true)
+        return read
+    }
+    copied :: ir_copy_value(&m, p, &b, read, span)
+    ir_release(&m, &b, base)
+    b.fresh[copied] = true
+    copied
+}
+
+// `result` is what a builtin that only reads `subject` returns
+// (`make().keys()`, `make_set().has(x)`), and `subject` is a fresh Map or
+// Set that ends with the read: now when the result is a scalar or a value
+// of its own, else as a part read off it (ir_end_read_base).
+fn ir_end_builtin_receiver(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, result: Int, span: Span) -> Int Never! {
+    if result >= 0 && !b.fresh[result] && ir_has_drop(m, b, result) -> return ir_end_read_base(&m, p, &b, subject, result, span)
+    if b.views.get(subject) == None && !ir_lent(b, subject) -> ir_release(&m, &b, subject)
+    result
+}
+
+// `list`, the List a loop walks, is a fresh temporary (`loop x in make()`):
+// the walk only reads it, and it ends with the loop. At the top level of the
+// statement being built it is held until the statement ends (ir_stmt) or an
+// early exit leaves it (ir_exit_statement_guards); true when it is not, and
+// the walk drops it after its last step (ir_list_walk).
+fn ir_end_walked_temporary(m: &IRModule, b: &IRBuilder, list: Int) -> Bool Never! {
+    if list < 0 || !b.fresh[list] || !ir_has_drop(m, b, list) || b.views.get(list) != None || ir_lent(b, list) -> return false
+    b.fresh[list] = false
+    if b.statement_depth >= 0 && b.f.open.len() == b.statement_depth {
+        ir_hold_statement_guard(&b, list, -1, true)
+        return false
+    }
+    true
 }
 
 // A fresh value ended in place (`close(^make("x"))`, `consume(make("x"))`):

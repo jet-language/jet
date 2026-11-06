@@ -1,0 +1,11 @@
+# A named `Ordering Never!` function as a sort_by comparator hands back a Result carrier; the
+# sort takes its Ordering and frees that carrier exactly once, so repeated sorts of refcounted
+# elements leave the heap intact at every optimization level. Named `map` and `filter` callbacks
+# with allocating bodies run over the sorted lists in the same rounds.
+fixture: named_comparator_sort_frees_its_carrier_once/input
+step: jet run run.jet
+exit: 0
+stdout: = ".jet/receipts/c-3.json,.jet/evidence/a-1.json,.jet/evidence/b-2.json|alpha-1,bravo-2,charlie-3,delta-4|c-3.json,a-1.json,b-2.json|2|384\n"
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = ".jet/receipts/c-3.json,.jet/evidence/a-1.json,.jet/evidence/b-2.json|alpha-1,bravo-2,charlie-3,delta-4|c-3.json,a-1.json,b-2.json|2|384\n"

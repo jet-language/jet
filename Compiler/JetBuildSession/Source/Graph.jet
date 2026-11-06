@@ -176,11 +176,13 @@ fn build_session_finish(session: &BuildSession, returned: BuildSessionValue) -> 
     {plan: Val(BuildSessionPlan{storage: session.storage, default: default}), diagnostics: state.diagnostics}
 }
 // What `jet build` runs: the selected targets (the default and its dependencies, or every
-// target), dependencies first. `executables` compile their first source; `unsupported` names
-// the selected targets the build executor does not run yet (other kinds, or own actions).
+// target), dependencies first. `executables` compile their first source after the target's
+// actions ran; `libraries` check theirs, as `jet check` does (a library is the source its
+// importers compile; `jet build --lib` is the linkable native library); `unsupported` names
+// the selected targets the build neither compiles, checks nor produces with actions.
 // `options` are the build options fn build set, its layer of D-SETTING-ORDER1.
 struct BuildPlanExecutable { name: String source: String }
-struct BuildPlanSelection { executables: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
+struct BuildPlanSelection { executables: [BuildPlanExecutable] libraries: [BuildPlanExecutable] unsupported: [String] options: [BuildSessionOption] }
 fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
     permit :: plan.storage.guard_read()
     order := [Int]{}
@@ -212,20 +214,39 @@ fn build_plan_selection(plan: BuildSessionPlan) -> BuildPlanSelection Never! {
         }
     }
     executables := [BuildPlanExecutable]{}
+    libraries := [BuildPlanExecutable]{}
     unsupported := [String]{}
     loop index in order {
         target :: permit.value.targets[index]
-        if target.kind == "executable" && target.actions.len() == 0 && target.sources.len() > 0 {
+        if target.kind == "executable" && target.sources.len() > 0 {
             &executables.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy()})
-        } else {
+        } else if target.kind == "library" && target.sources.len() > 0 {
+            &libraries.push(BuildPlanExecutable{name: target.name.copy(), source: target.sources[0].copy()})
+        } else if target.actions.len() == 0 {
             &unsupported.push("{target.name} ({target.kind})")
         }
     }
-    {executables: executables, unsupported: unsupported, options: permit.value.options.copy()}
+    {executables: executables, libraries: libraries, unsupported: unsupported, options: permit.value.options.copy()}
 }
 fn build_plan_graph(plan: BuildSessionPlan) -> BuildGraph Never! {
     permit :: plan.storage.guard_read()
     build_session_project(permit.value)
+}
+// The declared graph `jet build` hands its executor, in declaration order:
+// every handle id of the session indexes these lists. `default` is the
+// target `b.default(t)` selected, or -1 for every target.
+struct BuildPlanExecution {
+    toolchains: [BuildSessionToolchain]
+    signing: [BuildSessionSigning]
+    probes: [BuildSessionProbe]
+    plugins: [BuildSessionPlugin]
+    actions: [BuildSessionAction]
+    targets: [BuildSessionTarget]
+    default: Int
+}
+fn build_plan_execution(plan: BuildSessionPlan) -> BuildPlanExecution Never! {
+    permit :: plan.storage.guard_read()
+    BuildPlanExecution{toolchains: permit.value.toolchains.copy(), signing: permit.value.signing.copy(), probes: permit.value.probes.copy(), plugins: permit.value.plugins.copy(), actions: permit.value.actions.copy(), targets: permit.value.targets.copy(), default: plan.default}
 }
 // Every module `fn build` generated, selected or not (`write_generated: on`
 // writes them all for inspection), in path order.

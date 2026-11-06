@@ -1,5 +1,5 @@
 // HostParallelism.jet against fake procfs/sysfs trees. Expected values follow
-// Rust std 1.96 sys/thread/unix.rs available_parallelism + cgroups::quota.
+// Rust std 1.96 library/std/src/sys/thread/unix.rs available_parallelism + cgroups::quota.
 #define _GNU_SOURCE
 #include <errno.h>
 #include <sched.h>

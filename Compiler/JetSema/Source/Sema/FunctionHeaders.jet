@@ -134,9 +134,16 @@ fn sema_function_header_lint_err_params(function: Func, diagnostics: &[Diagnosti
     }
 }
 
-// L2401 (D-NARG1, Rust `Bundle/Validation.rs` and `Registration/Items.rs`): a
-// public function or method with a positional `Bool` parameter and no default
-// invites transposed `true`/`false` arguments at the call site.
+// L0510: a user function whose name is one the readable prelude opens
+// replaces that alias in its file; the declaration wins, and is worth seeing.
+fn sema_function_header_lint_prelude_shadow(function: Func, diagnostics: &[Diagnostic]) {
+    if function.compiler_generated || !SEMA_CALL_PRELUDE_NAMES.contains(function.name) -> return
+    &diagnostics.push(sema_lint("L0510", function.name_span, "Declaration {function.name} replaces a Core prelude alias", "The readable Core prelude opens this name automatically, and a user declaration wins in its file", "Keep the declaration to accept the shadow, or rename it to use the prelude alias"))
+}
+
+// L2401 (D-NARG1): a public function or method with a positional `Bool`
+// parameter and no default invites transposed `true`/`false` arguments at the
+// call site.
 fn sema_function_header_lint_positional_bools(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) {
     if !function.is_pub || function.compiler_generated -> return
     noun :: if is_method -> "method" else -> "function"
@@ -217,12 +224,14 @@ fn sema_function_header_memo_stats(receiver: Expr, method: String, args: [CallAr
 
 // E0126: a default expression may name only parameters written
 // before its own; defaults fill left to right. `self` is not a parameter here.
-fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
+// Answers the indices of the parameters whose defaults read a later one, so
+// their defaults aren't checked again (the later name is not in scope there).
+fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> [Int] {
     names := [String]{}
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name != "self" -> &names.push(function.params[parameter_index].name)
     }
-    valid := true
+    invalid := [Int]{}
     index := 0
     loop parameter_index in 0..<function.params.len() {
         if function.params[parameter_index].name == "self" -> next
@@ -240,14 +249,14 @@ fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: 
                     }
                     if later {
                         &diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
-                        valid = false
+                        if invalid.len() == 0 || invalid[invalid.len() - 1] != parameter_index -> &invalid.push(parameter_index)
                     }
                 }
             }
         }
         index += 1
     }
-    valid
+    invalid
 }
 
 // The identifier nodes a default expression reads, in source order.
@@ -380,21 +389,21 @@ fn sema_function_header_supported(function: Func, context: &SemaCheckContext) ->
         supported = false
     }
     loop marker in function.markers {
-        // Rust Guest.rs `is_guest_export_marker`: an `#Export(c)` function is an
-        // ordinary Jet body; the export row is read after checking
-        // (jet_driver_c_exports), so the marker adds nothing to the body check.
-        // A `#Kernel(.parallel)` marker is the parsed `function.kernel`, whose
-        // proof obligations Kernel.jet checks. `#Memo` is checked by
-        // sema_check_memoized_function (E0939/E0940) and the effect pass
-        // (E0938); its result cache is the body's memo facts
-        // (sema_function_header_memo_config). A `#Target(JS|Wasm)` or
-        // `#WasmExport` marker is the parsed `function.web_marker`, which
-        // WebPartition.jet checks. A `#State`/`#Transition` marker is the
-        // parsed `function.state_requires`/`state_transition`, which
-        // StateFacts.jet validates and Typestate.jet checks at each call. An
+        // `is_guest_export_marker`: an `#Export(c)` function is an ordinary Jet
+        // body; the export row is read after checking (jet_driver_c_exports), so
+        // the marker adds nothing to the body check. A `#Kernel(.parallel)`
+        // marker is the parsed `function.kernel`, whose proof obligations
+        // Kernel.jet checks. `#Memo` is checked by sema_check_memoized_function
+        // (E0939/E0940) and the effect pass (E0938); its result cache is the
+        // body's memo facts (sema_function_header_memo_config). A
+        // `#Target(JS|Wasm)` or `#WasmExport` marker is the parsed
+        // `function.web_marker`, which WebPartition.jet checks. A
+        // `#State`/`#Transition` marker is the parsed
+        // `function.state_requires`/`state_transition`, which StateFacts.jet
+        // validates and Typestate.jet checks at each call. An
         // `#Allow(jet.LintName, "why")` is a lint allowance over the body
-        // (LintAllowances.jet), validated by MarkerRules. A `#DevPanel` panel
-        // is an ordinary Jet body; the devtools publication gate
+        // (LintAllowances.jet), validated by MarkerRules. A `#DevPanel` panel is
+        // an ordinary Jet body; the devtools publication gate
         // (Calls/Devtools.jet) reads the marker to find the panel's state.
         if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || (marker.name == "Kernel" && function.kernel != None) || marker.name == "Memo" || marker.name == "Allow" || marker.name == "DevPanel" || ((marker.name == "Target" || marker.name == "WasmExport") && function.web_marker != None) || (marker.name == "State" && function.state_requires != None) || (marker.name == "Transition" && function.state_transition != None) || sema_marker_is_guest_export(marker) -> next
         // A user-declared marker is metadata its declaration describes; it
@@ -443,8 +452,9 @@ fn sema_function_header_check_variadic_bound_shape(function: Func, environment: 
     if last.variadic_bound_list == .Val(list) {
         bounded = list.len() > 0
     } else {
-        if last.ty == .Named(trait_name) && trait_name != "" && program.registration_graph == .Val(graph) {
-            bounded = sema_type_graph_trait_symbol(graph, environment.module_identity, trait_name) != None
+        if last.ty == .Named(trait_name) && trait_name != "" {
+            bounded = sema_type_builtin_trait_symbol(trait_name) != None
+            if !bounded && program.registration_graph == .Val(graph) -> bounded = sema_type_graph_trait_symbol(graph, environment.module_identity, trait_name) != None
         }
     }
     if !bounded -> return true

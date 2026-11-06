@@ -6,6 +6,7 @@ use {
         pkg_declares_workspace_module, pkg_discover_module_in,
     ]
     jetpack_foundation.[MAX_TREE_DEPTH, PACKAGE_FILE]
+    files :: core.files
 }
 
 #Test("module found regardless of filename") {
@@ -33,6 +34,23 @@ use {
     dir :: scratch.path
     files.write(files.join(dir, "arbitrary.jet"), "module _bench {{ }}\n") ?? panic("write")
     assert_eq(pkg_discover_module_in(dir, "_bench") ?? panic("internal module found"), dir)
+}
+
+#Test("role modules are discovered in both declaration spellings") {
+    scratch :: files.temp_dir("discovery-colon-spelling") ?? panic("scratch")
+    dir :: scratch.path
+    files.write(files.join(dir, "a.jet"), "workspace: module {{ members: [] }}\n") ?? panic("write")
+    files.write(files.join(dir, "b.jet"), "module dev {{ }}\n") ?? panic("write")
+    files.write(files.join(dir, "c.jet"), "env.laptop: module {{ }}\nother.dev: module {{ }}\n") ?? panic("write")
+    assert_eq(pkg_discover_module_in(dir, "workspace") ?? panic("colon module found"), dir)
+    assert_eq(pkg_discover_module_in(dir, "dev") ?? panic("retired module found"), dir)
+    if pkg_discover_module_in(dir, "laptop") == .Ok(_) -> panic("a dotted head declares no `laptop` module")
+    cache := WorkspaceDeclarationCache.new()
+    assert(pkg_declares_workspace_module(&cache, "workspace: module {{ members: [] }}\n"))
+    assert(pkg_declares_workspace_members(&cache, "workspace: module {{ members: [] }}\n"))
+    assert(pkg_declares_workspace_module(&cache, "module workspace {{ members: [] }}\n"))
+    assert(!pkg_declares_workspace_module(&cache, "dev: module {{ }}\n"))
+    assert(!pkg_declares_workspace_module(&cache, "x.workspace: module {{ }}\n"))
 }
 
 #Test("package jet is excluded from discovery") {

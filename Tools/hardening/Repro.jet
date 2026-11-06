@@ -1,0 +1,363 @@
+// jet.hardening.repro.v1: one hardening run, sealed. A bundle keeps the
+// exact source, the stdin it was fed, the tier commands, the raw stdout and
+// stderr bytes, the exit, the seed and mutation, the oracle, the commit and
+// the binary identity, and a content digest over all of it. Changing any
+// byte changes the digest, and a bundle recorded under another source
+// snapshot is stale.
+
+use {
+    json :: core.encoding.json
+    base64 :: core.encoding.base64
+}
+
+REPRO_SCHEMA :: "jet.hardening.repro.v1"
+SOURCE_SLOT :: "{{source}}"
+
+struct TierCommand {
+    tier: String
+    command: String
+}
+
+struct Oracle {
+    name: String
+    version: String
+    input_digest: String
+    independence_class: String
+}
+
+struct ReproInput {
+    run_id: String
+    started: String
+    finished: String
+    commit: String
+    binary_sha256: String
+    host: String
+    target: String
+    registry_snapshot_hash: String
+    config_hash: String
+    stable_surface_id: String
+    tier_commands: [TierCommand]
+    seed: String
+    mutation_arm: String
+    mutator_version: String
+    source: String
+    stdin: [U8]
+    stdout: [U8]
+    stderr: [U8]
+    exit: Int?
+    signal: String?
+    timeout: Bool
+    expected_relation: Dyn
+    actual_relation: Dyn
+    normalization: [String]
+    oracle: Oracle
+    classification: String
+    tower_action: Dyn
+}
+
+struct ReproCheck {
+    errors: [String]
+    stale: Bool
+}
+
+struct Reconstructed {
+    source: String
+    source_sha256: String
+    tier_commands: [TierCommand]
+    stdin: [U8]
+    stdout: [U8]
+    stderr: [U8]
+    exit: Int?
+    signal: String?
+    timeout: Bool
+    seed: String
+    mutation_arm: String
+    mutator_version: String
+    commit: String
+    binary_sha256: String
+    oracle: Oracle
+}
+
+fn is_lower_hex(text: String) -> Bool Never! {
+    loop byte in text.bytes() {
+        value :: Int.from_u8(byte)
+        if !((value >= 48 && value <= 57) || (value >= 97 && value <= 102)) -> return false
+    }
+    true
+}
+
+fn is_sha256(text: String) -> Bool Never! {
+    text.starts_with("sha256:") && text.len() == 71 && is_lower_hex(text.slice(7..<71))
+}
+
+fn is_commit(text: String) -> Bool Never! {
+    text.len() == 40 && is_lower_hex(text)
+}
+
+fn field(tree: Dyn, name: String) -> Dyn? Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return Val(entry.value.copy())
+        }
+    }
+    None
+}
+
+fn shape(value: Dyn) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(_) -> "bool"
+        .Text(_) -> "text"
+        .Array(_) -> "array"
+        .Object(_) -> "object"
+        else -> "number"
+    }
+}
+
+fn field_text(tree: Dyn, name: String) -> String? Never! {
+    value :: field(tree, name) ?? return None
+    if value == .Text(text) -> return Val(text.copy())
+    None
+}
+
+fn field_int(tree: Dyn, name: String) -> Int? Never! {
+    value :: field(tree, name) ?? return None
+    if value == {
+        .Int(number) -> return Val(number)
+        .Number(lexeme) -> {
+            parsed :: Int.parse(lexeme) ?? return None
+            return Val(parsed)
+        }
+        else -> {}
+    }
+    None
+}
+
+fn text_list(values: [String]) -> Dyn Never! {
+    out := [Dyn]{}
+    loop value in values -> &out.push(Dyn.Text(value.copy()))
+    Dyn.Array(out)
+}
+
+// The SHA-256 of the canonical JSON of a bundle without its content_digest.
+fn repro_digest(tree: Dyn) -> String Err! {
+    kept := [String: Dyn]{}
+    if shape(tree) != "object" -> return Err("repro bundle is not an object")
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key != "content_digest" -> kept[entry.key.copy()] = entry.value.copy()
+        }
+    }
+    text :: json.canonical(Dyn.Object(kept)) ?? return Err("repro bundle has no canonical form: {err}")
+    Ok(digest(text))
+}
+
+fn sorted_commands(commands: [TierCommand]) -> [TierCommand] Never! {
+    out := commands.copy()
+    &out.sort_by((left: TierCommand, right: TierCommand) -> left.tier <=> right.tier)
+    out
+}
+
+fn commands_dyn(commands: [TierCommand]) -> Dyn Never! {
+    out := [Dyn]{}
+    loop row in sorted_commands(commands) {
+        &out.push(Dyn.Object([String: Dyn]{"command": Dyn.Text(row.command.copy()), "tier": Dyn.Text(row.tier.copy())}))
+    }
+    Dyn.Array(out)
+}
+
+fn make_repro(input: ReproInput) -> Dyn Err! {
+    exit :: if input.exit == .Val(code) -> Dyn.Int(code) else -> Dyn.Null
+    signal :: if input.signal == .Val(name) -> Dyn.Text(name.copy()) else -> Dyn.Null
+    entries :: [String: Dyn]{
+        "actual_relation": input.actual_relation.copy(),
+        "binary_sha256": Dyn.Text(input.binary_sha256.copy()),
+        "classification": Dyn.Text(input.classification.copy()),
+        "commit": Dyn.Text(input.commit.copy()),
+        "config_hash": Dyn.Text(input.config_hash.copy()),
+        "exit": exit,
+        "expected_relation": input.expected_relation.copy(),
+        "finished": Dyn.Text(input.finished.copy()),
+        "host": Dyn.Text(input.host.copy()),
+        "mutation_arm": Dyn.Text(input.mutation_arm.copy()),
+        "mutator_version": Dyn.Text(input.mutator_version.copy()),
+        "normalization": text_list(input.normalization),
+        "oracle": Dyn.Object([String: Dyn]{
+            "independence_class": Dyn.Text(input.oracle.independence_class.copy()),
+            "input_digest": Dyn.Text(input.oracle.input_digest.copy()),
+            "name": Dyn.Text(input.oracle.name.copy()),
+            "version": Dyn.Text(input.oracle.version.copy()),
+        }),
+        "registry_snapshot_hash": Dyn.Text(input.registry_snapshot_hash.copy()),
+        "run_id": Dyn.Text(input.run_id.copy()),
+        "schema": Dyn.Text(REPRO_SCHEMA),
+        "schema_version": Dyn.Int(1),
+        "seed": Dyn.Text(input.seed.copy()),
+        "signal": signal,
+        "source": Dyn.Text(input.source.copy()),
+        "source_sha256": Dyn.Text(digest(input.source)),
+        "stable_surface_id": Dyn.Text(input.stable_surface_id.copy()),
+        "started": Dyn.Text(input.started.copy()),
+        "stderr_bytes": Dyn.Text(base64.encode(input.stderr)),
+        "stderr_encoding": Dyn.Text("base64"),
+        "stdin_bytes": Dyn.Text(base64.encode(input.stdin)),
+        "stdin_encoding": Dyn.Text("base64"),
+        "stdout_bytes": Dyn.Text(base64.encode(input.stdout)),
+        "stdout_encoding": Dyn.Text("base64"),
+        "target": Dyn.Text(input.target.copy()),
+        "tier_commands": commands_dyn(input.tier_commands),
+        "timeout": Dyn.Bool(input.timeout),
+        "tower_action": input.tower_action.copy(),
+    }
+    bundle :: sealed(entries) ?? return Err(err)
+    check :: validate_repro(bundle, "")
+    if check.errors.len() > 0 -> return Err(check.errors.join("\n"))
+    Ok(bundle)
+}
+
+// Canonical base64 only: decoding and encoding again gives the same text,
+// so one byte string has exactly one recorded form.
+fn channel_bytes(tree: Dyn, name: String, errors: &[String]) -> [U8] Never! {
+    encoding :: field_text(tree, "{name}_encoding") ?? ""
+    if encoding != "base64" -> &errors.push("repro {name}_encoding must be base64")
+    text :: field_text(tree, "{name}_bytes") ?? {
+        &errors.push("repro {name}_bytes is missing")
+        return [U8]{}
+    }
+    bytes :: base64.decode(text) ?? {
+        &errors.push("repro {name}_bytes is not valid base64")
+        return [U8]{}
+    }
+    if base64.encode(bytes) != text -> &errors.push("repro {name}_bytes is not canonical base64")
+    bytes
+}
+
+fn read_commands(tree: Dyn, errors: &[String]) -> [TierCommand] Never! {
+    out := [TierCommand]{}
+    value :: field(tree, "tier_commands") ?? Dyn.Null
+    if shape(value) != "array" -> &errors.push("repro tier_commands must be an array")
+    if value == .Array(items) {
+        loop item in items {
+            tier :: field_text(item, "tier") ?? ""
+            command :: field_text(item, "command") ?? ""
+            if tier == "" || command == "" {
+                &errors.push("repro tier command needs a tier and a command")
+                next
+            }
+            if !command.contains(SOURCE_SLOT) -> &errors.push("repro {tier} command does not run the recorded source through {SOURCE_SLOT}")
+            loop old in out {
+                if old.tier == tier -> &errors.push("repro has duplicate tier command: {tier}")
+            }
+            &out.push(TierCommand{tier: tier.copy(), command: command.copy()})
+        }
+    }
+    if out.len() == 0 -> &errors.push("repro tier commands are required")
+    loop index in 1..<out.len() {
+        if out[index - 1].tier > out[index].tier -> &errors.push("repro tier commands are not sorted by tier")
+    }
+    out
+}
+
+fn read_oracle(tree: Dyn, errors: &[String]) -> Oracle Never! {
+    value :: field(tree, "oracle") ?? Dyn.Null
+    oracle :: Oracle{
+        name: field_text(value, "name") ?? "",
+        version: field_text(value, "version") ?? "",
+        input_digest: field_text(value, "input_digest") ?? "",
+        independence_class: field_text(value, "independence_class") ?? "",
+    }
+    if oracle.name == "" || oracle.version == "" || oracle.independence_class == "" -> &errors.push("repro oracle needs a name, version and independence class")
+    if !is_sha256(oracle.input_digest) -> &errors.push("repro oracle input_digest must be sha256:<64 hex>")
+    oracle
+}
+
+// Check a bundle. `current_snapshot` is the tree's source snapshot hash, or
+// "" to skip the staleness check.
+fn validate_repro(tree: Dyn, current_snapshot: String) -> ReproCheck Never! {
+    errors := [String]{}
+    if shape(tree) != "object" -> return ReproCheck{errors: [String]{"repro bundle is not an object"}, stale: false}
+    if field_text(tree, "schema") != Val(REPRO_SCHEMA) -> &errors.push("repro schema must be {REPRO_SCHEMA}")
+    if field_int(tree, "schema_version") != Val(1) -> &errors.push("repro schema_version must be 1")
+    claimed :: field_text(tree, "content_digest") ?? ""
+    if {
+        !is_sha256(claimed) -> &errors.push("repro content digest is missing or invalid")
+        repro_digest(tree) == .Ok(expected) -> {
+            if expected != claimed -> &errors.push("repro content digest does not match bundle")
+        }
+        else -> &errors.push("repro bundle has no canonical form")
+    }
+    required :: [String]{"run_id", "started", "finished", "host", "target", "stable_surface_id", "seed", "mutation_arm", "mutator_version", "source", "classification"}
+    loop name in required {
+        if (field_text(tree, name) ?? "") == "" -> &errors.push("repro {name} is missing or not a string")
+    }
+    if !is_commit(field_text(tree, "commit") ?? "") -> &errors.push("repro commit must be a full 40-hex commit id")
+    hashes :: [String]{"binary_sha256", "registry_snapshot_hash", "config_hash", "source_sha256"}
+    loop name in hashes {
+        if !is_sha256(field_text(tree, name) ?? "") -> &errors.push("repro {name} must be sha256:<64 hex>")
+    }
+    source :: field_text(tree, "source") ?? ""
+    if field_text(tree, "source_sha256") != Val(digest(source)) -> &errors.push("repro source hash does not match source")
+    _ :: channel_bytes(tree, "stdin", &errors)
+    _ :: channel_bytes(tree, "stdout", &errors)
+    _ :: channel_bytes(tree, "stderr", &errors)
+    _ :: read_commands(tree, &errors)
+    _ :: read_oracle(tree, &errors)
+    relations :: [String]{"expected_relation", "actual_relation"}
+    loop name in relations {
+        if field(tree, name) == None -> &errors.push("repro {name} is missing")
+    }
+    if shape(field(tree, "normalization") ?? Dyn.Null) != "array" -> &errors.push("repro normalization must be an array")
+    if shape(field(tree, "tower_action") ?? Dyn.Null) != "object" -> &errors.push("repro Tower action is required")
+    exit_shape :: shape(field(tree, "exit") ?? Dyn.Bool(false))
+    if exit_shape != "null" {
+        code :: field_int(tree, "exit") ?? -1
+        if code < 0 -> &errors.push("repro exit must be a non-negative integer or null")
+    }
+    signal_shape :: shape(field(tree, "signal") ?? Dyn.Bool(false))
+    if signal_shape != "null" && signal_shape != "text" -> &errors.push("repro signal must be a string or null")
+    if shape(field(tree, "timeout") ?? Dyn.Null) != "bool" -> &errors.push("repro timeout must be true or false")
+    stale :: current_snapshot != "" && field_text(tree, "registry_snapshot_hash") != Val(current_snapshot)
+    if stale -> &errors.push("repro registry snapshot is stale")
+    ReproCheck{errors: errors, stale: stale}
+}
+
+// Everything a replay needs, read back from a valid bundle. `tier` = ""
+// keeps every command; otherwise exactly one command must match it.
+fn reconstruct_repro(tree: Dyn, tier: String) -> Reconstructed Err! {
+    check :: validate_repro(tree, "")
+    if check.errors.len() > 0 -> return Err(check.errors.join("\n"))
+    errors := [String]{}
+    commands :: read_commands(tree, &errors)
+    selected := [TierCommand]{}
+    loop row in commands {
+        if tier == "" || row.tier == tier -> &selected.push(row.copy())
+    }
+    if tier != "" && selected.len() != 1 -> return Err("repro has no unique command for tier {tier}")
+    exit :: field_int(tree, "exit")
+    signal :: field_text(tree, "signal")
+    timeout :: (field(tree, "timeout") ?? Dyn.Null) == .Bool(true)
+    Ok(Reconstructed{
+        source: field_text(tree, "source") ?? "",
+        source_sha256: field_text(tree, "source_sha256") ?? "",
+        tier_commands: selected,
+        stdin: channel_bytes(tree, "stdin", &errors),
+        stdout: channel_bytes(tree, "stdout", &errors),
+        stderr: channel_bytes(tree, "stderr", &errors),
+        exit: exit,
+        signal: signal,
+        timeout: timeout,
+        seed: field_text(tree, "seed") ?? "",
+        mutation_arm: field_text(tree, "mutation_arm") ?? "",
+        mutator_version: field_text(tree, "mutator_version") ?? "",
+        commit: field_text(tree, "commit") ?? "",
+        binary_sha256: field_text(tree, "binary_sha256") ?? "",
+        oracle: read_oracle(tree, &errors),
+    })
+}
+
+// The exact command for one tier, with the reconstructed source at `path`.
+fn replay_command(tree: Dyn, tier: String, path: String) -> String Err! {
+    if path == "" -> return Err("replay source path is required")
+    rebuilt :: reconstruct_repro(tree, tier) ?? return Err(err)
+    Ok(rebuilt.tier_commands[0].command.replace(SOURCE_SLOT, path))
+}

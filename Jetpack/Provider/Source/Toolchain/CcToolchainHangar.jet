@@ -1,7 +1,8 @@
 // Resolve and verify a C/C++ toolchain descriptor from a committed,
 // receipt-checked Hangar projection (jetpack::Provider::cc_toolchain). Store
-// registration and closure admission remain the single write/recording
-// boundary; this file only reads Hangar and re-proves every digest.
+// registration remains the single write/recording boundary; this file only
+// reads Hangar and re-proves every digest, including the toolchain pack a
+// pack-layout target entry mounts.
 
 fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, hangar_root: String, target: String, allow_fixture: Bool) -[FS, Env, Time]> CcToolchainDescriptor CcToolchainError! {
     normalized :: provider_cc_normalize_target(target)
@@ -25,16 +26,8 @@ fn provider_cc_toolchain_resolve_for_target(verification: &StoreVerification, ha
         layout :: producer.facts.get("cc.layout") ?? ""
         if !allow_fixture && layout == CC_TOOLCHAIN_FIXTURE_LAYOUT -> next
         if producer.facts.get("cc.target") != Val(normalized) -> next
-        if layout == CC_TOOLCHAIN_NIX_LAYOUT {
-            record :: provider_cc_acquisition_record(normalized) ?? {
-                corrupt = err.message()
-                next
-            }
-            provider_cc_validate_pinned_nix_descriptor(producer, record) ?? {
-                corrupt = "Hangar C toolchain `{entry.id}` is not the pinned acquisition: {err.message()}"
-                next
-            }
-        }
+        // An entry built from another jet's pack is not this jet's toolchain.
+        if layout == CC_TOOLCHAIN_PACK_LAYOUT && !provider_cc_pack_is_current(producer) -> next
         if provider_cc_descriptor_from_entry(roots, entry, producer) == {
             .Ok(descriptor) -> return Ok(descriptor)
             .Err(error) -> corrupt = error.message()
@@ -65,18 +58,6 @@ fn provider_cc_descriptor_from_entry(roots: HangarRoots, entry: StoreEntry, prod
     layout_text :: provider_cc_fact(producer, entry.id, "cc.layout")
     bundle_sha256 :: provider_cc_fact(producer, entry.id, "cc.bundle.sha256")
     layout :: CcToolchainLayout.parse(layout_text) ?? return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has unsupported layout `{layout_text}`"))
-    compiler_root := root
-    cxx_root := root
-    linker_root := root
-    sysroot_root := root
-    mounts := [CcMount]{provider_cc_fixture_mount(root, bundle_sha256)}
-    if layout == CcToolchainLayout.NixIndexHangar {
-        compiler_root = provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.compiler.root.sha256"), "compiler")
-        cxx_root = provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.cxx.root.sha256"), "C++ compiler")
-        linker_root = provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.linker.root.sha256"), "linker")
-        sysroot_root = provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.sysroot.root.sha256"), "sysroot")
-        mounts = provider_cc_entry_mounts(hangar, producer, entry.id)
-    }
     descriptor := CcToolchainDescriptor{
         entry_id: entry.id,
         root: root,
@@ -94,14 +75,18 @@ fn provider_cc_descriptor_from_entry(roots: HangarRoots, entry: StoreEntry, prod
         sysroot_sha256: provider_cc_fact(producer, entry.id, "cc.sysroot.sha256"),
         bundle_sha256: bundle_sha256,
         layout: layout,
-        compiler_root: compiler_root,
-        cxx_root: cxx_root,
-        linker_root: linker_root,
-        sysroot_root: sysroot_root,
-        mounts: mounts,
+        compiler_root: root,
+        cxx_root: root,
+        linker_root: root,
+        sysroot_root: root,
+        mounts: [CcMount]{provider_cc_fixture_mount(root, bundle_sha256)},
         references: entry.references,
         envelope: entry.envelope,
         producer: producer
+    }
+    if layout == CcToolchainLayout.Pack {
+        pack_root :: provider_cc_checked_object_digest_path(hangar, provider_cc_fact(producer, entry.id, "cc.compiler.root.sha256"), "C toolchain pack")
+        descriptor = provider_cc_pack_descriptor(entry.id, root, pack_root, entry.references, entry.envelope, producer)
     }
     provider_cc_validate_descriptor(descriptor, entry, hangar)
     if entry.cache_identity.source_fingerprint != descriptor.source_fingerprint() {
@@ -117,45 +102,6 @@ fn provider_cc_descriptor_from_entry(roots: HangarRoots, entry: StoreEntry, prod
         return Err(CcToolchainError.Invalid("could not re-read C toolchain producer record: {err.message()}"))
     }
     Ok(descriptor)
-}
-
-// The recorded closure mounts of a Nix-layout entry, each re-proved against
-// the content-addressed object pool.
-fn provider_cc_entry_mounts(hangar_root: String, producer: ProducerRecord, entry_id: String) -[FS, Env]> [CcMount] CcToolchainError! {
-    count_text :: provider_cc_fact(producer, entry_id, "cc.mount.count")
-    count :: provider_cc_parse_count(count_text) ?? return Err(CcToolchainError.Invalid("Hangar C toolchain has an invalid mount count"))
-    if count == 0 || count > CC_TOOLCHAIN_MAX_NIX_OBJECTS {
-        return Err(CcToolchainError.Invalid("Hangar C toolchain has an invalid mount count `{count}`"))
-    }
-    stores := [String: Bool]{}
-    digests := [String: Bool]{}
-    mounts := [CcMount]{}
-    loop index in 0..<count {
-        store_path :: provider_cc_fact(producer, entry_id, "cc.mount.{index}.store_path")
-        digest :: provider_cc_fact(producer, entry_id, "cc.mount.{index}.digest")
-        provider_cc_validate_nix_store_path(store_path)
-        provider_cc_validate_tree_digest(digest, "C/C++ closure object digest")
-        if stores.has_key(store_path) || digests.has_key(digest) {
-            return Err(CcToolchainError.Invalid("Hangar C toolchain has duplicate closure mounts"))
-        }
-        stores[store_path] = true
-        digests[digest] = true
-        source :: provider_cc_checked_object_digest_path(hangar_root, digest, "closure object")
-        &mounts.push(CcMount{store_path: store_path, digest: digest, source: source, destination: store_path})
-    }
-    Ok(mounts)
-}
-
-// `usize::from_str`: ASCII digits with one optional leading `+`.
-fn provider_cc_parse_count(text: String) -> Int? Never! {
-    digits :: text.removeprefix("+")
-    if digits == "" -> return None
-    raw :: digits.bytes()
-    loop byte in raw {
-        code :: Int.from_u8(byte)
-        if code < 48 || code > 57 -> return None
-    }
-    Val(Int.parse(digits) ?? return None)
 }
 
 // `<hangar>/objects/<digest>`: a real file or directory that canonicalizes
@@ -219,14 +165,6 @@ fn provider_cc_validate_descriptor(descriptor: CcToolchainDescriptor, entry: Sto
     provider_cc_validate_sha256(descriptor.linker_sha256, "linker digest")
     provider_cc_validate_tree_digest(descriptor.sysroot_sha256, "sysroot digest")
     provider_cc_validate_tree_digest(descriptor.bundle_sha256, "bundle digest")
-    if descriptor.producer.provider == CC_TOOLCHAIN_NIX_PRODUCER {
-        if descriptor.producer.facts.get("cc.producer") != Val(CC_TOOLCHAIN_PRODUCER) {
-            return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an invalid Nix producer marker"))
-        }
-        provider_validate_nix_build_facts(descriptor.producer) ?? {
-            return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}`: {err.message()}"))
-        }
-    }
     platform :: pkg_host_platform()
     if entry.envelope.output_hash != descriptor.bundle_sha256 || entry.envelope.platform != platform || entry.cache_identity.platform != platform {
         return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry.id}` has an envelope/platform identity mismatch"))
@@ -239,7 +177,7 @@ fn provider_cc_validate_descriptor(descriptor: CcToolchainDescriptor, entry: Sto
     }
     if descriptor.layout == {
         .Fixture -> provider_cc_validate_fixture_roots(descriptor, entry.id)
-        .NixIndexHangar -> provider_cc_validate_nix_roots(descriptor, entry.id, hangar_root)
+        .Pack -> provider_cc_validate_pack_roots(descriptor, entry.id, hangar_root)
     }
 }
 
@@ -259,36 +197,29 @@ fn provider_cc_validate_fixture_roots(descriptor: CcToolchainDescriptor, entry_i
     provider_cc_verify_tree(root, descriptor.sysroot, descriptor.sysroot_sha256, "sysroot")
 }
 
-// A Nix-layout toolchain mounts each admitted closure object at its store
-// path; the compiler, linker, and sysroot roles must be among those mounts.
-fn provider_cc_validate_nix_roots(descriptor: CcToolchainDescriptor, entry_id: String, hangar_root: String) CcToolchainError! -[FS, Env]> {
-    if descriptor.root != descriptor.compiler_root || descriptor.cxx_root != descriptor.compiler_root || descriptor.sysroot != "sysroot" {
-        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has inconsistent Nix role roots"))
+// A pack-layout toolchain mounts its pack object (compiler, C++ driver,
+// linker and their resources) as the compiler role and its own sysroot as the
+// sysroot role; the entry must reference the pack so it stays alive.
+fn provider_cc_validate_pack_roots(descriptor: CcToolchainDescriptor, entry_id: String, hangar_root: String) CcToolchainError! -[FS, Env]> {
+    if descriptor.mounts.len() != 2 || descriptor.cxx_root != descriptor.compiler_root || descriptor.linker_root != descriptor.compiler_root {
+        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has inconsistent pack roots"))
     }
-    stores := [String: Bool]{}
-    digests := [String: Bool]{}
-    loop mount in descriptor.mounts {
-        provider_cc_validate_nix_store_path(mount.store_path)
-        provider_cc_validate_tree_digest(mount.digest, "C/C++ closure object digest")
-        if stores.has_key(mount.store_path) || digests.has_key(mount.digest) {
-            return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has duplicate Nix mounts"))
-        }
-        stores[mount.store_path] = true
-        digests[mount.digest] = true
-        expected :: provider_cc_checked_object_digest_path(hangar_root, mount.digest, "closure object")
-        if expected != mount.source || mount.destination != mount.store_path {
-            return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has an invalid Nix mount"))
-        }
+    pack :: descriptor.mounts[0]
+    sysroot :: descriptor.mounts[1]
+    expected_pack :: provider_cc_checked_object_digest_path(hangar_root, pack.digest, "C toolchain pack")
+    if expected_pack != descriptor.compiler_root || pack.source != expected_pack || pack.destination != descriptor.role_virtual_root(CcToolchainRole.Compiler) {
+        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has an invalid pack mount"))
     }
-    compiler_ok :: if provider_cc_role_mount(descriptor.mounts, descriptor.compiler_root) == {
-        .Val(mount) -> mount.digest == descriptor.bundle_sha256
-        .None -> false
+    if !descriptor.references.contains(pack.digest) {
+        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` does not reference its toolchain pack"))
     }
-    if !compiler_ok || provider_cc_role_mount(descriptor.mounts, descriptor.linker_root) == None || provider_cc_role_mount(descriptor.mounts, descriptor.sysroot_root) == None {
-        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` is missing a role object mount"))
+    if descriptor.sysroot_root != files.join(descriptor.root, descriptor.sysroot) || sysroot.source != descriptor.sysroot_root || sysroot.digest != descriptor.sysroot_sha256 || sysroot.destination != descriptor.role_virtual_root(CcToolchainRole.Sysroot) {
+        return Err(CcToolchainError.Invalid("Hangar C toolchain `{entry_id}` has an invalid sysroot mount"))
     }
     provider_cc_verify_file(descriptor.compiler_root, descriptor.compiler, descriptor.compiler_sha256, "compiler")
-    provider_cc_verify_file(descriptor.cxx_root, descriptor.cxx, descriptor.cxx_sha256, "C++ compiler")
+    if descriptor.cxx != descriptor.compiler || descriptor.cxx_sha256 != descriptor.compiler_sha256 {
+        provider_cc_verify_file(descriptor.cxx_root, descriptor.cxx, descriptor.cxx_sha256, "C++ compiler")
+    }
     provider_cc_verify_file(descriptor.linker_root, descriptor.linker, descriptor.linker_sha256, "linker")
     sysroot_metadata :: files.stat(descriptor.sysroot_root) ?? {
         return Err(CcToolchainError.Invalid("C toolchain sysroot is unavailable: {err}"))
@@ -302,14 +233,6 @@ fn provider_cc_validate_nix_roots(descriptor: CcToolchainDescriptor, entry_id: S
     if actual_sysroot != descriptor.sysroot_sha256 {
         return Err(CcToolchainError.Invalid("C toolchain sysroot digest mismatch: expected {descriptor.sysroot_sha256}, got {actual_sysroot}"))
     }
-}
-
-// The mount whose source is a role root.
-fn provider_cc_role_mount(mounts: [CcMount], root: String) -> CcMount? Never! {
-    loop mount in mounts {
-        if mount.source == root -> return Val(mount)
-    }
-    None
 }
 
 // The entry output: a real directory that canonicalizes strictly inside the

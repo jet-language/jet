@@ -1,13 +1,13 @@
-// crates/jet-semindex/src/JSON.rs:145–154 json_strings/json_string_array and
-// 521–1043 fact presentation codecs: json_span, json_view_provenance,
-// json_callable_unavailable, json_callable_signature, json_kind, json_def,
-// json_trait_contract, json_ref, json_compiler_fact, json_call, json_effect,
-// json_arithmetic, json_member_kind, json_origin, json_member and
-// json_state_graph. Presentation JSON keeps source field order, array order,
-// duplicates and integer spelling; it is never RFC 8785 canonicalized. Absent
-// optional facts are `null`, checked empty collections are `[]`, and an
-// unavailable callable fact carries its own status object. Every string goes
-// through Foundation's canonical quote; there is no codec-local escaper.
+// json_strings/json_string_array and 521–1043 fact presentation codecs:
+// json_span, json_view_provenance, json_callable_unavailable,
+// json_callable_signature, json_kind, json_def, json_trait_contract, json_ref,
+// json_compiler_fact, json_call, json_effect, json_arithmetic,
+// json_member_kind, json_origin, json_member and json_state_graph. Presentation
+// JSON keeps source field order, array order, duplicates and integer spelling;
+// it is never RFC 8785 canonicalized. Absent optional facts are `null`, checked
+// empty collections are `[]`, and an unavailable callable fact carries its own
+// status object. Every string goes through Foundation's canonical quote; there
+// is no codec-local escaper.
 use {
     jet_foundation.[
         foundation_json_quote,
@@ -431,9 +431,9 @@ fn semindex_json_state_graph(graph: StateGraphFact) -> String Never! {
     "{{\"owner\":{owner},\"module\":{module_json},\"states\":[{joined_states}],\"transitions\":[{joined_transitions}]}}"
 }
 
-// Typed Report projections of JSON.rs:145–154,521–1043. The raw helpers above
-// remain byte-specific: Foundation quote escapes DEL/C1, Report does not.
-// Both expose the same consumer values, with authored array order/duplicates.
+// Typed Report projections. The raw helpers above remain byte-specific:
+// Foundation quote escapes DEL/C1, Report does not. Both expose the same
+// consumer values, with authored array order/duplicates.
 fn semindex_status_strings(values: [String]) -> StatusValue Never! {
     rows :: loop value in values -> StatusValue.String(value)
     StatusValue.Array(rows)

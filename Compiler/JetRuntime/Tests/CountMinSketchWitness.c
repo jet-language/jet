@@ -1,4 +1,4 @@
-// Real CMS producer/methods and allocator only; link -pthread -Wl,--wrap=jet_rt_free.
+// Real CMS producer/methods and allocator only.
 #include <assert.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -17,12 +17,13 @@ extern int64_t jet_rt_native_cms_count(CMS *, const Text *);
 extern int64_t jet_int_owned_to_i64(int64_t);
 extern void jet_rt_int_drop(int64_t);
 extern void jet_rt_string_drop(Text *);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 static CMS *watched;
 static unsigned frees;
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     if (pointer == watched) { assert(bytes == 4112 && align == 8); assert(++frees == 1); }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 static void count(CMS *value, const Text *key, int64_t expected) {
     int64_t result = jet_rt_native_cms_count(value, key);
@@ -34,8 +35,9 @@ static void *adds(void *pointer) {
     return NULL;
 }
 int main(void) {
-    // Frozen low-byte indices from Sketch.rs's two unsigned wrapping FNV hashes.
-    // No alternative CMS implementation is linked into this client.
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
+    // Frozen low-byte indices two unsigned wrapping FNV hashes. No alternative
+    // CMS implementation is linked into this client.
     static const unsigned indices[][4] = {{57,77,97,117},{115,187,3,75},{173,179,185,191},{205,226,247,12}};
     static const char snow[] = "snow\0\xe9\x9b\xaa";
     static const Text keys[] = {{"",0,0},{"alpha",5,5},{"beta",4,4},{snow,sizeof(snow)-1,sizeof(snow)-1}};

@@ -1,16 +1,28 @@
 #!/usr/bin/env node
 // Scheduler literals have no implicit String/Int carrier in the runtime unit.
 // A literal longer than one word is copied from one process-static text.
+// The E3003 deadline report is its registry row's What, Why and Fix.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { staticText, staticTextWorthy } from './runtime-static-text.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const registry = readFileSync(resolve(root, 'Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet'), 'utf8');
+function field(code, name) {
+  const row = registry.split(/DiagnosticRegistryRow\{|\n    \{(?=\n        code:)/).find(row => row.startsWith(`\n        code: "${code}",`));
+  if (!row) throw new Error(`missing runtime diagnostic ${code}`);
+  const value = new RegExp(`\\n        ${name}: ("(?:[^"\\\\]|\\\\.)*"),`).exec(row);
+  if (!value) throw new Error(`missing ${code}.${name}`);
+  return JSON.parse(value[1]);
+}
+const deadlineHole = '{{wait_kind}}';
+const deadlineWhat = field('E3003', 'what');
+if (!deadlineWhat.includes(deadlineHole)) throw new Error(`E3003.what has no ${deadlineHole} hole`);
 const literals = {
   threads: 'JET_SCHEDULER_THREADS', replay: 'JET_PROVE_REPLAY_TIME_MS', epoch: 'LEX_TEST_EPOCH',
   pause: 'task pause', join: 'task join', sleep: 'time sleep', yield: 'task yield', shield: 'shield exit', admission: 'task admission', selection: 'task selection',
-  deadline_head: 'Error [E3003]: Deadline exceeded while waiting in ',
-  deadline_tail: '\n Why: This wait point observed the task context deadline from `#Context(deadline: …)`\n Fix: Raise the deadline budget or shorten the work before this wait point\nMore: jet-lang.dev/e/E3003',
+  deadline_head: 'Error [E3003]: ' + deadlineWhat.split(deadlineHole)[0],
+  deadline_tail: deadlineWhat.split(deadlineHole)[1] + `\n Why: ${field('E3003', 'why')}\n Fix: ${field('E3003', 'fix')}\nMore: jet-lang.dev/e/E3003`,
   cancelled: 'task cancelled at a cooperative wait point',
   trace_head: 'paused=', trace_mid: ',cancel=', yes: 'true', no: 'false',
   separator: ': ', start_failed: 'could not start scheduler worker', completion_exhausted: 'task completion order exhausted',

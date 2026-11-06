@@ -4,15 +4,16 @@ use {
     core.ui.host.[UIAccessibility, UIAccessibilityProjection, UIHostError, UINodeID]
 }
 
-// core.ui.host.accessibility — route canonical node metadata through the host.
-fn attach(node: UINode, metadata: UIAccessibility) -[IO]> UINode UIHostError! {
-    #Unsafe("Core accessibility attaches metadata to the canonical node through the current retained provider") {
-        core.ui.host.accessibility.__attach(node, metadata)
-    }
+// core.ui.host.accessibility — node metadata on the canonical UINode, once the
+// provider reports accessibility available (capability code 5). There is no
+// second provider tree.
+fn attach(node: UINode, metadata: UIAccessibility) -[IO, Browser]> UINode UIHostError! {
+    if !core.ui.host.__capability(5) -> return Err(UIHostError.CapabilityUnavailable{capability: "Accessibility"})
+    Ok(core.ui.node_accessibility(node, metadata))
 }
 
 fn project(node: UINode, node_id: UINodeID) -[IO]> UIAccessibilityProjection? UIHostError! {
-    #Unsafe("Core accessibility projects metadata from the canonical node, never a second provider tree") {
-        core.ui.host.accessibility.__project(node, node_id)
-    }
+    if !core.ui.host.__capability(5) -> return Err(UIHostError.CapabilityUnavailable{capability: "Accessibility"})
+    metadata :: node.accessibility ?? return Ok(None)
+    Ok(Val(UIAccessibilityProjection{node: node_id, metadata: metadata}))
 }

@@ -1,4 +1,4 @@
-// Link real Jet exports with -Wl,--wrap=jet_rt_free.
+// Link real Jet exports.
 // invalid-tag mode must terminate via shared record-variant panic (exit101).
 #include <assert.h>
 #include <stdbool.h>
@@ -9,7 +9,7 @@
 typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern int64_t *jet_rt_handle_clone_jet_event_result(int64_t *);
 extern void jet_rt_handle_drop_jet_event_result(int64_t *);
 extern bool jet_rt_handle_eq_jet_event_result(int64_t *, int64_t *);
@@ -18,13 +18,14 @@ extern void jet_rt_string_drop(Text *);
 static struct { void *pointer; int64_t size, align; unsigned frees; } watched[6];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t size, int64_t align) {
     ++intercepted;
     for (size_t i = 0; i < count; ++i) if (pointer == watched[i].pointer) {
         assert(size == watched[i].size && align == watched[i].align);
         assert(++watched[i].frees == 1);
     }
-    __real_jet_rt_free(pointer, size, align);
 }
 static void watch(void *pointer, int64_t size, int64_t align) {
     assert(count < 6);
@@ -40,6 +41,7 @@ static int64_t *new_result(int64_t ordinal) {
     return result;
 }
 int main(int argc, char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if (argc == 2 && strcmp(argv[1], "invalid-tag") == 0) {
         (void)jet_rt_handle_show_jet_event_result(new_result(2));

@@ -30,6 +30,7 @@ extern void jet_rt_http_body_list_drop(Bytes *);
 extern W jet_rt_http_body_chunks_drop(void *);
 extern W jet_rt_http_body_drop(void *);
 extern int32_t jet_rt_main(void (*body)(void));
+extern void jet_rt_host_arguments(W, char **, char **);
 extern Text *jet_rt_string_from_static(const void *, W);
 extern void jet_rt_string_drop(Text *);
 extern void jet_rt_free(void *, W, W);
@@ -368,7 +369,9 @@ static void exercise(void) {
     assert(jet_file_reader_line_bytes_raw(reader, &bytes, &count, &error) == 0);
     jet_rt_handle_drop_io_error(error); jet_fd_drop_raw(reader);
 }
-int main(void) {
+int main(int argc, char **argv, char **envp) {
+    // Startup env/argv capture precedes any runtime entry (HostStartup.jet).
+    jet_rt_host_arguments(argc, argv, envp);
     int fd = mkstemp(path); assert(fd >= 0);
     FILE *file = fdopen(fd, "wb"); assert(file != NULL);
     for (int i = 0; i != 20000; ++i) assert(fputc('a', file) == 'a');

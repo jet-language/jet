@@ -1,0 +1,23 @@
+package {
+    name: "browser_route"
+    authority: { allow: [Browser] }
+}
+use web :: core.web
+use ui :: core.ui
+#Target(Web)
+
+// `web.page` renders on the server: `/` reaches no effect and stays static.
+fn home() -> WebPage { web.page("Hello", "world") }
+
+// `ui.button` is a browser-owned operation, so `/greet` reaches Browser and renders on the client.
+fn greet() -> WebPage {
+    _go :: ui.button("Go")
+    web.page("Greet", "hello")
+}
+
+fn run() {
+    web.app()
+        .route("/", home)
+        .route("/greet", greet)
+        .serve()
+}

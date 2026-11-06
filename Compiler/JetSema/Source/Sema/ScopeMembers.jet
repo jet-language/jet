@@ -348,16 +348,16 @@ fn sema_scope_members_check_dsl_header(registry: SemaScopeMembersMarkerRegistry,
     result
 }
 
-// Rust ScopeMembers.rs `scope_members` the member vocabulary
-// an applied-rule block declares; `#Test` is the only marker with members.
+// `scope_members` the member vocabulary an applied-rule block declares; `#Test`
+// is the only marker with members.
 fn sema_scope_members_vocabulary(marker: String) -> [String]? Never! {
     if marker == "Test" -> return Val([String]{"setup", "expect_fail", "timeout", "skip", "measure", "cases"})
     None
 }
 
-// Rust ScopeMembers.rs `check`: a dot member is legal only as a direct
-// statement of a member-declaring marker block (E0614/E0616), never nested
-// (E0618) and never in an ordinary function or method body (E0615).
+// `check`: a dot member is legal only as a direct statement of a
+// member-declaring marker block (E0614/E0616), never nested (E0618) and never
+// in an ordinary function or method body (E0615).
 fn sema_scope_members_check(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     sema_scope_members_check_assertionless_tests(items, &diagnostics)
@@ -384,10 +384,10 @@ fn sema_scope_members_check(items: [Item]) -> [Diagnostic] {
     diagnostics
 }
 
-// Rust ScopeMembers.rs `check_assertionless_tests` (@ 6083377777): a top-level
-// `#Test` whose body never calls `assert`/`assert_eq` or `expect(…).snapshot`
-// is L2901. The walk reads every expression the body holds, nested blocks and
-// lambdas included, as Rust's `statements_have_assertion` does.
+// `check_assertionless_tests`: a top-level `#Test` whose body never calls
+// `assert`/`assert_eq` or `expect(…).snapshot` is L2901. The walk reads every
+// expression the body holds, nested blocks and lambdas included, as Rust's
+// `statements_have_assertion` does.
 fn sema_scope_members_check_assertionless_tests(items: [Item], diagnostics: &[Diagnostic]) {
     loop item in items {
         if item == .Test(test) {

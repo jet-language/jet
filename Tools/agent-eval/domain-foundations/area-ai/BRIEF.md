@@ -1,6 +1,6 @@
 # Probe area-ai — AI/ML applications
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ An AI application as one Jet package: tensors with broadcasting and a matmul on 
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/llm-apps-agents/`, `~/.cache/jet-dev/dx2/ml-training/`, `~/.cache/jet-dev/dx2/ml-inference-serving/`, `~/.cache/jet-dev/dx2/recommender-search/`, `~/.cache/jet-dev/dx2/computer-vision/`, `~/.cache/jet-dev/dx2/mlops/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/llm-apps-agents/`, `$JET_STATE_ROOT/dx2/ml-training/`, `$JET_STATE_ROOT/dx2/ml-inference-serving/`, `$JET_STATE_ROOT/dx2/recommender-search/`, `$JET_STATE_ROOT/dx2/computer-vision/`, `$JET_STATE_ROOT/dx2/mlops/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/area-ai/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-ai/pkg/`. Gap ids start with `area-ai-G`.
+`$JET_STATE_ROOT/dx3/area-ai/probe.md`, `gaps.json`, `batteries.json`, and the code under `$JET_STATE_ROOT/dx3/area-ai/pkg/`. Gap ids start with `area-ai-G`.

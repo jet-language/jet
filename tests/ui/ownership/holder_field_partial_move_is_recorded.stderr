@@ -1,0 +1,12 @@
+Error [jet.UseAfterMove]: `holder.res` was consumed by the move `^holder.res`, so it can't be used here
+  --> holder_field_partial_move_is_recorded.jet:13:22
+    |
+ 13 |     print(holder.res.name)
+    |                      ^^^^
+  --> holder_field_partial_move_is_recorded.jet:12:18
+    |
+ 12 |     grab(^holder.res)
+    |                  ^^^ `holder.res` moved to the move `^holder.res` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `holder.res` after the move, or give the move `^holder.res` a copy with `holder.res.copy()` where it moved.
+More: jet-lang.dev/e/E0121

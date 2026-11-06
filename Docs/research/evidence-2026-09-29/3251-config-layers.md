@@ -45,7 +45,7 @@ statement.
 
 ## c2 / c7 — pure decode stays IO-free
 
-Probe `~/.cache/jet-dev/scratch/Closer04/nofs/cfg_decode.jet`:
+Probe `$JET_STATE_ROOT/scratch/Closer04/nofs/cfg_decode.jet`:
 - The package authority is only `[IO, Mem.Alloc]`, with no FS.
 - `base.json` beside the program contains `{"count": 1, "secret": "leak"}`.
 

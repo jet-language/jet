@@ -21,12 +21,71 @@ A seed is one directory:
 only after the chain below reaches its fixed point with no Rust on `PATH`.
 Its stage-2 compiler becomes the seed of the next release.
 
+## From a fresh clone
+
+A clone and a seed are enough: no Nix, no `Tools/agent/jet-env`, nothing in
+`HOME` and no Jet environment variables. Only the landing step needs more:
+the lane check runs `jet check` under `systemd-run --user`, so it needs the
+login session's `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`, which every
+desktop or SSH login sets. This builds the compiler of a release
+tag with that release's seed, gives it the seed's runtime pack, runs one row
+of the UI suite with it, runs an example, lands a patch on a scratch copy of
+the checkout and validates a ballot. `TAG` is a published release (see
+[Where the first seed comes from](#where-the-first-seed-comes-from)); its
+runtime pack was built from the tag's commit. `PATCH` is a `git diff` of
+your change, `MSG` a file with its commit message, `BALLOT` a ballot
+payload, and `NAME` and `EMAIL` your git identity.
+
+```sh
+TAG=a0_NNN
+git clone --branch "$TAG" https://github.com/jet-language/jet && cd jet
+gh release download "$TAG" -R jet-language/jet -p "jet-$TAG-linux-x64.tar.gz*" -D ../release
+(cd ../release && sha256sum -c "jet-$TAG-linux-x64.tar.gz.sha256")
+mkdir ../seed && tar -xzf "../release/jet-$TAG-linux-x64.tar.gz" -C ../seed && SEED=$(realpath ../seed)
+"$SEED/jet" build Compiler                     # writes Compiler/JetCli/.jet/build/jet
+"$SEED/jet" run Tools/packaging/ReuseSeedRuntime.jet -- "$SEED" Compiler/JetCli/.jet/build/jet
+export PATH=$PWD/Compiler/JetCli/.jet/build:$PATH
+jet test Compiler --profile ui tests/ui/list_expected_type_mismatch.jet
+jet run Examples/features/basics/hello.jet
+git config user.name "$NAME" && git config user.email "$EMAIL"
+jet Tools/agent/Land.jet land --scratch-copy ../dev-copy "$PATCH" "$MSG"
+jet Tools/agent/ballots/Validate.jet "$BALLOT"
+```
+
+`jet` reads the Core library from the checkout that holds its input, and its
+identity from the `IDENTITY` file beside it; `JET_TOOLCHAIN_ROOT` and
+`JET_COMPILER_IDENTITY` override both ([Environment
+variables](../reference/environment.md)). `ReuseSeedRuntime.jet` recomputes the
+source, backend and lifecycle inventories that the seed pack's
+`provenance.json` records, the way `Tools/packaging/prebuild-runtime.mjs` hashed
+them, and installs `jet-runtime/` and `IDENTITY` beside the new compiler only
+when every file matches. Otherwise it writes nothing, names how many files
+differ and the first, and points to the two ways on: the published release of
+the commit you checked out, or a runtime pack rebuilt for this checkout with
+`Tools/packaging/prebuild-runtime.sh`. The testkit keeps its scratch in
+`$JET_SCRATCH_ROOT/testkit`, else `~/.cache/jet/testkit`.
+
+A seed released before these defaults finds neither; run its two steps
+with `JET_TOOLCHAIN_ROOT=$PWD JET_COMPILER_IDENTITY=$(cat "$SEED/IDENTITY")`.
+
+`Land.jet land --scratch-copy DIR` clones the checkout into `DIR`, which must
+not exist yet, with the checkout's git identity. It applies the patch, runs
+the lane check (`Tools/agent/LaneCheck.jet`: the whole compiler and Jetpack's
+assembly when the patch touches `Compiler/`, `Core/` or `Jetpack/`, else each
+Jet file it touches) and commits it on `DIR`'s branch. A patch
+that does not apply or does not check leaves `DIR` as it was cloned. Several
+`PATCH MSG` pairs land in order, one commit each. `Validate.jet` reads only the
+payload, with the rules Tower applies when a ballot is posted
+([Tools/agent/ballots/README.md](../../../Tools/agent/ballots/README.md)).
+
 ## The chain
 
-Run it in the Nix development environment (`Tools/agent/jet-env` or
-`nix develop`) from a checkout of the commit you want to build. `SEED` is the
-seed directory, `WORK` a scratch directory outside the checkout, and
-`JET_PACK_MUSL_LIB` the `lib` directory of a static musl
+Run it from a checkout of the commit you want to build. The compiler builds
+need nothing but `jet`; the runtime pack step compiles the runtime's vendored
+C, so run `prebuild-runtime.mjs` in the Nix development environment
+(`Tools/agent/jet-env` or `nix develop`), which supplies the host C toolchain.
+`SEED` is the seed directory, `WORK` a scratch directory outside the
+checkout, and `JET_PACK_MUSL_LIB` the `lib` directory of a static musl
 (`$(nix build --no-link --print-out-paths nixpkgs#pkgsStatic.musl)/lib`).
 
 ```sh
@@ -64,6 +123,13 @@ it with the previous tag's `s2` as its seed.
    ```
 
    Then check out the `a0_NNN` tag and run the chain with `SEED=seed`.
+   Releases are built by `Tools/agent/publish-release.mjs`
+   (`build COMMIT --seed SEED --out OUT`), gated by `jet Tools/agent/VerifyFull.jet`
+   with `JET=OUT/jet` on each runner, recorded and signed by
+   `jet run Tools/release/Main.jet -- candidate OUT --evidence EV`, and published
+   by `jet run Tools/release/Main.jet -- publish OUT`. Each release also carries
+   `CANDIDATE.json` and its signature `CANDIDATE.json.sig`. The latest is fetched
+   with `gh release download -R jet-language/jet -p 'jet-a0_*-linux-x64.tar.gz*'`.
 3. **The `rust` branch.** The last commit that still contains the Rust
    implementation (`6083377777`) is kept as the frozen `rust` branch (see
    `AGENTS.md`). It carries the Rust `jet` (`cargo build --release --bin jet`)

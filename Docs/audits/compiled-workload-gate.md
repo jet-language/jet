@@ -5,7 +5,7 @@ This gate tests complete work. Core API rows alone do not close this gate.
 The gate reuses the agent corpus TSV shape and the Core competitor ledger as
 the source of comparison language names. It adds peer and adapter ledgers, a
 metric contract, a measurement policy, a target matrix, and one report
-validator. `tools/ci/compiled-workload-runner.mjs` produces the report from
+validator. `jet Tools/ci/CompiledWorkloads.jet run` produces the report from
 those frozen inputs; it does not add a second scoring framework.
 
 ## Frozen task set
@@ -151,20 +151,28 @@ the only standing exclusions.
 Check the frozen contract:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/compiled-workload-gate.sh --contract
+jet Tools/ci/CompiledWorkloads.jet --contract
+```
+
+Produce a report on the host platform (scratch defaults to `jet-dev/scratch`
+in the user cache under `$HOME`; set `JET_COMPILED_WORKLOAD_SCRATCH` to move
+it):
+
+```sh
+jet Tools/ci/CompiledWorkloads.jet run --platform linux --report-dir <report-dir>
 ```
 
 Review and check a producer report in the independent workflow:
 
 ```sh
 REVIEW_RUN=1 REVIEW_ACTOR=reviewer \
-  node tools/ci/compiled-workload-review.mjs <report-dir>
+  jet Tools/ci/CompiledWorkloads.jet review <report-dir>
 ```
 
 Check a complete reviewed report directory:
 
 ```sh
-TMPDIR="$HOME/.cache/jet-dev/scratch" bash tools/ci/compiled-workload-gate.sh --check <report-dir>
+jet Tools/ci/CompiledWorkloads.jet --check <report-dir>
 ```
 
 The gate has no checked-in measurement report yet. This is deliberate. Until

@@ -1,4 +1,4 @@
-// WsClient.rs:10-19,57-61 Clone/PartialEq. Native-private carriers in WsABI.
+// Native-private carriers in WsABI.
 #Export(c) fn jet_rt_handle_clone_jet_ws_error(value: I64) -> I64 {
     kind :: data_tree_word(wrapping(value + WS_ERROR_TAG))
     result :: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
@@ -19,8 +19,8 @@
     if (kind == I64{4}) -> return jet_rt_string_eq(data_tree_word(wrapping(left + WS_ERROR_OPERATION)), data_tree_word(wrapping(right + WS_ERROR_OPERATION)))
     true
 }
-// Custom show/debug/display are identical, never Rust derived Debug:
-// WsClient.rs:22-52. IO operation is raw text, MessageTooLarge is signed i64.
+// Custom show/debug/display are identical, never Rust derived Debug. IO
+// operation is raw text, MessageTooLarge is signed i64.
 #Export(c) fn jet_rt_handle_show_jet_ws_error(value: I64) -> I64 {
     kind :: data_tree_word(wrapping(value + WS_ERROR_TAG))
     result :: jet_rt_string_builder_new()

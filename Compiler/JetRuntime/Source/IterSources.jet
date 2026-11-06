@@ -1,10 +1,10 @@
-// CollectionIoSources.rs owns file/stdin line policy and shared process state;
-// CollectionSources.rs owns encoding next/error/EOF policy. Lower supplies Jet
-// callbacks to those source methods, never a Rust Box or an FD72 projection.
-// Borrowed adapter32: payload0, next8, release16, clone24. Copied before return.
+// The Rust original owns file/stdin line policy and shared process state; the
+// Rust original owns encoding next/error/EOF policy. Lower supplies Jet callbacks
+// to those source methods, never a Rust Box or an FD72 projection. Borrowed
+// adapter32: payload0, next8, release16, clone24. Copied before return.
 // next(payload, output) returns 0 EOF, 1 moved value, -1 stopped (out unwritten).
-// Errors render/panic at <core.prelude>:0 exactly as the source kernels do;
-// no runtime retry, decoding, line trimming or fault checkpoint is added here.
+// Errors render/panic at <core.prelude>:0 exactly as the source kernels do; no
+// runtime retry, decoding, line trimming or fault checkpoint is added here.
 // clone(payload) is needed only for a borrowed shared process stream.
 fn iter_source_node(adapter: I64, by_value: I64, meta: I64, shared: Bool) -> I64 {
     node :: iter_new(I64{29}, meta)
@@ -38,8 +38,8 @@ fn iter_source_pull(node: I64, output: I64) -> Bool {
 
 fn iter_line_source(adapter: I64, by_value: I64, meta: I64) -> I64 {
     node :: iter_source_node(adapter, by_value, meta, false)
-    // CollectionIoSources.rs:35-59,100-123 drains a borrowed reader at init;
-    // owned sources stay lazy. iter_collect_node cleans partials on stop.
+    // The Rust original drains a borrowed reader at init; owned sources stay
+    // lazy. iter_collect_node cleans partials on stop.
     if (by_value == I64{0}) { return iter_collect_node(node) }
     node
 }
@@ -53,11 +53,11 @@ fn iter_line_source(adapter: I64, by_value: I64, meta: I64) -> I64 {
 }
 
 #Export(c) fn jet_rt_native_iter_process_lines(source: I64, by_value: I64, meta: I64) -> I64 {
-    // CollectionIoSources.rs:136-163 retains the shared pipe, not the Child.
+    // The Rust original retains the shared pipe, not the Child.
     iter_source_node(source, by_value, meta, true)
 }
 
 #Export(c) fn jet_rt_native_iter_encoding_reader(source: I64, by_value: I64, meta: I64) -> I64 {
-    // Checked lowering admits only an owned reader (CollectionSources.rs).
+    // Checked lowering admits only an owned reader.
     iter_source_node(source, by_value, meta, false)
 }

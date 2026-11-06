@@ -94,8 +94,6 @@ extern int64_t jet_rt_record_new_duration(int64_t);
 extern int64_t jet_rt_record_new_encoding_limits(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_data_limits(int64_t, int64_t, int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_io_context(int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_jet_browser_locked(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t);
-extern int64_t jet_rt_record_new_jet_browser_timeout(int64_t);
 extern int64_t jet_rt_record_new_jet_date(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_period(int64_t, int64_t, int64_t);
 extern int64_t jet_rt_record_new_jet_memo_stats(int64_t, int64_t, int64_t, int64_t);
@@ -161,7 +159,7 @@ static const char overflow_reason[] = "This arithmetic overflows the value's typ
 static const char range_reason[] = "native Int argument exceeds host range";
 static const char divide_reason[] = "divided by zero";
 static unsigned released;
-enum { MODE_COUNT = 37, INT_MODE_BASE = 200, INT_MODE_COUNT = 115 };
+enum { MODE_COUNT = 37, INT_MODE_BASE = 200, INT_MODE_COUNT = 113 };
 typedef struct { int64_t mode; atomic_bool ready, proceed; } Env;
 
 static const char *expected_reason(int64_t mode) {
@@ -258,8 +256,8 @@ static void run_int_stop(int64_t test) {
         args[test - 36] = big;
         assert(jet_rt_record_new_data_limits(encoding, args[0], args[1], args[2], args[3]) == 0);
     } else if (test == 40) assert(jet_rt_record_new_io_context(0, 0, WORD(&big), 0) == 0);
-    else if (test == 41) assert(jet_rt_record_new_jet_browser_locked(0, 0, 0, 0, big, 0) == 0);
-    else if (test == 42) assert(jet_rt_record_new_jet_browser_timeout(big) == 0);
+    else if (test == 41) jet_socket_stream_timeout_set_raw(0, 1, big);
+    else if (test == 42) jet_udp_socket_timeout_set_raw(0, big);
     else if (test == 43) assert(jet_rt_record_new_jet_date(2026, 10, big) == 0);
     else if (test == 44) assert(jet_rt_record_new_jet_period(1, 1, big) == 0);
     else if (test == 45) assert(jet_rt_record_new_jet_memo_stats(big, 1, 1, 0) == 0);
@@ -356,8 +354,6 @@ static void run_int_stop(int64_t test) {
         case 110: jet_process_resize_raw(0, big, 1, a); break;
         case 111: jet_process_resize_raw(0, 1, big, a); break;
         case 112: assert(jet_process_take_stream_raw(0, big, a) == 0); break;
-        case 113: jet_socket_stream_timeout_set_raw(0, 1, big); break;
-        case 114: jet_udp_socket_timeout_set_raw(0, big); break;
         default: assert(!"unknown Int witness case");
         }
     }
@@ -412,11 +408,11 @@ static void run_stop(int64_t mode) {
         assert(jet_rt_record_new_watch_event(mode == 9 ? 3 : 0, mode == 10 ? 6 : 0,
             WORD(&key), WORD(&other), 0, 0) == 0);
     } else if (mode >= 11 && mode <= 13) {
+        /* The builder consumes its spec before the range stop returns. */
         int64_t spec = jet_std_process_cmd(0, 0);
         int64_t result = mode == 11 ? jet_process_spec_stdin(spec, -1) :
             mode == 12 ? jet_process_spec_stdout(spec, -1) : jet_process_spec_stderr(spec, -1);
         assert(result == 0);
-        jet_rt_handle_drop_process_spec(spec);
     } else if (mode == 14) {
         int64_t size = jet_rt_record_new_terminal_size(80, 24);
         /* Constructor consumes Size before tag rejection, just like seed. */
@@ -541,7 +537,7 @@ int main(int argc, char **argv, char **envp) {
             jet_rt_native_task_cancel(task);
             atomic_store_explicit(&env.proceed, true, memory_order_release);
         }
-        /* Observe.rs prefixes the canonical child identity + ': '. */
+        /* The panic report prefixes the canonical child identity + ': '. */
         Text *identity = jet_rt_string_clone(*(Text **)((unsigned char *)(uintptr_t)task + 128));
         int64_t out[4] = {0};
         assert(jet_rt_native_task_join(task, 0, WORD(out)) == 0);

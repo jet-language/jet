@@ -1,4 +1,3 @@
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1
 // HTTP-facing adapter for the typed browser devtools host.
 use {
     std.collections.[VecDeque]
@@ -17,13 +16,9 @@ use {
     core.encoding.[Dyn]
     core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelCapability]
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:38
 BROWSER_PAGE_SCHEMA :: "jet.devtools.browser.v1"
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:41
 struct WebLiveValueUpdate { key: String; type_identity: String; rendered_value: String? }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:50
 struct BrowserTools { source: Bool; source_reason: String?; rebuild: Bool; rebuild_reason: String? }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:63
 struct BrowserDevtoolsFrame {
     placement: BrowserPlacement; route: String; protocol: String; session_id: String
     source_id: String?; build_id: String?; revision: String; world_id: String?
@@ -31,7 +26,6 @@ struct BrowserDevtoolsFrame {
     status: DevtoolsStatusFact; tools: BrowserTools; receipts: [JetDevtoolsCommandReceipt]
     selection: BrowserSelection?; panels: [BrowserPanelView]; elements: [BrowserHtmlElement]
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:85
 struct BrowserWebState {
     host: BrowserHost; facts: [String:BrowserPanelFact]; panel_order: VecDeque<String>
     source_id: String?; build_id: String?; revision: String; world_id: String?
@@ -40,16 +34,13 @@ struct BrowserWebState {
     dom_state: [WebModuleSwapStateFact]
 }
 impl BrowserWebState {
-    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:103
     fn new(session_id: String) -> BrowserWebState {
         BrowserWebState { host: BrowserHost.new(session_id), facts: {}, panel_order: VecDeque.new(),
             source_id: .None, build_id: .None, revision: "", world_id: .None, status: starting_status(),
             tools: BrowserTools { source: false, source_reason: .None, rebuild: false, rebuild_reason: .None },
             receipts: [], swap: .None, last_swap: .None, swap_error: .None, dom_state: [] }
     }
-    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:127
     fn host(self) -> BrowserHost { &self.host }
-    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:131
     fn frame(self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
         model := self.host.view_model(placement)
         BrowserDevtoolsFrame { placement: model.placement, route: model.route, protocol: model.protocol,
@@ -59,7 +50,6 @@ impl BrowserWebState {
             tools: self.tools.clone(), receipts: self.receipts.clone(), selection: model.selection,
             panels: model.panels, elements: model.elements }
     }
-    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:154
     fn reset(&self, session_id: String) {
         self.host = BrowserHost.new(session_id)
         self.facts.clear(); self.panel_order.clear()
@@ -67,7 +57,6 @@ impl BrowserWebState {
         self.status = starting_status(); self.receipts.clear()
         self.swap = .None; self.last_swap = .None; self.swap_error = .None; self.dom_state.clear()
     }
-    // Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:170
     fn sync(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
         if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err("devtools projection protocol does not match jet.devtools.v1")
         if projection.session_id != self.host.session_id() -> self.reset(projection.session_id.clone())
@@ -113,12 +102,10 @@ impl BrowserWebState {
         .Ok(_)
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:269
 fn starting_status() -> DevtoolsStatusFact {
     DevtoolsStatusFact { state: .Starting, diagnostic_code: .None, diagnostic: .None, accepted_revision: .None,
         last_good_revision: .None, run_target: .None, run_output: .None, test_state: .None }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:282
 fn normalize_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
     status.diagnostic_code = bounded_optional(status.diagnostic_code, MAX_BROWSER_TEXT)
     status.diagnostic = bounded_optional(status.diagnostic, MAX_BROWSER_VALUE)
@@ -129,19 +116,16 @@ fn normalize_status(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
     status.test_state = bounded_optional(status.test_state, MAX_BROWSER_TEXT)
     status
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:293
 fn bounded_optional(value: String?, limit: USize) -> String? {
     value.and_then((value) -> {
         bounded := bounded_text(value, "", limit)
         if bounded.is_empty() -> .None else -> .Val(bounded)
     })
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:300
 fn browser_session_state(state: JetDevtoolsLifecycleState) -> BrowserSessionState {
     if state == { .Starting | .Ready -> .Idle, .Building -> .Building, .Error -> .BuildFailed
         .Unavailable | .Stopped -> .RuntimeFailure }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:312
 fn sync_session(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
     cursor := state.as_ref().and_then((state) -> state.host().sequence())
     projection := session.devtools_events_since(cursor)
@@ -152,16 +136,13 @@ fn sync_session(state: &BrowserWebState?, session: &ResidentDevSession) Err! {
     resident.tools.source_reason = if resident.tools.source -> .None else -> .Val(SOURCE_TOOLS_OFF_REASON.to_string())
     resident.sync(projection, canonical_panels)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:337
 SOURCE_TOOLS_OFF_REASON :: "This host runs without Canvas, so source is read and edited elsewhere."
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:340
 fn object_map(value: Dyn) -> [String:Dyn] Err! {
     if value == {
         .Object(fields) -> .Ok(fields.iter().cloned().collect())
         else -> .Err("expected a JSON object")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:351
 fn record_dom_snapshot(state: &BrowserWebState?, session_id: String, payload: &[U8]) Err! {
     text := std.str.from_utf8(payload) ?? return .Err("web DOM snapshot body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("web DOM snapshot body is not valid bounded JSON")
@@ -205,7 +186,6 @@ fn record_dom_snapshot(state: &BrowserWebState?, session_id: String, payload: &[
     resident.dom_state = facts
     .Ok(_)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:457
 fn parse_live_value_update(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
     keys := object.keys().collect(); keys.sort()
     loop field in keys {
@@ -221,13 +201,11 @@ fn parse_live_value_update(object: [String:Dyn]) -> WebLiveValueUpdate Err! {
     }
     .Ok(WebLiveValueUpdate { key: key, type_identity: type_identity, rendered_value: rendered_value })
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:495
 fn required_json_string(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("web DOM snapshot has no `{key}`")?
     text := value.as_str() ?? return .Err("web DOM snapshot `{key}` must be a string")
     .Ok(text.to_string())
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:510
 fn parse_dom_state_value(value: Dyn) -> WebStateValue Err! {
     object := object_map(value) ?? return .Err("web DOM snapshot state value must be an object")
     kind := required_json_string(object, "kind")?
@@ -259,9 +237,7 @@ fn parse_dom_state_value(value: Dyn) -> WebStateValue Err! {
         else -> .Err("web DOM state value has unknown kind `{kind}`")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:548
 fn view_json(state: BrowserWebState, placement: BrowserPlacement) -> String { frame_json(state.frame(placement)) }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:551
 fn swap_json(state: BrowserWebState) -> String {
     output := String.with_capacity(2048)
     output.push('{')
@@ -294,7 +270,6 @@ fn swap_json(state: BrowserWebState) -> String {
     }
     output.push('}'); output
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:593
 fn release_json(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
     output := String.with_capacity(2048)
     output.push('{')
@@ -324,7 +299,6 @@ fn release_json(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProject
     }
     output.push_str("]}}"); output
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:837
 fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {
     output.push_str("{{\"identity\":{{")
     field_string(output, "module", snapshot.identity.module_ref, true)
@@ -348,7 +322,6 @@ fn write_swap_snapshot(output: &String, snapshot: &WebModuleSwapSnapshot) {
     field_u64(output, "state_count", U64{snapshot.state.len()}, false)
     output.push('}')
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:870
 fn write_swap_receipt(output: &String, receipt: &WebModuleSwapReceipt) {
     output.push('{')
     field_string(output, "operation", receipt.operation.as_str(), true)
@@ -395,7 +368,6 @@ fn write_swap_receipt(output: &String, receipt: &WebModuleSwapReceipt) {
     field_string(output, "artifact", receipt.active_page.artifact, false)
     output.push_str("}}")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:936
 fn write_string_array(output: &String, key: String, values: &[String]) {
     output.push(','); quoted(key, output); output.push_str(":[")
     loop (index, value) in values.iter().enumerate() {
@@ -405,7 +377,6 @@ fn write_string_array(output: &String, key: String, values: &[String]) {
     output.push(']')
 }
 
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:952
 PAGE_CSS :: """
 :root{color-scheme:dark;--bg:#0F1013;--raised:#17191D;--raised-2:#1D2026;--well:#0A0B0D;--line:#30343C;--ink:#F6F5F2;--dim:#9B9EA8;--red:#E8232A;--ok:#56C271;--amber:#E3A43B;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{height:100%}
@@ -493,7 +464,6 @@ li[data-selected=true]>.node{background:var(--raised);box-shadow:inset 2px 0 0 v
 @media(max-width:560px){.bar,.attention,.source header,.source footer{padding-left:14px;padding-right:14px}.selected,.group,.fold{margin-left:14px;margin-right:14px}.group>summary{padding-left:11px;padding-right:11px}.group-meta{font-size:10px}}
 @media(prefers-reduced-motion:no-preference){.chev,.group>summary::before{transition:transform .12s}.selected,.source{animation:in .18s ease}@keyframes in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}}
 """
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1052
 PAGE_JS :: """
 const session=new URL(location.href).searchParams.get('session')||'';const params=new URL(location.href).searchParams;const q=(p)=>p+'?session='+encodeURIComponent(session);const key='jet-devtools:'+S.placement;const DRAFT='jet-devtools:draft';const OPEN='jet-devtools:source';const $=(s)=>document.querySelector(s);const note=$('.note');const embedded=window.parent!==window;$('main').classList.toggle('embedded',embedded);document.querySelectorAll('a[data-route]').forEach((a)=>{a.href=q(a.dataset.route);a.hidden=embedded});
 const store={get(k){try{return JSON.parse(sessionStorage.getItem(k)||'null')}catch(_){return null}},set(k,v){try{if(v==null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
@@ -540,17 +510,13 @@ const sel=S.selection&&S.panels.find((p)=>p.panel_id===S.selection.panel_id);if(
 addEventListener('keydown',(ev)=>{if(ev.key==='Escape'&&document.activeElement===src.text){src.text.blur();ev.preventDefault();return}if(!embedded)return;const alt=ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='j';if(ev.key==='Escape'||alt){ev.preventDefault();parent.postMessage({jet:'devtools',key:ev.key,altKey:ev.altKey},location.origin)}});
 """
 
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1099
 INTENT_GROUPS :: [(String, [String])]{[
     ("Build & source", ["build", "gates", "structure", "tests", "jobs"]),
     ("Data & requests", ["routes", "queries", "mutations", "forms", "table", "store", "database"]),
     ("Runtime & interface", ["traces", "cost", "profiler", "ui-tree", "topology", "game", "world"])
 ]}
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1124
 fn intent_group(panel_id: String) -> USize { INTENT_GROUPS.iter().position((group) -> group.1.contains(panel_id)).unwrap_or(INTENT_GROUPS.len() - 1) }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1131
 fn panel_available(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1137
 fn unavailable_reason_text(status: String) -> String {
     status.trim_start_matches("unavailable:").split(',').map((reason) -> if reason == {
         "unsupported-host" | "host-kind" -> "not offered by this host".to_string()
@@ -558,14 +524,12 @@ fn unavailable_reason_text(status: String) -> String {
         other -> other.to_string()
     }).collect().join(", ")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1151
 fn diagnostic_file(diagnostic: String) -> String? {
     rest := diagnostic.split("-->").nth(1)?.trim_start() // #4303
     token := rest.split_whitespace().next()?
     file := token.split(':').next()?
     if file.ends_with(".jet") -> .Val(file) else -> .None
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1163
 fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
     frame := state.frame(placement)
     state_json := frame_json(frame)
@@ -633,7 +597,6 @@ fn render_page(state: BrowserWebState, placement: BrowserPlacement) -> String {
     html
 }
 
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1305
 fn render_attention(html: &String, frame: &BrowserDevtoolsFrame) {
     status := frame.status
     failing_file := status.diagnostic.as_deref().and_then(diagnostic_file)
@@ -674,12 +637,10 @@ fn render_attention(html: &String, frame: &BrowserDevtoolsFrame) {
     }
     html.push_str("</div></section>")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1376
 fn render_source_tool(html: &String, frame: &BrowserDevtoolsFrame) {
     if !frame.tools.source -> return
     html.push_str("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1388
 fn render_panel(html: &String, panel: &BrowserPanelView, selection: &BrowserSelection?) {
     node_id := selection.filter((selection) -> selection.panel_id == panel.panel_id).and_then((selection) -> selection.node_id.as_deref())
     html.push_str("<article class=\"panel\" data-panel-id=\""); html.push_str(html_escape(panel.panel_id))
@@ -695,7 +656,6 @@ fn render_panel(html: &String, panel: &BrowserPanelView, selection: &BrowserSele
     }
     html.push_str("</article>")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1418
 fn render_selected(html: &String, frame: &BrowserDevtoolsFrame) {
     selection := frame.selection.as_ref() ?? return
     panel := frame.panels.iter().find((panel) -> panel.panel_id == selection.panel_id) ?? return
@@ -707,7 +667,6 @@ fn render_selected(html: &String, frame: &BrowserDevtoolsFrame) {
         .None -> { html.push_str("<h3>"); html.push_str(html_escape(panel.title)); html.push_str("</h3>") } }
     html.push_str("</section>")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1448
 fn render_crumbs(html: &String, panel: &BrowserPanelView, path: &[&BrowserNode]) {
     html.push_str("<div class=\"crumbs\"><span>"); html.push_str(html_escape(panel.title)); html.push_str("</span>")
     loop ancestor in path.iter().take(path.len().saturating_sub(1)) {
@@ -717,7 +676,6 @@ fn render_crumbs(html: &String, panel: &BrowserPanelView, path: &[&BrowserNode])
     }
     html.push_str("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1466
 fn render_node_detail(html: &String, panel_id: String, node: &BrowserNode) {
     html.push_str("<h3>"); html.push_str(html_escape(node.label))
     if node.status == .Val(status) { html.push_str(" <small class=\"mono\">"); html.push_str(html_escape(status)); html.push_str("</small>") }
@@ -739,7 +697,6 @@ fn render_node_detail(html: &String, panel_id: String, node: &BrowserNode) {
         html.push_str("</ul>")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1505
 fn render_inspector(html: &String, frame: &BrowserDevtoolsFrame) {
     html.push_str("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
     selection := frame.selection.as_ref() ?? { html.push_str("<p class=\"empty\">Select a fact to inspect it.</p></aside>"); return }
@@ -759,7 +716,6 @@ fn render_inspector(html: &String, frame: &BrowserDevtoolsFrame) {
     }
     html.push_str("</aside>")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1547
 fn find_path(nodes: [BrowserNode], node_id: String, path: [&BrowserNode]) -> Bool {
     loop node in nodes {
         path.push(node)
@@ -768,7 +724,6 @@ fn find_path(nodes: [BrowserNode], node_id: String, path: [&BrowserNode]) -> Boo
     }
     false
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1558
 fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
     descriptor := panel.availability.descriptor
     status := if {
@@ -797,9 +752,7 @@ fn panel_from_projection(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact 
     if nodes.is_empty() -> nodes.push(BrowserNode.new("availability", .Status, "availability").with_status(status.clone()))
     BrowserPanelFact.new(descriptor.id.as_str(), descriptor.title, 0, status, nodes).with_cursor(panel.cursor)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1620
 fn parse_revision(value: String) -> U64? { value.parse<U64>().ok() }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1624
 fn bounded_text(value: String, fallback: String, limit: USize) -> String {
     source := if value.is_empty() -> fallback else -> value
     output := String.new()
@@ -810,10 +763,8 @@ fn bounded_text(value: String, fallback: String, limit: USize) -> String {
     }
     if output.is_empty() -> fallback.to_string() else -> output
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1645
 fn bounded_value(value: String) -> String { bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
 
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1649
 fn frame_json(frame: BrowserDevtoolsFrame) -> String {
     output := String.with_capacity(4096)
     output.push('{')
@@ -883,7 +834,6 @@ fn frame_json(frame: BrowserDevtoolsFrame) -> String {
     }
     output.push_str("]}}"); output
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1740
 fn status_json(output: &String, status: &DevtoolsStatusFact) {
     output.push('{')
     field_string(output, "state", devtools_state_as_str(status.state), true)
@@ -896,7 +846,6 @@ fn status_json(output: &String, status: &DevtoolsStatusFact) {
     field_optional_string(output, "test_state", status.test_state.as_deref())
     output.push('}')
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1761
 fn devtools_state_as_str(state: JetDevtoolsLifecycleState) -> String {
     if state == {
         .Starting -> "starting"
@@ -907,7 +856,6 @@ fn devtools_state_as_str(state: JetDevtoolsLifecycleState) -> String {
         .Stopped -> "stopped"
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1772
 fn write_nodes_json(output: &String, nodes: &[BrowserNode]) {
     loop (index, node) in nodes.iter().enumerate() {
         if index != 0 -> output.push(',')
@@ -920,12 +868,10 @@ fn write_nodes_json(output: &String, nodes: &[BrowserNode]) {
         output.push_str(",\"children\":["); write_nodes_json(output, node.children); output.push_str("]}}")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1789
 fn field_string(output: &String, key: String, value: String, first: Bool) {
     if !first -> output.push(',')
     quoted(key, output); output.push(':'); quoted(value, output)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1798
 fn field_optional_string(output: &String, key: String, value: String?) {
     output.push(','); quoted(key, output); output.push(':')
     if value == {
@@ -933,7 +879,6 @@ fn field_optional_string(output: &String, key: String, value: String?) {
         .None -> output.push_str("null")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1808
 fn field_u64_option(output: &String, key: String, value: U64?) {
     output.push(','); quoted(key, output); output.push(':')
     if value == {
@@ -941,19 +886,15 @@ fn field_u64_option(output: &String, key: String, value: U64?) {
         .None -> output.push_str("null")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1818
 fn field_u64(output: &String, key: String, value: U64, first: Bool) {
     if !first -> output.push(',')
     quoted(key, output); output.push(':'); output.push_str(value.to_string())
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1827
 fn field_bool(output: &String, key: String, value: Bool, first: Bool) {
     if !first -> output.push(',')
     quoted(key, output); output.push(':'); output.push_str(if value -> "true" else -> "false")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1836
 fn quoted(value: String, output: &String) { output.push('"'); output.push_str(foundation_json_escape(value)); output.push('"') }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1844
 fn reconnect_json(state: BrowserWebState, from: U64?, reset: Bool, truncation: Bool) -> String Err! {
     output := String.with_capacity(4096)
     output.push('{')
@@ -976,7 +917,6 @@ fn reconnect_json(state: BrowserWebState, from: U64?, reset: Bool, truncation: B
     output.push_str("],\"view\":"); output.push_str(view_json(state, .Workbench)); output.push('}')
     .Ok(output)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1890
 fn event_json(output: &String, event: &BrowserHostEvent) {
     output.push('{')
     field_string(output, "protocol", event.protocol, true)
@@ -991,7 +931,6 @@ fn event_json(output: &String, event: &BrowserHostEvent) {
     }
     output.push_str("]}}")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1907
 fn panel_json(output: &String, panel: &BrowserPanelFact) {
     output.push('{')
     field_string(output, "panel_id", panel.panel_id, true)
@@ -1001,7 +940,6 @@ fn panel_json(output: &String, panel: &BrowserPanelFact) {
     field_u64_option(output, "cursor", panel.cursor)
     output.push_str(",\"nodes\":["); write_nodes_json(output, panel.nodes); output.push_str("]}}")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1922
 fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
     text := std.str.from_utf8(payload) ?? return .Err("browser selection body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser selection body is not valid bounded JSON")
@@ -1021,7 +959,6 @@ fn parse_selection(payload: [U8]) -> (String, String?)? Err! {
     }
     .Val((panel_id.to_string(), item_key))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:1959
 fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
     text := std.str.from_utf8(payload) ?? return .Err("browser action body must be UTF-8 JSON")
     root := parse_json_with_limit(text, MAX_REQUEST_BODY_BYTES) ?? return .Err("browser action body is not valid bounded JSON")
@@ -1040,7 +977,6 @@ fn parse_action(payload: [U8], default_placement: BrowserPlacement) -> BrowserHo
         else -> .Err("unknown browser action `{name}`")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2009
 fn parse_source_grant(object: [String:Dyn]) -> BrowserSourceGrant Err! {
     grant := nested_object(object, "grant")?
     source := nested_object(grant, "source")?
@@ -1048,41 +984,33 @@ fn parse_source_grant(object: [String:Dyn]) -> BrowserSourceGrant Err! {
     location := BrowserSourceLocation.new(required_string(source, "source_id")?, required_u32(source, "line")?, optional_u32(source, "column").unwrap_or(0), function.map((s) -> s.to_string()))
     .Ok(BrowserSourceGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, location))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2028
 fn parse_action_grant(object: [String:Dyn]) -> BrowserActionGrant Err! {
     grant := nested_object(object, "grant")?
     .Ok(BrowserActionGrant.new(required_string(grant, "session_id")?, required_u64(grant, "revision")?, required_string(grant, "panel_id")?, required_string(grant, "node_id")?, required_string(grant, "action_id")?))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2039
 fn nested_object(object: [String:Dyn], key: String) -> [String:Dyn] Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
     object_map(value).map_err((_) -> "browser action `{key}` must be an object")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2049
 fn required_string(object: [String:Dyn], key: String) -> String Err! {
     value := object.get(key).ok_or("browser action is missing `{key}`")?
     value.as_str().map_err((_) -> "browser action `{key}` must be a string")
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2060
 fn optional_string(object: [String:Dyn], key: String) -> String? { object.get(key).and_then((value) -> value.as_str().ok()) }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2064
 fn required_u64(object: [String:Dyn], key: String) -> U64 Err! {
     if object.get(key) == {
         .Val(.Int(value)) if value >= 0 -> U64.try_from(value).map_err((_) -> "browser action `{key}` is out of range") else -> .Err("browser action `{key}` must be a non-negative integer")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2075
 fn required_u32(object: [String:Dyn], key: String) -> U32 Err! {
     required_u64(object, key).and_then((value) -> U32.try_from(value).map_err((_) -> "browser action `{key}` is out of range"))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2081
 fn optional_u32(object: [String:Dyn], key: String) -> U32? {
     object.get(key).and_then((value) -> if value == {
         .Int(n) && n >= 0 -> U32.try_from(n).ok()
         else -> .None
     })
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2088
 fn parse_placement(value: Dyn) -> BrowserPlacement Err! {
     text := value.as_str() ?? return .Err("browser action placement must be a string")
     if text == {
@@ -1091,7 +1019,6 @@ fn parse_placement(value: Dyn) -> BrowserPlacement Err! {
         else -> .Err("unknown browser placement `{text}`")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2099
 fn parse_dock(value: String) -> BrowserDock Err! {
     if value == {
         "left" -> .Ok(.Left)
@@ -1102,7 +1029,6 @@ fn parse_dock(value: String) -> BrowserDock Err! {
     }
 }
 
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2109
 fn effect_json(effect_ref: BrowserHostEffect) -> String {
     output := String.from("{{\"schema\":\"")
     output.push_str(BROWSER_PAGE_SCHEMA); output.push_str("\",\"effect\":")
@@ -1137,11 +1063,9 @@ fn effect_json(effect_ref: BrowserHostEffect) -> String {
     }
     output.push_str("}}"); output
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2183
 fn dispatch_action(state: BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
     state.host.dispatch(action).map((effect_ref) -> effect_json(effect_ref))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2197
 fn render_nodes_html(output: &String, panel_id: String, nodes: &[BrowserNode], selected: String?) {
     loop node in nodes {
         is_selected := selected == .Val(node.id.as_str())
@@ -1157,12 +1081,10 @@ fn render_nodes_html(output: &String, panel_id: String, nodes: &[BrowserNode], s
         output.push_str("</button></li>")
     }
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2234
 fn contains_node(nodes: [BrowserNode], node_id: String?) -> Bool {
     id := node_id ?? return false
     nodes.iter().any((node) -> node.id == id || contains_node(node.children, .Val(id)))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2243
 fn html_escape(value: String) -> String {
     output := String.with_capacity(value.len())
     loop character in value.chars() {
@@ -1174,7 +1096,6 @@ fn html_escape(value: String) -> String {
     }
     output
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2259
 fn js_string(value: String) -> String {
     output := String.with_capacity(value.len())
     loop character in value.chars() {

@@ -4,11 +4,11 @@ Date: 2026-09-29. Binary: `jet-debug-snapshot14`.
 
 ## Method
 
-Witness: `~/.cache/jet-dev/scratch/Closer01/parked/field_metadata.jet` (parked, not blessed).
+Witness: `$JET_STATE_ROOT/scratch/Closer01/parked/field_metadata.jet` (parked, not blessed).
 Observed output: `.../parked/field_metadata.observed.out`.
-Tiers: I ran `~/.cache/jet-dev/scratch/Closer01/tiers.sh serde/field_metadata` while the file was at
+Tiers: I ran `$JET_STATE_ROOT/scratch/Closer01/tiers.sh serde/field_metadata` while the file was at
 `Examples/features/serde/field_metadata.jet`. Scratch repros:
-`deny1.jet`, `pub1.jet`, `hd1-7.jet` (all in `~/.cache/jet-dev/scratch/Closer01/`).
+`deny1.jet`, `pub1.jet`, `hd1-7.jet` (all in `$JET_STATE_ROOT/scratch/Closer01/`).
 
 ## Evidence (`jet run` == AOT, byte-identical)
 

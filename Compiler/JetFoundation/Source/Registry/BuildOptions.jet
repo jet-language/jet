@@ -163,15 +163,26 @@ struct BuildOptionChoice {
     pinned: Bool
 }
 
+// One `--set name=value` contribution to a declared package setting, the
+// value as written: the command-line writer of `$build.settings.<name>`.
+struct BuildSettingOverride {
+    name: String
+    value: String
+}
+
 // The options one command compiles under. `profile` is the selected profile
 // (`release`, a declared name), "" when none is; `written` keeps every
 // non-stock value in layer order, so a `fn build` layer can still go under the
 // flags; `values` is the resolved value of each row, in table order.
+// `settings` are the `--set` writers in argv order; `gates` the audited gates
+// `--gate name=allow` opens for the compile, in argv order.
 struct BuildOptions {
     command: String
     profile: String
     written: [BuildOptionChoice]
     values: [BuildOptionChoice]
+    settings: [BuildSettingOverride]{[BuildSettingOverride]{}}
+    gates: [PolicyKey]{[PolicyKey]{}}
 }
 
 enum BuildOptionsResolved {
@@ -310,12 +321,13 @@ fn build_option_join(words: [String]) -> String Never! {
 JET_BUILD_OPTIONS_UNKEYED :: [String]{"output_dir"}
 
 // The options' identity in a cache key: the profile, then each resolved row
-// that shapes the image.
+// that shapes the image, then each `--set` setting value.
 fn build_options_key(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> "dev" else -> options.profile
     loop choice in options.values {
         if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> out = "{out};{choice.name}={choice.value}"
     }
+    loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
     out
 }
 

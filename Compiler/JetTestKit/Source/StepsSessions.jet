@@ -1,0 +1,413 @@
+use {
+    files :: core.files
+    time :: core.time
+    sys :: core.sys
+}
+
+struct KitRecvForm {
+    line: Bool
+    collect: Bool
+    predicates: [KitAssertion]
+    // Nanoseconds; 0 uses the run's step timeout.
+    deadline: Int
+    every: Int
+    optional: Bool
+}
+
+struct KitRecvUnit {
+    // What the unit adds to the step's stdout, and what its predicates see.
+    record: String
+    subject: String
+    size: Int
+}
+
+fn kit_steps_recv_form(text: String) -> KitRecvForm? {
+    words :: kit_steps_tokens(kit_steps_body(text)) ?? return None
+    if words.len() < 2 || words[0].text != "recv" -> return None
+    form := KitRecvForm{line: false, collect: false, predicates: [KitAssertion]{}, deadline: 0, every: 0, optional: false}
+    cursor := 2
+    if cursor < words.len() && words[cursor].text == "line" {
+        form.line = true
+        cursor += 1
+    }
+    form.collect = cursor < words.len() && words[cursor].text == "collect"
+    if form.collect -> cursor += 1
+    if cursor < words.len() && words[cursor].text == "until" {
+        cursor += 1
+        start :: cursor
+        loop cursor < words.len() {
+            raw :: kit_steps_byte_slice(text, words[cursor].start, words[cursor].end)
+            if kit_expect_named(["timeout", "within", "every", "optional"], raw) -> break
+            cursor += 1
+        }
+        if cursor == start -> return None
+        predicates :: kit_steps_predicates(kit_steps_byte_slice(text, words[start].start, words[cursor - 1].end)) ?? return None
+        reason :: kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())
+        loop predicate in predicates {
+            tokens :: kit_steps_tokens(predicate) ?? return None
+            assertion :: if predicate.starts_with("$") -> {
+                if tokens.len() < 3 || tokens[1].text != "=" || kit_steps_json_path(tokens[0].text) == None -> return None
+                kit_steps_json_assertion("stdout doc {predicate}") ?? return None
+            } else if predicate.starts_with("ndjson ") -> {
+                kit_steps_json_assertion("stdout {predicate} {reason}") ?? return None
+            } else -> {
+                kit_steps_stream_assertion("stdout", "{predicate} {reason}") ?? return None
+            }
+            &form.predicates.push(assertion)
+        }
+    } else if form.collect -> return None
+    deadline := ""
+    loop cursor < words.len() {
+        key :: words[cursor].text
+        if key == "optional" {
+            if deadline == "" || cursor + 1 != words.len() -> return None
+            form.optional = true
+            break
+        }
+        if cursor + 1 >= words.len() -> return None
+        duration :: kit_steps_duration_ns(words[cursor + 1].text) ?? return None
+        if key == "timeout" || key == "within" {
+            if deadline != "" -> return None
+            deadline = key
+            form.deadline = duration
+        } else if key == "every" {
+            if form.every > 0 -> return None
+            form.every = if duration > 0 -> duration else -> 1
+        } else {
+            return None
+        }
+        cursor += 2
+    }
+    if form.every > 0 && deadline == "" -> return None
+    Val(form)
+}
+
+fn kit_steps_recv_valid(text: String) -> Bool {
+    _ :: kit_steps_recv_form(text) ?? return false
+    true
+}
+
+// Drains the child's captured stdout into `out`; an empty chunk marks its end.
+// Cancellation also ends the read empty, so only the task's own return (not a
+// cancelled join) means the stream really ended.
+fn kit_steps_session_pull(stream: ProcessStdoutStream, out: Sender<[U8]>) -> String Never! {
+    loop {
+        chunk :: stream.read(65536) ?? {
+            out.send([U8]{})
+            return "{err}"
+        }
+        if chunk.len() == 0 {
+            out.send([U8]{})
+            return ""
+        }
+        out.send(^chunk)
+    }
+    ""
+}
+
+// The next whole unit at the front of `buffer`: a Content-Length frame body,
+// or one line (a final unterminated line once the stream ended). Size 0 means
+// no whole unit has arrived yet.
+fn kit_steps_recv_unit(buffer: [U8], unit: String, ended: Bool) -> KitRecvUnit Err! {
+    incomplete :: KitRecvUnit{record: "", subject: "", size: 0}
+    if unit == "frame" {
+        separator :: [U8]{13, 10, 13, 10}
+        at :: kit_steps_bytes_search(buffer, separator, 0, buffer.len(), false) ?? return Ok(incomplete)
+        header :: String.from_bytes(buffer.slice(0, at)) ?? return Err("recv frame header is not UTF-8")
+        length := -1
+        loop field in header.lines() {
+            pair :: field.trim()
+            if !kit_steps_ascii_lower(pair).starts_with("content-length:") -> next
+            length = Int.parse(kit_steps_byte_slice(pair, 15, pair.count_bytes()).trim()) ?? return Err("recv frame length is not a number")
+        }
+        if length < 0 -> return Err("recv frame has no Content-Length header")
+        start :: at + 4
+        if buffer.len() < start + length -> return Ok(incomplete)
+        body :: String.from_bytes(buffer.slice(start, start + length)) ?? return Err("recv frame body is not UTF-8")
+        return Ok(KitRecvUnit{record: body.copy(), subject: body, size: start + length})
+    }
+    newline :: kit_steps_bytes_search(buffer, [U8]{10}, 0, buffer.len(), false)
+    if newline == None && !(ended && buffer.len() > 0) -> return Ok(incomplete)
+    end :: (newline ?? (buffer.len() - 1)) + 1
+    record :: String.from_bytes(buffer.slice(0, end)) ?? return Err("recv line is not UTF-8")
+    subject := if record.ends_with("\n") -> kit_steps_byte_slice(record, 0, record.count_bytes() - 1) else -> record.copy()
+    if subject.ends_with("\r") -> subject = kit_steps_byte_slice(subject, 0, subject.count_bytes() - 1)
+    Ok(KitRecvUnit{record: if record.ends_with("\n") -> record else -> "{record}\n", subject: subject, size: end})
+}
+
+// PASS when every predicate holds for `text`; FAIL when one does not yet.
+fn kit_steps_recv_holds(predicates: [KitAssertion], text: String, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    probe := state
+    probe.last = KitRun{stdout: text, stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+    probe.json_stdout = None
+    probe.json_stderr = None
+    loop assertion in predicates {
+        verdict :: kit_steps_check_assertion(assertion, context, probe, "", false)
+        if verdict.status != "PASS" -> return verdict
+    }
+    kit_expect_verdict("PASS", "")
+}
+
+fn kit_steps_recv_tail(text: String) -> String {
+    if text.count_bytes() <= 200 -> return text.copy()
+    kit_steps_byte_slice(text, text.count_bytes() - 200, text.count_bytes())
+}
+
+// Reads the session child's stdout until the form's unit or predicates are
+// met. Content-Length sessions read frames, line sessions and `line` read
+// lines, others read raw bytes. Without `until` one unit (raw: what arrived)
+// is the step's stdout; with `until` raw output accumulates until it holds,
+// lines accumulate through the first line that holds, and frames before the
+// first frame that holds are skipped; `collect` gathers every unit and tests
+// the collection.
+fn kit_steps_session_read(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    state := previous
+    form :: kit_steps_recv_form(step.instruction) ?? return kit_steps_action_error(state, "invalid recv")
+    index := -1
+    loop at in 0..<state.children.len() {
+        if state.children[at].label == step.label && !state.children[at].joined {
+            index = at
+            break
+        }
+    }
+    if index < 0 -> return kit_steps_action_error(state, "session label unavailable")
+    pending :: state.children[index]
+    unit :: if pending.step.session_mode == "content-length" -> "frame" else if form.line || pending.step.session_mode == "line" -> "line" else -> "raw"
+    limit :: kit_steps_answer_deadline(context.env, if form.deadline > 0 -> form.deadline else -> context.env.timeout.ns)
+    interval :: if form.every > 0 -> form.every else -> 5000000
+    check := context
+    check.bless.all = false
+    check.bless.ids = []
+    started :: time.instant()
+    buffer := pending.buffer
+    taken := pending.taken
+    ended := pending.ended
+    output := ""
+    matched := false
+    failure := ""
+    { sender: chunks, receiver: arrivals } :: channel<[U8]>()
+    reader :: task kit_steps_session_pull(pending.child.stdout, chunks)
+    loop {
+        if unit == "raw" {
+            // A chunk may end inside a UTF-8 sequence; wait for the rest.
+            text :: if buffer.len() > 0 -> String.from_bytes(buffer.slice(0, buffer.len())) ?? "" else -> ""
+            if text != "" {
+                holds :: if form.predicates.len() == 0 -> kit_expect_verdict("PASS", "") else -> kit_steps_recv_holds(form.predicates, text, check, state)
+                if holds.status == "PASS" {
+                    output = text
+                    taken += buffer.len()
+                    buffer = [U8]{}
+                    matched = true
+                } else if holds.status != "FAIL" {
+                    failure = "recv predicate: {holds.detail}"
+                }
+            }
+        } else {
+            loop !matched && failure == "" {
+                found :: kit_steps_recv_unit(buffer, unit, ended) ?? {
+                    failure = "{err}"
+                    break
+                }
+                if found.size == 0 -> break
+                taken += found.size
+                buffer = buffer.slice(found.size, buffer.len())
+                if form.predicates.len() == 0 {
+                    output = found.record
+                    matched = true
+                    break
+                }
+                if form.collect {
+                    output = if unit == "frame" -> "{output}{found.record}\n" else -> "{output}{found.record}"
+                    holds :: kit_steps_recv_holds(form.predicates, output, check, state)
+                    if holds.status == "PASS" {
+                        matched = true
+                    } else if holds.status != "FAIL" {
+                        failure = "recv predicate: {holds.detail}"
+                    }
+                    next
+                }
+                if unit == "line" -> output = "{output}{found.record}"
+                holds :: kit_steps_recv_holds(form.predicates, found.subject, check, state)
+                if holds.status == "PASS" {
+                    if unit == "frame" -> output = found.record
+                    matched = true
+                } else if holds.status != "FAIL" {
+                    failure = "recv predicate: {holds.detail}"
+                }
+            }
+        }
+        if matched || failure != "" -> break
+        if ended {
+            failure = "stdout ended before recv was satisfied"
+            break
+        }
+        if started.elapsed().ns >= limit {
+            failure = "deadline"
+            break
+        }
+        chunk :: arrivals.try_receive() ?? {
+            time.sleep(time.duration_ns(interval))
+            next
+        }
+        if chunk.len() == 0 {
+            ended = true
+        } else {
+            loop byte in chunk -> &buffer.push(byte)
+        }
+    }
+    reader.cancel()
+    read_error :: ^reader.join() ?? ""
+    // Bytes the reader delivered after the last unit belong to the next recv.
+    loop {
+        chunk :: arrivals.try_receive() ?? break
+        if chunk.len() == 0 {
+            ended = true
+        } else {
+            loop byte in chunk -> &buffer.push(byte)
+        }
+    }
+    state.children[index].buffer = buffer
+    state.children[index].taken = taken
+    state.children[index].ended = ended
+    if read_error != "" -> return kit_steps_action_error(state, "recv read: {read_error}")
+    elapsed :: started.elapsed().ns
+    seen :: if unit == "raw" -> String.from_bytes(buffer) ?? "" else -> output
+    if !matched {
+        if failure == "deadline" && form.optional {
+            state.last = KitRun{stdout: seen, stderr: "", code: 0, signal: None, timed_out: false, error: "", elapsed_ns: elapsed}
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        if failure.starts_with("recv predicate:") -> return kit_steps_action_error(state, failure)
+        detail :: if failure == "deadline" -> "recv deadline exceeded after {elapsed / 1000000}ms" else -> failure
+        return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "{detail}; stdout seen: {kit_steps_recv_tail(seen)}")}
+    }
+    state.last = KitRun{stdout: output, stderr: "", code: 0, signal: None, timed_out: false, error: "", elapsed_ns: elapsed}
+    KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+}
+
+fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    state := previous
+    if step.action == "recv" -> return kit_steps_session_read(step, context, state)
+    if step.action == "session" {
+        policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid session policy")
+        overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
+        prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
+        started :: time.instant()
+        spec := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay)
+        if step.terminal == .Val(shape) {
+            spec = spec.terminal(TerminalPolicy{size: TerminalSize{cols: shape.cols, rows: shape.rows}, mode: .Cooked})
+        }
+        child := spec.spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
+        input_error := ""
+        if step.stdin == "null" -> child.stdin.close()
+        else if prepared.stdin != "" {
+            child.stdin.write_text(prepared.stdin) ?? {
+                input_error = "session stdin: {err}"
+                ()
+            }
+        }
+        &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
+        if input_error != "" -> return kit_steps_action_error(state, input_error)
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    loop index in 0..<state.children.len() {
+        if state.children[index].label != step.label || state.children[index].joined -> next
+        pending := state.children[index]
+        if step.action == "send" {
+            payload :: if step.literal_input -> step.argv[0] else -> files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, step.argv[0])) ?? return kit_steps_action_error(state, "send file: {err}")
+            if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
+            expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
+            cr :: String.from_bytes([U8{13}]) ?? panic("CR")
+            framed :: if step.session_mode == "raw" -> expanded else if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.count_bytes()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
+            // A child that has closed its input fails the step, as a child
+            // whose output ended before a recv was satisfied does.
+            pending.child.stdin.write_text(framed) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "session send: {err}")}
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        if step.action == "signal" {
+            delivered :: kit_steps_signal(pending.child.id(), step.argv[0]) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "signal delivery: {err}")}
+            state.children[index].signalled = delivered
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        // Closing a terminal session's input types the end-of-file character;
+        // closing the terminal itself would hang up the child.
+        if step.action == "close" {
+            if kit_steps_has_terminal(pending.step) {
+                eof :: String.from_bytes([U8{4}]) ?? panic("EOF character")
+                pending.child.stdin.write_text(eof).drop("the child may have exited before its input ended")
+            } else {
+                pending.child.stdin.close()
+            }
+        }
+        if step.duration > 0 {
+            started :: time.instant()
+            deadline :: kit_steps_answer_deadline(context.env, step.duration)
+            loop !(pending.child.exited() ?? return kit_steps_action_error(state, "wait status: {err}")) {
+                if started.elapsed().ns >= deadline -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "wait deadline exceeded")}
+                time.sleep(1ms)
+            }
+        }
+        receipt :: pending.child.wait() ?? return kit_steps_action_error(state, "session wait: {err}")
+        state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
+        if pending.signalled -> state.last.signal = None
+        if pending.taken > 0 -> state.last.stdout = kit_steps_byte_slice(state.last.stdout, pending.taken, state.last.stdout.count_bytes())
+        state.children[index].joined = true
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    kit_steps_action_error(state, "session label unavailable")
+}
+
+fn kit_steps_signal(pid: Int, name: String) -> Bool Err! {
+    number :: if name == "INT" || name == "SIGINT" -> 2 else if name == "TERM" || name == "SIGTERM" -> 15 else if name == "KILL" || name == "SIGKILL" -> 9 else if name == "HUP" || name == "SIGHUP" -> 1 else if name == "STOP" || name == "SIGSTOP" -> 19 else if name == "CONT" || name == "SIGCONT" -> 18 else -> Int.parse(name) ?? return Err("unknown signal")
+    #Unsafe("the case explicitly authorizes signalling its own spawned child") {
+        sys.kill(pid, number) ?? return Err("signal delivery failed")
+    }
+    Ok(number != 0)
+}
+
+fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState) -> KitStepResult {
+    // #4790: keep task handles in joined call frames, not a typed Task list.
+    { sender, receiver: reports } :: channel<String>()
+    errors := [String]{}
+    task.group sends {
+        kit_steps_parallel_start(sends, steps, 0, context, state, sender)
+    }
+    sender.close()
+    loop message in reports {
+        if message != "" -> &errors.push(message)
+    }
+    KitStepResult{state: state, verdict: if errors.len() == 0 -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("ERROR", errors.join("; "))}
+}
+
+// Keep the report infallible; transport failures remain ordinary ERROR details.
+fn kit_steps_send_result(step: KitStep, context: KitStepCtx, state: KitStepState) -> String Never! {
+    result :: kit_steps_session_action(step, context, state)
+    if result.verdict.status == "PASS" -> "" else -> result.verdict.detail
+}
+
+fn kit_steps_send_report(step: KitStep, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
+    sender.send(kit_steps_send_result(step, context, state))
+}
+
+fn kit_steps_parallel_start(group: Group, steps: [KitStep], index: Int, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
+    if index >= steps.len() -> return
+    original :: steps[index]
+    if original.action != "send" {
+        sender.send("parallel contains a non-send action")
+        kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+        return
+    }
+    step :: kit_steps_resolve_step(original, context, state) ?? {
+        sender.send("parallel send token unavailable")
+        kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+        return
+    }
+    reporter :: sender.copy()
+    worker :: task kit_steps_send_report(step, context, state, reporter)
+    // Start all remaining sends before joining this one, preserving concurrency.
+    kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+    ^worker.join() ?? {
+        sender.send("parallel task join failed")
+        return
+    }
+}

@@ -157,6 +157,19 @@ fn provider_core_test_is_bad_output(error: ProviderError) -> Bool {
     files.remove_all(project) ?? panic("cleanup")
 }
 
+#Test("provider locked nix index key keeps the lock channel for a revision-pinned declaration") {
+    project :: provider_core_test_dir("locked-nix-index-key-revision-pin")
+    revision :: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
+    provider_core_test_write(files.join(files.join(project, SOURCE_ROOT_DIR), "lock"), "version = 1\n\n[[source_channel]]\nname = \"default\"\nchannel = \"nixpkgs-unstable\"\nexact = \"github:NixOS/nixpkgs#{revision}\"\n\n[root]\ndependencies = []\n")
+    table :: provider_core_test_table("default", "NixOS/nixpkgs/{revision}@github", ProviderKind.Nix)
+    spec :: provider_core_test_spec_in("ripgrep@default", table)
+    ctx :: provider_core_test_ctx(files.join(project, "hangar"), false, None, Val(project))
+    key :: provider_locked_nix_index_key(spec, table, ctx, "x86_64-linux") ?? panic("locked key")
+    assert_eq(key.channel, "nixpkgs-unstable")
+    assert_eq(key.revision, revision)
+    files.remove_all(project) ?? panic("cleanup")
+}
+
 fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: String, references: [String], proof: String, nar_hash: String, size: Int) -> AdmittedNixObject {
     AdmittedNixObject{store_path, hangar_path, hangar_digest: digest, direct_reference_digests: references, upstream_proof_sha256: proof, nar_hash, size, compression: "zstd"}
 }
@@ -339,7 +352,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
 }
 
 #Test("provider fixture name sanitizes slashes") {
-    assert_eq(provider_fixture_name(provider_core_test_spec("halcyonomega/cfg@github")), "github-halcyonomega_cfg.json")
+    assert_eq(provider_fixture_name(provider_core_test_spec("owner/cfg@github")), "github-owner_cfg.json")
 }
 
 #Test("provider parses good output") {
@@ -613,7 +626,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     store :: files.join(base, "store")
     files.create_dir_all(store) ?? panic("store")
     written :: [(path: String, text: String)]{
-        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"),
         (path: "packages/hello/package.jet", text: "name: \"hello\"\nversion: \"0.1.0\"\n"),
         (path: "packages/hello/hello.jet", text: "module hello {{ }}\n"),
         (path: "packages/hello/bin/hello", text: "#!/bin/sh\necho hi\n"),
@@ -626,12 +639,13 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     }
     upstream :: "file://{repo}"
     table :: provider_core_test_table("mine", upstream, ProviderKind.Core)
-    realized :: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization")
+    realized :: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization: {err.message()}")
     assert_eq(realized.name, "hello")
     cache :: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
     assert(files.is_file(files.join(cache, "packages/hello/package.jet")))
     assert(!files.exists(files.join(cache, "packages/world")))
-    assert(files.is_file(files.join(cache, "workspace.jet")))
+    assert(files.is_file(files.join(cache, "package.jet")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -644,7 +658,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     // `app` depends on the in-repo `logging` member through an alias (`log`)
     // that differs from the member name: resolution is by path target.
     written :: [(path: String, text: String)]{
-        (path: "workspace.jet", text: "module workspace {{ members: find(\"./packages\") }}\n"),
+        (path: "package.jet", text: "name: \"workspace\"\nmembers: find(\"./packages\")\n"),
         (path: "packages/app/package.jet", text: "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ log: ../logging }}\n"),
         (path: "packages/app/app.jet", text: "module app {{ }}\n"),
         (path: "packages/logging/package.jet", text: "name: \"logging\"\nversion: \"0.1.0\"\n"),
@@ -658,11 +672,12 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     }
     upstream :: "file://{repo}"
     table :: provider_core_test_table("mine", upstream, ProviderKind.Core)
-    provider_realize(&verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization")
+    provider_realize(&verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization: {err.message()}")
     cache :: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
     assert(files.is_file(files.join(cache, "packages/app/package.jet")))
     assert(files.is_file(files.join(cache, "packages/logging/package.jet")))
     assert(!files.exists(files.join(cache, "packages/unrelated")))
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 
@@ -720,6 +735,7 @@ fn provider_core_test_admitted(store_path: String, hangar_path: String, digest: 
     after :: provider_cache_expectation(&verification, spec, table, ctx) ?? panic("changed cache identity")
     assert(before.identity.source_fingerprint != after.identity.source_fingerprint)
     assert(before.owned_output != after.owned_output)
+    store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
     files.remove_all(base) ?? panic("cleanup")
 }
 

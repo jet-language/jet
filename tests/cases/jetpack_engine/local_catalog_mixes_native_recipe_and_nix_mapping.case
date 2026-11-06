@@ -17,7 +17,8 @@ await: file peer.port timeout 30s
 capture: port = text file peer.port
 step: jet run --allow=Env,FS.Read,FS.Write native-setup.jet -- {work}/catalog {work}/project
 exit: 0
-step: jetpack env --prep --no-color --trust --local-nix-catalog {work}/catalog
+# A piped `env --prep` needs an explicit `--yes` before it downloads.
+step: jetpack env --prep --no-color --trust --yes --local-nix-catalog {work}/catalog
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0
@@ -42,7 +43,8 @@ json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-un
 json: stdout doc $.explain.provider.producer_facts["nix.index.signature-chain"] = "none"
 json: stdout doc $.explain.provider.producer_facts !has "nix.drv_path" # original contains_key negation
 file: {cap:out}/bin/native-tool is-file
-file: root/hangar/receipts/{cap:receipt} ~ "756e7665726966696564" # original contains predicate
+# The hex receipt binds each input by digest; this is hex("sha256-" + sha256("unverified")), the catalog trust.
+file: root/hangar/receipts/{cap:receipt} ~ "7368613235362d39376237653264623739396532623739653635663431386234326137643330353463393562326433616231646261323433303339353937653434613338303834" # the receipt records the unverified catalog trust
 step: jetpack audit --no-color
 cwd: project
 exit: 0

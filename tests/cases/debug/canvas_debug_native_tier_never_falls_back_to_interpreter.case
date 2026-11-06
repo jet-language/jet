@@ -23,7 +23,7 @@ exit: 0
 when request.stdout ~ "HTTP/1.1 200"
 stdout: ~ "\"tier\":\"native-lldb\"" # original contains predicate
 stdout: ~ "\"state\":\"running\"" # original contains predicate
-stdout: !~ "\"tier\":\"jet-dev-interpreter\"" # original contains predicate
+stdout: !~ "\"tier\":\"jet-dev-replay\"" # original contains predicate
 capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
 write: request.json canvas_debug_native_tier_never_falls_back_to_interpreter.stop.json
 step stop: {work}/canvas-client

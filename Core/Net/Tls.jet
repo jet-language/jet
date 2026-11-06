@@ -157,9 +157,8 @@ fn __server(stream: ^TCPStream, cert_pem: String, key_pem: String, alpn: [String
 // listener (`tls: server.tls(cert, key)`) also builds one at bind to reject an
 // unusable identity before serving (D-TLSSERVE1=A,
 // Docs/spec/syntax-decisions.md:5083). The messages are the Rust oracle's
-// (c9129d174d^ crates/jet-pkg-model/src/Prelude/HTTPServerTLS.rs:37-64): a
-// certificate PEM holds a CERTIFICATE block, and a key PEM holds a PKCS#8,
-// PKCS#1 or SEC1 private key block.
+// (c9129d174d^): a certificate PEM holds a CERTIFICATE block, and a key PEM
+// holds a PKCS#8, PKCS#1 or SEC1 private key block.
 fn __server_context(cert_pem: String, key_pem: String) -> __TLSContext __TLSFailure! {
     if !cert_pem.contains("-----BEGIN CERTIFICATE-----") -> return Err(__fail("TLS certificate PEM did not contain a certificate"))
     if !key_pem.contains("-----BEGIN PRIVATE KEY-----") && !key_pem.contains("-----BEGIN RSA PRIVATE KEY-----") && !key_pem.contains("-----BEGIN EC PRIVATE KEY-----") {
@@ -1448,7 +1447,10 @@ fn __der_time(kind: Int, bytes: [U8]) -> Int __TLSFailure! {
 // ---- Mbed TLS calls -------------------------------------------------------------
 
 // Actual jet_tls.c / libc signatures. Every U64 handle is a live context owned
-// by a __TLSContext; strings are borrowed for the one call.
+// by a __TLSContext; strings are borrowed for the one call. The prove_net_*
+// rows are the runtime's `jet prove` journal (JetRuntime ProveJournal.jet):
+// the runtime object defines them in every program, so riding this import
+// gives core.http.client's capture and replay no new link input.
 #Import module c.mbedtls {
     fn new(out: &U64, endpoint: I32) -> I32 = "jet_tls_new"
     fn free(handle: U64) = "jet_tls_free"
@@ -1472,6 +1474,9 @@ fn __der_time(kind: Int, bytes: [U8]) -> Int __TLSFailure! {
     fn peer_cert(handle: U64, index: I64, data: &U64, length: &U64) -> I32 = "jet_tls_peer_cert"
     fn getenv(name: String) -> U64 = "getenv"
     fn cstr_len(text: U64) -> U64 = "jet_tls_cstr_len"
+    fn prove_net_mode() -> I64 = "jet_prove_net_mode"
+    fn prove_net_record(data: U64, length: I64) = "jet_prove_net_record"
+    fn prove_net_take(data: U64, length: I64, out: &U64, out_length: &U64) -> I64 = "jet_prove_net_take"
 }
 
 fn __c_authmode(raw: U64, mode: Int) {
@@ -1603,4 +1608,37 @@ fn __c_text(address: U64) -> String Never! {
     length :: Int.from_u64(mbedtls.cstr_len(address))
     if length == 0 -> return ""
     String.from_bytes(tls_mem.__bytes_unpack(address, length)) ?? ""
+}
+
+// 0 outside `jet prove`, 1 under `--capture-sensitive`, 2 under `--replay`.
+fn __prove_net_mode() -> Int Never! {
+    mode := I64{0}
+    #Unsafe("reads the run's journal mode word; no argument is borrowed") { mode = mbedtls.prove_net_mode() }
+    Int.from_i64(mode)
+}
+
+// A capture journals one HTTP client hop's encoded bytes.
+fn __prove_net_record(tape: [U8]) Never! {
+    if tape.len() == 0 -> return
+    #Unsafe("the packed copy lives until the matching free below; the runtime copies it into the journal during the call") {
+        address :: tls_mem.__bytes_pack(tape)
+        mbedtls.prove_net_record(address, I64{tape.len()})
+        tls_mem.__bytes_free(address, tape.len())
+    }
+}
+
+// A replay traces this hop's request and takes the next recorded hop's
+// bytes; empty once the run diverged.
+fn __prove_net_take(request: [U8]) -> [U8] Never! {
+    record := [U8]{}
+    #Unsafe("the packed request lives until the matching free below; the served address points into the run's loaded journal, copied out before return") {
+        address :: tls_mem.__bytes_pack(request)
+        data := U64{0}
+        length := U64{0}
+        if mbedtls.prove_net_take(address, I64{request.len()}, &data, &length) == (I64{1}) && length != (U64{0}) {
+            record = tls_mem.__bytes_unpack(data, Int.from_u64(length))
+        }
+        tls_mem.__bytes_free(address, request.len())
+    }
+    record
 }

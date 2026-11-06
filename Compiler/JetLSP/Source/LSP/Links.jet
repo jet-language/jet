@@ -1,4 +1,4 @@
-// Source/LSP/Server.rs:5699–5742,5777–5877. URI/Position/JSON remain canonical.
+// URI/Position/JSON remain canonical.
 use {
     jet_semindex.[SymbolDB]
     jet_foundation.[diagnostic_utf8_width, foundation_json_quote]
@@ -42,9 +42,12 @@ fn lsp_document_links_for(path: OSPath, workspace_root: OSPath?, src: String, re
             path_start = indent + 4
         }
         end := lsp_use_path_end(line, path_start)
-        // `alias :: path`: the link covers the path after `::`.
+        // `alias :: path` or `alias: path`: the link covers the path after the colon.
         if end + 4 <= line.bytes().len() && line.slice(end, end + 4) == " :: " {
             path_start = end + 4
+            end = lsp_use_path_end(line, path_start)
+        } else if end + 2 <= line.bytes().len() && line.slice(end, end + 2) == ": " {
+            path_start = end + 2
             end = lsp_use_path_end(line, path_start)
         }
         if end == path_start -> next
@@ -57,15 +60,15 @@ fn lsp_document_links_for(path: OSPath, workspace_root: OSPath?, src: String, re
     }
     out
 }
-// The end of the `use` path that starts at byte `start`: the first `{` or
-// whitespace.
+// The end of the `use` path that starts at byte `start`: the first `{`, `:`
+// or whitespace.
 fn lsp_use_path_end(line: String, start: Int) -> Int Never! {
     bytes :: line.bytes()
     end := start
     loop end < bytes.len() {
         width :: diagnostic_utf8_width(bytes, end)
         ch := line.slice(end, end + width) // #4303
-        if bytes[end] == (U8{123}) || lsp_source_text.is_whitespace(ch) -> break
+        if bytes[end] == (U8{123}) || bytes[end] == (U8{58}) || lsp_source_text.is_whitespace(ch) -> break
         end += width
     }
     end
@@ -89,7 +92,7 @@ fn lsp_code_lenses_for(uri: String, src: String) -> [String] Never! {
         line := src.slice(span.start, span.end) // #4303
         trimmed := lsp_source_text.trim_start(line) // #4303
         indent :: line.bytes().len() - trimmed.bytes().len()
-        if trimmed.starts_with("fn run") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
+        if trimmed.starts_with("fn run") || trimmed.starts_with("run: fn") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run file", "jet.runFile", ([String]{uri})))
         else if trimmed.starts_with("#Test") -> &out.push(lsp_code_lens_json(index, indent, line.bytes().len(), "Run test", "jet.testFile", ([String]{uri, "{index}"})))
     }
     out

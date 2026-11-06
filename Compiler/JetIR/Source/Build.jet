@@ -359,6 +359,11 @@ struct IRProgram {
     // (ir_build_program, ir_build_tests); false for the runtime library the
     // sentry is part of and for compile-time evaluation.
     sentries: Bool{false}
+    // Whether each checked `#Pre`/`#Post` clause reports its outcome to the
+    // runtime's contract records (BuildContracts.jet ir_contract,
+    // JetRuntime TestContracts.jet): true only for a test image
+    // (ir_build_tests), whose records `jet prove` reads.
+    contract_records: Bool{false}
     // The ordinal of each `task` spawn site among its file's spawn sites in
     // source order, by "{source file}:{span start}" (ir_spawn_sites): the
     // "spawn site N" of task reports.
@@ -1702,11 +1707,11 @@ fn ir_own(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int Never! {
         ir_disown(&b, slot)
         return slot
     }
-    // `^x` of a variable's own Option, Result or enum box whose payload has
-    // no clone moves the box: a second owner of it would share a payload
-    // that has no clone (I2), and a payload moved out of it later
-    // (ir_payload_take) needs the box's only owner.
-    if ir_movable_binding(b, slot) && ir_box_row(m, row) && ir_row_lacks_clone(&m, p, row) {
+    // `^x` moves the variable's own value: the variable stops owning it, so
+    // the new holder alone ends it (#6584). A second owner of a box whose
+    // payload has no clone would share that payload (I2), and a payload
+    // moved out of it later (ir_payload_take) needs the box's only owner.
+    if ir_movable_binding(b, slot) {
         ir_disown(&b, slot)
         b.fresh[slot] = true
         return slot
@@ -1736,6 +1741,106 @@ fn ir_payload_take(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int) -> Int 
     ir_close_disarm(&b, carrier)
     ir_disown(&b, carrier)
     ir_box_hand_over(&m, p, &b, carrier, slot, b.f.slot_type[slot])
+}
+
+// `^x.f` (or `^x.f.g`) of a variable that owns its value on every path here:
+// the member's bytes move to the new holder, and the variable's copy of them
+// is zeroed in place (ir_zero_drops), which its drop glue, a write of the
+// member and a whole reassignment all skip, so only the new holder ends what
+// the member held (#6584). -2 for any other place, which `^` reads as a
+// variable's value (ir_own).
+fn ir_move_member(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
+    node :: ir_body_node(p, b, place).kind
+    if node == .Field(receiver, field) {
+        member :: ir_owned_member(&m, p, b, receiver, field.name) ?? return -2
+        row :: member.ty
+        if m.types[row].drop == "" || ir_row_lacks_clone(&m, p, row) || !ir_zeroable(&m, p, row) -> return -2
+        base :: ir_expr(&m, p, &b, receiver)
+        if ir_failed(b) || base < 0 -> return -1
+        read :: ir_member_read(&m, &b, base, member)
+        ir_close_note(&m, p, &b, read, base, IRPartStep{selector: -1, offset: member.offset})
+        ir_close_disarm(&b, read)
+        taken := read
+        if m.types[row].kind == .Aggregate {
+            taken = ir_temp(&m, &b, row)
+            ir_emit(&b.f, IROp.StackAddress, taken, m.types[row].size, 8, -1, b.line)
+            ir_emit(&b.f, IROp.CopyBytes, -1, taken, read, m.types[row].size, b.line)
+        }
+        ir_zero_drops(&m, p, &b, base, member.offset, row)
+        b.fresh[taken] = true
+        return taken
+    }
+    -2
+}
+
+// The receiver of a `^self` method call, which consumes it: a member of a
+// variable moves out of it (ir_move_member), and a variable's own value
+// moves as `^x` does, so the callee's drop of `self` is its only end (#6584).
+fn ir_move_receiver(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, span: Span) -> Int Never! {
+    taken :: ir_move_member(&m, p, &b, receiver, span)
+    if taken != -2 -> return taken
+    slot :: ir_expr(&m, p, &b, receiver)
+    if ir_body_node(p, b, receiver).kind == .Local(_) -> b.moving = slot
+    slot
+}
+
+// The inline member `name` of the value `receiver` reads: a variable that
+// owns it on every path here, or an inline member of one. None for any other.
+fn ir_owned_member(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, name: String) -> IRMember? Never! {
+    ty :: ir_ty(p, b, receiver)
+    if ir_reactive_type(p, ty) || ir_default_err(p, ty) || ir_pin_target(ty) != None -> return None
+    row :: ir_value_type(&m, p, ty) ?? return None
+    if m.types[row].kind != .Aggregate -> return None
+    member :: ir_member_of_row(&m, p, row, name) ?? return None
+    if member.boxed -> return None
+    node :: ir_body_node(p, b, receiver).kind
+    if node == .Local(local) {
+        if local.persist_key != None -> return None
+        binding :: ir_lookup_local(b, local) ?? return None
+        if !ir_owned_binding(b, binding.slot) -> return None
+        return Val(member)
+    }
+    if node == .Field(inner, field) {
+        _ :: ir_owned_member(&m, p, b, inner, field.name) ?? return None
+        return Val(member)
+    }
+    None
+}
+
+// Whether a value of type row `row` zeroed in place holds nothing its drop
+// ends: a null handle, box or String, an inline Int, a counted buffer of
+// capacity 0, or a tuple or struct of those.
+fn ir_zeroable(m: &IRModule, p: IRProgram, row: Int) -> Bool Never! {
+    kind :: m.types[row].kind
+    if m.types[row].drop == "" || kind == .Int || kind == .String -> return true
+    if kind == .Pointer -> return ir_box_row(m, row) || ir_is_handle(m, row)
+    if kind != .Aggregate || ir_atomic_scalar(m.types[row].ty) != None -> return false
+    if ir_counted_entry(&m, p, row) != None -> return true
+    members :: ir_inline_members(&m, p, row) ?? return false
+    loop member in members {
+        if member.boxed || !ir_zeroable(&m, p, member.ty) -> return false
+    }
+    true
+}
+
+// Zeroes what the drop of the value of type row `row` at byte `offset` of
+// `base` would end (ir_zeroable): its words, and a counted buffer's length
+// and capacity.
+fn ir_zero_drops(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, offset: Int, row: Int) Never! {
+    if m.types[row].drop == "" -> return
+    if m.types[row].kind != .Aggregate {
+        zero :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, base, offset, zero, b.line)
+        return
+    }
+    if ir_counted_entry(&m, p, row) != None {
+        zero :: ir_word_const(&m, &b, 0)
+        ir_emit(&b.f, IROp.Store, -1, base, offset, zero, b.line)
+        ir_emit(&b.f, IROp.Store, -1, base, offset + 8, zero, b.line)
+        return
+    }
+    members :: ir_inline_members(&m, p, row) ?? return
+    loop member in members -> ir_zero_drops(&m, p, &b, base, offset + member.offset, member.ty)
 }
 
 // Whether a variable owns the value in `slot` (its own storage) on every

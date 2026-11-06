@@ -8,7 +8,7 @@ use {
     jet_lexer.[TOKEN_KW_MODULE, lex_config]
     jet_parser.[parse_lexed]
     jet_pkg_model.[
-        MigratedRef, PackageFacts, PackageKind, ProviderFactValue, ProviderFacts, RefError, RefSource,
+        PackageFacts, PackageKind, ProviderFactValue, ProviderFacts, RefError, RefSource,
         RefSpec, SourceTable, pkg_provider_is_external, pkg_split_channel_ref, pkg_with_default_source,
     ]
     jetpack_foundation.[
@@ -189,7 +189,7 @@ fn envmodel_profile_provider_label(source: RefSource, source_name: String, table
 // remain parseable and comparable.
 fn envmodel_provider_reference_from_upstream(upstream: String, provider: String) -> String Never! {
     halves :: upstream.split_once(REF_SEPARATOR) ?? return upstream
-    MigratedRef.persisted("{halves.after}{REF_PROVIDER_AT}{provider}").canonical
+    "{halves.after}{REF_PROVIDER_AT}{provider}"
 }
 
 fn envmodel_classify_profile_ref(raw: String, table: SourceTable) -> RefSpec RefError! {

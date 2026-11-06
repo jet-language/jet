@@ -1,6 +1,5 @@
-/* Real Jet provider only: -Wl,--wrap=jet_rt_free.
- * Private client-created carriers mirror DataABI, NOT Rust or IR layouts.
- * Derive policy: DataPlot.rs:481-485,662-666,692-711,772-804,929-967. */
+/* Real Jet provider only.
+ * Private client-created carriers mirror DataABI, NOT Rust or IR layouts. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -12,7 +11,7 @@ typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t length, capacity; int64_t *data; } Sequence;
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
@@ -52,13 +51,14 @@ extern const double *jet_rt_handle_field_jet_data_plot_layer_opacity(int64_t);
 
 static struct { int64_t address, size, align; bool freed; } watched[512];
 static size_t watched_count, calls;
-void __wrap_jet_rt_free(int64_t address, int64_t size, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(int64_t address, int64_t size, int64_t align) {
     ++calls;
     for (size_t i = 0; i < watched_count; ++i) if (watched[i].address == address) {
         assert(!watched[i].freed && watched[i].size == size && watched[i].align == align);
         watched[i].freed = true;
     }
-    __real_jet_rt_free(address, size, align);
 }
 static int64_t pointer(const void *p) { return (int64_t)(uintptr_t)p; }
 static int64_t *words(int64_t p) { return (int64_t *)(uintptr_t)p; }
@@ -153,6 +153,7 @@ static void aggregate_mapping_fixtures(Text *text) {
     }
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); Text *a = jet_rt_string_from_static("a", 1); Text *b = jet_rt_string_from_static("b", 1);
     aggregate_mapping_fixtures(a);
     int64_t fields[] = {field(a), field(b)};

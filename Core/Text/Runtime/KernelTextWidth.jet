@@ -1,7 +1,7 @@
-// Rust Text.rs:393-466 jet_text_graphemes (UAX #29 extended grapheme clusters)
-// and Text.rs:887-921 portable-default display width, over the
-// pinned Unicode 17.0.0 JUCD assets. One owner for core.text.graphemes /
-// display_width and the String padding methods (center/ljust/rjust/pad_*).
+// jet_text_graphemes (UAX #29 extended grapheme clusters):887-921
+// portable-default display width, over the pinned Unicode 17.0.0 JUCD assets.
+// One owner for core.text.graphemes / display_width and the String padding
+// methods (center/ljust/rjust/pad_*).
 use {
     width_assets :: core.text.runtime.unicode_assets
     width_string :: core.text.runtime.kernel_unicode_string
@@ -60,8 +60,8 @@ fn encode_cps(cps: [Int]) -> String Never! {
     String.from_bytes(out) ?? ""
 }
 
-// Rust Text.rs:429-466 jet_text_graphemes: GB11 keeps the Extended_Pictographic
-// state through Extend/ZWJ, GB12/13 use RI parity, and GB9c tracks InCB
+// jet_text_graphemes: GB11 keeps the Extended_Pictographic state through
+// Extend/ZWJ, GB12/13 use RI parity, and GB9c tracks InCB
 // Consonant [Extend|Linker]* Linker [Extend|Linker]* × Consonant.
 fn graphemes(text: String) -> [String] Never! {
     cps :: decode_scalars(text)
@@ -104,9 +104,9 @@ fn graphemes(text: String) -> [String] Never! {
     out
 }
 
-// Rust Text.rs:416-427 GB3-GB9b/GB999 over pinned Grapheme_Cluster_Break tags:
-// 1 CR, 2 LF, 3 Control, 4 Extend, 5 ZWJ, 6 RI, 7 Prepend, 8 SpacingMark,
-// 9 L, 10 V, 11 T, 12 LV, 13 LVT.
+// GB3-GB9b/GB999 over pinned Grapheme_Cluster_Break tags: 1 CR, 2 LF, 3
+// Control, 4 Extend, 5 ZWJ, 6 RI, 7 Prepend, 8 SpacingMark, 9 L, 10 V, 11 T, 12
+// LV, 13 LVT.
 fn grapheme_break_classes(pc: Int, cc: Int) -> Bool {
     if pc == 1 && cc == 2 -> return false
     if pc == 1 || pc == 2 || pc == 3 -> return true
@@ -120,7 +120,7 @@ fn grapheme_break_classes(pc: Int, cc: Int) -> Bool {
     true
 }
 
-// Rust Text.rs:393 Indic_Conjunct_Break: 0 None, 1 Linker, 2 Consonant, 3 Extend.
+// Indic_Conjunct_Break: 0 None, 1 Linker, 2 Consonant, 3 Extend.
 fn incb_class(cp: Int) -> Int {
     width_assets.asset_tag(width_incb.UNICODE_INCB, cp, 0)
 }
@@ -132,8 +132,8 @@ fn is_extended_pictographic(cp: Int) -> Bool {
     width_assets.asset_contains(width_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC, cp)
 }
 
-// Rust Text.rs:887-914 portable-default grapheme width. Emoji is not the
-// Extended_Pictographic property used by GB11, and VS16 alone is not wide.
+// Portable-default grapheme width. Emoji is not the Extended_Pictographic
+// property used by GB11, and VS16 alone is not wide.
 fn cluster_width(cps: [Int]) -> Int Never! {
     if cps.len() == 0 -> return 0
     category_asset :: width_category.UNICODE_GENERAL_CATEGORY
@@ -171,9 +171,9 @@ fn display_width(text: String) -> Int Never! {
     total
 }
 
-// Rust Text.rs jet_text_fill_columns: `columns` display columns of the first
-// grapheme of `fill`, repeated whole, then spaces for the remainder. An empty
-// fill, or a zero-width or too-wide unit, fills with spaces.
+// jet_text_fill_columns: `columns` display columns of the first grapheme of
+// `fill`, repeated whole, then spaces for the remainder. An empty fill, or a
+// zero-width or too-wide unit, fills with spaces.
 fn fill_columns(fill: String, columns: Int) -> String Never! {
     n :: if columns < 0 -> 0 else -> columns
     units :: graphemes(fill)
@@ -189,11 +189,10 @@ fn fill_columns(fill: String, columns: Int) -> String Never! {
     String.from_bytes(out) ?? panic("fill columns are whole graphemes and ASCII spaces")
 }
 
-// Rust jet_text_pad_start/pad_end/center (Text.rs:1078-1135): pad `text` to
-// `width` display columns with fill_columns units, before (`left`), after
-// (`right`) or split floor-left (both). The one padding owner for
-// core.text.pad_start/pad_end/center, core.text.parse.ljust/rjust/center and
-// the String methods.
+// Rust jet_text_pad_start/pad_end/center: pad `text` to `width` display columns
+// with fill_columns units, before (`left`), after (`right`) or split floor-left
+// (both). The one padding owner for core.text.pad_start/pad_end/center,
+// core.text.parse.ljust/rjust/center and the String methods.
 fn pad(text: String, width: Int, fill: String, left: Bool, right: Bool) -> String Never! {
     gap := width - display_width(text)
     if gap < 0 -> gap = 0

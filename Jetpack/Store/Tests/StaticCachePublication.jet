@@ -1,0 +1,79 @@
+// Port of tests/jetpack_nix_index.rs
+// `static_jetpack_cache_admits_content_addressed_objects_only_after_verification`
+// (card #2200): a published cache copied to a plain static HTTP root keeps its
+// content-addressed layout, and its bytes cross only the normal verification.
+
+// Serve the files under `site` over loopback HTTP; absent files are 404.
+fn store_static_cache_serve(site: String) -> StoreTestCacheServer Never! {
+    mux :: http_server.mux()
+    // workaround #5940(a): a catch-all route, not `http_server.static_files`.
+    mux.get("/*path", (path: String) -> store_nix_test_site_response(site, path))
+    server :: http_server.bind("127.0.0.1:0", mux) ?? panic("bind static cache")
+    address :: server.local_addr() ?? panic("static cache address")
+    serving :: task {
+        _ :: server.serve() ?? panic("serve static cache")
+    }
+    time.sleep(time.duration_ms(20))
+    StoreTestCacheServer{server: server, serving: serving, endpoint: "http://{address}"}
+}
+
+#Test("static_jetpack_cache_admits_content_addressed_objects_only_after_verification") {
+    root :: files.tmpdir("static-cache-root-") ?? panic("root")
+    source :: files.tmpdir("static-cache-source-") ?? panic("source")
+    local_cache :: files.tmpdir("static-cache-local-") ?? panic("local cache")
+    publication_parent :: files.tmpdir("static-cache-publication-") ?? panic("publication")
+    publication :: files.join(publication_parent, "site")
+    restored :: files.tmpdir("static-cache-restored-") ?? panic("restored")
+    roots :: HangarRoots{root, dev_mode: false}
+    files.write(files.join(source, "payload"), "static cache bytes\n") ?? panic("cache source")
+    verification := StoreVerification.new()
+    request :: IngestRequest{
+        name: "static-cache-demo",
+        version: "1",
+        reference: "./static-cache-demo",
+        cache_identity: CacheIdentity{source_fingerprint: "sha256:static-cache-source", recipe_fingerprint: "sha256:static-cache-recipe", policy_fingerprint: "sha256:static-cache-policy", platform: pkg_host_platform()},
+        references: [String]{},
+        outputs: [String: String]{"out": source},
+        signature: "",
+        provenance: "static cache test",
+        platform_artifact_kind: "",
+    }
+    entry :: (store_ingest_tree(&verification, roots, request) ?? panic("ingest static cache entry")).entry
+    store_bind_cache(roots, "public", [String]{local_cache}, None, None, true) ?? panic("bind local cache publisher")
+    published :: store_publish_cache_entry(&verification, roots, entry.id, "public") ?? panic("publish signed local cache objects")
+    files.copy_dir(local_cache, publication) ?? panic("copy the publication")
+    hash :: entry.envelope.output_hash
+    assert(files.is_file(files.join(publication, "nar/{hash}.nar")))
+    assert(files.is_file(files.join(publication, "{hash}-{entry.id}.narinfo")))
+    assert(files.is_file(files.join(publication, "trust/{hash}-{entry.id}.receipt")))
+    assert(!files.lexists(files.join(publication, "cache-public.key")))
+
+    server :: store_static_cache_serve(publication)
+    trust_key :: files.join(root, "trust/cache-public.key")
+    store_bind_cache(roots, "public", [String]{server.endpoint}, Val(trust_key), None, false) ?? panic("bind read-only static cache")
+    verified :: store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("verify static cache objects")
+    assert_eq(verified.mirror, server.endpoint)
+    assert_eq(verified.output_hash, published.output_hash)
+    assert_eq(verified.witness, published.witness)
+    store_substitute_cache_entry(&verification, roots, entry.id, "public", files.join(restored, "out")) ?? panic("substitute from verified static cache")
+    assert_eq(files.read(files.join(restored, "out/payload")) ?? panic("restored payload"), "static cache bytes\n")
+
+    info_path :: files.join(publication, "{hash}-{entry.id}.narinfo")
+    signed_info :: files.read(info_path) ?? panic("signed static narinfo")
+    unsigned := [String]{}
+    loop line in signed_info.lines() {
+        if !line.starts_with("Sig: ") -> &unsigned.push(line)
+    }
+    files.write(info_path, "{unsigned.join("\n")}\n") ?? panic("remove static narinfo signature")
+    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    files.write(info_path, signed_info) ?? panic("restore signed static narinfo")
+    store_test_stop_cache_server(^server)
+
+    store_make_tree_writable_for_removal(root).drop("cleanup")
+    files.remove_all(root).drop("cleanup")
+    files.remove_all(source).drop("cleanup")
+    files.remove_all(local_cache).drop("cleanup")
+    files.remove_all(publication_parent).drop("cleanup")
+    store_make_tree_writable_for_removal(restored).drop("cleanup")
+    files.remove_all(restored).drop("cleanup")
+}

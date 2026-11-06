@@ -213,6 +213,8 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
     assert(pkg_ascii_lower(diagnostic.fix).contains("adjust the denial"))
 }
 
+// The Fix names every undecided right; deny-only rights (`Mem.*`) are never
+// written into `allow:`.
 #Test("application policy diagnostic fix lists the complete missing set") {
     projection :: EffectProjection{
         required_effects: authority_holds([String]{"IO", "Mem.Alloc", "Exec"}),
@@ -221,7 +223,8 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
         authority: "package.jet authority"
     }
     diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, None)
-    assert(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"))
+    assert(diagnostic.fix.contains("allow: [Exec, IO]"), diagnostic.fix)
+    assert(!diagnostic.fix.contains("Mem.Alloc"), diagnostic.fix)
 }
 
 #Test("application policy diagnostic keeps policy denial separate") {
@@ -252,7 +255,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
     required :: authority_holds([String]{"FS", "IO", "Panic"})
     projection :: pkg_project_application_effects(required, None)
     diagnostic :: pkg_application_policy_diagnostic(projection, [String]{}, Val(ScriptEntry{path: "tools/gradient.jet", source: source, command: "run"}))
-    assert(diagnostic.fix.starts_with("run `jet run --allow=FS tools/gradient.jet`"))
+    assert(diagnostic.fix.starts_with("Run `jet run --allow=FS tools/gradient.jet`"))
     edit :: diagnostic.edit ?? panic("a manifest-less E1803 carries an edit")
     assert_eq(diagnostic.safety, Val(DiagnosticFixSafety.NeedsReview))
     raw :: source.bytes()

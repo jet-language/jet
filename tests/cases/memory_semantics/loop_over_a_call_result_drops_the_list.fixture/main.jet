@@ -1,0 +1,129 @@
+// A loop over a fresh call result (`loop row in make_rows(16)`) drops the
+// List once the loop ends: after its last pass, or when a break or return
+// leaves it. Each scenario runs 40,000 times on 16 rows. A List the loop
+// never drops keeps 100 MB or more resident, so the resident set may grow
+// by at most 8 MB across a scenario.
+package {
+    name: "loop_over_a_call_result_drops_the_list"
+    authority: { allow: [FS.Read] }
+}
+
+use files :: core.files
+
+ROUNDS :: 40000
+GROWTH_LIMIT_KB :: 8192
+
+struct Row {
+    name: String
+    items: [String]
+}
+
+fn status_kb(field: String) -> Int {
+    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+fn make_rows(n: Int) -> [Row] {
+    rows := [Row]{}
+    loop i in 0..<n -> &rows.push(Row{name: "row {i}", items: [String]{"a {i}", "b {i}"}})
+    rows
+}
+
+fn make_map(n: Int) -> [String:Int] {
+    map := [String:Int]{}
+    loop i in 0..<n -> map["key {i}"] = i
+    map
+}
+
+// Every pass runs.
+fn plain() -> Int {
+    total := 0
+    loop row in make_rows(16) -> total += row.items.len()
+    total
+}
+
+// With the index.
+fn indexed() -> Int {
+    total := 0
+    loop (i, row) in make_rows(16) -> total += i + row.name.len()
+    total
+}
+
+// `next` skips passes.
+fn with_next() -> Int {
+    total := 0
+    loop (i, row) in make_rows(16) {
+        if i % 2 == 0 -> next
+        total += row.items.len()
+    }
+    total
+}
+
+// `break` leaves early.
+fn with_break() -> Int {
+    total := 0
+    loop row in make_rows(16) {
+        total += row.items.len()
+        if total > 6 -> break
+    }
+    total
+}
+
+// `return` leaves the function from inside the loop.
+fn with_return() -> Int {
+    loop (i, row) in make_rows(16) {
+        if i == 5 -> return row.name.len()
+    }
+    0
+}
+
+// An inner loop over a fresh List on every outer pass.
+fn nested() -> Int {
+    total := 0
+    loop row in make_rows(4) {
+        loop inner in make_rows(4) -> total += inner.items.len() + row.items.len()
+    }
+    total
+}
+
+// Each item kept past the loop, which keeps its own share of the item.
+fn items_kept() -> Int {
+    kept := [Row]{}
+    loop row in make_rows(16) {
+        if row.name.len() > 5 -> &kept.push(row)
+    }
+    kept.len() + kept[0].items.len()
+}
+
+// A Map's entries in key order.
+fn map_entries() -> Int {
+    total := 0
+    loop (key, value) in make_map(16) -> total += key.len() + value
+    total
+}
+
+fn measure(name: String, scenario: fn() -> Int) {
+    total := scenario()
+    start :: status_kb("VmRSS:")
+    loop _ in 1..<ROUNDS -> total += scenario()
+    grown :: status_kb("VmRSS:") - start
+    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    print("{name}: {total}, every list dropped")
+}
+
+fn run() {
+    measure("plain", plain)
+    measure("indexed", indexed)
+    measure("with next", with_next)
+    measure("with break", with_break)
+    measure("with return", with_return)
+    measure("nested", nested)
+    measure("items kept", items_kept)
+    measure("map entries", map_entries)
+}

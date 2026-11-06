@@ -154,6 +154,48 @@ fn trust_test_secret(name: String) -> SecretSpec {
     assert(trust_is_trusted(store, canonical, "h"))
 }
 
+// #3590 c56: a trusted root is never escaped by `..`, a symlink, or an
+// absolute path outside it.
+#Test("trust pattern refuses dot-dot spellings that leave its root") {
+    dir :: trust_test_gate_dir("traversal_dotdot")
+    store :: files.join(dir, "trust")
+    trust_add_pattern(store, dir, "/home/dev/app") ?? panic("prefix grant")
+    assert(trust_is_trusted(store, "/home/dev/app/src", "h"))
+    escapes :: [String]{"/home/dev/app/../other", "/home/dev/app/src/../../../etc", "/home/dev/app/./../app2", "/home/dev/app/.."}
+    loop path in escapes -> assert(!trust_is_trusted(store, path, "h"), "{path} must not be trusted")
+}
+
+#Test("trust pattern refuses absolute and relative paths outside its root") {
+    dir :: trust_test_gate_dir("traversal_absolute")
+    store :: files.join(dir, "trust")
+    trust_add_pattern(store, dir, "/home/dev/app/*") ?? panic("pattern grant")
+    outside :: [String]{"/", "/etc", "/home/dev", "/home/dev/application", "home/dev/app/src", "app/src"}
+    loop path in outside -> assert(!trust_is_trusted(store, path, "h"), "{path} must not be trusted")
+}
+
+#Test("trust pattern refuses a symlink that leads out of its root") {
+    dir :: trust_test_gate_dir("traversal_symlink")
+    base :: files.canonicalize(dir) ?? panic("canonical scratch path")
+    trusted :: files.join(base, "trusted")
+    outside :: files.join(base, "outside")
+    files.create_dir_all(files.join(trusted, "real")) ?? panic("trusted project")
+    files.create_dir_all(outside) ?? panic("outside project")
+    files.symlink(outside, files.join(trusted, "link")) ?? panic("escaping link")
+    store :: files.join(base, "trust")
+    trust_add_pattern(store, base, "{trusted}/*") ?? panic("pattern grant")
+    assert(trust_is_trusted(store, files.join(trusted, "real"), "h"))
+    assert(!trust_is_trusted(store, files.join(trusted, "link"), "h"))
+    assert(!trust_is_trusted(store, outside, "h"))
+    // A typed env grant on the trusted root is held to the same rule.
+    refs :: [RefSpec]{trust_test_ref("fastfetch@nixpkgs")}
+    hash :: trust_env_definition_hash(refs, SourceTable.empty(), [SecretSpec]{})
+    env_store :: files.join(base, "trust-env")
+    trust_add_grant(env_store, base, TrustGrant{authority: TrustAuthority.Env.label(), subject: "{trusted}/*", scope: TRUST_SCOPE_REPO}) ?? panic("env grant")
+    assert(trust_is_env_trusted(env_store, files.join(trusted, "real"), hash, refs, [SecretSpec]{}))
+    assert(!trust_is_env_trusted(env_store, files.join(trusted, "link"), hash, refs, [SecretSpec]{}))
+    files.remove_all(base).drop("test cleanup")
+}
+
 #Test("flake hash is stable and content sensitive") {
     a :: trust_flake_definition_hash("{{ devShells.default = {{}}; }}")
     b :: trust_flake_definition_hash("{{ devShells.default = {{}}; }}")

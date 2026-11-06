@@ -1,5 +1,5 @@
-// Source/CmdTry.rs: speculate using one invocation's real incremental service;
-// keep enters the existing held SourceTransaction writer only after a verdict.
+// Speculate using one invocation's real incremental service; keep enters the
+// existing held SourceTransaction writer only after a verdict.
 use {
     jet_driver.[
         JetDriverCompilerQueries, JetDriverCompilerCheckResult, JetDriverCompilerQueryStats,
@@ -58,7 +58,7 @@ fn jet_cli_try_error_output(error: JetCLITryError) -> JetDriverVerbOutput Never!
 }
 
 fn jet_cli_try_fail(message: String) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", message, jet_cli_why("E2105"), "correct the named problem, then run the command again", false), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E2105", message, jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)
 }
 fn jet_cli_try_object(value: JetCLIStatusValue, message: String) -> JetCLITryObject JetCLIReadError! {
     if value == .Object(fields) -> return Ok(JetCLITryObject{fields: fields, consumed: loop _ in fields -> false})

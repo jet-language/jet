@@ -246,6 +246,11 @@ keeps paying for.
    with the same status in all 24 rows. Hello's 138,152 B on ab1f72dbee is
    4,088 B more than the IrTypes-8 build in the table above, which was
    measured on an earlier base; the difference is not broken down here.
+   Later (#6035 c17) the report stopped being an inline leaf: the linker
+   writes it into each image as the function `jet_rt_fault_report`, the
+   full form for an image with its location table and the address form
+   (`Assets/FaultReport/addresses.S`) for a `debug_info: split` image, whose
+   frames `jet crash` names from the side debug file.
 6. **Allocation-free defect reporter and static main thread block (S4).**
    Runtime-internal defects (out of memory, GS failure, invalid layout,
    internal overflow) write their exact text with stack-only code and exit
@@ -361,7 +366,7 @@ its prototype) runs the corpus cells in `cells.json`:
 
 ## 7. Evidence and reproduction
 
-All under `/mnt/jetscratch/lanes/IR/IrTypes/c6328/`:
+All under `$JET_SCRATCH_ROOT/lanes/IR/IrTypes/c6328/`:
 
 - `asm-floor.mjs floor`: writes `floor-hello` (197 B), `floor-nosigpipe`,
   `floor-pause`.
@@ -381,7 +386,7 @@ All under `/mnt/jetscratch/lanes/IR/IrTypes/c6328/`:
 ## 8. Owner ballot: D-RT-DEFECT-REPORT1
 
 The revised JSON is in
-`/mnt/jetscratch/lanes/Main/q/ballot/overnight/rev/D-RT-DEFECT-REPORT1.json`.
+`$JET_SCRATCH_ROOT/lanes/Main/q/ballot/overnight/rev/D-RT-DEFECT-REPORT1.json`.
 The owner asked to keep the full report and make it small instead of cutting
 it, so the vote now recommends keeping it in every program, and we expect to
 withdraw it.

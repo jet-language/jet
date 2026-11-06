@@ -1,0 +1,46 @@
+# tests/cffi.rs::absent_or_malformed_hash_regenerates_declared_header_cache at tests/cffi.rs:2800; hand-port
+# Claim: a stale cache with an absent or a malformed ("not-a-sha256") hash sidecar is rebound from the declared header: the check succeeds, the cache holds fresh_value and the sidecar holds SHA-256("int fresh_value(void);\n" || NUL) (tests/cffi.rs:2831-2844)
+# The original looped over both sidecar states in one temp root each; the case runs them in absent/ and malformed/
+# The original called CBind::generate in-process for the stale cache; the case runs `jet inspect bind` into seed/out and copies only the cache file, so no sidecar comes with it
+# Fixture: the headers, C provider and package manifests verbatim from the original (helpers tests/cffi.rs:1286-1320); the C provider is built with cc and ar as the original did
+# Syntax migrated: `use "include/rebind.h" as rebind` is written `use rebind :: "include/rebind.h"`
+# Not ported: jet::compile_with_path (internal Rust API); `jet check` runs the same loader, binder and checker
+requires: tool:cc|gcc|clang
+requires: tool:ar
+fixture: absent_or_malformed_hash_regenerates_declared_header_cache.fixture
+write: absent/package.jet absent_or_malformed_hash_regenerates_declared_header_cache.absent.package.template
+write: malformed/package.jet absent_or_malformed_hash_regenerates_declared_header_cache.malformed.package.template
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+mkdir: seed/out
+mkdir: absent/.jet/bindings/c
+mkdir: malformed/.jet/bindings/c
+step: jet inspect bind seed/stale.h --pkg rebind -o seed/out/rebind.jet
+exit: 0 # tests/cffi.rs:2815-2817 CBind::generate("int stale_value(void);\n", "rebind").unwrap()
+copy: seed/out/rebind.jet absent/.jet/bindings/c/rebind.jet
+copy: seed/out/rebind.jet malformed/.jet/bindings/c/rebind.jet
+write: malformed/.jet/bindings/c/rebind.hash = "not-a-sha256"
+capture: cc = first-spawnable cc --version | gcc --version | clang --version
+step: {cap:cc} -c rebind.c -o rebind.o
+cwd: absent
+exit: 0
+step: ar rcs librebind.a rebind.o
+cwd: absent
+exit: 0
+step: jet check main.jet
+cwd: absent
+exit: 0 # tests/cffi.rs:2831-2834 absent hash triggers rebind
+file: absent/.jet/bindings/c/rebind.jet ~ "fresh_value" # tests/cffi.rs:2835-2840 absent hash left no stale cache bytes
+file: absent/.jet/bindings/c/rebind.hash = "c2b8e3ed8c4490cf24d74cf94da07067fb3f9696084805b57973e55a2db31b7f"
+step: {cap:cc} -c rebind.c -o rebind.o
+cwd: malformed
+exit: 0
+step: ar rcs librebind.a rebind.o
+cwd: malformed
+exit: 0
+step: jet check main.jet
+cwd: malformed
+exit: 0 # tests/cffi.rs:2831-2834 malformed hash triggers rebind
+file: malformed/.jet/bindings/c/rebind.jet ~ "fresh_value" # tests/cffi.rs:2835-2840 malformed hash left no stale cache bytes
+file: malformed/.jet/bindings/c/rebind.hash = "c2b8e3ed8c4490cf24d74cf94da07067fb3f9696084805b57973e55a2db31b7f"

@@ -1,6 +1,6 @@
 // Native mirrors of Core/Data/Data.jet:29,164-187; not source-module registrations.
-// CommonTypes.rs:1039-1128 owns field order. DataABI owns the private offsets.
-// Text fields own E4 headers; nested records and text lists own deep carriers.
+// The Rust original owns field order. DataABI owns the private offsets. Text fields
+// own E4 headers; nested records and text lists own deep carriers.
 #Export(c) fn jet_rt_handle_clone_data_format(value: I64) -> I64 { encoding_enum_clone(value) }
 #Export(c) fn jet_rt_handle_drop_data_format(value: I64) { encoding_enum_drop(value) }
 #Export(c) fn jet_rt_handle_eq_data_format(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
@@ -77,7 +77,7 @@ fn data_metadata_kind(target: I64, ordinal: I64) {
         && jet_rt_string_eq(encoding_word(wrapping(a + DATA_SOURCE_MEMBER)), encoding_word(wrapping(b + DATA_SOURCE_MEMBER)))
         && process_text_list_eq(encoding_word(wrapping(a + DATA_SOURCE_PARAMETERS)), encoding_word(wrapping(b + DATA_SOURCE_PARAMETERS)), false)
 }
-// CAbiRoutes.rs:12442-50: out is a borrowed, read/clone-only stack Text header.
+// Out is a borrowed, read/clone-only stack Text header.
 #Export(c) fn jet_rt_handle_field_data_source_identity_locator(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + DATA_SOURCE_LOCATOR)), out, I64{24}) }
 #Export(c) fn jet_rt_handle_field_data_source_identity_member(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + DATA_SOURCE_MEMBER)), out, I64{24}) }
 #Export(c) fn jet_rt_handle_clone_data_provenance(value: I64) -> I64 {

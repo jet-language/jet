@@ -388,7 +388,7 @@ fn sema_call_http_check_serde(direction: SemaSerdeDirection, ty: Type, span: Spa
     if sema_serde_type_is_admissible(environment, program, ty, direction) -> return
     encode := direction == SemaSerdeDirection.Encode
     shown := sema_type_show_quoted(ty)
-    &diagnostics.push(sema_error("E2411", span, "{shown} can't be {if encode -> "serialized" else -> "decoded"}", "only types that opt in (and their fields) have a wire form; {shown} does not", if encode -> "add `#[Codable]` or `#[Encode]` to {shown}, or remove it from the encoded value" else -> "add `#[Codable]` or `#[Decode]` to {shown}, or remove it from the decoded value"))
+    &diagnostics.push(sema_error("E2411", span, "{shown} can't be {if encode -> "serialized" else -> "decoded"}", "only types that opt in (and their fields) have a wire form; {shown} does not", if encode -> "add `#[Codable]` or `#[Encode]` to {shown}, or remove it from the encoded value" else -> "add `#[Codable]` or `#[Decode]` to {shown}, or remove it from the encoded value"))
 }
 
 // Preserve the existing server JSON admission diagnostic while its ordinary
@@ -618,8 +618,19 @@ fn sema_call_http_core_form_descriptor(field: Field, value_variant: String, cont
     }
 }
 
-fn sema_call_http_web_form(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    if !sema_call_core_check_type_args(record.module_name, record.member, 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+// `web.form(Model, action: submit)` has no Core registry row: sema derives
+// the field descriptors from the model struct and rewrites the call into the
+// Core source functions `core.web.forms.input` and `core.web.forms.typed`.
+// Like `args.decode` it resolves through the import before the registry route.
+fn sema_call_try_web_form(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name != "core.web" || member != "form" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    sema_call_http_web_form(args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_call_http_web_form(args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+    if !sema_call_core_check_type_args("core.web", "form", 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     if args.len() != 2 {
         &diagnostics.push(sema_call_arity_diagnostic("form", 2, args.len(), false, span))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
@@ -823,7 +834,6 @@ fn sema_call_http_web_openapi_mux(target: SemaCallDirectTarget, qualified_name: 
 fn sema_call_try_http_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
     if record.module_name == "core.http.client" && (record.member == "get" || record.member == "post" || record.member == "request") -> return sema_call_http_transport(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if (record.module_name == "app" || record.module_name == "core.web") && record.member == "sync" -> return sema_call_http_sync(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    if record.module_name == "core.web" && record.member == "form" -> return sema_call_http_web_form(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}
 }
 

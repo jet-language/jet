@@ -70,6 +70,9 @@ approved contract is not a ballot.
   output alone is refused (`E_EVIDENCE`). A row with no code to land declares
   `--kind decision|duplicate|obsolete` and names the ratified decision, the
   surviving card, or the reason.
+- Board text never names this machine's home, user, host, email or mounts
+  (#6564 c5). Write `~`, `$JET_SCRATCH_ROOT`, `user` or `devhost` instead; a
+  write that adds one is refused (`E_PERSONAL_INFO`) with the text to use.
 - End each batch of board writes with `tower board commit --by <agent>`;
   `tower board check` must pass before you hand off.
 
@@ -93,6 +96,7 @@ tower goal show G1 [--json]          # linked cards with their phases, then the 
 tower goal add --title "…" [--body "…"] --by <agent>
 tower goal update G1 [--title "…"] [--body "…"] [--status active|achieved|dropped] --by <agent>
 tower goal log G1 --text "…" --by <agent>
+tower goal remap --merge G7=G1 --renumber G3=G2 --by <agent>   # merge goals, then renumber the rest
 tower card update '#N' --goals G1,G2 --by <agent>   # --goals '' clears the links
 ```
 

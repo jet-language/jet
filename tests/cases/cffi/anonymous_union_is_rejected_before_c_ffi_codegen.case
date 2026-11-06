@@ -1,0 +1,8 @@
+# tests/cffi.rs::anonymous_union_is_rejected_before_c_ffi_codegen at tests/cffi.rs:3038; hand-port
+# Claim: an anonymous union parameter on a C import is rejected by the checker with E3203, before any C FFI code is generated (tests/cffi.rs:3051-3055)
+# Fixture migrated: `use c.union_boundary as c` is spelled `use c :: c.union_boundary` (E0630); no C library is needed because the check stops first
+fixture: anonymous_union_is_rejected_before_c_ffi_codegen.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero # tests/cffi.rs:3051 check_with_path reports diagnostics
+stderr: ~ "E3203" # tests/cffi.rs:3053 diags.iter().any(|d| d.code == "E3203")

@@ -19,14 +19,12 @@ source and the complete diff; blessing is not a way to hide a red behavior.
   named target, then inspect `git diff` immediately for unrelated churn. Run
   the focused test again with no update variable.
 
-For example, a single UI fixture uses its repository-relative filter:
+For example, a single UI fixture uses its repository-relative filter, and
+`-u` blesses exactly the rows that filter selects:
 
 ```sh
-Tools/agent/jet-env node Tools/testkit/run.mjs ui --jet "$JET" \
-  --filter tests/ui/arg_type_mismatch.jet
-Tools/agent/jet-env node Tools/testkit/run.mjs ui --jet "$JET" \
-  --filter tests/ui/arg_type_mismatch.jet \
-  --bless tests/ui/arg_type_mismatch.jet --reason "<commit or ratified decision>"
+jet test Compiler --profile ui tests/ui/arg_type_mismatch.jet
+jet test Compiler --profile ui tests/ui/arg_type_mismatch.jet -u
 ```
 
 Use the admitted native compiler named by `JET` before any `jet explain`,

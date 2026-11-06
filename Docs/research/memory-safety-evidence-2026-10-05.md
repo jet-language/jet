@@ -20,9 +20,9 @@ on these Tower cards:
 | #4638 | I1: JetArena retains map values as exact-Int unless marked raw |
 | #4639 | I1: `Examples/features/memory/pin.jet` segfaults inside JIT code |
 
-Scratch record (not committed): `/mnt/jetscratch/scratch/memcorpus/`
+Scratch record (not committed): `$JET_SCRATCH_ROOT/scratch/memcorpus/`
 (`RESULTS.md`, `AUDIT.md`, `HANDOFF.md`, `cases/`, `out/`, `results.tsv`,
-`emit-cases.tsv`), and `~/.cache/jet-dev/scratch/SafetyNet/` (`HANDOFF.md`,
+`emit-cases.tsv`), and `$JET_STATE_ROOT/scratch/SafetyNet/` (`HANDOFF.md`,
 `PLAN-3-4.md`, `proto.mjs`). The SafetyNet code is on branch
 `safety/mir-lint` at `507cf8ef3`.
 
@@ -43,7 +43,7 @@ verdict. The shapes come from:
 - closure captures, `std::thread::scope`, and `Send`/`'static`.
 
 `run.sh` ran `jet check` with release binary
-`/mnt/jetscratch/candidates/dev-05ea86f65/jet` (dev `05ea86f65`). Every program
+`$JET_SCRATCH_ROOT/candidates/dev-05ea86f65/jet` (dev `05ea86f65`). Every program
 that `jet check` accepted was also lowered with `jet emit --rust`, which
 catches accepts that cannot actually build.
 
@@ -162,7 +162,7 @@ It used two instruments:
 
 Costs are **estimates**. The paired timing job `MemEvidence-copybench` (12 Jet
 release builds plus Rust references, `bench/`) ran and failed with rc 1. Every
-build stopped on `jet-env: CARGO_TARGET_DIR=/mnt/jetscratch/targets/MemEvidence
+build stopped on `jet-env: CARGO_TARGET_DIR=$JET_SCRATCH_ROOT/targets/MemEvidence
 is not checkout-owned`, and the timing script also lacked `bc`.
 `bench/times.tsv` has no measurements, so this note claims no measured ratio.
 
@@ -328,7 +328,7 @@ nor MIR Lint would catch them, which is why criteria 3 and 4 of #4619 exist.
   `Int` unless lowering had marked the values as raw words, and only U64 and
   I64 were marked. Positive Floats ≥ 2.0 carry the exact-Int pointer tag bits,
   so `jet_int_retain` dereferenced the mantissa (SIGSEGV). Root cause:
-  SegvHunt, `/mnt/jetscratch/scratch/SegvHunt/ROOT-CAUSE.md`. The main routes
+  SegvHunt, `$JET_SCRATCH_ROOT/scratch/SegvHunt/ROOT-CAUSE.md`. The main routes
   were fixed on `fix/segv-scaling@f520ef1ef`. Three routes remained when the
   card was written: `jet_jit_map_map_values` returning Float, `Map.from_keys`
   with a Float default, and `retain_value_roots` for an embedded map. The

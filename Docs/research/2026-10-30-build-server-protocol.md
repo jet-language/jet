@@ -2,9 +2,9 @@
 
 Date: 2026-10-30. Card #6322, criteria 1 and 2. Zig sources are Zig 0.16.0's
 `lib/zig` tree (`/nix/store/kbb1kfzlvqiwbcpw4sd2j3v63vqab3vg-zig-0.16.0`).
-Jet probes ran with `/mnt/jetscratch/discovery/base/latest/jet`
+Jet probes ran with `$JET_SCRATCH_ROOT/discovery/base/latest/jet`
 (bd83fe6361) against a dev export of the same commit. Probe files are in
-`/mnt/jetscratch/lanes/MemDesign/probes/`.
+`$JET_SCRATCH_ROOT/lanes/MemDesign/probes/`.
 
 ## Zig
 

@@ -1,9 +1,8 @@
-// Source/LSP/Server.rs:117–133,346–348,548–557,829–1031 and
-// Check.rs:110–119. All checks use the caller's canonical resident Driver.
-// Integration gates: C4/OsPath + pure PackageModel propagation; Foundation
-// Report/Diagnostic and card #4204 helper propagation; real stdio host loop
-// (L19) calls lsp_flush_dirty before every id-bearing request (Rust197–199).
-// These are dependencies, never successful unavailable providers or callbacks.
+// All checks use the caller's canonical resident Driver. Integration gates:
+// C4/OsPath + pure PackageModel propagation; Foundation Report/Diagnostic and
+// card #4204 helper propagation; real stdio host loop (L19) calls
+// lsp_flush_dirty before every id-bearing request (Rust197–199). These are
+// dependencies, never successful unavailable providers or callbacks.
 use {
     lsp_diag_term :: core.term
     lsp_diag_text :: core.text
@@ -192,8 +191,8 @@ fn lsp_related_location_json(uri: String, src: String, span: Span, what: String)
     "{{\"location\":{{\"uri\":{foundation_json_quote(uri)},\"range\":{lsp_range_json(lsp_byte_span_to_range(src, span))}}},\"message\":{message}}}"
 }
 
-// Check.rs110–119: the edit/action owner can filter already checked reports
-// through this function, with the canonical Driver cwd path (not a new cwd IO).
+// The edit/action owner can filter already checked reports through this
+// function, with the canonical Driver cwd path (not a new cwd IO).
 fn lsp_retain_document_diagnostics(diagnostics: ^[Diagnostic], cwd: lsp_diag_path.OsPath, path: lsp_diag_path.OsPath, text: String) -> [Diagnostic] Never! {
     canonical :: jet_driver_query_path(cwd, path)
     retained := [Diagnostic]{}

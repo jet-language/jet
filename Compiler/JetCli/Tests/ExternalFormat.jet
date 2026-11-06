@@ -1,5 +1,6 @@
 // Assemble with the production compiler/CLI sources, replacing its run entry.
-// Integrator supplies a disk-backed JET_CLI_FMT_TEST_ROOT, not a provider mock.
+// The fixture lives on disk, not in a provider mock: JET_CLI_FMT_TEST_ROOT
+// names its parent, else a fresh host temporary directory holds it.
 use {
     cli_files :: core.files
     cli_sys :: core.sys
@@ -15,8 +16,7 @@ fn external_format_require(ok: Bool, label: String) Never! {
 }
 
 #Test("external_format") {
-    base :: cli_sys.get("JET_CLI_FMT_TEST_ROOT") ?? panic("set JET_CLI_FMT_TEST_ROOT to disk-backed scratch")
-    root :: "{base}/fmt-{cli_process.current_pid()}"
+    root :: if cli_sys.get("JET_CLI_FMT_TEST_ROOT") == .Val(base) -> "{base}/fmt-{cli_process.current_pid()}" else -> cli_files.mkdtemp("jet-cli-fmt-test") ?? panic("create formatter scratch")
     cli_files.create_dir_all("{root}/staged") ?? panic("create fixture")
     paths :: [String]{"{root}/a.nix", "{root}/b.nix"}
     staged :: [String]{"{root}/staged/a.nix", "{root}/staged/b.nix"}

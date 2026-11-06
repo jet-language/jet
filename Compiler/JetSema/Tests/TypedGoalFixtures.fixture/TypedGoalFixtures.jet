@@ -2,9 +2,9 @@
 fn typed_goal_expect(expected: Type?, wanted: Type, card: String) {
     span :: Span{start: 3, end: 7}
     context := sema_check_context_init()
-    goal :: sema_expression_todo(expected, span, &context) ?? panic("goal was not checked")
+    goal :: sema_expression_todo(expected, span, 4, &context) ?? panic("goal was not checked")
     if goal.ty != wanted || goal.span != span -> panic("typed goal lost its type or source")
-    if goal.kind != (TExprKind.Flat{index: 0}) || context.arena.tree.nodes[0].kind != (NodeKind.Never{reason: "todo"}) -> panic("typed goal must diverge")
+    if goal.kind != (TExprKind.Flat{index: 0}) || context.arena.tree.nodes[0].kind != (NodeKind.Never{reason: "todo", line: 4}) -> panic("typed goal must diverge at its line")
     rows :: context.typed_goals
     if rows.len() != 1 || rows[0].span != span || rows[0].expected != card -> panic("typed goal lost its expected-type card")
 }

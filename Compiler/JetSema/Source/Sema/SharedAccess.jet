@@ -109,12 +109,12 @@ fn sema_shared_access_host_method_name(ty: Type, method: String) -> String Never
     }
 }
 
-// Rust `method_calls.rs` every `Shared<T>` protocol access
-// blocks on the cell's lock and records `Time.Wait`, except the wait-free
-// scalar `read`/`get`/`set`/`replace` rail. The other Shared owner methods
-// (`capture`, `same`, `downgrade`, …) and the Cell family record no effect.
-// The row is authoritative: a compiler-owned host call is never an unknown
-// callee, so it must not fall back to the maximal effect set.
+// Every `Shared<T>` protocol access blocks on the cell's lock and records
+// `Time.Wait`, except the wait-free scalar `read`/`get`/`set`/`replace` rail.
+// The other Shared owner methods (`capture`, `same`, `downgrade`, …) and the
+// Cell family record no effect. The row is authoritative: a compiler-owned host
+// call is never an unknown callee, so it must not fall back to the maximal
+// effect set.
 fn sema_shared_access_effect_row(ty: Type, method: String, span: Span) -> [EffectRowEntry] Never! {
     inner :: sema_shared_access_inner(ty) ?? return [EffectRowEntry]{}
     scalar_atomic :: (method == "read" || method == "get" || method == "set" || method == "replace") && sema_ownership_type_is_scalar(inner)
@@ -442,10 +442,10 @@ fn sema_shared_access_place_call_transaction(expr: Expr, environment: SemaScopeE
     None
 }
 
-// L0207 (Rust SharedAccess.rs lint_shared_busy_wait, D-CONC-SHARE2): an
-// unbounded conditional loop that polls a field of a `Shared` handle, with no
-// wait point, sleep, channel receive, or write to the polled field in its body,
-// spins a core. Runs on the parsed condition and body before they are checked.
+// L0207 (lint_shared_busy_wait, D-CONC-SHARE2): an unbounded conditional loop
+// that polls a field of a `Shared` handle, with no wait point, sleep, channel
+// receive, or write to the polled field in its body, spins a core. Runs on the
+// parsed condition and body before they are checked.
 fn sema_shared_access_lint_busy_wait(condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     handles := [String]{}
     members := [String]{}

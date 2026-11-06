@@ -1,0 +1,20 @@
+# Two compatible reports decide one budget differently: the less favorable wins.
+# The fixture holds the passing report of prove_projects_matching_budget_reports
+# and the same report re-measured over its limit (samples, decision, summary and
+# both ids recomputed). The failing report's id sorts first, so a "last file
+# wins" rule would pick the pass; a failure must never hide behind it.
+fixture: prove_reports_the_less_favorable_of_two_reports_of_one_budget.fixture
+step: jet prove src/run.jet --json
+limit: time=120
+exit: 1
+stdout: ~ "\"deterministicBudget\":{\"failed\":1,\"met\":0,\"selected\":1,\"skipped\":0,\"unavailable\":0}" # one budget, failed
+stdout: ~ "\"reportId\":\"11286d8a231860bd60e79ee4088566635fb1b57dcf823c962bb61c4c5e2d8793\"" # the failing report decides
+stdout: !~ "6e764b3f810d02568be73c487d74ab5079644031f517a5b05f2f7a5e68b0a0c2" # the passing report does not
+stdout: ~ "\"kind\":\"deterministic_budget\",\"outcome\":\"failed\",\"producer\":\"jet-budget\"" # the engine's recorded outcome
+stdout: ~ "\"result\":\"fail\"" # a failed budget fails the run
+step: jet prove src/run.jet
+limit: time=120
+exit: 1
+stdout: ~ "BUDGETS  0 met, 1 failed, 0 warned, 0 unavailable · verified canonical reports" # the human summary
+stdout: ~ "  budget receipt:binary: fail (regression)" # the failed budget, by name
+stdout: ~ "RESULT   fail" # the human result

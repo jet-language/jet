@@ -1,7 +1,6 @@
-// EncodingTypes.rs:29-80 field order and derive(Clone,PartialEq,Eq).
-// CAbiRoutes.rs:9394-9466 descriptor ABI: exact-Int inputs borrow, Text clones,
-// optional Int lends a word; Error ctor consumes cause, getters clone it.
-// CommonTypes.rs:182-217 and Core/EncodingError.rs:8-28 own all three renders.
+// Field order and derive(Clone,PartialEq,Eq). Descriptor ABI: exact-Int inputs
+// borrow, Text clones, optional Int lends a word; Error ctor consumes cause,
+// getters clone it. The Rust originals own all three renders.
 fn encoding_word(address: I64) -> I64 {
     #Unsafe("borrows an initialized aligned word in a live encoding carrier or option input") { return os_load_i64(address) }
 }
@@ -186,7 +185,7 @@ fn encoding_kind_label(target: I64, ordinal: I64) {
 }
 // One ladder for encoding-family diagnostics. The caller streams format/kind
 // labels into target first, avoiding temporary text owners for static labels.
-// Core/EncodingError.rs:8-28; optional fields are independent; cause is omitted.
+// Optional fields are independent; cause is omitted.
 fn encoding_error_render_tail(target: I64, offset: I64, line_present: I64, line: I64, column_present: I64, column: I64, path: I64, reason: I64) -> I64 {
     rt_text_push_word(target, I64{7310601557487411488}, I64{8}) // " at byte"
     rt_text_push_word(target, I64{32}, I64{1})
@@ -209,7 +208,7 @@ fn encoding_error_render_tail(target: I64, offset: I64, line_present: I64, line:
     jet_rt_string_builder_finish(target)
 }
 #Export(c) fn jet_rt_handle_show_encoding_error(value: I64) -> I64 {
-    // EncodingError.rs8-28: no cause text, independent line/column, omit empty path.
+    // No cause text, independent line/column, omit empty path.
     target :: jet_rt_string_builder_new()
     encoding_format_label(target, encoding_word(wrapping(value + ENCODING_ERROR_FORMAT)))
     rt_text_push_word(target, I64{32}, I64{1})

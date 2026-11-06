@@ -41,6 +41,9 @@ fn cli_cmd_use(verification: &StoreVerification, theme: Theme, parsed: CLIParsed
         return EXIT_OK
     }
     command :: parsed.command ?? [String]{}
+    // Say what runs before it runs, so the command's output is never mistaken
+    // for Jetpack's own.
+    if command.len() > 0 -> theme.status(cli_use_running_line(references, command))
     code :: if {
         command.len() > 0 && warm_reused -> &env.exec_command(command)
         command.len() > 0 -> &env.run_command(command)
@@ -48,4 +51,13 @@ fn cli_cmd_use(verification: &StoreVerification, theme: Theme, parsed: CLIParsed
     }
     if code == 0 -> cli_auto_clean_after_success(&verification, theme, roots)
     code
+}
+
+// `running <ref>... -> <program> <args>`, or `(no args)` when none follow.
+fn cli_use_running_line(references: [String], command: [String]) -> String Never! {
+    program :: command[0]
+    args := [String]{}
+    loop index in 1..<command.len() -> &args.push(command[index])
+    shown_args :: if args.len() == 0 -> "(no args)" else -> args.join(" ")
+    "running {references.join(" ")} -> {program} {shown_args}"
 }

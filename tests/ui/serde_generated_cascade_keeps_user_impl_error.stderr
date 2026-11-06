@@ -1,10 +1,10 @@
-Error [jet.DuplicateDefinition]: method `encode` is defined twice on `Bad`
+Error [jet.DuplicateDefinition]: Method `encode` is defined twice on `Bad`
   --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:5:2
     |
   5 | #Encode
     |  ^^^^^^
- Why: each method name may appear only once on a type
- Fix: rename or remove one of the definitions
+ Why: Each method name may appear only once on a type
+ Fix: Rename or remove one of the definitions
 More: jet-lang.dev/e/E0105
 
 Error [jet.DuplicateTraitImpl]: `Bad` already implements `Encode`
@@ -12,15 +12,15 @@ Error [jet.DuplicateTraitImpl]: `Bad` already implements `Encode`
     |
   5 | #Encode
     |  ^^^^^^
- Why: each type may implement a trait only once
- Fix: remove the duplicate `impl` block
+ Why: Each type may implement a trait only once
+ Fix: Remove the duplicate `impl` block
 More: jet-lang.dev/e/E0908
 
-Error [jet.ReturnTypeMismatch]: `encode` promises to return `Dyn`, but this returns Int (a whole number)
-  --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:11:33
+Error [jet.DynWrapNotAllowed]: `Plain` does not wrap into `Dyn` automatically
+  --> tests/ui/serde_generated_cascade_keeps_user_impl_error.jet:11:30
     |
- 11 |     fn encode(self) Dyn -> 1
-    |                                 ^
- Why: the value handed back must match the declared return type
- Fix: use `Dyn` here
-More: jet-lang.dev/e/E0113
+ 11 |     fn encode(self) -> Dyn { Plain{} }
+    |                              ^^^^^^^
+ Why: Only primitive data and recursively wrappable collections wrap automatically
+ Fix: Write `Dyn.from(value)` (the type must implement `Encode`)
+More: jet-lang.dev/e/E0172

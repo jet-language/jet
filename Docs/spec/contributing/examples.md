@@ -42,28 +42,44 @@ Use [`agent-engineering.md`](agent-engineering.md) for fixture and generated-
 artifact traps. Preserve the example's meaning; do not rewrite a snapshot only
 to hide a compiler or runtime regression.
 
-## Cargo-free golden kit
+## Corpus test profiles
 
-The testkit package's own `fn test` is the fixture gate. Run it from the
-repository root with the compiler under test in `JET`:
+`Compiler/package.jet` names the corpora as `suites:` and runs them through
+`test:` profiles; `jet test Compiler --profile <name> [FILTER]` runs the
+selected corpora in process through the `Compiler/JetTestKit` pool, with the
+running `jet` as the compiler under test:
 
 ```sh
-JET=/path/to/jet jet test Tools/testkit                    # every suite
-JET=/path/to/jet jet test Tools/testkit "suite golden"     # one suite
-TESTKIT_ARGS="--filter basics/fizzbuzz --tier o0" JET=/path/to/jet jet test Tools/testkit "suite golden"
-JET_CI_EVIDENCE_DIR=/disk/scratch JET=/path/to/jet jet test Tools/testkit "suite golden"  # writes golden.json
+jet test Compiler                                           # quick: every member's #Tests (defaults: { test: quick })
+jet test Compiler --profile golden                          # Examples/features and tests/run
+jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
+jet test Compiler --profile cases                           # tests/cases
+jet test Compiler --profile full                            # the #Tests and all three corpora
+jet test Compiler --profile corpora                         # all three corpora, no #Tests
+jet test Compiler --profile golden basics/fizzbuzz          # rows whose ID contains the filter
+JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json
+jet test Compiler --profile ui --shard=2/4 --results=ui-2.json        # one slice, one verdict document
 ```
 
-Each suite (`suite golden`, `suite ui`, `suite cases`) is one test; a failing
-test lists every failing case row. `TESTKIT_ARGS` carries the kit flags below, split like
-`.case` step words.
+The selected suites share one pool sized by cores and free memory. Rows print
+as cases finish; the reports and the failing rows keep suite-then-path order.
+A profile's `jobs:`, `memory:`, `filter:`, `cases:`, `shard:`, `opt_in:`,
+`optimize:` (none is o0, basic o1, full o2) and `baseline:` (the known-failing
+ledger) shape the run; each is also a `jet test` flag (`--jobs=8`,
+`--memory=16G`, `--cases=ids.txt`, `--shard=2/4`, `--opt-in`,
+`--optimize=none,full`, `--time-limit=90s`) that overrides the profile. Census
+and release tooling that shards, lists or reports across processes passes
+`--shard`, `--list`, `--results` and `--compiler=<jet under test>` to the
+same command.
 
 `o0` runs through `jet run`; `o1` builds an ordinary artifact; `o2`
 builds with `--release`. Every tier compares against the same expected bytes,
 except that `<stem>.<tier>.out`, `.err.out` or `.stderr.out` replaces the stem's
 streams for that tier alone, for a program whose output follows its build
 profile. A rejected build compares its stderr against the tier's `.err.out`
-with exit 1, and no run follows it.
+with exit 1, and no run follows it. On `o0` an entry whose sidecar spells no
+steps gets no separate `jet check`: its `jet run` reports the rejection, and a
+diagnostic report (`Error [jet.…]`) expects exit 1 there too.
 A PASS/FAIL disagreement is reported as `tier-split`, not blessed separately.
 An E2104 build refusal is `UNSUPPORTED` only on a native tier.
 
@@ -71,6 +87,12 @@ Discovery covers `Examples/features` and `tests/run`. A package or workspace
 root stops descent; its `run.jet` is the entry, not its support modules.
 `.out` expects successful stdout, `.err.out` expects stderr and exit 1 or 70,
 and `.stderr.out` pins successful stderr. `.stdin` contains exact piped input.
+`<stem>.test.out` is the entry's `jet test` stdout, checked on each tier once
+the run passes: `o0` tests with `--optimize=none`, `o1` with
+`--optimize=basic` and `o2` with `--release`, a package or workspace entry
+tests as its directory, and `<stem>.<tier>.test.out` replaces it for that tier
+alone. Its last line is the harness summary, and the exit must be 1 when the
+summary counts a failed or unexpected-pass test, else 0.
 Golden sidecars live beside expected streams as `<stem>.case`; runtime-test
 streams and sidecars live beside their source or project directory.
 
@@ -135,32 +157,53 @@ refused as `pty-stdio`.
 Use `--list`, `--cases FILE` (exact repository-relative IDs), or `--filter TEXT`
 to select cases. `--shard I/N` partitions the sorted corpus deterministically.
 Scratch must be disk-backed and outside the checkout; it is staged and removed
-per case. Selected entries run in one `task.group` whose limit is `--jobs N`;
-without it the kit admits one entry per core, capped so each running entry
-keeps 2 GiB of the host's available memory. Every child process keeps its own
-timeout and resident-memory guard. Rows, diffs and the results file stay in
-corpus order, identical to `--jobs 1`.
-Timeouts must be positive seconds within `Duration`'s representable range;
-out-of-range values are refused before corpus discovery with exit code 2.
+per case. `JET_TEST_STATE_DIR` (default `state/` under the scratch root, under the
+same rule) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
+time and resident peak, and `ffi/` is the FFI cache every run shares.
+Selected entries run in one `task.group`. Measured entries start longest
+first, after every unmeasured one. An entry starts once fewer than `--jobs N`
+run and its claim fits in the memory budget beside the running ones'; the
+first always starts. Each running entry holds two of the kit's scheduler
+workers (one per core, or `JET_SCHEDULER_THREADS`), so `--jobs` defaults to
+half of them and an explicit count above them is lowered to them. The claim
+is half again the entry's last peak (at least 64 MiB; 1 GiB unmeasured). The
+budget is `--memory SIZE`
+(bytes, or a count with a binary `K`, `M` or `G` suffix), by default all the
+memory the kit may still claim: the host's available memory less a tenth of
+its total (at least 1 GiB), lowered to the room under its cgroup caps. Every child process
+keeps its own timeout and an 8 GiB resident-memory guard, raised to the
+entry's own claim and never above that room; a case's `limit: resident=`
+tightens it. Each entry's verdict diffs and rows
+print as soon as it finishes; the results file stays in corpus order and
+records every entry's `wall_ms` and `peak_kib`.
+`--timeout SEC` is each child's step timeout, 60 s by default; a step that
+needs longer declares `limit: time=SEC`, which also makes the overrun a
+failure of that step. Timeouts must be positive seconds within `Duration`'s
+representable range; out-of-range values are refused before corpus discovery
+with exit code 2. A known-failing case waits at most 10 s for each answer
+(`recv`, `poll`, `await`, `wait` with a deadline, `repeat while`), so a
+product that never answers fails fast, and one that now answers still shows
+as an unexpected pass.
 
 UI comparison uses the corpus-relative source ID for the primary diagnostic
 location header, whether the compiler printed that ID or just its basename.
 This same normalization applies to expected and actual text; imported-source
 headers, line/column positions, diagnostic codes, and message bodies remain
-exact. `Tools/testkit/Ui.jet` owns the rule.
+exact. `Compiler/JetTestKit/Source/Ui.jet` owns the rule.
 
-Expected files are read-only unless explicitly selected for blessing:
+Expected files are read-only unless explicitly selected for blessing. `-u`
+blesses every row the profile and filter select:
 
 ```sh
-TESTKIT_ARGS="--bless Examples/features/basics/fizzbuzz.jet" JET=/path/to/jet jet test Tools/testkit "suite golden"
-TESTKIT_ARGS='--filter basics/ --bless-all --reason "compiler output change"' JET=/path/to/jet jet test Tools/testkit "suite golden"
+jet test Compiler --profile golden Examples/features/basics/fizzbuzz.jet -u
 ```
 
-`--bless ID` selects only named cases. `--bless-all` requires a nonempty reason;
-neither blessing mode accepts `--shard`. Only the first selected tier writes.
-UI/lint blessings also refuse fewer rendered diagnostics without an explicit
-`--allow-shrink ID`. The kit prints selected IDs and the reason for the commit
-message. Blessing never weakens a `one-of` contract.
+A sharded profile refuses `-u`. Only the first selected tier writes. `-u`
+blesses what the profile and its filter, `--cases` list or positional filter
+select. UI/lint blessings also refuse fewer rendered diagnostics unless
+`--allow-shrink=ID[,ID…]` names the row. The kit prints the blessed selection
+and the reason for the commit message. Blessing never weakens a `one-of`
+contract.
 
 Crypto UI fixtures inherit the standard library's declared `CryptoError -> Err`
 and `FileCryptoError -> Err` conversions (D-FAIL-CONV2=A, D-CRYPTO-ERRFAM1=A).
@@ -216,8 +259,8 @@ instead of the admitted-pack witness's local C helpers; exact witness output
 and zero exit remain required. The default pack witness and its typed-field
 case are unchanged. An unexecuted recipe or missing pack is never a pass.
 
-Evidence goes into a unique `census-*` directory below
-`~/.cache/jet-dev/scratch/GoldensCensus` (or `--scratch DIR`). `census.tsv` records
+Evidence goes into a unique `census-*` directory below `--scratch DIR`, else
+`$JET_SCRATCH_ROOT/goldens-census`, else `~/.cache/jet/goldens-census`. `census.tsv` records
 the test, kind, pass/fail/skip, and first diff/error lines; JSON retains raw
 statuses, tiers, repro commands and complete log paths. Native testkit result
 records retain their diff alongside the existing detail and exit fields.

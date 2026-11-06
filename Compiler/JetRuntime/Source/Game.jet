@@ -1,6 +1,5 @@
-// core.game headless runtime (Rust Game.rs headless substrate; Foundation
-// Game.rs frame budget and transcript hash; GameAssetPipeline.rs path
-// resolution). Every handle is an I64 address; text slots own E4 strings.
+// core.game headless runtime (headless substrate; Foundation frame budget and
+// transcript hash; Every handle is an I64 address; text slots own E4 strings.
 //
 // GameState128 (shared by a scene's assets and input; Rust Rc<GameState>):
 // refs0 assetKinds@8 assetPaths@32 bindingActions@56 bindingKeys@80
@@ -206,9 +205,8 @@ fn game_asset_fixed_error(message: I64, err: I64) -> I64 {
 }
 
 // The logical path of `path` under the built-in game root `.`
-// (GameAssetPipeline.rs jet_game_asset_normalize_path then
-// jet_game_asset_relative_path): 1 with the owned path in `out`, else 0 with
-// the owned error message in `err`.
+// (jet_game_asset_normalize_path then jet_game_asset_relative_path): 1 with the
+// owned path in `out`, else 0 with the owned error message in `err`.
 fn game_asset_resolve(path: I64, out: I64, err: I64) -> I64 {
     data :: rt_text_data(path)
     length :: rt_text_len(path)
@@ -329,7 +327,7 @@ fn game_path_show(prefix: I64, value: I64) -> I64 {
 
 // The replay keeps its checked `.jetreplay` path; the headless run presses
 // every bound action on frame 1 of a replayed run (the corelib replay
-// transcript oracle, tests/corelib_parts/runtime.rs:935).
+// transcript oracle).
 #Export(c) fn jet_game_replay_record(path: I64) -> I64 {
     replay :: jet_rt_alloc(I64{16}, I64{8})
     game_store(replay, I64{1})
@@ -600,6 +598,9 @@ fn game_pairs_line(target: I64, label: I64, left: I64, right: I64, joiner: I64) 
         game_store(wrapping(frame + I64{16}), I64{1})
         game_store(slot, frame)
         stopped := false
+        // The callbacks run one after another in registration order. That is
+        // the reference order: a callback's checked frame schedule orders the
+        // work inside it, and no schedule reorders one callback against another.
         data :: game_word(wrapping(callbacks + I64{16}))
         at := I64{0}
         loop at < game_word(callbacks) {

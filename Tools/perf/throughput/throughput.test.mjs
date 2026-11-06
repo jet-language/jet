@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
+import { scratchRoot } from '../../agent/roots.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,7 @@ import { cellGates, PINS, phaseBudgetCheck, quickCompare } from './harness.mjs';
 import { cpuAt, phaseTable } from './measure.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const scratch = process.env.JET_THROUGHPUT_SCRATCH ?? path.join(os.homedir(), '.cache/jet-dev/scratch/throughput-test');
+const scratch = process.env.JET_THROUGHPUT_SCRATCH ?? path.join(scratchRoot(), 'throughput-test');
 fs.mkdirSync(scratch, { recursive: true });
 const root = fs.mkdtempSync(path.join(scratch, 'test-'));
 

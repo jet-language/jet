@@ -71,9 +71,9 @@ source += `// E3005 Why: ${contractWhy.join("{msg}")}\n// Fix: ${contractFix}\n`
 source += emit("trap_footer_e3005_head", ` Why: ${contractWhy[0]}`) + "\n";
 source += emit("trap_footer_e3005_tail", `${contractWhy[1]}\n Fix: ${contractFix}\nMore: jet-lang.dev/e/E3005\n`) + "\n";
 source += emit("trap_invalid_layout_head", `Stop [E3001]: ${field("E3001", "what").replace("{msg}", "invalid box layout")}\n  --> <core.prelude>:0\n`);
-// A host stop whose code has no active runtime row renders the host form
-// of RuntimeDiagnosticCore.rs jet_write_runtime_stop; the code word sits
-// between these two literals and after the tail.
+// A host stop whose code has no active runtime row is a Jet defect, not a
+// diagnostic: no row speaks for it, so it prints one `internal error:` line
+// with no Why, Fix or More. The code word sits between these two literals.
 for (const code of ["E2805"]) {
   if (field(code, "stage").includes("runtime")) throw new Error(`${code} is an active runtime row; its stop renders the row, not the host form`);
 }
@@ -150,8 +150,8 @@ const literals = {
   inclusive: "inclusive",
   range_end: ")`\n",
   native_tls: nativeTlsRefusal(),
-  inactive_row_head: "Internal error: runtime diagnostic `",
-  inactive_row_tail: "` is not an active runtime row\n Why: Jet could not resolve this stop through the active diagnostic registry\n Fix: report this as a Jet compiler or host defect\nMore: jet-lang.dev/e/",
+  inactive_row_head: "internal error: runtime stop `",
+  inactive_row_tail: "` has no active runtime row, so Jet cannot report it; please report this as a Jet defect",
   coded_head: "Stop [",
   coded_mid: "]: ",
 };

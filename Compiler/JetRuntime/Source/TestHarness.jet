@@ -15,11 +15,16 @@
     // A failed expectation latches its state for the rest of its own test
     // only; the next unit starts with no expectation frames and no latch.
     jet_rt_test_expect_fail_abort()
+    _ :: test_stop_assertion_take()
     save :: jet_rt_alloc(I64{40}, I64{8})
     root :: jet_rt_root_begin(save)
     returned :: coll_call1(invoke, env)
     record :: jet_rt_root_take_stop(root, wrapping(save + I64{32}))
     jet_rt_root_leave(root, save)
+    // A stop that is not a failed assert/assert_eq is an uncaught runtime
+    // stop (proof-replay-decisions.md: caught assertions exit 1, runtime
+    // stops 70); the outcome's runtime_stop flag carries it to the host.
+    runtime_stop :: record != I64{0} && !test_stop_assertion_take()
     error := returned
     if (record != I64{0}) {
         error = scheduler_stop_take_message(record)
@@ -32,7 +37,111 @@
     jet_rt_free(save, I64{40}, I64{8})
     stdout :: jet_rt_test_capture_take()
     skipped :: jet_rt_test_take_whole_skip()
-    jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+    outcome :: jet_rt_test_unit_outcome(name, expected, skipped, stdout, error)
+    if runtime_stop -> trap_store(outcome, trap_word(outcome).bit_or(I64{8}))
+    outcome
+}
+
+// `#Test(faults: [...])` (D-TESTFAULT1). `selectors` is the test's canonical
+// selectors, one per line. A clean run observes how often each selector's
+// checkpoints are reached; then each selector fails at each ordinal that run
+// reached, one injected rerun at a time. The test passes when the clean run
+// and every injected run return without a stop. The first injected run that
+// stops is the outcome, its report headed by the fault it injected. A clean
+// run that fails, is skipped or expects failure is the outcome unchanged. A
+// property test (`property`) runs all its generated cases each time.
+#Export(c) fn jet_rt_test_unit_faults(name: I64, expected: Bool, env: I64, invoke: I64, selectors: I64, property: Bool) -> I64 {
+    data :: rt_text_data(selectors)
+    length :: rt_text_len(selectors)
+    count := I64{0}
+    at := I64{0}
+    loop at <= length {
+        if (at == length || trap_byte(wrapping(data + at)) == I64{10}) -> count += I64{1}
+        at += I64{1}
+    }
+    rows :: jet_rt_alloc(count * I64{8}, I64{8})
+    start := I64{0}
+    row := I64{0}
+    at = I64{0}
+    loop at <= length {
+        if (at == length || trap_byte(wrapping(data + at)) == I64{10}) {
+            trap_store(wrapping(rows + row * I64{8}), rt_text_copy(wrapping(data + start), at - start))
+            row += I64{1}
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    fault_schedule_arm(rows, count, I64{-1}, I64{0})
+    outcome := test_fault_run(name, expected, env, invoke, property)
+    observed :: jet_rt_alloc(count * I64{8}, I64{8})
+    schedule :: trap_word(wrapping(fault_allocation_state() + I64{40}))
+    row = I64{0}
+    loop row < count {
+        trap_store(wrapping(observed + row * I64{8}), trap_word(wrapping(wrapping(schedule + row * I64{16}) + I64{8})))
+        row += I64{1}
+    }
+    flags :: trap_word(outcome)
+    if (!expected && flags.bit_and(I64{5}) == I64{1}) {
+        row = I64{0}
+        loop row < count {
+            nth := I64{1}
+            loop nth <= trap_word(wrapping(observed + row * I64{8})) {
+                fault_schedule_arm(rows, count, row, nth)
+                injected :: test_fault_run(name, expected, env, invoke, property)
+                if (trap_word(injected).bit_and(I64{1}) == I64{0}) {
+                    jet_rt_test_outcome_drop(outcome)
+                    test_fault_report(injected, trap_word(wrapping(rows + row * I64{8})), nth)
+                    outcome = injected
+                    row = count
+                    break
+                }
+                jet_rt_test_outcome_drop(injected)
+                nth += I64{1}
+            }
+            row += I64{1}
+        }
+    }
+    jet_rt_fault_allocation_clear()
+    row = I64{0}
+    loop row < count {
+        jet_rt_string_drop(trap_word(wrapping(rows + row * I64{8})))
+        row += I64{1}
+    }
+    jet_rt_free(rows, count * I64{8}, I64{8})
+    jet_rt_free(observed, count * I64{8}, I64{8})
+    outcome
+}
+
+fn test_fault_run(name: I64, expected: Bool, env: I64, invoke: I64, property: Bool) -> I64 {
+    if property -> return jet_rt_test_property(name, expected, env, invoke)
+    jet_rt_test_unit(name, expected, env, invoke)
+}
+
+// Heads a failed injected run's report with the fault it injected:
+// "fault injected: <selector> call <nth>\n".
+fn test_fault_report(outcome: I64, selector: I64, nth: I64) {
+    report :: trap_word(wrapping(outcome + I64{24}))
+    head :: rt_static_text("fault injected: ")
+    call :: rt_static_text(" call ")
+    selector_len :: rt_text_len(selector)
+    report_len :: rt_text_len(report)
+    text :: test_text_new(rt_text_len(head) + selector_len + rt_text_len(call) + I64{20} + I64{1} + report_len)
+    out :: rt_text_data(text)
+    used := I64{0}
+    test_copy_bytes(wrapping(out + used), rt_text_data(head), rt_text_len(head))
+    used += rt_text_len(head)
+    test_copy_bytes(wrapping(out + used), rt_text_data(selector), selector_len)
+    used += selector_len
+    test_copy_bytes(wrapping(out + used), rt_text_data(call), rt_text_len(call))
+    used += rt_text_len(call)
+    used += test_decimal_bytes(wrapping(out + used), nth)
+    trap_put(wrapping(out + used), I64{10})
+    used += I64{1}
+    test_copy_bytes(wrapping(out + used), rt_text_data(report), report_len)
+    used += report_len
+    trap_store(wrapping(text + I64{8}), used)
+    test_text_drop(report)
+    trap_store(wrapping(outcome + I64{24}), text)
 }
 
 // `invoke(env)` returns one owned outcome; `release(env)` runs shielded once.

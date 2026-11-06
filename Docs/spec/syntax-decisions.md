@@ -20,8 +20,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
-| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row; the retired `use path as alias`, `owner.[x as y]` and `owner.{…}` teach E0630 | — |
-| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
+| `use { … } / use alias :: path` | import block (#6542): one row per line, each a module path, `alias :: path`, a "file" path or `alias :: "file"`; `alias :: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row | — |
+| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
 | `struct Name { impl Marker { group :: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
@@ -32,13 +32,13 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
 | `#Align` | retired standalone alignment marker | `D-PLACE1=A` |
 | `Atomic<T>` | safe lock-free scalar cell | `D-PLACE1=A; D-ATOMIC-WIDTH1=A` |
-| `@` | live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: comptime { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$` | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
+| `@` | live link (D-MEMREF1); the retired compile-time `@NAME` constant, `@` template name splices and `@` fact spellings are not Jet syntax | `D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B` |
 | `comptime` | compile-time block `comptime { … }`; `NAME :: comptime { value }` is the only binding that forces compile time (a plain `NAME :: value` folds while building when it can); `@ { … }` and `prep` are retired | `D-PREP-SURFACE2=A` |
 | `comptime if` | build-time branch; unchosen arms are name-checked only | `D-PREP-BRANCH1=A` |
 | `comptime loop` | build-time loop over statements or declarations | `D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A` |
 | `comptime fn` | build-time literal-hook method | `D-PREP-FN1=A; D-FOUND-LITERAL1=A` |
 | `<comptime N: Int>` | compile-time number parameter declaration | `D-CONSTGEN2=A` |
-| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388 | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
+| `$` | compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; fact declaration metadata `$holds:`; template name splice `fn $method`, `self.$field`, `.$left` | `D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B` |
 | `$build` | build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`, `.cpu.cache_line` (an `Int`, also accepted in `#Layout(c, align(…))`) | `D-BUILD-FACT3=A; D-CACHE-CONTROL1=A` |
 | `$package` | package fact root: `$package.name`, `.version` | `D-BUILD-FACT3=A; D-META-REFLECT2=A` |
 | `$phase` | total evaluation-site phase fact | `D-PREP-SURFACE2=A; D-META-ROOT3=A` |
@@ -73,7 +73,7 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, recordin
 | `__core_intrinsic` | compiler-only namespace | `D-CORE-CALL1` |
 | `<:` | open a lock-step statement-expansion fence | `D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A` |
 | `:>` | close a lock-step statement-expansion fence | `D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A` |
-| `@[ … ]@` | retired fence spelling; E-FENCE-SPELLING teaches `<: … :>` | `D-FENCE2=A` |
+| `@[ … ]@` | retired fence spelling; the fence is `<: … :>` | `D-FENCE2=A` |
 
 <!-- END GENERATED LEXICAL LEDGER -->
 
@@ -125,7 +125,7 @@ declaration or type position gets E0358 with a `jet fix` edit (markers:
 E0927).
 
 **S84 — Hyphens in package/module/system/image/env names**: kebab-case allowed
-in these *name* positions (`image.halcyon-iso`, `module web-app`). Grammar:
+in these *name* positions (`image.devhost-iso`, `module web-app`). Grammar:
 dashed name `ident (-ident)*`, `-` joins only when span-adjacent on both sides,
 so spaced `a - b` stays subtraction — parser-level (`expect_dashed_name`), no
 lexer change. No leading/trailing/doubled hyphen. Code identifiers stay plain
@@ -256,8 +256,10 @@ D-DOTCTOR3 whole-value reading, so `evens: [Int] :: xs.map(f)` becomes
 **S4 — Type annotations**: `name: Type` after the name on signatures and fields.
 Never on a local binding. Never `Type name`.
 
-**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `&=` `|=` `^=` `<<=`
-`>>=`. Arithmetic four on Int/Float; the rest Int-only. `String += piece`
+**S17 — Compound assignment**: `+=` `-=` `*=` `/=` `%=` `<<=` `>>=`.
+Arithmetic four on Int/Float; the rest Int-only. `&=`, `|=` and `^=` are
+retired with infix bit arithmetic (D-SIGIL-ALGEBRA1=B): an update assigns the
+`bit_and`, `bit_or` or `bit_xor` result back. `String += piece`
 appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
 copied values. The place must be mutable or reached through an `&` parameter.
@@ -2649,7 +2651,7 @@ fn sensor() -[!Mem.Alloc(above: 2048)]> { }
 
 # Package policy may only tighten safety, never authorize it:
 policy: { unsafe: .Allow }
-// error E1206: `policy.unsafe` must be `.Deny` or `.Paths([...])`
+// error E1215: `policy.unsafe` must be `.Deny` or `.Paths([...])`
 // and cannot authorize unsafe code; each operation still needs
 // `#Unsafe("reason")` at the exact block or function.
 ```
@@ -3364,7 +3366,11 @@ one-branch-only E0141; lending instead E0142. A list of single-use values
 (`[Task<T>]`) is also consumed by a drain loop: `loop xs.len() > 0` (or
 `xs.len() != 0`, `!xs.is_empty()`) whose body names `xs` only to `pop` it or
 ask its length and never breaks out. Each popped value owes its own consume;
-a body that refills or lends `xs` leaves the list's duty (E0140).
+a body that refills or lends `xs` leaves the list's duty (E0140). Under
+D-LIN-CONTAINER1=A a List, Option, Result, Map, tuple or generic type argument
+holding a single-use value owes the duty too, so a dropped `[Lease]` or
+`Lease?` is E0140. A loop over such a list (or `loop (k, v) in ^table`) hands
+each element over, and each loop name owes its own consume.
 
 **D-PREPOST1 — Contracts** *(amended by D-FAIL-TIER1)*:
 `#Pre(cond, "msg")` / `#Post(cond, "msg")` on a signature (`result` in Post);
@@ -5618,7 +5624,7 @@ D-JPK-NONIX1, no daemon/root per D-JPK-NODAEMON1) and execs it
 (D-JPK-DISPATCH1). Frozen-forward identity block: the bare top-level identity
 fields stay parseable by every future jet, so an old jet can always read enough
 of any manifest to fetch the right toolchain. The retired `payload:` wrapper is
-an ordinary E1206 unknown-field error. `jet self toolchain`
+an ordinary E1215 unknown-field error. `jet self toolchain`
 shows the pin; `jet update jet` moves it deliberately.
 
 **U9 — Provider inference**: a source is `name: target@provider`, or a bare
@@ -7674,7 +7680,7 @@ resolved dependency graph, and an empty list denies every dependency. Repeated
 list entries normalize to one sorted value. `.Allow` is not a valid
 `policy.unsafe` value.
 
-The parser reports malformed package policy as `E1206`. A valid policy
+The parser reports malformed package policy as `E1215`. A valid policy
 violation is a compile/check error `E2960` naming the policy key, rejected
 construct, and project path. `jet inspect guarantees` projects the
 same normalized values, preserving absent keys and explicit empty deny lists;

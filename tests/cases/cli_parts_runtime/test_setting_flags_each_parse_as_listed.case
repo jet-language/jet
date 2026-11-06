@@ -1,0 +1,142 @@
+# Every `jet test` setting flag `jet help test` lists (JET_TEST_SETTINGS) runs once, in the
+# spelling its help row gives, beside `--list` on a profile with #Tests and a golden corpus:
+# each ported flag is taken, never refused as an unknown flag, and each unported one is
+# refused as not built yet. A selection that matches only #Tests is not a corpus error.
+fixture: fixtures/test_profiles
+env: NO_COLOR=1
+env: TERM=dumb
+copy: alt/cases.txt app/cases.txt
+step: jet test --profile full --list --fresh
+cwd: {work}/app
+exit: 0
+stdout: ~ "golden\ttests/golden/greet.jet" # the list names the corpus row
+step: jet test --profile full --list --docs
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --filter=adds
+cwd: {work}/app
+exit: 0
+stdout: ~ "adds" # the filter keeps the #Test
+stdout: !~ "greet" # and no corpus row, which is no error
+step: jet test --profile full --list --capture=all
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --update-snapshots
+cwd: {work}/app
+exit: 2
+stderr: ~ "`list` (flag) and `update_snapshots` (flag) don't combine" # parsed, then refused beside list
+step: jet test --profile full --list --shuffle=7
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --serial
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --measure
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --trace-tiers
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --optimize=none
+cwd: {work}/app
+exit: 0
+stderr: !~ "optimize full" # the flag replaces the profile's levels
+step: jet test --profile full --list --time-limit=60s
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --opt-in
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --shard=1/2
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --cases=cases.txt
+cwd: {work}/app
+exit: 0
+stdout: ~ "adds" # the file's #Test
+stdout: ~ "golden\ttests/golden/greet.jet" # and its corpus row
+stdout: !~ "waits a moment" # nothing the file leaves out
+step: jet test --profile full --list --jobs=2
+cwd: {work}/app
+exit: 0
+stderr: !~ "isn't a flag jet understands" # `--jobs=<n>` is the corpus pool's width, not a thread cap
+step: jet test --profile full --list --memory=1G
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --allow-shrink=x
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --diagnostic-coverage
+cwd: {work}/app
+exit: 2
+stderr: ~ "`diagnostic_coverage` (flag) checks the ui suite, and profile `full` runs none" # refused before any run
+stdout: !~ "adds" # nothing listed
+step: jet test --profile full --list --results=r.json
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --compiler={jet}
+cwd: {work}/app
+exit: 0
+step: jet test --profile full --list --where=x
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --where` is not built yet" # unported rows are refused, never ignored
+step: jet test --profile full --list --coverage
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --coverage` is not built yet" # unported row refused
+step: jet test --profile full --list --grade=generated
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --grade` is not built yet" # unported row refused
+step: jet test --profile full --list --iterations=4
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --iterations` is not built yet" # unported row refused
+step: jet test --profile full --list --time=4
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --time` is not built yet" # unported row refused
+step: jet test --profile full --list --seed=7
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --seed` is not built yet" # unported row refused
+step: jet test --profile full --list --corpus=x
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --corpus` is not built yet" # unported row refused
+step: jet test --profile full --list --watch
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --watch` is not built yet" # unported row refused
+step: jet test --profile full --list --record=x
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --record` is not built yet" # unported row refused
+step: jet test --profile full --list --browser=x
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --browser` is not built yet" # unported row refused
+step: jet test --profile full --list --browser-retries=4
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --browser-retries` is not built yet" # unported row refused
+step: jet test --profile full --list --browser-reporter=x
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --browser-reporter` is not built yet" # unported row refused
+step: jet test --profile full --list --browser-ui
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --browser-ui` is not built yet" # unported row refused
+step: jet test --profile full --list --browser-visual
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --browser-visual` is not built yet" # unported row refused
+step: jet test --profile full --list --browser-trace
+cwd: {work}/app
+exit: 2
+stderr: ~ "`jet test --browser-trace` is not built yet" # unported row refused

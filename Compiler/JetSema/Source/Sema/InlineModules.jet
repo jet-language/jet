@@ -1,10 +1,8 @@
-// Inline code modules (`module bank { ... }`). The Rust
-// bootstrap gives every member one compiler-owned identity before any
-// declaration is registered (`Bundle/GenericModules/Expansion.rs`
-// `hoist_inline_module_member_types`, `Bundle/InlineCalls.rs`
-// `mangle_inline_sibling_calls`, the `Item::CodeModule` registration arm in
-// `Pipeline/CheckInner.rs`, and the inline-module body jobs in
-// `Validation.rs`). This pass is that same step on one module program:
+// Inline code modules (`module bank { ... }`). The Rust bootstrap gives every
+// member one compiler-owned identity before any declaration is registered
+// (`hoist_inline_module_member_types`, `mangle_inline_sibling_calls`, the
+// `Item::CodeModule` registration arm, and the inline-module body jobs). This
+// pass is that same step on one module program:
 //
 // 1. member types (struct, enum, trait, tag, impl) lift beside the module
 //    under `module_type_name` (`bank.Account` -> `M4BankAccount`); the bare and
@@ -18,7 +16,7 @@
 //    resolve to the member identity: an unknown member is E0608/E0611, a
 //    private one E0609; a nested `priv module` is usable only inside the
 //    module enclosing it, which names its children relatively (`audit.f()`);
-// 4. a module's own `use` declarations (Rust `Pipeline/InlineImports.rs`)
+// 4. a module's own `use` declarations
 //    bind inside that module only, and its `pub use` re-exports a member as
 //    `module.name`; a module named as a value is E0107, like Rust.
 //
@@ -322,13 +320,12 @@ fn sema_inline_module_lowered(definition: CodeModule) -> Bool Never! {
     true
 }
 
-// A module lowers unless it imports a foreign namespace, or a Core module
-// under a binding the enclosing file does not make the same way: those
-// bindings stay with the module body (Rust `inline_core_imports`). An inline
-// body sees the file's imports overlaid with its own (Rust BodyCheck.rs
-// `check_func_body`), so an inline Core import that repeats a file import's
-// alias and module binds nothing new and the lifted members resolve it
-// through the file's binding.
+// A module lowers unless it imports a foreign namespace, or a Core module under
+// a binding the enclosing file does not make the same way: those bindings stay
+// with the module body (Rust `inline_core_imports`). An inline body sees the
+// file's imports overlaid with its own, so an inline Core import that repeats a
+// file import's alias and module binds nothing new and the lifted members
+// resolve it through the file's binding.
 fn sema_inline_module_lowerable(definition: CodeModule, file_imports: [ImportDecl]) -> Bool Never! {
     if definition.body == None -> return false
     loop declaration in definition.imports {
@@ -368,6 +365,16 @@ fn sema_inline_is_local(rewrite: SemaInlineRewrite, name: String) -> Bool Never!
         if local == name -> return true
     }
     false
+}
+
+// `alias.Type` as a value's base (`internal.Failure.Missing`) names the
+// hoisted member type, as a type position spelling `alias.Type` does.
+fn sema_inline_type_path(rewrite: SemaInlineRewrite, base: Expr) -> Expr? Never! {
+    if base == .Field(inner, member, span, node) && inner == .Ident(alias, _, _) {
+        if sema_inline_is_local(rewrite, alias) -> return None
+        if rewrite.types.get("{alias}.{member}") == .Val(.Named(name)) -> return Val(Expr.Ident{name: name, span: span, id: node})
+    }
+    None
 }
 
 fn sema_inline_surface(rewrite: SemaInlineRewrite, name: String) -> SemaInlineModuleSurface? Never! {
@@ -722,7 +729,10 @@ fn sema_inline_rewrite_expr(rewrite: &SemaInlineRewrite, expression: Expr) -> Ex
         .RawOf(value, span, node) -> return Expr.RawOf{value: sema_inline_rewrite_expr(&rewrite, value), span: span, id: node}
         .Copy(value, span, node) -> return Expr.Copy{value: sema_inline_rewrite_expr(&rewrite, value), span: span, id: node}
         .Place(value, access, span, node) -> return Expr.Place{value: sema_inline_rewrite_expr(&rewrite, value), access: access, span: span, id: node}
-        .Field(base, member, span, node) -> return Expr.Field{base: sema_inline_rewrite_expr(&rewrite, base), member: member, span: span, id: node}
+        .Field(base, member, span, node) -> {
+            if sema_inline_type_path(rewrite, base) == .Val(type_name) -> return Expr.Field{base: type_name, member: member, span: span, id: node}
+            return Expr.Field{base: sema_inline_rewrite_expr(&rewrite, base), member: member, span: span, id: node}
+        }
         .OptField(base, member, member_span, flatten, span, node) -> return Expr.OptField{base: sema_inline_rewrite_expr(&rewrite, base), member: member, member_span: member_span, flatten: flatten, span: span, id: node}
         .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) -> {
             if receiver == .Ident(alias, alias_span, _) {
@@ -1534,9 +1544,9 @@ fn sema_inline_lift_nested(body: [Item], parent: String, file_imports: [ImportDe
 
 // Every module's functions are lifted (top-level ones in
 // sema_inline_modules_lower, nested ones by sema_inline_lift_nested), and a
-// module constant or test is never registered (CheckInner.rs registers an
-// inline body's `Item::Func` members only): functions, constants and tests
-// leave the lowered program.
+// module constant or test is never registered (registers an inline body's
+// `Item::Func` members only): functions, constants and tests leave the lowered
+// program.
 fn sema_inline_strip_members(body: [Item]) -> [Item] Never! {
     kept := [Item]{}
     loop item in body {

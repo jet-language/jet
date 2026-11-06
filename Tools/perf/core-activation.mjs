@@ -18,7 +18,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { scratchRoot, stateRoot } from "../agent/roots.mjs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,9 +34,9 @@ const BATTERIES = {
 
 function parseArgs(argv) {
   const args = {
-    jet: join(homedir(), ".cache/jet-dev/safe-jet.sh"),
-    out: join(homedir(), ".cache/jet-dev/scratch/core-activation.json"),
-    work: join(homedir(), ".cache/jet-dev/core-activation"),
+    jet: join(stateRoot(), "safe-jet.sh"),
+    out: join(scratchRoot(), "core-activation.json"),
+    work: join(stateRoot(), "core-activation"),
     samples: 20,
     batteries: Object.keys(BATTERIES),
   };

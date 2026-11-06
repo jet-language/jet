@@ -52,7 +52,6 @@ use {
     jet_lexer.[
         TOKEN_AT,
         TOKEN_COLON,
-        TOKEN_COLON_COLON,
         TOKEN_COMMA,
         TOKEN_DOT,
         TOKEN_EOF,
@@ -107,7 +106,7 @@ fn parser_module_is_dashed(name: String) -> Bool Never! {
 }
 
 // A module body of sources, imports, members or namespace contributions; the
-// `#X :: value` lines it opens with are its markers.
+// `#X: value` lines it opens with are its markers.
 fn parser_module_config_body_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_LBRACE -> return false
     at :: parser_skip_inbody_marker_lines(&state, 1)
@@ -127,7 +126,7 @@ fn parser_module_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_KW_MODULE -> return false
     if parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
     if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
-    parser_kind_at(&state, 2) == TOKEN_MINUS || parser_kind_at(&state, 2) == TOKEN_LBRACE || parser_kind_at(&state, 2) == TOKEN_SEMI || parser_kind_at(&state, 2) == TOKEN_LT || parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_COLON_COLON
+    parser_kind_at(&state, 2) == TOKEN_MINUS || parser_kind_at(&state, 2) == TOKEN_LBRACE || parser_kind_at(&state, 2) == TOKEN_SEMI || parser_kind_at(&state, 2) == TOKEN_LT || parser_kind_at(&state, 2) == TOKEN_LPAREN || parser_kind_at(&state, 2) == TOKEN_COLON
 }
 
 // One entry point for the dispatcher.  `modifiers` has already consumed
@@ -137,7 +136,7 @@ fn parser_parse_module(state: &JetParserState, modifiers: ParsedItemModifiers) -
     name_head :: parser_module_dashed_name(&state, "for the module name")
     if {
         parser_current_kind(&state) == TOKEN_DOT -> parser_parse_role_module(&state, modifiers, start.span, name_head)
-        parser_current_kind(&state) == TOKEN_COLON_COLON -> parser_parse_module_alias_after_name(&state, modifiers, start.span, name_head)
+        parser_current_kind(&state) == TOKEN_COLON -> parser_parse_module_alias_after_name(&state, modifiers, start.span, name_head)
         parser_current_kind(&state) == TOKEN_LT || parser_current_kind(&state) == TOKEN_LPAREN -> parser_parse_generic_module_after_name(&state, modifiers, start.span, name_head)
         parser_module_is_dashed(name_head.name) || parser_module_config_body_ahead(&state) -> parser_parse_module_decl_after_name(&state, modifiers, start.span, name_head)
         else -> {

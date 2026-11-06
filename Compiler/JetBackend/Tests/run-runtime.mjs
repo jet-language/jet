@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The hosted CLI checks the canonical runtime source aggregate, then its
 // library hook lowers the checked exports and lifecycle as ONE native object.
-// No Tests.rs factory, emitted Rust, or Rust schema reader enters this path.
-// usage: JET=<hosted compiler> node run-runtime.mjs OUT
+// No factory, emitted Rust, or Rust schema reader enters this path. usage:
+// JET=<hosted compiler> node run-runtime.mjs OUT
 //        [--stage assemble|lower] [--until assemble|lower] [--test NAME]
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,7 +36,9 @@ if (until === 1) {
   if (!process.env.JET) throw Error('JET must name the actual Jet-hosted CLI from this source tree');
   const prefix = join(out, 'jet_runtime_jet');
   for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
-  const run = spawnSync(resolve(process.env.JET), ['check', entry], {
+  // The library seam runs under `jet doc` (prebuild-runtime.mjs): `jet check`
+  // stops before lowering, so it has no C export rows to build.
+  const run = spawnSync(resolve(process.env.JET), ['doc', entry], {
     cwd: library,
     env: { ...process.env, JET_TOOLCHAIN_ROOT: repo,
       JET_FRONT_LIBRARY_OBJECT_OUTPUT: prefix,

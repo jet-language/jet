@@ -1,10 +1,8 @@
 // The one `jet.report/v3` machine projection of a diagnostic
-// (crates/jet-foundation/src/Diagnostics.rs `to_report_with_clears`,
-// `report_clear_counts`, `render_all_json`, and Report.rs `ReportPath`,
-// `ReportEnvelope::json`; the `build_error` member is Outcome.rs
-// `JetErrorReport::to_json`). Every `--json` surface that carries
-// diagnostics serializes them here; the status envelope around them is
-// Status.jet.
+// (`to_report_with_clears`, `report_clear_counts`, `render_all_json`, and
+// `ReportPath`, `ReportEnvelope::json`; the `build_error` member is
+// `JetErrorReport::to_json`). Every `--json` surface that carries diagnostics
+// serializes them here; the status envelope around them is Status.jet.
 use {
     cli_files :: core.files
     jet_foundation.[
@@ -37,10 +35,10 @@ fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
     Val(directory)
 }
 
-// Report.rs `ReportPath::from_process`: an empty or synthetic (`<…>`) label
-// stays as written; a disk path becomes absolute against `cwd` and lexically
-// normalized (`.` dropped, `..` pops a component, never above the root). No
-// filesystem lookup is involved, so the path need not exist.
+// `ReportPath::from_process`: an empty or synthetic (`<…>`) label stays as
+// written; a disk path becomes absolute against `cwd` and lexically normalized
+// (`.` dropped, `..` pops a component, never above the root). No filesystem
+// lookup is involved, so the path need not exist.
 fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
     // copy: `value` stays with the caller (`value` is a read parameter: no move out of it, E0201)
     // and the new value owns its own.
@@ -160,7 +158,6 @@ fn jet_cli_report_moment(moment: DiagnosticMoment) -> String Never! {
     }
 }
 
-// Report.rs `FixSafety::as_str`.
 fn jet_cli_report_safety(safety: DiagnosticFixSafety) -> String Never! {
     if safety == {
         .Formatting -> "formatting"
@@ -171,7 +168,6 @@ fn jet_cli_report_safety(safety: DiagnosticFixSafety) -> String Never! {
     }
 }
 
-// Report.rs `NoFixReasonKind::as_str`.
 fn jet_cli_report_no_fix_kind(kind: DiagnosticNoFixReasonKind) -> String Never! {
     if kind == {
         .Behavior -> "behavior"
@@ -180,7 +176,6 @@ fn jet_cli_report_no_fix_kind(kind: DiagnosticNoFixReasonKind) -> String Never! 
     }
 }
 
-// Diagnostics.rs `CryptoMisuseReason::as_str`.
 fn jet_cli_report_crypto_reason(reason: DiagnosticCryptoMisuseReason) -> String Never! {
     if reason == {
         .InvalidLength -> "invalid_length"
@@ -202,11 +197,11 @@ fn jet_cli_report_hex_digit(value: Int) -> String Never! {
     String.from_bytes([U8{87 + value}]) ?? "0"
 }
 
-// JSON.rs `json_escape` / Outcome.rs `jet_error_json_quote`, quoted: unlike
-// `jet_cli_json_string`, every `char::is_control` scalar (C0, DEL, and the C1
-// block U+0080..U+009F) other than `\n`, `\r`, `\t` becomes `\u00xx`, and
-// backspace and form feed take that form too. The C1 scalars are the UTF-8
-// pairs `C2 80`..`C2 9F`; every other byte run is copied verbatim.
+// `json_escape` / `jet_error_json_quote`, quoted: unlike `jet_cli_json_string`,
+// every `char::is_control` scalar (C0, DEL, and the C1 block U+0080..U+009F)
+// other than `\n`, `\r`, `\t` becomes `\u00xx`, and backspace and form feed
+// take that form too. The C1 scalars are the UTF-8 pairs `C2 80`.`C2 9F`; every
+// other byte run is copied verbatim.
 fn jet_cli_json_control_quote(value: String) -> String Never! {
     bytes :: value.bytes()
     out := [U8]{U8{34}}
@@ -257,10 +252,9 @@ fn jet_cli_report_span(start: Int, end: Int) -> String Never! {
     "{{\"start\":{start},\"end\":{end}}}"
 }
 
-// Outcome.rs `JetErrorReport::to_json`: the `jet.err/v1` object a build error
-// carries. A Jet error frame records no column and the report no separate
-// origin frame (the host codec's projection), so `column` is 0 and `origin`
-// is absent.
+// `JetErrorReport::to_json`: the `jet.err/v1` object a build error carries. A
+// Jet error frame records no column and the report no separate origin frame
+// (the host codec's projection), so `column` is 0 and `origin` is absent.
 fn jet_cli_build_error_json(report: DiagnosticBuildError) -> String Never! {
     fields := [String]{
         "\"schema\":\"jet.err/v1\"",
@@ -305,8 +299,7 @@ fn jet_cli_build_error_json(report: DiagnosticBuildError) -> String Never! {
     "{{{fields.join(",")}}}"
 }
 
-// Diagnostics.rs `all_edits`: the primary repair, then any source-derived
-// alternatives.
+// `all_edits`: the primary repair, then any source-derived alternatives.
 fn jet_cli_report_edits(diagnostic: Diagnostic) -> [TextEdit] Never! {
     edits := [TextEdit]{}
     // copy: `edit` is a payload of read parameter `diagnostic`, which keeps the original; the returned `edits` list owns this one
@@ -328,14 +321,14 @@ fn jet_cli_report_same_origin(left: DiagnosticOrigin?, right: DiagnosticOrigin?)
     first.revision == second.revision && first.path == second.path && first.display == second.display && first.source == second.source
 }
 
-// Diagnostics.rs `DiagnosticCause::matches`: a cause names a report by its
-// code, span, and originating snapshot.
+// `DiagnosticCause::matches`: a cause names a report by its code, span, and
+// originating snapshot.
 fn jet_cli_report_cause_names(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
     cause.code == diagnostic.code && cause.span == diagnostic.span && jet_cli_report_same_origin(cause.origin, diagnostic.origin)
 }
 
-// Diagnostics.rs `report_clear_counts`: for each report, how many other
-// reports in the batch name it in their cause chain.
+// `report_clear_counts`: for each report, how many other reports in the batch
+// name it in their cause chain.
 fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
     any_cause :: loop diagnostic in diagnostics {
         if diagnostic.cause.len() > 0 -> break true
@@ -357,10 +350,10 @@ fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
     counts
 }
 
-// Diagnostics.rs `to_report_with_clears` + Report.rs `ReportEnvelope::json`:
-// one report object. `file` is the batch's report path (`jet_cli_report_file`)
-// and `source` its bytes; a diagnostic's own origin replaces both, and origin
-// paths are named under `base` the same way.
+// `to_report_with_clears` + `ReportEnvelope::json`: one report object. `file`
+// is the batch's report path (`jet_cli_report_file`) and `source` its bytes; a
+// diagnostic's own origin replaces both, and origin paths are named under
+// `base` the same way.
 fn jet_cli_report_json(diagnostic: Diagnostic, base: JetCLIReportBase?, file: String, source: String, clears: Int) -> String Never! {
     sources := diagnostic_source_texts()
     jet_cli_report_json_with(diagnostic, base, file, source, clears, &sources)
@@ -455,29 +448,29 @@ fn jet_cli_reports_json(base: JetCLIReportBase?, file: String, source: String, d
     reports
 }
 
-// Diagnostics.rs `render_all_json`: JSON Lines, one report per line; an empty
-// batch is no bytes.
+// `render_all_json`: JSON Lines, one report per line; an empty batch is no
+// bytes.
 fn jet_cli_render_all_json(base: JetCLIReportBase?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
     reports :: jet_cli_reports_json(base, file, source, diagnostics)
     if reports.len() == 0 -> return ""
     "{reports.join("\n")}\n"
 }
 
-// The one status line around a batch of reports (main.rs `report_problems`,
-// CmdInspect.rs `render_check_failure`): `action` names the producer and `ok`
-// matches the exit status.
+// The one status line around a batch of reports (`report_problems`,
+// `render_check_failure`): `action` names the producer and `ok` matches the
+// exit status.
 fn jet_cli_reports_status_json(action: String, ok: Bool, base: JetCLIReportBase?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
     "{jet_cli_status_render_with_reports(action, ok, jet_cli_reports_json(base, file, source, diagnostics), [JetCLIStatusField]{})}\n"
 }
 
-// main.rs `emit_cli_report`: one spanless command diagnostic in the `cli`
-// status envelope, with no file.
+// `emit_cli_report`: one spanless command diagnostic in the `cli` status
+// envelope, with no file.
 fn jet_cli_report_status_json(diagnostic: Diagnostic) -> String Never! {
     "{jet_cli_status_render_with_reports("cli", false, [String]{jet_cli_report_json(diagnostic, None, "", "", 0)}, [JetCLIStatusField]{})}\n"
 }
 
-// The `--json` form of a spanless CLI error (Source/main.rs `cli_error!` in
-// machine mode): one failed `cli` status line on stdout.
+// The `--json` form of a spanless CLI error (`cli_error!` in machine mode): one
+// failed `cli` status line on stdout.
 fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
     jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
 }

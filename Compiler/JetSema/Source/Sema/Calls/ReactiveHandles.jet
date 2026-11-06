@@ -11,6 +11,7 @@ use jet_foundation.[
     FunctionDefaultRef,
     ParamZone,
     Span,
+    SymbolID,
     Type,
     expr_span,
     type_name,
@@ -50,7 +51,7 @@ fn sema_reactive_function_value(ty: Type) -> Bool Never! {
 
 fn sema_reactive_value_ok(ty: Type, kind: String, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if sema_reactive_function_value(ty) {
-        &diagnostics.push(sema_error("E2913", span, "a reactive {kind} can't hold a function", "signals and derived values hold ordinary data so they can be copied to dependents", "use a data value (number, text, list, struct, …); wrap behaviour in `reactive.effect` instead"))
+        &diagnostics.push(sema_error("E2913", span, "a reactive {kind} can't hold a function", "signals and derived values hold ordinary data so they can be copied to dependents", "use a data value (number, text, list, struct, …); wrap behaviour in `reactive.autorun` instead"))
         return false
     }
     true
@@ -129,26 +130,26 @@ fn sema_reactive_check_retained_lambda(kind: String, argument: CallArg, expected
 }
 
 fn sema_reactive_direct_closure(kind: String, lambda: TLambda, result_type: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, type_args: [Type], diagnostics: &[Diagnostic]) -> TExpr? {
-    closure_kind :: if kind == "effect" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
+    closure_kind :: if kind == "autorun" -> TCoreClosureKind.ReactiveEffect{executable: lambda} else -> TCoreClosureKind.ReactiveDerived{executable: lambda}
     value := sema_tree_node(result_type, TExprKind.CoreClosureCall{kind: closure_kind}, span)
     checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return None
     if !sema_reactive_call_fact(environment, program, &scopes, &context, "core.reactive.{kind}", span, result_type, type_args, "", &diagnostics) -> return None
     Val(checked)
 }
 
-fn sema_reactive_effect_value(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_reactive_autorun_value(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if args.len() != 1 {
         _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic("core.reactive.effect", 1, args.len(), false, span))
+        &diagnostics.push(sema_call_arity_diagnostic("core.reactive.autorun", 1, args.len(), false, span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    if !sema_call_core_check_type_args("core.reactive", "effect", 0, false, type_args, span, &diagnostics) {
+    if !sema_call_core_check_type_args("core.reactive", "autorun", 0, false, type_args, span, &diagnostics) {
         _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    lambda :: sema_reactive_check_retained_lambda("effect", args[0], Val(sema_reactive_unit_type()), None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    lambda :: sema_reactive_check_retained_lambda("autorun", args[0], Val(sema_reactive_unit_type()), None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type := Type.Named{name: "Effect"}
-    value :: sema_reactive_direct_closure("effect", lambda, result_type, span, expected, environment, program, &scopes, &context, type_args, &diagnostics)
+    value :: sema_reactive_direct_closure("autorun", lambda, result_type, span, expected, environment, program, &scopes, &context, type_args, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
@@ -167,7 +168,7 @@ fn sema_reactive_derived_value(member: String, type_args: [Type], span: Span, ex
     lambda :: sema_reactive_check_retained_lambda(member, args[0], None, expected_element, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     result_type :: lambda.ret ?? Type.Named{name: "Unit"}
     if result_type == sema_reactive_unit_type() {
-        &diagnostics.push(sema_error("E2912", expr_span(args[0].expr), "`reactive.{member}` must compute and return a value", "a derived value is recomputed from its signals; its lambda has to return the value", "return a value from the body, or use `reactive.effect(() -> {{ … }})` for a side effect"))
+        &diagnostics.push(sema_error("E2912", expr_span(args[0].expr), "`reactive.{member}` must compute and return a value", "a derived value is recomputed from its signals; its lambda has to return the value", "return a value from the body, or use `reactive.autorun(() -> {{ … }})` for a side effect"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_reactive_value_ok(result_type, member, args[0].span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -177,9 +178,12 @@ fn sema_reactive_derived_value(member: String, type_args: [Type], span: Span, ex
     SemaDirectSpecialCheck{handled: true, value: value}
 }
 
+// `reactive.signal(value)` has no Core registry row: sema types the element
+// and rewrites the call into the Core source function `signal<T>`.
 fn sema_reactive_signal_value(type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    record :: sema_reactive_core_record("core.reactive", "signal", args, span, &diagnostics) ?? {
+    if args.len() != 1 {
         _ := sema_reactive_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_call_arity_diagnostic("core.reactive.signal", 1, args.len(), false, span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     if !sema_call_core_check_type_args("core.reactive", "signal", 1, true, type_args, span, &diagnostics) {
@@ -191,8 +195,12 @@ fn sema_reactive_signal_value(type_args: [Type], span: Span, expected: Type?, en
     if !sema_reactive_value_ok(value.ty, "signal", args[0].span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     element := if expected_element == .Val(required) -> required else -> sema_call_resolved_type(value.ty, environment, program)
     result_type := Type.Apply{name: "Signal", args: [Type]{element}}
-    value_out :: sema_reactive_core_call_value(record, [TExpr]{value}, span, [Type]{element}, result_type, expected, environment, program, &scopes, &context, &diagnostics)
-    SemaDirectSpecialCheck{handled: true, value: value_out}
+    identity :: sema_call_core_module_identity(environment, program, "core.reactive") ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    target :: sema_call_core_source_target(environment, program, identity, "signal", [Type]{element}, span, false, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    callee :: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    argument := TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
+    call := sema_tree_node(result_type, TExprKind.Call{callee: callee, type_args: target.type_args, args: [TCallArg]{argument}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, &diagnostics)}
 }
 
 fn sema_reactive_loadable_value(member: String, type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, args: [CallArg], diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
@@ -215,7 +223,7 @@ fn sema_call_try_reactive_core_call(module_name: String, member: String, args: [
     if module_name == "core.reactive" {
         if member == "signal" -> return sema_reactive_signal_value(type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, args, &diagnostics)
         if member == "derived" || member == "computed" -> return sema_reactive_derived_value(member, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, args, &diagnostics)
-        if member == "effect" -> return sema_reactive_effect_value(type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, args, &diagnostics)
+        if member == "autorun" -> return sema_reactive_autorun_value(type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, args, &diagnostics)
     }
     if module_name == "core.reactive.loadable" && (member == "idle" || member == "loading" || member == "loaded" || member == "failed") -> return sema_reactive_loadable_value(member, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, args, &diagnostics)
     SemaDirectSpecialCheck{handled: false, value: None}

@@ -1,0 +1,29 @@
+// A `Pool<T>` parameter without `&` is read-only: `add` and `remove` change
+// the pool, so each is refused through it. A `:=` local and a `&` parameter
+// change their pool with no mark at the call.
+struct Player {
+    name: String
+    hp: Int
+}
+
+fn spawn(world: Pool<Player>) -> ID<Player> {
+    world.add(Player{name: "Kai", hp: 100})
+}
+
+fn despawn(world: Pool<Player>, id: ID<Player>) {
+    _ :: world.remove(id)
+}
+
+fn respawn(world: &Pool<Player>, id: ID<Player>) -> ID<Player> {
+    _ :: world.remove(id)
+    world.add(Player{name: "Kai", hp: 100})
+}
+
+fn run() {
+    world := Pool<Player>.new()
+    kai :: world.add(Player{name: "Kai", hp: 100})
+    again :: respawn(&world, kai)
+    print(world.ids().len())
+    despawn(world, again)
+    _ :: spawn(world)
+}

@@ -9,18 +9,17 @@ package {
     }
 }
 
-// SqlQuery.rs:1–1086 sole grammar and row-selection kernel.
-// Public grammar and row-selection source; no database connection authority.
-// #4483 gates core.sys.usize_max() (ordinals, LIMIT, ORDER exclusion);
-// never substitute host pointer width.
+// Sole grammar and row-selection kernel. Public grammar and row-selection
+// source; no database connection authority. #4483 gates core.sys.usize_max()
+// (ordinals, LIMIT, ORDER exclusion); never substitute host pointer width.
 // #4500 gates retaining payload/list loans and allocation-free scalar lowering.
 // #4494/#4409 are not used: this kernel has no OS, pointer or IO operations.
 // #4499 is not used: Rust itself groups on escaped String keys; these are not
-// an encoding of composite user map keys to evade that gate.
-// #4318/#4392 still gate allocation-free String bytes and retained views.
-// SUM reuses the canonical JetFixedWide carrier for Rust's private i128 sum;
-// native I128/checked-add is not in this worktree's fixed numeric registry.
-// No Rust wrapper/provider or native DB route is implemented by this module.
+// an encoding of composite user map keys to evade that gate. #4318/#4392 still
+// gate allocation-free String bytes and retained views. SUM reuses the
+// canonical JetFixedWide carrier for Rust's private i128 sum; native
+// I128/checked-add is not in this worktree's fixed numeric registry. No Rust
+// wrapper/provider or native DB route is implemented by this module.
 use {
     sql_text :: core.text.runtime.kernel_unicode_string
     sql_assets :: core.text.runtime.unicode_assets
@@ -390,7 +389,7 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
             if value == {
                 .Int(integer) -> {
                     integer_sum = sum_add(integer_sum, integer)
-                    float_sum += Float.from_i64(integer)
+                    float_sum += approx(integer)
                 }
                 .Float(real) -> {
                     all_int = false
@@ -420,7 +419,7 @@ fn sql_aggregate_value(group: [U64], function: JetSQLAggregate, field: String?, 
             }
             return .Float(float_sum)
         }
-        .Avg -> return .Float(float_sum / Float.from_i64(count))
+        .Avg -> return .Float(float_sum / approx(count))
         .Min -> selected ?? JetSQLValue.Null
         .Max -> selected ?? JetSQLValue.Null
         .Count -> return .Int(count)
@@ -545,7 +544,7 @@ priv module internal {
     }
     fn value_number(value: JetSQLValue) -> Float? Never! {
         if value == {
-            .Int(number) -> Val(Float.from_i64(number))
+            .Int(number) -> Val(approx(number))
             .Float(number) -> Val(number)
             else -> None
         }

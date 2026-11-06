@@ -1,8 +1,8 @@
 // The compiler-private source keys are the existing runtime spellings.
 // No reserved-name parser exemption or compatibility alias is involved.
 use jet_foundation.[
-    CoreCallInterpreterRoute, Effect, Type, TypeTupleField, core_call, core_host_fixed_signature,
-    core_module_export, type_identity_equal,
+    Effect, Type, TypeTupleField, core_call, core_host_fixed_signature,
+    core_module_export, type_identity_equal, type_tuple_fields_canonical,
 ]
 
 fn raw_host_key_fixture(module_name: String, key: String, retired: String, parameters: [Type], result: Type, borrowed: [Bool], effect_kind: Effect, effect_leaf: String?) {
@@ -10,7 +10,7 @@ fn raw_host_key_fixture(module_name: String, key: String, retired: String, param
     assert(row.module_name == module_name && row.member == key)
     assert(row.signature.arity == parameters.len() && row.signature.max_arity == parameters.len())
     assert(row.signature.borrow_mask == borrowed)
-    assert(row.interpreter_route == CoreCallInterpreterRoute.Ambient && row.aot_direct)
+    assert(row.aot_direct)
     if row.symbol == {
         .Prelude(symbol) -> assert(symbol == key)
         else -> panic("raw host route retains its Prelude symbol")
@@ -42,12 +42,13 @@ fn raw_host_key_fixture(module_name: String, key: String, retired: String, param
     wire :: Type.List{element: Type.List{element: Type.IntN{signed: false, bits: 8}}}
     result :: Type.Result{ok: wire, err: Type.String}
     raw_host_key_fixture("core.http.client", "jet_http_build_resolve", "__build_resolve", [Type]{Type.String, Type.Int}, result, [Bool]{true, false}, Effect.Net, Val("Time.Wait"))
-    link_facts :: Type.Tuple{fields: [TypeTupleField]{
+    // Named tuple fields are canonical by name (S73), as the signature row reads them.
+    link_facts :: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{
         {name: "available", ty: Type.Bool},
         {name: "held", ty: Type.Bool},
         {name: "value", ty: Type.Int},
         {name: "errno", ty: Type.Int}
-    }}
+    })}
     raw_host_key_fixture("core.files", "jet_files_link_reader_at_raw", "__link_reader_at", [Type]{Type.Named{name: "FileReader"}, Type.Int, Type.String}, link_facts, [Bool]{true, false, true}, Effect.FS, Val("FS.Write"))
     files :: core_module_export("core.files") ?? panic("files exports are registered")
     assert(files.members.contains("compiler_link_held"))

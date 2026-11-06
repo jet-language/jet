@@ -1,25 +1,22 @@
-// Rust `plain_literal_value` (Registration/Items.rs) lands a constant whose
-// checked initializer is a plain literal as its own value, unevaluated
-// (#3661: evaluating one lowered, assembled and ran an IR fragment holding
-// every module's declarations). Rust evaluates every other initializer with
-// its interpreter; Jet's comptime is native only, and a host with no
-// execution child (the bootstrap factory, the native CLI) evaluates nothing.
-// So every value that is literal data folds here: Int, sized-integer
-// (`I64{208}`, `U8{7}`), Float, Bool, Char and string literals, their
-// negation, the checked Int-to-fixed conversion of a literal, lists, struct
-// literals (sema has already filled each omitted field's default), enum
-// constructors with positional or named payloads, `Val(x)` and `None`,
-// constants that already landed, and integer, Float and Bool arithmetic and
-// comparison over them. It reads the same checked facts evaluation does: a
-// `T.$layout` read is the LayoutInfo sema computed for the selected target
-// (a CtLit) and `.size` its field; `x ?? panic(..)` on a present value is
-// that value; a value `if`/else-if chain takes the arm its folded condition
-// selects; shifts stay within the checked width. Aggregates take the shape
-// the evaluator returns: the declared type name, field and named payload
-// labels. A value outside its checked
-// type, a selected arm that stops (`panic`), a division or power, a call,
-// and any other shape is not folded: it is evaluated, and the evaluator
-// reports it.
+// A constant whose checked initializer is a plain literal lands as its own
+// value, unevaluated (#3661: evaluating one lowered, assembled and ran an IR
+// fragment holding every module's declarations). Jet's comptime runs only as
+// native code, and a host with no execution child (the bootstrap factory, the
+// native CLI) evaluates nothing. So every value that is literal data folds
+// here: Int, sized-integer (`I64{208}`, `U8{7}`), Float, Bool, Char and string
+// literals, their negation, the checked Int-to-fixed conversion of a literal,
+// lists, struct literals (sema has already filled each omitted field's
+// default), enum constructors with positional or named payloads, `Val(x)` and
+// `None`, constants that already landed, and integer, Float and Bool arithmetic
+// and comparison over them. It reads the same checked facts evaluation does: a
+// `T.$layout` read is the LayoutInfo sema computed for the selected target (a
+// CtLit) and `.size` its field; `x ?? panic(..)` on a present value is that
+// value; a value `if`/else-if chain takes the arm its folded condition selects;
+// shifts stay within the checked width. Aggregates take the shape the evaluator
+// returns: the declared type name, field and named payload labels. A value
+// outside its checked type, a selected arm that stops (`panic`), a division or
+// power, a call, and any other shape is not folded: it is evaluated, and the
+// evaluator reports it.
 //
 // The fold reads each node and its checked type in place in the tree (no
 // node or type copy per visited node): a generated data table folds millions

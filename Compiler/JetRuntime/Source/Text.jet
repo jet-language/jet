@@ -915,15 +915,6 @@ fn rt_text_with_length(length: I64, capacity: I64) -> I64 {
     header
 }
 
-// Hands the caller the byte buffer of a text it uniquely owns (count 1, as
-// every fresh builder is) and frees only the header; capacity is the
-// caller-checked buffer size. A shared text is never taken apart.
-fn rt_text_take_unique_buffer(value: I64) -> I64 {
-    data :: rt_text_data(value)
-    rt_text_header_free(value)
-    data
-}
-
 #Export(c) fn jet_rt_string_builder_new() -> I64 { rt_text_copy(I64{1}, I64{0}) }
 
 #Export(c) fn jet_rt_string_builder_push(target: I64, value: I64) {
@@ -1072,7 +1063,6 @@ fn rt_text_slice_range(value: I64, start: I64, end: I64, exclusive: U8, file: I6
         rt_text_push_number(message, end)
         rt_text_push_word(message, if (exclusive != U8{0}) -> I64{8319675061114316832} else -> I64{8319675060946806816}, I64{8})
         rt_text_push_word(message, I64{694515305}, I64{4})
-        // Static filenames use the same lossy UTF-8 convention as CAbi.rs.
         location := I64{0}
         if builtin {
             location = rt_text_builder_with_capacity(I64{14})
@@ -1188,7 +1178,7 @@ fn text_iter_drop(state: I64) {
     iter
 }
 
-// CString panic text matches MIRRust.rs c_abi_decode_owned/c_abi_arg_expr.
+// CString panic text matches c_abi_decode_owned/c_abi_arg_expr.
 fn rt_c_string_stop(kind: I64) {
     capacity :: if (kind == I64{1}) -> I64{23} else -> I64{28}
     message :: rt_text_builder_with_capacity(capacity)

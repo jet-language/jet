@@ -56,7 +56,7 @@ static void equal(Text *value,const char *expected) {
 }
 static Text borrowed(char *value) { return (Text){value,(W)strlen(value),0}; }
 static void journey_goldens(void) {
-    // Literal bytes from Outcome.rs:2066-2172; no regenerated approximation.
+    // Literal bytes; no regenerated approximation.
     Text file=borrowed("Examples/features/errors/error_context.jet");
     Text empty=borrowed(""), a=borrowed("read_raw"), b=borrowed("parse_config"), c=borrowed("load_config"), d=borrowed("run");
     Text n1=borrowed("reading raw config"), n2=borrowed("loading config app.toml");

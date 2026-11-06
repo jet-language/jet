@@ -1,9 +1,8 @@
 // Compiler-facing `jet` verbs of the self-hosted driver. Each verb returns the
 // exact bytes and exit status the Rust CLI produces for the same input
-// (Source/main.rs `report_problems_with_summary`, Source/CmdCompile.rs
-// `emit_check_outcome`, Source/CmdDevTools.rs `run_explain`), so both front
-// doors print one meaning (I9). Writing the bytes and exiting stay with the
-// host that owns the process.
+// (`report_problems_with_summary`, `emit_check_outcome`, `run_explain`), so
+// both front doors print one meaning (I9). Writing the bytes and exiting stay
+// with the host that owns the process.
 use jet_foundation.[
     Diagnostic,
     DiagnosticOrigin,
@@ -20,19 +19,26 @@ use jet_foundation.[
     sha256_hex,
 ]
 
-// crates/jet-foundation/src/ExitCodes.rs
 JET_DRIVER_EXIT_OK :: 0
 JET_DRIVER_EXIT_USER_ERROR :: 1
 JET_DRIVER_EXIT_USAGE :: 2
+
+// A failed verb's typed reports, kept beside the text its stderr renders, so
+// a `--json` run answers with them in the `jet.status/v1` envelope instead
+// (D-REPORT-MACHINE1). `notice` is the stderr text that comes before them.
+struct JetDriverFailure {
+    reports: [Diagnostic]
+    notice: String
+}
 
 struct JetDriverVerbOutput {
     stdout: String
     stderr: String
     exit_code: Int
+    failure: JetDriverFailure?{None}
 }
 
-// Accessibility lints that only `jet lint --a11y` shows
-// (Source/CmdDevTools.rs `A11Y_LINT_CODES`).
+// Accessibility lints that only `jet lint --a11y` shows.
 fn jet_driver_is_a11y_lint(code: String) -> Bool Never! {
     code == "E2930" || code == "E2931"
 }
@@ -44,8 +50,8 @@ fn jet_driver_explain_pointer_line(code: String, color: Bool) -> String Never! {
 
 // `jet explain <CODE>` for a registered diagnostic code: the essay on stdout,
 // or E2104 on stderr when no such code exists. The other explain subjects
-// (syntax tokens, build facts, policies, markers, and the `--cost`,
-// `--reload`, and `--web-graph` views) are not owned by this driver yet.
+// (syntax tokens, build facts, policies, markers, and the `--web-graph` view)
+// belong to the CLI (`jet_cli_explain`).
 fn jet_driver_explain_code(code: String?, color: Bool) -> JetDriverVerbOutput Never! {
     if code == .Val(query) {
         if diagnostic_explanation(query) == .Val(explanation) {
@@ -105,10 +111,9 @@ fn jet_driver_present_origin_once(path: String, snapshot: JetDriverAuthorizedSou
 }
 
 // Project one checked diagnostic onto the file that owns it, the way the
-// bootstrap host does (Compiler/Bootstrap/Host/DiagnosticCodec.rs): a named
-// source path becomes the origin (root-relative display; a generated source
-// shows its path), and the span, edit, and labels move from aggregate offsets
-// to offsets in that file's exact bytes.
+// bootstrap host does: a named source path becomes the origin (root-relative
+// display; a generated source shows its path), and the span, edit, and labels
+// move from aggregate offsets to offsets in that file's exact bytes.
 fn jet_driver_present_diagnostic(diagnostic: Diagnostic, snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile], origins: &[String:DiagnosticOrigin]) -> Diagnostic Never! {
     // copy: `presented` is the shifted copy returned for display, while `diagnostic` stays the
     // caller's raw row (a read parameter). Its source_start/offset/span/edit are read below to

@@ -79,6 +79,17 @@ fn services_test_wait_child_pid(path: String) -> Int {
     Int.parse(text.trim()) ?? panic("child pid")
 }
 
+// Core contains a spawned child's process group: once the leader exits, its
+// collector sweeps the group, so no descendant outlives the leader. Wait up
+// to two seconds for that sweep.
+fn services_test_wait_swept(pid: Int) {
+    deadline :: services_now_ms() + 2000
+    loop services_test_is_alive(pid) {
+        assert(services_now_ms() < deadline, "the leader's process group must be swept once it exits")
+        time.sleep(time.duration_ms(20))
+    }
+}
+
 fn services_test_has_pair(command: [String], first: String, second: String) -> Bool {
     loop index in 1..<command.len() {
         if command[index - 1] == first && command[index] == second -> return true
@@ -254,7 +265,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     port :: reservation.ports[0]
     assert(port != 0)
     assert(net.tcp_listen("127.0.0.1:{port}") == .Err(_), "the parent reservation must prevent a competing bind")
-    reservation.release()
+    services_release_ports(^reservation)
     _ :: net.tcp_listen("127.0.0.1:{port}") ?? panic("the reservation must release before the child is spawned")
 }
 
@@ -357,7 +368,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     child_pid :: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
     started.child.wait() ?? panic("leader exit")
     assert(!services_test_is_alive(started.state.pid), "the recorded leader must exit")
-    assert(services_test_is_alive(child_pid), "the descendant must outlive its leader")
+    services_test_wait_swept(child_pid)
 
     services_down_one(services_test_host(), dir, plan) ?? panic("down must stop the persisted authority")
     assert(!services_test_is_alive(child_pid), "the persisted process group must be gone")
@@ -377,7 +388,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     service_dir :: services_service_dir(dir, "fixture")
     child_pid :: services_test_wait_child_pid(files.join(service_dir, "data/child.pid"))
     started.child.wait() ?? panic("leader exit")
-    assert(services_test_is_alive(child_pid), "the descendant must outlive its leader")
+    services_test_wait_swept(child_pid)
 
     running :: services_read_lifecycle(service_dir) ? present -> present ! failure -> panic("read lifecycle")
     facts := running ?? panic("running lifecycle facts must exist")
@@ -401,7 +412,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
     found :: services_start_one(services_test_host(), dir, &env, plan) ? present -> present ! failure -> panic("start")
     started := found ?? panic("fixture must start")
     child_pid :: services_test_wait_child_pid(files.join(services_service_dir(dir, "fixture"), "data/child.pid"))
-    assert(services_test_is_alive(child_pid), "the descendant must outlive its leader")
+    services_test_wait_swept(child_pid)
 
     // The leader can lose the identity race between the supervisor's check
     // and its stop request; cleanup must fall back to the persisted authority.
@@ -585,7 +596,7 @@ fn services_test_has_pair(command: [String], first: String, second: String) -> B
 #Test("typed catalog presets share runtime package and port facts") {
     dir :: services_test_scratch("typed-catalog")
     names :: [String]{"redis", "postgres", "mysql", "mariadb", "nginx", "minio", "adminer", "blackfire", "caddy", "cassandra", "clickhouse", "cockroachdb", "couchdb", "dynamodb-local", "elasticmq", "elasticsearch", "garage", "httpbin", "influxdb", "kafka-connect", "kafka", "keycloak", "meilisearch", "memcached", "mongodb", "mosquitto", "nats", "nixseparatedebuginfod", "opensearch", "opentelemetry-collector", "prometheus", "rabbitmq", "rustfs", "sqld", "tailscale", "temporal", "tideways", "typesense", "varnish", "vault", "wiremock"}
-    packages :: [String]{"redis@nixpkgs", "postgresql@nixpkgs", "mysql@nixpkgs", "mariadb@nixpkgs", "nginx@nixpkgs", "minio@nixpkgs", "adminer@nixpkgs", "blackfire@nixpkgs", "caddy@nixpkgs", "cassandra_4@nixpkgs", "clickhouse@nixpkgs", "cockroachdb@nixpkgs", "couchdb3@nixpkgs", "dynamodb-local@nixpkgs", "elasticmq-server-bin@nixpkgs", "elasticsearch7@nixpkgs", "garage_2@nixpkgs", "httpbin@nixpkgs", "influxdb2-server@nixpkgs", "apacheKafka@nixpkgs", "apacheKafka@nixpkgs", "keycloak@nixpkgs", "meilisearch@nixpkgs", "memcached@nixpkgs", "mongodb-ce@nixpkgs", "mosquitto@nixpkgs", "nats-server@nixpkgs", "nixseparatedebuginfod2@nixpkgs", "opensearch@nixpkgs", "opentelemetry-collector-contrib@nixpkgs", "prometheus@nixpkgs", "rabbitmq-server@nixpkgs", "rustfs@nixpkgs", "sqld@nixpkgs", "tailscale@nixpkgs", "temporal-cli@nixpkgs", "tideways-daemon@nixpkgs", "typesense@nixpkgs", "varnish@nixpkgs", "vault-bin@nixpkgs", "wiremock@nixpkgs"}
+    packages :: [String]{"redis@jetpack", "postgresql@jetpack", "mysql@jetpack", "mariadb@jetpack", "nginx@jetpack", "minio@jetpack", "adminer@jetpack", "blackfire@jetpack", "caddy@jetpack", "cassandra_4@jetpack", "clickhouse@jetpack", "cockroachdb@jetpack", "couchdb3@jetpack", "dynamodb-local@jetpack", "elasticmq-server-bin@jetpack", "elasticsearch7@jetpack", "garage_2@jetpack", "httpbin@jetpack", "influxdb2-server@jetpack", "apacheKafka@jetpack", "apacheKafka@jetpack", "keycloak@jetpack", "meilisearch@jetpack", "memcached@jetpack", "mongodb-ce@jetpack", "mosquitto@jetpack", "nats-server@jetpack", "nixseparatedebuginfod2@jetpack", "opensearch@jetpack", "opentelemetry-collector-contrib@jetpack", "prometheus@jetpack", "rabbitmq-server@jetpack", "rustfs@jetpack", "sqld@jetpack", "tailscale@jetpack", "temporal-cli@jetpack", "tideways-daemon@jetpack", "typesense@jetpack", "varnish@jetpack", "vault-bin@jetpack", "wiremock@jetpack"}
     ports :: [Int]{6379, 5432, 3306, 3306, 8080, 9000, 8081, 8307, 8080, 9042, 9000, 26257, 5984, 8000, 9324, 9200, 3900, 8080, 8086, 8083, 9092, 8080, 7700, 11211, 27017, 1883, 4222, 8000, 9200, 13133, 9090, 5672, 9000, 8080, 41641, 7233, 9135, 8108, 6081, 8200, 8080}
     executables :: [String]{"redis-server", "postgres", "mysqld", "mariadbd", "nginx", "minio", "adminer", "blackfire", "caddy", "cassandra", "clickhouse-server", "cockroachdb", "couchdb", "dynamodb-local", "elasticmq-server", "elasticsearch", "garage", "gunicorn", "influxd", "connect-standalone.sh", "kafka-server-start.sh", "kc.sh", "meilisearch", "memcached", "mongod", "mosquitto", "nats-server", "nixseparatedebuginfod", "opensearch", "otelcol-contrib", "prometheus", "rabbitmq-server", "rustfs", "sqld", "tailscale", "temporal", "tideways-daemon", "typesense-server", "varnishd", "vault", "wiremock"}
     presets :: services_catalog_presets()

@@ -1094,6 +1094,62 @@ fn run() {
 // Err([FieldError{ path: "[\"payload\"]", reason: "CBOR Truncated at byte 15: CBOR byte string declares 2 bytes but input ended after 1" }])
 ```
 
+## Erlang External Term Format
+
+`core.encoding.eetf` reads and writes one standalone version-131 term
+(D-CORE-EETF1, D-CORE-ETF-CODEC1), not node distribution, `LOCAL_EXT` or a BEAM
+runtime. One reader serves the JSON view `to_json(bytes, limits)` and the typed
+`decode<T>(bytes, layout, strings, byte_arrays, limits)`; `encode(value, …)`
+writes owned bytes. The whole input is one term: trailing bytes are a `Syntax`
+error, and a `COMPRESSED` term is accepted only as the whole input, with its
+declared size bounded before it is inflated and checked after.
+
+The fixtures: COUNT-ETF-131 `83 74 00000001 6d 00000005 "count" 61 02` and its
+atom-keyed form `83 74 00000001 77 05 "count" 61 02` both view as
+`{"count":2}` and decode `CountRecord{count: 2}`; `encode(CountRecord{count: 2})`
+writes the atom-keyed form.
+
+Atoms, binaries and byte lists stay distinct:
+
+| ETF | JSON view | Typed target |
+| --- | --- | --- |
+| `true`/`false` atom | boolean | `Bool`, or `Atom` |
+| `nil` atom | `"nil"` | an absent optional, or `Atom` |
+| other atom | text | `String` (its text) or `Atom` |
+| binary | Base64 text | `String` (strict UTF-8) under `strings: .UTF8Binary`; `[U8]` |
+| `STRING_EXT`, byte `LIST_EXT` | array of integers | `String` (strict UTF-8 bytes) under `strings: .UTF8ByteList`; `[U8]`; `[Int]` |
+| integers, bignums | exact number | `Int` (exact); fixed widths range-checked |
+| tuple, proper list | array | a list |
+| map | object | a record or `[String: T]` map |
+
+Conversion loss is the documented part of the JSON view: an atom and a UTF-8
+binary key read alike, a tuple and a list of the same elements look alike, a
+byte list is indistinguishable from a list of small integers, and binaries
+become Base64 text. Map keys must be atoms, UTF-8 binaries or proper lists
+(Unicode scalars in the view, UTF-8 bytes in typed decode); any other key, and
+two keys with the same text, is an error. Pids, ports, references, funs,
+exports, `LOCAL_EXT`, atom-cache references, distribution headers, improper
+lists, bitstrings that are not byte-aligned and non-finite floats are
+`Unsupported`.
+
+Writing is lossy in one direction too: `Dyn` does not separate a record from a
+`[String: T]` map, so every object key is written as a UTF-8 atom of at most
+255 characters, and an absent optional record field is left out rather than
+written as `nil`. Ordinary string values are never atoms; an `Atom` value (an
+owned, validated name of at most 255 characters) is the one way to write one.
+It travels through `Dyn` as a one-entry object under the private key
+`$etf_atom`, which other codecs see as that object. `layout: .Proplist` writes
+records and maps as proper lists of `{Key, Value}` 2-tuples and reads a list
+whose first element is a 2-tuple as one. `byte_arrays` chooses how `[U8]` is
+written (a binary or a byte list); a typed read accepts either. The decision
+names the layout enum `Layout`; Core enum names are unique and
+`core.compiler.lang.Layout` exists, so the type is `TermLayout`.
+
+Limits are the shared `EncodingLimits`: the input and the output are charged to
+`max_total_bytes`, nesting to `max_depth`, and each atom, binary, byte list,
+bignum and compressed size to `max_item_bytes`; arities are checked against the
+bytes left before anything is allocated.
+
 ## Strict base encodings
 
 Use deterministic RFC 4648 encoders: standard base64 emits padding,
@@ -1344,9 +1400,19 @@ Typed `csv.decode<T>` owns the native header-to-record policy in Jet. The
 whole-value comma parser retains blank records, doubled quotes, CRLF rules,
 Unicode-scalar columns and the exact `E2701` failure text. It intentionally
 does not impose streaming `EncodingLimits` on the shipped unbounded whole-value
-operation. Each header names a text cell (missing cells are empty; extra cells
-are ignored), and all typed errors are accumulated in data-record order with
-the native `row N` path prefix.
+operation. Each header names a text cell, and a data record must have exactly
+the header's cell count: a short or long record is a `row N` error, never
+padded or truncated. All typed errors are accumulated in data-record order
+with the native `row N` path prefix.
+
+One CSV record contract covers the eager `csv.rows`, `csv.dict_rows`, typed
+`csv.decode<T>`, the `core.data` CSV loader and the streaming `csv.reader`: a
+record ends at LF or CRLF and a bare CR is malformed; a quote may open only an
+empty field; an unclosed quote is `Truncated`; errors carry the same reason,
+one-based line, scalar column and `$[record][field]` path; `header` drops the
+first record; and `skip_blank` drops each record whose fields are all empty.
+Ragged records stay physical in `rows` and the reader, and are errors wherever
+cells map to a header (`dict_rows`, `decode`, the data loader).
 
 CBOR file streams retain the existing `CBORReader`/`CBORWriter` names,
 consuming file factories, optional pull events and IO method effects.

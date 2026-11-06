@@ -1,4 +1,4 @@
-/* Real Jet providers; link --wrap=jet_rt_alloc/jet_rt_free.
+/* Real Jet providers; checked-heap alloc/free observers.
  * Compose 301f6b608 (TextDebug), 2442d5d80 (bad-tag stop).
  * argv[1]: frozen RtPlot1b char-debug-goldens.bin, all 1,112,064 scalars.
  * No C renderer/model substitutes for the Jet renderer being exercised. */
@@ -13,8 +13,8 @@ typedef int64_t H;
 typedef struct { unsigned char *data; uint64_t len,cap; } Text;
 enum { KEY_BYTES=16, KEY_KIND=0, KEY_PAYLOAD=8 };
 extern void jet_rt_alloc_init(void);
-extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern H jet_rt_alloc(H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern H jet_rt_handle_clone_jet_key(H);
 extern void jet_rt_handle_drop_jet_key(H);
@@ -23,21 +23,18 @@ extern Text *jet_rt_handle_show_jet_key(H),*jet_rt_handle_debug_jet_key(H),*jet_
 static struct { H address,bytes,align; bool live; } ledger[256];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align) {
-    H address=__real_jet_rt_alloc(bytes,align);
+static void observe_alloc(H address, H bytes, H align) {
     if(tracking) {
         assert(address&&bytes>0&&allocations<256&&(uint64_t)address%(uint64_t)align==0);
         for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);
         ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;
     }
-    return address;
 }
-void __wrap_jet_rt_free(H address,H bytes,H align) {
+static void observe_free(H address,H bytes,H align) {
     if(tracking) {
-        for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;__real_jet_rt_free(address,bytes,align);return;}
+        for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}
         assert(!"untracked or double free");
     }
-    __real_jet_rt_free(address,bytes,align);
 }
 static void balanced(void) {
     assert(allocations==frees);
@@ -63,6 +60,7 @@ static void projection(H kind,H payload,const unsigned char *bytes,size_t length
 }
 static uint32_t u32le(const unsigned char *p) { return (uint32_t)p[0]|(uint32_t)p[1]<<8|(uint32_t)p[2]<<16|(uint32_t)p[3]<<24; }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2&&!strcmp(argv[1],"key-tag")){jet_rt_handle_show_jet_key(key(13,0));return 99;}
     if(argc!=2)return 2;

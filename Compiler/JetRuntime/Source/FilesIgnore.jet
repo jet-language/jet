@@ -1,11 +1,11 @@
-// Core/FSIgnore.rs gitignore matcher for filesystem walks: an immutable
-// root-to-directory rule stack; a directory's rules follow inherited ones and
-// the last matching rule wins. Matching is per Unicode scalar, exactly as the
-// Rust `chars()` DP (glob_component_matches/bracket_match/glob_path_matches).
-// Rule32: refs @0, owned base E4 @8 (trimmed of '/'), owned pattern E4 @16,
-// flags @24 (1 negated, 2 directory_only, 4 anchored, 8 has_separator).
-// Matcher24: refs @0, rule count @8, rule pointer words @16 (count*8 bytes).
-// Only the owning walk context (under its lock) retains or drops either.
+// Gitignore matcher for filesystem walks: an immutable root-to-directory rule
+// stack; a directory's rules follow inherited ones and the last matching rule
+// wins. Matching is per Unicode scalar, exactly as the Rust `chars()` DP
+// (glob_component_matches/bracket_match/glob_path_matches). Rule32: refs @0,
+// owned base E4 @8 (trimmed of '/'), owned pattern E4 @16, flags @24 (1
+// negated, 2 directory_only, 4 anchored, 8 has_separator). Matcher24: refs @0,
+// rule count @8, rule pointer words @16 (count*8 bytes). Only the owning walk
+// context (under its lock) retains or drops either.
 IGNORE_NEGATED :: I64{1}
 IGNORE_DIRECTORY_ONLY :: I64{2}
 IGNORE_ANCHORED :: I64{4}

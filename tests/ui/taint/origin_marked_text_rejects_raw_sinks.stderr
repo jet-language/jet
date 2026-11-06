@@ -1,10 +1,28 @@
 Error [jet.ValueThrownAway]: This Sh value is thrown away
-  --> origin_marked_text_rejects_raw_sinks.jet:7:8
+  --> tests/ui/taint/origin_marked_text_rejects_raw_sinks.jet:7:8
     |
   7 |     Sh.raw(raw)
     |        ^^^
  Why: `run` has no return type, so it returns nothing and the value of its last line is lost
  Fix: If `run` should return it, write `-> Sh` after its parameter list; to discard it on purpose, write `.drop("reason")`
+More: jet-lang.dev/e/E0433
+
+Error [jet.ValueThrownAway]: The result of `raw` is thrown away
+  --> tests/ui/taint/origin_marked_text_rejects_raw_sinks.jet:5:9
+    |
+  5 |     SQL.raw(raw)
+    |         ^^^
+ Why: `raw` is pure (it has no effects and changes nothing through `&`), so this line does nothing
+ Fix: Use the result, bind it with `result :: raw`, or write `.drop("reason")` if dropping it is intended
+More: jet-lang.dev/e/E0433
+
+Error [jet.ValueThrownAway]: The result of `raw` is thrown away
+  --> tests/ui/taint/origin_marked_text_rejects_raw_sinks.jet:6:10
+    |
+  6 |     HTML.raw(raw)
+    |          ^^^
+ Why: `raw` is pure (it has no effects and changes nothing through `&`), so this line does nothing
+ Fix: Use the result, bind it with `result :: raw`, or write `.drop("reason")` if dropping it is intended
 More: jet-lang.dev/e/E0433
 
 Error [jet.TaggedValueDenied]: A `$origin.fs` value is denied at `SQL.raw`

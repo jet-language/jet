@@ -38,7 +38,7 @@ static void rejected(uint64_t raw, bool sign, bool f32, int64_t file) {
     int status;
     assert(waitpid(child, &status, 0) == child);
     assert(WIFEXITED(status) && WEXITSTATUS(status) == 70);
-    assert(strstr(text, "whole number cannot cross into the decimal without losing precision"));
+    assert(strstr(text, f32 ? "whole number has no exact F32; approx(x) rounds it to the nearest F32" : "whole number has no exact Float; approx(x) rounds it to the nearest Float"));
     assert(strstr(text, "numeric-witness.jet:27"));
 }
 

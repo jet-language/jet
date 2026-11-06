@@ -167,12 +167,11 @@ fn sema_call_shared_owner_guard(receiver: Expr, receiver_value: TExpr, inner: Ty
     sema_call_shared_owner_nullary(receiver, receiver_value, method, result, span, expected, environment, program, &scopes, &state, &context, &diagnostics)
 }
 
-// Rust builtin_methods.rs (`Cell` receivers), CheckerOwnership.rs
-// `finish_cell_*` and Collections.rs `cell_method_return` /
+// (`Cell` receivers), `finish_cell_*` and `cell_method_return` /
 // `cell_guard_method_return`: a local `Cell<T>` mutates through a read
-// receiver. `get` hands out an independent owned value, so the stored type
-// must copy. Guard `map`/`split` consume the source guard so only the
-// projected guards keep the original dynamic loan.
+// receiver. `get` hands out an independent owned value, so the stored type must
+// copy. Guard `map`/`split` consume the source guard so only the projected
+// guards keep the original dynamic loan.
 fn sema_call_cell_guard_type(editable: Bool, inner: Type) -> Type Never! {
     Type.Apply{name: if editable -> "CellEditGuard" else -> "CellReadGuard", args: [Type]{inner}}
 }
@@ -200,6 +199,7 @@ fn sema_call_cell_write(receiver: Expr, receiver_value: TExpr, owner: String, in
     checked :: sema_check_expression(updated_args[0].expr, Val(inner), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     value :: sema_expr_expected(checked, Val(inner), environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     params :: [SemaCallParam]{sema_call_shared_owner_param("value", AccessConvention.Move, inner)}
+    sema_receiver_mark_allow_write(&state, receiver)
     ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
     result :: if method == "replace" -> inner else -> Type.Named{name: "Unit"}
@@ -376,8 +376,10 @@ fn sema_call_try_cell_method(receiver: Expr, receiver_value: TExpr, name: String
 
 // Rust `finish_pool_add` / `finish_pool_remove` and the `("Pool", "ids")` arm:
 // `pool.add(value)` consumes a `T` and returns its `ID<T>`, `pool.remove(id)`
-// returns the removed `T?`, `pool.ids()` lists every live `ID<T>`. None of
-// them records a receiver write; each lowers to the plain `JetPool<T>` method.
+// returns the removed `T?`, `pool.ids()` lists every live `ID<T>`. `add` and
+// `remove` change the pool, so like `pool[id] = v` they need a writable pool
+// (a `:=` binding or a `&` parameter); the call site needs no `&` mark. Each
+// lowers to the plain `JetPool<T>` method.
 fn sema_call_pool_method(receiver: Expr, receiver_value: TExpr, element: Type, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     id_type :: Type.Apply{name: "ID", args: [Type]{element}}
@@ -405,6 +407,7 @@ fn sema_call_pool_method(receiver: Expr, receiver_value: TExpr, element: Type, m
     params :: [SemaCallParam]{sema_call_shared_owner_param(if method == "add" -> "value" else -> "id", convention, slot)}
     ownership := sema_ownership_check_method_call(&state, "Pool.{method}", receiver, AccessConvention.Read, params, &updated_args, scopes, span, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return failed
+    if !sema_ownership_check_receiver_write(&state, receiver, method, scopes, expr_span(receiver), &diagnostics) -> return failed
     result :: if method == "add" -> id_type else -> Type.Option{inner: element}
     sema_call_shared_owner_host_value(receiver_value, method, [TExpr]{value}, result, span, expected, environment, program, &scopes, &context, &diagnostics)
 }

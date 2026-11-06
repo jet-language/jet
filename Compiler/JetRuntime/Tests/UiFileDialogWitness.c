@@ -1,4 +1,4 @@
-/* Real providers --wrap=jet_rt_alloc/jet_rt_free; no substitutes. */
+/* Real providers, checked-heap alloc/free observers; no substitutes. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,8 +14,8 @@ typedef struct {Text *label;List *extensions,*mime;} Filter;
 typedef struct {H kind;Text *title;Grant grant;GrantedPath *initial;List *filters;H multiple;} Dialog;
 _Static_assert(sizeof(Dialog)==56&&sizeof(GrantedPath)==24&&sizeof(Filter)==24,"UiABI dialog graph");
 extern void jet_rt_alloc_init(void);
-extern H jet_rt_alloc(H,H),__real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern H jet_rt_alloc(H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,H);
 extern H jet_rt_handle_clone_jet_ui_file_dialog_request(H);
 extern void jet_rt_handle_drop_jet_ui_file_dialog_request(H);
@@ -27,14 +27,11 @@ extern void jet_rt_record_seq_list_rec_jet_ui_file_filter_push(H,H);
 static struct {H address,bytes,align;bool live;} ledger[4096];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align) {
-    H address=__real_jet_rt_alloc(bytes,align);
+static void observe_alloc(H address, H bytes, H align) {
     if(tracking){assert(address&&bytes>0&&allocations<4096&&(uint64_t)address%(uint64_t)align==0);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live||ledger[i].address!=address);ledger[allocations].address=address;ledger[allocations].bytes=bytes;ledger[allocations].align=align;ledger[allocations++].live=true;}
-    return address;
 }
-void __wrap_jet_rt_free(H address,H bytes,H align) {
-    if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;__real_jet_rt_free(address,bytes,align);return;}assert(!"untracked or double free");}
-    __real_jet_rt_free(address,bytes,align);
+static void observe_free(H address,H bytes,H align) {
+    if(tracking){for(size_t i=allocations;i>0;--i)if(ledger[i-1].address==address&&ledger[i-1].live){assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align);ledger[i-1].live=false;++frees;return;}assert(!"untracked or double free");}
 }
 static void balanced(void){assert(allocations==frees);for(size_t i=0;i<allocations;++i)assert(!ledger[i].live);allocations=frees=0;}
 static Text *text(const char *s){return jet_rt_string_from_static(s,(H)strlen(s));}
@@ -57,4 +54,4 @@ static void cases(H kind,unsigned initial,bool multiple,size_t n) {
     if(n>1){H t=b->filters->data[0];b->filters->data[0]=b->filters->data[1];b->filters->data[1]=t;assert(!jet_rt_handle_eq_jet_ui_file_dialog_request(ah,bh));b->filters->data[1]=b->filters->data[0];b->filters->data[0]=t;}
     jet_rt_handle_drop_jet_ui_file_dialog_request(ah);assert(jet_rt_handle_eq_jet_ui_file_dialog_request(bh,bh));jet_rt_handle_drop_jet_ui_file_dialog_request(bh);balanced();
 }
-int main(void){jet_rt_alloc_init();tracking=true;for(H kind=0;kind<2;++kind)for(unsigned initial=0;initial<3;++initial)for(unsigned multiple=0;multiple<2;++multiple){cases(kind,initial,multiple,0);cases(kind,initial,multiple,1);cases(kind,initial,multiple,11);}jet_rt_handle_drop_jet_ui_file_dialog_request(0);balanced();puts("UI FileDialog: every field, 36 option/list combinations, borrowed views, transitive clones and exact-once frees ok");return 0;}
+int main(void){assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);jet_rt_alloc_init();tracking=true;for(H kind=0;kind<2;++kind)for(unsigned initial=0;initial<3;++initial)for(unsigned multiple=0;multiple<2;++multiple){cases(kind,initial,multiple,0);cases(kind,initial,multiple,1);cases(kind,initial,multiple,11);}jet_rt_handle_drop_jet_ui_file_dialog_request(0);balanced();puts("UI FileDialog: every field, 36 option/list combinations, borrowed views, transitive clones and exact-once frees ok");return 0;}

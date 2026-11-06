@@ -1,9 +1,8 @@
-// PathFiles.rs:21-71 and Path.rs:1-140: the core.handle.path value routes.
-// A Path8 handle owns one native List<U8> of its bytes (ByteHandlesABI.jet).
-// Every rule is lexical over the Unix std::path component grammar after the
-// shared `\` -> `/` source spelling (Path.rs:3-9); nothing touches the
-// filesystem. Text results and kernel inputs are the lossy UTF-8 rendering,
-// as the reference converts with to_string_lossy.
+// The core.handle.path value routes. A Path8 handle owns one native List<U8> of
+// its bytes (ByteHandlesABI.jet). Every rule is lexical over the Unix std::path
+// component grammar after the shared `\` -> `/` source spelling; nothing
+// touches the filesystem. Text results and kernel inputs are the lossy UTF-8
+// rendering, as the reference converts with to_string_lossy.
 
 // A Path handle holding a copy of `len` bytes at `data`.
 fn path_route_new(data: I64, len: I64) -> I64 {
@@ -97,8 +96,8 @@ fn path_route_extension_dot(data: I64, start: I64, length: I64) -> I64 {
 // PathBuf::from(text): the text's bytes.
 #Export(c) fn jet_path_from(text: I64) -> I64 { path_route_from_text(text) }
 
-// Path.rs:12-19: PathBuf::push over both lexical sources (an absolute part
-// replaces; otherwise one separator unless the base is empty or ends in one).
+// PathBuf::push over both lexical sources (an absolute part replaces; otherwise
+// one separator unless the base is empty or ends in one).
 #Export(c) fn jet_path_join(path: I64, other: I64) -> I64 {
     base :: path_route_source(path)
     part :: path_route_lexical(other)
@@ -212,8 +211,8 @@ fn path_route_pop(words: I64) {
 
 fn path_route_text_is_dot_dot(text: I64) -> Bool { path_route_is_dot_dot(rt_text_data(text), I64{0}, rt_text_len(text)) }
 
-// Path.rs:42-66 jet_std_path_normalize: CurDir drops, ParentDir pops a kept
-// Normal, stays as ".." in a relative path with none, and vanishes at a root.
+// jet_std_path_normalize: CurDir drops, ParentDir pops a kept Normal, stays as
+// ".." in a relative path with none, and vanishes at a root.
 #Export(c) fn jet_path_normalize(path: I64) -> I64 {
     source :: path_route_source(path)
     raw :: data_sequence_new(I64{0}, I64{8})
@@ -253,8 +252,8 @@ fn path_route_text_is_dot_dot(text: I64) -> Bool { path_route_is_dot_dot(rt_text
     result
 }
 
-// Path.rs:71-119 `components`: ParentDir pops a non-".." part, stays as ".."
-// in a relative path, and vanishes at a root.
+// `components`: ParentDir pops a non-".." part, stays as ".." in a relative
+// path, and vanishes at a root.
 fn path_route_containment_parts(path: I64, parts: I64) -> Bool {
     source :: path_route_source(path)
     raw :: data_sequence_new(I64{0}, I64{8})
@@ -298,8 +297,7 @@ fn path_route_containment_parts(path: I64, parts: I64) -> Bool {
     within
 }
 
-// Path.rs:122-140 (Unix): HOME when it is valid UTF-8, else the current
-// directory, else empty.
+// (Unix): HOME when it is valid UTF-8, else the current directory, else empty.
 #Export(c) fn jet_path_home() -> I64 {
     home :: rt_env_get(rt_static_text("HOME"))
     if (home != I64{0}) {

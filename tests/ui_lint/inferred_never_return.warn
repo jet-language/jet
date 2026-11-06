@@ -1,0 +1,26 @@
+Warning [jet.InferredNeverReturn]: Public function `fail` always diverges but does not declare `Never`
+  --> inferred_never_return.jet:4:4
+    |
+  4 | fn fail(message: String) {
+    |    ^^^^
+ Why: Inferred divergence is useful to callers but is not part of the written API contract
+ Fix: Write `-> Never` as the return type, for example `fn fail() -> Never`
+More: jet-lang.dev/e/L2421
+
+Warning [jet.InferredNeverReturn]: Public function `stop` always diverges but does not declare `Never`
+  --> inferred_never_return.jet:8:4
+    |
+  8 | fn stop(code: Int) -> Int {
+    |    ^^^^
+ Why: Inferred divergence is useful to callers but is not part of the written API contract
+ Fix: Write `-> Never` as the return type, for example `fn stop() -> Never`
+More: jet-lang.dev/e/L2421
+
+Warning [jet.PositionalBoolParameter]: Public function `maybe` has a positional `Bool` parameter `flag`
+  --> inferred_never_return.jet:17:10
+    |
+ 17 | fn maybe(flag: Bool) {
+    |          ^^^^
+ Why: Positional booleans are easy to transpose at the call site
+ Fix: Callers can write `flag: true` to make the intent clear (S61 labels)
+More: jet-lang.dev/e/L2401

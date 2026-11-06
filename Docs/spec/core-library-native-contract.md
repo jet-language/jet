@@ -571,8 +571,10 @@ gate checks this projection instead of maintaining a parallel symbol list.
 Core `Task` handles are move-only: one consuming joiner uses the completion
 park slot, while lexical cleanup drains the retained state with a wake-all
 completion word. Rejected bounded-group spawns return their admission permit.
-An exiting thread drops unrun `atexit` closures without invoking their bodies,
-matching the reference thread-local queue destructor.
+An `atexit` handler belongs to the process, not to its registering thread: it
+survives that thread's exit and runs, once and in registration order, at the
+process exit's handler step. One process queue holds every handler; its lock
+covers append and batch claim only, and each claimed batch runs outside it.
 `Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
 runtime with Jet callback assertions and uses C only to transport callback
 addresses. Its run phase covers one-, two- and eight-worker pools; root panic
@@ -1006,8 +1008,7 @@ mode uses the shared canonical record-variant panic, not a new trap.
 Workflow take/return APIs remain held without direct AOT; this carrier does not
 establish service or workflow behavior or native parity. The existing shared
 record-variant panic's task publication repair and the canonical Prelude stop-fact
-classification fix are separate composition gates, recorded in
-`Tests/TaskOutcomeRoutes.tsv`. The getter explicitly returns its stopped zero
+classification fix are separate composition gates. The getter explicitly returns its stopped zero
 word after shared panic publication; it never clones an inactive reason after
 publication returns. TaskFailure and TaskOutcome use one shared terminal render
 tail, with TaskOutcome adding only Finished; the fixture checks the unchanged

@@ -1,0 +1,69 @@
+// Use-driven Core loading (CoreReach.jet): a Core module's private import
+// loads only once reached code spells its alias as a path head; until then
+// the import and every unreached declaration that spells its alias leave the
+// module, so every tier sees the same closed program.
+use {
+    jet_driver.[
+        JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot,
+        JetDriverCompileMode, JetDriverCompileRequest, JetDriverCoreSource, JetDriverLoadResult,
+        jet_driver_core_text, jet_driver_has_errors, jet_driver_load,
+    ]
+    jet_cli.[jet_cli_driver_request]
+}
+
+fn reach_test_load(source: String) -> JetDriverLoadResult {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/reach-fixture",
+            identity: "reach-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/reach-fixture/main.jet", relative_path: "main.jet", identity: "reach-file", source: source}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "reach-root",
+        entry_path: "/reach-fixture/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, Val(1), JetDriverCompileMode.Check)
+    // `lookup` is the only code that names the table part; a comment naming
+    // it reaches nothing.
+    owner :: "use {{\n    table :: __core_devtools_table\n}}\n\nfn plain() -> Int Never! {{ 1 }}\n\n// lookup reads table.value\nfn lookup() -> Int Never! {{ table.value() }}\n"
+    request.core_sources = [JetDriverCoreSource]{
+        {module_name: "core.devtools", alias: "core_devtools", path: "Core/devtools-reach.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text(owner)},
+        {module_name: "__core_devtools_table", alias: "__core_devtools_table", path: "Core/devtools-reach-table.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("fn value() -> Int Never! {{ 7 }}\n")},
+    }
+    load :: jet_driver_load(request)
+    assert(load.complete && !jet_driver_has_errors(load.diagnostics))
+    load
+}
+
+fn reach_test_has_module(load: JetDriverLoadResult, module_name: String) -> Bool Never! {
+    loop module_row in load.modules {
+        if module_row.module_name == module_name -> return true
+    }
+    false
+}
+
+fn reach_test_functions(load: JetDriverLoadResult, module_name: String) -> [String] Never! {
+    names := [String]{}
+    loop module_row in load.modules {
+        if module_row.module_name != module_name -> next
+        loop item in module_row.program.items {
+            if item == .Func(value) -> &names.push(value.name)
+        }
+    }
+    names
+}
+
+#Test("a Core part no reached code names is never loaded, and its only user leaves") {
+    load :: reach_test_load("use tools :: core.devtools\nfn run() {{ print(tools.plain()) }}\n")
+    assert(reach_test_has_module(load, "core.devtools"))
+    assert(!reach_test_has_module(load, "__core_devtools_table"))
+    assert_eq(reach_test_functions(load, "core.devtools"), [String]{"plain"})
+}
+
+#Test("a Core part loads once reached code spells its alias") {
+    load :: reach_test_load("use tools :: core.devtools\nfn run() {{ print(tools.lookup()) }}\n")
+    assert(reach_test_has_module(load, "__core_devtools_table"))
+    assert_eq(reach_test_functions(load, "core.devtools"), [String]{"plain", "lookup"})
+    assert_eq(reach_test_functions(load, "__core_devtools_table"), [String]{"value"})
+}

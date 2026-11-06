@@ -6,7 +6,7 @@
 // at TASK_CONTEXT. Result initializes only after Propagate == 0.
 TASK_CONTEXT :: I64{200}
 fn task_state_bytes() -> I64 { TASK_CONTEXT + CONTEXT_RECORD_BYTES }
-// JetTaskFailure: Outcome.rs:2185-2188 / TaskGroup.rs:77-82 ordinals 0/1/2.
+// JetTaskFailure: ordinals 0/1/2.
 fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
     failure :: jet_rt_alloc(TASK_FAILURE_BYTES, I64{8})
     sync_store(wrapping(failure + TASK_FAILURE_TAG), kind)
@@ -40,9 +40,9 @@ fn task_failure_new(kind: I64, owned_reason: I64) -> I64 {
     if kind != TASK_FAILURE_PANICKED -> return true
     jet_rt_string_eq(sync_load(wrapping(left + TASK_FAILURE_REASON)), sync_load(wrapping(right + TASK_FAILURE_REASON)))
 }
-// Values.rs:454-460/TextValues.rs:212-227: Panicked is raw in show/display
-// but Rust str Debug quoted in debug. Extend the existing carrier in place.
-// Normalize service outcome ordinals to TaskFailure's terminal variants.
+// Panicked is raw in show/display but Rust str Debug quoted in debug. Extend
+// the existing carrier in place. Normalize service outcome ordinals to
+// TaskFailure's terminal variants.
 fn task_terminal_render(result: I64, kind: I64, reason: I64, debug: Bool) {
     if kind == TASK_FAILURE_CANCELLED {
         rt_text_push_word(result, I64{7308335478031147331}, I64{8})
@@ -69,7 +69,7 @@ fn task_failure_render(failure: I64, debug: Bool) -> I64 {
 #Export(c) fn jet_rt_handle_debug_jet_task_failure(failure: I64) -> I64 { task_failure_render(failure, true) }
 
 // Service TaskOutcome is a distinct registry-owned carrier, not TaskFailure.
-// Services.rs:102-106 / CAbiRoutes.rs:11381-11409 fix these four ordinals.
+// The Rust originals fix these four ordinals.
 fn task_outcome_new(kind: I64, owned_reason: I64) -> I64 {
     outcome :: jet_rt_alloc(TASK_OUTCOME_BYTES, I64{8})
     sync_store(wrapping(outcome + TASK_OUTCOME_TAG), kind)
@@ -285,9 +285,9 @@ fn task_drain(child: I64) {
     scheduler_blocking_wait_leave()
 }
 
-// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's
-// MathTaskMem.rs:606 has no Clone and join(self):717 consumes the sole handle.
-// Lexical group cleanup is a separate retained drain, using done@24 wake-all.
+// Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
+// and join(self):717 consumes the sole handle. Lexical group cleanup is a
+// separate retained drain, using done@24 wake-all.
 fn task_join_wait(child: I64) -> I64 {
     kind :: scheduler_msg_join()
     if (sync_load(wrapping(child + I64{184})) == I64{0}) -> _ := scheduler_deadline_check(kind)
@@ -315,7 +315,7 @@ fn task_panic_reason(child: I64) -> I64 {
     result
 }
 
-// Literal mirror of Scheduler.rs:263-288, including its transported-header
+// A literal mirror of the Rust original, including its transported-header
 // fallback and the compiler-shaped location suffix. Never strips arbitrary
 // parenthesized text: the suffix must end ')' and contain a location colon.
 fn task_panic_prefix(data: I64, length: I64, at: I64) -> Bool {
@@ -490,79 +490,62 @@ fn scheduler_task_completion_end(frame: I64) {
     scheduler_words_drop(frame)
 }
 
-// One thread-confined queue, drained in registration order after scope
-// cleanup. Pre-stop late registrations are owed in subsequent FIFO batches.
-// The first registration creates the key and installs the drain as the
-// process exit's handler step (Main.jet main_exit_handlers_code), so a
-// program that registers no exit handler links neither the queue's TLS
-// destructor nor its drain.
-task_exit_key := I64{0}
+// The process's one exit-handler queue: a lock word at +0, then the queued
+// closures' words header (count, capacity, data) at +8. A handler belongs
+// to the process, not to its registering thread, so it survives that
+// thread's exit. The lock covers append and claim only: the drain takes
+// each FIFO batch under it and runs the batch outside it, so a handler that
+// registers another does not deadlock, and a pre-stop late registration is
+// owed in a subsequent batch. The first registration creates the queue and
+// installs the drain as the process exit's handler step (Main.jet
+// main_exit_handlers_code), so a program that registers no exit handler
+// links no drain.
+task_exit_root := I64{0}
 #Export(c) fn jet_rt_task_exit_init() {
-    if (task_exit_key != I64{0}) -> return
+    if (task_exit_root != I64{0}) -> return
     sync_mutex_lock(thread_tls_registry)
-    if (task_exit_key == I64{0}) {
-        destructor :: jet_rt_alloc(I64{24}, I64{8})
-        sync_store(destructor, I64{1})
-        sync_store(wrapping(destructor + I64{8}), rt_task_exit_destructor_address())
-        sync_store(wrapping(destructor + I64{16}), I64{0})
+    if (task_exit_root == I64{0}) {
+        root :: jet_rt_alloc(I64{32}, I64{8})
+        thread_zero(root, I64{32})
         main_exit_handlers_install(rt_task_exit_run_address())
-        #Unsafe("written under the TLS registry mutex") {
-            task_exit_key = thread_tls_key_new_locked(destructor, I64{0})
+        #Unsafe("written once, zeroed first, under the TLS registry mutex") {
+            task_exit_root = root
         }
     }
     sync_mutex_unlock(thread_tls_registry)
 }
-// RuntimeLower resolves these checked addresses through its sole intrinsic table.
-fn rt_task_exit_destructor_address() -> I64 {
-    loop { jet_rt_unreachable(I64{0}, I64{0}) }
-}
+// RuntimeLower resolves this checked address through its sole intrinsic table.
 fn rt_task_exit_run_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
-}
-#Export(c) fn jet_rt_task_exit_destructor(_header: I64, queue: I64) -> I64 {
-    // Unrun TLS exit closures release captures without invoking their bodies.
-    jet_scheduler_shield_enter()
-    count := sync_load(queue)
-    data :: sync_load(wrapping(queue + I64{16}))
-    loop count > (I64{0}) {
-        count -= I64{1}
-        scheduler_cleanup_closure_drop(sync_load(wrapping(data + count * I64{8})))
-    }
-    scheduler_words_drop(queue)
-    jet_scheduler_shield_leave()
-    I64{0}
-}
-fn task_exit_queue() -> I64 {
-    jet_rt_task_exit_init()
-    queue := jet_rt_tls_get(task_exit_key)
-    if (queue == I64{0}) {
-        queue = jet_rt_alloc(I64{24}, I64{8})
-        thread_zero(queue, I64{24})
-        jet_rt_tls_set(task_exit_key, queue)
-    }
-    queue
 }
 #Export(c) fn jet_rt_native_atexit(closure: I64) {
     if (scheduler_control_status(scheduler_control_current()) != I64{0}) {
         scheduler_cleanup_closure_drop(closure)
         return
     }
-    scheduler_words_push(task_exit_queue(), closure)
+    jet_rt_task_exit_init()
+    root :: task_exit_root
+    sync_mutex_lock(root)
+    scheduler_words_push(wrapping(root + I64{8}), closure)
+    sync_mutex_unlock(root)
 }
 #Export(c) fn jet_rt_task_exit_handlers() {
-    queue :: jet_rt_tls_get(task_exit_key)
-    if (queue == I64{0}) -> return
-    loop sync_load(queue) != (I64{0}) {
-        count :: sync_load(queue)
-        capacity :: sync_load(wrapping(queue + I64{8}))
-        data :: sync_load(wrapping(queue + I64{16}))
-        thread_zero(queue, I64{24})
+    root :: task_exit_root
+    if (root == I64{0}) -> return
+    loop {
+        sync_mutex_lock(root)
+        count :: sync_load(wrapping(root + I64{8}))
+        capacity :: sync_load(wrapping(root + I64{16}))
+        data :: sync_load(wrapping(root + I64{24}))
+        thread_zero(wrapping(root + I64{8}), I64{24})
+        sync_mutex_unlock(root)
+        if (count == I64{0}) -> return
         at := I64{0}
         loop at < count {
             scheduler_cleanup_closure_run(sync_load(wrapping(data + at * I64{8})))
             at += I64{1}
         }
-        if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{8}, I64{8})
+        jet_rt_free(data, capacity * I64{8}, I64{8})
     }
 }
 // jet_rt_task_exit_handlers as main_exit_handlers_code calls it.

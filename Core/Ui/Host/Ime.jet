@@ -23,8 +23,37 @@ struct UIIMEEvent {
     composition: UIIMEComposition?
 }
 
+// One raw event from the provider's IME queue (queue 0, capability code 2),
+// U+001F-separated: target, phase, text, selection start, selection end, and
+// the marked range's start and end (both empty when absent). A Cancel event
+// has no composition.
 fn poll() -[IO]> UIIMEEvent? UIHostError! {
-    #Unsafe("Core IME consumes one typed event from the current retained provider queue") {
-        core.ui.host.ime.__poll()
-    }
+    if !core.ui.host.__capability(2) -> return Err(UIHostError.CapabilityUnavailable{capability: "IME"})
+    raw :: core.ui.host.__event_pop(0) ?? return Ok(None)
+    fields :: raw.split(String.from_bytes([U8]{31}) ?? panic("U+001F is UTF-8")).to_list()
+    if fields.len() != 7 -> return Err(ime_failure("an IME event has 7 fields, not {fields.len()}"))
+    phase :: ime_phase(fields[1])
+    target :: UINodeID{value: fields[0].copy()}
+    if phase == .Cancel -> return Ok(Val(UIIMEEvent{target: target, phase: phase, composition: None}))
+    selection :: UITextRange{start: ime_offset(fields[3]), end: ime_offset(fields[4])}
+    marked :: if fields[5].len() == 0 && fields[6].len() == 0 -> UITextRange?{None} else -> Val(UITextRange{start: ime_offset(fields[5]), end: ime_offset(fields[6])})
+    Ok(Val(UIIMEEvent{target: target, phase: phase, composition: Val(UIIMEComposition{text: fields[2].copy(), selection: selection, marked: marked})}))
+}
+
+fn ime_phase(text: String) -> UIIMEPhase UIHostError! {
+    if text == "Start" -> return Ok(UIIMEPhase.Start)
+    if text == "Update" -> return Ok(UIIMEPhase.Update)
+    if text == "Commit" -> return Ok(UIIMEPhase.Commit)
+    if text == "Cancel" -> return Ok(UIIMEPhase.Cancel)
+    Err(ime_failure("unknown IME phase `{text}`"))
+}
+
+fn ime_offset(text: String) -> Int UIHostError! {
+    offset :: Int.parse(text) ?? return Err(ime_failure("IME offset `{text}` is not a number"))
+    if offset < 0 -> return Err(ime_failure("IME offset `{text}` is negative"))
+    Ok(offset)
+}
+
+fn ime_failure(message: String) -> UIHostError Never! {
+    UIHostError.HostFailure{service: "IME", message: message}
 }

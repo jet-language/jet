@@ -1,5 +1,5 @@
-// Outcome.rs:100-254 canonical native Err88 ownership. Public three-field
-// source shape is NEVER the native carrier. ErrLayout.jet is the shared ABI.
+// Canonical native Err88 ownership. Public three-field source shape is NEVER
+// the native carrier. ErrLayout.jet is the shared ABI.
 fn err_zero(value: I64, bytes: I64) {
     at := I64{0}
     loop at < bytes {
@@ -89,7 +89,7 @@ fn err_new_take(message: I64, code: I64, cause: I64) -> I64 {
     rt_text_store(wrapping(result + ERR_CAUSE), cause)
     result
 }
-// CAbi.rs:372-377: borrow+clone message/code, TAKE cause, borrow option box.
+// borrow+clone message/code, TAKE cause, borrow option box.
 #Export(c) fn jet_rt_record_new_jet_err(message: I64, code: I64, cause: I64) -> I64 {
     err_new_take(jet_rt_string_clone(message), if (code == I64{0}) -> I64{0} else -> jet_rt_string_clone(rt_text_word(code)), cause)
 }
@@ -157,8 +157,8 @@ fn err_details_clone(value: I64) -> I64 {
     if (rt_text_word(wrapping(a + ERR_DETAILS_HAS_SPAN)) == I64{0}) -> return true
     rt_text_word(wrapping(a + ERR_DETAILS_START)) == rt_text_word(wrapping(b + ERR_DETAILS_START)) && rt_text_word(wrapping(a + ERR_DETAILS_END)) == rt_text_word(wrapping(b + ERR_DETAILS_END))
 }
-// Values.rs:317-330: JetDisplay, JetShow and JetDebug all return message only;
-// Outcome's root report is a separate operation, never these trait adapters.
+// JetDisplay, JetShow and JetDebug all return message only; Outcome's root
+// report is a separate operation, never these trait adapters.
 #Export(c) fn jet_rt_handle_display_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }
 #Export(c) fn jet_rt_handle_show_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }
 #Export(c) fn jet_rt_handle_debug_jet_err(value: I64) -> I64 { jet_rt_record_get_jet_err_message(value) }

@@ -654,7 +654,7 @@ states the requirement; only the named proof is new.
 
 ### 12.1 Is a reflected field's type `f.type` or `f.ty`?
 
-Ballot: `/mnt/jetscratch/lanes/Main/ballots/D-REFLECT-FIELDTYPE1.json`.
+Ballot: `$JET_SCRATCH_ROOT/lanes/Main/ballots/D-REFLECT-FIELDTYPE1.json`.
 
 - **Side 1, D-META-REFLECT2 A** (2026-09-21): "FieldInfo has identity:
   DeclarationHandle, name: String, type: TypeId, …". `ParameterInfo`,
@@ -720,7 +720,7 @@ they need no ballot.
 ## 15. Coverage and confidence
 
 **Run directory:**
-`/mnt/jetscratch/lanes/Main/research/mine/jai-reflection-tSv-2026-11-04/`.
+`$JET_SCRATCH_ROOT/lanes/Main/research/mine/jai-reflection-tSv-2026-11-04/`.
 It holds `coverage.json`, `ledger.json`, `claims.json`, `recall-audit.json`
 and `coverage-receipt.txt`.
 

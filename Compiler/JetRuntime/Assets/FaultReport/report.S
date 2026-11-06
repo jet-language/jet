@@ -1,10 +1,12 @@
 # The native fault report (Compiler/JetRuntime/Source/Fault.jet): the text
 # of a fatal signal, as one position-independent run of x86-64 code with its
 # texts. Tools/agent/gen-runtime-fault-report.mjs assembles it into
-# Compiler/JetBackend/Source/X64/FaultReport.jet, the bytes the runtime's
-# rt_fault_print intrinsic calls (JetIR BuildLibrary.jet):
+# X64_FAULT_REPORT (Compiler/JetBackend/Source/X64/FaultReport.jet), which
+# the static linker writes as the function the runtime's rt_fault_print
+# intrinsic calls (JetIR BuildLibrary.jet; Image/StaticLink.jet
+# link_fault_report) in every image but a split one (addresses.S):
 #
-#   rt_fault_print(signal, info, context, backtrace, image, bias) -> I64
+#   jet_rt_fault_report(signal, info, context, backtrace, image, bias) -> I64
 #
 # signal, siginfo_t and ucontext_t as the kernel passes them to the handler;
 # backtrace the image's `backtrace` option (0 full, 1 brief, 2 off); image a
@@ -12,9 +14,8 @@
 # It writes the report to fd 2 and returns 70 after an E3012 stop, else 0;
 # the handler then exits or takes the signal's default action.
 #
-# The bytes run as an `#FFI(asm)` leaf body (JetIR IRAsmLeaf): arguments in
-# rdi, rsi, rdx, rcx, r8, r9, the result in rax, every callee-saved register
-# kept, rsp balanced, and the code falls through its last byte. No byte is
+# The bytes are a whole C function: arguments in rdi, rsi, rdx, rcx, r8,
+# r9, the result in rax, every callee-saved register kept. No byte is
 # relocated: every reference is relative and inside the run.
 #
 # Frames come from the frame-pointer chain and the location table
@@ -76,16 +77,6 @@
     push r13
     push r14
     push r15
-    call report
-    pop r15
-    pop r14
-    pop r13
-    pop r12
-    pop rbp
-    pop rbx
-    jmp report_end
-
-report:
     sub rsp, FRAME
     lea rbp, [rsp + WORDS]
     mov r15, rbp
@@ -226,6 +217,12 @@ signal:
     xor eax, eax
 done:
     add rsp, FRAME
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop rbp
+    pop rbx
     ret
 
 # Walk the callers from the faulting frame, calling r13 with each return
@@ -743,4 +740,3 @@ texts:
     .asciz "  \1 at \2:\4\n"
     .asciz "  \1\n"
     .asciz "  ??\n"
-report_end:

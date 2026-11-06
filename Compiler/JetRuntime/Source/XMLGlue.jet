@@ -1,5 +1,4 @@
-// CommonTypes.rs:222-279 and XmlOptions.rs:52-70 derive Clone/PartialEq.
-// CAbiRoutes.rs:12198-12237/12292-12307: borrowed exact Int, cloned text.
+// The Rust originals derive Clone/PartialEq. Borrowed exact Int, cloned text.
 // XMLABI.jet owns native offsets; no Rust layout or allocation is accepted.
 fn xml_word(address: I64) -> I64 {
     #Unsafe("borrows an initialized aligned word in a live XML carrier or optional input") { return os_load_i64(address) }
@@ -86,7 +85,7 @@ fn xml_optional_eq(left: I64, right: I64, present: I64, field: I64) -> Bool {
 #Export(c) fn jet_rt_record_get_xml_error_path(value: I64) -> I64 { jet_rt_string_clone(xml_word(wrapping(value + XML_ERROR_PATH))) }
 #Export(c) fn jet_rt_record_get_xml_error_reason(value: I64) -> I64 { jet_rt_string_clone(xml_word(wrapping(value + XML_ERROR_REASON))) }
 fn xml_reason_label(target: I64, ordinal: I64) {
-    // Debug enum labels in CommonTypes.rs:223-236, in CAbi ordinal order.
+    // Debug enum labels, in CAbi ordinal order.
     if {
         (ordinal == I64{0}) -> {
             rt_text_push_word(target, I64{5000237400500629065}, I64{8})
@@ -129,8 +128,8 @@ fn xml_reason_label(target: I64, ordinal: I64) {
     }
 }
 #Export(c) fn jet_rt_handle_show_xml_error(value: I64) -> I64 {
-    // CommonTypes.rs249-279 -> Core/EncodingError.rs8-28: byte absent = 0;
-    // optional line/column independent; empty path omitted; no quoting.
+    // Byte absent = 0; optional line/column independent; empty path
+    // omitted; no quoting.
     target :: jet_rt_string_builder_new()
     rt_text_push_word(target, I64{541871448}, I64{4}) // "XML "
     xml_reason_label(target, xml_word(wrapping(value + XML_ERROR_KIND)))

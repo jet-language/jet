@@ -2,8 +2,8 @@
 
 Tower card: #6312. Related cards: #4727 (memory profile method), #3447, #4212. Ballots drafted from this research: `D-PERF-MEMORY1`, `D-CACHE-CONTROL2`.
 
-Code facts cite dev `82d3369757`. Probes used the prebuilt dev compiler `/mnt/jetscratch/discovery/base/latest/jet` (also `82d3369757`) on all three tiers: `--optimize=none` (o0), `--optimize=basic` (o1) and `--optimize=full` (o2).
-Probe files live in `/mnt/jetscratch/lanes/MemDesign/probes/`. C comparison programs are in `probes/cprior/`, built with gcc 15.3 `-O2 -march=native`.
+Code facts cite dev `82d3369757`. Probes used the prebuilt dev compiler `$JET_SCRATCH_ROOT/discovery/base/latest/jet` (also `82d3369757`) on all three tiers: `--optimize=none` (o0), `--optimize=basic` (o1) and `--optimize=full` (o2).
+Probe files live in `$JET_SCRATCH_ROOT/lanes/MemDesign/probes/`. C comparison programs are in `probes/cprior/`, built with gcc 15.3 `-O2 -march=native`.
 Host: AMD Ryzen 9 7950X3D (Zen 4, 16 cores, 32 KiB L1D and 1 MiB L2 per core, two L3 slices totalling 128 MiB), one NUMA node, Linux 7.2.8, `perf_event_paranoid=2`, transparent huge pages `always` with defrag `defer+madvise`, `nr_hugepages=0`, resctrl not mounted. Reasoning that no probe tested is marked `[INFERENCE]`.
 
 ## Plain summary

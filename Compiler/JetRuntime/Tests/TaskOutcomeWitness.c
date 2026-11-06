@@ -1,4 +1,4 @@
-/* Real native exports; link --wrap=jet_rt_free. Expected bytes, not receipts.
+/* Real native exports. Expected bytes, not receipts.
  * Contract: Core/Service/Service.jet:91-125 at 497daa7a0, read-only.
  * Its exact a\"b display/debug vector is asserted below. No workflow proof.
  * wrong mode must use the shared canonical record-variant panic, exit70. */
@@ -33,7 +33,7 @@ extern Text *jet_rt_handle_display_jet_task_failure(TaskOutcome *);
 extern Text *jet_rt_handle_debug_jet_task_failure(TaskOutcome *);
 extern void jet_rt_handle_drop_jet_task_failure(TaskOutcome *);
 extern void jet_rt_string_drop(Text *);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 #include "TextDebugGoldens.h"
 
 struct Watched { void *ptr; int64_t size,align; unsigned freed; };
@@ -45,14 +45,15 @@ static void watch(void *ptr,int64_t size,int64_t align) {
     for(size_t i=0;i<count;++i) assert(watched[i].ptr!=ptr || watched[i].freed);
     watched[count++]=(struct Watched){ptr,size,align,0};
 }
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     ++interceptions;
     for(size_t i=count;i>0;--i) if(watched[i-1].ptr==ptr && !watched[i-1].freed) {
         assert(size==watched[i-1].size && align==watched[i-1].align);
         watched[i-1].freed=1;
         break;
     }
-    __real_jet_rt_free(ptr,size,align);
 }
 static Text borrow(const void *bytes,int64_t len) { return (Text){(unsigned char *)bytes,len,0}; }
 static void text_watch(Text *value) {
@@ -88,6 +89,7 @@ static void panic_render(TaskOutcome *value,const void *raw,int64_t raw_len,cons
     panic_text(jet_rt_handle_debug_jet_task_outcome(value),quoted,quoted_len);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc>1 && strcmp(argv[1],"wrong")==0) {
         TaskOutcome *unit=jet_rt_record_new_jet_task_outcome_finished();

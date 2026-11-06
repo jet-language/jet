@@ -1,12 +1,12 @@
-// `jet init [<script.jet>]` (Source/main.rs `run_init`, U11/D-JPK-SCRIPTDEP1=A):
-// write a fresh `package.jet` pinned to the running toolchain's channel (the
-// Trust pin writer never clobbers a manifest), then fold the script's inline
-// `use pkg#version` refs into its `deps` block with the comment-preserving
-// editor `jet add` uses. Status lines go to stderr unless `--quiet`/`--json`;
-// a pin diagnostic is always stderr. The migration-era role-file transition
-// (`--restore-role-files`, `--check` beside pkg/env/workspace/config.jet, and a
-// bare `jet init` beside them without a manifest) is Jetpack's Environment
-// transition, which no CLI package reaches: those forms are refused.
+// `jet init [<script.jet>]` (`run_init`, U11/D-JPK-SCRIPTDEP1=A): write a fresh
+// `package.jet` pinned to the running toolchain's channel (the Trust pin writer
+// never clobbers a manifest), then fold the script's inline `use pkg#version`
+// refs into its `deps` block with the comment-preserving editor `jet add` uses.
+// Status lines go to stderr unless `--quiet`/`--json`; a pin diagnostic is
+// always stderr. The migration-era role-file transition (`--restore-role-files`,
+// `--check` beside pkg/env/workspace/config.jet, and a bare `jet init` beside
+// them without a manifest) is Jetpack's Environment transition, which no CLI
+// package reaches: those forms are refused.
 use {
     cli_files :: core.files
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
@@ -17,21 +17,9 @@ use {
     jetpack_trust.[trust_pin_write_init]
 }
 
-JET_CLI_INIT_ROLE_FILES :: [String]{"pkg.jet", "env.jet", "workspace.jet", "config.jet"}
-
-fn jet_cli_init(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+fn jet_cli_init(args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     cwd :: cli_files.cwd() ?? "."
-    has_role_file := false
-    loop name in JET_CLI_INIT_ROLE_FILES {
-        if cli_files.is_file(cli_files.join(cwd, name)) -> has_role_file = true
-    }
-    if jet_argv.contains("--restore-role-files") -> return jet_cli_not_ported("init --restore-role-files", color)
-    if jet_argv.contains("--check") {
-        if has_role_file -> return jet_cli_not_ported("init --check", color)
-        return jet_cli_done("", jet_cli_init_status("No migration-era role files found.\nNo files changed.\n", quiet, json), JET_DRIVER_EXIT_OK)
-    }
     script :: args.get(1)
-    if script == None && has_role_file && !cli_files.is_file(cli_files.join(cwd, JET_CLI_PACKAGE_FILE)) -> return jet_cli_not_ported("init", color)
     base :: cli_files.basename(cwd)
     name :: if base == "" || base == "/" -> "app" else -> base
     message :: trust_pin_write_init(cwd, name, JET_CLI_VERSION) ?? {

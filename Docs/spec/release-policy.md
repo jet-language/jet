@@ -171,6 +171,61 @@ projection; it consumes the bounded `manifest.capability_relation.rows`
 source and remains fail-closed for missing, stale, unavailable, failed, or
 unqualified rows. Telemetry reports observations only.
 
+`jet run Tools/hardening/Main.jet -- --regressions DIR` runs the #2337
+regression seeds: semantic equality, indexed places, packed Int, release
+emission and stdin transport. Each seed runs under `jet run` and as a release
+build, and must print its expected bytes and exit 0. Any other result is
+written to DIR as a `jet.hardening.repro.v1` bundle, and the run fails.
+`--invert` puts each seam's broken behavior back. That run fails unless every
+seed gives a bundle, so the check is proven to see each bug.
+
+`jet run Tools/hardening/Main.jet -- --generate DIR` writes programs from a
+seed (`--seed`, default 2342; `--cases`, default 16, at most 128). Each
+program joins one to three constructs from expressions, statements, control
+flow, patterns, generics, traits, effects, views, comptime and nested places.
+Every program parses, loops only over ranges or lists, and prints each
+value it makes. Each one must pass `jet check`, then print the same bytes
+under `jet run` and as a release build. A program that fails is shrunk to
+its main construct while the failure stays the same. It is then written to
+DIR as a bundle, and the run fails. The run first checks four planted faults:
+a missing family, an admitted but unlowered construct, an optimizer-only
+change and a program that prints nothing. Each must fail, or the run stops.
+`--invert` plants faults in every case and fails unless each one is found.
+One seed on one compiler gives the same bundles in the same order; the last
+line prints their digest without the run times.
+
+`jet run Tools/hardening/Main.jet -- --write` generates the rows source above as
+`.jet/hardening-manifest.json`. Its rows come from the Core registries and the
+route and dispatcher facts, and each covered row names the observable sink its
+conformance witness uses. `--check` fails unless the stored file is
+byte-identical to a fresh generation. It reports the file stale when the
+source snapshot hash has moved, so evidence recorded under the old hash no
+longer counts. `--repro-check` and `--repro-replay` validate and replay
+`jet.hardening.repro.v1` bundles.
+
+## Compiler release candidates
+
+`jet run Tools/release/Main.jet -- candidate DIR` turns a compiler build into a
+release candidate. It writes `DIR/CANDIDATE.json` (schema
+`jet.release.candidate.v1`), one record that names the source commit and
+tree, the toolchain and its chain fixed point, every shipped and uploaded
+file's sha256, the signer, the test receipts, the support matrix
+(`Tools/release/support-matrix.tsv`) and the provenance. The record carries
+its own content digest, and `CANDIDATE.json.sig` is an Ed25519 signature of
+that digest by the `jet-release` key.
+
+`jet run Tools/release/Main.jet -- publish DIR` is the one route to a GitHub
+release. It derives the record again from disk and refuses any difference, a
+bad signature or an untrusted signer. These also block release: a target or
+shard with no receipt, a check that passed in one run and failed in another, a
+skipped or partly run check, a stale artifact, a signing failure, a chain
+without a fixed point, an archive that packs differently twice, and a release
+GitHub holds only in part. Every run appends a JSON entry under `DIR/audit/`,
+and a rerun moves the earlier stage and record there instead of deleting them.
+Evidence comes first: `publish` refuses a record with no `candidate` entry,
+and it writes its own entry before `gh release create` runs.
+`Tools/release/Tests.jet` covers each case with a fake `gh`.
+
 ## Exit codes
 
 `jet` returns stable documented exit codes so shells and CI can branch without

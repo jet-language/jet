@@ -1,18 +1,18 @@
-// Project entry resolution for the Jet-hosted `jet` which
-// file a bare `jet check`/`jet run`, or one aimed at a directory, compiles.
-// A port of Source/main.rs `resolve_bare_entry`, `resolve_command_target`,
-// `resolve_source_path`, `find_project_entry_with_callable`,
-// `command_override_entry` and `missing_bare_entry`, over the pieces of the
-// package model they read: jet-pkg-model Package `resolve_run_entry_checked`,
-// `entry_file_checked`, `resolve_command_entry_checked`,
-// `migrate_retired_entry`, `top_level_function_lines`; Authority
-// `resolve_workspace_source`; jet-driver Loader `find_package_root_checked`
-// and `package_run_member`; jet-env-model WorkspaceFile `evaluate` (literal
-// member lists and `find("./dir")`); CmdInspect `package_is_library_only` and
-// `missing_project_context_diagnostic`. Every report is the Rust host's
-// bytes and exit status. A shape this port does not read yet (a computed
-// `members:` expression, an ambiguous output selection, a stale workspace
-// lock, a build entry) is refused with E2104 instead of guessed.
+// Project entry resolution for the Jet-hosted `jet` which file a bare `jet
+// check`/`jet run`, or one aimed at a directory, compiles. A port of
+// `resolve_bare_entry`, `resolve_command_target`, `resolve_source_path`,
+// `find_project_entry_with_callable`, `command_override_entry` and
+// `missing_bare_entry`, over the pieces of the package model they read:
+// jet-pkg-model Package `resolve_run_entry_checked`, `entry_file_checked`,
+// `resolve_command_entry_checked`, `migrate_retired_entry`,
+// `top_level_function_lines`; Authority `resolve_workspace_source`; jet-driver
+// Loader `find_package_root_checked` and `package_run_member`; jet-env-model
+// WorkspaceFile `evaluate` (literal member lists and `find("./dir")`);
+// CmdInspect `package_is_library_only` and
+// `missing_project_context_diagnostic`. Every report is the Rust host's bytes
+// and exit status. A shape this port does not read yet (a computed `members:`
+// expression, an ambiguous output selection, a stale workspace lock, a build
+// entry) is refused with E2104 instead of guessed.
 use {
     cli_files :: core.files
     jet_driver.[
@@ -41,6 +41,7 @@ use {
     TOKEN_DOT,
     TOKEN_EOF,
     TOKEN_FALSE,
+    TOKEN_HASH,
     TOKEN_IDENT,
     TOKEN_KW_MODULE,
     TOKEN_KW_USE,
@@ -63,8 +64,6 @@ use {
     jet_pkg_model.[WorkspaceDeclarationCache, pkg_manifest_parse]
 }
 
-// Syntax.rs `DEFAULT_ENTRY_FILE`, `PACKAGE_FILE`, `WORKSPACE_FILE`, `ENV_FILE`,
-// `CONFIG_FILE`, `UNIFIED_LOCK_FILE`, `COMMAND_ROLE_FILES`.
 JET_CLI_DEFAULT_ENTRY_FILE :: "run.jet"
 
 JET_CLI_PACKAGE_FILE :: "package.jet"
@@ -75,11 +74,11 @@ JET_CLI_COMMAND_ROLE_FILES :: [String]{"run.jet", "build.jet", "dev.jet", "test.
 
 JET_CLI_RESERVED_SOURCE_NAMES :: [String]{"package.jet", "pkg.jet", "env.jet", "config.jet", "workspace.jet"}
 
-// The stock entry locations, root first (Package/mod.rs canonical run entry).
+// The stock entry locations, root first (canonical run entry).
 JET_CLI_STOCK_ENTRIES :: [String]{"run.jet", "src/run.jet"}
 
-// One resolved entry: the file and, when a Package rule chose it, the
-// function the command starts at (main.rs `ResolvedEntry`).
+// One resolved entry: the file and, when a Package rule chose it, the function
+// the command starts.
 struct JetCLIEntry {
     path: String
     callable: String?
@@ -184,7 +183,7 @@ fn jet_cli_file_name(path: String) -> String Never! {
     &parts.pop() ?? path
 }
 
-// Authority.rs `checked_file`: the regular file at `root/relative`, else None.
+// `checked_file`: the regular file at `root/relative`, else None.
 fn jet_cli_checked_file(root: String, relative: String) -[FS]> String? Never! {
     path :: jet_cli_entry_join(root, relative)
     if cli_files.is_symlink(path) || !cli_files.is_file(path) -> return None
@@ -483,9 +482,9 @@ fn jet_cli_file_manifest(file: String, source: String) -[FS]> JetCLIManifest? Ne
     jet_cli_root_manifest(root)
 }
 
-// Loader.rs `checked_inline_package_entry`: the stock entry (`run.jet`, then
-// `src/run.jet`) whose leading `package { }` block makes `root` a Package.
-// A malformed block is reported by the compile that reads it.
+// `checked_inline_package_entry`: the stock entry (`run.jet`, then
+// `src/run.jet`) whose leading `package { }` block makes `root` a Package. A
+// malformed block is reported by the compile that reads it.
 fn jet_cli_inline_carrier(root: String) -[FS]> String? Never! {
     loop relative in JET_CLI_STOCK_ENTRIES {
         path :: jet_cli_checked_file(root, relative) ?? next
@@ -497,14 +496,18 @@ fn jet_cli_inline_carrier(root: String) -[FS]> String? Never! {
     None
 }
 
-// Package/mod.rs `top_level_function_lines`: the lines where a top-level
-// `fn <wanted>` is declared, by the brace-depth text scan the Rust package
-// model runs (comments and strings skipped).
+// `top_level_function_lines`: the lines where a top-level `fn <wanted>` (or,
+// ahead of the D-DECL-COLON1 cutover, `<wanted>: fn`) is declared, by the
+// brace-depth text scan the Rust package model runs (comments and strings
+// skipped).
 fn jet_cli_top_level_function_lines(source: String, wanted: String) -> [Int] Never! {
     depth := 0
     token := ""
     token_line := 1
     saw_fn := false
+    candidate := false
+    candidate_line := 1
+    colon_seen := false
     in_string := false
     escaped := false
     line_comment := false
@@ -571,8 +574,19 @@ fn jet_cli_top_level_function_lines(source: String, wanted: String) -> [Int] Nev
         }
         if token.len() > 0 {
             if depth == 0 && saw_fn && token == wanted -> &matches.push(token_line)
-            saw_fn = depth == 0 && token == "fn"
+            if depth == 0 && candidate && colon_seen && token == "fn" -> &matches.push(candidate_line)
+            saw_fn = depth == 0 && token == "fn" && (ch == 32 || ch == 9)
+            candidate = depth == 0 && token == wanted && previous != 46
+            candidate_line = token_line
+            colon_seen = false
             token = ""
+        }
+        if candidate && ch != 32 && ch != 9 {
+            if ch == 58 && !colon_seen {
+                colon_seen = true
+            } else {
+                candidate = false
+            }
         }
         previous = ch
         if ch == 10 -> line += 1
@@ -601,17 +615,16 @@ fn jet_cli_function_count(program: Program, wanted: String) -> Int Never! {
     count
 }
 
-// Authority.rs `discover_source_files` under `root`, or the problem that
-// stopped the walk.
+// `discover_source_files` under `root`, or the problem that stopped the walk.
 fn jet_cli_discover_sources(root: String, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
     unretained := [AppAuthorizedDirectory]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
     jet_cli_walk_sources(root, "", 0, &files, &unretained, false, &budget)
 }
 
-// Package/mod.rs `source_files_checked`: the package's discovered sources
-// without the reserved manifest, environment, config, and workspace files and
-// without a root or `src/` retired `main.jet`.
+// `source_files_checked`: the package's discovered sources without the reserved
+// manifest, environment, config, and workspace files and without a root or
+// `src/` retired `main.jet`.
 fn jet_cli_package_sources(root: String, files: &[JetDriverAuthorizedSourceFile]) -[FS]> String? Never! {
     discovered := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, &discovered) == .Val(problem) -> return Val(problem)
@@ -630,7 +643,6 @@ fn jet_cli_relative_parent(relative: String) -> String Never! {
     jet_cli_prefix(parts, parts.len() - 1).join("/")
 }
 
-// Package/mod.rs `intent_accepts_kind("run", kind)`.
 fn jet_cli_runnable_kind(kind: String) -> Bool Never! { kind == "Executable" || kind == "Service" }
 
 enum JetCLIStockEntry {
@@ -640,9 +652,8 @@ enum JetCLIStockEntry {
     Unported(shape: String)
 }
 
-// The Package rule failed with this message.
-// A shape this port does not read yet.
-// An identifier as Package/mod.rs `is_identifier` reads one.
+// The Package rule failed with this message. A shape this port does not read
+// yet. An identifier as `is_identifier` reads one.
 fn jet_cli_is_identifier(part: String) -> Bool Never! {
     if part.len() == 0 -> return false
     loop (index, byte) in part.bytes() {
@@ -654,8 +665,7 @@ fn jet_cli_is_identifier(part: String) -> Bool Never! {
     true
 }
 
-// Package/mod.rs `entry_file_checked`: the source file a typed output's
-// `entry:` names.
+// `entry_file_checked`: the source file a typed output's `entry:` names.
 fn jet_cli_output_entry_file(root: String, output: JetCLIOutputFact) -[FS]> JetCLIEntry? Never! {
     entry :: output.entry ?? return None
     parts :: entry.split(".").to_list()
@@ -701,10 +711,10 @@ fn jet_cli_output_entry_file(root: String, output: JetCLIOutputFact) -[FS]> JetC
     Val(JetCLIEntry{path: files[selected].path, callable: Val(parts[1])})
 }
 
-// Package/mod.rs `resolve_run_entry_checked` for the facts `manifest`
-// (`None` = `PackageFacts::default()`, whose origin is empty): the
-// canonical `run.jet` (root, then `src/`) after the retired-entry migration,
-// the refusal of a leftover `main.jet`, else the selected runnable output.
+// `resolve_run_entry_checked` for the facts `manifest` (`None` =
+// `PackageFacts::default()`, whose origin is empty): the canonical `run.jet`
+// (root, then `src/`) after the retired-entry migration, the refusal of a
+// leftover `main.jet`, else the selected runnable output.
 fn jet_cli_resolve_run_entry(root: String, manifest: JetCLIManifest?, notices: &[String]) -[FS]> JetCLIStockEntry Never! {
     origin :: if manifest == .Val(facts) -> facts.origin else -> ""
     name :: if manifest == .Val(facts) -> facts.name else -> ""
@@ -739,8 +749,8 @@ fn jet_cli_resolve_run_entry(root: String, manifest: JetCLIManifest?, notices: &
     JetCLIStockEntry.Unported{shape: "package whose run default names no output"}
 }
 
-// Loader.rs `package_run_member`: the first discovered source (not
-// `package.jet`) that parses cleanly and declares a top-level `fn run`.
+// `package_run_member`: the first discovered source (not `package.jet`) that
+// parses cleanly and declares a top-level `fn run`.
 fn jet_cli_package_run_member(root: String) -[FS]> String? Never! {
     files := [JetDriverAuthorizedSourceFile]{}
     if jet_cli_discover_sources(root, &files) != None -> return None
@@ -752,8 +762,8 @@ fn jet_cli_package_run_member(root: String) -[FS]> String? Never! {
     None
 }
 
-// main.rs `find_project_entry_with_callable`: the stock entry of the
-// project rooted at `root`.
+// `find_project_entry_with_callable`: the stock entry of the project rooted at
+// `root`.
 fn jet_cli_find_project_entry(root_path: String, command: String, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
     jet_cli_find_project_entry_at(root_path, command, color, &notices, true)
 }
@@ -800,25 +810,22 @@ fn jet_cli_find_project_entry_at(root_path: String, command: String, color: Bool
         }
         // Without `run.jet`, the member declaring the
         // package's one `fn run` is the entry; a library package has none,
-        // and its first source file stands for the package.
+        // and its first source file (never project configuration such as
+        // `env.jet`) stands for the package.
         if !cli_files.is_file(jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE)) {
             if run_member && jet_cli_package_run_member(root) == .Val(member) {
                 return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: member, callable: None}}
             }
             files := [JetDriverAuthorizedSourceFile]{}
-            if jet_cli_discover_sources(root, &files) == .None {
-                loop file in files {
-                    if jet_cli_file_name(file.relative_path) != JET_CLI_PACKAGE_FILE {
-                        return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: file.path, callable: None}}
-                    }
-                }
+            if jet_cli_package_sources(root, &files) == .None && files.len() > 0 {
+                return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: files[0].path, callable: None}}
             }
         }
     }
     JetCLIEntryFound.Entry{entry: JetCLIEntry{path: jet_cli_entry_join(root, JET_CLI_DEFAULT_ENTRY_FILE), callable: None}}
 }
 
-// Syntax.rs `command_role_file`: the package-root home of a command.
+// `command_role_file`: the package-root home of a command.
 fn jet_cli_command_role_file(command: String) -> String? Never! {
     if command == "run" || command == "build" || command == "dev" || command == "test" {
         return Val("{command}.jet")
@@ -826,10 +833,11 @@ fn jet_cli_command_role_file(command: String) -> String? Never! {
     None
 }
 
-// main.rs `command_override_entry` over Package/mod.rs
-// `resolve_command_entry_checked` for `run`, `dev`,
-// `build`, and `test`, the package-root role home declaring the command's
-// function, else one root file, else one `src/` file.
+// `command_override_entry` over `resolve_command_entry_checked` for `run`,
+// `dev`, `build`, and `test`: the command function the package scope declares.
+// The scope is the package-root role home, then the other root files, or the
+// `src/` files when the root declares none. One declaring function is the
+// override; more than one is ambiguous (E3540), listed home first.
 fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[FS, Env]> JetCLIEntryFound Never! {
     role :: jet_cli_command_role_file(command) ?? return JetCLIEntryFound.Absent
     root :: cli_files.realpath(root_path) ?? root_path
@@ -851,29 +859,34 @@ fn jet_cli_command_override(root_path: String, command: String, color: Bool) -[F
             else -> {}
         }
     }
-    loop file in role_files {
-        if jet_cli_top_level_function_lines(file.source, command).len() > 0 {
-            return JetCLIEntryFound.Entry{entry: JetCLIEntry{path: file.path, callable: Val(command)}}
+    paths := [String]{}
+    locations := [String]{}
+    loop file in role_files -> jet_cli_command_override_lines(file, command, &paths, &locations)
+    loop file in root_files -> jet_cli_command_override_lines(file, command, &paths, &locations)
+    if paths.len() == 0 {
+        loop file in src_files -> jet_cli_command_override_lines(file, command, &paths, &locations)
+    }
+    if paths.len() == 0 -> return JetCLIEntryFound.Absent
+    if paths.len() > 1 {
+        listed := locations[0].copy()
+        loop index in 1..<locations.len() {
+            separator :: if index == locations.len() - 1 -> " and " else -> ", "
+            listed = "{listed}{separator}{locations[index]}"
         }
+        return JetCLIEntryFound.Refused{plan: jet_cli_fail("E3540", "One {command} command has multiple overrides: {listed}.", "A command scope can select one override or the stock default, but multiple overrides are ambiguous.", "Keep one fn {command} in the package scope, or remove the other command override.", color, JET_DRIVER_EXIT_USER_ERROR)}
     }
-    entries := [String]{}
-    levels :: [[JetDriverAuthorizedSourceFile]]{root_files, src_files}
-    loop level in levels {
-        loop file in level {
-            loop line in jet_cli_top_level_function_lines(file.source, command) {
-                &entries.push("{file.path}:{line}")
-            }
-        }
-        if entries.len() > 0 -> break
-    }
-    if entries.len() > 1 {
-        return JetCLIEntryFound.Refused{plan: jet_cli_entry_not_ported(command, "package with two `{command}` command overrides", color)}
-    }
-    if entries.len() == 0 -> return JetCLIEntryFound.Absent
-    JetCLIEntryFound.Entry{entry: JetCLIEntry{path: entries[0].split(":").to_list()[0], callable: Val(command)}}
+    JetCLIEntryFound.Entry{entry: JetCLIEntry{path: paths[0], callable: Val(command)}}
 }
 
-// main.rs `find_command_entry_with_callable`.
+// Each top-level `fn <command>` of `file`: its path, and its location as the
+// package-relative `file:line`.
+fn jet_cli_command_override_lines(file: JetDriverAuthorizedSourceFile, command: String, paths: &[String], locations: &[String]) Never! {
+    loop line in jet_cli_top_level_function_lines(file.source, command) {
+        &paths.push(file.path.copy())
+        &locations.push("`{file.relative_path}:{line}`")
+    }
+}
+
 fn jet_cli_find_command_entry(root: String, command: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
     stock :: jet_cli_find_project_entry(root, command, color, &notices)
     if stock == {
@@ -889,8 +902,8 @@ fn jet_cli_find_command_entry(root: String, command: String, use_override: Bool,
     stock
 }
 
-// WorkspacePlan.rs `declares_workspace_module`: a top-level
-// `module workspace` declaration.
+// `declares_workspace_module`: a top-level `workspace: module` declaration
+// (or the retired `module workspace`).
 fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
     lexed :: lex(source.bytes())
     tokens :: jet_cli_significant_tokens(lexed.tokens)
@@ -899,14 +912,50 @@ fn jet_cli_declares_workspace_module(source: String) -> Bool Never! {
         kind :: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
-        if kind == TOKEN_KW_MODULE && depth == 0 && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 1]) == "workspace" {
-            return true
-        }
+        if depth == 0 && jet_cli_workspace_module_head(tokens, lexed.tables, index) > 0 -> return true
     }
     false
 }
 
-// WorkspacePlan.rs `declares_workspace_members`.
+// The token count of a `workspace: module` head (3) or the retired `module
+// workspace` head (2) starting at `index`, else 0.
+fn jet_cli_workspace_module_head(tokens: [Token], tables: TokenTables, index: Int) -> Int Never! {
+    if index + 1 >= tokens.len() -> return 0
+    if tokens[index].kind == TOKEN_KW_MODULE && tokens[index + 1].kind == TOKEN_IDENT && token_decoded(tables, tokens[index + 1]) == "workspace" -> return 2
+    if index > 0 && tokens[index - 1].kind == TOKEN_DOT -> return 0
+    if index + 2 < tokens.len() && tokens[index].kind == TOKEN_IDENT && tokens[index + 1].kind == TOKEN_COLON && tokens[index + 2].kind == TOKEN_KW_MODULE && token_decoded(tables, tokens[index]) == "workspace" -> return 3
+    0
+}
+
+// A top-level `#Target(Web)` marker: the program builds for the browser.
+fn jet_cli_declares_web_target(source: String) -> Bool Never! {
+    lexed :: lex(source.bytes())
+    tokens :: jet_cli_significant_tokens(lexed.tokens)
+    depth := 0
+    loop index in 0..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_LBRACE -> depth += 1
+        if kind == TOKEN_RBRACE -> depth -= 1
+        if kind != TOKEN_HASH || depth != 0 || index + 4 >= tokens.len() -> next
+        if tokens[index + 1].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index + 1]) != "Target" || tokens[index + 2].kind != TOKEN_LPAREN -> next
+        if tokens[index + 3].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 3]) == "Web" && tokens[index + 4].kind == TOKEN_RPAREN -> return true
+    }
+    false
+}
+
+// A `web.app()` (or `core.web.app()`) builder: the program is a full-stack App
+// whose `fn run` serves it, so `jet run` runs it natively (D-WEBAPP1).
+fn jet_cli_declares_web_app(source: String) -> Bool Never! {
+    lexed :: lex(source.bytes())
+    tokens :: jet_cli_significant_tokens(lexed.tokens)
+    loop index in 0..<tokens.len() {
+        if index + 3 >= tokens.len() -> break
+        if tokens[index].kind != TOKEN_IDENT || token_decoded(lexed.tables, tokens[index]) != "web" || tokens[index + 1].kind != TOKEN_DOT -> next
+        if tokens[index + 2].kind == TOKEN_IDENT && token_decoded(lexed.tables, tokens[index + 2]) == "app" && tokens[index + 3].kind == TOKEN_LPAREN -> return true
+    }
+    false
+}
+
 fn jet_cli_declares_workspace_members(source: String) -> Bool Never! {
     if !jet_cli_declares_workspace_module(source) -> return false
     lexed :: lex(source.bytes())
@@ -916,14 +965,13 @@ fn jet_cli_declares_workspace_members(source: String) -> Bool Never! {
     false
 }
 
-// The E1239 report for two declaring sources (WorkspacePlan.rs).
+// The E1239 report for two declaring sources.
 fn jet_cli_ambiguous_workspace(paths: [String], color: Bool) -> JetCLIPlan Never! {
     names := [String]{}
     loop path in paths -> &names.push(jet_cli_file_name(path))
     jet_cli_fail("E1239", "`module workspace` is declared in more than one file: `{names.join("`, `")}`", "the workspace authority is discovered by declaration, so exactly one file may declare `module workspace {{ … }}`", "keep one declaration and delete the others", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
-// WorkspacePlan.rs `e0995_no_workspace_module`.
 fn jet_cli_no_workspace_module(color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E0995", "`workspace.jet` must declare `module workspace {{ … }}`", "`workspace.jet` is the monorepo workspace index; it must contain exactly one `module workspace {{ members: … }}` body", "write `module workspace {{ members: find(\"./packages\") }}` in `workspace.jet`", color, JET_DRIVER_EXIT_USER_ERROR)
 }
@@ -943,10 +991,9 @@ fn jet_cli_walk_up(dir: String) -> String? Never! {
     jet_cli_parent(dir)
 }
 
-// Authority.rs `resolve_workspace_source` at `dir`: a Package root with
-// `members:` owns membership; otherwise the one top-level `.jet` file that
-// declares `module workspace` (an index when it is `workspace.jet` or lists
-// members).
+// `resolve_workspace_source` at `dir`: a Package root with `members:` owns
+// membership; otherwise the one top-level `.jet` file that declares `module
+// workspace` (an index when it is `workspace.jet` or lists members).
 fn jet_cli_workspace_source(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSource Never! {
     if jet_cli_checked_file(dir, JET_CLI_PACKAGE_FILE) == .Val(manifest_path) {
         source :: cli_files.read(manifest_path) ?? ""
@@ -988,7 +1035,7 @@ fn jet_cli_workspace_source(dir: String, color: Bool) -[FS]> JetCLIWorkspaceSour
 }
 
 // The `members:` references of a `workspace.jet` index: the field of its
-// one `module workspace { }` body.
+// one `workspace: module { }` body.
 fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never! {
     lexed :: lex(source.bytes())
     tokens :: jet_cli_significant_tokens(lexed.tokens)
@@ -997,13 +1044,13 @@ fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never!
         kind :: tokens[index].kind
         if kind == TOKEN_LBRACE -> depth += 1
         if kind == TOKEN_RBRACE -> depth -= 1
-        if kind != TOKEN_KW_MODULE || depth != 0 || index + 2 >= tokens.len() || token_decoded(lexed.tables, tokens[index + 1]) != "workspace" || tokens[index + 2].kind != TOKEN_LBRACE {
-            next
-        }
-        close :: jet_cli_matching_close(tokens, index + 2)
+        if depth != 0 -> next
+        head :: jet_cli_workspace_module_head(tokens, lexed.tables, index)
+        if head == 0 || index + head >= tokens.len() || tokens[index + head].kind != TOKEN_LBRACE -> next
+        close :: jet_cli_matching_close(tokens, index + head)
         if close < 0 -> return None
         inner := 0
-        loop field in index + 3..<close {
+        loop field in index + head + 1..<close {
             field_kind :: tokens[field].kind
             if field_kind == TOKEN_LBRACE || field_kind == TOKEN_LBRACKET || field_kind == TOKEN_LPAREN {
                 inner += 1
@@ -1020,8 +1067,8 @@ fn jet_cli_workspace_module_members(source: String) -> [JetCLIMemberRef]? Never!
     None
 }
 
-// One `find("./dir")` scan (WorkspaceFile.rs `find_package_dirs`): the
-// immediate subdirectories holding `package.jet`, root-relative and sorted.
+// One `find("./dir")` scan: the immediate subdirectories holding `package.jet`,
+// root-relative and sorted.
 fn jet_cli_find_member_dirs(root: String, raw: String) -[FS]> [String]? Never! {
     relative := raw
     if relative.starts_with("./") -> relative = relative.slice(2..<relative.len())
@@ -1041,9 +1088,9 @@ fn jet_cli_find_member_dirs(root: String, raw: String) -[FS]> [String]? Never! {
     Val(found)
 }
 
-// WorkspaceFile.rs `evaluate_checked_source` for literal member lists and
-// `find("./dir")`: each member's path and its `package.jet` name. Member
-// validation failures and computed expressions are not ported yet.
+// `evaluate_checked_source` for literal member lists and `find("./dir")`: each
+// member's path and its `package.jet` name. Member validation failures and
+// computed expressions are not ported yet.
 fn jet_cli_workspace_members(root: String, index_path: String, command: String, color: Bool) -[FS, Env]> JetCLIWorkspacePlan Never! {
     source :: cli_files.read(index_path) ?? return JetCLIWorkspacePlan.Refused{plan: jet_cli_entry_not_ported(command, "unreadable workspace index", color)}
     refs := [JetCLIMemberRef]{}
@@ -1088,7 +1135,6 @@ fn jet_cli_workspace_members(root: String, index_path: String, command: String, 
     JetCLIWorkspacePlan.Members{members: members}
 }
 
-// Lock.rs `looks_like_workspace_lock`.
 fn jet_cli_looks_like_workspace_lock(raw: String) -> Bool Never! {
     loop raw_line in raw.lines() {
         line :: raw_line.trim()
@@ -1102,10 +1148,10 @@ fn jet_cli_looks_like_workspace_lock(raw: String) -> Bool Never! {
     false
 }
 
-// Loader.rs `find_manifest_root_checked` and `find_inline_package_root_checked`
-// combined as `find_package_root_checked`: walk up from `start`; a workspace
-// boundary stops the walk (its own `package.jet` is the root); the nearest
-// `package.jet` is the manifest root; an inline-Package stock entry wins.
+// `find_manifest_root_checked` and `find_inline_package_root_checked` combined
+// as `find_package_root_checked`: walk up from `start`; a workspace boundary
+// stops the walk (its own `package.jet` is the root); the nearest `package.jet`
+// is the manifest root; an inline-Package stock entry wins.
 fn jet_cli_find_package_root(start: String, color: Bool) -[FS, Env]> JetCLIRootFound Never! {
     cache := WorkspaceDeclarationCache.new()
     if jet_cli_find_package_root_checked(&cache, start) == {
@@ -1129,10 +1175,63 @@ fn jet_cli_workspace_member_entry(member_root: String, scanned: JetCLIEntry, fro
     JetCLIEntryFound.Entry{entry: scanned}
 }
 
-// main.rs `resolve_bare_entry` the entry a bare command, or
-// one aimed at the directory `cwd`, compiles. A workspace with more than one
-// runnable member is ambiguous unless `-p <member>` picks one; otherwise the
-// nearest package's stock entry (or its command override).
+// The members of a workspace that can run `command`, in index order, with
+// the entry each runs and whether its stock entry (not a command override)
+// chose it.
+struct JetCLIWorkspaceRunnable {
+    members: [JetCLIWorkspaceMember]
+    entries: [JetCLIEntry]
+    stocks: [Bool]
+}
+
+enum JetCLIWorkspaceRunnableFound {
+    Found(runnable: JetCLIWorkspaceRunnable)
+    Refused(plan: JetCLIPlan)
+}
+
+// The runnable members of `members` (a workspace rooted at `root`). The
+// stock entry of a member is resolved without the `fn run` member parse:
+// whether it can run needs only that it has an entry file; a selected
+// member's entry is resolved in full (jet_cli_workspace_member_entry).
+fn jet_cli_workspace_runnable(root: String, members: [JetCLIWorkspaceMember], command: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceRunnableFound Never! {
+    runnable := [JetCLIWorkspaceMember]{}
+    entries := [JetCLIEntry]{}
+    stocks := [Bool]{}
+    loop member in members {
+        member_root :: jet_cli_entry_join(root, member.path)
+        stock := JetCLIEntry?{None}
+        if jet_cli_find_project_entry_at(member_root, command, color, &notices, false) == {
+            .Entry(entry) -> {
+                if cli_files.is_file(entry.path) -> stock = Val(entry)
+            }
+            .Refused(plan_refused) -> return JetCLIWorkspaceRunnableFound.Refused{plan: plan_refused}
+            .Absent -> {}
+        }
+        entry := stock
+        from_stock := true
+        if use_override {
+            if jet_cli_command_override(member_root, command, color) == {
+                .Entry(found) -> {
+                    entry = Val(found)
+                    from_stock = false
+                }
+                .Refused(plan_refused) -> return JetCLIWorkspaceRunnableFound.Refused{plan: plan_refused}
+                .Absent -> {}
+            }
+        }
+        if entry == .Val(selected) {
+            &runnable.push(member)
+            &entries.push(selected)
+            &stocks.push(from_stock)
+        }
+    }
+    JetCLIWorkspaceRunnableFound.Found{runnable: JetCLIWorkspaceRunnable{members: runnable, entries: entries, stocks: stocks}}
+}
+
+// `resolve_bare_entry` the entry a bare command, or one aimed at the directory
+// `cwd`, compiles. A workspace with more than one runnable member is ambiguous
+// unless `-p <member>` picks one; otherwise the nearest package's stock entry
+// (or its command override).
 fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIEntryFound Never! {
     root :: cli_files.realpath(cwd) ?? return JetCLIEntryFound.Absent
     source :: jet_cli_workspace_source(root, color)
@@ -1152,40 +1251,14 @@ fn jet_cli_resolve_bare_entry(command: String, cwd: String, member_flag: String?
             .Refused(refusal) -> return JetCLIEntryFound.Refused{plan: refusal}
             .Members(members) -> members_plan = members
         }
-        runnable := [JetCLIWorkspaceMember]{}
-        entries := [JetCLIEntry]{}
-        // The stock entry of a member is resolved without the `fn run`
-        // member parse: whether it can run needs only that it has an entry
-        // file; the selected member's entry is resolved in full below.
-        stocks := [Bool]{}
-        loop member in members_plan {
-            member_root :: jet_cli_entry_join(root, member.path)
-            stock := JetCLIEntry?{None}
-            if jet_cli_find_project_entry_at(member_root, command, color, &notices, false) == {
-                .Entry(entry) -> {
-                    if cli_files.is_file(entry.path) -> stock = Val(entry)
-                }
-                .Refused(plan_refused) -> return JetCLIEntryFound.Refused{plan: plan_refused}
-                .Absent -> {}
-            }
-            entry := stock
-            from_stock := true
-            if use_override {
-                if jet_cli_command_override(member_root, command, color) == {
-                    .Entry(found) -> {
-                        entry = Val(found)
-                        from_stock = false
-                    }
-                    .Refused(plan_refused) -> return JetCLIEntryFound.Refused{plan: plan_refused}
-                    .Absent -> {}
-                }
-            }
-            if entry == .Val(selected) {
-                &runnable.push(member)
-                &entries.push(selected)
-                &stocks.push(from_stock)
-            }
+        found := JetCLIWorkspaceRunnable{members: [JetCLIWorkspaceMember]{}, entries: [JetCLIEntry]{}, stocks: [Bool]{}}
+        if jet_cli_workspace_runnable(root, members_plan, command, use_override, color, &notices) == {
+            .Refused(refusal) -> return JetCLIEntryFound.Refused{plan: refusal}
+            .Found(scanned) -> found = scanned
         }
+        runnable :: found.members
+        entries :: found.entries
+        stocks :: found.stocks
         if member_flag == .Val(want) {
             loop (index, member) in runnable {
                 if member.name == want -> return jet_cli_workspace_member_entry(jet_cli_entry_join(root, member.path), entries[index], stocks[index], command, color)
@@ -1262,14 +1335,50 @@ fn jet_cli_workspace_check_entries(dir: String, color: Bool, notices: &[String])
     JetCLIWorkspaceCheck.Members{entries: entries}
 }
 
-// main.rs `missing_bare_entry`: no file and no project (E2104).
+// `jet test` of a workspace root tests every member that can run it
+// (Host.jet `jet_cli_test_workspace`): their names and directories, in
+// index order. Absent when the directory is not a workspace index or at
+// most one member can run, which resolves as a bare `jet test` does.
+enum JetCLIWorkspaceTest {
+    Absent
+    Members(names: [String], directories: [String])
+    Refused(plan: JetCLIPlan)
+}
+
+fn jet_cli_workspace_test_members(dir: String, use_override: Bool, color: Bool, notices: &[String]) -[FS, Env]> JetCLIWorkspaceTest Never! {
+    root :: cli_files.realpath(dir) ?? return JetCLIWorkspaceTest.Absent
+    index_path := ""
+    if jet_cli_workspace_source(root, color) == {
+        .Index(path) -> index_path = path
+        else -> return JetCLIWorkspaceTest.Absent
+    }
+    members := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_members(root, index_path, "test", color) == {
+        .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
+        .Members(found) -> members = found
+    }
+    runnable := [JetCLIWorkspaceMember]{}
+    if jet_cli_workspace_runnable(root, members, "test", use_override, color, &notices) == {
+        .Refused(refusal) -> return JetCLIWorkspaceTest.Refused{plan: refusal}
+        .Found(scanned) -> runnable = scanned.members
+    }
+    if runnable.len() < 2 -> return JetCLIWorkspaceTest.Absent
+    names := [String]{}
+    directories := [String]{}
+    loop member in runnable {
+        &names.push(member.name)
+        &directories.push(jet_cli_entry_join(root, member.path))
+    }
+    JetCLIWorkspaceTest.Members{names: names, directories: directories}
+}
+
+// `missing_bare_entry`: no file and no project (E2104).
 fn jet_cli_missing_bare_entry(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
     jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// main.rs `resolve_command_target` for a directory `raw`: the shared bare
-// rule when it yields a real file, else `resolve_source_path`'s project
-// entry.
+// `resolve_command_target` for a directory `raw`: the shared bare rule when it
+// yields a real file, else `resolve_source_path`'s project entry.
 fn jet_cli_resolve_directory_target(command: String, raw: String, member_flag: String?, use_override: Bool, color: Bool) -[FS, Env]> JetCLITarget Never! {
     notices := [String]{}
     resolved :: jet_cli_resolve_bare_entry(command, raw, member_flag, use_override, color, &notices)
@@ -1285,10 +1394,10 @@ fn jet_cli_resolve_directory_target(command: String, raw: String, member_flag: S
     jet_cli_resolve_source_path(command, raw, color, notices)
 }
 
-// main.rs `resolve_source_path` for a directory `raw` (a project root): its
-// stock entry. A missing entry beside a package is read, and so reported, by
-// the caller; no package at all is E2105. `notices` are the stderr notices
-// written so far.
+// `resolve_source_path` for a directory `raw` (a project root): its stock
+// entry. A missing entry beside a package is read, and so reported, by the
+// caller; no package at all is E2105. `notices` are the stderr notices written
+// so far.
 fn jet_cli_resolve_source_path(command: String, raw: String, color: Bool, notices: [String]) -[FS, Env]> JetCLITarget Never! {
     written := notices
     root :: cli_files.realpath(raw) ?? raw
@@ -1319,12 +1428,12 @@ fn jet_cli_with_notices(notices: [String], plan: ^JetCLIPlan) -> JetCLIPlan Neve
     plan
 }
 
-// CmdInspect.rs `package_is_library_only`: a project check of a library
-// package runs in Check mode and never demands `fn run`. A package is a
-// library when every declared output is a Library, or when it declares none
-// and no member file defines a top-level `fn run`. A clean compile already
-// parsed every member, so its load facts answer that; a compile with errors
-// may have stopped before some member, so the members are parsed here.
+// `package_is_library_only`: a project check of a library package runs in Check
+// mode and never demands `fn run`. A package is a library when every declared
+// output is a Library, or when it declares none and no member file defines a
+// top-level `fn run`. A clean compile already parsed every member, so its load
+// facts answer that; a compile with errors may have stopped before some member,
+// so the members are parsed here.
 fn jet_cli_package_is_library_only(entry: String, compiled: JetDriverCompileResult) -[FS, Env]> Bool Never! {
     folder :: jet_cli_parent(entry) ?? "."
     root := ""
@@ -1343,9 +1452,9 @@ fn jet_cli_package_is_library_only(entry: String, compiled: JetDriverCompileResu
     jet_cli_package_run_member(root) == .None
 }
 
-// Completion.rs under `CompileMode::Run`: a project check of a program needs
-// `fn run` in its entry file (E0101). Only a cleanly parsed entry is judged;
-// a parse error is reported by the compile itself.
+// Under `CompileMode::Run`: a project check of a program needs `fn run` in its
+// entry file (E0101). Only a cleanly parsed entry is judged; a parse error is
+// reported by the compile itself.
 fn jet_cli_entry_lacks_run(source: String) -> Bool Never! {
     jet_cli_entry_lacks_callable(source, "run")
 }
@@ -1375,12 +1484,11 @@ fn jet_cli_project_entry_callable(file: String) -[FS, Env]> String Never! {
     "run"
 }
 
-// CmdInspect.rs `missing_project_context_diagnostic`: an explicit file with
-// no owning package, inline Package, or workspace that imports
-// `project.<module>` is E2393 at the import. The file's own bytes decide
-// first: only a file that imports `project.<module>` walks its ancestors for
-// an owning context, so checking any other file reads exactly the sources
-// `jet run` of it reads.
+// `missing_project_context_diagnostic`: an explicit file with no owning
+// package, inline Package, or workspace that imports `project.<module>` is
+// E2393 at the import. The file's own bytes decide first: only a file that
+// imports `project.<module>` walks its ancestors for an owning context, so
+// checking any other file reads exactly the sources `jet run` of it reads.
 fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]> Diagnostic? Never! {
     block :: jet_driver_inline_package(source)
     if block.found || block.error != None -> return None
@@ -1428,4 +1536,16 @@ fn jet_cli_missing_project_context(file: String, source: String) -[FS, Env]> Dia
         dir = jet_cli_walk_up(dir) ?? break
     }
     Val(diagnostic_from_registry("E2393", Val(at), "use project.<module> needs an owning project context.", "Project-local imports are resolved from the nearest package or workspace graph; an isolated file has no declared project root to resolve them from.", "Run jet check from the package or workspace, or replace the import with the canonical file-relative form when the dependency is local to this file."))
+}
+
+#Test("entry detectors read both declaration spellings") {
+    assert(jet_cli_declares_workspace_module("module workspace {{ members: [] }}\n"))
+    assert(jet_cli_declares_workspace_module("workspace: module {{ members: [] }}\n"))
+    assert(!jet_cli_declares_workspace_module("x.workspace: module {{ }}\n"))
+    assert(!jet_cli_declares_workspace_module("dev: module {{ }}\n"))
+    assert_eq((jet_cli_workspace_module_members("workspace: module {{ members: [] }}\n") ?? panic("members")).len(), 0)
+    assert_eq(jet_cli_top_level_function_lines("fn run() {{}}\nrun: fn() {{}}\nShape.run: fn(self) {{}}\nm: module {{ run: fn() {{}} }}\n", "run"), [Int]{1, 2})
+    assert(jet_cli_repl_declares_run("run: fn() {{}}\n"))
+    assert(jet_cli_repl_declares_run("fn run() {{}}\n"))
+    assert(!jet_cli_repl_declares_run("Shape.run: fn(self) {{}}\n"))
 }

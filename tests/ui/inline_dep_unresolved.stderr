@@ -3,6 +3,6 @@ Error [jet.UnresolvedInlineDependency]: Inline dependency `ghostpkg#1.0.0` didn'
     |
   3 | use ghostpkg#1.0.0
     |             ^^^^^^
- Why: No local source knows a package named `ghostpkg` — an inline dependency must resolve from a committed or explicitly materialized local copy.
- Fix: Commit a copy at `.jet/inline-deps/ghostpkg/<version>/`, materialize the source locally first, or run `jet init` and depend on `ghostpkg` through `package.jet`.
+ Why: No local copy under `.jet/inline-deps/ghostpkg/` holds `ghostpkg`, and only `jet run` and `jet fetch --lock` fetch a missing inline dependency.
+ Fix: Run the script with `jet run`, which fetches and locks `ghostpkg` from the configured package registry on its first run, or commit a copy at `.jet/inline-deps/ghostpkg/<version>/`.
 More: jet-lang.dev/e/E1253

@@ -22,39 +22,39 @@ exit: 0
 step: built
 exit: 70
 stdout: empty
-stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # original runtime precision trap
 stderr: ~ "[E3010]" # original runtime code
 end when
 step Floatdefault: jet run --json Float/main.jet
 exit: in [70, 1]
 when exit == 70: stdout: empty
-when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # original runtime precision trap
 when exit == 70: stderr: ~ "[E3010]" # original runtime code
-when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number has no exact Float; approx(x) rounds it to the nearest Float"] #>= 1
 step Floatrelease: jet run --release --json Float/main.jet
 exit: in [70, 1]
 when exit == 70: stdout: empty
-when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "whole number has no exact Float; approx(x) rounds it to the nearest Float" # original runtime precision trap
 when exit == 70: stderr: ~ "[E3010]" # original runtime code
-when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number has no exact Float; approx(x) rounds it to the nearest Float"] #>= 1
 when tool rustc
 step: jet build --profile=debug F32/main.jet
 exit: 0
 step: built
 exit: 70
 stdout: empty
-stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+stderr: ~ "whole number has no exact F32; approx(x) rounds it to the nearest F32" # original runtime precision trap
 stderr: ~ "[E3010]" # original runtime code
 end when
 step F32default: jet run --json F32/main.jet
 exit: in [70, 1]
 when exit == 70: stdout: empty
-when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "whole number has no exact F32; approx(x) rounds it to the nearest F32" # original runtime precision trap
 when exit == 70: stderr: ~ "[E3010]" # original runtime code
-when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number has no exact F32; approx(x) rounds it to the nearest F32"] #>= 1
 step F32release: jet run --release --json F32/main.jet
 exit: in [70, 1]
 when exit == 70: stdout: empty
-when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "whole number has no exact F32; approx(x) rounds it to the nearest F32" # original runtime precision trap
 when exit == 70: stderr: ~ "[E3010]" # original runtime code
-when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number has no exact F32; approx(x) rounds it to the nearest F32"] #>= 1

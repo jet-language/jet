@@ -44,13 +44,16 @@ struct JetOSRealizedPackage {
     original_reference_text: String
     consumption_override: String?
 
-    // Rust store_realize.rs:41-49; the held lease remains authoritative.
+    // Rust store_realize.rs:41-49; the held lease remains authoritative: a
+    // durable member is consumed only after the lease revalidates it.
     fn consumption_path(self, path: String) -[FS, Env, Rand]> String IOError! {
         if self.consumption_override == .Val(root) {
             relative :: store_path_strip_prefix(path, self.entry.out) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("package member escapes realized output")}))
             return Ok(files.join(root, relative))
         }
-        self.lease.stable_path(path)
+        self.lease.validate()
+        self.lease.output_relative(path)
+        Ok(path)
     }
 
     // Rust store_realize.rs:55-60: provenance names durable provider output,

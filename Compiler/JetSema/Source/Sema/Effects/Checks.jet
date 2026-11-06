@@ -31,6 +31,8 @@ use jet_foundation.[
     DeclTable,
     decl_table_find,
     Diagnostic,
+    diagnostic_registry_row,
+    Effect,
     EffectRowEntry,
     FnBody,
     Func,
@@ -193,6 +195,15 @@ fn sema_effect_source_display(path: String) -> String Never! {
     if parts.len() == 0 -> path else -> parts[parts.len() - 1]
 }
 
+// A named function value in a slot with a closed effect bound: the value took
+// the slot's bound (sema_function_value_type), so `callee`'s own row is held
+// to `bound` once every row is solved (E0747 at `span`).
+struct SemaEffectCallbackBound {
+    callee: String
+    bound: [String]
+    span: Span
+}
+
 struct SemaEffectNode {
     key: String
     name: String
@@ -243,6 +254,8 @@ struct SemaEffectNode {
     prohibition_span: Span?{None}
     // The `#FX(…)` caps of the inline modules enclosing this function.
     module_caps: [ModuleCap]{[ModuleCap]{}}
+    // The bounded callback slots this body fills with named functions.
+    callback_bounds: [SemaEffectCallbackBound]{[SemaEffectCallbackBound]{}}
 }
 
 fn sema_effect_source_from_function(func: Func, module_identity: String) -> SemaEffectFunctionSource Never! {
@@ -351,9 +364,7 @@ fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode,
     }
     if api == "" -> return None
     row :: fact.facts.effect_bound ?? return None
-    loop span in node.assume_det_spans {
-        if sema_effect_span_contains(span, expression.span) -> return None
-    }
+    if sema_effect_in_assume_det(node, expression.span) -> return None
     loop entry in row {
         if entry.name.starts_with("!") -> next
         root :: sema_effect_root(entry.name)
@@ -362,22 +373,83 @@ fn sema_effect_nondeterministic_core(node: SemaEffectNode, expression: BodyNode,
     None
 }
 
+// Rust D-DET1 `assume_deterministic { … }` (Stmt::AssumeDet, det_suppress):
+// inside a pure body the block suspends the determinism rejections, E3403 and
+// E3401 alike.
+fn sema_effect_in_assume_det(node: SemaEffectNode, span: Span) -> Bool Never! {
+    if !node.is_pure -> return false
+    loop region in node.assume_det_spans {
+        if sema_effect_span_contains(region, span) -> return true
+    }
+    false
+}
+
+// Rust `crate::Sema::e3403` at a Clock intrinsic site
+// (record_static_time_effect and the `Clock.{method}` check, `Clock
+// comparison`, `Clock formatting` and `Clock copy`): the producer recorded a
+// `Time` row under the operation's own name (`Clock.system`), so a pure body
+// reports E3403 with the pure denial and records none of the site's effects.
+// False when the site is not one.
+fn sema_effect_report_nondeterministic_intrinsic(nodes: &[SemaEffectNode], node_index: Int, fact: SemaCallSiteFact, span: Span, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if !nodes[node_index].is_pure || fact.callee != None -> return false
+    api :: fact.intrinsic_api ?? return false
+    if !api.starts_with("Clock.") && !api.starts_with("Clock ") -> return false
+    row :: fact.facts.effect_bound ?? return false
+    if sema_effect_in_assume_det(nodes[node_index], span) -> return false
+    loop entry in row {
+        if entry.name.starts_with("!") || sema_effect_root(entry.name) != "Time" -> next
+        nodes[node_index].nondeterministic_call = true
+        // A wrapper node at the site's own span reports once.
+        loop previous in diagnostics {
+            if previous.code == "E3403" && previous.span == span -> return true
+        }
+        diagnostic :: sema_error("E3403", span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound.")
+        &diagnostics.push(diagnostic_with_rights(^diagnostic, "pure", [String]{api.copy()}, [String]{}, None))
+        return true
+    }
+    false
+}
+
 // A compile-time value's call site `fact` whose callee reads ambient time or
 // randomness is refused by the API it calls (E3403), before evaluation
-// reaches the host clock or random source.
+// reaches the host clock or random source. An intrinsic (`time.now`) has no
+// declared callee and is named by its API.
 fn sema_effect_comptime_nondeterministic(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
-    callee :: fact.callee ?? return
+    api :: if fact.callee == .Val(callee) -> sema_effect_decl_label(callee.key) else -> fact.intrinsic_api ?? return
     row :: fact.facts.effect_bound ?? return
     loop entry in row {
         if entry.name.starts_with("!") -> next
         root :: sema_effect_root(entry.name)
         if root == "Time" || root == "Rand" {
-            api :: sema_effect_decl_label(callee.key)
             diagnostic :: sema_error("E3403", fact.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or keep it at runtime outside the `comptime` value.")
             &diagnostics.push(diagnostic_with_rights(^diagnostic, "pure", [String]{api}, [String]{}, None))
             return
         }
     }
+}
+
+// A compile-time value's call into `core.net` that reaches the network: only
+// the pinned `fetch(url, sha256:)` is a compile-time network operation, so any
+// other callee whose effect row carries `Net` is refused (E3412). A pure
+// `core.net` helper (`mime.extension`) has no `Net` and evaluates. True when
+// it was refused.
+fn sema_effect_comptime_net_unavailable(fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) -> Bool {
+    callee :: fact.callee ?? return false
+    owner :: sema_effect_symbol_module(callee.key) ?? return false
+    if owner != "<corelib>/core.net" && !owner.starts_with("<corelib>/core.net.") -> return false
+    method :: sema_effect_symbol_leaf(callee.key)
+    if method == "fetch" -> return false
+    row :: fact.facts.effect_bound ?? return false
+    reaches_net := false
+    loop entry in row {
+        if !entry.name.starts_with("!") && sema_effect_root(entry.name) == "Net" {
+            reaches_net = true
+            break
+        }
+    }
+    if !reaches_net -> return false
+    &diagnostics.push(sema_error("E3412", fact.span, "`core.net.{method}()` is not available at comptime.", "Only `core.net.fetch(url, sha256:)` is supported at compile time as a Tier-1 hermetic effect.", "Use `core.net.fetch(url, sha256: \"…\")` for content-hash-pinned downloads."))
+    true
 }
 
 // Rust `memory_control_multiplier`: one execution, or None inside a loop.
@@ -737,7 +809,7 @@ fn sema_effect_apply_via(nodes: &[SemaEffectNode], node_index: Int, function: Fn
     }
 }
 
-// Rust `Effects.rs` `e0740`: the span is the row's first entry.
+// `e0740`: the span is the row's first entry.
 fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnostic {
     sorted := over.copy()
     &sorted.sort()
@@ -748,8 +820,8 @@ fn sema_effect_bound_diagnostic(node: SemaEffectNode, over: [String]) -> Diagnos
     diagnostic_with_rights(^diagnostic, "invocation", [String]{node.name}, [String]{}, None)
 }
 
-// Rust `Effects.rs` `e0749` / `e0749_panic`: a reached Panic names the
-// reachable function where the stop enters the call graph.
+// `e0749` / `e0749_panic`: a reached Panic names the reachable function where
+// the stop enters the call graph.
 fn sema_effect_prohibited_diagnostic(node: SemaEffectNode, reached: [String], panic_site: String) -> Diagnostic {
     reached_list :: sema_effect_show(reached)
     declared :: sema_effect_show(node.prohibited)
@@ -936,14 +1008,13 @@ fn sema_effect_file_caps_of(index: Int, direct: [[SemaEffectModuleCap]], parents
     caps
 }
 
-// Rust `Effects.rs` `e0725`.
 fn sema_effect_replayable_diagnostic(node: SemaEffectNode, reached: [String]) -> Diagnostic {
     span :: node.replayable_span ?? node.name_span
     diagnostic :: sema_error("E0725", span, "`{node.name}` is `#Replayable` but reaches `{sema_effect_show(reached)}`", "`#Replayable` code must replay from explicit inputs; ambient time, randomness, network, or console IO would make the same replay diverge", "inject a deterministic clock/RNG or mockable input, pass recorded data in, or move the ambient effect outside the replayable function")
     diagnostic_with_rights(^diagnostic, "replayable", [String]{node.name}, [String]{}, None)
 }
 
-// Rust `Registration.rs` `effect_key`: a method's key is `Owner::name`.
+// `effect_key`: a method's key is `Owner::name`.
 fn sema_effect_chain_name(function: FnBody) -> String Never! {
     owner :: if function.kind == {
         .Method(_, owner_type) -> owner_type
@@ -1144,13 +1215,16 @@ fn sema_effect_record_intrinsic_fact(environment: SemaScopeEnvironment, program:
     allowed :: wall ?? return false
     if !allowed -> return false
     caller_key := sema_scope_function_owner_key(scopes)
-    if caller_key != "" {
+    // A compile-time value has no owner frame; its sites still feed the
+    // ambient time/randomness check (sema_effect_comptime_nondeterministic).
+    if caller_key != "" || scopes.comptime_execution_depth > 0 {
         &context.call_facts.push(SemaCallSiteFact{
             span: span,
             caller_key: caller_key,
             callee: None,
             facts: facts,
             discarded: false,
+            intrinsic_api: Val(api),
         })
     }
     true
@@ -1177,9 +1251,9 @@ fn sema_effect_record_intrinsic_effects(environment: SemaScopeEnvironment, progr
 }
 
 fn sema_effect_record_fact(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, fact: SemaCallSiteFact, diagnostics: &[Diagnostic]) {
-    // Rust `direct_calls.rs` a foreign body with a known effect
-    // root records that root and an open memory dispatch; only an extern with
-    // no root is an unknown callee that forces the maximal set.
+    // A foreign body with a known effect root records that root and an open
+    // memory dispatch; only an extern with no root is an unknown callee that
+    // forces the maximal set.
     if fact.foreign_effect_root == .Val(root) {
         effect_name :: sema_effect_parse_name(root) ?? {
             &diagnostics.push(sema_effect_unknown(root, fact.span))
@@ -1370,6 +1444,21 @@ fn sema_effect_exact_position(caller: SemaEffectCallerFacts, facts: [SemaCallSit
     None
 }
 
+// The caller's Clock intrinsic fact whose span is exactly `span`. A Clock
+// method is a declared Core method, so its call fact (with a callee) shares
+// the site with the intrinsic fact the time route recorded.
+fn sema_effect_clock_intrinsic_position(index: SemaEffectCallIndex, caller: SemaEffectCaller, span: Span) -> Int? Never! {
+    if caller.slot < 0 -> return None
+    calls :: index.modules[caller.module_index]
+    row :: calls.callers[caller.slot].starts.get(span.start) ?? return None
+    loop position in calls.callers[caller.slot].exact[row] {
+        fact :: calls.facts[position]
+        if fact.span.end != span.end || fact.callee != None -> next
+        if fact.intrinsic_api == .Val(api) && api.starts_with("Clock.") -> return Val(position)
+    }
+    None
+}
+
 fn sema_effect_is_call(kind: NodeKind) -> Bool Never! {
     if kind == {
         .Call(_, _, _)
@@ -1460,9 +1549,9 @@ fn sema_effect_record_decl_call(nodes: &[SemaEffectNode], facts: SemaEffectCallI
     }
 }
 
-// Rust `direct_calls.rs` `attribute_fn_arg`: a named function passed to a
-// function-typed parameter flows its effects through to this caller, and the
-// callee may invoke it any number of times.
+// `attribute_fn_arg`: a named function passed to a function-typed parameter
+// flows its effects through to this caller, and the callee may invoke it any
+// number of times.
 fn sema_effect_record_function_arguments(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, tree: BodyTree, args: [BodyCallArg]) Never! {
     loop argument in args {
         if body_type(tree, argument.value) == .Fn(_, _, _, _, _, _) {
@@ -1473,6 +1562,39 @@ fn sema_effect_record_function_arguments(nodes: &[SemaEffectNode], node_by_key: 
                 &nodes[node_index].memory_calls.push(SemaMemoryCall{callee: symbol.key, span: value.span, executions: None})
             }
         }
+    }
+}
+
+// A named function read whose value type carries a closed effect row records
+// that row against the function's node. A function read under its own
+// declared row passes trivially; one that took a callback slot's bound is
+// the obligation sema_effect_check_callback_bounds settles.
+fn sema_effect_record_callback_bound(nodes: &[SemaEffectNode], node_by_key: NameRows, node_index: Int, callee: String, ty: Type, span: Span) {
+    if ty == .Fn(_, _, bound, _, _, _) {
+        row :: bound ?? return
+        if sema_effect_node_index(node_by_key, callee) == None -> return
+        names := [String]{}
+        loop entry in row {
+            if entry.name.starts_with("..") -> return
+            if entry.name.starts_with("!") -> next
+            // An unknown or positive `Panic` entry is already its own error;
+            // the bound it spoils holds no callback to account.
+            effect_name :: sema_effect_parse_name(entry.name) ?? return
+            if sema_effect_root(effect_name) == "Panic" -> return
+            _ := sema_effect_set_add(&names, effect_name)
+        }
+        &nodes[node_index].callback_bounds.push(SemaEffectCallbackBound{callee: callee, bound: names, span: span})
+    }
+}
+
+// E0747: a function's contract is its declared row (or `-[]>`); an
+// undeclared function is judged by its solved row.
+fn sema_effect_check_callback_bounds(nodes: [SemaEffectNode], node_by_key: NameRows, solved: [[String]], node_index: Int, diagnostics: &[Diagnostic]) {
+    loop obligation in nodes[node_index].callback_bounds {
+        target :: sema_effect_node_index(node_by_key, obligation.callee) ?? next
+        row :: if nodes[target].has_declared_row || nodes[target].is_pure -> nodes[target].declared else -> solved[target]
+        over :: sema_effect_uncovered(row, obligation.bound)
+        if over.len() > 0 -> &diagnostics.push(sema_effect_callback_diagnostic(over, obligation.bound, obligation.span))
     }
 }
 
@@ -1498,15 +1620,15 @@ fn sema_effect_record_dispatch(nodes: &[SemaEffectNode], node_index: Int, tree: 
     }
 }
 
-// Rust `seed_trait_dispatch_effects` / `method_calls.rs` generic dispatch:
-// a call through a generic bound (`producer: P` with `P: Producer`) is
-// statically selected after type inference, so it reaches the trait
-// method's `<static>` node: the declared row when the method has one,
-// otherwise the union of every implementation's summary. An implementing
-// type with no summary of its own for the method (a trait default body, an
-// unloaded impl) is unresolved, and so is a trait with no implementation:
-// either forces the maximal row, as in Rust. Only a trait-object receiver is
-// the open-world dispatch that stays maximal for a row-less method.
+// Rust `seed_trait_dispatch_effects` / generic dispatch: a call through a
+// generic bound (`producer: P` with `P: Producer`) is statically selected after
+// type inference, so it reaches the trait method's `<static>` node: the
+// declared row when the method has one, otherwise the union of every
+// implementation's summary. An implementing type with no summary of its own for
+// the method (a trait default body, an unloaded impl) is unresolved, and so is
+// a trait with no implementation: either forces the maximal row, as in Rust.
+// Only a trait-object receiver is the open-world dispatch that stays maximal
+// for a row-less method.
 fn sema_effect_record_static_dispatch(nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, node_index: Int, tree: BodyTree, expression: BodyNode, fact: SemaCallSiteFact) -> Bool Never! {
     if fact.facts.effect_bound != None -> return false
     if expression.kind == {
@@ -1587,7 +1709,12 @@ fn sema_effect_walk_expr(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTr
 // false when its children aren't walked.
 fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: BodyTree, expression: Int, node: BodyNode, facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller) -> Bool {
     if {
+        // The suspended determinism checks record nothing for the call.
+        sema_effect_in_assume_det(nodes[node_index], node.span) -> {}
         sema_effect_is_call(node.kind) -> {
+            // Rust's `Clock.{method}` check runs before the declared method's
+            // call is recorded: a pure body reports E3403 and records nothing.
+            if sema_effect_clock_intrinsic_position(facts, caller, node.span) == .Val(clock) && sema_effect_report_nondeterministic_intrinsic(&nodes, node_index, facts.modules[caller.module_index].facts[clock], node.span, &diagnostics) -> return true
             found :: sema_effect_find_fact(facts, caller, node.span)
             if found == {
                 .Val(position) -> {
@@ -1598,7 +1725,7 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
                         // the pure function reports E3403 instead of E3401.
                         nodes[node_index].nondeterministic_call = true
                         &diagnostics.push(sema_error("E3403", node.span, "`{api}` is non-deterministic and cannot appear in a pure evaluation.", "Pure evaluation must produce the same result on every machine.", "remove this call, or remove the enclosing function's explicit empty effect bound."))
-                    } else {
+                    } else if !sema_effect_report_nondeterministic_intrinsic(&nodes, node_index, value, node.span, &diagnostics) {
                         if !sema_effect_record_static_dispatch(&nodes, facts, node_index, tree, node, value) {
                             sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
                             sema_effect_record_dispatch(&nodes, node_index, tree, node, value)
@@ -1619,11 +1746,14 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         }
         else -> {
             found :: sema_effect_find_exact_fact(facts, caller, node.span)
-            if found == .Val(position) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, facts.modules[caller.module_index].facts[position], &diagnostics)
+            if found == .Val(position) {
+                value :: facts.modules[caller.module_index].facts[position]
+                if !sema_effect_report_nondeterministic_intrinsic(&nodes, node_index, value, node.span, &diagnostics) -> sema_effect_record_fact(&nodes, facts.node_by_key, node_index, value, &diagnostics)
+            }
         }
     }
     if node.kind == {
-        .RequireStop(_, _, _) | .Never(_) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
+        .RequireStop(_, _, _) | .Never(_, _) -> sema_effect_node_add_edge(&nodes, node_index, "__jet_panic__")
         // Rust `check_panic_call`: `value ?? panic(message)` stops through
         // the same sentinel as a bare `panic(message)`.
         .OrFallback(_, fallback, _) -> {
@@ -1646,6 +1776,7 @@ fn sema_effect_walk_expr_enter(nodes: &[SemaEffectNode], node_index: Int, tree: 
         .List(values, _) | .ListLit(values) -> {
             if values.len() > 0 && !sema_effect_is_fixed_list(body_type(tree, expression)) -> sema_effect_push_memory_event(&nodes, node_index, node.span, "list construction allocates backing storage", "alloc", None)
         }
+        .ConstRef(symbol) -> sema_effect_record_callback_bound(&nodes, facts.node_by_key, node_index, symbol.key, body_type(tree, expression), node.span)
         // A `[U8]{"…"}` byte value (one checked byte constant) builds the same
         // backing storage its per-element list spelling would.
         .CtLit(value) -> {
@@ -1705,6 +1836,10 @@ fn sema_effect_check_unsafe_enter(nodes: &[SemaEffectNode], facts: SemaEffectCal
             }
             if facts.modules[caller.module_index].facts[position].unsafe_foreign_name == .Val(foreign) {
                 _ :: sema_effect_require_unsafe_call(foreign, true, audited, node.span, &diagnostics)
+            }
+            if facts.modules[caller.module_index].facts[position].foreign_capability == .Val(capability) && !audited {
+                row :: diagnostic_registry_row("E0702") ?? panic("E0702 has no registry row")
+                &diagnostics.push(sema_error("E0702", node.span, row.what.replace("{{subject}}", "call `{capability.name}` uses capability `{capability.sigil}` outside `#Unsafe`"), "a foreign capability can write to or transfer ownership of Jet storage, so a raw call needs an audited boundary", "call `{capability.name}` inside `#Unsafe(\"…\") {{ … }}`, or expose it through a generated typed binding"))
             }
         }
     }
@@ -1875,8 +2010,8 @@ fn sema_effect_check_unsafe_statements_tree(nodes: &[SemaEffectNode], facts: Sem
     }
 }
 
-// Rust `Effects.rs` `e0712`: the region is both the call and the scope frame;
-// its own caps never grant the effects it is missing.
+// `e0712`: the region is both the call and the scope frame; its own caps never
+// grant the effects it is missing.
 fn sema_effect_scope_diagnostic(marker: String, over: [String], bounds: [String], span: Span) -> Diagnostic {
     allowed :: if bounds.len() == 0 -> "no effects" else -> "`{sema_effect_show(bounds)}`"
     diagnostic :: sema_error("E0712", span, "this `#{marker}` region uses the effect `{sema_effect_show(over)}`, which it has no authority for", "`#{marker}(…)` allows only {allowed}; an effect reached inside — even through a call — must be in that list", "add `{sema_effect_show(over)}` to the `#{marker}(…)` list, or move that work outside the region")
@@ -1924,8 +2059,7 @@ fn sema_effect_check_scope_bounds(marker: String, parsed: SemaEffectScopeBounds,
     valid
 }
 
-// Rust `Effects.rs` `e0747`: the callback's effects against its parameter's
-// invocation row.
+// `e0747`: the callback's effects against its parameter's invocation row.
 fn sema_effect_callback_diagnostic(over: [String], bounds: [String], span: Span) -> Diagnostic {
     over_list :: sema_effect_show(over)
     allowed :: if bounds.len() == 0 -> "the parameter is `fn(…) -[]>`, so the callback must be pure" else -> "the parameter is `fn(…) -[{sema_effect_show(bounds)}]>`, so the callback may use only those effects"
@@ -2043,8 +2177,10 @@ fn sema_effect_tfacts(node: SemaEffectNode, solved: [String]) -> TEffectFacts Ne
     TEffectFacts{direct: node.direct, solved: solved, call_edges: node.call_edges, maximal: node.maximal, direct_spans: node.direct_spans, maximal_span: node.maximal_span}
 }
 
+// Rust `e1264`: the span is the first entry of the declared effect row, or
+// the function's name when it declares none.
 fn sema_effect_secret_diagnostic(node: SemaEffectNode) -> Diagnostic {
-    sema_error("E1264", node.span, "`{node.name}` reads a secret but doesn't declare the `Secret` effect", "reading a secret always requires an explicit grant; unlike other effects, there is no silently inferred default", "add `Secret` to `{node.name}`'s effect row, or widen an existing row to cover it")
+    sema_error("E1264", node.row_span ?? node.name_span, "`{node.name}` reads a secret but doesn't declare the `Secret` effect", "reading a secret (`core.crypto.vault.get`) always requires an explicit grant — unlike other effects, there is no silently-inferred default here, so a function must opt in even with no other explicit effect row at all.", "add `-[Secret]>` to `{node.name}`'s signature (or widen an existing effect row to cover it)")
 }
 
 fn sema_effect_unbounded_dispatch_diagnostic(dispatch: TEffectSpan) -> Diagnostic {
@@ -2633,6 +2769,12 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
         }
         sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^function_diagnostics)
     }
+    loop node_index in 0..<nodes.len() {
+        if nodes[node_index].callback_bounds.len() == 0 -> next
+        callback_diagnostics := [Diagnostic]{}
+        sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, &callback_diagnostics)
+        sema_effect_publish_diagnostics(&diagnostics, inputs[nodes[node_index].module_index].source_segments, ^callback_diagnostics)
+    }
     loop module_index in 0..<inputs.len() {
         module_row :: inputs[module_index]
         bound_diagnostics := [Diagnostic]{}
@@ -2706,8 +2848,8 @@ fn sema_effects_check_modules(modules: &[SemaGraphModuleResult], inputs: [SemaEf
             modules[target].functions[function_index].effects = sema_effect_tfacts(nodes[node_index], solved[node_index])
         }
     }
-    // Rust `Purity.rs` e3401 names the first impure call and its chain; the
-    // reached row is the report when no single call carries it.
+    // e3401 names the first impure call and its chain; the reached row is the
+    // report when no single call carries it.
     loop (pending, node_index) in pure_nodes {
         pure_diagnostics := [Diagnostic]{}
         &pure_diagnostics.push(sema_pure_root_find(nodes[node_index].key, modules, decls, true) ?? sema_effect_pure_diagnostic(nodes[node_index], pure_rows[pending]))
@@ -2816,19 +2958,21 @@ fn sema_effect_collect_module(functions: [FnBody], module_row: SemaEffectModuleI
 fn sema_effect_collect_one(nodes: &[SemaEffectNode], node_index: Int, function: FnBody, calls: SemaEffectCallIndex, module_index: Int, any_unsafe: Bool, diagnostics: &[Diagnostic]) {
     sema_effect_collect_function(&nodes, node_index, function, calls, module_index, &diagnostics)
     // A call needs an audited region only when its callee is an
-    // `#Unsafe` function or inline foreign function; with none in the graph
-    // the walk finds nothing.
+    // `#Unsafe` function, an inline foreign function or a raw `extern rust`
+    // function taking a capability; with none in the graph the walk finds
+    // nothing.
     if any_unsafe {
         audited := function.is_unsafe && (function.unsafe_gate.map((gate) -> gate.enabled) ?? false)
         sema_effect_check_unsafe_statements_tree(&nodes, calls, sema_effect_caller_slot(calls, module_index, function.key), function.tree, function.body, audited, &diagnostics)
     }
 }
 
-// Whether any call site names an `#Unsafe` inline foreign callee.
+// Whether any call site names an `#Unsafe` inline foreign callee or a raw
+// `extern rust` callee taking a capability.
 fn sema_effect_calls_any_unsafe_foreign(modules: [SemaEffectModuleCalls]) -> Bool Never! {
     loop module_calls in modules {
         loop fact in module_calls.facts {
-            if fact.unsafe_foreign_name != None -> return true
+            if fact.unsafe_foreign_name != None || fact.foreign_capability != None -> return true
         }
     }
     false
@@ -3212,7 +3356,7 @@ fn sema_effect_walk_binary(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts
 // which the generic visitors cannot do.
 fn sema_effect_walk_expr_children(walk: SemaEffectWalk, nodes: &[SemaEffectNode], facts: SemaEffectCallIndex, diagnostics: &[Diagnostic], caller: SemaEffectCaller, tree: BodyTree, node: BodyNode) {
     if node.kind == {
-        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_) | .TypeTest(_, _) -> {}
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .Local(_) | .Unit | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .InvariantViolation(_, _) | .Absent | .SelectStart | .Never(_, _) | .TypeTest(_, _) -> {}
         .StrLit(parts) -> loop part in parts {
             if part == {
                 .Interpolation(value, _) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, value)
@@ -3607,7 +3751,7 @@ fn sema_effect_walk_require_children(walk: SemaEffectWalk, nodes: &[SemaEffectNo
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, condition)
             if message == .Val(message_value) -> sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, message_value)
         }
-        .RequireEq(left, right) -> {
+        .RequireEq(left, right, _) -> {
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, left)
             sema_effect_walk_visit(walk, &nodes, facts, &diagnostics, caller, tree, right)
         }

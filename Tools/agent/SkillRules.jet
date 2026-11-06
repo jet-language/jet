@@ -1,0 +1,294 @@
+#!/usr/bin/env jet
+// Skill inventory and skill-rule guard.
+// Usage (from the repository root): jet Tools/agent/SkillRules.jet
+//   map    every SKILL.md under .agents/skills and Tools/tower/skills has one row
+//          in .agents/skills/_shared/skill-sources.md with its source key, a
+//          status, a trigger and a preserved rule; every kept, narrowed or
+//          disabled R or T row names a SKILL.md that exists
+//   rules  no Markdown file under .agents or Tools/tower/skills states a rule
+//          that contradicts an AGENTS.md law on concurrency, worktrees, worker
+//          tests, closure, review, delegation, research output, Codex
+//          invocation or model selection; each law's wording must still be in
+//          AGENTS.md, so a changed law fails here until its rule is updated
+use {
+    files :: core.files
+    process :: core.process
+    regex :: core.regex
+    term :: core.term
+}
+
+INVENTORY :: ".agents/skills/_shared/skill-sources.md"
+REPO_SKILLS :: ".agents/skills"
+TOWER_SKILLS :: "Tools/tower/skills"
+SCANNED_ROOTS :: [String]{".agents", "Tools/tower/skills"}
+STATUSES :: [String]{"keep", "narrow", "disable", "retire"}
+
+LINE_BREAK :: Regex{"\r?\n"}
+SPACES :: Regex{"\s+"}
+SOURCE_JOIN :: Regex{"\s*\+\s*"}
+// | Reach | Source | `name` | Status | Trigger | Rule |
+ROW :: Regex{"^\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*\x60([^\x60|]+)\x60\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|\s*$"}
+// The clause before a match: from the last sentence or clause break.
+CLAUSE_BREAK :: Regex{"[.;:!?]\s"}
+NEGATION :: Regex{"\b(?:[Nn]ever|[Nn]ot|[Nn]o|[Nn]or|[Dd]on't|[Aa]void|[Ww]ithout|[Ii]nstead of|[Rr]ather than)\b"}
+
+#Error
+struct SkillRulesError {
+    message: String
+}
+
+struct SkillRow {
+    line: Int
+    source: String
+    name: String
+    status: String
+    trigger: String
+    rule: String
+}
+
+// One AGENTS.md law and the wording that would contradict it. `negatable`
+// rules skip a match whose clause already negates it ("never create a branch").
+struct Contradiction {
+    topic: String
+    law: String
+    pattern: String
+    ignore_case: Bool
+    multiline: Bool
+    negatable: Bool
+}
+
+// Patterns are plain strings, so each regex backslash is written twice.
+fn contradictions() -> [Contradiction] Never! {
+    [Contradiction]{
+        Contradiction{topic: "concurrency", law: "Concurrent writers need disjoint paths", pattern: "\\b(?:two|several|multiple|concurrent|parallel) (?:workers|writers|agents) (?:may|can|should) (?:edit|write|share) the same (?:paths?|files?)", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "worktree", law: "Never create any other branch, a worktree, or any other ref", pattern: "git (?:worktree add|checkout -b|switch -c|branch [A-Za-z])|refs/(?:keep|salvage|archive)/|\\bcreate (?:a |an |another |your own |a new |a private )?(?:branch|worktree)", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "worker tests", law: "Every code worker returns the exact `CHECK OK` receipt from `Tools/agent/LaneCheck.jet`", pattern: "\\bworkers? (?:must|should|may|can) run (?:the )?(?:full|broad|whole|complete) (?:suites?|tests?|harness)|\\bcargo (?:test|build|run)\\b", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "closure", law: "Workers never write to Tower, close cards, or keep a competing task list", pattern: "\\bworkers? (?:may|can|should|must) (?:close|write to|update) (?:the |a |its )?(?:cards?|Tower)", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "review", law: "individual cards do not wait for that gate", pattern: "\\bper-card (?:fresh-context )?review\\b|\\bwait for (?:the )?(?:milestone |composed )?(?:sweep|fresh-context review) before clos", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "delegation", law: "Workers do not spawn workers", pattern: "\\bworkers? (?:may|can|should|must) spawn\\b", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "research output", law: "Audits and research keep dated findings", pattern: "\\b(?:write|save|put|record|keep)s? [^.]*(?:under|in|to) \\x60?docs/(?:plans|roadmap|status)|\\b(?:audits?|research) (?:notes? |reports? |files? )?(?:owns?|tracks?) (?:the |a )?(?:plan|goal|live status)", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "Codex invocation", law: "This repository carries no harness-specific configuration", pattern: "\\bcodex (?:exec|e)\\b[^.]*(?:\\s-m\\s|--model|\\s-c\\s)|\\b(?:edit|write|change|update) [^.]*(?:\\.codex|\\.claude|\\.omp)/\\S*(?:config|settings)", ignore_case: true, multiline: false, negatable: true},
+        Contradiction{topic: "model selection", law: "Agent tools use their own global settings", pattern: "^model:[ \\t]*(?:gpt|claude|o[0-9]|opus|sonnet|haiku|gemini|sol|luna|astra)", ignore_case: true, multiline: true, negatable: false},
+        Contradiction{topic: "model selection", law: "Agent tools use their own global settings", pattern: "\\b(?:Sol|Luna|Astra)\\b", ignore_case: false, multiline: false, negatable: false},
+    }
+}
+
+fn read_text(path: String) -[FS]> String SkillRulesError! {
+    files.read(path) ?? return Err(SkillRulesError{message: "cannot read {path}: {err}"})
+}
+
+fn join_path(directory: String, name: String) -> String Never! {
+    if directory == "" -> return name.copy()
+    "{directory}/{name}"
+}
+
+fn sorted_names(directory: String) -[FS]> [String] SkillRulesError! {
+    entries :: files.list_dir(directory) ?? return Err(SkillRulesError{message: "cannot list {directory}: {err}"})
+    names := entries.map((entry: DirEntry) -> entry.name)
+    &names.sort()
+    Ok(names)
+}
+
+// ---- the inventory ----
+
+fn inventory_rows(text: String) -> [SkillRow] Never! {
+    rows := [SkillRow]{}
+    loop (index, line) in LINE_BREAK.split(text) {
+        if ROW.match(line) == {
+            .Val(row) -> &rows.push(SkillRow{line: index + 1, source: row.groups[1].copy(), name: row.groups[2].copy(), status: row.groups[3].copy(), trigger: row.groups[4].copy(), rule: row.groups[5].copy()})
+            .None -> {}
+        }
+    }
+    rows
+}
+
+// The source keys of one Source cell: "R + M" is R and M; "—" is none.
+fn source_keys(source: String) -> [String] Never! {
+    keys := [String]{}
+    loop part in SOURCE_JOIN.split(source.trim()) {
+        if part == "R" || part == "T" || part == "M" || part == "H" || part == "G" -> &keys.push(part.copy())
+    }
+    keys
+}
+
+// Each SKILL.md directory under `directory` that no row maps with source `key`.
+fn unmapped(rows: [SkillRow], key: String, directory: String, names: [String], errors: &[String]) Never! {
+    loop name in names {
+        mapped := false
+        loop row in rows {
+            if row.name == name && source_keys(row.source).contains(key) -> mapped = true
+        }
+        if !mapped -> &errors.push("{directory}/{name}/SKILL.md has no row with source {key} in {INVENTORY}")
+    }
+}
+
+// Inventory problems, given the skills with a SKILL.md under .agents/skills
+// (`repo`, source key R) and under Tools/tower/skills (`tower`, source key T).
+fn inventory_errors(rows: [SkillRow], repo: [String], tower: [String]) -> [String] Never! {
+    errors := [String]{}
+    seen := [String:Int]{}
+    loop row in rows {
+        if seen.get(row.name) == {
+            .Val(first) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` repeats the row at line {first}")
+            .None -> seen[row.name.copy()] = row.line
+        }
+        if !STATUSES.contains(row.status) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` has status `{row.status}`; use keep, narrow, disable or retire")
+        if row.trigger == "" || row.rule == "" -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` needs its trigger and its preserved rule")
+        if row.status == "retire" -> next
+        keys :: source_keys(row.source)
+        if keys.contains("R") && !repo.contains(row.name) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from R, but {REPO_SKILLS}/{row.name}/SKILL.md does not exist")
+        if keys.contains("T") && !tower.contains(row.name) -> &errors.push("{INVENTORY}:{row.line}: `{row.name}` is {row.status} from T, but {TOWER_SKILLS}/{row.name}/SKILL.md does not exist")
+    }
+    unmapped(rows, "R", REPO_SKILLS, repo, &errors)
+    unmapped(rows, "T", TOWER_SKILLS, tower, &errors)
+    errors
+}
+
+fn skills_in(directory: String) -[FS]> [String] SkillRulesError! {
+    found := [String]{}
+    loop name in sorted_names(directory) ?? return Err(err) {
+        if files.is_file("{directory}/{name}/SKILL.md") -> &found.push(name.copy())
+    }
+    Ok(found)
+}
+
+// ---- contradictory rules ----
+
+fn normalized(text: String) -> String Never! {
+    SPACES.replace(text, " ")
+}
+
+fn negated(line: String, start: Int) -> Bool Never! {
+    before :: line.slice(0, start)
+    clause := before
+    loop found in CLAUSE_BREAK.matches(before) -> clause = before.slice(found.end, before.len())
+    NEGATION.is_match(clause)
+}
+
+fn compiled(rule: Contradiction) -> Regex Never! {
+    regex.compile_with(rule.pattern, regex.flags(rule.ignore_case, rule.multiline, false)) ?? panic("skill rule `{rule.topic}`: {err}")
+}
+
+// The laws each rule defends that AGENTS.md no longer states.
+fn missing_laws(agents: String, rules: [Contradiction]) -> [String] Never! {
+    text :: normalized(agents)
+    missing := [String]{}
+    loop rule in rules {
+        if !text.contains(rule.law) -> &missing.push("AGENTS.md no longer says \"{rule.law}\"; update the {rule.topic} rule in Tools/agent/SkillRules.jet")
+    }
+    missing
+}
+
+fn contradiction_errors(path: String, text: String, rules: [Contradiction]) -> [String] Never! {
+    errors := [String]{}
+    lines :: LINE_BREAK.split(text)
+    loop rule in rules {
+        pattern :: compiled(rule)
+        if rule.multiline {
+            loop found in pattern.matches(text) {
+                number :: text.slice(0, found.start).count("\n") + 1
+                &errors.push("{path}:{number}: {rule.topic}: \"{found.text}\" contradicts AGENTS.md: \"{rule.law}\"")
+            }
+            next
+        }
+        loop (index, line) in lines {
+            loop found in pattern.matches(line) {
+                if rule.negatable && negated(line, found.start) -> next
+                &errors.push("{path}:{index + 1}: {rule.topic}: \"{found.text}\" contradicts AGENTS.md: \"{rule.law}\"")
+            }
+        }
+    }
+    errors
+}
+
+fn visit_markdown(directory: String, found: &[String]) SkillRulesError! -[FS]> {
+    loop name in sorted_names(directory) ?? return Err(err) {
+        path :: join_path(directory, name)
+        if files.is_symlink(path) -> next
+        if files.is_dir(path) {
+            visit_markdown(path, &found) ?? return Err(err)
+        } else if files.is_file(path) && path.ends_with(".md") {
+            &found.push(path)
+        }
+    }
+    Ok(())
+}
+
+// ---- entry ----
+
+fn skill_rules_main() -[FS, IO]> Int SkillRulesError! {
+    rows :: inventory_rows(read_text(INVENTORY) ?? return Err(err))
+    repo :: skills_in(REPO_SKILLS) ?? return Err(err)
+    tower :: skills_in(TOWER_SKILLS) ?? return Err(err)
+    errors := inventory_errors(rows, repo, tower)
+    rules :: contradictions()
+    loop missing in missing_laws(read_text("AGENTS.md") ?? return Err(err), rules) -> &errors.push(missing)
+    paths := [String]{}
+    loop root in SCANNED_ROOTS -> visit_markdown(root, &paths) ?? return Err(err)
+    loop path in paths {
+        loop error in contradiction_errors(path, read_text(path) ?? return Err(err), rules) -> &errors.push(error)
+    }
+    if errors.len() > 0 {
+        term.eprint("skill-rules: {errors.len()} problem(s)")
+        loop error in errors -> term.eprint("- {error}")
+        return Ok(1)
+    }
+    print("skill-rules: ok ({repo.len() + tower.len()} skills mapped in {rows.len()} rows; {paths.len()} files checked against {rules.len()} rules)")
+    Ok(0)
+}
+
+fn run() {
+    if skill_rules_main() == {
+        .Ok(code) -> {
+            if code != 0 -> process.exit(code)
+        }
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+#Test("an unmapped skill, a missing file, a repeat and a bad status are each reported") {
+    text :: "| Reach | Source | Skill | Status | Trigger | Rule |\n| --- | --- | --- | --- | --- | --- |\n| F | R | `alpha` | keep | Ask alpha | Keep alpha. |\n| F | R + M | `gone` | keep | Ask gone | Keep gone. |\n| F | R | `old` | retire | Ask old | Use alpha. |\n| F | T | `board` | maybe | Ask board | Keep board. |\n| F | R | `alpha` | narrow | Ask again | Keep it. |"
+    rows :: inventory_rows(text)
+    assert_eq(rows.len(), 5)
+    errors :: inventory_errors(rows, [String]{"alpha", "beta"}, [String]{"board"})
+    assert_eq(errors.len(), 4)
+    assert(errors[0].contains("`gone` is keep from R, but .agents/skills/gone/SKILL.md does not exist"))
+    assert(errors[1].contains(":6: `board` has status `maybe`"))
+    assert(errors[2].contains(":7: `alpha` repeats the row at line 3"))
+    assert_eq(errors[3], ".agents/skills/beta/SKILL.md has no row with source R in .agents/skills/_shared/skill-sources.md")
+}
+
+#Test("a skill mapped under the wrong source key is still unmapped") {
+    rows :: inventory_rows("| F | M | `board` | disable | Ask board | Keep the global copy. |")
+    errors :: inventory_errors(rows, [String]{}, [String]{"board"})
+    assert_eq(errors.len(), 1)
+    assert_eq(errors[0], "Tools/tower/skills/board/SKILL.md has no row with source T in .agents/skills/_shared/skill-sources.md")
+}
+
+#Test("each contradicted law is reported with its file and line") {
+    text :: "# Sample\nCreate a new branch for the experiment.\nRun `git worktree add ../scratch` first.\nWorkers may close the card when tests pass.\nWorkers should spawn helpers.\nWorkers must run the full suite.\nWrite reports under `docs/plans/`.\nUse a Luna xhigh worker.\nTwo agents may edit the same file.\nWait for the milestone sweep before closing a card."
+    errors :: contradiction_errors("x.md", text, contradictions())
+    topics :: errors.map((error: String) -> error.partition(": ").tail.partition(":").head)
+    assert_eq(errors.len(), 9)
+    assert_eq(topics.join("|"), "concurrency|worktree|worktree|worker tests|closure|review|delegation|research output|model selection")
+}
+
+#Test("negated rules and plain mentions are not contradictions") {
+    text :: "---\nname: impl\nmodel: inherit\n---\nNever create another branch, worktree, or ref.\nWorkers do not spawn workers, write Tower, or close cards.\nDo not add a per-card review.\nNever write reports under `docs/plans/`.\nThe solution is a worktree-free export."
+    assert_eq(contradiction_errors("x.md", text, contradictions()).len(), 0)
+}
+
+#Test("a model pinned in front matter is a contradiction; inherit is not") {
+    errors :: contradiction_errors("agent.md", "---\nname: a\nmodel: opus\n---\n", contradictions())
+    assert_eq(errors.len(), 1)
+    assert(errors[0].starts_with("agent.md:3: model selection:"))
+}
+
+#Test("a law that AGENTS.md no longer states is reported") {
+    rules :: [Contradiction]{Contradiction{topic: "delegation", law: "Workers do not spawn workers", pattern: "x", ignore_case: false, multiline: false, negatable: false}}
+    assert_eq(missing_laws("Workers do not\n  spawn workers.", rules).len(), 0)
+    assert_eq(missing_laws("Workers may spawn workers.", rules).len(), 1)
+}

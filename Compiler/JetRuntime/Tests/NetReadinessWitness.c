@@ -1,4 +1,4 @@
-/* Real composed Jet-object client; link with --wrap=jet_rt_free. */
+/* Real composed Jet-object client. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -8,7 +8,7 @@ typedef struct { int64_t readable,writable; } Ready;
 _Static_assert(sizeof(Ready)==16 && _Alignof(Ready)==8,"Ready16");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Ready *jet_rt_record_new_jet_net_ready(uint8_t,uint8_t);
 extern bool jet_rt_record_get_jet_net_ready_readable(Ready *);
 extern bool jet_rt_record_get_jet_net_ready_writable(Ready *);
@@ -29,13 +29,15 @@ static void watch(void *ptr,int64_t size) {
     for(size_t i=0;i<count;++i) assert(watched[i].ptr!=ptr || watched[i].freed);
     watched[count++]=(struct Watched){ptr,size,0};
 }
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     for(size_t i=count;i>0;--i) if(watched[i-1].ptr==ptr && !watched[i-1].freed) {
         assert(size==watched[i-1].size && align==8); watched[i-1].freed=1; break;
     }
-    __real_jet_rt_free(ptr,size,align);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     jet_rt_handle_drop_jet_net_ready(NULL); jet_rt_handle_drop_jet_net_ready_interest(NULL); jet_rt_handle_drop_jet_net_shutdown(NULL);
     const uint8_t inputs[]={0,1,2,255};

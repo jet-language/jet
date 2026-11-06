@@ -5,7 +5,8 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 checker_source="$script_dir/ci-perf-check.sh"
 dashboard_source="$script_dir/dashboard.sh"
 corpus_source="$script_dir/corpus.tsv"
-scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}
+. "$script_dir/../agent/roots.sh"
+scratch_parent=${JET_PERF_SCRATCH_ROOT:-"$JET_STATE_ROOT/perf-bench"}
 scratch_parent_resolved=$(realpath -m -- "$scratch_parent")
 case "$scratch_parent_resolved" in
     /tmp|/tmp/*|*/target|*/target/*)
@@ -25,8 +26,9 @@ root=$(mktemp -d "$scratch_parent/ci-perf-check.XXXXXX")
 trap 'rm -rf "$root"' EXIT
 
 fixture_perf="$root/Tools/perf"
-mkdir -p "$fixture_perf"
+mkdir -p "$fixture_perf" "$root/Tools/agent"
 cp "$checker_source" "$fixture_perf/ci-perf-check.sh"
+cp "$script_dir/../agent/roots.sh" "$root/Tools/agent/roots.sh"
 chmod +x "$fixture_perf/ci-perf-check.sh"
 fixture_checker="$fixture_perf/ci-perf-check.sh"
 fixture_baseline="$fixture_perf/baseline.json"
@@ -262,7 +264,7 @@ assert_dashboard_source 'Examples/features/devloop/job_runner.jet|Tools/perf/edi
 assert_dashboard_source '"$JET_BIN" run run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" jobs'
 assert_dashboard_source 'parity_check_job_runner_case edit Tools/perf/edits/job_runner.jet'
-assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'
+assert_dashboard_source 'TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$JET_STATE_ROOT/perf-bench"}'
 assert_dashboard_source 'run_dir=$(mktemp -d "$TMP_ROOT/compiler-speed.XXXXXX")'
 assert_dashboard_source 'run_bounded_process()'
 assert_dashboard_source 'record_machine_load'
@@ -286,7 +288,7 @@ assert_dashboard_source 'mv -f -- "$baseline_tmp" "$BASELINE"'
 assert_checker_source 'check_identity host "$current_host"'
 assert_checker_source 'realpath -m -- "$SCRATCH_ROOT"'
 assert_checker_source 'df -P "$SCRATCH_ROOT"'
-assert_checker_source 'SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$HOME/.cache/jet-dev/perf-bench"}'
+assert_checker_source 'SCRATCH_ROOT=${JET_PERF_SCRATCH_ROOT:-"$JET_STATE_ROOT/perf-bench"}'
 assert_checker_source 'CI_RUN_DIR=$(mktemp -d "$SCRATCH_ROOT/compiler-speed-ci.XXXXXX")'
 assert_checker_source 'cleanup_ci()'
 assert_checker_source 'JET_PERF_SCRATCH_ROOT="$SCRATCH_ROOT" TMPDIR="$SCRATCH_ROOT"'

@@ -7,7 +7,6 @@ use {
 }
 // GATE #4494: actual native filesystem, Barrier/Arc and thread providers.
 
-// Rust: tests/canvas.rs:1776
 #Test("canvas_multi_input_transactions_guard_nested_pattern_scope_and_stale_edits") {
     path :: write_fixture("nested_multi_input_tx", "fn choose(x: Int) -> Int {{\n    if x == {{\n        1 -> {{\n            values :: [1, 2]\n            return values[0]\n        }}\n        else -> {{ return 0 }}\n    }}\n}}\n\nfn run() {{ print(choose(1)) }}\n")
     graph_json :: graph_json_for_file(path).expect("nested multi-input graph")
@@ -40,7 +39,6 @@ use {
     assert(err.contains("\"kind\":\"conflict\""), err)
     assert_eq(fs.read_to_string(path).unwrap(), invalid_before)
 }
-// Rust: tests/canvas.rs:1855
 #Test("canvas_statement_state_nodes_and_toggle_transaction") {
     path :: write_fixture("statement_state", "fn run() {{\n    #Off print(\"off\")\n    #DebugOnly print(\"debug\")\n    print(\"on\")\n}}\n")
     graph :: graph_json_for_file(path).expect("state graph")
@@ -68,13 +66,11 @@ use {
     apply_transaction_json(path, restore).expect("restore state")
     assert_eq(fs.read_to_string(path).unwrap(), on)
 }
-// Rust: tests/canvas.rs:1920
 #Test("canvas_projects_typestate_diagram_facts") {
     path :: write_fixture("typestate_diagram", "struct Door {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n")
     graph :: graph_json_for_file(path).expect("typestate diagram")
     loop field in ["\"state_graphs\":[{{", "\"name\":\"Open\",\"terminal\":true", "\"name\":\"Orphan\",\"terminal\":true,\"reachable\":false", "\"operation\":\"open\",\"from\":\"Closed\",\"to\":\"Open\""] -> assert(graph.contains(field), graph)
 }
-// Rust: tests/canvas.rs:1950
 #Test("canvas_debug_only_execution_path_keeps_source_backed_incoming_wires") {
     path :: write_fixture("debug_only_execution_flow", "fn run() {{\n    print(\"before\")\n    #DebugOnly print(\"debug\")\n    print(\"after\")\n}}\n")
     source :: fs.read_to_string(path).unwrap()
@@ -93,7 +89,6 @@ use {
     assert(control_wire(before, debug) != None, "missing before -> debug wire: {graph}")
     assert(control_wire(debug, after) != None, "missing debug -> after wire: {graph}")
 }
-// Rust: tests/canvas.rs:1996
 #Test("canvas_projects_and_edits_subjectless_guard_arms") {
     path :: write_fixture("subjectless_guards", "fn run() -> Int {{\n    ready :: true\n    if {{\n        ready -> {{ return 1 }}\n        else -> {{ return 0 }}\n    }}\n}}\n")
     graph :: graph_json_for_file(path).expect("canvas guard graph")
@@ -107,7 +102,6 @@ use {
     edited :: fs.read_to_string(path).unwrap()
     assert(edited.contains("false ->"), edited)
 }
-// Rust: tests/canvas.rs:2024
 #Test("canvas_classic_pattern_branch_transactions_use_canonical_switch") {
     path :: write_fixture("classic_pattern_transactions", "fn choose(x: Int?) -> Int {{\n    if x == Val(_) {{ return 1 }} else {{ return 0 }}\n}}\n\nfn run() {{\n    print(choose(Val(1)))\n}}\n")
     graph :: graph_json_for_file(path).expect("classic pattern graph")
@@ -133,7 +127,6 @@ use {
     converted :: fs.read_to_string(path).unwrap()
     loop field in ["if x == {{", ".None ->", ".Val(_) ->", "else ->"] -> assert(converted.contains(field), converted)
 }
-// Rust: tests/canvas.rs:2075
 #Test("canvas_classic_if_ignores_braces_inside_leading_trivia") {
     path :: write_fixture("classic_if_trivia", "fn run() {{\n    ready :: true\n    if /* {{ trivia */ ready {{ print(\"ready\") }}\n}}\n")
     graph :: graph_json_for_file(path).expect("commented classic graph")
@@ -141,7 +134,6 @@ use {
     assert(!graph.contains("\"title\":\"if guards\""), graph)
     assert(graph.contains("/* {{ trivia */"), graph)
 }
-// Rust: tests/canvas.rs:2091
 #Test("canvas_wired_insert_transaction_writes_call_with_origin_value") {
     path :: write_fixture("wired_insert", "fn use_int(n: Int) {{\n    print(n)\n}}\n\nfn demo(x: Int) {{\n}}\n\nfn run() {{\n    demo(1)\n}}\n")
     src :: fs.read_to_string(path).unwrap()
@@ -166,7 +158,6 @@ use {
     assert(changed.contains("helper()"), changed)
     assert(!changed.contains("helper(1)"), changed)
 }
-// Rust: tests/canvas.rs:2150
 #Test("canvas_comment_regions_round_trip_through_source_comments") {
     path :: write_fixture("comment_region", CANVAS_COMMENT_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -196,7 +187,6 @@ use {
     assert(!deleted.contains("canvas:comment"), deleted)
     assert(deleted.contains("print(\"damage\")"), deleted)
 }
-// Rust: tests/canvas.rs:2210
 #Test("canvas_collapse_extract_preview_and_inline_are_source_refactors") {
     path :: write_fixture("collapse_extract", CANVAS_COLLAPSE_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -232,7 +222,6 @@ use {
     inlined :: fs.read_to_string(path).unwrap()
     assert(inlined.contains("return limit + 1"), inlined)
 }
-// Rust: tests/canvas.rs:2278
 #Test("canvas_structural_writes_insert_control_and_fallible_rails_with_undo_source") {
     path :: write_fixture("structural_writes", CANVAS_STRUCTURAL_WRITE_FIXTURE)
     original :: fs.read_to_string(path).unwrap()
@@ -255,7 +244,6 @@ use {
     expected :: format_source(original).expect("format original")
     assert_eq(fs.read_to_string(path).unwrap(), expected)
 }
-// Rust: tests/canvas.rs:2339
 #Test("canvas_structural_insert_uses_exec_pin_target_and_refuses_stale_target") {
     path :: write_fixture("structural_pin_target", "fn run() {{\n    print(\"before\")\n    print(\"target\")\n    print(\"after\")\n}}\n")
     before :: fs.read_to_string(path).unwrap()
@@ -293,7 +281,6 @@ use {
     assert(output_inserted.find("if true").unwrap() > output_inserted.find("print(\"before\")").unwrap())
     assert(output_inserted.find("if true").unwrap() < output_inserted.find("print(\"target\")").unwrap())
 }
-// Rust: tests/canvas.rs:2433
 #Test("canvas_structural_incomplete_wire_refuses_without_writing") {
     path :: write_fixture("structural_incomplete_wire", "fn run() {{\n    print(\"target\")\n}}\n")
     before :: fs.read_to_string(path).unwrap()
@@ -321,7 +308,6 @@ use {
     assert(data_err.contains("Canvas structural nodes connect through the exec pin"), data_err)
     assert_eq(fs.read_to_string(data_path).unwrap(), data_before)
 }
-// Rust: tests/canvas.rs:2500
 #Test("canvas_fallible_rail_is_excluded_outside_fallible_function") {
     path :: write_fixture("fallible_rail_nonfallible", "fn compute() {{\n    print(1)\n}}\n")
     before :: fs.read_to_string(path).unwrap()
@@ -334,7 +320,6 @@ use {
     assert(!err.contains("E0403"), err)
     assert_eq(fs.read_to_string(path).unwrap(), before)
 }
-// Rust: tests/canvas.rs:2521
 #Test("canvas_stale_transaction_conflicts_without_writing") {
     path :: write_fixture("stale", CANVAS_FIXTURE)
     stale :: "{{\"schema_version\":1,\"op\":\"rename_binding\",\"revision\":\"sha256-stale\",\"from\":\"total\",\"to\":\"score\"}}"
@@ -342,7 +327,6 @@ use {
     assert(err.contains("\"kind\":\"conflict\""), err)
     assert(fs.read_to_string(path).unwrap().contains("total"))
 }
-// Rust: tests/canvas.rs:2530
 #Test("canvas_concurrent_clients_get_one_winner_and_current_revision_conflict") {
     path :: write_fixture("concurrent_conflict", CANVAS_FIXTURE)
     before :: fs.read_to_string(path).unwrap()
@@ -365,7 +349,6 @@ use {
     assert(loser.contains("\"kind\":\"conflict\""), loser)
     assert(loser.contains("\"current_revision\":\"{current_revision}\""), loser)
 }
-// Rust: tests/canvas.rs:2570
 #Test("canvas_code_lens_source_edit_uses_replace_source_transaction") {
     path :: write_fixture("code_lens_edit", "fn run() {{\n    print(\"old\")\n}}\n")
     before :: fs.read_to_string(path).unwrap()
@@ -377,7 +360,6 @@ use {
     assert(graph.contains("print(\\\"new\\\")"), graph)
     assert(fs.read_to_string(path).unwrap().contains("print(\"new\")"))
 }
-// Rust: tests/canvas.rs:2589
 #Test("canvas_query_search_references_source_jump_and_rename_preview") {
     path :: write_fixture("query", CANVAS_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -401,7 +383,6 @@ use {
     err :: query_json_for_file(path, stale).unwrap_err()
     assert(err.contains("\"kind\":\"conflict\""), err)
 }
-// Rust: tests/canvas.rs:2650
 #Test("canvas_project_search_and_references_share_project_revision") {
     dir :: temp_dir("project_query")
     fs.write(dir.join("package.jet"), "name: \"project_query\"\nversion: \"0.1.0\"\n").unwrap()
@@ -426,7 +407,6 @@ use {
     assert(stale.contains("\"kind\":\"conflict\""), stale)
     assert(fs.read_to_string(other).unwrap().contains("return 3"))
 }
-// Rust: tests/canvas.rs:2718
 #Test("canvas_project_rename_preview_and_atomic_commit_use_semantic_sites") {
     dir :: temp_dir("project_rename")
     fs.write(dir.join("package.jet"), "name: \"project_rename\"\nversion: \"0.1.0\"\n").unwrap()
@@ -462,7 +442,6 @@ use {
     assert(fs.read_to_string(entry).unwrap().contains("compute()"))
     assert(fs.read_to_string(other).unwrap().contains("compute()"))
 }
-// Rust: tests/canvas.rs:2818
 #Test("canvas_actions_project_palette_entries_and_preview_jit_backed_source_transactions") {
     path :: write_fixture("actions", CANVAS_FIXTURE)
     src :: fs.read_to_string(path).unwrap()
@@ -537,7 +516,6 @@ use {
     synth_reproject :: graph_json_for_file(synth_path).expect("synth reproject")
     assert(synth_reproject.contains("\"title\":\".decode\""), "reproject should show inserted Core function node: {synth_reproject}")
 }
-// Rust: tests/canvas.rs:3096
 #Test("canvas_actions_keep_entry_callees_and_exclude_foreign_binding_exports") {
     dir :: temp_dir("actions_exports")
     fs.create_dir_all(dir.join(".jet/bindings/js")).unwrap()
@@ -589,7 +567,6 @@ use {
     assert(error.contains("diagnostic") || error.contains("E"), error)
     assert_eq(fs.read_to_string(path).unwrap(), before_invalid)
 }
-// Rust: tests/canvas.rs:3254
 #Test("canvas_actions_preserve_nested_imported_module_callee") {
     dir :: temp_dir("actions_nested_import")
     fs.write(dir.join("helper.jet"), "module tools {{\n    fn square(n: Int) -> Int {{\n        return n * n\n    }}\n}}\n").unwrap()
@@ -616,7 +593,6 @@ use {
     assert(stale_error.contains("diagnostic") || stale_error.contains("E"), "flattened nested callee must fail sema: {stale_error}")
     assert_eq(fs.read_to_string(path).unwrap(), changed)
 }
-// Rust: tests/canvas.rs:3327
 #Test("canvas_core_catalog_browses_canonical_core_library_without_write_authority") {
     path :: write_fixture("core_catalog", "use m :: core.math\n\nfn run() {{\n    print(\"core\")\n}}\n")
     src :: fs.read_to_string(path).unwrap()
@@ -632,7 +608,6 @@ use {
     args_catalog :: query_json_for_file(path, args_query).expect("Canvas args catalog query")
     loop field in ["\"path\":\"core.args\"", "\"name\":\"help\"", "\"available\":false", "\"stageable\":true", "\"stage_reason_code\":\"method_only\"", "\"receiver_type\":\"ArgsSpec\"", "\"name\":\"receiver\",\"direction\":\"input\",\"type\":\"ArgsSpec\"", "\"unavailable_reason_code\":\"method_only\"", "Use this as a method on an ArgsSpec value."] -> assert(args_catalog.contains(field), args_catalog)
 }
-// Rust: tests/canvas.rs:3433
 #Test("canvas_core_catalog_uses_default_alias_without_import") {
     path :: write_fixture("core_catalog_default_alias", "fn run() {{\n    print(\"core\")\n}}\n")
     source :: fs.read_to_string(path).unwrap()
@@ -641,7 +616,6 @@ use {
     assert(actions.contains("\"insert_callee\":\"math.abs\""), actions)
     assert(!actions.contains("\"insert_callee\":\"core.math.abs\""), actions)
 }
-// Rust: tests/canvas.rs:3456
 #Test("canvas_core_insert_synthesizes_default_alias_import_without_import") {
     path :: write_fixture("core_insert_default_alias", "fn run() {{\n    print(1)\n}}\n")
     source :: fs.read_to_string(path).unwrap()
@@ -654,7 +628,6 @@ use {
     assert(after.contains("math.abs(1)"), after)
     assert_eq(format_source(after).unwrap(), after)
 }
-// Rust: tests/canvas.rs:3475
 #Test("canvas_library_action_preserves_events_example_source_and_refuses_bad_edits") {
     repo :: OSPath(env.manifest_dir())
     example :: fs.read_to_string(repo.join("Examples/features/ui/events.jet")).expect("read events Canvas example")

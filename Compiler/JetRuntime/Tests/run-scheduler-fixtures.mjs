@@ -2,8 +2,9 @@
 // Real runtime source + Jet fixture callbacks in one library object.
 // C only transports code pointers; no Rust provider or substitute scheduler.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
@@ -44,7 +45,10 @@ if (mode === 'assemble') {
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'link') {
-  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/scheduler-fixture.c'), join(dir, 'fixture.o'),
+  // The Jet linker writes jet_rt_fault_report into an image; this platform
+  // link takes it from the shared report source.
+  const faultReport = faultReportObject(mkdtempSync(join(out, 'fault-report-')));
+  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/scheduler-fixture.c'), join(dir, 'fixture.o'), faultReport,
     '-lpthread', '-ldl', '-lm', '-o', join(out, 'scheduler-fixture')]);
 } else {
   const failures = [];

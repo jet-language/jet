@@ -15,7 +15,7 @@ of a language rule.
 Each finding names its owner in the last column:
 
 - `card Fnn` / `card Tnn` / `card Dnn` is a proposed fix card. Its JSON is in
-  `/mnt/jetscratch/lanes/Main/q/cards/6128/` under the same key; Main files it
+  `$JET_SCRATCH_ROOT/lanes/Main/q/cards/6128/` under the same key; Main files it
   and the filed number replaces the key here.
 - `ballot Bnn` is a proposed owner ballot, in the same folder.
 - `#NNNN` is an existing card that already owns the finding.

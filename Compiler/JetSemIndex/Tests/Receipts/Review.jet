@@ -391,11 +391,11 @@ fn review_test_effect(function: String, direct: [String], inferred: [String], ca
     assert_eq(review_test_count(ops, ReviewOpKind.SignatureChanged), 0)
 }
 
-// Original tests/semantic_ops.rs16–76 and SemanticOps.rs244–288 are owned and
-// preserved in Tests/Receipts/SemanticOps.jet (S25), intentionally unchanged.
-// The following full review fixtures are unregistered acceptance hooks, NEVER
-// literal records pretending to be C4 output. Sources below are exact Rust
-// fixtures; the integration runner must load them and invoke the real CLI.
+// The Rust originals are owned and preserved in Tests/Receipts/SemanticOps.jet
+// (S25), intentionally unchanged. The following full review fixtures are
+// unregistered acceptance hooks, NEVER literal records pretending to be C4
+// output. Sources below are exact Rust fixtures; the integration runner must
+// load them and invoke the real CLI.
 fn review_test_comment_sources() -> [String] Never! {
     [String]{"fn run() {{ print(\"same\") }}\n", "// review comment\nfn run() {{ print(\"same\") }}\n"}
 }
@@ -413,15 +413,15 @@ fn review_test_join_sources() -> [String] Never! {
     [String]{"fn run() {{ print(\"base\") }}\n", "fn run() {{ print(\"head\") }}\n"}
 }
 
-// tests/review.rs293–320: actual checked comment-only comparison + CLI output.
+// Actual checked comment-only comparison + CLI output.
 fn review_test_comment_only_change_has_no_semantic_operation(before: SemIndex, after: SemIndex, success: Bool, stdout: String) {
     assert_eq(review_semantic_ops(before, after).len(), 0)
     assert(success)
     assert(stdout.contains(`"semantic_ops":[]`))
     assert(stdout.contains(`"changes":[]`))
 }
-// tests/review.rs324–388: receipt belongs head/run.jet with BOTH source hashes;
-// hand/run.jet has identical head bytes but no applicable operation receipt.
+// Receipt belongs head/run.jet with BOTH source hashes; hand/run.jet has
+// identical head bytes but no applicable operation receipt.
 fn review_test_review_uses_a_recorded_rename_and_ignores_hand_spelling(before: SemIndex, after: SemIndex, applicable: [SemanticOp], recorded_success: Bool, recorded_stdout: String, hand_success: Bool, hand_stdout: String) {
     recorded :: review_semantic_ops_with_receipts(before, after, applicable)
     assert_eq(review_test_count(recorded, ReviewOpKind.Renamed), 1)
@@ -436,8 +436,8 @@ fn review_test_review_uses_a_recorded_rename_and_ignores_hand_spelling(before: S
     assert(hand_stdout.contains(`"kind":"removed"`))
     assert(hand_stdout.contains(`"kind":"added"`))
 }
-// tests/review.rs392–442: canonical before old.jet/after new.jet identities,
-// exact target and equal source hashes. S25/caller supplies applicable receipt.
+// Canonical before old.jet/after new.jet identities, exact target and equal
+// source hashes. S25/caller supplies applicable receipt.
 fn review_test_review_uses_a_recorded_move_across_module_paths(before: SemIndex, after: SemIndex, applicable: [SemanticOp], success: Bool, stdout: String) {
     operations :: review_semantic_ops_with_receipts(before, after, applicable)
     assert_eq(review_test_count(operations, ReviewOpKind.Renamed), 0)
@@ -467,8 +467,8 @@ fn review_test_review_uses_a_recorded_move_across_module_paths(before: SemIndex,
     assert(!stdout.contains(`"kind":"added"`))
     assert(!stdout.contains(`"kind":"removed"`))
 }
-// tests/review.rs817–844: scan the real stale-before-hash receipt through S25,
-// then use its canonical applicability method (no local path/hash law).
+// Scan the real stale-before-hash receipt through S25, then use its canonical
+// applicability method (no local path/hash law).
 fn review_test_review_operation_fixture_matrix_ignores_changed_hash_receipts(before: SemIndex, after: SemIndex, scanned: [SemanticOp], paths: [String], before_hash: String, after_hash: String, success: Bool, stdout: String) -[FS, Env]> {
     applicable := [SemanticOp]{}
     loop operation in scanned {
@@ -478,7 +478,7 @@ fn review_test_review_operation_fixture_matrix_ignores_changed_hash_receipts(bef
     assert(success)
     assert(!stdout.contains(`"kind":"renamed"`))
 }
-// tests/review.rs958–984,989–1011: real effect solve and checked identity.
+// Real effect solve and checked identity.
 fn review_test_review_reports_effect_changes_as_checked_semantic_operations(before: SemIndex, after: SemIndex, success: Bool, stdout: String) {
     found := false
     loop operation in review_semantic_ops(before, after) {
@@ -494,10 +494,10 @@ fn review_test_review_aligns_signature_changes_by_checked_identity(before: SemIn
     assert(success)
     assert(stdout.contains(`"kind":"signature_changed"`))
 }
-// tests/review.rs179–289: semantic projection and all output assertions retained.
-// Actual authority/proof receipts/machine-record decoding belong the CLI lane;
-// decoded_status must come from its canonical MachineOutput reader, not JSON
-// reparsing or a fabricated literal. Source-only hooks do not prove CLI joins.
+// Semantic projection and all output assertions retained. Actual authority/proof
+// receipts/machine-record decoding belong the CLI lane; decoded_status must come
+// from its canonical MachineOutput reader, not JSON reparsing or a fabricated
+// literal. Source-only hooks do not prove CLI joins.
 fn review_test_review_joins_meaning_authority_and_receipt_changes(before: SemIndex, after: SemIndex, success: Bool, decoded_status: Bool, stdout: String) {
     assert(review_test_count(review_semantic_ops(before, after), ReviewOpKind.BodyChanged) > 0)
     assert(success)

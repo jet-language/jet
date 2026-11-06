@@ -22,24 +22,25 @@ struct ToolLiveInstall {
 // Copy every tool's executables into `generation_dir/bin`, record each
 // projection digest on the tool, and sync the directory. A live install
 // supplies its own lease; any other tool re-leases its checked StoreEntry.
-fn cli_materialize_generation_bins(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], live: ToolLiveInstall?) CLIError! -[FS, Env, Exec, Time, Rand]> {
+fn cli_materialize_generation_bins(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], ^live: ToolLiveInstall?) CLIError! -[FS, Env, Exec, Time, Rand]> {
     bin_dir :: files.join(generation_dir, "bin")
     files.create_dir(bin_dir)
     projected := [String]{}
+    held_live := ^live
     loop index in 0..<tools.len() {
         tool :: tools[index]
         if tool.bins.len() != tool.members.len() || tool.bins.len() == 0 -> return Err(CLIError.Other("profile tool has mismatched bin/member pairs"))
-        if live == .Val(install) {
+        if &held_live == .Val(install) {
             receipt :: install.receipt
             if receipt.reference == tool.reference && receipt.output_hash == tool.output_hash && receipt.store_root == tool.store_root {
-                tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, install.lease, &projected)
+                tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, &install.lease, &projected)
                 next
             }
         }
         roots :: HangarRoots{root: tool.store_root, dev_mode: true}
         entry :: cli_tool_store_entry(&verification, roots, tool)
-        fallback :: store_snapshot_lease(&verification, roots, entry) ?? return Err(CLIError.Store(err))
-        if cli_tool_project_bins(bin_dir, tool, fallback, &projected) == {
+        fallback := store_snapshot_lease(&verification, roots, entry) ?? return Err(CLIError.Store(err))
+        if cli_tool_project_bins(bin_dir, tool, &fallback, &projected) == {
             .Ok(digests) -> {
                 fallback.release()
                 tools[index].member_digests = digests
@@ -63,7 +64,7 @@ fn cli_tool_store_entry(verification: &StoreVerification, roots: HangarRoots, to
 
 // Project one tool's bin/member pairs through `lease`; the projection digests
 // in bin order.
-fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: CacheLease, projected: &[String]) -[FS, Env, Rand]> [String] CLIError! {
+fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: &CacheLease, projected: &[String]) -[FS, Env, Rand]> [String] CLIError! {
     digests := [String]{}
     loop index in 0..<tool.bins.len() {
         bin :: tool.bins[index]
@@ -75,7 +76,7 @@ fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: CacheL
         if projected.contains(folded) -> return Err(CLIError.Other("duplicate profile bin `{bin}`"))
         &projected.push(folded)
         destination :: files.join(bin_dir, physical)
-        proof :: lease.copy_profile_executable(member, destination)
+        proof :: &lease.copy_profile_executable(member, destination)
         if sys.is_unix() && ((proof.mode).bit_and(TOOL_PROFILE_EXEC_BITS)) == 0 -> return Err(CLIError.Other("profile projection is not executable"))
         cli_make_profile_projection_read_only(destination)
         &digests.push(proof.digest)

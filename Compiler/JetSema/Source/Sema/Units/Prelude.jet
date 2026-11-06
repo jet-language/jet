@@ -3,12 +3,12 @@ use {
     jet_parser.[parse_generated_source]
 }
 
-// Rust Bundle/Units.rs::inject_units_prelude: the only catalog is the ordinary
-// Prelude source SEMA_PRELUDE_UNITS_SOURCE (Registration/PreludeUnits.jet). This
-// stage changes AST items only; it never adds a physical/loaded module.
-// Parsing it (exact scales included) is most of a small program's compile,
-// so it runs only once some source mentions a catalog unit
-// (sema_units_mentioned); the scan for mentions reads the outline.
+// `inject_units_prelude`: the only catalog is the ordinary Prelude source
+// SEMA_PRELUDE_UNITS_SOURCE (Registration/PreludeUnits.jet). This stage changes
+// AST items only; it never adds a physical/loaded module. Parsing it (exact
+// scales included) is most of a small program's compile, so it runs only once
+// some source mentions a catalog unit (sema_units_mentioned); the scan for
+// mentions reads the outline.
 fn sema_units_catalog(diagnostics: &[Diagnostic]) -> [UnitFamilyDef] {
     parsed :: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     loop diagnostic in parsed.diagnostics -> &diagnostics.push(diagnostic)

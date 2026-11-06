@@ -1,6 +1,6 @@
-// 2: checked Output links and tool selection, ported from
-// Sema/Bundle/Outputs.rs. Resolve against the existing registration graph;
-// collect owned facts before publishing so no graph read survives a write.
+// 2: checked Output links and tool selection, ported. Resolve against the
+// existing registration graph; collect owned facts before publishing so no
+// graph read survives a write.
 use jet_foundation.[ConstDef, Diagnostic, EnumLitArg, Expr, ExprMember, Item, OutputCallableAuthority, OutputKind, OutputParam, ResolvedOutput, Span, Symbol, SymbolKind, TGenericParam, Type, diagnostic_from_registry, expr_span, failure_contract_of_function, name_mangle, symbol_id]
 
 enum SemaOutputIntent {
@@ -9,8 +9,8 @@ enum SemaOutputIntent {
     Test
 }
 
-// Rust Registration/Items.rs: metadata bindings are not runtime constants.
-// Explicit comptime bindings still use the normal evaluator.
+// Metadata bindings are not runtime constants. Explicit comptime bindings still
+// use the normal evaluator.
 fn sema_output_metadata_binding(definition: ConstDef) -> Bool {
     if definition.is_comptime -> return false
     ty :: definition.ty ?? return false
@@ -553,10 +553,9 @@ fn sema_output_resolve(graph: &SemaRegistrationGraph, intent: SemaOutputIntent, 
     ^diagnostics
 }
 
-// The legacy `fn run` entry contract (Rust `Bundle/Outputs.rs`), checked once
-// Output resolution published its selection. The driver reports it beside the
-// check rather than stopping there, so the body of `run` still reports its
-// own errors.
+// The legacy `fn run` entry contract, checked once Output resolution published
+// its selection. The driver reports it beside the check rather than stopping
+// there, so the body of `run` still reports its own errors.
 fn sema_output_legacy_run_contract(graph: SemaRegistrationGraph, intent: SemaOutputIntent) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     if intent != SemaOutputIntent.Run && intent != SemaOutputIntent.Check -> return ^diagnostics
@@ -577,7 +576,7 @@ fn sema_output_legacy_run_contract(graph: SemaRegistrationGraph, intent: SemaOut
     ^diagnostics
 }
 
-// Completion.rs publishes the same solved callable row into every checked
+// The Rust original publishes the same solved callable row into every checked
 // Output. Index only modules actually referenced by an Output; keep functions
 // and their bodies borrowed while publishing the settled callable contract.
 fn sema_output_fact_with_solved_effects(output: ^ResolvedOutput, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], rows: &[[String:Int]], indexed: &[Bool]) -> ResolvedOutput {

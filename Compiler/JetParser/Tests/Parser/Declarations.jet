@@ -69,7 +69,6 @@ fn run() {}
     loop site in MARKER_SOURCE_SITES -> _ :: marker_test_decl("struct Uses {{ impl Marker {{ sites :: [.{site}] }} }}\nfn run() {{}}\n")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:981
 #Test("fact_declaration_parses_its_law_columns") {
     program :: parser_test_program(`fact Exactness($holds: .Value, $safe: .Gain, $gates: [approx, raw], $decision: "D-TEST")
 fn run() {}
@@ -84,19 +83,16 @@ fn run() {}
     assert_eq(names, [String]{"$holds", "$safe", "$gates", "$decision"})
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1013
-#Test("former_text_contract_is_rejected") {
+#Test("an_unknown_top_word_lists_the_declaration_forms") {
     diagnostics :: parser_test_errors(`
-marker Selector on [.Text] {
+frobnicate Selector on [.Text] {
     check @body
-    hole @value
 }
 fn run() {}
 `)
-    assert_eq(diagnostics.len(), 1)
-    assert_eq(diagnostics[0].code, "E0381")
-    assert(diagnostics[0].what.contains("retired"))
-    assert(diagnostics[0].fix.contains("impl Marker"))
+    assert_eq(diagnostics[0].code, "E0003")
+    assert(diagnostics[0].what.contains("`frobnicate` is not a Jet word"), diagnostics[0].what)
+    assert(diagnostics[0].why.contains("`fn`, `struct`, `enum`"), diagnostics[0].why)
 }
 
 #Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
@@ -148,38 +144,6 @@ fn run() {}
     assert(template.body != None)
 }
 
-#Test("retired_declarations_teach_the_struct_form_with_an_edit") {
-    diagnostics :: parser_test_errors(`marker Pre(condition: String, $sites: [.Function], $repeatable: true)
-
-marker Fast = #[Inline(.Always), Scalar]
-
-fn run() {}
-`)
-    assert_eq(diagnostics.len(), 2)
-    loop diagnostic in diagnostics -> assert_eq(diagnostic.code, "E0381")
-    rule :: diagnostics[0].edit ?? panic("the parameter form carries its rewrite")
-    assert_eq(rule.new_text, "struct Pre {{\n    condition: String\n\n    impl Marker {{\n        sites :: [.Function]\n        repeatable :: true\n    }}\n}}")
-    group :: diagnostics[1].edit ?? panic("the group form carries its rewrite")
-    assert_eq(group.new_text, "struct Fast {{\n    impl Marker {{\n        group :: #[Inline(.Always), Scalar]\n    }}\n}}")
-}
-
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1078
-#Test("rejected_trailers_each_teach_the_struct_form") {
-    diagnostics :: parser_test_errors(`
-marker Inline(mode: String) on [.Function]
-
-marker Pre(condition: String)(sites: [.Function])
-
-fn run() {}
-`)
-    assert_eq(diagnostics.len(), 2)
-    loop diagnostic in diagnostics {
-        assert_eq(diagnostic.code, "E0381")
-        assert(diagnostic.fix.contains("impl Marker"))
-        assert(diagnostic.edit == None)
-    }
-}
-
 #Test("impl_marker_rejects_what_a_marker_does_not_have") {
     diagnostics :: parser_test_errors(`struct Bad {
     impl Marker {
@@ -196,7 +160,6 @@ fn run() {}
     assert_eq(codes, [String]{"E0937", "E0936", "E0907"})
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1108
 #Test("nested_state_section_is_stored_on_struct_not_as_an_item") {
     program :: parser_test_program(`struct Door {
     state { Open, Closed }
@@ -211,7 +174,6 @@ fn run() {}
     assert_eq(names, [String]{"Open", "Closed"})
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1129
 #Test("top_level_state_companion_is_rejected_with_a_spanned_rewrite") {
     source :: `state Door { Open, Closed }
 struct Door { value: Int }
@@ -230,7 +192,6 @@ fn run() {}
     assert_eq(formatted.diagnostics[0].code, "E0157")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1152
 #Test("inline_code_module_companion_uses_the_same_rewrite") {
     source :: `module ledger { state Order { Draft, Confirmed } }
 `
@@ -242,7 +203,6 @@ fn run() {}
     _ :: parser_test_diagnostic(formatted.diagnostics, "E0157")
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1178
 #Test("ineligible_state_section_uses_one_registered_parser_diagnostic") {
     loop testcase in [
         (source: `enum Door { state { Open } }
@@ -281,7 +241,6 @@ fn run() {}
     }
 }
 
-// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1212
 #Test("repeated_state_section_points_at_the_second_section") {
     source :: `struct Door { state { Ready } state { Open } }
 fn run() {}
@@ -292,7 +251,6 @@ fn run() {}
     assert_eq(diagnostic.span, Val(Span{start: start, end: finish}))
 }
 
-// Rust: crates/jet-parser/tests/sigil_algebra.rs
 #Test("distinct_markers_select_the_type_site_before_module_bindings") {
     loop source in ([String]{"#Numeric Meters :: distinct Float", "#Numeric\nMeters :: distinct Float"}) {
         program :: parser_test_program(source)

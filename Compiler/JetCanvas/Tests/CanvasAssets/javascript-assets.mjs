@@ -7,8 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { Script } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
-// Independent oracle from Rust canvas.rs:6081–6094, not extracted from the
-// Jet implementation. URLs are module-relative, never arbitrary cwd assets.
+// Independent oracle, not extracted from the Jet implementation. URLs are
+// module-relative, never arbitrary cwd assets.
 const order = [
   'runtime-state.js',
   'session-workbench.js',

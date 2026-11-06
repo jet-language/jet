@@ -1,6 +1,6 @@
 # Probe area-backend — Backend services and APIs
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -18,8 +18,8 @@ A JSON API service as one Jet package: HTTP routes with typed request/response b
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/api-design-contracts/`, `~/.cache/jet-dev/dx2/databases-storage-engines/`, `~/.cache/jet-dev/dx2/messaging-eventing/`, `~/.cache/jet-dev/dx2/identity-auth/`, `~/.cache/jet-dev/dx2/observability-platforms/`, `~/.cache/jet-dev/dx2/distributed-systems/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/api-design-contracts/`, `$JET_STATE_ROOT/dx2/databases-storage-engines/`, `$JET_STATE_ROOT/dx2/messaging-eventing/`, `$JET_STATE_ROOT/dx2/identity-auth/`, `$JET_STATE_ROOT/dx2/observability-platforms/`, `$JET_STATE_ROOT/dx2/distributed-systems/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/area-backend/probe.md`, `gaps.json`, `batteries.json`, and the code under `~/.cache/jet-dev/dx3/area-backend/pkg/`. Gap ids start with `area-backend-G`.
+`$JET_STATE_ROOT/dx3/area-backend/probe.md`, `gaps.json`, `batteries.json`, and the code under `$JET_STATE_ROOT/dx3/area-backend/pkg/`. Gap ids start with `area-backend-G`.

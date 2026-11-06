@@ -1,4 +1,4 @@
-// Rust 1.97.1 char Debug: fmt/mod.rs2972-2979 and char/methods.rs474-487.
+// Rust 1.97.1 char Debug: library/core/src/fmt/mod.rs:2972-2979 and library/core/src/char/methods.rs:474-487.
 // Layer on TextDebug.jet (301f6b608) and the one TRAP_DEBUG_RANGES table.
 // RtPlot1b frozen oracle: all 1,112,064 Unicode scalars, zero model differences.
 // Caller supplies a valid Unicode scalar; append directly, without temporary text.
@@ -19,4 +19,13 @@ fn rt_text_push_rust_debug_char(target: I64, cp: I64) {
         else -> rt_text_push_scalar(target, cp)
     }
     rt_text_push_word(target, I64{39}, I64{1})
+}
+
+// The Debug text of a Char (`{c:Debug}`): quoted and escaped, an invalid
+// scalar shown as U+FFFD like its Display.
+#Export(c) fn jet_rt_char_debug(value: I64) -> I64 {
+    scalar :: if (value < I64{0} || value > I64{1114111} || (value >= I64{55296} && value <= I64{57343})) -> I64{65533} else -> value
+    target :: jet_rt_string_builder_new()
+    rt_text_push_rust_debug_char(target, scalar)
+    jet_rt_string_builder_finish(target)
 }

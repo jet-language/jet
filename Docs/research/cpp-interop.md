@@ -95,7 +95,7 @@ The implementation deliberately throws on the negative path and on a rejected ca
 
 ### Prototype commands and observations
 
-All repository commands below were run through `scripts/agent/jet-env`; scratch files are under `$HOME/.cache/jet-dev/scratch/cpp-interop-2901`.
+All repository commands below were run through `scripts/agent/jet-env`; scratch files are under `$JET_STATE_ROOT/scratch/cpp-interop-2901`.
 
 **Native C++ archive.** The fixture was compiled as C++17 for the selected target and archived:
 
@@ -141,7 +141,7 @@ The generated projection records `CppError`, `#SingleUse` `Counter`, consuming `
 
 #### Generated projection
 
-The captured generated file is `$HOME/.cache/jet-dev/scratch/cpp-interop-2901/.jet/bindings/cpp/counter.jet` in the scratch evidence, with these relevant lines:
+The captured generated file is `$JET_STATE_ROOT/scratch/cpp-interop-2901/.jet/bindings/cpp/counter.jet` in the scratch evidence, with these relevant lines:
 
 ```jet
 enum CppError { Exception InvalidHandle ResourceLimit }
@@ -171,17 +171,17 @@ The binder's C++ shim allocates `Counter` in the generated constructor, clears t
 Each requested native command was attempted against the same fixture:
 
 ```text
-scripts/agent/jet-env full jet check /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
-scripts/agent/jet-env full jet run /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
-scripts/agent/jet-env full jet run --interpret /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
-scripts/agent/jet-env full jet build --profile=debug /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet check $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet run $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet run --interpret $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
+scripts/agent/jet-env full jet build --profile=debug $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet
 ```
 
 All four exited 1 before executing the C++ call. The common diagnostic was:
 
 ```text
 Error [E0320]: Struct construction uses `Counter{…}`, not `Counter.[…]`
-  --> /home/nate/.cache/jet-test-scratch/cpp-interop-2901/run.jet:21:1
+  --> $HOME/.cache/jet-test-scratch/cpp-interop-2901/run.jet:21:1
     |
  21 |
     | ^

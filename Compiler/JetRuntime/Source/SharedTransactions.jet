@@ -1,13 +1,12 @@
-// SharedProtocol.rs:544-595,751-788,934-1042 and MathTaskMem.rs:1756-1766,
-// 1895-1929. Bodies execute once on an immediate owned stage. No callback
-// environment is stored in a transaction or replayed at commit.
-// Root32: mutex0, owning thread8, recursive gate depth16, wake sequence24.
-// State48: stack-next0, weak parent8, sorted parts16, live24, gate32, refs40.
-// Native weak parents retain only the state allocation, not its live authority.
-// Part72: next0, retained cell8, stage16, writes24, commit-hook32,
-// prepared40, retired48, next revision56, borrowed cell descriptor64.
-// Each part retains the combined native cell allocation until disposal; its
-// descriptor and staged/drop functions therefore cannot outlive their owner.
+// Bodies execute once on an immediate owned stage. No callback environment is
+// stored in a transaction or replayed at commit. Root32: mutex0, owning
+// thread8, recursive gate depth16, wake sequence24. State48: stack-next0, weak
+// parent8, sorted parts16, live24, gate32, refs40. Native weak parents retain
+// only the state allocation, not its live authority. Part72: next0, retained
+// cell8, stage16, writes24, commit-hook32, prepared40, retired48, next
+// revision56, borrowed cell descriptor64. Each part retains the combined native
+// cell allocation until disposal; its descriptor and staged/drop functions
+// therefore cannot outlive their owner.
 stm_root := I64{0}
 
 stm_key := I64{0}
@@ -26,9 +25,9 @@ stm_key := I64{0}
     }
 }
 
-// SharedProtocol.rs:544-595/729-748: the outermost process-wide gate is
-// held from begin through commit/rollback, including all body execution.
-// Nested scopes join their parent's authority rather than reacquiring it.
+// The outermost process-wide gate is held from begin through commit/rollback,
+// including all body execution. Nested scopes join their parent's authority
+// rather than reacquiring it.
 fn stm_gate_enter() {
     me :: sync_load(wrapping(thread_base() + I64{8}))
     sync_mutex_lock(stm_root)
@@ -257,9 +256,9 @@ fn stm_merge(parent: I64, first: I64) {
                     prepared = false
                 }
                 else -> {
-                    // MathTaskMem.rs:1911-1912 clones the working value in
-                    // the commit hook. Preserve observable clone-count parity;
-                    // prepare all copies before any participant publishes.
+                    // The Rust original clones the working value in the commit
+                    // hook. Preserve observable clone-count parity; prepare all
+                    // copies before any participant publishes.
                     value :: stm_clone(sync_load(wrapping(part + I64{16})), sync_load(wrapping(part + I64{64})))
                     if {
                         value == (I64{0}) -> prepared = false

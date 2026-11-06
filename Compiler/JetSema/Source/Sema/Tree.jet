@@ -14,7 +14,6 @@ use jet_foundation.[
     Expr,
     Field,
     FrameSchedule,
-    HTTPRouteMethod,
     KernelProof,
     DeclID,
     Lambda,
@@ -38,6 +37,7 @@ use jet_foundation.[
     TComptimeValue,
     TContractDisposition,
     TContractKind,
+    TContractSite,
     TContractResult,
     TDestructureBinding,
     TEffectFacts,
@@ -64,11 +64,11 @@ use jet_foundation.[
     TPatternPosition,
     TStaticOwner,
     TStrFormat,
-    TTargetApplicability,
     TTextPatternPart,
     TTransactionSnapshot,
     TTryConvert,
     TTypedGoal,
+    TIndexProof,
     TUnaryOp,
     TUnitRoundingMode,
     TUnsafeGate,
@@ -215,6 +215,7 @@ struct TContract {
     line: Int
     span: Span
     disposition: TContractDisposition
+    site: TContractSite
 }
 
 enum TStmt {
@@ -536,6 +537,9 @@ enum THandleOp {
     DurationTotalSeconds
     DurationDifference
     TestSuiteRun
+    // `t.<setting>(…)` (Registry/TestSettings.jet): args are the plan-file
+    // environment key and the `name<TAB>value<NL>` line.
+    TestSetting
     DurationAbs
     DurationNegated
     DurationSign
@@ -633,7 +637,6 @@ enum THandleOp {
     ChannelDelayMs
     ChannelClose
     SenderSend
-    HTTPRouterRegister(verb: HTTPRouteMethod, handler: TExpr, file: String, line: Int, handler_param_names: [String], contract_json: String)
     MathMethod(type_name: String, method: String)
     ReactiveGet
     ReactiveSet
@@ -720,7 +723,9 @@ enum THandleOp {
 
 enum TRequireKind {
     Require(cond: TExpr, msg: TExpr?)
-    RequireEq(left: TExpr, right: TExpr)
+    // `hook`: the authored `equal`/`compare` implementation `==` dispatches
+    // to for the operands' type; None compares them structurally.
+    RequireEq(left: TExpr, right: TExpr, hook: TMethodRef?)
     Panic(msg: TExpr)
 }
 
@@ -760,7 +765,6 @@ struct TFunc {
     source_span: Span
     failure_carrier: TFailureCarrier
     effects: TEffectFacts
-    target_applicability: TTargetApplicability
     web_bucket: WebBucket?
     web_marker: WebPartitionMarker?
     visibility: TVisibility
@@ -791,6 +795,10 @@ struct TFunc {
     kind: TFuncKind
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
     typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The fixed-list indexes sema proved in range, and the checked `#Pre`
+    // clauses; only the solver reads them (FnBody).
+    index_proofs: [TIndexProof]{[TIndexProof]{}}
+    pre: [TContract]{[TContract]{}}
 }
 
 struct TParameter {
@@ -1055,7 +1063,7 @@ fn tree_each_require_child(requirement: TRequireKind, visit: fn(TExpr) -[Mem.All
             visit(condition)
             if message == Val(message_value) -> visit(message_value)
         }
-        .RequireEq(left, right) -> {
+        .RequireEq(left, right, _) -> {
             visit(left)
             visit(right)
         }

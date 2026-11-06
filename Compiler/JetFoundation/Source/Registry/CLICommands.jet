@@ -148,9 +148,8 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
             {name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: "Logs", also_canonical_top_level: false},
             {name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: "Info", also_canonical_top_level: false},
             {name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: "Outdated", also_canonical_top_level: false},
-            // #1659 criterion 5: reserved words and sigils, including the five
-            // teaching-reserved words (copy/mut/take/const/unsafe) that reject valid
-            // identifiers with a redirect to their current spelling.
+            // Reserved words and sigils, including the words with no grammar
+            // rule (`copy`, `const`) that a user cannot bind.
             {name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: "Reserved", also_canonical_top_level: false},
         },
     },
@@ -260,7 +259,7 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
         summary: "Run tests",
         frequency_rank: 5,
         exhaustive: false,
-        usage: Val("test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>]"),
+        usage: Val("test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--fresh] [--docs] [-u]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -351,6 +350,14 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
         frequency_rank: 15,
         exhaustive: false,
         usage: Val("debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames]"),
+        actions: [JetCLIActionSpec]{},
+    },
+    {
+        name: "crash",
+        summary: "Name the functions and lines of a release crash report",
+        frequency_rank: 62,
+        exhaustive: false,
+        usage: Val("crash < <report.txt>"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -448,6 +455,7 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
             {name: "hook", usage: "hook <bash|zsh|fish>", summary: "Print the shell auto-activation hook", handler: "Env", also_canonical_top_level: false},
             {name: "sync", usage: "sync", summary: "Apply typed managed environment files", handler: "Env", also_canonical_top_level: false},
             {name: "info", usage: "info", summary: "Show the typed environment plan", handler: "Env", also_canonical_top_level: false},
+            {name: "fetch-toolchain", usage: "fetch-toolchain", summary: "Download this jet's C toolchain pack for offline C builds", handler: "Env", also_canonical_top_level: false},
         },
     },
     {
@@ -656,14 +664,6 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
         },
     },
     {
-        name: "fuzz",
-        summary: "Find failing inputs for property tests",
-        frequency_rank: 40,
-        exhaustive: false,
-        usage: Val("fuzz <file.jet> [<test>]"),
-        actions: [JetCLIActionSpec]{},
-    },
-    {
         name: "version",
         summary: "Show the Jet version",
         frequency_rank: 39,
@@ -682,17 +682,61 @@ JET_CLI_COMMANDS :: comptime { [JetCLICommandSpec]{
 } }
 
 // Every jet flag: the fixed rows, with one row per build option
-// (BuildOptions.jet) after `--profile`.
+// (BuildOptions.jet) after `--profile` and one per `jet test` setting
+// (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
+// fixed row shared with other commands keeps that row; one whose flag is a
+// build option's (`--optimize`) shares that option's row, which says both.
 JET_CLI_FLAGS :: comptime { jet_cli_flag_rows() }
 
 fn jet_cli_flag_rows() -> [JetCLIFlagSpec] Never! {
     rows := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FIXED_FLAGS {
         &rows.push(spec.copy())
-        if spec.long != "--profile" -> next
-        loop option in JET_BUILD_OPTIONS -> &rows.push(JetCLIFlagSpec{long: build_option_flag(option.name), help: "With build/run/dev/test: {option.help}"})
+        if spec.long == "--profile" {
+            loop option in JET_BUILD_OPTIONS {
+                flag :: build_option_flag(option.name)
+                help := "With build/run/dev/test: {option.help}"
+                if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
+                &rows.push(JetCLIFlagSpec{long: flag, help: help})
+            }
+        }
+        if spec.long != "--explain-partition" -> next
+        loop setting in JET_TEST_SETTINGS {
+            flag :: test_setting_flag(setting.name)
+            // The lambdas take their own names: a capture moves the name it reads.
+            fixed_flag :: flag.copy() // copy: the fixed-row lambda's own name.
+            if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
+            option_flag :: flag.copy() // copy: the build-option lambda's own name.
+            if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
+            &rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
+        }
     }
     rows
+}
+
+// The `jet test` setting whose flag is `flag`, if one is.
+fn jet_cli_test_setting_of_flag(flag: String) -> TestSettingRow? Never! {
+    loop setting in JET_TEST_SETTINGS {
+        if test_setting_flag(setting.name) == flag -> return Val(setting.copy()) // copy: the registry keeps its row.
+    }
+    None
+}
+
+#Test("--optimize is one flag row that says what it does for a build and for jet test") {
+    rows :: JET_CLI_FLAGS.filter(row -> row.long == "--optimize")
+    assert_eq(rows.len(), 1)
+    assert(rows[0].help.starts_with("With build/run/dev/test: How hard to optimize: none, basic or full; with test: Run the tests at each listed optimize level"))
+}
+
+// A setting's help line: what it does and its three spellings.
+fn jet_cli_test_setting_help(setting: TestSettingRow) -> String Never! {
+    "With test: {jet_cli_test_setting_text(setting)}"
+}
+
+// A setting's help after its `With test: ` scope.
+fn jet_cli_test_setting_text(setting: TestSettingRow) -> String Never! {
+    ported :: if setting.ported -> "" else -> " (not ported to the Jet test runner yet)"
+    "{setting.help}{ported}; {test_setting_spellings(setting)}"
 }
 
 JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
@@ -730,7 +774,6 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel"},
     {long: "--check", help: "With fmt: Check without changing files (CI gate)"},
     {long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language"},
-    {long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files"},
     {long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file"},
     {long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling"},
     {long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)"},
@@ -900,12 +943,7 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     // `--preset` selects a named environment composition.
     {long: "--preset", help: "With env/run/dev/test: Select one declared environment preset"},
     {long: "--explain-partition", help: "With build --target=web: Show which code becomes JavaScript or WebAssembly"},
-    {long: "--fresh", help: "With test: Bypass only cached test results (default off); the build cache remains reusable"},
-    {long: "--docs", help: "With test: Run checked documentation examples only (default off)"},
-    {long: "--where", help: "With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>"},
-    {long: "--capture", help: "With test: Capture output as failed, all, or none (default failed); watch key o cycles it"},
     {long: "--no-capture", help: "With dev: Disable automatic replay capture for this session"},
-    {long: "--update-snapshots", help: "With test: Replace expected snapshot output"},
     {long: "--update", help: "With import: Merge generated Jet into an existing target"},
     {long: "--coverage", help: "With test/inspect build: Show function or diagnostic coverage"},
     {long: "--verify", help: "With build: Rebuild and compare one indexed receipt artifact"},
@@ -932,29 +970,12 @@ JET_CLI_FIXED_FLAGS :: comptime { [JetCLIFlagSpec]{
     {long: "--max", help: "With lint --complexity: Fail when a function exceeds this score"},
     {long: "--scope", help: "With inspect: Choose a ledger or trust scope"},
     {long: "--core", help: "With inspect structure: Show the canonical core module export facts"},
-    // The shared test name-selection flag.
-    {long: "--filter", help: "With test: Only run claims whose name contains --filter=<substr>"},
-    {long: "--grade", help: "With test: Select the generated property-test grade as --grade=generated"},
-    {long: "--shuffle", help: "With test: Run tests in random (or --shuffle=<seed>) order"},
-    {long: "--serial", help: "With test: Run tests one at a time instead of the parallel default"},
     {long: "--show-default", help: "With run/build/dev/test: Use and report the stock default"},
-    {long: "--measure", help: "With test: Measure `.measure` claims"},
     // Native cross-browser test controls.
     {long: "--browser", help: "With test/db: Select browser engines for tests or serve a loopback database inspector"},
-    {long: "--browser-retries", help: "With test: Retry each browser attempt up to five times"},
-    {long: "--browser-reporter", help: "With test: Browser report format: text, json, or html"},
-    {long: "--browser-ui", help: "With test: Write/open the local browser report viewer"},
-    {long: "--browser-visual", help: "With test: Capture screenshots for passing browser attempts"},
-    {long: "--browser-trace", help: "With test: Keep redacted BiDi trace entries for every browser attempt"},
     {long: "--browser-scaffold", help: "With test: Create an isolated browser-test project as --browser-scaffold=<name>"},
     {long: "--record", help: "With run/dev/test/debug: Record a named replay as --record=<name>"},
     {long: "--replay", help: "With inspect/debug: Consume a named replay artifact"},
-    // `jet fuzz` (its own bespoke flags below are validated by
-    // `owns_flag_vocabulary`; these two are listed for completions/the man page).
-    {long: "--iterations", help: "With fuzz: Case budget --iterations=<n> (default 1000)"},
-    {long: "--time", help: "With fuzz: Wall-clock budget in seconds --time=<n>"},
-    {long: "--seed", help: "With fuzz: Base PRNG seed --seed=<n> (default: fixed, reproducible)"},
-    {long: "--corpus", help: "With fuzz: Corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)"},
     {long: "--lens", help: "With prove: Project the human report by an exact evidence facet"},
     // #1659 criterion 1 (round 2): see the block above --message for the
     // other 7 formerly usage-string-only flags.

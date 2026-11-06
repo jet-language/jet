@@ -25,7 +25,7 @@ fn semindex_items_test_policy(scope: PolicyScope, target: Span?) -> PolicyDeclar
     assert(!semindex_policy_applies_to_function(semindex_items_test_policy(.Function, Val(Span{start: 0, end: 50})), function))
 }
 
-// tests/semindex.rs1378–1432, byte-exact original method/dossier source.
+// Byte-exact original method/dossier source.
 fn semindex_s9_scattered_members_source() -> String Never! {
     "\ntrait DrawThing {{\n    fn render(self) -> String ->\n}}\n\nstruct Widget {{\n    title: String\n\n    fn label(self) -> String {{\n        return ~self.title\n    }}\n}}\n\nimpl Widget {{\n    fn size(self) -> Int {{\n        return 1\n    }}\n}}\n\nimpl Widget.DrawThing {{\n    fn render(self) -> String {{\n        return self.label()\n    }}\n}}\n\nfn run() {{\n    w :: Widget.{{title: \"ok\"}}\n    print(w.render())\n}}\n"
 }
@@ -35,12 +35,12 @@ fn semindex_s9_scattered_members_assertions(index: SemIndex, dossier_json: Strin
     assert(dossier_json.contains("\"trait_impl\""))
     assert(dossier_json.contains("\"inherent_impl\""))
 }
-// tests/semindex.rs1435–1473 remains canonical in S6; reuse its exact fixture
-// and assertions, including defaults/public labels/zones/rest, no second oracle.
+// The Rust original remains canonical in S6; reuse its exact fixture and
+// assertions, including defaults/public labels/zones/rest, no second oracle.
 fn semindex_s9_method_contract_source() -> String Never! { semindex_s6_method_contract_source() }
 fn semindex_s9_method_contract_assertions(index: SemIndex) Never! { semindex_s6_method_contract_assertions(index) }
 
-// tests/semindex.rs486–534: actual state owner and checked marker anchor.
+// Actual state owner and checked marker anchor.
 fn semindex_s9_state_owner_source() -> String Never! {
     "\nstruct Door {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) fn new() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door {{ return self }}\n}}\nfn run() {{}}\n"
 }
@@ -73,7 +73,7 @@ fn semindex_s9_state_owner_assertions(index: SemIndex, source: String, json: Str
     assert(definition_found && reference_found)
 }
 
-// tests/semindex.rs774–795: caller supplies real checked two-file symbols.
+// Caller supplies real checked two-file symbols.
 fn semindex_s9_import_library_source() -> String Never! { "fn score(name: String) -> Int {{ return 1 }}\n" }
 fn semindex_s9_import_main_source() -> String Never! {
     "use api :: \"./library\"\nuse imported_score :: api.score\nfn run() {{ print(imported_score(\"Ada\")) }}\n"
@@ -86,20 +86,20 @@ fn semindex_s9_import_assertions(symbols: SemanticSymbolIndex) Never! {
     assert(imported[0].signature.contains("score(name: String) Int"))
 }
 
-// lib.rs829–895: canonical original import-member/alias/two-receiver fixture
-// and checked target assertions already live in S5. No duplicated checked model.
+// Canonical original import-member/alias/two-receiver fixture and checked target
+// assertions already live in S5. No duplicated checked model.
 fn semindex_s9_reference_library_source() -> String Never! { semindex_build_test_reference_library_source() }
 fn semindex_s9_reference_main_source() -> String Never! { semindex_build_test_reference_main_source() }
 fn semindex_s9_reference_assertions(index: SemIndex) { semindex_build_test_checked_reference_facts_cover_import_members_aliases_and_receivers(index) }
 
-// tests/semindex.rs169–227 canonical exact CheckedText source+all assertions
-// live in S20; S9's impl methods must compose with that nominal conversion.
+// Canonical exact CheckedText source+all assertions live in S20; S9's impl
+// methods must compose with that nominal conversion.
 fn semindex_s9_checked_text_source() -> String Never! { semindex_s20_checked_text_source() }
 fn semindex_s9_checked_text_assertions(index: SemIndex, symbols: SemanticSymbolIndex, json: String, dossier_text: String) Never! {
     semindex_s20_checked_text_assertions(index, symbols, json, dossier_text)
 }
 
-// tests/semindex.rs1476–1552: original spelled bypass fixture and assertions.
+// Original spelled bypass fixture and assertions.
 fn semindex_s9_bypasses_source() -> String Never! {
     "\nstruct Invoice {{\n    #Allow(jet.FloatMoney)\n    price: Float,\n}}\n\n#Unsafe(\"caller must ensure the pointer is valid\") fn risky_fn() {{\n    print(\"danger\")\n}}\n\nfn run() {{\n    #Unsafe(\"index checked against len\") {{\n        print(\"audited\")\n    }}\n    #Unsafe(\"risky_fn's contract is upheld here\") {{\n        risky_fn()\n    }}\n    fetch_it().drop(\"telemetry only\")\n}}\n\nfn fetch_it() -> Int {{\n    return 1\n}}\n"
 }

@@ -2,8 +2,8 @@
 
 Tower card: #6314. Related cards: #5030 (context allocator), #2889 (column storage), #4169, #6310. Ballots drafted from this research: `D-ALLOC-TRAIT1`, `D-ALLOC-SITE1`.
 
-Code facts cite dev `82d3369757`. Probes used the prebuilt dev compiler `/mnt/jetscratch/discovery/base/latest/jet` (also `82d3369757`) with `jet run` on all three tiers: `--optimize=none` (o0), `--optimize=basic` (o1) and `--optimize=full` (o2). Every probe gave the same result on all three tiers.
-Probe files live in `/mnt/jetscratch/lanes/MemDesign/probes/`, with per-tier output in `probes/out/` and summaries in `probes/summary*.tsv`. Reasoning that no probe tested is marked `[INFERENCE]`.
+Code facts cite dev `82d3369757`. Probes used the prebuilt dev compiler `$JET_SCRATCH_ROOT/discovery/base/latest/jet` (also `82d3369757`) with `jet run` on all three tiers: `--optimize=none` (o0), `--optimize=basic` (o1) and `--optimize=full` (o2). Every probe gave the same result on all three tiers.
+Probe files live in `$JET_SCRATCH_ROOT/lanes/MemDesign/probes/`, with per-tier output in `probes/out/` and summaries in `probes/summary*.tsv`. Reasoning that no probe tested is marked `[INFERENCE]`.
 
 ## Plain summary
 

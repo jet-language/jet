@@ -136,7 +136,7 @@ fn envmodel_test_member_paths(plan: WorkspacePlan) -> [String] {
     tmp :: envmodel_test_workspace_dir("member-malformed-metadata")
     envmodel_test_write_package(tmp, "packages/app", "not package metadata\n")
     error :: envmodel_test_eval_error_in("module workspace {{ members: [\"./packages/app\"] }}\n", tmp)
-    assert_eq(error.code, "E1206")
+    assert_eq(error.code, "E1215")
     files.remove_all(tmp) ?? panic("scratch cleanup")
 }
 

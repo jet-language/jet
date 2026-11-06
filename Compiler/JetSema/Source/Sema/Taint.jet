@@ -778,6 +778,10 @@ fn sema_taint_type_of_expr(state: SemaTaintFlowState, expression: Expr) -> Strin
     if expression == {
         .Ident(name, _, _) -> return sema_taint_get_binding(state, name).type_name
         .StructLit(type_name, _, _, _, _, _, _, _) -> return Val(type_name)
+        // `Row{field: value}` parses as a typed literal headed by its type.
+        .TypedLit(head, _, _, _) -> {
+            if head == .Val(ty) -> return sema_taint_type_name(ty)
+        }
         .Call(call, _) -> {
             fact :: sema_taint_find_callable(state.catalog, state.module_identity, "", call.name) ?? return None
             return sema_taint_type_name(fact.return_type ?? Type.Named{name: "Unit"})
@@ -834,6 +838,9 @@ fn sema_taint_tags_of(state: &SemaTaintFlowState, expression: Expr) -> [String] 
             tags := sema_taint_tags_of(&state, receiver)
             loop argument in args -> sema_taint_union(&tags, sema_taint_tags_of(&state, argument.expr))
             destinations := sema_taint_method_destinations(state, receiver, method)
+            // A method of a local type also reaches `from:` rows that name it
+            // by its type (`Store.read`), whatever the receiver is called.
+            if sema_taint_type_of_expr(state, receiver) == .Val(owner) -> &destinations.push("{owner}.{method}")
             sema_taint_union(&tags, sema_taint_source_tags(state, destinations))
             sema_taint_union(&tags, sema_taint_call_return_tags(state, "", method))
             sema_taint_scrub(state, &tags, "", method)

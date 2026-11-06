@@ -79,7 +79,8 @@ fn registry_optional(value: String?, expected: String) -> Bool Never! {
     selected :: JobRegistry.for_entry([jet_foundation.Program]{entry, helper}, 0)
     assert(selected.completion_words().join(" ") == "entry")
     assert(registry_error(selected, "entry") == "job graph references unknown job `helper`")
-    assert(JobRegistry.for_entry([jet_foundation.Program]{entry, helper}, 2).jobs().len() == 0)
+    out_of_range :: JobRegistry.for_entry([jet_foundation.Program]{entry, helper}, 2)
+    assert(out_of_range.jobs().len() == 0)
 
     span :: Span{start: 0, end: 0}
     function := registry_function("args", .Dev, [String]{}, 1)

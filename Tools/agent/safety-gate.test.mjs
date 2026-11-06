@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { scratchRoot } from "./roots.mjs";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { generateCase, generateCoreCase } from "./safety-fuzz.mjs";
 import { ADDITIONAL_COVERAGE, compareNative, coverageReceipt, hash, prepareCorpus, TIERS } from "./safety-gate.mjs";
 import { due, INTERVAL_MS, renderJob, tick } from "./safety-schedule.mjs";
 
-const scratch = process.env.JET_TEST_SCRATCH_DIR ?? process.env.TMPDIR ?? "/mnt/jetscratch/candidates/SafetyNet8/tests";
+const scratch = process.env.JET_TEST_SCRATCH_DIR ?? process.env.TMPDIR ?? join(scratchRoot(), "candidates/SafetyNet8/tests");
 mkdirSync(scratch, { recursive: true });
 function temporary(t) {
   const path = mkdtempSync(join(scratch, "safety-tool-test-"));

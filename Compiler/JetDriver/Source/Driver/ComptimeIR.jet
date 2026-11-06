@@ -5,7 +5,7 @@
 // comptime child (jet_eval_native_load), and each entry runs its own item
 // function there (jet_eval_native_run).
 use {
-    jet_foundation.[DeclTable, FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTargetApplicability, TTypeDef, TVisibility]
+    jet_foundation.[DeclTable, FnBody, Span, StmtKind, TComptimeValue, TConstantDef, TImplDef, TTypeDef, TVisibility]
     jet_sema.[SemaComptimeItemRequest, SemaComptimeItemValue, SemaGraphModuleResult]
     jet_ir.[IRProgram, IR_STARTUP_FUNCTION_PREFIX, ir_comptime_item_function, ir_program_declared]
     jet_eval.[JetEvalConfig, JetEvalIRComptime, JetEvalIRResult, jet_eval_ir_comptime_build, jet_eval_ir_comptime_build_over, jet_eval_native_load, jet_eval_native_run]
@@ -101,7 +101,6 @@ fn jet_driver_comptime_startup_function(request: SemaComptimeItemRequest) -> FnB
     parts :: request.key.split(":").to_list()
     init.name = "{IR_STARTUP_FUNCTION_PREFIX}{if parts.len() > 0 -> parts[parts.len() - 1] else -> request.key}"
     init.key = "{request.module_identity}::__startup::{request.key}"
-    init.target_applicability = TTargetApplicability{rust_aot: true, interpreter: true, web: true}
     init.tree = request.expression.tree.copy()
     &init.tree.stmts.push(StmtKind.Return{value: Val(request.expression.root), span: request.span})
     init.body = [Int]{init.tree.stmts.len() - 1}

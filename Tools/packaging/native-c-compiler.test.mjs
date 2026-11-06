@@ -75,7 +75,7 @@ test('real native C witnesses have no glibc fortified imports and resolve agains
       '-c', join(root, 'Compiler/JetRuntime/Tests', name + '.c'), '-o', object]);
     const imports = command('nm', ['-u', '--format=posix', object]).split('\n').filter(Boolean).map(line => line.split(/\s+/u)[0]);
     const forbiddenImports = imports.filter(forbidden);
-    const missingImports = imports.filter(symbol => !platformSymbols.has(symbol) && !providerSymbols.has(symbol) && symbol !== '__real_jet_rt_free');
+    const missingImports = imports.filter(symbol => !platformSymbols.has(symbol) && !providerSymbols.has(symbol));
     census.push({ name, imports, forbiddenImports, missingImports });
   }
   writeFileSync(join(out, 'census.json'), JSON.stringify({ archives, census }, null, 2) + '\n');

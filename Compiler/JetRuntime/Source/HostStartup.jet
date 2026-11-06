@@ -86,6 +86,7 @@ fn host_arguments_register(argc: I64, argv: I64, envp: I64, main: Bool) {
         // The envp array is word aligned: bit 0 tells capture it is a main's.
         _ := coll_call1(capture, if main -> envp.bit_or(I64{1}) else -> envp)
     }
+    rt_test_reads_arm(envp)
     #Unsafe("host argument registration is single-threaded and precedes user code") {
         host_argc = count
     }
@@ -300,10 +301,9 @@ fn host_startup_list(bytes: I64, length: I64, output: I64) {
     I64{1}
 }
 
-// FSIoEnvOsTesting.rs jet_std_io_args: std::env::args().collect(), argv[0]
-// first, through the generated list-out ABI (an exact count*8 buffer of owned
-// Text words, 0 when empty). Args::next unwraps into_string, so a non-UTF-8
-// argument panics.
+// jet_std_io_args: std::env::args().collect(), argv[0] first, through the
+// generated list-out ABI (an exact count*8 buffer of owned Text words, 0 when
+// empty). Args::next unwraps into_string, so a non-UTF-8 argument panics.
 #Export(c) fn jet_std_io_args(output: I64) -> I64 {
     host_arguments_require()
     count :: host_argc

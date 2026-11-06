@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Run one command in Jet's core shell, reusing nix-direnv's cache when present.
 # `jet-env full <cmd>` selects FFI/browser/VM integration tooling.
+# A tool that needs only jet or node runs without it; it is for the commands
+# that need host tools Jet does not supply yet: the runtime pack's C toolchain
+# (cc, ar, nm, crt files, a static musl), suite rows that require host tools,
+# and GNU as for the fault report.
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -17,7 +21,17 @@ if [ "$#" -eq 0 ]; then
   exit 64
 fi
 # The development command means the admitted native compiler named by $JET,
-# not the prebuilt Jet package the Nix shell may also put on PATH.
+# not the prebuilt Jet package the Nix shell may also put on PATH. When the
+# caller names none, $JET is the compiler this checkout built (`jet build
+# Compiler` writes Compiler/JetCli/.jet/build/jet), else the caller's `jet` on
+# PATH, resolved before direnv or Nix can change PATH.
+if [ -z "${JET:-}" ]; then
+  if [ -x "$repo/Compiler/JetCli/.jet/build/jet" ]; then
+    export JET="$repo/Compiler/JetCli/.jet/build/jet"
+  elif caller_jet="$(command -v jet)"; then
+    export JET="$caller_jet"
+  fi
+fi
 if [ "$1" = "jet" ] && [ -n "${JET:-}" ]; then
   shift
   set -- "$JET" "$@"

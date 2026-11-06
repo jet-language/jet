@@ -60,8 +60,8 @@ GENERIC_CALL_OPEN :: "<"
 GENERIC_CALL_CLOSE :: ">"
 
 /// `pub use` re-export is the only remaining `pub` form (re-export
-/// ballot pending, card #4723). `pub` on a declaration or field is
-/// rejected (E0411) with a fix that deletes it.
+/// ballot pending, card #4723). No rule accepts `pub` on a declaration or
+/// field.
 KW_PUB :: "pub"
 
 /// (owner directive 2026-10-07, card #4723): everything is public by
@@ -69,7 +69,7 @@ KW_PUB :: "pub"
 /// enclosing module) or a struct field (usable only by the type's own module).
 KW_PRIV :: "priv"
 
-/// Retired file marker, recognized only so E0418 can delete it.
+/// Retired file marker spelling; no parser rule accepts it.
 MARKER_PUB_FILE :: "PubFile"
 
 /// (ratified 2026-06-28): file-scope marker that disables the
@@ -77,16 +77,14 @@ MARKER_PUB_FILE :: "PubFile"
 /// the no-prefix surface.
 MARKER_NO_PRELUDE :: "NoPrelude"
 
-/// This rule option B (rejected): foreign spelling of `priv`, recognized
-/// only for E0412 teaching diagnostics.
+/// Rejected spelling of `priv`; no parser rule accepts it.
 FOREIGN_PRIVATE :: "private"
 
 /// External program schema source for
 /// `jet self completions SHELL --for PROGRAM`.
 CLI_COMPLETIONS_FOR :: "--for"
 
-/// Retired file marker spelling, recognized only so E0418 can
-/// delete it.
+/// Retired file marker spelling; no parser rule accepts it.
 MARKER_PUBLIC_FILE :: "PublicFile"
 
 /// `priv(package) module` — the module is usable by every module
@@ -358,23 +356,20 @@ PARAM_ZONE_LABEL_ONLY :: "*"
 /// user-typable Jet syntax (I8).
 METHOD_COPY :: "copy"
 
-/// The retired prefix copy sigil (was 's
-/// spelling). Recognized only for the E0941 teaching error whose Safe fix
-/// rewrites `~x` to `x.copy()`.
+/// The retired prefix copy sigil; no parser rule accepts it. A copy is
+/// `x.copy()`.
 SIGIL_COPY_RETIRED :: "~"
 
-/// The retired `copy` word (was S4's one copy
-/// spelling). Recognized only for the E0991 teaching error that points at
-/// `x.copy()`.
+/// The retired `copy` word. The lexer keeps it reserved; no grammar rule
+/// accepts it.
 KW_COPY :: "copy"
 
-/// S10 (M2) → the retired write keyword. Recognized only for the E0056
-/// teaching error that points at the `&` sigil.
+/// The retired write keyword. The lexer keeps it reserved; no grammar rule
+/// accepts it.
 KW_MUTATE :: "mut"
 
-/// S10 (M2) → the retired move keyword. Bare `take value` is recognized
-/// only for the paused capability teaching path. `.take(n)` stays a valid method
-/// name, while `take(names) () ->` is recognized only to report E0057.
+/// The retired move keyword. The lexer keeps it reserved; no grammar rule
+/// accepts bare `take`. `.take(n)` stays a valid method name.
 KW_MOVE :: "take"
 
 /// M2: struct definition keyword (construction spelling: S29).
@@ -434,8 +429,8 @@ KW_SELF :: "self"
 KW_IMPL :: "impl"
 
 /// (ratified): external inherent methods attach with dot:
-/// `fn Type.method(self)`. S83's earlier `~~` connector is retired and exists
-/// only for E0325 teaching diagnostics.
+/// `fn Type.method(self)`. S83's earlier `~~` connector is retired; no rule
+/// accepts it.
 EXTERNAL_METHOD_CONNECTOR :: "."
 
 EXTERNAL_METHOD_CONNECTOR_RETIRED :: "~~"
@@ -447,8 +442,8 @@ KW_POLICY :: "policy"
 /// The checked body that wraps the declared callable.
 KW_WRAP :: "wrap"
 
-/// Retired module binding keyword. Lexer still emits `KwConst`
-/// so the parser can teach `comptime` (S57). Not in `JET_KEYWORD_LIST`.
+/// Retired module binding keyword. The lexer keeps it reserved (`KwConst`)
+/// with no grammar rule (S57). Not in `JET_KEYWORD_LIST`.
 KW_CONST :: "const"
 
 /// M1/M2: return from a function. Foundational keyword predating the
@@ -462,20 +457,8 @@ KW_DEFER :: "defer"
 
 RESOURCE_CLOSE :: "close"
 
-/// Nominal, consuming, infallible cleanup capability.
-TRAIT_CLOSE :: "Close"
-
-/// (card #2789): a nominal type may opt into contextual
-/// numeric literals through one of these capability traits. The dot-separated
-/// names are semantic capability names, not new lexer words or literal suffixes.
-TRAIT_LITERAL_INT :: "Literal.Int"
-
-TRAIT_LITERAL_FLOAT :: "Literal.Float"
-
-METHOD_LITERAL_FROM_LITERAL :: "from_literal"
-
 /// S19 (ratified): loop statement (for SharedHandle lint checks) — same
-/// governing decision as the loop-header keywords in Syntax/math_layout.rs.
+/// governing decision as the loop-header keywords.
 KW_LOOP :: "loop"
 
 /// (ratified): `yield expr` — hand a value to a `Stream<T>`
@@ -490,10 +473,8 @@ TYPE_STREAM :: "Stream"
 /// The audited
 /// expert gate. Block form: `#Unsafe("reason") { … }`. Whole-function form:
 /// `#Unsafe("reason") fn`. Bare `#Unsafe { … }` / `#Unsafe fn` are E3112.
-/// The reason is the argument of `#Unsafe` itself; the separate
-/// `#Audit` marker is retired (E0055). The bare lowercase `unsafe` keyword
-/// (FOREIGN_UNSAFE) is the rejected foreign spelling, recognized only to emit a
-/// teaching error.
+/// The reason is the argument of `#Unsafe` itself. The lowercase word
+/// `unsafe` (FOREIGN_UNSAFE) is not Jet syntax.
 KW_UNSAFE :: "Unsafe"
 
 /// (ratified 2026-07-11): `#Shield { … }` — the cancellation-shield
@@ -634,8 +615,7 @@ COMPILER_BUILD_FACT_STAMP_AT :: "$build.stamp.at"
 /// (`COMPILER_BUILD_CPU_CACHE_LINE_GENERIC`, Registry/RegistrationFacts.jet).
 COMPILER_BUILD_FACT_CPU_CACHE_LINE :: "$build.cpu.cache_line"
 
-/// S14/S58: bare lowercase `unsafe` — the foreign (C/Rust) spelling, recognized
-/// only for teaching errors (E0031 / E0003) pointing at the `#Unsafe` marker.
+/// Bare lowercase `unsafe` is not Jet syntax; the gate is `#Unsafe`.
 FOREIGN_UNSAFE :: "unsafe"
 
 /// S58 (ratified 2026-06-12): discovery gate — naming any low-level item
@@ -645,11 +625,8 @@ FOREIGN_UNSAFE :: "unsafe"
 /// The import gate (`use core.mem`) unlocks every name; the audit gate (`#Unsafe("reason")`) is required only for items marked `Audit`.
 CORE_MEM_MODULE :: "core.mem"
 
-/// (ratified 2026-06-21, opt C): the `#Uninit` binding marker.
-/// **Retired by ** (2026-07-02) — the spelling moved to the
-/// `uninit` contextual keyword (see `KW_UNINIT` below); this constant is kept
-/// only so the parser can recognize the old marker and reject it with a
-/// teaching error (E0426) pointing at the new spelling.
+/// The retired `#Uninit` binding marker; the spelling is the `uninit`
+/// contextual keyword (see `KW_UNINIT` below). No rule accepts the marker.
 MARKER_UNINIT :: "Uninit"
 
 /// (ratified 2026-07-24; amends):
@@ -677,9 +654,9 @@ VAULT_KEY_REF_TYPE :: "KeyRef"
 /// `KeyRef` still names one key rather than a copy of its rendering.
 VAULT_KEY_REF_HANDLE :: "__jet_vault_handle"
 
-/// Carrier field holding the ONE `impl Display for JetVaultKeyRef` rendering
-/// (`Prelude/SecretsCrypto.rs`). The ambient host calls that impl while it
-/// marshals the handle; no engine re-derives `repo:{name}@v{generation}`.
+/// Carrier field holding the ONE `impl Display for JetVaultKeyRef` rendering.
+/// The ambient host calls that impl while it marshals the handle; no engine
+/// re-derives `repo:{name}@v{generation}`.
 VAULT_KEY_REF_SHOWN :: "__jet_vault_shown"
 
 /// S58 (ratified): raw-pointer type is `*T`.
@@ -763,8 +740,8 @@ MEM_ALLOC_TRY_ALLOC :: "try_alloc"
 /// (ratified 2026-06-19): reset the allocator, keeping the backing buffer.
 MEM_ALLOC_RESET :: "reset"
 
-/// Retired allocator-specific terminal verb. Kept only so
-/// diagnostics can teach the sole `close(^allocator)` resource protocol.
+/// Retired allocator-specific terminal verb; the resource protocol is
+/// `close(^allocator)` and no rule accepts `free`.
 MEM_ALLOC_FREE :: "free"
 
 /// S58: one tier for every current `core.mem` module item. Keep this table

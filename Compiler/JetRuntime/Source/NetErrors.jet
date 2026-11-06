@@ -1,5 +1,5 @@
-// NetHTTP.rs149-181 derive clone/eq; CAbiRoutes10732-10962 ownership/seam.
-// Reuse EncodingErrors raw-word/optional-int helpers; native layouts are separate.
+// The Rust original derives clone/eq. Reuse
+// EncodingErrors raw-word/optional-int helpers; native layouts are separate.
 fn net_optional_text_clone(text: I64) -> I64 {
     if (text == I64{0}) -> I64{0} else -> jet_rt_string_clone(text)
 }
@@ -128,7 +128,7 @@ fn net_render_ordinal(ordinal: I64) -> I64 {
 #Export(c) fn jet_rt_handle_show_jet_net_error(value: I64) -> I64 {
     ordinal :: net_render_ordinal(encoding_word(wrapping(value + NET_ERROR_TAG)))
     payload :: encoding_word(wrapping(value + NET_ERROR_PAYLOAD))
-    // Core/NetError.rs7-22: every detail is message-only; DNS Failure also message-only.
+    // Every detail is message-only; DNS Failure also message-only.
     if ordinal != NET_RENDER_DNS -> return jet_rt_string_clone(encoding_word(wrapping(payload + NET_DETAIL_MESSAGE)))
     text :: encoding_word(wrapping(payload + NET_DNS_TEXT))
     if encoding_word(wrapping(payload + NET_DNS_TAG)) == NET_DNS_FAILURE -> return jet_rt_string_clone(text)

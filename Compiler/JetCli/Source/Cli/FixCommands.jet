@@ -1,5 +1,5 @@
-// Source/CmdCompile.rs run_fix: the shared diagnostic edit engine, not a
-// second formatter. Publication uses the canonical held codemod transaction.
+// run_fix: the shared diagnostic edit engine, not a second formatter.
+// Publication uses the canonical held codemod transaction.
 use {
     cli_files :: core.files
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, jet_driver_present_diagnostics, jet_driver_inline_package, jet_driver_inline_trivia_end, jet_driver_inline_space, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
@@ -29,13 +29,7 @@ fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuer
             }
             // A script runs with every right, so it needs no authority block.
             authority :: jet_cli_application_authority(result, jet_cli_source_invocation(source, None))
-            if jet_cli_is_application_default(authority) && !jet_driver_inline_package(source).found && jet_cli_undecided(authority).len() > 0 {
-                if jet_cli_authority_refusal(authority, file, "run") == .Val(report) {
-                    at :: jet_cli_fix_inline_insertion(source)
-                    edit :: TextEdit{span: Span{start: at, end: at}, new_text: jet_cli_fix_inline_authority(file, jet_cli_inline_allow_row(authority))}
-                    &diagnostics.push(diagnostic_with_edit_grade(report, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
-                }
-            }
+            if jet_cli_inline_grant_refusal(authority, file, source, "run") == .Val(report) -> &diagnostics.push(report)
         }
     }
     fixes :: jet_cli_collect_fixes_from_diagnostics(diagnostics, source)
@@ -44,6 +38,19 @@ fn jet_cli_fix_collect(file: String, source: String, all: Bool) -> JetCLIFixQuer
         if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push("{diagnostic.code}: {diagnostic.what}")
     }
     JetCLIFixQuery.Fixes{fixes: if all -> fixes else -> jet_cli_safe_fixes(fixes), errors: ^errors}
+}
+
+// The E1803 refusal of a script with no package block whose authority is
+// undecided, carrying the leading `package` block that grants the rights as
+// a needs-review edit; None for any other refusal. `jet run` reports the
+// grant and `jet fix` applies it only under `--all`: granting a right is a
+// decision, not a repair.
+fn jet_cli_inline_grant_refusal(authority: JetCLIAuthority, file: String, source: String, command: String) -> Diagnostic? Never! {
+    if !jet_cli_is_application_default(authority) || jet_driver_inline_package(source).found || jet_cli_undecided(authority).len() == 0 -> return None
+    report :: jet_cli_authority_refusal(authority, file, command) ?? return None
+    at :: jet_cli_fix_inline_insertion(source)
+    edit :: TextEdit{span: Span{start: at, end: at}, new_text: jet_cli_fix_inline_authority(file, jet_cli_inline_allow_row(authority))}
+    Val(diagnostic_with_edit_grade(report, edit, DiagnosticFixApplicability.Suggested, DiagnosticFixSafety.NeedsReview))
 }
 
 fn jet_cli_fix_inline_authority(file: String, allow: [String]) -> String Never! {
@@ -147,7 +154,7 @@ fn jet_cli_fix_markers(before: String, inside: Bool) -> JetCLIFixApply {
 }
 
 fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, color: Bool, quiet: Bool, json: Bool) -> JetDriverVerbOutput {
-    before :: cli_files.read(file) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    before :: cli_files.read(file) ?? return jet_cli_report_output("", "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     all_fixes := [JetCLIFix]{}
     baseline := [String]{}
     if jet_cli_fix_collect(file, before, true) == {
@@ -173,7 +180,7 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, colo
         applied = jet_cli_fix_markers(before, markers == "inside")
         count = applied.applied
         if applied.source != before && jet_cli_fix_errors(file, applied.source).len() > baseline.len() {
-            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            return jet_cli_report_output("", "E2105", "moving the markers {markers} would make `{file}` fail to check", jet_cli_why("E2105"), "fix the file's errors first, then run `jet fix --markers {markers}` again", color, JET_DRIVER_EXIT_USER_ERROR)
         }
     } else {
         applied = jet_cli_fix_checked(file, before, fixes, baseline, &rejected)
@@ -197,20 +204,45 @@ fn jet_cli_fix_run(file: String, dry_run: Bool, all: Bool, markers: String, colo
     loop skip in rejected -> rolled = "{rolled}{file}: rolled back the fix at {skip.edit.span.start}..{skip.edit.span.end} -> `{skip.edit.new_text}`: {skip.reason}\n"
     status := ""
     if applied.source == before {
+        if json -> return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, 0, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         detail :: if skipped == 0 -> "" else -> " ({skipped} suggestion{if skipped == 1 -> "" else -> "s"} need review)"
         status = "{rolled}{file}: no changes made{detail}\n"
-        return JetDriverVerbOutput{stdout: "", stderr: if quiet || json -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
     }
     diff := ""
     if dry_run {
-        if !json -> diff = jet_format_unified_diff(file, before, applied.source)
+        if json -> return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, count, skips, None), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        diff = jet_format_unified_diff(file, before, applied.source)
         status = "{rolled}{file}: would apply {count} fix{if count == 1 -> "" else -> "es"} (dry run; nothing written)\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review (dry run)\n"
     } else {
-        log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None, skips) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        log :: jet_cli_commit_fix(file, before.bytes(), applied.source.bytes(), None, skips) ?? return jet_cli_report_output("", "E2105", err.message, jet_cli_why("E2105"), "correct the named problem, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+        if json -> return JetDriverVerbOutput{stdout: jet_cli_fix_status(file, dry_run, count, skips, Val(log)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
         status = "{rolled}{file}: applied {count} fix{if count == 1 -> "" else -> "es"}\n"
         if skipped > 0 -> status = "{status}{file}: skipped {skipped} suggestion{if skipped == 1 -> "" else -> "s"} for review\n"
         status = "{status}  log: {log}\n"
     }
-    JetDriverVerbOutput{stdout: diff, stderr: if quiet || json -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: diff, stderr: if quiet -> "" else -> status, exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// `jet fix --json`: one jet.status/v1 line naming the edits applied (or, on
+// a dry run, that would be) and each edit left out with its reason. A
+// needs-review suggestion such as a script's authority grant stays out until
+// `jet fix --all` or a hand edit decides it; a rolled-back fix names the
+// error it adds. `log` is the replay log of a written file.
+fn jet_cli_fix_status(file: String, dry_run: Bool, count: Int, skips: [JetCLIFixSkip], log: String?) -> String Never! {
+    skipped :: loop skip in skips -> jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("title", jet_cli_status_text(skip.title)),
+        jet_cli_status_field("reason", jet_cli_status_text(skip.reason)),
+        jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(skip.edit.span.start)), jet_cli_status_field("end", jet_cli_status_int(skip.edit.span.end))})),
+        jet_cli_status_field("new_text", jet_cli_status_text(skip.edit.new_text)),
+    })
+    fix :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("file", jet_cli_status_text(file)),
+        jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
+        jet_cli_status_field("applied", jet_cli_status_int(count)),
+        jet_cli_status_field("skipped", jet_cli_status_array(skipped)),
+        jet_cli_status_field("log", jet_cli_status_optional_text(log)),
+    })
+    "{jet_cli_status_render("fix", true, [JetCLIStatusField]{jet_cli_status_field("fix", fix)})}\n"
 }

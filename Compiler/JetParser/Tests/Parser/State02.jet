@@ -4,10 +4,8 @@ use {
     jet_parser.[jfmt_check_parse_accepts, parse_tokens, parser_prepare_tokens]
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1361
 fn program(source: String) -> Program { parser_test_program(source) }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1369
 #Test("clean_preparation_reuses_byte_identical_tokens") {
     lexed := lex("fn run() {{ value :: 1 }}\n".bytes())
     assert(lexed.diagnostics.is_empty())
@@ -21,7 +19,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1419
 #Test("suffix_failure_contracts_cover_nested_type_positions") {
     parsed :: program("struct Holder {{\noptional: Int?\nunit: IOError!\nunion: Int (DbError | TimeoutError)!\ncallback: fn(Int? IOError!) IOError!\nimpossible: Never!\n}}\nBox<T> :: T? IOError!\nfn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! {{ value }}\nfn save() IOError! {{}}\nfn run() {{}}\n")
     holder :: loop item in parsed.items {
@@ -48,7 +45,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(contextual.contains("?(\"loading config\")"))
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1448
 #Test("built_in_marker_accepts_positional_string_argument") {
     parsed :: program("#CLI\nstruct ServeArgs {{\n#Doc(\"port\") port: Int{{3000}}\n}}\nfn run(args: ServeArgs) {{}}\n")
     field :: loop item in parsed.items {
@@ -59,7 +55,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(field.serde_markers[0].arg_labels[0] == None)
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1515
 #Test("dispatch_atom_boolean_group_has_safe_source_edit") {
     source :: "fn run() {{\n    n :: 48\n    ready :: true\n    if n < {{\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }}\n}}\n"
     lexed :: lex(source.bytes())
@@ -83,7 +78,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     }
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1562
 #Test("missing_function_body_is_e0081_and_recovers_for_check") {
     source :: "fn host_open(path: String) -[FS]> Int\nfn run() {{}}\n"
     lexed :: lex(source.bytes())
@@ -103,7 +97,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(loop item in recovered.program.items { if item == .Func(func) && func.name == "bar" -> break true } ?? false)
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1613
 #Test("spaced_minus_is_subtraction") {
     parsed :: program("fn run() {{ d :: 5 - 3 }}")
     func :: loop item in parsed.items { if item == .Func(f) -> break f } ?? panic("a run function")
@@ -111,9 +104,8 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(if binding.init == { .Binary(op, _, _, _, _) -> op == BinOp.Sub else -> false })
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1637
 #Test("derive_generic_type_holes_stay_in_the_template_ast") {
-    // The Rust fixture's retired `~self.value` (binary_unary.rs:949) is spelled `.copy()`.
+    // The Rust fixture's retired `~self.value` is spelled `.copy()`.
     parsed :: program("\nderive T.TypeName {{\n    info :: T.reflect()\n    param :: info.type_params[0].name\n    fn get_value(self) -> @param {{ self.value.copy() }}\n    fn type_name(self) -> String {{ T.$name }}\n}}\n")
     template :: loop item in parsed.items { if item == .UserDerive(d) -> break d } ?? panic("user derive")
     function :: loop body_item in template.body {
@@ -124,7 +116,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(function.return_type == (Val(Type.Named{name: "@param"})))
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1676
 #Test("derive_body_rejects_nested_impl_but_generate_keeps_item_blocks") {
     source :: "\nderive T.Debug {{\n    impl Thing.Debug {{\n        fn debug(self) -> String {{ \"nested\" }}\n    }}\n}}\n"
     lexed :: lex(source.bytes())
@@ -135,7 +126,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     _ :: program("\nfn build(b: Build) {{\n    b.generate(\"made\") {{\n        impl Thing.Debug {{\n            fn debug(self) -> String {{ \"generated\" }}\n        }}\n    }}\n}}\n")
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1707
 #Test("root_template_loop_parses_closed_type_list_and_declarations") {
     parsed :: program("\nprep loop T in [Point] {{\n    impl T {{\n        fn generated(self) -> String {{ \"generated\" }}\n    }}\n    #Test(\"generated\") {{\n        .measure {{\n            assert(true)\n        }}\n    }}\n}}\n")
     loop_item :: loop item in parsed.items { if item == .TemplateLoop(value) -> break value } ?? panic("root template loop")
@@ -144,7 +134,6 @@ fn program(source: String) -> Program { parser_test_program(source) }
     assert(if loop_item.body[1] == { .Item(item) -> if item == { .Test(_) -> true else -> false } else -> false })
 }
 
-// Rust: crates/jet-parser/src/Parser/mod.rs:1745
 #Test("task_keyword_callable_body_parses_as_spawn") {
     parsed :: program("fn run() {{\n    task.group g {{\n        h :: task work()\n    }}\n}}\n")
     run :: loop item in parsed.items { if item == .Func(f) && f.name == "run" -> break f } ?? panic("run")

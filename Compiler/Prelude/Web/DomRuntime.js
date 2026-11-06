@@ -1744,18 +1744,18 @@ if (typeof globalThis !== "undefined") {
   globalThis.__jetSubscribeWebForm = subscribeWebForm;
 }
 
-// D-UISHOWCASE1 (c134 Phase 8): stable per-node DOM identity without adding
-// any argument to the Jet-level `ui.null_backend()` call (I7/I8 — no new
-// language surface for what's purely a codegen bookkeeping concern). Every
-// exported top-level `#JS` function's generated body is wrapped in
-// `enterRenderScope(name)` / `exitRenderScope()` (see Web.rs's `emit_js_fn`).
-// `enterRenderScope` only resets the scope name + counter when call depth is
-// 0 — i.e. only for the OUTERMOST exported call, not for a shared helper
-// (also exported, since every `#JS` function is) invoked *from* that outer
-// call. `createBackend()` then stamps each new backend with
-// `"{scope}#{ordinal}"`, and `paint()` looks its box up in a scope-keyed
-// registry instead of caching one element per backend OBJECT. That's what
-// makes both real-world shapes work with the same mechanism:
+// D-UISHOWCASE1 (c134 Phase 8): stable per-node DOM identity without adding any
+// argument to the Jet-level `ui.null_backend()` call (I7/I8 — no new language
+// surface for what's purely a codegen bookkeeping concern). Every exported
+// top-level `#JS` function's generated body is wrapped in
+// `enterRenderScope(name)` / `exitRenderScope()` (`emit_js_fn`).
+// `enterRenderScope` only resets the scope name + counter when call depth is 0
+// — i.e. only for the OUTERMOST exported call, not for a shared helper (also
+// exported, since every `#JS` function is) invoked *from* that outer call.
+// `createBackend()` then stamps each new backend with `"{scope}#{ordinal}"`,
+// and `paint()` looks its box up in a scope-keyed registry instead of caching
+// one element per backend OBJECT. That's what makes both real-world shapes work
+// with the same mechanism:
 //   - 196_ui_web_click.jet's `render(n)`, called repeatedly by a click
 //     handler: each call resets to the same first key ("render#0") ->
 //     the one box is found and updated in place, never duplicated.
@@ -1858,8 +1858,7 @@ export function layout(backend, node, frame) {
 }
 
 // Card #1658: shared default mount viewport (classic 80x24 terminal), named
-// once so no host hand-types the literal. Matches DEFAULT_MOUNT_COLS/ROWS in
-// crates/jet-codegen/src/Prelude/Ui.rs.
+// once so no host hand-types the literal. Matches DEFAULT_MOUNT_COLS/ROWS.
 export const DEFAULT_MOUNT_COLS = 80;
 export const DEFAULT_MOUNT_ROWS = 24;
 
@@ -2368,11 +2367,11 @@ export function ariaRoleTextInput() { return "textbox"; }
 export function ariaRoleLabel() { return "label"; }
 export function ariaRoleContainer() { return "group"; }
 
-// D-RENDERTGT2=A carried into JS (Phase 7 web/DOM backend): a minimal
-// reactive runtime mirroring the Rust `JetSignal`/`jet_reactive_effect`
-// prelude (crates/jet-codegen/src/Prelude/CoreLib.rs). An "observer" is the
-// closure currently (re)running; reading a signal while an observer is
-// active subscribes it; `set` re-runs every subscriber synchronously.
+// D-RENDERTGT2=A carried into JS (Phase 7 web/DOM backend): a minimal reactive
+// runtime mirroring the Rust `JetSignal`/`jet_reactive_effect` prelude. An
+// "observer" is the closure currently (re)running; reading a signal while an
+// observer is active subscribes it; `set` re-runs every subscriber
+// synchronously.
 const jetReactiveObservers = [];
 const jetReactiveRootEffects = new Set();
 let jetReactiveNextObserver = 1;
@@ -2456,7 +2455,7 @@ export function makeEffect(body) {
   };
 }
 
-/** Runtime-owned rendering effect; public `reactive.effect` returns its handle. */
+/** Runtime-owned rendering effect; public `reactive.autorun` returns its handle. */
 export function reactiveRender(body) {
   const scopeName = jetDomScopeName;
   // Re-enter the caller's DOM scope on every synchronous rerun so backend

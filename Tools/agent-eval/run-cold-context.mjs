@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import http from "node:http";
 import net from "node:net";
-import { homedir } from "node:os";
+import { scratchRoot as devScratchRoot } from "../agent/roots.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -1184,7 +1184,7 @@ async function run(options) {
   const contexts = { capsule: inputs.capsuleText, control: inputs.controlText };
   const rows = [];
   const blocked = [...preflightBlocked];
-  const sharedScratchRoot = path.resolve(process.env.JET_TEST_SCRATCH || process.env.JET_TEST_SCRATCH_DIR || path.join(homedir(), ".cache/jet-dev/scratch"));
+  const sharedScratchRoot = path.resolve(process.env.JET_TEST_SCRATCH || process.env.JET_TEST_SCRATCH_DIR || devScratchRoot());
   const scratchRoot = path.resolve(process.env.JET_AGENT_EVAL_SCRATCH_DIR || path.join(sharedScratchRoot, "agent-eval"));
   const adapterScratchRoot = path.resolve(process.env.JET_AGENT_EVAL_ADAPTER_SCRATCH_DIR || path.join(sharedScratchRoot, "agent-eval-adapters"));
   await fs.mkdir(scratchRoot, { recursive: true });

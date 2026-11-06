@@ -1,4 +1,4 @@
-// Docs.rs tests are mapped to this paired packet test file by Wave 0799.
+// Tests are mapped to this paired packet test file by Wave 0799.
 use {
     jet_ast.[CtValue]
     repl_docs_test_files :: core.files.host.retained_descriptor
@@ -8,7 +8,6 @@ use {
     repl_docs_test_process :: std.process // GATE #4494: native process id.
 }
 
-// Rust: crates/jet-repl/src/Docs.rs:151
 #Test("builtin_list_filter_uses_shared_fact") {
     session :: Session.new()
     doc :: lookup(session, "List.filter") ?? panic("List.filter docs")
@@ -16,7 +15,6 @@ use {
     assert(doc.contains("Keeps items where f(item) is true."))
     assert(doc.contains("Source: core.collections"))
 }
-// Rust: crates/jet-repl/src/Docs.rs:160
 #Test("session_binding_lookup_shows_live_value") {
     session := Session.new()
     session.scope["answer"] = CtValue.Int(42)
@@ -24,7 +22,6 @@ use {
     assert(doc.starts_with("answer: Int :: 42\n"))
     assert(doc.contains("Source: this session"))
 }
-// Rust: crates/jet-repl/src/Docs.rs:171
 #Test("completion_dedups_shadowed_session_item") {
     session := Session.new()
     &session.item_srcs.push("fn answer() -> Int {{ return 1 }}")
@@ -33,7 +30,6 @@ use {
     assert_eq(candidates.len(), 1)
     assert_eq(candidates[0].identity, "session:binding:answer")
 }
-// Rust: crates/jet-repl/src/Docs.rs:185
 #Test("core_import_alias_completes_module_members") {
     session := Session.new()
     session.core_imports["math"] = "core.math"
@@ -42,7 +38,6 @@ use {
     assert_eq(candidates[0].name, "sqrt")
     assert_eq(candidates[0].module_path, "core.math")
 }
-// Rust: crates/jet-repl/src/Docs.rs:197
 #Test("runtime_receiver_beats_core_import_alias") {
     session := Session.new()
     session.core_imports["items"] = "core.math"
@@ -51,7 +46,6 @@ use {
     assert(candidates.any((c) -> c.name == "filter"))
     assert(!candidates.any((c) -> c.name == "floor"))
 }
-// Rust: crates/jet-repl/src/Docs.rs:221
 #Test("core_import_alias_docs_resolve_member") {
     session := Session.new()
     session.core_imports["math"] = "core.math"
@@ -59,14 +53,12 @@ use {
     assert(doc.contains("core.math.sqrt"))
     assert(doc.contains("Source: core.math"))
 }
-// Rust: crates/jet-repl/src/Docs.rs:232
 #Test("syntax_docs_use_the_registry_dictionary") {
     doc :: lookup(Session.new(), "^") ?? panic("^ docs")
     assert(doc.contains("Before a name (move)") && doc.contains("Before a parameter's type"))
     assert(doc.contains("Afterwards:"))
     assert(!doc.contains("SIGIL_MOVE") && !doc.contains("D-"))
 }
-// Rust: crates/jet-repl/src/Docs.rs:244
 #Test("docs_temp_writer_rejects_existing_symlink") {
     if repl_docs_test_target.selected_family() == .Unix {
         root := repl_docs_test_files.temp_dir()

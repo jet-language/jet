@@ -1,0 +1,26 @@
+Error [jet.MarkedFunctionValue]: `bump` can't be used as a function value because its parameter `x` is `&`
+  --> tests/ui/marked_function_value.jet:25:28
+    |
+ 25 |     hooks :: Hooks{on_int: bump, on_text: consume}
+    |                            ^^^^
+ Why: A function type gives each parameter plain read access, so a value of `bump` would drop the `&` its callers must write
+ Fix: Call `bump` directly with the `&` mark, or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227
+
+Error [jet.MarkedFunctionValue]: `consume` can't be used as a function value because its parameter `s` is `^`
+  --> tests/ui/marked_function_value.jet:25:43
+    |
+ 25 |     hooks :: Hooks{on_int: bump, on_text: consume}
+    |                                           ^^^^^^^
+ Why: A function type gives each parameter plain read access, so a value of `consume` would drop the `^` its callers must write
+ Fix: Call `consume` directly with the `^` mark, or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227
+
+Error [jet.MarkedFunctionValue]: `bump` can't be used as a function value because its parameter `x` is `&`
+  --> tests/ui/marked_function_value.jet:26:15
+    |
+ 26 |     call_with(bump)
+    |               ^^^^
+ Why: A function type gives each parameter plain read access, so a value of `bump` would drop the `&` its callers must write
+ Fix: Call `bump` directly with the `&` mark, or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227

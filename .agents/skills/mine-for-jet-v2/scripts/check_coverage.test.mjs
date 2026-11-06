@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { scratchRoot } from '../../../../Tools/agent/roots.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { check, main, merge, render as renderResult, sample, seconds, vague } from './check_coverage.mjs';
@@ -226,7 +226,7 @@ test('merge joins shards into one contiguous source and re-checks', () => {
 });
 
 test('--merge writes the joined run, never overwrites, and exits by the re-check', t => {
-  const scratch = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
+  const scratch = scratchRoot();
   mkdirSync(scratch, { recursive: true });
   const root = mkdtempSync(join(scratch, 'check-coverage-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

@@ -1,6 +1,6 @@
 # Adaptive runtime specialization: when a JIT-like tier beats AOT, and how Jet gets it with one backend (2026-10-04)
 
-Card #4571. Ballot draft: `~/.cache/jet-dev/ballots/READY/D-ADAPTIVE-TIER1.json`.
+Card #4571. Ballot draft: `$JET_STATE_ROOT/ballots/READY/D-ADAPTIVE-TIER1.json`.
 
 Owner questions, verbatim:
 

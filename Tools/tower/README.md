@@ -107,7 +107,7 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   browser to apply the owner-visibility rule; no board-data migration is needed.
 - **Milestone review** — milestone criteria use the same `open` → `met` →
   `verified` flow. After all cards close, freeze the source commit with
-  `Tools/agent/closeout-gate.mjs open <id> --by X`; broad proof is refused
+  `jet Tools/agent/CloseoutGate.jet open <id> --by X`; broad proof is refused
   before that. `tower milestone verify <id> --evidence "…" --by X` works only
   when every linked card is done, every milestone criterion is verified, and
   the token exists. Reopening a linked card or milestone criterion clears the
@@ -128,7 +128,10 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   is ever half-archived. `tower archive status|show <id>|restore <id>` reads
   the archive back and, if needed, brings something back to the live board.
   `card show`/`decision show` fall through to history automatically once
-  something isn't live any more (marked `archived: true`).
+  something isn't live any more (marked `archived: true`). `tower archive
+  shard --apply --by X` moves a large archive into `history/<kind>-NNN.json`
+  shards of at most 8 MiB each, with `history.json` as their manifest, so no
+  board file nears GitHub's 100 MB limit; without `--apply` it is a dry run.
 
 ## CLI
 
@@ -255,7 +258,8 @@ write; `--expect-rev N` gives optimistic concurrency (exit 2 on conflict).
 
 Everything is optional; the UI and validation follow whatever you set.
 `retireAfterDays` is the walk-back buffer before a done card / ratified
-decision moves to `Tools/tower/.tower/history.json`.
+decision moves to the archive, `Tools/tower/.tower/history.json` (with its
+shards under `history/` once sharded).
 
 There is no runtime credential file. `auth` and `push` are removed fields.
 Tower rejects them in tracked `config.json` with `ConfigError`; remove those

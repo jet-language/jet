@@ -1,0 +1,26 @@
+# A range slice of a `[T#N]` is a read view into the array's own
+# storage. Returning it as `View<T>` and passing it to a `View<T>` parameter
+# both check the bounds and point into the array: no element is copied and
+# nothing is allocated. Every tier agrees on the result.
+fixture: a_fixed_list_range_slice_is_a_read_view.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet emit --ir main.jet --fn middle
+exit: 0
+stdout: ~ "jet_rt_view_end" # the slice bounds are checked once
+stdout: !~ "jet_rt_alloc" # the view points into the parameter, no new list
+stdout: !~ "jet_rt_free" # nothing is freed either
+step: jet emit --ir main.jet --fn middle_total
+exit: 0
+stdout: ~ "jet_rt_view_end" # the argument is a checked window
+stdout: !~ "jet_rt_alloc" # the argument view is not materialized
+step: jet run --optimize=none main.jet
+exit: 0
+stdout: = a_fixed_list_range_slice_is_a_read_view.out
+step: jet run --optimize=basic main.jet
+exit: 0
+stdout: = a_fixed_list_range_slice_is_a_read_view.out
+step: jet run --optimize=full main.jet
+exit: 0
+stdout: = a_fixed_list_range_slice_is_a_read_view.out

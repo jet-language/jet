@@ -253,6 +253,7 @@ export function ffiRunCachePath(context, casePath, declared) {
 function sandboxMounts(exec, cwd, context, declared) {
     if (exec.argv.filter(arg => arg === '--clearenv').length !== 1) throw Error('foreign sandbox must clear its environment');
     const mounts = [], directories = [];
+    let lowers = 0;
     for (let i = 1; i < exec.argv.length; i++) {
         const arg = exec.argv[i];
         if (arg === '--') break;
@@ -265,6 +266,18 @@ function sandboxMounts(exec, cwd, context, declared) {
         } else if (['--tmpfs', '--proc', '--dev'].includes(arg)) {
             const path = exec.argv[++i];
             if (inside('/work/source', path) || inside(path, '/work/source') || inside('/work/output', path) || inside(path, '/work/output')) throw Error('sandbox overlay obscures helper mounts');
+        } else if (arg === '--overlay-src') {
+            if (!exec.argv[++i]) throw Error('incomplete sandbox overlay');
+            lowers++;
+        } else if (arg === '--tmp-overlay') {
+            // A memory-backed overlay (the host Cargo registry) discards its
+            // writes with the sandbox, so it may sit under the output like a bind.
+            const path = exec.argv[++i];
+            if (!path || !lowers) throw Error('incomplete sandbox overlay');
+            lowers = 0;
+            if (inside('/work/source', path) || inside(path, '/work/source') || inside(path, '/work/output') || inside('/work/output/metadata-source', path) || inside(path, '/work/output/metadata-source')) throw Error('sandbox overlay obscures helper mounts');
+        } else if (['--overlay', '--ro-overlay'].includes(arg)) {
+            throw Error('sandbox overlay persists outside the sandbox');
         }
     }
     const source = mounts.filter(mount => mount.path === '/work/source');
@@ -523,7 +536,7 @@ export function auditNativeTrace({ text, root, jet, allowlistText = '', tracePat
                 } else throw Error(`${exec.kind} is forbidden outside the constrained Rust FFI branch`);
             } catch (error) { state.approvedCargo = null; state.approvedRustc = null; violate(event, state, 'forbidden-execution', error.message, exec); }
         }
-        if (script && existsSync(script.path) && (script.path === resolve(root, 'Tools/ci/compiled-workload-runner.mjs') || inside(resolve(root, 'Tools/perf'), script.path) && script.path.endsWith('.mjs'))) entry.performancePeer = script.path;
+        if (script && existsSync(script.path) && inside(resolve(root, 'Tools/perf'), script.path) && script.path.endsWith('.mjs')) entry.performancePeer = script.path;
         state.history = [...state.history, entry];
     }
     receipt.cases = [...cases.values()].sort((a, b) => a.case.localeCompare(b.case));

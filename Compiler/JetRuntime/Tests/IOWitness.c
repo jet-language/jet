@@ -1,4 +1,4 @@
-/* Real Jet object client: link --wrap=jet_rt_free; no provider implementations.
+/* Real Jet object client:; no provider implementations.
  * CAbiHost carrier layouts; frozen seed 89622-89747 (record_index_stop),
  * 72109-72218 (renders); current Host adds AlreadyExists/Unsupported. */
 #include <assert.h>
@@ -17,7 +17,7 @@ _Static_assert(sizeof(Error)==56 && _Alignof(Error)==8 && offsetof(Error,resourc
 _Static_assert(sizeof(Text)==24 && _Alignof(Text)==8,"E4 ABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const char *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -66,13 +66,14 @@ static void watch(void *ptr,int64_t size,int64_t align) {
     for(size_t i=0;i<count;++i) assert(watched[i].ptr!=ptr || watched[i].freed==1);
     watched[count++]=(struct Watch){ptr,size,align,0};
 }
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     ++intercepted;
     for(size_t i=count;i>0;--i) if(watched[i-1].ptr==ptr && !watched[i-1].freed) {
         assert(watched[i-1].size==size && watched[i-1].align==align);
         watched[i-1].freed=1; break;
     }
-    __real_jet_rt_free(ptr,size,align);
 }
 static void text_watch(Text *text) {
     if(!text) return;
@@ -123,6 +124,7 @@ static void stop_mode(const char *mode) {
     assert(!"unknown mode");
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) { stop_mode(argv[1]); return 99; }
     jet_rt_handle_drop_io_context(NULL); jet_rt_handle_drop_io_error(NULL); jet_rt_handle_drop_io_operation(NULL);

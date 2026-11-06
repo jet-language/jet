@@ -1,79 +1,236 @@
 // The lease on a verified cache output (Rust `CacheLease`,
 // crates/jetpack/src/Store/Reuse.rs). A lease pins the exact bytes a
 // consumer may use: a private sealed snapshot (or, on Linux, the canonical
-// sealed CAS object held by directory handle), open handles to every
-// snapshot file and executable, and the Hangar objects of a Nix closure.
-// Consumers only ever receive descriptor-view paths of those handles.
+// sealed CAS object held by directory handle), its executables, and the
+// Hangar objects of a Nix closure.
 //
-// Rust hands the held handles to a child by clearing close-on-exec, each at
-// its lease slot (`/proc/self/fd/<slot>` on Linux, `/dev/fd/<slot>`
-// elsewhere), so a path swap after verification cannot redirect the
-// consumer. Core cannot pass an open descriptor to a child process, so
-// `keep_open_for` fails closed for a lease that holds handles.
+// This process reads leased bytes only through the held handles. A child
+// reaches them through the held directories: each is reserved a child
+// descriptor when it is opened, and `keep_open_for` passes it into the
+// child's ProcessSpec at exactly that descriptor (`/proc/self/fd/<fd>` on
+// Linux, `/dev/fd/<fd>` elsewhere), so a path swap after verification cannot
+// redirect the child. Child-visible text is a `LeaseText`: it names each
+// leased directory by a token that only `render` resolves, and only for a
+// descriptor the same spec bound.
 
-STORE_LEASE_HANDOFF_UNSUPPORTED :: "running a command over a verified cache lease is not supported yet: Core cannot pass the lease's open descriptors to a child process"
-
-// The first descriptor number a lease pins handles at; below it are the
-// standard streams and the descriptors Core itself hands to children.
-STORE_LEASE_NEXT_SLOT :: shared ProcessSequence{next: 64}
+// The first descriptor a leased directory is reserved at in a child; below
+// it are the standard streams and the descriptors Core hands to children.
+STORE_LEASE_CHILD_FD :: shared ProcessSequence{next: 64}
 
 // Rust `SEQ`: the per-process lease sequence used in lease names.
 STORE_LEASE_SEQUENCE :: shared ProcessSequence{next: 0}
 
-// The next unused child descriptor slot.
-fn store_lease_allocate_slot() -> Int Never! {
-    process_sequence_take(STORE_LEASE_NEXT_SLOT)
+// Reserve the next process-unique child descriptor.
+fn store_lease_reserve_child_fd() -> Int Never! {
+    process_sequence_take(STORE_LEASE_CHILD_FD)
 }
 
-// The descriptor-view path of a pinned slot.
-fn store_lease_descriptor_path(slot: Int) -> String Never! {
+// The path a child sees for the directory passed at `fd`.
+fn store_lease_child_fd_path(fd: Int) -> String Never! {
     prefix :: if sys.name() == "linux" -> "/proc/self/fd" else -> "/dev/fd"
-    "{prefix}/{slot}"
+    "{prefix}/{fd}"
 }
 
-// One opened regular file of a lease: a snapshot member (`relative`) or an
-// executable (`relative` is its file name). `id` is the identity recorded
-// when the file was opened; `file` is None once handed to a process spec.
+// NUL cannot occur in a path, argument, or environment value, so a token
+// that `render` did not resolve can never name a file.
+fn store_lease_token_mark() -> String Never! {
+    String.from_bytes([U8]{U8{0}}) ?? panic("NUL is one UTF-8 byte")
+}
+
+// The token standing for the directory reserved at `fd` inside LeaseText.
+fn store_lease_fd_token(fd: Int) -> String Never! {
+    mark :: store_lease_token_mark()
+    "{mark}jet-lease-fd:{fd}{mark}"
+}
+
+// Child text naming the directory reserved at `fd`.
+fn store_lease_fd_text(fd: Int) -> LeaseText Never! {
+    LeaseText{text: store_lease_fd_token(fd)}
+}
+
+#Error
+enum LeaseHandoffError {
+    // A leased directory no longer holds the handle its descriptor passes.
+    HandleLost(String)
+    // Child text names a leased directory its process was not given.
+    Unbound(String)
+    // Core refused to pass a held directory into the child.
+    Pass(IOError)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .HandleLost(path) -> "leased directory `{path}` lost its handle before it reached the child"
+            .Unbound(text) -> "child text `{text}` names a leased directory its process was not given"
+            .Pass(error) -> "could not pass a leased directory to the child: {error}"
+        }
+    }
+}
+
+impl LeaseHandoffError -> StoreError { StoreError.Other(self.message()) }
+
+// The leased directories one ProcessSpec carries, by reserved descriptor.
+// Only `CacheLease.keep_open_for` adds to it, after passing the directory.
+struct LeaseBinding {
+    priv fds: [Int]
+
+    fn empty() -> LeaseBinding Never! {
+        LeaseBinding{fds: [Int]{}}
+    }
+}
+
+// Text a child receives that may name paths inside leased directories.
+// The only way out is `render` against the binding of the child's own
+// spec; this process never reads leased bytes through it.
+struct LeaseText {
+    priv text: String
+
+    fn plain(text: String) -> LeaseText Never! {
+        LeaseText{text: text}
+    }
+
+    fn join(parts: [LeaseText], separator: String) -> LeaseText Never! {
+        texts := [String]{}
+        loop part in parts -> &texts.push(part.text)
+        LeaseText{text: texts.join(separator)}
+    }
+
+    // `join` keeping only the first of equal parts.
+    fn join_unique(parts: [LeaseText], separator: String) -> LeaseText Never! {
+        seen := [String: Bool]{}
+        texts := [String]{}
+        loop part in parts {
+            if seen.has_key(part.text) -> next
+            seen[part.text] = true
+            &texts.push(part.text)
+        }
+        LeaseText{text: texts.join(separator)}
+    }
+
+    // `relative` below this text; an empty relative is the text itself.
+    fn child(self, relative: String) -> LeaseText Never! {
+        if relative == "" -> return LeaseText{text: self.text}
+        if self.text.ends_with("/") -> return LeaseText{text: "{self.text}{relative}"}
+        LeaseText{text: "{self.text}/{relative}"}
+    }
+
+    fn append(self, suffix: String) -> LeaseText Never! {
+        LeaseText{text: "{self.text}{suffix}"}
+    }
+
+    fn same(self, other: LeaseText) -> Bool Never! {
+        self.text == other.text
+    }
+
+    // The child-visible text, or `Unbound` when it names a leased directory
+    // that `binding` did not pass.
+    fn render(self, binding: LeaseBinding) -> String LeaseHandoffError! {
+        out := self.text
+        loop fd in binding.fds -> out = out.replace(store_lease_fd_token(fd), store_lease_child_fd_path(fd))
+        mark :: store_lease_token_mark()
+        if out.contains(mark) -> return Err(LeaseHandoffError.Unbound(out.replace(mark, "")))
+        Ok(out)
+    }
+
+    // The text for a parent shell, each token replaced by the durable root
+    // `roots` names for its descriptor; None when one has no durable root.
+    fn render_durable(self, roots: [Int: String]) -> String? Never! {
+        out := self.text
+        loop fd in roots.keys().to_list() -> out = out.replace(store_lease_fd_token(fd), roots[fd])
+        if out.contains(store_lease_token_mark()) -> return None
+        Val(out)
+    }
+}
+
+// One opened executable of a lease; `relative` is its file name and `id`
+// the identity recorded when it was opened.
 struct SnapshotFile {
     relative: String
     file: FileReader?
     id: FileID
-    slot: Int
 }
 
-// One held directory of a lease.
+// One held directory of a lease and the child descriptor reserved for it.
 struct LeasedDirectory {
     path: String
     priv directory: Directory?
     id: FileID
-    slot: Int
+    child_fd: Int
 
     fn holds_handle(self) -> Bool Never! {
         self.directory != None
     }
 
-    // Each entry as `name\ttarget`, read through the held handle. The path
-    // can die first: a wrapper's is the mount keeper's /proc root.
-    fn link_entries(self) -> [String] IOError! {
-        // The handle is read where it is held: a copy out of the borrowed
+    // The child's text for `relative` below this directory.
+    fn child_text(self, relative: String) -> LeaseText Never! {
+        store_lease_fd_text(self.child_fd).child(relative)
+    }
+
+    // Pass the held directory into `spec` at its reserved descriptor.
+    fn pass_into(self, spec: ProcessSpec, binding: &LeaseBinding) -> ProcessSpec LeaseHandoffError! {
+        // The handle is used where it is held: a copy out of the borrowed
         // receiver would own, and close, the lease's descriptor.
         if self.directory == {
             .Val(directory) -> {
-                out := [String]{}
-                loop entry in directory.list() {
-                    target :: directory.read_link(entry.name)
-                    &out.push("{entry.name}\t{target}")
-                }
-                Ok(out)
+                passed :: directory.pass_to(spec, self.child_fd) ?? return Err(LeaseHandoffError.Pass(err))
+                &binding.fds.push(self.child_fd)
+                Ok(passed)
             }
-            .None -> Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased directory `{self.path}` lost its handle")}))
+            .None -> Err(LeaseHandoffError.HandleLost(self.path))
         }
     }
+
+    // Open the regular file `relative` through the held handle.
+    fn open_file(self, relative: String) -> FileReader IOError! {
+        if self.directory == {
+            .Val(directory) -> directory.open(relative)
+            .None -> Err(store_lease_handle_lost(self.path))
+        }
+    }
+
+    // Describe `relative` without following a final link; "" is the
+    // directory itself.
+    fn stat_entry(self, relative: String) -> Stat IOError! {
+        if self.directory == {
+            .Val(directory) -> if relative == "" -> directory.stat() else -> directory.entry_stat(relative)
+            .None -> Err(store_lease_handle_lost(self.path))
+        }
+    }
+
+    fn read_link(self, relative: String) -> String IOError! {
+        if self.directory == {
+            .Val(directory) -> directory.read_link(relative)
+            .None -> Err(store_lease_handle_lost(self.path))
+        }
+    }
+
+    // The entries of `relative` below this directory; "" lists it.
+    fn list(self, relative: String) -> [DirectoryEntry] IOError! {
+        if self.directory == {
+            .Val(directory) -> {
+                if relative == "" -> return directory.list()
+                nested :: directory.open_directory(relative)
+                nested.list()
+            }
+            .None -> Err(store_lease_handle_lost(self.path))
+        }
+    }
+
+    // Each entry as `name\ttarget`, read through the held handle. The path
+    // can die first: a wrapper's is the mount keeper's /proc root.
+    fn link_entries(self) -> [String] IOError! {
+        out := [String]{}
+        loop entry in self.list("") -> &out.push("{entry.name}\t{self.read_link(entry.name)}")
+        Ok(out)
+    }
+}
+
+fn store_lease_handle_lost(path: String) -> IOError Never! {
+    IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased directory `{path}` lost its handle")})
 }
 
 // A held Nix projection source: its directory or regular file.
 enum ProjectionHandle {
-    Directory(Directory)
+    Directory(LeasedDirectory)
     File(FileReader)
 }
 
@@ -88,21 +245,45 @@ struct NixProjectionBinding {
     handle: ProjectionHandle?
     pinned_id: FileID?
     pinned_dir: Bool
-    slot: Int
     symlink_target: String?
+
+    // The descriptor reserved for a held directory source.
+    fn child_fd(self) -> Int? Never! {
+        if self.handle == {
+            .Val(handle) -> if handle == {
+                .Directory(held) -> Val(held.child_fd)
+                .File(_) -> None
+            }
+            .None -> None
+        }
+    }
+
+    // Pass a held directory source into `spec`; other sources reach the
+    // child by their canonical path.
+    fn pass_into(self, spec: ProcessSpec, binding: &LeaseBinding) -> ProcessSpec LeaseHandoffError! {
+        if self.handle == {
+            .Val(handle) -> if handle == {
+                .Directory(held) -> held.pass_into(spec, &binding)
+                .File(_) -> Ok(spec)
+            }
+            .None -> Ok(spec)
+        }
+    }
 }
 
-// A logical `/nix/store/<name>` path and the stable source a rootless
-// namespace binds there.
+// A logical `/nix/store/<name>` path and the source a rootless namespace
+// binds there.
 struct NixProjectionPath {
     logical: String
-    source: String
+    source: LeaseText
 }
 
-// A leased output root and the stable root consumers resolve it through.
+// A leased output root, how a child names it, and the descriptor reserved
+// for its held directory (None when the child gets the canonical source).
 struct LeasedOutputRoot {
     output_root: String
-    lease_root: String
+    child_root: LeaseText
+    child_fd: Int?
 }
 
 enum ConsumptionStatus {
@@ -112,7 +293,6 @@ enum ConsumptionStatus {
 
 struct CacheLease {
     priv verification: StoreVerification
-    priv files: [SnapshotFile]
     priv executables: [SnapshotFile]
     priv out: String
     priv lease_root: String
@@ -126,21 +306,25 @@ struct CacheLease {
     snapshot_root: String
     priv snapshot_dir: LeasedDirectory?
     priv bin_relative: String?
+    // The sealed private snapshot's digest, which `validate` re-proves.
     priv expected_digest: String
+    // The realization's canonical output digest, which names it in the Store
+    // and in profile receipts.
+    priv output_hash: String
     priv direct_cas: Bool
     priv package: String
     priv version: String
     priv reference: String
     priv store_root: String
     priv consumption_status_value: ConsumptionStatus
-    priv wrapper_root: String?
-    // Logical `/nix/store/<name>` paths mapped to a verified lease root or
-    // canonical Hangar object; shell consumers use them only inside a
-    // rootless namespace.
+    // Logical `/nix/store/<name>` paths and the source a rootless namespace
+    // binds there.
     priv nix_store_projection_paths: [NixProjectionPath]
-    // Verified output roots accepted by `stable_path`.
+    // Verified output roots a consumer path may name.
     priv leased_output_roots: [LeasedOutputRoot]
     priv bin_output_root: String?
+    // The `leased_output_roots` entry the bin directory lies in.
+    priv bin_output_index: Int?
     priv projected_bin_root: String?
     priv nix_projection_bindings: [NixProjectionBinding]
     priv wrapper_directory_handle: LeasedDirectory?
@@ -150,76 +334,58 @@ struct CacheLease {
         self.handed_off = true
     }
 
-    // Every held handle and the live lease lock must reach the child at its
-    // slot so the child reads the verified bytes and the lease container
-    // outlives the parent. Core cannot pass an open descriptor to a child
-    // process, so a lease that holds any handle refuses the handoff.
-    fn keep_open_for(&self, spec: ProcessSpec) -> ProcessSpec StoreError! {
-        if self.holds_handles() -> return Err(StoreError.Unsupported(STORE_LEASE_HANDOFF_UNSUPPORTED))
+    // Pass every held directory into `spec` at its reserved descriptor and
+    // record it in `binding`, so this lease's child text renders for that
+    // child. The live lease lock stays here: this process outlives the
+    // children it waits for.
+    fn keep_open_for(&self, spec: ProcessSpec, binding: &LeaseBinding) -> ProcessSpec LeaseHandoffError! {
+        out := spec
+        if sys.family() != "windows" {
+            if self.snapshot_dir == {
+                .Val(held) -> out = held.pass_into(out, &binding)
+                .None -> {}
+            }
+            if self.wrapper_directory_handle == {
+                .Val(held) -> out = held.pass_into(out, &binding)
+                .None -> {}
+            }
+            loop index in 0..<self.nix_projection_bindings.len() -> out = self.nix_projection_bindings[index].pass_into(out, &binding)
+        }
         &self.mark_process_handoff()
-        Ok(spec)
+        Ok(out)
     }
 
-    fn holds_handles(self) -> Bool Never! {
-        if self.live_lock != None -> return true
-        loop file in self.files {
-            if file.file != None -> return true
-        }
-        loop file in self.executables {
-            if file.file != None -> return true
-        }
+    // The descriptors `keep_open_for` passes, so a program path can be
+    // rendered before its spec exists; the spec still binds them itself.
+    fn plan_binding(self, binding: &LeaseBinding) Never! {
+        if sys.family() == "windows" -> return
         if self.snapshot_dir == {
-            .Val(held) -> { if held.holds_handle() -> return true }
+            .Val(held) -> &binding.fds.push(held.child_fd)
             .None -> {}
         }
         if self.wrapper_directory_handle == {
-            .Val(held) -> { if held.holds_handle() -> return true }
+            .Val(held) -> &binding.fds.push(held.child_fd)
             .None -> {}
         }
-        loop binding in self.nix_projection_bindings {
-            if binding.handle != None -> return true
+        loop index in 0..<self.nix_projection_bindings.len() {
+            if self.nix_projection_bindings[index].child_fd() == .Val(fd) -> &binding.fds.push(fd)
         }
-        false
     }
 
     fn status(self) -> ConsumptionStatus Never! {
         self.consumption_status_value
     }
 
-    fn wrapper_dir(self) -> String? Never! {
-        self.wrapper_root
-    }
-
-    // The lease-owned bin directory for PATH projection. On Linux the
-    // protected wrapper directory is the only path form that may cross the
-    // child boundary; the private snapshot path stays an internal source.
-    fn projected_bin_dir(self) -> String? Never! {
-        if self.validate() == {
-            .Err(_) -> return None
-            else -> {}
-        }
-        self.projected_bin_dir_after_validation()
-    }
-
-    // The projected bin directory after the caller has revalidated the
-    // lease, so one entry path does not walk the same lease twice.
-    fn projected_bin_dir_after_validation(self) -> String? Never! {
+    // The leased bin directory a child puts on PATH: the protected wrapper
+    // directory on Linux, else the bin directory below its leased root.
+    fn child_bin_dir(self) -> LeaseText? Never! {
         bin :: self.bin_relative ?? return None
-        if sys.name() == "linux" {
-            if self.wrapper_root == {
-                .Val(wrapper) -> return Val(wrapper)
-                .None -> {}
-            }
+        if self.wrapper_directory_handle == {
+            .Val(wrapper) -> return Val(wrapper.child_text(""))
+            .None -> {}
         }
-        snapshot_root :: self.snapshot_root
-        if sys.family() != "windows" && self.projected_bin_root == Val((snapshot_root)) {
-            if self.snapshot_dir == {
-                .Val(directory) -> return Val(files.join(store_lease_descriptor_path(directory.slot), bin))
-                .None -> {}
-            }
-        }
-        root :: self.projected_bin_root ?? return None
-        Val(files.join(root, bin))
+        index :: self.bin_output_index ?? return None
+        Val(self.leased_output_roots[index].child_root.child(bin))
     }
 
     // The verified, durable package bin directory for a parent shell. Child
@@ -228,9 +394,21 @@ struct CacheLease {
     // exits, so it may use the canonical Hangar object only while its sealed
     // object and bin directory are still immutable.
     fn parent_shell_bin_dir(self) -> String? Never! {
-        verification := self.verification
         bin :: self.bin_relative ?? return None
         if files.is_abs(bin) || store_path_components(bin).contains("..") -> return None
+        expected :: self.parent_shell_root() ?? return None
+        bin_path :: files.join(expected, bin)
+        bin_info :: files.stat(bin_path) ?? return None
+        if bin_info.is_symlink || !bin_info.is_dir -> return None
+        if sys.family() != "windows" && (bin_info.mode).bit_and(0o222) != 0 -> return None
+        Val(bin_path)
+    }
+
+    // The canonical Hangar object of the primary output while it is sealed
+    // and immutable: the only root a parent shell may name once this
+    // process, and its leases, are gone.
+    fn parent_shell_root(self) -> String? Never! {
+        verification := self.verification
         if self.consumption_status_value != ConsumptionStatus.Consumable || self.expected_digest == "" || self.expected_digest.contains("/") || self.expected_digest.contains("\\") -> return None
         hangar :: files.join(self.store_root, "hangar")
         expected :: files.join(files.join(hangar, STORE_OBJECTS_DIR), self.expected_digest)
@@ -243,11 +421,21 @@ struct CacheLease {
         if sealed != self.expected_digest -> return None
         seal_info :: files.stat(seal) ?? return None
         if !seal_info.is_file -> return None
-        bin_path :: files.join(expected, bin)
-        bin_info :: files.stat(bin_path) ?? return None
-        if bin_info.is_symlink || !bin_info.is_dir -> return None
-        if sys.family() != "windows" && (bin_info.mode).bit_and(0o222) != 0 -> return None
-        Val(bin_path)
+        Val(expected)
+    }
+
+    // Each reserved descriptor mapped to the durable root a parent shell
+    // names instead; None when the primary output has no such root.
+    fn durable_roots(self) -> [Int: String]? Never! {
+        roots := [Int: String]{}
+        if self.snapshot_dir == {
+            .Val(held) -> roots[held.child_fd] = self.parent_shell_root() ?? return None
+            .None -> {}
+        }
+        loop index in 0..<self.nix_projection_bindings.len() {
+            if self.nix_projection_bindings[index].child_fd() == .Val(fd) -> roots[fd] = self.nix_projection_bindings[index].source
+        }
+        Val(roots)
     }
 
     fn nix_store_projection(self) -> [NixProjectionPath] Never! {
@@ -268,18 +456,21 @@ struct CacheLease {
         loop executable in self.executables -> &members.push(executable.relative)
         &members.sort()
         if members.len() == 0 -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified tool lease has no executables")}))
-        Ok(ProfileInstallReceipt{store_root: self.store_root, package: self.package, version: self.version, reference: self.reference, output_hash: self.expected_digest, executable_members: members})
+        Ok(ProfileInstallReceipt{store_root: self.store_root, package: self.package, version: self.version, reference: self.reference, output_hash: self.output_hash, executable_members: members})
     }
 
-    // The copy reads the member through a fresh handle on the very file the
-    // lease holds, so the lease's own descriptor and offset stay untouched.
-    fn copy_profile_executable(self, member: String, destination: String) -> ProfileExecutableProof IOError! {
+    // The copy streams the very file handle the lease holds.
+    fn copy_profile_executable(&self, member: String, destination: String) -> ProfileExecutableProof IOError! {
         self.validate()
         index :: store_lease_member_index(self.executables, member) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
-        if self.executables[index].file == None -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
-        input :: files.open(self.executable_file_path(index))
-        if input.stat().id != self.executables[index].id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))
-        store_reuse_copy_open_profile_file(^input, destination)
+        expected_id :: self.executables[index].id
+        if &self.executables[index].file == {
+            .Val(input) -> {
+                if input.stat().id != expected_id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))
+                store_reuse_copy_open_profile_file(&input, destination)
+            }
+            .None -> Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        }
     }
 
     fn require_consumable(self) IOError! {
@@ -289,37 +480,37 @@ struct CacheLease {
         }
     }
 
-    fn executable(self, name: String) -> String? Never! {
+    fn executable(self, name: String) -> LeaseText? Never! {
         if self.require_consumable() == {
             .Err(_) -> return None
             else -> {}
         }
         index :: self.executable_index(name) ?? return None
-        Val(self.executable_file_path(index))
+        self.executable_child_text(index)
     }
 
     // Resolve a caller-supplied executable only when it is an exact lease
     // member or the exact raw/projected path of that member. A path that
     // merely shares an output prefix never becomes a trusted handle.
-    fn executable_for(self, requested: String) -> String? Never! {
+    fn executable_for(self, requested: String) -> LeaseText? Never! {
         self.executable(requested)
     }
 
-    fn executable_for_command(self, requested: String) -> String? IOError! {
+    fn executable_for_command(self, requested: String) -> LeaseText? IOError! {
         caller_dir :: sys.current_dir() ?? "."
         self.executable_for_command_at(requested, caller_dir)
     }
 
-    fn executable_for_command_at(self, requested: String, caller_dir: String) -> String? IOError! {
+    fn executable_for_command_at(self, requested: String, caller_dir: String) -> LeaseText? IOError! {
         self.require_consumable()
         resolved :: if files.is_abs(requested) -> requested else -> files.join(caller_dir, requested)
         if self.executable_index_at(requested, resolved) == {
-            .Val(index) -> return Ok(Val(self.executable_file_path(index)))
+            .Val(index) -> return Ok(self.executable_child_text(index))
             .None -> {}
         }
         resolved_paths :: store_reuse_path_variants(resolved)
         roots := [String]{self.out, self.lease_root}
-        optional_roots :: [String?]{self.bin_output_root, self.projected_bin_root, self.wrapper_root}
+        optional_roots :: [String?]{self.bin_output_root, self.projected_bin_root}
         loop root in optional_roots {
             if root == {
                 .Val(path) -> {
@@ -341,6 +532,31 @@ struct CacheLease {
         Ok(None)
     }
 
+    // The hex SHA-256 of the member `requested` names, read through the
+    // handle the lease holds; None when it names no member of this lease.
+    fn executable_digest_for_command(&self, requested: String) -> String? IOError! {
+        if self.executable_for_command(requested) == None -> return Ok(None)
+        self.validate()
+        caller_dir :: sys.current_dir() ?? "."
+        resolved :: if files.is_abs(requested) -> requested else -> files.join(caller_dir, requested)
+        index :: self.executable_index_at(requested, resolved) ?? return Ok(None)
+        expected_id :: self.executables[index].id
+        if &self.executables[index].file == {
+            .Val(input) -> {
+                if input.stat().id != expected_id -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased executable member changed")}))
+                &input.seek(0)
+                hasher := StreamingSHA256.new()
+                loop {
+                    chunk :: input.read(65536)
+                    if chunk.len() == 0 -> break
+                    &hasher.update(chunk)
+                }
+                Ok(Val(hasher.finalize_hex()))
+            }
+            .None -> Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("verified receipt lost executable member")}))
+        }
+    }
+
     fn executable_index(self, requested: String) -> Int? Never! {
         self.executable_index_at(requested, requested)
     }
@@ -351,69 +567,86 @@ struct CacheLease {
             bin :: self.bin_relative ?? return None
             matches_bin_output :: store_lease_member_path_matches(self.bin_output_root, bin, member, requested_path)
             matches_projected :: store_lease_member_path_matches(self.projected_bin_root, bin, member, requested_path)
-            matches_wrapper :: if self.wrapper_root == {
-                .Val(root) -> store_reuse_same_path(files.join(root, member), requested_path)
-                .None -> false
-            }
-            if !matches_bin_output && !matches_projected && !matches_wrapper -> return None
+            if !matches_bin_output && !matches_projected -> return None
             return store_lease_member_index(self.executables, member)
         }
         store_lease_member_index(self.executables, requested)
     }
 
-    fn executable_file_path(self, index: Int) -> String Never! {
-        if sys.family() != "windows" -> return store_lease_descriptor_path(self.executables[index].slot)
-        bin :: self.bin_relative ?? panic("executable member has a bin-relative path")
-        root :: self.projected_bin_root ?? panic("executable member has a projected bin root")
-        files.join(files.join(root, bin), self.executables[index].relative)
-    }
-
-    fn projected_executable(self, name: String) -> String? Never! {
-        if self.require_consumable() == {
-            .Err(_) -> return None
-            else -> {}
-        }
-        separator :: if sys.family() == "windows" -> "\\" else -> "/"
-        if name.contains(separator) -> return None
-        if store_lease_member_index(self.executables, name) == None -> return None
-        root :: self.projected_bin_root ?? return None
+    // How a child names executable member `index`: below its leased bin
+    // root, which the child holds at that root's reserved descriptor.
+    fn executable_child_text(self, index: Int) -> LeaseText? Never! {
         bin :: self.bin_relative ?? return None
-        Val(files.join(files.join(root, bin), name))
+        at :: self.bin_output_index ?? return None
+        Val(self.leased_output_roots[at].child_root.child(bin).child(self.executables[index].relative))
     }
 
-    // The stable path of a consumer path inside a leased output: a file or
-    // executable handle's descriptor path, the held snapshot directory's
-    // descriptor view, or the leased root. Anything outside is refused.
-    fn stable_path(self, path: String) -> String IOError! {
+    // How a child names a consumer path inside a leased output, after
+    // revalidation: below the held directory of that output, or below the
+    // canonical source of a root no directory handle holds. Anything outside
+    // every leased output is refused.
+    fn child_path(self, path: String) -> LeaseText IOError! {
         self.validate()
         leased :: store_lease_output_for(self.leased_output_roots, path) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("consumer path `{path}` escapes leased output `{self.out}`")}))
-        relative :: leased.relative
+        if store_path_components(leased.relative).contains("..") -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased consumer path contains parent traversal")}))
+        Ok(leased.child_root.child(leased.relative))
+    }
+
+    // `path` relative to the primary output, refused outside it.
+    fn output_relative(self, path: String) -> String IOError! {
+        relative :: store_path_strip_prefix(path, self.out) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("consumer path `{path}` escapes leased output `{self.out}`")}))
         if store_path_components(relative).contains("..") -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased consumer path contains parent traversal")}))
-        unix :: sys.family() != "windows"
-        at_out :: store_reuse_same_path(leased.output_root, self.out)
-        if at_out && unix {
-            loop member in self.files {
-                if store_reuse_same_path(member.relative, relative) -> return Ok(store_lease_descriptor_path(member.slot))
-            }
+        Ok(relative)
+    }
+
+    // A fresh read handle on the regular file `relative` in the primary
+    // output, opened through the held output directory.
+    fn open_output(self, relative: String) -> FileReader IOError! {
+        self.require_consumable()
+        if self.snapshot_dir == {
+            .Val(held) -> held.open_file(relative)
+            .None -> Err(store_lease_handle_lost(self.snapshot_root))
         }
-        at_bin_output :: if self.bin_output_root == {
-            .Val(root) -> store_reuse_same_path(root, leased.output_root)
-            .None -> false
+    }
+
+    // The text of the regular file `relative` in the primary output.
+    fn read_output(self, relative: String) -> String IOError! {
+        input := self.open_output(relative)
+        bytes := [U8]{}
+        loop {
+            chunk :: input.read(65536)
+            if chunk.len() == 0 -> break
+            &bytes.extend(chunk)
         }
-        if at_bin_output && unix && store_lease_parent_is(relative, self.bin_relative) {
-            name :: store_reuse_file_name(relative) ?? ""
-            if store_lease_member_index(self.executables, name) == {
-                .Val(index) -> return Ok(store_lease_descriptor_path(self.executables[index].slot))
-                .None -> {}
-            }
+        text :: String.from_bytes(bytes) ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("leased output member `{relative}` is not UTF-8")}))
+        Ok(text)
+    }
+
+    // Describe `relative` in the primary output without following a final
+    // link; "" is the output root.
+    fn output_entry(self, relative: String) -> Stat IOError! {
+        self.require_consumable()
+        if self.snapshot_dir == {
+            .Val(held) -> held.stat_entry(relative)
+            .None -> Err(store_lease_handle_lost(self.snapshot_root))
         }
-        if at_out && unix {
-            if self.snapshot_dir == {
-                .Val(directory) -> return Ok(files.join(store_lease_descriptor_path(directory.slot), relative))
-                .None -> {}
-            }
+    }
+
+    // The entries of `relative` in the primary output; "" lists the root.
+    fn list_output(self, relative: String) -> [DirectoryEntry] IOError! {
+        self.require_consumable()
+        if self.snapshot_dir == {
+            .Val(held) -> held.list(relative)
+            .None -> Err(store_lease_handle_lost(self.snapshot_root))
         }
-        Ok(files.join(leased.lease_root, relative))
+    }
+
+    fn read_output_link(self, relative: String) -> String IOError! {
+        self.require_consumable()
+        if self.snapshot_dir == {
+            .Val(held) -> held.read_link(relative)
+            .None -> Err(store_lease_handle_lost(self.snapshot_root))
+        }
     }
 
     // Revalidate immediately before handing paths to a child consumer. The
@@ -440,7 +673,12 @@ struct CacheLease {
         if sys.name() == "linux" {
             loop binding in self.nix_projection_bindings -> self.validate_binding(binding)
             if self.wrapper_directory_handle == {
-                .Val(wrapper) -> store_lease_validate_wrappers(wrapper, self.executables)
+                .Val(wrapper) -> {
+                    bin :: self.bin_relative ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("lease executable wrappers have no bin directory")}))
+                    at :: self.bin_output_index ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("lease executable wrappers have no bin root")}))
+                    root_fd :: self.leased_output_roots[at].child_fd ?? return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("lease executable wrappers have no held bin root")}))
+                    store_lease_validate_wrappers(wrapper.link_entries(), root_fd, bin, self.executables)
+                }
                 .None -> {}
             }
         }
@@ -551,43 +789,41 @@ fn store_lease_member_path_matches(root: String?, bin: String, member: String, r
     }
 }
 
-// Rust `relative.parent() == bin_relative`.
-fn store_lease_parent_is(relative: String, bin: String?) -> Bool Never! {
-    expected :: bin ?? return false
-    components :: store_path_components(relative)
-    if components.len() == 0 -> return false
-    parent := [String]{}
-    loop index in 0..<(components.len() - 1) -> &parent.push(components[index])
-    parent == store_path_components(expected)
-}
-
-// The leased output root containing `path` and the path below it.
+// The leased output root containing `path`, how a child names that root,
+// and the path below it.
 struct LeasedOutputMatch {
     output_root: String
-    lease_root: String
+    child_root: LeaseText
     relative: String
 }
 
 fn store_lease_output_for(roots: [LeasedOutputRoot], path: String) -> LeasedOutputMatch? Never! {
     loop leased in roots {
         if store_path_strip_prefix(path, leased.output_root) == {
-            .Val(relative) -> return Val(LeasedOutputMatch{output_root: leased.output_root, lease_root: leased.lease_root, relative: relative})
+            .Val(relative) -> return Val(LeasedOutputMatch{output_root: leased.output_root, child_root: leased.child_root, relative: relative})
             .None -> {}
         }
     }
     None
 }
 
+// The link target of the wrapper for executable `name`: the member below
+// its bin root, through the descriptor the child holds that root at.
+fn store_lease_wrapper_target(root_fd: Int, bin: String, name: String) -> String Never! {
+    files.join(files.join(store_lease_child_fd_path(root_fd), bin), name)
+}
+
 // The protected wrapper directory still holds exactly one link per
-// executable, each naming that executable's descriptor path. It is read
-// through the held handle: the keeper that exposed its path has exited.
-fn store_lease_validate_wrappers(wrapper: LeasedDirectory, executables: [SnapshotFile]) IOError! {
-    actual := wrapper.link_entries()
-    &actual.sort()
+// executable, each naming that member through its bin root's descriptor.
+// `actual` is read through the held handle: the keeper that exposed its
+// path has exited.
+fn store_lease_validate_wrappers(actual: [String], root_fd: Int, bin: String, executables: [SnapshotFile]) IOError! {
+    found := actual
+    &found.sort()
     expected := [String]{}
-    loop executable in executables -> &expected.push("{executable.relative}\t/proc/self/fd/{executable.slot}")
+    loop executable in executables -> &expected.push("{executable.relative}\t{store_lease_wrapper_target(root_fd, bin, executable.relative)}")
     &expected.sort()
-    if actual != expected -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("lease executable wrappers changed")}))
+    if found != expected -> return Err(IOError.Other(IOContext{operation: .Read, resource: None, os_code: None, cause: Val("lease executable wrappers changed")}))
 }
 
 // Rust `file_name`: the last normal component, or None for an empty path,

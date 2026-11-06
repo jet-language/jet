@@ -5,11 +5,11 @@ use {
     jetpack_foundation.[ReportError, StatusEnvelope, StatusFields]
 }
 
-// Rust JSON.rs:1045–1118: the canonical inspect.semindex status boundary.
-// Schema VERSION 20 has the actual fifteen payload fields below, plus expand
-// only when requested. Nodes/bypasses are not extra top-level wire fields.
-// S17/S18 and Foundation own every nested codec; no escaped/raw JSON field,
-// no payload reparse, no index getter copies and no local report model.
+// The canonical inspect.semindex status boundary. Schema VERSION 20 has the
+// actual fifteen payload fields below, plus expand only when requested.
+// Nodes/bypasses are not extra top-level wire fields. S17/S18 and Foundation
+// own every nested codec; no escaped/raw JSON field, no payload reparse, no
+// index getter copies and no local report model.
 impl SemIndex {
     fn to_json(self) -> String Never! { self.to_status_envelope().json() }
 
@@ -120,9 +120,9 @@ fn semindex_status_expand_value(value: ExpandValue) -> StatusValue ReportError! 
     }
 }
 
-// Rust JSON.rs:1121–1169 json_expand_projection/json_expand_value. Objects
-// stable-sort by key only, retaining duplicate keys and equal-key input order.
-// Sort scalar indices, never clone the recursive fact graph to reorder it.
+// Objects stable-sort by key only, retaining duplicate keys and equal-key input
+// order. Sort scalar indices, never clone the recursive fact graph to reorder
+// it.
 fn semindex_json_expand_projection(projection: ExpandProjection) -> String Never! {
     lenses := [String]{}
     loop lens in projection.lenses {

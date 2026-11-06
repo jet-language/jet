@@ -1,10 +1,10 @@
-// This rule card #4827: ONE Rand adapter.
-// CryptoEntropy.rs:184-232; Linux x86-64 only, as the native runtime target.
-// out exclusively borrows count initialized writable bytes. No allocation/copy
-// on production fills. Short reads continue on the suffix; EINTR wipes just
-// that suffix and retries. All other failures wipe the entire attempted span.
-// The private native harness owns callback/context lifetime until clear; each
-// OS thread owns its adapter state. The destructor also clears on thread exit.
+// This rule card #4827: ONE Rand adapter. Linux x86-64 only, as the native
+// runtime target. out exclusively borrows count initialized writable bytes. No
+// allocation/copy on production fills. Short reads continue on the suffix;
+// EINTR wipes just that suffix and retries. All other failures wipe the entire
+// attempted span. The private native harness owns callback/context lifetime
+// until clear; each OS thread owns its adapter state. The destructor also
+// clears on thread exit.
 crypto_entropy_key := I64{0}
 
 fn rt_crypto_entropy_drop_address() -> I64 {
@@ -119,7 +119,7 @@ fn rt_crypto_entropy_fill(out: I64, count: I64) -> I64 {
     }
     capacity :: count * RT_HOST_U8_STRIDE
     bytes :: jet_rt_alloc(capacity, I64{8})
-    if (rt_crypto_entropy_fill(bytes, count) != I64{0}) {
+    if (rt_prove_rand_fill(bytes, count) != I64{0}) {
         rt_crypto_wipe(bytes, capacity)
         jet_rt_free(bytes, capacity, I64{8})
         return I64{0}

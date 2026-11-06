@@ -10,7 +10,7 @@
 ## What worked
 
 Command:
-`/home/nate/Projects/Github/jet/Tools/agent/jet-env jet inspect bind zreader.h --pkg zreader`
+`$HOME/Projects/Github/jet/Tools/agent/jet-env jet inspect bind zreader.h --pkg zreader`
 
 Output: `bound 3 functions from \`zreader.h\` → .jet/bindings/c/zreader.jet`.
 

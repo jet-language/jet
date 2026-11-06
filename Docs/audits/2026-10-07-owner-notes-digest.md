@@ -10,8 +10,8 @@ How to read each section:
 
 - **Today in Jet** lists facts. Each fact cites a ratified decision (D-…), a spec
   section, a source file, or a probe I ran. Probes ran with the shared release
-  `jet` (`/mnt/jetscratch/candidates/dev-595e0dca3/jet`); the probe files are in
-  `~/.cache/jet-dev/scratch/OwnerNotes1/probe/`. A claim I did not observe is
+  `jet` (`$JET_SCRATCH_ROOT/candidates/dev-595e0dca3/jet`); the probe files are in
+  `$JET_STATE_ROOT/scratch/OwnerNotes1/probe/`. A claim I did not observe is
   marked [INFERENCE].
 - **Gap** says what is missing or broken.
 - **Recommendation** says what I suggest.
@@ -19,8 +19,8 @@ How to read each section:
   covers it), *decision-needed* (a ballot draft is ready for you), *work-item*
   (a card draft is ready for Main), or *doc-update*.
 
-Ballot drafts are in `~/.cache/jet-dev/scratch/ballots/`. Card drafts are in
-`~/.cache/jet-dev/scratch/OwnerNotes1/cards/`. Nothing was written to Tower.
+Ballot drafts are in `$JET_STATE_ROOT/scratch/ballots/`. Card drafts are in
+`$JET_STATE_ROOT/scratch/OwnerNotes1/cards/`. Nothing was written to Tower.
 
 ## Summary
 
@@ -854,7 +854,7 @@ keep whole-program speed.
 
 ## Re-export ballot (`D-VIS-REEXPORT1`)
 
-File: `~/.cache/jet-dev/scratch/ballots/D-VIS-REEXPORT1.json` (full profile,
+File: `$JET_STATE_ROOT/scratch/ballots/D-VIS-REEXPORT1.json` (full profile,
 still `draft: true`; Tower's own readiness check reports zero gaps when run
 read-only through `OwnerNotes1/validate.mjs`).
 
@@ -885,7 +885,7 @@ read-only through `OwnerNotes1/validate.mjs`).
 
 ## Draft files
 
-Cards (`~/.cache/jet-dev/scratch/OwnerNotes1/cards/`), P0 first:
+Cards (`$JET_STATE_ROOT/scratch/OwnerNotes1/cards/`), P0 first:
 
 1. `union-switch-bugs.json` (P0; owned by P0Fix1)
 2. `vec-math-bug.json` (P0; owned by P0Fix1)
@@ -897,7 +897,7 @@ Cards (`~/.cache/jet-dev/scratch/OwnerNotes1/cards/`), P0 first:
 8. `gpu-kernel-library.json` (blocked by #3026, #3028)
 9. `portable-math.json`
 
-Ballots (`~/.cache/jet-dev/scratch/ballots/`). Each passes Tower's own
+Ballots (`$JET_STATE_ROOT/scratch/ballots/`). Each passes Tower's own
 `ballotGaps` check, run read-only with `OwnerNotes1/validate.mjs`, except where
 noted:
 

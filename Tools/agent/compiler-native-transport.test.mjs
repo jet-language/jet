@@ -22,13 +22,13 @@ test('native transport clears inherited bootstrap and observation hooks', () => 
     assert.deepEqual(nativeTransportEnvironment({ JET_TOOLCHAIN_ROOT: '/pinned', JET_RUNTIME_PACK: '/pack', JET_BOOTSTRAP_MODE: 'factory', JET_FRONT_LIBRARY_OBJECT_OUTPUT: '/stale' }), { JET_TOOLCHAIN_ROOT: '/pinned', JET_RUNTIME_PACK: '/pack' });
 });
 
-test('library uses check FILE and rejects completion without fresh artifacts', (t) => {
+test('library uses doc FILE and rejects completion without fresh artifacts', (t) => {
     const root = temporary(t), file = join(root, 'unit.jet'), prefix = join(root, 'fixture'), lifecycle = join(root, 'lifecycle.list');
     writeFileSync(file, 'fn run() {}\n');
     writeFileSync(lifecycle, 'explicit lifecycle fixture\n');
     for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues']) writeFileSync(prefix + suffix, 'stale artifact');
     const result = runNativeLibrary({ jet: '/pinned/jet', file, prefix, lifecycle, env: { JET_BOOTSTRAP_MODE: 'factory', JET_TOOLCHAIN_ROOT: root }, execute(command, args, options) {
-        assert.equal(command, '/pinned/jet'); assert.deepEqual(args, ['check', file]);
+        assert.equal(command, '/pinned/jet'); assert.deepEqual(args, ['doc', file]);
         assert.equal(options.env.JET_BOOTSTRAP_MODE, undefined);
         assert.equal(options.env.JET_FRONT_LIBRARY_OBJECT_OUTPUT, prefix);
         assert.equal(options.env.JET_FRONT_LIBRARY_LIFECYCLE, lifecycle);
@@ -39,7 +39,7 @@ test('library uses check FILE and rejects completion without fresh artifacts', (
     assert.equal(readFileSync(lifecycle, 'utf8'), 'explicit lifecycle fixture\n');
     for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues']) assert.equal(existsSync(prefix + suffix), false);
     const receipt = JSON.parse(readFileSync(prefix + '.front.run.json', 'utf8'));
-    assert.deepEqual(receipt.args, ['check', file]); assert.equal(receipt.status, 0);
+    assert.deepEqual(receipt.args, ['doc', file]); assert.equal(receipt.status, 0);
 });
 
 test('program build completion without an executable is not a native feed', (t) => {

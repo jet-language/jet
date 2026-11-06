@@ -26,7 +26,7 @@ fn provider_test_fixed_evaluation() -> NixNativeDerivation {
 }
 
 fn provider_test_native_entry(verification: &StoreVerification, roots: HangarRoots, source: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry {
-    build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build")
+    build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build: {err.message()}")
     provider_nix_admit_built_derivation(&verification, roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
 }
 
@@ -35,7 +35,7 @@ fn provider_test_native_entry(verification: &StoreVerification, roots: HangarRoo
     evaluation :: provider_test_fixed_evaluation()
     roots :: provider_test_nix_roots("admit")
     source :: provider_test_nix_source("admit")
-    build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build")
+    build :: provider_nix_build_derivation(roots, source, evaluation) ?? panic("native build: {err.message()}")
     assert_eq((build.outputs.get("out") ?? panic("built out")).store_path, evaluation.output_path("out") ?? panic("evaluated out"))
     entry :: provider_nix_admit_built_derivation(&verification, roots, build, "./flake.nix#native-hello", "") ?? panic("native admission")
     assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
@@ -113,7 +113,7 @@ fn provider_test_native_entry(verification: &StoreVerification, roots: HangarRoo
     flake :: files.join(project, "native-builder-flake.nix")
     files.write(flake, PROVIDER_TEST_NATIVE_FLAKE) ?? panic("fixture flake")
     roots :: provider_test_nix_roots("repository")
-    entry :: provider_nix_build_repository_output(&verification, roots, project, flake, "x86_64-linux", "native", "./tests/fixtures/nix-compat/native-builder-flake.nix#native", "") ?? panic("repository build")
+    entry :: provider_nix_build_repository_output(&verification, roots, project, flake, "x86_64-linux", "native", "./tests/fixtures/nix-compat/native-builder-flake.nix#native", "") ?? panic("repository build: {err.message()}")
     assert_eq(entry.name, "native-repository")
     assert(entry.out.starts_with("{files.join(roots.hangar_dir(), "objects")}/"))
     producer :: ProducerRecord.decode(entry.producer_record) ?? panic("producer record")
@@ -128,7 +128,7 @@ fn provider_test_native_entry(verification: &StoreVerification, roots: HangarRoo
     source :: provider_test_nix_source("failure")
     if provider_nix_build_derivation(roots, source, evaluation) == {
         .Ok(_) -> panic("a failing builder must be reported")
-        .Err(error) -> assert_eq(error.code(), "E1273")
+        .Err(error) -> assert(error.code() == "E1273", "expected E1273, got {error.code()}: {error.message()}")
     }
     files.remove_all(roots.root) ?? panic("roots cleanup")
     files.remove_all(source) ?? panic("source cleanup")

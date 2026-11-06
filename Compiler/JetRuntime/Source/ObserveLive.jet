@@ -1,9 +1,9 @@
-// Observe.rs:285-320,344-380,387-541. Native records contain only the
-// canonical identity/event metadata, never payloads or Rust layouts.
-// Writer120: mutex0, exited8, sequence16, started24, CPU-ticks32, clock-hz40,
-// boot-ns48, identity56..88, directory96, path104, periodic-started112.
-// Value48: next0, canonical five E4 fields8..40 (rendered0 means None).
-// Event128: next0, canonical fifteen fields8..120, five owned E4 strings.
+// Native records contain only the canonical identity/event metadata, never
+// payloads or Rust layouts. Writer120: mutex0, exited8, sequence16, started24,
+// CPU-ticks32, clock-hz40, boot-ns48, identity56..88, directory96, path104,
+// periodic-started112. Value48: next0, canonical five E4 fields8..40 (rendered0
+// means None). Event128: next0, canonical fifteen fields8..120, five owned E4
+// strings.
 //
 // The published snapshot is raw facts, not a rendered view (D-SIZE-PAYUSE1
 // A); `jet inspect` (JetCli LiveSnapshot.jet) validates and renders them.
@@ -111,8 +111,8 @@ fn observe_event_drop(node: I64) {
     }
     jet_rt_free(node, I64{128}, I64{8})
 }
-// Source has canonical Event fields in Observe.rs:49-65 order; sequence is
-// assigned under the same lock as append, as the Rust VecDeque producer does.
+// Source has canonical Event fields:49-65 order; sequence is assigned under the
+// same lock as append, as the Rust VecDeque producer does.
 #Export(c) fn jet_observe_event(source: I64) {
     if observe_events_code == (I64{0}) {
         #Unsafe("an idempotent install: every writer stores the same code address") {
@@ -293,9 +293,9 @@ fn observe_append_directory(target: I64, directory: I64) {
     if length != (I64{0}) && trap_byte(wrapping(wrapping(rt_text_data(directory) + length) - I64{1})) != (I64{47}) -> rt_text_push_scalar(target, I64{47})
 }
 
-// Holds the run mutex through staging+rename. A periodic publication that
-// loses to final publication cannot overwrite it; failed publication still
-// closes this run, matching Observe.rs:525-533.
+// Holds the run mutex through staging+rename. A periodic publication that loses
+// to final publication cannot overwrite it; failed publication still closes
+// this run.
 fn observe_publish(writer: I64, exit: I64) {
     sync_mutex_lock(writer)
     if sync_load(wrapping(writer + I64{8})) != (I64{0}) {
@@ -438,8 +438,8 @@ fn observe_env_key(index: I64) -> I64 {
     key
 }
 
-// Observe.rs:683-700. Read the ONE logical Env cell, not startup environ.
-// All five supplied components must be present, nonempty, <=16KiB and Cc-free.
+// Read the ONE logical Env cell, not startup environ. All five supplied
+// components must be present, nonempty, <=16KiB and Cc-free.
 #Export(c) fn jet_rt_observe_runtime_start_from_env() {
     key :: jet_rt_string_builder_new()
     observe_msg_env_observe(key)

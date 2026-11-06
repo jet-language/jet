@@ -8,14 +8,14 @@ use {
 #Test("s61 leading hyphen name is clean error") {
     // S84: a leading-hyphen name is rejected cleanly (the ordinary teaching
     // diagnostic, never an internal error).
-    src :: "module m {{ image.-iso: {{ from: system.halcyon, format: iso }} }}"
+    src :: "module m {{ image.-iso: {{ from: system.devhost, format: iso }} }}"
     assert_eq(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code, "E0003")
 }
 
 #Test("s61 double hyphen name is clean error") {
     // S84: a doubled hyphen stops the dashed name at the first gap and reaches a
     // parser diagnostic, not a panic.
-    src :: "module m {{ image.a--b: {{ from: system.halcyon, format: iso }} }}"
+    src :: "module m {{ image.a--b: {{ from: system.devhost, format: iso }} }}"
     assert(envmodel_test_env_error(envmodel_evaluate_env(src, envmodel_test_base_dir())).code.starts_with("E"))
 }
 

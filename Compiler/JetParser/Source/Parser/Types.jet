@@ -331,9 +331,9 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
-            // (Rust `Types.rs` E1107): the per-container prefix
-            // spelling `columnar [T]` is reserved; nothing ships, so it is a
-            // fatal teaching error at the prefix word.
+            // (E1107): the per-container prefix spelling `columnar [T]` is
+            // reserved; nothing ships, so it is a fatal teaching error at the
+            // prefix word.
             if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
                 parser_add_fatal_code(&state, "E1107", start.span, "the `columnar [T]` per-container layout form is reserved", "a per-use columnar override isn't built yet — only the whole-struct form ships", "put `#Layout(columnar)` on the `struct` declaration instead")
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
@@ -347,16 +347,13 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 name = "{name}.{parser_value(state, member)}"
                 end = member.span
             }
-            // S33: the built-in generic constructors take `<…>`; square
-            // brackets after them are the foreign `Type[Args]` spelling.
-            if parser_current_kind(&state) == TOKEN_LBRACKET && (name == "Shared" || name == "Ptr" || name == "Result") {
-                bracket_span :: parser_current(&state).span
-                parser_add_error_code(&state, "E0034", bracket_span, "`{name}[...]` isn't how Jet writes generic types", "square brackets start collection types like `[Int]` or `[String:Int]`, and collection values like `[1, 2]`", "write angle brackets for generic arguments, or use `[Int]` for a list type")
-                parser_skip_group(&state)
-                return ParsedType{ty: Type.Named{name: "__jet_error"}, span: parser_cover(start.span, end)}
-            }
             if parser_current_kind(&state) == TOKEN_LT {
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
+            }
+            // E0119: a `$fact` path segment reads a compile-time fact value,
+            // which never names a type outside a derive template.
+            if state.derive_template_depth == 0 && (name.starts_with("$") || name.contains(".$")) {
+                parser_add_error_code(&state, "E0119", start.span, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
             }
             ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
         }

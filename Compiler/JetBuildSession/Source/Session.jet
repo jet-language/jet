@@ -188,8 +188,8 @@ fn build_session_set_args(session: &BuildSession, args: [String]) Never! {
     permit.value.args = args.copy()
 }
 
-// runtime_bridge.rs `build_diag`: a generated-source cycle is E3511, every
-// other invalid graph fact the E3502 invalid-plan report.
+// `build_diag`: a generated-source cycle is E3511, every other invalid graph
+// fact the E3502 invalid-plan report.
 fn build_session_diag(state: BuildSessionState, what: String) -> BuildSessionDiagnostic {
     if what.starts_with("E3511: ") {
         detail :: what.removeprefix("E3511: ")
@@ -202,8 +202,8 @@ fn build_session_fail(state: BuildSessionState, what: String) -> BuildSessionRep
     return BuildSessionReply.Failure{error: build_session_diag(state, what)}
 }
 
-// runtime_bridge.rs `eval_session_method`: an ambient build call outside
-// `#Impure` is its own E3502 report, not an invalid-plan fact.
+// `eval_session_method`: an ambient build call outside `#Impure` is its own
+// E3502 report, not an invalid-plan fact.
 fn build_session_impure(state: BuildSessionState, method: String) -> BuildSessionReply {
     return BuildSessionReply.Failure{error: {code: "E3502", what: "`b.{method}` touches the ambient world and must be inside `#Impure(\"reason\")`", why: "build effects must be declared exactly where an auditor can see them", fix: "wrap the `b.{method}` call in `#Impure(\"why it is needed\")`", start: state.start, end: state.end}}
 }

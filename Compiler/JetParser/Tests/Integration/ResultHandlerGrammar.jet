@@ -16,7 +16,7 @@ fn result_handler_binding(function: Func, name: String) -> Expr? {
     }
     None
 }
-// Rust: crates/jet-parser/tests/result_handler_grammar.rs:4 (stale on dev: Rust rejects retired Error with E0432 and teaches Err)
+// (stale on dev: Rust rejects retired Error with E0432 and teaches Err)
 #Test("result_handler_lookahead_keeps_neighboring_forms_unambiguous") {
     source :: "\nfn optional() -> Success? {{ None }}\nfn fallible() Err! {{ Err(\"bad\") }}\n\nfn run(value: Int Err!, optional: String) {{\n    propagated :: value\n    noted :: value?(\"context\")\n    chained :: optional?.len\n    negated :: !true\n    handled :: value ? ok -> if {{\n        !true -> ok\n        else -> ok\n    }}\n    ! error -> error\n}}\n"
     lexed :: lex(source.bytes())
@@ -71,7 +71,6 @@ fn result_handler_is_pointer_to(ty: Type, element: String) -> Bool Never! {
     }
     false
 }
-// Rust: crates/jet-parser/tests/result_handler_grammar.rs:103
 #Test("pointer_mark_leaves_the_failure_contract_and_union_to_the_enclosing_type") {
     source :: "\nfn from_addr<T>(addr: Int) -> *T Never! {{ todo }}\nfn either(value: *Node | Label) {{}}\n"
     lexed :: lex(source.bytes())

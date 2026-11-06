@@ -3,22 +3,39 @@ use {
     core.ui.host.[UIHostError, UIShortcut, UIShortcutBinding, UIShortcutDispatch]
 }
 
-// core.ui.host.shortcuts — pure binding policy and provider-backed dispatch.
+// core.ui.host.shortcuts — the process's shortcut registry. Core owns it; the
+// provider only answers whether shortcuts are available (capability code 4).
+struct ShortcutRegistry {
+    bindings: [UIShortcutBinding]
+}
+
+SHORTCUTS :: shared ShortcutRegistry{bindings: [UIShortcutBinding]{}}
+
 fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
     if action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
     Ok(UIShortcutBinding{shortcut: shortcut, action: action, node: None})
 }
 
+// Registering the same shortcut and action again is a no-op; the same
+// shortcut for a different action conflicts with the first.
 fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
-    #Unsafe("Core shortcut registration uses the current retained provider's canonical action registry") {
-        core.ui.host.shortcuts.__register(binding)
+    if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    if binding.action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    loop existing in SHORTCUTS.bindings {
+        if existing.shortcut != binding.shortcut -> next
+        if existing.action == binding.action -> return Ok(existing.copy())
+        return Err(UIHostError.ShortcutConflict{shortcut: binding.shortcut.copy(), existing_action: existing.action.copy()})
     }
+    &SHORTCUTS.bindings.push(binding.copy())
+    Ok(binding)
 }
 
 fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
-    #Unsafe("Core shortcut dispatch uses the current retained provider's canonical action registry") {
-        core.ui.host.shortcuts.__dispatch(shortcut)
+    if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
+    loop existing in SHORTCUTS.bindings {
+        if existing.shortcut == shortcut -> return Ok(UIShortcutDispatch.Dispatched(existing.copy()))
     }
+    Ok(UIShortcutDispatch.Unhandled)
 }
 
 #Test("UI shortcut bindings preserve action bytes and absent node identity") {

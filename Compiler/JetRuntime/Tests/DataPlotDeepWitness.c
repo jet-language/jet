@@ -1,7 +1,6 @@
-/* Link REAL composed Jet providers including RtBurn1 Limits with BOTH
- * -Wl,--wrap=jet_rt_alloc -Wl,--wrap=jet_rt_free. No mock providers.
+/* Link REAL composed Jet providers including RtBurn1 Limits; checked-heap
+ * alloc and free observers see every allocation. No mock providers.
  * Client-created private DP carriers mirror DataABI only, not Rust/IR.
- * Rust derive/declarations: DataPlot.rs:1377-1392,2256-2267,2373-2386.
  * Every allocation in the scope must be released exactly once at its size/
  * alignment. Limits are opaque: the witness never reads their field layout. */
 #include <assert.h>
@@ -15,8 +14,7 @@ typedef struct { unsigned char *data; int64_t length, capacity; } Text;
 typedef struct { int64_t length, capacity; int64_t *data; } Sequence;
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc(int64_t, int64_t);
-extern int64_t __real_jet_rt_alloc(int64_t, int64_t);
-extern void __real_jet_rt_free(int64_t, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *, int64_t);
 extern Text *jet_rt_string_clone(Text *);
 extern void jet_rt_string_drop(Text *);
@@ -61,17 +59,15 @@ extern void jet_rt_record_seq_list_rec_jet_data_plot_selected_row_push(Sequence 
 static struct { int64_t address, bytes, align; bool freed; } allocations[4096];
 static size_t count, frees;
 static bool active;
-int64_t __wrap_jet_rt_alloc(int64_t bytes, int64_t align) {
-    int64_t p = __real_jet_rt_alloc(bytes, align);
+static void observe_alloc(int64_t p, int64_t bytes, int64_t align) {
     if (active) {
         assert(count < 4096);
         for (size_t i = 0; i < count; ++i) assert(allocations[i].freed || allocations[i].address != p);
         allocations[count].address = p; allocations[count].bytes = bytes;
         allocations[count].align = align; allocations[count++].freed = false;
     }
-    return p;
 }
-void __wrap_jet_rt_free(int64_t p, int64_t bytes, int64_t align) {
+static void observe_free(int64_t p, int64_t bytes, int64_t align) {
     if (active) {
         size_t i = count;
         while (i && (allocations[i - 1].address != p || allocations[i - 1].freed)) --i;
@@ -79,7 +75,6 @@ void __wrap_jet_rt_free(int64_t p, int64_t bytes, int64_t align) {
         assert(allocations[i].bytes == bytes && allocations[i].align == align);
         allocations[i].freed = true; ++frees;
     }
-    __real_jet_rt_free(p, bytes, align);
 }
 static int64_t pointer(const void *p) { return (int64_t)(uintptr_t)p; }
 static int64_t *words(int64_t p) { return (int64_t *)(uintptr_t)p; }
@@ -137,6 +132,7 @@ static int64_t selected(Text *text, double value) {
     return p;
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init(); active = true;
     Text *text = jet_rt_string_from_static("row", 3);
     int64_t row = selected(text, 1); int64_t row_copy = jet_rt_handle_clone_jet_data_plot_selected_row(row);

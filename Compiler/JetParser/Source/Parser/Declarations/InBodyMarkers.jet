@@ -1,4 +1,4 @@
-// Markers written inside a declaration's body as `#X :: value` lines. They
+// Markers written inside a declaration's body as `#X: value` lines. They
 // fill the same marker list `#X(args)` above the declaration fills. This file
 // reads those lines, joins them to the markers above, and builds the one edit
 // that writes a declaration's whole marker set above it or into its body
@@ -18,9 +18,10 @@ use {
         diagnostic_from_registry,
         diagnostic_with_alternative_edit,
         diagnostic_with_edit,
+        owned_trait_auto_derive_marker,
     ]
     jet_lexer.[
-        TOKEN_COLON_COLON,
+        TOKEN_COLON,
         TOKEN_DOT,
         TOKEN_EOF,
         TOKEN_FALSE,
@@ -45,14 +46,14 @@ struct ParserMarkerSplice {
     text: String
 }
 
-// `#Name ::` or `#lib.Name ::` starts a marker line. Nothing else puts `::`
+// `#Name:` or `#lib.Name:` starts a marker line. Nothing else puts `:`
 // right after a marker name, so field, variant and statement markers and the
 // `#Name` value expression never read as one.
 fn parser_inbody_marker_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH || parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
     offset := 2
     loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
-    parser_kind_at(&state, offset) == TOKEN_COLON_COLON
+    parser_kind_at(&state, offset) == TOKEN_COLON
 }
 
 fn parser_inbody_line_ends(state: &JetParserState) -> Bool Never! {
@@ -60,7 +61,7 @@ fn parser_inbody_line_ends(state: &JetParserState) -> Bool Never! {
     kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_EOF
 }
 
-// The token offset past the `#X :: value` lines (and the line ends after
+// The token offset past the `#X: value` lines (and the line ends after
 // them) that start `offset` tokens ahead, so the value line before a body's
 // trailing marker lines is still its last line.
 fn parser_skip_inbody_marker_lines(state: &JetParserState, offset: Int) -> Int Never! {
@@ -68,7 +69,7 @@ fn parser_skip_inbody_marker_lines(state: &JetParserState, offset: Int) -> Int N
     loop parser_kind_at(&state, at) == TOKEN_HASH && parser_kind_at(&state, at + 1) == TOKEN_IDENT {
         name_end := at + 2
         loop parser_kind_at(&state, name_end) == TOKEN_DOT && parser_kind_at(&state, name_end + 1) == TOKEN_IDENT -> name_end += 2
-        if parser_kind_at(&state, name_end) != TOKEN_COLON_COLON -> return at
+        if parser_kind_at(&state, name_end) != TOKEN_COLON -> return at
         end := name_end + 1
         depth := 0
         loop {
@@ -84,14 +85,14 @@ fn parser_skip_inbody_marker_lines(state: &JetParserState, offset: Int) -> Int N
     at
 }
 
-// One `#X :: value` line. `true` applies the marker with its defaults,
+// One `#X: value` line. `true` applies the marker with its defaults,
 // `false` is the signed `#!X`, `(…)` holds the arguments exactly as `#X(…)`
 // does, and one name path, string or number is the one argument. None when
 // the value needs parentheses; that is reported with the edit adding them.
 fn parser_parse_inbody_marker(state: &JetParserState) -> Marker? {
     hash :: parser_bump(&state)
     name :: parser_expect_marker_path(&state, "after `#` in a marker line")
-    parser_expect(&state, TOKEN_COLON_COLON, "`::` after the marker name")
+    parser_expect(&state, TOKEN_COLON, "`:` after the marker name")
     marker_name :: parser_value(state, name)
     value :: parser_current(&state)
     negated := false
@@ -102,7 +103,7 @@ fn parser_parse_inbody_marker(state: &JetParserState) -> Marker? {
     } else if value.kind == TOKEN_FALSE {
         parser_bump(&state)
         negated = true
-        if !parser_marker_is_signed_auto_derive(marker_name) {
+        if !owned_trait_auto_derive_marker(marker_name) {
             parser_add_fatal_code(&state, "E0931", parser_cover(hash.span, value.span), "`#{marker_name} :: false` is not a signed auto-derive trait", "`false` rejects compiler generation only for structurally auto-derived traits", "write `#{marker_name} :: true`, or use `false` with an auto-derived trait")
         }
     } else if value.kind == TOKEN_LPAREN {

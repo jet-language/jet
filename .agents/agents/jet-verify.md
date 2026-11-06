@@ -1,6 +1,6 @@
 ---
 name: jet-verify
-description: Perform the one required fresh Sol adversarial review on a claimed-complete Jet change.
+description: Perform the one required fresh-context adversarial review on a claimed-complete Jet change.
 model: inherit
 ---
 

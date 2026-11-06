@@ -258,7 +258,7 @@ fn jet_driver_foreign_add_request(requests: &[JetDriverForeignRequest], language
             // whatever order the import forms were collected in.
             span :: if existing.declaration.span.start > declaration.span.start -> existing.declaration.span else -> declaration.span
             diagnostic :: jet_driver_foreign_import_conflict_diagnostic(library, header, span)
-            &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, span.start))
+            &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, 0))
             return
         }
     }
@@ -278,7 +278,7 @@ fn jet_driver_foreign_add_request(requests: &[JetDriverForeignRequest], language
                     request_header :: jet_driver_foreign_import_header(request.declaration)
                     header :: if request_header == "" -> jet_driver_foreign_import_header(declaration) else -> request_header
                     diagnostic :: jet_driver_foreign_import_conflict_diagnostic(library, header, declaration.span)
-                    &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, declaration.span.start))
+                    &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, 0))
                 }
                 else -> {}
             }
@@ -357,7 +357,7 @@ fn jet_driver_foreign_collect_imports(imports: [ImportDecl], root_index: Int, mo
             }
             if foreign_form {
                 diagnostic :: jet_driver_diagnostic("E3208", declaration.span, "a foreign import has an invalid library identity", "foreign cache and header paths must identify one native library without an empty or malformed name", "use `c.<library>`, `cpp.<library>`, or a header whose basename names the library")
-                &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, declaration.span.start))
+                &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, 0))
             }
         }
     }
@@ -369,12 +369,12 @@ fn jet_driver_foreign_collect_items(items: [Item], root_index: Int, module_index
             .CModule(c_module) -> {
                 if !jet_driver_foreign_valid_library(c_module.lib) {
                     diagnostic :: jet_driver_diagnostic("E3208", c_module.path_span, "a C module has an invalid library identity", "foreign cache and overlay paths must identify one native library without path traversal", "use `c.<library>` with one safe library name")
-                    &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, c_module.path_span.start))
+                    &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, 0))
                     next
                 }
                 if c_module.kind == CModuleKind.Bindgen {
                     diagnostic :: jet_driver_diagnostic("E3207", c_module.path_span, "`#Bindgen` is only allowed in generated cache files", "`.jet/bindings/c/{c_module.lib}.jet` is written by `jet inspect bind`; hand-written sources use `#Import module`", "edit your overlay file with `#Import module`, or regenerate the cache with `jet inspect bind`")
-                    &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, c_module.path_span.start))
+                    &diagnostics.push(diagnostic_with_source_path(^diagnostic, source_path, 0))
                     next
                 }
                 surface_index := -1
@@ -1286,7 +1286,8 @@ fn jet_driver_assemble_foreign_providers(snapshot: JetDriverAuthorizedSourceSnap
                         !jet_driver_foreign_same_signature(merged[index], surface.overlay_functions[overlay_index]) -> {
                             diagnostic :: jet_driver_diagnostic("E3205", surface.overlay_functions[overlay_index].name_span, "overlay `{surface.overlay_functions[overlay_index].name}` disagrees with the generated binding", "user `#Import module c.{surface.library}` may override bindgen symbols, but the signature must stay compatible when replacing", "match the generated signature, or rename your overlay function")
                             if {
-                                overlay_path != "" -> &diagnostics.push(diagnostic_with_source_path(^diagnostic, overlay_path, surface.overlay_functions[overlay_index].name_span.start))
+                                // The overlay's spans are relative to its own source file, as at its load (E3207/E3208).
+                                overlay_path != "" -> &diagnostics.push(diagnostic_with_source_path(^diagnostic, overlay_path, 0))
                                 else -> &diagnostics.push(diagnostic)
                             }
                         }

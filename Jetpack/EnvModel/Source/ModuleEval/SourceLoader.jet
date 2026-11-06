@@ -260,15 +260,7 @@ fn envmodel_build_source_table(units: [EvalUnit]) -[FS]> SourceTable EnvModelEva
             loop declaration in decl.sources {
                 ref_text :: pkg_bytes_text(source_bytes, declaration.ref_span.start, declaration.ref_span.end).trim()
                 span :: if is_root -> Val(declaration.ref_span) else -> None
-                reference :: if ProviderRef.classify(ref_text) == {
-                    .Ok(reference) -> reference
-                    .Err(error) -> {
-                        if error == {
-                            .RetiredNixpkgs(raw, replacement) -> { return Err(envmodel_retired_nixpkgs_source_ref(raw, replacement, span)) }
-                            else -> { return Err(envmodel_bad_source_ref(ref_text, span)) }
-                        }
-                    }
-                }
+                reference :: ProviderRef.classify(ref_text) ?? return Err(envmodel_bad_source_ref(ref_text, span))
                 upstream :: reference.upstream()
                 if map.get(declaration.name) == {
                     .Val(existing) -> {

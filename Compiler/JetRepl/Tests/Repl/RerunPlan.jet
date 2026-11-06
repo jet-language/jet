@@ -1,4 +1,4 @@
-// RerunPlan.rs:119–132 original fixture uses the sole canonical turn record.
+// Original fixture uses the sole canonical turn record.
 fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: String?) -> ReplTurn Never! {
     ReplTurn{
         id, input: input.copy(), summary: "", status: ReplTurnStatus.Ok,
@@ -7,7 +7,7 @@ fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: S
     }
 }
 
-// RerunPlan.rs:135–153: all original fixtures and assertions.
+// All original fixtures and assertions.
 #Test("plan_marks_pure_turns_auto_and_effectful_confirm") {
     turns :: [ReplTurn]{
         repl_replay_test_turn(1, "rate :: 0.07", false, Val("rate")),
@@ -23,7 +23,6 @@ fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: S
     assert(plan_needs_confirmation(plan))
 }
 
-// RerunPlan.rs:156–163.
 #Test("plan_without_effects_needs_no_confirmation") {
     turns :: [ReplTurn]{
         repl_replay_test_turn(1, "x :: 1", false, Val("x")),
@@ -33,7 +32,7 @@ fn repl_replay_test_turn(id: Int, input: String, had_effect: Bool, bound_name: S
     assert(!plan_needs_confirmation(plan))
 }
 
-// RerunPlan.rs:166–169, with exact error propagation checked too.
+// With exact error propagation checked too.
 #Test("unknown_turn_id_errors") {
     turns :: [ReplTurn]{repl_replay_test_turn(1, "x :: 1", false, Val("x"))}
     error :: if build_replay_plan(turns, 5, None) == {

@@ -1,26 +1,8 @@
-Error [jet.ArrowFunctionBody]: This named function body follows an arrow instead of braces.
-  --> tests/ui/nested_option.jet:1:8
+Error [jet.NestedOptional]: `??` isn't allowed on a type
+  --> tests/ui/nested_option.jet:1:15
     |
   1 | fn f() -> Int ?? {
-    |        ^^
- Why: A named function has one arrow, `->` or `-[Effects]>`, followed by its optional return type; the body always sits in braces: `fn name(...) -> Type { … }`.
- Fix: Replace `-> expr` with `{ expr }`; `jet fmt` applies this fix.
-More: jet-lang.dev/e/E0080
-
-Error [jet.UnknownName]: Nothing named `Int` exists here
-  --> tests/ui/nested_option.jet:1:11
-    |
-  1 | fn f() -> Int ?? {
-    |           ^^^
- Why: A name must be declared before it's used
- Fix: Declare it first: `Int :: ...`
-More: jet-lang.dev/e/E0107
-
-Error [jet.ValueTypeMismatch]: `print` doesn't know how to show `Unit`
-  --> tests/ui/nested_option.jet:5:18
-    |
-  5 | fn run() { print(f()) }
-    |                  ^
- Why: Print shows values that have a display
- Fix: Print one of its parts instead
-More: jet-lang.dev/e/E0112
+    |               ^^
+ Why: An optional value is written `T?` once; there is no optional optional
+ Fix: Use a single `?`, like `Int?`
+More: jet-lang.dev/e/E0309

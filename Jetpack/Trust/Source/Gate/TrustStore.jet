@@ -226,17 +226,17 @@ fn trust_revoke(store: String, selector: String) -[FS]> Bool {
     removed
 }
 
-// Already trusted: an exact hash grant, or a pattern matching the project
-// by its spelled or canonical path.
+// Already trusted: an exact hash grant, or a pattern naming the project's
+// matched path (see `trust_project_subject`).
 fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, Env]> Bool {
-    canonical :: files.canonicalize(project_dir) ?? ""
+    subject :: trust_project_subject(project_dir)
     target :: "{TRUST_HASH_PREFIX}{hash}"
     loop line in trust_store_lines(store) {
         if line == target -> return true
         if !line.starts_with(TRUST_PATTERN_PREFIX) -> next
         pattern :: line.removeprefix(TRUST_PATTERN_PREFIX)
-        if trust_matches_pattern(pattern, project_dir) || (canonical != "" && trust_matches_pattern(pattern, canonical)) -> return true
-        if trust_matches_canonical_pattern(pattern, project_dir) || (canonical != "" && trust_matches_canonical_pattern(pattern, canonical)) -> return true
+        path :: subject ?? next
+        if trust_matches_pattern(pattern, path) || trust_matches_canonical_pattern(pattern, path) -> return true
     }
     false
 }
@@ -244,9 +244,24 @@ fn trust_is_trusted(store: String, project_dir: String, hash: String) -[FS, Env]
 // A typed env grant names the project (pattern) or the exact hash.
 fn trust_grant_matches_project_or_hash(grant: TrustGrant, project_dir: String, hash: String) -[FS, Env]> Bool {
     if grant.subject == hash || grant.subject == trust_record_line_text(TRUST_HASH_PREFIX, hash) -> return true
-    if trust_matches_pattern(grant.subject, project_dir) || trust_matches_canonical_pattern(grant.subject, project_dir) -> return true
-    canonical :: files.canonicalize(project_dir) ?? return false
-    trust_matches_pattern(grant.subject, canonical) || trust_matches_canonical_pattern(grant.subject, canonical)
+    path :: trust_project_subject(project_dir) ?? return false
+    trust_matches_pattern(grant.subject, path) || trust_matches_canonical_pattern(grant.subject, path)
+}
+
+// The one path a trust pattern is matched against, so a trusted root cannot
+// be escaped. An existing project is matched only by its canonical path: a
+// symlink under a trusted root that leads outside it is not trusted. A
+// missing project is matched by its spelling, and only when that spelling
+// has no `.` or `..` component (`/trusted/../elsewhere` names no trusted
+// root); such a spelling matches nothing.
+fn trust_project_subject(project_dir: String) -[FS, Env]> String? {
+    canonical :: files.canonicalize(project_dir) ?? {
+        loop part in files.split_slash(project_dir.replace("\\", "/")) {
+            if part == "." || part == ".." -> return None
+        }
+        return Val(project_dir)
+    }
+    Val(canonical)
 }
 
 // `prefix` followed by `value`.

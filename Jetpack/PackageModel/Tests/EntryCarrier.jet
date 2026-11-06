@@ -9,7 +9,10 @@ use {
         pkg_find_manifest_root_checked, pkg_manifest_path_checked, pkg_package_facts_for_entry,
         pkg_package_facts_for_root, pkg_package_facts_from_checked_entry, pkg_path_parent,
     ]
-    jet_foundation.[Diagnostic]
+    jet_foundation.[Diagnostic, diagnostic_sentence_case_line]
+    files :: core.files
+    process :: core.process
+    sys :: core.sys
 }
 
 fn pkg_entry_test_root(label: String) -[FS, Env]> String Never! {
@@ -137,9 +140,9 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     block :: (pkg_extract_inline_package(source) ? found -> found ! error -> panic("extract")) ?? panic("carrier")
     diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
     assert_eq(diagnostic.code, "E1363")
-    assert_eq(diagnostic.what, "an inline Package conflicts with package.jet")
-    assert_eq(diagnostic.why, "one project cannot carry both an inline Package block and a package.jet manifest")
-    assert_eq(diagnostic.fix, "remove package.jet or remove the inline Package block")
+    assert_eq(diagnostic.what, "An inline Package conflicts with package.jet")
+    assert_eq(diagnostic.why, "One project cannot carry both an inline Package block and a package.jet manifest")
+    assert_eq(diagnostic.fix, "Remove package.jet or remove the inline Package block")
     assert_eq(diagnostic.span, Val(block.span))
     if pkg_package_facts_for_root(&cache, root) == {
         .Err(error) -> assert_eq(error.diagnostic.span, Val(block.span))
@@ -187,9 +190,9 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
         .Ok(_) -> panic("missing name is malformed")
     }
     assert_eq(diagnostic.code, "E1362")
-    assert_eq(diagnostic.what, "the inline Package body is malformed")
-    assert_eq(diagnostic.why, error.message())
-    assert_eq(diagnostic.fix, "fix the inline Package fields, then retry")
+    assert_eq(diagnostic.what, "The inline Package body is malformed")
+    assert_eq(diagnostic.why, diagnostic_sentence_case_line(error.message()))
+    assert_eq(diagnostic.fix, "Fix the inline Package fields, then retry")
     assert_eq(diagnostic.span, Val(block.body_span))
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -395,39 +398,39 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     files.set_mode(path, 0o000) ?? panic("remove read access")
     diagnostic :: pkg_entry_test_failure(&cache, path)
     assert_eq(diagnostic.code, "E1331")
-    assert_eq(diagnostic.what, "entry `{path}` cannot be read")
-    assert_eq(diagnostic.fix, "restore the entry source, then retry")
+    assert_eq(diagnostic.what, "Entry `{path}` cannot be read")
+    assert_eq(diagnostic.fix, "Restore the entry source, then retry")
     assert(diagnostic.span == None)
     files.set_mode(path, 0o600) ?? panic("restore access")
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// BLOCKED #4394, intentionally retains the original exact native detail.
-// This is not a relaxed authority-message assertion or a source-text test.
-#Test("missing entry retains exact native E1331 detail #4394") {
+// E1331 keeps the native open cause of a missing entry.
+#Test("missing entry retains exact native E1331 detail") {
     if !sys.is_linux() -> return
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("missing-native-detail")
     path :: files.join(root, "missing.jet")
     diagnostic :: pkg_entry_test_failure(&cache, path)
     assert_eq(diagnostic.code, "E1331")
-    assert_eq(diagnostic.what, "entry `{path}` cannot be read")
+    assert_eq(diagnostic.what, "Entry `{path}` cannot be read")
     assert_eq(diagnostic.why, "No such file or directory (os error 2)")
-    assert_eq(diagnostic.fix, "restore the entry source, then retry")
+    assert_eq(diagnostic.fix, "Restore the entry source, then retry")
     assert(diagnostic.span == None)
     files.remove_all(root) ?? panic("cleanup")
 }
 
-// BLOCKED #4394: fs::read_to_string's original UTF-8 error must be retained
-// independently of the checked carrier's valid-UTF-8 authority diagnostic.
-#Test("invalid UTF8 entry retains exact E1331 read detail #4394") {
+// E1331 keeps Core's read-decode cause; the E1334 authority detail of the
+// checked carrier separately locates the bad byte.
+#Test("invalid UTF8 entry retains exact E1331 read detail") {
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("utf8-native-detail")
     path :: files.join(root, "run.jet")
     files.write_bytes(path, [U8]{U8{255}}) ?? panic("write invalid UTF8")
     diagnostic :: pkg_entry_test_failure(&cache, path)
     assert_eq(diagnostic.code, "E1331")
-    assert_eq(diagnostic.why, "stream did not contain valid UTF-8")
+    // Registry prose is sentence-cased.
+    assert_eq(diagnostic.why, "Stream did not contain valid UTF-8")
     assert(diagnostic.span == None)
     files.remove_all(root) ?? panic("cleanup")
 }

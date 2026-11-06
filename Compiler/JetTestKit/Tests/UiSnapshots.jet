@@ -1,0 +1,285 @@
+use {
+    files :: core.files
+    sys :: core.sys
+    process :: core.process
+}
+
+fn kit_ui_test_scratch(label: String) -> String {
+    root :: files.join(kit_scratch_root() ?? panic("no scratch: set JET_SCRATCH_ROOT or HOME"), "testkit-ui-{process.current_pid()}-{label}")
+    files.create_dir_all(root) ?? panic("UI self-test scratch: {err}")
+    root
+}
+
+fn kit_ui_test_context(root: String, label: String) -> KitCtx {
+    options := kit_test_checkout_options(root)
+    options.tiers = ["o0", "o1"]
+    env :: KitEnv{root: root, scratch: root, jet: files.join(sys.current_dir(), "Compiler/JetTestKit/Tests/Fixtures/ui/compiler.sh"), jetpack: "", timeout: 5s, memory_limit: 0}
+    KitCtx{env: env, root: root, scratch: files.join(root, label), bless: options.bless, known: kit_known_load(options.ledger), options: options}
+}
+
+fn kit_ui_test_run(code: Int, stderr: String) -> KitRun {
+    KitRun{stdout: "", stderr: stderr, code: code, signal: None, timed_out: false, error: ""}
+}
+
+#Test("UI plain success ignores lints; failures retain renderer and exact normalized paths") {
+    call :: kit_ui_invocation("fn run() {{}}", "tests/ui/example.jet", false)
+    assert_eq(call.argv, ["check", "tests/ui/example.jet"])
+    assert_eq(kit_ui_actual(call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: advisory\n")), "(no errors)\n")
+    report :: "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nrun `jet explain E0109` to learn more\n"
+    assert_eq(kit_ui_actual(call, kit_ui_test_run(1, report)), "Error [jet.OperatorTypeMismatch]: mismatch\n")
+    assert_eq(kit_ui_rendered_only("Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n"), "Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nnot a hint\n")
+    crlf :: String.from_bytes([U8{13}, U8{10}]) ?? panic("CRLF")
+    assert_eq(kit_ui_normalize("tests/ui/project/workspace.jet", "/staged/tests/ui/project/member.jet{crlf}Blocking waiting for file lock on package cache\n", "/staged"), "/tmp/member.jet\n")
+    lint :: kit_ui_invocation("", "tests/ui_lint/one.jet", true)
+    assert_eq(lint.argv, ["check", "--verbose", "tests/ui_lint/one.jet"])
+    assert_eq(kit_ui_actual(lint, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n\nok: `one.jet` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n")), "Warning [jet.SameEnumGuardTable]: lint\n")
+    all :: kit_ui_invocation("// @all_diags\nfn run() {{}}", "tests/ui/example.jet", false)
+    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "Warning [jet.DivergentStatePaths]: split\n\nok: `example.jet` has no errors (1 warning)\nrun `jet explain L0152` to learn more\n")), "Warning [jet.DivergentStatePaths]: split\n")
+    assert_eq(kit_ui_actual(all, kit_ui_test_run(0, "")), "(no errors)\n")
+}
+
+#Test("UI comparison normalizes only primary location paths and retains every other mismatch") {
+    root :: kit_ui_test_scratch("primary-source")
+    entry :: KitEntry{path: "tests/ui/example.jet", expected: "tests/ui/example.stderr", project: "tests/ui", suite: "ui", mode: "plain"}
+    call :: kit_ui_invocation("", entry.path, false)
+    ctx :: kit_ui_test_context(root, "case")
+    short :: "Error [jet.OperatorTypeMismatch]: mismatch\n  --> example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
+    canonical :: "Error [jet.OperatorTypeMismatch]: mismatch\n  --> tests/ui/example.jet:2:4\n Why: example.jet must stay in the message\n  --> imported.jet:8:3\n"
+    assert_eq(kit_ui_primary_source_headers(entry.path, short), canonical)
+    kit_exec_write(files.join(root, entry.expected), canonical)
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, short), short, ctx).status, "PASS")
+    kit_exec_write(files.join(root, entry.expected), short)
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, canonical), canonical, ctx).status, "PASS")
+    loop changed in [short.replace("E0109", "E0107"), short.replace("mismatch", "different"), short.replace(":2:4", ":2:5"), short.replace("Why: example.jet", "Why: tests/ui/example.jet"), short.replace("imported.jet", "elsewhere.jet")] {
+        assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, changed), changed, ctx).status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove primary-source scratch: {err}")
+}
+
+#Test("UI directive table preserves argv cwd streams and refuses internal or unknown facts") {
+    loop row in kit_ui_directives() {
+        argument :: if row.name == "complexity_cli" -> "branches 8" else if row.name == "compiler_extension" -> "Tools/hook.wasm" else -> ""
+        call :: kit_ui_invocation("// @{row.name} {argument}\nprint(1)\n", "tests/ui/a.jet", false)
+        if row.capability != "" {
+            assert_eq(call.refused, row.capability)
+            next
+        }
+        assert_eq(call.refused, "")
+        if row.argv.len() > 0 {
+            assert_eq(call.parent, row.parent)
+            assert_eq(call.streams, row.streams)
+            assert_eq(call.exit, row.exit)
+            assert_eq(call.argv[0], row.argv[0])
+        }
+        if row.name == "check_cli" -> assert_eq(call.argv[1], "a.jet")
+        if row.name == "complexity_cli" -> assert_eq(call.argv[3], "--max=8")
+        if row.name == "repl_deny" -> assert_eq(call.stdin, "print(1)\n:quit")
+        if row.name == "compiler_extension" -> assert_eq(call.extension, "Tools/hook.wasm")
+    }
+    assert(kit_ui_invocation("// @unknown_fact\n", "a.jet", false).refused.contains("unknown_fact"))
+    assert(kit_ui_invocation("// @complexity_cli branches\n", "a.jet", false).refused != "")
+    assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
+}
+
+#Test("UI discovery walks groups but stops at project entries and excludes fixed companions") {
+    root :: kit_ui_test_scratch("discover")
+    loop path in ["tests/ui/a.jet", "tests/ui/a.fixed.jet", "tests/ui/group/nested.jet", "tests/ui/group/project/run.jet", "tests/ui/group/project/helper.jet", "tests/ui/main/main.jet", "tests/ui/workspace/workspace.jet", "tests/ui/workspace/member/run.jet", "tests/ui_lint/group/lint.jet"] -> kit_exec_write(files.join(root, path), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/group/support.jet"), "// @fixture_module\nfn helper() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/route.jet"), "// @fixture_module\nfn page() {{}}\n")
+    entries :: kit_ui_discover(kit_ui_test_context(root, "scratch"))
+    assert_eq(entries.len(), 6)
+    assert_eq(entries[0].path, "tests/ui/a.jet")
+    assert(entries.any(entry -> entry.expected == "tests/ui/group/project/stderr"))
+    assert(entries.any(entry -> entry.expected == "tests/ui/main/stderr"))
+    assert(entries.any(entry -> entry.expected == "tests/ui/workspace.stderr"))
+    assert(entries.any(entry -> entry.expected == "tests/ui_lint/group/lint.warn"))
+    assert(!entries.any(entry -> entry.path.ends_with("helper.jet") || entry.path.ends_with(".fixed.jet") || entry.path.contains("member")))
+    assert(!entries.any(entry -> entry.path.ends_with("support.jet") || entry.path.ends_with("route.jet")))
+    assert(entries.any(entry -> entry.path == "tests/ui/group/nested.jet"))
+    coverage := kit_ui_test_context(root, "coverage")
+    coverage.options.coverage = true
+    assert_eq(kit_ui_discover(coverage)[0].mode, "coverage")
+    files.remove_all(root) ?? panic("remove UI scratch: {err}")
+}
+
+#Test("UI staging handles plain lint project state schema hook and fixed build/run") {
+    root :: kit_ui_test_scratch("driver")
+    hook :: files.join(root, "hook.wasm")
+    kit_exec_write(hook, "fixture hook")
+    loop path in ["tests/ui/bad.jet", "tests/ui/clean.jet", "tests/ui/clean.fixed.jet", "tests/ui/published.jet", "tests/ui/extension.jet", "tests/ui/project/run.jet", "tests/ui_lint/lint.jet"] -> kit_exec_write(files.join(root, path), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/extension.jet"), "// @compiler_extension hook.wasm\nfn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/project/state/authored"), "state")
+    kit_exec_write(files.join(root, "tests/ui/published.published.snapshot"), "type = Record\nfield = old\n")
+    loop path in ["tests/ui/bad.stderr", "tests/ui/project/stderr"] -> kit_exec_write(files.join(root, path), "Error [jet.OperatorTypeMismatch]: mismatch\n")
+    loop path in ["tests/ui/clean.stderr", "tests/ui/published.stderr", "tests/ui/extension.stderr"] -> kit_exec_write(files.join(root, path), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui_lint/lint.warn"), "Warning [jet.SameEnumGuardTable]: lint\n")
+    kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
+    entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    loop (index, entry) in entries {
+        outcomes :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
+        loop outcome in outcomes -> assert_eq(outcome.verdict.status, "PASS")
+        if entry.path == "tests/ui/clean.jet" {
+            assert_eq(outcomes.len(), 3)
+            assert_eq(outcomes[1].tier, "o0")
+            assert_eq(outcomes[2].tier, "o1")
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI driver scratch: {err}")
+}
+
+#Test("UI known-failing ledger rows own real snapshot failures and reject stale passes") {
+    root :: kit_ui_test_scratch("known-failing")
+    loop path in ["tests/ui/owned.jet", "tests/ui/stale.jet", "tests/ui/unowned.jet", "tests/ui/dir_owned/run.jet"] -> kit_exec_write(files.join(root, path), "fn run() {{}}\n")
+    loop path in ["tests/ui/owned.stderr", "tests/ui/unowned.stderr", "tests/ui/dir_owned/stderr"] -> kit_exec_write(files.join(root, path), "Error [jet.UnknownName]: other\n")
+    kit_exec_write(files.join(root, "tests/ui/stale.stderr"), "Error [jet.OperatorTypeMismatch]: mismatch\n")
+    kit_exec_write(kit_test_ledger(root), "# repo-relative ID\tcard\treason\ntests/ui/owned\t#4868\towned ui mismatch\ntests/ui/stale\t#4869\tstale ui row\ntests/ui/dir_owned\t#4870\towned ui project\n")
+    kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
+    entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.len(), 4)
+    loop (index, entry) in entries {
+        outcome :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))[0]
+        if entry.path == "tests/ui/owned.jet" {
+            assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+            assert(outcome.verdict.detail.starts_with("#4868 owned ui mismatch: "))
+        } else if entry.path == "tests/ui/dir_owned/run.jet" {
+            assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+        } else if entry.path == "tests/ui/stale.jet" {
+            assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+            assert_eq(outcome.verdict.detail, "#4869 stale ui row: remove stale known-failing annotation")
+        } else {
+            assert_eq(entry.path, "tests/ui/unowned.jet")
+            assert_eq(outcome.verdict.status, "FAIL")
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI known-failing scratch: {err}")
+}
+
+#Test("a UI fixed companion's rows belong to the companion's own ledger row, not the entry's") {
+    root :: kit_ui_test_scratch("fixed-ledger")
+    loop stem in ["clean_crash", "clean_crash_entry"] {
+        kit_exec_write(files.join(root, "tests/ui/{stem}.jet"), "fn run() {{}}\n")
+        kit_exec_write(files.join(root, "tests/ui/{stem}.fixed.jet"), "fn run() {{}}\n")
+        kit_exec_write(files.join(root, "tests/ui/{stem}.stderr"), "(no errors)\n")
+    }
+    kit_exec_write(kit_test_ledger(root), "tests/ui/clean_crash.fixed\towner\tcompanion crash\ntests/ui/clean_crash_entry\towner\tentry row only\n")
+    kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
+    entries :: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.len(), 2)
+    loop (index, entry) in entries {
+        outcomes :: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
+        statuses :: outcomes.map(outcome -> outcome.verdict.status.copy())
+        if entry.path == "tests/ui/clean_crash.jet" {
+            assert_eq(statuses, ["PASS", "KNOWN-FAILING", "KNOWN-FAILING"])
+            assert(outcomes[1].verdict.detail.starts_with("owner companion crash: "))
+        } else {
+            assert_eq(entry.path, "tests/ui/clean_crash_entry.jet")
+            assert_eq(statuses, ["UNEXPECTED-PASS", "FAIL", "FAIL"])
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI fixed-ledger scratch: {err}")
+}
+
+#Test("UI staging gives a loose entry its imported modules route trees and data but no other entry") {
+    root :: kit_ui_test_scratch("imports")
+    main :: "use helper :: \"./modules/helper\"\nfn run() {{ print(helper.value()) }}\n"
+    helper :: "fn value() -> Int {{ 7 }}\n// @fixture_module\n"
+    kit_exec_write(files.join(root, "tests/ui/clean_import.jet"), main)
+    kit_exec_write(files.join(root, "tests/ui/clean_import.stderr"), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui/modules/helper.jet"), helper)
+    kit_exec_write(files.join(root, "tests/ui/routes/Index.jet"), "fn page() {{}}\n// @fixture_module\n")
+    kit_exec_write(files.join(root, "tests/ui/embedded.dat"), "data\n")
+    kit_exec_write(files.join(root, "tests/ui/other.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/other.stderr"), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui/group/inner.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/project/run.jet"), "fn run() {{}}\n")
+    context :: kit_ui_test_context(root, "case")
+    kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
+    entries :: kit_ui_discover(context)
+    assert_eq(entries.len(), 4)
+    assert_eq(entries[0].path, "tests/ui/clean_import.jet")
+    assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
+    source :: files.join(context.scratch, "ui-source")
+    assert_eq(files.read(files.join(source, "tests/ui/clean_import.jet")) ?? panic("staged entry"), main)
+    assert_eq(files.read(files.join(source, "tests/ui/modules/helper.jet")) ?? panic("staged module"), helper)
+    assert(files.exists(files.join(source, "tests/ui/routes/Index.jet")))
+    assert(files.exists(files.join(source, "tests/ui/embedded.dat")))
+    loop path in ["tests/ui/other.jet", "tests/ui/other.stderr", "tests/ui/clean_import.stderr", "tests/ui/group", "tests/ui/project"] {
+        assert(!files.exists(files.join(source, path)), "a loose entry's stage holds no other entry: {path}")
+    }
+    files.remove_all(root) ?? panic("remove imported UI scratch: {err}")
+}
+
+#Test("UI public CLI directives stage the unlocked package and build the web target") {
+    root :: kit_ui_test_scratch("public-cli")
+    fixture :: "// @jetpack_e1250\nfn run() {{}}\n"
+    kit_exec_write(files.join(root, "tests/ui/unlocked.jet"), fixture)
+    kit_exec_write(files.join(root, "tests/ui/unlocked.stderr"), "Error [jet.UnlockedToolchainChannel]: unlocked toolchain\n")
+    context :: kit_ui_test_context(root, "case")
+    entries :: kit_ui_discover(context)
+    assert_eq(entries.len(), 1)
+    assert_eq(kit_ui_run(entries[0], context)[0].verdict.status, "PASS")
+    private_source :: files.join(context.scratch, "unlocked-toolchain")
+    assert_eq(files.read(files.join(private_source, "main.jet")) ?? panic("staged E1250"), fixture)
+    assert_eq(files.read(files.join(private_source, "package.jet")) ?? panic("staged manifest"), "name: \"e1250_fixture\"\nversion: \"1\"\njet: 0.9\n")
+    unlocked :: kit_ui_invocation(fixture, "tests/ui/unlocked.jet", false)
+    assert_eq(unlocked.argv, ["build", "main.jet", "--offline"])
+    assert(unlocked.parent && unlocked.unlocked_toolchain)
+    assert_eq(unlocked.exit, "nonzero")
+    assert_eq(unlocked.streams, "both")
+    web :: kit_ui_invocation("// @web_target\n", "tests/ui/web.jet", false)
+    assert_eq(web.argv, ["build", "tests/ui/web.jet", "--target=web"])
+    assert(!web.parent && !web.unlocked_toolchain)
+    assert_eq(web.streams, "rendered-both")
+    files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
+}
+
+#Test("UI lint acceptance and diagnostic shrink guard cannot be blessed away") {
+    root :: kit_ui_test_scratch("bless")
+    entry :: KitEntry{path: "tests/ui_lint/lint.jet", expected: "tests/ui_lint/lint.warn", project: "tests/ui_lint", suite: "ui", mode: "lint"}
+    call :: kit_ui_invocation("", entry.path, true)
+    ctx := kit_ui_test_context(root, "scratch")
+    ctx.bless.ids = [entry.path]
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, ""), "", ctx).status, "FAIL")
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(1, "Warning [jet.SameEnumGuardTable]: lint\n"), "Warning [jet.SameEnumGuardTable]: lint\n", ctx).status, "FAIL")
+    kit_exec_write(files.join(root, entry.expected), "Warning [jet.SameEnumGuardTable]: lint\nWarning [jet.RepeatedListHead]: another\n")
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n"), "Warning [jet.SameEnumGuardTable]: lint\n", ctx).status, "REFUSED")
+    ctx.bless.allow_shrink = [entry.path]
+    assert_eq(kit_ui_snapshot(entry, call, kit_ui_test_run(0, "Warning [jet.SameEnumGuardTable]: lint\n"), "Warning [jet.SameEnumGuardTable]: lint\n", ctx).status, "PASS")
+    assert_eq(files.read(files.join(root, entry.expected)) ?? "", "Warning [jet.SameEnumGuardTable]: lint\n")
+    files.remove_all(root) ?? panic("remove UI bless scratch: {err}")
+}
+
+#Test("UI coverage independently derives source codes report openers and allowances") {
+    row :: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
+    kept := [String]{}
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "", &kept).status, "FAIL")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", &kept).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n", &kept).status, "FAIL")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "", &kept).status, "PASS")
+    over := ""
+    loop i in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
+    assert(kit_ui_set_coverage([row], ["E0109"], [], over, &kept).detail.contains("ceiling 152"))
+    assert_eq(kit_ui_extract_reports("Error [jet.OperatorTypeMismatch]: root\n Warning [jet.SameEnumGuardTable]: indented\n Fix: E0001\nStop [E3003]: runtime\nLint [L0302]: lint\nError [jet.Unknown]: unregistered\n", [row]), ["E0109", "E3003", "L0302"])
+    assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
+    parsed :: kit_ui_registry("// header\nstruct A {{\n    impl Diagnostic {{\n        code :: \"E0109\"\n        edit :: .CryptoMisuse\n        no_fix :: None\n        fn what(self) -> String {{ \"w\" }}\n    }}\n}}\n\nstruct B {{\n    path: String\n\n    impl Diagnostic {{\n        code :: \"E0001\"\n        stage :: [.Jet, .Parse]\n    }}\n}}\n\nstruct C {{\n    impl Diagnostic {{\n        code :: \"E0004\"\n        status :: .Retired\n    }}\n}}\n")
+    assert_eq(parsed.len(), 3)
+    assert_eq(parsed[0].code, "E0109")
+    assert_eq(parsed[0].name, "jet.A")
+    assert(parsed[0].active && parsed[1].active)
+    assert_eq(parsed[1].name, "jet.B")
+    assert(!parsed[2].active)
+}
+
+#Test("a blessed coverage run keeps every allowance it still needs and drops only stale ones") {
+    row :: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
+    other :: KitUIRegistryRow{code: "E0001", name: "jet.StrayCharacter", active: true}
+    allowlist :: "# code\tside\tcard\nE0109\tleft-only\tTower #2093\nE0001\tleft-only\tTower #1\n"
+    kept := [String]{}
+    verdict :: kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], allowlist, &kept)
+    assert_eq(verdict.status, "FAIL")
+    assert(verdict.detail.contains("stale coverage allowance: E0001"))
+    assert_eq(kept.join("\n"), "# code\tside\tcard\nE0109\tleft-only\tTower #2093\n")
+    again := [String]{}
+    assert_eq(kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], kept.join("\n"), &again).status, "PASS")
+    assert_eq(again.join("\n"), kept.join("\n"))
+}

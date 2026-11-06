@@ -694,7 +694,7 @@ fn iter_repeat(source: I64, count: I64, loops: Bool) -> I64 {
         // `wrapping` governs its one operator: the LCG's multiply and add
         // each wrap (Rust wrapping_mul(..).wrapping_add(1)).
         state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1})
-        other :: I64{(state >> U64{33}) % U64{at + I64{1}}}
+        other :: wrapping(I64{(state >> U64{33}) % wrapping(U64{at + I64{1}})})
         coll_copy(wrapping(data + at * stride), scratch, coll_payload(meta))
         coll_copy(wrapping(data + other * stride), wrapping(data + at * stride), coll_payload(meta))
         coll_copy(scratch, wrapping(data + other * stride), coll_payload(meta))
@@ -1252,7 +1252,7 @@ fn iter_try_callback(source: I64, env: I64, invoke: I64, release: I64, carrier: 
 
 // Cursor is [iterator, current payload, stride, initialized, exhausted]. Init
 // pulls once. A moved binding clears initialized, but advance still skips
-// stride-1 elements and pulls the next item, exactly like LoopCursor.rs.
+// stride-1 elements and pulls the next item.
 #Export(c) fn jet_rt_native_iter_cursor_init(source: I64, step: I64, has_step: I64) -> I64 {
     stride :: if (has_step == I64{0}) -> I64{1} else -> step
     if (stride <= I64{0}) {

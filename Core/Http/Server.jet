@@ -326,6 +326,11 @@ fn __accept_timed_out(error: NetError) -> Bool Never! {
 }
 
 fn mux() -[Net]> HTTPMux Never! {
+    __mux_new()
+}
+
+// An empty route table: a mux's, and the one an `http.router()` routes with.
+fn __mux_new() -> HTTPMux Never! {
     HTTPMux{__state: shared __HTTPMuxState{routes: [__HTTPRoute]{}, layers: [Shared<__HTTPLayerCell>]{}, request_seq: 0}}
 }
 
@@ -645,7 +650,16 @@ fn __with_request_id(mux: HTTPMux, request: HTTPRequest) -> HTTPRequest Never! {
     out
 }
 
-fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
+// The route a request selects, or the answer it gets without one: OPTIONS *,
+// 400, 404 or 405. `index` is the selected route's position in `routes`.
+struct __HTTPPick {
+    answer: HTTPResponse?
+    index: Int
+    request: HTTPRequest
+    routes: [__HTTPRoute]
+}
+
+fn __pick(mux: HTTPMux, request: HTTPRequest) -> __HTTPPick Never! {
     routes :: __mux_routes(mux)
     if request.method == "OPTIONS" && request.path == "*" {
         everything := [String]{}
@@ -654,9 +668,9 @@ fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
         }
         allowed := __empty_response(204)
         allowed.headers = http.headers_set(allowed.headers, "Allow", __allow_value(everything))
-        return Ok(allowed)
+        return __HTTPPick{answer: Val(allowed), index: -1, request: request, routes: routes}
     }
-    segments :: __path_segments(access_log_path(request.path)) ?? return Ok(response(400, "400 Bad Request"))
+    segments :: __path_segments(access_log_path(request.path)) ?? return __HTTPPick{answer: Val(response(400, "400 Bad Request")), index: -1, request: request, routes: routes}
     best := -1
     matched := [String]{}
     loop index in 0..<routes.len() {
@@ -667,16 +681,21 @@ fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
         if best < 0 || __route_better(route.segments, routes[best].segments) -> best = index
     }
     if best < 0 {
-        if matched.len() == 0 -> return Ok(response(404, "404 Not Found"))
+        if matched.len() == 0 -> return __HTTPPick{answer: Val(response(404, "404 Not Found")), index: -1, request: request, routes: routes}
         refused := response(405, "405 Method Not Allowed")
         refused.headers = http.headers_set(refused.headers, "Allow", __allow_value(matched))
-        return Ok(refused)
+        return __HTTPPick{answer: Val(refused), index: -1, request: request, routes: routes}
     }
-    chosen :: routes[best]
     routed := request.copy()
-    routed.__params = __route_params(chosen.segments, segments)
-    routed.__route_template = Val(chosen.pattern)
-    chosen.handler.handle(routed)
+    routed.__params = __route_params(routes[best].segments, segments)
+    routed.__route_template = Val(routes[best].pattern)
+    __HTTPPick{answer: None, index: best, request: routed, routes: routes}
+}
+
+fn __select(mux: HTTPMux, request: HTTPRequest) -> HTTPResponse HTTPError! {
+    pick :: __pick(mux, request)
+    if pick.answer == .Val(answer) -> return Ok(answer)
+    pick.routes[pick.index].handler.handle(pick.request)
 }
 
 // Sorted methods, HEAD wherever GET is served, then OPTIONS.
@@ -823,7 +842,7 @@ fn __route_shape(segments: [__HTTPSegment]) -> String Never! {
 }
 
 // The OpenAPI path of a parsed route: static segments percent-encoded,
-// parameters as `{name}` (HTTPRoute.rs jet_http_route_openapi_path).
+// parameters as `{name}` (jet_http_route_openapi_path).
 fn __route_openapi_path(segments: [__HTTPSegment]) -> String Never! {
     path := "/"
     loop (index, segment) in segments {
@@ -838,8 +857,8 @@ fn __route_openapi_path(segments: [__HTTPSegment]) -> String Never! {
 }
 
 // A registration's checked contract, completed and checked once
-// (HTTPServer.rs jet_http_mux_register): a dynamic pattern's contract
-// (`"pattern":""`) gets its path inputs from the pattern registered.
+// (jet_http_mux_register): a dynamic pattern's contract (`"pattern":""`) gets
+// its path inputs from the pattern registered.
 fn __route_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
     completed :: if contract.contains("\"pattern\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
     __route_require_contract(method, pattern, completed)
@@ -877,7 +896,6 @@ fn __contract_set(fields: [(key: String, value: Dyn)], name: String, value: Dyn)
     out
 }
 
-// HTTPServer.rs jet_http_route_complete_contract.
 fn __route_complete_contract(method: String, pattern: String, segments: [__HTTPSegment], contract: String) -> String Never! {
     parsed :: json_codec.parse(contract) ?? panic("invalid checked HTTP route descriptor")
     fields := if parsed == {
@@ -933,8 +951,8 @@ fn __route_complete_contract(method: String, pattern: String, segments: [__HTTPS
     json_codec.dump(Dyn.Object(fields)) ?? panic("checked HTTP route descriptor does not render: {err.reason}")
 }
 
-// HTTPServer.rs jet_http_require_route_contract, for a mux route: its
-// responses may be empty at registration; `web.openapi` refuses that later.
+// jet_http_require_route_contract, for a mux route: its responses may be empty
+// at registration; `web.openapi` refuses that later.
 fn __route_require_contract(method: String, pattern: String, contract: String) Never! {
     route :: "route `{method} {pattern}`"
     parsed :: json_codec.parse(contract) ?? panic("E2805: {route} has an invalid checked endpoint contract")

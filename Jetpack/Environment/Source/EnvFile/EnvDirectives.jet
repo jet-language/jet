@@ -11,10 +11,20 @@
 //         ]
 //     }
 //
-// The directive calls are read structurally so `jetpack add/remove/build`
-// can resolve and edit the declared environment. The env file stays the
-// declarative front door: add and remove edit this file, never a hidden
-// install database.
+// The directive calls are read structurally (EnvModel's EnvDirectiveScan.jet)
+// so `jetpack add/remove/build` can resolve and edit the declared environment.
+// The env file stays the declarative front door: add and remove edit this
+// file, never a hidden install database.
+
+use {
+    jetpack_foundation.[
+        ENV_FILE, JETPACK_PROMPT_LABEL, PACK_DIRECTIVE_PACKAGES, PACK_DIRECTIVE_PROMPT, PACK_DIRECTIVE_SOURCE, REF_PROVIDER_AT, REF_SOURCE_JETPACK,
+        REF_SOURCE_NIXPKGS,
+    ]
+    jet_env_model.[env_file_all_call_args, env_file_list_arg, env_file_quoted_strings, env_file_string_arg]
+    jet_pkg_model.[NamedSourceDecl, ProviderKind, ProviderRef, SourceTable, pkg_is_bare_path]
+    files :: core.files
+}
 
 // A named source declaration: `pkg.source("<name>", "<upstream>" [, "<via>"])`.
 // `via` selects the provider (`nix` by default, `core` for first-party Jet
@@ -213,127 +223,4 @@ fn env_file_quote_jet_string(value: String) -> String Never! {
     }
     &out.push("\"")
     out.join("")
-}
-
-// ── directive extraction ──
-
-// `name("...")`: the first quoted string argument.
-fn env_file_string_arg(text: String, name: String) -> String? Never! {
-    inside :: env_file_call_args(text, name) ?? return None
-    strings :: env_file_quoted_strings(inside)
-    if strings.len() == 0 -> return None
-    Val(strings[0])
-}
-
-// `name([...])`: every quoted string in the list.
-fn env_file_list_arg(text: String, name: String) -> [String] Never! {
-    inside :: env_file_call_args(text, name) ?? return [String]{}
-    env_file_quoted_strings(inside)
-}
-
-// The inner arguments of every `name(...)` call in `text`, in order.
-fn env_file_all_call_args(text: String, name: String) -> [String] Never! {
-    out := [String]{}
-    rest := text
-    loop {
-        parts :: rest.split_once(name) ?? break
-        if env_file_call_args_after(parts.after) == .Val(args) -> &out.push(args)
-        rest = parts.after
-    }
-    out
-}
-
-// The text between the matched `(` and its closing `)` of the first
-// `name(...)` call.
-fn env_file_call_args(text: String, name: String) -> String? Never! {
-    parts :: text.split_once(name) ?? return None
-    env_file_call_args_after(parts.after)
-}
-
-fn env_file_call_args_after(after: String) -> String? Never! {
-    rest :: after.trim_start()
-    if !rest.starts_with("(") -> return None
-    scalars := [String]{}
-    loop scalar in rest.chars() -> &scalars.push("{scalar}")
-    depth := 1
-    out := [String]{}
-    in_quote := false
-    escaped := false
-    loop index in 1..<scalars.len() {
-        current :: scalars[index]
-        if in_quote {
-            &out.push(current)
-            if escaped {
-                escaped = false
-            } else if current == "\\" {
-                escaped = true
-            } else if current == "\"" {
-                in_quote = false
-            }
-            next
-        }
-        if current == {
-            "\"" -> {
-                in_quote = true
-                &out.push(current)
-            }
-            "(" -> {
-                depth += 1
-                &out.push(current)
-            }
-            ")" -> {
-                depth -= 1
-                if depth == 0 -> return Val(out.join(""))
-                &out.push(current)
-            }
-            else -> &out.push(current)
-        }
-    }
-    None
-}
-
-// Every `"..."` string literal in a fragment, in order, with Jet string
-// escapes and doubled braces decoded.
-fn env_file_quoted_strings(fragment: String) -> [String] Never! {
-    scalars := [String]{}
-    loop scalar in fragment.chars() -> &scalars.push("{scalar}")
-    out := [String]{}
-    index := 0
-    loop index < scalars.len() {
-        if scalars[index] != "\"" {
-            index += 1
-            next
-        }
-        index += 1
-        value := [String]{}
-        loop index < scalars.len() {
-            current :: scalars[index]
-            index += 1
-            if current == "\"" -> break
-            if current == "\\" {
-                if index >= scalars.len() {
-                    &value.push("\\")
-                    break
-                }
-                escaped :: scalars[index]
-                index += 1
-                if escaped == {
-                    "n" -> &value.push("\n")
-                    "t" -> &value.push("\t")
-                    "\"" -> &value.push("\"")
-                    "\\" -> &value.push("\\")
-                    else -> {
-                        &value.push("\\")
-                        &value.push(escaped)
-                    }
-                }
-                next
-            }
-            doubled :: (current == "{{" || current == "}}") && index < scalars.len() && scalars[index] == current
-            if doubled -> index += 1
-            &value.push(current)
-        }
-        &out.push(value.join(""))
-    }
-    out
 }

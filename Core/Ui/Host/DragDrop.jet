@@ -31,8 +31,48 @@ struct UIDragEvent {
     items: [UIDropItem]
 }
 
+// One raw event from the provider's drag/drop queue (queue 1, capability
+// code 3), U+001F-separated: target, phase, operation, then one field per item
+// whose first character is its kind (`T` text, `U` URI) and the rest its
+// value. A browser item has no native path, so a provider never sends a file.
 fn poll() -[IO]> UIDragEvent? UIHostError! {
-    #Unsafe("Core drag/drop consumes one typed event from the current retained provider queue") {
-        core.ui.host.drag_drop.__poll()
+    if !core.ui.host.__capability(3) -> return Err(UIHostError.CapabilityUnavailable{capability: "DragDrop"})
+    raw :: core.ui.host.__event_pop(1) ?? return Ok(None)
+    fields :: raw.split(String.from_bytes([U8]{31}) ?? panic("U+001F is UTF-8")).to_list()
+    if fields.len() < 3 -> return Err(drag_failure("a drag/drop event has at least 3 fields, not {fields.len()}"))
+    phase :: drag_phase(fields[1])
+    operation :: drag_operation(fields[2])
+    items := [UIDropItem]{}
+    loop index in 3..<fields.len() {
+        item :: fields[index]
+        value :: item.slice(1, item.len())
+        if item.starts_with("T") {
+            &items.push(UIDropItem.Text{value: value})
+        } else if item.starts_with("U") {
+            &items.push(UIDropItem.URI{value: value})
+        } else {
+            return Err(drag_failure("unknown drop item `{item}`"))
+        }
     }
+    Ok(Val(UIDragEvent{target: UINodeID{value: fields[0].copy()}, phase: phase, operation: operation, items: items}))
+}
+
+fn drag_phase(text: String) -> UIDragPhase UIHostError! {
+    if text == "Enter" -> return Ok(UIDragPhase.Enter)
+    if text == "Over" -> return Ok(UIDragPhase.Over)
+    if text == "Drop" -> return Ok(UIDragPhase.Drop)
+    if text == "Leave" -> return Ok(UIDragPhase.Leave)
+    if text == "Cancel" -> return Ok(UIDragPhase.Cancel)
+    Err(drag_failure("unknown drag/drop phase `{text}`"))
+}
+
+fn drag_operation(text: String) -> UIDragOperation UIHostError! {
+    if text == "Copy" -> return Ok(UIDragOperation.Copy)
+    if text == "Move" -> return Ok(UIDragOperation.Move)
+    if text == "Link" -> return Ok(UIDragOperation.Link)
+    Err(drag_failure("unknown drag/drop operation `{text}`"))
+}
+
+fn drag_failure(message: String) -> UIHostError Never! {
+    UIHostError.HostFailure{service: "DragDrop", message: message}
 }

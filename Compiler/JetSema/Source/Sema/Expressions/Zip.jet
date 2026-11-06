@@ -53,7 +53,7 @@ fn sema_expression_zip_field_name(index: Int, label: String?) -> String Never! {
 }
 
 fn sema_expression_zip_type_error(message: String, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0128", span, message, "zip inputs and fill values must have one statically known column type", "pass lists or iterators with matching element types, or use a typed fill value"))
+    &diagnostics.push(sema_error("E0112", span, message, "zip inputs and fill values must have one statically known column type", "pass lists or iterators with matching element types, or use a typed fill value"))
 }
 
 fn sema_expression_zip_cloneable(ty: Type, span: Span, message: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
@@ -309,8 +309,8 @@ fn sema_expression_zip_method(receiver: Expr, receiver_value: TExpr, method: Str
     SemaMethodSpecialCheck{handled: true, value: Val(value)}
 }
 
-// Rust options_rng.rs:140-177 finish_option_zip (method_calls.rs:7885):
-// `a: T?`.zip(`b: U?`) is `(a: T, b: U)?`, present only when both are.
+// finish_option_zip: `a: T?`.zip(`b: U?`) is `(a: T, b: U)?`, present only when
+// both are.
 fn sema_expression_option_zip(receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     failed :: SemaMethodSpecialCheck{handled: true, value: None}
     if args.len() != 1 {

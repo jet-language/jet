@@ -1,7 +1,7 @@
-// Source/CmdStatus.rs machine-wide cache CLI. Reuses Jetpack's sole
-// ArtifactStore (jet_store::Store), not a second cache or pruning policy.
-// These are the existing Jetpack CoreImports aliases needed by this closure;
-// its monolithic bootstrap is not included in the compiler's CLI assembly.
+// Machine-wide cache CLI. Reuses Jetpack's sole ArtifactStore
+// (jet_store::Store), not a second cache or pruning policy. These are the
+// existing Jetpack CoreImports aliases needed by this closure; its monolithic
+// bootstrap is not included in the compiler's CLI assembly.
 use {
     files :: core.files
     sys :: core.sys
@@ -101,7 +101,7 @@ fn jet_cli_cache_error(code: String, what: String, why: String, fix: String, jso
         text :: jet_cli_reports_status_json("status", false, jet_cli_report_base(""), "", "", [Diagnostic]{diagnostic}).removesuffix("\n")
         return JetDriverVerbOutput{stdout: text, stderr: "", exit_code: exit_code}
     }
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, false), exit_code: exit_code}
+    jet_cli_report_output("", code, what, why, fix, false, exit_code)
 }
 
 fn jet_cli_cache_usage_error(message: String, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {

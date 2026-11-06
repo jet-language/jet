@@ -1,11 +1,14 @@
-// CommandSuite.rs:8-49: a 24B snapshot [iteration0,result8,runner16]. The
-// harness TLS state keeps the runner's raw I64 pair; a snapshot holds both as
-// owned exact-Int words, so `t.iteration` / `t.result` read in place and
-// `run` returns its exact Int, as CAbiRoutes.rs jet_int_from_i64 did.
-// The runner is a named-fn box using Lower/Closures.jet:3-16,291-315:
-// [refs0,code8,release16], called with box first and inline pair output second.
-// TLS uses the one dynamic-key mechanism, with detach owning its state free.
+// A 24B snapshot [iteration0,result8,runner16]. The harness TLS state keeps the
+// runner's raw I64 pair; a snapshot holds both as owned exact-Int words, so
+// `t.iteration` / `t.result` read in place and `run` returns its exact Int,
+// jet_int_from_i64 did. The runner is a named-fn box using
+// Lower/Closures.jet:3-16,291-315: [refs0,code8,release16], called with box
+// first and inline pair output second. TLS uses the one dynamic-key mechanism,
+// with detach owning its state free.
 test_suite_key := I64{0}
+// 1 once `fn test` called `t.run()`: a later `t.<setting>(…)` plan line is
+// marked, and `jet test` refuses it (Registry/TestSettings.jet).
+test_suite_ran := I64{0}
 
 fn rt_test_suite_state_drop_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -77,6 +80,9 @@ fn test_suite_state_ensure() -> I64 {
 }
 
 #Export(c) fn jet_test_suite_run(suite: I64) -> I64 {
+    #Unsafe("`fn test` calls `t.run()` on the harness's main thread, before any test task exists") {
+        test_suite_ran = I64{1}
+    }
     runner :: trap_word(wrapping(suite + I64{16}))
     if (runner == I64{0}) { return jet_rt_int_clone(trap_word(wrapping(suite + I64{8}))) }
     state :: test_suite_state_ensure()
@@ -92,6 +98,34 @@ fn test_suite_state_ensure() -> I64 {
 #Export(c) fn jet_test_suite_status() -> I64 {
     state :: test_suite_state()
     if (state == I64{0}) -> I64{0} else -> trap_word(wrapping(state + I64{8}))
+}
+
+// `t.<setting>(…)` (Registry/TestSettings.jet): in `jet test`'s plan step the
+// environment variable `key` names the plan file, and `line`
+// (`name<TAB>value<NL>`) is appended to it, after `t.run()` behind the
+// TEST_SETTING_AFTER_RUN mark `!`; any other run ignores the call. A plan
+// the parent cannot read whole is a protocol failure (exit 103), as for the
+// harness's own records (TestContracts.jet).
+#Export(c) fn jet_test_setting(_suite: I64, key: I64, line: I64) {
+    path :: rt_env_get(key)
+    if (path == I64{0}) -> return
+    error :: jet_rt_alloc(I64{8}, I64{8})
+    trap_store(error, I64{0})
+    appended := I64{1}
+    if (test_suite_ran != I64{0}) {
+        mark :: jet_rt_alloc(I64{8}, I64{8})
+        trap_store(mark, I64{0x21})
+        appended = jet_files_append_bytes_os(path, mark, I64{1}, error)
+        jet_rt_free(mark, I64{8}, I64{8})
+    }
+    if (appended != I64{0}) -> appended = jet_files_append_bytes_os(path, rt_text_data(line), rt_text_len(line), error)
+    if (appended == I64{0}) {
+        message :: jet_rt_handle_show_io_error(trap_word(error))
+        jet_rt_test_eprint(message)
+        jet_std_process_exit_owned(I64{103})
+    }
+    jet_rt_free(error, I64{8}, I64{8})
+    jet_rt_string_drop(path)
 }
 
 #Export(c) fn jet_rt_test_suite_state_drop(_closure: I64, state: I64) -> I64 {

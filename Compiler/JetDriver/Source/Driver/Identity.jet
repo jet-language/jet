@@ -2,9 +2,11 @@ use {
     core.build.[BuildGraphNode]
     // Source, module, and package identities remain separate at the driver boundary.
     jet_sema.[SemaOutputIntent]
-    jet_pkg_model.[BuildStamp, LockedBuildContribution, PackageGrant]
+    jet_pkg_model.[BuildStamp, ImportBoundary, LockedBuildContribution, PackageGrant]
     jet_foundation.[
         AppAuthorizedDirectory,
+        AppRouteRoot,
+        BuildSettingOverride,
         CompilerThreads,
         compiler_threads_single,
         CompilerTraceSink,
@@ -105,9 +107,9 @@ struct JetDriverHostFacts {
 // canonical comptime stage (checked, built to JetIR, evaluated by JetEval),
 // then stops: nothing is built or emitted for run time. Config surfaces
 // (Jetpack EnvModel) evaluate their typed values this way.
-// `Eval` and `Interpreter` check the selected root of the entry module for
-// JetEval's IR evaluation, without AOT emission. Eval checks the selected
-// root's transitive pure row; Interpreter leaves effects to its runtime
+// `Eval` and `RootRun` check the selected root of the entry module and build
+// it as slot IR that runs natively, without AOT emission. Eval checks the
+// selected root's transitive pure row; RootRun leaves effects to its runtime
 // authorizer.
 // `Check` is `jet check`: the Program checks, then it stops before lowering.
 // No Core reachability pruning and no C export rows; the entry and the
@@ -119,7 +121,7 @@ enum JetDriverCompileMode {
     Doc
     Comptime
     Eval
-    Interpreter
+    RootRun
 }
 
 // One user module of the checked bundle as `jet doc` and the semantic index
@@ -152,6 +154,8 @@ struct JetDriverDocModule {
     target_layout: JetTargetLayout?{None}
     layout_facts: [SemaLayoutProjectionRow]{[SemaLayoutProjectionRow]{}}
     name_module_index: Int{-1}
+    // The `.routes(from:)` convention roots the loader read for this module.
+    app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
 }
 
 // One Core library source module the host embeds (a CORE_SOURCE_OWNED_ROWS
@@ -192,9 +196,12 @@ struct JetDriverCoreText {
     text: String?
 }
 
-// The host's read of one Core file; `None` when it can't be read.
+// The host's read of one Core file; `None` when it can't be read. A Core
+// file's comptime inputs (`embed_bytes`, `embed_file`) are files beside it,
+// read with `read_bytes`.
 trait JetDriverCoreSourceReader {
     fn read(self, file: String) -[FS.Read]> String?
+    fn read_bytes(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError!
 }
 
 fn jet_driver_core_text(text: String) -> Shared<JetDriverCoreText> Never! {
@@ -231,12 +238,19 @@ struct JetDriverCompileRequest {
     // the same diagnostics and output bytes.
     compiler_threads: CompilerThreads
     mode: JetDriverCompileMode{JetDriverCompileMode.Program}
+    // A Test compile for one code suite of test.jet (`jet test --profile`'s
+    // JET_TEST_SUITE child): it runs that suite and no #Test, so a package
+    // without #Tests is no E0601.
+    code_suite: Bool{false}
     // Selection is separate from compilation/lowering mode: checking validates
     // all links/defaults; running selects one address; testing selects Checks.
     output_intent: SemaOutputIntent{SemaOutputIntent.Check}
     output_address: String?{None}
     gate_set: GateSet{GateSet{}}
     gate_policies: [JetDriverGatePolicy]{[JetDriverGatePolicy]{}}
+    // The organization's audited-gate floor (`JET_ORG_UNSAFE_POLICY`, read by
+    // the host): the outermost rung of every loaded file's policy chain.
+    organization_policy: [PolicyDeclaration]{[PolicyDeclaration]{}}
     // External lock/trust/forced-build writers use the canonical gate row.
     external_gate_entries: [GateEntry]{[GateEntry]{}}
     // Explicit callable shared by named jobs, generation and evaluation.
@@ -256,14 +270,17 @@ struct JetDriverCompileRequest {
     // When set, every Tier-1 comptime input this compile reads (path and
     // SHA-256), in read order, for the comptime input lock.
     comptime_input_log: Shared<JetDriverComptimeInputLog>?{None}
-    // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host
-    // (Lock.rs `build_stamp`): the provenance `$build.stamp.*` folds from.
-    // None keeps the default stamp (jet_driver_build_facts).
+    // The `[build.stamp]` of the entry root's `.jet/lock`, read by the host:
+    // the provenance `$build.stamp.*` folds. None keeps the default stamp
+    // (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
     // The `[[build.contribution]]` rows of that lock (D-CONF-SPLIT1): what
     // `fn build` contributed to declared settings, which
     // jet_driver_build_settings folds over the defaults and profile values.
     build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
+    // The `--set name=value` writers, the command-line layer of that fold
+    // (BuildFactChain.jet).
+    setting_overrides: [BuildSettingOverride]{[BuildSettingOverride]{}}
 }
 
 struct JetDriverGatePolicy {
@@ -454,6 +471,8 @@ struct JetDriverPackageInfo {
     policy_declarations: [PolicyDeclaration]{[PolicyDeclaration]{}}
     policy_unsafe_paths: [String]?{None}
     policy_expert: Bool?{None}
+    // `policy.lints.deny`: lint names that fail this package's build (E1293).
+    policy_lints_deny: [String]{[String]{}}
     // The Package comes from a leading inline `package { … }` block (its
     // carrier file is `manifest_path`), not from `package.jet`.
     inline_package: Bool
@@ -467,6 +486,9 @@ struct JetDriverPackageInfo {
     // (`$build.settings.*`, jet_driver_build_facts).
     settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}}
     profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}}
+    // `boundaries: { deny: [...] }` (D-STRUCT-EDGE1=A): denied import edges
+    // between this package's modules and any loaded module (Boundaries.jet).
+    boundaries: [ImportBoundary]{[ImportBoundary]{}}
 }
 
 struct JetDriverPackageOutputs {
@@ -525,10 +547,12 @@ struct JetDriverLoadedModule {
     program: Program
     // (jet_driver_bind_package_namespaces): the package
     // namespace of a member file ("" outside one), the names it contributes
-    // in declaration order, and the names of other members its source can
-    // reach (jet_driver_namespace_reach).
+    // in declaration order, the names it keeps to itself (a named entry's or
+    // a command home's own command function), and the names of other members
+    // its source can reach (jet_driver_namespace_reach).
     namespace: String{""}
     namespace_names: [String]{[String]{}}
+    namespace_private: [String]{[String]{}}
     namespace_refs: [String]{[String]{}}
 }
 
@@ -565,16 +589,17 @@ struct JetDriverLoadResult {
 }
 
 // The entry package's written authority policy, for the host's application
-// authority check (Source/CmdCompile.rs `resolve_application_authority`).
-// `manifest_path` is None for a file with no `package.jet`; `allow`/`deny`
-// are None when the manifest writes no `authority` row.
-// `inline_package` marks a leading `package { … }` block, whose carrier file
-// is `manifest_path`.
+// authority check. `manifest_path` is None for a file with no `package.jet`;
+// `allow`/`deny` are None when the manifest writes no `authority` row.
+// `inline_package` marks a leading `package { … }` block, whose carrier file is
+// `manifest_path`.
 struct JetDriverAuthorityPolicy {
     manifest_path: String?
     inline_package: Bool
     allow: [String]?
     deny: [String]?
+    // The package's declared name: the subject a workspace build grant names.
+    subject: String{""}
 }
 
 struct JetDriverCompileResult {

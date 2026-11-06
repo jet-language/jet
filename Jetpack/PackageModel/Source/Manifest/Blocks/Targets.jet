@@ -1,7 +1,7 @@
 // `packages:` (U10) and `targets:` target-profile
 // selections (Package/Blocks.rs).
 use jetpack_foundation.[
-    PACKAGE_FIELD_KIND_REMOVED, PACKAGE_FIELD_TARGETS, TARGET_EXAMPLE, TARGET_EXECUTABLE,
+    PACKAGE_FIELD_TARGETS, TARGET_EXAMPLE, TARGET_EXECUTABLE,
     TARGET_FIELD_ENTRY, TARGET_FIELD_EXPORT, TARGET_FIELD_NAME, TARGET_LIBRARY, TARGET_RESERVED,
     TARGET_SANDBOX, TARGET_TEST,
 ]
@@ -282,7 +282,6 @@ fn pkg_validate_plugin_block(name: String, body: String) -> String? PackageParse
 
 fn pkg_parse_package_entry_block(name: String, body: String) -> [PackageTarget] PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
-        if entry.key == PACKAGE_FIELD_KIND_REMOVED -> return Err(PackageParseError.KindFieldRemoved{name: name})
         if entry.key == PACKAGE_FIELD_TARGETS -> return pkg_parse_targets_list(name, entry.value.trim())
         return Err(PackageParseError.BadTargetField{name: name, detail: "unknown package field `{entry.key}`"})
     }

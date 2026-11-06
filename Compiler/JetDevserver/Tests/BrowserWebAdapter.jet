@@ -5,7 +5,6 @@ use {
     jet_devserver.Devtools.catalog.[canonical]
     jet_devserver.Session.[DevtoolsProjection, DevtoolsStatusFact, DevtoolsCommandCapabilities, JET_DEVTOOLS_PROTOCOL]
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2287
 fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection]) {
     envelope := JetDevtoolsEnvelope.new("s1", 0)
     envelope.push(JetDevtoolsEvent.from_parts(100 + sequence, "devserver", "state", "session", "{{\"state\":\"ready\"}}").unwrap())
@@ -21,7 +20,6 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
         command_receipts: [], reset: sequence == 1, truncation: false }
     (projected, panels)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2340
 #Test("typed_projection_renders_both_placements_from_one_state") {
     state := BrowserWebState.new("s1")
     (projected, panels) := projection(1)
@@ -32,7 +30,6 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
     assert_eq(in_app.panels[0].panel_id, workbench.panels[0].panel_id)
     assert_ne(in_app.route, workbench.route)
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2352
 #Test("typed_status_and_identity_stay_frame_metadata") {
     (projected, panels) := projection(1)
     projected.source_id = .Val("src/main.jet"); projected.build_id = .Val("build-1"); projected.world_id = .Val("world-1")
@@ -53,7 +50,6 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
     assert(json.contains("\"receipts\":[]"))
     assert(!json.contains("__session_status"))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2384
 #Test("page_offers_tools_only_where_the_host_has_them") {
     (projected, panels) := projection(1)
     projected.status.state = .Error
@@ -71,7 +67,6 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
     assert(source_page.contains("data-tool=\"source\" data-focus=\"tool:source\" data-file=\"app.jet\">Fix in source"))
     assert(source_page.contains("class=\"source\""))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2408
 #Test("reconnect_reset_returns_bounded_snapshot_events") {
     state := BrowserWebState.new("s1")
     (projected, panels) := projection(1)
@@ -81,7 +76,6 @@ fn projection(sequence: U64) -> (DevtoolsProjection, [JetDevtoolsPanelProjection
     truncated := reconnect_json(state, .Val(0), true, true).unwrap()
     assert(truncated.contains("\"truncation\":true")); assert(truncated.contains("\"complete\":false")); assert(truncated.contains("\"events\":[]"))
 }
-// Rust: crates/jet-devserver/src/BrowserWebAdapter.rs:2424
 #Test("action_parser_requires_typed_grant_for_source_navigation") {
     error := parse_action("{{\"action\":\"navigate_source\",\"panel_id\":\"build\",\"node_id\":\"source\"}}".as_bytes(), .InApp).unwrap_err()
     assert(error.contains("grant"))

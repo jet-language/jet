@@ -1,4 +1,4 @@
-// Link real providers with -pthread -Wl,--wrap=jet_rt_free. overflow mode expects canonical overflow stop.
+// Link real providers. overflow mode expects canonical overflow stop.
 #include <assert.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -19,15 +19,16 @@ extern List *jet_rt_native_reservoir_sample(Reservoir *);
 extern void jet_rt_string_drop(Text *);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_free(void *,int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 static Reservoir *watched;
 static void *pointers[34];
 static int64_t sizes[34];
 static int64_t aligns[34];
 static unsigned nwatched,freed[34];
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align){
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align){
     for(unsigned i=0;i<nwatched;++i)if(p==pointers[i]){assert(bytes==sizes[i] && align==aligns[i]);assert(++freed[i]==1);}
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align){assert(nwatched<34);pointers[nwatched]=p;sizes[nwatched]=bytes;aligns[nwatched]=align;freed[nwatched++]=0;}
 static void watch_owner(Reservoir *r){
@@ -39,10 +40,11 @@ static void show(Reservoir *r,const char *s){Text *t=jet_rt_handle_show_jet_rese
 static void drop_list(List *list){for(int64_t i=0;i<list->len;++i)jet_rt_string_drop(list->data[i]);if(list->capacity)jet_rt_free(list->data,list->capacity*8,8);jet_rt_free(list,24,8);}
 static void *adds(void *p){for(unsigned i=0;i<1000;++i){Text *text=jet_rt_string_from_static("shared",6);jet_rt_native_reservoir_add(p,text);jet_rt_string_drop(text);}return NULL;}
 int main(int argc,char **argv){
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2 && strcmp(argv[1],"overflow")==0){Reservoir *r=jet_reservoir_sampler_new(1);r->count=UINT64_MAX;Text t={"x",1,0};jet_rt_native_reservoir_add(r,&t);return 1;}
     assert(argc==1);
-    // Actual seed Sketch.rs oracle: capacity clamping, RNG bits and every output slot.
+    // Actual seed oracle: capacity clamping, RNG bits and every output slot.
     static const int64_t capacities[]={-1,0,1,4,16};
     static const unsigned lengths[]={1,1,1,4,16};
     static const unsigned indices[][16]={{57},{57},{57},{13,18,105,86},{0,73,77,52,64,54,98,59,69,102,70,11,41,44,95,67}};

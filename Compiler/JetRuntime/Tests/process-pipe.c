@@ -54,7 +54,7 @@ static void line(Word held, const unsigned char *expected, size_t length) {
     assert(!error && len == (Word)length);
     assert(length ? data != 0 : data == 0);
     if (length) assert(memcmp((void *)data, expected, length) == 0);
-    jet_rt_free(data, len, 1);
+    jet_rt_free(data, len, 8);
 }
 static void closed(int fd) {
     errno = 0;
@@ -73,7 +73,7 @@ static Word stop_next(Word held, Word output) {
     (void)output;
     assert(jet_process_stream_line_bytes_raw(held, (Word)&data, (Word)&len, (Word)&error) == 1);
     assert(len == 2 && !error);
-    jet_rt_free(data, len, 1);
+    jet_rt_free(data, len, 8);
     jet_rt_comptime_work(UINT64_C(1000001));
     assert(jet_rt_session_propagate());
     return -1; // No moved output slot was initialized.

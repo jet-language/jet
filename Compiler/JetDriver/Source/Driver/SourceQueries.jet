@@ -31,9 +31,10 @@ fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQ
 }
 
 // A source query's load with its name ledger. Only the source queries read
-// the ledger, so a compile's `jet_driver_load` leaves `names` None.
+// the ledger, so a compile's `jet_driver_load` leaves `names` None. The
+// ledger names every declaration of each loaded Core module, reached or not.
 fn jet_driver_load_with_names(request: JetDriverCompileRequest) -> JetDriverLoadResult {
-    load := jet_driver_load(request)
+    load := jet_driver_load_reach(request, false)
     load.names = Val(jet_driver_loaded_names(&load.modules, load.source_units, load.imports))
     load
 }

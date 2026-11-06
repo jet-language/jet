@@ -31,8 +31,7 @@ fn run() IOError! {
 
     // The kernel counts CPU time in whole seconds: 3600.5 s rounds up.
     cpu :: sys.cpu_time_limit()
-    half :: Duration.milliseconds(3600500) ?? panic("3600.5 s")
-    sys.set_cpu_time_limit(half, cpu.hard)
+    sys.set_cpu_time_limit(3600500ms, cpu.hard)
     rounded :: sys.cpu_time_limit()
     span :: rounded.soft ?? panic("the CPU limit read back as unlimited")
     print("cpu limit: {span.in(.Seconds) ?? -1} s")

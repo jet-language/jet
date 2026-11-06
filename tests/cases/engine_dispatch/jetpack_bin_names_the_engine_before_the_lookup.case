@@ -1,0 +1,23 @@
+# The engine lookup order (InspectB.jet jet_cli_find_engine_binary): JETPACK_BIN
+# first, then beside jet, then PATH. PATH holds a skewed engine (E1227 if
+# reached); JETPACK_BIN names one that exits 37.
+requires: os:unix
+fixture: fixtures/jetpack_bin_names_the_engine_before_the_lookup
+mkdir: isolated
+mkdir: path
+mkdir: named
+copy: {jet} isolated/jet
+copy: path-engine path/jetpack
+copy: named-engine named/jetpack
+step: {work}/isolated/jet env
+env: PATH={work}/path
+env: JETPACK_BIN={work}/named/jetpack
+exit: 37
+# A JETPACK_BIN that names no engine is E1228, never a fall-through to PATH.
+step: {work}/isolated/jet env
+env: PATH={work}/path
+env: JETPACK_BIN={work}/named/missing
+exit: 1
+stderr: ~ "E1228" # the code; the report also names the missing path
+stderr: ~ "JETPACK_BIN" # the report names the setting that chose the path
+stderr: !~ "E1227" # the skewed PATH engine is never reached

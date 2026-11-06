@@ -337,7 +337,17 @@ fn provider_record_nix_lock_after_store(verification: &StoreVerification, ctx: P
         locked_digest :: provider_project_lock_digest(Val(project)) ?? return Err(ProviderError.BadOutput(err.message()))
         if locked_digest != expected_lock_digest -> return Err(ProviderError.BadOutput("project lock changed during local provider publication"))
         pkg_lock_record_registry_realization(project, "jetpackage", entry.name, entry.version, entry.reference, entry.envelope.output_hash, source_hash, repository, authority, [String]{}, envelope)
-        return Ok(entry)
+        // The producer carries the published lock digest, as the Nix branch
+        // below does, so receipt projection checks the lock it just wrote.
+        // Its policy facts name the cache key the Store recorded as the
+        // entry's policy, as the Nix branch's locked producer does.
+        locked_entry := entry.copy()
+        locked_producer := producer
+        locked_producer.policy_facts = "policy={entry.cache_identity.policy_fingerprint}\nplatform={entry.cache_identity.platform}"
+        locked_entry.producer_record = locked_producer.encode()
+        published_digest :: provider_project_lock_digest(Val(project)) ?? return Err(ProviderError.BadOutput(err.message()))
+        refreshed :: store_refresh_lock_digest(&verification, roots, locked_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
+        return Ok(refreshed)
     }
     project_cas_bundle :: store_publish_nix_cas_bundle(&verification, project, roots, entry.envelope.output_hash) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
     nix_closure :: provider_nix_closure_record(entry, producer, project_cas_bundle)
@@ -413,11 +423,14 @@ fn provider_locked_nix_index_key_for_project(spec: RefSpec, table: SourceTable, 
     // `NixOS/nixpkgs/nixos-unstable@github#auto` -> `nixos-unstable`. Read the
     // original spelling, not the live upstream: applying the lock rewrites the
     // upstream to `github:NixOS/nixpkgs#<revision>`. The implicit `@nixpkgs`
-    // source has no declaration, so it keeps naming its channel in the lock.
+    // source has no declaration, and a revision-pinned declaration
+    // (`NixOS/nixpkgs/<revision>@github`) names no channel, so both keep the
+    // channel the lock records.
     declared_channel :: if table.source_ref(source_name) == {
         .Val(declared) -> {
             before :: declared.split_once("@")?.before ?? declared
-            before.cut_last("/")?.after ?? before
+            segment :: before.cut_last("/")?.after ?? before
+            if provider_is_lower_hex(segment, 40) -> "" else -> segment
         }
         .None -> ""
     }

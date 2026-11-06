@@ -86,7 +86,7 @@ if (fs.existsSync(normalization)) {
 }
 add('run-native-text-normalize', [r('run-native-text-normalize', '--native', out('native-text-normalize'), object)], [...runtime,nfc], {JET_NFC_FROZEN_SCALARS:nfc});
 const ui = {
-  'accessibility-projection':'UiAccessibilityProjectionWitness','browser':'UiBrowserWitness','choices':'UiCarriersChoicesWitness',
+  'accessibility-projection':'UiAccessibilityProjectionWitness','choices':'UiCarriersChoicesWitness',
   'clipboard':'UiClipboardWitness','dialog-selection':'UiDialogSelectionWitness','drag':'UiDragWitness','events':'UiEventsWitness',
   'file-dialog':'UiFileDialogWitness','form-action-error':'UiFormActionErrorWitness','host-error':'UiHostErrorWitness','ime':'UiImeWitness',
   'key':'UiKeyWitness','raylib-metadata':'UiRaylibMetadataWitness','shortcut-binding':'UiShortcutBindingWitness',

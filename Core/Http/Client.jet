@@ -18,6 +18,15 @@ C_MAX_BODY_BYTES :: 1048576
 C_MAX_URL_BYTES :: 8192
 C_MAX_REDIRECTS :: 10
 C_MAX_RETRIES :: 1
+// `jet prove --capture-sensitive` and `--replay` (core.net.tls __prove_net_mode).
+C_CLIENT_PROVE_CAPTURE :: 1
+C_CLIENT_PROVE_REPLAY :: 2
+// How far a hop got before it ended: resolving, connecting, the TLS
+// handshake (after any proxy tunnel), or the exchange itself.
+C_CLIENT_STAGE_RESOLVE :: 0
+C_CLIENT_STAGE_CONNECT :: 1
+C_CLIENT_STAGE_HANDSHAKE :: 2
+C_CLIENT_STAGE_EXCHANGE :: 3
 
 struct Client {
     method: String
@@ -549,6 +558,13 @@ fn __build_fail(message: String) -> __BuildHTTPFailure Never! { __BuildHTTPFailu
 // The connection (exactly one of tcp/tls), the bytes of the last read with
 // the cursor into them, the exchange's absolute deadline, and the current
 // phase's per-operation bound (0 for none).
+//
+// Under `jet prove` (`prove` is C_CLIENT_PROVE_*, else 0), a capture's
+// `taped` gains every byte read, `sends` counts the sends that went out,
+// `ending` names how the stream ended, and `stage`/`addresses` show how far
+// the dial got. A replay's buffer starts as the taped bytes, `sends` counts
+// the sends left, and `ending` fails the send after them or the read past
+// the tape.
 struct __BuildWire {
     tcp: TCPStream?
     tls: build_tls.TLSStream?
@@ -556,6 +572,12 @@ struct __BuildWire {
     at: Int
     end_ns: Int
     idle_ns: Int
+    prove: Int
+    taped: [U8]
+    sends: Int
+    ending: String
+    stage: Int
+    addresses: [[U8]]
 }
 
 struct __BuildSpan { from: Int, to: Int }
@@ -568,8 +590,9 @@ fn jet_http_build_get(host: String, authority: String, target: String, secure: B
     if port < 0 || port > 65535 || timeout_ms < 0 || limit < 0 -> return Err(__build_fail("out of range integral type conversion attempted"))
     now :: core.time.__clock_mono_ns()
     end_ns :: if timeout_ms > (C_BUILD_INT_MAX - now) /% 1000000 -> C_BUILD_INT_MAX else -> now + timeout_ms * 1000000
-    tcp := __build_connect(addresses, port, end_ns) ?? return Err(err)
-    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0}
+    portable := ""
+    tcp := __build_connect(addresses, port, end_ns, &portable) ?? return Err(err)
+    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: end_ns, idle_ns: 0, prove: 0, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_EXCHANGE, addresses: [[U8]]{}}
     if secure {
         remaining :: end_ns - core.time.__clock_mono_ns()
         if remaining <= 0 -> return Err(__build_fail("timed out"))
@@ -601,19 +624,26 @@ fn __build_exchange(&wire: __BuildWire, request: [U8], limit: Int) -[Net, Time.W
 }
 
 // Tries each resolver answer (4 or 16 network-order octets) in order within
-// the deadline; the last connect failure when none connects.
-fn __build_connect(addresses: [[U8]], port: Int, end_ns: Int) -[Net, Time.Wait]> TCPStream __BuildHTTPFailure! {
+// the deadline; the last connect failure when none connects, with its
+// portable name in `portable` (__build_net_portable).
+fn __build_connect(addresses: [[U8]], port: Int, end_ns: Int, &portable: String) -[Net, Time.Wait]> TCPStream __BuildHTTPFailure! {
     failure := "no resolved addresses"
     loop address in addresses {
         if address.len() != 4 && address.len() != 16 -> return Err(__build_fail("invalid resolved address carrier"))
     }
     loop address in addresses {
         remaining :: end_ns - core.time.__clock_mono_ns()
-        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        if remaining <= 0 {
+            portable = "timed_out"
+            return Err(__build_fail("timed out"))
+        }
         millis :: remaining /% 1000000
         if build_net.tcp_connect_timeout(__build_socket(address, port), if millis == 0 -> 1 else -> millis) == {
             .Ok(stream) -> return Ok(stream)
-            .Err(error) -> failure = "{error}"
+            .Err(error) -> {
+                failure = "{error}"
+                portable = __build_net_portable(error)
+            }
         }
     }
     Err(__build_fail(failure))
@@ -629,29 +659,51 @@ fn __build_socket(address: [U8], port: Int) -> SocketAddr Never! {
 }
 
 fn __build_send(&wire: __BuildWire, bytes: [U8]) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    if wire.prove == C_CLIENT_PROVE_REPLAY {
+        if wire.sends == 0 -> return Err(__build_fail(__build_ending_message(wire.ending)))
+        wire.sends -= 1
+        return Ok(bytes.len())
+    }
     at := 0
     loop at < bytes.len() {
         remaining :: __build_remaining(wire)
-        if remaining <= 0 -> return Err(__build_fail("timed out"))
+        if remaining <= 0 -> return Err(__build_tape_fail(&wire, "timed_out", "timed out"))
         rest :: __build_slice(bytes, at, bytes.len())
+        failed := ""
+        message := ""
         if wire.tls == {
             .Val(stream) -> {
-                stream.write_all(rest, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
+                if stream.write_all(rest, deadline: Duration{ns: remaining}) == .Err(err) {
+                    failed = __build_io_portable(err)
+                    message = "{err}"
+                }
                 at = bytes.len()
             }
             .None -> {
                 if wire.tcp == {
                     .Val(stream) -> {
-                        sent :: stream.write(rest, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}"))
-                        if sent == 0 -> return Err(__build_fail("failed to write whole buffer"))
-                        at += sent
+                        if stream.write(rest, deadline: Duration{ns: remaining}) == {
+                            .Ok(sent) -> {
+                                if sent == 0 {
+                                    failed = "unmapped"
+                                    message = "failed to write whole buffer"
+                                }
+                                at += sent
+                            }
+                            .Err(err) -> {
+                                failed = __build_net_portable(err)
+                                message = "{err}"
+                            }
+                        }
                     }
                     .None -> return Err(__build_fail("HTTP transport has no connection"))
                 }
             }
         }
+        if failed != "" -> return Err(__build_tape_fail(&wire, failed, message))
     }
-    if wire.end_ns - core.time.__clock_mono_ns() <= 0 -> return Err(__build_fail("timed out"))
+    if wire.end_ns - core.time.__clock_mono_ns() <= 0 -> return Err(__build_tape_fail(&wire, "timed_out", "timed out"))
+    if wire.prove == C_CLIENT_PROVE_CAPTURE -> wire.sends += 1
     Ok(at)
 }
 
@@ -663,24 +715,123 @@ fn __build_remaining(wire: __BuildWire) -[Time.Wait]> Int Never! {
     left
 }
 
-// One read into the drained buffer: the byte count, 0 at EOF.
+// One read into the drained buffer: the byte count, 0 at EOF. A replay's
+// buffer started as the whole tape, so a read past it is the recorded
+// ending.
 fn __build_fill(&wire: __BuildWire) -[Net, Time.Wait]> Int __BuildHTTPFailure! {
+    if wire.prove == C_CLIENT_PROVE_REPLAY {
+        if wire.ending != "eof" -> return Err(__build_fail(__build_ending_message(wire.ending)))
+        wire.buffer = [U8]{}
+        wire.at = 0
+        return Ok(0)
+    }
     remaining :: __build_remaining(wire)
-    if remaining <= 0 -> return Err(__build_fail("timed out"))
+    if remaining <= 0 -> return Err(__build_tape_fail(&wire, "timed_out", "timed out"))
     got := [U8]{}
+    failed := ""
+    message := ""
     if wire.tls == {
-        .Val(stream) -> { got = stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}")) }
+        .Val(stream) -> {
+            if stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
+                .Ok(bytes) -> got = bytes
+                .Err(err) -> {
+                    failed = __build_io_portable(err)
+                    message = "{err}"
+                }
+            }
+        }
         .None -> {
             if wire.tcp == {
-                .Val(stream) -> { got = stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) ?? return Err(__build_fail("{err}")) }
+                .Val(stream) -> {
+                    if stream.read(C_BUILD_READ_BYTES, deadline: Duration{ns: remaining}) == {
+                        .Ok(bytes) -> got = bytes
+                        .Err(err) -> {
+                            failed = __build_net_portable(err)
+                            message = "{err}"
+                        }
+                    }
+                }
                 .None -> return Err(__build_fail("HTTP transport has no connection"))
             }
         }
     }
+    if failed != "" -> return Err(__build_tape_fail(&wire, failed, message))
     count :: got.len()
+    if wire.prove == C_CLIENT_PROVE_CAPTURE {
+        &wire.taped.extend(got)
+        if count == 0 -> wire.ending = "eof"
+    }
     wire.buffer = got
     wire.at = 0
     Ok(count)
+}
+
+// A wire failure. A capture records its portable name (`timed_out` once the
+// deadline has passed) as the stream's ending and fails with the message a
+// replay rebuilds from that name, so both runs classify it alike
+// (__client_timed_out, __client_body_error).
+fn __build_tape_fail(&wire: __BuildWire, name: String, message: String) -[Time.Wait]> __BuildHTTPFailure Never! {
+    if wire.prove != C_CLIENT_PROVE_CAPTURE -> return __build_fail(message)
+    wire.ending = if core.time.__clock_mono_ns() >= wire.end_ns -> "timed_out" else -> name.copy()
+    __build_fail(__build_ending_message(wire.ending))
+}
+
+// The failure message of a recorded ending: `timed out`, else the portable
+// name with spaces (`connection reset`).
+fn __build_ending_message(name: String) -> String Never! {
+    if name == "timed_out" -> return "timed out"
+    name.replace("_", " ")
+}
+
+// The portable error name (the `jet prove` replay registry) of a TCP
+// failure; `unmapped` when it has none.
+fn __build_net_portable(err: NetError) -> String Never! {
+    if err == {
+        .PermissionDenied(_) -> "permission_denied"
+        .AddressInUse(_) -> "address_in_use"
+        .AddressUnavailable(_) -> "address_unavailable"
+        .ConnectionRefused(_) -> "connection_refused"
+        .ConnectionReset(_) -> "connection_reset"
+        .NotConnected(_) -> "not_connected"
+        .Timeout(_) -> "timed_out"
+        .Cancelled(_) -> "interrupted"
+        .Closed(detail) -> __build_errno_portable(detail.os_code)
+        .Other(detail) -> __build_errno_portable(detail.os_code)
+        else -> "unmapped"
+    }
+}
+
+// The portable error name of a TLS stream failure.
+fn __build_io_portable(err: IOError) -> String Never! {
+    if err == {
+        .TimedOut(_) -> "timed_out"
+        .PermissionDenied(_) -> "permission_denied"
+        .Cancelled(_) -> "interrupted"
+        .Closed(context) -> __build_errno_portable(context.os_code)
+        .Other(context) -> __build_errno_portable(context.os_code)
+        else -> "unmapped"
+    }
+}
+
+// The portable name of a Linux errno (the journal's platform), one errno
+// per name; `unmapped` for any other.
+fn __build_errno_portable(code: Int?) -> String Never! {
+    errno :: code ?? return "unmapped"
+    if errno == {
+        4 -> "interrupted"
+        110 -> "timed_out"
+        11 -> "would_block"
+        32 -> "broken_pipe"
+        103 -> "connection_aborted"
+        111 -> "connection_refused"
+        104 -> "connection_reset"
+        107 -> "not_connected"
+        98 -> "address_in_use"
+        99 -> "address_unavailable"
+        13 -> "permission_denied"
+        2 -> "not_found"
+        else -> "unmapped"
+    }
 }
 
 // BufReader + Take(limit): appends at most `limit` bytes to `out`, stopping
@@ -1264,7 +1415,7 @@ fn __client_follow(original_method: String, original_url: String, original_field
         }
         &visited.push(url.copy())
         parsed :: __client_url(url) ?? return Err(err)
-        reply :: __client_once(method, parsed, fields, body, phases, proxy) ?? return Err(err)
+        reply :: __client_once(method, parsed, fields, body, phases, proxy, followed) ?? return Err(err)
         status :: reply.status
         if status != 301 && status != 302 && status != 303 && status != 307 && status != 308 -> return Ok(__client_finish(reply, history))
         location :: http.headers_get(reply.headers, "location") ?? return Ok(__client_finish(reply, history))
@@ -1308,43 +1459,212 @@ fn __client_finish(reply: __ClientReply, history: [String]) -> HTTPResponse Neve
 
 // One request on a fresh connection: dial (through the proxy when one is
 // set), write the head and body, read the final head and the body. The
-// connection is closed before returning.
-fn __client_once(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?) -[Net, Time.Wait]> __ClientReply HTTPError! {
+// connection is closed before returning. Under `jet prove` a capture
+// journals the hop (`hop` redirects in) and a replay answers it from the
+// journal instead of the network.
+fn __client_once(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
     if method == "" || !valid_method(method) -> return Err(.InvalidHeader)
+    prove :: build_tls.__prove_net_mode()
+    if prove == C_CLIENT_PROVE_REPLAY -> return __client_replayed(method, url, fields, body, phases, proxy, hop)
+    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: prove, taped: [U8]{}, sends: 0, ending: "", stage: C_CLIENT_STAGE_RESOLVE, addresses: [[U8]]{}}
+    reply := __ClientReply?{None}
+    failure := HTTPError?{None}
+    if __client_dial_exchange(&wire, method, url, fields, body, phases, proxy) == {
+        .Ok(got) -> reply = Val(got)
+        .Err(error) -> failure = Val(error)
+    }
+    __client_close(&wire)
+    if prove == C_CLIENT_PROVE_CAPTURE -> build_tls.__prove_net_record(__client_net_tape(hop, method, url, fields, body, wire, reply))
+    if failure == .Val(error) -> return Err(error)
+    answered :: reply ?? return Err(.IO{operation: "transport"})
+    Ok(answered)
+}
+
+// The live hop. Each dial failure leaves its stage and portable name on the
+// wire for a capture to record.
+fn __client_dial_exchange(&wire: __BuildWire, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?) -[Net, Time.Wait]> __ClientReply HTTPError! {
     destination :: proxy ?? url
     connect_end :: __client_until(phases.connect_ns, phases.end_ns)
-    if connect_end <= core.time.__clock_mono_ns() -> return Err(.Timeout{phase: "transport"})
-    addresses :: provider.jet_http_build_resolve(destination.host, destination.port) ?? return Err(.Resolve{host: "<redacted>"})
-    tcp := __build_connect(addresses, destination.port, connect_end) ?? {
-        if core.time.__clock_mono_ns() >= connect_end -> return Err(.Timeout{phase: "transport"})
+    if connect_end <= core.time.__clock_mono_ns() {
+        wire.ending = "timed_out"
+        return Err(.Timeout{phase: "transport"})
+    }
+    addresses :: provider.jet_http_build_resolve(destination.host, destination.port) ?? {
+        wire.ending = __client_resolve_portable(err)
+        return Err(.Resolve{host: "<redacted>"})
+    }
+    wire.addresses = addresses.copy()
+    wire.stage = C_CLIENT_STAGE_CONNECT
+    portable := "unmapped"
+    tcp := __build_connect(addresses, destination.port, connect_end, &portable) ?? {
+        if core.time.__clock_mono_ns() >= connect_end {
+            wire.ending = "timed_out"
+            return Err(.Timeout{phase: "transport"})
+        }
+        wire.ending = portable
         return Err(.Connect{address: "<redacted>"})
     }
-    wire := __BuildWire{tcp: None, tls: None, buffer: [U8]{}, at: 0, end_ns: phases.end_ns, idle_ns: 0}
+    wire.stage = C_CLIENT_STAGE_HANDSHAKE
     if url.scheme == "https" {
         tls_end :: __client_until(phases.tls_ns, phases.end_ns)
         if proxy != None {
-            wire.tcp = Val(^tcp)
-            wire.idle_ns = phases.tls_ns
-            _ :: __client_tunnel(&wire, url) ?? {
-                __client_close(&wire)
+            // The tunnel runs on its own wire so the socket can move back
+            // out; what it read and sent carries over to the hop's wire.
+            tunnel := __BuildWire{tcp: Val(^tcp), tls: None, buffer: [U8]{}, at: 0, end_ns: wire.end_ns, idle_ns: phases.tls_ns, prove: wire.prove, taped: [U8]{}, sends: 0, ending: "", stage: wire.stage, addresses: [[U8]]{}}
+            _ :: __client_tunnel(&tunnel, url) ?? {
+                __client_carry(&wire, tunnel)
+                __client_close(&tunnel)
                 return Err(err)
             }
-            tcp = ^wire.tcp ?? return Err(.Proxy{stage: "transport"})
-            wire.tcp = None
+            __client_carry(&wire, tunnel)
+            tcp = ^tunnel.tcp ?? return Err(.Proxy{stage: "transport"})
         }
         remaining :: tls_end - core.time.__clock_mono_ns()
-        if remaining <= 0 -> return Err(.Timeout{phase: "transport"})
+        if remaining <= 0 {
+            wire.ending = "timed_out"
+            return Err(.Timeout{phase: "transport"})
+        }
         stream := build_tls.__client_deadline_entry(^tcp, url.host, Duration{ns: remaining}) ?? {
-            if core.time.__clock_mono_ns() >= tls_end -> return Err(.Timeout{phase: "transport"})
+            if core.time.__clock_mono_ns() >= tls_end {
+                wire.ending = "timed_out"
+                return Err(.Timeout{phase: "transport"})
+            }
+            // A certificate or protocol failure has no portable name.
+            wire.ending = "unmapped"
             return Err(.TLS{stage: "handshake"})
         }
         wire.tls = Val(stream)
     } else {
         wire.tcp = Val(^tcp)
     }
-    result := __client_exchange(&wire, method, url, fields, body, phases, proxy != None)
-    __client_close(&wire)
-    result
+    wire.stage = C_CLIENT_STAGE_EXCHANGE
+    __client_exchange(&wire, method, url, fields, body, phases, proxy != None)
+}
+
+// Moves a proxy tunnel's progress onto the hop's wire: the unread bytes and
+// idle bound it leaves, and for a capture what it read, sent and how it ended.
+fn __client_carry(&wire: __BuildWire, tunnel: __BuildWire) Never! {
+    wire.buffer = tunnel.buffer.copy()
+    wire.at = tunnel.at
+    wire.idle_ns = tunnel.idle_ns
+    &wire.taped.extend(tunnel.taped)
+    wire.sends += tunnel.sends
+    wire.ending = tunnel.ending.copy()
+}
+
+// A resolver failure's portable name: the name has no address (`not_found`);
+// any other failure (a temporary or system one) has none.
+fn __client_resolve_portable(message: String) -> String Never! {
+    if message.contains("not known") || message.contains("No address associated") || message.contains("does not resolve") -> return "not_found"
+    "unmapped"
+}
+
+// A replayed hop: the journal's next record answers this request in place
+// of the network. The wire starts as the recorded stream, so the exchange
+// parses exactly the bytes the capture read. A record the run does not hold
+// next ends the hop as IO; the parent reports the divergence (E3623).
+fn __client_replayed(method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, phases: __ClientPhases, proxy: __ClientURL?, hop: Int) -[Net, Time.Wait]> __ClientReply HTTPError! {
+    record :: build_tls.__prove_net_take(__client_net_request(hop, method, url, fields, body))
+    stage :: __client_take_u64(record, 0)
+    sends :: __client_take_u64(record, 8)
+    size :: __client_take_u64(record, 16)
+    if stage < 0 || sends < 0 || size < 0 || size > record.len() - 24 -> return Err(.IO{operation: "transport"})
+    ending :: String.from_bytes(__build_slice(record, 24 + size, record.len())) ?? ""
+    if stage < C_CLIENT_STAGE_HANDSHAKE {
+        if ending == "timed_out" -> return Err(.Timeout{phase: "transport"})
+        if stage == C_CLIENT_STAGE_RESOLVE -> return Err(.Resolve{host: "<redacted>"})
+        return Err(.Connect{address: "<redacted>"})
+    }
+    wire := __BuildWire{tcp: None, tls: None, buffer: __build_slice(record, 24, 24 + size), at: 0, end_ns: phases.end_ns, idle_ns: 0, prove: C_CLIENT_PROVE_REPLAY, taped: [U8]{}, sends: sends, ending: ending, stage: stage, addresses: [[U8]]{}}
+    if url.scheme == "https" {
+        if proxy != None {
+            wire.idle_ns = phases.tls_ns
+            _ :: __client_tunnel(&wire, url) ?? return Err(err)
+        }
+        if stage == C_CLIENT_STAGE_HANDSHAKE {
+            if ending == "timed_out" -> return Err(.Timeout{phase: "transport"})
+            return Err(.TLS{stage: "handshake"})
+        }
+    }
+    __client_exchange(&wire, method, url, fields, body, phases, proxy != None)
+}
+
+// The request a hop makes, as the `jet prove` journal carries it (u64 LE
+// numbers, each text or byte string after its u64 length): the hop, method,
+// scheme, host, port, target, the field count and each (name, value), then 1
+// and the body, or 0 for none.
+fn __client_net_request(hop: Int, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?) -> [U8] Never! {
+    out := [U8]{}
+    __client_put_u64(&out, hop)
+    __client_put_bytes(&out, method.bytes())
+    __client_put_bytes(&out, url.scheme.bytes())
+    __client_put_bytes(&out, url.host.bytes())
+    __client_put_u64(&out, url.port)
+    __client_put_bytes(&out, url.target.bytes())
+    __client_put_u64(&out, fields.len())
+    loop field in fields {
+        __client_put_bytes(&out, field.name.bytes())
+        __client_put_bytes(&out, field.value.bytes())
+    }
+    if body == .Val(bytes) {
+        __client_put_u64(&out, 1)
+        __client_put_bytes(&out, bytes)
+    } else {
+        __client_put_u64(&out, 0)
+    }
+    out
+}
+
+// A captured hop: its request, then how far it got (stage), the resolver's
+// answers, the sends that went out, every byte read, 1 with the status and
+// header fields of the reply the program saw (0 when it saw none), and the
+// ending: `eof` once the stream ended or the run read no further, else a
+// portable error name (`unmapped` when the failure has none).
+fn __client_net_tape(hop: Int, method: String, url: __ClientURL, fields: [http.Header], body: [U8]?, wire: __BuildWire, seen: __ClientReply?) -> [U8] Never! {
+    out := __client_net_request(hop, method, url, fields, body)
+    __client_put_u64(&out, wire.stage)
+    __client_put_u64(&out, wire.addresses.len())
+    loop address in wire.addresses -> __client_put_bytes(&out, address)
+    __client_put_u64(&out, wire.sends)
+    __client_put_bytes(&out, wire.taped)
+    if seen == .Val(reply) {
+        __client_put_u64(&out, 1)
+        __client_put_u64(&out, reply.status)
+        __client_put_u64(&out, reply.headers.fields.len())
+        loop field in reply.headers.fields {
+            __client_put_bytes(&out, field.name.bytes())
+            __client_put_bytes(&out, field.value.bytes())
+        }
+    } else {
+        __client_put_u64(&out, 0)
+    }
+    __client_put_bytes(&out, (if wire.ending == "" -> "eof" else -> wire.ending).bytes())
+    out
+}
+
+fn __client_put_u64(out: &[U8], value: Int) Never! {
+    rest := value
+    loop _ in 0..<8 {
+        &out.push(U8{rest %% 256})
+        rest = rest /% 256
+    }
+}
+
+fn __client_put_bytes(out: &[U8], bytes: [U8]) Never! {
+    __client_put_u64(&out, bytes.len())
+    &out.extend(bytes)
+}
+
+// The u64 LE at `at`, or -1 past the end or above Int's range.
+fn __client_take_u64(bytes: [U8], at: Int) -> Int Never! {
+    if at < 0 || at + 8 > bytes.len() || (Int{bytes[at + 7]}) > 127 -> return 0 - 1
+    value := 0
+    step := 7
+    loop step >= 0 {
+        value = value * 256 + Int{bytes[at + step]}
+        step -= 1
+    }
+    value
 }
 
 // A TLS stream owns its socket until closed: close it so the peer sees
@@ -1484,6 +1804,9 @@ fn __client_length(text: String) -> Int? Never! {
 // A transport failure is Timeout when the stream reports one or the send's
 // deadline has passed, else IO.
 fn __client_timed_out(wire: __BuildWire, message: String) -[Time.Wait]> Bool Never! {
+    // Under `jet prove` the recorded ending decides (__build_tape_fail), so a
+    // replay classifies the failure as its capture did.
+    if wire.prove != 0 -> return message.contains("timed out")
     message.contains("timed out") || message.contains("timeout") || core.time.__clock_mono_ns() >= wire.end_ns
 }
 

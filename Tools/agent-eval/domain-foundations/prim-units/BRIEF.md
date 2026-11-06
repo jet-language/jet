@@ -1,6 +1,6 @@
 # Probe prim-units — Physical units: library versus type system
 
-Read `~/.cache/jet-dev/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
+Read `$JET_STATE_ROOT/dx3/COMMON.md` first; it holds the rule, the gap rubric, the working method, and the output contract. This file adds only what is specific to this probe.
 
 ## Kind
 
@@ -17,8 +17,8 @@ Find what Jet ships for units today (search spec, Prelude, Examples/features/typ
 
 ## Research to mine
 
-Domain census and reports: `~/.cache/jet-dev/dx2/control-systems/`, `~/.cache/jet-dev/dx2/power-energy-systems/`, `~/.cache/jet-dev/dx2/space-satellite/`, `~/.cache/jet-dev/dx2/electromagnetics-antenna/` (report.md, census.json, claims.json). Deleted ballots with worked code: `~/.cache/jet-dev/dx2/ballots/` (grep the mechanism name). Family syntheses: `~/.cache/jet-dev/dx2/_families/*/synthesis.md`.
+Domain census and reports: `$JET_STATE_ROOT/dx2/control-systems/`, `$JET_STATE_ROOT/dx2/power-energy-systems/`, `$JET_STATE_ROOT/dx2/space-satellite/`, `$JET_STATE_ROOT/dx2/electromagnetics-antenna/` (report.md, census.json, claims.json). Deleted ballots with worked code: `$JET_STATE_ROOT/dx2/ballots/` (grep the mechanism name). Family syntheses: `$JET_STATE_ROOT/dx2/_families/*/synthesis.md`.
 
 ## Output
 
-`~/.cache/jet-dev/dx3/prim-units/probe.md`, `gaps.json`, and the code under `~/.cache/jet-dev/dx3/prim-units/pkg/`. Gap ids start with `prim-units-G`.
+`$JET_STATE_ROOT/dx3/prim-units/probe.md`, `gaps.json`, and the code under `$JET_STATE_ROOT/dx3/prim-units/pkg/`. Gap ids start with `prim-units-G`.

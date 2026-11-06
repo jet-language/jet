@@ -100,6 +100,13 @@ An aggregate fixture object already contains the full Jet runtime and links
 without a second provider. Standalone C witnesses use `jet_runtime_jet.o`
 exactly once; the startup-bearing `jet_runtime.pack.o` is a program-link input,
 not an additional runtime object for a C program that defines its own `main`.
+A C witness that counts allocations or frees installs observers with
+`jet_rt_alloc_check_observe(on_alloc, on_free)` at the top of `main`. A C host
+that links the runtime object runs on the checked heap, which calls them for
+every block it hands out or takes back, the runtime's own included. A
+link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
+internal calls section-relative. `run-alloc-observer-witness.mjs` is the
+negative control: its leak mode keeps one buffer and must fail.
 Native scan proofs require the current native `scan.cases` receipt and the
 fresh Jet object/pack. Saved reference and evaluator TSVs are optional,
 explicitly named `--frozen-reference` and `--frozen-evaluator` inputs; a live
@@ -232,7 +239,7 @@ three zeros.
 `RuntimeRoutes.jet` is the native lowering table of runtime C-ABI routes and
 its only home: its route, record and import rows are edited by hand, sorted,
 together with the runtime `#Export(c)` they name. After provider admission
-changes, run `Tools/agent/lane-check.sh --runtime-generators` to check the
+changes, run `jet Tools/agent/LaneCheck.jet --runtime-generators` to check the
 generated runtime message tables.
 
 Native `[U8]` payloads are packed one-byte elements, matching checked
@@ -987,18 +994,14 @@ silently selects the retired Rust emitter. The historical Bootstrap host passes
 `true` only while its Rust-emitting bootstrap entry remains installed.
 
 Proof chains use one shared
-[`git-archive source export`](../../Tools/agent/proof-source.mjs) per full commit,
-not a moving checkout. `node Tools/agent/proof-source.mjs <full-sha> [repository]`
+[`git-archive source export`](../../Tools/agent/ProofSource.jet) per full commit,
+not a moving checkout. `jet Tools/agent/ProofSource.jet <full-sha> [repository]`
 prints its source directory; the sibling manifest records the commit, tree,
-tracked blob hashes and executable modes. Each phase calls
-`assertPinnedSource(source, sha)` before consuming it. Regeneration uses a
-writable copy outside the shared export. `proofTargetDirectory(sha)` provides
-the corresponding external Cargo target; set `CARGO_TARGET_DIR` only after
-export creation, before invoking the exported `jet-env`. When creating the
-export through the live checkout's `jet-env`, unset `CARGO_TARGET_DIR` so that
-checkout does not stamp the proof target as its own. The
-[`proof source guard`](../../Tools/agent/proof-source.test.mjs) checks tracked
-bytes, symlink targets and executable modes without requiring dev to stand still.
+tracked blob hashes and executable modes. Each phase runs
+`jet Tools/agent/ProofSource.jet check <source> <sha>` before consuming it.
+Regeneration uses a writable copy outside the shared export. The check covers
+tracked bytes, symlink targets and executable modes without requiring dev to
+stand still; the same file's tests prove it.
 The exporter completes a temporary tar file before extraction, removes that
 file, and publishes the verified source and manifest with one atomic rename.
 Archive or extraction failures publish nothing; consumer EOF cannot race the
@@ -1445,7 +1448,15 @@ Cargo metadata and the helper build run under the mandatory Linux native
 sandbox, never an unsandboxed fallback. Input manifests/source, descriptor,
 toolchain, target, artifact mode, native tools/link inputs, artifact digest,
 and provenance govern cache reuse. A per-key OS lock outside the key directory
-and a shared-output publication lock retain one helper build under concurrency.
+retains one helper build per key under concurrency. A shared-output
+publication lock is held only while a build snapshots the shared Cargo target
+into its private output and while it publishes the result back, never while
+Cargo runs, so helpers that share a target build at once. A helper with
+dependencies reads the host Cargo registry through a memory-backed bubblewrap
+overlay (`--overlay-src`/`--tmp-overlay`, bubblewrap 0.11 or newer, checked by
+the backend probe): Cargo's writes end with the sandbox and nothing is copied.
+A raw `extern rust` call whose parameter takes `&` or `^` is a sema error
+(`E0702`) outside `#Unsafe`, so it fails before any Cargo work.
 `check`, `run` and `build` share this realization and its
 `E0703`/`E0704`/`E0705` errors, including canonical declaration hints and separate
 Cargo detail. Cargo is resolved only from `PATH`; the selected musl rustc,
@@ -1469,6 +1480,9 @@ output-private mounts, locks, dependency identity, or the cache's root key count
 Manifest-less `use package#version` admission reuses the package model's local,
 offline inline-dependency resolver: `.jet/inline-deps` is authoritative, with
 the explicit fixture root as a fallback only when the package is absent.
+Before admission, `jet run` hands a package neither root knows to the engine's
+`jet fetch --lock <script>` (registry, verification, Hangar, the
+`.jet/inline-deps` copy and the script lock), so admission itself stays offline.
 The CLI snapshots the selected no-follow authority root; the Driver binds its
 recorded name, selector, selected version, and content digest into the source
 and package receipts. Loose selectors retain `L0203`, unresolved dependencies
@@ -1540,7 +1554,7 @@ target, generated sources, and schema.
 Generated wrappers keep ownership, errors, layout, callbacks, and task crossings
 explicit. Safe Jet cannot acquire an ungated unsafe operation through a bridge.
 Executable bridge proof is in `tests/cases/cffi/`, the scoped C++ system proof,
-and the feature goldens run by `Tools/testkit/Golden.jet`.
+and the feature goldens run by `Compiler/JetTestKit/Source/Golden.jet`.
 
 ### Jet as guest: embedding contract
 
@@ -1682,7 +1696,7 @@ not advertise speculative features.
 ### Compiler-speed evidence boundary (#666)
 
 Compiler-speed evidence stays on the production compiler path. The differential
-gate (the golden suite, Tools/testkit/Golden.jet) runs the same checked example
+gate (the golden suite, Compiler/JetTestKit/Source/Golden.jet) runs the same checked example
 at three tiers: o0 is the default `jet run` (O0 image run from memory,
 D-EXEC2=A), o1 is the `jet build` executable, and o2 is the
 `jet build --release` executable. It compares each tier's exit status, stdout
@@ -2153,25 +2167,30 @@ deterministic, ANSI-free bytes — scripts never parse escape sequences.
 
 ## Testing strategy
 
-The canonical [Jet testkit](../../Tools/testkit/run.jet) owns diagnostic
+The [Jet testkit](../../Compiler/JetTestKit/Source/Kit.jet) owns diagnostic
 snapshots (`ui`), executable examples and runtime fixtures (`golden`), and CLI
-scenarios (`cases`). Its package test entry is the fixture gate:
-`JET=/absolute/path/to/jet jet test Tools/testkit` runs each suite as one test
-(`suite golden`, `suite ui`, `suite cases`; a positional filter selects them),
-and a failing test names every failing case. `TESTKIT_ARGS` passes testkit flags such as `--filter` or
-`--tier`; scratch stays disk-backed outside the checkout. O0, O1 and O2 compare the real exit
-and exact streams; diagnostic text remains a product surface, not a blessable
-implementation accident.
+scenarios (`cases`). `Compiler/package.jet` names the corpora as `suites:` and
+runs them through `test:` profiles: `jet test Compiler --profile
+golden|ui|cases|corpora|full [FILTER]` runs them in process with the running
+`jet` (or the jet `--compiler` names) as the compiler under test, and `-u`
+blesses the selected rows. The selected suites share one pool sized by cores
+and free memory (`--jobs`, `--memory`). Rows print as cases finish; each
+suite's report and failure list keep suite-then-path order, whatever the
+pool's size. Census and release tooling that shards or lists the corpus
+across processes passes `--shard`, `--list`, `--cases` and `--results` to the
+same command. Scratch stays disk-backed outside the checkout. O0, O1 and O2
+compare the real exit and exact streams; diagnostic text remains a product
+surface, not a blessable implementation accident.
 
-`JET=/absolute/path/to/jet Tools/agent/verify-full.sh` runs the complete native
-suite inventory and source-pinned compiler registries, collecting independent
-failures. Missing, refused, skipped and non-PASS verdicts do not close the gate.
-It uses an already-built compiler, never Cargo to build Jet's compiler/tests,
-and never a Rust producer. `Tools/agent/native-suite.mjs` exposes the shared,
-pure post-closeout command descriptors and strict receipt validator; it has no
-CLI or closeout-bypass flag. Under owner directive #59, native cutover executes
-those runners directly and reports formal qualification/closeout separately as
-**NOT MET (deferred)**, never as a suite pass.
+`JET=/absolute/path/to/jet jet Tools/agent/VerifyFull.jet` runs the complete
+native suite inventory and source-pinned compiler registries, collecting
+independent failures. Missing, refused, skipped and non-PASS verdicts do not
+close the gate. It uses an already-built compiler, never Cargo to build Jet's
+compiler/tests, and never a Rust producer. The gate's command list and strict
+receipt validator live in that one file; it has no closeout-bypass flag. Under
+owner directive #59, native cutover executes those runners directly and reports
+formal qualification/closeout separately as **NOT MET (deferred)**, never as a
+suite pass.
 
 Native cutover uses one outer process trace. Testkit's exec-only
 `native-command.mjs` labels each case without changing its command PID or streams;
@@ -2190,7 +2209,9 @@ under the same checks as builds. The immutable tracing wrapper enables retained
 private workspaces beneath `<cache>/<full-key>/.trace-workspaces/<pid>-<attempt>`;
 the source is mounted readonly at `/work/source`, output writable at
 `/work/output`. Audit maps those exact mounts back to retained manifests, rejects
-overlays/escapes, and records their bytes and hashes. Case/tier scratch is retained
+escapes and any mount or overlay that obscures them, admits only memory-backed
+`--tmp-overlay` layers (the registry overlay), and records the manifests' bytes
+and hashes. Case/tier scratch is retained
 only for the outer audit; ordinary runs keep their existing cleanup.
 The exact `rustc -vV` identity query is admitted only in an allowlisted case's
 Jet foreign branch, and is recorded separately. Extra query arguments or sysroot
@@ -2214,9 +2235,14 @@ names and imports for the real parent fixtures. An absent expected-output file
 never causes exclusion: unmarked UI fixtures remain discovered and require an
 owner-reviewed snapshot.
 The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
-in external scratch, then checks each case in that shared source tree. Sibling
-imports, convention route roots and authored fixture state therefore resolve
-as in the original Rust runner, without per-case same-stem copy gaps. When outer
+in external scratch, where each project case compiles rooted at its own
+directory. A loose case's source root is its whole directory, and the compiler
+snapshots every `.jet` file under it, so each loose case is staged alone in its
+own scratch: the case, its `.fixed.jet` companion, and its directory's support,
+which is every file there but another case and its companion and snapshots,
+and every subdirectory that holds no case. Sibling imports, convention route
+roots, embedded data and authored fixture state therefore resolve as in the
+original Rust runner, and no case compiles beside another. When outer
 tracing is enabled, run-wide scratch also remains until the final trace audit;
 ordinary runs remove it after reporting.
 UI `@jetpack_e1250` copies its program as `main.jet` into a private scratch

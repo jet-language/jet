@@ -1,12 +1,12 @@
 // Resolve all dependencies and publish the machine graph + semantic rationale
 // only after provider verification. Locked mode never writes or refreshes an index.
 fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: Manifest, existing: LockFile?, options: PackageFetchOptions) -[FS, Env, Exec, Net, Time, Time.Wait]> PackageFetchResult PackageFetchError! {
-    root :: files.canonicalize(project_root) ?? return Err(pkg_fetch_error("E1206", "couldn't open project root", "{err}", "restore the package directory"))
+    root :: files.canonicalize(project_root) ?? return Err(pkg_fetch_error("E1224", "couldn't open project root", "{err}", "restore the package directory"))
     pkg_check_toolchain(manifest, files.join(root, PACKAGE_FILE)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
     roots :: pkg_resolve_roots()
     context :: ProviderCtx{fixtures: provider_fixtures_from_env(None), store_dir: roots.hangar_dir(), offline: options.locked, project_dir: Val(root), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
     if options.locked {
-        lock :: existing ?? return Err(pkg_fetch_error("E1202", "`{UNIFIED_LOCK_FILE}` is missing", "locked mode requires an exact package graph", "run `jet fetch` and commit `.jet/lock`"))
+        lock :: existing ?? return Err(pkg_fetch_error("E1202", pkg_fetch_missing_lock_what(manifest), "locked mode requires an exact package graph", "run `jet fetch` and commit `.jet/lock`"))
         pkg_lock_verify_lock_matches_manifest(lock, manifest, files.join(root, UNIFIED_LOCK_FILE)) ?? return Err(pkg_fetch_lock_error(err))
         pkg_lock_verify_all_manifest_deps_locked(manifest, lock) ?? return Err(PackageFetchError{diagnostic: err.diagnostic()})
         lock.validate_completeness() ?? return Err(PackageFetchError{diagnostic: err.diagnostic()})
@@ -52,6 +52,15 @@ fn pkg_fetch(verification: &StoreVerification, project_root: String, manifest: M
     pkg_lock_write_atomically(root, pkg_lock_write(lock).bytes()) ?? return Err(pkg_fetch_lock_error(err))
     Ok(PackageFetchResult{lock: lock, directories: directories})
 }
+// The missing-lock headline names the dependencies it leaves unlocked.
+fn pkg_fetch_missing_lock_what(manifest: Manifest) -> String Never! {
+    names :: pkg_lock_manifest_dependency_names(manifest)
+    if names.len() == 0 -> return "`{UNIFIED_LOCK_FILE}` is missing"
+    quoted := [String]{}
+    loop name in names -> &quoted.push("`{name}`")
+    verb :: if names.len() == 1 -> "is" else -> "are"
+    "`{UNIFIED_LOCK_FILE}` is missing, so {quoted.join(", ")} {verb} not locked"
+}
 fn pkg_fetch_provenance(lock: LockFile, manifest: Manifest) PackageFetchError! {
     requirement :: if manifest.authority.trust == .Val(trust) -> trust.require ?? ProvenanceRequirement.Unrequired else -> ProvenanceRequirement.Unrequired
     pkg_lock_enforce_provenance_requirement(lock, requirement) ?? return Err(pkg_fetch_error("E1207", err.message(), "authority.trust.require is an explicit provenance floor; Jet will not silently downgrade it", "record the required transparency or build evidence, or set `authority: {{ trust: {{ require: none }} }}`"))
@@ -64,7 +73,7 @@ fn pkg_fetch_semantic_records(root: String, lock: LockFile, manifest: Manifest, 
     loop package in lock.packages {
         if scope == .Val(names) && !names.contains(package.name) -> next
         if package.source == .Registry(registry, reference, output, hash, repository, _, _, _) {
-            dependency :: pkg_fetch_load_manifest(output, package.name)
+            dependency :: pkg_fetch_load_store_manifest(output, package.name)
             receipt :: publication_authorize_package_candidate(manifest.policy, package.name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{manifest.package.name} -> {package.name}#{package.version}", registry, err)})
             metadata :: if publication_read_registry_package_metadata(output, package.name, package.version) == {
                 .Val(found) -> Val(found)
@@ -88,7 +97,7 @@ fn pkg_fetch_semantic_records(root: String, lock: LockFile, manifest: Manifest, 
             _ :: &semantic.selective_update(record)
         }
     }
-    trust_revalidate_semantic_lock(semantic) ?? return Err(pkg_fetch_error("E1206", "couldn't record the registry resolution rationale", "semantic lock validation rejected the update explanation", err.message()))
+    trust_revalidate_semantic_lock(semantic) ?? return Err(pkg_fetch_error("E1205", "couldn't record the registry resolution rationale", "semantic lock validation rejected the update explanation", err.message()))
     Ok(semantic)
 }
 fn pkg_fetch_locked_error(name: String, detail: String) -> PackageFetchError Never! {
@@ -156,7 +165,7 @@ fn pkg_fetch_locked_registry(verification: &StoreVerification, roots: HangarRoot
             .Err(error) -> { return Err(pkg_fetch_registry_error(name, "locked registry index could not be read: {error}")) }
         }
         if reference != "{name}#{package.version}" || hash == "" || selected.content_hash != hash || publication_tier_label(selected.tier) != tier || publication_gate_summary(selected.gate_status) != gate -> return Err(pkg_fetch_registry_error(name, "locked registry identity, hash, tier or gate status disagrees with the local index"))
-        all :: publication_verify_registry_package(repo, registry, name) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
+        all :: publication_verify_registry_package(repo, registry, name) ?? return Err(pkg_fetch_registry_evidence_error(name, err.diagnostic))
         publication_verify_entry_tier(selected) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
         _ :: publication_verify_index_entry(all, selected, selected.tier == .Community, registry) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
         snapshot :: publication_snapshot_verified_artifact(repo, selected) ?? return Err(pkg_fetch_registry_error(name, "locked artifact is unavailable: {err}"))
@@ -175,9 +184,9 @@ fn pkg_fetch_locked_registry(verification: &StoreVerification, roots: HangarRoot
             &expected.push(child)
         }
         if pkg_overlay_sorted_unique(package.dependencies) != pkg_overlay_sorted_unique(expected) -> return Err(pkg_fetch_registry_error(name, "locked dependency roles, features, or constraints disagree with the artifact metadata"))
-        receipt :: publication_authorize_package_candidate(manifest.policy, name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{name}#{package.version}", registry, err)})
+        receipt :: publication_authorize_package_candidate(manifest.policy, name, package.version, dependency.package.license, registry) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(manifest.package.name, "{manifest.package.name} -> {name}#{package.version}", registry, err)})
         resolver :: PackageFetchResolver{root: root, previous: Val(lock), options: PackageFetchOptions{locked: true}, policy: manifest.policy, nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
-        installed :: pkg_fetch_registry_ingest(&verification, roots, resolver, config, selected, snapshot.path(), [String]{}, None, receipt, publication_active_source_exception(manifest.policy.exceptions, name, package.version))
+        installed :: pkg_fetch_registry_ingest(&verification, roots, resolver, config, selected, snapshot.path(), [String]{}, None, receipt, publication_active_source_exception(manifest.policy.exceptions, name, package.version), true)
         close(^snapshot)
         // A hashing failure is a failed content hash; `hash` is never empty here.
         if (publication_registry_artifact_hash(installed.out) ?? "") != hash -> return Err(pkg_fetch_registry_error(name, "stored registry artifact failed its content hash"))

@@ -1,10 +1,10 @@
-// core.net.ws routes: RFC 6455 over a TCP stream (WsClient.rs, Ws.rs). A
-// client connect and a server upgrade share one frame codec. A connection owns
-// its Stream56 and a read buffer, so bytes that arrive with the handshake
-// response stay queued for the first frame. Every read and write waits at most
-// the connection's timeout (30 s unless set), and a passed task deadline is
-// Cancelled. Read failures classify as the reference's io kinds (timed out,
-// closed, other I/O); every write failure is I/O.
+// core.net.ws routes: RFC 6455 over a TCP stream. A client connect and a server
+// upgrade share one frame codec. A connection owns its Stream56 and a read
+// buffer, so bytes that arrive with the handshake response stay queued for the
+// first frame. Every read and write waits at most the connection's timeout (30
+// s unless set), and a passed task deadline is Cancelled. Read failures
+// classify as the reference's io kinds (timed out, closed, other I/O); every
+// write failure is I/O.
 WS_MAX_MESSAGE :: I64{1048576}
 WS_MAX_CONTROL :: I64{125}
 WS_DEFAULT_TIMEOUT_MS :: I64{30000}
@@ -75,6 +75,7 @@ fn ws_conn_new(stream: I64, client: Bool) -> I64 {
 }
 #Export(c) fn jet_rt_handle_drop_jet_ws_conn(conn: I64) {
     if (conn == I64{0}) -> return
+    ws_hub_leave(conn)
     net_stream_drop(net_word(conn, WS_CONN_STREAM))
     capacity :: net_word(conn, WS_CONN_CAPACITY)
     if (capacity != I64{0}) -> jet_rt_free(net_word(conn, WS_CONN_BUFFER), capacity, I64{1})
@@ -182,7 +183,11 @@ fn ws_write_frame(conn: I64, opcode: I64, data: I64, length: I64, error: I64) ->
         rt_text_put(wrapping(body + at), if client -> byte.bit_xor(rt_text_byte(wrapping(mask + at % I64{4}))) else -> byte)
         at += I64{1}
     }
+    // The write lock keeps this frame whole beside a hub publish.
+    lock :: wrapping(conn + WS_CONN_WRITE_LOCK)
+    sync_mutex_lock(lock)
     result :: ws_write(conn, frame, total, rt_static_text("write frame"), error)
+    sync_mutex_unlock(lock)
     jet_rt_free(frame, total, I64{1})
     result
 }
@@ -458,7 +463,144 @@ fn ws_accept_key(key: I64) -> I64 {
         return I64{0}
     }
     net_put(output, I64{0}, conn)
+    ws_hub_join(conn)
     I64{1}
+}
+
+// The live transport hub (D-LIVEQUERY1, #1158). Every server-side connection
+// joins it once its upgrade response is written and leaves when dropped.
+// core.web's live registry publishes each invalidation as one text event on a
+// topic: the event becomes the topic's latest and goes to every joined
+// connection as a text frame, and a joining connection first receives every
+// topic's latest event, oldest topic first. The hub lock serializes
+// publishing, joining and leaving, so no connection is freed under a send;
+// each connection's write lock keeps a published frame whole beside its
+// owner's own sends. A send that fails leaves the connection joined until its
+// owner drops it.
+// Hub40: lock0, connections8 (WS_HUB_MAX_CONNECTIONS words), count16,
+// topics24 (WS_HUB_MAX_TOPICS [topic, event] text pairs, oldest first),
+// topic count32.
+WS_HUB_BYTES :: I64{40}
+WS_HUB_CONNECTIONS :: I64{8}
+WS_HUB_COUNT :: I64{16}
+WS_HUB_TOPICS :: I64{24}
+WS_HUB_TOPIC_COUNT :: I64{32}
+WS_HUB_MAX_CONNECTIONS :: I64{1024}
+WS_HUB_MAX_TOPICS :: I64{2048}
+WS_HUB_MAX_TOPIC :: I64{512}
+ws_hub_root := I64{0}
+
+// runtime-init: 3 when ws_hub_root
+#Export(c) fn jet_rt_ws_hub_init() {
+    if (ws_hub_root != I64{0}) -> return
+    root :: jet_rt_alloc(WS_HUB_BYTES, I64{8})
+    thread_zero(root, WS_HUB_BYTES)
+    net_put(root, WS_HUB_CONNECTIONS, jet_rt_alloc(WS_HUB_MAX_CONNECTIONS * I64{8}, I64{8}))
+    net_put(root, WS_HUB_TOPICS, jet_rt_alloc(WS_HUB_MAX_TOPICS * I64{16}, I64{8}))
+    #Unsafe("runtime-init runs before any other thread exists") {
+        ws_hub_root = root
+    }
+}
+
+// One text frame of `event` to a joined connection, unless it is closed.
+fn ws_hub_send(conn: I64, event: I64) {
+    if (net_word(conn, WS_CONN_CLOSED) != I64{0}) -> return
+    error :: jet_rt_alloc(I64{8}, I64{8})
+    net_put(error, I64{0}, I64{0})
+    _ := ws_write_frame(conn, I64{1}, rt_text_data(event), rt_text_len(event), error)
+    jet_rt_handle_drop_jet_ws_error(net_word(error, I64{0}))
+    jet_rt_free(error, I64{8}, I64{8})
+}
+
+// Joins `conn` and replays every topic's latest event to it; a full hub
+// leaves it out.
+fn ws_hub_join(conn: I64) {
+    root :: ws_hub_root
+    if (root == I64{0}) -> return
+    sync_mutex_lock(root)
+    count :: net_word(root, WS_HUB_COUNT)
+    if (count < WS_HUB_MAX_CONNECTIONS) {
+        net_put(net_word(root, WS_HUB_CONNECTIONS), count * I64{8}, conn)
+        net_put(root, WS_HUB_COUNT, count + I64{1})
+        net_put(conn, WS_CONN_HUB, I64{1})
+        topics :: net_word(root, WS_HUB_TOPICS)
+        at := I64{0}
+        loop at < net_word(root, WS_HUB_TOPIC_COUNT) {
+            ws_hub_send(conn, net_word(topics, at * I64{16} + I64{8}))
+            at += I64{1}
+        }
+    }
+    sync_mutex_unlock(root)
+}
+
+fn ws_hub_leave(conn: I64) {
+    if (net_word(conn, WS_CONN_HUB) == I64{0}) -> return
+    root :: ws_hub_root
+    sync_mutex_lock(root)
+    connections :: net_word(root, WS_HUB_CONNECTIONS)
+    count :: net_word(root, WS_HUB_COUNT)
+    at := I64{0}
+    loop at < count {
+        if (net_word(connections, at * I64{8}) == conn) {
+            net_put(connections, at * I64{8}, net_word(connections, (count - I64{1}) * I64{8}))
+            net_put(root, WS_HUB_COUNT, count - I64{1})
+            at = count
+        } else {
+            at += I64{1}
+        }
+    }
+    net_put(conn, WS_CONN_HUB, I64{0})
+    sync_mutex_unlock(root)
+}
+
+// Drops topic pair `at` of `count`, moving the later ones down.
+fn ws_hub_topic_remove(topics: I64, at: I64, count: I64) {
+    jet_rt_string_drop(net_word(topics, at * I64{16}))
+    jet_rt_string_drop(net_word(topics, at * I64{16} + I64{8}))
+    index := at
+    last :: count - I64{1}
+    loop index < last {
+        net_put(topics, index * I64{16}, net_word(topics, (index + I64{1}) * I64{16}))
+        net_put(topics, index * I64{16} + I64{8}, net_word(topics, (index + I64{1}) * I64{16} + I64{8}))
+        index += I64{1}
+    }
+}
+
+// core.web.__live_publish: `event` becomes `topic`'s latest and goes to every
+// joined connection. An empty or oversized topic or event is dropped.
+#Export(c) fn jet_web_live_publish(topic: I64, event: I64) {
+    root :: ws_hub_root
+    if (root == I64{0}) -> return
+    if (rt_text_len(topic) == I64{0} || rt_text_len(topic) > WS_HUB_MAX_TOPIC) -> return
+    if (rt_text_len(event) == I64{0} || rt_text_len(event) > WS_MAX_MESSAGE) -> return
+    sync_mutex_lock(root)
+    topics :: net_word(root, WS_HUB_TOPICS)
+    count := net_word(root, WS_HUB_TOPIC_COUNT)
+    at := I64{0}
+    loop at < count {
+        if jet_rt_string_eq(net_word(topics, at * I64{16}), topic) {
+            ws_hub_topic_remove(topics, at, count)
+            count -= I64{1}
+            at = count
+        } else {
+            at += I64{1}
+        }
+    }
+    if (count == WS_HUB_MAX_TOPICS) {
+        ws_hub_topic_remove(topics, I64{0}, count)
+        count -= I64{1}
+    }
+    net_put(topics, count * I64{16}, jet_rt_string_clone(topic))
+    net_put(topics, count * I64{16} + I64{8}, jet_rt_string_clone(event))
+    net_put(root, WS_HUB_TOPIC_COUNT, count + I64{1})
+    connections :: net_word(root, WS_HUB_CONNECTIONS)
+    joined :: net_word(root, WS_HUB_COUNT)
+    index := I64{0}
+    loop index < joined {
+        ws_hub_send(net_word(connections, index * I64{8}), event)
+        index += I64{1}
+    }
+    sync_mutex_unlock(root)
 }
 
 fn ws_ascii_lower(byte: I64) -> I64 { if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte }

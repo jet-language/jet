@@ -1,15 +1,15 @@
-// The JS/WASM web partition (D-WASM1=A, Rust WebPartition.rs). Every checked
-// function gets a web bucket by one precedence: its `#Target(JS|Wasm)` or
-// `#WasmExport` marker, the `Browser` effect, the inline-module or file
-// `#Target` ceiling, a `Stream` result, then the Wasm default. Unpinned
-// functions follow their call edges until the graph is closed: a Wasm caller
-// of a JS function becomes JS, and so does an unpinned Wasm callee of a JS
-// caller. Once a program opts in (a web marker or a `#Target` ceiling), a
-// `#WasmExport` signature must be ABI-safe (E-WEB-ABI-TYPE), a Wasm function
-// must not use `Browser` (E-WEB-TARGET-BROWSER), and a call must stay in its
-// bucket unless it is the JS-to-`#WasmExport` bridge (E-WEB-CROSS-PARTITION).
-// The bucket is stamped onto each FnBody (`web_bucket`).
-use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, type_name]
+// The JS/WASM web partition (D-WASM1=A). Every checked function gets a web
+// bucket by one precedence: its `#Target(JS|Wasm)` or `#WasmExport` marker, the
+// `Browser` effect, the inline-module or file `#Target` ceiling, a `Stream`
+// result, then the Wasm default. Unpinned functions follow their call edges
+// until the graph is closed: a Wasm caller of a JS function becomes JS, and so
+// does an unpinned Wasm callee of a JS caller. Once a program opts in (a web
+// marker or a `#Target` ceiling), a `#WasmExport` signature must be ABI-safe
+// (E-WEB-ABI-TYPE), a Wasm function must not use `Browser`
+// (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
+// JS-to-`#WasmExport` bridge (E-WEB-CROSS-PARTITION). The bucket is stamped
+// onto each FnBody (`web_bucket`).
+use jet_foundation.[Diagnostic, EffectRowEntry, EnumDef, Func, Item, NamedSpan, Span, StructDef, Type, VariantPayload, WebBucket, WebPartitionMarker, owned_trait_codec_names, owned_trait_family, type_name]
 
 // One function's partition inputs, read from its declaration and its checked
 // body (`slot`/`row` in the module results; row -1 when it has none).
@@ -36,19 +36,15 @@ struct SemaWebTypes {
 fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) Never! {
     metas := [SemaWebMeta]{}
     types := SemaWebTypes{structs: [String:StructDef]{}, enums: [String:EnumDef]{}}
-    active := false
     loop module_index in 0..<modules.len() {
         registration :: sema_registration_module_index(graph, modules[module_index].module_identity) ?? next
         program :: graph.modules[registration].program
-        if program.web_target_ceiling != None -> active = true
         is_entry :: graph.modules[registration].module_identity == graph.entry_module_identity
         file_prefix :: if is_entry -> String?{None} else -> Val(graph.modules[registration].module_name)
         sema_web_collect(program.items, program.web_target_ceiling, None, None, file_prefix, module_index, registration, modules, &metas, &types)
     }
-    loop meta in metas {
-        if meta.marker != None -> active = true
-    }
     if metas.len() == 0 -> return
+    active :: sema_web_partition_active(graph)
     rows := [String:Int]{}
     loop at in 0..<metas.len() {
         if metas[at].row >= 0 -> rows[modules[metas[at].slot].functions[metas[at].row].key] = at
@@ -90,7 +86,8 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
                 if !sema_web_abi_safe(ret, types) -> &found.push(sema_web_abi_type(ret, "as a `#WasmExport` return type", meta.name_span))
             }
         }
-        if buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser") {
+        uses_browser :: buckets[at] == .Wasm && sema_web_has_root(sema_web_solved(modules, meta), "Browser")
+        if uses_browser {
             &found.push(sema_error("E-WEB-TARGET-BROWSER", meta.name_span, "`{meta.name}` is pinned to Wasm but uses the `Browser` effect", "the web backend keeps DOM/view code in JS and compute in WASM; a Wasm-pinned function cannot call browser APIs directly", "remove the `#Target(Wasm)` pin, move browser work into a `#Target(JS)` function, or drop the browser API calls"))
         }
         if meta.row >= 0 {
@@ -99,6 +96,9 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
                 if buckets[at] == buckets[callee] -> next
                 // The one sanctioned crossing: JS calling a `#WasmExport`.
                 if buckets[at] == .JS && metas[callee].marker == .Val(.WasmExport) -> next
+                // A Core browser API reached from a Wasm pin is the E-WEB-TARGET-BROWSER
+                // above (Rust partitioned user functions only).
+                if uses_browser && sema_module_is_core_source(graph.modules[metas[callee].registration].module_identity) -> next
                 &found.push(sema_error("E-WEB-CROSS-PARTITION", meta.name_span, "`{meta.key}` is compiled to {sema_web_bucket_name(buckets[at])} but calls `{metas[callee].name}`, which lives in {sema_web_bucket_name(buckets[callee])}", "the web backend keeps DOM/view code in JS and compute in WASM; a direct call across that boundary is not allowed yet", "move the call behind a generated bridge, colocate both functions in the same bucket, or adjust their `#Target(Wasm|JS)` markers"))
             }
         }
@@ -106,6 +106,57 @@ fn sema_web_partition_check(modules: &[SemaGraphModuleResult], graph: SemaRegist
         sema_attach_diagnostic_source_locations(&found, 0, graph.modules[meta.registration].source_segments)
         loop diagnostic in found -> &diagnostics.push(diagnostic)
     }
+}
+
+// Whether a program opts in to the partition's checks: a module has a file
+// `#Target` ceiling or a function a web marker. Before it does, the partition
+// only stamps buckets, so a check that leaves some bodies unchecked
+// (CoreDemand.jet) reports what checking every body would.
+fn sema_web_partition_active(graph: SemaRegistrationGraph) -> Bool Never! {
+    loop module_index in 0..<graph.modules.len() {
+        if graph.modules[module_index].program.web_target_ceiling != None || sema_web_items_marked(graph.modules[module_index].program.items) -> return true
+    }
+    false
+}
+
+// Whether a function sema_web_collect visits in `items` has a web marker.
+fn sema_web_items_marked(items: [Item]) -> Bool Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> {
+                if function.web_marker != None -> return true
+            }
+            .Struct(structure) -> {
+                if sema_web_methods_marked(structure.methods) -> return true
+                loop implementation in structure.trait_impls {
+                    if sema_web_methods_marked(implementation.methods) -> return true
+                }
+            }
+            .Enum(enumeration) -> {
+                if sema_web_methods_marked(enumeration.methods) -> return true
+                loop implementation in enumeration.trait_impls {
+                    if sema_web_methods_marked(implementation.methods) -> return true
+                }
+            }
+            .Impl(implementation) -> {
+                if sema_web_methods_marked(implementation.methods) -> return true
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    if sema_web_items_marked(body) -> return true
+                }
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+fn sema_web_methods_marked(methods: [Func]) -> Bool Never! {
+    loop method in methods {
+        if method.web_marker != None -> return true
+    }
+    false
 }
 
 fn sema_web_collect(items: [Item], file_ceiling: WebBucket?, module_ceiling: WebBucket?, module_prefix: String?, file_prefix: String?, module_index: Int, registration: Int, modules: [SemaGraphModuleResult], metas: &[SemaWebMeta], types: &SemaWebTypes) Never! {
@@ -262,15 +313,19 @@ fn sema_web_codable_named(name: String, args: [Type], types: SemaWebTypes) -> Bo
     false
 }
 
+// Whether the derives give the type every codec trait: each one named, or a
+// family marker (`Codable`) that derives them.
 fn sema_web_codable(derives: [NamedSpan]) -> Bool Never! {
-    encode := false
-    decode := false
+    covered := [String]{}
     loop marker in derives {
-        if marker.name == "Codable" -> return true
-        if marker.name == "Encode" -> encode = true
-        if marker.name == "Decode" -> decode = true
+        family :: owned_trait_family(marker.name, false)
+        if family.len() == 0 -> &covered.push(marker.name.copy())
+        loop member in family -> &covered.push(member.copy())
     }
-    encode && decode
+    loop codec in owned_trait_codec_names() {
+        if !covered.contains(codec) -> return false
+    }
+    true
 }
 
 // Rust `type_show`: source spellings for the common types; any other type

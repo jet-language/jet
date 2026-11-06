@@ -103,7 +103,9 @@ fn env_acquire_lock(root: String, scope: String) -[FS, Env, Time]> RuntimeLock I
 fn env_try_acquire_lock(root: String, scope: String) -[FS, Env]> RuntimeLock? IOError! {
     authority :: foundation_open_directory_authority(root, true)
     opened :: env_lock_open_scope(^authority, scope)
-    owner :: env_lock_try_owner(opened) ?? return Ok(None)
+    // Bound first: `??` on `FileLock? IOError!` would fold a refusal into None.
+    attempt :: env_lock_try_owner(opened)
+    owner :: attempt ?? return Ok(None)
     Ok(Val(env_lock_hold(^opened, ^owner)))
 }
 
@@ -116,7 +118,8 @@ fn env_acquire_lock_waiting(root: String, scope: String, wait: Duration) -[FS, E
 fn env_lock_acquire_opened(opened: ^RuntimeLockScope, wait: Duration) -[FS, Env, Time]> RuntimeLock IOError! {
     deadline :: time.instant() + wait
     loop {
-        if env_lock_try_owner(opened) == .Val(owner) -> return Ok(env_lock_hold(^opened, ^owner))
+        attempt :: env_lock_try_owner(opened)
+        if attempt == .Val(owner) -> return Ok(env_lock_hold(^opened, ^owner))
         remaining :: deadline - time.instant()
         if remaining.ns <= 0 -> return Err(IOError.TimedOut(IOContext{operation: .Write, resource: Val(opened.path), os_code: None, cause: Val("timed out waiting for jetpack lock `{opened.path}`")}))
         poll :: time.duration_ms(RUNTIME_LOCK_POLL_MS)
@@ -124,9 +127,9 @@ fn env_lock_acquire_opened(opened: ^RuntimeLockScope, wait: Duration) -[FS, Env,
     }
 }
 
-// Rust `acquire_lease_lock`. Rust passes the lock to the launched process
-// tree; Core cannot pass an open descriptor to a child, so a lease that
-// holds it refuses the handoff (`CacheLease.keep_open_for`).
+// Rust `acquire_lease_lock`. The lock is this process's own descriptor; a
+// lease that holds it keeps it until the launched process tree exits
+// (`RuntimeLock.release` with `keep_for_descendant`).
 fn env_acquire_lease_lock(root: String, scope: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_acquire_lock(root, scope)
 }
@@ -157,13 +160,27 @@ fn env_lock_open_scope(authority: ^FoundationDirectoryAuthority, scope: String) 
 // The retained root chain and the scope marker are revalidated after every
 // attempt, so a moved root or replaced marker never yields a claim.
 fn env_lock_try_owner(opened: RuntimeLockScope) -[FS, Env]> FileLock? IOError! {
+    env_lock_check_owner_kind(opened.authority)
     attempted :: files.try_lock(env_lock_owner_path(opened.authority))
+    env_lock_check_owner_kind(opened.authority)
     opened.authority.revalidate()
     env_lock_validate_marker(opened.marker_parent, opened.marker, opened.name, opened.path)
     Ok(attempted)
 }
 fn env_lock_owner_path(authority: FoundationDirectoryAuthority) -> String Never! {
     files.join(authority.path(), RUNTIME_LOCK_OWNER_FILE)
+}
+// The owner file is a regular file: a directory, symlink or other node at its
+// name is refused before and after the lock attempt, never followed.
+fn env_lock_check_owner_kind(authority: FoundationDirectoryAuthority) IOError! -[FS]> {
+    info :: authority.entry_stat(RUNTIME_LOCK_OWNER_FILE) ?? {
+        if err == .NotFound(_) -> return
+        return Err(err)
+    }
+    if !info.is_file || info.is_symlink {
+        path :: env_lock_owner_path(authority)
+        return Err(env_lock_io_error(path, "jetpack lock owner `{path}` is not a regular file"))
+    }
 }
 // The lock takes the scope's retained handles; nothing else keeps them.
 fn env_lock_hold(opened: ^RuntimeLockScope, owner: ^FileLock) -> RuntimeLock Never! {
@@ -207,8 +224,11 @@ fn env_lock_state(path: String) -[FS, Env]> RuntimeLockState IOError! {
     }
     env_lock_validate_marker(marker_parent, marker, name, path)
     opened :: RuntimeLockScope{authority: authority, marker_parent: marker_parent, marker: marker, name: name, path: path}
+    // The probe's claim is released before the state is reported, so a
+    // recovery claim that follows in this process is not refused by it.
     probe :: env_lock_try_owner(opened)
-    if probe == None -> return Ok(RuntimeLockState.Held)
+    owner :: probe ?? return Ok(RuntimeLockState.Held)
+    close(^owner)
     Ok(RuntimeLockState.Idle)
 }
 

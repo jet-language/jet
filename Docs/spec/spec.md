@@ -89,9 +89,8 @@ vocabulary](vocabulary.md).
 - A marker is a struct whose fields are its arguments, with one
   `impl Marker { … }` block in its body. The block's settings are written
   `name :: value` (`sites :: [...]`, `repeatable :: true`, …) and its template
-  is `fn expand(self, target: Target) { … }`; the retired `marker Name(…)`
-  and `marker Name = #[…]` declarations are E0381 with the struct rewrite
-  (D-DECL-TYPES1=A, D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
+  is `fn expand(self, target: Target) { … }` (D-DECL-TYPES1=A,
+  D-MARKER-SITES1, D-BOUND-SINK1=A). A trailing list field
   takes its items as separate arguments at the use site.
   A fixed named group instead is a field-less marker struct whose block sets
   `group :: #[Inline, Scalar]`; it has at least two members and no parameters,
@@ -412,8 +411,7 @@ results unify (D-IF1, D-IF2, D-IF3, D-IFGUARD1=A, D-IFDIST1=A).
 `if subject == { head -> body }` compares a bare value head with the subject.
 A range head `lo..hi` tests inclusive membership. The subject and both bounds
 must be an ordered scalar type (`Int` or `Char`). Open `Int` and `Char` domains
-still require `else`. `..=` in an arm head is E0318 because `..` is already
-inclusive; `step` in an arm head is E0319 because stride belongs to loops; an
+still require `else`. `..=` and `step` are not arm-head syntax; an
 inverted or empty band is E0316. Range heads are literals. A `distinct Int`
 constraint likewise requires literal bounds because a runtime `Range` cannot
 define a type (D-PATR, D-RANGE1, D-RANGE-VALUE1=A).
@@ -513,6 +511,8 @@ Paths and globs are string literals resolved relative to the embedding file, nev
 absolute and never escaping the project with `..` (E0957). Missing or unreadable
 input, and non-UTF-8 input for `embed_file`, are E0955. Every embedded or matched
 file records its SHA-256 in `.jet/lock` (D-CTIO1, D-CTFIND1/2, D-META-EFFECT1).
+A Core library file embeds files beside it in the toolchain's Core tree. They
+are part of the compiler, not of the program, so `.jet/lock` doesn't record them.
 
 When a ratified feature has a staged diagnostic, unsupported syntax receives that
 registered error and its milestone rather than a generic syntax failure. A spelling
@@ -884,7 +884,7 @@ function-value effect bound is written `fn(T1, T2) -[]> R`; other effect sets
 replace the empty set. Unmarked parameters have plain read access. A named
 function becomes a value only when every parameter can be called with that read
 access; parameters requiring `&` or `^` keep the function direct-call-only
-(S47, D-MEM-PARAM1).
+(**E0227**; S47, D-MEM-PARAM1).
 
 The same structural callable-value comparison applies inside collection and
 aggregate slots: a named function's declaration call metadata does not make
@@ -1245,8 +1245,7 @@ bound with `::`, wrapped in a carrier, or taken apart, it closes nothing, and
 its owner closes it. `x.copy()` is the one copy spelling
 (D-COPY-WORD1=A); it is a compiler-owned method that no type can redefine, and
 it creates an independent owned value. `.clone()` is not user-typable Jet
-syntax; the retired prefix `~x` teaches E0941 (whose Safe fix writes `x.copy()`)
-and the retired `copy x` word teaches E0991. Copying a value that Jet cannot
+syntax. Copying a value that Jet cannot
 duplicate, such as a function or trait value, is E0211. Copying a scalar is
 legal but redundant.
 The Core-only `IOOperation` carrier is a payload-free runtime `Copy` enum;
@@ -1427,7 +1426,7 @@ zero-copy view into the receiver's buffer when sema proves the binding cannot
 outlive its owner. The Jet-level type remains `String`.
 
 ```jet
-padded := "  nate@jet-lang.dev  "
+padded := "  user@jet-lang.dev  "
 email :: padded.trim()
 domain :: email.after("@")
 print("padded still readable: {padded}")
@@ -1572,7 +1571,9 @@ data. The pool owns each `T`; an `ID<T>` never accesses `T` by itself. `add`
 returns an ID, `pool[id]` indexes for read or write, and `ids()` walks live
 entries. Removing an entry bumps its generation and returns `?T`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
-storage.
+storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
+writable pool: a `:=` binding or a `&` parameter. Through an unmarked
+parameter, `add` and `remove` are **E0202**.
 
 ```jet
 struct Player {
@@ -1580,6 +1581,7 @@ struct Player {
     hp: Int
     attack: Int
     target: ID<Player>?
+}
 
 fn run() {
     world := Pool<Player>.new()
@@ -1763,8 +1765,8 @@ enum FS {
 ```
 
 An `FS.Read` call inside `#Transact` is allowed; an `FS.Write` call is E0746.
-The `effect` declaration word is retired for Prelude effects and bare roots
-(E0381; `jet fix` deletes a re-declared Prelude effect). A package may still
+An effect is a type with an `impl Effect` block; `effect` is not a declaration
+word. A package may still
 declare a leaf beneath a Prelude root at compile time:
 
 ```jet
@@ -2214,9 +2216,7 @@ body-less `module owner` declares, a file import's alias, or a package
 dependency), binds that member; any other path keeps its module error. A
 member list names its members unrenamed: a renamed member is its own
 `alias :: owner.name` row. A row takes one alias, so `alias ::` with a member
-list is an error, and an empty block is an error. The retired spellings
-`use path as alias`, `owner.[name as alias]` and `owner.{…}` are E0630, a
-teaching error that `jet fmt` rewrites to the rows above.
+list is an error, and an empty block is an error.
 
 An unquoted module name is resolved by recursively searching from the project
 root for `name.jet` and for `name/run.jet`; `core` is a compiler-provided
@@ -2236,7 +2236,7 @@ A dependency package is checked as its own package. When the dependency has
 errors, the importer reports them inline, followed by one **E0626** naming the
 dependency and the `jet check` that checks it on its own; the dependency's
 warnings stay with its own check. A path dependency declared by a dependency
-must stay below that dependency's directory (**E1206**) unless the root
+must stay below that dependency's directory (**E1223**) unless the root
 package declares the same directory itself, or reaches its sibling directory
 through an explicit out-of-tree path dependency. This lets sibling packages such as
 `Compiler/JetLexer` and `Compiler/JetFoundation` share a dependency
@@ -2339,11 +2339,10 @@ Declarations are public by default (S18, D-VIS-MODULE1). `priv module name`
 keeps a module's contents to its enclosing module, and `priv(package) module
 name` keeps them inside the package; a `priv` struct field is usable only by its
 type's module. Reaching into a private module or field across files reports
-**E0605**, importing a member of a private module **E0609**. The retired
-markers are errors whose fix deletes them: `pub` (**E0411**), `private`
-(**E0412**), `priv` on another declaration (**E0413**), an unknown `priv(...)`
-qualifier (**E0414**), section labels (**E0415**), `priv(package)` on a field
-(**E0417**), and `#PubFile` (**E0418**). Inline-module bodies are type-checked
+**E0605**, importing a member of a private module **E0609**. These markers are
+errors whose fix deletes them: `priv` on another declaration (**E0413**), an
+unknown `priv(...)` qualifier (**E0414**), section labels (**E0415**) and
+`priv(package)` on a field (**E0417**). Inline-module bodies are type-checked
 in their defining scope, so siblings call each other freely.
 
 A member import names any top-level declaration: a function, type, enum,
@@ -2440,7 +2439,7 @@ dashed-name  = ident { "-" ident } ;
 ```
 
 Package, module, image, and environment names may use kebab case, for example
-`module web-app`, `env.web-tools`, and `image.halcyon-oci`. A hyphen joins
+`module web-app`, `env.web-tools`, and `image.devhost-oci`. A hyphen joins
 segments only when it is adjacent to both; `a - b` remains subtraction. Code
 identifiers—variables, fields, types, and functions—remain plain identifiers.
 Leading, trailing, and doubled hyphens are invalid (S84).
@@ -2496,6 +2495,9 @@ they do not fetch. `jet env info [--env <name>] [--preset <name>] [--json]` is a
 read-only report of one selected environment plan: package references, typed
 service facts, jobs and checks, variables with source labels, managed files,
 and integrations. It does not realize, start, or apply anything (U23, U26/#789).
+`jet env fetch-toolchain` downloads this jet's C toolchain pack into the Hangar
+ahead of the first `jet cc`, so later C builds work offline
+([`reference/cc-driver.md`](reference/cc-driver.md)).
 
 The selected environment facts are also available through the existing LSP
 resource bridge as `jet://environment` via `resources/list` and
@@ -2745,12 +2747,6 @@ For a relative wall-clock budget, derive that absolute millisecond value from
 `time.unix_ns() /% 1_000_000 + budget_ms`; `time.now()` returns a civil
 `DateTime`, not the deadline's integer epoch.
 
-The teaching diagnostic **E0040** directs `async`/`await` users to `task`;
-**E0041** directs `Mutex`/`lock` users to channels.
-These direct-call teaching forms are diagnosed before ordinary name resolution.
-Likewise, `getenv(name)` and `os.environ` teach `core.sys` access with E0039.
-The field-form diagnostic marks `environ`, rather than the whole access path.
-
 ### Parallel collection adapters
 
 Lists expose `para_map`, `para_filter`, `para_partition`, and `para_fold`.
@@ -2906,8 +2902,7 @@ numeric, and encoding operations. `core.encoding` uses one `Dyn` value for
 JSON, CSV, TOML, and YAML and supports `#Codable`. Every fallible call returns
 `T !E`; handle it with `??`, a pattern test, or contextual `?(text)`. Importing
 a core namespace does not by itself emit every helper: code generation keeps
-the helpers a program calls. Teaching errors are **E0037**–**E0039**
-(D-CORENS1, D-CORENS-CANON1).
+the helpers a program calls (D-CORENS1, D-CORENS-CANON1).
 
 Core surface diagnostics and examples are exercised by the `tests/ui/core_*`
 fixtures.
@@ -3782,6 +3777,26 @@ source location. A test target with no tests or doctests reports E0601; bare
 package testing skips source members with neither, then reports the resolved
 package contains no testable member at all. (R9)
 
+A package's `policy: { claims: { min: <rung> } }` sets its claims floor
+(D-GRADE-POLICY1). The rungs, weakest first, are `.Unchecked`, `.Checked`,
+`examples(n)`, `generated(n)` and `.Proved`; a count is part of the rung. When
+nothing failed but the run's grade is below the floor, `jet test` and
+`jet prove` report E2942 and exit 1. Its fix names the evidence to add: more
+passing `#Test` examples, property tests (200 generated cases each), or
+`jet prove FILE --lens solver`. A run with a failure gets no E2942, because the
+failure already fails it and names its own fix. `jet prove` reaches `.Proved`
+only when the solver proves every obligation it found; its ProofReport carries
+`summaries.claims.floor` and `floorMet` when a floor is declared. `jet inspect
+claims` shows the grade of the newest `.jet/evidence` report for the target's
+current source, the floor, and whether it is met.
+
+Like `contain` and `harden`, the floor is a package-only key with no
+`#Policy` mirror (`#Policy(claims)` is E0355), and it only tightens. A member
+of a Package root with `members:` inherits the root's floor when it sets none
+and may raise it; a member whose `claims.min` is below the root's is E1215 in
+`jet test`, `jet prove` and `jet inspect claims`. No organization scope holds
+a floor.
+
 A fenced ```` ```jet ```` block in a `///` doc comment is a doctest: a claim
 named `doctest at <file>:<fence line>` in the same harness, compiled after the
 file's own items so it can call them. Its lines run in order; each
@@ -3789,6 +3804,16 @@ file's own items so it can call them. Its lines run in order; each
 exactly, and a mismatch fails the doctest with E2901 at that line. With
 `--update-snapshots` a mismatched one-line rendering rewrites the claimed
 `VALUE` in the file instead. (D-TEST4)
+
+`expect(value).snapshot()` in a `#Test` asserts that the Display text of
+`value` equals the snapshot `__snapshots__/<file>_<line>.snap` beside the test
+(`run.jet` line 8 is `run_jet_8.snap`). It is
+`assert(core.testing.snap(name, "{value}"))` and needs no import: the first
+run writes a missing snapshot and passes, a different value fails with
+`snapshot differs: <name>` and a unified diff while the file stays as it was,
+and `jet test -u` (`--update-snapshots`) rewrites the snapshot with the new
+value. A local or function named `expect` shadows the builtin. (D-TOOL4,
+D-TESTKIT1)
 
 Bare `jet test` and `jet test <package dir>` discover every source member in the
 package's checked project set, not only the entry file, and run the aggregate
@@ -3798,13 +3823,76 @@ walked recursively for `*.jet` files. A package-level `fn test` override owns
 the command unless `--show-default` requests the stock harness.
 The default child-output policy is `--capture=failed`; choose `all` or `none`
 explicitly. `--fresh` bypasses only the persisted test-result cache; the build
-cache remains reusable. `--docs` selects checked documentation examples.
+cache remains reusable. The test-result cache keeps a passing run's outcomes
+with the reads its tests made: each file or directory opened, each path
+stat'ed, each environment variable read. A rerun of the same test executable
+and selection reuses the outcomes while every recorded read is unchanged (a
+file's content, a directory's listing, a variable's value) and runs the tests
+again when one changed. `--docs` selects checked documentation examples.
 `--watch`, `--where=<expr>`, `--filter=<substring>`, `--shuffle[=<seed>]`,
 `--serial`, `--coverage`, `--update-snapshots` (or `-u`), `--release`, and
 `--profile=<name>` select the corresponding test-run behavior. Browser claims
 use `--browser=<engines>`, `--browser-retries=<n>`,
 `--browser-reporter=<text|json|html>`, `--browser-ui`, `--browser-visual`, and
 `--browser-trace`.
+
+A package names test profiles in `package.jet`, and `--profile=<name>` or
+`defaults: { test: <name> }` selects one. Test and build profiles share one
+namespace, so a test profile can't take the name of a stock or declared build
+profile. `tests` is the built-in suite, every `#Test` of the package; stock
+suites are declared in `suites:`, and code suites by `t.suite("<name>", body)`
+in `test.jet`'s `fn test`. A profile naming a suite none of these declares, or
+a name declared twice, is a manifest error (E1215) that `jet check` and every
+command loading the package report, as is a `defaults.test` that names neither
+a test profile nor a Check output.
+
+```text
+test: {
+    quick: TestProfile{ suites: [tests], time_limit: 60s },
+    full: TestProfile{ suites: [tests, golden], optimize: [none, full] },
+}
+suites: { golden: TestSuite{ golden_corpus: "tests/golden" } }
+defaults: { test: quick }
+```
+
+`time_limit:` (`ms`, `s` or `m`) stops and fails each test that runs longer.
+`optimize:` runs the `tests` suite once per listed level, and runs a golden
+corpus at the matching tiers (none is `jet run`, basic `jet build`, full
+`jet build --release`). Each run's rows are its baseline in
+`.jet/test/<profile>/`. A later run fails when a test that passed in the
+baseline fails or is gone; a failure the baseline already holds does not fail
+it, and `-u` records the run as the new baseline. A suite with
+`golden_corpus:`, `ui_corpus:` or `cases_corpus:` runs in the `jet` process
+itself, every entry of the corpus a row; `jobs:`, `memory:`, `filter:`,
+`shard: I/N`, `opt_in:` and `baseline:` (a ledger of the rows accepted as
+failing) shape that run, a filter argument after the package replaces
+`filter:`, and `-u` rewrites the selected rows' expected output
+(`reference/cli.md`).
+
+A code suite checks what no corpus folder describes, such as a binary-size
+budget (D-TEST-SUITE2=A). Its name is a string literal (E0635), so a profile
+run lists the suites without running code. `body` takes a `TestRows` and
+reports each row as its check ends: `rows.pass(id)`, `rows.fail(id, detail)`
+or `rows.skip(id, reason)`. A profile runs the suite in its own child, which
+runs no `#Test`, so a package with no `#Test` still runs its code suites
+(no E0601); a plain `jet test` skips it. The child's environment names
+the `jet` running the profile in `JET` and the package's directory in
+`JET_TEST_SUITE_ROOT`, so the suite drives the compiler under test. The rows
+are compared with the suite's baseline like a run's, a repeated id fails, and
+a suite that panics keeps the rows it reported and adds the failing row
+`stopped`.
+
+```text
+fn test(t: Test) -> Int {
+    t.suite("perf", perf_rows)
+    t.run()
+}
+
+fn perf_rows(rows: TestRows) {
+    size :: built_size("hello")
+    if size <= 24_000 -> rows.pass("size hello") else -> rows.fail("size hello", "{size} B > 24000 B")
+}
+```
 
 ### Test scope members
 
@@ -3965,7 +4053,15 @@ image that links no unwinder (no code of it unwinds the stack; a crash report
 walks frame pointers) moves its call frame information to the side file too,
 as `.debug_frame`, so its loaded segments hold no `.eh_frame`; with an
 unwinder `.eh_frame` stays loaded. A crash report of the image prints
-addresses, as under `false`.
+addresses: its first line, then `Build <id> (names and lines: jet crash)`
+with the image's build id, then `Backtrace:` with the faulting address and,
+under `backtrace: full` or for a stack overflow, the return addresses
+(`backtrace: off` prints no frame). `jet crash < report.txt`, run in the
+package that built the image or a directory below it, reads that report,
+finds the side file in the symbol store and prints the report a
+`debug_info: true` build of the program prints: the same functions, lines and
+source. A report with no `Build` line is E2114, and a build id the store
+doesn't hold is E2115.
 `jet run`, `jet dev` and `jet test` keep the debug info in the image under
 `split`, as under `true`, so their crash reports name functions and lines.
 `backtrace: full` stays legal with `split`. A user who wants the debug info
@@ -4736,10 +4832,17 @@ numeric text such as `1.4` or `1.4.2`, not an operator range, and applies only
 to a single-segment package name. `core.files#1.0` is not a package dependency.
 
 `jet run stats.jet` collects inline references from the entry file and resolves
-them into the module search. Resolution is local: a matching copy under
-`.jet/inline-deps/<name>/<version>/` or the documented fixture override. It
-never executes dependency code during resolution and does not fetch from the
-public registry by name. An unresolved reference is E1253.
+them into the module search from a matching copy under
+`.jet/inline-deps/<name>/<version>/` or the documented fixture override. On
+its first run, a reference to a package no local copy knows is fetched through
+the configured package registry on the same path as `jet fetch --lock`: the
+artifact is verified, ingested into the Hangar, copied to
+`.jet/inline-deps/<name>/<version>/` and locked in `stats.jet.lock`, with no
+`jet add` step. Later runs resolve from that copy offline. A local package
+stays authoritative: when it has no matching version, the registry is not
+asked. Resolution never executes dependency code. A reference that still
+doesn't resolve, or one `jet check` or `jet build` meets without a local copy,
+is E1253.
 
 An exact `major.minor.patch` selector is pinned. A looser selector such as
 `1.4` is accepted but emits L0203 until
@@ -5151,7 +5254,7 @@ under `.jetos/proof/`.
 These are intentional boundaries, not implied promises:
 
 - Jet does not provide a general `Any` top type. Use a precise type, a generic,
-  a trait, or a closed data carrier; E0350 explains the boundary.
+  a trait, or a closed data carrier.
 - Stored-borrow reference fields and their `refs` expansion lens are absent.
   Borrowed views may still be used where their checked callable contract allows.
 - Nested `#CLI` structs and implicit grouped flag prefixes are not part of the

@@ -1,0 +1,14 @@
+# Docs/spec/reference/environment.md: with `JET_TOOLCHAIN_ROOT` unset, the toolchain root is the
+# nearest directory at or above the input that holds `Core/` and `Compiler/Prelude/`. The work
+# directory itself looks like a checkout but holds no Core sources; `tree/` holds the real ones.
+env: NO_COLOR=1
+requires: os:unix
+mkdir: Core
+mkdir: Compiler/Prelude
+copy: {root}/Core tree/Core
+copy: {root}/Compiler/Prelude tree/Compiler/Prelude
+copy: {root}/Examples/features/basics/hello.jet tree/app/hello.jet
+step: jet check tree/app/hello.jet
+unset: JET_TOOLCHAIN_ROOT
+exit: 0
+stdout+stderr: ~ "has no problems" # the check's verdict line; the path varies with the work directory

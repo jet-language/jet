@@ -1,4 +1,4 @@
-// Real native Condition48 + allocator; link -Wl,--wrap=jet_rt_free.
+// Real native Condition48 + allocator.
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -10,14 +10,16 @@ extern void jet_rt_native_condition_notify_one(Condition *);
 extern void jet_rt_native_condition_notify_all(Condition *);
 extern Condition *jet_rt_handle_clone_jet_condition(Condition *);
 extern void jet_rt_handle_drop_jet_condition(Condition *);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 static Condition *watched;
 static unsigned frees;
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     if (pointer == watched) { assert(bytes == 48 && align == 8); assert(++frees == 1); }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     Condition *owner = jet_rt_native_condition_new();
     watched = owner;

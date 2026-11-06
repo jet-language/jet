@@ -368,16 +368,25 @@ fn ir_list_extend(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int
     // A buffer another holder shares is first the source's own.
     ir_make_unique(&m, p, &b, source)
     ir_list_append(&m, p, &b, list, row, source, true)
+    ir_list_retire(&m, &b, source, row, capacity)
+    ir_end(&b.f, b.line)
+}
+
+// Retires the buffer of the List-family header at `list` (row `row`
+// elements in `capacity` slots, capacity above 0), whose elements were all
+// moved out: the buffer is freed and the header cleared, so its drop
+// releases nothing.
+fn ir_list_retire(m: &IRModule, b: &IRBuilder, list: Int, row: Int, capacity: Int) Never! {
+    zero :: ir_word_const(&m, &b, 0)
     stride :: ir_list_stride(m, row)
     if stride > 0 {
         width :: ir_word_const(&m, &b, stride)
         held :: ir_word_op(&m, &b, IROp.Mul, capacity, width)
         align :: ir_word_const(&m, &b, 8)
-        data :: ir_load_word(&m, &b, source, 16)
+        data :: ir_load_word(&m, &b, list, 16)
         _ :: ir_runtime(&m, &b, "jet_rt_free", [Int]{data, held, align}, -1)
     }
-    loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, source, offset, zero, b.line)
-    ir_end(&b.f, b.line)
+    loop offset in ([Int]{0, 8, 16}) -> ir_emit(&b.f, IROp.Store, -1, list, offset, zero, b.line)
 }
 
 // The elements of the List-family header at `source` copied (`moving`: moved)
@@ -686,6 +695,22 @@ fn ir_allocator_method(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rece
     result
 }
 
+// `mapped.lines()`: a ViewIter over the mapping's lines. The runtime lists
+// each line's View<U8> header (the newline, and a CR before it, excluded),
+// lending the read-only bytes the MappedFile owns; the iterator takes over
+// that fresh List of headers, never a copy of the line bytes.
+fn ir_mapped_lines(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
+    element :: ir_iter_element(ty) ?? return ir_fail_slot(&b, span, "MappedFile.lines producing {ir_type_name(ty)}")
+    row :: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+    map :: ir_expr(&m, p, &b, receiver)
+    if ir_failed(b) || map < 0 -> return -1
+    list :: ir_route(&m, p, &b, "jet_std_fs_map_lines_view", [Int]{map}, [Bool]{true}, Type.List{element: element.copy()}, span)
+    if ir_failed(b) || list < 0 -> return -1
+    meta :: ir_lazy_meta(&m, p, &b, element, span)
+    if meta < 0 -> return -1
+    ir_lazy_iter_from_list(&m, p, &b, list, element, meta, row, span)
+}
+
 // `List<T>.try_with_capacity(capacity)`: a new empty List with room for
 // `capacity` elements, or the try_reserve `Err(AllocError)`.
 fn ir_list_try_with_capacity(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
@@ -840,8 +865,9 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
     int_row :: ir_type_row(&m, Type.Int) ?? 0
     if operation == .SetFrom || operation == .SortedSetFrom || ir_set_element(receiver_ty) != None {
         set_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
-        if ir_set_builtin(&m, p, &b, ty, set_route.symbol, subject, operands, span) == .Val(result) -> return result
-        return ir_fail_slot(&b, span, "set builtin {set_route.symbol}")
+        result :: ir_set_builtin(&m, p, &b, ty, set_route.symbol, subject, operands, span) ?? return ir_fail_slot(&b, span, "set builtin {set_route.symbol}")
+        if mutates || operation == .SetFrom || operation == .SortedSetFrom -> return result
+        return ir_end_builtin_receiver(&m, p, &b, subject, result, span)
     }
     if operation == .PriorityQueueFrom || ir_priority_queue_element(receiver_ty) != None {
         return ir_priority_queue_builtin(&m, p, &b, ty, operation, subject, operands, span)
@@ -850,8 +876,9 @@ fn ir_builtin_on(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver_t
     if ir_cache_carrier(receiver_ty) != None -> return ir_cache_builtin(&m, p, &b, ty, receiver_ty, operation, subject, operands, span)
     if ir_map_entry_type(receiver_ty) != None {
         map_route :: ir_builtin_route_plan(operation, receiver_ty, ty, ir_failure_carrier_for_type(ty))
-        if ir_map_builtin(&m, p, &b, ty, map_route.symbol, subject, operands, span) == .Val(result) -> return result
-        return ir_fail_slot(&b, span, "map builtin {map_route.symbol}")
+        result :: ir_map_builtin(&m, p, &b, ty, map_route.symbol, subject, operands, span) ?? return ir_fail_slot(&b, span, "map builtin {map_route.symbol}")
+        if mutates -> return result
+        return ir_end_builtin_receiver(&m, p, &b, subject, result, span)
     }
     if element >= 0 {
         if operation == {
@@ -2671,9 +2698,9 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
     close_glue :: if by_key -> ir_close_glue(&m, p, &b, key_row, false, span) else -> -1
     if ir_failed(b) -> return -1
     // A comparator value of a `Ordering Never!` function hands back its
-    // Result carrier (ir_function_value); the order is its Ok payload.
+    // Result carrier (ir_function_value); ir_call_callback hands its Ok
+    // payload over and frees the carrier.
     order_ty :: ir_never_carrier_success(ret) ?? ret
-    carried :: !by_key && ir_never_carrier_success(ret) != None
     order_row :: ir_value_type(&m, p, order_ty) ?? return ir_type_fail(&b, span, order_ty)
     less_index := 0
     if !by_key {
@@ -2807,14 +2834,7 @@ fn ir_closure_sort(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: In
         left_address :: ir_element_address(&m, &b, data, left_at, stride)
         right_item :: ir_load_at(&m, &b, right_address, 0, element)
         left_item :: ir_load_at(&m, &b, left_address, 0, element)
-        verdict :: ir_call_closure(&m, &b, callback, [Int]{right_item, left_item}, ret_row)
-        decided := verdict
-        if carried {
-            decided = ir_adapt(&m, p, &b, verdict, order_row, span)
-            shell_bytes :: ir_result_box_bytes(&m, p, ret)
-            shell :: ir_word_const(&m, &b, shell_bytes)
-            ir_free(&m, &b, verdict, shell)
-        }
+        decided :: ir_call_callback(&m, p, &b, callback, closure_ty, [Int]{right_item, left_item}, order_row, span)
         verdict_tag :: ir_enum_tag_of(&m, &b, decided)
         less :: ir_temp_like(&m, &b, verdict_tag)
         ir_emit(&b.f, IROp.Const, less, less_index, -1, -1, b.line)
@@ -3371,13 +3391,15 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
     if name == "jet_ordering_then" || name == "jet_ordering_reverse" -> return Val(ir_ordering_method(&m, p, &b, name, inputs, span))
     if name == "jet_std::JetShared::new" || name == "jet_std::JetCell::new" -> return Val(ir_shared_new(&m, p, &b, inputs, result, span))
     if name == "jet_std::JetPool::new" -> return Val(ir_pool_new(&m, p, &b, result, span))
-    // `os.atexit(handler)`: the runtime's exit queue takes the handler's
-    // closure box over (Task.jet jet_rt_native_atexit; it runs invoke at 8,
-    // then the release at 16, as a scope guard does).
-    if name == "jet_std_os_atexit" {
-        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "atexit with {inputs.len()} arguments"))
+    // `os.atexit(handler)` / `os.on_interrupt(handler)`: the runtime's exit
+    // queue (Task.jet jet_rt_native_atexit) or interrupt list
+    // (ProcessSignal.jet jet_rt_native_interrupt) takes the handler's closure
+    // box over; it runs invoke at 8, then the release at 16, as a scope guard
+    // does.
+    if name == "jet_std_os_atexit" || name == "jet_std_os_interrupt" {
+        if inputs.len() != 1 || inputs[0] < 0 -> return Val(ir_fail_slot(&b, span, "{name} with {inputs.len()} arguments"))
         handler :: ir_own(&m, p, &b, inputs[0])
-        _ :: ir_runtime(&m, &b, "jet_rt_native_atexit", [Int]{handler}, -1)
+        _ :: ir_runtime(&m, &b, if name == "jet_std_os_atexit" -> "jet_rt_native_atexit" else -> "jet_rt_native_interrupt", [Int]{handler}, -1)
         b.fresh[handler] = false
         return Val(-1)
     }
@@ -3418,11 +3440,11 @@ fn ir_route_inline(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inpu
         return Val(root)
     }
     // `core.devtools.__publish_payload(source, entity, fields, field, value)`:
-    // DevtoolsPanel.rs:111-137 builds a JetDevtoolsEvent and hands it to
-    // jet_devtools_publish_event, which reaches only installed event sinks;
-    // the native runtime installs none (RouteACore.jet
-    // jet_job_queue_publish_parts), so the publication has no observer to
-    // build for and the fresh arguments it consumed end here.
+    // The Rust original builds a JetDevtoolsEvent and hands it to
+    // jet_devtools_publish_event, which reaches only installed event sinks; the
+    // native runtime installs none (RouteACore.jet
+    // jet_job_queue_publish_parts), so the publication has no observer to build
+    // for and the fresh arguments it consumed end here.
     if name == "jet_devtools_publish_payload" {
         loop slot in inputs -> ir_release(&m, &b, slot)
         return Val(-1)
@@ -3874,8 +3896,8 @@ fn ir_list_split(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int,
     pair
 }
 
-// `xss.flatten()` (Collections.rs jet_list_flatten): a new List of copies of
-// every inner List's elements, in order.
+// `xss.flatten()` (jet_list_flatten): a new List of copies of every inner
+// List's elements, in order.
 fn ir_list_flatten(m: &IRModule, p: IRProgram, b: &IRBuilder, list: Int, row: Int, result_row: Int, span: Span) -> Int Never! {
     inner :: ir_list_element_of(&m, p, row) ?? return ir_fail_slot(&b, span, "List flatten of {ir_type_name(m.types[row].ty)} elements")
     out :: ir_list_empty(&m, &b, result_row)
@@ -4347,7 +4369,7 @@ fn ir_route_symbol(symbol: String) -> String Never! {
 IR_ROUTES_INLINE :: comptime { [String]{
     "std::collections::BinaryHeap::new", "std::collections::HashSet::new", "std::collections::BTreeSet::new", "std::collections::VecDeque::new", "std::collections::HashMap::new", "jet_deque_from", "JetCache::new",
     "jet_eq", "jet_map_from_keys_kernel", "jet_map_from_keys_int", "jet_map_from_keys_composite",
-    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_rt_callback", "jet_devtools_publish_payload",
+    "jet_ordering_then", "jet_ordering_reverse", "jet_std::JetShared::new", "jet_std::JetCell::new", "jet_std::JetPool::new", "jet_std_os_atexit", "jet_std_os_interrupt", "jet_rt_callback", "jet_devtools_publish_payload",
     "jet_unicode_split_once", "jet_unicode_cut_last",
     "jet_list_get_opt", "jet_list_first", "jet_list_last", "jet_list_slice", "jet_list_index_of", "jet_list_sum",
     "jet_list_sum_fixed_f64", "jet_list_product", "jet_list_contains", "jet_list_equal", "jet_list_replace",
@@ -4362,12 +4384,14 @@ IR_ROUTES_NATIVE_INDEX :: comptime { [String]{"jet_bit_set_has", "jet_bitset_add
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of
-// ir_core_call (the raw List layout leaves, crypto.wipe, channels, event
-// policy, object entries), or an Iter route (BuildLazy.jet ir_lazy_symbol).
+// ir_core_call (the raw List layout leaves, crypto.wipe, volatile access and
+// stream stores, channels, event policy, object entries), or an Iter route
+// (BuildLazy.jet ir_lazy_symbol).
 // IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 fn ir_route_builder_lowered(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
     if name == "jet_raw_list_capacity" || name == "jet_raw_list_reserve_exact" || name == "jet_raw_type_size" || name == "jet_raw_crypto_wipe" -> return true
+    if name == "jet_raw_volatile_read" || name == "jet_raw_volatile_write" || name == "jet_raw_stream_store" -> return true
     if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::JetEvent::with_policy" -> return true
     if name == "jet_raw_object_from_entries" || name == "jet_raw_object_entries_view" -> return true
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
@@ -5054,7 +5078,6 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
         if name == "jet_std::JetHook::new" -> return ir_hook_new(&m, p, &b, ty, args, span)
         if name == "jet_std::JetDecisionHook::new" -> return ir_decision_hook_new(&m, p, &b, ty, args, span)
         if name == "jet_std::JetAsyncEvent::new" -> return ir_async_event_new(&m, p, &b, ty, args, span)
-        if name == "jet_std::JetSignal::new" -> return ir_reactive_signal(&m, p, &b, ty, args, span)
     }
     if canonical.module_name == "core.crypto.vault" && canonical.member == "current" -> return ir_core_vault_current(&m, p, &b, ty, args, type_args, span)
     if type_args.len() > 0 -> return ir_fail_slot(&b, span, "generic Core call {canonical.module_name}.{canonical.member}")
@@ -5063,7 +5086,6 @@ fn ir_core_call(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Cor
     }
     symbol :: if canonical.symbol == {
         .Prelude(name) -> name
-        .Rust(name) -> name
         .SourceOwned -> { return ir_fail_slot(&b, span, "source-owned Core call {canonical.module_name}.{canonical.member}") }
     }
     if p.comptime_values && b.impure == 0 {
@@ -5256,7 +5278,7 @@ fn ir_task_timeout(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span:
 fn ir_comptime_ambient_refusal(symbol: String) -> String? Never! {
     if symbol == {
         "jet_random_state_raw" | "jet_random_try_update_raw" | "jet_std_random_seed" -> Val("the ambient random stream")
-        "jet_std_env_get" | "jet_std_env_vars" | "jet_sys_env_value_raw" | "jet_sys_env_columns_raw" | "jet_sys_startup_env_columns_raw" | "jet_rt_logical_env_get" | "jet_sys_host_env_raw" | "jet_time_raw_zone_env" | "jet_std::jet_fs_temp_directory_raw" | "jet_browser_test_config_from_env" -> Val("the environment")
+        "jet_std_env_get" | "jet_std_env_vars" | "jet_sys_env_value_raw" | "jet_sys_env_columns_raw" | "jet_sys_startup_env_columns_raw" | "jet_rt_logical_env_get" | "jet_sys_host_env_raw" | "jet_time_raw_zone_env" | "jet_std::jet_fs_temp_directory_raw" -> Val("the environment")
         "jet_std_io_args" -> Val("the process arguments")
         "jet_sys_executable_raw" -> Val("the running executable's path")
         "jet_sys_cpu_count_raw" -> Val("the host's processor count")

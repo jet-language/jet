@@ -1,5 +1,5 @@
-// Exact compiler-value contract from Collections.rs::build_context_method_*.
-// This table is arity-polymorphic; Core owns the session semantics, not sema.
+// Exact compiler-value contract::build_context_method_*. This table is
+// arity-polymorphic; Core owns the session semantics, not sema.
 use {
     jet_foundation.[AccessConvention, BuildOptionKind, BuildOptionRow, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, Type, ast_program, build_option_accepts, build_option_argument, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text]
     jet_parser.[jfmt_format_program_with_tokens]
@@ -126,7 +126,7 @@ fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, met
         if argument.flags.template_items != None -> template_count += 1
     }
     if method == "generate" && template_count != 1 {
-        &diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") {{ ... }}?`; source strings are retired"))
+        &diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") {{ ... }}?`"))
         return failed
     }
     if method != "generate" && template_count > 0 -> return failed

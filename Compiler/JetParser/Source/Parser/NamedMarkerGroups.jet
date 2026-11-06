@@ -1,8 +1,8 @@
 // Syntax-only expansion into the ordinary marker reader.
 // Sema owns declaration validity and lexical declaration identities.
 use {
-    jet_foundation.[Span, name_intern, name_text]
-    jet_lexer.[Token, TokenLiteral, TokenTables, StringPart, token_tables, token_decoded, TOKEN_IDENT, TOKEN_DOT, TOKEN_COLON_COLON, TOKEN_HASH, TOKEN_BANG, TOKEN_KW_IMPL, TOKEN_KW_MODULE, TOKEN_KW_STRUCT, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_EOF, TOKEN_SEMI, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
+    jet_foundation.[Diagnostic, Span, name_intern, name_text]
+    jet_lexer.[Token, TokenLiteral, TokenTables, StringPart, token_tables, token_decoded, TOKEN_IDENT, TOKEN_DOT, TOKEN_COLON, TOKEN_HASH, TOKEN_BANG, TOKEN_KW_IMPL, TOKEN_KW_MODULE, TOKEN_KW_STRUCT, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_EOF, TOKEN_SEMI, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT]
 }
 
 struct NamedMarkerGroupTokens {
@@ -42,9 +42,13 @@ struct MarkerGroupNamespace {
     braces: [String?]
 }
 
-fn marker_group_code(tokens: [Token]) -> [Token] Never! {
+// The code tokens in the keyword-first head order (parser_colon_declarations),
+// so `Name: struct { impl Marker { group: #[…] } }` reads as `struct Name`.
+// The parse proper reports any retired spelling.
+fn marker_group_code(input: [Token], tables: TokenTables) -> [Token] Never! {
     code := [Token]{}
-    loop token in tokens {
+    retired := [Diagnostic]{}
+    loop token in parser_colon_declarations(input.copy(), tables, &retired) {
         if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &code.push(token)
     }
     code
@@ -67,7 +71,7 @@ fn marker_group_skip_semicolons(tokens: [Token], index: Int) -> Int Never! {
     at
 }
 
-// `struct Name { impl Marker { group :: #[…] } }`: a marker type with no
+// `Name: struct { impl Marker { group: #[…] } }`: a marker type with no
 // fields whose one member is its group.
 fn marker_group_token_range(tokens: [Token], tables: TokenTables, start: Int) -> MarkerGroupTokenRange? Never! {
     if start < 0 || start + 2 >= tokens.len() -> return None
@@ -75,7 +79,7 @@ fn marker_group_token_range(tokens: [Token], tables: TokenTables, start: Int) ->
     head := marker_group_skip_semicolons(tokens, start + 3)
     if head + 2 >= tokens.len() || tokens[head].kind != TOKEN_KW_IMPL || tokens[head + 1].kind != TOKEN_IDENT || token_decoded(tables, tokens[head + 1]) != "Marker" || tokens[head + 2].kind != TOKEN_LBRACE -> return None
     head = marker_group_skip_semicolons(tokens, head + 3)
-    if head + 3 >= tokens.len() || tokens[head].kind != TOKEN_IDENT || token_decoded(tables, tokens[head]) != "group" || tokens[head + 1].kind != TOKEN_COLON_COLON || tokens[head + 2].kind != TOKEN_HASH || tokens[head + 3].kind != TOKEN_LBRACKET -> return None
+    if head + 3 >= tokens.len() || tokens[head].kind != TOKEN_IDENT || token_decoded(tables, tokens[head]) != "group" || tokens[head + 1].kind != TOKEN_COLON || tokens[head + 2].kind != TOKEN_HASH || tokens[head + 3].kind != TOKEN_LBRACKET -> return None
     depth := 1
     end := head + 4
     loop end < tokens.len() {
@@ -112,7 +116,7 @@ fn marker_group_namespace_advance(scope: &MarkerGroupNamespace, tokens: [Token],
 }
 
 fn named_marker_groups(tokens: [Token], tables: TokenTables) -> [NamedMarkerGroupTokens] Never! {
-    code :: marker_group_code(tokens)
+    code :: marker_group_code(tokens, tables)
     groups := [NamedMarkerGroupTokens]{}
     index := 0
     scope := MarkerGroupNamespace{path: "", braces: [String?]{}}
@@ -215,7 +219,7 @@ fn expand_named_marker_groups(tokens: [Token], tables: &TokenTables, imported: [
 fn expand_named_marker_groups_with_uses(tokens: [Token], tables: &TokenTables, imported: [NamedMarkerGroupTokens]) -> ExpandedMarkerGroups {
     local :: named_marker_groups(tokens, tables)
     if local.len() == 0 && imported.len() == 0 -> return ExpandedMarkerGroups{tokens: tokens, uses: [ExpandedMarkerGroupUse]{}}
-    code :: marker_group_code(tokens)
+    code :: marker_group_code(tokens, tables)
     output := [Token]{}
     uses := [ExpandedMarkerGroupUse]{}
     index := 0

@@ -1,14 +1,17 @@
 // Reversible source transitions for the unified Package surface: `jet split`
-// (environment or member package out of `package.jet`), `jet fold` (its
-// reverse), `jet init` (fold migration-era role files into `package.jet`),
-// and `jet init --restore-role-files`.
+// (environment or member package out of `package.jet`) and `jet fold` (its
+// reverse).
 //
 // There is no second package evaluator here: every forward plan is checked
 // with PackageFacts, and every reverse plan is checked against the exact
 // bytes its journal recorded. A plan is safe to preview, apply, and fold
 // without timestamps or last-writer-wins behavior.
 
-TRANSITION_ROLE_FILES :: [String]{"pkg.jet", "env.jet", "workspace.jet", "config.jet"}
+use {
+    jetpack_foundation.[env_runtime_lock]
+    jet_pkg_model.[ConfigFacts, PackageFacts, PackageOutputKind, PackageParseError, pkg_debug_output, pkg_sha256_hex]
+    files :: core.files
+}
 
 enum SplitTarget {
     Environment
@@ -187,28 +190,6 @@ fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env, 
     plan.finish(check_only)
 }
 
-// Preview or apply the migration-era role-file fold used by `jet init`. Only
-// closed, typed role files convert; a file with an open or unknown field is
-// rejected before any file changes, because copying it into `package.jet`
-// would create a second interpretation of the graph.
-fn env_transition_init(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
-    plan :: env_transition_legacy_plan(root)
-    plan.finish(check_only)
-}
-
-// Restore the last successful role-file migration: the explicit
-// migration-epoch escape hatch of `jet init --restore-role-files`.
-fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
-    canonical :: env_transition_canonical_root(root)
-    journal_path :: env_transition_latest_legacy_journal(canonical)
-    journal :: env_transition_read_journal(journal_path)
-    if !journal.operation.starts_with("legacy-role-fold") {
-        return Err(env_transition_error("journal {journal_path} is not a role-file migration"))
-    }
-    plan :: TransitionPlan{root: canonical, operation: "restore-{journal.operation}", changes: journal.changes, journal_path: journal_path, journal: [U8]{}, before_fingerprint: journal.after_fingerprint, after_fingerprint: journal.before_fingerprint, reverse: true}
-    plan.finish(check_only)
-}
-
 fn env_transition_package_error(path: String, error: PackageParseError) -> EnvironmentError Never! {
     env_transition_error("typed Package {path} is invalid: {error.message()}")
 }
@@ -327,120 +308,6 @@ fn env_transition_fold_plan(root: String, path: String) -[FS, Env]> TransitionPl
 struct TransitionJournalMatch {
     path: String
     journal: TransitionJournal
-}
-
-// One migration-era role file and its exact bytes.
-struct TransitionRoleFile {
-    name: String
-    bytes: [U8]
-}
-
-fn env_transition_legacy_plan(root: String) -[FS, Env]> TransitionPlan EnvironmentError! {
-    canonical :: env_transition_canonical_root(root)
-    package_path :: files.join(canonical, TRANSITION_PACKAGE_FILE)
-    existing_package := [U8]?{None}
-    if files.is_file(package_path) -> existing_package = Val(env_transition_read_regular(package_path))
-    role_files := [TransitionRoleFile]{}
-    has_pkg := false
-    pkg_bytes := [U8]?{None}
-    loop name in TRANSITION_ROLE_FILES {
-        path :: files.join(canonical, name)
-        if !files.is_file(path) -> next
-        bytes :: env_transition_read_regular(path)
-        if name == PAYLOAD_FILE {
-            has_pkg = true
-            pkg_bytes = Val(bytes)
-        }
-        &role_files.push(TransitionRoleFile{name: name, bytes: bytes})
-    }
-    if role_files.len() == 0 {
-        return Err(env_transition_error("no migration-era role files found in {canonical}"))
-    }
-    if has_pkg && existing_package != None {
-        return Err(env_transition_error("both package.jet and pkg.jet exist; choose one Package root before migration"))
-    }
-    root_bytes :: existing_package ?? (pkg_bytes ?? return Err(env_transition_error("role-file migration needs a typed pkg.jet or package.jet Package root")))
-    root_text := String.from_bytes(root_bytes) ?? return Err(env_transition_error("the Package root must be UTF-8"))
-    if has_pkg && PackageFacts.parse_uncomposed(root_text, package_path) == .Err(_) {
-        root_text = env_transition_render_legacy_package_root(root_text)
-    }
-    root_facts :: PackageFacts.parse_uncomposed(root_text, package_path) ?? return Err(env_transition_package_error(package_path, err))
-    // Compose from the in-memory facts rather than re-reading the Package
-    // root: a migration-era `pkg.jet` keeps its raw wrapper on disk until
-    // this fold writes the translated `package.jet`.
-    before_facts := root_facts
-    &before_facts.compose_configs(canonical) ?? return Err(env_transition_package_error(package_path, err))
-    before_facts.validate_defaults() ?? return Err(env_transition_error("typed Package {package_path} is invalid: {err.message()}"))
-    before_facts.validate_members_in(canonical) ?? return Err(env_transition_package_error(package_path, err))
-    configs := root_facts.configs
-    changes := [TransitionFileChange]{}
-    environment_names := [String: Bool]{}
-    loop role in role_files {
-        if role.name == PAYLOAD_FILE -> next
-        text :: String.from_bytes(role.bytes) ?? return Err(env_transition_error("{role.name} must be UTF-8"))
-        stem :: role.name.removesuffix(".jet")
-        if role.name == WORKSPACE_FILE {
-            found :: env_transition_module_body(text, "workspace")
-            body :: found ?? return Err(env_transition_error("workspace.jet has no module workspace declaration"))
-            entries :: env_transition_source_entries(body)
-            members :: env_transition_required_field(entries, "members", role.name)
-            loop entry in entries {
-                if entry.field != .Val("members") {
-                    field :: entry.field ?? entry.raw.trim()
-                    return Err(env_transition_error("workspace.jet contains unsupported field `{field}`; migration stops before writing"))
-                }
-            }
-            root_text = env_transition_set_or_add_field(root_text, "members", members.value)
-            next
-        }
-        if role.name == ENV_FILE {
-            env_modules :: env_transition_env_modules(text)
-            loop env_module in env_modules {
-                if environment_names.has_key(env_module.name) {
-                    return Err(env_transition_error("env.jet declares environment `{env_module.name}` more than once; migration stops before writing"))
-                }
-                environment_names[env_module.name] = true
-                environment :: "{{ {env_module.name}: Environment{{\n{env_module.body.trim()}\n}} }}"
-                config_text :: env_transition_render_config(env_module.name, "environments", environment)
-                destination :: "package/{stem}-{env_module.name}.jet"
-                env_transition_ensure_new_file(canonical, destination)
-                ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
-                root_text = env_transition_add_config_reference(root_text, configs, destination)
-                &configs.push(destination)
-                &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
-            }
-            next
-        }
-        config_name :: "config"
-        config_text := text
-        if ConfigFacts.parse(text, role.name) == .Err(_) {
-            found :: env_transition_module_body(text, "config")
-            body :: found ?? return Err(env_transition_error("{role.name} contains open role fields; migration stops before writing. Close the facts in a Config first"))
-            config_text = env_transition_render_config(config_name, "raw", body)
-        }
-        destination :: "package/{stem}-{config_name}.jet"
-        env_transition_ensure_new_file(canonical, destination)
-        ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
-        root_text = env_transition_add_config_reference(root_text, configs, destination)
-        &configs.push(destination)
-        &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
-    }
-    migrated_facts :: PackageFacts.parse_uncomposed(root_text, package_path) ?? return Err(env_transition_package_error(package_path, err))
-    migrated_facts.validate_members_in(canonical) ?? return Err(env_transition_error(err.message()))
-    composed := [ConfigFacts]{}
-    loop change in changes {
-        bytes :: change.after ?? next
-        config_text :: String.from_bytes(bytes) ?? return Err(env_transition_error("generated Config is not UTF-8"))
-        config :: ConfigFacts.parse(config_text, change.relative) ?? return Err(env_transition_parse_error(change.relative, err))
-        &composed.push(config)
-    }
-    after := before_facts
-    &after.compose(composed) ?? return Err(env_transition_error(err.message()))
-    after.validate_defaults() ?? return Err(env_transition_error(err.message()))
-    loop role in role_files -> &changes.push(TransitionFileChange{relative: role.name, before: Val(role.bytes), after: None})
-    package_before :: if files.is_file(package_path) -> Val(root_bytes) else -> None
-    &changes.push(TransitionFileChange{relative: TRANSITION_PACKAGE_FILE, before: package_before, after: Val(root_text.bytes())})
-    env_transition_forward_plan(canonical, env_transition_next_legacy_operation(canonical), changes, env_transition_semantic_fingerprint(before_facts), env_transition_semantic_fingerprint(after))
 }
 
 fn env_transition_forward_plan(root: String, operation: String, changes: [TransitionFileChange], before_fingerprint: String, after_fingerprint: String) -> TransitionPlan EnvironmentError! {

@@ -1,5 +1,5 @@
-// TOOLS-S19 JSON.rs1045–1169. These direct record edge claims are not a
-// checked-source producer or proof of C4/S4/full SemIndex composition.
+// TOOLS-S19. These direct record edge claims are not a checked-source producer
+// or proof of C4/S4/full SemIndex composition.
 #Test("semindex_expand_values_keep_null_empty_scalars_and_exact_integer") {
     values :: ExpandValue.Array{values: [ExpandValue]{
         ExpandValue.Null, ExpandValue.Bool{value: false}, ExpandValue.Bool{value: true},
@@ -53,9 +53,9 @@
     assert_eq(semindex_json_expand_projection(ExpandProjection{selection: "x", lenses: [ExpandLens]{}}), `{"selection":"x","lenses":[]}`)
 }
 
-// Original tests/semindex.rs799–811: supply S4.open on basics/hello.jet.
-// Unregistered until the real checked C4/S4 producer and canonical typed Report
-// + all S17/S18 projections are available; no fabricated hello index.
+// Supply S4.open on basics/hello.jet. Unregistered until the real checked C4/S4
+// producer and canonical typed Report + all S17/S18 projections are available;
+// no fabricated hello index.
 fn semindex_hello_json_shape(index: SemIndex) {
     wire :: index.to_json()
     assert(wire.starts_with("{{"))
@@ -69,8 +69,8 @@ fn semindex_hello_json_shape(index: SemIndex) {
     assert(wire.contains("\"run\""))
 }
 
-// Original tests/semindex.rs814–920: C4 checks these exact two fixtures under
-// the SAME identity_reorder.jet path before calling the assertions below.
+// C4 checks these exact two fixtures under the SAME identity_reorder.jet path
+// before calling the assertions below.
 fn semindex_envelope_reorder_before_source() -> String Never! {
     "\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
 }
@@ -114,8 +114,8 @@ fn semindex_envelope_right_view_source() -> String Never! {
     "fn pick(left: [Int], right: [Int], first: Bool) -> View<Int> {{ return right[0..1] }}\nfn run() {{}}\n"
 }
 
-// Original tests/semindex.rs923–976. C4 checks both original pick sources at
-// view_provenance.jet; S1/S3 retain their full producer/provenance assertions.
+// C4 checks both original pick sources at view_provenance.jet; S1/S3 retain
+// their full producer/provenance assertions.
 fn returned_view_provenance_is_structured_and_changes_signature_id(union: SemIndex, right: SemIndex) {
     pick :: if union.lookup("pick") == {
         .Val(row) -> row
@@ -156,8 +156,8 @@ fn semindex_envelope_aggregate_view_source(right_owner: String) -> String Never!
     "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -> Pair {{\n    left_view :: left[0..1]\n    right_view :: {right_owner}[0..1]\n    return Pair.{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{}}\n"
 }
 
-// Original tests/semindex.rs979–1033, same aggregate_view_provenance.jet path:
-// distinct source right_view::right[0..1], changed source left[0..1].
+// Same aggregate_view_provenance.jet path: distinct source
+// right_view::right[0..1], changed source left[0..1].
 fn aggregate_view_provenance_preserves_slots_and_changes_signature_id(distinct: SemIndex, changed: SemIndex) {
     pair :: if distinct.lookup("pair") == {
         .Val(row) -> row

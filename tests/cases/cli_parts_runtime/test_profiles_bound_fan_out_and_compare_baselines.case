@@ -1,0 +1,95 @@
+# Test profiles in package.jet: a bare `jet test` runs the `defaults.test` profile, each
+# run is a child `jet test` whose rows become its baseline under `.jet/test/<profile>/`,
+# and a later run fails only on a lost row (a baseline pass that now fails). `time_limit`
+# stops a test that runs past it, `optimize:` runs the tests once per level, and a golden
+# corpus suite runs in process at the matching tiers. Each part has its negative control.
+fixture: fixtures/test_profiles
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check
+cwd: {work}/app
+exit: 0
+step: jet test --capture=all
+cwd: {work}/app
+exit: 0
+stderr: ~ "jet test: profile `quick`, run `tests`" # defaults.test picks quick for a bare run
+stderr: ~ "`tests`: 2 rows recorded as the baseline `.jet/test/quick/tests.rows`" # the first run records its baseline
+stdout: ~ "waited" # under the 60 s limit the sleeping test finishes
+stdout: ~ "2 passed, 0 failed" # both tests pass
+file: app/.jet/test/quick/tests.rows ~ "adds" # the baseline holds each test
+file: app/.jet/test/quick/tests.rows ~ "waits a moment" # the baseline holds each test
+file: app/.jet/test/quick/tests.rows !~ "failed" # every recorded row passed
+file: app/.jet/test/quick/tests-none.rows absent # quick has no optimize fan-out
+step: jet test --show-default --capture=all
+cwd: {work}/app
+exit: 0
+stderr: !~ "profile `quick`" # --show-default runs the stock default, not the profile
+step: jet test --capture=all
+cwd: {work}/app
+exit: 0
+stderr: ~ "`tests`: 2 rows against `.jet/test/quick/tests.rows`: 0 lost, 0 changed, 0 new" # a later run compares
+step: jet test --profile tight --capture=all
+cwd: {work}/app
+exit: 1
+stdout+stderr: ~ "test exceeded its time limit and was stopped" # 300 ms stops the sleeping test
+stdout: ~ "1 passed, 1 failed" # the other test still passes
+stdout: !~ "waited" # the stopped test never finished
+stderr: ~ "jet test: profile `tight`, run `tests`" # --profile names a test profile
+step: jet test --profile levels --capture=all
+cwd: {work}/app
+exit: 0
+stderr: ~ "run `tests at optimize none`" # one run per optimize level
+stderr: ~ "run `tests at optimize full`" # one run per optimize level
+file: app/.jet/test/levels/tests-none.rows exists
+file: app/.jet/test/levels/tests-full.rows exists
+file: app/.jet/test/levels/tests.rows absent # a fan-out profile has no unsuffixed run
+step: jet test --profile levels --optimize=basic --capture=all
+cwd: {work}/app
+exit: 0
+stderr: ~ "run `tests at optimize basic`" # the flag overrides the profile's levels
+stderr: !~ "run `tests at optimize none`" # the profile's levels don't run beside it
+file: app/.jet/test/levels/tests-basic.rows exists
+step: jet test --profile full --capture=all
+cwd: {work}/app
+exit: 0
+stdout: ~ "PASS\ttests/golden/greet.jet\to0" # optimize none runs the corpus on o0
+stdout: ~ "PASS\ttests/golden/greet.jet\to2" # optimize full runs it on o2
+stdout: !~ "greet.jet\to1" # basic is not one of the profile's levels
+stderr: ~ "run `tests at optimize full`" # the #Tests run beside the corpus
+remove: app/tests/golden
+step: jet test --profile full
+cwd: {work}/app
+exit: 1
+stderr: ~ "suite `golden` names the corpus `tests/golden`, which isn't a directory" # a missing corpus is named first
+copy: alt/broken.jet app/run.jet
+step: jet test --capture=all
+cwd: {work}/app
+exit: 1
+stderr: ~ "1 lost, 0 changed, 0 new" # a baseline pass that fails now is lost
+stderr: ~ "lost: adds: was passed, now failed" # the lost row is named
+step: jet test -u --capture=all
+cwd: {work}/app
+exit: 1
+stderr: ~ "2 rows recorded as the baseline `.jet/test/quick/tests.rows`" # -u makes this run the baseline
+file: app/.jet/test/quick/tests.rows ~ "failed" # the accepted failure is in the baseline now
+step: jet test --capture=all
+cwd: {work}/app
+exit: 0
+stdout: ~ "1 passed, 1 failed" # the test still fails
+copy: alt/unknown-suite.jet app/package.jet
+step: jet check
+cwd: {work}/app
+exit: 1
+stderr: ~ "profile `nightly` names unknown suite `browser` (known: tests)" # suites are checked against the declared ones
+stderr: ~ "E1215" # it is a package.jet shape error
+copy: alt/clash.jet app/package.jet
+step: jet check
+cwd: {work}/app
+exit: 1
+stderr: ~ "profile `staging` has the name of a build profile" # test and build profiles share one namespace
+copy: alt/bad-default.jet app/package.jet
+step: jet test
+cwd: {work}/app
+exit: 1
+stderr: ~ "`test` names `nightly`, which is neither a test profile nor an output (test profiles: quick)" # a default must name a profile or a Check output
+stderr: ~ "E1215" # it is a package.jet shape error

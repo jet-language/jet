@@ -1,7 +1,7 @@
-// Native C link closure (I9). The host realizes checked link
-// facts; it never changes a signature or owns a handle. The only C it writes
-// is FFI.rs's own inline-body wrapper, with the checked declaration's C ABI.
-// Every C compile here applies the one native C policy (NativeCPolicy.jet).
+// Native C link closure (I9). The host realizes checked link facts; it never
+// changes a signature or owns a handle. The only C it writes is own inline-body
+// wrapper, with the checked declaration's C ABI. Every C compile here applies
+// the one native C policy (NativeCPolicy.jet).
 use {
     cli_files :: core.files
     cli_process :: core.process
@@ -259,7 +259,7 @@ fn jet_cli_foreign_compile(lib: String, directory: String, cache: String) -[FS, 
     Ok(archive)
 }
 
-// FFI.rs `inline_c_type`: the C spelling of a checked inline scalar.
+// `inline_c_type`: the C spelling of a checked inline scalar.
 fn jet_cli_inline_c_type(ty: Type) -> String Never! {
     if ty == {
         .Int -> "int64_t"
@@ -272,7 +272,7 @@ fn jet_cli_inline_c_type(ty: Type) -> String Never! {
     }
 }
 
-// FFI.rs `emit_native_inline_source`: the body, its prototype and the
+// `emit_native_inline_source`: the body, its prototype and the
 // `jet_inline_<wrapper>` symbol the checked foreign row calls.
 fn jet_cli_inline_c_source(row: JetDriverInlineC, body: String) -> String Never! {
     ret :: if row.return_type == .Val(ty) -> jet_cli_inline_c_type(ty) else -> "void"
@@ -292,12 +292,12 @@ fn jet_cli_inline_c_source(row: JetDriverInlineC, body: String) -> String Never!
     "/* Jet #FFI provenance: entry {row.index}, language c. */\n#include <stdint.h>\n#include <stdbool.h>\n{ret} {row.name}({declared});\n{body}\n{ret} {row.symbol}({defined}) {{ {call} }}\n"
 }
 
-// FFI.rs `emit_inline_build_rs` for the native link: every selected inline C
-// body (`#FFI(c)`, checked wrapper identity `jet_inline_jet_ffi_<name>`) is one
+// `emit_inline_build_rs` for the native link: every selected inline C body
+// (`#FFI(c)`, checked wrapper identity `jet_inline_jet_ffi_<name>`) is one
 // translation unit; after all compile, ONE strict shared-object proof links
-// them together with undefined symbols refused, so bodies may share C state
-// but nothing may stay unresolved; then one archive joins the native link.
-// None when the program has no inline C body.
+// them together with undefined symbols refused, so bodies may share C state but
+// nothing may stay unresolved; then one archive joins the native link. None
+// when the program has no inline C body.
 fn jet_cli_native_inline_c(facts: JetDriverForeignLinkFacts, cache: String) -[FS, Env, Exec, Time.Wait]> String? JetCLIForeignLinkError! {
     units := [String]{}
     loop row in facts.inline_c {
@@ -307,8 +307,9 @@ fn jet_cli_native_inline_c(facts: JetDriverForeignLinkFacts, cache: String) -[FS
     }
     if units.len() == 0 -> return Ok(None)
     tools :: jet_cli_native_c_tools() ?? return Err(err)
-    // FFI.rs compiles each unit with the compiler's own dialect and `-fPIC`;
-    // the native static link adds the c@path code-generation constraints.
+    // The Rust original compiles each unit with the compiler's own dialect and
+    // `-fPIC`; the native static link adds the c@path code-generation
+    // constraints.
     flags :: [String]{"-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables"}
     identity := [U8]{}
     jet_cli_native_c_identity(&identity, "jet-native-inline-c-v3", tools, flags) ?? return Err(err)
@@ -536,7 +537,7 @@ fn jet_cli_native_c_closure(facts: JetDriverForeignLinkFacts, rust_helper: Strin
         jet_cli_foreign_add(&inputs, archive) ?? return Err(err)
     }
     if rust_helper == .Val(path) -> jet_cli_foreign_add(&inputs, path) ?? return Err(err)
-    // FFI.rs's inline C bridge: every selected `#FFI(c)` body, one archive.
+    // Inline C bridge: every selected `#FFI(c)` body, one archive.
     if jet_cli_native_inline_c(facts, cache) == {
         .Val(archive) -> { jet_cli_foreign_add(&inputs, archive) ?? return Err(err) }
         .None -> {}

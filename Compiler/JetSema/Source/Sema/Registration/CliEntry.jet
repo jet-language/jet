@@ -1,25 +1,22 @@
-// The typed entry `fn run(args: T)` over a `#CLI`
-// struct `T`. The compiler appends `fn __jet_cli_run()`, which parses
-// the process argument vector against the spec of `T` and then calls `run` (or,
-// when `T` declares commands, the selected command). When `T` declares no
-// commands the entry calls `fn __jet_cli_parse() -> T`, a parser written for
-// exactly the inputs of `T` (sema_cli_entry_direct): help and error texts are
-// literals, and only an input of a kind links its check (the Float parser only
-// for a Float input).
-// A `T` with commands decodes its spec from a compact table written here
-// (`core.args` `__cli_spec`). The driver picks `__jet_cli_run` as the entry of such a
-// program. An Executable Output of the entry file whose `entry:` takes one
-// typed CLI parameter (syntax-decisions.md:7416-7419) gets the same wrapper,
-// named for its binding (sema_cli_entry_output_wrapper), and the driver picks
-// it when sema selects that Output. A wrapper whose function and `T` are in
-// the entry file expands right after that file parses; one over an imported
-// `T` or a qualified `entry: module.function` gets the entry's imports then
-// and its wrapper once every module has loaded. The spec follows Rust
-// `command_schema_with_items` (CLISchema.rs) and the entry follows Rust
-// `jet_cli_entry` (MIRRust.rs). A program the `#CLI` checks refuse
-// (E1305/E1345) gets no wrapper; the checks report it. Every `#CLI` struct
-// also gets the decoder behind `args.decode<T>()` and a `T.merge` from the
-// same spec (sema_cli_entry_projections).
+// The typed entry `fn run(args: T)` over a `#CLI` struct `T`. The compiler appends
+// `fn __jet_cli_run()`, which parses the process argument vector against the spec of
+// `T` and then calls `run` (or, when `T` declares commands, the selected command).
+// When `T` declares no commands the entry calls `fn __jet_cli_parse() -> T`, a parser
+// written for exactly the inputs of `T` (sema_cli_entry_direct): help and error texts
+// are literals, and only an input of a kind links its check (the Float parser only
+// for a Float input). A `T` with commands decodes its spec from a compact table
+// written here (`core.args` `__cli_spec`). The driver picks `__jet_cli_run` as the
+// entry of such a program. An Executable Output of the entry file whose `entry:`
+// takes one typed CLI parameter (syntax-decisions.md:7416-7419) gets the same
+// wrapper, named for its binding (sema_cli_entry_output_wrapper), and the driver
+// picks it when sema selects that Output. A wrapper whose function and `T` are in the
+// entry file expands right after that file parses; one over an imported `T` or a
+// qualified `entry: module.function` gets the entry's imports then and its wrapper
+// once every module has loaded. The spec follows Rust `command_schema_with_items` and
+// the entry follows Rust `jet_cli_entry`. A program the `#CLI` checks refuse
+// (E1305/E1345) gets no wrapper; the checks report it. Every `#CLI` struct also gets
+// the decoder behind `args.decode<T>()` and a `T.merge` from the same spec
+// (sema_cli_entry_projections).
 use {
     unicode :: core.text
     jet_foundation.[
@@ -463,7 +460,7 @@ fn sema_cli_entry_label(input: SemaCLIInput) -> String Never! {
     out
 }
 
-// Parses the process argument vector: through `__spec` and the `core.args` interpreter
+// Parses the process argument vector: through `__spec` and the `core.args` parser
 // when the spec has commands, else through the parser written for its inputs
 // (sema_cli_entry_direct). Help and version print and run `help_end`. A
 // refusal prints to stderr and exits, or in a `projection` stores its text in

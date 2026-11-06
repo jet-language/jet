@@ -22,6 +22,14 @@ and `jet version --json` succeed with no output. Diagnostic essays instead
 use the `jet.status/v1` `explain` action under `--json`. C and C++ driver aliases own their raw
 arguments (including `--help` and `--version`) before Jet parses global flags.
 
+A command that fails under `--json` prints one `jet.status/v1` line on stdout
+and nothing on stderr. Its `reports` hold the typed refusal: a missing file or
+project, a usage error, an unbuilt command, or a missing or mismatched engine.
+The compile and authority problems of `jet run --json` keep their status line
+on stderr, so the program's own stdout stays clean. `jet new --json` prints
+one line with action `new`: `new.path` is the folder and `new.files` the
+files it wrote.
+
 `jet emit --ast|--ir <file>` prints one compiler tier of a file:
 `--ast` the parsed syntax tree (parsing only), and `--ir` the slot IR `jet build`
 builds from the checked functions of the entry package (every checked function
@@ -228,7 +236,6 @@ jet audit [args]                     Inspect implicit copies, exercised memory w
 jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle
 jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
 jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>] Flash firmware to a target board
-jet fuzz <file.jet> [<test>]         Find failing inputs for property tests
 jet gc <command>                     Show values moved into automatic memory management
 jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
 jet status [<file.jet|dir>]          Show what the project has proved
@@ -262,6 +269,7 @@ jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Ru
 jet shared-store <command>           Manage the optional shared package broker
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
 jet fold [args]                      Reverse a recorded Package source transition
+jet crash < <report.txt>             Name the functions and lines of a release crash report
 ```
 
 `jet try` reports compiler-query and checked-index failures through its existing
@@ -274,6 +282,14 @@ The `bind` shorthand accepts the explicit binding-plan form shown by help:
 `bind <name> --update --preview` or
 `bind <name> --update --accept <candidate-digest>`. Foreign-header bind-in
 commands remain under `jet inspect bind`.
+
+`jet crash < report.txt` reads the stderr of a crashed release program, whose
+report gives addresses and a `Build <id> (names and lines: jet crash)` line,
+and prints the report a dev build gives: the function, file, line and source
+of each frame, from the side debug file the build saved under
+`.jet/symbols/.build-id/` (searched from the current directory upward). Text
+around the report passes through. A report without the build line is E2114;
+no side file for its build is E2115. The command takes no arguments.
 
 Normal `jet fix <file|dir>` consumes the same checked diagnostic edits as
 editor code actions. Without `--all`, both the applicability and safety class
@@ -288,9 +304,16 @@ out (one needing review, or one rolled back) with its reason. A `#Deprecated`
 declared function that takes the same call; otherwise L2001's Fix says to edit
 the use by hand. `--dry-run` renders the diff without publishing.
 `--edition=2027` performs the registered JSON/CBOR migrations first, retaining
-written propagation and making panic fallbacks idempotent. Human status is
-suppressed by `--quiet` and `--json`; machine mode does not create a fake fix
-receipt. Publication uses the held codemod transaction and its durable undo
+written propagation and making panic fallbacks idempotent. `--quiet` suppresses
+the human status. `--json` prints one `jet.status/v1` line with action `fix`
+instead: `fix.file`, `fix.dry_run`, `fix.applied` (the count), `fix.skipped`
+(each edit left out, with its `title`, `reason`, `span` and `new_text`) and
+`fix.log` (the replay log, or null when nothing was written); machine mode
+does not create a fake fix receipt. A script with no package block whose
+rights are undecided gets the leading `package` block that grants them as a
+needs-review edit: the E1803 report of `jet run --json` carries it, plain
+`jet fix` skips it, and `jet fix --all` applies it. Granting a right is a
+decision, not a repair. Publication uses the held codemod transaction and its durable undo
 journal. Rename provenance comes from uniquely matched checked before/after
 definition facts; when those checks cannot establish a rename, the receipt
 records the exact changed byte region instead.
@@ -356,7 +379,13 @@ content-authenticated files under `.jet/receipts`. The record-index JSONL
 snapshot under `.jet/records` is reloaded while holding its directory lock
 before each mutation and replaced atomically with mode `0600`. FIFO eviction
 removes only unreferenced disposable groups; removed artifacts are cleaned up
-after the new index is published, without following links.
+after the new index is published, without following links. The index and the
+`.jet/evidence` reports are per-machine cache: they publish by the same
+exclusive stage and rename but are not flushed to disk, so a crash can lose
+the latest entries but never expose a substituted file. An index that does not
+decode reads as empty, and an evidence report whose bytes differ from its
+content id is replaced by the next publication of that id. Proof artifacts,
+replay captures, receipts, and source transactions stay flushed.
 
 Build-node evidence stays immutable in the machine-wide artifact store. The
 latest record key for each program is workspace state:
@@ -546,7 +575,8 @@ The options below are intentionally named exactly as in `jet help`:
   builds or runs, every value gives the same diagnostics and output bytes,
   and `build --verbose` reports the cap it used. No
   environment variable sets it. `--jobs` and `-j` are usage errors (E2102)
-  that point to `--threads`, because `jobs` names project jobs.
+  that point to `--threads`, because `jobs` names project jobs; `jet test
+  --jobs=<n>` is the test setting that sizes the corpus pool.
 
 For C and C++, the driver-specific options are `--project-root`, `--build-root`,
 `-c`, `-o`, `-MMD`, `-MD`, `-MF`, `-MT`, reserved `--sysroot`, `-I`, `-D`, `-L`,
@@ -564,8 +594,10 @@ root: the nearest directory at or above the file that holds `package.jet`, or
 the file's own directory for a loose file, with every `.jet` file under it (dot names,
 `target`, `build`, `node_modules`, `bin`, and nested projects stay out) and the
 generated C/C++ binding caches. The Core library bodies are read from the Jet
-toolchain source tree named by `JET_TOOLCHAIN_ROOT` (the directory that holds
-`Core/`); the Core row table and the canonical effect source are generated
+toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
+`JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
+input, else `jet`'s own directory when it holds both (see
+[Environment variables](environment.md)); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
 by `jet Tools/agent/CoreSourceRows.jet`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
@@ -683,18 +715,53 @@ keeps the emitted harness path. Native property generation is refused. Both
 paths preserve `JET_TEST_CAPTURE`, `JET_TEST_FILTER`, `JET_TEST_SHUFFLE_SEED`,
 `JET_TEST_SERIAL`, `JET_TEST_TRACE_TIERS`, `JET_UPDATE_SNAPSHOTS`, and
 `JET_PROJECT_ROOT`. Native outcomes use process-private framed record files,
-never stdout; after a fatal trap only unreported tests rerun individually,
+never stdout, kept in memory: in the per-user runtime directory
+(`XDG_RUNTIME_DIR`), else `/dev/shm`, and in `.jet/build` only on a host with
+neither. After a fatal trap only unreported tests rerun individually,
 one child per core at a time (fewer when free memory can't hold 1 GiB per
 child; one at a time under `--serial`), reported in test order.
 Output checks run after joins in the same batch process. If that process
 traps, each unrun check fails with E3015 rather than running against fresh
 state in the final reporter. Its
 captured output is shown under `--capture=all`, or for a failed run under the
-default `--capture=failed`; the exit is 0 when the harness passed, else 1. It
-honors `--capture`, `--filter`, `--shuffle=<seed>`, `--serial`,
-`--trace-tiers`, `-u`/`--update-snapshots`, `--fresh`, `--show-default`,
-`--release`, `--profile`, `--verbose`, `--quiet`, `--color`, `--threads`,
-`--measure`, and `--json`.
+default `--capture=failed`; the exit is 0 when the harness passed, else 1.
+Each test setting (D-TEST-INVOKE1=A, the `JET_TEST_SETTINGS` table in
+`Compiler/JetFoundation/Source/Registry/TestSettings.jet`) has three
+spellings from one row: the flag `--shard=3/8`, the TestProfile field
+`shard: 3/8` and the call `t.shard(3, 8)` on the `Test` value of test.jet's
+`fn test`. The layers are the selected test profile, then `fn test`, then the
+flags, each replacing the earlier; `jet test` runs `fn test` once in a plan
+step (the harness runs no test while `JET_TEST_PLAN` names the plan file)
+before any test runs, and prints the settings it used and the layer each came
+from whenever a profile or `fn test` wrote one. The settings are `fresh`,
+`docs`, `filter`, `capture`, `update_snapshots` (`-u`), `shuffle=<seed>`,
+`serial`, `measure`, `trace_tiers`, `optimize=<levels>` (one run per level
+when it lists more than one), `time_limit=<duration>`, `opt_in`,
+`shard=<i/n>` (the tests and corpus rows sorted, then every n-th from the
+i-th), `list` (prints the selected tests and corpus rows, runs nothing, exits
+0), `cases=<file>` (only the tests and corpus rows the file names, one name
+or ID per line; blank and `#` lines skipped; beside #Tests, a `filter` or
+`cases` that matches no corpus row selects none instead of failing, and a
+corpus-only run refuses a name that is no row), `jobs=<n>` and `memory=<size>`
+(the corpus pool's width and its memory bound, such as `16G`),
+`allow_shrink=<ids>` (ui rows `-u` may bless with fewer diagnostics,
+comma-separated), `diagnostic_coverage` (the ui suite's coverage entry instead
+of its rows), `results=<file>` (one JSON document of every verdict, the
+testkit's results shape, whose `jet` is the compiler that ran them; a run of
+several levels or another `compiler` writes its children's verdicts there,
+each level's rows at the tier `tests at optimize <level>`) and
+`compiler=<jet>` (the jet that builds and runs the tests). `list` beside `-u`,
+a shard beside `-u`, a shard outside `1 <= i <= n`, `jobs`, `memory`,
+`allow_shrink` or `diagnostic_coverage` in a run with no corpus suite,
+`diagnostic_coverage` in a profile with no ui suite, a
+`cases` file that can't be read and a `results` file that can't be written are
+refused with E2104 before any test runs, as is a `t.<setting>(…)` call that
+`fn test` makes after `t.run()`. A child run gets the decided settings in
+`JET_TEST_SETTINGS` and decides nothing again; the parent keeps `compiler`,
+`optimize`, `results` and the corpus-pool settings.
+It also honors
+`--show-default`, `--release`, `--profile`, `--verbose`, `--quiet`,
+`--color`, `--threads` and `--json`.
 Doctests (fenced ```` ```jet ```` blocks in `///` comments) run as claims of
 the same harness, named `doctest at <file>:<line>`, and `--docs` runs them alone; a wrong `// =>` value
 fails with E2901, and `-u` rewrites it instead (D-TEST4). `--measure` runs only
@@ -702,12 +769,72 @@ the claims with a `.measure` member, serially and under the release profile
 unless `--profile` names one. It prints one record per claim, as a `measure
 NAME:` line or, with `--json`, as one JSON object line with the same fields.
 It also evaluates the claim's `.Test(name)` budgets against that record
-(D-CLAIM-BENCH1). Directory and package
-targets, a `fn test` override, a bare `--shuffle`, and the other test flags are
-refused with E2104 until they are ported. The test-result cache, the evidence
-report, and the package claims
-floor are not ported yet: every run compiles fresh, and the outcome is the
-harness exit (the outcome for a package without a claims floor).
+(D-CLAIM-BENCH1). A directory target (or none, inside a package) tests the
+package through its own `fn test(t: Test)` when it declares one, else through
+its stock entry. At a workspace root, each member
+that can run `jet test` runs as its own child `jet test <member>` with the
+same flags, one child per core, fewer while free memory can't hold 1 GiB for
+each; each member's output is written whole, in member order, after a
+`jet test: member <name>` line on stderr (muted by `--quiet`), and the exit is
+the worst member's. The root's own `test.jet` holds only the code suites its
+profiles run. `--profile <name>` naming a test profile of the package's
+`package.jet` (`test: { quick: TestProfile{ suites: [tests], time_limit: 60s } }`),
+or a bare package `jet test` when `defaults: { test: <name> }` names one, runs
+that profile instead (`--show-default` runs the stock default): each run is a
+child `jet test` with the other flags, the `tests` suite once, or once per
+level `optimize: [none, full]` lists (an `--optimize` flag or `t.optimize(…)`
+call replaces the profile's levels). `time_limit:` stops each test that runs longer and fails it; each
+test then runs alone, and with output checks the batch runs bounded by the
+limit for each test and check. Each run's output follows a
+`jet test: profile <name>, run <run>` line on stderr (muted by `--quiet`). Its
+rows (each test and its outcome) are compared with the baseline
+`.jet/test/<profile>/tests.rows` (`tests-<level>.rows` per level): a test the
+baseline has passing that now fails or is gone is lost and fails the profile
+with exit 1, while a failure the baseline already holds does not. A run with no
+baseline, or under `-u`, records its rows as the baseline and keeps its own
+exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows)`
+(D-TEST-SUITE2=A; the name is a string literal, E0635), runs as its own child
+`jet test <package>/test.jet` that runs no #Test and calls only that suite's
+function with a `TestRows`; each `pass(id)`, `fail(id, detail)` and
+`skip(id, reason)` is one row, kept even if the suite then panics. The child
+gets `JET`, the path of the `jet` running the profile, and
+`JET_TEST_SUITE_ROOT`, the package directory as the profile named it. The rows
+are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
+failing row's detail is printed. A repeated id fails as `duplicate row id`, and
+a suite that panics or exits non-zero adds the failing row `stopped` with its
+panic message. A profile naming a suite that neither `suites:` nor `test.jet`
+declares, or a name both declare, is a `package.jet` error (E1215) that
+`jet check` reports too.
+A corpus suite (`suites: { ui: TestSuite{ ui_corpus: "../tests/ui" } }`,
+or `golden_corpus:` / `cases_corpus:`, a directory relative to `package.jet`)
+fails with E2105 when the directory is missing; otherwise the profile's corpus
+suites run in this `jet` through the testkit pool (`Compiler/JetTestKit`),
+which prints one row per case and tier (PASS, FAIL, KNOWN-FAILING,
+UNEXPECTED-PASS, UNSUPPORTED, SKIP-HOST, OPT-IN, REFUSED, ERROR, TIMEOUT) and a
+summary. Row IDs are relative to the deepest directory holding the package and
+every corpus. The `jobs`, `memory`, `filter`, `cases`, `shard`, `opt_in`,
+`list`, `optimize` and `diagnostic_coverage` settings steer the pool;
+`time_limit` bounds each step; the `baseline:` ledger
+(`ID<TAB>card<TAB>reason` rows) holds the accepted failures. `-u` blesses
+every selected row's snapshots. A sharded run never writes a baseline and
+compares only the baseline rows its shard holds; code suites run in shard 1.
+`jet test Compiler --profile ui` (also `golden`, `cases`, `corpora`, `full`) runs
+the repository's corpora; a bare `jet test Compiler` runs `quick`. A bare
+`--shuffle` and the settings not ported yet (`where`, `coverage`, `grade`,
+`iterations`, `time`, `seed`, `corpus`, `watch`, `record`, the `browser_*`
+rows) are refused in all three spellings. The evidence report and the package claims
+floor are not ported yet: the outcome is the harness exit (the outcome for a
+package without a claims floor). The test-result cache lives in
+`.jet/test-results/`, keyed by the harness executable's bytes, the run's
+selection and every `JET_*` variable. A passing run stores its outcomes with
+the reads the harness runtime recorded (`JET_TEST_READS_PATH` names the log:
+opened files and directories, stat'ed paths, environment variables; reads
+under `/proc`, `/sys` and `/dev` key nothing). The next run with that key
+reuses the outcomes while every read's fingerprint (a file's content hash, a
+directory's listing, a stat's kind, size, mode and modification time, a
+variable's value) is unchanged, and runs the tests again otherwise. Snapshot
+updates, `--measure`, code-suite rows and `jet prove` captures always run;
+`--fresh` skips the lookup.
 
 `jet new <name> [--template cli|ui|web|overrides] [--annotated]` writes a
 project: `package.jet`
@@ -726,12 +853,7 @@ named after the directory (`app` when it has no name) and pinned with
 and is never overwritten. With a script, each inline `use pkg#version` ref in it
 is added to the new manifest's `deps` block, and `lifted N inline
 dependencies into package.jet` precedes `created package.jet (pinned jet
-<channel>)` on stderr (muted by `--quiet` and `--json`). `jet init --check`
-with no migration-era role files (`pkg.jet`, `env.jet`, `workspace.jet`,
-`config.jet`) beside it reports that no files changed. The role-file
-transition itself (`--restore-role-files`, `--check` beside role files, and a
-bare `jet init` beside them without `package.jet`) is refused with E2104 until
-it is ported.
+<channel>)` on stderr (muted by `--quiet` and `--json`).
 
 `jet update jet [<channel>]` re-resolves the project's toolchain pin, moved to
 `channel` when given (else the manifest's `jet:` channel, else the running
@@ -754,7 +876,7 @@ the ratified rewrites. The retired-spelling status lines go to stderr unless
 `--quiet`. `package.jet` and `Config` record sources go through the typed
 Package formatter (the Jetpack Package model, referenced into the Compiler
 unit from `Jetpack/PackageModel`): an unreadable manifest stops the run with
-its E1206-family diagnostic, and a layout the model declines (authored
+its E1215 manifest diagnostic, and a layout the model declines (authored
 comments) is left as written. `--changed` formats the `.jet` files git reports
 changed against `HEAD` or staged (exit 2 outside a git worktree).
 Ordinary-source formatting preserves declaration meaning: a raw

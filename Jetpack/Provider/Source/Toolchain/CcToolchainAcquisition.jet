@@ -1,7 +1,7 @@
 // Acquire the C/C++ toolchain (jetpack::Provider::cc_toolchain): reuse a
-// verified Hangar descriptor, provision an offline fixture bundle, or admit
-// the pinned signed Nix index records' closure through the Nix cache. No host
-// or PATH compiler is ever a fallback.
+// verified Hangar descriptor, provision an offline fixture bundle, or build
+// the target entry from the toolchain pack this jet embeds the hash of
+// (CcToolchainPack.jet). No host or PATH compiler is ever a fallback.
 
 // The native provider's cache expectation for a toolchain ref: the verified
 // Hangar descriptor's identity, or None when there is none yet.
@@ -12,8 +12,7 @@ fn provider_cc_toolchain_cache_expectation(verification: &StoreVerification, spe
 }
 
 // The download plan for toolchain refs: cached when Hangar already holds a
-// verified descriptor, new for a fixture bundle, otherwise the signed Nix
-// closure's download plan.
+// verified descriptor, new for a fixture bundle or a covered pack target.
 fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, specs: [RefSpec], ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> DownloadPlan ProviderError! {
     plan := DownloadPlan.empty()
     loop spec in specs {
@@ -43,30 +42,17 @@ fn provider_cc_toolchain_plan_downloads(verification: &StoreVerification, specs:
             }
             .None -> {}
         }
-        record :: provider_cc_acquisition_record(target) ?? {
+        provider_cc_pack_covered_target(target) ?? {
             return Err(ProviderError.Unsupported(err.message()))
         }
-        index :: ctx.nix_index ?? return Err(provider_cc_missing_index_error(ctx.offline, "the signed C/C++ toolchain index for `{record.id}` is not available offline"))
-        resolved :: provider_cc_resolve_nix_records(index, record)
-        roots :: ctx.nix_roots ?? return Err(ProviderError.BadOutput("C toolchain download planning has no Hangar roots for closure admission"))
-        compiler_path :: provider_cc_signed_output_path(resolved.compiler, "compiler") ?? {
-            return Err(ProviderError.BadOutput(err.message()))
-        }
-        linker_path :: provider_cc_signed_output_path(resolved.linker, "linker") ?? {
-            return Err(ProviderError.BadOutput(err.message()))
-        }
-        nix :: store_plan_nix_downloads(&verification, roots, [String]{compiler_path, linker_path}, ctx.offline, ctx.progress) ?? {
-            return Err(ProviderError.NixCache(err.message()))
-        }
-        &plan.add_nix(nix)
         &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
     }
     Ok(plan)
 }
 
 // Realize a toolchain ref: the verified Hangar descriptor, else a fixture
-// bundle, else the signed Nix acquisition.
-fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
+// bundle, else the target entry built from this jet's toolchain pack.
+fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[IO, FS, Env, Exec, Net, Time, Time.Wait]> Realized ProviderError! {
     target :: provider_cc_toolchain_requested_target(spec) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }
@@ -90,207 +76,7 @@ fn provider_cc_toolchain_realize(verification: &StoreVerification, spec: RefSpec
         }
         .None -> {}
     }
-    provider_cc_realize_nix(&verification, spec, ctx, target)
-}
-
-// No signed index: offline is E1276, otherwise the provider refuses to guess.
-fn provider_cc_missing_index_error(offline: Bool, offline_message: String) -> ProviderError Never! {
-    if offline -> return ProviderError.Offline(offline_message)
-    ProviderError.Unsupported("the signed C/C++ toolchain index is not configured; Jet will not use a host or PATH compiler")
-}
-
-// The compiler and linker records of the pinned acquisition, resolved from the
-// official signed index on the record's own Nix system.
-fn provider_cc_resolve_nix_records(index: NixIndexClient, record: CcNixAcquisitionRecord) -[FS, Env, Net, Time, Time.Wait]> (compiler: NixVerifiedIndexRecord, linker: NixVerifiedIndexRecord) ProviderError! {
-    host_system :: provider_host_nix_system()
-    if host_system != Val(record.system) {
-        machine :: host_system ?? "an unsupported host"
-        return Err(ProviderError.Unsupported("signed C/C++ toolchain record `{record.id}` is for `{record.system}`, but this machine is `{machine}`"))
-    }
-    compiler :: provider_cc_resolve_nix_record(index, record, record.compiler_attr, "compiler")
-    linker :: provider_cc_resolve_nix_record(index, record, record.linker_attr, "linker")
-    Ok((compiler: compiler, linker: linker))
-}
-
-fn provider_cc_resolve_nix_record(index: NixIndexClient, record: CcNixAcquisitionRecord, attrpath: [String], role: String) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord ProviderError! {
-    key :: record.index_key(attrpath)
-    verified :: index.resolve(key) ?? {
-        return Err(ProviderError.NixIndex(err))
-    }
-    if verified.trust != NixIndexTrustTier.OfficialSigned {
-        return Err(ProviderError.Unsupported("C/C++ {role} record `{record.id}` was not resolved from an official signed Nix index"))
-    }
-    if verified.record.attrpath != key.attrpath {
-        return Err(ProviderError.BadOutput("signed C/C++ {role} record attrpath disagrees with `{key.attrpath.join(".")}`"))
-    }
-    Ok(verified)
-}
-
-// The record's `out` store path, validated.
-fn provider_cc_signed_output_path(record: NixVerifiedIndexRecord, role: String) -> String CcToolchainError! {
-    path :: record.record.outputs.get("out") ?? return Err(CcToolchainError.Invalid("signed C/C++ {role} record has no `out` output"))
-    provider_cc_validate_nix_store_path(path)
-    Ok(path)
-}
-
-fn provider_cc_realize_nix(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx, target: String) -[IO, FS, Env, Net, Time, Time.Wait]> Realized ProviderError! {
-    record :: provider_cc_acquisition_record(target) ?? {
-        return Err(ProviderError.Unsupported(err.message()))
-    }
-    index :: ctx.nix_index ?? return Err(provider_cc_missing_index_error(ctx.offline, "signed C/C++ toolchain index `{record.id}` is not cached for offline use"))
-    resolved :: provider_cc_resolve_nix_records(index, record)
-    roots :: ctx.nix_roots ?? return Err(ProviderError.BadOutput("signed C/C++ toolchain realization has no Hangar roots for closure admission"))
-    compiler_path :: provider_cc_signed_output_path(resolved.compiler, "compiler") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    linker_path :: provider_cc_signed_output_path(resolved.linker, "linker") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    requests :: [NixOutputRequest]{
-        {name: "compiler", store_path: compiler_path},
-        {name: "linker", store_path: linker_path}
-    }
-    admitted :: store_admit_nix_closure_with_progress(&verification, roots, requests, ctx.offline, None, ctx.progress) ?? {
-        return Err(ProviderError.NixCache(err.message()))
-    }
-    descriptor :: provider_cc_nix_descriptor(record, resolved.compiler, resolved.linker, admitted, roots)
-    Ok(provider_cc_realized_from_descriptor(spec, ctx, descriptor, SourceState.Substituted))
-}
-
-// The Nix-layout descriptor for an admitted closure: role roots are the
-// admitted compiler, linker, and marker-named sysroot objects, and every tool
-// byte is hashed from the admitted object pool.
-fn provider_cc_nix_descriptor(record: CcNixAcquisitionRecord, compiler_record: NixVerifiedIndexRecord, linker_record: NixVerifiedIndexRecord, admitted: AdmittedNixClosure, roots: HangarRoots) -[FS, Env]> CcToolchainDescriptor ProviderError! {
-    if admitted.objects.len() == 0 {
-        return Err(ProviderError.BadOutput("signed C/C++ toolchain admission returned an empty closure"))
-    }
-    if admitted.objects.len() > CC_TOOLCHAIN_MAX_NIX_OBJECTS {
-        return Err(ProviderError.BadOutput("signed C/C++ toolchain closure exceeds {CC_TOOLCHAIN_MAX_NIX_OBJECTS} objects"))
-    }
-    compiler_path :: provider_cc_signed_output_path(compiler_record, "compiler") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    linker_path :: provider_cc_signed_output_path(linker_record, "linker") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    compiler :: admitted.outputs.get("compiler") ?? return Err(ProviderError.BadOutput("C/C++ admission returned no compiler output"))
-    linker :: admitted.outputs.get("linker") ?? return Err(ProviderError.BadOutput("C/C++ admission returned no linker output"))
-    if compiler.store_path != compiler_path || linker.store_path != linker_path {
-        return Err(ProviderError.BadOutput("C/C++ admission changed a signed toolchain output path"))
-    }
-    compiler_root :: provider_cc_checked_admitted_object(roots, compiler, "compiler")
-    linker_root :: provider_cc_checked_admitted_object(roots, linker, "linker")
-    marker :: provider_cc_checked_relative_path(compiler_root, record.sysroot_marker, "sysroot marker") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    sysroot_store_path :: provider_cc_read_store_path_marker(marker)
-    sysroot :: admitted.objects.get(sysroot_store_path) ?? return Err(ProviderError.BadOutput("C/C++ compiler sysroot marker names `{sysroot_store_path}`, which is not in the admitted closure"))
-    sysroot_root :: provider_cc_checked_admitted_object(roots, sysroot, "sysroot")
-    mounts :: provider_cc_admitted_mounts(roots, admitted)
-    reference_set := [String: Bool]{}
-    loop entry in admitted.objects {
-        if entry.value.hangar_digest != compiler.hangar_digest -> reference_set[entry.value.hangar_digest] = true
-    }
-    references := reference_set.keys().to_list()
-    &references.sort()
-    compiler_sha256 :: foundation_sha256_file_hex(files.join(compiler_root, record.compiler_path)) ?? {
-        return Err(ProviderError.BadOutput("hash C compiler: {err}"))
-    }
-    cxx_sha256 :: foundation_sha256_file_hex(files.join(compiler_root, record.cxx_path)) ?? {
-        return Err(ProviderError.BadOutput("hash C++ compiler: {err}"))
-    }
-    linker_sha256 :: foundation_sha256_file_hex(files.join(linker_root, record.linker_path)) ?? {
-        return Err(ProviderError.BadOutput("hash C linker: {err}"))
-    }
-    host :: provider_cc_toolchain_host_target_triple()
-    facts :: provider_cc_nix_facts(record, host, compiler_record, linker_record, compiler, linker, sysroot, sysroot_store_path, compiler_sha256, cxx_sha256, linker_sha256, mounts, references, admitted.closure_receipt_sha256)
-    plan :: ProviderPlanFacts.from_facts(facts) ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    producer :: ProducerRecord.new(CC_TOOLCHAIN_NIX_PRODUCER, record.immutable_source(), compiler.hangar_digest, plan, "jet-cc:nix-index-hangar-v1", "policy=official-signed-index+signed-nix-cache\nplatform=host", facts) ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    cxx_root :: provider_cc_checked_admitted_object(roots, compiler, "C++ compiler")
-    Ok(CcToolchainDescriptor{
-        entry_id: "{CC_TOOLCHAIN_PACKAGE}-{record.id}-{compiler.hangar_digest}",
-        root: compiler_root,
-        host: host,
-        target: record.target,
-        version: provider_cc_nix_version(compiler_record, linker_record),
-        abi: record.abi,
-        compiler: record.compiler_path,
-        compiler_sha256: compiler_sha256,
-        cxx: record.cxx_path,
-        cxx_sha256: cxx_sha256,
-        linker: record.linker_path,
-        linker_sha256: linker_sha256,
-        sysroot: "sysroot",
-        sysroot_sha256: sysroot.hangar_digest,
-        bundle_sha256: compiler.hangar_digest,
-        layout: CcToolchainLayout.NixIndexHangar,
-        compiler_root: compiler_root,
-        cxx_root: cxx_root,
-        linker_root: linker_root,
-        sysroot_root: sysroot_root,
-        mounts: mounts,
-        references: references,
-        envelope: Envelope{output_hash: compiler.hangar_digest, platform: pkg_host_platform(), signature: "", provenance: "{record.id} via signed Nix index and cache"},
-        producer: producer
-    })
-}
-
-// One read-only mount per admitted closure object, in store-path order.
-fn provider_cc_admitted_mounts(roots: HangarRoots, admitted: AdmittedNixClosure) -[FS, Env]> [CcMount] ProviderError! {
-    store_paths := admitted.objects.keys().to_list()
-    &store_paths.sort()
-    mounts := [CcMount]{}
-    loop store_path in store_paths {
-        object :: admitted.objects[store_path]
-        if store_path != object.store_path {
-            return Err(ProviderError.BadOutput("C/C++ closure key `{store_path}` disagrees with `{object.store_path}`"))
-        }
-        provider_cc_validate_nix_store_path(store_path) ?? {
-            return Err(ProviderError.BadOutput(err.message()))
-        }
-        provider_cc_validate_tree_digest(object.hangar_digest, "C/C++ closure object digest") ?? {
-            return Err(ProviderError.BadOutput(err.message()))
-        }
-        source :: provider_cc_checked_admitted_object(roots, object, "closure object")
-        &mounts.push(CcMount{store_path: store_path, digest: object.hangar_digest, source: source, destination: store_path})
-    }
-    Ok(mounts)
-}
-
-// An admitted object's canonical path inside the content-addressed pool,
-// named by its own digest.
-fn provider_cc_checked_admitted_object(roots: HangarRoots, object: AdmittedNixObject, label: String) -[FS, Env]> String ProviderError! {
-    provider_cc_validate_tree_digest(object.hangar_digest, "{label} digest") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    hangar :: files.canonicalize(roots.hangar_dir()) ?? {
-        return Err(ProviderError.BadOutput("canonicalize Hangar: {err}"))
-    }
-    objects :: files.join(hangar, "objects")
-    source :: files.canonicalize(object.hangar_path) ?? {
-        return Err(ProviderError.BadOutput("C/C++ {label} Hangar object is unavailable: {err}"))
-    }
-    if !provider_cc_path_within(source, objects) || files.basename(source) != object.hangar_digest {
-        return Err(ProviderError.BadOutput("C/C++ {label} Hangar object is outside the content-addressed object pool"))
-    }
-    Ok(source)
-}
-
-// The sysroot store path named by the compiler's `nix-support` marker.
-fn provider_cc_read_store_path_marker(path: String) -[FS]> String ProviderError! {
-    bytes :: provider_cc_read_bounded_file(path, CC_TOOLCHAIN_MAX_MARKER_BYTES, "C/C++ sysroot marker") ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    text :: String.from_bytes(bytes) ?? return Err(ProviderError.BadOutput("C/C++ sysroot marker is not UTF-8"))
-    store_path :: text.trim()
-    provider_cc_validate_nix_store_path(store_path) ?? {
-        return Err(ProviderError.BadOutput(err.message()))
-    }
-    Ok(store_path)
+    provider_cc_realize_pack(&verification, spec, ctx, target)
 }
 
 fn provider_cc_realized_from_descriptor(spec: RefSpec, ctx: ProviderCtx, descriptor: CcToolchainDescriptor, source_state: SourceState) -[FS, Env]> Realized Never! {

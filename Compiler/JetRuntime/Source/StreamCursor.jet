@@ -1,13 +1,11 @@
-// Canonical opaque Cursor/Reader provider. Private 32B align8:
-// [packed data@0, byte length@8, capacity@16, byte position@24].
-// Cursor's first24B are exactly an E4 header. Empty data=1, cap=0.
-// Constructors borrow input (Reader accepts checked element stride1/8).
-// All advances prove pos <= len before writing. Clones own independent bytes;
-// drop releases (cap,1) only when nonempty, then the (32,8) carrier.
-// This replaces Rust Box<JetCursor/JetReader> in native packs, never mixes it.
-// Reference semantics: Foundation/StreamCursor.rs26-498.
-// Packed input (stride 1) is copied with one bulk move; word-stride input
-// narrows one element per byte.
+// Canonical opaque Cursor/Reader provider. Private 32B align8: [packed data@0,
+// byte length@8, capacity@16, byte position@24]. Cursor's first24B are exactly
+// an E4 header. Empty data=1, cap=0. Constructors borrow input (Reader accepts
+// checked element stride1/8). All advances prove pos <= len before writing.
+// Clones own independent bytes; drop releases (cap,1) only when nonempty, then
+// the (32,8) carrier. This replaces Rust Box<JetCursor/JetReader> in native
+// packs, never mixes it. Packed input (stride 1) is copied
+// with one bulk move; word-stride input narrows one element per byte.
 fn stream_new(data: I64, len: I64, stride: I64, position: I64) -> I64 {
     handle :: jet_rt_alloc(I64{32}, I64{8})
     target :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
@@ -90,7 +88,7 @@ fn stream_clone(handle: I64) -> I64 {
     }
     captured :: rt_text_copy(wrapping(rt_text_data(handle) + position), found - position)
     rt_text_store(ok, captured)
-    // Delimiter is not consumed, exactly StreamCursor.rs481-487.
+    // Delimiter is not consumed, exactly.
     rt_text_store(wrapping(handle + I64{24}), found)
     I64{1}
 }

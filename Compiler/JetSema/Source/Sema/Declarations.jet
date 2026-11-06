@@ -21,6 +21,7 @@ use jet_foundation.[
     failure_contract_effective_type,
     failure_contract_from_return_type,
     failure_contract_source,
+    owned_trait,
     type_with_effective_fn_returns,
     ViewProvenanceMap,
 ]
@@ -31,13 +32,14 @@ fn sema_effective_return_type(return_type: Type?) -> Type Never! {
     failure_contract_effective_type(failure_contract_from_return_type(return_type))
 }
 
-// These traits are raw protocol ABIs (String, Bool,
-// Ordering, Dyn, and same-type arithmetic), never the implicit failure
-// carrier, for user and derived impls alike (the Rust reference's
-// `uses_raw_protocol_return`).
+// The compiler-owned traits OWNED_TRAITS marks `raw_return` are raw protocol
+// ABIs (String, Bool, Ordering, Dyn, and same-type arithmetic), never the
+// implicit failure carrier, for user and derived impls alike (the Rust
+// reference's `uses_raw_protocol_return`).
 fn sema_raw_protocol_trait(trait_name: String?) -> Bool Never! {
     name :: trait_name ?? return false
-    name == "Display" || name == "Debug" || name == "Encode" || name == "Decode" || name == "Equatable" || name == "Comparable" || name == "Add" || name == "Sub" || name == "Mul" || name == "Div" || name == "Iterable"
+    owned :: owned_trait(name) ?? return false
+    owned.raw_return
 }
 
 // Whether a trait-impl method keeps its declared return raw (the Rust
@@ -68,8 +70,8 @@ fn sema_failure_contract_source(return_type: Type?) -> String Never! {
 fn sema_failure_contract_is_default(return_type: Type?) -> Bool Never! {
     failure_contract_from_return_type(return_type) == .Default(_, _)
 }
-// Guest.rs `export_signature`: failure inference's infallible rail is not
-// a second Component value. Keep genuinely fallible and diverging returns.
+// `export_signature`: failure inference's infallible rail is not a second
+// Component value. Keep genuinely fallible and diverging returns.
 fn sema_guest_export_value_type(return_type: Type?) -> Type? Never! {
     value :: return_type ?? return None
     if value == .Result(ok, err) && err == .Named(name) && name == "Never" {

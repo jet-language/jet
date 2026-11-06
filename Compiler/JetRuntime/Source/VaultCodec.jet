@@ -12,8 +12,8 @@ VAULT_CRYPTO_VERIFY_FAILED :: I64{1}
 VAULT_CRYPTO_KEY_REJECTED :: I64{2}
 VAULT_CRYPTO_LENGTH :: I64{3}
 VAULT_CRYPTO_UNAVAILABLE :: I64{4}
-// Rich CryptoEntropy.rs:9-20 tags project by variant NAME, never by ordinal.
-// Every richer case is represented; public VerifyFailed has no rich seed case.
+// Rich tags project by variant NAME, never by ordinal. Every richer case is
+// represented; public VerifyFailed has no rich seed case.
 fn vault_crypto_from_provider(kind: I64) -> I64 {
     if (kind == I64{4}) -> return VAULT_CRYPTO_OPEN_FAILED
     if (kind == I64{1} || kind == I64{2} || kind == I64{3} || kind == I64{5} || kind == I64{7}) -> return VAULT_CRYPTO_KEY_REJECTED
@@ -208,9 +208,9 @@ fn vault_payload_hash(payload: I64, length: I64, digest: I64, scratch: I64) {
     rt_text_store(wrapping(domain + I64{8}), I64{0})
 }
 
-// Historical pair codec: SecretsCrypto.rs:88-131. Wire buffers use the E4
-// raw-byte header privately (not exposed as UTF-8 Text). Pairs own a native
-// List<(Text,Text)> with the canonical 16-byte pair stride.
+// Historical pair codec. Wire buffers use the E4 raw-byte header privately (not
+// exposed as UTF-8 Text). Pairs own a native List<(Text,Text)> with the
+// canonical 16-byte pair stride.
 VAULT_PAIR_BYTES :: I64{16}
 fn vault_utf8_valid(data: I64, length: I64) -> Bool {
     at := I64{0}
@@ -358,9 +358,9 @@ fn vault_record_compare(left: I64, right: I64) -> I64 {
     if vault_unsigned_less(y, x) -> return I64{1}
     I64{0}
 }
-// SecretsCrypto.rs:878,886,919,950 use stable Rust sorts. The index merge is
-// stable even on invalid duplicate input; records/key buffers are never copied.
-// Caller lends two count-word scratch arrays; count is bounded by the codec.
+// The Rust original use stable Rust sorts. The index merge is stable even on
+// invalid duplicate input; records/key buffers are never copied. Caller lends
+// two count-word scratch arrays; count is bounded by the codec.
 fn vault_sorted_indices(data: I64, count: I64, records: Bool, first: I64, second: I64) -> I64 {
     at := I64{0}
     loop at < count {

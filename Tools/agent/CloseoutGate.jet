@@ -1,0 +1,182 @@
+#!/usr/bin/env jet
+// Milestone closeout gate: broad proof runs only on a frozen commit that a
+// review-ready milestone has closed out.
+// Usage (from the repository root):
+//   jet Tools/agent/CloseoutGate.jet check [MILESTONE]
+//   jet Tools/agent/CloseoutGate.jet open MILESTONE --by AGENT
+// `check` pins the head to the commit of an inherited ../source.manifest.json
+// (checked by Tools/agent/ProofSource.jet), or else to HEAD of a tree whose
+// only changes are Tower state writes. It then needs exactly one milestone,
+// or the one named (else $JET_CLOSEOUT_MILESTONE), that is review-ready or met
+// with a closeout token for that head, and prints
+// `CLOSEOUT TOKEN OK <milestone> <head>`. `open` records the token at the
+// frozen HEAD through Tower, then checks it. Any refusal prints
+// `closeout gate: <reason>` and exits 2.
+use {
+    files :: core.files
+    json :: core.encoding.json
+    process :: core.process
+    sys :: core.sys
+    term :: core.term
+}
+
+TOWER_STATE_PREFIX :: "Tools/tower/.tower/"
+
+fn run() {
+    args :: process.args()
+    repo :: repo_root()
+    if args.len() >= 1 && args.len() <= 2 && args[0] == "check" {
+        requested :: if args.len() == 2 -> args[1].copy() else -> env_or("JET_CLOSEOUT_MILESTONE", "")
+        return check(repo, requested)
+    }
+    if args.len() == 4 && args[0] == "open" && args[2] == "--by" && args[1] != "" && args[3] != "" {
+        head :: frozen_head(repo)
+        tower(repo, [String]{"milestone", "closeout", args[1], "--commit", head, "--by", args[3]})
+        return check(repo, args[1])
+    }
+    refuse("usage: jet Tools/agent/CloseoutGate.jet open MILESTONE --by AGENT | check [MILESTONE]")
+}
+
+fn refuse(reason: String) -[Exec, IO]> Never {
+    term.eprint("closeout gate: {reason}")
+    process.exit(2)
+}
+
+fn env_or(name: String, fallback: String) -[Env]> String Never! {
+    value :: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The checkout holding this script.
+fn repo_root() -[Env, Exec, FS, IO]> String Never! {
+    tool :: "/Tools/agent/CloseoutGate.jet"
+    script :: sys.executable()
+    if script.ends_with(tool) -> return script.removesuffix(tool)
+    dir := files.cwd() ?? "/"
+    loop {
+        if files.exists("{dir}{tool}") -> return dir
+        if dir == "/" || dir == "" -> return refuse("run from inside the Jet checkout (no Tools/agent/CloseoutGate.jet above the working directory)")
+        dir = files.dirname(dir)
+    }
+}
+
+// The trimmed stdout of a command run in the checkout; a failure refuses.
+fn output(repo: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
+    ran :: process.cmd(argv).cwd(repo).output_limit(67108864).run() ?? return refuse("{argv[0]} cannot start: {err}")
+    if ran.code != 0 || ran.signal != None -> return refuse("{argv.join(" ")} failed: {ran.errors.trim_end()}")
+    ran.output.trim().copy()
+}
+
+fn tower(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
+    argv := [String]{"node", "{repo}/Tools/tower/tower.mjs"}
+    loop arg in args -> &argv.push(arg.copy())
+    output(repo, argv)
+}
+
+fn check(repo: String, requested: String) -[Env, Exec, FS, IO, Time, Time.Wait]> () {
+    head :: pinned_head(repo) ?? frozen_head(repo)
+    listed :: json.parse(tower(repo, [String]{"milestone", "list", "--archived", "--json"})) ?? return refuse("tower milestone list is not JSON: {err}")
+    milestones :: if listed == .Array(items) -> items.copy() else -> [Dyn]{}
+    picked :: select_closeout(milestones, head, requested)
+    if picked.problem != "" -> return refuse(picked.problem)
+    print("CLOSEOUT TOKEN OK {picked.id} {head}")
+}
+
+// The commit an inherited ../source.manifest.json pins, once ProofSource.jet
+// confirms the checkout still holds its bytes. None without a manifest.
+fn pinned_head(repo: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
+    manifest :: "{files.dirname(repo)}/source.manifest.json"
+    if !files.exists(manifest) -> return None
+    text :: files.read(manifest) ?? return refuse("`{manifest}` cannot be read: {err}")
+    tree :: json.parse(text) ?? return refuse("`{manifest}` is not JSON: {err}")
+    commit :: text_field(tree, "commit")
+    ran :: process.cmd([String]{env_or("JET", "jet"), "{repo}/Tools/agent/ProofSource.jet", "check", repo, commit}).cwd(repo).run() ?? return refuse("the proof source check cannot start: {err}")
+    if ran.code != 0 || ran.signal != None -> return refuse(ran.errors.trim_end().removeprefix("proof-source: "))
+    Val(commit)
+}
+
+fn frozen_head(repo: String) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
+    changed :: non_tower_changes(output(repo, [String]{"git", "status", "--porcelain=v1", "--untracked-files=all"}))
+    if changed.len() > 0 {
+        shown :: if changed.len() > 20 -> changed[0..<20] else -> changed.copy()
+        return refuse("source tree is not frozen; commit or remove these changes before broad proof:\n{shown.join("\n")}")
+    }
+    output(repo, [String]{"git", "rev-parse", "HEAD"})
+}
+
+// `git status --porcelain=v1` lines outside Tower's own state directory.
+fn non_tower_changes(status: String) -> [String] Never! {
+    changed := [String]{}
+    loop line in status.split("\n") {
+        if line == "" -> next
+        path :: String.from_bytes_lossy(line.bytes()[3..<line.bytes().len()]).removeprefix("\"")
+        if !path.starts_with(TOWER_STATE_PREFIX) -> &changed.push(line.copy())
+    }
+    changed
+}
+
+// The milestone whose closeout token opens `head`: the requested one (it must
+// be eligible), else the single eligible one.
+fn select_closeout(milestones: [Dyn], head: String, requested: String) -> (id: String, problem: String) Never! {
+    eligible :: milestones.filter(milestone -> eligible(milestone, head)).map(milestone -> text_field(milestone, "id"))
+    if requested != "" {
+        if !milestones.any(milestone -> text_field(milestone, "id") == requested) -> return (id: "", problem: "unknown milestone {requested}")
+        if !eligible.contains(requested) -> return (id: "", problem: "milestone {requested} has no valid closeout token for source commit {head}")
+        return (id: requested.copy(), problem: "")
+    }
+    if eligible.len() == 1 -> return (id: eligible[0].copy(), problem: "")
+    if eligible.len() == 0 -> return (id: "", problem: "no review-ready milestone has a closeout token for source commit {head}")
+    (id: "", problem: "multiple closeout tokens match {head}; set JET_CLOSEOUT_MILESTONE to one of: {eligible.join(", ")}")
+}
+
+fn eligible(milestone: Dyn, head: String) -> Bool Never! {
+    status :: text_field(milestone, "status")
+    text_field(field(milestone, "closeout"), "sourceCommit") == head
+        && field(field(milestone, "progress"), "reviewReady") == .Bool(true)
+        && (status == "review-ready" || status == "met")
+}
+
+fn field(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+fn text_field(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+// --- tests ------------------------------------------------------------------
+
+fn fixture_milestone(id: String, commit: String) -> Dyn Never! {
+    Dyn.Object([String: Dyn]{
+        "id": Dyn.Text(id.copy()),
+        "status": Dyn.Text("review-ready"),
+        "progress": Dyn.Object([String: Dyn]{"reviewReady": Dyn.Bool(true)}),
+        "closeout": Dyn.Object([String: Dyn]{"sourceCommit": Dyn.Text(commit.copy())}),
+    })
+}
+
+#Test("the closeout gate ignores only Tower state writes") {
+    status :: " M Tools/tower/.tower/tower.json\n?? Tools/tower/.tower/.tower.json.tmp-1\n M Source/Main.rs\n?? tests/new_case.rs\n"
+    assert_eq(non_tower_changes(status), [String]{" M Source/Main.rs", "?? tests/new_case.rs"})
+}
+
+#Test("the closeout gate selects one review-ready token at the frozen commit") {
+    head :: "a".repeat(40)
+    picked :: select_closeout([Dyn]{fixture_milestone("stale", "b".repeat(40)), fixture_milestone("ready", head)}, head, "")
+    assert_eq(picked.id, "ready")
+}
+
+#Test("the closeout gate rejects missing, ambiguous and explicitly stale tokens") {
+    head :: "a".repeat(40)
+    assert_eq(select_closeout([Dyn]{}, head, "").problem, "no review-ready milestone has a closeout token for source commit {head}")
+    assert_eq(select_closeout([Dyn]{fixture_milestone("a", head), fixture_milestone("b", head)}, head, "").problem, "multiple closeout tokens match {head}; set JET_CLOSEOUT_MILESTONE to one of: a, b")
+    assert_eq(select_closeout([Dyn]{fixture_milestone("stale", "b".repeat(40))}, head, "stale").problem, "milestone stale has no valid closeout token for source commit {head}")
+    assert_eq(select_closeout([Dyn]{}, head, "gone").problem, "unknown milestone gone")
+}

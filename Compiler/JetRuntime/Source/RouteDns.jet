@@ -1,7 +1,7 @@
-// NetHTTP.rs:3528-4295 and DNSResolverPolicy.rs: the core.net DNS lookups.
-// Every failure is the Rust kernel's message text (Core classifies it). Waits
-// are blocking OS waits in slices of at most 10 ms, checking the task's
-// cancellation flag and the lookup deadline between slices, as the reference.
+// The core.net DNS lookups. Every failure is the Rust kernel's message text
+// (Core classifies it). Waits are blocking OS waits in slices of at most 10 ms,
+// checking the task's cancellation flag and the lookup deadline between slices,
+// as the reference.
 
 // Record40: owned owner text@0, type@8, class@16, rdata start@24, length@32.
 DNS_RECORD_BYTES :: I64{40}
@@ -937,7 +937,7 @@ fn dns_srv_new(priority: I64, weight: I64, port: I64, target: I64) -> I64 {
     jet_rt_string_drop(trap_word(wrapping(value + I64{24})))
     jet_rt_free(value, I64{32}, I64{8})
 }
-// NetHTTP.rs:603 "DNSSRV(priority=, weight=, port=, target=)".
+// "DNSSRV(priority=, weight=, port=, target=)".
 #Export(c) fn jet_rt_handle_show_jet_dns_srv(value: I64) -> I64 {
     text :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("DNSSRV(priority="))
@@ -1001,10 +1001,10 @@ fn dns_srv_at(server: I64, name: I64, milliseconds: I64, data_out: I64, length_o
     dns_srv_at(server, name, native, data_out, length_out, error)
 }
 
-// DNSResolverPolicy.rs + jet_net_dns_system_servers (Linux): every
-// "nameserver <ip>" of /etc/resolv.conf (text before '#', whitespace fields;
-// brackets trimmed; IPv4/IPv6 literals only) as "ip:53"/"[ip]:53", sorted
-// and deduplicated. Returns the count; `servers_out` owns the text buffer.
+// + jet_net_dns_system_servers (Linux): every "nameserver <ip>" of
+// /etc/resolv.conf (text before '#', whitespace fields; brackets trimmed;
+// IPv4/IPv6 literals only) as "ip:53"/"[ip]:53", sorted and deduplicated.
+// Returns the count; `servers_out` owns the text buffer.
 fn dns_system_servers(servers_out: I64) -> I64 {
     jet_rt_world_reject_uncontrolled(I64{1})
     trap_store(servers_out, I64{0})
@@ -1321,8 +1321,8 @@ fn dns_system_ip(name: I64, milliseconds: I64, family: I64, data_out: I64, lengt
 #Export(c) fn jet_net_dns_a_lookup(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_ip(name, milliseconds, I64{4}, data_out, length_out, error) }
 #Export(c) fn jet_net_dns_aaaa_lookup(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_system_ip(name, milliseconds, I64{6}, data_out, length_out, error) }
 
-// NetHTTP.rs:744-776 jet_net_dns_result: a lookup's String failure as the
-// canonical NetError, classified by the message as the reference does.
+// jet_net_dns_result: a lookup's String failure as the canonical NetError,
+// classified by the message as the reference does.
 fn dns_text_starts_with(text: I64, prefix: I64) -> Bool {
     rt_text_len(text) >= rt_text_len(prefix) && rt_text_equal_bytes(rt_text_data(text), rt_text_data(prefix), rt_text_len(prefix))
 }
@@ -1370,12 +1370,12 @@ fn dns_net_result(status: I64, name: I64, error: I64) -> I64 {
     I64{0}
 }
 
-// NetHTTP.rs:4084-4098: the NetError forms of the system TXT/PTR/SRV lookups.
+// The NetError forms of the system TXT/PTR/SRV lookups.
 #Export(c) fn jet_net_dns_txt(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_txt_lookup(name, milliseconds, data_out, length_out, error), name, error) }
 #Export(c) fn jet_net_dns_ptr(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_ptr_lookup(name, milliseconds, data_out, length_out, error), name, error) }
 #Export(c) fn jet_net_dns_srv(name: I64, milliseconds: I64, data_out: I64, length_out: I64, error: I64) -> I64 { dns_net_result(jet_net_dns_srv_lookup(name, milliseconds, data_out, length_out, error), name, error) }
 
-// NetHTTP.rs:4297-4311 and CAbiRoutes.rs:22469-22495: SRV field reads.
+// SRV field reads.
 #Export(c) fn jet_net_dns_srv_priority(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(value)) }
 #Export(c) fn jet_net_dns_srv_weight(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{8}))) }
 #Export(c) fn jet_net_dns_srv_port(value: I64) -> I64 { jet_int_owned_from_i64(trap_word(wrapping(value + I64{16}))) }

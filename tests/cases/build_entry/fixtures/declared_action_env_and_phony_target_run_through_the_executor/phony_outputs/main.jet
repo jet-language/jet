@@ -1,0 +1,27 @@
+fn build(b: Build) BuildError! {
+    #Impure("declare a phony action that claims an output") {
+        tc :: b.toolchain("native", "x86_64-linux")
+        signer :: b.signing("dev", "Developer")
+        announce :: b.action(
+            "announce",
+            [],
+            ["announce.txt"],
+            ["sh", "-c", "printf ran > announce.txt"],
+            ["Exec", "FS"],
+            tc,
+            [],
+            signer,
+            "generic",
+            [],
+            [],
+            [],
+            [],
+            [],
+            "phony"
+        )
+        app :: b.add_executable("app", ["main.jet"], [announce])
+        b.default(app)
+    }
+}
+
+fn run() {}

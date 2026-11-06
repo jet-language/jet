@@ -1,4 +1,8 @@
-Error [jet.UseCycle]: These files import each other in a circle
- Why: Jet loads every imported file before compiling, so imports can't loop
- Fix: Break the cycle: run.jet → a.jet → run.jet
-More: jet-lang.dev/e/E0604
+Error [jet.RelativeImportInPackage]: `use "a"` imports a file, but this file belongs to a package
+  --> tests/ui/inline_package_cycle/run.jet:2:5
+    |
+  2 | use "a"
+    |     ^^^
+ Why: The files of one package share one namespace, so they reach each other's names without imports; only loose files import files by path.
+ Fix: Remove the import and use the names directly, or import another package with `use <package>.[names]`.
+More: jet-lang.dev/e/E0623

@@ -1,0 +1,14 @@
+# tests/cffi.rs::cffi_raw_status_out_pointer_reads_only_on_success at tests/cffi.rs:2018; hand-port
+# Claim: a raw C out-pointer is read back only when C returns status zero; the failing call's scribbled bytes never become a Record (tests/cffi.rs:2109)
+# Fixture migrated: the Examples/features/lowlevel/native_c shape (deps store: c@"c", C source in c/store.c, `use store :: c.store`); the cc/ar/rustc steps are dropped because jet build compiles and links c/
+# Not ported: the generated-Rust asserts (`*mut super::__jet_Record`, no `Result<super::__jet_Record`, tests/cffi.rs:2087-2088); they read Rust output the native backend does not produce
+requires: tool:cc|gcc|clang
+fixture: cffi_raw_status_out_pointer_reads_only_on_success.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet build main.jet
+exit: 0 # tests/cffi.rs:2081 compile_with_path accepts the out-pointer; tests/cffi.rs:2104 the link succeeds
+step: built
+exit: 0
+stdout: = "70\nstatus 9\n" # tests/cffi.rs:2109 assert_eq!(stdout, "70\nstatus 9\n")

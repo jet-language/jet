@@ -1,0 +1,58 @@
+# Code suites (D-TEST-SUITE2=A): test.jet's `fn test` declares `t.suite("sizes", sizes_rows)`,
+# and `jet test --profile` runs that suite in its own child, which runs no #Test. Its TestRows
+# rows become a baseline under `.jet/test/<profile>/` that later runs are compared with. A plain
+# `jet test` skips the suite. The negative controls are a failing row, a repeated id, a panic,
+# a suite named twice and an unknown suite.
+fixture: fixtures/test_code_suites
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet test --capture=all
+cwd: {work}/app
+exit: 0
+stdout: ~ "1 passed, 0 failed" # fn test's t.run() runs the #Tests
+stderr: !~ "sizes" # a plain run skips the code suite
+step: jet test --profile sizes --capture=all
+cwd: {work}/app
+exit: 0
+stderr: ~ "jet test: profile `sizes`, run `sizes`" # the suite runs as its own child
+stderr: ~ "`sizes`: 3 rows recorded as the baseline `.jet/test/sizes/sizes.rows`" # the first run records the suite's rows
+stderr: ~ "`tests`: 1 rows recorded as the baseline `.jet/test/sizes/tests.rows`" # the #Tests run beside it
+file: app/.jet/test/sizes/sizes.rows ~ "size hello\tpassed" # a passing row
+file: app/.jet/test/sizes/sizes.rows ~ "slow\tskipped" # a skipped row
+file: app/.jet/test/sizes/sizes.rows ~ "suite env\tpassed" # the child gets JET and JET_TEST_SUITE_ROOT
+file: app/.jet/test/sizes/sizes.rows !~ "adds" # the suite's child runs no #Test
+step: jet test --profile sizes --capture=all
+cwd: {work}/app
+exit: 0
+stderr: ~ "`sizes`: 3 rows against `.jet/test/sizes/sizes.rows`: 0 lost, 0 changed, 0 new" # a later run compares
+copy: alt/untested.jet app/run.jet
+step: jet test --profile rows --capture=all
+cwd: {work}/app
+exit: 0
+stderr: !~ "E0601" # a package with no #Test still runs its code suite
+stderr: ~ "`sizes`: 3 rows recorded as the baseline `.jet/test/rows/sizes.rows`" # the suite ran alone
+copy: alt/failing.jet app/sizes.jet
+step: jet test --profile sizes --capture=all
+cwd: {work}/app
+exit: 1
+stderr: ~ "`sizes`: failed size hello: 30 B > 24 B" # a failing row shows its detail
+stderr: ~ "lost: size hello: was passed, now failed" # a baseline pass that fails now is lost
+copy: alt/stopping.jet app/sizes.jet
+step: jet test --profile sizes --capture=all
+cwd: {work}/app
+exit: 1
+stderr: ~ "failed size hello: duplicate row id" # a repeated id fails
+stderr: ~ "failed stopped:" # a suite that panics adds the failing row `stopped`
+stderr: ~ "out of disk" # with the panic's message
+stderr: ~ "changed: slow: was skipped, now missing" # rows after the panic are missing
+copy: alt/unknown-suite.jet app/package.jet
+step: jet check
+cwd: {work}/app
+exit: 1
+stderr: ~ "profile `sizes` names unknown suite `browser` (known: tests, sizes)" # jet check reads the code suites of test.jet
+stderr: ~ "E1215" # it is a package.jet shape error
+copy: alt/twice.jet app/test.jet
+step: jet test --profile sizes
+cwd: {work}/app
+exit: 1
+stderr: ~ "suite `tests` is declared twice: as the built-in suite of every #Test, and by" # both places are named

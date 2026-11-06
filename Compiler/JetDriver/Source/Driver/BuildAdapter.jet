@@ -100,8 +100,8 @@ impl JetDriverBuildAdapter.JetEvalBuildHostAdapter {
     }
 }
 
-// This rule bounds shared with the Rust reference: one tree file (SHA256.rs
-// `MAX_TREE_FILE_BYTES`) and one fetched resource (jet-net `MAX_FETCH_BYTES`).
+// This rule bounds shared with the Rust reference: one tree file and one
+// fetched resource (jet-net `MAX_FETCH_BYTES`).
 JET_DRIVER_BUILD_MAX_FILE_BYTES :: 536870912
 JET_DRIVER_BUILD_MAX_FETCH_BYTES :: 67108864
 // std::io::ErrorKind::NotFound as the reference's error text spells it.
@@ -121,9 +121,8 @@ fn jet_driver_build_input_text(args: [BuildSessionValue], index: Int) -> String?
     None
 }
 
-// The input services `build_session_call` hands back to its host
-// (runtime_bridge.rs `eval_program_build_input_method`), answered over the
-// host's raw transport. A host without one, and the plugin and legacy
+// The input services `build_session_call` hands back to its host, answered over
+// the host's raw transport. A host without one, and the plugin and legacy
 // importer services, keep the request: the caller refuses it.
 fn jet_driver_build_input_reply(inputs: JetDriverSharedBuildInputs?, http_inputs: JetDriverSharedBuildHTTPInputs?, network_declared: Bool, base_dir: String, method: String, args: [BuildSessionValue], span: Span) -[FS.Read, Net, Time.Wait]> BuildSessionReply {
     if method == "fetch" -> return jet_driver_build_fetch(inputs, http_inputs, network_declared, base_dir, args, span)
@@ -142,7 +141,7 @@ fn jet_driver_build_input_reply(inputs: JetDriverSharedBuildInputs?, http_inputs
     BuildSessionReply.HostRequest{method: method.copy(), args: args.copy()}
 }
 
-// dispatch.rs `split_rel`: the non-empty, non-`.` components.
+// `split_rel`: the non-empty, non-`.` components.
 fn jet_driver_build_split_rel(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
@@ -166,8 +165,8 @@ fn jet_driver_build_within(path: String, root: String) -> Bool Never! {
     path.starts_with("{root}/")
 }
 
-// dispatch.rs `checked_embed_path`: `relative` under `root`, every link
-// followed, still inside the real root. `None` when it names nothing.
+// `checked_embed_path`: `relative` under `root`, every link followed, still
+// inside the real root. `None` when it names nothing.
 fn jet_driver_build_checked_path(host: JetDriverSharedBuildInputs, root: String, relative: String) -[FS.Read]> JetDriverBuildPath? JetDriverBuildInputError! {
     real_root :: host.resolve(root) ?? return Err(err)
     if !real_root.exists -> return Err(JetDriverBuildInputError{message: JET_DRIVER_BUILD_NOT_FOUND})
@@ -177,8 +176,8 @@ fn jet_driver_build_checked_path(host: JetDriverSharedBuildInputs, root: String,
     Ok(Val(^real))
 }
 
-// dispatch.rs `segment_match_chars` over one pattern segment's characters
-// from `pi` and one name's characters from `ti`.
+// `segment_match_chars` over one pattern segment's characters from `pi` and one
+// name's characters from `ti`.
 fn jet_driver_build_segment_match(pattern: [String], pi: Int, text: [String], ti: Int) -> Bool Never! {
     if pi >= pattern.len() -> return ti >= text.len()
     head :: pattern[pi]
@@ -211,7 +210,7 @@ fn jet_driver_build_segment_match(pattern: [String], pi: Int, text: [String], ti
     ti < text.len() && text[ti] == head && jet_driver_build_segment_match(pattern, pi + 1, text, ti + 1)
 }
 
-// dispatch.rs `class_matches`: `[a-z]` ranges and single members.
+// `class_matches`: `[a-z]` ranges and single members.
 fn jet_driver_build_class(pattern: [String], start: Int, end: Int, needle: String) -> Bool Never! {
     index := start
     matched := false
@@ -233,14 +232,14 @@ fn jet_driver_build_characters(text: String) -> [String] Never! {
     out
 }
 
-// dispatch.rs `glob_segments_match`: `**` spans any number of components.
+// `glob_segments_match`: `**` spans any number of components.
 fn jet_driver_build_glob_match(pattern: [String], pi: Int, path: [String], qi: Int) -> Bool Never! {
     if pi >= pattern.len() -> return qi >= path.len()
     if pattern[pi] == "**" -> return jet_driver_build_glob_match(pattern, pi + 1, path, qi) || (qi < path.len() && jet_driver_build_glob_match(pattern, pi, path, qi + 1))
     qi < path.len() && jet_driver_build_segment_match(jet_driver_build_characters(pattern[pi]), 0, jet_driver_build_characters(path[qi]), 0) && jet_driver_build_glob_match(pattern, pi + 1, path, qi + 1)
 }
 
-// dispatch.rs `walk_find`: entries in name order, never through a link.
+// `walk_find`: entries in name order, never through a link.
 fn jet_driver_build_walk(host: JetDriverSharedBuildInputs, directory: String, logical: String, pattern: [String], depth: Int, max_depth: Int, out: &[String]) -[FS.Read]> String? {
     entries := host.entries(directory) ?? return Val(err.message)
     entries = loop fresh_item in entries -> fresh_item
@@ -258,7 +257,7 @@ fn jet_driver_build_walk(host: JetDriverSharedBuildInputs, directory: String, lo
     None
 }
 
-// dispatch.rs `check_literal_embed_path` for `b.find` (E0957).
+// `check_literal_embed_path` for `b.find` (E0957).
 fn jet_driver_build_find_path_problem(glob: String, span: Span) -> BuildSessionReply? Never! {
     if glob.starts_with("/") -> return Val(jet_driver_build_input_fail("E0957", "`find` glob must be relative", "an absolute glob reaches outside the project", "use a glob relative to this file's own directory", span))
     loop part in glob.split("/") {
@@ -267,9 +266,9 @@ fn jet_driver_build_find_path_problem(glob: String, span: Span) -> BuildSessionR
     None
 }
 
-// runtime_bridge.rs `b.find` -> dispatch.rs `eval_locked_find`/`find_glob`:
-// the sorted relative files the glob matches below the build file's
-// directory, each one readable within the tree-file bound.
+// `b.find` -> `eval_locked_find`/`find_glob`: the sorted relative files the
+// glob matches below the build file's directory, each one readable within the
+// tree-file bound.
 fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
     if args.len() != 1 -> return jet_driver_build_input_fail("E3502", "build plan is invalid: `b.find` requires exactly one glob", "`fn build` must return one deterministic typed graph whose handles all belong to that build", "fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph", span)
     raw :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0957", "`find` glob must be a string literal", "a computed glob can't be audited at build time, so the compiler can't tell which file it reads", "pass the glob inline, e.g. `find(\"content/**/*.jet\")`", span)
@@ -278,7 +277,7 @@ fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, arg
     walk_what :: "`find` can't walk `{raw}`"
     walk_fix :: "check that every directory matched by the glob can be read"
     segments :: jet_driver_build_split_rel(glob)
-    // dispatch.rs `static_glob_prefix`: the leading components with no glob.
+    // `static_glob_prefix`: the leading components with no glob.
     prefix := [String]{}
     loop segment in segments {
         if segment == "**" || segment.contains("*") || segment.contains("?") || segment.contains("{{") || segment.contains("[") -> break
@@ -314,8 +313,8 @@ fn jet_driver_build_find(host: JetDriverSharedBuildInputs, base_dir: String, arg
     BuildSessionReply.Value{value: BuildSessionValue.List{values: ^values}}
 }
 
-// runtime_bridge.rs `b.embed` -> dispatch.rs `eval_build_embed`: one locked
-// relative UTF-8 file below the build file's directory.
+// `b.embed` -> `eval_build_embed`: one locked relative UTF-8 file below the
+// build file's directory.
 fn jet_driver_build_embed(host: JetDriverSharedBuildInputs, base_dir: String, args: [BuildSessionValue], span: Span) -[FS.Read]> BuildSessionReply {
     relative :: jet_driver_build_input_text(args, 0) ?? return jet_driver_build_input_fail("E0956", "``b.embed` requires a path string` isn't supported by the current evaluator yet", "The canonical evaluator doesn't cover this construct yet", "Report this unsupported construct as a compiler bug", span)
     escapes := args.len() != 1 || relative.starts_with("/")

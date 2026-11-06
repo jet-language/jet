@@ -1,5 +1,4 @@
 // Payload-free browser rows relayed by jet dev.
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:3
 use {
     fs :: std.fs
     std.fs.[File, OpenOptions]
@@ -16,25 +15,16 @@ use {
     core.encoding.[Dyn]
 }
 
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:16
 ROW_LIMIT :: 4096
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:17
 ENVELOPE_LIMIT :: 512
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:18
 REQUEST_SCHEMA :: "jet.browser.request.v1"
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:19
 RELAY_ACTION :: "browser.relay"
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:22
 struct Row { class: String; duration_ns: U64; start_ns: U64; symbol: String }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:30
 struct Capture { rows: [Row]; sources: [Source]; source_map: String?; truncated: Bool }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:38
 struct Source { path: String; sha256: String; symbols: [(String, String)] }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:44
 struct Relay { file: Mutex<File>; nonce: String; path: OSPath; rows: Mutex<Usize>; started: Instant }
 
 impl Relay {
-    // Rust: crates/jet-devserver/src/BrowserTrace.rs:53
     fn new(manifest: String) -> Self Err! {
         // GATE #4494: owner-only atomic file creation, native locks and clock.
         supported()
@@ -59,9 +49,7 @@ impl Relay {
         file.flush() ?? return .Err("cannot flush browser trace relay: {err}")
         return Self { file: Mutex.new(^file), nonce: ^nonce, path: ^path, rows: Mutex.new(0), started: Instant.now() }
     }
-    // Rust: crates/jet-devserver/src/BrowserTrace.rs:106
     fn nonce(self: Self) -> String { return self.nonce }
-    // Rust: crates/jet-devserver/src/BrowserTrace.rs:110
     fn record(self: &Self, body: &[U8]) RecordError! {
         if body.len() > ENVELOPE_LIMIT -> return .Err(.Oversized)
         body :: std.str.from_utf8(body) ?? return .Err(.Malformed)
@@ -101,19 +89,13 @@ impl Relay {
         return ()
     }
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:177
 impl Relay.Drop {
-    // Rust: crates/jet-devserver/src/BrowserTrace.rs:178
     fn drop(self: &Self) { _ :: fs.remove_file(self.path) }
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:184
 #Error
 enum RecordError { Malformed; Oversized; Unavailable }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:190
 fn read(pid: U32) -> Capture Err! { supported()?; return read_with_process_state(pid, process_state(pid)) }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:196
  enum ProcessState { Alive(String); Dead; Unknown }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:202
 fn read_with_process_state(pid: U32, process: ProcessState) -> Capture Err! {
     // GATE #4494: descriptor-backed no-follow open and native metadata ownership.
     path :: relay_path(pid)
@@ -159,11 +141,8 @@ fn read_with_process_state(pid: U32, process: ProcessState) -> Capture Err! {
     }
     return Capture { rows: ^rows, sources: ^sources, source_map: ^source_map, truncated: truncated }
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:287
 fn relay_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-browser-trace-{pid}.relay") }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:291
 fn request_path(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-browser-trace-{pid}.request") }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:295
 fn request(pid: U32) Err! {
     supported()
     started :: if process_state(pid) == {
@@ -180,7 +159,6 @@ fn request(pid: U32) Err! {
     file.flush() ?? return .Err("cannot flush browser trace request: {err}")
     return ()
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:318
 fn take_request() -> Bool Err! {
     supported()
     pid :: std.process.id()
@@ -195,14 +173,11 @@ fn take_request() -> Bool Err! {
     if !valid -> return .Err("browser trace request belongs to a stale process session")
     return true
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:341
 fn cancel_request(pid: U32) { _ :: fs.remove_file(request_path(pid)) }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:345
 fn supported() Err! {
     if selected_os() == "linux" || selected_os() == "android" -> return ()
     return .Err("browser trace relay requires verified process and file ownership")
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:356
 fn secure_read(path: OSPath, limit: U64, label: String) -> String Err! {
     link :: fs.symlink_metadata(path) ?? return .Err("{label} is unavailable")
     if !link.file_type().is_file() -> return .Err("{label} is not a regular file")
@@ -222,9 +197,7 @@ fn secure_read(path: OSPath, limit: U64, label: String) -> String Err! {
     if (U64{raw.len()}) > limit -> return .Err("{label} exceeds its limit")
     return ^raw
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:400
 fn sources_from_manifest(manifest: String) -> [Source] Err! { return identity_from_manifest(manifest)?._0 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:404
 fn identity_from_manifest(manifest: String) -> ([Source], String?) Err! {
     key :: "\"traceMap\": \""
     start :: manifest.find(key).map((index) -> index + key.len()) ?? return .Err("web manifest has no compiler trace map")
@@ -241,7 +214,6 @@ fn identity_from_manifest(manifest: String) -> ([Source], String?) Err! {
     }
     return (_0: ^sources, _1: ^source_map)
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:430
 fn encode_sources(sources: [Source]) -> String {
     lines := [String]{}
     loop source in sources {
@@ -251,7 +223,6 @@ fn encode_sources(sources: [Source]) -> String {
     lines.sort()
     return lines.join("\n")
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:450
 fn decode_sources(text: String) -> [Source] Err! {
     sources := [Source]{}
     symbols := [(String, String, String)]{}
@@ -289,19 +260,16 @@ fn decode_sources(text: String) -> [Source] Err! {
     }
     return ^sources
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:513
 fn number(value: String?) -> U64 RecordError! {
     value :: value ?? return .Err(.Malformed)
     return U64.parse(value) ?? return .Err(.Malformed)
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:520
 fn relay_status(line: String, action: String) -> Dyn Err! {
     value :: parse(line) ?? return .Err("browser trace relay record is malformed")
     object :: object_map(value)
     if object.get("schema").and_then(json_str) != .Val(STATUS_SCHEMA) || object.get("action").and_then(json_str) != .Val(action) || object.get("ok") != .Val(.Bool(true)) || object.get("reports") != .Val(.Array(_)) || object.contains_key("status") -> return .Err("browser trace relay record is not a shared status")
     return ^value
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:534
 fn relay_row(line: String) -> (U64, U64, String, String) Err! {
     value :: relay_status(line, "browser.relay.row")
     object :: object_map(value)
@@ -312,7 +280,6 @@ fn relay_row(line: String) -> (U64, U64, String, String) Err! {
     if (class != "event" && class != "wasm" && class != "dom") || symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all((b) -> b == 95 || b == 36 || b.is_ascii_alphanumeric()) -> return .Err("browser trace relay row is malformed")
     return (_0: start_ns, _1: duration_ns, _2: ^class, _3: ^symbol)
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:569
 fn relay_header(header: String) -> (U32, String, [Source], String?) Err! {
     value :: relay_status(header, RELAY_ACTION)
     object :: object_map(value)
@@ -327,7 +294,6 @@ fn relay_header(header: String) -> (U32, String, [Source], String?) Err! {
     }).transpose()
     return (_0: recorded_pid, _1: ^started, _2: ^sources, _3: ^source_map)
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:603
 fn nonce() -> String {
     // GATE #4494: randomized native hash state, process ID and system clock.
     state :: RandomState.new()
@@ -342,7 +308,6 @@ fn nonce() -> String {
     }
     return ^out
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:620
 fn process_start_marker(pid: U32) -> String? {
     if selected_os() == "linux" || selected_os() == "android" {
         stat :: fs.read_to_string("/proc/{pid}/stat").ok()
@@ -352,7 +317,6 @@ fn process_start_marker(pid: U32) -> String? {
     }
     return None
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:636
 fn object_map(value: Dyn) -> [String:Dyn] Err! {
     fields :: if value == {
         .Object(fields) -> fields
@@ -360,7 +324,6 @@ fn object_map(value: Dyn) -> [String:Dyn] Err! {
     }
     return fields.iter().map(((_0: key, _1: value)) -> (key.copy(), value.copy())).collect()
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:643
 fn process_state(pid: U32) -> ProcessState {
     if selected_os() == "linux" || selected_os() == "android" {
         path :: OSPath.from("/proc/{pid}")
@@ -369,7 +332,6 @@ fn process_state(pid: U32) -> ProcessState {
     }
     return .Unknown
 }
-// Rust: crates/jet-devserver/src/BrowserTrace.rs:661
 fn unhex(text: String) -> String Err! {
     if text.len() % 2 != 0 -> return .Err("browser trace relay source encoding is malformed")
     digit :: (byte) -> {

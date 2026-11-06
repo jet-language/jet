@@ -2,8 +2,8 @@
 //
 // This is the Jet implementation of `jet_foundation::RecordCodec`. Both
 // implementations write the same bytes for the same record, and a conformance
-// test (`tests/record_conformance.rs`) compares them. The layout, with every
-// integer an unsigned LEB128 `uvarint` in its minimal form:
+// test compares them. The layout, with every integer an unsigned LEB128
+// `uvarint` in its minimal form:
 //
 //   "JETR"                         magic, 4 bytes
 //   uvarint format                 RECORD_FORMAT (1)
@@ -453,7 +453,6 @@ fn record_put_value(out: &[U8], table: RecordStringTable, value: RecordValue) Ne
 }
 
 // Stable scalar-position ordering by section id.
-// Rust: crates/jet-foundation/src/RecordCodec.rs::encode_record
 fn record_section_order(ids: [Int]) -> [Int] Never! {
     order := [Int]{}
     loop index in 0..<ids.len() -> &order.push(index)
@@ -486,7 +485,6 @@ fn record_section_order(ids: [Int]) -> [Int] Never! {
 // Encode a record. Sections may be passed in any order; they are written in
 // ascending id order. A repeated section id, a repeated map key, an integer
 // outside i64, or a digest that is not 32 bytes is a problem, not bytes.
-// Rust: crates/jet-foundation/src/RecordCodec.rs::encode_record
 fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeResult Never! {
     problems := [String]{}
     canonical := [RecordSection]{}
@@ -632,9 +630,8 @@ fn record_reader_failure(problem: String) -> RecordReaderResult Never! {
     RecordReaderResult{reader: None, problem: Val(problem)}
 }
 
-// Verify the checksum and framing and index every section. Element payloads
-// are not decoded until asked for.
-// Rust: crates/jet-foundation/src/RecordCodec.rs::RecordReader::open
+// Verify the checksum and framing and index every section. Element payloads are
+// not decoded until asked for.
 fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
     body_end :: bytes.len() - RECORD_CHECKSUM_BYTES
@@ -696,7 +693,6 @@ fn record_open_schema(bytes: [U8], schema: String) -> RecordReaderResult Never! 
     opened
 }
 
-// Rust: crates/jet-foundation/src/RecordCodec.rs::RecordReader::slices
 fn record_section_index(reader: RecordReader, id: Int) -> Int? Never! {
     reader.section_positions.get(id)
 }

@@ -1,4 +1,5 @@
 import { basename, join, resolve } from 'node:path';
+import { writeHistoryAt } from './history-shards.mjs';
 import { withLock } from './lock.mjs';
 import { MAX_JSON_BYTES, withDirectoryAuthority } from './paths.mjs';
 
@@ -89,13 +90,17 @@ export function hasPendingRepairAt(root, heldBackups = null) {
 
 export const hasPendingRepair = (dataDir) => checkedJournal(dataDir) !== null;
 
-export function beginRepairTransaction(dataDir, { liveBackup, historyBackup, manifestHash }, heldRoot = null, heldBackups = null) {
+// `historyLayout: 'shards'` records that the archive was sharded before the
+// transaction (history-shards.mjs), so recovery writes the backup back as
+// shards; a single-file archive leaves the field out.
+export function beginRepairTransaction(dataDir, { liveBackup, historyBackup, historyLayout, manifestHash }, heldRoot = null, heldBackups = null) {
   withBackups(dataDir, (_root, backups) => {
     backups.writeAtomic(JOURNAL, JSON.stringify({
       schema: SCHEMA,
       manifestHash,
       liveBackup: backupName(basename(liveBackup), 'tower-'),
       historyBackup: backupName(basename(historyBackup), 'history-'),
+      ...(historyLayout === 'shards' ? { historyLayout } : {}),
     }, null, 2) + '\n');
     backups.sync();
   }, heldRoot, heldBackups);
@@ -133,10 +138,15 @@ export function recoverPendingRepairLocked(dataDir, heldRoot = null, heldBackups
         throw new Error(`tower: unknown repair transaction journal schema at ${file}`);
       const liveName = backupName(journal.liveBackup, 'tower-');
       const historyName = backupName(journal.historyBackup, 'history-');
+      if (journal.historyLayout !== undefined && journal.historyLayout !== 'shards')
+        invalid(`tower: unknown history layout in transaction journal at ${file}`);
       const liveBackup = backups.read(liveName, MAX_JSON_BYTES, `tower: repair backup is unsafe: ${join(join(dataDir, 'backups'), liveName)}`);
       const historyBackup = backups.read(historyName, MAX_JSON_BYTES, `tower: repair backup is unsafe: ${join(join(dataDir, 'backups'), historyName)}`);
       root.writeAtomic('tower.json', liveBackup);
-      root.writeAtomic('history.json', historyBackup);
+      // A crash may have left any shard half way, so every shard is rewritten.
+      if (journal.historyLayout === 'shards')
+        writeHistoryAt(root, JSON.parse(historyBackup.toString('utf8')), 'shards', { rewriteAll: true });
+      else root.writeAtomic('history.json', historyBackup);
       root.sync();
       backups.remove(JOURNAL, journalStat);
       backups.sync();

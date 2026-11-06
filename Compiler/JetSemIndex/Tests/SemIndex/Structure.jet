@@ -145,12 +145,12 @@ fn semindex_structure_test_nested_caller_restores() {
     assert_eq(db.calls[2].caller, "outer")
 }
 
-// Original lib.rs819 fixture; Driver must load this exact source path checked.
+// Driver must load this exact source path checked.
 fn semindex_structure_original_explicit_slots_fixture() -> String Never! { "Examples/features/basics/default_refs.jet" }
 fn semindex_structure_original_explicit_slots_assertions(index: SemIndex) Never! {
     loop node in index.structural_nodes() -> assert(node.parent == None || node.slot != "root")
 }
-// Original tests/semindex.rs1107–1161, including the negative checked source.
+// Including the negative checked source.
 fn semindex_structure_original_unified_loops_source() -> String Never! {
     "fn run() {{\n    loop item in [1, 2, 3], 2 {{\n        print(item)\n    }}\n    loop cursor in 0..<1 {{\n        print(cursor)\n    }}\n}}\n"
 }
@@ -181,7 +181,7 @@ fn semindex_structure_original_unified_loops_assertions(index: SemIndex, diagnos
     loop diagnostic in diagnostics { if diagnostic.code == "E0107" && diagnostic.what.contains("cursor") -> failed = true }
     assert(failed, "state binding must end with the loop")
 }
-// Original tests/semindex.rs1164–1189. Same path for both checked versions.
+// Same path for both checked versions.
 fn semindex_structure_original_ancestry_before() -> String Never! { "fn score(n: Int) -> Int {{ return n + 1 }}\nfn run() {{ print(score(1)) }}\n" }
 fn semindex_structure_original_ancestry_after() -> String Never! { "fn score(n: Float, bonus: Float) -> Float {{ return n * bonus }}\nfn run() {{ print(score(1.0, 2.0)) }}\n" }
 fn semindex_structure_original_ancestry_assertions(before: SemIndex, after: SemIndex) Never! {

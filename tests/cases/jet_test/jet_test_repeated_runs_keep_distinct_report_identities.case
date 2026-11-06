@@ -1,0 +1,45 @@
+# #6035 c54 (was #3057): repeated fresh `jet test` runs of one file, filtered
+# and unfiltered, each publish their own immutable evidence report. The run,
+# not only the source, names the report, so a repeat never collides with a
+# report an earlier run published (the E2105 of #3057). Text, JSON and the
+# typed evidence agree on the expected failure and the unexpected pass.
+fixture: fixtures/package
+env: NO_COLOR=1
+step: jet test --json --serial --filter=known {root}/Examples/features/tooling/expected_fail.jet
+exit: 0
+json: stdout doc $.ok = true
+json: stdout doc $.test.expectedFailures = 1
+json: stdout doc $.test.unexpectedPasses = 0
+stderr: !~ "E2105" # no report collision (#3057)
+stderr: !~ "history:" # the report was published
+capture: filtered_first stdout doc $.evidence.identity.report
+step: jet test --json --serial --filter=known {root}/Examples/features/tooling/expected_fail.jet
+exit: 0
+stderr: !~ "E2105" # a repeat never collides (#3057)
+stderr: !~ "history:" # the repeat's report was published
+capture: filtered_repeat stdout doc $.evidence.identity.report
+cap:filtered_repeat: != "{cap:filtered_first}" # a repeat is its own report
+step: jet test --json --serial {root}/Examples/features/tooling/expected_fail.jet
+exit: 1
+json: stdout doc $.ok = false
+json: stdout doc $.test.passed = 1
+json: stdout doc $.test.expectedFailures = 1
+json: stdout doc $.test.unexpectedPasses = 1
+json: stdout doc $.evidence.evidence has {"claim":"known bug remains expected-fail","kind":"unit","outcome":"failed","expectation":"expected_failure"}
+json: stdout doc $.evidence.evidence has {"claim":"fixed bug still marked","kind":"unit","outcome":"passed","expectation":"expected_failure"}
+json: stdout doc $.evidence.evidence has {"claim":"ordinary pass","kind":"unit","outcome":"passed","expectation":"ordinary"}
+stderr: ~ "UNEXPECTED-PASS" # the human report moves to stderr under --json
+stderr: !~ "E2105" # no report collision (#3057)
+stderr: !~ "history:" # the unfiltered report was published
+capture: full_first stdout doc $.evidence.identity.report
+cap:full_first: != "{cap:filtered_first}" # the unfiltered run is its own report
+cap:full_first: != "{cap:filtered_repeat}" # the unfiltered run is its own report
+step: jet test --show-default --capture=all --serial {root}/Examples/features/tooling/expected_fail.jet
+exit: 1
+stdout: ~ "1 passed, 0 failed, 0 skipped, 1 expected-fail, 1 unexpected-pass" # the text tally agrees with the JSON
+stderr: !~ "E2105" # no report collision (#3057)
+stderr: !~ "history:" # the text run's report was published
+entries: .jet/evidence = 4 # one immutable report per run
+file: .jet/evidence/{cap:filtered_first}.json is-file
+file: .jet/evidence/{cap:filtered_repeat}.json is-file
+file: .jet/evidence/{cap:full_first}.json is-file

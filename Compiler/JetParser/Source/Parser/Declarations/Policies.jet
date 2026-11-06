@@ -12,6 +12,7 @@ use {
         Program,
         Span,
         Stmt,
+        marker_registered_site_bound,
         policy_key_parse,
         type_name,
     ]
@@ -93,46 +94,6 @@ fn parser_unsafe_obligation_policy(state: &JetParserState, marker: Marker, scope
     None
 }
 
-fn parser_policy_retired_memory(state: &JetParserState, name: String, span: Span, limit: Int?) -> Bool {
-    replacement :: if name == {
-        "no_alloc" -> "`-[!Mem.Alloc]>`"
-        "zero_rc" -> "`-[!Mem.Rc]>`"
-        "arena_bounded" -> if limit == .Val(bytes) -> "`-[!Mem.Alloc(above: {bytes})]>`" else -> "`-[!Mem.Alloc(above: N)]>`"
-        else -> {
-            return false
-        }
-    }
-    parser_add_fatal_code(&state, "E0355", span, "`{name}` is a retired memory policy", "memory floors are rights-tree prohibitions, not policy-marker arguments", "write {replacement} on the function signature")
-    true
-}
-
-// Rust `retired_memory_policy_marker_diagnostic`: the first argument naming a
-// retired memory policy (`no_alloc`, `zero_rc`, `arena_bounded(N)`) ends the
-// declaration. True when one was reported.
-fn parser_policy_retired_marker(state: &JetParserState, marker: Marker) -> Bool {
-    loop index in 0..<marker.args.len() {
-        expr :: parser_marker_expression(marker, index) ?? next
-        if expr == .Ident(name, span, _) {
-            if parser_policy_retired_memory(&state, name, span, None) -> return true
-        } else if expr == .Call(call, _) {
-            limit := Int?{None}
-            if call.args.len() == 1 {
-                argument :: call.args[0]
-                if argument.label != None || argument.spread -> next
-                if argument.expr == .Int(value, _, _, _, _) {
-                    limit = Val(value)
-                } else {
-                    next
-                }
-            } else if call.args.len() > 1 {
-                next
-            }
-            if parser_policy_retired_memory(&state, call.name, call.name_span, limit) -> return true
-        }
-    }
-    false
-}
-
 // Rust `CallablePolicyChain::parse(..).is_ok()`: every argument is a policy
 // call (`retry(3)`) whose own arguments are plain positional values.
 fn parser_callable_policy_marker(marker: Marker) -> Bool Never! {
@@ -160,7 +121,6 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
         label :: parser_marker_label(marker, index)
         name := label
         name_span := marker.span
-        limit := Int?{None}
         mode := PolicyValue?{None}
         if label == "copies" || label == "sentries" {
             variant :: if expr == {
@@ -177,35 +137,22 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
                 }
             }
         } else {
-            if expr == {
-                .Ident(written, span, _) -> {
-                    name = written
-                    name_span = span
-                }
-                .Call(call, _) -> {
-                    if call.args.len() != 1 || call.args[0].label != None {
-                        parser_marker_shape_error(&state, marker)
-                        return None
-                    }
-                    if call.args[0].expr == {
-                        .Int(value, _, _, _, _) -> limit = Val(value)
-                        else -> {
-                            parser_marker_shape_error(&state, marker)
-                            return None
-                        }
-                    }
-                    name = call.name
-                    name_span = call.name_span
-                }
-                else -> {
-                    parser_marker_shape_error(&state, marker)
-                    return None
-                }
+            if expr == .Ident(written, span, _) {
+                name = written
+                name_span = span
+            } else {
+                parser_marker_shape_error(&state, marker)
+                return None
             }
         }
-        if parser_policy_retired_memory(&state, name, name_span, limit) -> return None
         key :: policy_key_parse(name) ?? {
-            parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
+            // A registered rule outside policy inheritance stays at its own
+            // site, so the refusal points there instead of at the policy keys.
+            if marker_registered_site_bound(name) {
+                parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a scoped policy", "authority markers stay attached to the audited operation or declaration; policy scope cannot widen them", "use `#{name}` at its sound site")
+            } else {
+                parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
+            }
             return None
         }
         value :: if key == {

@@ -2,7 +2,7 @@
 // The bootstrap unit includes that kernel beside these helpers. No graph
 // validation, policy, defaulting or key recipe is implemented at this boundary.
 use {
-    jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry]
+    jet_foundation.[Diagnostic, DiagnosticStructured, DiagnosticBuildError, DiagnosticErrorDetails, DiagnosticErrorField, DiagnosticErrorSpan, Span, TComptimeEnumArg, TComptimeField, TComptimeReport, TComptimeValue, Type, diagnostic_from_registry, diagnostic_registry_row]
     core.build.[BuildGraph, BuildGraphAction, BuildGraphFile]
     jet_build_session.[BuildSessionDiagnostic, BuildSessionValue, build_session_error_projection]
 }
@@ -88,7 +88,20 @@ fn jet_eval_build_session_output(value: BuildSessionValue) -> TComptimeValue Nev
 }
 
 fn jet_eval_build_session_diagnostic(error: BuildSessionDiagnostic) -> Diagnostic Never! {
-    diagnostic := diagnostic_from_registry(error.code, Val(Span{start: error.start, end: error.end}), error.what, error.why, error.fix)
+    span :: Val(Span{start: error.start, end: error.end})
+    // A project build rule (`b.error`) reports under its own code, which
+    // build_session_project_error kept out of the compiler's E/W range,
+    // through the build-rule row's metadata. Its prose is the project's,
+    // reported as written.
+    if diagnostic_registry_row(error.code) == None {
+        rule := diagnostic_from_registry("E3530", span, error.what, error.why, error.fix)
+        rule.code = error.code
+        rule.what = error.what
+        rule.why = error.why
+        rule.fix = error.fix
+        return rule
+    }
+    diagnostic := diagnostic_from_registry(error.code, span, error.what, error.why, error.fix)
     if error.error == .Val(typed) {
         projection :: build_session_error_projection(typed)
         diagnostic.structured = Val(DiagnosticStructured.BuildError{report: DiagnosticBuildError{
@@ -151,7 +164,10 @@ fn jet_eval_build_field_present(data: TComptimeValue, name: String) -> TComptime
 }
 
 fn jet_eval_build_failed_diagnostic(value: TComptimeValue, fallback: Span) -> Diagnostic? Never! {
-    if value == .Failed(.Told(error)) {
+    if value == .Failed(.Told(told)) {
+        // An error union member keeps its record as the union case's payload.
+        error := told
+        if told == .Enum(_, _, cases) && cases.len() == 1 -> error = cases[0].value
         if error == .Struct(name, _) {
             if name != "Err" -> return None
         } else { return None }

@@ -1,0 +1,40 @@
+# The `jet prove` front (D-PROVE-REPLAY1=A, D-RECORD-SPELL1=D): each bad input is
+# refused with its exact message and exit class before any producer runs.
+fixture: prove_front_refuses_bad_input_before_any_producer.fixture
+requires: os:unix
+symlink: "{work}/real" linked
+step: jet prove a.jet --capture --replay=run.jetproof-replay
+exit: 2
+stdout: empty
+stderr: ~ "`jet prove` accepts at most one of `--capture` / `--replay`" # the refusal names both flags
+step: jet prove a.jet --save=one --unsave=two
+exit: 2
+stderr: ~ "`jet prove` accepts at most one of `--save` / `--unsave`" # the refusal names both flags
+step: jet prove a.jet --save
+exit: 2
+stderr: ~ "`--save` needs a replay artifact id or path" # a missing value is a usage error
+step: jet prove a.jet --replay
+exit: 2
+stderr: ~ "`--replay` needs a `.jetproof-replay` artifact path" # a missing value is a usage error
+step: jet prove a.jet --bogus
+exit: 2
+stderr: ~ "Unknown `jet prove` flag `--bogus`" # the refusal names the flag
+step: jet prove a.jet real/a.jet
+exit: 2
+stderr: ~ "needs exactly one file, package, or workspace target" # one target per run
+step: jet prove empty/notes.txt
+exit: 1
+stderr: ~ "Proof target `empty/notes.txt` is not a .jet file" # a file target must be Jet source
+step: jet prove linked/a.jet
+exit: 1
+stderr: ~ "must not pass through symlink" # no ancestor of the target may be a link
+step: jet prove empty --json
+exit: 1
+stdout: ~ "\"action\":\"prove\"" # one status line owned by prove
+stdout: ~ "\"code\":\"E2105\"" # the target error code
+stdout: ~ "contains no .jet files" # the folder has nothing to prove
+stderr: empty
+step: jet prove . --replay=run.jetproof-replay
+exit: 1
+stderr: ~ "selected package resolved 2 runnable targets: a.jet, real/a.jet" # members are sorted and the link is skipped
+file: run.jetproof-replay absent

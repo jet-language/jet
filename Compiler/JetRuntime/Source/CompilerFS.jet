@@ -13,8 +13,8 @@ fn compiler_fs_error(kind: I64, operation: I64, path: I64, code: I64, cause: I64
     rt_text_store(error, value)
     I64{0}
 }
-// JSONDyn.rs:2-22 jet_std::io_error_at: only these std ErrorKinds have their
-// own IOError arm. AlreadyExists, Unsupported and the rest are Other.
+// jet_std::io_error_at: only these std ErrorKinds have their own IOError arm.
+// AlreadyExists, Unsupported and the rest are Other.
 fn compiler_fs_errno(operation: I64, path: I64, code: I64, error: I64) -> I64 {
     kind :: if {
         (code == I64{2}) -> HOST_IO_KIND_NOT_FOUND
@@ -158,34 +158,62 @@ fn compiler_fs_write_open(path: I64, data: I64, length: I64, error: I64, flags: 
     if (failure < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -failure, error)
     I64{1}
 }
+// mkdir of the NUL-terminated prefix name[0, at): 1 when made, 0 when a directory is
+// already there, else the negative errno (-2 when a parent is missing).
+fn compiler_fs_mkdir_prefix(name: I64, at: I64, scratch: I64) -> I64 {
+    saved :: rt_text_byte(wrapping(name + at))
+    rt_text_put(wrapping(name + at), I64{0})
+    result := host_call(I64{83}, name, I64{511}, I64{0})
+    if (result < I64{0}) {
+        // create_dir_all accepts existing directories, not existing files.
+        #Unsafe("the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes") {
+            stat :: os_stat_facts_i64(I64{4}, name, scratch)
+            if (stat >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}) -> result = I64{0}
+        }
+    } else {
+        result = I64{1}
+    }
+    rt_text_put(wrapping(name + at), saved)
+    result
+}
+// An existing directory costs one stat. Otherwise mkdir walks back from the whole path to
+// the deepest prefix that exists, then forward making the rest: mkdir of a name that is
+// already there takes its parent's directory lock, so creating every prefix from the root
+// would contend with every other creator under the same ancestors.
 #Export(c) fn jet_files_create_dirs_os(path: I64, error: I64) -> I64 {
     if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
     length :: rt_text_len(path)
     if (length == I64{0}) -> return I64{1}
     name :: fd_c_path(path)
     scratch :: jet_rt_alloc(I64{128}, I64{8})
-    at := I64{1}
-    failure := I64{0}
-    loop at <= length {
-        if (at == length || rt_text_byte(wrapping(name + at)) == I64{47}) {
-            saved :: rt_text_byte(wrapping(name + at))
-            rt_text_put(wrapping(name + at), I64{0})
-            result :: host_call(I64{83}, name, I64{511}, I64{0})
-            if (result < I64{0}) {
-                // create_dir_all accepts existing directories, not existing files.
-                #Unsafe("the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes") {
-                    stat :: os_stat_facts_i64(I64{4}, name, scratch)
-                    if (stat < I64{0} || (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) != I64{16384}) -> failure = result
-                }
+    present := false
+    #Unsafe("name is NUL-terminated and scratch lends 128 writable portable stat-fact bytes") {
+        present = os_stat_facts_i64(I64{4}, name, scratch) >= I64{0} && (rt_text_word(wrapping(scratch + I64{16})).bit_and(I64{61440})) == I64{16384}
+    }
+    result := I64{1}
+    if !present {
+        at := length
+        loop {
+            result = compiler_fs_mkdir_prefix(name, at, scratch)
+            if (result != I64{-2}) -> break
+            back := at - I64{1}
+            loop back > (I64{0}) && rt_text_byte(wrapping(name + back)) != (I64{47}) {
+                back -= I64{1}
             }
-            rt_text_put(wrapping(name + at), saved)
-            if (failure < I64{0}) -> break
+            if (back <= I64{0}) -> break
+            at = back
         }
-        at += I64{1}
+        loop result >= (I64{0}) && at < length {
+            at += I64{1}
+            loop at < length && rt_text_byte(wrapping(name + at)) != (I64{47}) {
+                at += I64{1}
+            }
+            result = compiler_fs_mkdir_prefix(name, at, scratch)
+        }
     }
     jet_rt_free(scratch, I64{128}, I64{8})
     fd_c_path_drop(name, path)
-    if (failure < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -failure, error)
+    if (result < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -result, error)
     I64{1}
 }
 #Export(c) fn jet_files_read_link_os(path: I64, output: I64, error: I64) -> I64 {
@@ -290,9 +318,9 @@ fn compiler_fs_time_ns(seconds: I64, nanos: I64) -> I64 {
     scaled :: if (seconds > I64{9223372036}) -> I64{9223372036854775807} else if (seconds < I64{-9223372036}) -> I64{-9223372036854775808} else -> seconds * I64{1000000000}
     if (scaled > I64{9223372036854775807} - nanos) -> I64{9223372036854775807} else -> scaled + nanos
 }
-// FileHandles.rs:571-616 jet_fs_stat_row from StatFacts128 and BirthTime24:
-// kind, size, mode, readonly, device, inode, links, owner, size_on_disk,
-// modified_ns, changed_ns, created present, created_ns. Shared by every stat.
+// jet_fs_stat_row from StatFacts128 and BirthTime24: kind, size, mode,
+// readonly, device, inode, links, owner, size_on_disk, modified_ns, changed_ns,
+// created present, created_ns. Shared by every stat.
 fn compiler_fs_stat_row(facts: I64, birth: I64, output: I64, len: I64) {
     mode :: rt_text_word(wrapping(facts + I64{16}))
     bits :: mode.bit_and(I64{61440})

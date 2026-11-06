@@ -4,7 +4,6 @@ use {
     core.sys.target.[selected_family]
 }
 
-// Rust: crates/jet-devserver/src/LiveInspect.rs:915
 #Test("render_uses_only_bounded_runtime_facts") {
     snapshot :: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\"}}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false}},{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}}],\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}],\"effects\":{{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}}}"
     rendered :: render(snapshot)
@@ -13,7 +12,6 @@ use {
     assert(rendered.contains("depth 4/4"))
     assert(!rendered.contains("payload"))
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:925
 #Test("runtime_window_is_optional_and_strictly_shaped") {
     snapshot :: (runtime: String) -> "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
     assert_eq(runtime_window(snapshot("")).unwrap(), .None)
@@ -54,7 +52,6 @@ use {
     assert(decode_raw_snapshot(trailing, .None).unwrap_err().contains("trailing bytes"))
     assert(decode_raw_snapshot(bytes[0..bytes.len() - 1].to_vec(), .None).unwrap_err().contains("truncated"))
 }
-// Rust: crates/jet-devserver/src/LiveInspect.rs:947
 #Test("reader_rejects_symlinks_and_open_permissions") {
     if selected_family() != "unix" -> return
     // GATE #4494: real filesystem symlink, process id and permission primitives.

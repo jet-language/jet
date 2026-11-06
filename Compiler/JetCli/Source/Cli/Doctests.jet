@@ -118,9 +118,10 @@ fn jet_cli_doctest_line_span(source: String, line: Int) -> Span Never! {
 
 // The outcome wire of the claim of `test` in `doctests`, settled: each framed
 // rendering compared with its claimed value, the frames removed from its
-// output. A mismatch fails the claim with E2901, unless `update` records the
-// rewrite of a one-line rendering in `rewrites` instead.
-fn jet_cli_doctest_settle(wire: String, doctests: JetCLIDoctestFile, test: JetCLIDocTest, color: Bool, update: Bool, rewrites: &[JetCLIDocExpectation]) -> String Err! {
+// output. A mismatch fails the claim with E2901 and is added to `mismatches`,
+// unless `update` records the rewrite of a one-line rendering in `rewrites`
+// instead.
+fn jet_cli_doctest_settle(wire: String, doctests: JetCLIDoctestFile, test: JetCLIDocTest, color: Bool, update: Bool, rewrites: &[JetCLIDocExpectation], mismatches: &[JetCLITestStop]) -> String Err! {
     parts := jet_cli_native_test_wire_parts(wire)
     pieces :: parts.stdout.split(JET_CLI_DOCTEST_OPEN).to_list()
     output := pieces[0]
@@ -151,10 +152,12 @@ fn jet_cli_doctest_settle(wire: String, doctests: JetCLIDoctestFile, test: JetCL
             &rewrites.push(JetCLIDocExpectation{expression: expectation.expression, expected: actual, line: expectation.line})
             next
         }
-        &diagnostics.push(diagnostic_from_registry(row.code, Val(jet_cli_doctest_line_span(doctests.source, expectation.line)), "Doctest output mismatch. Expected: `{expectation.expected}` Got: `{actual}`", row.why, row.fix))
+        message :: "Doctest output mismatch. Expected: `{expectation.expected}` Got: `{actual}`"
+        &mismatches.push(JetCLITestStop{code: row.code.copy(), message: message.copy(), file: doctests.shown.copy(), line: U32.from_int(expectation.line) ?? U32{0}})
+        &diagnostics.push(diagnostic_from_registry(row.code, Val(jet_cli_doctest_line_span(doctests.source, expectation.line)), message, row.why, row.fix))
     }
     if diagnostics.len() > 0 {
-        parts.flags = parts.flags.bit_and(6)
+        parts.flags = parts.flags.bit_and(14)
         parts.stderr = "{parts.stderr}{diagnostic_render_all(doctests.shown, doctests.source, diagnostics, color)}"
     }
     parts.stdout = output
@@ -187,13 +190,20 @@ fn jet_cli_doctest_rewrite(source: String, rewrites: [JetCLIDocExpectation]) -> 
     stdout :: "setup\n{JET_CLI_DOCTEST_OPEN}4{JET_CLI_DOCTEST_CLOSE}"
     wire :: jet_cli_native_test_wire(JetNativeTestWire{flags: 1, name: "doctest at a.jet:1", stdout: stdout, stderr: ""})
     rewrites := [JetCLIDocExpectation]{}
-    settled :: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, false, &rewrites) ?? panic("a well-formed wire settles")
+    mismatches := [JetCLITestStop]{}
+    settled :: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, false, &rewrites, &mismatches) ?? panic("a well-formed wire settles")
     parts :: jet_cli_native_test_wire_parts(settled) ?? panic("a settled wire parses")
     assert_eq(parts.flags, 0)
     assert_eq(parts.stdout, "setup\n")
     assert(parts.stderr.contains("E2901"))
     assert(parts.stderr.contains("Expected: `5` Got: `4`"))
-    updated :: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, true, &rewrites) ?? panic("a well-formed wire settles")
+    assert_eq(mismatches.len(), 1)
+    assert_eq(mismatches[0].code, "E2901")
+    assert_eq(mismatches[0].message, "Doctest output mismatch. Expected: `5` Got: `4`")
+    assert_eq(mismatches[0].file, "a.jet")
+    assert_eq(mismatches[0].line, U32{2})
+    updated :: jet_cli_doctest_settle(wire, doctests, doctests.tests[0], false, true, &rewrites, &mismatches) ?? panic("a well-formed wire settles")
+    assert_eq(mismatches.len(), 1)
     assert_eq((jet_cli_native_test_wire_parts(updated) ?? panic("an updated wire parses")).flags, 1)
     assert_eq(jet_cli_doctest_rewrite(source, rewrites), "/// ```jet\n/// 2 + 2 // => 4\n/// ```\n")
 }

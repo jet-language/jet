@@ -1,8 +1,8 @@
-// Source/LSP/Check.rs:312–410. Canonical Driver query/cache/receipt owners.
-// Snapshot is the actual host-authorized source view for bench.jet/cone-bench.jet.
-// #4483: elapsed Duration.ns currently has the Core Int range; full Rust Instant
-// Duration u128-microsecond range requires Core's exact wide elapsed provider.
-// Counters inherit Driver's Int/target-usize range gate, not a local cache.
+// Canonical Driver query/cache/receipt owners. Snapshot is the actual
+// host-authorized source view for bench.jet/cone-bench.jet. #4483: elapsed
+// Duration.ns currently has the Core Int range; full Rust Instant Duration
+// u128-microsecond range requires Core's exact wide elapsed provider. Counters
+// inherit Driver's Int/target-usize range gate, not a local cache.
 use {
     lsp_bench_time :: core.time
     lsp_bench_path :: core.files.runtime.kernel_path_components
@@ -80,9 +80,9 @@ fn lsp_run_bench(snapshot: JetDriverQuerySnapshot, source: String, rounds: Int, 
     }
 }
 
-// Source/LSP/Check.rs:273–279: read_dir failure => zero, entry errors =>
-// skip, end-of-stream => stop. Count by extension only, even for directories.
-// Explicit consuming closes ignore errors just as Rust ReadDir/File drop does.
+// read_dir failure => zero, entry errors => skip, end-of-stream => stop. Count
+// by extension only, even for directories. Explicit consuming closes ignore
+// errors just as Rust ReadDir/File drop does.
 fn lsp_doctor_transcript_count(transcripts: OSPath) -[FS]> Int Never! {
     count := 0
     options :: lsp_doctor_native.OpenOptions{nofollow: false, cloexec: true, open_reparse_point: false, read: None, write: None, share_mode: None, custom_flags: None}
@@ -109,11 +109,11 @@ fn lsp_doctor_transcript_count(transcripts: OSPath) -[FS]> Int Never! {
     count
 }
 
-// Source/LSP/Check.rs:242–308. Real language pipeline, never provider mocks.
-// #4494 / RuntimeD375 gate: canonical retained_descriptor.exists(OSPath)
-// has a published native ABI but its real descriptor body remains gated.
-// Native enumeration uses Directory.entries()/DirectoryEntries.next() and
-// consuming close; Core's UTF-8 String/scandir API is NOT equivalent.
+// Real language pipeline, never provider mocks. #4494 / RuntimeD375 gate:
+// canonical retained_descriptor.exists(OSPath) has a published native ABI but
+// its real descriptor body remains gated. Native enumeration uses
+// Directory.entries()/DirectoryEntries.next() and consuming close; Core's UTF-8
+// String/scandir API is NOT equivalent.
 fn lsp_run_doctor(snapshot: JetDriverQuerySnapshot, manifest_dir: OSPath) -[IO, FS, Env]> {
     print("jet self lsp doctor")
     print("--------------")

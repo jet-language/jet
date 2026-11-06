@@ -789,7 +789,7 @@ fn civil_round(value: Int, unit: String, increment: Int, mode: String) -> Int Ne
     if mode == "floor" -> return floor * quantum
     if mode == "ceil" -> return ceil * quantum
     // Round in the exact intermediate domain, then clamp the final Duration.
-    // Date differences can exceed i64 nanoseconds before rounding (Time.rs:257).
+    // Date differences can exceed i64 nanoseconds before rounding.
     twice :: (if remainder < 0 -> -remainder else -> remainder) * 2
     half_trunc :: mode == "half_trunc" || mode == "halfTrunc" || mode == "half-toward-zero"
     half_expand :: mode == "half_expand" || mode == "halfExpand" || mode == "half-away-from-zero"
@@ -1684,8 +1684,8 @@ impl DateTime.Decode {
     }
 }
 // The Dyn.DateTime payload decodes as itself; RFC 3339 text decodes as
-// Dyn.parse_datetime reads it (Foundation Dyn.rs DynDateTime.parse_rfc3339):
-// the instant at its fixed offset, in the zone that offset names.
+// Dyn.parse_datetime reads it (Foundation DynDateTime.parse_rfc3339): the
+// instant at its fixed offset, in the zone that offset names.
 impl ZonedDateTime.Decode {
     fn decode(tree: Dyn) -> ZonedDateTime [FieldError]! {
         if tree == {
@@ -1698,7 +1698,7 @@ impl ZonedDateTime.Decode {
         }
     }
 }
-// The decode diagnostic's name for a Dyn variant (DynKind.rs dyn_kind).
+// The decode diagnostic's name for a Dyn variant (dyn_kind).
 fn civil_dyn_kind(tree: Dyn) -> String Never! {
     if tree == {
         .Null -> "null"

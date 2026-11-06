@@ -1,7 +1,7 @@
-// Core.rs:674-688 and TestingShared.rs: core.testing's physical leaves.
-// Evidence classification, sanitation and lifecycle ordering stay in Core.
+// core.testing's physical leaves. Evidence classification, sanitation and
+// lifecycle ordering stay in Core.
 
-// Core.rs:674/684: the thread's one pending testing failure (TestScope.jet).
+// The thread's one pending testing failure (TestScope.jet).
 #Export(c) fn jet_testing_record_failure(message: I64, detail: I64) { jet_rt_testing_record_failure(message, detail) }
 #Export(c) fn jet_testing_clear_failure() { jet_rt_testing_clear_failure() }
 
@@ -39,8 +39,8 @@ fn testing_evidence_new(ok: I64, text: I64, missing: I64) -> I64 {
         jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
 }
 
-// TestingShared.rs:32 std::fs::read_to_string: NotFound is `missing`; every
-// other failure (including invalid UTF-8 and std's NUL refusal) is not.
+// std::fs::read_to_string: NotFound is `missing`; every other failure
+// (including invalid UTF-8 and std's NUL refusal) is not.
 #Export(c) fn jet_testing_evidence_read_raw(path: I64) -> I64 {
     if testing_has_nul(path) -> return testing_evidence_new(I64{0}, jet_rt_string_builder_new(), I64{0})
     scratch :: jet_rt_alloc(I64{8}, I64{8})
@@ -100,7 +100,7 @@ fn testing_thread_id() -> I64 {
     id
 }
 
-// TestingShared.rs:43: std::process::id() and format!("{:?}", ThreadId).
+// std::process::id() and format!("{:?}", ThreadId).
 #Export(c) fn jet_testing_temp_facts_raw() -> I64 {
     thread :: jet_rt_string_builder_new()
     jet_rt_string_builder_push(thread, rt_static_text("ThreadId("))
@@ -138,9 +138,9 @@ fn testing_thread_id() -> I64 {
     jet_rt_string_eq(rt_text_word(wrapping(left + I64{24})), rt_text_word(wrapping(right + I64{24})))
 }
 
-// TestingShared.rs:50: std::env::temp_dir() (TMPDIR from the process
-// environment, else /tmp) joined with `name` (Path::push: an absolute name
-// replaces; otherwise one separator unless the base is empty or ends in /).
+// std::env::temp_dir() (TMPDIR from the process environment, else /tmp) joined
+// with `name` (Path::push: an absolute name replaces; otherwise one separator
+// unless the base is empty or ends in /).
 #Export(c) fn jet_testing_temp_join_raw(name: I64) -> I64 {
     host_arguments_require()
     base := host_environment_value(rt_static_text("TMPDIR"))
@@ -192,7 +192,7 @@ fn testing_remove_new(ok: I64, missing: I64, cause: I64) -> I64 {
         jet_rt_string_eq(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16})))
 }
 
-// TestingShared.rs:64 std::fs::remove_dir_all over the opaque path bytes.
+// std::fs::remove_dir_all over the opaque path bytes.
 #Export(c) fn jet_testing_temp_remove_raw(data: I64, length: I64) -> I64 {
     path :: rt_text_copy(data, length)
     result :: if testing_has_nul(path) -> I64{-2147483648} else -> files_remove_dir_all(path)
@@ -274,7 +274,7 @@ fn testing_create_dir_all(path: I64, length: I64) -> I64 {
     second
 }
 
-// TestingShared.rs:75 std::fs::create_dir_all over the opaque path bytes.
+// std::fs::create_dir_all over the opaque path bytes.
 #Export(c) fn jet_testing_temp_create_raw(data: I64, length: I64) -> I64 {
     owned :: rt_text_copy(data, length)
     nul :: testing_has_nul(owned)
@@ -286,8 +286,8 @@ fn testing_create_dir_all(path: I64, length: I64) -> I64 {
     testing_create_new(I64{1}, jet_rt_string_builder_new())
 }
 
-// TestingShared.rs:82 text[start..end]: Core passes in-bounds char-boundary
-// byte offsets as U64 words.
+// text[start..end]: Core passes in-bounds char-boundary byte offsets as U64
+// words.
 #Export(c) fn jet_testing_text_window_raw(text: I64, start: I64, end: I64) -> I64 {
     first :: jet_int_owned_to_i64(start)
     if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}

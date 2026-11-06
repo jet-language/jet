@@ -3,7 +3,7 @@
 use {
     jet_foundation.[Diagnostic, Span, policy_key_name]
     jet_pkg_model.[
-        EffectBudgetWitness, Manifest, PackageEffects, PackageFacts, PackagePolicy,
+        ClaimsGrade, EffectBudgetWitness, Manifest, PackageEffects, PackageFacts, PackagePolicy,
         ProvenanceRequirement, pkg_effect_enforce,
     ]
 }
@@ -29,34 +29,39 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
     blocks :: [String]{"grants: {{ \"dep\": [Net] }}", "policy: {{ trust: {{ default: prompt }} }}", "policy: {{ providers: {{ nix: {{ registry: \"nixpkgs\" }} }} }}"}
     loop block in blocks {
         diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n")
-        assert_eq(diagnostic.code, "E1206")
+        assert_eq(diagnostic.code, "E1215")
         assert(diagnostic.why.contains("authority:"))
         assert(diagnostic.fix.contains("authority:"))
     }
 }
 
 #Test("policy_keeps_unsafe_mode_and_package_floors") {
-    facts :: PackageFacts.parse("\nname: \"demo\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Forbid, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }}\nauthority: {{ deny: [Mem.Alloc] }}\n", "package.jet") ?? panic("policy floors")
+    facts :: PackageFacts.parse("\nname: \"demo\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Deny, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }}\nauthority: {{ deny: [Mem.Alloc] }}\n", "package.jet") ?? panic("policy floors")
+    // `unsafe:` is a package-only field: `.Deny` is an empty path list beside
+    // the source policy declarations, never one of them.
+    assert_eq(facts.policy.unsafe_paths, Val([String]{}))
     keys := [String]{}
     loop declaration in facts.policy.declarations -> &keys.push(policy_key_name(declaration.key))
-    assert_eq(keys, [String]{"unsafe", "gc", "explicit_units", "copies", "sentries"})
+    assert_eq(keys, [String]{"gc", "explicit_units", "copies", "sentries"})
     assert_eq(facts.authority.deny, Val([String]{"Mem.Alloc"}))
     assert_eq(facts.authority.trust, None)
     assert(facts.authority.providers.is_empty())
     retired :: [String]{"policy: {{ no_alloc: true }}", "policy: {{ zero_rc: true }}", "policy: {{ arena_bounded: 65536 }}"}
     loop block in retired {
         diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\n{block}\n")
-        assert_eq(diagnostic.code, "E1206")
+        assert_eq(diagnostic.code, "E1215")
         assert(diagnostic.why.contains("authority"))
         assert(diagnostic.fix.contains("authority"))
     }
 }
 
-#Test("retired_effect_budget_names_authority_holds") {
+// `effects:` is not a Package field: the unknown-field refusal names the one
+// `authority:` block among the fields to use.
+#Test("effect budget field is unknown and names the authority block") {
     diagnostic :: s1_authority_manifest_error("name: \"demo\"\nversion: \"0.1.0\"\neffects: {{ deny: [Net] }}\n")
-    assert_eq(diagnostic.code, "E1206")
-    assert(diagnostic.why.contains("authority"))
-    assert(diagnostic.fix.contains("authority"))
+    assert_eq(diagnostic.code, "E1215")
+    assert(diagnostic.what.contains("effects:"))
+    assert(diagnostic.fix.contains("`authority:`"))
 }
 
 #Test("e1220_keeps_dependency_and_effect_provenance_after_key_move") {
@@ -102,4 +107,25 @@ fn s1_authority_manifest_error(text: String) -> Diagnostic {
         .Err(_) -> {}
         .Ok(_) -> panic("weak policy must not tighten strong")
     }
+}
+
+#Test("a member inherits or raises its root's claims floor and never lowers it") {
+    root := PackagePolicy.default()
+    root.claims_min = Val(ClaimsGrade.Examples(2))
+    unset :: PackagePolicy.default()
+    raised := PackagePolicy.default()
+    raised.claims_min = Val(ClaimsGrade.Proved)
+    lowered := PackagePolicy.default()
+    lowered.claims_min = Val(ClaimsGrade.Examples(1))
+    inherited :: root.member_claims_floor(unset) ? found -> found ! error -> panic("an unset member inherits: {error.message}")
+    assert_eq(inherited, Val(ClaimsGrade.Examples(2)))
+    tightened :: root.member_claims_floor(raised) ? found -> found ! error -> panic("a member may raise the floor: {error.message}")
+    assert_eq(tightened, Val(ClaimsGrade.Proved))
+    if root.member_claims_floor(lowered) == {
+        .Err(error) -> assert(error.message.contains("cannot weaken from `examples(2)` to `examples(1)`"))
+        .Ok(_) -> panic("a member must not lower its root's floor")
+    }
+    // A root with no floor leaves each member its own.
+    own :: unset.member_claims_floor(lowered) ? found -> found ! error -> panic("no root floor: {error.message}")
+    assert_eq(own, Val(ClaimsGrade.Examples(1)))
 }

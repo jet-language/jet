@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // ABI-only L9 proof: actual Jet body kernels from an explicit Jet-only runtime
 // object/archive (KEY/jet_runtime_jet.o, not startup-bearing jet_runtime.pack.o).
-// The delivered-only rail is scripted in check-http-body.c. This does not prove Core
-// head/transport integration; that belongs to the cutover.
+// check-http-body.c publishes real stops on a control it entered. This does not
+// prove Core head/transport integration; that belongs to the cutover.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,9 +22,12 @@ function record(name, result, ok) {
   if (!ok) failures.push(name);
 }
 const program = join(out, "http-body.hosted");
+// The runtime imports jet_rt_fault_report, which Jet's linker writes into each
+// image; this platform link takes it from the shared report source.
+const faultReport = faultReportObject(mkdtempSync(join(out, "fault-report-")));
 const link = spawnSync(nativeCCompiler, [
   "-std=c11", "-Wall", "-Wextra", "-Werror", join(root, "Compiler/JetRuntime/Tests/check-http-body.c"),
-  object, "-Wl,--wrap=jet_rt_session_propagate", "-lpthread", "-ldl", "-lm", "-o", program,
+  object, faultReport, "-lpthread", "-ldl", "-lm", "-o", program,
 ], { cwd: root, encoding: "utf8", timeout: 120000, maxBuffer: 1 << 24 });
 writeFileSync(join(out, "link.log"), `${link.stdout ?? ""}${link.stderr ?? ""}`);
 record("link", link, link.status === 0 && !link.error && link.signal === null);

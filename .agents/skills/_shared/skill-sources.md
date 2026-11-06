@@ -8,9 +8,9 @@ Source keys:
 
 - `R` — `.agents/skills/<name>/SKILL.md`.
 - `T` — `Tools/tower/skills/<name>/SKILL.md`.
-- `M` — `/home/nate/.omp/agent/managed-skills/<name>/SKILL.md`.
+- `M` — `$HOME/.omp/agent/managed-skills/<name>/SKILL.md`.
 - `H` — host plugin or cache copy under `$HOME/.claude` or `$HOME/.codex`.
-- `G` — `/home/nate/.agents/skills/<name>/SKILL.md`.
+- `G` — `$HOME/.agents/skills/<name>/SKILL.md`.
 - `A` — advertised in the audited runtime catalog, not proof of current invocation behavior; `F` — filesystem-backed entry.
 
 ### Entry map
@@ -55,6 +55,7 @@ Source keys:
 | A+F | R | `lessons-learned` | keep | Peer-language lineage, regrets, or do-not-repeat research | Convert peer failure to Jet risk and a guard such as an invariant, card, or ballot. |
 | A+F | M | `milestone-burndown` | disable | Card-first closure, milestone sweep, or milestone verification | Preserve the global installation; Jet uses owner-guide closure law through `tower-burndown`. |
 | A+F | R | `mine-for-jet` | keep | Mine a repository, video, article, paper, docs site, or discussion | Capture claims and evidence, cross-check Jet state, and preserve syntax, API, UX, and tooling details. |
+| F | R | `mine-for-jet-v2` | keep | Deep state-first mining of named sources with exhaustive micro and macro coverage and review before publication | Split each source into bounded segments with a concept ledger; `scripts/check_coverage.mjs` must exit 0 before hand-in. |
 | A+F | R | `mission-audit` | keep | Mission, philosophy, or language-experience alignment | Score beginner defaults, expert control, safety, diagnostics, batteries, and tooling. |
 | F | R | `orchestration` | keep | Dispatch, waves, worktrees, receipts, integration, recovery, or card closure | Apply the shared contract through bounded briefs, disjoint ownership, focused proof, and immediate Tower closure. |
 | A+F | R | `persona-audit` | keep | Persona status, practical use, push, pull, or development feel | Use fresh personas, representative runs, and concrete push/pull evidence. |
@@ -100,4 +101,4 @@ Source keys:
 
 The canonical custom skill directories are `.agents/skills` and `Tools/tower/skills`; each agent host is configured outside this repository to load them and to exclude the four disabled logical names. The canonical ELI5 files override same-named managed copies; do not name-ignore ELI5 itself. Leave global settings and managed, installed-plugin, vendor, and cache sources untouched. Canonical in-repository Tower sources are editable when the owner requests their maintenance.
 
-Check the effective name-to-file mapping with the installed host's real loader after discovery changes. The source checker only validates the inventory and source constraints; it does not prove routing behavior or enforce write permissions. Unmatched host catalogs have no Jet-specific route.
+Check the effective name-to-file mapping with the installed host's real loader after discovery changes. `jet Tools/agent/SkillRules.jet` only validates this inventory against the skill directories and checks skill text against the `AGENTS.md` laws it names; it does not prove routing behavior or enforce write permissions. Unmatched host catalogs have no Jet-specific route.

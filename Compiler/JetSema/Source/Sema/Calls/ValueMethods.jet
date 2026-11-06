@@ -188,11 +188,11 @@ fn sema_value_method_source_arg(value: TExpr) -> TCallArg Never! {
     TCallArg{value: value, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
 }
 
-// Preserve the old seed's method_calls.rs:4287-4288:
-// materialize the Read receiver first, then the eager reason, with the same
-// owned TCallArg flags. Only this existing view passes those evaluated copies
-// to its canonical source body's move parameters; it does not move the user
-// place or establish a general Read-checked call to a move parameter.
+// Preserve the old seed's: materialize the Read receiver first, then the eager
+// reason, with the same owned TCallArg flags. Only this existing view passes
+// those evaluated copies to its canonical source body's move parameters; it
+// does not move the user place or establish a general Read-checked call to a
+// move parameter.
 fn sema_value_method_option_or_err(receiver: Expr, receiver_value: TExpr, inner: Type, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     why :: sema_value_method_argument(args[0], "or_err", 0, Type.String, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     updated_args := args
@@ -245,9 +245,8 @@ fn sema_value_method_outcome_read(receiver: Expr, method: String, method_span: S
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(notes, expected, environment, program, &diagnostics)}
 }
 
-// Rust `decimal_method_return` / `fraction_method_return` (jet-foundation
-// Numeric.rs:281-308), lowered as `handle_method_op` does
-// (subset/handles.rs:235-253) to one precise-method operation. Neither
+// Rust `decimal_method_return` / `fraction_method_return` (jet-foundation),
+// lowered as `handle_method_op` does to one precise-method operation. Neither
 // owner has declared argument types (`builtin_method_arg_types`), so the
 // arguments are checked as written; the receiver is read.
 fn sema_value_method_precise_result(owner: String, method: String, argc: Int) -> Type? {
@@ -305,10 +304,21 @@ fn sema_call_try_value_method(receiver: Expr, receiver_value: TExpr, method: Str
     owner := sema_value_method_owner(receiver_value.ty)
     if row.lowering == BuiltinMethodLowering.Atomic && scopes.transaction_wall_depth > 0 {
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_error("E0041", span, "`Atomic` cannot be used inside `#Transact`", "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics", "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together"))
+        &diagnostics.push(sema_error("E0752", span, "`Atomic` cannot be used inside `#Transact`", "`Shared<T>` is the lock-guarded family for multi-value transactions; `Atomic<T>` is one lock-free scalar and has no transaction commit semantics", "move the atomic operation outside `#Transact`, or use `Shared<T>` when several values must commit together"))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     labels_valid := sema_value_method_check_labels(method, args, &diagnostics)
+    // `a.pow(b)` across float widths is the same E0109 as the operator, over
+    // both operands, not a parameter mismatch on `b`.
+    if method == "pow" && args.len() == 1 && (receiver_value.ty == Type.Float || receiver_value.ty == Type.Float32) {
+        probe_diagnostics := [Diagnostic]{}
+        if sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) == .Val(exponent) {
+            if sema_expr_pow_widths_mixed(receiver_value.ty, exponent.ty) {
+                &diagnostics.push(sema_expr_pow_width_mismatch(Span{start: receiver_value.span.start, end: expr_span(args[0].expr).end}))
+                return SemaMethodSpecialCheck{handled: true, value: None}
+            }
+        }
+    }
     typed := [TExpr]{}
     params := [SemaCallParam]{}
     loop (index, argument) in args {

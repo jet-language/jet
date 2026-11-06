@@ -47,6 +47,11 @@ fn provider_remote_test_outside(dep: InRepoDep) -> String? {
     // `fn run` inside a comment or string never counts.
     assert(!provider_file_has_top_level_run("// fn run()\nfn lib() {{}}\n"))
     assert(!provider_file_has_top_level_run("fn lib() {{ s :: \"fn run()\" }}\n"))
+    // The colon spelling `run: fn` is the same entry point.
+    assert(provider_file_has_top_level_run("run: fn() {{}}\n"))
+    assert(!provider_file_has_top_level_run("m: module {{ run: fn() {{}} }}\n"))
+    assert(!provider_file_has_top_level_run("lib: fn() {{ s :: \"run: fn()\" }}\n"))
+    assert(!provider_file_has_top_level_run("Shape.run: fn(self) {{}}\n"))
 }
 
 #Test("provider remote revision allowlist rejects option injection") {

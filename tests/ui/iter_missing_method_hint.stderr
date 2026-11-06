@@ -12,8 +12,8 @@ Error [jet.UnknownFunction]: `Iter` has no method `get`
     |
   8 |     _ :: parts.get(0)
     |                ^^^
- Why: Check the method name on this type
- Fix: Call `.to_list()` first
+ Why: `Iter` is a one-pass source; `get` needs a materialized list, so collection consumes the source and allocates the list
+ Fix: Materialize it first with `.to_list()`; this consumes the source and allocates a list
 More: jet-lang.dev/e/E0102
 
 Error [jet.UnknownFunction]: `Widget` has no method `get`

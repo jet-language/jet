@@ -1,7 +1,7 @@
-// The offline syntax dictionary's queries (crates/jet-cli Syntax/dictionary.rs
-// and the syntax leaf of Explain.rs `lookup`) over SyntaxDictionaryData.jet.
-// Shared with the Jetpack unit: `jetpack explain <token>` answers from the
-// same one table (Rust jetpack used `Syntax::lookup` and `Explain::lookup`).
+// The offline syntax dictionary's queries (crates/jet-cli and the syntax leaf
+// of `lookup`) over SyntaxDictionaryData.jet. Shared with the Jetpack unit:
+// `jetpack explain <token>` answers from the same one table (Rust jetpack used
+// `Syntax::lookup` and `Explain::lookup`).
 use jet_foundation.[DiagnosticExplanation]
 
 // ASCII lowercase (Rust `to_ascii_lowercase`).
@@ -38,8 +38,15 @@ fn jet_cli_edit_distance(left: String, right: String) -> Int Never! {
     previous[b.len()]
 }
 
+// An exact spelling wins before ASCII case folding: `Effect` (the type) and
+// `effect` (the keyword), or `#static` and `#Static`, are separate rows, and
+// each row's own display must find that row.
 fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
-    wanted :: jet_cli_ascii_lower(query.trim())
+    trimmed :: query.trim()
+    loop (index, row) in JET_CLI_SYNTAX_ROWS {
+        if trimmed == jet_cli_syntax_display(row) -> return Val(index)
+    }
+    wanted :: jet_cli_ascii_lower(trimmed)
     loop (index, row) in JET_CLI_SYNTAX_ROWS {
         if wanted == row.query || wanted == row.display_query -> return Val(index)
     }
@@ -79,7 +86,7 @@ fn jet_cli_syntax_ascii_alphanumeric(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-// Syntax/dictionary.rs looks_like_query: package references are not typo queries.
+// looks_like_query: package references are not typo queries.
 fn jet_cli_syntax_query(query: String) -> Bool Never! {
     text :: query.trim()
     if text.starts_with("package-overlay:") -> return false

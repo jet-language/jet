@@ -56,10 +56,10 @@ fn cli_shared_store_enroll(theme: Theme, parsed: CLIParsed, roots: HangarRoots) 
         return EXIT_USAGE
     }
     uid :: parsed.positional[1]
-    read_only :: parsed.positional.contains("--read-only")
+    read_only :: parsed.flags.read_only
     loop index in 1..<parsed.positional.len() {
         item :: parsed.positional[index]
-        if item != uid && item != "--read-only" {
+        if item != uid {
             theme.error("shared-store enrollment has an unknown argument", "enrollment accepts one uid and optional `--read-only`", "run `jetpack hangar shared enroll <uid> [--read-only]`.")
             return EXIT_USAGE
         }

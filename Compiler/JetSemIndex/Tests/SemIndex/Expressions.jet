@@ -35,7 +35,6 @@ use {
     assert(!semindex_comptime_origin_reference(sentinel, Span{start: 0, end: 0}, ""))
 }
 
-// tests/semindex.rs:1192–1198: actual Examples/features/effects/effects.jet.
 fn semindex_expressions_original_effects_and_calls(index: SemIndex) {
     assert(index.lookup("report") != None)
     has_call := false
@@ -44,7 +43,7 @@ fn semindex_expressions_original_effects_and_calls(index: SemIndex) {
     report :: index.effect_of("report") ?? panic("report has effects")
     assert(report[0].inferred.len() > 0 || report[0].direct.len() > 0)
 }
-// tests/semindex.rs:1201–1223; filename inferred_effect_signature.jet.
+// Filename inferred_effect_signature.jet.
 fn semindex_expressions_original_inferred_source() -> String Never! {
     "fn announce() {{ print(\"hello\") }}\nfn run() {{ announce() }}\n"
 }
@@ -60,7 +59,7 @@ fn semindex_expressions_original_projects_omitted_inferred_effects(index: SemInd
     assert_eq(run[0].provenance[0].call_path, [String]{"run", "inferred_effect_signature::announce"})
     assert_eq(run[0].provenance[0].spans.len(), 2)
 }
-// tests/semindex.rs:1226–1239; filename inline_inferred_effect_signature.jet.
+// Filename inline_inferred_effect_signature.jet.
 fn semindex_expressions_original_inline_inferred_source() -> String Never! {
     "module inner {{ fn announce() {{ print(\"hello\") }} }}\nfn run() {{ inner.announce() }}\n"
 }
@@ -69,7 +68,7 @@ fn semindex_expressions_original_projects_inline_module_inferred_effects(symbols
     assert_eq(announce.len(), 1)
     assert(announce[0][0].signature.contains("-[IO]>"), announce[0][0].signature)
 }
-// tests/semindex.rs:1242–1270; filename effect_provenance_origins.jet.
+// Filename effect_provenance_origins.jet.
 fn semindex_expressions_original_dispatch_source() -> String Never! {
     "trait Shape {{ fn area(self) -[IO]> Int }}\nfn dynamic(shape: Shape) -> Int {{ return shape.area() }}\nfn apply(f: fn() -> Int) -> Int {{ return f() }}\nfn stored(f: ^fn() -> Int) -> Int {{\n    g :: f\n    return g()\n}}\nfn run() {{}}\n"
 }
@@ -93,7 +92,7 @@ fn semindex_expressions_original_effect_provenance_covers_open_and_trait_dispatc
     }
     assert(found, "IO provenance")
 }
-// tests/semindex.rs:1316–1339; filename rename_anchor_identity.jet.
+// Filename rename_anchor_identity.jet.
 fn semindex_expressions_original_rename_source() -> String Never! {
     "fn helper() -> Int {{ return 1 }}\nfn run() {{ print(helper()) }}\n"
 }
@@ -111,7 +110,7 @@ fn semindex_expressions_original_rename_sites_keep_definition_identity_in_json(i
     assert(found, "helper reference")
     assert(json.contains("\"semantic_identity\":"))
 }
-// tests/semindex.rs:1342–1357; filename fenced_range_names.jet.
+// Filename fenced_range_names.jet.
 fn semindex_expressions_original_fenced_source() -> String Never! {
     "fn run() {{\n    <: t1..t4 :> :: 1\n    print(<: t1, t2, t3, t4 :>)\n}}\n"
 }
@@ -127,7 +126,7 @@ fn semindex_expressions_original_indexes_generated_fenced_range_names(index: Sem
     assert_eq(index.references_to("t4").len(), 1)
 }
 
-// lib.rs:829–895: C4 must load BOTH files through its real checked graph.
+// C4 must load BOTH files through its real checked graph.
 fn semindex_expressions_original_reference_library_source() -> String Never! {
     "fn report() {{ print(\"library\") }}\n"
 }

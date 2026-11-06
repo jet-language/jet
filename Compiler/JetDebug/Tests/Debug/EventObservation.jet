@@ -1,6 +1,10 @@
-// TOOLS-D1 EventObservation.rs consumer tests (158/167) plus closed-schema
-// edges. These exercise the debugger's validator only; the runtime producer
-// feed (tests/event_observations.rs) needs the unported runtime observer.
+// TOOLS-D1 consumer tests (158/167) plus closed-schema edges. These exercise
+// the debugger's validator only; the runtime producer feed needs the unported
+// runtime observer.
+
+use {
+    jet_debug.[render_event_observations]
+}
 
 fn debug_event_test_record() -> String Never! {
     `{"sequence":1,"source":"AsyncEvent","event_id":2,"owner_id":3,"subscription_id":4,"dispatch_id":5,"lifecycle":"HandlerFailed","queued":1,"blocked":0,"running":1,"capacity":8,"overflow":"DropNewest","priority":17,"failure":"Handler","terminal":"None"}`
@@ -46,13 +50,11 @@ fn debug_event_test_padded(total_bytes: Int) -> String Never! {
     String.from_bytes(bytes) ?? panic("padding is UTF-8")
 }
 
-// Original EventObservation.rs:158.
 #Test("preserves_closed_runtime_facts") {
     snapshot :: debug_event_test_snapshot(debug_event_test_record())
     assert_eq(debug_event_test_render(snapshot), "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=17 failure=Handler terminal=None")
 }
 
-// Original EventObservation.rs:167.
 #Test("rejects_payload_fields_and_unbounded_sequences") {
     unsafe_record :: debug_event_test_record().replace("\"terminal\":\"None\"", "\"terminal\":\"None\",\"payload\":\"secret\"")
     assert(debug_event_test_error(debug_event_test_snapshot(unsafe_record)).contains("unsafe or unknown"))

@@ -1,4 +1,4 @@
-// Real Jet object client. Link -Wl,--wrap=jet_rt_free; no runtime substitutes.
+// Real Jet object client; no runtime substitutes.
 // Native XMLABI layouts, not Rust layout. Rust goldens cite CommonTypes249-279
 // -> Core/EncodingError8-28; enum spelling cites CommonTypes223-236.
 #include <assert.h>
@@ -19,7 +19,7 @@ _Static_assert(sizeof(Render)==16 && offsetof(Render,lexical)==8, "XML render AB
 _Static_assert(sizeof(Enum)==8, "XML enum ABI");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern int64_t jet_int_owned_from_i64(int64_t);
@@ -57,13 +57,14 @@ extern int64_t jet_rt_record_get_xml_render_options_lexical(Render *);
 static struct { void *pointer; int64_t bytes, align; unsigned frees; } watched[64];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align);
         assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<64);
@@ -169,6 +170,7 @@ static void error_cases(void) {
     jet_rt_handle_drop_xml_error(NULL);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc>1) {
         if(strcmp(argv[1],"encoding-range")==0) { (void)jet_rt_record_new_xml_render_options(4,0); }

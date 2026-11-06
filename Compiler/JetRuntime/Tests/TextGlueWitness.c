@@ -1,6 +1,6 @@
-// Real Jet-object client; link --wrap=jet_rt_free. No runtime substitutes.
-// Native TextGlueABI layout. Goldens: FieldError.rs10-16, Regex.rs294-307,
-// CommonTypes.rs6647-6696 (single message copied verbatim by every render).
+// Real Jet-object client. No runtime substitutes.
+// Native TextGlueABI layout. Goldens: a single message copied verbatim by every
+// render.
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -14,7 +14,7 @@ typedef struct { int64_t insensitive,multiline,dotall; } Flags;
 _Static_assert(sizeof(Message)==8 && sizeof(Field)==16,"error layouts");
 _Static_assert(sizeof(Flags)==24 && offsetof(Flags,dotall)==16,"flags layout");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 #define MESSAGE_API(name,field) \
@@ -47,12 +47,13 @@ extern Text *jet_rt_handle_show_regex_flags(Flags *);
 static struct { void *pointer; int64_t bytes,align; unsigned frees; } watched[40];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) {
         assert(bytes==watched[i].bytes && align==watched[i].align); assert(++watched[i].frees==1);
     }
-    __real_jet_rt_free(p,bytes,align);
 }
 static void watch(void *p,int64_t bytes,int64_t align) {
     assert(p && count<40); for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
@@ -129,6 +130,7 @@ static void flags(void) {
     jet_rt_handle_drop_regex_flags(NULL);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     MessageAPI apis[]={API(TextError,message),API(UTF8Error,message),API(RangeError,reason)};
     for(size_t i=0;i<3;++i) messages(apis[i]);

@@ -1,0 +1,22 @@
+# A child that prints `ready`, flushes its piped stdout and then waits for the
+# parent delivers the line while it runs: the parent answers and the child
+# finishes, on every optimization level and in a built binary (#6591).
+requires: os:unix
+fixture: flushed_child_line_reaches_the_parent_while_the_child_waits.fixture
+step o0: jet run --optimize=none run.jet
+exit: 0
+stdout: = flushed_child_line_reaches_the_parent_while_the_child_waits.out
+step: jet run --optimize=basic run.jet
+exit: == o0
+stdout: == o0
+stderr: == o0
+step: jet run --optimize=full run.jet
+exit: == o0
+stdout: == o0
+stderr: == o0
+step: jet build --optimize=full run.jet
+exit: 0
+step: built
+exit: == o0
+stdout: == o0
+stderr: == o0

@@ -114,12 +114,13 @@ fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceD
             theme.error_coded("E1330", "job `{job}` has an unsafe cached environment", err.message(), "remove secret-bearing environment inputs, or use `cache: .Uncached`.")
             return EXIT_USAGE
         }
-        jet_binary = cli_resolve_job_jet_binary(env) ?? {
+        compiler :: cli_resolve_job_compiler(&env) ?? {
             theme.error_coded("E1330", "job `{job}` cannot resolve its compiler", err.message(), "make the compiler named by the job environment available, or use `cache: .Uncached`.")
             return EXIT_USAGE
         }
+        jet_binary = compiler.program
         environment_hash :: cli_task_environment_hash_with_env(plan.refs, plan.table, plan.secrets, plan.environment, env)
-        key :: cli_task_cache_key(project_dir, entry, job, jet_binary, metadata, task_args, plan.refs, plan.table, environment_hash) ?? {
+        key :: cli_task_cache_key(project_dir, entry, job, compiler.build, metadata, task_args, plan.refs, plan.table, environment_hash) ?? {
             theme.error_coded("E1330", "job `{job}` has invalid cache inputs or outputs", err.message(), "use existing project-relative input and output paths.")
             return EXIT_USAGE
         }
@@ -193,18 +194,28 @@ fn cli_run_project_job_leaf(verification: &StoreVerification, cache: &WorkspaceD
     code
 }
 
-// The compiler a strict cached job runs: the lease-resolved executable when
-// the job environment provides `jet`, else the one on PATH.
-fn cli_resolve_job_jet_binary(env: ShellEnv) -[FS, Env]> String CLIError! {
+// The compiler a strict cached job runs and the hex SHA-256 its cache key
+// records. A lease member stays named as requested, so the job's own spawn
+// resolves it through the lease, and is hashed through the handle the
+// lease holds; else the compiler is the one on PATH.
+struct JobCompiler {
+    program: String
+    build: String
+}
+
+fn cli_resolve_job_compiler(env: &ShellEnv) -[FS, Env, Rand]> JobCompiler CLIError! {
     requested :: envmodel_find_jet_binary()
-    loop lease in env.cache_leases {
-        if lease.executable_for_command(requested) == {
-            .Val(stable) -> return Ok(stable)
-            .None -> {}
+    loop index in 0..<env.cache_leases.len() {
+        if &env.cache_leases[index].executable_digest_for_command(requested) == {
+            .Ok(found) -> {
+                if found == .Val(digest) -> return Ok(JobCompiler{program: requested, build: digest})
+            }
             .Err(error) -> return Err(CLIError.Other("{error}"))
         }
     }
-    cli_resolve_executable_path(requested)
+    path :: cli_resolve_executable_path(requested)
+    build :: foundation_sha256_file_hex(path) ?? return Err(CLIError.Other("couldn't hash compiler `{path}`: {err}"))
+    Ok(JobCompiler{program: path, build: build})
 }
 
 fn cli_resolve_executable_path(program: String) -[FS, Env]> String CLIError! {

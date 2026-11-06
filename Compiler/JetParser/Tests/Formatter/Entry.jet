@@ -1,5 +1,3 @@
-// Rust: Formatter/mod.rs:2459-2683; CanonicalAST.rs:200-229;
-// Syntax/retirements.rs:817-875; effects_surface.rs:400-425.
 // Composed formatter proofs require the complete formatter SCC, not mocks.
 use {
     jet_parser.[jet_format_source, jfmt_format_program_with_tokens, parse_source]
@@ -13,7 +11,6 @@ fn fmt_core_stable(source: String) -> String {
     assert(fmt_core_ok(formatted) == formatted)
     formatted
 }
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2551
 #Test("trailing_transaction_comment_stays_inside_transaction_block") {
     source :: `fn transfer(from: Shared<Account>, amount: Int) {
     #Transact(tx) {
@@ -26,12 +23,10 @@ fn fmt_core_stable(source: String) -> String {
     close :: parser_test_rfind(formatted, "}}")
     assert(comment < close)
 }
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2570
 #Test("inner_comment_stays_before_enclosing_block_close") {
     formatted :: fmt_core_stable("fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
     assert(parser_test_find(formatted, "/* go */") < parser_test_find(formatted, "}}"))
 }
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2586
 #Test("inferred_braces_and_blocks_round_trip") {
     source :: `struct Point {
     x: Int
@@ -57,7 +52,6 @@ fn run() {
     assert(formatted.contains("accepts({{\"needle\"}})"))
     assert(formatted.contains("fn block() {{"))
 }
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2617
 #Test("repeated_struct_list_heads_preserve_explicit_heads") {
     source :: `struct Point {
     x: Int
@@ -82,7 +76,6 @@ fn run() {
     assert(!simplified.contains("compact := [Point]"))
     assert_eq(jet_format_source(simplified, true).text, simplified)
 }
-// Rust: crates/jet-parser/src/Formatter/mod.rs:2672
 #Test("failure_formatter_keeps_prefix_and_contextual_roles") {
     formatted :: fmt_core_stable("fn load() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
     assert(formatted.contains("fn load() -> Int? IOError!"))

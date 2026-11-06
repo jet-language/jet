@@ -1,0 +1,234 @@
+// What a release directory holds, read from disk. A directory is either a
+// build of Tools/agent/publish-release.mjs (COMMIT, SEED and BUILD.json) or a
+// release Tools/agent/release-compiler.mjs admitted (RELEASE.json). Both ship
+// the seed files SHA256SUMS lists. Nothing here judges the facts; Gate.jet does.
+
+use {
+    crypto :: core.crypto
+    files :: core.files
+    json :: core.encoding.json
+}
+
+// What a seed directory ships (release-compiler.mjs SEED_FILES); jetpack is
+// absent from some, and a missing name is skipped as there. RELEASE names the
+// release, so jet can download its own C toolchain pack.
+SEED_FILES :: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE"}
+
+// The kinds of problem that block a release. Each blocked run records its
+// problems under these names in the audit trail.
+MISSING_RUNNER :: "missing-runner"
+FLAKY :: "flaky"
+SKIPPED :: "skipped"
+FAILED :: "failed"
+STALE :: "stale"
+SIGNING :: "signing"
+NONDETERMINISM :: "nondeterminism"
+PARTIAL :: "partial-publication"
+MISMATCH :: "record-mismatch"
+MATRIX :: "support-matrix"
+ADMISSION :: "admission"
+REMOTE :: "remote"
+PERSONAL :: "personal-information"
+INPUT :: "input"
+
+#Error
+struct Problem {
+    class: String
+    text: String
+}
+
+struct Artifact {
+    path: String
+    sha256: String
+    size: Int
+}
+
+struct Release {
+    dir: String
+    // "build" or "admitted".
+    kind: String
+    identity: String
+    jet_sha256: String
+    commit: String
+    seed: String
+    // An admitted release keeps the name release-compiler.mjs gave it.
+    name: String
+    target: String
+    s2: String
+    s3: String
+    shipped: [Artifact]
+    sums: String
+    runtime_key: String
+    runtime_provenance_sha256: String
+    runtime_compiler_sha256: String
+    admission: Dyn
+    problems: [Problem]
+}
+
+fn problem(class: String, text: String) -> Problem Never! {
+    Problem{class: class.copy(), text: text.copy()}
+}
+
+fn sha256_hex(bytes: [U8]) -> String Never! { crypto.sha256(bytes).hex() }
+
+fn field(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+fn text_field(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+// Strict JSON keeps each number as its lexeme (`Dyn.Number`), so a whole
+// number is read back from either form.
+fn int_field(tree: Dyn, name: String) -> Int? Never! {
+    if field(tree, name) == {
+        .Int(value) -> Val(value)
+        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
+        else -> None
+    }
+}
+
+fn array_field(tree: Dyn, name: String) -> [Dyn] Never! {
+    if field(tree, name) == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+fn is_object(tree: Dyn) -> Bool Never! {
+    if tree == .Object(_) -> return true
+    false
+}
+
+fn is_hex(text: String, length: Int) -> Bool Never! {
+    if text.len() != length -> return false
+    loop byte in text.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// The part of `identity` (`jet@VERSION#SHA256`) after the `#`.
+fn identity_sha(identity: String) -> String Never! {
+    identity.partition("#").tail.copy()
+}
+
+fn read_text(path: String) -[FS]> String? Never! {
+    text :: files.read(path) ?? return None
+    Val(text)
+}
+
+fn read_json(path: String) -[FS]> Dyn Problem! {
+    text :: files.read(path) ?? return Err(problem(INPUT, "cannot read {path}: {err}"))
+    parsed :: json.parse(text) ?? return Err(problem(INPUT, "{path} is not JSON: {err}"))
+    Ok(parsed)
+}
+
+fn file_artifact(path: String, shown: String) -[FS]> Artifact Problem! {
+    bytes :: files.read_bytes(path) ?? return Err(problem(STALE, "cannot read {shown}: {err}"))
+    Ok(Artifact{path: shown.copy(), sha256: sha256_hex(bytes), size: bytes.len()})
+}
+
+// Every regular file under `root`, by relative path, each level sorted by
+// name; symbolic links are skipped (release-compiler.mjs fileHashes).
+fn tree_artifacts(root: String, prefix: String, out: &[Artifact]) Never! -[FS]> {
+    entries :: files.list_dir(root) ?? return
+    names := [String]{}
+    loop entry in entries -> &names.push(entry.name.copy())
+    &names.sort_by((left: String, right: String) -> left <=> right)
+    loop name in names {
+        path :: files.join(root, name)
+        shown :: "{prefix}/{name}"
+        if files.is_symlink(path) -> next
+        if {
+            files.is_dir(path) -> tree_artifacts(path, shown, &out)
+            files.is_file(path) -> {
+                if file_artifact(path, shown) == .Ok(found) -> &out.push(found)
+            }
+        }
+    }
+}
+
+// The shipped files of `dir` in SHA256SUMS order.
+fn shipped_artifacts(dir: String) -[FS]> [Artifact] Never! {
+    out := [Artifact]{}
+    loop name in SEED_FILES {
+        path :: files.join(dir, name)
+        if !files.exists(path) -> next
+        if {
+            files.is_dir(path) -> tree_artifacts(path, name, &out)
+            else -> {
+                if file_artifact(path, name) == .Ok(found) -> &out.push(found)
+            }
+        }
+    }
+    out
+}
+
+// SHA256SUMS text of `artifacts`: `<sha256>  <path>` lines.
+fn sums_text(artifacts: [Artifact]) -> String Never! {
+    lines := [String]{}
+    loop artifact in artifacts -> &lines.push("{artifact.sha256}  {artifact.path}")
+    "{lines.join("\n")}\n"
+}
+
+fn first_line(text: String) -> String Never! {
+    text.partition("\n").head.trim().copy()
+}
+
+// Reads `dir`. Missing or malformed inputs become problems, so one run
+// reports all of them.
+fn read_release(dir: String) -[FS]> Release Never! {
+    release := Release{dir: dir.copy(), kind: "build", identity: "", jet_sha256: "", commit: "", seed: "", name: "", target: "", s2: "", s3: "", shipped: [Artifact]{}, sums: "", runtime_key: "", runtime_provenance_sha256: "", runtime_compiler_sha256: "", admission: Dyn.Null, problems: [Problem]{}}
+    admitted :: files.exists(files.join(dir, "RELEASE.json"))
+    release.kind = if admitted -> "admitted" else -> "build"
+    required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
+    if !admitted -> &required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
+    loop name in required {
+        if !files.exists(files.join(dir, name)) -> &release.problems.push(problem(INPUT, "{dir} lacks {name}: not a publish-release.mjs build or a release-compiler.mjs release"))
+    }
+    if release.problems.len() > 0 -> return release
+    release.identity = first_line(read_text(files.join(dir, "IDENTITY")) ?? "")
+    jet :: files.read_bytes(files.join(dir, "jet")) ?? [U8]{}
+    release.jet_sha256 = sha256_hex(jet)
+    release.shipped = shipped_artifacts(dir)
+    release.sums = read_text(files.join(dir, "SHA256SUMS")) ?? ""
+    release.runtime_key = first_line(read_text(files.join(dir, "jet-runtime/native.key")) ?? "")
+    provenance_path :: files.join(dir, "jet-runtime/provenance.json")
+    if files.read_bytes(provenance_path) == .Ok(bytes) {
+        release.runtime_provenance_sha256 = sha256_hex(bytes)
+        if read_json(provenance_path) == .Ok(provenance) -> release.runtime_compiler_sha256 = text_field(provenance, "compilerSha256")
+    }
+    if admitted {
+        record :: read_json(files.join(dir, "RELEASE.json")) ?? {
+            &release.problems.push(problem(ADMISSION, err.text))
+            return release
+        }
+        release.commit = text_field(record, "commit")
+        release.name = text_field(record, "name")
+        release.seed = text_field(field(record, "seed"), "identity")
+        release.target = text_field(record, "target")
+        chain :: field(record, "chain")
+        release.s2 = text_field(chain, "s2")
+        release.s3 = text_field(chain, "s3")
+        release.admission = record
+        return release
+    }
+    release.commit = first_line(read_text(files.join(dir, "COMMIT")) ?? "")
+    release.seed = first_line(read_text(files.join(dir, "SEED")) ?? "")
+    built :: read_json(files.join(dir, "BUILD.json")) ?? {
+        &release.problems.push(err)
+        return release
+    }
+    release.target = text_field(built, "target")
+    chain :: field(built, "chain")
+    release.s2 = text_field(chain, "s2")
+    release.s3 = text_field(chain, "s3")
+    release
+}

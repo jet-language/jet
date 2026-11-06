@@ -586,17 +586,6 @@ fn ir_handle_civil_time_route(kind: String, method: String) -> IRHandleRoute? {
 
 fn ir_handle_dynamic_route(operation: BodyHandleOp, receiver: Type, argument_count: Int, carrier: TFailureCarrier) -> IRHandleRoute? {
     if operation == {
-        .HTTPServerMethod(kind, method) -> {
-            route :: ir_browser_handle_route(kind, method, argument_count, true)
-            if route != None -> return route
-        }
-        .HTTPClientMethod(kind, method) -> {
-            route :: ir_browser_handle_route(kind, method, argument_count, false)
-            if route != None -> return route
-        }
-        else -> {}
-    }
-    if operation == {
         .ReactiveGet -> return ir_handle_reactive_route(receiver, "get")
         .ReactiveSet -> return ir_handle_reactive_route(receiver, "set")
         .TaskJoin -> return Val(ir_handle_task_route(receiver, carrier))
@@ -686,9 +675,8 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .FileReaderRead -> return Val(ir_handle_h("file_reader.read", "jet_std_file_reader_read", [Bool]{true, false}, Val(Effect.FS)))
         .FileReaderSeek -> return Val(ir_handle_h("file_reader.seek", "jet_std_file_reader_seek", [Bool]{true, false}, Val(Effect.FS)))
         .FileReaderPath -> return Val(ir_handle_h("file_reader.path", "jet_std_file_reader_path", [Bool]{true}, None))
-        .MappedFileWindow -> return Val(ir_handle_h("mapped_file.window", "jet_std_fs_map_window_view", [Bool]{true, false, false}, Val(Effect.FS)))
-        .MappedFileWindowLen -> return Val(ir_handle_h("mapped_file.window_len", "jet_std_fs_map_window_len_view", [Bool]{true, false, false}, Val(Effect.FS)))
-        .MappedFileLines -> return Val(ir_handle_h("mapped_file.lines", "jet_std_fs_map_lines_view", [Bool]{true}, Val(Effect.FS)))
+        .MappedFileWindow -> return Val(ir_handle_h("mapped_file.window", "jet_std_fs_map_window_view", [Bool]{true, true, true}, Val(Effect.FS)))
+        .MappedFileWindowLen -> return Val(ir_handle_h("mapped_file.window_len", "jet_std_fs_map_window_len_view", [Bool]{true, true, true}, Val(Effect.FS)))
         .MappedFileLen -> return Val(ir_handle_h("mapped_file.len", "jet_std_fs_map_len", [Bool]{true}, None))
         .MappedFileIsEmpty -> return Val(ir_handle_h("mapped_file.is_empty", "jet_std_fs_map_is_empty", [Bool]{true}, None))
         .FileWriterWriteLine -> return Val(ir_handle_h("file_writer.write_line", "jet_std_file_writer_write_line", [Bool]{true, true}, Val(Effect.FS)))
@@ -725,6 +713,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
         .StderrFlush -> return Val(ir_handle_h("stderr.flush", "jet_std_io_stderr_flush", [Bool]{true}, Val(Effect.IO)))
         .StderrIsTTY -> return Val(ir_handle_h("stderr.is_tty", "jet_std_io_stderr_is_tty", [Bool]{true}, Val(Effect.IO)))
         .TestSuiteRun -> return Val(ir_handle_h("test_suite.run", "jet_test_suite_run", [Bool]{true}, None))
+        .TestSetting -> return Val(ir_handle_h("test_suite.setting", "jet_test_setting", [Bool]{true, true, true}, None))
         .WorldNow -> return Val(ir_handle_h("deterministic_world.now", "jet_world_now", [Bool]{true}, Val(Effect.Time)))
         .WorldAdvance -> return Val(ir_handle_h("deterministic_world.advance", "jet_world_advance", [Bool]{true, true}, Val(Effect.Time)))
         .WorldWaitIdle -> return Val(ir_handle_h("deterministic_world.wait_idle", "jet_world_wait_idle", [Bool]{true}, Val(Effect.Time)))
@@ -874,7 +863,7 @@ fn ir_general_handle_route(operation: BodyHandleOp, receiver: Type, argument_cou
             if sender_receiver -> return Val(ir_handle_core("core.channels", "sender.close", "jet_std::JetSender::close", [Bool]{true}, None))
             return Val(ir_handle_core("core.channels", "receiver.close", "jet_std::JetReceiver::close", [Bool]{true}, None))
         }
-        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .HTTPRouterRegister(_, _, _, _, _, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
+        .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_) | .SerdeEncode | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .HTTPServerMethod(_, _) | .ProcessLines -> return None
         else -> return None
     }
 }

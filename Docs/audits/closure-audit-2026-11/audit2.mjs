@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { readHistoryDoc } from '../../../Tools/tower/app/store.mjs';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const env = { ...process.env }; delete env.GIT_INDEX_FILE;
@@ -36,7 +37,8 @@ for (const rec of git(['log', 'dev', 'master', '--format=%H%x1f%s%x1f%b%x1e']).s
 }
 
 const live = JSON.parse(fs.readFileSync(`${TOWER}/tower.json`, 'utf8'));
-const hist = JSON.parse(fs.readFileSync(`${TOWER}/history.json`, 'utf8'));
+// The archive may be sharded (Tower #6564 c7); Tower's reader assembles it.
+const hist = readHistoryDoc(TOWER) ?? {};
 const decisions = [...(live.decisions || []), ...(hist.decisions || [])];
 const ratified = new Set(decisions.filter((d) => d.status === 'ratified').map((d) => d.id));
 const cards = [...live.cards.map((c) => ({ ...c, _arch: false })), ...(hist.cards || []).map((c) => ({ ...c, _arch: true }))];

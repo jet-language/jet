@@ -1,4 +1,4 @@
-/* Real Jet provider only, --wrap=jet_rt_alloc/jet_rt_free. Private UiABI
+/* Real Jet provider only, checked-heap alloc/free observers. Private UiABI
  * carriers, never a Rust/source-nominal allocation or C provider mock.
  * Compose e1306aee0 + c39d89b6b + 9e344d0f0 before native linking. */
 #include <assert.h>
@@ -11,8 +11,7 @@ typedef int64_t H;
 typedef struct { unsigned char *data; uint64_t len, cap; } Text;
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H,H);
-extern H __real_jet_rt_alloc(H,H);
-extern void __real_jet_rt_free(H,H,H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_free(H,H,H);
 extern Text *jet_rt_string_from_static(const void *,H);
 extern void jet_rt_string_drop(Text *);
@@ -44,24 +43,20 @@ extern void jet_rt_handle_field_jet_web_store_event_action(H,Text *);
 static struct { H address,bytes,align; bool live; } ledger[4096];
 static size_t allocations,frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes,H align) {
-    H address=__real_jet_rt_alloc(bytes,align);
+static void observe_alloc(H address, H bytes, H align) {
     if(tracking) {
         assert(address&&bytes>0&&allocations<4096&&(uint64_t)address%(uint64_t)align==0);
         for(size_t i=0;i<allocations;++i) assert(!ledger[i].live||ledger[i].address!=address);
         ledger[allocations].address=address; ledger[allocations].bytes=bytes; ledger[allocations].align=align; ledger[allocations++].live=true;
     }
-    return address;
 }
-void __wrap_jet_rt_free(H address,H bytes,H align) {
+static void observe_free(H address,H bytes,H align) {
     if(tracking) {
         for(size_t i=allocations;i>0;--i) if(ledger[i-1].address==address&&ledger[i-1].live) {
-            assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align); ledger[i-1].live=false; ++frees;
-            __real_jet_rt_free(address,bytes,align); return;
+            assert(ledger[i-1].bytes==bytes&&ledger[i-1].align==align); ledger[i-1].live=false; ++frees; return;
         }
         assert(!"untracked or double free");
     }
-    __real_jet_rt_free(address,bytes,align);
 }
 static uint64_t *w(H h) { return (uint64_t *)(uintptr_t)h; }
 static H box(size_t bytes) { H h=jet_rt_alloc((H)bytes,8); memset((void *)(uintptr_t)h,0,bytes); return h; }
@@ -154,6 +149,7 @@ static void snapshots(void) {
     a=box(8);w(a)[0]=UINT64_C(0xabcdef00ff);b=jet_rt_handle_clone_jet_ui_capability_facts(a);assert(w(b)[0]==255&&jet_rt_handle_eq_jet_ui_capability_facts(a,b));w(b)[0]^=128;assert(!jet_rt_handle_eq_jet_ui_capability_facts(a,b));jet_rt_handle_drop_jet_ui_capability_facts(a);jet_rt_handle_drop_jet_ui_capability_facts(b);jet_rt_handle_drop_jet_ui_capability_facts(0);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         if(!strcmp(argv[1],"sort-tag")){Text column={(unsigned char *)"column",6,0};jet_rt_record_new_jet_web_table_sort(&column,2);}

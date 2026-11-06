@@ -1,19 +1,17 @@
-// Core/FSWalk8Raw.rs walk identities for Core/Files walk_impl: the
-// queue, policy and error construction stay in Core; this owns only path,
-// matcher and open-directory slots.
-// FSWalk8Raw.rs:13-29 lifetime: one process table of monotonic keys (from 1,
+// The Rust original walk identities for Core/Files walk_impl: the queue, policy
+// and error construction stay in Core; this owns only path, matcher and
+// open-directory slots. lifetime: one process table of monotonic keys (from 1,
 // never reused) to shared contexts. Every operation retains its context from
 // the table before taking the context lock, so a close only drops the table's
 // reference: an operation in flight keeps the context alive, a repeated close
-// is a no-op, and a key that is not live panics "live walk context".
-// Root24: mutex @0, next key @8, list head @16. Node24: next @0, key @8,
-// context (the table's reference) @16.
-// Context64: lock @0, owned root bytes @8 / length @16 (NUL-terminated),
-// owned ignore-file name E4 or 0 @24, slot words @32, count @40, capacity @48,
-// references @56.
-// Slot32: owned path bytes @0 (length+1, NUL-terminated), length @8,
-// shared FilesIgnore matcher or 0 @16, directory stream or 0 @24.
-// Stream40: fd @0, getdents64 buffer @8, filled @16, position @24, ended @32.
+// is a no-op, and a key that is not live panics "live walk context". Root24:
+// mutex @0, next key @8, list head @16. Node24: next @0, key @8, context (the
+// table's reference) @16. Context64: lock @0, owned root bytes @8 / length @16
+// (NUL-terminated), owned ignore-file name E4 or 0 @24, slot words @32, count
+// @40, capacity @48, references @56. Slot32: owned path bytes @0 (length+1,
+// NUL-terminated), length @8, shared FilesIgnore matcher or 0 @16, directory
+// stream or 0 @24. Stream40: fd @0, getdents64 buffer @8, filled @16, position
+// @24, ended @32.
 WALK_CONTEXT_BYTES :: I64{64}
 WALK_SLOT_BYTES :: I64{32}
 WALK_STREAM_BYTES :: I64{40}

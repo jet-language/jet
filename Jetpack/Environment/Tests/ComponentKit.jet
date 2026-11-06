@@ -1,5 +1,7 @@
 // jetpack Components.rs unit tests.
 
+use files :: core.files
+
 fn env_component_test_dir(label: String) -[FS]> String {
     files.tmpdir("jetpack_components_test_{label}_") ?? panic("component scratch")
 }
@@ -17,7 +19,7 @@ fn env_component_test_dir(label: String) -[FS]> String {
     components :: env_starter_components()
     loop component in components {
         assert(component.source.contains("use ui :: core.ui"))
-        assert(component.source.contains("UiNode"))
+        assert(component.source.contains("UINode"))
         assert(!component.source.contains("enum View"))
     }
 }

@@ -1,7 +1,7 @@
 # A `:=` binding that never changes
 
 Date: 2026-10-30. Card #6324. Probes live in
-`/mnt/jetscratch/lanes/SurfaceDesign/probes/` (`m6324`, `m6324b`, `m6324x`).
+`$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/` (`m6324`, `m6324b`, `m6324x`).
 Every probe printed the same output on o0, o1 and o2 with the base compiler at
 bd83fe6361.
 

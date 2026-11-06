@@ -179,6 +179,7 @@ struct BodyContract {
     line: Int
     span: Span
     disposition: TContractDisposition
+    site: TContractSite
 }
 
 enum StmtKind {
@@ -341,7 +342,9 @@ enum NodeKind {
     SelectAfter(builder: Int, duration: Int, value: Int?)
     SelectWait(builder: Int, nonblocking: Bool)
     FnValue(kind: BodyFnValueKind)
-    Never(reason: String)
+    // A stop with no value, `reason` naming it ("todo" for a `#Todo` goal);
+    // `line` is a `#Todo` goal's 1-based source line, 0 for any other stop.
+    Never(reason: String, line: Int)
     // D-TYPESWITCH1: whether generic type `subject` (a type parameter) is
     // exactly `target` in the instance being built. Only an `if` condition
     // holds one, and the IR folds that `if` to the arm its instance keeps.
@@ -502,6 +505,7 @@ enum BodyHandleOp {
     DurationTotalSeconds
     DurationDifference
     TestSuiteRun
+    TestSetting
     DurationAbs
     DurationNegated
     DurationSign
@@ -599,7 +603,6 @@ enum BodyHandleOp {
     ChannelDelayMs
     ChannelClose
     SenderSend
-    HTTPRouterRegister(verb: HTTPRouteMethod, handler: Int, file: String, line: Int, handler_param_names: [String], contract_json: String)
     MathMethod(type_name: String, method: String)
     ReactiveGet
     ReactiveSet
@@ -686,7 +689,8 @@ enum BodyHandleOp {
 
 enum BodyRequireKind {
     Require(cond: Int, msg: Int?)
-    RequireEq(left: Int, right: Int)
+    // `hook`: the authored `equal`/`compare` the sides compare through.
+    RequireEq(left: Int, right: Int, hook: TMethodRef?)
     Panic(msg: Int)
 }
 
@@ -726,7 +730,6 @@ struct FnBody {
     source_span: Span
     failure_carrier: TFailureCarrier
     effects: TEffectFacts
-    target_applicability: TTargetApplicability
     web_bucket: WebBucket?
     web_marker: WebPartitionMarker?
     visibility: TVisibility
@@ -757,6 +760,10 @@ struct FnBody {
     kind: TFuncKind
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
     typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The fixed-list indexes sema proved in range, and the function's checked
+    // `#Pre` clauses; only the solver reads them.
+    index_proofs: [TIndexProof]{[TIndexProof]{}}
+    pre: [BodyContract]{[BodyContract]{}}
     // The function's nodes, statements and expression-type column.
     tree: BodyTree
 }
@@ -1488,9 +1495,8 @@ fn body_each_node_kind_child(tree: BodyTree, value: NodeKind, visit: fn(Int) -[M
             visit(f3)
             visit(f4)
         }
-        .HandleMethod(f0, f1, f2) -> {
+        .HandleMethod(f0, _, f2) -> {
             visit(f0)
-            body_each_handle_op_child(tree, f1, visit)
             loop item in f2 {
                 visit(item)
             }
@@ -1675,15 +1681,6 @@ fn body_each_fn_value_kind_child(tree: BodyTree, value: BodyFnValueKind, visit: 
     }
 }
 
-fn body_each_handle_op_child(tree: BodyTree, value: BodyHandleOp, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
-    if value == {
-        .HTTPRouterRegister(_, f1, _, _, _, _) -> {
-            visit(f1)
-        }
-        else -> {}
-    }
-}
-
 fn body_each_require_kind_child(tree: BodyTree, value: BodyRequireKind, visit: fn(Int) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     if value == {
         .Require(f0, f1) -> {
@@ -1692,7 +1689,7 @@ fn body_each_require_kind_child(tree: BodyTree, value: BodyRequireKind, visit: f
                 visit(inner)
             }
         }
-        .RequireEq(f0, f1) -> {
+        .RequireEq(f0, f1, _) -> {
             visit(f0)
             visit(f1)
         }

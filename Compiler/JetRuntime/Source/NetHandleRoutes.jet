@@ -1,6 +1,6 @@
-// NetHTTP.rs TCP handle policy over Stream56/Listener8 and FD72, never Rust
-// Word limits/counts are raw i64; Duration Word parameters borrow exact ns.
-// List bytes follow RT_HOST_U8_STRIDE. Logical close retains the descriptor.
+// TCP handle policy over Stream56/Listener8 and FD72, never Rust Word
+// limits/counts are raw i64; Duration Word parameters borrow exact ns. List
+// bytes follow RT_HOST_U8_STRIDE. Logical close retains the descriptor.
 fn net_tcp_direction_open(stream: I64, reading: Bool, operation: I64, error: I64) -> Bool {
     mask :: if reading -> I64{3} else -> I64{5}
     if (jet_socket_stream_flags_raw(stream).bit_and(mask) == I64{0}) -> return true
@@ -21,8 +21,8 @@ fn net_tcp_timeout_valid(milliseconds: I64, operation: I64, error: I64) -> Bool 
     _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
     false
 }
-// CommonTypes.rs Duration::as_millis truncates towards zero (-1ns is 0ms, a
-// valid timeout); `/%` floors, so drop the truncated remainder first.
+// Duration::as_millis truncates towards zero (-1ns is 0ms, a valid timeout);
+// `/%` floors, so drop the truncated remainder first.
 fn net_deadline_millis(deadline: I64) -> I64 {
     nanoseconds :: host_native_int(deadline)
     (nanoseconds - nanoseconds %% I64{1000000}) /% I64{1000000}

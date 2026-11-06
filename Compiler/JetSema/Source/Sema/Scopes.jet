@@ -34,9 +34,11 @@ use jet_foundation.[
     TEXPR_FIRST_LOCAL_ID,
     TOriginProjection,
     TTypedGoal,
+    TIndexProof,
     TFailureCarrier,
     TGenericParam,
     TIntegerBounds,
+    Param,
     TTypeDef,
     Type,
     TypeParam,
@@ -139,6 +141,9 @@ struct SemaCallSiteFact {
     // The callee is the `#Unsafe` inline foreign function of this name: the
     // call needs an audited region (E3103).
     unsafe_foreign_name: String?{None}
+    // The callee is a raw `extern rust` function whose parameter takes a
+    // capability: the call needs an audited region (E0702).
+    foreign_capability: SemaForeignCapability?{None}
     // A resolved Core lifecycle marker, retained with the checked call site.
     lifecycle: CoreMarkerApplication?{None}
     // The declared callee's `#Deprecated(use:)` replacement name resolves at
@@ -148,6 +153,16 @@ struct SemaCallSiteFact {
     shared_lifetime: SharedLifetime?{None}
     shared_member: String{""}
     shared_source: String{""}
+    // An intrinsic operation's own name (`Clock.system`), recorded with its
+    // effect row when the site has no declared callee.
+    intrinsic_api: String?{None}
+}
+
+// A raw `extern rust` callee's name and the capability sigil (`&` or `^`)
+// of its first parameter that takes one.
+struct SemaForeignCapability {
+    name: String
+    sigil: String
 }
 
 struct SemaCallReturnViewFact {
@@ -155,9 +170,12 @@ struct SemaCallReturnViewFact {
     access: AccessConvention
     places: [SemaOwnershipPlace]
     sources: [ViewSourcePath]
-    // Argument spans of parameter sources that name no place (a temporary
-    // owner dropped at the end of the statement).
+    // Argument or receiver spans of sources that name no place (a temporary
+    // owner the call drops when it returns).
     temporaries: [Span]{[Span]{}}
+    // The literal field value that holds this view inside a returned
+    // aggregate; a report names it rather than the whole returned value.
+    span: Span?{None}
 }
 
 struct SemaCallReturnView {
@@ -399,6 +417,8 @@ struct SemaComptimeBodySource {
     span: Span
     site_span: Span
     prepared: [SemaComptimePreparedLocal]
+    // The site is lexically inside an `#Impure` block.
+    impure: Bool{false}
 }
 
 struct SemaComptimeBodyValue {
@@ -589,6 +609,9 @@ struct SemaCheckContext {
     loop_break_flows: [SemaLoopBreakFlows]
     pending_loop_value: SemaPendingLoopValue?
     collect_item_types: [Type?]
+    // The value-if a collecting loop yields as its item, while it is checked:
+    // its arms are the loop's item paths, so their mismatch is E0074.
+    collect_item_if: Span?
     last_loop_result_type: Type?
     arrow_loop_body: Bool
     reactive_upgrades: [String]
@@ -676,6 +699,8 @@ struct SemaCheckContext {
     origin_facts: [TOriginProjection]{[TOriginProjection]{}}
     // The body's `todo` goals, with the card naming each one's expected type.
     typed_goals: [TTypedGoal]{[TTypedGoal]{}}
+    // The fixed-list indexes the body proved in range (TIndexProof).
+    index_proofs: [TIndexProof]{[TIndexProof]{}}
     // The source node ids this check gave its nodes (sema_check_record_expr_id),
     // in filing order and as a set, and the next function-local id for a node
     // whose source id is generated or already filed (a desugared copy). A
@@ -695,6 +720,10 @@ struct SemaCheckContext {
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Arithmetic(mode)` marker. Closures checked inside the body keep it.
     arithmetic_policy: ArithmeticPolicyFact?{None}
+    // The overflow word (`wrapping`, `saturating` or `checked`) written
+    // directly around the typed-literal conversion being checked. The
+    // conversion takes it on entry, so it never reaches a nested expression.
+    overflow_word: String?{None}
     // The body being checked is compiler-generated scaffolding (a derived
     // codec or protocol method, a field policy wrapper) that spells every
     // carrier out: a call root keeps its Result and an unmarked writing
@@ -714,6 +743,11 @@ struct SemaCheckContext {
     // first field's fact.
     struct_field_fact_rows: [String:Int]{[String:Int]{}}
     struct_field_facts: [SemaStructFieldFact]{[SemaStructFieldFact]{}}
+    // Spans of the named-literal field values whose declared field type holds
+    // a view (`View<T>`, `View<str>` or a struct that stores one): only these
+    // keep a view into their source inside the literal; any other field owns
+    // its value (sema_stmt_local_view_facts_fields).
+    view_field_values: [Span]{[Span]{}}
 }
 
  
@@ -751,6 +785,9 @@ struct SemaScopeTable {
     // `copies: .Explicit` is active for the function being
     // checked (package, module, or function scope).
     copies_explicit: Bool{false}
+    // The innermost `#Context` block: 0 outside one, 1 inside one without an
+    // `allocator:` field, 2 when an enclosing block names an allocator.
+    context_allocation: Int{0}
     // Derived from the immutable graph installed by seed_unit_policy.
     // Function rollback leaves this memo intact; snapshots may rebuild it.
     // A new graph/module setup reseeds it, including each staging version.
@@ -777,6 +814,11 @@ struct SemaScopeTable {
     // counts: each resolution adds one lookup and the binding rows it
     // examined. None for an uncounted table.
     lookup_counters: SemaScopeLookupCounters?{None}
+    // The inferred return-view provenance of this module's view-returning
+    // methods (sema_check_view_summaries), by registered method symbol key.
+    // A method call candidate carries the registered signature, which holds
+    // only a declared `from` contract.
+    method_return_views: [String:ViewProvenanceMap]{[String:ViewProvenanceMap]{}}
 }
 
 // A scope table's handle on the graph's counters. It shows as its name:
@@ -1055,6 +1097,7 @@ fn sema_check_context_init() -> SemaCheckContext Never! {
         loop_break_flows: [SemaLoopBreakFlows]{},
         pending_loop_value: None,
         collect_item_types: [Type?]{},
+        collect_item_if: None,
         last_loop_result_type: None,
         reactive_upgrades: [String]{},
         reactive_upgrade_names: [String]{},
@@ -1121,6 +1164,7 @@ fn sema_check_context_snapshot(source: SemaCheckContext) -> SemaCheckContext Nev
         loop_break_flows: sema_loop_break_flows_snapshot(source.loop_break_flows),
         pending_loop_value: source.pending_loop_value,
         collect_item_types: source.collect_item_types.copy(),
+        collect_item_if: source.collect_item_if,
         last_loop_result_type: source.last_loop_result_type,
         arrow_loop_body: source.arrow_loop_body,
         reactive_upgrades: source.reactive_upgrades.copy(),
@@ -1192,6 +1236,7 @@ struct SemaCheckContextMark {
     incomplete_reasons: Int
     origin_facts: Int
     typed_goals: Int
+    index_proofs: Int
     filed_expr_ids: Int
     next_expr_id: Int
     saved: SemaCheckContext
@@ -1226,6 +1271,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
         incomplete_reasons: context.incomplete_reasons.len(),
         origin_facts: context.origin_facts.len(),
         typed_goals: context.typed_goals.len(),
+        index_proofs: context.index_proofs.len(),
         filed_expr_ids: context.filed_expr_ids.len(),
         next_expr_id: context.next_expr_id,
         saved: SemaCheckContext{
@@ -1264,6 +1310,7 @@ fn sema_check_context_save(context: SemaCheckContext) -> SemaCheckContextMark Ne
             loop_break_flows: sema_loop_break_flows_snapshot(context.loop_break_flows),
             pending_loop_value: context.pending_loop_value,
             collect_item_types: context.collect_item_types.copy(),
+            collect_item_if: context.collect_item_if,
             last_loop_result_type: context.last_loop_result_type,
             arrow_loop_body: context.arrow_loop_body,
             reactive_upgrades: context.reactive_upgrades.copy(),
@@ -1325,6 +1372,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     loop context.copy_events.len() > mark.copy_events -> _ := &context.copy_events.pop()
     loop context.origin_facts.len() > mark.origin_facts -> _ := &context.origin_facts.pop()
     loop context.typed_goals.len() > mark.typed_goals -> _ := &context.typed_goals.pop()
+    loop context.index_proofs.len() > mark.index_proofs -> _ := &context.index_proofs.pop()
     loop context.filed_expr_ids.len() > mark.filed_expr_ids {
         dropped := &context.filed_expr_ids.pop()
         if dropped == .Val(id) -> _ := &context.filed_expr_id_set.remove(id)
@@ -1360,6 +1408,7 @@ fn sema_check_context_rollback(context: &SemaCheckContext, mark: SemaCheckContex
     context.loop_break_flows = sema_loop_break_flows_snapshot(saved.loop_break_flows)
     context.pending_loop_value = saved.pending_loop_value
     context.collect_item_types = saved.collect_item_types.copy()
+    context.collect_item_if = saved.collect_item_if
     context.last_loop_result_type = saved.last_loop_result_type
     context.arrow_loop_body = saved.arrow_loop_body
     context.reactive_upgrades = saved.reactive_upgrades.copy()
@@ -1480,12 +1529,14 @@ fn sema_scope_snapshot(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        context_allocation: source.context_allocation,
         binding_undo: source.binding_undo.copy(),
         open_marks: source.open_marks,
         location_function: source.location_function,
         light_types: source.light_types.copy(),
         position_free: source.position_free,
         lookup_counters: source.lookup_counters,
+        method_return_views: source.method_return_views.copy(),
     }
 }
 
@@ -1517,6 +1568,7 @@ fn sema_scope_mark(table: &SemaScopeTable) -> SemaScopeMark Never! {
             transaction_wall_depth: table.transaction_wall_depth,
             unit_explicit_units: table.unit_explicit_units,
             copies_explicit: table.copies_explicit,
+            context_allocation: table.context_allocation,
             open_marks: table.open_marks,
         },
     }
@@ -1556,6 +1608,7 @@ fn sema_scope_rollback(table: &SemaScopeTable, mark: SemaScopeMark) Never! {
     table.transaction_wall_depth = saved.transaction_wall_depth
     table.unit_explicit_units = saved.unit_explicit_units
     table.copies_explicit = saved.copies_explicit
+    table.context_allocation = saved.context_allocation
     // Exact even when a nested mark was abandoned by an early return.
     table.open_marks = saved.open_marks
 }
@@ -1606,6 +1659,16 @@ fn sema_scope_function_owner_key(table: SemaScopeTable) -> String Never! {
     frame := table.current
     loop table.frames[frame].parent > 0 -> frame = table.frames[frame].parent
     table.frames[frame].owner
+}
+
+// Whether the current scope is lexically inside an `#Impure` block.
+fn sema_scope_inside_impure(table: SemaScopeTable) -> Bool Never! {
+    frame := table.current
+    loop frame > 0 {
+        if table.frames[frame].owner.starts_with("impure@") -> return true
+        frame = table.frames[frame].parent
+    }
+    false
 }
 
 // A local identity is rooted at its enclosing function/lambda and includes
@@ -1803,7 +1866,6 @@ fn sema_scope_require_knowledge_gate(table: &SemaScopeTable, plane: SemaKnowledg
     false
 }
 
-// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
 fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) -> Int Never! {
     if table.policy_modules.get(module_identity) == .Val(position) -> return position
     policy := SemaScopeModulePolicy{
@@ -1840,7 +1902,6 @@ fn sema_scope_module_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph
     position
 }
 
-// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
 fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String) Never! {
     // Module installation is the graph-lifetime boundary, not a function check.
     table.policy_modules = [String:Int]{}
@@ -1849,7 +1910,6 @@ fn sema_scope_seed_unit_policy(table: &SemaScopeTable, graph: SemaRegistrationGr
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
 }
 
-// Rust: crates/jet-sema/src/Sema/mod.rs::Checker::explicit_units_enabled
 fn sema_scope_apply_unit_policy_for_function(table: &SemaScopeTable, graph: SemaRegistrationGraph, module_identity: String, function_span: Span) Never! {
     position :: sema_scope_module_policy(&table, graph, module_identity)
     table.unit_explicit_units = table.policy_rows[position].unit_explicit_units
@@ -2071,6 +2131,7 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
         transaction_wall_depth: source.transaction_wall_depth,
         unit_explicit_units: source.unit_explicit_units,
         copies_explicit: source.copies_explicit,
+        context_allocation: source.context_allocation,
         policy_modules: source.policy_modules.copy(),
         policy_rows: source.policy_rows.copy(),
         binding_undo: source.binding_undo.copy(),
@@ -2078,6 +2139,7 @@ fn sema_scope_light_copy(source: SemaScopeTable) -> SemaScopeTable Never! {
         location_function: source.location_function,
         light_types: ^light,
         lookup_counters: source.lookup_counters,
+        method_return_views: source.method_return_views.copy(),
     }
 }
 
@@ -2399,4 +2461,26 @@ fn sema_scope_declaration_function_type_params(environment: SemaScopeEnvironment
 fn sema_scope_nominal_function_type_params(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> [TypeParam] Never! {
     if graph.modules[module_index].nominals[row].source == .SourceAST(item) -> return sema_scope_item_function_type_params(item)
     [TypeParam]{}
+}
+
+// The first `&` or `^` parameter when sema_scope_declaration_site(environment,
+// program, id) is a function, else none. Such a function is direct-call-only:
+// a function type has read parameters only.
+fn sema_scope_declaration_function_marked_param(environment: SemaScopeEnvironment, program: SemaProgramTables, id: SymbolID) -> Param? {
+    site :: sema_scope_declaration_site(environment, program, id) ?? return None
+    if site == .Local(index) {
+        if environment.declarations[index].item == .Func(func) -> return sema_scope_first_marked_param(func.params)
+        return None
+    }
+    if program.registration_graph == .Val(graph) {
+        if site == .Function(module_index, row) -> return sema_scope_first_marked_param(graph.modules[module_index].functions[row].declaration.params)
+    }
+    None
+}
+
+fn sema_scope_first_marked_param(params: [Param]) -> Param? Never! {
+    loop param in params {
+        if param.convention != AccessConvention.Read -> return Val(param)
+    }
+    None
 }

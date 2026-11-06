@@ -1,8 +1,8 @@
-Error [jet.MissingErrorConversion]: This implicit fallible call can't convert `CryptoError` into `Err` — no declared conversion exists
-  --> tests/ui/crypto_safe_raw_nonce.jet:5:17
+Error [jet.UnknownArgumentLabel]: `core.crypto.seal` has no parameter labelled `nonce`
+  --> tests/ui/crypto_safe_raw_nonce.jet:5:34
     |
   5 |     _ :: crypto.seal([], [], [], nonce: [0])
-    |                 ^^^^
- Why: Ordinary fallible calls propagate automatically; `CryptoError` can reach `Err` only through `impl CryptoError -> Err`
- Fix: Handle this call locally with `??`, add `impl CryptoError -> Err { … }`, or change the return type
-More: jet-lang.dev/e/E2402
+    |                                  ^^^^^
+ Why: A label binds an argument to the parameter of that name
+ Fix: `core.crypto.seal` accepts `recipients`, `bytes`, `aad`
+More: jet-lang.dev/e/E0764

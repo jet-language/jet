@@ -19,7 +19,8 @@ literal whose `{self.field}` holes the report fills. Preserve the code and its
 meaning when changing an impl. `Tools/agent/DiagnosticRows.jet` reads the impls
 as source and writes the Foundation rows in `Registry/DiagnosticRows.jet`
 (`--check` proves they agree). Retired and reserved codes stay types with their
-status.
+status. They run in no stage, so they state no `stage`, and `jet explain`
+prints none for them (`--json` gives `"stage": null`).
 
 A diagnostic's name is its type path: `jet.UnusedParameter` for the compiler's
 own, `web.BadPath` for a library's. The current registered code shapes are `E`
@@ -56,14 +57,6 @@ words for the learner who hit it:
   or stage names. That material belongs to `jet explain CODE --verbose` and
   `--json`.
 
-E0396 teaches `value.pow(exponent)` for the non-Jet `**` spelling, under
-D-SIGIL-ALGEBRA1=B. Its structured repair covers both operands and parenthesizes
-the receiver before calling `pow`, like E0398's precedence-preserving repairs;
-it never replaces `**` with the retired arithmetic `^` spelling.
-The source-less parser keeps the same teaching and exact `**` location;
-spaced `a * *p` remains ordinary multiplication and raw-pointer-of syntax,
-with its unsafe obligation checked separately.
-
 ## Human rendering
 
 The fixed headings are `Error [jet.Name]:` and `Warning [jet.Name]:`, naming
@@ -78,6 +71,20 @@ separated by one blank line. Lints do not block compilation by default;
 target, and a package may deny a named lint through its lint policy, but a
 diagnostic code is never a policy value. JSON and LSP `code` stays the
 registered code.
+
+Every human report renders from its row through
+`Compiler/JetFoundation/Source/Diagnostics/Render.jet`: `diagnostic_render`,
+`diagnostic_render_all`, and the `Stop` line helpers (one of which reads a
+`Stop` line back, for `jet test`). Extra lines go in the
+diagnostic's detail. No other source file under `Compiler/`, `Core/` or
+`Jetpack/` writes a heading such as `Error [E0102]` or `Stop [{code}]`, or a
+`jet-lang.dev/e/` link. Runtime reports cannot reach the registry while they
+run, so their texts are generated from the rows by
+`Tools/agent/gen-runtime-*-messages.mjs`. The stack-overflow report in the
+runtime's assembly stays hand-written, because its handler runs on an exhausted
+stack. `Tools/agent/DiagnosticRows.jet --check` fails on a hand-built report,
+on a generated or assembly copy whose heading, Why or Fix differs from its
+row, and on a generated heading or link that names no code.
 
 Package-budget reports retain the authored callable witness's span and source
 snapshot, including witnesses in dependency modules. A named witness must not
@@ -117,7 +124,8 @@ errors. Their `exit:` metadata is rendered from the same exit-code fact that
 the returned runtime report carries: 70 under S36 / D-FAIL-EXIT1. Execution
 boundaries deliver that report and preserve its status; they do not classify
 the fault from its prose. An unresolved diagnostic row remains a host defect
-with status 101.
+with status 101. No row speaks for it, so it is not a report: it prints one
+`internal error:` line that names the code, with no Why, Fix or More.
 
 A native program's fatal signal is reported the same way under `jet run` and
 `jet build`. The handler runs on a per-thread alternate stack, so an exhausted
@@ -130,6 +138,15 @@ image's location table, `.debug_jetline`, which the compiler writes beside
 the DWARF from the same rows). It then re-raises the signal with its default action, so the
 status is the signal's (128 + number in a shell). Addresses other than the
 faulting one are not printed, because they differ between the two tiers.
+
+A release image (`debug_info: split`) holds no location table, so its report
+keeps the first line with the address in place of the name, then
+`Build <id> (names and lines: jet crash)` and `Backtrace:` with the faulting
+address and the return addresses. `jet crash < report.txt` names them from
+the side debug file the build filed under that id in `.jet/symbols` and
+prints the report the same program built with `debug_info: true` prints, so
+a fault reads alike on every tier (D-RT-DEFECT-REPORT1). A report without the
+`Build` line is E2114; a build id with no side file in the store is E2115.
 
 ## Machine reports and causes
 
@@ -219,7 +236,14 @@ constant and owning decision appear only with `--verbose`.
 3. Add or update the matching snapshot under `tests/ui/` or `tests/ui_lint/`.
    It must point at the actionable source span, preserve structured fields, and
    contain no raw backend error.
-4. Run the focused snapshot and coverage checks, then check
+4. Run `jet Tools/agent/DiagnosticRows.jet --write`. It regenerates every copy
+   of the row: the Foundation registry rows, the repair-coverage baseline
+   `tests/diagnostics_coverage_baseline.txt`, and the explain page
+   `Docs/site/dist/e/<CODE>/index.html`. Never edit those files by hand;
+   `--check` (run by the cheap gates) fails when any of them differs from the
+   rows, and the generator refuses a change that adds an active row with
+   neither a structured edit nor a `no_fix` reason.
+5. Run the focused snapshot and coverage checks, then check
    `jet explain <CODE>`. Test rendered behavior where applicable; do not add a
    persistent Markdown mirror.
    Parser parity proofs also compare byte spans, secondary labels, edits, and
@@ -234,15 +258,16 @@ new diagnostic or change compiler semantics.
 
 ### Running and blessing snapshots
 
-From the checkout root, `JET=<compiler> jet test Tools/testkit "suite ui"` compares
-UI and lint snapshots; `TESTKIT_ARGS="--filter <repo-relative-name>"` focuses the
-selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable verdicts to
-`<dir>/ui.json`. `TESTKIT_ARGS=--coverage` checks independently derived emitted
-and rendered code sets, owned exclusions in
-`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152), and
-the exact per-plane repair counts in `tests/diagnostics_coverage_baseline.txt`.
-The transitional emission scan reads `Source/**/*.rs` and `crates/**/*.rs`;
-the native compiler cutover moves this scan to its Jet sources.
+From the checkout root, `jet test Compiler --profile ui` compares UI and lint
+snapshots; a positional filter (`jet test Compiler --profile ui <repo-relative-name>`)
+focuses the selection, and `JET_CI_EVIDENCE_DIR=<dir>` writes machine-readable
+verdicts to `<dir>/ui.json`. `jet test Compiler --profile ui --diagnostic-coverage`
+runs the suite's coverage entry instead of its rows: it checks
+independently derived emitted and rendered code sets against the owned
+exclusions in `tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152).
+Blessing that entry (the same command with `-u`)
+rewrites the allowlist without its stale rows; it never adds one. The emission
+scan reads the `.jet` sources under `Compiler/`, `Jetpack/` and `Core/`.
 
 Plain fixtures run `jet check` and record rendered stderr on failure, or
 exactly `(no errors)` on success, even when advisory lints exist. Lint fixtures
@@ -259,13 +284,12 @@ capability are `REFUSED`, never silently converted to ordinary checks.
 After reviewing a compiler change, bless only the affected fixture:
 
 ```sh
-TESTKIT_ARGS="--bless tests/ui/example.jet" JET=<compiler> jet test Tools/testkit "suite ui"
+jet test Compiler --profile ui tests/ui/example.jet -u
 ```
 
 Blessing creates or updates that fixture's snapshot from actual tool output.
-A lower diagnostic count is refused unless the reviewed invocation also names
-`--allow-shrink tests/ui/example.jet`. Broad blessing requires
-`--bless-all --reason "<compiler change>"`; blessing with `--shard` is refused.
+A lower diagnostic count is refused unless the reviewed invocation names the
+fixture in `--allow-shrink=tests/ui/example.jet`. A sharded profile refuses `-u`.
 Expected files are read-only in ordinary runs.
 
 

@@ -14,16 +14,17 @@ close it.
 ## Authorship and level playing field
 
 Every headline implementation—Jet, every port, and every fixture—is authored by
-a Luna xhigh worker. Use `.agents/skills/orchestration/SKILL.md` for dispatch.
+a worker. Use `.agents/skills/orchestration/SKILL.md` for dispatch.
 Use the same author and reasoning budget on both sides. Record authoring cost in
 `entry.json`: worker turns, retries, and diagnostics hit.
 
 An expert tier is optional and applies only to performance entries. When an
 established expert implementation exists, such as a benchmarks-game or real OSS
 implementation, check it in as a labeled sourced reference row. Pair it with a
-Jet expert variant authored by Sol high. Compare expert with expert, never Luna
-with expert. The orchestrator does not author corpus code. Workers do not run
-the harness; they type-check with `Tools/agent/lane-check.sh` only.
+Jet expert variant authored with the same expert effort. Compare expert with
+expert, never a headline entry with an expert one. The orchestrator does not
+author corpus code. Workers do not run the harness; they type-check with
+`Tools/agent/LaneCheck.jet` only.
 
 ## Environment
 

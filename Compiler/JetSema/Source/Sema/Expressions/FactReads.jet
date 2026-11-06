@@ -36,6 +36,7 @@ use jet_foundation.[
     VariantPayload,
     ViewProvenance,
     ViewSourcePath,
+    core_record_field,
     diagnostic_with_edit,
     symbol_id,
     type_name,
@@ -110,10 +111,10 @@ fn sema_fact_enum_variants(enum_name: String) -> [String]? {
     }
 }
 
-// Rust `builtin_type_registry` (Bundle.rs): the compiler-owned runtime enums
-// every module sees without a declaration. `<=>` and `compare` produce an
-// `Ordering`; checked removals select by `RemoveBy`. They share the closed
-// menu checks below, but they are runtime values, so codegen never folds them.
+// Rust `builtin_type_registry`: the compiler-owned runtime enums every module
+// sees without a declaration. `<=>` and `compare` produce an `Ordering`;
+// checked removals select by `RemoveBy`. They share the closed menu checks
+// below, but they are runtime values, so codegen never folds them.
 fn sema_compiler_enum_variants(enum_name: String) -> [String]? {
     if {
         enum_name == "Ordering" -> Val([String]{"Less", "Equal", "Greater"})
@@ -925,6 +926,31 @@ fn sema_fact_type_info(symbol: Symbol?, name: String, environment: SemaScopeEnvi
     None
 }
 
+// A reflection record folded into a program value keeps only the fields its
+// Core record rows declare. Producer-only members (`TypeInfo.trait_contracts`,
+// a marker's `sites`) feed derive templates; no program can name them, and
+// the IR builds a record constant from its declared layout. A struct with no
+// declared row at all is not a Core record and keeps every field.
+fn sema_fact_declared_value(value: TComptimeValue) -> TComptimeValue Never! {
+    if value == {
+        .Struct(type_name, fields) -> {
+            declared :: loop field in fields {
+                if core_record_field(type_name, field.name) != None -> break true
+            } ?? false
+            kept := [TComptimeField]{}
+            loop field in fields {
+                if declared && core_record_field(type_name, field.name) == None -> next
+                &kept.push(TComptimeField{name: field.name, value: sema_fact_declared_value(field.value)})
+            }
+            return TComptimeValue.Struct{type_name: type_name, fields: kept}
+        }
+        .List(values) -> return TComptimeValue.List{values: loop item in values -> sema_fact_declared_value(item)}
+        .Present(inner) -> return TComptimeValue.Present{value: sema_fact_declared_value(inner)}
+        // copy: a scalar leaf of the read producer value; the caller keeps the original
+        else -> return value.copy()
+    }
+}
+
 fn sema_fact_state_infos(definition: StructDef, symbol: Symbol, environment: SemaScopeEnvironment, program: SemaProgramTables) -> TComptimeValue? {
     if definition.state == None -> return None
     graph_fact := SemaStateGraphFact?{None}
@@ -954,9 +980,13 @@ fn sema_fact_subject_value(read: FactRead, name: String, symbol: Symbol?, enviro
     unit :: sema_fact_unit(name, environment, program)
     declared :: item != None || unit != None
     if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
+        // A builtin scalar has no declaration, only its fixed target layout.
+        if read == FactRead.Layout && symbol == None && program.registration_graph == .Val(graph) {
+            if sema_comptime_reflection_builtin_layout(graph, name) == .Val(layout) -> return Val(SemaFactReadValue{ty: sema_fact_named("LayoutInfo"), value: sema_fact_declared_value(layout)})
+        }
         info :: sema_fact_type_info(symbol, name, environment, program) ?? return None
         field :: if read == FactRead.Layout -> "layout" else -> if read == FactRead.Name -> "name" else -> "fields"
-        value :: sema_fact_struct_field(info, field) ?? return None
+        value :: sema_fact_declared_value(sema_fact_struct_field(info, field) ?? return None)
         ty :: sema_fact_reflection_field_type("TypeInfo", field) ?? return None
         return Val(SemaFactReadValue{ty: ty, value: value})
     }

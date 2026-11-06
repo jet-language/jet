@@ -1,7 +1,5 @@
-/* Link the REAL Jet provider object with -Wl,--wrap=jet_rt_free.
- * Private carrier layout comes from DataABI.jet, never Rust/IR storage.
- * Rust derives Clone/PartialEq: DataPlot.rs:269-344,748-754,865-917,
- * 1024-1031,1144-1168,1255-1262,2357-2361. */
+/* Link the REAL Jet provider object.
+ * Private carrier layout comes from DataABI.jet, never Rust/IR storage. */
 #include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -10,7 +8,7 @@
 
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc(int64_t bytes, int64_t alignment);
-extern void __real_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 #define DECLARE(T) \
     extern int64_t jet_rt_handle_clone_##T(int64_t value); \
     extern void jet_rt_handle_drop_##T(int64_t value); \
@@ -46,19 +44,21 @@ static const struct operations families[] = {
 static int64_t expected[36];
 static bool freed[36];
 static size_t free_calls;
-void __wrap_jet_rt_free(int64_t address, int64_t bytes, int64_t alignment) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(int64_t address, int64_t bytes, int64_t alignment) {
     assert(bytes == 8 && alignment == 8);
     size_t i = 0;
     while (i < 36 && expected[i] != address) ++i;
     assert(i < 36 && !freed[i]);
     freed[i] = true;
     ++free_calls;
-    __real_jet_rt_free(address, bytes, alignment);
 }
 static void set_tag(int64_t value, int64_t tag) {
     *(int64_t *)(uintptr_t)value = tag;
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     const size_t count = sizeof families / sizeof families[0];
     assert(count == 12);

@@ -1,6 +1,6 @@
-// Shared native-private Node160/metadata contract, adapted from 78f5f6471.
-// Rust Ui.rs:64-101 has raw Option<i64> callbacks, not Closure24 owners.
-// Nullable text/metadata pointers mean None; a present empty text owns E4.
+// Shared native-private Node160/metadata contract, adapted from 78f5f6471. The
+// Rust original has raw Option<i64> callbacks, not Closure24 owners. Nullable
+// text/metadata pointers mean None; a present empty text owns E4.
 UI_NODE_BYTES :: I64{160}
 UI_NODE_CHILD_BYTES :: I64{8} // owned Node-pointer slots, not U8
 UI_NODE_LABEL :: I64{0}
@@ -29,12 +29,16 @@ UI_NODE_SLOT_CLICK :: I64{8}
 UI_NODE_SLOT_DROP :: I64{16}
 UI_NODE_OPTION_MASK :: I64{26}
 
+// UIAccessibility: optional name and description texts, then its states as an
+// inline List header (length, capacity, data) of UI_STATE_BYTES states; that
+// header is also the record's `List.Rec` sequence (DataSequences layout).
 UI_ACCESSIBILITY_BYTES :: I64{40}
 UI_ACCESSIBILITY_NAME :: I64{0}
 UI_ACCESSIBILITY_DESCRIPTION :: I64{8}
 UI_ACCESSIBILITY_LENGTH :: I64{16}
 UI_ACCESSIBILITY_CAPACITY :: I64{24}
 UI_ACCESSIBILITY_DATA :: I64{32}
+// UIAccessibilityState: its variant (schema position) and payload.
 UI_STATE_BYTES :: I64{16}
 UI_STATE_PAYLOAD :: I64{8}
 UI_STATE_DISABLED :: I64{0}
@@ -47,6 +51,7 @@ UI_STATE_VALUE :: I64{6}
 UI_SHORTCUT_BYTES :: I64{16}
 UI_SHORTCUT_KEY :: I64{0}
 UI_SHORTCUT_MODIFIERS :: I64{8}
+UI_SHORTCUT_MODIFIERS_BYTES :: I64{8}
 
 // UI slice3: seed HostServices74-76/1242-1246, WebTable51-120,
 // WebForms1657-1662, WebQuery303-383, WebStore242-249.
@@ -197,8 +202,8 @@ UI_DRAG_EVENT_PHASE :: I64{8}
 UI_DRAG_EVENT_OPERATION :: I64{16}
 UI_DRAG_EVENT_ITEMS :: I64{24}
 
-// Seed WebForms.rs:1580-1583; two inline List24 headers and Text8 keys.
-// Keep the shared layout independent of runtime-only DataSequences constants.
+// Two inline List24 headers and Text8 keys. Keep the shared layout independent
+// of runtime-only DataSequences constants.
 UI_FORM_ACTION_ERROR_FIELDS :: I64{0}
 UI_FORM_ACTION_ERROR_FORM :: I64{24}
 UI_FORM_ACTION_ERROR_BYTES :: I64{48}

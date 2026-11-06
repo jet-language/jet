@@ -282,7 +282,7 @@ fn provider_report_import_gap(file: String, gap: ImportGap) Never! -[IO]> {
         "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits",
     )
     stderr_handle := term.stderr()
-    &stderr_handle.write_line("Warning [{diagnostic_display_name(diagnostic.code)}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
+    &stderr_handle.write_line(diagnostic_render(diagnostic, file, "", false).trim_end()).drop("warnings are best-effort output")
 }
 
 // Carriage returns and newlines as spaces.
@@ -466,7 +466,7 @@ fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtures: 
             if pkg_lock_record_source_channel(dir, channel) == {
                 .Ok(_) -> {}
                 .Err(error) -> {
-                    theme.error_coded("E1206", "couldn't write the imported source channel lock", error.message(), "fix the project lock permissions and rerun the import")
+                    theme.error_coded("E1224", "couldn't write the imported source channel lock", error.message(), "fix the project lock permissions and rerun the import")
                     return 1
                 }
             }

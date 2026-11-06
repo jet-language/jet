@@ -1,8 +1,8 @@
-Error [jet.ValueTypeMismatch]: `consume` cannot be used as a function value
-  --> named_write_and_move_functions_cannot_erase_access_as_function_values_2.jet:3:24
+Error [jet.MarkedFunctionValue]: `consume` can't be used as a function value because its parameter `value` is `^`
+  --> tests/ui/ownership/named_write_and_move_functions_cannot_erase_access_as_function_values_2.jet:3:24
     |
   3 | fn run() { callback :: consume }
     |                        ^^^^^^^
- Why: Parameter 1 requires the move marker `^`, but `fn(T)` function values take every parameter with plain read access
- Fix: Call this function directly; function values cannot erase write or ownership requirements
-More: jet-lang.dev/e/E0112
+ Why: A function type gives each parameter plain read access, so a value of `consume` would drop the `^` its callers must write
+ Fix: Call `consume` directly with the `^` mark, or pass a lambda that makes that call
+More: jet-lang.dev/e/E0227

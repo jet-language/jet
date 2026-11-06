@@ -1,0 +1,23 @@
+# tests/cffi.rs::jet_bind_native_backend_end_to_end at tests/cffi.rs:1333; hand-port
+# Claim: the native C binder turns a real header into a binding cache that names each C symbol verbatim and carries the C descriptor stamp, and a program using that cache builds, links and prints 42 and "hi from C" (tests/cffi.rs:1360-1429)
+# The original called CBind::generate in-process; its public route is `jet inspect bind <header> --pkg <name> -o <cache>`.
+# Fixture migrated: the C library from build_c_lib (tests/cffi.rs:1240-1258) verbatim in c/jetc.c (deps jetc: c@"c"); the header lines verbatim in jetc.h (the Rust raw-string indentation dropped); `use c.jetc as jc` is written `use jc :: c.jetc`
+# Not ported: the exact descriptor stamp (tests/cffi.rs:1374-1379 compares with binder_descriptor(C).stamp(), an internal API); the case checks the stamp's fixed C prefix
+# Not ported: result.skipped.is_empty() and result.bound.len() == 2 (internal API); the two function lines below cover both bound symbols
+# Not ported: the rustc build and FFI bridge arguments (replaced by jet build + built)
+requires: tool:cc|gcc|clang
+fixture: jet_bind_native_backend_end_to_end.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+mkdir: .jet/bindings/c
+step: jet inspect bind jetc.h --pkg jetc -o .jet/bindings/c/jetc.jet
+exit: 0 # tests/cffi.rs:1360 expect("native bind backend")
+file: .jet/bindings/c/jetc.jet ~ "fn jetc_add_ints(a: Int, b: Int) -> Int = \"jetc_add_ints\"\n" # tests/cffi.rs:1368
+file: .jet/bindings/c/jetc.jet ~ "fn jetc_greeting() -> String = \"jetc_greeting\"\n" # tests/cffi.rs:1371
+file: .jet/bindings/c/jetc.jet ~ "// jet-ffi-descriptor=jet-ffi-descriptor-v1;language=C;" # tests/cffi.rs:1377
+step: jet build main.jet
+exit: 0 # tests/cffi.rs:1396 the front end accepts the bind-generated program; tests/cffi.rs:1419 the link succeeds
+step: built
+exit: 0 # tests/cffi.rs:1425 bind-generated program succeeds at runtime
+stdout: = "42\nhi from C\n" # tests/cffi.rs:1429

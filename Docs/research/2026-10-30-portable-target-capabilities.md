@@ -1,9 +1,9 @@
 # A portable Jet target better than WebAssembly, and what it may learn about the host
 
 Date: 2026-10-30. Card #6345, criteria 1 to 3. Author: MemDesign-2 lane
-(design only). Probes live in `/mnt/jetscratch/lanes/MemDesign-2/probes/`
+(design only). Probes live in `$JET_SCRATCH_ROOT/lanes/MemDesign-2/probes/`
 (`g/` for facts, `w/` for targets, `perf/` for the timing cell) and ran with
-`/mnt/jetscratch/discovery/base/latest/jet` (commit 4e514f96e1) against a
+`$JET_SCRATCH_ROOT/discovery/base/latest/jet` (commit 4e514f96e1) against a
 `git archive` export of dev 4e514f96e1, at o0, o1 and o2 through
 `probes/tiers.sh`. Unless a row says otherwise, all three levels gave the same
 result.
@@ -270,4 +270,4 @@ with both times reported. This cell proves that a "no" answer costs only speed.
   Options: A, an in-page Jet host translates it to WebAssembly (recommended);
   B, a separate web build, as ratified.
 
-Builders and JSON are in `/mnt/jetscratch/lanes/MemDesign-2/ballot/`.
+Builders and JSON are in `$JET_SCRATCH_ROOT/lanes/MemDesign-2/ballot/`.

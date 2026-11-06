@@ -1,4 +1,4 @@
-// Link actual native providers with -Wl,--wrap=jet_rt_free; no mocks.
+// Link actual native providers; no mocks.
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,7 +8,7 @@ typedef struct { int64_t tag; } Enum;
 typedef struct { const char *data; int64_t len, capacity; } Text;
 _Static_assert(sizeof(Enum) == 8, "canonical native enum8");
 extern void jet_rt_alloc_init(void);
-extern void __real_jet_rt_free(void *, int64_t, int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_string_drop(Text *);
 extern Enum *jet_rt_handle_clone_jet_service_restart(const Enum *);
 extern void jet_rt_handle_drop_jet_service_restart(Enum *);
@@ -22,10 +22,11 @@ extern Text *jet_rt_handle_show_jet_service_delivery(const Enum *);
 extern Text *jet_rt_handle_display_jet_service_delivery(const Enum *);
 static void *watched;
 static unsigned frees, intercepted;
-void __wrap_jet_rt_free(void *pointer, int64_t bytes, int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *pointer, int64_t bytes, int64_t align) {
     ++intercepted;
     if (pointer == watched) { assert(bytes == 8 && align == 8); assert(++frees == 1); }
-    __real_jet_rt_free(pointer, bytes, align);
 }
 static void text(Text *value, const char *expected) {
     assert(value->len == (int64_t)strlen(expected));
@@ -56,6 +57,7 @@ static void family(int64_t count, const char *const *labels,
     drop(NULL);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     static const char *const restart[] = {"OneForOne", "OneForAll", "RestForOne"};
     static const char *const delivery[] = {"AtMostOnce", "DurableAtLeastOnce"};
     jet_rt_alloc_init();

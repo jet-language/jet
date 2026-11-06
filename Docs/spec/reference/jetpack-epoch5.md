@@ -104,8 +104,12 @@ A script without a Package carrier or `package.jet` may declare a top-level
 single-package import such as `use textkit#1.4.2`. The native CLI admits its
 sources from `<script-directory>/.jet/inline-deps/textkit/<version>/`, then
 `JET_INLINE_DEPS_FIXTURES/textkit/<version>/` when that override is set. A local
-package is authoritative even if none of its versions matches; admission never
-fetches a registry package or runs Cargo or another compiler.
+package is authoritative even if none of its versions matches, and admission
+never runs Cargo or another compiler. A package neither root knows is fetched
+once, before admission, by `jet run` through `jet fetch --lock <script>`: the
+configured registry's verified artifact is ingested into the Hangar, copied to
+`.jet/inline-deps/textkit/<version>/` and locked in `<script>.lock`; later runs
+resolve from that copy offline.
 
 One- and two-component numeric selectors choose the highest matching
 three-component version. Exact three-component selectors are pinned; looser
@@ -401,8 +405,8 @@ prerequisite stops the affected dependent graph.
 
 Built-in presets use one constructor registry for package reference,
 executable, port, argument vector, readiness, and state setup. For example,
-`postgres` uses `postgresql@nixpkgs`, `.jet/services/postgres/data`, loopback
-port 5432, and `pg_isready`; `redis` uses `redis@nixpkgs`,
+`postgres` uses `postgresql@jetpack`, `.jet/services/postgres/data`, loopback
+port 5432, and `pg_isready`; `redis` uses `redis@jetpack`,
 `.jet/services/redis/data`, loopback port 6379, and `redis-cli -p 6379 ping`.
 Explicit `ports`, `run`, or `ready` values override only the corresponding
 preset fact.

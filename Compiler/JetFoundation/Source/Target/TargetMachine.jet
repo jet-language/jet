@@ -1,7 +1,7 @@
-// Driver-owned target selection and dossier construction ported from
-// TargetMachine.rs and Driver::target_machine_for_facts.
+// Driver-owned target selection and dossier construction ported and
+// Driver::target_machine_for_facts.
 
-// Canonical TargetMachine.rs validation carriers restored from 45acf6f8f.
+// Canonical validation carriers restored from 45acf6f8f.
 enum TargetCapability {
     Allocator Atomic64 MMIO Hardware TimeWall TimeMonotonic TimeZoneData
     TimeSleep Entropy Scheduler IORead IOWrite PanicReport Startup
@@ -463,7 +463,7 @@ fn jet_target_programmers_json(programmers: [TargetProgrammerFacts]) -> String N
     "[{rows.join(",")}]"
 }
 
-// Rust TargetProgrammerFacts::missing_fact (TargetMachine.rs:441-483).
+// Rust TargetProgrammerFacts::missing_fact.
 fn jet_target_programmer_missing_fact(facts: TargetProgrammerFacts) -> String? Never! {
     if facts.executable.trim().is_empty() -> return Val("executable")
     loop value in facts.config {
@@ -549,7 +549,7 @@ fn jet_target_provider_identity(machine: TargetMachine) -> String Never! {
     jet_target_append_frame(&bytes, "hardware", jet_target_hardware_json(machine.hardware))
     jet_target_append_frame(&bytes, "programmers", jet_target_programmers_json(machine.programmers))
     jet_target_append_frame(&bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
-    "target-providers-v1:{sha256_hex_bytes(bytes)}"
+    "target-providers-v1:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
 }
 
 fn jet_target_allocator_provides_heap(policy: AllocatorPolicy) -> Bool Never! {
@@ -580,7 +580,7 @@ fn jet_target_wasm_provider(name: String, implementation: String) -> ProviderCon
     bytes := [U8]{}
     jet_target_append_frame(&bytes, "provider", name)
     jet_target_append_frame(&bytes, "implementation", implementation)
-    digest :: sha256_hex_bytes(bytes)
+    digest :: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
     ProviderContract{
         provider: name,
         sha256: "sha256:{digest}",
@@ -651,13 +651,13 @@ fn jet_target_active_os_name(target_triple: String, host_os: String) -> String N
     }
 }
 
-// Rust TargetMachineUse::default (TargetMachine.rs).
+// Rust TargetMachineUse::default.
 fn jet_target_machine_use_default() -> TargetMachineUse Never! {
     TargetMachineUse{stack_bytes: 0, static_ram_bytes: 0, heap_required: false,
         core_apis: [String]{}, mmio: [MMIOAccess]{}, required_capabilities: [TargetCapability]{}}
 }
 
-// Rust TargetCapability::as_str (TargetMachine.rs).
+// Rust TargetCapability::as_str.
 fn jet_target_capability_name(capability: TargetCapability) -> String Never! {
     if capability == {
         .Allocator -> "Target.Allocator"
@@ -677,7 +677,7 @@ fn jet_target_capability_name(capability: TargetCapability) -> String Never! {
     }
 }
 
-// Rust capabilities_for_core_usage (TargetMachine.rs).
+// Rust capabilities_for_core_usage.
 fn jet_target_capabilities_for_core_usage(api: String) -> [TargetCapability] Never! {
     bytes :: api.bytes()
     separator := 0
@@ -717,7 +717,7 @@ fn jet_target_capabilities_for_core_usage(api: String) -> [TargetCapability] Nev
     result
 }
 
-// Rust TargetMachineUse::from_core_apis (TargetMachine.rs).
+// Rust TargetMachineUse::from_core_apis.
 fn jet_target_machine_use_from_core_apis(apis: [String]) -> TargetMachineUse Never! {
     usage := jet_target_machine_use_default()
     sorted := apis.copy()
@@ -736,7 +736,7 @@ fn jet_target_machine_use_from_core_apis(apis: [String]) -> TargetMachineUse Nev
     usage
 }
 
-// Rust ProviderAbi::is_valid / ProviderContract::is_valid (TargetMachine.rs).
+// Rust ProviderAbi::is_valid / ProviderContract::is_valid.
 fn jet_target_no_whitespace(value: String) -> Bool Never! {
     // UTF-8 spellings of Rust char::is_whitespace. Scan the borrowed byte
     // view rather than allocating chars and a one-character String per scalar.
@@ -775,7 +775,7 @@ fn jet_target_provider_valid(provider: ProviderContract) -> Bool Never! {
     true
 }
 
-// Rust MemoryRegion::end / contains (TargetMachine.rs).
+// Rust MemoryRegion::end / contains.
 fn jet_target_memory_end(region: MemoryRegion) -> Int? Never! {
     end :: region.origin + region.size.bytes
     if end > 18446744073709551615 -> None else -> Val(end)
@@ -786,7 +786,7 @@ fn jet_target_memory_contains(region: MemoryRegion, origin: Int, size: ByteSize)
     access_end <= 18446744073709551615 && region.origin <= origin && access_end <= end
 }
 
-// Rust policy provider/provides methods (TargetMachine.rs).
+// Rust policy provider/provides methods.
 fn jet_target_clock_provider(policy: ClockPolicy) -> ProviderContract? Never! {
     if policy == {
         .Provider(provider) -> Val(provider)
@@ -809,7 +809,7 @@ fn jet_target_sink_provider(policy: ByteSinkPolicy, capability: TargetCapability
         else -> None
     }
 }
-// Rust TargetMachine::provides_capability (TargetMachine.rs).
+// Rust TargetMachine::provides_capability.
 fn jet_target_machine_provides_capability(machine: TargetMachine, capability: TargetCapability) -> Bool Never! {
     hosted :: jet_target_environment_identity(machine) == "hosted"
     if capability == {
@@ -844,7 +844,7 @@ fn jet_target_machine_provides_capability(machine: TargetMachine, capability: Ta
     }
 }
 
-// Rust push_unique / validate_provider_contract / validate_simple_capability (TargetMachine.rs).
+// Rust push_unique / validate_provider_contract / validate_simple_capability.
 fn jet_target_push_unique(errors: &[TargetMachineError], error: TargetMachineError) Never! {
     if !errors.contains(error) -> &errors.push(error)
 }
@@ -862,7 +862,7 @@ fn jet_target_validate_simple_capability(machine: TargetMachine, capability: Tar
     if provider == Val(contract) -> jet_target_validate_provider_contract(capability, contract, &errors)
 }
 
-// Rust validate_memory_regions (TargetMachine.rs); sort indices, not copied region payloads.
+// Rust validate_memory_regions; sort indices, not copied region payloads.
 fn jet_target_validate_memory_regions(regions: [MemoryRegion], errors: &[TargetMachineError]) Never! {
     names := [String:Bool]{}
     indices := [Int]{}
@@ -885,7 +885,7 @@ fn jet_target_validate_memory_regions(regions: [MemoryRegion], errors: &[TargetM
     }
 }
 
-// Rust validate_linker (TargetMachine.rs).
+// Rust validate_linker.
 fn jet_target_validate_linker(linker: LinkerInput, no_os: Bool, errors: &[TargetMachineError]) Never! {
     if linker == {
         .Unspecified -> if no_os -> &errors.push(.MissingLinkerInput)
@@ -896,7 +896,7 @@ fn jet_target_validate_linker(linker: LinkerInput, no_os: Bool, errors: &[Target
         else -> {}
     }
 }
-// Rust validate_allocator (TargetMachine.rs).
+// Rust validate_allocator.
 fn jet_target_validate_allocator(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if machine.allocator == {
         .Unspecified -> if machine.no_os -> &errors.push(.MissingAllocatorPolicy)
@@ -917,12 +917,12 @@ fn jet_target_validate_allocator(machine: TargetMachine, errors: &[TargetMachine
         else -> {}
     }
 }
-// Rust validate_panic (TargetMachine.rs).
+// Rust validate_panic.
 fn jet_target_validate_panic(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if machine.no_os && (machine.panic == .Unspecified || machine.panic == .HostedDefault) -> &errors.push(.MissingPanicPolicy)
     if machine.panic == .Report(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, &errors)
 }
-// Rust validate_ram_budget (TargetMachine.rs).
+// Rust validate_ram_budget.
 fn jet_target_validate_ram_budget(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     if !machine.no_os -> return
     kinds :: [MemoryKind]{.Flash, .Ram}
@@ -941,7 +941,7 @@ fn jet_target_validate_ram_budget(machine: TargetMachine, usage: TargetMachineUs
     used :: if sum > 18446744073709551615 -> 18446744073709551615 else -> sum
     if ram > 0 && used > ram -> &errors.push(.RamOverflow{used_bytes: used, ram_bytes: ram})
 }
-// Rust validate_core_usage (TargetMachine.rs).
+// Rust validate_core_usage.
 fn jet_target_validate_core_usage(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     if usage.heap_required && !jet_target_machine_provides_capability(machine, .Allocator) -> &errors.push(.HeapRequiresAllocator)
     available :: jet_target_max_runtime_layer(machine)
@@ -950,7 +950,7 @@ fn jet_target_validate_core_usage(machine: TargetMachine, usage: TargetMachineUs
     }
 }
 
-// Rust validate_target_capabilities (TargetMachine.rs).
+// Rust validate_target_capabilities.
 fn jet_target_validate_target_capabilities(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     mmio_provider :: if machine.mmio == { .Provider(provider) -> Val(provider) else -> None }
     jet_target_validate_simple_capability(machine, .MMIO, machine.mmio != .Unspecified, machine.mmio == .HostedDefault, mmio_provider, &errors)
@@ -984,7 +984,7 @@ fn jet_target_validate_target_capabilities(machine: TargetMachine, usage: Target
         if !jet_target_machine_provides_capability(machine, capability) -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
     }
 }
-// Rust validate_startup_facts (TargetMachine.rs).
+// Rust validate_startup_facts.
 fn jet_target_validate_startup_facts(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if !machine.no_os -> return
     if machine.startup == {
@@ -995,7 +995,7 @@ fn jet_target_validate_startup_facts(machine: TargetMachine, errors: &[TargetMac
         else -> {}
     }
 }
-// Rust validate_mmio (TargetMachine.rs).
+// Rust validate_mmio.
 fn jet_target_validate_mmio(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     loop access in usage.mmio {
         inside := false
@@ -1010,7 +1010,7 @@ fn jet_target_validate_mmio(machine: TargetMachine, usage: TargetMachineUse, err
     }
 }
 
-// Rust TargetHardwareFacts::validate_into (TargetMachine.rs:549-670).
+// Rust TargetHardwareFacts::validate_into.
 fn jet_target_hardware_validate_into(hardware: TargetHardwareFacts, memory: [MemoryRegion], errors: &[TargetMachineError]) Never! {
     if hardware.svd == Val(svd) {
         digest :: if svd.sha256.starts_with("sha256:") -> String.from_bytes(svd.sha256.bytes()[7..<svd.sha256.bytes().len()]) ?? "" else -> ""
@@ -1073,13 +1073,13 @@ fn jet_target_hardware_validate_into(hardware: TargetHardwareFacts, memory: [Mem
         if channel.max_transfer_bytes == Val(bound) && bound == 0 -> &errors.push(.DMATransferSizeZero{channel: channel.name})
     }
 }
-// Rust TargetHardwareFacts::validate (TargetMachine.rs).
+// Rust TargetHardwareFacts::validate.
 fn jet_target_hardware_validate(hardware: TargetHardwareFacts, memory: [MemoryRegion]) -> [TargetMachineError] Never! {
     errors := [TargetMachineError]{}
     jet_target_hardware_validate_into(hardware, memory, &errors)
     errors
 }
-// Rust TargetMachine::validate (TargetMachine.rs:1193-1212); preserve push order.
+// Rust TargetMachine::validate; preserve push order.
 fn jet_target_machine_validate(machine: TargetMachine, usage: TargetMachineUse) -> [TargetMachineError] Never! {
     errors := [TargetMachineError]{}
     if machine.triple.trim().is_empty() -> &errors.push(.MissingTargetTriple)
@@ -1096,8 +1096,8 @@ fn jet_target_machine_validate(machine: TargetMachine, usage: TargetMachineUse) 
     errors
 }
 
-// Rust derive(Debug) for TargetMachineError (TargetMachine.rs:3388-3586).
-// String :Debug delegates to Rust str Debug (Prelude/Core/Values.rs:281-284).
+// Rust derive(Debug) for TargetMachineError. String :Debug delegates to Rust
+// str Debug.
 fn jet_target_machine_error_debug(error: TargetMachineError) -> String Never! {
     if error == {
         .MissingTargetTriple -> "MissingTargetTriple"
@@ -1203,11 +1203,11 @@ fn jet_target_machine_errors_debug(errors: [TargetMachineError]) -> String Never
     "[{rows.join(", ")}]"
 }
 
-// Rust MemoryRegion::new (TargetMachine.rs).
+// Rust MemoryRegion::new.
 fn jet_target_memory_region_new(name: String, origin: Int, size: ByteSize, kind: MemoryKind, access: MemoryAccess) -> MemoryRegion Never! {
     MemoryRegion{name: name, origin: origin, size: size, kind: kind, access: access}
 }
-// Rust TargetMachine::with_startup_facts (TargetMachine.rs).
+// Rust TargetMachine::with_startup_facts.
 fn jet_target_machine_with_startup_facts(machine: TargetMachine, entry: String, vectors: String, abi: ProviderABI, placement: String) -> TargetMachine Never! {
     result := machine
     result.startup_entry = entry
@@ -1216,15 +1216,15 @@ fn jet_target_machine_with_startup_facts(machine: TargetMachine, entry: String, 
     result.startup_placement = placement
     result
 }
-// Rust builtin_provider (TargetMachine.rs). These digests are the immutable
-// board implementation facts, calculated from Rust's exact adapter/startup
-// format! bytes by CLI-37/oracle.py (Rust SHA256.rs), not a profile-label hash.
+// Rust builtin_provider. These digests are the immutable board implementation
+// facts, calculated from Rust's exact adapter/startup format! bytes by
+// CLI-37/oracle.py, not a profile-label hash.
 fn jet_target_builtin_provider_digest(name: String, digest: String) -> ProviderContract Never! {
     ProviderContract{provider: name, sha256: "sha256:{digest}",
         provenance: "builtin:{name};sha256:{digest}", abi: jet_target_abi_c(),
         limits: ProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
 }
-// Rust TargetMachine::board_sensor_v1 (TargetMachine.rs:1819-1927).
+// Rust TargetMachine::board_sensor_v1.
 fn jet_target_machine_board_sensor_v1(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", package_version)
     machine.memory = [MemoryRegion]{
@@ -1258,7 +1258,7 @@ fn jet_target_machine_board_sensor_v1(package_version: String) -> TargetMachine 
     }
     machine
 }
-// Rust TargetMachine::board_virt_aarch64 (TargetMachine.rs:1930-2000).
+// Rust TargetMachine::board_virt_aarch64.
 fn jet_target_machine_board_virt_aarch64(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", ProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
     machine.memory = [MemoryRegion]{
@@ -1286,7 +1286,7 @@ fn jet_target_machine_board_virt_aarch64(package_version: String) -> TargetMachi
     }
     machine
 }
-// Rust TargetMachine::wasm_no_os (TargetMachine.rs:2083-2115).
+// Rust TargetMachine::wasm_no_os.
 fn jet_target_machine_wasm_no_os(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("wasm.no-os", "wasm32-unknown-unknown", package_version)
     machine.memory = [MemoryRegion]{

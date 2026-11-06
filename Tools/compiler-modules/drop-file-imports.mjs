@@ -11,11 +11,9 @@
 // `alias` token plus its following dot, so strings and comments are untouched.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { basename, resolve } from "node:path";
 
-const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const jetCmd = (process.env.JET_CMD ?? `${repo}/Tools/agent/jet-env jet`).split(/\s+/);
+const jetCmd = process.env.JET_CMD ? process.env.JET_CMD.split(/\s+/) : [process.env.JET || "jet"];
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
 const files = args.filter((arg) => arg !== "--apply");

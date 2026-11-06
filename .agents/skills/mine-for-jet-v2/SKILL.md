@@ -119,7 +119,7 @@ Never silently remap historical identities. Playlist expansion needs explicit sc
 
 Load [capture](references/capture.md) and only relevant source-kind branches.
 All disposable captures go under **`$JET_SCRATCH_ROOT/mine/<run-id>/`**; set
-`JET_SCRATCH_ROOT` explicitly (default `~/.cache/jet-dev/scratch`) and pass the
+`JET_SCRATCH_ROOT` explicitly (default `$JET_STATE_ROOT/scratch`) and pass the
 location to commands. Never repo `target-mine-*` directories or `/tmp`. Process
 **transcripts/text first**. Retrieve
 frames only when on-screen code, diagrams, or results matter to a claim; use

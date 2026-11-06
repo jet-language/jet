@@ -7,11 +7,11 @@ use jobs :: core.jobs
 
 fn ordinary(payload: String) { print(payload) }
 
-fn reject(queue: jobs.JobQueue) -[DB, Time]> {
+fn reject(queue: &jobs.JobQueue) -[DB, Time]> {
     _ :: &queue.enqueue(ordinary, "not a declared job") ?? return
 }
 
 fn run() {
-    queue :: jobs.queue() ?? return
-    reject(queue)
+    queue := jobs.queue() ?? return
+    reject(&queue)
 }

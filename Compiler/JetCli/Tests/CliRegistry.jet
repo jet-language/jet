@@ -1,9 +1,8 @@
-// The canonical CLI table's routing laws (crates/jet-cli CLI.rs tests
+// The canonical CLI table's routing laws (crates/jet-cli tests
 // no_command_declared_in_both_tables, moved_command_registry_agrees_with_dispatch,
 // typo_suggestions_never_advertise_moved_bare_actions,
-// self_update_keyless_override_is_registered_for_help_and_completions) and the
-// retired-marker explanation (Explain.rs marker_explain_reports_typed_signature_and_retirement),
-// run on the Jet-built CLI.
+// self_update_keyless_override_is_registered_for_help_and_completions) and the retired-marker
+// explanation (marker_explain_reports_typed_signature_and_retirement), run on the Jet-built CLI.
 use {
     jet_cli.[
         JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
@@ -41,11 +40,6 @@ fn cli_registry_tables() Never! {
 fn cli_registry_moved_commands() Never! {
     loop group in JET_CLI_COMMANDS {
         loop action in group.actions {
-            if action.name == "install" {
-                cli_registry_require(action.handler == "SharedStore", "install routes to the shared store")
-                cli_registry_require(jet_cli_moved_command(action.name) == .None, "install keeps its E0043 teaching")
-                next
-            }
             if action.also_canonical_top_level || cli_registry_is_command(action.name) {
                 cli_registry_require(jet_cli_is_canonical_top_level(action.name), "{action.name} is canonical")
                 cli_registry_require(jet_cli_moved_command(action.name) == .None, "{action.name} is not moved")
@@ -57,10 +51,12 @@ fn cli_registry_moved_commands() Never! {
             cli_registry_require(owner.actions[moved.action].name == action.name, "{action.name} moved to the wrong action of {owner.name}")
         }
     }
-    // This rule retired the `report` root: `gc report` is nested only.
+    // `gc report` is nested only. Retired roots and their teaching are gone
+    // (greenfield), so bare `report` is the moved word of that nested action.
     report :: jet_cli_nested_command("gc", "report") ?? panic("gc report is registered")
     cli_registry_require(!JET_CLI_COMMANDS[report.group].actions[report.action].also_canonical_top_level, "gc report is not canonical at the top level")
-    cli_registry_require(jet_cli_moved_command("report") == .None && !jet_cli_is_canonical_top_level("report"), "the retired report root stays retired")
+    moved_report :: jet_cli_moved_command("report") ?? panic("bare report names its nested owner")
+    cli_registry_require(moved_report.group == report.group && moved_report.action == report.action && !jet_cli_is_canonical_top_level("report"), "bare report teaches gc report, not a top-level root")
 }
 
 fn cli_registry_typo_suggestions() Never! {
@@ -103,7 +99,7 @@ fn cli_registry_completions() Never! {
     }
 }
 
-// Help.rs palette law: flag help is user-facing copy, never planning vocabulary.
+// Palette law: flag help is user-facing copy, never planning vocabulary.
 fn cli_registry_flag_copy() Never! {
     words :: [String]{"milestone", "requirement", "epoch", "ratified"}
     loop flag in JET_CLI_FLAGS {

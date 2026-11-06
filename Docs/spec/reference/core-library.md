@@ -1152,17 +1152,21 @@ or substitute an unknown profile name.
 `connect_profile(endpoint, profile, timeout)` sequences the handshake in Jet:
 raw WebSocket connection and timeout setup, `session.status` ready/message
 validation, then `session.new` with ordered empty `alwaysMatch` capabilities.
-The session-started carrier fact is recorded before validating the session ID
-and capabilities. CDP requires the first `goog:cdp` field to be exactly true.
-Socket/command operations and the three native carrier tails remain registered
-raw leaves; there is no whole-handshake adapter.
+The session-started fact is recorded before validating the session ID and
+capabilities. CDP requires the first `goog:cdp` field to be exactly true.
+The whole runtime is Jet source in `Core/Web/Browser.jet`: commands, event
+capture, trace bounds, locators, reports, and the test server run over
+`core.net.ws`, `core.process`, and `core.files`. Wire operations carry `Net`
+and `Time`, because each command measures its own deadline. A `Browser` and its
+contexts, pages, frames, locators, intercepts, and protocol handles stay on the
+thread that opened them (**E1102**).
 
 | API | Result | Description |
 | --- | --- | --- |
 | `config()` / `config_from_env()` | `BrowserTestConfig !BrowserError` | Load checked browser-test configuration. |
 | `make_profile(name)` / `profile(name)` / `timeout(ms)` | `BrowserProfile` / `BrowserProfile !BrowserError` / `BrowserTimeout !BrowserError` | Construct an isolated profile, check a pinned BiDi profile (`bidi-2024.11` or `bidi-2025.5`), or check a timeout in `1..=600000` milliseconds. |
 | `locked(engine)` | `BrowserLocked !BrowserError` | Read and verify the provider's locked browser record. |
-| `connect()` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect through the default or named profile. |
+| `connect(endpoint)` / `connect_profile(endpoint, profile, timeout)` / `connect_browser_profile(profile, timeout)` | `Browser !BrowserError` | Connect to an endpoint with the default or a named profile. |
 | `browser.context()` | `BrowserContext !BrowserError` | Open an isolated browsing context. |
 | `context.page()` / `context.tab()` | `BrowserPage` | Open a page or tab in a context. |
 | `page.goto(url)` | `BrowserPage !BrowserError` | Navigate a page under its timeout and protocol policy. |
@@ -1170,14 +1174,14 @@ raw leaves; there is no whole-handshake adapter.
 | `page.close()` / `context.close()` / `browser.close()` | `!BrowserError` | Explicitly close page, context, or browser resources. |
 | `page.get_by_role(role, name)` / `get_by_text(text)` | `BrowserLocator` | Locate an element through semantic role or visible text. |
 | `page.get_by_label(label)` / `get_by_placeholder(text)` / `get_by_test_id(id)` | `BrowserLocator` | Locate labeled, placeholder, or test-id controls. |
-| `page.get_by_css(selector)` / `selected(page, selector)` | `BrowserLocator` | Use an explicit CSS locator when semantic selection is not suitable. |
+| `page.get_by_css(selector)` | `BrowserLocator` | Use an explicit CSS locator when semantic selection is not suitable. |
 | `locator.wait(timeout)` / `locator.wait_gone(timeout)` | `!BrowserError` | Wait for a locator to appear or disappear. |
 | `locator.click()` / `locator.hover()` | `!BrowserError` | Perform checked pointer actions. |
 | `locator.fill(text)` / `locator.press(key)` | `!BrowserError` | Fill a control or send a key. |
-| `browser.subscribe(kind)` / `browser.next_event(timeout)` | `BrowserEvent` | Subscribe to and receive bounded, redacted browser events. |
+| `browser.subscribe(kind)` / `browser.next_event(timeout)` | `!BrowserError` / `BrowserEvent !BrowserError` | Subscribe to and receive bounded, redacted browser events. |
 | `browser.add_intercept(pattern)` / `add_intercept_url(pattern, url)` | `BrowserIntercept` | Install a network interception rule. |
 | `browser.continue_request(id)` / `fail_request(id)` / `fulfill_request(id, status, body)` | `!BrowserError` | Continue, fail, or fulfill an intercepted request. |
-| `page.set_cookie(name, value, options)` / `page.cookie(name)` | cookie value | Set or read a page-partition cookie. |
+| `page.set_cookie(name, value, domain)` / `page.cookie(name)` | `!BrowserError` / `String? !BrowserError` | Set or read a page-partition cookie. |
 | `page.clear_cookies()` | `!BrowserError` | Clear cookies in the page partition. |
 | `page.storage_get(kind, key)` / `storage_set(kind, key, value)` | `String` / `!BrowserError` | Read or write local or session storage. |
 | `page.storage_clear(kind)` | `!BrowserError` | Clear a local or session storage partition. |
@@ -1186,13 +1190,14 @@ raw leaves; there is no whole-handshake adapter.
 | `browser.protocol("bidi" \| "cdp")` / `protocol.send(method, params)` | `BrowserProtocol` / response | Access the selected protocol; CDP requires the advertised capability. |
 | `browser.privacy()` | `BrowserPrivacy` | Report isolated-profile, receipt-redaction, and shared-profile policy facts. |
 | `browser.receipt()` / `browser.trace()` | `BrowserReceipt` / `BrowserTrace` | Return redacted audit facts and the bounded action trace. |
-| `begin_named(...)` / `fixture_context(browser)` / `fixture_page(context, url)` | fixture values | Build named test fixtures and their contexts/pages. |
+| `begin_named(config, test, engine, attempt, path, line, column)` / `fixture_context(fixture)` / `fixture_page(fixture)` | `BrowserTestFixture !BrowserError` / `BrowserContext` / `BrowserPage` | Open a named test fixture (locked engine, isolated context, page, event subscriptions) and read its context and page. |
 | `fixture_source(name, body)` / `generate_source(name, body, base_url)` | `String !BrowserError` | Generate bounded fixture source with escaped base-URL data. |
-| `report_new(title)` / `report_add_case(report, name, ok)` | `BrowserReport` | Build an ordered browser report. |
-| `report_text(report)` / `report_json(report)` / `report_html(report)` | `String` | Render the report in text, JSON, or HTML. |
-| `report_exit_code(report)` / `write_report(report, path)` | `Int` / `!IOError` | Produce the test exit code or write the text report. |
-| `server_start(root)` / `server_stop(server)` | `BrowserServer` | Start or stop a provider-backed test server. |
-| `watch_changed(path)` | `Bool !BrowserError` | Ask the provider whether the watched path changed. |
+| `selected(config, name)` | `Bool` | Apply the configured test filter to a test name. |
+| `report_new(config)` / `report_add_case(report, case)` | `BrowserTestReport` | Build an ordered browser test report. |
+| `report_text(report)` / `report_json(report)` / `report_html(report)` | `String` | Render the report in text, JSON, or the self-contained HTML viewer. |
+| `report_exit_code(report)` / `write_report(report, path)` | `Int` / `!BrowserError` | Produce the test exit code or write the configured report (plus the HTML viewer for `ui` runs). |
+| `server_start(config)` / `server_stop(server)` / `server_url(server)` / `server_logs(server)` | `BrowserTestServer !BrowserError` / – / `String` / `String` | Start the configured test server and wait until it accepts connections; stop it and keep its bounded logs. |
+| `watch_changed(path, last_modified_ms)` | `Bool !BrowserError` | Report whether the watched path changed since the given modification time. |
 
 The source generator rejects empty names and values over its fixed source
 limits; HTML/JSON report renderers escape their output contexts. Provider
@@ -1799,7 +1804,7 @@ fn run() {
 | `home_dir()` / `temp_dir()` | `?String -[Env]>` / `String -[Env]>` | Return platform home or temporary-directory values. |
 | `name()` / `family()` / `arch()` | `String -[Env]>` | Return OS name, OS family, and CPU architecture. |
 | `platform()` / `is_windows()` / `is_unix()` / `is_linux()` / `is_macos()` | platform values `-[Env]>` | Query the environment-derived platform facts. |
-| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier. |
+| `executable()` / `username()` | `String -[Env]>` | Return process facts. `executable()` is the running program's path: the built binary, or the script's absolute path under `jet run`; launching it runs the program again on either tier, and every later command word reaches the program as an argument (under `jet run` the relaunch places them after `--`). |
 | `hostname()` | `String -[Env, FS]>` | Return the host name. |
 | `release()` / `version()` | `String -[Env, FS, Exec, Time.Wait]>` | Read operating-system facts; macOS queries run `uname` or `sw_vers`. |
 | `pid()` / `getpid()` / `getppid()` / `cpu_count()` | `Int -[Env]>` | Return process IDs or a logical CPU count of at least one. |
@@ -2926,7 +2931,7 @@ header on the first pull) and decodes it, so rows stream one at a time.
 | Function or type | Returns | Description |
 | --- | --- | --- |
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
-| `csv.parse(text)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays. |
+| `csv.parse(text, delimiter, header, skip_blank)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays through the same engine and options as `csv.rows`. |
 | `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
 | `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
 | `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
@@ -3244,6 +3249,31 @@ stream is terminal and does not resume iteration.
 | `stream.take_n(stream, n)` | `[T] !DataError` | Consume at most `n` rows. |
 | `stream.len(stream)` / `is_empty(stream)` | `Int` / `Bool` | Inspect remaining rows without changing row ownership. |
 
+### Event-time windows over `Stream<T>`
+
+Three receiver stages on the builtin pull stream group events into tumbling
+event-time windows. They are `core.data` source stages
+([`Core/Data/Data.jet`](../../../Core/Data/Data.jet)). Each stage consumes
+its receiver and stays lazy: the stream runs the callbacks once per element as
+it is pulled. The callbacks take one element and carry no effects.
+
+| Stage | Returns | Description |
+| --- | --- | --- |
+| `stream.with_event_time(event -> time)` | `StreamEventTime<T>` | Stamp each element with its event time: `Int` Unix seconds or a `DateTime`. |
+| `stamped.key_by(event -> key)` | `KeyedStream<K, T>` | Key each stamped element. `K` must be `Equatable`. |
+| `keyed.window(width, watermark: lateness, late: .Drop)` | `Stream<Window<K, T>>` | Group elements into tumbling windows of `width`. `late:` defaults to `.Drop`. |
+
+`Window<K, T>` has `key`, `start` and `end` (`DateTime`), and `events`, a list
+of `StreamEvent<T>` (`value` plus `event_time`) in arrival order. A window
+starts at a multiple of `width` since the Unix epoch. The watermark is the
+largest event time seen so far minus `lateness`, and it never moves back. An
+element older than the watermark is late, and `LateEventDisposition.Drop`
+discards it. A window is emitted once the watermark reaches its end. When the
+source ends, the remaining windows are emitted. Windows that become ready at
+the same time come out in the order their keys were first seen, then by start.
+`width` must be positive and `lateness` must not be negative; anything else
+panics when the stream is first pulled.
+
 ### `core.data.plot` — deterministic data plots
 
 `core.data.plot` turns aligned labels and numeric values into a deterministic
@@ -3459,7 +3489,7 @@ or golden file. The public source is
 |---|---|---|
 | `assert_equal(comparison: TestComparison) -> Bool` | Boolean | Check the comparison's recorded proof fields. |
 | `compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E!` | comparison | Compare reference and candidate outputs over explicit cases. The callbacks' shared failure type passes up (D-CALLBACK-ERR1=A); callbacks that cannot fail make the comparison `Never!`. |
-| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. A mismatch returns `false` and records `snapshot differs: <name>` with the same bounded unified diff as `golden`, so a failing `assert` shows it. |
+| `snap(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare or create `__snapshots__/<sanitized-name>.snap`; `JET_UPDATE_SNAPSHOTS=1` rewrites it. Snapshot names retain ASCII letters, digits, `-`, and `_`, replacing other scalars with `_`; an empty name becomes `case`. A mismatch returns `false` and records `snapshot differs: <name>` with the same bounded unified diff as `golden`, so a failing `assert` shows it. The `expect(value).snapshot()` builtin is `assert(snap("<file>_<line>", "{value}"))`. |
 | `golden(name: String, value: String) -[FS, Env]> Bool` | Boolean | Compare `value` with the file `name`. A missing, unreadable, or differing file returns `false` and records the reason (with a bounded unified diff for a difference). The next failing `assert` or `assert_eq` on that thread reports the recorded reason as its stop message and the path and diff as its locals; a passing helper call clears it. Under `JET_UPDATE_SNAPSHOTS=1` (`jet test -u`) a missing or differing file is written, parent folders included, and the check passes. |
 | `fixture(name: String) -[FS]> String` | text | Load a named fixture. |
 | `temp_dir(prefix: String) -[FS]> String` | path | Allocate an isolated temporary directory. |
@@ -4098,8 +4128,10 @@ hooks may opt into reverse lookup with `#Commutative`, as in
 declared operand order. The exact foundations example exercises both operand
 orders without changing its integer or rational representation.
 
-Plain arithmetic on a fixed-width integer traps on overflow. Use one of the
-explicit operation policies when wrapping or clamping is part of the contract:
+Plain arithmetic on a fixed-width integer traps on overflow, and a typed-literal
+conversion to a fixed width that can't hold every source value (`U8{count}`,
+`I32{wide}`) stops with **E3010** when the value doesn't fit. Use one of the
+explicit policies when wrapping or clamping is part of the contract:
 
 | Form | Result | Description |
 |---|---|---|
@@ -4107,12 +4139,20 @@ explicit operation policies when wrapping or clamping is part of the contract:
 | `wrapping(a + b)` | `T` | Wrap in the operand's width. |
 | `saturating(a + b)` | `T` | Clamp to the operand's bounds. |
 | `checked(a + b)` | `Option<T>` | Return no value on overflow. |
+| `T{x}` | `T` | Stop with E3010 if `x` is outside `T`. |
+| `wrapping(T{x})` | `T` | Keep the low bits of `x` in `T`'s width. |
+| `saturating(T{x})` | `T` | Clamp `x` to `T`'s bounds. |
+| `checked(T{x})` | `Option<T>` | Return no value when `x` is outside `T`. |
 | `value.wrapping_add(other)` | `T` | Receiver form of wrapping addition. |
 | `value.saturating_add(other)` | `T` | Receiver form of saturating addition. |
 | `value.checked_add(other)` | `Option<T>` | Receiver form of checked addition. |
 
-The wrappers accept exactly one integer arithmetic operation; another expression
-reports **E1005**. Integer types expose `MIN`, `MAX`, `count_ones`,
+The wrappers accept exactly one integer arithmetic operation or one narrowing
+conversion; another expression, including a conversion that can't fail,
+reports **E1005**. A wrapper covers only the operation or conversion it is
+written around. A written literal must fit its destination even inside a
+wrapper (**E1003**, whose fix names the value the wrapper would give).
+Integer types expose `MIN`, `MAX`, `count_ones`,
 `count_zeros`, `leading_zeros`, and `trailing_zeros`. Float types expose
 `INFINITY`, `NEG_INFINITY`, `NAN`, and `EPSILON`, plus `is_nan`, `is_infinite`,
 and `is_finite`. Named bit methods preserve operand width. A shift keeps its
@@ -4363,6 +4403,7 @@ subquery from another table) is refused.
 | `decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]!` | `T` | Decode a row into a typed value. A field's column is its `Rename(db:)` name, else its shared name. |
 | `transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Execute a checked transaction. |
 | `migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError!` | count | Apply a migration under its checksum. |
+| `scope.live(sql: SQL) -[DB.Read]> Live<[[String: DBValue]], DBError> DBError!` | binding | Bind one policy-checked `SELECT` in the shared `core.web` live registry; read it with `core.web.state`. |
 
 Scoped connection and pool handles provide checked `query`, `query_one`,
 `execute`, lease, commit, rollback, and close operations. A policy expression
@@ -4371,6 +4412,30 @@ with a table identifier. Policy text has a bounded size. Schema and transaction
 control belong to the migration/control path, not to arbitrary interpolated
 application values. Migrations record their name and checksum so a changed
 migration cannot silently replace an applied one.
+
+`DBScope` implements the prelude trait `Driver` (`query`, `query_one`,
+`execute`, `begin`, `commit`, `rollback`), which a generic bound names bare:
+`fn count<T: Driver>(conn: T)` takes any scope and calls its methods.
+
+`DBScope.live` (D-LIVEQUERY1, #1158) refuses any statement other than one
+`SELECT` and applies the scope's policy before binding, so a refused query
+fails at the call. The binding is identified by the scope's user, the
+policy-applied SQL and its bound values: the same query from the same user
+returns the same binding, and another user's gets its own. `core.web.state`
+runs the query on first read and again, with the policy applied anew, after a
+scope write (`execute`, `transaction`, `migrate`) to the table it reads, or
+after a rollback that undid one. A write to another table leaves it current.
+No WebSocket transport carries these results yet (core.net.ws, #4957), so
+`live_stats()` keeps reporting `ws_pushes=0`.
+
+`DBPool.acquire(deadline:)` admits waiters first come, first served. A waiter
+leaves the queue when it gets a lease, when its deadline passes, when the pool
+starts draining, or when its task is cancelled at the wait, so a cancelled
+acquire never blocks the waiters behind it. `DBLease.close()` returns the
+connection once; a second close does nothing. While the pool drains it refuses
+new leases (`database pool is draining`) but still takes back the ones out.
+Statements themselves have no cancel operation; that and any engine other
+than SQLite are separate owner choices.
 
 Rows are inspectable `[String: DBValue]` maps. The closed value carrier has
 `Null`, `Int`, `Float`, `Text`, `Bool`, and `Blob([U8])` variants; SQLite Boolean
@@ -4575,8 +4640,8 @@ Combined rollback failures preserve the original diagnostic and recovery text.
 Generation rollout, start and stop are Jet policy; each registry change takes
 the registry guard, the one linearization point for drain, partition, handoff
 and endpoint send.
-No job or service invocation runs in-process, so no execution scope binds an
-endpoint and `core.jobs.queue()` reports `ServiceError.NotStarted`.
+No service worker runs its handler in-process. `core.jobs.queue()` binds to
+the package endpoint instead, whose authority `core.jobs` describes below.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -4734,6 +4799,15 @@ The source-owned lifecycle exposes the effects it actually consumes:
 startup value selects the database; otherwise `.jet/state/jobs.db` is used.
 Logical environment overlays do not redirect this provider. Set an isolated
 database path before launching examples or conformance programs.
+
+The queue binds to the package endpoint, so durable jobs need no service setup
+(D-DX-QUEUE1=A). Its authority is a private secret in `<database>.authority`.
+The first run creates it with a no-replace publish of an exclusive 0600 file.
+A concurrent first run that loses the race reads the winner's secret, so every
+run of the package reaches the same rows and verifies the same receipts. An
+existing secret that is not a regular file owned by the current user, or that
+grants any group or other permission, is refused with `ServiceError.Policy`
+and is never overwritten.
 
 Queue status publication also retains `DB` alongside `Time`, matching the
 provider calls reached while obtaining its wall-clock sample.

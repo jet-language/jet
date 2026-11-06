@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// Native pack symbol proof for the UTF-8 validator, then the Rust utf8-corpus.rs
-// acceptance witness. That witness is retired: this runner reports UNCOVERED
-// with cardRequired:true and exits 2 without invoking rustc. The producer must
-// supply this exact tree's freshly emitted Jet object and same-tree runtime pack.
+// Native pack symbol proof for the UTF-8 validator, then the Rust utf8-
+// acceptance witness. That witness is retired: this runner reports UNCOVERED with
+// cardRequired:true and exits 2 without invoking rustc. The producer must supply
+// this exact tree's freshly emitted Jet object and same-tree runtime pack.
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -25,7 +25,7 @@ for (const [label, path] of [['object', object], ['pack', pack]]) {
   const count = definitions.filter(([name, kind]) => name === 'jet_string_validate_utf8' && kind === 'T').length;
   if (count !== 1) failures.push(`${label}: validator has ${count} strong definitions`);
 }
-const reason = 'utf8-corpus.rs Rust acceptance witness retired (owner #38/#59; Tower #4923): exact UTF-8 acceptance and error run not executed; no rustc invoked';
+const reason = 'The Rust utf8-corpus acceptance witness retired (owner #38/#59; Tower #4923): exact UTF-8 acceptance and error run not executed; no rustc invoked';
 const receipt = { status: 'UNCOVERED', cardRequired: true, reason, object, pack, symbolFailures: failures };
 writeFileSync(join(out, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
 console.log(JSON.stringify(receipt));

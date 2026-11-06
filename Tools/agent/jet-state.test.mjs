@@ -6,7 +6,7 @@ import childProcess from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { homedir } from 'node:os';
+import { scratchRoot } from './roots.mjs';
 import { dirname, join } from 'node:path';
 import { collectDigest, decisionState, parseNameStatus, parseWorktrees, queryMatcher, renderText,
   subjectRows, workingFingerprint } from './jet-state.mjs';
@@ -22,7 +22,7 @@ const decision = (id, cardId, extra = {}) => ({ id, cardId, title: 'memory model
   draft: false, outcome: 'A', options: [{ key: 'A', title: 'Selected contract' }], ...extra });
 const stateOf = (cards, decisions, extra = {}) => normalize({ meta: { rev: 7 }, cards, decisions, ...extra }, [], false);
 function fixture(t) {
-  const scratch = process.env.JET_SCRATCH_ROOT || join(homedir(), '.cache/jet-dev/scratch');
+  const scratch = scratchRoot();
   mkdirSync(scratch, { recursive: true });
   const root = mkdtempSync(join(scratch, 'jet-state-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

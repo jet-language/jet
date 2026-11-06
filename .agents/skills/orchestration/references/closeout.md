@@ -36,7 +36,13 @@ passes and the candidate loses needs a line in `--dispositions` naming its card.
 It releases only with at least `--min-gains` (default 10) gained rows. On a pass
 it writes the next a0_NNN and prints the commands; Main runs them: `jet-use
 a0_NNN`, `git merge --no-ff -F a0_NNN/MERGE_MSG` on `master`, the annotated tag,
-and the push. The tool never moves `current`, merges, tags or pushes. `jet-use`
+the push, then `jet run Tools/release/Main.jet -- candidate <seeds>/a0_NNN` and
+`jet run Tools/release/Main.jet -- publish <seeds>/a0_NNN`, the one route to a
+GitHub release (jet, IDENTITY, checksums, the seed archive and the signed
+candidate record). `candidate` signs with the `jet-release` key
+(`jet registry keygen --registry jet-release` once); `publish` refuses any
+release that no longer matches that record.
+The tool never moves `current`, merges, tags, pushes or publishes. `jet-use`
 also rolls back, but only to a release whose evidence passed; `jet-which` names
 the current one.
 
@@ -75,13 +81,13 @@ After **every linked card** for a milestone is `done`, freeze the integrated
 source in a commit and open the commit-bound token:
 
 ```sh
-Tools/agent/closeout-gate.mjs open MILESTONE --by AGENT
+jet Tools/agent/CloseoutGate.jet open MILESTONE --by AGENT
 ```
 
 The gate must select the frozen source commit, a qualified candidate at that
 commit, and a review-ready milestone. Only that token authorizes **one composed
 targeted sweep** and **one fresh-context integrated-diff review**, covering
-every applicable I9 tier. Broad proof, an unfiltered conformance census, and `verify-full.sh` do not
+every applicable I9 tier. Broad proof, an unfiltered conformance census, and `Tools/agent/VerifyFull.jet` do not
 substitute for card evidence and refuse without the token. Do not reuse a
 token after the source changes.
 
@@ -110,4 +116,7 @@ and every remaining path has a concrete owner gate or external blocker,
 responsible party, and continuation condition in Tower. Agent-fixable failures
 are work, not external blockers. Leave unmet criteria open and say blocked,
 not done. In either outcome, account for every worker, proof, worktree, branch,
-and handoff; nothing may remain unowned or silently in flight.
+and handoff; nothing may remain unowned or silently in flight. Then delete the
+scratch of every integrated item (exports, build trees, staged patches, test
+scratch, logs and superseded compilers), as `AGENTS.md` requires, and report
+the scratch disk's free space with the closeout.

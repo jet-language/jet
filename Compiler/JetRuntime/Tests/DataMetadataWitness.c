@@ -1,4 +1,4 @@
-// Real native providers only. Link with --wrap=jet_rt_free; no Rust at test time.
+// Real native providers only; no Rust at test time.
 // Private carriers are fixed by DataABI.jet, not Rust or checked-IR layouts.
 #include <assert.h>
 #include <stdbool.h>
@@ -17,7 +17,7 @@ _Static_assert(sizeof(Authority)==16 && sizeof(Source)==32 && sizeof(Provenance)
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
 extern void jet_rt_free(void *,int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern void jet_rt_string_drop(Text *);
 extern bool jet_rt_string_eq(Text *,Text *);
@@ -49,9 +49,10 @@ extern Text *jet_rt_record_get_data_snapshot_identity_schema(Snapshot *);
 extern int64_t jet_rt_record_get_data_snapshot_identity_format(Snapshot *);
 static struct {void *ptr; int64_t size, align; unsigned frees;} watched[128];
 static size_t count;
-void __wrap_jet_rt_free(void *ptr,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *ptr,int64_t size,int64_t align) {
     for(size_t i=0;i<count;i++) if(watched[i].ptr==ptr){assert(size==watched[i].size && align==watched[i].align);assert(++watched[i].frees==1);}
-    __real_jet_rt_free(ptr,size,align);
 }
 static void watch(void *p,int64_t n,int64_t a){assert(count<128);watched[count].ptr=p;watched[count].size=n;watched[count].align=a;watched[count++].frees=0;}
 static void watch_text(Text *t){watch((char *)(t)-8,32,8);if(t->cap)watch(t->data,t->cap,1);}
@@ -115,4 +116,4 @@ static void owners(void){
     jet_rt_handle_drop_data_snapshot_identity(raw_snapshot);jet_rt_string_drop(raw);jet_rt_string_drop(long_text);
     jet_rt_handle_drop_data_authority(NULL);jet_rt_handle_drop_data_source_identity(NULL);jet_rt_handle_drop_data_provenance(NULL);jet_rt_handle_drop_data_snapshot_identity(NULL);
 }
-int main(int argc,char **argv){jet_rt_alloc_init();if(argc==2){Text *empty=text("");int64_t ordinal=!strcmp(argv[1],"negative")?-1:5;(void)jet_rt_record_new_data_snapshot_identity(empty,empty,empty,empty,ordinal);assert(!"invalid format returned");}enums();owners();policy_goldens();puts("DataMetadata36 ownership/equality/render OK");}
+int main(int argc,char **argv){assert(jet_rt_alloc_check_observe(0,(int64_t)(uintptr_t)observe_free)==1);jet_rt_alloc_init();if(argc==2){Text *empty=text("");int64_t ordinal=!strcmp(argv[1],"negative")?-1:5;(void)jet_rt_record_new_data_snapshot_identity(empty,empty,empty,empty,ordinal);assert(!"invalid format returned");}enums();owners();policy_goldens();puts("DataMetadata36 ownership/equality/render OK");}

@@ -1,5 +1,5 @@
-// Realtime.rs:21-98,107-116,182-205,234-513. One Control128 owns cancel.
-// No Rust box or callback registry ID crosses the native producer boundary.
+// One Control128 owns cancel. No Rust box or callback registry ID crosses the
+// native producer boundary.
 fn realtime_raise(message: I64) {
     jet_rt_panic_message(sync_load(message), sync_load(wrapping(message + I64{8})))
     jet_rt_string_drop(message)
@@ -231,15 +231,15 @@ fn realtime_join(stream: I64) {
 }
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
 fn rt_realtime_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
-// core.rt.__callback(rate, frames, callback), Realtime.rs callback: the IR
-// hands the callback's closure box over with its lazy.callback invoke and
-// lazy.release helpers; the stream skips through its own internal cell.
+// core.rt.__callback(rate, frames, callback), callback: the IR hands the
+// callback's closure box over with its lazy.callback invoke and lazy.release
+// helpers; the stream skips through its own internal cell.
 #Export(c) fn jet_rt_callback(rate_word: I64, frames_word: I64, env: I64, invoke: I64, release: I64) -> I64 {
     jet_rt_native_realtime_start(rate_word, frames_word, env, invoke, release, rt_realtime_worker_address(), I64{0})
 }
 #Export(c) fn jet_rt_native_realtime_worker(stream: I64) -> I64 {
-    // Thread.jet attaches a fresh TCB, matching Realtime.rs:406-408. Never copy
-    // caller provider, World or deadline TLS. Callback panic uses this control.
+    // Thread.jet attaches a fresh TCB. Never copy caller provider, World or
+    // deadline TLS. Callback panic uses this control.
     base :: thread_base()
     control :: sync_load(wrapping(stream + RT_CONTROL))
     sync_store(wrapping(base + I64{16}), control)
@@ -300,9 +300,9 @@ fn rt_realtime_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0
         sync_store(wrapping(stream + RT_DEADLINE_IDENTITY), realtime_add(sync_load(wrapping(stream + RT_START_IDENTITY)), offset))
         sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
     }
-    // Preserve BOTH clock steps in Realtime.rs:327-329: JetInstant::now()
-    // samples the provider (TimeInstant.rs:10-13), then end_identity samples
-    // again. The discarded first value is observable to a stepping clock.
+    // Preserve BOTH clock steps: JetInstant::now() samples the provider, then
+    // end_identity samples again. The discarded first value is observable to a
+    // stepping clock.
     _ := realtime_now_ns()
     sync_store(wrapping(stream + RT_END), realtime_now_ns())
     jet_scheduler_shield_enter()
@@ -336,8 +336,8 @@ fn rt_realtime_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0
     true
 }
 
-// CAbiRoutes.rs:11063-11112: parameters/results are canonical exact-Int words,
-// but the native snapshot stores eight bounded raw i64 facts in source order.
+// parameters/results are canonical exact-Int words, but the native snapshot
+// stores eight bounded raw i64 facts in source order.
 #Export(c) fn jet_rt_record_new_jet_realtime_receipt(rate: I64, frames: I64, callbacks: I64, completed: I64, missed: I64, lateness: I64, start: I64, end: I64) -> I64 {
     a :: jet_int_owned_to_i64(rate)
     b :: jet_int_owned_to_i64(frames)

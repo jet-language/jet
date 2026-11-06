@@ -1,13 +1,13 @@
 // the failure law's declaration side. The Rust reference is
-// `TraitRegistry::register_error_conv` (jet-foundation Traits.rs),
-// `Sema::Prelude::inject_exercised_error_conversions` and the
-// arm of `CheckerInfer/fallible.rs`.
+// `TraitRegistry::register_error_conv` (jet-foundation),
+// `Sema::Prelude::inject_exercised_error_conversions` and the arm.
 use {
     jet_foundation.[
         AccessConvention,
         AppliedRuleApplication,
         BodyNode,
         CallArg,
+        DIAGNOSTIC_ERROR,
         Diagnostic,
         DiagnosticFixApplicability,
         DiagnosticFixSafety,
@@ -29,6 +29,7 @@ use {
         TextEdit,
         Type,
         ast_func,
+        ast_visit_expr,
         core_call_typed_signature,
         core_module_export,
         core_module_has_type,
@@ -430,6 +431,10 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
         }
         before :: diagnostics.len()
         checked :: sema_function_check(conversion, symbol.id, TFuncKind.TopLevel, false, &environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
+        // The routine is the shipped Prelude declaration checked under this
+        // module's name: its spans are offsets into that generated text, not
+        // into anything the author wrote, so its warnings and lints are dropped.
+        sema_failure_keep_errors_since(&diagnostics, before)
         if !checked.complete {
             complete = false
             if keep_going {
@@ -452,6 +457,14 @@ fn sema_inject_prelude_error_conversions(module_identity: String, environment: &
         }
     }
     complete
+}
+
+fn sema_failure_keep_errors_since(diagnostics: &[Diagnostic], start: Int) Never! {
+    kept := [Diagnostic]{}
+    loop index in 0..<diagnostics.len() {
+        if index < start || diagnostics[index].severity == DIAGNOSTIC_ERROR -> &kept.push(diagnostics[index])
+    }
+    diagnostics = kept
 }
 
 // E2417: an explicit `!` domain names `Err`, a Core
@@ -555,7 +568,6 @@ fn sema_failure_domain_is_error(ty: Type, seen: [String], environment: SemaScope
 fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     if ty == {
         .Named(name) -> {
-            if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             if name == "Never" && !in_return -> &diagnostics.push(sema_error("E2422", span, "`Never` cannot be used in a value position.", "`Never` has no values; only a function return slot or function-type return slot may promise it.", "Move `Never` to a function return type, or use `()`/another value type."))
             sema_check_private_module_type(name, span, environment, program, &diagnostics)
             // Compiler-owned IO enum/record rows have no public annotation origin.
@@ -618,7 +630,6 @@ fn sema_check_failure_contract_type(ty: Type, span: Span, in_return: Bool, gener
             if ret == .Val(value) -> sema_check_failure_contract_type(value, span, true, generic_names, environment, program, &diagnostics)
         }
         .Apply(name, args) -> {
-            if name == "Any" -> &diagnostics.push(sema_no_any_type(span))
             sema_check_private_module_type(name, span, environment, program, &diagnostics)
             if sema_failure_written_name_unknown(name, generic_names, environment, program) -> sema_unknown_generic_type_name(name, span, &diagnostics)
             sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, &diagnostics)
@@ -693,10 +704,6 @@ fn sema_failure_written_name_unknown(name: String, generic_names: [String], envi
     if program.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
     if environment.registration_graph == .Val(graph) -> return sema_type_written_name_unknown(graph, sema_scope_caller_row(environment, graph), name, generic_names)
     false
-}
-
-fn sema_no_any_type(span: Span) -> Diagnostic {
-    sema_error("E0350", span, "Jet does not have an `Any` type", "a value should keep a precise shape: use an enum for known variants, generics or traits for abstraction, `T?` for absence, and `Dyn` for parsed dynamic data", "replace `Any` with the specific mechanism for this value")
 }
 
 // Rust `union_member_has_open_shape`, or a member that mentions one of the
@@ -790,10 +797,13 @@ fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, g
         if nominal.symbol.name != leaf -> next
         // The module source is read in place at the (rare) diagnostic sites;
         // binding it here copied the whole source text for every carrier.
+        // A member type hoisted out of an inline module is registered under
+        // its generated name; the diagnostic names it as its declaration does.
+        shown :: sema_public_failure_shown_name(graph.modules[row.module_index].source, nominal.symbol.span, leaf)
         if nominal.symbol.visibility < 2 {
             if reported.get(leaf) == None {
                 reported[leaf] = true
-                &diagnostics.push(sema_public_failure_diagnostic(function, leaf, nominal.symbol.span, graph.modules[row.module_index].source))
+                &diagnostics.push(sema_public_failure_diagnostic(function, shown, nominal.symbol.span, graph.modules[row.module_index].source))
             }
             next
         }
@@ -802,9 +812,15 @@ fn sema_check_public_failure_carrier_graph(function: String, error_type: Type, g
             member :: "{leaf}.{field.symbol.name}"
             if field.symbol.visibility >= 2 || reported.get(member) != None -> next
             reported[member] = true
-            &diagnostics.push(sema_public_failure_diagnostic(function, member, field.symbol.span, graph.modules[row.module_index].source))
+            &diagnostics.push(sema_public_failure_diagnostic(function, "{shown}.{field.symbol.name}", field.symbol.span, graph.modules[row.module_index].source))
         }
     }
+}
+
+fn sema_public_failure_shown_name(source: String, span: Span, leaf: String) -> String {
+    shown :: sema_call_histories_span_text(source, span)
+    if shown == "" -> return leaf.copy()
+    shown
 }
 
 fn sema_public_failure_diagnostic(function: String, member: String, span: Span, source: String) -> Diagnostic {
@@ -986,14 +1002,18 @@ fn sema_never_module_call_diverges(receiver: Expr, method: String, arity: Int, e
     false
 }
 
-fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    declared :: func.return_type ?? return true
-    never_success :: if declared == {
+// A function whose written success type is `Never`: bare, or as the success of a fallible return.
+fn sema_function_promises_never(func: Func) -> Bool {
+    declared :: func.return_type ?? return false
+    if declared == {
         .Named(name) -> name == "Never"
         .Result(ok, _) -> ok == Type.Named{name: "Never"}
         else -> false
     }
-    if !never_success -> return true
+}
+
+fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if !sema_function_promises_never(func) -> return true
     loop statement in func.body {
         if statement == .Expr(expr) {
             if sema_never_expr_diverges(expr, environment, program, scopes) -> return true
@@ -1004,6 +1024,55 @@ fn sema_check_never_fallthrough(func: Func, environment: SemaScopeEnvironment, p
     if func.body.len() > 0 -> span = sema_compiler_index_stmt_span(func.body[func.body.len() - 1])
     &diagnostics.push(sema_error("E2423", span, "Function `{func.name}` promises `Never` but can reach the end.", "A declared `Never` return means every path must stop; this path falls through instead.", "End every path with `panic`, a `Never` call, or another diverging operation, or remove `Never`."))
     false
+}
+
+// L2421: a public function whose body stops on every path but whose written
+// return type doesn't say `Never` keeps that contract from its callers.
+fn sema_lint_inferred_never_return(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+    if !func.is_pub || func.compiler_generated || sema_function_promises_never(func) || environment.module_identity.starts_with("<corelib>/") -> return
+    if !sema_function_always_diverges(func.body, environment, program, scopes) -> return
+    name :: sema_inline_member_source_name(func.name)
+    &diagnostics.push(sema_lint("L2421", func.name_span, "Public function `{name}` always diverges but does not declare `Never`", "Inferred divergence is useful to callers but is not part of the written API contract", "Write `-> Never` as the return type, for example `fn {name}() -> Never`"))
+}
+
+// A body that reaches a diverging statement (`panic`, a `Never` call) on its
+// one straight-line path. Any statement that could branch or return first (a
+// table, a loop, an `if`, a `??` fallback that returns) leaves it unproven.
+fn sema_function_always_diverges(body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
+    loop statement in body {
+        if statement == {
+            .Expr(expr) -> {
+                if sema_expr_may_branch(expr) -> return false
+                if sema_never_expr_diverges(expr, environment, program, scopes) -> return true
+            }
+            .Val(binding) -> {
+                if binding.pattern == .Val(.Refutable(_, _, _, _)) || sema_expr_may_branch(binding.init) -> return false
+            }
+            .Assign(_, _, _, value) -> {
+                if sema_expr_may_branch(value) -> return false
+            }
+            else -> return false
+        }
+    }
+    false
+}
+
+// Whether evaluating `expr` could leave the straight-line path: it holds an
+// `if` or a `??` fallback that runs a block or returns.
+fn sema_expr_may_branch(expr: Expr) -> Bool {
+    probe := SemaBranchProbe{found: false}
+    ast_visit_expr(expr, (inner: Expr) -> &probe.visit(inner))
+    probe.found
+}
+
+struct SemaBranchProbe {
+    found: Bool
+    fn visit(&self, inner: Expr) Never! -[Mem.Alloc, Mem.Rc, Time.Wait]> {
+        if inner == {
+            .If(_, _, _, _, _, _, _) | .OrFallback(_, .Block(_, _, _), _, _, _) | .OrFallback(_, .Return(_, _), _, _, _) -> self.found = true
+            else -> {}
+        }
+    }
 }
 
 // E0408/E0409: `err` names a failure report; an optional fallback or a pure

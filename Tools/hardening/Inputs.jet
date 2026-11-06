@@ -1,0 +1,103 @@
+// Every file the hardening manifest reads. The same list is the source
+// snapshot, so a change to any input changes the snapshot hash.
+use {
+    files :: core.files
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS]
+}
+
+EXCLUSIONS_PATH :: "tests/conformance/exclusions.tsv"
+CORPUS_ROOT :: "tests/conformance/corpus"
+REGISTRY_DIR :: "Compiler/JetFoundation/Source/Registry"
+
+struct Inputs {
+    core_sources: [SourceFile]
+    route_files: [SourceFile]
+    registry_files: [SourceFile]
+    specials_text: String
+    special_files: [SourceFile]
+    exclusions_text: String
+    witnesses: [SourceFile]
+    // The generator's own sources: changing how rows are derived changes
+    // the snapshot as surely as changing what they are derived from.
+    generator_files: [SourceFile]
+}
+
+fn route_paths() -> [String] Never! {
+    [String]{BUILD_ROUTES_PATH, BUILD_TYPES_PATH, ROUTE_HANDLE_PATH, RUNTIME_ROUTES_PATH, RUNTIME_RECORDS_PATH, COMPILER_OWNED_PATH, EVAL_VALUES_PATH}
+}
+
+fn read_file(root: String, path: String) -[FS]> SourceFile Err! {
+    raw :: files.read_bytes(files.join(root, path)) ?? return Err("cannot read {path}: {err}")
+    Ok(SourceFile{path: path.copy(), text: String.from_bytes_lossy(raw)})
+}
+
+// Sorted repository-relative paths of the `.jet` files under `relative`.
+fn jet_files(root: String, relative: String, out: &[String]) Err! -[FS]> {
+    entries :: files.list_dir(files.join(root, relative)) ?? return Err("cannot list {relative}: {err}")
+    names := [String]{}
+    loop entry in entries -> &names.push(entry.name.copy())
+    &names.sort_by((left: String, right: String) -> left <=> right)
+    loop name in names {
+        child :: "{relative}/{name}"
+        path :: files.join(root, child)
+        if files.is_symlink(path) -> next
+        if {
+            files.is_dir(path) -> jet_files(root, child, &out) ?? return Err(err)
+            name.ends_with(".jet") -> &out.push(child)
+        }
+    }
+    Ok(())
+}
+
+fn has_path(list: [SourceFile], path: String) -> Bool Never! {
+    loop file in list { if file.path == path -> return true }
+    false
+}
+
+fn load_inputs(root: String) -[FS]> Inputs Err! {
+    core_sources := [SourceFile]{}
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        if has_path(core_sources, row.path) -> next
+        &core_sources.push(read_file(root, row.path) ?? return Err(err))
+    }
+    route_files := [SourceFile]{}
+    loop path in route_paths() -> &route_files.push(read_file(root, path) ?? return Err(err))
+    registry_paths := [String]{}
+    jet_files(root, REGISTRY_DIR, &registry_paths) ?? return Err(err)
+    registry_files := [SourceFile]{}
+    loop path in registry_paths -> &registry_files.push(read_file(root, path) ?? return Err(err))
+    specials :: read_file(root, SPECIAL_ROUTES_PATH) ?? return Err(err)
+    special_rows :: parse_special_routes(specials.text) ?? return Err(err)
+    special_files := [SourceFile]{}
+    loop row in special_rows {
+        if has_path(special_files, row.path) -> next
+        if !files.is_file(files.join(root, row.path)) -> next
+        &special_files.push(read_file(root, row.path) ?? return Err(err))
+    }
+    exclusions :: read_file(root, EXCLUSIONS_PATH) ?? return Err(err)
+    witness_paths := [String]{}
+    jet_files(root, CORPUS_ROOT, &witness_paths) ?? return Err(err)
+    witnesses := [SourceFile]{}
+    loop path in witness_paths -> &witnesses.push(read_file(root, path) ?? return Err(err))
+    generator_paths := [String]{}
+    jet_files(root, GENERATOR_ROOT, &generator_paths) ?? return Err(err)
+    generator_files := [SourceFile]{}
+    loop path in generator_paths -> &generator_files.push(read_file(root, path) ?? return Err(err))
+    Ok(Inputs{core_sources: core_sources, route_files: route_files, registry_files: registry_files, specials_text: specials.text.copy(), special_files: special_files, exclusions_text: exclusions.text.copy(), witnesses: witnesses, generator_files: generator_files})
+}
+
+// Every input file once, sorted by path: the source snapshot.
+fn snapshot_files(inputs: Inputs) -> [SourceFile] Never! {
+    out := [SourceFile]{}
+    seen := [String: Bool]{}
+    groups :: [[SourceFile]]{inputs.registry_files, inputs.route_files, inputs.core_sources, inputs.special_files, inputs.witnesses, inputs.generator_files, [SourceFile]{SourceFile{path: SPECIAL_ROUTES_PATH, text: inputs.specials_text.copy()}, SourceFile{path: EXCLUSIONS_PATH, text: inputs.exclusions_text.copy()}}}
+    loop group in groups {
+        loop file in group {
+            if seen.get(file.path) != None -> next
+            seen[file.path.copy()] = true
+            &out.push(file.copy())
+        }
+    }
+    &out.sort_by((left: SourceFile, right: SourceFile) -> left.path <=> right.path)
+    out
+}

@@ -5,7 +5,7 @@ quoting, give explicit outcomes for malformed types and unknown extensions,
 and serve as the one typed representation that HTTP and email use?
 
 Binary: `jet-debug-snapshot14` (safe-jet.sh), 2026-09-29. Probe:
-`~/.cache/jet-dev/scratch/Closer04/mime_probe.jet`.
+`$JET_STATE_ROOT/scratch/Closer04/mime_probe.jet`.
 
 ## Evidence
 

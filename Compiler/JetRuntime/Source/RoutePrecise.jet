@@ -1,16 +1,14 @@
-// core.math Fraction and Decimal routes. Rust providers: PreciseNumeric.rs
-// (route kernels), Numeric.rs CtFraction (334-480) and CtDecimal (2078-2791)
-// for the value law, MathRandomTime.rs:1041-1375 for the route wrappers and
-// CAbiRoutes.rs for the C ABI (borrowed Int and handle arguments, native()
-// on from_int/new, owned results).
-// A Fraction handle owns two exact-Int words, numerator@0 and denominator@8,
-// always reduced with the sign on the numerator. A Decimal handle owns its
-// signed exact-Int coefficient@0 and its scale@8 (digits after the point);
-// a zero coefficient is never negative and keeps its written scale.
+// core.math Fraction and Decimal routes. Rust providers: (route kernels),
+// CtFraction (334-480) and CtDecimal (2078-2791) for the value law, for the
+// route wrappers for the C ABI (borrowed Int and handle arguments, native() on
+// from_int/new, owned results). A Fraction handle owns two exact-Int words,
+// numerator@0 and denominator@8, always reduced with the sign on the numerator.
+// A Decimal handle owns its signed exact-Int coefficient@0 and its scale@8
+// (digits after the point); a zero coefficient is never negative and keeps its
+// written scale.
 PRECISE_HANDLE_BYTES :: I64{16}
 PRECISE_TOP :: I64{0}
 PRECISE_BOTTOM :: I64{8}
-// JSONNumber.rs JSON_NUMBER_MAX_DIGITS / JSON_NUMBER_MAX_EXPONENT.
 DECIMAL_MAX_DIGITS :: I64{1000000}
 
 fn precise_top(value: I64) -> I64 { rt_text_word(wrapping(value + PRECISE_TOP)) }
@@ -23,9 +21,9 @@ fn precise_pair(top: I64, bottom: I64) -> I64 {
     result
 }
 
-// MathRandomTime.rs `panic!("{}", failure_message(..))` is a foreign String
-// panic under the CAbi guard: the payload bytes, a newline and the host-fault
-// status 101 (as rt_seq_capacity_overflow_stop), not a Jet stop report.
+// The Rust `panic!("{}", failure_message(..))` is a foreign String panic under
+// the CAbi guard: the payload bytes, a newline and the host-fault status 101
+// (as rt_seq_capacity_overflow_stop), not a Jet stop report.
 fn precise_fault(message: I64) -> I64 {
     trap_defect_prepare()
     jet_rt_stdout_flush()
@@ -35,7 +33,7 @@ fn precise_fault(message: I64) -> I64 {
     I64{0}
 }
 
-// CAbi.rs native(): the Int argument must fit the host i64.
+// native(): the Int argument must fit the host i64.
 fn precise_native_fits(value: I64) -> Bool {
     _ := jet_int_owned_to_i64(value)
     jet_scheduler_native_propagate() == I64{0}
@@ -340,10 +338,10 @@ fn decimal_digits_valid(data: I64, from: I64, to: I64) -> Bool {
     true
 }
 
-// JSONNumber.rs json_decimal_lexeme over the trimmed text: optional sign,
-// digits with at most one point (not both sides empty), an optional e/E i64
-// exponent, the digit and exponent limits; the written scale is kept and a
-// negative scale widens the coefficient. 0 for an invalid lexeme.
+// json_decimal_lexeme over the trimmed text: optional sign, digits with at most
+// one point (not both sides empty), an optional e/E i64 exponent, the digit and
+// exponent limits; the written scale is kept and a negative scale widens the
+// coefficient. 0 for an invalid lexeme.
 fn decimal_parse(text: I64) -> I64 {
     start :: numeric_trim_start(text)
     end :: numeric_trim_end(text, start)
@@ -462,7 +460,7 @@ fn decimal_integral(value: I64, mode: I64) -> I64 {
 #Export(c) fn jet_decimal_from_str(text: I64) -> I64 {
     result :: decimal_parse(text)
     if (result != I64{0}) -> return result
-    // MathRandomTime.rs:1053 jet_panic("", 0, ..): a Jet stop with an empty file.
+    // jet_panic("", 0..): a Jet stop with an empty file.
     message :: rt_static_text("invalid Decimal string")
     trap_simple(I64{0}, I64{1}, I64{0}, I64{0}, rt_text_data(message), rt_text_len(message))
     I64{0}

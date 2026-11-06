@@ -19,7 +19,7 @@ use {
 GOLDENS :: "Compiler/JetRuntime/Tests"
 SHARED_STOP :: "DataPlotStops-getter-variant.stderr"
 USAGE :: "usage: jet Compiler/JetRuntime/Tests/UiWitness.jet WITNESS OUT BINARY [ORACLE]"
-WITNESSES :: "accessibility-projection, browser, choices, clipboard, dialog-selection, drag, events, file-dialog, form-action-error, host-error, ime, key, raylib-metadata, shortcut-binding, slice2, slice3, view-snapshots"
+WITNESSES :: "accessibility-projection, choices, clipboard, dialog-selection, drag, events, file-dialog, form-action-error, host-error, ime, key, raylib-metadata, shortcut-binding, slice2, slice3, view-snapshots"
 OUTPUT_MISMATCH :: "byte-exact output mismatch"
 
 struct Case {
@@ -89,7 +89,6 @@ fn sequence_stops(slice: String, operand: String, golden: String, own: [Case], d
 fn witness(key: String) -> Witness Never! {
     tags :: [String]{"clone-tag", "drop-tag", "eq-tag"}
     if key == "accessibility-projection" -> return plain("UI_ACCESSIBILITY_PROJECTION_WITNESS", "UiAccessibilityProjectionWitness.stdout", "UI AccessibilityProjection: real-provider ownership byte-identical")
-    if key == "browser" -> return plain("UI_BROWSER_WITNESS", "UiBrowserWitness.stdout", "UI Browser: real pure producers and borrowed-kind ownership byte-identical")
     if key == "clipboard" -> return plain("UI_CLIPBOARD_WITNESS", "UiClipboardWitness.stdout", "UI Clipboard: real-provider ownership byte-identical")
     if key == "dialog-selection" -> return plain("UI_DIALOG_SELECTION_WITNESS", "UiDialogSelectionWitness.stdout", "UI DialogSelection: real-provider ownership byte-identical")
     if key == "events" -> return plain("UI_EVENTS_WITNESS", "UiEventsWitness.stdout", "UI events: real-provider ownership byte-identical")

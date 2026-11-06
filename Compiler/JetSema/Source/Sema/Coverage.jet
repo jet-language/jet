@@ -426,6 +426,12 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     if matrix {
         rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
         if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) -> return
+        // A map pattern names some keys and a map can always hold others, so
+        // no arm list covers it: the only cover is `else`.
+        if subject_ty == .Map(_, _, _) {
+            &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every `{type_name(subject_ty)}` value — it needs an `else` arm", "every arm tests part of the value's shape, so some values match no arm", "add `else -> {{ … }}` after the last arm"))
+            return
+        }
         witness :: sema_pattern_collection_witness(subject_ty, rows, environment, program)
         &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {witness}", "pattern arms must cover every collection shape", "add an arm for `{witness}` or an `else` arm"))
         return
@@ -462,9 +468,9 @@ fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, 
     &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}"))
 }
 
-// Rust switches.rs `note_pattern_coverage`: an arm head that an earlier full
-// arm, or an ancestor group arm already covers is unreachable —
-// E0365 over an anonymous union subject, L0301 otherwise.
+// `note_pattern_coverage`: an arm head that an earlier full arm, or an ancestor
+// group arm already covers is unreachable — E0365 over an anonymous union
+// subject, L0301 otherwise.
 fn sema_coverage_check_unreachable_arms(conditions: [TExpr], multi_head: Bool, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
     union_subject :: sema_pattern_unwrap_tags(table.subject.ty) == .Union(_)
@@ -574,7 +580,7 @@ fn sema_coverage_noelse_chain_collect(current: TExpr, span: Span, context: SemaC
     if current.kind == {
         // The chain's `NoElse` end is a flat `Never` row (sema_node).
         .Flat(index) -> {
-            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .Never(reason) -> return reason == "no else arm"
+            if context.arena.tree.nodes[index - context.arena.tree.node_base].kind == .Never(reason, _) -> return reason == "no else arm"
             return false
         }
         .IfExpr(cond, _, _, _, next_value) -> {
@@ -995,7 +1001,6 @@ fn sema_pattern_collection_witness(ty: Type, rows: [SemaPatternCoverageRow], env
         }
         return "[_, ..]"
     }
-    if ty == .Map(_, _, _) -> return "a map with other keys"
     "_"
 }
 

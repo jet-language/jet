@@ -106,10 +106,12 @@ owner-ratified decision naming its exact scope and removal condition.
 
 A violation stops the affected work until it is fixed at the root.
 
-- **I1 — Safety.** Jet is memory-safe and type-safe by default. The expert
-  escape hatch is a user-written, audited `#Unsafe("reason") { … }` block or
-  `#Unsafe("reason") fn`. Generated `unsafe` operations appear only there or in
-  vetted standard-library and memory internals.
+- **I1 — Safety.** Jet is memory-safe and type-safe by default. Memory safety
+  includes leak freedom: safe Jet cannot leak memory, and only code inside an
+  `#Unsafe` block or function may. The expert escape hatch is a user-written,
+  audited `#Unsafe("reason") { … }` block or `#Unsafe("reason") fn`. Generated
+  `unsafe` operations appear only there or in vetted standard-library and
+  memory internals.
 - **I2 — Hidden backend.** If the native backend rejects or cannot lower checked
   code, that is an internal compiler error with exit code 101, never a user
   diagnostic.
@@ -210,37 +212,51 @@ that gate.
 
 One implementer owns each coherent patch. Concurrent writers need disjoint
 paths and one named close owner. The repository's working branches are
-`master` and `dev`, with one dev worktree. At the Rust cutover, the last
+`master` and `dev`. At the Rust cutover, the last
 commit that still contains the Rust implementation becomes the `rust` branch: a
 frozen dead-end leaf kept as a reference and a re-bootstrap safety net. Nobody
 commits to it or merges it into `dev` or `master`. Every agent commits directly
 on `dev` in the dev worktree, in small commits that stage only its own paths.
-Never create any other branch, a worktree, or any other ref (`refs/keep`,
-`refs/salvage`, `refs/archive`, private lineages), for any purpose: experiments,
-candidates, measurements, and proofs included. To build or measure an
-uncommitted change,
-apply a scratch patch to a temporary `git archive` export outside the
-repository. Use checkout-owned external targets configured through
-`jet-env` (see the orchestration resource reference). Never overwrite another
+Besides the master checkout, at most three worktrees may exist: the dev worktree
+and up to two more that the orchestrator creates as detached checkouts of
+`dev`. Each extra worktree has one named owner, is kept at a current `dev`
+commit, holds no build output, and is removed as soon as it is idle; its work
+reaches `dev` before removal. Never create any other branch, worktree, or other
+ref (`refs/keep`, `refs/salvage`, `refs/archive`, private lineages), for any
+purpose: experiments, candidates, measurements, and proofs included. Work
+happens in these worktrees; no agent keeps its own copy of the repository. A
+`git archive` export
+outside the repository is allowed only for one build or measurement that can
+use neither the worktree nor a published compiler (a release gate, or an A/B
+base whose compiler is not published), and the job that made it deletes it
+when it ends. Use checkout-owned external targets (see the orchestration
+resource reference). Never overwrite another
 task's paths. Never run `git add -A`, a broad `git commit -a`, `git stash`,
 `git restore .`, `git reset --hard`, or any equivalent broad operation. Never
 hand-edit `Tools/tower/.tower/`.
 
-Never delete work. Work means any file an agent or the owner made: patches,
-notes, held rows, briefs, ballots, research, scripts, logs and evidence,
-worktrees, and lane or scratch directories. Never `rm -rf`, `git clean`,
-remove a worktree or overwrite such a file. To retire something or free space,
-first save any commits and uncommitted changes it holds. Then move it under
-`/mnt/jetscratch/held/<date>/<original path>`, and add one line to
-`/mnt/jetscratch/held/LOG.tsv` with the date, path, size, owner, reason and
-the card or decision that allows it. Before you replace a file, copy it to
-`<name>.prev-<date>`. Only the owner empties `held/`. The one exemption is a
-temporary file a step created and removes itself.
+Scratch feeds work into `dev`; it is not an archive. Before removing anything,
+save the work it holds: commit it on `dev`, or record on its Tower card exactly
+what remains unlanded and why. Once the work is on `dev`, delete everything
+that fed it: exports, build trees, staged patches, test scratch and logs. Each
+agent deletes its own scratch when its commit lands. The orchestrator removes
+leftovers at every milestone and whenever the scratch disk passes 75% full.
+Keep only the compilers in use: the admitted seed, a candidate under test, and
+the compilers a running job names. Never retire files by moving them elsewhere
+on disk; git history and Tower are the record. Audits and final reports under
+`Docs/` stay owner-only deletions (see Documentation).
 
 Only the owner starts `tower serve` unless the owner directs otherwise. Agents
 use the non-serve Tower CLI (`node Tools/tower/tower.mjs`) against the main
 board and report any stale or duplicate server. Never touch the owner's
 personal notes or scratch files.
+
+Committed files carry no personal or machine information: no home paths, user
+or host names, personal emails or machine mounts. Write a placeholder instead,
+such as `$HOME`, `$USER`, `$JET_SCRATCH_ROOT` or `$JET_STATE_ROOT`; fixtures
+use the example account `user` on `devhost`. This holds for recorded evidence
+too. `Tools/agent/LaneCheck.jet` refuses a checkout that breaks it, through
+its personal-information guard (`--personal-info`, #6564 c5).
 
 ## Adversarial design review
 
@@ -273,7 +289,7 @@ may call a design better only where a passing review backs that exact claim.
 
 Use the most specific agent available for each role. Workers do not spawn
 workers. Every code worker returns the exact `CHECK OK` receipt from
-`Tools/agent/lane-check.sh`; prose-only or static-data-only work returns
+`Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
 `DOCS ONLY`. The orchestration skill defines briefs, liveness, integration,
 proof cadence, recovery, and closure.
 
@@ -292,15 +308,14 @@ in one pass:
 
 - **Expensive launches are gated, never bypassed.** A stage0, self-hosting
   chain, release build or any other run costing more than about 15 minutes
-  starts only through tooling that refuses to launch without a collect-all
-  preflight receipt for that exact commit
-  (`~/.cache/jet-dev/scratch/Main/preflight.mjs`, enforced by
-  `prepare-sharded-chain.mjs`). The receipt runs every later stage's cheap
-  probe on the new sources (parse, generators, comptime-host count, and the
-  last good factory's keep-going censuses of every unit through every phase it
-  can reach). Every row is clean or carries a written disposition naming the
-  commit in this launch that fixes it. Launching to "see what fails next" is
-  forbidden.
+  starts only after a clean collect-all preflight of that exact commit:
+  `Tools/agent/land/census-snap.sh` (the seed's keep-going `jet check` and
+  `jet build` of the compiler, the runtime pack and the self-check, every row
+  of every phase in one report; the lander runs it through `precommit.sh`
+  before every compiler commit) and `Tools/agent/chain/chain.sh TREE LEVEL
+  --dry-run`, which names every stage the launch would build. Every row is
+  clean or carries a written disposition naming the commit in this launch that
+  fixes it. Launching to "see what fails next" is forbidden.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
@@ -347,21 +362,37 @@ in one pass:
 
 ## Environment and proof
 
-Run repository commands through `Tools/agent/jet-env`; `JET` names the admitted
+Run repository commands with `jet` directly; `JET` names the admitted
 native compiler (the stage-2 output of `jet build Compiler`) for
 every tool and gate. Keep scratch and logs on disk and build output outside the
 repository. Follow the orchestration resource reference for bounded,
 checkout-owned targets and shared artifacts; respect `JET_TARGET_CAP_GB=120`.
 Rebuild before compiler smoke tests. After integration, run the exact narrow
 proof the criteria name. Broad suites, unfiltered censuses, and
-`Tools/agent/verify-full.sh` are milestone or release operations and need the
+`Tools/agent/VerifyFull.jet` are milestone or release operations and need the
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
+Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
+chain and the machine build slots), `Tools/agent/land/` (the lander, batch
+landing, the census preflight and publishing), `Tools/agent/Land.jet` (`queue`
+adds a land job for the lander; `land` lands a patch stack directly, with
+`--scratch-copy` on a fresh clone), `Tools/agent/suite/` (suite runs through
+`jet test Compiler --profile`) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
+Tools find state, scratch, queues, published compilers and seeds only through
+the root variables of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs`
+(node). Their defaults derive from `$HOME` and the XDG directories; a machine
+sets its own values in the environment or in
+`${XDG_CONFIG_HOME:-~/.config}/jet/env`. No
+committed file spells one machine's home, user, mounts or tool roots:
+`Tools/agent/LaneCheck.jet`'s personal-information guard, which every lane
+check runs first, refuses them, and
+`tower redact` cleans the board.
+
 Hosted CI runs only the Core source-coverage ratchet
 (`.github/workflows/ci.yml`); until a pinned native seed release exists
-(D-SEED-DIST1), `Tools/agent/lane-check.sh` and the full gate
-(`Tools/agent/verify-full.sh`) run locally with the admitted `JET`.
+(D-SEED-DIST1), `Tools/agent/LaneCheck.jet` and the full gate
+(`JET=<jet> jet Tools/agent/VerifyFull.jet`) run locally with the admitted `JET`.
 
 ## References
 

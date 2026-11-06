@@ -5,6 +5,16 @@
 // waiter_and_new_opener_never_split_lock_inode) and the Rust backend
 // source-text checks are not ported; see the EnvRuntimePort report.
 
+use {
+    jetpack_foundation.[
+        JETPACK_VERBS, RUNTIME_LOCK_DIR, RUNTIME_LOCK_OWNER_FILE, SOURCE_ROOT_DIR, env_acquire_lock, env_acquire_lock_waiting,
+        env_lock_path_for_scope, env_lock_state, env_try_acquire_lock,
+    ]
+    files :: core.files
+    sys :: core.sys
+    time :: core.time
+}
+
 fn env_rt_test_scratch(label: String) -[FS]> String {
     files.tmpdir("jpk-runtime-policy-{label}-") ?? panic("claim runtime policy scratch")
 }
@@ -123,7 +133,7 @@ fn env_rt_test_is_timeout(error: IOError) -> Bool {
         .Err(error) -> {
             assert(env_rt_test_is_timeout(error))
             if error == .TimedOut(context) {
-                path :: env_lock_path_for_scope(root, "hangar")
+                path :: env_lock_path_for_scope(root, "other")
                 assert_eq(context.resource, Val(path))
                 assert_eq(context.cause, Val("timed out waiting for jetpack lock `{path}`"))
             }

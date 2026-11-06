@@ -1,0 +1,40 @@
+# tests/polyglot_systems.rs::cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface at tests/polyglot_systems.rs:33; hand-port
+# Claim: the clang AST C++ binder binds one namespace of an external static library (constructor, overloads, operator, callback, exceptions, one requested template instance), skips decls outside the namespace, records the target, clang, namespace, library and linked archive in its provenance, and the bound program runs (tests/polyglot_systems.rs:119-199)
+# The original called CppBind::bind in-process and compiled the Rust output with rustc (internal API); its public route is `jet inspect bind cpp` (BindOptions become --target/--clang/--ar/--pkg/--namespace/--instantiate/-I/-L/-l) and `jet run`, so rustc is no longer a prerequisite
+# Fixture: counter.hpp, counter.cpp and main.jet are the original bytes; `use cpp.counter as cpp` is written `use cpp :: cpp.counter`; observe/tools.jet finds the absolute clang++/ar and spells the host triple as jet does, in place of env!("JET_BUILD_TARGET")
+# Not ported: result.archive outside the cache directory (BindResult field) and cache_identity_for_test for another target (test-only hook), tests/polyglot_systems.rs:123,148-150
+requires: os:unix
+requires: tool:clang++
+requires: tool:ar
+requires: tool:nm
+fixture: cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface.fixture
+env: NO_COLOR=1
+step: jet run --allow=Env,FS.Read observe/tools.jet
+exit: 0
+capture: clang stdout doc $.clang
+capture: ar stdout doc $.ar
+capture: target stdout doc $.target
+step: {cap:clang} -std=c++17 -fPIC -c counter.cpp -target {cap:target} -o counter.o
+exit: 0
+step: {cap:ar} rcs libcounter_impl.a counter.o
+exit: 0
+step: jet inspect bind cpp counter.hpp --target {cap:target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme --instantiate acme::twice=int64_t:twice_int -I {work} -L {work} -l counter_impl
+exit: 0 # tests/polyglot_systems.rs:119 CppBind::bind(...).unwrap()
+file: .jet/bindings/cpp/libjet_cpp_counter.a is-file # tests/polyglot_systems.rs:124
+file: .jet/bindings/cpp/counter.provenance ~ "schema=jet-ffi-bridge-provenance-v1" # tests/polyglot_systems.rs:125-127
+file: .jet/bindings/cpp/counter.provenance ~ "binder-schema=jet-cpp-bind-v3" # tests/polyglot_systems.rs:128
+file: .jet/bindings/cpp/counter.provenance ~ "target={cap:target}" # tests/polyglot_systems.rs:129
+file: .jet/bindings/cpp/counter.provenance ~ "clang={cap:clang}" # tests/polyglot_systems.rs:130-132
+file: .jet/bindings/cpp/counter.provenance ~ "namespace=acme" # tests/polyglot_systems.rs:133
+file: .jet/bindings/cpp/counter.provenance ~ "library=counter_impl" # tests/polyglot_systems.rs:134
+file: .jet/bindings/cpp/counter.provenance ~ "linked-archive=" # tests/polyglot_systems.rs:135
+file: .jet/bindings/cpp/counter.provenance ~ "linked-archive-sha256=" # tests/polyglot_systems.rs:136
+file: .jet/bindings/cpp/counter.provenance ~ "descriptor=jet-ffi-descriptor-v1;" # tests/polyglot_systems.rs:137-139
+file: .jet/bindings/cpp/counter.jet !~ "decoy" # tests/polyglot_systems.rs:140 nothing outside namespace acme is bound
+file: .jet/bindings/cpp/counter.jet ~ "pub fn apply(callback:" # tests/polyglot_systems.rs:141
+file: .jet/bindings/cpp/counter.jet ~ "// jet-ffi-descriptor=jet-ffi-descriptor-v1;" # tests/polyglot_systems.rs:142-144
+file: .jet/bindings/cpp/counter.jet ~ "-[FFI.Cpp]>" # tests/polyglot_systems.rs:145
+file: .jet/bindings/cpp/counter.jet !~ "=>" # tests/polyglot_systems.rs:146
+step: jet run main.jet
+exit: 0 # tests/polyglot_systems.rs:195
+stdout: = "15\n17\n20\n42\n-1\n42\n-1\n" # tests/polyglot_systems.rs:196-199

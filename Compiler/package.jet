@@ -1,6 +1,12 @@
 // The Jet compiler workspace: the packages `jet` is built from. `jet build Compiler/` runs
 // build.jet's `fn build`, which builds the `jet` executable from JetCli and its package
 // dependencies. Tool packages beside them (LSP, devserver, debugger) are not members.
+// `jet test Compiler --profile <p>` runs a test profile below, and a bare `jet test Compiler`
+// runs `quick`, every member's #Tests compared with their row baseline. The corpus suites
+// run in the `jet` under test through JetTestKit, their row IDs relative to the checkout.
+// `registries` runs every case, the opt-in ones too, against no baseline:
+// Tools/agent/CompilerRegistries.jet's testkit entry. `corpora` runs every corpus
+// suite and none of the #Tests: Tools/agent/goldens-census.mjs's corpus pass.
 name: "compiler"
 version: "0.0.1"
 edition: "2026"
@@ -18,5 +24,23 @@ members: [
     "JetBuildSession",
     "JetRepl",
     "JetDriver",
+    "JetTestKit",
     "JetCli",
 ]
+suites: {
+    golden: TestSuite{ golden_corpus: "../Examples/features" },
+    run: TestSuite{ golden_corpus: "../tests/run" },
+    ui: TestSuite{ ui_corpus: "../tests/ui" },
+    ui_lint: TestSuite{ ui_corpus: "../tests/ui_lint" },
+    cases: TestSuite{ cases_corpus: "../tests/cases" },
+}
+test: {
+    quick: TestProfile{ suites: [tests] },
+    golden: TestProfile{ suites: [golden, run], baseline: "../Tools/testkit/known-failing.tsv" },
+    ui: TestProfile{ suites: [ui, ui_lint], baseline: "../Tools/testkit/known-failing.tsv" },
+    cases: TestProfile{ suites: [cases], baseline: "../Tools/testkit/known-failing.tsv" },
+    registries: TestProfile{ suites: [cases], opt_in: true },
+    full: TestProfile{ suites: [tests, golden, run, ui, ui_lint, cases], baseline: "../Tools/testkit/known-failing.tsv" },
+    corpora: TestProfile{ suites: [golden, run, ui, ui_lint, cases], baseline: "../Tools/testkit/known-failing.tsv" },
+}
+defaults: { test: quick }

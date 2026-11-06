@@ -4,7 +4,7 @@
 /// (ratified 2026-06-17, E2-M11; PascalCase marker follow-on
 /// 2026-06-21): typed goal `#Todo` — compiles everywhere, panics at runtime with
 /// file, line, and expected type. Bare lowercase `todo` (FOREIGN_TODO) is the
-/// retired spelling → E0054 teaching error pointing at `#Todo`.
+/// retired spelling; no rule accepts it.
 KW_TODO :: "Todo"
 
 /// S60's former `#Pure fn` marker, retained only so can reject it
@@ -25,11 +25,10 @@ EFFECT_ARROW_OPEN :: "-["
 
 EFFECT_ARROW_CLOSE :: "]>"
 
-/// The retired effect-declaration word. An effect is a type: a struct, or an
-/// enum whose cases are a closed family, with an `impl Effect { … }` block.
-/// The word still declares a package leaf under a Prelude root
-/// (`effect Log.Audit`); on a Prelude effect or a bare root it teaches the type
-/// form (E0381).
+/// The effect-declaration word. An effect is a type: a struct, or an enum
+/// whose cases are a closed family, with an `impl Effect { … }` block. The
+/// word declares only a package leaf under a Prelude root
+/// (`effect Log.Audit`).
 KW_EFFECT_DECL :: "effect"
 
 /// Reading the program's own arguments. It is a leaf of
@@ -77,7 +76,7 @@ BUILTIN_EFFECT_LEAVES :: [String]{
     "FFI.Octave",
 }
 
-/// Retired spelling. Uses direct declared tags such
+/// Retired spelling; no rule accepts it. Facts are direct declared tags such
 /// as `#Input value` and `#Credential value`.
 KW_TAINTED :: "Tainted"
 
@@ -86,7 +85,7 @@ KW_TAINTED :: "Tainted"
 /// (`.Input`/`.PII`/`.Secret`/`.Credential`). PascalCase per.
 KW_CREDENTIAL :: "Credential"
 
-/// Retired spelling. Uses `#Scrub(Tag)`.
+/// Retired spelling; no rule accepts it. The contract is `#Scrub(Tag)`.
 KW_SANITIZER :: "Sanitizer"
 
 /// A typed function contract that removes exactly one
@@ -139,9 +138,8 @@ PROTO_CLIENT :: "client"
 PROTO_SERVER :: "server"
 
 /// The retired rule-declaration word. A marker is a struct with an
-/// `impl Marker { … }` block; the word is kept only so the parser can teach
-/// the struct form (E0381) where `marker Name(…)` or `marker Name = #[…]` is
-/// written. Not in `JET_KEYWORD_LIST`.
+/// `impl Marker { … }` block; no rule accepts `marker Name(…)`. Not in
+/// `JET_KEYWORD_LIST`.
 KW_MARKER :: "marker"
 
 /// The one non-code fact declaration word —
@@ -235,69 +233,10 @@ TXN_ON_COMMIT :: "on_commit"
 /// form, I7 untouched).
 TXN_ON_ROLLBACK :: "on_rollback"
 
-/// (ratified 2026-06-25, layer 2): the trait a type may derive/impl
-/// to customize how a mutated value is snapshotted and restored inside a `#Transact`
-/// block (e.g. a cheap diff instead of a full deep copy). When a mutated value's
-/// type implements `Rollback`, the auto-snapshot (layer 1) uses it instead of a
-/// generic clone. A user-derivable trait name (I7).
-TRAIT_ROLLBACK :: "Rollback"
-
-/// User-facing string rendering for `{}` interpolation.
-TRAIT_DISPLAY :: "Display"
-
-/// Developer-facing debug rendering for `{value:Debug}` interpolation.
-TRAIT_DEBUG :: "Debug"
-
-/// Expert opt-in hook enabling zero-copy `loop x in mytype`.
-TRAIT_ITERABLE :: "Iterable"
-
-/// Cursor type for `Iterable::iter`.
-TRAIT_ITERATOR :: "Iterator"
-
-/// Expert opt-in hook enabling `mytype[key]` read syntax.
-TRAIT_INDEX :: "Index"
-
-/// Expert opt-in hook enabling `mytype[key] = v` write syntax.
-TRAIT_INDEX_MUT :: "IndexMut"
-
-/// Expert operator hooks. Existing symbols and precedence only.
-TRAIT_ADD :: "Add"
-
-TRAIT_SUB :: "Sub"
-
-TRAIT_MUL :: "Mul"
-
-TRAIT_DIV :: "Div"
-
-TRAIT_EQUATABLE :: "Equatable"
-
-TRAIT_COMPARABLE :: "Comparable"
-
 TYPE_ORDERING :: "Ordering"
-
-/// The prelude `Numeric` trait. It builds on the
-/// operator hooks with the right side fixed to `Self` plus ordering, and adds
-/// two static members. `/` and unary minus are deliberately outside it.
-/// Built-in numbers (Int, Float, F32, sized integers, Decimal, Fraction) and
-/// every `#Numeric` distinct type implement it; structs may `impl T.Numeric`.
-TRAIT_NUMERIC :: "Numeric"
-
-NUMERIC_SUPERTRAITS :: [String]{TRAIT_ADD, TRAIT_SUB, TRAIT_MUL, TRAIT_COMPARABLE}
-
-NUMERIC_STATIC_MEMBERS :: [String]{"zero", "one"}
 
 /// Variant order is the shared scalar carrier order for the built-in enum.
 ORDERING_VARIANTS :: [String]{"Less", "Equal", "Greater"}
-
-/// Nominal byte-stream read contract in `core.term`.
-TRAIT_IO_READER :: "Reader"
-
-/// Nominal byte-stream write contract in `core.term`.
-TRAIT_IO_WRITER :: "Writer"
-
-/// Backend-neutral typed-SQL driver
-/// contract in `core.db`.
-TRAIT_DRIVER :: "Driver"
 
 INTERPOLATION_UNIT_STYLES :: [String]{"name", "bare"}
 
@@ -378,16 +317,14 @@ MARKER_REDACT :: "Redact"
 /// opaque sema-only handle; erased in codegen (I3).
 TXN_HANDLE_TYPE :: "Transaction"
 
-/// S14 follow-on (2026-06-21): retired lowercase spellings retained
-/// only for targeted diagnostics. `test` and `todo` teach their marker forms;
-/// the former `#Pure` marker is retired by (`-[]>`).
+/// S14 follow-on (2026-06-21): retired lowercase spellings; no rule accepts
+/// them. The former `#Pure` marker is retired by (`-[]>`).
 FOREIGN_TEST :: "test"
 
 FOREIGN_TODO :: "todo"
 
-/// Bare lowercase `sanitizer` in fn-modifier position is retained only for
-/// E0059, which points at `#Scrub(Tag)`. An ordinary identifier named
-/// `sanitizer` elsewhere is unaffected.
+/// Bare lowercase `sanitizer` is not a fn modifier; no rule accepts it. An
+/// ordinary identifier named `sanitizer` is unaffected.
 FOREIGN_SANITIZER :: "sanitizer"
 
 /// `consume(x)` is the deliberate
@@ -410,20 +347,20 @@ BUILTIN_SNAPSHOT :: "snapshot"
 /// KW_DECISION_ID_EXEMPT).
 KW_IT :: "it"
 
-/// S42 (ratified M5): `as` recognized only for teaching error E0030.
+/// S42 (ratified M5): foreign cast word; no rule accepts `as`.
 FOREIGN_AS :: "as"
 
-/// S46 (ratified M8): foreign anonymous-fn spellings for teaching error E0032.
+/// S46 (ratified M8): foreign anonymous-fn spellings; no rule accepts them.
 FOREIGN_LAMBDA :: "lambda"
 
-/// S14 (M5): foreign collection spellings for teaching errors.
+/// S14 (M5): foreign collection spellings; no rule accepts them.
 FOREIGN_VEC :: "Vec"
 
 FOREIGN_DICT :: "dict"
 
 FOREIGN_APPEND :: "append"
 
-/// S14 (M4): foreign error spellings for teaching errors.
+/// S14 (M4): foreign error spellings; no rule accepts them.
 FOREIGN_THROW :: "throw"
 
 FOREIGN_RAISE :: "raise"
@@ -436,7 +373,7 @@ FOREIGN_UNWRAP :: "unwrap"
 
 FOREIGN_EXPECT :: "expect"
 
-/// M10 teaching spellings for common Core/library habits.
+/// M10: foreign spellings of common Core/library habits; no rule accepts them.
 FOREIGN_EPRINTLN :: "eprintln"
 
 FOREIGN_OPEN :: "open"
@@ -445,7 +382,7 @@ FOREIGN_GETENV :: "getenv"
 
 FOREIGN_OS :: "os"
 
-/// M11 teaching spellings: async/await and mutex/lock.
+/// M11: foreign async/await and mutex/lock spellings; no rule accepts them.
 FOREIGN_ASYNC :: "async"
 
 FOREIGN_AWAIT :: "await"
@@ -462,8 +399,8 @@ MARKER_LIST_OPEN :: "["
 
 MARKER_LIST_CLOSE :: "]"
 
-/// Rejected `@` applied-rule spelling (teaching error; prefix
-/// `@` is reserved for compile-time names and fact reads by).
+/// Rejected `@` applied-rule spelling (E0063; prefix `@` is reserved for
+/// compile-time names and fact reads).
 FOREIGN_AT_ATTR :: "@"
 
 /// S52 (ratified M12): package source root directory inside a project.
@@ -563,10 +500,9 @@ REF_SOURCE_RELEASES :: "releases"
 
 /// The one home for "which source tokens are built-in providers" — every
 /// recognized `REF_SOURCE_*` above, in the order a ref may not put them
-/// (`target@provider`, never `provider@target`).
-/// `jet-pkg-model`'s `RefSpec::Source::is_builtin` and
-/// `Syntax/retirements.rs`'s `package-ref-order` ratchet both read this list
-/// instead of hand-copying it, so they can never drift apart.
+/// (`target@provider`, never `provider@target`). `jet-pkg-model`'s
+/// `RefSpec::Source::is_builtin` and 's `package-ref-order` ratchet both read
+/// this list instead of hand-copying it, so they can never drift apart.
 REF_SOURCE_PROVIDERS :: [String]{
     REF_SOURCE_JETPACK,
     REF_SOURCE_NIXPKGS,
@@ -690,7 +626,7 @@ FOREIGN_DEFAULT_FILE :: "default.nix"
 
 /// U19 (card c9jetpackgates): the project-level `jetpack
 /// dev` engine verb — distinct from the already-shipped `jet dev <file.jet>`
-/// interpreter/hot-reload loop. Bare `jet dev` (no file argument)
+/// native O0 hot-reload loop. Bare `jet dev` (no file argument)
 /// dispatches here: realize `env(base + env.dev)`, gate on trust, wait for
 /// services (U12 no-op today), then run the project's `fn dev()` or fall back
 /// to `fn run()`.
@@ -955,10 +891,10 @@ SECRETS_RECIPIENTS_VERB_LIST :: "list"
 
 SECRETS_RECIPIENTS_VERBS :: [String]{SECRETS_RECIPIENTS_VERB_ADD, SECRETS_RECIPIENTS_VERB_LIST}
 
-/// U13: the `--force` flag on `jetpack secrets keygen`, overwriting an
-/// existing identity. Reuses the bare string rather than minting a new flag
-/// constant family — mirrors `jet registry keygen --force`'s own flag spelling
-/// (`crates/jet-cli/src/CLI.rs`), kept a plain literal there too.
+/// U13: the `--force` flag on `jetpack secrets keygen`, overwriting an existing
+/// identity. Reuses the bare string rather than minting a new flag constant
+/// family — mirrors `jet registry keygen --force`'s own flag spelling, kept a
+/// plain literal there too.
 SECRETS_FLAG_FORCE :: "--force"
 
 /// SecretSpec 0.18 parity: `jetpack secrets import` reads this file when no

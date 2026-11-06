@@ -1,4 +1,4 @@
-// Link the real composed Jet runtime with -Wl,--wrap=jet_rt_free.
+// Link the real composed Jet runtime.
 // BYTE_HANDLE_U8_STRIDE must match RT_HOST_U8_STRIDE (canonical packed 1).
 #include <assert.h>
 #include <stdbool.h>
@@ -18,7 +18,7 @@ _Static_assert(sizeof(Buffer)==16 && offsetof(Buffer,position)==8,"ByteHandlesAB
 _Static_assert(sizeof(Path)==8,"ByteHandlesABI path");
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t,int64_t);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern Text *jet_rt_string_from_static(const void *,int64_t);
 extern Text *jet_rt_string_clone(const Text *);
 extern void jet_rt_string_drop(Text *);
@@ -47,14 +47,14 @@ extern bool jet_rt_handle_eq_##N(int64_t *,int64_t *);
 ENUM_DECL(jet_failure_policy)
 ENUM_DECL(jet_dispatch_state)
 ENUM_DECL(jet_event_config_error)
-ENUM_DECL(jet_late_event_disposition)
 static struct { void *pointer; int64_t size,align; unsigned frees; } watched[32];
 static size_t count;
 static unsigned intercepted;
-void __wrap_jet_rt_free(void *p,int64_t size,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t size,int64_t align) {
     ++intercepted;
     for(size_t i=0;i<count;++i) if(watched[i].pointer==p) { assert(size==watched[i].size && align==watched[i].align);assert(++watched[i].frees==1); }
-    __real_jet_rt_free(p,size,align);
 }
 static void watch(void *p,int64_t size,int64_t align) {
     assert(count<32);for(size_t i=0;i<count;++i) assert(watched[i].pointer!=p);
@@ -143,10 +143,10 @@ static void bitset_cases(void) {
     jet_rt_handle_drop_jet_bit_set(NULL);
 }
 int main(void) {
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();buffer_cases();path_cases();bitset_cases();
     enum_cases(4,jet_rt_handle_clone_jet_failure_policy,jet_rt_handle_drop_jet_failure_policy,jet_rt_handle_eq_jet_failure_policy);
     enum_cases(7,jet_rt_handle_clone_jet_dispatch_state,jet_rt_handle_drop_jet_dispatch_state,jet_rt_handle_eq_jet_dispatch_state);
     enum_cases(1,jet_rt_handle_clone_jet_event_config_error,jet_rt_handle_drop_jet_event_config_error,jet_rt_handle_eq_jet_event_config_error);
-    enum_cases(2,jet_rt_handle_clone_jet_late_event_disposition,jet_rt_handle_drop_jet_late_event_disposition,jet_rt_handle_eq_jet_late_event_disposition);
     assert(intercepted>0);puts("Jet byte/policy/enum glue: ok");return 0;
 }

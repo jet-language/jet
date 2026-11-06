@@ -1,8 +1,7 @@
-// Human terminal rendering of diagnostics: the byte-stable form the
-// tests/ui snapshots pin (Docs/spec/diagnostics.md). Mirrors
-// crates/jet-foundation/src/Diagnostics.rs `render_inner`/`push_snippet`
-// and Terminal.rs `Theme`. With `color` false the text is plain; color only
-// wraps the same text in ANSI styling, so scripts read identical bytes.
+// Human terminal rendering of diagnostics: the byte-stable form the tests/ui
+// snapshots pin (Docs/spec/diagnostics.md). `render_inner`/`push_snippet` and
+// `Theme`. With `color` false the text is plain; color only wraps the same text
+// in ANSI styling, so scripts read identical bytes.
 use diagnostic_unicode :: core.text
 
 DIAGNOSTIC_THEME_ACCENT :: "1;96"
@@ -353,8 +352,46 @@ fn diagnostic_render_with(diagnostic: Diagnostic, file: String, source: String, 
         if diagnostic.nearest_granting_scope == .Val(scope) -> diagnostic_push_text(&out, " {diagnostic_theme_bold(color, "Nearest granting scope:")} {diagnostic_escape_terminal_text(scope)}\n")
     }
     // Jet's own codes have a reference page; a library diagnostic's code is its type path.
-    if !diagnostic.code.contains(".") -> diagnostic_push_text(&out, "More: jet-lang.dev/e/{diagnostic.code}\n")
+    if !diagnostic.code.contains(".") -> diagnostic_push_text(&out, diagnostic_more_line(diagnostic.code))
     String.from_bytes(out) ?? ""
+}
+
+// The reference line that closes every report of a Jet code.
+fn diagnostic_more_line(code: String) -> String Never! {
+    "More: jet-lang.dev/e/{code}\n"
+}
+
+DIAGNOSTIC_STOP_OPEN :: "Stop ["
+DIAGNOSTIC_STOP_CLOSE :: "]: "
+
+// A runtime stop's first line, `Stop [CODE]: what`, as the runtime prints a
+// stop row (its code, not its name).
+fn diagnostic_stop_line(code: String, what: String) -> String Never! {
+    "{DIAGNOSTIC_STOP_OPEN}{code}{DIAGNOSTIC_STOP_CLOSE}{what}"
+}
+
+// The code and What of one line `diagnostic_stop_line` wrote, as a tool reads
+// back the stop another Jet program printed; None for any other line.
+struct DiagnosticStopHead {
+    code: String
+    what: String
+}
+
+fn diagnostic_stop_parse(line: String) -> DiagnosticStopHead? Never! {
+    if !line.starts_with(DIAGNOSTIC_STOP_OPEN) -> return None
+    open :: DIAGNOSTIC_STOP_OPEN.bytes().len()
+    close :: line.find(DIAGNOSTIC_STOP_CLOSE)
+    if close <= open -> return None
+    bytes :: line.bytes()
+    code :: String.from_bytes(bytes.slice(open, close)) ?? ""
+    what :: String.from_bytes(bytes.slice(close + DIAGNOSTIC_STOP_CLOSE.bytes().len(), bytes.len())) ?? ""
+    Val(DiagnosticStopHead{code: code, what: what})
+}
+
+// The lines that close a runtime stop: its row's Why and Fix, then More.
+fn diagnostic_stop_footer(code: String) -> String Never! {
+    row :: diagnostic_registry_row(code) ?? panic("runtime stop `{code}` has no registry row")
+    " Why: {row.why}\n Fix: {row.fix}\n{diagnostic_more_line(code)}"
 }
 
 // A batch of diagnostics, one blank line between each. Each source the batch

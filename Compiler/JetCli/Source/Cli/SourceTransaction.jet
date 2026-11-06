@@ -1,5 +1,5 @@
-// Source/CmdCodemod/Transaction.rs: held multi-file source publication and
-// byte-exact schema-2 recovery. A journal is durable before the first rename.
+// Held multi-file source publication and byte-exact schema-2 recovery. A
+// journal is durable before the first rename.
 use {
     cli_transaction_hex :: core.encoding.hex
     jet_foundation.[foundation_json_quote]
@@ -171,9 +171,9 @@ fn jet_cli_transaction_recover(project: JetCLIRootedDirectory, journal: JetCLIRo
         current :: record.read(project)
         if current != after -> all_after = false
         if current != before && current != after -> return Err(jet_cli_read_error("codemod recovery found concurrent drift; journal preserved: {path}"))
-        // Transaction.rs prepare_recovery_handles: a staged temp that still
-        // exists must be the recorded single-link file holding exactly the
-        // journaled after-image, before any byte is restored or removed.
+        // prepare_recovery_handles: a staged temp that still exists must be the
+        // recorded single-link file holding exactly the journaled after-image,
+        // before any byte is restored or removed.
         temp_present :: if record.parent == .Val(parent) -> parent.member_present(record.temp) else -> project.member_present(record.temp)
         if temp_present {
             temp_info :: record.stat(project, record.temp)

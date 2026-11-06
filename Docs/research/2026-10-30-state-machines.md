@@ -1,7 +1,7 @@
 # State machines in Jet today
 
 Date: 2026-10-30. Card #6326. Probes live in
-`/mnt/jetscratch/lanes/SurfaceDesign/probes/` (`m6326`, `m6326b`, `jt`).
+`$JET_SCRATCH_ROOT/lanes/SurfaceDesign/probes/` (`m6326`, `m6326b`, `jt`).
 Every probe printed the same output on o0, o1 and o2 with the base compiler at
 bd83fe6361, except where a timing is given.
 

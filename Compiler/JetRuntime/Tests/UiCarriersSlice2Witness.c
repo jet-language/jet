@@ -1,4 +1,4 @@
-/* REAL Jet providers, --wrap=jet_rt_alloc/jet_rt_free. Private UiABI and
+/* REAL Jet providers, checked-heap alloc/free observers. Private UiABI and
  * UiCarriersABI only. Stop modes require c39d89b6b + 9e344d0f0 composed:
  * exit101, empty stdout, exact stderr in UiCarriersSlice2Stops-*.stderr.
  * No C mocks, no Rust allocation. Syntax is not native execution proof. */
@@ -13,8 +13,7 @@ typedef int64_t H;
 typedef struct { unsigned char *data; uint64_t len, cap; } Text;
 extern void jet_rt_alloc_init(void);
 extern H jet_rt_alloc(H, H);
-extern H __real_jet_rt_alloc(H, H);
-extern void __real_jet_rt_free(H, H, H);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 extern void jet_rt_free(H, H, H);
 extern Text *jet_rt_string_from_static(const void *, H);
 extern void jet_rt_string_drop(Text *);
@@ -29,7 +28,7 @@ DECLARE(JetUiFsGrant);
 extern void jet_rt_handle_field_jet_ui_node_label(H, Text *);
 extern H jet_rt_handle_field_jet_ui_node_width(H);
 extern H jet_rt_handle_field_jet_ui_node_height(H);
-extern void jet_rt_handle_field_jet_ui_shortcut_key(H, Text *);
+extern Text *jet_rt_record_get_jet_ui_shortcut_key(H);
 extern H jet_rt_handle_field_jet_tui_style_bold(H);
 extern H jet_rt_handle_field_jet_tui_style_dim(H);
 extern H jet_rt_handle_field_jet_tui_style_underline(H);
@@ -45,12 +44,11 @@ extern H jet_rt_record_seq_list_rec_jet_ui_node_len(H);
 extern H jet_rt_record_seq_list_rec_jet_ui_node_get(H, H);
 extern void jet_rt_record_seq_list_rec_jet_ui_node_push(H, H);
 
-/* Observer reused from UiCarriersBasicWitness; forwards every real call. */
+/* Observer reused from UiCarriersBasicWitness; it only records, never frees. */
 static struct { H address, bytes, alignment; bool live; } ledger[16384];
 static size_t allocations, frees;
 static bool tracking;
-H __wrap_jet_rt_alloc(H bytes, H alignment) {
-    H address = __real_jet_rt_alloc(bytes, alignment);
+static void observe_alloc(H address, H bytes, H alignment) {
     if (tracking) {
         assert(allocations < 16384 && address && bytes > 0);
         assert((uint64_t)address % (uint64_t)alignment == 0);
@@ -61,22 +59,19 @@ H __wrap_jet_rt_alloc(H bytes, H alignment) {
         ledger[allocations].alignment = alignment;
         ledger[allocations++].live = true;
     }
-    return address;
 }
-void __wrap_jet_rt_free(H address, H bytes, H alignment) {
+static void observe_free(H address, H bytes, H alignment) {
     if (tracking) {
         for (size_t i = allocations; i > 0; --i) {
             if (ledger[i-1].address == address && ledger[i-1].live) {
                 assert(ledger[i-1].bytes == bytes && ledger[i-1].alignment == alignment);
                 ledger[i-1].live = false;
                 ++frees;
-                __real_jet_rt_free(address, bytes, alignment);
                 return;
             }
         }
         assert(!"untracked or double free");
     }
-    __real_jet_rt_free(address, bytes, alignment);
 }
 static uint64_t *words(H h) { return (uint64_t *)(uintptr_t)h; }
 static H boxed(size_t n) {
@@ -159,14 +154,14 @@ static void node_cases(void) {
     words(b)[2] = UINT64_C(0x7ff8000000000001); assert(!jet_rt_handle_eq_jet_ui_node(b,b)); words(b)[2] = 0;
     Text view; jet_rt_handle_field_jet_ui_node_label(b,&view); header_is(&view,(H)words(b)[0]);
     assert(jet_rt_handle_field_jet_ui_node_width(b) == b+8 && jet_rt_handle_field_jet_ui_node_height(b) == b+16);
-    jet_rt_handle_field_jet_ui_shortcut_key((H)words(b)[18],&view); header_is(&view,(H)words((H)words(b)[18])[0]);
+    Text *key = jet_rt_record_get_jet_ui_shortcut_key((H)words(b)[18]); assert(key != (Text *)(uintptr_t)words((H)words(b)[18])[0]);
     H bs = (H)words((H)words(b)[17])[4];
     for (unsigned i=2;i<=4;++i) { words(bs)[2*i+1] ^= 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words(bs)[2*i+1] ^= 1; }
     words(bs)[0] = 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words(bs)[0] = 0;
     words(bs)[1] = 0; assert(jet_rt_handle_eq_jet_ui_node(a,b));
     words((H)words(b)[18])[1] ^= 1; assert(!jet_rt_handle_eq_jet_ui_node(a,b)); words((H)words(b)[18])[1] ^= 1;
     jet_rt_handle_drop_jet_ui_node(a);
-    assert(view.len == 3 && memcmp(view.data,"key",3) == 0);
+    assert(key->len == 3 && memcmp(key->data,"key",3) == 0); jet_rt_string_drop(key);
     jet_rt_handle_drop_jet_ui_node(b);
     jet_rt_handle_drop_jet_ui_node(0); jet_rt_handle_drop_jet_ui_accessibility(0); jet_rt_handle_drop_jet_ui_shortcut(0);
 }
@@ -230,6 +225,7 @@ static void scalar_cases(void) {
     jet_rt_handle_drop_jet_tui_style(0); jet_rt_handle_drop_jet_tui_capabilities(0); jet_rt_handle_drop_jet_ui_fs_rights(0); jet_rt_handle_drop_jet_ui_fs_grant(0);
 }
 int main(int argc,char **argv) {
+    assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
     if(argc==2) {
         if(!strcmp(argv[1],"negative-capacity")) jet_rt_record_seq_list_rec_jet_ui_node_new(-1);

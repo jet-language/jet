@@ -1,6 +1,11 @@
 // A real browser target: the companion HTML is the page under test.  The
 // endpoint and server are supplied by the browser harness, never fabricated by
 // this example.  All protocol and report values remain typed handles.
+package {
+    name: "browser_surface"
+    authority: { allow: [Env, FS, Net, Time] }
+}
+
 #[Target(Web), HTML(Path{"browser_surface.html"})]
 use browser :: core.web.browser
 
@@ -97,7 +102,7 @@ fn browser_session(endpoint: String, page_url: String) {
     _receipt_isolated :: receipt.isolated()
     _receipt_cleaned :: receipt.cleaned()
 
-    if &b.next_event(timeout) == {
+    if b.next_event(timeout) == {
         .Ok(value) -> {
             _kind :: value.kind()
             _request_id :: value.request_id()

@@ -25,7 +25,7 @@ fn host_output_columns(value: I64, output: I64) -> Bool {
             byte :: os_load_u8(wrapping(value + at))
             if (byte == I64{0}) -> break
             if (byte < I64{48} || byte > I64{57}) -> return false
-            digit :: U64{byte - I64{48}}
+            digit :: wrapping(U64{byte - I64{48}})
             if (width > U64{1844674407370955161} || (width == U64{1844674407370955161} && digit > U64{5})) -> return false
             width = width * U64{10} + digit
             at = wrapping(at + I64{1})

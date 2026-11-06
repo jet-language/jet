@@ -42,4 +42,16 @@ impl JetCLIRootedFixtureRoot.Close {
     assert(jet_cli_build_record_program_at("nested/not-created.jet", canonical_root, canonical_root) == "nested/not-created.jet")
     sibling :: "{canonical_root}/original-other/source.jet"
     assert(jet_cli_build_record_program_at(sibling, "{canonical_root}/original", canonical_root) == sibling)
+    // A durable store refuses different bytes under a published name; a cache
+    // store takes them as a torn publication and replaces it.
+    collided :: replacement.publish_immutable("record", "different".bytes(), Val(0o600), 1024) == .Err(_)
+    assert(collided)
+    cache :: JetCLIRootedDirectory.open_cache(root, [String]{"cache"}, true) ?? panic("hold cache")
+    assert(!cache.durable)
+    _ :: cache.publish_immutable("report", "torn".bytes(), Val(0o600), 1024) ?? panic("publish torn")
+    rebuilt :: cache.publish_immutable("report", "complete".bytes(), Val(0o600), 1024) ?? panic("rebuild torn")
+    again :: cache.publish_immutable("report", "complete".bytes(), Val(0o600), 1024) ?? panic("republish")
+    assert(rebuilt && !again)
+    stored :: cli_files.read("{root}/cache/report") ?? panic("read rebuilt report")
+    assert(stored == "complete")
 }

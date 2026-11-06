@@ -1,0 +1,69 @@
+package {
+    name: "rand_fault"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Rand, Time] }
+}
+use {
+    crypto :: core.crypto
+    random :: core.crypto.random
+    uuid :: core.crypto.uuid
+}
+
+// The fixed recipient keeps key parsing off the entropy rail, so each fault
+// the schedule injects lands on a draw the consumer makes itself.
+fn recipient() -> crypto.X25519PublicKey {
+    secret :: crypto.X25519SecretKey.from_bytes([U8]{
+        0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45,
+        0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a,
+    }) ?? panic("fixed recipient key")
+    secret.public_key()
+}
+
+#Test(faults: [Rand]) fn raw_entropy_failure_is_unavailable() {
+    if random.bytes(16) == {
+        .Ok(bytes) -> assert_eq(bytes.len(), 16)
+        .Err(.Unavailable) -> print("rand fault observed: raw")
+        .Err(_) -> assert(false)
+    }
+}
+
+#Test(faults: [Rand]) fn keygen_entropy_failure_is_unavailable() {
+    if crypto.SigningKey.new_random() == {
+        .Ok(key) -> assert_eq(key.public_key().bytes.len(), 32)
+        .Err(.Unavailable) -> print("rand fault observed: signing keygen")
+        .Err(_) -> assert(false)
+    }
+    if crypto.generatekey() == {
+        .Ok(key) -> assert_eq(key.public_key().bytes.len(), 32)
+        .Err(.Unavailable) -> print("rand fault observed: x25519 keygen")
+        .Err(_) -> assert(false)
+    }
+}
+
+#Test(faults: [Rand]) fn nonce_entropy_failure_seals_nothing() {
+    if crypto.seal([recipient()], [U8]{1, 2, 3}, [U8]{}) == {
+        .Ok(box) -> assert(crypto.sealed_bytes(box).len() > 3)
+        .Err(.Unavailable) -> print("rand fault observed: seal")
+        .Err(_) -> assert(false)
+    }
+}
+
+#Test(faults: [Rand]) fn salt_entropy_failure_hashes_nothing() {
+    if crypto.password_hash(crypto.Secret.from_text("correct horse")) == {
+        .Ok(stored) -> assert(stored.text.starts_with("$argon2id$"))
+        .Err(.Unavailable) -> print("rand fault observed: password salt")
+        .Err(_) -> assert(false)
+    }
+}
+
+#Test(faults: [Rand]) fn uuid_entropy_failure_is_typed() {
+    if uuid.v4() == {
+        .Ok(id) -> assert_eq(id.len(), 36)
+        .Err(error) -> {
+            assert_eq(error.reason, "secure random unavailable")
+            print("rand fault observed: uuid v4")
+        }
+    }
+}
+
+fn run() {}

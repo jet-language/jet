@@ -1,0 +1,68 @@
+// profiler_fixture, and the capture half of perf_source_profile_view_preserves_ranges_and_coverage_states.
+// The view and export half is the case
+// tests/cases/jet_perf_trace_parts_views/perf_source_profile_view_preserves_ranges_and_coverage_states.case;
+// its fixtures/profile/<state>.jettrace files are the exact bytes these builders produce.
+use jet_foundation.[
+    JetSymbolRef, SourceIdentity, TraceAllocation, TraceBrowser, TraceGameDrawEvent, TraceGameFrame,
+    TraceHardware, TraceIO, TraceLock, TraceNative, TraceProfile, TraceProfileRow, TraceProfileSource,
+    TraceReceiptSection, TraceSample, TraceSkeleton, TraceSourceMap, TraceSpan, TraceTask,
+    TraceToolchain, build_skeleton_bytes, capture_policy_default_exclusions, sha256_hex,
+    trace_profile_unsupported, trace_source_map_jet_with_source, verify_jettrace,
+]
+
+PERF_PROFILE_FIXTURE_SOURCE :: "fn run() {{\n    hot()\n}}\nfn hot() {{\n}}\nfn cold() {{\n}}\n"
+PERF_PROFILE_FIXTURE_STATES :: [String]{"captured", "no_samples", "unsupported", "truncated", "dropped"}
+
+fn perf_profile_fixture_row(clock: String, name: String, start_line: U64, end_column: U64, sample_count: U64) -> TraceProfileRow Never! {
+    TraceProfileRow{clock: clock, execution_count: None, sample_count: sample_count, sample_weight: sample_count,
+        source: TraceProfileSource{path: "profile.jet", sha256: sha256_hex(PERF_PROFILE_FIXTURE_SOURCE), start_line: start_line, start_column: U64{1}, end_line: start_line, end_column: end_column},
+        symbol: JetSymbolRef{path: "profile.jet", name: name}}
+}
+fn perf_profile_fixture_profile(state: String) -> TraceProfile Never! {
+    hot_wall :: perf_profile_fixture_row("wall", "hot", U64{4}, U64{7}, U64{37})
+    hot_cpu :: perf_profile_fixture_row("cpu", "hot", U64{4}, U64{7}, U64{11})
+    cold_wall :: perf_profile_fixture_row("wall", "cold", U64{6}, U64{8}, U64{1})
+    if state == {
+        "captured" -> return TraceProfile{method: "sampling", status: "captured", coverage: "complete", rows: [TraceProfileRow]{hot_wall, hot_cpu, cold_wall},
+            row_limit: U64{4096}, rows_truncated: false, overhead_ns: Val(U64{3}), overhead_status: "measured", overhead_reason: "fixture sampling overhead",
+            reason: "source-attributed sampling retained hot and cold rows", window_status: "exit", window_wall_ns: Val(U64{5000000}),
+            window_cpu_ns: Val(U64{4000000}), window_reason: "published by the runtime at its exit seam"}
+        "no_samples" -> return TraceProfile{method: "sampling", status: "no_samples", coverage: "none", rows: [TraceProfileRow]{},
+            row_limit: U64{4096}, rows_truncated: false, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "no source samples were retained",
+            reason: "the observe channel produced no source-attributed samples", window_status: "unavailable", window_wall_ns: None,
+            window_cpu_ns: None, window_reason: "the runtime published no run window"}
+        "unsupported" -> return trace_profile_unsupported("source sampling is unsupported for fixture")
+        "truncated" -> return TraceProfile{method: "sampling", status: "truncated", coverage: "partial", rows: [TraceProfileRow]{hot_wall},
+            row_limit: U64{4096}, rows_truncated: true, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "no matched non-profiled run was captured",
+            reason: "sampling observations exceeded the bounded profile sample limit", window_status: "live", window_wall_ns: Val(U64{9000000}),
+            window_cpu_ns: None, window_reason: "the runtime has no process CPU clock on this target"}
+        "dropped" -> return TraceProfile{method: "sampling", status: "truncated", coverage: "partial", rows: [TraceProfileRow]{hot_wall},
+            row_limit: U64{4096}, rows_truncated: true, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "no matched non-profiled run was captured",
+            reason: "dropped_rows=1 at bounded profile sample limit", window_status: "unavailable", window_wall_ns: None,
+            window_cpu_ns: None, window_reason: "the runtime published no run window"}
+        else -> panic("unknown profiler fixture state {state}")
+    }
+}
+fn perf_profile_fixture(state: String) -> [U8] Never! {
+    identity := SourceIdentity{path: "profile.jet", sha256: sha256_hex(PERF_PROFILE_FIXTURE_SOURCE), symbols: [(kind: String, name: String)]{}}
+    loop name in ([String]{"cold", "hot", "run"}) -> &identity.symbols.push((kind: "fn", name: name))
+    source_map :: trace_source_map_jet_with_source("profile.jet", PERF_PROFILE_FIXTURE_SOURCE) ?? panic(err.message)
+    skeleton :: TraceSkeleton{command: "run", argv: [String]{"run", "profile.jet"},
+        toolchain: TraceToolchain{jet_version: "fixture", compiler_build_id: "profile-fixture", stdlib_id: "profile-stdlib", runner_id: "profile-runner"},
+        hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "fixture", target: "profile-target"},
+        capture_policy: capture_policy_default_exclusions(), samples: [TraceSample]{}, profile: perf_profile_fixture_profile(state),
+        allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{},
+        tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{},
+        receipt_sections: [TraceReceiptSection]{}, source_identity: [SourceIdentity]{identity}, source_maps: [TraceSourceMap]{source_map}}
+    build_skeleton_bytes(skeleton) ?? panic(err.message)
+}
+
+#Test("perf_source_profile_view_preserves_ranges_and_coverage_states capture") {
+    captured :: perf_profile_fixture("captured")
+    _ :: verify_jettrace(captured) ?? panic(err.message)
+    text :: String.from_bytes(captured) ?? panic("captured trace is not UTF-8")
+    markers :: [String]{"\"method\":\"sampling\"", "\"execution_count\":null", "\"sample_count\":37", "\"sample_weight\":37",
+        "\"sha256\":\"{sha256_hex(PERF_PROFILE_FIXTURE_SOURCE)}\"", "\"start_line\":4", "\"end_column\":7"}
+    loop marker in markers -> assert(text.contains(marker), "{marker}: {text}")
+    loop state in PERF_PROFILE_FIXTURE_STATES -> _ :: verify_jettrace(perf_profile_fixture(state)) ?? panic("{state}: {err.message}")
+}

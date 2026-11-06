@@ -2,26 +2,24 @@
 # fault, never a user diagnostic. Each faulty function is one census row
 # naming its pass, and one run reports every such function.
 # The fixture carries two independent open backend gaps, so one report counts
-# two fault rows: `nine` calls `ime.poll`, whose Core function `poll` reaches
-# the runtime route jet_ui_host_ime_poll, and `run` calls `drag_drop.poll`,
-# whose Core function `poll` reaches the runtime route jet_ui_host_drag_poll.
-# Both are native UI host provider routes (#4954). When either gap lands,
-# replace it with another open gap in the same position.
+# two fault rows: `nine` calls `compute.gradient` and `run` calls
+# `compute.jvp`, both precise autodiff builtins with no IR lowering yet (#4599).
+# When either gap lands, replace it with another open gap in the same position.
 fixture: fixtures/backend_gap
 step: jet build gap.jet
 exit: 101
 stderr: ~ "internal compiler error: the Jet backend failed on `gap.jet`: 2 compiler faults:" # one report counts every row
-stderr: ~ "ir.build unlowered: poll [function:<corelib>/core.ui.host.drag_drop::poll]" # the entry's gap row names its pass and rule
-stderr: ~ "ir.build unlowered: poll [" # the callee's row comes from the same run
-stderr: ~ "runtime route jet_ui_host_ime_poll" # the builder's own message stays in the row
-stderr: ~ "runtime route jet_ui_host_drag_poll" # the builder's own message stays in the row
+stderr: ~ "ir.build unlowered: run [function:" # the entry's gap row names its pass and function
+stderr: ~ "ir.build unlowered: nine [" # the callee's row comes from the same run
+stderr: ~ "precise builtin core.compute.jvp" # the builder's own message stays in the row
+stderr: ~ "precise builtin core.compute.gradient" # the builder's own message stays in the row
 stderr: !~ "E2104" # a backend gap is never a user diagnostic
 step: jet run gap.jet
 exit: 101
-stderr: ~ "ir.build unlowered: poll [" # `jet run` reports the same census
+stderr: ~ "ir.build unlowered: run [" # `jet run` reports the same census
 stderr: !~ "E2104" # a backend gap is never a user diagnostic
 
 step: jet test gap.jet
 exit: 101
-stderr: ~ "ir.build unlowered: poll [" # the test harness reports the same census
+stderr: ~ "ir.build unlowered: nine [" # the test harness reports the same census
 stderr: !~ "E2105" # a backend gap is never an operating-system failure

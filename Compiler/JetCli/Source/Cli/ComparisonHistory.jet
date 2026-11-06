@@ -1,16 +1,16 @@
-// Source/CmdTest.rs::persist_comparison_artifacts and ReceiptStore.rs
-// index_published_receipt. The comparison and receipt index rows land together.
+// The comparison and receipt index rows land together.
 use {
     jet_foundation.[
         EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind,
         EvidenceKind, EvidenceOutcome, EvidenceReport, evidence_identity_for_record,
         evidence_record_new, evidence_record_checked_derivation, evidence_report_new,
-        evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode,
+        evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode, evidence_producer_name,
         canonical_json_bytes, comparison_record_to_json, ComparisonStatus, comparison_status_as_str,
     ]
     jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
     receipt_crypto :: core.crypto
     cli_sys :: core.sys
+    cli_files :: core.files
 }
 
 fn jet_cli_comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome Never! {
@@ -66,6 +66,29 @@ fn jet_cli_comparison_index_entry(index: JetCLIRecordIndex, identity: JetCLIReco
     jet_cli_record_entry_normalize(entry)
 }
 
+// Rust `persist_evidence_report_for_inputs_with_retention`: the encoded `bytes`
+// of `report` under the project root selected from cwd
+// (jet_cli_evidence_persist_at).
+fn jet_cli_evidence_persist(cache: &WorkspaceDeclarationCache, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
+    cwd :: cli_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
+    root :: jet_cli_selected_project_root(&cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
+    jet_cli_evidence_persist_at(root, report, bytes, name, target_inputs_sha256, protected)
+}
+
+// The encoded `bytes` of `report` as `.jet/evidence/<name>.json` under `root`,
+// published once and never replaced, and indexed as evidence for
+// `target_inputs_sha256`. `protected` exempts the row from history retention.
+// Evidence history is a per-machine cache, stored without flushes.
+fn jet_cli_evidence_persist_at(root: String, report: EvidenceReport, bytes: [U8], name: String, target_inputs_sha256: String, protected: Bool) JetCLIReadError! -[FS, Env, Time]> {
+    if name == "" || name.contains("/") || name.contains("\\") || name == "." || name == ".." -> return Err(jet_cli_read_error("evidence report has an unsafe id `{name}`"))
+    held :: JetCLIRootedDirectory.open_cache(root, [String]{".jet", "evidence"}, true) ?? return Err(err)
+    _ :: held.publish_immutable("{name}.json", bytes, Val(0o600), 268435456) ?? return Err(err)
+    index := jet_cli_record_index_load(root)
+    identity :: JetCLIRecordIdentity{target_inputs_sha256: target_inputs_sha256, tool_version: report.build.toolchain, engine: evidence_producer_name(report.producer)}
+    entry :: jet_cli_comparison_index_entry(index, identity, "evidence", name, ".jet/evidence/{name}.json", bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, protected)
+    jet_cli_record_index_publish_and_store(&index, root, ^entry)
+}
+
 // Evidence is rooted from cwd, whereas the receipt is rooted from its target.
 // These roots deliberately need not coincide for an external corpus.
 fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [String], terminal: [U8]) JetCLIReadError! -[FS, Env, Time]> {
@@ -74,23 +97,19 @@ fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [S
     artifact_id :: receipt_crypto.sha256(bytes).hex()
     report :: jet_cli_comparison_evidence(run, target, artifact_id)
     evidence_bytes :: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
-    cwd :: cli_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
     cache := WorkspaceDeclarationCache.new()
-    evidence_root :: jet_cli_selected_project_root(&cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
-    evidence_held :: JetCLIRootedDirectory.open(evidence_root, [String]{".jet", "evidence"}, true) ?? return Err(err)
     report_id :: report.identity.report_id
-    _ :: evidence_held.publish_immutable("{report_id}.json", evidence_bytes, Val(0o600), 268435456) ?? return Err(err)
-    evidence_index := jet_cli_record_index_load(evidence_root)
-    evidence_identity :: JetCLIRecordIdentity{target_inputs_sha256: artifact_id, tool_version: report.build.toolchain, engine: "jet-test"}
-    evidence_entry :: jet_cli_comparison_index_entry(evidence_index, evidence_identity, "evidence", report_id, ".jet/evidence/{report_id}.json", evidence_bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true)
-    jet_cli_record_index_publish_and_store(&evidence_index, evidence_root, ^evidence_entry)
+    jet_cli_evidence_persist(&cache, report, evidence_bytes, report_id, artifact_id, true) ?? return Err(err)
 
     paths :: jet_cli_comparison_input_paths(&cache, target)
     if paths.len() == 0 -> return Err(jet_cli_read_error("comparison corpus has no current input path"))
     claim :: jet_cli_receipt_claim("test-compare", paths, argv, terminal)
     // ReceiptStore's target_path consumes the full normalized argv, not the
     // display path. The dispatcher supplies that same selected corpus here.
-    start :: AuthorityResolver.authority_walk_root(target) ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
+    // The root walk starts at the corpus file's directory: the walk only
+    // accepts a directory.
+    corpus :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize comparison corpus {target}: {jet_cli_io_error_text(err)}"))
+    start :: AuthorityResolver.authority_walk_root(jet_cli_parent(corpus) ?? "/") ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
     receipt_root :: jet_cli_receipt_project_root(&cache, start)
     section :: jet_cli_receipt_section_new("comparison", "ComparisonRecord", bytes)
     consumed :: [JetCLIRecordLink]{JetCLIRecordLink{kind: "evidence", artifact_id: report_id}}
@@ -114,7 +133,9 @@ fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [S
     jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{^comparison_entry, ^receipt_entry})
 }
 
-fn jet_cli_comparison_history_notice(error: String) -> String Never! {
+// `optional_history_notice`: one stderr line naming the optional `operation`
+// that failed; the command's own result stands.
+fn jet_cli_history_notice(operation: String, error: String) -> String Never! {
     lower :: error.to_lower()
     fix :: if {
         lower.contains("permission") || lower.contains("access denied") -> "check `.jet` history permissions"
@@ -123,5 +144,5 @@ fn jet_cli_comparison_history_notice(error: String) -> String Never! {
         lower.contains("budget") || lower.contains("exceeds") -> "raise the history byte budget or remove disposable history"
         else -> "check `.jet` history storage and retry"
     }
-    "history: optional persistence failed while writing a comparison record: {error}; fix: {fix}\n"
+    "history: optional persistence failed while {operation}: {error}; fix: {fix}\n"
 }

@@ -12,6 +12,7 @@
 // instruction before a trap point set the `flag` local that point reads.
 
 use {
+    jet_backend.[LINK_FAULT_REPORT]
     jet_ir.[IRFunction, IRModule, IROp, IRType, IRX64Tables, IR_INT_INLINE_BITS, IR_OVERFLOW_WRAP, IR_STOP_POLL_KEY, IR_STOP_TRAP_KEY, IR_TAIL_JUMP, IR_X64_DIVIDED_BY_ZERO, ir_clone_shares, ir_kind_name, ir_op_name, ir_x64_overflow_message]
     jet_foundation.[name_rows_value]
     jet_wasm.[WASM_F32, WASM_F64, WASM_I32, WASM_I64, wasm_put_unsigned, wasm_sig_type]
@@ -337,11 +338,20 @@ fn web_select(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, tables:
         .Call -> web_direct_call(&e, &st, m, f, at)
         .CallRuntime -> {
             if f.a[at] < 0 || f.a[at] >= m.names.len() -> return web_fail(&e, &st, f, at, "runtime name {f.a[at]} is not interned")
-            letters :: web_push_args(&e, m, f, at)
-            resolved :: web_symbol(&st, m.names[f.a[at]], "{letters}:{web_site_result(e, m, f, dst)}")
-            if web_sig_params(resolved.sig) != letters -> return web_fail(&e, &st, f, at, "`{m.names[f.a[at]]}` takes ({web_sig_params(resolved.sig)}), not ({letters})")
-            web_call(&e, resolved.callee)
-            web_call_result(&e, &st, m, f, at, web_sig_result(resolved.sig))
+            // The native fault report the static linker writes into each image
+            // (JetBackend Image/StaticLink.jet LINK_FAULT_REPORT) runs in a
+            // signal handler; the web host delivers no signals (a fault is a
+            // wasm trap the host reports), so reaching it is a trap.
+            if m.names[f.a[at]] == LINK_FAULT_REPORT {
+                web_op(&e, 0x00)
+                web_call_result(&e, &st, m, f, at, "l")
+            } else {
+                letters :: web_push_args(&e, m, f, at)
+                resolved :: web_symbol(&st, m.names[f.a[at]], "{letters}:{web_site_result(e, m, f, dst)}")
+                if web_sig_params(resolved.sig) != letters -> return web_fail(&e, &st, f, at, "`{m.names[f.a[at]]}` takes ({web_sig_params(resolved.sig)}), not ({letters})")
+                web_call(&e, resolved.callee)
+                web_call_result(&e, &st, m, f, at, web_sig_result(resolved.sig))
+            }
         }
         .CallIndirect -> {
             letters :: web_push_args(&e, m, f, at)
@@ -504,24 +514,28 @@ fn web_direct_call(e: &WebEmitter, st: &WebState, m: IRModule, f: IRFunction, at
         return web_call_result(&e, &st, m, f, at, if target.result >= 0 -> "l" else -> "")
     }
     sig :: st.sigs[callee]
+    // A runtime export the host defines in its place (JetIR IR_HOST_PROVIDER)
+    // is called as the host's C function.
+    replaced :: target.host_symbol != "" && (st.hosts.get(target.host_symbol) ?? false)
+    called :: if replaced -> web_ref(&st, "c", target.host_symbol, sig) else -> callee
     tail :: at + 1 < f.op.len() && f.op[at + 1] == .Return && f.b[at + 1] == IR_TAIL_JUMP
     letters :: web_push_args(&e, m, f, at)
     if letters != web_sig_params(sig) -> return web_fail(&e, &st, f, at, "`{target.name}` takes ({web_sig_params(sig)}), not ({letters})")
     if tail {
         if web_sig_result(sig) == e.result {
             web_epilogue_frame(&e)
-            return web_return_call(&e, callee)
+            return web_return_call(&e, called)
         }
         // The callee's result is not this function's: call, then return
         // this result's zero; the callee's return set the stop global.
-        web_call(&e, callee)
+        web_call(&e, called)
         if web_sig_result(sig) != "" -> web_op(&e, 0x1a)
         web_epilogue_frame(&e)
         zero :: web_result_type(e.result)
         if zero != 0 -> web_zero(&e, zero)
         return web_op(&e, 0x0f)
     }
-    web_call(&e, callee)
+    web_call(&e, called)
     web_call_result(&e, &st, m, f, at, web_sig_result(sig))
 }
 

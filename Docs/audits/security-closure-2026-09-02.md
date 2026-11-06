@@ -209,16 +209,16 @@ SHA-256 covers every repository artifact referenced by the criterion, dispositio
 
 ## Fresh external scan gate
 
-Status: `pending-external-gate`. A Codex Security plugin is installed at `/home/nate/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22`; its `scripts/finalize_scan_contract.py` and `scripts/validate_scan_contract.py` files are present.
+Status: `pending-external-gate`. A Codex Security plugin is installed at `$HOME/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22`; its `scripts/finalize_scan_contract.py` and `scripts/validate_scan_contract.py` files are present.
 
 This pass did not execute the external scan or fabricate its canonical manifest, findings, coverage, or receipt. Run the following exact gate once a new preparation request and the returned scan directory are available:
 
 ~~~sh
-CODEX_SECURITY_PLUGIN_DIR=/home/nate/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22
-publish=/home/nate/Projects/Github/jet/docs/audits/security-final-2026-09-02
+CODEX_SECURITY_PLUGIN_DIR=$HOME/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22
+publish=$HOME/Projects/Github/jet/docs/audits/security-final-2026-09-02
 scripts/agent/jet-env full node scripts/agent/security-scan.mjs \
   finalize \
-  --repo /home/nate/Projects/Github/jet \
+  --repo $HOME/Projects/Github/jet \
   --request <REQUEST_DIR>/request.json \
   --scan-dir <SCAN_DIR> \
   --plugin-dir "$CODEX_SECURITY_PLUGIN_DIR" \
@@ -231,7 +231,7 @@ The attempted run observed HEAD `08243a6aa42f0e960c9df54b5cc22f55934c93d7`.
 The shared checkout was dirty because sibling implementation lanes were editing it.
 Preparation stopped before scan execution with `security-scan: repository must be clean before a security scan`.
 The requested finalization then stopped because no request existed:
-`security-scan: scan request does not exist: /home/nate/.cache/jet-dev/security/request-2026-09-02/request.json`.
+`security-scan: scan request does not exist: $JET_STATE_ROOT/security/request-2026-09-02/request.json`.
 No scan artifacts or publish directory were created.
 
 ## Receipt
@@ -258,12 +258,12 @@ No scan artifacts or publish directory were created.
     "status": "dirty",
     "note": "Sibling implementation lanes edited the shared checkout; preparation refused before scan execution.",
     "prepareLastLine": "security-scan: repository must be clean before a security scan",
-    "finalizeLastLine": "security-scan: scan request does not exist: /home/nate/.cache/jet-luna/security/request-2026-09-02/request.json"
+    "finalizeLastLine": "security-scan: scan request does not exist: $HOME/.cache/jet-luna/security/request-2026-09-02/request.json"
   },
   "freshRepositoryScan": {
     "status": "pending-external-gate",
-    "pluginDirectory": "/home/nate/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22",
-    "command": "scripts/agent/jet-env full node scripts/agent/security-scan.mjs finalize --repo /home/nate/Projects/Github/jet --request <REQUEST_DIR>/request.json --scan-dir <SCAN_DIR> --plugin-dir /home/nate/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22 --publish-dir /home/nate/Projects/Github/jet/docs/audits/security-final-2026-09-02"
+    "pluginDirectory": "$HOME/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22",
+    "command": "scripts/agent/jet-env full node scripts/agent/security-scan.mjs finalize --repo $HOME/Projects/Github/jet --request <REQUEST_DIR>/request.json --scan-dir <SCAN_DIR> --plugin-dir $HOME/.codex/plugins/cache/openai-curated-remote/codex-security/0.1.22 --publish-dir $HOME/Projects/Github/jet/docs/audits/security-final-2026-09-02"
   }
 }
 ~~~

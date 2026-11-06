@@ -309,14 +309,6 @@ fn sema_copy_named_is_core(name: String) -> Bool Never! {
     core_type_modules(name).len() > 0
 }
 
-fn sema_copy_is_clock_type(ty: Type) -> Bool Never! {
-    if ty == {
-        .Named(name) -> name == "Clock"
-        .Tagged(_, inner) -> sema_copy_is_clock_type(inner)
-        else -> false
-    }
-}
-
 fn sema_copy_copyable_scalar(ty: Type) -> Bool Never! {
     if ty == {
         .Int -> true
@@ -524,7 +516,7 @@ fn sema_copy_type_facts(
         }
         .Tagged(marker, inner) -> {
             nested :: sema_copy_type_facts(inner, graph, table, caller, generic_params, &walk)
-            deterministic :: marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_copy_is_clock_type(inner)
+            deterministic :: marker == TagMarker.Internal{internal_tag: InternalTag.DeterministicClock} && sema_call_is_clock_type(inner)
             sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, if deterministic -> false else -> nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
         .Union(members) -> {
@@ -549,7 +541,13 @@ fn sema_copy_type_facts(
             nested :: sema_copy_type_facts(base, graph, table, caller, generic_params, &walk)
             sema_copy_facts_holding(sema_copy_type_facts_known(sema_copy_copyable_scalar(ty), nested.cloneable, nested.heap, nested.observable_clock, false, nested.dynamic_loan, nested.complete), nested.holds_resource)
         }
-        .Named(name) -> sema_copy_named_facts(ty, name, graph, table, caller, generic_params, &walk)
+        .Named(name) -> {
+            facts := sema_copy_named_facts(ty, name, graph, table, caller, generic_params, &walk)
+            // Core's Clock reads ambient time, whatever its declared fields
+            // say: a value that holds one observes it.
+            if sema_call_is_clock_type(ty) -> facts.observable_clock = true
+            facts
+        }
         .Apply(name, args) -> sema_copy_apply_facts(ty, name, args, graph, table, caller, generic_params, &walk)
     }
 }
@@ -983,6 +981,19 @@ fn sema_copy_classify(
         accepted: accepted,
         complete: source_facts.complete && target_facts.complete,
     }
+}
+
+// Whether a value of `ty` holds a Clock that is not deterministic at any
+// depth (Rust `type_contains_observable_clock`): comparing, formatting or
+// copying it reads ambient time.
+fn sema_copy_observable_clock(ty: Type, env: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String -> return false
+        else -> {}
+    }
+    caller :: if program.registration_graph == .Val(graph) -> sema_type_module_row(graph, env.module_identity) else -> -1
+    walk := sema_copy_walk()
+    sema_copy_type_facts(ty, program.registration_graph, program.copy_facts, caller, generic_params, &walk).observable_clock
 }
 
 fn sema_copy_diagnostic(facts: SemaCopyFacts, span: Span) -> Diagnostic? {

@@ -1,12 +1,11 @@
-// (Rust `CheckerValidate.rs` `process_validate_blocks`): a
-// struct's `validate { … }` block becomes, before registration, the ordinary
-// method `impl T { fn validate(value: T) -> T [FieldError]! }`. Every rule is
-// `check(condition, at: field, "message")`; the method collects one
-// `FieldError{path: "field", reason: message}` per failing rule and returns
-// them all, or the value when every rule holds. The method is `pure`, so the
-// ordinary purity check confines conditions and messages to pure calls. The
-// generated decode of a struct with a block returns `T.validate(decoded)`
-// (sema_serde_items_struct_decode_body).
+// (`process_validate_blocks`): a struct's `validate { … }` block becomes,
+// before registration, the ordinary method `impl T { fn validate(value: T) -> T
+// [FieldError]! }`. Every rule is `check(condition, at: field, "message")`; the
+// method collects one `FieldError{path: "field", reason: message}` per failing
+// rule and returns them all, or the value when every rule holds. The method is
+// `pure`, so the ordinary purity check confines conditions and messages to pure
+// calls. The generated decode of a struct with a block returns
+// `T.validate(decoded)` (sema_serde_items_struct_decode_body).
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,

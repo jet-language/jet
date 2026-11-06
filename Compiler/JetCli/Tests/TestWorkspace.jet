@@ -1,0 +1,69 @@
+// The workspace `jet test` pool: real child processes, run at most `width`
+// at once, reported in member order whatever order they finish in.
+use {
+    jet_cli.[jet_cli_test_members_run, JetCLITestMemberRun]
+    cli_files :: core.files
+}
+
+// Member 0 waits up to 5 s for member 1's marker file, so it sees it only
+// when both run at once; member 1 ends first and fails; member 2 writes to
+// stderr only.
+fn test_workspace_argvs(dir: String) -> [[String]] {
+    [[String]]{
+        [String]{"/bin/sh", "-c", "i=0; while [ ! -e '{dir}/one' ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done; if [ -e '{dir}/one' ]; then echo together; else echo alone; fi"},
+        [String]{"/bin/sh", "-c", "touch '{dir}/one'; echo one; exit 3"},
+        [String]{"/bin/sh", "-c", "echo two >&2"},
+    }
+}
+
+fn test_workspace_no_env(count: Int) -> [[String]] {
+    envs := [[String]]{}
+    loop _ in 0..<count -> &envs.push([String]{})
+    envs
+}
+
+fn test_workspace_run(width: Int) -> [JetCLITestMemberRun] {
+    scratch :: cli_files.temp_dir("jet-cli-test-workspace") ?? panic("workspace scratch")
+    jet_cli_test_members_run("member", [String]{"zero", "one", "two"}, test_workspace_argvs(scratch.path), test_workspace_no_env(3), width, true)
+}
+
+#Test("workspace members come back in member order with their own output and status") {
+    loop width in [1, 2, 4] {
+        runs :: test_workspace_run(width)
+        assert_eq(runs.len(), 3)
+        loop (index, run) in runs {
+            assert_eq(run.index, index)
+            assert(run.done)
+        }
+        assert_eq(runs[1].output, "one\n")
+        assert_eq(runs[1].code, 3)
+        assert_eq(runs[2].output, "")
+        assert_eq(runs[2].errors, "two\n")
+        assert_eq(runs[0].code, 0)
+        assert_eq(runs[2].code, 0)
+    }
+}
+
+#Test("the workspace pool runs members at once only when its width allows") {
+    assert_eq(test_workspace_run(1)[0].output, "alone\n")
+    assert_eq(test_workspace_run(2)[0].output, "together\n")
+    assert_eq(test_workspace_run(4)[0].output, "together\n")
+}
+
+#Test("a workspace member that can't start fails its own run only") {
+    scratch :: cli_files.temp_dir("jet-cli-test-workspace-missing") ?? panic("workspace scratch")
+    argvs :: [[String]]{[String]{"{scratch.path}/no-such-jet", "test"}, [String]{"/bin/sh", "-c", "echo fine"}}
+    runs :: jet_cli_test_members_run("member", [String]{"missing", "fine"}, argvs, test_workspace_no_env(2), 2, true)
+    assert(runs[0].code != 0)
+    assert(runs[0].errors.contains("couldn't run"))
+    assert_eq(runs[1].output, "fine\n")
+    assert_eq(runs[1].code, 0)
+}
+
+#Test("each pooled run sees its own environment pairs") {
+    argvs :: [[String]]{[String]{"/bin/sh", "-c", "echo \"$JET_POOL_A:$JET_POOL_B\""}, [String]{"/bin/sh", "-c", "echo \"$JET_POOL_A:$JET_POOL_B\""}}
+    envs :: [[String]]{[String]{"JET_POOL_A", "first", "JET_POOL_B", "1"}, [String]{"JET_POOL_A", "second"}}
+    runs :: jet_cli_test_members_run("run", [String]{"first", "second"}, argvs, envs, 2, true)
+    assert_eq(runs[0].output, "first:1\n")
+    assert_eq(runs[1].output, "second:\n")
+}

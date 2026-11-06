@@ -2,7 +2,7 @@
 
 Status: proposal, 2026-10-24, lane O0Load. Nothing here is implemented.
 Tree audited: dev `8d2082ea63`. Line numbers are at `f714e05fe7`; no audited file changed between the two.
-Probes ran with the 1589c62507 compiler, one at a time; transcripts are in `/mnt/jetscratch/lanes/O0Load/authres/` (`probes.md` for P1-P15, `me/` for p1-p2).
+Probes ran with the 1589c62507 compiler, one at a time; transcripts are in `$JET_SCRATCH_ROOT/lanes/O0Load/authres/` (`probes.md` for P1-P15, `me/` for p1-p2).
 Owner choices are in ballots `D-AUTH-AMBIENT3` and `D-AUTHORITY-DENYROW1`.
 The full site list for the `holds` cutover is `authority-streamline-sites.tsv` beside this file.
 

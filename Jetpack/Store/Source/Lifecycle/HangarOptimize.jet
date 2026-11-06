@@ -91,9 +91,9 @@ fn store_optimize_object_dirs(objects: String) -[FS]> [String] StoreError! {
 }
 
 // Rust `optimize_hangar`.
-fn store_optimize_hangar(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_optimize_hangar(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     report := store_optimize_package_tree_hardlinks(roots.hangar_dir())
-    cas :: store_optimize_objects_cas_pool(roots)
+    cas :: store_optimize_objects_cas_pool(&verification, roots)
     report.optimized_files += cas.optimized_files
     report.optimized_bytes += cas.optimized_bytes
     Ok(report)
@@ -132,7 +132,10 @@ fn store_optimize_package_tree_hardlinks(hangar: String) -[FS, Env]> CleanReport
 
 // Rust `optimize_objects_cas_pool`: share Store-v2 object files through the
 // machine CAS pool under the shared-CAS lock, then sync the object pool.
-fn store_optimize_objects_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+// Sharing swaps files for byte-equal pool links, which changes the inode
+// and mtime tuples a seal records, so an object whose seal held before the
+// swap is resealed after it; an unsealed object stays unsealed.
+fn store_optimize_objects_cas_pool(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar :: roots.hangar_dir()
     objects :: files.join(hangar, STORE_OBJECTS_DIR)
     store_ensure_real_directory(hangar, "Hangar root")
@@ -141,9 +144,11 @@ fn store_optimize_objects_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanRe
     shared_lock :: store_with_shared_cas_lock(roots)
     report := CleanReport.empty()
     loop path in object_dirs {
+        sealed :: store_check_seal(&verification, path, hangar)
         shared :: store_share_tree_files_unlocked_with_report(roots, path, false)
         report.optimized_files += shared.optimized_files
         report.optimized_bytes += shared.optimized_bytes
+        if shared.optimized_files > 0 && sealed == .Val(digest) -> store_write_seal(&verification, path, hangar, digest)
     }
     files.fsync(objects)
     Ok(report)
@@ -164,9 +169,9 @@ fn store_optimize_same_file(left: String, right: String) -[FS, Env]> Bool Never!
 
 // Rust `optimize_cas_pool`: the CAS-pool optimizer under the Hangar lock
 // (also run by `clean`).
-fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_optimize_cas_pool(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
-    store_optimize_objects_cas_pool(roots)
+    store_optimize_objects_cas_pool(&verification, roots)
 }
 
 // Rust `hardlink_replace`: replace `file` with a hardlink to `first`. Unix

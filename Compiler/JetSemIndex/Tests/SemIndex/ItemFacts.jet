@@ -3,14 +3,10 @@
 // must deliver actual parsed/checked inputs before these tests run. No fixture
 // here manufactures an index, name ledger, resolved module or callable facts.
 // Original fixture homes are shared intentionally (no divergent oracle copies):
-// lib.rs313–466 typed/default/extern: CallableFacts.jet;
-// lib.rs762–816 generic module key/applications: Build.jet;
-// lib.rs829–895 import alias/member/receiver anchors: Build.jet;
-// tests/semindex.rs169–227 CheckedText: Convert.jet;
-// tests/semindex.rs486–534 state owner;774–795 imports: Items.jet;
-// tests/semindex.rs923–1033 union/aggregate views: CallableFacts.jet;
-// tests/semindex.rs537–564 checked Output: Build.jet;
-// tests/semindex.rs1435–1473 public labels/defaults/zones/rest: Signatures.jet.
+// typed/default/extern: CallableFacts.jet; generic module key/applications:
+// Build.jet; import alias/member/receiver anchors: Build.jet; state
+// owner and imports: Items.jet; union/aggregate views: CallableFacts.jet;
+// checked Output: Build.jet; public labels/defaults/zones/rest: Signatures.jet.
 use jet_foundation.[Func, Program, NameFacts, ExternFn]
 
 // A real parser supplies the function from the exact S6 method-contract fixture.
@@ -109,8 +105,8 @@ fn semindex_s10_selected_import_assertions(symbols: SemanticSymbolIndex) Never! 
     semindex_s9_import_assertions(symbols)
 }
 
-// Complete original item identity fixture tests/semindex.rs813–920: open both
-// revisions at the SAME identity_reorder.jet path through the actual driver.
+// Complete original item identity fixture: open both revisions at the SAME
+// identity_reorder.jet path through the actual driver.
 fn semindex_s10_item_reorder_before() -> String Never! {
     "\nmodule math {{\n    fn double(n: Int) -> Int {{\n        return n * 2\n    }}\n}}\n\nstruct Point {{\n    x: Int\n    y: Int\n\n    fn sum(self) -> Int {{\n        return self.x + self.y\n    }}\n}}\n\nimpl Point {{\n    fn origin() -> Point {{\n        return Point.{{x: 0, y: 0}}\n    }}\n}}\n\nenum Light {{\n    Red\n    Green\n}}\n\nfn helper(p: Point) -> Int {{\n    return p.sum()\n}}\n\nfn run() {{\n    p :: Point.origin()\n    print(helper(p))\n}}\n"
 }

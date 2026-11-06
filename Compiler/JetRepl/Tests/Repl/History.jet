@@ -170,11 +170,11 @@ fn history_default_session_retains_two_thousand_newest_submissions() Never! -[FS
     assert(history.search("submission-0").is_empty())
 }
 
-// Native-only ORIGINAL claims stay unregistered until #4494/H1/H2 + the real
-// Jet REPL binary/runtime process provider land. ToolsLead agreed sole test
-// mapping: HistoryHost.jet owns History.rs273 replacement/290 timeout and
-// tests/repl171 symlink/203 parent-swap; this file owns the other five originals.
-// No facade, mock store, path-lock, skipped assertion, or fake empty proof.
+// Native-only ORIGINAL claims stay unregistered until #4494/H1/H2 + the real Jet
+// REPL binary/runtime process provider land. ToolsLead agreed sole test mapping:
+// HistoryHost.jet owns replacement/290 timeout and tests/repl171 symlink/203
+// parent-swap; this file owns the other five originals. No facade, mock store,
+// path-lock, skipped assertion, or fake empty proof.
 
 // Shared canonical helpers used by native HistoryHost tests as well.
 fn repl_history_test_process_spec(state: String) -[Env, Exec]> ProcessSpec Never! {
@@ -218,7 +218,7 @@ fn repl_history_test_remove_root(state: String) Never! -[FS]> {
     repl_history_test_files.remove_all(state).drop("original best-effort remove_dir_all")
 }
 
-// tests/repl.rs65–101, exact submissions and success/search/privacy/unlink law.
+// Exact submissions and success/search/privacy/unlink law.
 fn repl_history_persists_only_successes_searches_clears_and_is_private() Never! -[Env, Exec, FS, Time.Wait]> {
     state :: repl_history_test_root("persist")
     repl_history_test_remove_root(state)
@@ -240,7 +240,7 @@ fn repl_history_persists_only_successes_searches_clears_and_is_private() Never! 
     repl_history_test_remove_root(state)
 }
 
-// tests/repl.rs104–134, no literal fake stored history or fake warning.
+// No literal fake stored history or fake warning.
 fn repl_history_limit_and_corrupt_tail_recover_visibly() Never! -[Env, Exec, FS, Time.Wait]> {
     state :: repl_history_test_root("tail")
     repl_history_test_remove_root(state)
@@ -256,7 +256,6 @@ fn repl_history_limit_and_corrupt_tail_recover_visibly() Never! -[Env, Exec, FS,
     repl_history_test_remove_root(state)
 }
 
-// tests/repl.rs137–167.
 fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() Never! -[Env, Exec, FS, Time.Wait]> {
     state :: repl_history_test_root("off")
     repl_history_test_remove_root(state)
@@ -274,8 +273,8 @@ fn repl_history_off_is_session_only_and_visible_storage_failure_falls_back() Nev
     repl_history_test_remove_root(state)
 }
 
-// tests/repl.rs242–295, actual parallel writes to TWO actual child processes,
-// followed by clear while a third actual child retains a stale session snapshot.
+// Actual parallel writes to TWO actual child processes, followed by clear while
+// a third actual child retains a stale session snapshot.
 fn repl_history_two_processes_merge_and_clear_cannot_resurrect() Never! -[Env, Exec, FS, Time, Time.Wait]> {
     state :: repl_history_test_root("tx")
     repl_history_test_remove_root(state)
@@ -308,8 +307,8 @@ fn repl_history_two_processes_merge_and_clear_cannot_resurrect() Never! -[Env, E
     repl_history_test_remove_root(state)
 }
 
-// tests/repl.rs299–341: same timed F3+query+submit sequence under a REAL PTY.
-// No fixture/string assertion pretending the live raw editor ran.
+// Same timed F3+query+submit sequence under a REAL PTY. No fixture/string
+// assertion pretending the live raw editor ran.
 fn repl_raw_f3_search_recalls_and_submits_persistent_history() Never! -[Env, Exec, FS, Time.Wait]> {
     state :: repl_history_test_root("f3")
     repl_history_test_remove_root(state)

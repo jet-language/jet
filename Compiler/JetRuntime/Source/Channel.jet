@@ -1,11 +1,11 @@
-// Scheduler.rs:3393-4123, native homogeneous payload channels.
-// State160: mutex0, refs8, queue len16/cap24/data32/head40, bound48,
-// owned meta56, recvwait64/sendwait72, reservations80, closed88/cancelled96,
-// kind104 (0 channel,1 timer,2 interval), delay112, senders120/receivers128,
-// observe136, recvwaitcount144/sendwaitcount152. Endpoint handles are the
-// opaque state pointer, each retaining one ref and one logical endpoint.
-// WaitNode24: next0, park8, flags16 (linked1, ever-woken2), under lock.
-// Single wake is Vec::pop (LIFO); close walks Vec insertion order (FIFO).
+// Native homogeneous payload channels. State160: mutex0, refs8, queue
+// len16/cap24/data32/head40, bound48, owned meta56, recvwait64/sendwait72,
+// reservations80, closed88/cancelled96, kind104 (0 channel,1 timer,2 interval),
+// delay112, senders120/receivers128, observe136,
+// recvwaitcount144/sendwaitcount152. Endpoint handles are the opaque state
+// pointer, each retaining one ref and one logical endpoint. WaitNode24: next0,
+// park8, flags16 (linked1, ever-woken2), under lock. Single wake is Vec::pop
+// (LIFO); close walks Vec insertion order (FIFO).
 
 fn channel_update(channel: I64) {
     jet_rt_observe_channel_update(sync_load(wrapping(channel + I64{136})), sync_load(wrapping(channel + I64{16})), sync_load(wrapping(channel + I64{152})), sync_load(wrapping(channel + I64{144})), sync_load(wrapping(channel + I64{88})))
@@ -680,9 +680,9 @@ fn channel_fatal(kind: I64) {
     scheduler_fatal(message)
 }
 
-// MathTaskMem.rs:1080-1083: one-variant zero-sized Closed enum, deriving
-// Clone and PartialEq. ReactiveEventWatch.rs:2326-2329 shows exactly "Closed".
-// The generated C ABI emits these four operations (no Display/Debug adapter).
+// One-variant zero-sized Closed enum, deriving Clone and PartialEq. The Rust
+// original shows exactly "Closed". The generated C ABI emits these four
+// operations (no Display/Debug adapter).
 #Export(c) fn jet_rt_handle_clone_closed(_value: I64) -> I64 { I64{1} }
 
 #Export(c) fn jet_rt_handle_drop_closed(_value: I64) {}

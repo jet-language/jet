@@ -66,7 +66,9 @@ check("nonunicode JSON presence", ["nonunicode-json"], {}, expectedReport("faile
 for (const [seed, normalized] of [["17", "17"], ["+00017", "17"], ["0", "0"], ["18446744073709551615", "18446744073709551615"], ["18446744073709551616", undefined], ["invalid", undefined], ["", undefined]]) {
   check(`shuffle ${JSON.stringify(seed)}`, [], { JET_TEST_SHUFFLE_SEED: seed }, expectedReport("failed", false, normalized));
 }
+check("property case count", ["cases"], {}, { status: 0, stdout: "a: pass\n1 passed, 0 failed, 0 skipped\n", stderr: "" });
 check("unknown fifth header field", ["property"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
+check("case count overflow", ["cases-overflow"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
 check("truncated wire", ["malformed"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
 if (failures.length) {
   for (const failure of failures) console.error(failure);

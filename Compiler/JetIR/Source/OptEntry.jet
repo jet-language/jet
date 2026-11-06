@@ -143,6 +143,7 @@ fn ir_opt_entry_build(caller: IRFunction, guards: [[IRFunction]], keys: [String]
     out.inline_always = caller.inline_always
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
+    out.host_symbol = caller.host_symbol.copy()
     loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
     loop value in caller.args -> &out.args.push(value)

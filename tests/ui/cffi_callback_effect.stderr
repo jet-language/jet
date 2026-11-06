@@ -7,11 +7,12 @@ Error [jet.NonCAbiType]: `fn(I32) -[]> I32` is not a C-compatible type for a for
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 More: jet-lang.dev/e/E3203
 
-Error [jet.ValueTypeMismatch]: `call` wants fn(I32) -[]> I32 for argument 1, but this is fn(I32) -> I32
+Error [jet.CallbackEffectBoundExceeded]: This callback uses the effect `IO`, which the parameter doesn't allow
   --> tests/ui/cffi_callback_effect.jet:12:25
     |
  12 | fn run() { print(c.call(impure, 1)) }
     |                         ^^^^^^
- Why: Every argument must match its parameter's type
- Fix: Use fn(I32) -[]> I32 here
-More: jet-lang.dev/e/E0112
+ Why: The parameter is `fn(…) -[]>`, so the callback must be pure; `IO` is outside that bound
+ Fix: Pass a `fn(…) -[]>` callback (or a lambda that uses no effects), or widen the parameter's bound
+ Denial: invocation
+More: jet-lang.dev/e/E0747

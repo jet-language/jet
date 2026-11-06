@@ -1,6 +1,7 @@
 // CSV shape edges: quoted delimiters, embedded newlines and doubled quotes
 // stay inside one field; ragged rows, unterminated quotes, missing columns and
-// wrong-typed cells each have one declared result.
+// wrong-typed cells each have one declared result. A typed record must have
+// the header's cell count: no cell is padded in or dropped.
 use csv :: core.encoding.csv
 
 struct Item {
@@ -44,6 +45,7 @@ fn run() {
     show_typed("typed column order", "qty,name\n7,cap")
     show_typed("typed missing column", "name\npen")
     show_typed("typed bad int", "name,qty\npen,three")
-    show_typed("typed ragged", "name,qty\npen,3,extra")
+    show_typed("typed long record", "name,qty\npen,3,extra")
+    show_typed("typed short record", "name,qty,note\npen,3")
     show_typed("typed quoted newline", "name,qty\n\"fountain\npen\",2")
 }

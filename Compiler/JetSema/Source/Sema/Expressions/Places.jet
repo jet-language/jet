@@ -488,8 +488,8 @@ fn sema_expression_field_checked(base: TExpr, member: String, span: Span, expect
     reflection :: sema_fact_reflection_field(base, member, span, context)
     if reflection == .Val(value) -> return sema_expr_expected(value, expected, environment, program, &diagnostics)
     // D-COMPUTE-VJP1=A (syntax-decisions.md:6950-6954): a `VJPRun` carries
-    // `.value`, `.pull(seed)` and `.grads` (Rust core_types.rs field_type);
-    // any other member falls through to the undeclared-field error below.
+    // `.value`, `.pull(seed)` and `.grads` (field_type); any other member falls
+    // through to the undeclared-field error below.
     if owner_name == "VJPRun" && owner_args.len() == 1 {
         if sema_expression_vjp_run_field(owner_args[0], member) == .Val(run_field_ty) {
             run_reference :: TFieldRef{owner: None, field: symbol_id(SymbolKind.Field, "", owner_name, member), name: member, ty: run_field_ty, boxed: false}
@@ -531,14 +531,6 @@ fn sema_expression_vjp_run_field(gradient: Type, member: String) -> Type? {
 // `field` is the whole `base.member` expression (spanning `span`): the moved
 // checks read it in place instead of rebuilding it around a copy of `base`.
 fn sema_expression_field(field: Expr, base: Expr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    // Rust infer_field diagnoses the foreign surface before reading `os`,
-    // without treating a lexical `os` binding as an exemption.
-    if base == .Ident(root, _, _) && root == "os" && member == "environ" {
-        // Native Field carries the whole path; Rust Field carries its member.
-        member_span :: Span{start: span.end - member.len(), end: span.end}
-        &diagnostics.push(sema_error("E0039", member_span, "`os.environ` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
-        return None
-    }
     // `task.x` with no local named `task` in scope: `x` is not a task
     // combinator (the parser takes only the complete task surface), so teach
     // the selectors rather than report an unknown `task`.
@@ -819,7 +811,8 @@ fn sema_expression_module_constant_read(graph: SemaRegistrationGraph, resolved: 
     if source_function {
         signature :: symbol.ty ?? return SemaMethodSpecialCheck{handled: false, value: None}
         &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "function"})
-        function :: sema_node(&context, sema_function_value_type(program, signature, symbol.module_name), NodeKind.ConstRef{symbol: symbol.id}, span)
+        if sema_expr_marked_function_value(label, symbol.id, span, environment, program, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        function :: sema_node(&context, sema_function_value_type(program, signature, symbol.module_name, expected), NodeKind.ConstRef{symbol: symbol.id}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(function, expected, environment, program, &diagnostics)}
     }
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: symbol, kind: "const"})

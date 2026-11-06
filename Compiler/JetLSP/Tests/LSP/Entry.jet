@@ -12,16 +12,13 @@ use {
     core.sync.atomic.[AtomicU64, Ordering]
 }
 
-// Rust: Source/LSP/mod.rs:46
 // GATE #4494: real atomic fetch_add, not a fabricated project identity.
 NEXT_TEST_PROJECT := AtomicU64.new(0)
 
-// Rust: Source/LSP/mod.rs:50
 struct TestProject {
     root: OSPath
     entry_path: String
 
-    // Rust: Source/LSP/mod.rs:56
     fn new() -[FS, Env]> TestProject {
         root :: loop {
             // GATE #4494: native temp directory, process id and atomic counter.
@@ -41,11 +38,9 @@ struct TestProject {
         project
     }
 
-    // Rust: Source/LSP/mod.rs:79
     fn entry(self) -> String { self.entry_path }
 }
 
-// Rust: Source/LSP/mod.rs:85
 impl TestProject.Close {
     fn close(^self) Never! -[FS]> {
         // GATE #4494: best-effort native cleanup on every exit.
@@ -53,14 +48,12 @@ impl TestProject.Close {
     }
 }
 
-// Rust: Source/LSP/mod.rs:90
 fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
     project :: TestProject.new()
     (diagnostics, bundle, facts) :: check_document_with_bundle(project.entry(), text)
     (project, diagnostics, bundle, facts)
 }
 
-// Rust: Source/LSP/mod.rs:155
 #Test("overlapping_fixes_apply_the_wider_edit_and_defer_the_rest") {
     fix :: (start: Int, end: Int, text: String) -> {
         Fix{title: "", edit: TextEdit{span: Span{start: start, end: end}, new_text: text}, applicability: FixApplicability.Safe, safety: FixSafety.Formatting}
@@ -71,7 +64,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq((applied, deferred), (2, 1))
 }
 
-// Rust: Source/LSP/mod.rs:175
 #Test("test_document_context_does_not_discover_the_workspace") {
     (project, diagnostics, maybe_bundle, _) :: check_test_document("fn run() {{}}\n")
     assert(diagnostics.is_empty(), "{diagnostics:Debug}")
@@ -83,7 +75,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(bundle.modules[0].display, project.entry())
 }
 
-// Rust: Source/LSP/mod.rs:190
 #Test("inline_package_is_masked_for_lsp_but_keeps_pub_package") {
     project :: TestProject.new()
     // GATE #4494: remove the real manifest, preserving inline-package coverage.
@@ -94,7 +85,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(bundle != None, "LSP should retain a checked bundle")
 }
 
-// Rust: Source/LSP/mod.rs:217
 #Test("lsp_pos_round_trip") {
     src :: "fn run() {{\n    x :: 1\n}}\n"
     offset :: 18
@@ -102,7 +92,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(lsp_pos_to_offset(src, pos), offset)
 }
 
-// Rust: Source/LSP/mod.rs:226
 #Test("symbol_db_finds_function") {
     src :: "fn greet(name: String) {{\n    print(name)\n}}\nfn run() {{\n    greet(\"world\")\n}}\n"
     (_project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -113,7 +102,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(db.refs.iter().any((r) -> { r.name == "greet" }))
 }
 
-// Rust: Source/LSP/mod.rs:238
 #Test("hover_returns_function_signature") {
     src :: "fn add(a: Int, b: Int) -> Int {{ return a + b }}\nfn run() {{ r :: add(1, 2) }}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -125,7 +113,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(h.contains("add"), "hover should mention the function name")
 }
 
-// Rust: Source/LSP/mod.rs:252
 #Test("marker_hover_and_completion_show_one_canonical_parameter_list") {
     src :: "struct Needs {{\n    value: String\n\n    impl Marker {{\n        sites :: [.Function, .Method]\n        repeatable :: true\n    }}\n}}\n#Needs(\"x\") fn work() {{}}\nfn run() {{\n    \n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -141,7 +128,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(completion.detail, Val(expected))
 }
 
-// Rust: Source/LSP/mod.rs:280
 #Test("hover_shows_callable_access_defaults_and_policies") {
     src :: "#Policy(trace(\"users.load\"))\nfn load(value: Int, label: String{{\"user\"}}) -> Int {{ return 1 }}\nfn run() {{}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -155,7 +141,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(hover.contains("policies=[trace(\"users.load\")]"), "{hover}")
 }
 
-// Rust: Source/LSP/mod.rs:300
 #Test("unique_type_uses_leaf_in_hover_and_json") {
     src :: "struct Point {{ x: Int }}\nfn run() {{}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -171,7 +156,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(json.contains("\"name\":\"Point\",\"leaf_name\":\"Point\""), "{json}")
 }
 
-// Rust: Source/LSP/mod.rs:341
 #Test("hover_shows_source_module_for_imported_root_call") {
     project :: TestProject.new()
     // GATE #4494: write the actual imported source, not checked facts.
@@ -187,7 +171,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(hover.contains("library.jet"), "{hover}")
 }
 
-// Rust: Source/LSP/mod.rs:373
 #Test("compiler_layout_fact_lsp_surface_is_visible_and_fixed") {
     src :: "struct Packet {{ count: Int }}\nderive T.LayoutFacts {{ info :: T.@layout }}\nfn run() {{}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -212,7 +195,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(rename_error.contains("compiler-owned @layout"), "{rename_error}")
 }
 
-// Rust: Source/LSP/mod.rs:437
 #Test("compiler_origin_fact_lsp_surface_is_visible_and_fixed") {
     src :: "fn run() {{\n    #Track speed :: Float{{3.5}}\n    @origin :: speed.@origin\n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -236,7 +218,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(rename_error.contains("compiler-owned @origin"), "{rename_error}")
 }
 
-// Rust: Source/LSP/mod.rs:495
 #Test("rename_basic_function") {
     src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -247,7 +228,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(spans.iter().any((pair) -> { pair.1.start <= 3 && 3 <= pair.1.end }))
 }
 
-// Rust: Source/LSP/mod.rs:507
 #Test("rename_rejects_keyword") {
     src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -256,7 +236,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(compute_rename(db, toks, project.entry(), 3, "fn").is_err())
 }
 
-// Rust: Source/LSP/mod.rs:517
 #Test("rename_rejects_reserved_double_underscore_name") {
     src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -265,7 +244,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(compute_rename(db, tokens, project.entry(), 3, "__generated").is_err())
 }
 
-// Rust: Source/LSP/mod.rs:526
 #Test("rename_preserves_identifier_case_category") {
     src :: "fn greet() {{}}\nfn run() {{ greet() }}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -275,7 +253,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(error.contains("bad_name"), "{error}")
 }
 
-// Rust: Source/LSP/mod.rs:537
 #Test("rename_uses_semantic_category_for_uncased_unicode_names") {
     src :: "fn 日本語() {{}}\nfn run() {{ 日本語() }}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -286,7 +263,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(error.contains("bad_name"), "{error}")
 }
 
-// Rust: Source/LSP/mod.rs:549
 #Test("rename_preserves_case_for_all_declaration_families") {
     src :: "UserId :: distinct Int\nCount :: Int\n#UnitFamily(Length) {{ meter }}\nstruct Door {{ state {{ Open }} }}\nprotocol Wire {{ client: Send(value: Int) }}\nmodule holder<T> {{ struct Box {{ value: T }} }}\nmodule cache :: holder<Int>\nfn run() {{}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -302,7 +278,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     }
 }
 
-// Rust: Source/LSP/mod.rs:588
 #Test("semantic_tokens_non_empty") {
     src :: "fn run() {{ x: Int :: 1 }}\n"
     (toks, _) :: lex(src)
@@ -310,7 +285,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(data.len() >= 5, "expected at least one semantic token")
 }
 
-// Rust: Source/LSP/mod.rs:597
 #Test("semantic_tokens_keep_string_interpolations_one_color") {
     src :: "fn run() {{\n    line :: \"{{escape(level)}}\"\n}}\n"
     (toks, diags) :: lex(src)
@@ -334,7 +308,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(saw_string, "expected a string semantic token over the quoted span")
 }
 
-// Rust: Source/LSP/mod.rs:636
 #Test("semantic_tokens_name_arithmetic_policy") {
     src :: "fn run() {{ #Arithmetic(.Wrapping) {{ value :: U8{{250}} + U8{{10}} }} }}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -353,7 +326,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(hover.contains("scope = {project.entry()}:{operation.scope_span.start}..{operation.scope_span.end}"), "hover lost exact arithmetic scope: {hover}")
 }
 
-// Rust: Source/LSP/mod.rs:681
 #Test("inlay_hints_for_int_literal") {
     src :: "fn run() {{\n    x :: 42\n    count := 0\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -363,7 +335,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(hints.iter().any((h) -> { h.label.contains(": Int") }), "expected : Int inlay hint for mutable binding")
 }
 
-// Rust: Source/LSP/mod.rs:698
 #Test("inlay_hints_for_bare_call_parameter_names") {
     src :: "fn clamp(value: Int, low: Int, high: Int) -> Int {{\n    return value\n}}\nfn run() {{\n    print(clamp(12, low: 0, high: 10))\n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -395,7 +366,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(marks, expected)
 }
 
-// Rust: Source/LSP/mod.rs:721
 #Test("inlay_and_hover_for_inferred_struct_lit_from_place") {
     src :: "struct Point {{ x: Int y: Int }}\nfn run() {{\n    p := Point{{ x: 1, y: 2 }}\n    p = {{ x: 3, y: 4 }}\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -405,7 +375,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(db.hover.iter().any((h) -> { h.text.contains("`Point`") }), "expected hover naming Point on inferred struct lit")
 }
 
-// Rust: Source/LSP/mod.rs:744
 #Test("completion_includes_keywords") {
     src :: "fn run() {{\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -416,7 +385,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(items.iter().any((i) -> { i.label == "use" }), "expected use (KW_USE) in completions")
 }
 
-// Rust: Source/LSP/mod.rs:767
 #Test("completion_hides_soft_public_names_until_explicitly_requested") {
     src :: "fn _helper() {{}}\nfn run() {{}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -426,7 +394,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(db.symbols.complete_visible_in("_", None, Val(project.entry())).iter().any((symbol) -> { symbol.name == "_helper" }))
 }
 
-// Rust: Source/LSP/mod.rs:785
 #Test("hover_and_completion_use_same_semantic_fact") {
     src :: "/// Adds two values.\n/// Example: add(1, 2)\nfn add(a: Int, b: Int) -> Int {{ return a + b }}\nfn run() {{\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -446,7 +413,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(completion.detail, Val(symbol.signature))
 }
 
-// Rust: Source/LSP/mod.rs:821
 #Test("failure_contract_hover_teaches_default_and_explicit_routes") {
     src :: "#Error\nenum Problem {{ Bad }}\nfn default_helper() -> Int {{ return 1 }}\nfn explicit_helper() -> Int !Problem {{ return Ok(1) }}\nfn run() {{}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -461,7 +427,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(explicit_hover.contains("failure: Int (explicit !Problem)"), "{explicit_hover}")
 }
 
-// Rust: Source/LSP/mod.rs:859
 #Test("checked_text_metadata_reaches_editor_symbol_surfaces") {
     src :: "\n#Error\nenum PatternError {{ Bad }}\nPattern :: distinct String\nimpl Pattern.CheckedText {{\n    type Error = PatternError\n    fn check(text: String) !PatternError -[]> {{\n        return\n    }}\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"\"\n    }}\n}}\nfn run() {{\n    \n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -482,7 +447,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(completion.detail.is_some_and((detail) -> { detail.contains("implements CheckedText") }))
 }
 
-// Rust: Source/LSP/mod.rs:916
 #Test("completion_exposes_public_labels_and_parameter_zones") {
     src :: "fn connect(host: String, /, *, timeout seconds: Int{{30}}) -> String {{\n    return host\n}}\nfn run() {{\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -492,7 +456,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(item.detail, Val("fn connect(host: String, /, *, timeout seconds: Int) -> String"))
 }
 
-// Rust: Source/LSP/mod.rs:933
 #Test("completion_uses_builtin_member_facts_for_list_local") {
     src :: "fn run() {{\n    items :: [1, 2]\n    count :: items.len()\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -503,7 +466,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(items.iter().any((item) -> { item.label == "len" && item.detail == Val(len.signature) }))
 }
 
-// Rust: Source/LSP/mod.rs:947
 #Test("completion_exposes_call_for_function_value_param") {
     src :: "fn run(callback: fn(Int) -> Int) {{\n    callback.call(1)\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -513,7 +475,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert_eq(item.detail, Val("call(...)"))
 }
 
-// Rust: Source/LSP/mod.rs:960
 #Test("completion_catalogs_numeric_destination_methods") {
     src :: "fn run() {{\n    value :: F32.from_float(1.0) ?? F32.from_int(0)\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -523,7 +484,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(items.iter().any((item) -> { item.label == "from_float" && item.detail == Val("F32.from_float(value: Float) -> F32 !String") }))
 }
 
-// Rust: Source/LSP/mod.rs:973
 #Test("completion_catalogs_source_distinct_and_unit_members") {
     src :: "\n#Numeric Token :: distinct Int(0..10)\n#UnitFamily(Reward) {{ credit }}\n\nfn run() {{\n    token :: Token.from_u8(1)\n    money :: Credit.from_int(1)\n}}\n"
     (project, diagnostics, maybe_bundle, facts) :: check_test_document(src)
@@ -537,7 +497,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     }
 }
 
-// Rust: Source/LSP/mod.rs:1022
 #Test("completion_excludes_locals_from_other_functions") {
     src :: "fn first() {{\n    hidden :: 1\n}}\nfn second() {{\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -546,7 +505,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(!compute_completions(db, src, offset, project.entry(), None, None).iter().any((item) -> { item.label == "hidden" }))
 }
 
-// Rust: Source/LSP/mod.rs:1035
 #Test("completion_respects_then_else_slot_boundaries") {
     src :: "fn run(flag: Bool) {{\n    if flag {{\n        then_only :: 1\n        print(then_only)\n    }} else {{\n        else_only :: 2\n        print(else_only)\n    }}\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -567,7 +525,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(!else_items.iter().any((item) -> { item.label == "then_only" }))
 }
 
-// Rust: Source/LSP/mod.rs:1064
 #Test("completion_keeps_then_local_out_of_empty_else") {
     src :: "fn run(flag: Bool) {{\n    if flag {{\n        then_only :: 1\n    }} else {{\n        \n    }}\n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -576,7 +533,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(!compute_completions(db, src, offset, project.entry(), None, None).iter().any((item) -> { item.label == "then_only" }))
 }
 
-// Rust: Source/LSP/mod.rs:1077
 #Test("completion_sees_parameter_inside_empty_body") {
     src :: "fn inspect(value: Int) {{\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -589,7 +545,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(compute_completions(db, src, offset, project.entry(), None, None).iter().any((item) -> { item.label == "value" }))
 }
 
-// Rust: Source/LSP/mod.rs:1101
 #Test("completion_sees_last_local_on_trailing_blank_line") {
     src :: "fn run() {{\n    last_local :: 1\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)
@@ -601,7 +556,6 @@ fn check_test_document(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pro
     assert(compute_completions(db, src, offset, project.entry(), None, None).iter().any((item) -> { item.label == "last_local" }))
 }
 
-// Rust: Source/LSP/mod.rs:1124
 #Test("slot_boundaries_ignore_comment_and_interpolation_braces") {
     src :: "fn run(flag: Bool) {{\n    text :: \"flag={{flag}}\"\n    // comment braces: {{ }}\n    \n}}\n"
     (project, _, maybe_bundle, facts) :: check_test_document(src)

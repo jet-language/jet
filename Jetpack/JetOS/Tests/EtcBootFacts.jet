@@ -38,7 +38,7 @@
 }
 
 fn jetos_identity_test_system(options: [OptionPlan]) -> SystemPlan Never! {
-    SystemPlan{name: "halcyon", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
+    SystemPlan{name: "devhost", target: "linux.x64", packages: [Pkg]{}, services: [ServicePlan]{}, options: options}
 }
 
 // Actual SystemPlan/option resolution is mandatory; borrowed trim ABI #4303
@@ -59,7 +59,7 @@ fn jetos_identity_test_system(options: [OptionPlan]) -> SystemPlan Never! {
     root :: files.tmpdir("jetos-identity-etc-") ?? panic("identity scratch")
     system :: jetos_identity_test_system([OptionPlan]{})
     jetos_write_etc_tree(root, system) ?? panic("write etc tree")
-    assert_eq(files.read(files.join(root, "etc/hostname")) ?? panic("hostname"), "halcyon\n")
+    assert_eq(files.read(files.join(root, "etc/hostname")) ?? panic("hostname"), "devhost\n")
     assert_eq(files.read(files.join(root, "etc/fstab")) ?? panic("fstab"), "LABEL=jetos-root\t/\text4\tdefaults\t0\t1\n")
     assert_eq(files.read(files.join(root, "etc/passwd")) ?? panic("passwd"), "root:x:0:0:root:/root:/bin/sh\nmessagebus:x:81:81:D-Bus system message bus:/run/dbus:/usr/sbin/nologin\ngdm:x:120:120:GDM display manager:/var/lib/gdm:/usr/sbin/nologin\n")
     assert_eq(files.read(files.join(root, "etc/shadow")) ?? panic("shadow"), "root:!:1::::::\n")
@@ -207,7 +207,7 @@ fn jetos_identity_test_realized(verification: &StoreVerification, root: String, 
     jetos_write_boot_facts(root, system, [JetOSRealizedPackage]{}) ?? panic("boot facts")
     assert_eq(files.read(files.join(root, "boot/kernel")) ?? panic("fallback kernel"), "{absent_kernel}\n")
     assert_eq(files.read(files.join(root, "boot/initrd")) ?? panic("fallback initrd"), "modules=virtio_blk,ext4\n")
-    assert_eq(files.read(files.join(root, "boot/limine.conf")) ?? panic("limine"), "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/jetos 26.10 (Apex) — halcyon\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init=/sbin/init\n")
+    assert_eq(files.read(files.join(root, "boot/limine.conf")) ?? panic("limine"), "timeout: 5\nserial: yes\ngraphics: no\nverbose: yes\n/jetos 26.10 (Apex) — devhost\n    protocol: linux\n    kernel_path: boot():/boot/kernel\n    module_path: boot():/boot/initrd\n    textmode: yes\n    cmdline: console=ttyS0 root=LABEL=jetos-root rw init=/sbin/init\n")
     assert_eq(files.read(files.join(root, "boot/facts.json")) ?? panic("boot facts wire"), "{{\"loader\":\"Limine\",\"kernel\":\"{absent_kernel}\",\"init\":\"/sbin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"],\"kernel_package\":null}}")
     files.remove_all(root) ?? panic("remove boot scratch")
 }

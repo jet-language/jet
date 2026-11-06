@@ -1,16 +1,17 @@
 // The driver request the Jet-hosted `jet` builds for one entry file, the way
-// the Rust bootstrap host does (Compiler/Bootstrap/Host/Native.rs
-// `open_authorized_sources` and `__jet_bootstrap_request_from_host`): the
-// entry root and its declared path-dependency closure, the Core library rows
-// with their bodies, the canonical effect source, and the host facts. The
-// entry root is the nearest directory at or above the entry that holds
-// `package.jet`, or the entry's own directory for a loose file.
+// the Rust bootstrap host does (`open_authorized_sources` and
+// `__jet_bootstrap_request_from_host`): the entry root and its declared
+// path-dependency closure, the Core library rows with their bodies, the
+// canonical effect source, and the host facts. The entry root is the nearest
+// directory at or above the entry that holds `package.jet`, or the entry's own
+// directory for a loose file.
 use {
     cli_files :: core.files
     cli_sys :: core.sys
     jet_foundation.[
         AppAuthorizedDirectory,
         BuildOptions,
+        BuildSettingOverride,
         AppAuthorizedDirectoryEntry,
         CompilerThreads,
         CompilerTraceSink,
@@ -38,6 +39,7 @@ use {
         JetDriverHostFacts,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_report_problems,
         jet_driver_compile,
         jet_driver_compile_keep_going,
         jet_driver_lowering_inputs,
@@ -60,7 +62,7 @@ use {
     ]
     jet_backend.[x64_link_runtime_image, x64_link_runtime_pack]
     jet_ir.[IRLibraryExportRow, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
-    jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_lock_load, pkg_manifest_parse, pkg_to_manifest]
+    jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent]
     jet_web.[web_runtime_partition]
 }
@@ -229,33 +231,80 @@ fn jet_cli_runtime_pack(result: ^JetDriverCompileResult, prefix: String, object:
 
 // Names the Jet toolchain source tree: the directory that holds `Core/`. The
 // Rust host embeds those bodies; the Jet host reads them from this tree.
+// Unset, the tree is found (jet_cli_toolchain_root).
 JET_CLI_TOOLCHAIN_ROOT_ENV :: "JET_TOOLCHAIN_ROOT"
-// This compiler's identity (`name@version#<source id>`). The toolchain launcher and every
-// chain stage set it; a compiler built by `jet build Compiler` carries no identity of its own.
+// This compiler's identity (`name@version#<source id>`). Unset, it is read from
+// the IDENTITY file beside the jet executable (jet_cli_compiler_identity).
 JET_CLI_COMPILER_IDENTITY_ENV :: "JET_COMPILER_IDENTITY"
+// Beside the jet executable: the file holding its identity on one line.
+JET_CLI_IDENTITY_FILE :: "IDENTITY"
 
-// The running compiler's identity: JET_COMPILER_IDENTITY; None when it is unset.
-fn jet_cli_compiler_identity() -> String? Never! {
-    if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
-    None
+// The directory holding the running jet executable.
+fn jet_cli_executable_dir() -[Env]> String Never! {
+    jet_cli_parent(cli_sys.executable()) ?? "/"
 }
 
-// crates/jet-foundation/src/SHA256.rs `MAX_TREE_DEPTH`.
+// The running compiler's identity: JET_COMPILER_IDENTITY, else the one line of
+// the IDENTITY file beside the executable; None when neither names one.
+fn jet_cli_compiler_identity() -> String? Never! {
+    if cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) == .Val(value) -> return Val(value)
+    text :: cli_files.read(jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)) ?? return None
+    identity :: text.trim()
+    if identity == "" || identity.contains("\n") -> return None
+    Val(identity)
+}
+
+// The refusal when this compiler has no identity, naming both places it looks.
+fn jet_cli_identity_missing() -> (what: String, fix: String) Never! {
+    file :: jet_cli_authority_path(jet_cli_executable_dir(), JET_CLI_IDENTITY_FILE)
+    (what: "this compiler has no identity: `{JET_CLI_COMPILER_IDENTITY_ENV}` is not set and `{file}` names none", fix: "set `{JET_CLI_COMPILER_IDENTITY_ENV}` to the compiler's `name@version#build-id`, or write that one line to `{file}`")
+}
+
+// Whether `directory` holds a Jet toolchain: the Core library and the
+// compiler prelude.
+fn jet_cli_is_toolchain(directory: String) -[FS]> Bool Never! {
+    cli_files.is_dir(jet_cli_authority_path(directory, "Core")) && cli_files.is_dir(jet_cli_authority_path(directory, "Compiler/Prelude"))
+}
+
+// Where the toolchain sources a request for `input` (a file or directory) come from.
+enum JetCLIToolchainRoot {
+    Found(root: String)
+    Missing(what: String, fix: String)
+}
+
+// The toolchain source tree: JET_TOOLCHAIN_ROOT, else the nearest directory at or
+// above `input` that holds a toolchain (a Jet checkout), else the toolchain
+// installed beside the jet executable. Missing names all three places.
+fn jet_cli_toolchain_root(input: String) -> JetCLIToolchainRoot Never! {
+    if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) -> return JetCLIToolchainRoot.Found{root: root}
+    start :: cli_files.realpath(input) ?? input
+    current := start
+    loop {
+        if jet_cli_is_toolchain(current) -> return JetCLIToolchainRoot.Found{root: current}
+        if current == "/" -> break
+        current = jet_cli_parent(current) ?? break
+    }
+    installed :: jet_cli_executable_dir()
+    if jet_cli_is_toolchain(installed) -> return JetCLIToolchainRoot.Found{root: installed}
+    JetCLIToolchainRoot.Missing{
+        what: "can't find the Jet toolchain sources: `{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, no directory at or above `{start}` holds `Core/` and `Compiler/Prelude/`, and `{installed}` beside jet holds no installed toolchain",
+        fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, run jet on a file inside a Jet checkout, or install the toolchain beside jet",
+    }
+}
+
 JET_CLI_MAX_TREE_DEPTH :: 256
 JET_CLI_MAX_SOURCE_BYTES :: 536870912
 JET_CLI_MAX_SOURCE_TOTAL :: 4294967296
 JET_CLI_MAX_SOURCE_FILES :: 1000000
 
-// A directory holding one of these is its own project, outside the walk
-// (Authority.rs `has_nested_project_boundary`).
+// A directory holding one of these is its own project, outside the walk.
 JET_CLI_PROJECT_MARKERS :: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
 
-// Names the source walk never enters or reads (Authority.rs
-// `discover_source_files_from`), besides every name that starts with `.`.
+// Names the source walk never enters or reads, besides every name that starts
+// with `.`.
 JET_CLI_SKIPPED_NAMES :: [String]{"target", "build", "node_modules", "bin"}
 
-// Generated foreign-binding caches and the sidecars each binding may carry
-// (Native.rs `collect_authorized_foreign_cache_files`).
+// Generated foreign-binding caches and the sidecars each binding may carry.
 JET_CLI_FOREIGN_CACHE_DIRECTORIES :: [String]{".jet/bindings/c", ".jet/bindings/cpp"}
 JET_CLI_FOREIGN_CACHE_SIDECARS :: [String]{"metadata", "provenance"}
 
@@ -268,11 +317,7 @@ enum JetCLICompiled {
 }
 
 fn jet_cli_refused(what: String, fix: String, color: Bool) -> JetCLICompiled Never! {
-    JetCLICompiled.Refused{output: JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, color),
-        exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }}
+    JetCLICompiled.Refused{output: jet_cli_prepare_refusal(what, fix, color)}
 }
 
 // `root` joined with a root-relative path (Loader.jet `jet_driver_authority_path`).
@@ -281,8 +326,8 @@ fn jet_cli_authority_path(root: String, relative: String) -> String Never! {
     "{root}/{relative}"
 }
 
-// Native.rs `identity_key` over Authority.rs `FileIdentity::from_metadata`.
-// Directory identity is pinned to the opened object, not its mutable listing.
+// `identity_key` over `FileIdentity::from_metadata`. Directory identity is
+// pinned to the opened object, not its mutable listing.
 fn jet_cli_identity_key(kind: String, stat: cli_files.Stat) -> String Never! {
     if kind == "directory" -> return "authority-file-v1;kind=directory;length=0;modified_ns=none;device={stat.id.device};inode={stat.id.inode}"
     modified :: if stat.modified.to_unix_ns() == {
@@ -300,11 +345,11 @@ fn jet_cli_is_project_boundary(directory: String) -[FS]> Bool Never! {
     false
 }
 
-// Authority.rs `discover_source_files_from`: entries in name order, so the
-// files come out in relative-path order; a symlinked directory is skipped and
-// any other symlink refused; dot names, build output, and nested projects stay
-// out. With `retain_directories`, every walked directory's complete immediate
-// listing (taken before those filters, empty directories included) goes to
+// `discover_source_files_from`: entries in name order, so the files come out in
+// relative-path order; a symlinked directory is skipped and any other symlink
+// refused; dot names, build output, and nested projects stay out. With
+// `retain_directories`, every walked directory's complete immediate listing
+// (taken before those filters, empty directories included) goes to
 // `directories` for App convention routing. Returns the problem that stopped
 // the walk.
 struct JetCLISourceBudget {
@@ -448,9 +493,9 @@ fn jet_cli_cache_file(root: String, relative: String, budget: &JetCLISourceBudge
     Ok(JetCLICacheSource{relative_path: relative, read: read})
 }
 
-// Native.rs `collect_authorized_foreign_cache_files`: every generated C and
-// C++ binding (not the `.adapted.jet` views) with its `.metadata` and
-// `.provenance` sidecars, in relative-path order.
+// `collect_authorized_foreign_cache_files`: every generated C and C++ binding
+// (not the `.adapted.jet` views) with its `.metadata` and `.provenance`
+// sidecars, in relative-path order.
 fn jet_cli_foreign_cache_files(root: String, caches: &[JetDriverAuthorizedSourceFile], budget: &JetCLISourceBudget) -[FS]> String? Never! {
     collected := [JetCLICacheSource]{}
     loop cache_directory in JET_CLI_FOREIGN_CACHE_DIRECTORIES {
@@ -549,8 +594,8 @@ fn jet_cli_dependency_within(path: String, root: String) -> Bool Never! {
     path == root || path.starts_with(if root.ends_with("/") -> root else -> "{root}/")
 }
 
-// Loader.rs `RootPathReach`: the entry's relative declarations, canonicalized
-// once, and the canonical sibling directories they open outside its tree.
+// `RootPathReach`: the entry's relative declarations, canonicalized once, and
+// the canonical sibling directories they open outside its tree.
 struct JetCLIRootPathReach {
     declared: [String]
     sibling_dirs: [String]
@@ -584,7 +629,7 @@ fn jet_cli_path_dependency_reachable(canonical: String, reach: JetCLIRootPathRea
 }
 
 fn jet_cli_path_dependency_escape(name: String, relative: String, parent: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E1206", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    jet_cli_report_output("", "E1223", "path dependency `{name}` escapes its parent package", "the path `{relative}` resolves outside the declaring package directory `{parent}`", "use a relative path below the declaring package directory", color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // Authorize each path root once, in dependency-name order, and each version
@@ -605,8 +650,15 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
             if dependencies[name] == .Registry(source) {
                 // No battery leaves the dependency unbound: the driver emits
                 // E0603 at the declaration.
-                battery :: jet_cli_first_party_battery(name, source) ?? next
+                battery :: jet_cli_first_party_battery(name, source, entry) ?? next
                 if jet_cli_authorize_dependency_root(&roots, battery, color) == .Val(refusal) -> return Val(refusal)
+                next
+            }
+            if dependencies[name] == .Git(_, _) {
+                // The source-store entry `jet fetch` pinned in the project's
+                // lock; checking it against the lock is `jet build --locked`.
+                directory :: jet_cli_locked_git_root(entry, name) ?? return Val(jet_cli_report_output("", "E1202", "git dependency `{name}` is not fetched: `.jet/lock` pins no revision for it", jet_cli_diagnostic_copy("E1202").why, "run `jet fetch`, then build again", color, JET_DRIVER_EXIT_USER_ERROR))
+                if jet_cli_authorize_dependency_root(&roots, directory, color) == .Val(refusal) -> return Val(refusal)
                 next
             }
             if dependencies[name] == .Path(relative) {
@@ -630,19 +682,34 @@ fn jet_cli_path_dependency_roots(roots: &[JetDriverAuthorizedSourceRoot], color:
     None
 }
 
+// The source-store directory of the git dependency `name` the lock at
+// `project_root` pins, or None when it pins no revision or the entry is gone.
+fn jet_cli_locked_git_root(project_root: String, name: String) -[FS, Env]> String? Never! {
+    lock :: pkg_lock_load(project_root) ?? return None
+    package :: lock.find_package(name) ?? return None
+    pinned :: if package.source == {
+        .Git(_, _) -> package.locked != None
+        else -> false
+    }
+    if !pinned -> return None
+    Val(cli_files.realpath(pkg_source_store_path(name, package.version, package.fingerprint)) ?? return None)
+}
+
 // The toolchain directory of the first-party batteries.
 JET_CLI_BATTERIES_DIR :: "Jetpack/Provider/Batteries"
 
 // The canonical root of the first-party battery a version dependency `name`
 // (`source`, its selector) names, or None. Like the Rust jetpack's embedded
-// batteries registry (crates/jetpack/build.rs generated
-// batteries_registry.rs from crates/jetpack/batteries/*), the toolchain
-// ships the batteries: `$JET_TOOLCHAIN_ROOT/Jetpack/Provider/Batteries/<name>`
-// resolves only when its package.jet declares that name and a version the
-// selector matches.
-fn jet_cli_first_party_battery(name: String, source: String) -[FS, Env]> String? Never! {
+// batteries registry (generated from crates/jetpack/batteries/*), the toolchain
+// ships the batteries: `<toolchain root>/Jetpack/Provider/Batteries/<name>`
+// (jet_cli_toolchain_root of `entry`, the entry root) resolves only when its
+// package.jet declares that name and a version the selector matches.
+fn jet_cli_first_party_battery(name: String, source: String, entry: String) -[FS, Env]> String? Never! {
     selector :: jet_driver_dependency_selector(source, name) ?? return None
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return None
+    toolchain :: if jet_cli_toolchain_root(entry) == {
+        .Found(root) -> root
+        .Missing(_, _) -> { return None }
+    }
     directory :: jet_cli_authority_path(toolchain, "{JET_CLI_BATTERIES_DIR}/{name}")
     manifest_path :: jet_cli_authority_path(directory, "package.jet")
     text :: cli_files.read(manifest_path) ?? return None
@@ -664,10 +731,10 @@ fn jet_cli_authorize_dependency_root(roots: &[JetDriverAuthorizedSourceRoot], ca
     caches := [JetDriverAuthorizedSourceFile]{}
     budget := JetCLISourceBudget{entries: 0, bytes: 0, files: 0}
     if jet_cli_walk_sources(canonical, "", 0, &files, &directories, true, &budget) == .Val(problem) {
-        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        return Val(jet_cli_report_output("", "E2105", "can't securely read the sources under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or check a file outside this tree", color, JET_DRIVER_EXIT_USER_ERROR))
     }
     if jet_cli_foreign_cache_files(canonical, &caches, &budget) == .Val(problem) {
-        return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        return Val(jet_cli_report_output("", "E2105", "can't securely read the foreign bindings under `{canonical}`: {problem}", jet_cli_why("E2105"), "remove the symbolic link or unreadable file, or regenerate the bindings with `jet bind`", color, JET_DRIVER_EXIT_USER_ERROR))
     }
     &roots.push(JetDriverAuthorizedSourceRoot{canonical_path: canonical, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: files, foreign_cache_files: caches, directories: directories})
     None
@@ -685,7 +752,6 @@ fn jet_cli_source_root(entry_path: String) -[FS]> String Never! {
     }
 }
 
-// Layout.rs `TargetLayout::host_triple`.
 fn jet_cli_host_triple(arch: String, os: String) -> String Never! {
     known_arch :: arch == "x86_64" || arch == "aarch64"
     if os == "linux" && known_arch -> return "{arch}-unknown-linux-gnu"
@@ -823,20 +889,28 @@ fn jet_cli_threads_left(physical: Int, logical: Int, online: Int, stat: String) 
     physical
 }
 
-// The Core library rows of the toolchain tree that `JET_TOOLCHAIN_ROOT`
-// names, or the refusal that stops the request. Each body is read when the
+// The Core library rows of the toolchain tree (jet_cli_toolchain_root of
+// `input`, the entry), or the refusal that stops the request. Each body is read when the
 // compile first schedules its row (jet_driver_core_text_file), so a compile
 // reads only the Core files its imports reach; every file is checked to be
 // present here, so a missing one still refuses the request up front.
 // `checked` says the caller already found every row a regular file (the
-// `jet run` keeper's toolchain read), so they aren't checked twice.
+// `jet run` keeper's toolchain read), so they aren't checked twice. Every
+// compile also needs this compiler's identity, so its absence refuses here too.
 enum JetCLICoreSources {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
 }
 
-fn jet_cli_core_sources(checked: Bool) -> JetCLICoreSources Never! {
-    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLICoreSources.Missing{what: "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the Core library sources can't be found", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+fn jet_cli_core_sources(input: String, checked: Bool) -> JetCLICoreSources Never! {
+    if jet_cli_compiler_identity() == None {
+        missing :: jet_cli_identity_missing()
+        return JetCLICoreSources.Missing{what: missing.what, fix: missing.fix}
+    }
+    toolchain :: if jet_cli_toolchain_root(input) == {
+        .Found(root) -> root
+        .Missing(what, fix) -> { return JetCLICoreSources.Missing{what: what, fix: fix} }
+    }
     core_sources := [JetDriverCoreSource]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         core_path :: jet_cli_authority_path(toolchain, row.path)
@@ -846,13 +920,18 @@ fn jet_cli_core_sources(checked: Bool) -> JetCLICoreSources Never! {
     JetCLICoreSources.Loaded{sources: core_sources}
 }
 
-// The CLI's read of one Core file for jet_driver_core_text_file.
+// The CLI's read of one Core file for jet_driver_core_text_file, and of the
+// assets a Core file embeds.
 struct JetCLICoreSourceReader {}
 
 impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
     fn read(self, file: String) -[FS.Read]> String? {
         text :: cli_files.read(file) ?? return None
         Val(text)
+    }
+    fn read_bytes(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        bytes :: cli_files.read_bytes(file) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
+        Ok(bytes)
     }
 }
 
@@ -881,6 +960,7 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
         trace_sink: None,
         compiler_threads: CompilerThreads{cap: Val(threads ?? jet_cli_default_threads(cores)), cores: cores, memory_available: jet_cli_memory_available()},
         mode: mode,
+        code_suite: mode == JetDriverCompileMode.Test && cli_sys.get(JET_CLI_TEST_SUITE_ENV) != None,
         build_inputs: Val(jet_driver_shared_build_inputs(JetCLIBuildInputs{})),
         build_http_inputs: Val(jet_driver_shared_build_http_inputs(JetCLIBuildHTTPInputs{})),
         build_stamp: stamp,
@@ -888,10 +968,10 @@ fn jet_cli_driver_request(snapshot: JetDriverAuthorizedSourceSnapshot, core_sour
     }
 }
 
-// The entry root's `.jet/lock` (Lock.rs `load`), whose `[build.stamp]` and
+// The entry root's `.jet/lock`, whose `[build.stamp]` and
 // `[[build.contribution]]` rows a compile folds. A missing or unparsable lock
-// is None: the compile keeps the driver's default stamp, never captures a
-// fresh one from git and the clock, and folds no contribution.
+// is None: the compile keeps the driver's default stamp, never captures a fresh
+// one from git and the clock, and folds no contribution.
 fn jet_cli_entry_lock(snapshot: JetDriverAuthorizedSourceSnapshot) -[FS]> LockFile? {
     loop root in snapshot.roots {
         if root.identity != snapshot.entry_root_identity -> next
@@ -1150,10 +1230,11 @@ struct JetCLIOverlay {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// `settings` are the command line's `--set` writers (`jet check`).
+fn jet_cli_compile_entry(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> &overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -1233,11 +1314,7 @@ fn jet_cli_snapshot_refused(what: String, fix: String, color: Bool) -> JetCLISna
 }
 
 fn jet_cli_prepare_refusal(what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
-    JetDriverVerbOutput{
-        stdout: "",
-        stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, color),
-        exit_code: JET_DRIVER_EXIT_USER_ERROR,
-    }
+    jet_cli_report_output("", "E2105", what, jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
 }
 
 // The checked sources under `anchor`'s source root with `overlays` laid over
@@ -1246,11 +1323,11 @@ fn jet_cli_prepare_refusal(what: String, fix: String, color: Bool) -> JetDriverV
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases.
-fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+fn jet_cli_compile_overlays(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared :: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(^prepared, None, trace_sink)
+    jet_cli_compile_prepared(^prepared, None, trace_sink, settings)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -1263,8 +1340,8 @@ fn jet_cli_prepared_file_count(prepared: JetCLIPrepared) -> Int Never! {
 
 // Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
 // records every comptime input file the compile reads (`embed_file`,
-// `embed_bytes`, `find`).
-fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?) -> JetCLICompiled {
+// `embed_bytes`, `find`); `settings` are the `--set` writers.
+fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
     if ^prepared == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1272,6 +1349,7 @@ fn jet_cli_compile_prepared(prepared: ^JetCLIPrepared, input_log: Shared<JetDriv
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
+            selected.setting_overrides = settings
             library_prefix :: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads :: selected.compiler_threads.copy()
@@ -1320,6 +1398,8 @@ fn jet_cli_compile_executable(prepared: ^JetCLIPrepared, entry: String?, options
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
             if options.profile != "" -> selected.profile = options.profile
+            selected.setting_overrides = options.settings.copy()
+            selected.gate_set.allowed = options.gates.copy()
             contributed := jet_cli_contributed_request(^selected, color)
             // copy: `refusal` is a payload view of `contributed`.
             if contributed.refusal == .Val(refusal) -> return JetCLIExecutableCompiled.Refused{output: refusal.copy()}
@@ -1363,13 +1443,19 @@ fn jet_cli_prepare_overlays(anchor: String, entry: String, overlays: [JetCLIOver
 }
 
 // The request that compiles `snapshot` against the Core sources of this
-// toolchain; `core_checked` as jet_cli_core_sources's `checked`.
+// toolchain; `core_checked` as jet_cli_core_sources's `checked`. The
+// organization's gate policy (`JET_ORG_UNSAFE_POLICY`) is its outermost policy
+// rung; a configured policy that can't be read is refused (E3109), never
+// skipped.
 fn jet_cli_prepare_request(snapshot: JetDriverAuthorizedSourceSnapshot, color: Bool, threads: Int?, mode: JetDriverCompileMode, core_checked: Bool) -> JetCLIPrepared {
-    core_sources :: if jet_cli_core_sources(core_checked) == {
+    core_sources :: if jet_cli_core_sources(snapshot.entry_path, core_checked) == {
         .Loaded(sources) -> sources
         .Missing(what, fix) -> { return jet_cli_prepare_refused(what, fix, color) }
     }
-    JetCLIPrepared.Prepared{request: jet_cli_driver_request(snapshot, core_sources, threads, mode), snapshot: snapshot}
+    organization :: pkg_load_organization_gate_policy() ? declarations -> declarations ! error -> return JetCLIPrepared.Refused{output: JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems("", "", error.diagnostics, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    request := jet_cli_driver_request(snapshot, core_sources, threads, mode)
+    request.organization_policy = organization
+    JetCLIPrepared.Prepared{request: ^request, snapshot: snapshot}
 }
 
 // Whether the entry at `entry_path` (or its overlay) is a script: its first
@@ -1471,31 +1557,30 @@ fn jet_cli_prepare_snapshot(anchor: String, entry: String, overlays: [JetCLIOver
 // ---- The compiler's streaming trace: `--trace[=FILE]` and JET_TRACE_FILE ----
 //
 // The native `jet` implements the driver's CompilerTraceSink
-// (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives
-// the Chrome trace-event lines the Rust host's writer produces
-// (crates/jet-driver/src/Trace.rs): the `[` header, `process_name`,
-// `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per span, with
-// `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time (`cpu_ns` of
-// its thread, `proc_cpu_ns` of every thread, `majflt` major faults; this
-// writer only) on every phase close and a `memory` counter after a phase,
-// while an item's close (`begin_item`, or an indexed `begin`) carries only
-// its thread's `cpu_ns`, and nested phases closer than
+// (Compiler/JetFoundation/Source/Trace.jet) itself. A file target receives the
+// Chrome trace-event lines the Rust host's writer produces: the `[` header,
+// `process_name`, `trace.start` (`unix_ms`, `functions`), one `B`/`E` event per
+// span, with `rss_kb`/`peak_rss_kb` (VmRSS/VmHWM) and the span's CPU time
+// (`cpu_ns` of its thread, `proc_cpu_ns` of every thread, `majflt` major
+// faults; this writer only) on every phase close and a `memory` counter after a
+// phase, while an item's close (`begin_item`, or an indexed `begin`) carries
+// only its thread's `cpu_ns`, and nested phases closer than
 // JET_CLI_TRACE_PROCESS_MS share one process read, so per-item events stay
-// cheap; throttled `C` progress events,
-// `<phase>.<name>` counter events, and `JET_PHASE_COUNTERS` stderr lines
-// when that variable is set, so Tools/perf and Tools/agent read either
-// compiler's trace. `-` or `stderr` streams one readable line per event to
-// stderr instead. The target stays open for the whole compile and every line
-// is flushed as soon as its event happens, so a running compile can be
-// followed. A failed write stops the trace, never the compile. The sink's
-// calls stay inside the trait's FS row: monotonic time is `/proc/uptime`
-// (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as `/dev/stderr`.
+// cheap; throttled `C` progress events, `<phase>.<name>` counter events, and
+// `JET_PHASE_COUNTERS` stderr lines when that variable is set, so Tools/perf
+// and Tools/agent read either compiler's trace. `-` or `stderr` streams one
+// readable line per event to stderr instead. The target stays open for the
+// whole compile and every line is flushed as soon as its event happens, so a
+// running compile can be followed. A failed write stops the trace, never the
+// compile. The sink's calls stay inside the trait's FS row: monotonic time is
+// `/proc/uptime` (CLOCK_BOOTTIME, 10 ms resolution) and stderr is written as
+// `/dev/stderr`.
 JET_CLI_TRACE_FILE_ENV :: "JET_TRACE_FILE"
 JET_CLI_TRACE_DETAIL_ENV :: "JET_TRACE_DETAIL"
 JET_CLI_PHASE_COUNTERS_ENV :: "JET_PHASE_COUNTERS"
 JET_CLI_TRACE_STDERR :: "/dev/stderr"
-// Minimum spacing of the progress events of one kind; the last item is
-// always written (Trace.rs `PROGRESS_INTERVAL`).
+// Minimum spacing of the progress events of one kind; the last item is always
+// written.
 JET_CLI_TRACE_PROGRESS_MS :: 200
 // A progress kind reads the clock on its first call and then once every this
 // many calls (and on its last item), so a per-item kind costs no clock read
@@ -1814,8 +1899,8 @@ fn jet_cli_trace_close_line(sink: JetCLITraceSink, span: JetCLITraceSpan, named:
     line
 }
 
-// `{"name":..,"cat":..,"ph":..,"ts":..,"pid":..,"tid":..` without the
-// closing brace, so the caller appends `args` (Trace.rs `push_event_head`).
+// `{"name":..,"cat":..,"ph":..,"ts":..,"pid":..,"tid":..` without the closing
+// brace, so the caller appends `args`.
 fn jet_cli_trace_head(name: String, kind: String?, phase: String, ts: Int, pid: Int, thread: Int) -> String Never! {
     category :: if kind == .Val(text) -> ",\"cat\":{foundation_json_quote(text)}" else -> ""
     "{{\"name\":{foundation_json_quote(name)}{category},\"ph\":\"{phase}\",\"ts\":{ts},\"pid\":{pid},\"tid\":{thread}"

@@ -452,11 +452,20 @@ fn pkg_overlay_strip_wrapped(text: String, prefix: String, suffix: String) -> St
     Val(rest.removesuffix(suffix))
 }
 
-// Locate the `{` that opens the `module workspace { … }` body.
+// Locate the `{` that opens the `workspace: module { … }` body (or the
+// retired `module workspace { … }`).
 fn pkg_overlay_find_workspace_body_start(src: String) -> Int? Never! {
     raw :: src.bytes()
     namespace :: NS_WORKSPACE.bytes()
+    keyword :: KW_MODULE.bytes()
     search := 0
+    loop {
+        at :: pkg_overlay_find_word(raw, NS_WORKSPACE, search) ?? break
+        head :: pkg_bytes_colon_keyword_end(raw, at + namespace.len(), keyword)
+        if head >= 0 && pkg_bytes_code(raw, at - 1) != 46 -> return pkg_overlay_find_char(raw, head, OVERLAY_OPEN_BRACE)
+        search = at + namespace.len()
+    }
+    search = 0
     loop {
         at :: pkg_overlay_find_word(raw, KW_MODULE, search) ?? return None
         cursor :: pkg_bytes_skip_space(raw, at + KW_MODULE.bytes().len())

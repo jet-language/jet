@@ -54,7 +54,7 @@ fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan N
     report :: provider_normalize_document(ProviderFamily.Nix, facts_json)
     name :: if report.facts.name == "" -> cli_import_nix_string(object, "name") ?? "nix-import" else -> report.facts.name
     version :: if report.facts.version == "" || report.facts.version == "set" -> "0.1.0" else -> report.facts.version
-    root_reference :: if report.facts.name != "" && report.facts.version != "" && report.facts.version != "set" -> cli_import_canonical_package_ref(report.shared_facts().qualified_reference()) else -> "{name}@nix"
+    root_reference :: if report.facts.name != "" && report.facts.version != "" && report.facts.version != "set" -> report.shared_facts().qualified_reference() else -> "{name}@nix"
     &plan.packages.push(ImportedPackage{name: name, version: version})
     cli_import_retain_normalized_root(&plan, ProviderFamily.Nix, facts_json, root_reference, source_path)
     if object.get("packages") == {
@@ -167,7 +167,7 @@ fn cli_import_nix_package(value: Dyn) -> NixImportPackage? Never! {
             raw :: text.trim()
             if raw == "" -> return None
             name = raw.split_once("#")?.before ?? raw.split_once("@")?.before ?? raw
-            reference = Val(if raw.contains("@") || raw.contains("#") -> cli_import_canonical_package_ref(raw) else -> "{raw}@nixpkgs")
+            reference = Val(if raw.contains("@") || raw.contains("#") -> raw else -> "{raw}@nixpkgs")
         }
         .None -> {
             object :: pkg_json_object(value) ?? return None
@@ -182,7 +182,7 @@ fn cli_import_nix_package(value: Dyn) -> NixImportPackage? Never! {
     }
     trimmed :: name.trim()
     provider_ref :: if reference == {
-        .Val(raw) -> cli_import_canonical_package_ref(raw)
+        .Val(raw) -> raw.trim()
         .None -> {
             authority :: source ?? "nixpkgs"
             selector :: if {

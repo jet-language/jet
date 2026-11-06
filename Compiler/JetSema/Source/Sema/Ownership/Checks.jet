@@ -171,6 +171,13 @@ struct SemaOwnershipClosureCaptures {
     places: [SemaOwnershipPlace]
 }
 
+// A captured name an escaping lambda binding writes, held until the scope
+// that bound the lambda (`scope_depth`) closes.
+struct SemaOwnershipLambdaWriteBorrow {
+    name: String
+    scope_depth: Int
+}
+
 // An unmarked move site that a later use reached. The
 // function check re-runs with the site known, and the site then checks as
 // the authored copy `name.copy()`.
@@ -263,6 +270,11 @@ struct SemaOwnershipState {
     // argument of the same call also names. Such a name has no last use in
     // that call (Rust `take_unmarked_last_use` `named_elsewhere`): E0209.
     implicit_take_twice: [Span]{[Span]{}}
+    // Unmarked take arguments the typed argument check found to have a type
+    // that is neither copyable nor cloneable for a reason other than a cleanup
+    // duty (a function field, a non-cloneable handle): E0201, never an
+    // implicit clone. A value with cleanup keeps the cloneable E0209.
+    noncloneable_takes: [Span]{[Span]{}}
     // `^`-marked field arguments the typed argument check found to be exact
     // moves into a consuming parameter; the call ownership check records the
     // move, so a later use of the field is E0121.
@@ -276,6 +288,11 @@ struct SemaOwnershipState {
     direct_call_lambdas: [Span]{[Span]{}}
     // Lambda bindings whose calls read their captures, by binding key.
     closure_captures: [SemaOwnershipClosureCaptures]{[SemaOwnershipClosureCaptures]{}}
+    // Names an escaping lambda bound in an open scope writes.
+    lambda_write_borrows: [SemaOwnershipLambdaWriteBorrow]{[SemaOwnershipLambdaWriteBorrow]{}}
+    // `#Reactive` bodies checked so far: their writes land on the
+    // registration's clones, not on the enclosing lambda's captures.
+    reactive_bodies: [Span]{[Span]{}}
     // `function#parameter` keys of list write parameters
     // proven length-preserving (sema_fixed_length_write_params).
     fixed_length_write_params: [String]
@@ -439,6 +456,9 @@ struct SemaReceiverMarkFrame {
     receiver_span: Span
     mark: SemaReceiverMark?
     convention: AccessConvention?
+    // A `Cell` write (`set`, `replace`, `edit`) changes the cell through a
+    // read receiver; its `&` mark is optional, never an unused mark.
+    write_mark_optional: Bool{false}
 }
 
 struct SemaOwnershipCallViewFact {
@@ -719,6 +739,25 @@ fn sema_ownership_writes_temporary_edit_guard(expr: Expr) -> Bool Never! {
     }
 }
 
+// A place reached through the `.value` of a `guard_edit()` binding
+// (`guard.value.items`) is written under the guard's edit permit, so a
+// writing call on it needs no `&`, as a write through the guard needs none.
+fn sema_ownership_place_under_edit_guard(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if expr == {
+        .Field(base, member, _, _) -> {
+            if member == "value" {
+                if base == .Ident(name, span, _) {
+                    index :: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+                    return sema_ownership_binding_is_edit_shared_guard(scopes.bindings[index])
+                }
+            }
+            sema_ownership_place_under_edit_guard(base, scopes)
+        }
+        .Index(base, _, _, _, _) | .Paren(base, _, _) -> sema_ownership_place_under_edit_guard(base, scopes)
+        else -> false
+    }
+}
+
 // Rust `place_reads_untagged_or_read_shared_guard`: a write that reaches a
 // `.value` held by an untagged or `guard_read()` SharedGuard. A write
 // parameter root keeps its caller-granted capability. The guard type is
@@ -962,6 +1001,12 @@ fn sema_ownership_leave_scope(state: &SemaOwnershipState) Never! {
         if view.active && view.scope_depth < depth -> &remaining_views.push(view)
     }
     state.views = remaining_views
+
+    remaining_lambda_writes := [SemaOwnershipLambdaWriteBorrow]{}
+    loop borrow in state.lambda_write_borrows {
+        if borrow.scope_depth < depth -> &remaining_lambda_writes.push(borrow)
+    }
+    state.lambda_write_borrows = remaining_lambda_writes
     state.scope_depth = depth - 1
 }
 
@@ -2259,6 +2304,16 @@ fn sema_ownership_place_moved(state: &SemaOwnershipState, place: SemaOwnershipPl
     None
 }
 
+// Whether `expr`'s place was moved at a site before `expr`: an earlier
+// argument of its call, not a later one whose nested move typing recorded.
+fn sema_ownership_moved_before(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable) -> Bool {
+    start :: expr_span(expr).start
+    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, &state) {
+        if sema_ownership_place_moved(&state, place) == .Val(moved) && moved.origin.span.start < start -> return true
+    }
+    false
+}
+
 // The deferred `close` that takes `place` when its scope exits.
 fn sema_ownership_place_deferred(state: &SemaOwnershipState, place: SemaOwnershipPlace) -> SemaOwnershipMovedPlace? {
     loop moved in state.moved {
@@ -2401,13 +2456,20 @@ fn sema_ownership_one_pass_note(place: String, ty: Type) -> String Never! {
     " Note: `{place}` is one-pass — materialize it first with `{place}{materializer}`, or create a fresh source for the second drive"
 }
 
-// Rust Diagnostics.rs aliasing_while_mut (the conflicting access writes) and
+// aliasing_while_mut (the conflicting access writes) and
 // aliasing_mut_after_read (it reads and this access writes).
 fn sema_ownership_diag_alias(place: String, active_write: Bool, span: Span) -> Diagnostic {
     if {
         active_write -> sema_error("E0204", span, "`{place}` is being changed in this call, so it can't be used again here", "while something is being changed through the write-access marker `&`, nobody else may be looking at it", "pass the write-access marker `&` (`&{place}`) only once, or copy first with `{place}.copy()`")
         else -> sema_error("E0204", span, "`{place}` is already shared in this call, so it can't be changed here too", "while something is being looked at, nobody else may be changing it", "drop the extra use of `{place}`, or copy first with `{place}.copy()`")
     }
+}
+
+// A captured access reports at the place it names: `&pair.left` points at
+// `left`, as the unmarked `pair.left` does, never at the marker.
+fn sema_ownership_capture_site_span(site: Expr) -> Span Never! {
+    if site == .Place(inner, _, _, _) -> return sema_ownership_capture_site_span(inner)
+    expr_span(site)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2459,9 +2521,36 @@ fn sema_ownership_exact_view_carrier_for_place(state: &SemaOwnershipState, expr:
 }
 
 fn sema_ownership_diag_invalidated_view(fact: SemaOwnershipViewFact, span: Span) -> Diagnostic {
-    owner :: sema_ownership_place_name(fact.source)
+    // Rust `check_view_use` names the arena itself, not the fresh slot.
+    owner :: sema_ownership_view_owner_name(fact.source)
     verb :: if fact.invalidated_verb == "" -> "operation" else -> fact.invalidated_verb
     sema_error("E0632", span, "`{owner}` was {verb} here, so the value `{fact.carrier}` points into is gone", "`{fact.carrier}` is a view into `{owner}`; `{owner}.{verb}()` invalidated everything stored in `{owner}`, so reading `{fact.carrier}` now would read freed memory", "use `{fact.carrier}` before `{owner}.{verb}()`, or re-`alloc` after the {verb} to get a fresh value")
+}
+
+// D-ALLOC2 (Rust `report_view_escape`): E0631 when a name holding an
+// `arena.alloc` view would leave the arena's region.
+fn sema_ownership_report_arena_view_escape(state: &SemaOwnershipState, expr: Expr, what: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    if expr == {
+        .Ident(name, span, _) -> {
+            index :: sema_scope_resolve_index_at(scopes, name, span) ?? return false
+            if !sema_ownership_is_allocator_view(scopes.bindings[index].symbol.ty) -> return false
+            key :: scopes.bindings[index].symbol.id.key
+            loop fact in state.views {
+                if !fact.active || fact.carrier_key != key || !fact.source.projections.contains("[fresh]") -> next
+                arena :: sema_ownership_view_owner_name(fact.source)
+                &diagnostics.push(sema_error("E0631", span, "`{name}` cannot be shared — it does not live long enough to {what}", "`{name}` is a view into `{arena}`; sharing it outside the region would let it outlive `{arena}` and point into freed memory", "keep `{name}` inside the `{arena}` region, or copy what you need out with `{name}.copy()` before it leaves"))
+                return true
+            }
+            false
+        }
+        else -> false
+    }
+}
+
+// The type `arena.alloc(v)` gives its result (Memory.jet allocator methods).
+fn sema_ownership_is_allocator_view(ty: Type?) -> Bool Never! {
+    if ty == .Val(.Tagged(marker, _)) -> return marker == (TagMarker.Internal{internal_tag: InternalTag.AllocatorView})
+    false
 }
 
 fn sema_ownership_report_invalidated_view(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> Bool {
@@ -2551,9 +2640,12 @@ fn sema_ownership_check_use(state: &SemaOwnershipState, expr: Expr, scopes: Sema
             sema_ownership_report_moved(&state, origin, place, expr_span(expr), &diagnostics)
             return false
         }
+        // Rust `check_place_read` reports E0220 and lets the read go on, so
+        // the access that follows still runs its own checks (a write
+        // receiver's E0212).
         if sema_ownership_conflicting_view_for_expr(&state, place, AccessConvention.Read, expr, scopes) == .Val(fact) {
             &diagnostics.push(sema_ownership_diag_owner_read(fact, place, expr_span(expr), scopes))
-            return false
+            next
         }
         conflict :: sema_ownership_active_loan_conflict_for_expr(&state, place, AccessConvention.Read, expr, scopes)
         if conflict == .Val(loan) {
@@ -2785,7 +2877,7 @@ fn sema_ownership_place_is_static(place: SemaOwnershipPlace, scopes: SemaScopeTa
 // it only the change checks run: Rust `check_write_arg_change` for a `&`
 // argument to a parameter that does not edit, and `record_call_receiver_access`
 // for a handle receiver that writes through the handle.
-fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, action: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if sema_ownership_reject_frozen_write(state, expr, if action == "" -> "be edited" else -> action, expr_span(expr), scopes, &diagnostics) -> return false
     if sema_ownership_report_invalidated_view(&state, expr, scopes, expr_span(expr), &diagnostics) -> return false
     places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
@@ -2847,6 +2939,12 @@ fn sema_ownership_write_capability(state: &SemaOwnershipState, expr: Expr, actio
                 if info.symbol.kind == SymbolKind.Parameter {
                     param_type :: type_name(info.symbol.ty ?? Type.Named{name: "Unit"})
                     &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "an unmarked parameter gives read access only; nobody changes it during the call", "change the parameter to `{places[0].root}: &{param_type}` with the write-access marker `&`, and write `&` at its call sites"))
+                } else if callee != "" && !info.place_alias && places[0].projections.len() == 0 && info.binding_sigil == .Val(sigil) {
+                    // A whole `::` local passed with `&` to a write parameter:
+                    // the fix is the binding's sigil, as for an assignment.
+                    leaf :: callee.slice(callee.rfind(".") + 1, callee.len())
+                    diagnostic :: sema_error("E0111", expr_span(expr), "`{places[0].root}` was made with `::`, so it can't be changed", "`{leaf}` will change this value, so it must be mutable (`:=`)", "declare it with `{places[0].root} := ...`")
+                    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: ":="}))
                 } else {
                     &diagnostics.push(sema_error("E0205", expr_span(expr), "cannot edit through `{places[0].root}` — it has read access only", "a read window may inspect its place, but it cannot change the owner", "take a write window from a mutable owner instead"))
                 }
@@ -2906,17 +3004,22 @@ fn sema_ownership_report_group_loan_change(state: SemaOwnershipState, changed: S
 // `action` is Rust's change wording for a pinned place (E0219), such as
 // "be assigned"; an empty action keeps the general E0212 report.
 fn sema_ownership_check_write(state: &SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(&state, expr, action, true, scopes, &diagnostics)
+    sema_ownership_check_write_as(&state, expr, action, "", true, scopes, &diagnostics)
+}
+
+// A whole argument passed with `&` to `callee`'s write parameter.
+fn sema_ownership_check_write_argument(state: &SemaOwnershipState, expr: Expr, callee: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    sema_ownership_check_write_as(&state, expr, "be passed with write access", callee, true, scopes, &diagnostics)
 }
 
 // A write access whose root needs no write capability (see
 // `sema_ownership_write_capability`).
 fn sema_ownership_check_write_change(state: &SemaOwnershipState, expr: Expr, action: String, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    sema_ownership_check_write_as(&state, expr, action, false, scopes, &diagnostics)
+    sema_ownership_check_write_as(&state, expr, action, "", false, scopes, &diagnostics)
 }
 
-fn sema_ownership_check_write_as(state: &SemaOwnershipState, expr: Expr, action: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
-    ok :: sema_ownership_write_capability(&state, expr, action, capability, scopes, &diagnostics)
+fn sema_ownership_check_write_as(state: &SemaOwnershipState, expr: Expr, action: String, callee: String, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    ok :: sema_ownership_write_capability(&state, expr, action, callee, capability, scopes, &diagnostics)
     if ok {
         places := sema_ownership_places_from_expr_in_state(expr, scopes, &state)
         loop place in places {
@@ -3015,13 +3118,17 @@ fn sema_ownership_mark_move_as(state: &SemaOwnershipState, expr: Expr, scopes: S
     if binding != None {
         info :: binding
         // Rust moves only non-Copy values: every projection of a Copy root
-        // is Copy, so nothing moves and no move conflict exists. Rust
+        // is Copy, so nothing moves and no move conflict exists. A string
+        // view binding is a borrowed `&str` window, Copy in the same way: an
+        // owning destination copies the window or refuses it (E2307), and the
+        // view stays usable. Rust
         // `note_move_if_direct_ident`: an unmarked owning position moves a
         // binding without an access convention only; a read or write
         // parameter or a write window keeps its value (the binding and return
-        // audits report E0120 where it would have to copy).
+        // audits report E0120 where it would have to copy). A function item
+        // names immutable code, so naming it as a value moves nothing.
         root_ty :: info.symbol.ty ?? Type.Named{name: "Unit"}
-        if sema_ownership_type_is_copy(root_ty) || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
+        if sema_ownership_type_is_copy(root_ty) || info.symbol.kind == SymbolKind.Function || info.string_view || (unmarked && sema_ownership_binding_lends(info)) || (unmarked && !sema_ownership_unmarked_moves_name(expr)) {
             loop place in places -> sema_ownership_note_place_reference(&state, expr, place, expr_span(expr), scopes, SemaOwnershipReferenceKind.Move)
             return true
         }
@@ -3322,10 +3429,10 @@ fn sema_ownership_diag_place_alias_move(name: String, consumer: String, span: Sp
 }
 
 // `borrowed_read` is Rust `check_call_argument_access`'s flag: a read argument
-// of a non-scalar read parameter keeps its loan through the call.
-// `single_use` is false for a receiver call: E0142 belongs to direct calls and
-// function values (Rust direct_calls.rs, check_callable_argument_ownership),
-// never to a Core route or a method call.
+// of a non-scalar read parameter keeps its loan through the call. `single_use`
+// is false for a receiver call: E0142 belongs to direct calls and function
+// values (check_callable_argument_ownership), never to a Core route or a method
+// call.
 fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState, callee: String, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, diagnostics: &[Diagnostic], initial_accesses: ^[SemaOwnershipCallAccess], initial_accepted: Bool, initial_complete: Bool, borrowed_read: Bool, single_use: Bool) -> SemaOwnershipCheckResult {
     accesses := initial_accesses
     accepted := initial_accepted
@@ -3333,6 +3440,7 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
     // Reports that predate this call's argument checks: a nested call
     // already judged its own arguments against its own accesses.
     known :: diagnostics.len()
+    value_callee :: single_use && sema_ownership_callee_is_value(callee, scopes)
     loop index in 0..<args.len() {
         arg :: args[index]
         param :: sema_ownership_param_for_arg(params, arg, index) ?? {
@@ -3377,7 +3485,8 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
         }
         // (Rust `reject_unbacked_write_mark`): a written
         // `&` always means the call edits; a write window parameter keeps it.
-        if arg.convention == AccessConvention.Write && write_place_ok && param.convention == AccessConvention.Read && !sema_ownership_is_window_type(param.ty ?? Type.Named{name: "Unit"}) {
+        // A function value's call takes the written `&` as its write instead.
+        if arg.convention == AccessConvention.Write && write_place_ok && !value_callee && param.convention == AccessConvention.Read && !sema_ownership_is_window_type(param.ty ?? Type.Named{name: "Unit"}) {
             accepted = false
             &diagnostics.push(sema_ownership_diag_unbacked_write_mark(callee, arg.expr))
             next
@@ -3411,7 +3520,11 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 // argument's root on write capability; `&` toward a parameter
                 // that does not edit runs the change checks alone.
                 checked :: if {
-                    arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write(&state, arg.expr, "be passed with write access", scopes, &diagnostics)
+                    // An earlier argument's lambda moved its captures when it
+                    // was built; Rust infers each argument after the previous
+                    // one's captures, so a write to a moved place is E0121.
+                    arg.convention == AccessConvention.Write && sema_ownership_moved_before(&state, arg.expr, scopes) && !sema_ownership_check_moved_place_use(&state, arg.expr, scopes, &diagnostics) -> false
+                    arg.convention == AccessConvention.Write && param.convention == AccessConvention.Write -> sema_ownership_check_write_argument(&state, arg.expr, callee, scopes, &diagnostics)
                     arg.convention == AccessConvention.Write -> sema_ownership_check_write_change(&state, arg.expr, "be passed with write access", scopes, &diagnostics)
                     // Exact-place inference has already checked and consumed
                     // this projected argument; reading it again is a reuse.
@@ -3454,15 +3567,16 @@ fn sema_ownership_check_call_arguments_with_accesses(state: &SemaOwnershipState,
                 if !sema_ownership_mark_implicit_take(&state, arg.expr, scopes, callee, &diagnostics) -> accepted = false
             } else {
                 // Rust `check_take_arg_ownership`: a cloneable value is E0209, any
-                // other is E0201. A nominal `Clone` row is registry-owned and not
-                // visible here, so an unresolved nominal takes the cloneable
-                // diagnostic; both reject the unmarked owning argument. A
-                // secret-bearing crypto value never clones: a copy would be a
-                // second owned credential.
+                // other is E0201. The typed argument check classified a named
+                // argument's type with the registry (noncloneable_takes); another
+                // unresolved nominal takes the cloneable diagnostic. Both reject
+                // the unmarked owning argument. A secret-bearing crypto value
+                // never clones: a copy would be a second owned credential.
                 taken_ty :: param.ty ?? Type.Named{name: "Unit"}
                 secret :: sema_is_secret_bearing_crypto_type(taken_ty) || sema_ownership_argument_is_secret(&state, arg.expr, scopes)
+                noncloneable :: sema_ownership_expr_site_listed(state.noncloneable_takes, arg.expr)
                 if {
-                    !secret && (sema_ownership_type_cloneable(taken_ty) ?? true) -> &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
+                    !secret && !noncloneable && (sema_ownership_type_cloneable(taken_ty) ?? true) -> &diagnostics.push(sema_ownership_call_diag_clone(callee, sema_ownership_argument_name(arg), arg.span))
                     else -> {
                         accepted = false
                         &diagnostics.push(sema_ownership_call_diag_not_copyable(callee, index, sema_ownership_argument_name(arg), arg.span))
@@ -3627,6 +3741,29 @@ fn sema_ownership_closure_writes(state: &SemaOwnershipState, callee: Expr, scope
     [String]{}
 }
 
+// An escaping lambda bound in this scope writes the captured `names`: it
+// holds their write access while the scope lasts, so assigning one of them
+// directly is E0204 (Rust `lambda_mut_borrow_stack`).
+fn sema_ownership_bind_lambda_write_borrows(state: &SemaOwnershipState, names: [String]) Never! {
+    loop name in names -> &state.lambda_write_borrows.push(SemaOwnershipLambdaWriteBorrow{name: name, scope_depth: state.scope_depth})
+}
+
+// Rust `lambda_mut_borrow_active`.
+fn sema_ownership_lambda_write_borrow_active(state: SemaOwnershipState, name: String) -> Bool Never! {
+    loop borrow in state.lambda_write_borrows {
+        if borrow.name == name -> return true
+    }
+    false
+}
+
+// True when `span` lies inside a checked `#Reactive` body.
+fn sema_ownership_in_reactive_body(state: SemaOwnershipState, span: Span) -> Bool Never! {
+    loop body in state.reactive_bodies {
+        if span.start >= body.start && span.end <= body.end -> return true
+    }
+    false
+}
+
 // The lambda at `site` is bound to a local that only direct calls reach.
 fn sema_ownership_note_direct_call_lambda(state: &SemaOwnershipState, site: Span) Never! {
     loop known in state.direct_call_lambdas {
@@ -3706,13 +3843,14 @@ fn sema_ownership_call_once_lambda(state: &SemaOwnershipState, callee: Expr, sco
 // another argument (sema_ownership_note_implicit_take_twice).
 fn sema_ownership_note_implicit_take(state: &SemaOwnershipState, expr: Expr, ty: Type, required: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam], scopes: SemaScopeTable) -> String? Never! {
     if expr == .Ident(_, span, _) {
+        facts :: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, generic_params, false)
+        if facts.complete && !facts.copyable && !facts.cloneable && !facts.resource && !facts.holds_resource -> &state.noncloneable_takes.push(span)
         binding :: sema_ownership_binding_for_expr(&state, expr, scopes) ?? return None
         if binding.symbol.kind != SymbolKind.Local && binding.symbol.kind != SymbolKind.Parameter -> return None
         if sema_ownership_binding_is_borrowed_param(binding) || binding.string_view -> return None
         if sema_single_use_key(state, binding.symbol.id.key) -> return None
         if sema_ownership_binding_captured(scopes, binding) -> return None
         if !type_identity_equal(ty, required) || sema_ownership_type_mentions_generic(ty, generic_params) -> return None
-        facts :: sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, generic_params, false)
         if !facts.accepted || !facts.complete || facts.copyable || !facts.cloneable || facts.resource || facts.materializes_view || facts.dynamic_loan -> return None
         &state.implicit_take_ok.push(span)
         return Val(binding.symbol.id.key)
@@ -3773,6 +3911,14 @@ fn sema_ownership_check_call_arguments(state: &SemaOwnershipState, callee: Strin
     sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, [SemaOwnershipCallAccess]{}, true, true, true, true)
 }
 
+// A call through a function value bound to a local or a parameter
+// (Calls/Values.jet names the callee by that binding). Rust
+// `reject_unbacked_write_mark` checks declared callees only.
+fn sema_ownership_callee_is_value(callee: String, scopes: SemaScopeTable) -> Bool Never! {
+    symbol :: sema_scope_resolve(scopes, callee) ?? return false
+    symbol.kind == SymbolKind.Local || symbol.kind == SymbolKind.Parameter
+}
+
 fn sema_ownership_argument_name(arg: CallArg) -> String Never! {
     if arg.expr == {
         .Ident(name, _, _) -> name
@@ -3804,6 +3950,7 @@ fn sema_ownership_check_call_receiver_as(state: &SemaOwnershipState, receiver: E
     if places.len() == 0 {
         if convention == AccessConvention.Write {
             if sema_ownership_writes_temporary_edit_guard(receiver) -> return true
+            if sema_receiver_mark_written(state, receiver) -> return false
             &diagnostics.push(sema_error("E0202", span, "the write-access marker `&` needs a place after it", "write access can only be granted to stable storage, not a temporary expression", "bind the value first, then pass the binding with `&`"))
             return false
         }
@@ -3917,9 +4064,39 @@ fn sema_receiver_mark_note(state: &SemaOwnershipState, receiver: Expr, conventio
     }
 }
 
-// Rust's handle builders (`ProcessSpec` methods, method_calls.rs) report no
-// receiver convention, so the written mark is not checked against one: a
-// builder chain `spec = spec.env(…)` needs no `^`.
+// The resolved call writes through its read receiver (a `Cell` write), so an
+// `&` on that receiver names the write and stays allowed.
+fn sema_receiver_mark_allow_write(state: &SemaOwnershipState, receiver: Expr) Never! {
+    span :: expr_span(receiver)
+    index := state.receiver_frames.len() - 1
+    loop index >= 0 {
+        frame :: state.receiver_frames[index]
+        if frame.receiver_span.start == span.start && frame.receiver_span.end == span.end {
+            updated := frame
+            updated.write_mark_optional = true
+            state.receiver_frames[index] = updated
+            return
+        }
+        index -= 1
+    }
+}
+
+// The receiver carries a written `&` or `^`; on a fresh value the mark itself
+// is the error, reported once when the receiver frame finishes.
+fn sema_receiver_mark_written(state: SemaOwnershipState, receiver: Expr) -> Bool Never! {
+    span :: expr_span(receiver)
+    index := state.receiver_frames.len() - 1
+    loop index >= 0 {
+        frame :: state.receiver_frames[index]
+        if frame.receiver_span.start == span.start && frame.receiver_span.end == span.end -> return frame.mark != None
+        index -= 1
+    }
+    false
+}
+
+// Rust's handle builders (`ProcessSpec` methods) report no receiver convention,
+// so the written mark is not checked against one: a builder chain `spec =
+// spec.env(…)` needs no `^`.
 fn sema_receiver_mark_forget(state: &SemaOwnershipState, receiver: Expr) {
     span :: expr_span(receiver)
     index := state.receiver_frames.len() - 1
@@ -3971,7 +4148,7 @@ fn sema_receiver_mark_finish(state: &SemaOwnershipState, receiver: Expr, scopes:
         if {
             convention == AccessConvention.Write && mark.access == PlaceAccess.Take -> &diagnostics.push(sema_receiver_mark_replace(mark, written, "&", "writes"))
             convention == AccessConvention.Move && mark.access == PlaceAccess.Write -> &diagnostics.push(sema_receiver_mark_replace(mark, written, "^", "takes"))
-            convention == AccessConvention.Read && mark.access == PlaceAccess.Write && sema_receiver_mark_is_write_window(state, root ?? "") -> {}
+            convention == AccessConvention.Read && mark.access == PlaceAccess.Write && (frame.write_mark_optional || sema_receiver_mark_is_write_window(state, root ?? "")) -> {}
             convention == AccessConvention.Read -> &diagnostics.push(sema_receiver_mark_remove(mark, written, "this call only reads its receiver, so it takes no `{written}` mark", "a mark shows that a call writes (`&`) or takes (`^`) the named place; a read call leaves the place unmarked"))
             else -> {}
         }
@@ -3987,6 +4164,7 @@ fn sema_receiver_mark_finish(state: &SemaOwnershipState, receiver: Expr, scopes:
         .None -> ""
     }
     if needed == "" -> return
+    if needed == "&" && sema_ownership_place_under_edit_guard(receiver, scopes) -> return
     if needed == "^" && receiver_last_use -> return
     verb :: if needed == "&" -> "writes" else -> "takes"
     place_name :: sema_ownership_place_name(places[0])
@@ -4041,6 +4219,16 @@ fn sema_ownership_check_snapshot_receiver_call(state: &SemaOwnershipState, calle
     sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, [SemaOwnershipCallAccess]{}, accepted, true, true, false)
 }
 
+// An allocator handle named as the receiver of `alloc`/`try_alloc` keeps its
+// Read call access but runs no place read on the name: the arena's `[fresh]`
+// views look into storage the handle does not read (Rust
+// `allocator_view_preserving_receiver`).
+fn sema_ownership_check_allocator_handle_call(state: &SemaOwnershipState, callee: String, receiver: Expr, params: [SemaCallParam], args: &[CallArg], scopes: SemaScopeTable, span: Span, diagnostics: &[Diagnostic]) -> SemaOwnershipCheckResult {
+    sema_ownership_note_call_receiver(&state, receiver, AccessConvention.Read)
+    accesses :: loop receiver_place in sema_ownership_places_from_expr_in_state(receiver, scopes, &state) -> SemaOwnershipCallAccess{place: receiver_place, access: AccessConvention.Read, span: span, reserved: false, retained: true}
+    sema_ownership_check_call_arguments_with_accesses(&state, callee, params, &args, scopes, &diagnostics, ^accesses, true, true, true, false)
+}
+
 fn sema_ownership_check_lambda_captures(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop capture in lambda.take_names {
@@ -4072,13 +4260,13 @@ fn sema_ownership_owner_of_captured_window(state: SemaOwnershipState, owner: Str
 // ────────────────────────────────────────────────────────────────────────────
 // Evaluated access walk
 //
-// What one call argument reads and writes while it is evaluated, and what
-// its lambdas capture when they are built (Rust CheckerOwnership.rs
-// push_evaluated_access through check_call_argument_captures). `bound`
-// holds the names a lambda parameter or a body binding shadows. A call
-// nested in the argument was checked before this call's accesses existed,
-// so with `nested` the walk replays that call's receiver and argument checks
-// against them, as Rust checks every call against each active call frame.
+// What one call argument reads and writes while it is evaluated, and what its
+// lambdas capture when they are built (push_evaluated_access through
+// check_call_argument_captures). `bound` holds the names a lambda parameter or
+// a body binding shadows. A call nested in the argument was checked before this
+// call's accesses existed, so with `nested` the walk replays that call's
+// receiver and argument checks against them, as Rust checks every call against
+// each active call frame.
 
 enum SemaOwnershipAccessWalk {
     EvaluateNow
@@ -4143,6 +4331,12 @@ fn sema_ownership_note_lambda(state: &SemaOwnershipState, body: SemaOwnershipSta
     loop (key, value) in body.lambda_facts -> state.lambda_facts[key] = value.copy()
     loop (key, value) in body.receiver_accesses -> state.receiver_accesses[key] = value.copy()
     loop (key, value) in body.place_types -> state.place_types[key] = value.copy()
+    sema_ownership_note_lambda_facts(&state, span, facts)
+}
+
+// The capture facts a call checks a lambda argument's construction against,
+// keyed by the lambda's span.
+fn sema_ownership_note_lambda_facts(state: &SemaOwnershipState, span: Span, facts: TCaptureFacts) Never! {
     // copy: the capture name lists stay with `facts`, the checked lambda's own checked-tree facts.
     state.lambda_facts[sema_ownership_span_key(span)] = SemaOwnershipLambdaFacts{escapes: facts.escapes, needs_fn_mut: facts.needs_fn_mut, cloned: facts.cloned.copy(), moved: facts.moved.copy()}
 }
@@ -5082,14 +5276,17 @@ fn sema_ownership_check_argument_captures(state: &SemaOwnershipState, accesses: 
     sema_ownership_collect_evaluated_expr_accesses(&state, arg.expr, SemaOwnershipAccessWalk.ConstructCaptures, [String]{}, true, scopes, &events, &checks)
     accepted := sema_ownership_check_nested_accesses(accesses, checks, known, &diagnostics)
     loop event in events {
-        if sema_ownership_call_access_conflict(accesses, event.place, event.access, false, event.access == AccessConvention.Move || event.through_call || event.moves_owner) == .Val(active) {
+        // Every construction capture holds against a reserved `&` argument
+        // (Rust `check_call_place_access`): even a cloned one reads the place
+        // while the write is lent, as in a lambda nested in a struct field.
+        if sema_ownership_call_access_conflict(accesses, event.place, event.access, false, true) == .Val(active) {
             accepted = false
-            &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(event.place), active == AccessConvention.Write, expr_span(event.site)))
+            &diagnostics.push(sema_ownership_diag_alias(sema_ownership_place_name(event.place), active == AccessConvention.Write, sema_ownership_capture_site_span(event.site)))
         }
         if event.through_call {
             &accesses.push(SemaOwnershipCallAccess{place: sema_ownership_place_snapshot(event.place), access: event.access, span: expr_span(event.site), reserved: false, retained: true})
         } else if event.moves_owner {
-            sema_ownership_mark_capture_move(&state, event.place, event.capture_ty, expr_span(event.site))
+            sema_ownership_mark_capture_move(&state, event.place, event.capture_ty, sema_ownership_capture_site_span(event.site))
         }
     }
     if !sema_ownership_record_call_result_views(state, &accesses, arg.expr, &diagnostics) -> accepted = false
@@ -6069,12 +6266,12 @@ fn sema_ownership_check_lvalue_write(state: &SemaOwnershipState, target: LValue,
 // root binding needs no write capability of its own.
 fn sema_ownership_check_lvalue_write_as(state: &SemaOwnershipState, target: LValue, capability: Bool, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
     if target == {
-        .Local(name, span) -> sema_ownership_check_write_as(&state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
+        .Local(name, span) -> sema_ownership_check_write_as(&state, Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, &diagnostics)
         // copy: `base` is a payload of read parameter `target`, which keeps the original; field `base` of the new Expr.Field owns this one
-        .Field(base, field, span) -> sema_ownership_check_write_as(&state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
+        .Field(base, field, span) -> sema_ownership_check_write_as(&state, Expr.Field{base: base.copy(), member: field, span: span, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, &diagnostics)
         .Index(base, index, span, kind) -> {
             if !sema_ownership_check_expression(&state, index, scopes, &diagnostics) -> return false
-            sema_ownership_check_write_as(&state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", capability, scopes, &diagnostics)
+            sema_ownership_check_write_as(&state, Expr.Index{base: base, index: index, span: span, kind: kind, id: AST_NODE_GENERATED}, "be assigned", "", capability, scopes, &diagnostics)
         }
     }
 }

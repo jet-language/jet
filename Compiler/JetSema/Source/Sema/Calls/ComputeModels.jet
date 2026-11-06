@@ -5,7 +5,6 @@ use jet_foundation.[
     AccessConvention,
     CallArg,
     CallContractRow,
-    CoreCallRecord,
     Diagnostic,
     EffectRowEntry,
     Expr,
@@ -241,7 +240,7 @@ fn sema_call_compute_tensor_value(argument: CallArg, environment: SemaScopeEnvir
     Val(value)
 }
 
-fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+fn sema_call_compute_transform(member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
     if args.len() == 0 {
         sema_call_compute_arity_error(member, 1, 0, span, &diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
@@ -433,8 +432,10 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     target_values := [TExpr]{}
     loop target in selected -> &target_values.push(sema_tree_node(Type.Int, TExprKind.IntLit{value: target, width: None}, span))
     &runtime_args.push(sema_tree_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
-    fallibility := if result_type == {.Result(ok, error) -> TFailureCarrier.Result{success: ok, error: error} else -> TFailureCarrier.Infallible}
-    effective_type_args := [Type]{function_value.ty}
+    effects :: effect_bound ?? [EffectRowEntry]{}
+    transform_effects := [EffectRowEntry]{EffectRowEntry{name: "GPU", span: span}}
+    loop entry in effects -> &transform_effects.push(entry)
+    facts := SemaCallFacts{return_type: result_type, failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(transform_effects), type_args: [Type]{function_value.ty}, default_refs: [FunctionDefaultRef]{}}
     values_args := [CallArg]{args[0]}
     loop index in value_indexes -> &values_args.push(args[index])
     ownership_types := [Type]{function_value.ty}
@@ -442,20 +443,23 @@ fn sema_call_compute_transform(record: CoreCallRecord, member: String, args: [Ca
     accesses := (loop _ in ownership_types -> AccessConvention.Read)
     ownership := sema_ownership_check_call_arguments(&state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), &values_args, scopes, &diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tree(record, runtime_args, span, effective_type_args, loop _ in runtime_args -> false, result_type, fallibility, expected, environment, program, &diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    _ := sema_call_core_record_effects(record, span, effective_type_args, result_type, fallibility, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics)
-    return SemaComputeModelsSpecialCheck{handled: true, value: Val(value)}
+    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "core.compute.{member}", span, facts, &diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
+    // Autodiff is a code transform the compiler emits (inventory: emission),
+    // not a Core semantic row: the named compiler builtin carries the function
+    // value, the Tensor values and the selected parameter indexes.
+    value :: sema_tree_node(result_type, TExprKind.MathBuiltin{type_name: "core.compute", function: member, args: runtime_args}, span)
+    return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
-// The caller owns route selection and invokes this helper before the generic
-// Core-call producer.
-fn sema_call_try_compute_models_core_call(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
-    // D-COMPUTE-AUTODIFF1=D (Rust core_call.rs): every `core.compute` call is
-    // recorded before any route returns, so a source-owned member stays
-    // visible to the autodiff trace check exactly like a transform.
-    if !sema_compute_record_core_call(record, span, &context) -> return SemaComputeModelsSpecialCheck{handled: false, value: None}
-    if record.member == "gradient" || record.member == "value_and_gradient" || record.member == "vjp" || record.member == "jvp" {
-        return sema_call_compute_transform(record, record.member, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
-    }
-    return SemaComputeModelsSpecialCheck{handled: false, value: None}
+// `compute.gradient`, `value_and_gradient`, `vjp` and `jvp` have no Core row:
+// sema types the transform after the import resolves, before the registry route.
+fn sema_call_try_compute_transform(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name != "core.compute" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if member != "gradient" && member != "value_and_gradient" && member != "vjp" && member != "jvp" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    &context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
+    if !sema_call_core_check_type_args("core.compute", member, 0, false, type_args, span, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    checked :: sema_call_compute_transform(member, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: checked.value}
 }

@@ -1,0 +1,91 @@
+# A fixed-width value converted to a fixed width that cannot hold it stops
+# with E3010 at the conversion, exactly as the same narrowing from an Int
+# does, in each sign class (signed to signed, unsigned to unsigned, signed to
+# unsigned, unsigned to signed), and values that fit convert unchanged, on
+# every optimization level.
+fixture: fixed_narrowing_stops_like_int.fixture
+env: NO_COLOR=1
+step: jet run --optimize=none run.jet
+exit: 0
+stdout: = fixed_narrowing_stops_like_int.out
+step: jet run --optimize=none run.jet -- signed
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:8" # at the conversion's line
+step: jet run --optimize=none run.jet -- unsigned
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:9" # at the conversion's line
+step: jet run --optimize=none run.jet -- signed_to_unsigned
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:10" # at the conversion's line
+step: jet run --optimize=none run.jet -- unsigned_to_signed
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:11" # at the conversion's line
+step: jet run --optimize=none run.jet -- int
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:12" # at the conversion's line
+step: jet run --optimize=basic run.jet
+exit: 0
+stdout: = fixed_narrowing_stops_like_int.out
+step: jet run --optimize=basic run.jet -- signed
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:8" # at the conversion's line
+step: jet run --optimize=basic run.jet -- unsigned
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:9" # at the conversion's line
+step: jet run --optimize=basic run.jet -- signed_to_unsigned
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:10" # at the conversion's line
+step: jet run --optimize=basic run.jet -- unsigned_to_signed
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:11" # at the conversion's line
+step: jet run --optimize=basic run.jet -- int
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:12" # at the conversion's line
+step: jet run --optimize=full run.jet
+exit: 0
+stdout: = fixed_narrowing_stops_like_int.out
+step: jet run --optimize=full run.jet -- signed
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:8" # at the conversion's line
+step: jet run --optimize=full run.jet -- unsigned
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:9" # at the conversion's line
+step: jet run --optimize=full run.jet -- signed_to_unsigned
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:10" # at the conversion's line
+step: jet run --optimize=full run.jet -- unsigned_to_signed
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:11" # at the conversion's line
+step: jet run --optimize=full run.jet -- int
+exit: nonzero # the narrowing stops
+stdout: empty
+stderr: ~ "Stop [E3010]: `Value doesn't fit in destination type`" # the Int narrowing's stop
+stderr: ~ "run.jet:12" # at the conversion's line

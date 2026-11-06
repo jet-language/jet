@@ -25,6 +25,7 @@ use jet_foundation.[
     TBinaryOp,
     TContractDisposition,
     TContractKind,
+    TContractSite,
     TContractResult,
     TContractResultMode,
     TIntegerRange,
@@ -41,6 +42,8 @@ use jet_foundation.[
 struct SemaContractDeclaration {
     complete: Bool
     post: [TContract]
+    // The checked `#Pre` clauses; only the solver reads them (FnBody.pre).
+    pre: [TContract]{[TContract]{}}
     result: TContractResult
 }
 
@@ -83,6 +86,30 @@ fn sema_contract_line(environment: SemaScopeEnvironment, program: SemaProgramTab
     sema_source_line_at(environment.source_segments, span) ?? 0
 }
 
+// The declared site of the clause whose condition spans `span` in the module
+// `module_identity`, whose source `segments` map.
+fn sema_contract_site(segments: [SemaSourceSegment], file: String, origin: SemaSourceOrigin, module_identity: String, span: Span) -> TContractSite Never! {
+    TContractSite{file: sema_source_file_at(segments, file, origin, span), line: sema_source_line_at(segments, span) ?? 0, column: sema_source_column_at(segments, span) ?? 0, core: sema_module_is_core_source(module_identity)}
+}
+
+// The declared sites of `func`'s `pre` clauses: `func` is the declaration
+// `target` resolves to (sema_contract_function_for_symbol), in its own
+// module, whose source maps the clause spans; a call site's module may differ.
+fn sema_contract_pre_sites(environment: SemaScopeEnvironment, program: SemaProgramTables, target: SymbolID, func: Func) -> [TContractSite] Never! {
+    if program.registration_graph == .Val(graph) {
+        if sema_registration_callable_row(graph, target.key) == .Val(row) {
+            module_index :: if row == {
+                .Function(index, _) -> index
+                .Foreign(index, _) -> index
+                .NominalMethod(index, _, _) -> index
+                .ImplMethod(index, _, _) -> index
+            }
+            return loop clause in func.pre -> sema_contract_site(graph.modules[module_index].source_segments, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].module_identity, expr_span(clause.cond))
+        }
+    }
+    loop clause in func.pre -> sema_contract_site(environment.source_segments, environment.source_file, environment.source_origin, environment.module_identity, expr_span(clause.cond))
+}
+
 fn sema_contract_call_is_pure(fact: SemaCallSiteFact, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if fact.facts.effect_bound == .Val(row) {
         loop entry in row {
@@ -121,6 +148,7 @@ fn sema_contract_merge_context_delta(source: SemaCheckContext, call_start: Int, 
     // A snapshot starts with no goal rows and no incomplete reasons, so every
     // row it holds is this condition's; a condition left incomplete keeps why.
     loop index in 0..<source.typed_goals.len() -> &destination.typed_goals.push(source.typed_goals[index])
+    loop index in 0..<source.index_proofs.len() -> &destination.index_proofs.push(source.index_proofs[index])
     loop reason in source.incomplete_reasons -> &destination.incomplete_reasons.push(reason)
     sema_check_context_merge_expr_ids(source, &destination)
     if source.exact_int_reachable -> destination.exact_int_reachable = true
@@ -648,8 +676,9 @@ fn sema_contract_disposition(condition: TExpr, environment: SemaScopeEnvironment
     if sema_contract_expr_proven(condition, environment, program, context) -> TContractDisposition.Proven else -> TContractDisposition.Check
 }
 
-fn sema_contract_make(kind: TContractKind, condition: TExpr, message: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, location_span: Span, context: SemaCheckContext) -> TContract Never! {
-    TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(environment, program, location_span), line: sema_contract_line(environment, program, location_span), span: span, disposition: sema_contract_disposition(condition, environment, program, context)}
+// `site` is the clause's declared site (TContractSite).
+fn sema_contract_make(kind: TContractKind, condition: TExpr, message: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span, location_span: Span, site: TContractSite, context: SemaCheckContext) -> TContract Never! {
+    TContract{kind: kind, condition: condition, message: message, file: sema_contract_file(environment, program, location_span), line: sema_contract_line(environment, program, location_span), span: span, disposition: sema_contract_disposition(condition, environment, program, context), site: site}
 }
 
 // `owner` is the function owner key plus a `post` segment: a body local named
@@ -669,6 +698,7 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
     result :: sema_contract_result_for_function(declared_return, func.name_span, environment, program, sema_scope_function_owner_key(scopes))
     complete := true
     post := [TContract]{}
+    pre := [TContract]{}
     // A parameter a condition reads is used (L0102).
     reads := [String:Bool]{}
     loop clause in func.pre {
@@ -676,6 +706,10 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
         if condition == None -> complete = false
         message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, scopes, state, &reads, &tail_store, &context, &diagnostics)
         if message == None -> complete = false
+        if condition == .Val(condition_value) && message == .Val(message_value) {
+            site :: sema_contract_site(environment.source_segments, environment.source_file, environment.source_origin, environment.module_identity, expr_span(clause.cond))
+            &pre.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, environment, program, clause.span, clause.span, site, context))
+        }
     }
     if func.post.len() > 0 {
         post_scopes := sema_scope_snapshot(scopes)
@@ -696,7 +730,8 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
                     message :: sema_contract_check_expr(clause.message_expr, Type.String, "Post", false, false, environment, program, post_scopes, post_state, &reads, &tail_store, &context, &diagnostics)
                     if message == None -> complete = false
                     if condition == .Val(condition_value) && message == .Val(message_value) {
-                        &post.push(sema_contract_make(TContractKind.Post, condition_value, message_value, environment, program, clause.span, clause.span, context))
+                        site :: sema_contract_site(environment.source_segments, environment.source_file, environment.source_origin, environment.module_identity, expr_span(clause.cond))
+                        &post.push(sema_contract_make(TContractKind.Post, condition_value, message_value, environment, program, clause.span, clause.span, site, context))
                     }
                 }
             }
@@ -704,7 +739,7 @@ fn sema_contract_check_function(func: Func, environment: SemaScopeEnvironment, p
         sema_scope_leave(&post_scopes, &post_state)
     }
     loop (key, _) in reads -> state.used_keys[key] = true
-    SemaContractDeclaration{complete: complete, post: post, result: result}
+    SemaContractDeclaration{complete: complete, post: post, pre: pre, result: result}
 }
 
 fn sema_contract_method_function_for_item(item: Item, target: SymbolID, module_identity: String) -> Func? {
@@ -860,7 +895,9 @@ fn sema_contract_pin_argument(environment: SemaScopeEnvironment, program: SemaPr
     local
 }
 
-fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
+// `target` is the callee's symbol: its clauses' declared sites are read in
+// the callee's own module (sema_contract_pre_sites).
+fn sema_contract_check_call(func: Func, target: SymbolID, args: &[TCallArg], slots: [Int], call_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaContractCall? {
     if func.pre.len() == 0 -> return Val(SemaContractCall{bindings: [TStmt]{}, contracts: [TContract]{}})
     if args.len() != slots.len() -> return None
     if func.params.len() == 0 && args.len() > 0 -> return None
@@ -880,13 +917,20 @@ fn sema_contract_check_call(func: Func, args: &[TCallArg], slots: [Int], call_sp
     fresh_expr_ids :: context.fresh_expr_ids
     context.fresh_expr_ids = true
     reads := [String:Bool]{}
-    loop clause in func.pre {
+    sites :: sema_contract_pre_sites(environment, program, target, func)
+    loop (clause_index, clause) in func.pre {
+        // The declaration already reported `result` in this clause (E0144); checking
+        // it again here would only add an unknown-name report for the same span.
+        if sema_contract_result_ident_in_expr(clause.cond) != None {
+            complete = false
+            next
+        }
         condition :: sema_contract_check_expr(clause.cond, Type.Bool, "Pre", false, true, environment, program, checked_scopes, checked_state, &reads, &tail_store, &context, &diagnostics)
         if condition == None -> complete = false
         message :: sema_contract_check_expr(clause.message_expr, Type.String, "Pre", false, false, environment, program, checked_scopes, checked_state, &reads, &tail_store, &context, &diagnostics)
         if message == None -> complete = false
         if condition == .Val(condition_value) && message == .Val(message_value) {
-            &contracts.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, environment, program, call_span, call_span, context))
+            &contracts.push(sema_contract_make(TContractKind.Pre, condition_value, message_value, environment, program, call_span, call_span, sites[clause_index], context))
         }
     }
     context.fresh_expr_ids = fresh_expr_ids

@@ -10,7 +10,13 @@
 // All patches are staged in memory first and committed file by file with an
 // atomic rename; a failed commit restores the files already written.
 
-use env_overlay_text :: core.text.parse
+use {
+    jet_pkg_model.[AuthorityResolver, CheckedDirectory, OverlayError, PackageOverride, PatchApplication]
+    env_overlay_text :: core.text.parse
+    files :: core.files
+    random :: core.crypto.random
+    sys :: core.sys
+}
 
 OVERLAY_TEMP_ATTEMPTS :: 16
 OVERLAY_TEMP_MODE :: 0o600

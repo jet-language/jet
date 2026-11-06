@@ -1,8 +1,17 @@
-Error [jet.ImportedScriptExecutes]: imported script `helper.jet` has executable top-level statements
+Error [jet.TopLevelStatementsWithoutRun]: Top-level executable statements require an explicit `fn run`
   --> tests/ui/script_imported/run.jet:1:1
     |
   1 | print("dependency")
     | ^^^^^
- Why: imported files provide declarations; executable code belongs in an explicit `fn run`, so an import never gains a hidden side effect.
- Fix: move the statements into the entry file's `fn run`, or import a declaration-only file
+ Why: Jet does not invent a runtime function for ordinary files; only `fn run` executes code
+ Fix: Move the statements into `fn run`
+More: jet-lang.dev/e/E0621
+
+Error [jet.ImportedScriptExecutes]: Imported script `helper.jet` has executable top-level statements
+  --> helper.jet:1:1
+    |
+  1 | print("dependency")
+    | ^^^^^
+ Why: Imported files provide declarations; executable code belongs in an explicit `fn run`, so an import never gains a hidden side effect.
+ Fix: Move the statements into the entry file's `fn run`, or import a declaration-only file
 More: jet-lang.dev/e/E0620

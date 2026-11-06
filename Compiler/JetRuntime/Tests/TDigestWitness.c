@@ -1,4 +1,4 @@
-// Real providers, -pthread -Wl,--wrap=jet_rt_free. Pass TDigestVectors.txt as argv[1].
+// Real providers, -pthread. Pass TDigestVectors.txt as argv[1].
 #include <assert.h>
 #include <inttypes.h>
 #include <math.h>
@@ -18,15 +18,16 @@ extern Text *jet_rt_handle_show_jet_t_digest(TD *);
 extern void jet_rt_native_tdigest_add(TD *,double);
 extern double jet_rt_native_tdigest_quantile(TD *,double);
 extern void jet_rt_string_drop(Text *);
-extern void __real_jet_rt_free(void *,int64_t,int64_t);
+extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
 static TD *watched;
 static Centroid *watched_buffer;
 static int64_t watched_capacity;
 static unsigned shell_frees,buffer_frees;
-void __wrap_jet_rt_free(void *p,int64_t bytes,int64_t align) {
+// The checked heap reports every free it accepts here, the runtime's own
+// included (jet_rt_alloc_check_observe), before it reclaims the block.
+static void observe_free(void *p,int64_t bytes,int64_t align) {
     if(p==watched){assert(bytes==40 && align==8);assert(++shell_frees==1);}
     if(p==watched_buffer){assert(bytes==watched_capacity*16 && align==8);assert(++buffer_frees==1);}
-    __real_jet_rt_free(p,bytes,align);
 }
 static uint64_t bits(double v){uint64_t b;memcpy(&b,&v,8);return b;}
 static double from(uint64_t b){double v;memcpy(&v,&b,8);return v;}
@@ -48,6 +49,7 @@ static void nan_cases(void){
     }
 }
 int main(int argc,char **argv){
+    assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     assert(argc==2);jet_rt_alloc_init();
     TD *td=jet_t_digest_new();watched=td;
     assert(td->refs==1 && td->mutex==0 && td->len==0 && td->capacity==0);

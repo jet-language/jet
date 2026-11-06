@@ -1,0 +1,44 @@
+# #3590 c21: the retired `jetpack build/test/fmt/run/dev` workspace fan-out
+# runs through `jet`. At a `workspace.jet` root, `build`, `test`, `fmt` and
+# `check` cover every member; `run` and `dev` start one program, so a root
+# with two runnable members asks for `-p <member>`.
+fixture: fixtures/root_commands_fan_out_or_pick_a_member
+# A workspace build writes each member's artifact under the member; the kit's
+# artifact check is pointed at member a's from the (empty) root build directory.
+artifact: ../../packages/a/.jet/build/run
+mkdir: .jet/build
+env: NO_COLOR=1
+step: jet build
+exit: 0
+file: packages/a/.jet/build/run is-file # each member's run entry is built
+file: packages/b/.jet/build/run is-file
+remove: packages/a/.jet
+remove: packages/b/.jet
+step: jet build workspace.jet
+exit: 0
+file: packages/a/.jet/build/run is-file # the index names the same workspace build
+file: packages/b/.jet/build/run is-file
+step: jet test
+exit: 0
+stdout: ~ "a test: pass" # every member's tests run
+stdout: ~ "b test: pass" # in index order
+step: jet test workspace.jet
+exit: 0
+stdout: ~ "a test: pass" # the index names the same workspace test
+stdout: ~ "b test: pass" # both members
+step: jet check
+exit: 0
+stderr: ~ "packages/a/run.jet` has no problems" # every member is checked
+stderr: ~ "packages/b/run.jet` has no problems" # both members
+step: jet fmt --check
+exit: 1
+stdout: = "packages/b/run.jet\n" # only the unformatted member file
+step: jet run
+exit: 2
+stderr: ~ "`jet run` is ambiguous — 2 workspace members can run" # one program, so a member is picked
+step: jet run -p a
+exit: 0
+stdout: = "a runs\n"
+step: jet dev
+exit: 2
+stderr: ~ "`jet dev` is ambiguous — 2 workspace members can run" # dev serves one member, too

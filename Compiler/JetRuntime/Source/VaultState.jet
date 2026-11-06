@@ -1,6 +1,6 @@
-// Owned native provider state; layout mirrors SecretsCrypto.rs:543-609.
-// Record key storage is the canonical native Secret, not a Rust Vec/key object.
-// Raw u64 bit words retain the entire reference range (including its high bit).
+// Owned native provider state; Record key storage is the canonical native
+// Secret, not a Rust Vec/key object. Raw u64 bit words retain the entire
+// reference range (including its high bit).
 VAULT_STORE_BYTES :: I64{40}
 VAULT_STORE_UUID :: I64{0}
 VAULT_STORE_REVISION :: I64{16}
@@ -45,8 +45,8 @@ fn vault_put_u64(target: I64, value: I64) {
         at += I64{1}
     }
 }
-// SecretsCrypto.rs:715-744; UTF-8 preflight only protects the raw test boundary.
-// NFC is the shared native provider48a5f5ae9, never Rust JetCString reinterpretation.
+// UTF-8 preflight only protects the raw test boundary. NFC is the shared native
+// provider48a5f5ae9, never Rust JetCString reinterpretation.
 fn vault_validate_text(text: I64, reason: Bool) -> Bool {
     length :: rt_text_len(text)
     limit :: if reason -> I64{256} else -> I64{128}
@@ -369,10 +369,10 @@ fn vault_key_digest(record: I64, digest: I64, scratch: I64) {
     bytes :: jet_rt_secret_bytes(rt_text_word(wrapping(record + VAULT_RECORD_SECRET)))
     vault_key_digest_bytes(rt_text_word(wrapping(record + VAULT_RECORD_TYPE)), rt_text_word(wrapping(bytes + DATA_SEQUENCE_DATA)), I64{32}, digest, scratch)
 }
-// SecretsCrypto.rs:830-861. Caller has validated the record name <=128/key32.
-// Encoder hashes BEFORE validating an optional origin name; that borrowed span
-// is deliberately unbounded here. Prefix<=269 plus tail56 use fixed scratch,
-// and parts4 streams the origin bytes without a concatenation allocation.
+// Caller has validated the record name <=128/key32. Encoder hashes BEFORE
+// validating an optional origin name; that borrowed span is deliberately
+// unbounded here. Prefix<=269 plus tail56 use fixed scratch, and parts4 streams
+// the origin bytes without a concatenation allocation.
 fn vault_record_hash(record: I64, digest: I64, scratch: I64) {
     key_digest :: wrapping(scratch + I64{4192})
     vault_key_digest(record, key_digest, scratch)
@@ -464,9 +464,9 @@ fn vault_record_validate(record: I64, decoded: Bool, scratch: I64) -> I64 {
     I64{-1}
 }
 
-// SecretsCrypto.rs:1492-1514. Canonicalizes owned pair slots by moving owners,
-// never cloning them. Duplicate detection precedes ANY name/value validation.
-// On failure pairs retain their original ordering and out is unchanged.
+// Canonicalizes owned pair slots by moving owners, never cloning them.
+// Duplicate detection precedes ANY name/value validation. On failure pairs
+// retain their original ordering and out is unchanged.
 fn vault_canonical_pairs(pairs: I64, out: I64) -> I64 {
     count :: rt_text_word(wrapping(pairs + DATA_SEQUENCE_LENGTH))
     if (count > VAULT_MAX_STRINGS) -> return vault_error_new(I64{8}, I64{0}, I64{0})
@@ -576,8 +576,8 @@ fn vault_start_hash(kind: I64, bytes: I64, length: I64, out: I64, scratch: I64) 
         rt_sha256_parts(domain, I64{20}, bytes, length, out, scratch)
     }
 }
-// SecretsCrypto.rs:1525-1546. The caller retains the Zeroizing plaintext owner.
-// Outputs adopt one complete store/hash/kind only after every check succeeds.
+// The caller retains the Zeroizing plaintext owner. Outputs adopt one complete
+// store/hash/kind only after every check succeeds.
 fn vault_decode_plaintext(plaintext: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
     bytes :: rt_text_word(wrapping(plaintext + DATA_SEQUENCE_DATA))
     length :: rt_text_word(wrapping(plaintext + DATA_SEQUENCE_LENGTH))
@@ -638,8 +638,8 @@ fn vault_decode_plaintext(plaintext: I64, store_out: I64, hash_out: I64, kind_ou
     jet_rt_free(scratch, I64{624}, I64{8})
     I64{0}
 }
-// SecretsCrypto.rs:1516-1547. Identity and plaintext bytes are real owned
-// sequences; a borrowed E4 view passes identity text without a second copy.
+// Identity and plaintext bytes are real owned sequences; a borrowed E4 view
+// passes identity text without a second copy.
 fn vault_decode_ciphertext_at_root(root: I64, ciphertext: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{40}, I64{8})
     error :: vault_identity_read_at_root(root, scratch)
@@ -666,9 +666,9 @@ fn vault_decode_ciphertext_at_root(root: I64, ciphertext: I64, store_out: I64, h
     jet_rt_free(scratch, I64{40}, I64{8})
     decoded
 }
-// SecretsCrypto.rs:1650-1664. No recipients or identity read on absence.
-// Recovery is deliberately NOT hidden here: the seed's recovered caller must
-// explicitly run its lock-aware recovery before entering this unrecovered path.
+// No recipients or identity read on absence. Recovery is deliberately NOT
+// hidden here: the seed's recovered caller must explicitly run its lock-aware
+// recovery before entering this unrecovered path.
 fn vault_read_contents_unrecovered_at_root(root: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{640}, I64{8})
     name :: wrapping(scratch + I64{576})
@@ -702,16 +702,16 @@ fn vault_read_contents_unrecovered_at_root(root: I64, store_out: I64, hash_out: 
     result
 }
 
-// SecretsCrypto.rs:1666-1672. Recovery errors propagate before any read output
-// is written; callers needing a lock-held snapshot use the unrecovered path.
+// Recovery errors propagate before any read output is written; callers needing
+// a lock-held snapshot use the unrecovered path.
 fn vault_read_contents_at_root(root: I64, store_out: I64, hash_out: I64, kind_out: I64) -> I64 {
     error :: vault_recover_backup_at_root(root)
     if (error != I64{0}) -> return error
     vault_read_contents_unrecovered_at_root(root, store_out, hash_out, kind_out)
 }
 
-// SecretsCrypto.rs:1673-1679. Provider policy stays in the shared recipient
-// decoder. Adopt a snapshot only after both store and provider are available.
+// Provider policy stays in the shared recipient decoder. Adopt a snapshot only
+// after both store and provider are available.
 fn vault_read_at_root(root: I64, store_out: I64, hash_out: I64, provider_out: I64, kind_out: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{88}, I64{8})
     error :: vault_read_contents_at_root(root, scratch, wrapping(scratch + I64{8}), wrapping(scratch + I64{72}))
@@ -748,7 +748,7 @@ fn vault_wall_unix_ms(out: I64, scratch: I64) -> Bool {
     rt_text_store(out, wrapping(seconds * I64{1000} + fraction))
     true
 }
-// SecretsCrypto.rs:2531-2548. Fold EVERY record, not only the active generation.
+// Fold EVERY record, not only the active generation.
 fn vault_lifecycle_unix_ms(store: I64, out: I64) -> I64 {
     scratch :: jet_rt_alloc(I64{80}, I64{8})
     rollback :: vault_writer_fault(I64{8030531024808012899}, I64{118074579774572}, I64{0}, I64{0}, I64{14}, scratch)
@@ -777,7 +777,7 @@ fn vault_lifecycle_unix_ms(store: I64, out: I64) -> I64 {
     jet_rt_free(scratch, I64{80}, I64{8})
     I64{0}
 }
-// SecretsCrypto.rs:2934-2944. Decode and take, never clone the typed strings.
+// Decode and take, never clone the typed strings.
 fn vault_strings_from_plaintext(plaintext: I64, out: I64) -> I64 {
     bytes :: rt_text_word(wrapping(plaintext + DATA_SEQUENCE_DATA))
     length :: rt_text_word(wrapping(plaintext + DATA_SEQUENCE_LENGTH))
@@ -826,8 +826,8 @@ fn vault_revision_overflow(scratch: I64) -> I64 {
     rt_text_store(wrapping(error + VAULT_ERROR_SECOND), I64{0})
     error
 }
-// SecretsCrypto.rs:2945-2984. Canonicalization precedes every filesystem read.
-// Scratch192 tracks all owners; adopted pairs are consumed even on an error.
+// Canonicalization precedes every filesystem read. Scratch192 tracks all
+// owners; adopted pairs are consumed even on an error.
 fn vault_replace_strings_inner(root: I64, scratch: I64) -> I64 {
     pairs :: rt_text_word(scratch)
     canonical_error :: vault_canonical_pairs(pairs, wrapping(scratch + I64{8}))
@@ -871,8 +871,8 @@ fn vault_replace_strings_at_root(root: I64, pairs: I64) -> I64 {
     error
 }
 
-// Existing name-mapped JetVaultKeyRef<T>, SecretsCrypto.rs:453-460.
-// T is phantom: the provider receives its checked key tag as a parameter.
+// Existing name-mapped JetVaultKeyRef<T>. T is phantom: the provider receives
+// its checked key tag as a parameter.
 VAULT_REF_BYTES :: I64{88}
 VAULT_REF_PROVIDER :: I64{0}
 VAULT_REF_UUID :: I64{8}
@@ -1145,7 +1145,7 @@ fn vault_status_at_root(root: I64, reference: I64, key_type: I64, out: I64) -> I
     vault_key_access_at_root(root, reference, key_type, false, out)
 }
 
-// Name-mapped seed carriers, SecretsCrypto.rs:667-694. No runtime T field.
+// Name-mapped seed carriers. No runtime T field.
 VAULT_PLAN_BYTES :: I64{288}
 VAULT_PLAN_ACTION :: I64{0}
 VAULT_PLAN_NAME :: I64{8}
@@ -1485,8 +1485,8 @@ fn vault_authorize_write(plan: I64, key_type: I64, reason: I64, out: I64) -> I64
     I64{0}
 }
 
-// SecretsCrypto.rs:814-828. The active reason is empty/zero; all inactive
-// reasons use one domain-separated algorithm, including the literal rotation.
+// The active reason is empty/zero; all inactive reasons use one
+// domain-separated algorithm, including the literal rotation.
 fn vault_reason_hash_bytes(status: I64, data: I64, length: I64, out: I64, scratch: I64) {
     prefix :: wrapping(scratch + I64{4096})
     rt_text_store(prefix, I64{8391085931256108618})

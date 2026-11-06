@@ -1,7 +1,7 @@
-// The one machine status object every `--json` command writes
-// (crates/jet-foundation/src/Report.rs `StatusValue`, `StatusFields`,
-// `StatusEnvelope::json`, `render_status`, `report_json_string`). Producers
-// build typed values; only this file turns them into JSON bytes.
+// The one machine status object every `--json` command writes (`StatusValue`,
+// `StatusFields`, `StatusEnvelope::json`, `render_status`,
+// `report_json_string`). Producers build typed values; only this file turns
+// them into JSON bytes.
 
 JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
 
@@ -64,9 +64,9 @@ fn jet_cli_status_hex_digit(value: Int) -> String Never! {
     String.from_bytes([U8{87 + value}]) ?? "0"
 }
 
-// Report.rs `report_json_string`: quote and escape one string. Every escaped
-// character is ASCII, so the scan runs over bytes and copies the unescaped
-// runs (UTF-8 sequences included) verbatim.
+// `report_json_string`: quote and escape one string. Every escaped character is
+// ASCII, so the scan runs over bytes and copies the unescaped runs (UTF-8
+// sequences included) verbatim.
 fn jet_cli_json_string(value: String) -> String Never! {
     bytes :: value.bytes()
     output := "\""

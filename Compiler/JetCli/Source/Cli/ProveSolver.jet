@@ -1,0 +1,771 @@
+// `jet prove --lens solver` (D-PROVE-SOLVER1=A, proof-replay-decisions.md
+// "Solver proof boundary"): the native-presburger backend. It reads sema's
+// typed function bodies, never source text, and turns three kinds of claim
+// into obligations: fixed-list indexes sema proved, `#Pre` claims at calls,
+// and `#Post` claims at returns. Each obligation is a normalized formula over
+// integer variables. The search refutes `assumptions && !claim` branch by
+// branch with Fourier-Motzkin elimination and integer splits; a proof keeps a
+// certificate that an independent checker below re-validates, and a failed
+// refutation yields an integer counterexample checked against the formula.
+use {
+    solver_crypto :: core.crypto
+    jet_foundation.[CanonicalJSON, canonical_json_parse, foundation_json_quote]
+}
+
+// Fixed work bounds (one obligation each, except the obligation count).
+JET_CLI_SOLVER_MAX_OBLIGATIONS :: 10000
+JET_CLI_SOLVER_MAX_TERMS :: 50000
+JET_CLI_SOLVER_MAX_VARIABLES :: 256
+JET_CLI_SOLVER_MAX_STEPS :: 1000000
+JET_CLI_SOLVER_BACKEND :: "native-presburger"
+JET_CLI_SOLVER_BACKEND_VERSION :: "1"
+// Checked i128: every coefficient and constant stays inside it.
+JET_CLI_SOLVER_I128_MAX :: 170141183460469231731687303715884105727
+JET_CLI_SOLVER_I128_MIN :: -170141183460469231731687303715884105728
+// 256-bit source literals: a literal outside is a structural limit.
+JET_CLI_SOLVER_LITERAL_MAX :: 57896044618658097711785492504343953926634992332820282019728792003956564819967
+JET_CLI_SOLVER_LITERAL_MIN :: -57896044618658097711785492504343953926634992332820282019728792003956564819968
+
+// Why a search stopped without an answer: `coefficient_overflow`,
+// `step_limit`, `structural_limit`, `unsupported_formula` or
+// `machine_overflow`.
+#Error
+struct JetCLISolverUnknown {
+    reason: String
+    // Plain words for an `unsupported_formula`: what the solver can't read.
+    detail: String{""}
+}
+
+struct JetCLISolverTerm {
+    variable: String
+    coefficient: Int
+}
+
+// `constant + sum(coefficient * variable)`, terms sorted by variable bytes,
+// no zero coefficient.
+struct JetCLISolverAffine {
+    constant: Int
+    terms: [JetCLISolverTerm]
+}
+
+// `affine <relation> 0` with relation `le`, `eq` or `ne`.
+struct JetCLISolverAtom {
+    affine: JetCLISolverAffine
+    relation: String
+}
+
+enum JetCLISolverBool {
+    Constant(Bool)
+    Atom(JetCLISolverAtom)
+    And([JetCLISolverBool])
+    Or([JetCLISolverBool])
+}
+
+struct JetCLISolverFormula {
+    assumptions: JetCLISolverBool
+    claim: JetCLISolverBool
+}
+
+fn jet_cli_solver_unknown(reason: String) -> JetCLISolverUnknown Never! {
+    JetCLISolverUnknown{reason: reason}
+}
+
+fn jet_cli_solver_checked(value: Int) -> Int JetCLISolverUnknown! {
+    if value > JET_CLI_SOLVER_I128_MAX || value < JET_CLI_SOLVER_I128_MIN -> return Err(jet_cli_solver_unknown("coefficient_overflow"))
+    Ok(value)
+}
+
+// `left + factor * right`, in checked i128 arithmetic.
+fn jet_cli_solver_combine(left: JetCLISolverAffine, factor: Int, right: JetCLISolverAffine) -> JetCLISolverAffine JetCLISolverUnknown! {
+    terms := [JetCLISolverTerm]{}
+    i := 0
+    j := 0
+    loop i < left.terms.len() || j < right.terms.len() {
+        take_left :: j >= right.terms.len() || (i < left.terms.len() && left.terms[i].variable < right.terms[j].variable)
+        take_right :: i >= left.terms.len() || (j < right.terms.len() && right.terms[j].variable < left.terms[i].variable)
+        if take_left {
+            &terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: left.terms[i].coefficient})
+            i += 1
+        } else if take_right {
+            scaled :: jet_cli_solver_checked(factor * right.terms[j].coefficient)
+            if scaled != 0 -> &terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
+            j += 1
+        } else {
+            sum :: jet_cli_solver_checked(left.terms[i].coefficient + jet_cli_solver_checked(factor * right.terms[j].coefficient))
+            if sum != 0 -> &terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
+            i += 1
+            j += 1
+        }
+    }
+    Ok(JetCLISolverAffine{constant: jet_cli_solver_checked(left.constant + jet_cli_solver_checked(factor * right.constant)), terms: terms})
+}
+
+fn jet_cli_solver_constant(value: Int) -> JetCLISolverAffine Never! {
+    JetCLISolverAffine{constant: value, terms: [JetCLISolverTerm]{}}
+}
+
+fn jet_cli_solver_variable(name: String) -> JetCLISolverAffine Never! {
+    JetCLISolverAffine{constant: 0, terms: [JetCLISolverTerm]{JetCLISolverTerm{variable: name, coefficient: 1}}}
+}
+
+fn jet_cli_solver_scale(value: JetCLISolverAffine, factor: Int) -> JetCLISolverAffine JetCLISolverUnknown! {
+    jet_cli_solver_combine(jet_cli_solver_constant(0), factor, value)
+}
+
+fn jet_cli_solver_gcd(left: Int, right: Int) -> Int Never! {
+    a := if left < 0 -> -left else -> left
+    b := if right < 0 -> -right else -> right
+    loop b != 0 {
+        r :: a - (a /% b) * b
+        a = b
+        b = r
+    }
+    a
+}
+
+// Atoms normalize over the integers: the coefficients share no factor, so
+// `3x + 1 <= 0` is `x + 1 <= 0`; an `eq` whose factor misses the constant
+// is false and such a `ne` is true. An `eq` or `ne` keeps one sign: its
+// first coefficient is positive.
+fn jet_cli_solver_atom(affine: JetCLISolverAffine, relation: String) -> JetCLISolverBool JetCLISolverUnknown! {
+    g := 0
+    loop term in affine.terms -> g = jet_cli_solver_gcd(g, term.coefficient)
+    reduced := affine.copy()
+    if g > 1 {
+        terms := [JetCLISolverTerm]{}
+        loop term in affine.terms -> &terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+        constant :: if relation == "le" -> -((-affine.constant) /% g) else -> affine.constant /% g
+        if relation != "le" && constant * g != affine.constant -> return Ok(JetCLISolverBool.Constant(relation == "ne"))
+        reduced = JetCLISolverAffine{constant: constant, terms: terms}
+    }
+    if relation == "le" -> return Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: reduced, relation: relation}))
+    flip :: reduced.terms.len() > 0 && reduced.terms[0].coefficient < 0
+    Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: if flip -> jet_cli_solver_scale(reduced, -1) else -> reduced, relation: relation}))
+}
+
+// `lhs <op> rhs` as a normalized atom, op one of `<`, `<=`, `>`, `>=`, `==`,
+// `!=` (TBinaryOp Lt Le Gt Ge Eq Ne).
+fn jet_cli_solver_compare(lhs: JetCLISolverAffine, op: String, rhs: JetCLISolverAffine) -> JetCLISolverBool JetCLISolverUnknown! {
+    difference :: jet_cli_solver_combine(lhs, -1, rhs)
+    if op == {
+        "<" -> jet_cli_solver_atom(jet_cli_solver_combine(difference, 1, jet_cli_solver_constant(1)), "le")
+        "<=" -> jet_cli_solver_atom(difference, "le")
+        ">" -> jet_cli_solver_atom(jet_cli_solver_combine(jet_cli_solver_scale(difference, -1), 1, jet_cli_solver_constant(1)), "le")
+        ">=" -> jet_cli_solver_atom(jet_cli_solver_scale(difference, -1), "le")
+        "==" -> jet_cli_solver_atom(difference, "eq")
+        else -> jet_cli_solver_atom(difference, "ne")
+    }
+}
+
+// --- canonical formula bytes --------------------------------------------------
+
+fn jet_cli_solver_terms_json(value: JetCLISolverAffine) -> String Never! {
+    terms := [String]{}
+    loop term in value.terms -> &terms.push("{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}")
+    "[{terms.join(",")}]"
+}
+
+fn jet_cli_solver_affine_json(value: JetCLISolverAffine) -> String Never! {
+    "{{\"constant\":\"{value.constant}\",\"terms\":{jet_cli_solver_terms_json(value)}}}"
+}
+
+fn jet_cli_solver_bool_json(node: JetCLISolverBool) -> String Never! {
+    if node == {
+        .Constant(value) -> "{{\"constant\":{value}}}"
+        .Atom(atom) -> "{{\"affine\":{jet_cli_solver_affine_json(atom.affine)},\"relation\":\"{atom.relation}\"}}"
+        .And(children) -> jet_cli_solver_list_json("and", children)
+        .Or(children) -> jet_cli_solver_list_json("or", children)
+    }
+}
+
+fn jet_cli_solver_list_json(op: String, children: [JetCLISolverBool]) -> String Never! {
+    parts := [String]{}
+    loop child in children -> &parts.push(jet_cli_solver_bool_json(child))
+    "{{\"children\":[{parts.join(",")}],\"op\":\"{op}\"}}"
+}
+
+// The formula's A-canonical JSON, without the trailing LF its hash adds.
+fn jet_cli_solver_formula_json(formula: JetCLISolverFormula) -> String Never! {
+    "{{\"assumptions\":{jet_cli_solver_bool_json(formula.assumptions)},\"claim\":{jet_cli_solver_bool_json(formula.claim)}}}"
+}
+
+fn jet_cli_solver_formula_sha256(formula: JetCLISolverFormula) -> String Never! {
+    solver_crypto.sha256("{jet_cli_solver_formula_json(formula)}\n".bytes()).hex()
+}
+
+// A normalized formula: each side an `and` node, flattened, deduplicated and
+// sorted (jet_cli_solver_normalize).
+fn jet_cli_solver_formula(assumptions: [JetCLISolverBool], claim: [JetCLISolverBool]) -> JetCLISolverFormula Never! {
+    JetCLISolverFormula{
+        assumptions: jet_cli_solver_normalize(JetCLISolverBool.And(assumptions)),
+        claim: jet_cli_solver_normalize(JetCLISolverBool.And(claim)),
+    }
+}
+
+// One child and its sort key: atoms first, by their terms' bytes, then
+// constant (numeric), then relation; other nodes after, by canonical bytes.
+// `node` indexes the child list, so the sort moves only these keys.
+struct JetCLISolverKeyed {
+    rank: Int
+    key: String
+    constant: Int
+    relation: String
+    text: String
+    node: Int
+}
+
+fn jet_cli_solver_keyed_order(left: JetCLISolverKeyed, right: JetCLISolverKeyed) -> Ordering Never! {
+    if left.rank != right.rank -> return left.rank <=> right.rank
+    if left.key != right.key -> return left.key <=> right.key
+    if left.constant != right.constant -> return left.constant <=> right.constant
+    left.relation <=> right.relation
+}
+
+fn jet_cli_solver_normalize(node: JetCLISolverBool) -> JetCLISolverBool Never! {
+    if node == {
+        .And(children) -> jet_cli_solver_normalize_list(true, children)
+        .Or(children) -> jet_cli_solver_normalize_list(false, children)
+        else -> node.copy()
+    }
+}
+
+// Flattened, deduplicated and sorted children; `conj` is `and`. A constant
+// that decides the node replaces it; the other constant drops.
+fn jet_cli_solver_normalize_list(conj: Bool, children: [JetCLISolverBool]) -> JetCLISolverBool Never! {
+    keyed := [JetCLISolverKeyed]{}
+    nodes := [JetCLISolverBool]{}
+    loop child in children {
+        normal :: jet_cli_solver_normalize(child)
+        flat := [JetCLISolverBool]{}
+        if normal == {
+            .Constant(value) -> {
+                if value != conj -> return JetCLISolverBool.Constant(value)
+            }
+            .And(inner) -> if conj -> flat = inner.copy() else -> &flat.push(normal.copy())
+            .Or(inner) -> if conj -> &flat.push(normal.copy()) else -> flat = inner.copy()
+            .Atom(_) -> &flat.push(normal.copy())
+        }
+        loop item in flat {
+            text :: jet_cli_solver_bool_json(item)
+            if item == {
+                .Atom(atom) -> &keyed.push(JetCLISolverKeyed{rank: 0, key: jet_cli_solver_terms_json(atom.affine), constant: atom.affine.constant, relation: atom.relation.copy(), text: text, node: nodes.len()})
+                else -> &keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
+            }
+            &nodes.push(item.copy())
+        }
+    }
+    // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
+    &keyed.sort_by((left: JetCLISolverKeyed, right: JetCLISolverKeyed) -> jet_cli_solver_keyed_order(left, right))
+    out := [JetCLISolverBool]{}
+    loop (index, item) in keyed {
+        if index > 0 && keyed[index - 1].text == item.text -> next
+        &out.push(nodes[item.node].copy())
+    }
+    if conj -> JetCLISolverBool.And(out) else -> JetCLISolverBool.Or(out)
+}
+
+// `!node` in negation normal form, children kept in order.
+fn jet_cli_solver_negate(node: JetCLISolverBool) -> JetCLISolverBool JetCLISolverUnknown! {
+    if node == {
+        .Constant(value) -> Ok(JetCLISolverBool.Constant(!value))
+        .Atom(atom) -> {
+            if atom.relation == "le" -> return Ok(JetCLISolverBool.Atom(JetCLISolverAtom{affine: jet_cli_solver_combine(jet_cli_solver_constant(1), -1, atom.affine), relation: "le"}))
+            jet_cli_solver_atom(atom.affine, if atom.relation == "eq" -> "ne" else -> "eq")
+        }
+        .And(children) -> {
+            out := [JetCLISolverBool]{}
+            loop child in children -> &out.push(jet_cli_solver_negate(child))
+            Ok(JetCLISolverBool.Or(out))
+        }
+        .Or(children) -> {
+            out := [JetCLISolverBool]{}
+            loop child in children -> &out.push(jet_cli_solver_negate(child))
+            Ok(JetCLISolverBool.And(out))
+        }
+    }
+}
+
+// The formula's term and variable counts, for the structural limits.
+fn jet_cli_solver_term_count(node: JetCLISolverBool) -> Int Never! {
+    if node == {
+        .Constant(_) -> 0
+        .Atom(atom) -> atom.affine.terms.len()
+        .And(children) -> (loop child in children -> jet_cli_solver_term_count(child)).sum()
+        .Or(children) -> (loop child in children -> jet_cli_solver_term_count(child)).sum()
+    }
+}
+
+// --- search -------------------------------------------------------------------
+
+// Step accounting: one step is charged before each action, and the limit is
+// checked first.
+struct JetCLISolverSteps {
+    used: Int
+    limit: Int
+}
+
+fn jet_cli_solver_charge(steps: &JetCLISolverSteps) -> Bool JetCLISolverUnknown! {
+    if steps.used >= steps.limit -> return Err(jet_cli_solver_unknown("step_limit"))
+    steps.used += 1
+    Ok(true)
+}
+
+// The branches of `node` (its disjunctive normal form): each branch is the
+// list of `affine <= 0` inequalities, in the node's order.
+fn jet_cli_solver_branches(node: JetCLISolverBool, steps: &JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
+    if node == {
+        .Constant(value) -> Ok(if value -> [[JetCLISolverAffine]]{[JetCLISolverAffine]{}} else -> [[JetCLISolverAffine]]{})
+        .Atom(atom) -> {
+            if atom.relation == "le" -> return Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{atom.affine}})
+            negated :: jet_cli_solver_scale(atom.affine, -1)
+            if atom.relation == "eq" -> return Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{atom.affine, negated}})
+            Ok([[JetCLISolverAffine]]{[JetCLISolverAffine]{jet_cli_solver_combine(atom.affine, 1, jet_cli_solver_constant(1))}, [JetCLISolverAffine]{jet_cli_solver_combine(negated, 1, jet_cli_solver_constant(1))}})
+        }
+        .Or(children) -> {
+            out := [[JetCLISolverAffine]]{}
+            loop child in children {
+                loop branch in jet_cli_solver_branches(child, &steps) {
+                    _ :: jet_cli_solver_charge(&steps)
+                    &out.push(branch)
+                }
+            }
+            Ok(out)
+        }
+        .And(children) -> {
+            out := [[JetCLISolverAffine]]{[JetCLISolverAffine]{}}
+            loop child in children {
+                right :: jet_cli_solver_branches(child, &steps)
+                next_out := [[JetCLISolverAffine]]{}
+                loop left in out {
+                    loop extra in right {
+                        _ :: jet_cli_solver_charge(&steps)
+                        joined := left
+                        loop item in extra -> &joined.push(item)
+                        &next_out.push(joined)
+                    }
+                }
+                out = next_out
+            }
+            Ok(out)
+        }
+    }
+}
+
+// The branches the search refutes: `assumptions && !claim`.
+fn jet_cli_solver_formula_branches(formula: JetCLISolverFormula, steps: &JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
+    negated :: jet_cli_solver_negate(formula.claim)
+    jet_cli_solver_branches(JetCLISolverBool.And([JetCLISolverBool]{formula.assumptions, negated}), &steps)
+}
+
+// One derived inequality and the nonnegative multipliers of the branch's
+// inequalities that sum to it.
+struct JetCLISolverDerived {
+    affine: JetCLISolverAffine
+    multipliers: [Int]
+}
+
+struct JetCLISolverValue {
+    name: String
+    value: Int
+}
+
+// One search over a branch: refuted, satisfied, or split on a variable that
+// has no integer between its bounds.
+enum JetCLISolverSearch {
+    Unsat([Int])
+    Sat([JetCLISolverValue])
+    Split(JetCLISolverValue)
+}
+
+fn jet_cli_solver_coefficient(value: JetCLISolverAffine, variable: String) -> Int Never! {
+    loop term in value.terms {
+        if term.variable == variable -> return term.coefficient
+    }
+    0
+}
+
+// `row` divided by the greatest common divisor of its coefficients, constant
+// and multipliers, so every number stays an integer.
+fn jet_cli_solver_reduce(row: JetCLISolverDerived) -> JetCLISolverDerived Never! {
+    g := row.affine.constant
+    loop term in row.affine.terms -> g = jet_cli_solver_gcd(g, term.coefficient)
+    loop m in row.multipliers -> g = jet_cli_solver_gcd(g, m)
+    if g <= 1 -> return row.copy()
+    terms := [JetCLISolverTerm]{}
+    loop term in row.affine.terms -> &terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+    multipliers := [Int]{}
+    loop m in row.multipliers -> &multipliers.push(m /% g)
+    JetCLISolverDerived{affine: JetCLISolverAffine{constant: row.affine.constant /% g, terms: terms}, multipliers: multipliers}
+}
+
+fn jet_cli_solver_variables(ineqs: [JetCLISolverAffine]) -> [String] Never! {
+    names := [String]{}
+    loop ineq in ineqs {
+        loop term in ineq.terms {
+            if !names.contains(term.variable) -> &names.push(term.variable)
+        }
+    }
+    &names.sort_by((left: String, right: String) -> left <=> right)
+    names
+}
+
+// Fourier-Motzkin elimination in variable-name order, keeping each derived
+// row's multipliers. A row `0 < c <= 0` refutes the branch. Otherwise the
+// branch holds over the rationals, and back-substitution picks integers or
+// names the variable to split.
+fn jet_cli_solver_refute(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps) -> JetCLISolverSearch JetCLISolverUnknown! {
+    count :: ineqs.len()
+    rows := [JetCLISolverDerived]{}
+    loop (index, ineq) in ineqs {
+        multipliers :: loop k in 0..<count -> if k == index -> 1 else -> 0
+        &rows.push(JetCLISolverDerived{affine: ineq, multipliers: multipliers})
+    }
+    loop row in rows {
+        if row.affine.terms.len() == 0 {
+            _ :: jet_cli_solver_charge(&steps)
+            if row.affine.constant > 0 -> return Ok(JetCLISolverSearch.Unsat(row.multipliers))
+        }
+    }
+    vars :: jet_cli_solver_variables(ineqs)
+    stages := [[JetCLISolverDerived]]{}
+    loop variable in vars {
+        &stages.push(rows)
+        positive := [JetCLISolverDerived]{}
+        negative := [JetCLISolverDerived]{}
+        next_rows := [JetCLISolverDerived]{}
+        loop row in rows {
+            c :: jet_cli_solver_coefficient(row.affine, variable)
+            if c > 0 -> &positive.push(row) else if c < 0 -> &negative.push(row) else -> &next_rows.push(row)
+        }
+        loop p in positive {
+            loop q in negative {
+                _ :: jet_cli_solver_charge(&steps)
+                cp :: jet_cli_solver_coefficient(p.affine, variable)
+                cq :: -jet_cli_solver_coefficient(q.affine, variable)
+                combined :: jet_cli_solver_combine(jet_cli_solver_scale(p.affine, cq), cp, q.affine)
+                multipliers := [Int]{}
+                loop k in 0..<count -> &multipliers.push(jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k]))
+                row :: jet_cli_solver_reduce(JetCLISolverDerived{affine: combined, multipliers: multipliers})
+                if row.affine.terms.len() == 0 {
+                    _ :: jet_cli_solver_charge(&steps)
+                    if row.affine.constant > 0 -> return Ok(JetCLISolverSearch.Unsat(row.multipliers))
+                    next
+                }
+                &next_rows.push(row)
+            }
+        }
+        rows = next_rows
+    }
+    values := [JetCLISolverValue]{}
+    stage := vars.len() - 1
+    loop stage >= 0 {
+        variable :: vars[stage]
+        lo := Int?{None}
+        hi := Int?{None}
+        loop row in stages[stage] {
+            c :: jet_cli_solver_coefficient(row.affine, variable)
+            if c == 0 -> next
+            rest := row.affine.constant
+            loop term in row.affine.terms {
+                if term.variable == variable -> next
+                loop known in values {
+                    if known.name == term.variable -> rest = jet_cli_solver_checked(rest + jet_cli_solver_checked(term.coefficient * known.value))
+                }
+            }
+            if c > 0 {
+                bound :: (-rest) /% c
+                hi = if hi == .Val(old) && old < bound -> Val(old) else -> Val(bound)
+            } else {
+                bound :: -((-rest) /% (-c))
+                lo = if lo == .Val(old) && old > bound -> Val(old) else -> Val(bound)
+            }
+        }
+        value :: jet_cli_solver_pick(lo, hi) ?? return Ok(JetCLISolverSearch.Split(JetCLISolverValue{name: variable, value: hi ?? 0}))
+        &values.push(JetCLISolverValue{name: variable, value: value})
+        stage -= 1
+    }
+    Ok(JetCLISolverSearch.Sat(values))
+}
+
+// The canonical small witness in `lo..hi`: 1 when it fits, else the bound
+// nearest to 1; None when no integer fits.
+fn jet_cli_solver_pick(lo: Int?, hi: Int?) -> Int? Never! {
+    low :: lo ?? (if hi == .Val(top) && top < 1 -> top else -> 1)
+    high :: hi ?? (if low > 1 -> low else -> 1)
+    if low > high -> return None
+    if low <= 1 && 1 <= high -> return Val(1)
+    Val(if low > 1 -> low else -> high)
+}
+
+enum JetCLISolverProof {
+    Pending
+    Contradiction([Int])
+    Split(JetCLISolverSplit)
+}
+
+struct JetCLISolverSplit {
+    variable: String
+    pivot: Int
+    left: Int
+    right: Int
+}
+
+struct JetCLISolverTask {
+    node: Int
+    ineqs: [JetCLISolverAffine]
+}
+
+// A backend answer: `proved` with its certificate, `disproved` with every
+// formula variable's value, or `unknown` with its reason.
+enum JetCLISolverOutcome {
+    Proved(JetCLISolverProved)
+    Disproved(JetCLISolverDisproved)
+    Unknown(JetCLISolverUnknownAt)
+}
+
+struct JetCLISolverProved {
+    certificate: String
+    steps: Int
+}
+
+struct JetCLISolverDisproved {
+    values: [JetCLISolverValue]
+    steps: Int
+}
+
+struct JetCLISolverUnknownAt {
+    reason: String
+    steps: Int
+}
+
+// The structural limits are checked before any search step: a formula over
+// them is `structural_limit` with 0 steps.
+fn jet_cli_solver_prove(formula: JetCLISolverFormula) -> JetCLISolverOutcome Never! {
+    if jet_cli_solver_term_count(formula.assumptions) + jet_cli_solver_term_count(formula.claim) > JET_CLI_SOLVER_MAX_TERMS || jet_cli_solver_complete(formula, [JetCLISolverValue]{}).len() > JET_CLI_SOLVER_MAX_VARIABLES {
+        return JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: "structural_limit", steps: 0})
+    }
+    steps := JetCLISolverSteps{used: 0, limit: JET_CLI_SOLVER_MAX_STEPS}
+    jet_cli_solver_search(formula, &steps) ?? JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: err.reason, steps: steps.used})
+}
+
+// Canonical FIFO branch search over `assumptions && !claim`: every task is a
+// branch or a split child; every task refuted proves the claim. A split at
+// `pivot` adds `x - pivot <= 0` on the left and `pivot + 1 - x <= 0` on the
+// right, each as the branch's next inequality.
+fn jet_cli_solver_search(formula: JetCLISolverFormula, steps: &JetCLISolverSteps) -> JetCLISolverOutcome JetCLISolverUnknown! {
+    branches :: jet_cli_solver_formula_branches(formula, &steps)
+    proofs := [JetCLISolverProof]{}
+    queue := [JetCLISolverTask]{}
+    loop branch in branches {
+        &queue.push(JetCLISolverTask{node: proofs.len(), ineqs: branch})
+        &proofs.push(JetCLISolverProof.Pending)
+    }
+    head := 0
+    loop head < queue.len() {
+        _ :: jet_cli_solver_charge(&steps)
+        task :: queue[head].copy()
+        head += 1
+        found :: jet_cli_solver_refute(task.ineqs, &steps)
+        if found == {
+            .Unsat(multipliers) -> proofs[task.node] = JetCLISolverProof.Contradiction(multipliers.copy())
+            .Sat(values) -> return Ok(JetCLISolverOutcome.Disproved(JetCLISolverDisproved{values: jet_cli_solver_complete(formula, values.copy()), steps: steps.used}))
+            .Split(at) -> {
+                _ :: jet_cli_solver_charge(&steps)
+                left := task.ineqs.copy()
+                &left.push(jet_cli_solver_split_left(at.name, at.value))
+                left_node :: proofs.len()
+                &proofs.push(JetCLISolverProof.Pending)
+                &queue.push(JetCLISolverTask{node: left_node, ineqs: left})
+                _ :: jet_cli_solver_charge(&steps)
+                right := task.ineqs.copy()
+                &right.push(jet_cli_solver_split_right(at.name, at.value))
+                right_node :: proofs.len()
+                &proofs.push(JetCLISolverProof.Pending)
+                &queue.push(JetCLISolverTask{node: right_node, ineqs: right})
+                proofs[task.node] = JetCLISolverProof.Split(JetCLISolverSplit{variable: at.name, pivot: at.value, left: left_node, right: right_node})
+            }
+        }
+    }
+    parts := [String]{}
+    loop (index, _) in branches -> &parts.push("{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}")
+    Ok(JetCLISolverOutcome.Proved(JetCLISolverProved{certificate: "{{\"branches\":[{parts.join(",")}],\"kind\":\"branches\"}}", steps: steps.used}))
+}
+
+fn jet_cli_solver_split_left(variable: String, pivot: Int) -> JetCLISolverAffine JetCLISolverUnknown! {
+    jet_cli_solver_combine(jet_cli_solver_variable(variable), 1, jet_cli_solver_constant(-pivot))
+}
+
+fn jet_cli_solver_split_right(variable: String, pivot: Int) -> JetCLISolverAffine JetCLISolverUnknown! {
+    jet_cli_solver_combine(jet_cli_solver_scale(jet_cli_solver_variable(variable), -1), 1, jet_cli_solver_constant(jet_cli_solver_checked(pivot + 1)))
+}
+
+fn jet_cli_solver_proof_json(proofs: [JetCLISolverProof], node: Int) -> String Never! {
+    if proofs[node] == {
+        .Contradiction(multipliers) -> {
+            terms := [String]{}
+            loop (index, m) in multipliers {
+                if m != 0 -> &terms.push("{{\"inequalityIndex\":{index},\"multiplier\":\"{m}\"}}")
+            }
+            "{{\"kind\":\"linear_contradiction\",\"terms\":[{terms.join(",")}]}}"
+        }
+        .Split(split) -> "{{\"kind\":\"split\",\"left\":{jet_cli_solver_proof_json(proofs, split.left)},\"pivot\":\"{split.pivot}\",\"right\":{jet_cli_solver_proof_json(proofs, split.right)},\"variable\":{foundation_json_quote(split.variable)}}}"
+        .Pending -> panic("solver proof node {node} was never settled")
+    }
+}
+
+// Every formula variable, its branch value or 1, in name order.
+fn jet_cli_solver_complete(formula: JetCLISolverFormula, values: [JetCLISolverValue]) -> [JetCLISolverValue] Never! {
+    affines := [JetCLISolverAffine]{}
+    jet_cli_solver_collect_affines(formula.assumptions, &affines)
+    jet_cli_solver_collect_affines(formula.claim, &affines)
+    out := [JetCLISolverValue]{}
+    loop name in jet_cli_solver_variables(affines) {
+        value := 1
+        loop known in values {
+            if known.name == name -> value = known.value
+        }
+        &out.push(JetCLISolverValue{name: name, value: value})
+    }
+    out
+}
+
+fn jet_cli_solver_collect_affines(node: JetCLISolverBool, out: &[JetCLISolverAffine]) Never! {
+    if node == {
+        .Atom(atom) -> &out.push(atom.affine)
+        .And(children) -> loop child in children -> jet_cli_solver_collect_affines(child, &out)
+        .Or(children) -> loop child in children -> jet_cli_solver_collect_affines(child, &out)
+        .Constant(_) -> {}
+    }
+}
+
+// --- independent checks -------------------------------------------------------
+
+// Exact integer evaluation of `node` under `values` (a missing variable is 0).
+fn jet_cli_solver_eval(node: JetCLISolverBool, values: [JetCLISolverValue]) -> Bool Never! {
+    if node == {
+        .Constant(value) -> value
+        .Atom(atom) -> {
+            total := atom.affine.constant
+            loop term in atom.affine.terms {
+                loop known in values {
+                    if known.name == term.variable -> total += term.coefficient * known.value
+                }
+            }
+            if atom.relation == {
+                "le" -> total <= 0
+                "eq" -> total == 0
+                else -> total != 0
+            }
+        }
+        .And(children) -> {
+            loop child in children {
+                if !jet_cli_solver_eval(child, values) -> return false
+            }
+            true
+        }
+        .Or(children) -> {
+            loop child in children {
+                if jet_cli_solver_eval(child, values) -> return true
+            }
+            false
+        }
+    }
+}
+
+// A counterexample holds when it satisfies every assumption and makes the
+// claim false.
+fn jet_cli_solver_counterexample_holds(formula: JetCLISolverFormula, values: [JetCLISolverValue]) -> Bool Never! {
+    jet_cli_solver_eval(formula.assumptions, values) && !jet_cli_solver_eval(formula.claim, values)
+}
+
+// The certificate checker: reads `certificate` as A-canonical JSON, rebuilds
+// the branches of `formula`, and checks every proof node against them. A
+// contradiction's positive multipliers, at strictly increasing indexes, must
+// sum the inequalities to `c <= 0` with no terms and `c > 0`. A split must
+// name a variable of its inequalities.
+fn jet_cli_solver_certificate_valid(formula: JetCLISolverFormula, certificate: String) -> Bool Never! {
+    parsed :: canonical_json_parse("{certificate}\n".bytes()) ?? return false
+    top :: jet_cli_solver_fields(parsed, [String]{"branches", "kind"}) ?? return false
+    if !jet_cli_solver_json_text(top[1], "branches") -> return false
+    items :: jet_cli_solver_json_array(top[0]) ?? return false
+    steps := JetCLISolverSteps{used: 0, limit: JET_CLI_SOLVER_I128_MAX}
+    branches :: jet_cli_solver_formula_branches(formula, &steps) ?? return false
+    if items.len() != branches.len() -> return false
+    loop (index, item) in items {
+        node :: jet_cli_solver_fields(item, [String]{"branchIndex", "proof"}) ?? return false
+        if jet_cli_solver_json_int(node[0]) != Val(index) -> return false
+        if !jet_cli_solver_proof_valid(node[1], branches[index]) -> return false
+    }
+    true
+}
+
+fn jet_cli_solver_proof_valid(proof: CanonicalJSON, ineqs: [JetCLISolverAffine]) -> Bool Never! {
+    contradiction :: jet_cli_solver_fields(proof, [String]{"kind", "terms"})
+    if contradiction == .Val(fields) {
+        if !jet_cli_solver_json_text(fields[0], "linear_contradiction") -> return false
+        terms :: jet_cli_solver_json_array(fields[1]) ?? return false
+        sum := jet_cli_solver_constant(0)
+        last := -1
+        loop term in terms {
+            parts :: jet_cli_solver_fields(term, [String]{"inequalityIndex", "multiplier"}) ?? return false
+            index :: jet_cli_solver_json_int(parts[0]) ?? return false
+            multiplier :: jet_cli_solver_json_decimal(parts[1]) ?? return false
+            if index <= last || index >= ineqs.len() || multiplier <= 0 -> return false
+            last = index
+            sum = jet_cli_solver_combine(sum, multiplier, ineqs[index]) ?? return false
+        }
+        return sum.terms.len() == 0 && sum.constant > 0
+    }
+    fields :: jet_cli_solver_fields(proof, [String]{"kind", "left", "pivot", "right", "variable"}) ?? return false
+    if !jet_cli_solver_json_text(fields[0], "split") -> return false
+    pivot :: jet_cli_solver_json_decimal(fields[2]) ?? return false
+    variable :: jet_cli_solver_json_string(fields[4]) ?? return false
+    occurs :: loop ineq in ineqs -> if jet_cli_solver_coefficient(ineq, variable) != 0 -> 1 else -> 0
+    if occurs.sum() == 0 -> return false
+    left := ineqs
+    &left.push(jet_cli_solver_split_left(variable, pivot) ?? return false)
+    right := ineqs
+    &right.push(jet_cli_solver_split_right(variable, pivot) ?? return false)
+    jet_cli_solver_proof_valid(fields[1], left) && jet_cli_solver_proof_valid(fields[3], right)
+}
+
+// The values of an object with exactly `keys` (sorted), or None.
+fn jet_cli_solver_fields(value: CanonicalJSON, keys: [String]) -> [CanonicalJSON]? Never! {
+    if value == {
+        .Object(fields) -> {
+            if fields.len() != keys.len() -> return None
+            loop (index, field) in fields {
+                if field.key != keys[index] -> return None
+            }
+            Val(loop field in fields -> field.value.copy())
+        }
+        else -> None
+    }
+}
+
+fn jet_cli_solver_json_text(value: CanonicalJSON, expected: String) -> Bool Never! {
+    if value == .String(text) -> text == expected else -> false
+}
+
+fn jet_cli_solver_json_array(value: CanonicalJSON) -> [CanonicalJSON]? Never! {
+    if value == .Array(values) -> Val(values.copy()) else -> None
+}
+
+fn jet_cli_solver_json_string(value: CanonicalJSON) -> String? Never! {
+    if value == .String(text) -> Val(text.copy()) else -> None
+}
+
+fn jet_cli_solver_json_int(value: CanonicalJSON) -> Int? Never! {
+    text :: if value == .Integer(found) -> Val(found.copy()) else -> None
+    digits :: text ?? return None
+    number :: Int.parse(digits) ?? return None
+    Val(number)
+}
+
+// A decimal string in canonical form (no sign but `-`, no leading zero).
+fn jet_cli_solver_json_decimal(value: CanonicalJSON) -> Int? Never! {
+    text :: jet_cli_solver_json_string(value) ?? return None
+    number :: Int.parse(text) ?? return None
+    if "{number}" != text -> return None
+    Val(number)
+}

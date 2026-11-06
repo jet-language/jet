@@ -63,7 +63,7 @@ fn sema_job_schedule_duration_int(value: Int, unit: SemaRegistrationUnitFact) ->
 fn sema_job_schedule_duration_float(value: Float, unit: SemaRegistrationUnitFact) -> SemaJobScheduleResolution {
     if !math.is_finite(value) || value <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}
     if unit.scale.numerator <= 0 || unit.scale.denominator <= 0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
-    nanos := value * Float.from_int(unit.scale.numerator) / Float.from_int(unit.scale.denominator)
+    nanos := value * approx(unit.scale.numerator) / approx(unit.scale.denominator)
     max_int_exclusive :: Float{9223372036854775808.0}
     if !math.is_finite(nanos) || nanos >= max_int_exclusive -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.DurationOutOfRange)}
     if nanos <= 0.0 -> return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.NonPositiveDuration)}

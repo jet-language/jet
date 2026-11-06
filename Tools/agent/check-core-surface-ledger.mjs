@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { readHistoryDoc } from "../tower/app/store.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { FIXTURE_BINDINGS } from "./core-conformance.mjs";
@@ -35,13 +36,20 @@ const CORE_SOURCE_PATH = "Compiler/Prelude/Core.jet";
 // built-in receiver methods, and the lowering-owned extension calls.
 const CORE_SURFACE_INVENTORY_PATH = "Compiler/Prelude/CoreSurfaceInventory.jet";
 const CORE_CALL_EXTENSIONS_PATH = "Compiler/Prelude/CoreCallExtensions.jet";
+// The Jet tables an inventory `receivers` row reads receiver methods from, and
+// the sema sources a `methods` row's names must be spelled in.
+const BUILTIN_METHODS_PATH = "Compiler/JetFoundation/Source/Registry/BuiltinMethods.jet";
+const BUILTIN_STATICS_PATH = "Compiler/JetFoundation/Source/Registry/BuiltinStatics.jet";
+const COLLECTIONS_PATH = "Compiler/JetFoundation/Source/Collections.jet";
+const CORE_SOURCE_PARTS_PATH = "Compiler/Prelude/CoreSourceParts.tsv";
+const SEMA_SOURCE_DIR = "Compiler/JetSema/Source";
 const CORE_CALL_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet";
 const CORE_CALL_ROWS_BEGIN = "// BEGIN GENERATED CORE CALL ROWS";
 const CORE_CALL_ROWS_END = "// END GENERATED CORE CALL ROWS";
 const CORE_ENUM_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet";
-// The Core source-ownership views' Jet generator, run by $JET through jet-env.
+// The Core source-ownership views' Jet generator, run by $JET, else `jet` on PATH.
 const CORE_ROWS_GENERATOR_PATH = "Tools/agent/CoreSourceRows.jet";
-const JET_ENV_PATH = "Tools/agent/jet-env";
+const JET = process.env.JET || "jet";
 // The owner-controlled syntax registry: every Syntax string constant a Core.jet
 // dispatcher row or the core.mem tier map names.
 const SYNTAX_DIR = "Compiler/JetFoundation/Data/Syntax";
@@ -1179,7 +1187,7 @@ function rustStringSliceValue(expression, context) {
 
 // Jet CoreCalls.jet CORE_CALL_COVERAGE_* bits.
 const CORE_CALL_COVERAGE = {
-  SEMA: 1, TIR_SUBSET: 2, TIR_EVAL: 4, AOT: 8, INTERPRETER: 16, COMPTIME: 32, KNOWN: 63,
+  SEMA: 1, TIR_SUBSET: 2, TIR_EVAL: 4, AOT: 8, COMPTIME: 32, KNOWN: 47,
 };
 
 function corePureRouteValue(expression, context) {
@@ -1199,23 +1207,6 @@ function corePureRouteValue(expression, context) {
     SketchCms: "SketchCMS", Ui: "UI", Io: "IO",
   };
   return jetSpelling[match[1]] ?? match[1];
-}
-
-function coreInterpreterRouteValue(expression, context) {
-  const value = expression.trim();
-  if (value.startsWith("CoreCallInterpreterRoute::Pure(")) {
-    const pure = readRustCall(value, 0, context);
-    if (pure.name !== "CoreCallInterpreterRoute::Pure" ||
-        pure.end !== value.length || pure.args.length !== 1) {
-      throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
-    }
-    return { kind: "Pure", route: corePureRouteValue(pure.args[0], context) };
-  }
-  const match = value.match(/^CoreCallInterpreterRoute::(None|Ambient|TypedIntrinsic)$/);
-  if (!match) {
-    throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
-  }
-  return { kind: match[1] === "None" ? "NoRoute" : match[1] };
 }
 
 function coreCoverageValue(expression, context) {
@@ -1348,8 +1339,9 @@ function coreCallEffectFor(moduleName, member) {
   if (moduleName === "core.log" && member === "__metric_publish") return null;
   if (moduleName === "core.devtools" && member === "__publish_payload") return null;
   if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop"])) return null;
-  // The live-binding registry is in-process state (Core/Web/Web.jet), not a browser API.
-  if (moduleName === "core.web" && coreCallOneOf(member, ["__live_load", "__live_replace", "live_stats"])) return null;
+  // The live-binding registry is in-process state (Core/Web/Web.jet), not a browser API; its
+  // publish only writes to connections a server already upgraded under Net.
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__live_load", "__live_replace", "__live_publish", "live_stats"])) return null;
   if (moduleName === "core.web.store" && member === "__facts_snapshot") return null;
   if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
     "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;
@@ -1484,6 +1476,8 @@ function coreCallEffectLeafFor(moduleName, member) {
     "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__walk_parallel_raw",
     "__entries_context", "__entries_close", "__entries_release", "__entries_read_dir",
     "__entries_next", "__entries_file_type", "__entries_before", "__entries_shown",
+    // The compiler-private non-blocking open only reads (RawHostKeys.jet).
+    "jet_std_files_open_reader_nonblocking",
   ])) return "FS.Read";
   if (moduleName === "core.files" && coreCallOneOf(member, [
     "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
@@ -1551,15 +1545,8 @@ function coreCallSinkFor(moduleName, member) {
   return null;
 }
 
-function coreInterpreterRouteIsExecutable(route) {
-  if (route.kind === "NoRoute") return false;
-  if (route.kind === "Pure") return route.route !== "NoPureRoute";
-  return true;
-}
-
-function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
+function coreCallRecordNew(moduleName, member, symbol, borrowMask) {
   const effectKind = coreCallEffectFor(moduleName, member);
-  const route = { kind: effectKind === null ? "TypedIntrinsic" : "NoRoute" };
   return {
     module_name: moduleName,
     member: member,
@@ -1574,11 +1561,9 @@ function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
     effect_leaf: coreCallEffectLeafFor(moduleName, member),
     sink_class: coreCallSinkFor(moduleName, member),
     pure_route: "NoPureRoute",
-    interpreter_route: route,
-    symbol: { kind: prelude ? "Prelude" : "Rust", name: symbol },
+    symbol: { kind: "Prelude", name: symbol },
     source_target: null,
-    coverage: coreInterpreterRouteIsExecutable(route) ?
-      CORE_CALL_COVERAGE.KNOWN : CORE_CALL_COVERAGE.KNOWN - CORE_CALL_COVERAGE.INTERPRETER,
+    coverage: CORE_CALL_COVERAGE.KNOWN,
     aot_direct: true,
     native_int_result: false,
     ui_capabilities: [],
@@ -1586,7 +1571,7 @@ function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
   };
 }
 
-function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
+function coreCallRecordReceiver(receiverTypes, member, symbol, borrowMask) {
   return {
     module_name: "",
     member: member,
@@ -1599,8 +1584,7 @@ function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
     effect_leaf: null,
     sink_class: null,
     pure_route: "NoPureRoute",
-    interpreter_route: { kind: "TypedIntrinsic" },
-    symbol: { kind: "Rust", name: "" },
+    symbol: { kind: "Prelude", name: symbol },
     source_target: null,
     coverage: CORE_CALL_COVERAGE.KNOWN,
     aot_direct: false,
@@ -1613,64 +1597,47 @@ function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
 function coreCallMarkSourceOwned(record) {
   record.symbol = { kind: "SourceOwned" };
   record.coverage = CORE_CALL_COVERAGE.SEMA;
-  record.interpreter_route = { kind: "NoRoute" };
   record.aot_direct = false;
-}
-
-function coreCallSetInterpreterRoute(record, route) {
-  record.interpreter_route = route;
-  if (coreInterpreterRouteIsExecutable(route)) record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
 }
 
 function coreCallConstructorRecord(name, args, context) {
   if (name === "CoreCallRecord::source_owned") {
     expectRustArgumentCount(name, args, 3, context);
     const member = rustStringValue(args[1], context);
-    const record = coreCallRecordNew(rustStringValue(args[0], context), member, member, false,
+    const record = coreCallRecordNew(rustStringValue(args[0], context), member, member,
       rustBoolSliceValue(args[2], context));
     coreCallMarkSourceOwned(record);
     return record;
   }
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
-    const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
-      rustStringValue(args[2], context), true, rustBoolSliceValue(args[3], context));
-    coreCallSetInterpreterRoute(record, { kind: "TypedIntrinsic" });
-    return record;
+    return coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), rustBoolSliceValue(args[3], context));
   }
   if (name === "CoreCallRecord::new" || name === "CoreCallRecord::new_with_coverage") {
     const withCoverage = name.endsWith("new_with_coverage");
     expectRustArgumentCount(name, args, withCoverage ? 6 : 5, context);
+    coreCallRequireJetRoute(args[3], context);
     const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
-      rustStringValue(args[2], context), rustBoolValue(args[3], context), rustBoolSliceValue(args[4], context));
+      rustStringValue(args[2], context), rustBoolSliceValue(args[4], context));
     if (withCoverage) record.coverage = coreCoverageValue(args[5], context);
     return record;
   }
-  if (name === "CoreCallRecord::receiver" ||
-      name === "CoreCallRecord::receiver_with_symbol" ||
-      name === "CoreCallRecord::receiver_with_coverage") {
-    const withSymbol = name.endsWith("receiver_with_symbol");
-    const withCoverage = name.endsWith("receiver_with_coverage");
-    expectRustArgumentCount(name, args, withSymbol ? 5 : withCoverage ? 4 : 3, context);
-    const receiverTypes = rustStringSliceValue(args[0], context);
-    const member = rustStringValue(args[1], context);
-    if (withSymbol) {
-      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[4], context));
-      record.symbol = {
-        kind: rustBoolValue(args[3], context) ? "Prelude" : "Rust",
-        name: rustStringValue(args[2], context),
-      };
-      return record;
-    }
-    if (withCoverage) {
-      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
-      record.coverage = coreCoverageValue(args[3], context);
-      record.interpreter_route = { kind: "NoRoute" };
-      return record;
-    }
-    return coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
+  if (name === "CoreCallRecord::receiver_with_symbol") {
+    expectRustArgumentCount(name, args, 5, context);
+    coreCallRequireJetRoute(args[3], context);
+    return coreCallRecordReceiver(rustStringSliceValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), rustBoolSliceValue(args[4], context));
   }
   throw new Error("unsupported CoreCallRecord constructor in " + context + ": " + name);
+}
+
+// Every executable Core row routes to the Jet runtime (CoreCallSymbol.Prelude);
+// the Rust-route form (`false`) was retired with the Rust runtime.
+function coreCallRequireJetRoute(argument, context) {
+  if (!rustBoolValue(argument, context)) {
+    throw new Error("CoreCallRecord in " + context + " names a retired Rust route; route it to its Jet runtime symbol (`true`)");
+  }
 }
 
 function applyCoreCallMethod(record, name, args, context) {
@@ -1686,12 +1653,7 @@ function applyCoreCallMethod(record, name, args, context) {
   if (name === "with_max_arity") {
     record.signature.max_arity = rustIntegerValue(argument, context);
   } else if (name === "with_pure_route") {
-    const route = corePureRouteValue(argument, context);
-    record.pure_route = route;
-    record.interpreter_route = { kind: "Pure", route: route };
-    if (route !== "NoPureRoute") record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
-  } else if (name === "with_interpreter_route") {
-    coreCallSetInterpreterRoute(record, coreInterpreterRouteValue(argument, context));
+    record.pure_route = corePureRouteValue(argument, context);
   } else if (name === "with_frame_accesses") {
     record.frame_accesses = rustSliceItems(argument, context).map(function (value) {
       return coreResourceAccessValue(value, context);
@@ -1741,7 +1703,6 @@ function jetStringList(values) {
 
 // The CoreCallRecord literal, fields in CoreCalls.jet declaration order.
 function coreCallRecordLiteral(record) {
-  const route = record.interpreter_route;
   const symbol = record.symbol;
   const capability = record.capability;
   const completion = record.frame_completion;
@@ -1769,8 +1730,6 @@ function coreCallRecordLiteral(record) {
     "effect_leaf: " + jetOptional(record.effect_leaf, jetStringExpression),
     "sink_class: " + jetOptional(record.sink_class, function (sink) { return "SinkClass." + sink; }),
     "pure_route: CoreCallPureRoute." + record.pure_route,
-    "interpreter_route: CoreCallInterpreterRoute." + route.kind +
-      (route.kind === "Pure" ? "{route: CoreCallPureRoute." + route.route + "}" : ""),
     "symbol: CoreCallSymbol." + symbol.kind +
       (symbol.kind === "SourceOwned" ? "" : "{name: " + jetStringExpression(symbol.name) + "}"),
     "source_target: " + jetOptional(record.source_target, jetStringExpression),
@@ -1791,18 +1750,8 @@ function translateCoreCallExpression(expression, context) {
   return coreCallRecordLiteral(coreCallRecordFromRust(expression, context));
 }
 
-function coreDispatcherExpression(row, ambientKeys) {
-  let expression = row.expression.replace(/,\s*$/, "");
-  const key = row.module + "." + row.member;
-  if (
-    ambientKeys.has(key) &&
-    !expression.includes("with_interpreter_route(") &&
-    !expression.includes("with_pure_route(") &&
-    !expression.includes("sema_web_call(")
-  ) {
-    expression += ".with_interpreter_route(CoreCallInterpreterRoute::Ambient)";
-  }
-  return expression;
+function coreDispatcherExpression(row) {
+  return row.expression.replace(/,\s*$/, "");
 }
 
 function coreCallIdentityValue(argument, field, sourceLine) {
@@ -1838,7 +1787,7 @@ function coreCallReceiverTypes(argument, sourceLine) {
 
 function coreCallIdentity(expression, sourceLine) {
   const call = expression.match(
-    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
+    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_symbol))|(sema_web_call))\s*\(/,
   );
   if (!call) {
     throw new Error("dispatcher row has no CoreCallRecord adapter at line " + sourceLine);
@@ -1952,7 +1901,6 @@ function parseCoreSource(source, root = ROOT) {
   const sourceModules = [];
   const bootstraps = [];
   const dispatcherRows = [];
-  const ambientRoutes = [];
   const formatRows = [];
   let rootTypes = [];
   let namespaceOnly = [];
@@ -1964,7 +1912,6 @@ function parseCoreSource(source, root = ROOT) {
   const seenFormatLabels = new Set();
   const seenFormatModules = new Set();
   const seenDispatcherKeys = new Set();
-  const seenAmbientRoutes = new Set();
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = coreSourceLine(raw);
     if (!line) continue;
@@ -2094,22 +2041,6 @@ function parseCoreSource(source, root = ROOT) {
         ownedMembers: ownedMembers,
         ownedTypes: ownedTypes,
         implTypes: implTypes,
-        sourceLine: sourceLine,
-      });
-      continue;
-    }
-    const ambient = line.match(
-      /^ambient_route\s+([A-Za-z_][A-Za-z0-9_.]*)\s+([A-Za-z_][A-Za-z0-9_!?]*)$/,
-    );
-    if (ambient) {
-      const key = ambient[1] + "." + ambient[2];
-      if (seenAmbientRoutes.has(key)) {
-        throw new Error("duplicate Core ambient route `" + key + "` at line " + sourceLine);
-      }
-      seenAmbientRoutes.add(key);
-      ambientRoutes.push({
-        module: ambient[1],
-        member: ambient[2],
         sourceLine: sourceLine,
       });
       continue;
@@ -2333,23 +2264,6 @@ function parseCoreSource(source, root = ROOT) {
         "` instead of the provider; delete the row and the Rust symbol it names");
     }
   }
-  const nonReceiverDispatcherCounts = new Map();
-  for (const row of dispatcherRows) {
-    if (row.kind === "receiver") continue;
-    const key = row.module + "." + row.member;
-    nonReceiverDispatcherCounts.set(key, (nonReceiverDispatcherCounts.get(key) || 0) + 1);
-  }
-  for (const route of ambientRoutes) {
-    if (!moduleSet.has(route.module)) {
-      throw new Error("ambient route names missing Core module `" + route.module + "`");
-    }
-    const key = route.module + "." + route.member;
-    const matches = nonReceiverDispatcherCounts.get(key) || 0;
-    if (matches !== 1) {
-      throw new Error("ambient route must match exactly one non-receiver dispatcher row: " +
-        key + " (matches=" + matches + ")");
-    }
-  }
   const namespaceSet = new Set(namespaceOnly);
   if (namespaceSet.size !== namespaceOnly.length) {
     throw new Error("Core namespace_only declarations contain a duplicate");
@@ -2366,7 +2280,6 @@ function parseCoreSource(source, root = ROOT) {
     rootTypes,
     namespaceOnly,
     dispatcherRows,
-    ambientRoutes,
     formatRows,
   };
 }
@@ -2394,12 +2307,9 @@ function coreModuleInventory() {
 // ledger; otherwise a stale adapter spelling can become user-visible without
 // a source declaration.
 function publicDispatcherRows(declarations = coreSourceFacts()) {
-  const ambientKeys = new Set(declarations.ambientRoutes.map(function (route) {
-    return route.module + "." + route.member;
-  }));
   // One body line per dispatcher row, in Core.jet order.
   const body = declarations.dispatcherRows.map(function (row) {
-    return "    " + coreDispatcherExpression(row, ambientKeys) + ",";
+    return "    " + coreDispatcherExpression(row) + ",";
   }).join("\n");
   const sourceLineAt = function (offset) {
     return declarations.dispatcherRows[lineAt(body, offset) - 1].sourceLine;
@@ -2570,11 +2480,6 @@ function coreCallRowText(expression) {
 }
 
 function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
-  const ambientKeys = new Set(
-    declarations.ambientRoutes.map(function (route) {
-      return route.module + "." + route.member;
-    }),
-  );
   const lines = [
     CORE_CALL_ROWS_BEGIN,
     "// Source: " + CORE_SOURCE_PATH,
@@ -2588,7 +2493,7 @@ function generatedCoreCallRegistry(coreSource, extensionSource, declarations) {
     "CORE_CALLS :: comptime { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
-    const expression = coreDispatcherExpression(row, ambientKeys);
+    const expression = coreDispatcherExpression(row);
     lines.push(
       "    " + translateCoreCallExpression(expression, "Core.jet line " + row.sourceLine) + ",",
     );
@@ -2634,6 +2539,35 @@ function writeCoreCallRegistry(source, declarations) {
     generatedCoreCallRegistry(source, read(CORE_CALL_EXTENSIONS_PATH), declarations),
   );
 }
+// The variant names of `enum <name> { … }` declared in one Core source file,
+// or null when that file does not declare it (a compiler-owned family). A
+// variant is an upper-case name at the enum body's top level; payloads,
+// discriminants and methods are skipped.
+function coreSourceEnumVariants(path, name) {
+  const text = read(path);
+  const header = new RegExp("(?:^|\\n)[ \\t]*(?:pub\\s+)?enum\\s+" + name + "\\s*\\{").exec(text);
+  if (!header) return null;
+  let end = header.index + header[0].length;
+  for (let depth = 1; depth && end < text.length; end++) {
+    if (text[end] === "{") depth++;
+    else if (text[end] === "}") depth--;
+  }
+  const body = text.slice(header.index + header[0].length, end - 1).replace(/\/\/[^\n]*/g, "");
+  const variants = [];
+  let depth = 0;
+  for (let at = 0; at < body.length;) {
+    const ch = body[at];
+    if ("({[".includes(ch)) { depth++; at++; continue; }
+    if (")}]".includes(ch)) { depth--; at++; continue; }
+    const word = depth === 0 ? /^[A-Za-z_][A-Za-z0-9_]*/.exec(body.slice(at)) : null;
+    if (!word) { at++; continue; }
+    if (word[0] === "fn" || word[0] === "impl") break;
+    if (/^[A-Z]/.test(word[0])) variants.push(word[0]);
+    at += word[0].length;
+  }
+  return variants;
+}
+
 // Core enum leaves for the Jet compiler's `core_enum_variants` (the Rust
 // CoreModuleExports query): the CoreLeafKind::Enum rows of the export table,
 // in Core.jet module declaration order.
@@ -2658,6 +2592,14 @@ function generatedCoreEnumRows(source, declarations) {
         throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " has different variants in " + module.module);
       }
       seen.set(type.name, variants);
+      for (const entry of declarations.sourceModules) {
+        if (entry.module !== module.module) continue;
+        const declared = coreSourceEnumVariants(entry.path, type.name);
+        if (declared && declared.join("|") !== variants) {
+          throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " of " + module.module +
+            " lists " + variants + " but " + entry.path + " declares " + declared.join("|"));
+        }
+      }
       lines.push(
         "    CoreModuleTypeExport{name: " + jetStringExpression(type.name) +
         ", kind: CoreLeafKind.Enum{variants: [String]{" +
@@ -2752,7 +2694,7 @@ function validateCoreCallRegistry(source, declarations) {
 
 function validateGeneratedViews(source, declarations) {
   // The Jet-hosted CLI's Core row table is generated from the same declarations.
-  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH, "--check"], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(JET, [CORE_ROWS_GENERATOR_PATH, "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
       read(CORE_ENUM_ROWS_PATH) !== generatedCoreEnumRows(source, declarations)) {
     throw new Error("CoreEnumRows.jet is stale; run --write to regenerate from Core.jet");
@@ -2766,7 +2708,7 @@ function validateGeneratedViews(source, declarations) {
 function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
-  execFileSync(join(ROOT, JET_ENV_PATH), ["jet", CORE_ROWS_GENERATOR_PATH], { cwd: ROOT, stdio: "inherit" });
+  execFileSync(JET, [CORE_ROWS_GENERATOR_PATH], { cwd: ROOT, stdio: "inherit" });
   writeCoreCallRegistry(source, declarations);
   writeCoreEnumRows(source, declarations);
   writeCoreEnumPayloadRows();
@@ -2790,19 +2732,26 @@ function checkCoreCallRegistryOnly() {
 
 
 // The Core surface beyond Core.jet's module exports, from its one authored
-// home: `fixed_sig <module> { … }` and `methods <Container> { … }` lines.
+// home: `fixed_sig <module> { … }`, `receivers <Container> { … }` and
+// `methods <Container> { … }` lines. A receivers row names the Jet tables a
+// container's receiver methods come from; the method names are read from those
+// tables, so the inventory follows the compiler. A methods row names only the
+// methods sema checks in code with no table to read; each must be spelled in
+// sema and must not already come from the container's receivers.
 function coreSurfaceInventory(modules) {
   const source = read(CORE_SURFACE_INVENTORY_PATH);
   const knownModules = new Set(modules.map(function (entry) { return entry.module; }));
+  const tables = jetReceiverTables();
   const pairs = new Set();
   const fixedModules = new Set();
-  const collections = new Map();
+  const derived = new Map();
+  const declared = new Map();
   for (const [index, raw] of source.split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line || line.startsWith("//")) continue;
     const context = CORE_SURFACE_INVENTORY_PATH + " line " + (index + 1);
-    const row = line.match(/^(fixed_sig|methods)\s+(\S+)\s+\{\s*([^{}]*?)\s*\}$/);
-    if (!row) throw new Error(context + " is not a fixed_sig or methods row");
+    const row = line.match(/^(fixed_sig|receivers|methods)\s+(\S+)\s+\{\s*([^{}]*?)\s*\}$/);
+    if (!row) throw new Error(context + " is not a fixed_sig, receivers or methods row");
     const items = row[3].split(",").map(function (item) { return item.trim(); });
     if (items.some(function (item) { return !item; }) || new Set(items).size !== items.length) {
       throw new Error(context + " has an empty or repeated name");
@@ -2817,21 +2766,156 @@ function coreSurfaceInventory(modules) {
       }
       continue;
     }
-    if (collections.has(row[2])) throw new Error(context + " repeats container " + row[2]);
-    collections.set(row[2], {
-      function: CORE_SURFACE_INVENTORY_PATH,
-      type: row[2],
-      methods: items.slice().sort(),
-      sourceLine: index + 1,
-    });
+    const into = row[1] === "receivers" ? derived : declared;
+    if (into.has(row[2])) throw new Error(context + " repeats " + row[1] + " container " + row[2]);
+    if (row[1] === "receivers") {
+      const methods = new Set();
+      for (const item of items) {
+        for (const method of receiverSourceMethods(tables, item, context)) methods.add(method);
+      }
+      derived.set(row[2], { methods: methods, sourceLine: index + 1 });
+      continue;
+    }
+    for (const method of items) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(method)) throw new Error(context + " has an invalid method: " + method);
+      if (!tables.semaNames.has(method)) {
+        throw new Error(context + " declares `" + row[2] + "." + method + "`, but no sema source spells that method; delete the stale name");
+      }
+    }
+    declared.set(row[2], { methods: new Set(items), sourceLine: index + 1 });
+  }
+  const collections = new Map();
+  for (const [type, entry] of derived.entries()) {
+    collections.set(type, { function: CORE_SURFACE_INVENTORY_PATH, type: type, methods: new Set(entry.methods), sourceLine: entry.sourceLine });
+  }
+  for (const [type, entry] of declared.entries()) {
+    const owner = collections.get(type);
+    if (owner) {
+      const repeated = Array.from(entry.methods).filter(function (method) { return owner.methods.has(method); }).sort();
+      if (repeated.length) {
+        throw new Error(CORE_SURFACE_INVENTORY_PATH + " line " + entry.sourceLine + " declares " + type + " methods its receivers row already reads from the Jet tables: " + repeated.join(", "));
+      }
+      for (const method of entry.methods) owner.methods.add(method);
+      continue;
+    }
+    collections.set(type, { function: CORE_SURFACE_INVENTORY_PATH, type: type, methods: new Set(entry.methods), sourceLine: entry.sourceLine });
   }
   if (!pairs.size || !collections.size) throw new Error(CORE_SURFACE_INVENTORY_PATH + " has an empty table");
   return {
     fixedPairs: Array.from(pairs).sort(),
-    collections: Array.from(collections.values()).sort(function (left, right) {
+    collections: Array.from(collections.values()).map(function (entry) {
+      return { function: entry.function, type: entry.type, methods: Array.from(entry.methods).sort(), sourceLine: entry.sourceLine };
+    }).sort(function (left, right) {
       return left.type.localeCompare(right.type);
     }),
   };
+}
+
+// The Jet tables a receivers row reads. Each is the compiler's own row set:
+// sema checks receiver methods against these rows, so reading them here keeps
+// the inventory receiver-aware with no second copy.
+function jetReceiverTables() {
+  const builtin = new Map();
+  const collection = new Map();
+  const statics = new Map();
+  const numeric = new Set();
+  const record = function (table, key, name) {
+    if (!table.has(key)) table.set(key, new Set());
+    table.get(key).add(name);
+  };
+  for (const line of read(BUILTIN_METHODS_PATH).split(/\r?\n/)) {
+    const row = line.match(/receiver: BuiltinMethodReceiver\.([A-Za-z]+), name: "([^"]+)"/);
+    if (row) record(builtin, row[1], row[2]);
+  }
+  // `collection_receivers_accept`: a Sequence row serves List and Iter; a
+  // Proposed row is not checked by sema.
+  for (const line of read(COLLECTIONS_PATH).split(/\r?\n/)) {
+    const row = line.match(/receivers: CollectionReceivers\.([A-Za-z]+), name: "([^"]+)".*status: CollectionStatus\.([A-Za-z]+)/);
+    if (!row || row[3] === "Proposed") continue;
+    if (row[1] === "Sequence") {
+      record(collection, "List", row[2]);
+      record(collection, "Iter", row[2]);
+    } else {
+      record(collection, row[1], row[2]);
+    }
+  }
+  for (const line of read(BUILTIN_STATICS_PATH).split(/\r?\n/)) {
+    const row = line.match(/\{module_name: "([^"]*)", owner: "([^"]+)", method: "([^"]+)"/);
+    if (row) record(statics, (row[1] ? row[1] + "." : "") + row[2], row[3]);
+    const conversion = line.match(/\{method: "([^"]+)", source: "[^"]+"\}/);
+    if (conversion) numeric.add(conversion[1]);
+  }
+  const modulePaths = new Map();
+  for (const line of read(CORE_SOURCE_PATH).split(/\r?\n/)) {
+    const row = line.match(/^source_module\s+(\S+)\s+path\s+(\S+)\s/);
+    if (row) record(modulePaths, row[1], row[2]);
+  }
+  for (const line of read(CORE_SOURCE_PARTS_PATH).split(/\r?\n/)) {
+    if (line.startsWith("#")) continue;
+    const cells = line.split("\t");
+    if (cells.length > 2) record(modulePaths, cells[1], cells[2]);
+  }
+  const semaNames = new Set();
+  const walk = function (dir) {
+    for (const name of readdirSync(join(ROOT, dir)).sort()) {
+      const path = dir + "/" + name;
+      if (statSync(join(ROOT, path)).isDirectory()) walk(path);
+      else if (name.endsWith(".jet")) {
+        for (const literal of read(path).matchAll(/"([A-Za-z_][A-Za-z0-9_]*)"/g)) semaNames.add(literal[1]);
+      }
+    }
+  };
+  walk(SEMA_SOURCE_DIR);
+  return { builtin: builtin, collection: collection, statics: statics, numeric: numeric, modulePaths: modulePaths, semaNames: semaNames };
+}
+
+// One receivers source: `builtin:<BuiltinMethodReceiver>`,
+// `collection:<CollectionReceivers>`, `static:[<module>.]<owner>`,
+// `numeric:conversions` (BUILTIN_NUMERIC_SOURCES), or
+// `type:<core module>.<Type>` (the type's methods declared in its Core source).
+function receiverSourceMethods(tables, item, context) {
+  const source = item.match(/^(builtin|collection|static|numeric|type):([A-Za-z_][A-Za-z0-9_.]*)$/);
+  if (!source) throw new Error(context + " has an invalid receivers source: " + item);
+  const kind = source[1];
+  const key = source[2];
+  let methods = undefined;
+  if (kind === "builtin") methods = tables.builtin.get(key);
+  if (kind === "collection") methods = tables.collection.get(key);
+  if (kind === "static") methods = tables.statics.get(key);
+  if (kind === "numeric" && key === "conversions") methods = tables.numeric;
+  if (kind === "type") {
+    const dot = key.lastIndexOf(".");
+    const paths = dot < 0 ? undefined : tables.modulePaths.get(key.slice(0, dot));
+    if (!paths) throw new Error(context + " names a type outside any Core source module: " + item);
+    methods = coreTypeMethods(Array.from(paths), key.slice(dot + 1));
+  }
+  if (!methods || !methods.size) throw new Error(context + " names a receivers source with no methods: " + item);
+  return methods;
+}
+
+// The public methods a Core source declares on a type: `fn` members of its
+// struct body and of its `impl` blocks, trait implementations included.
+function coreTypeMethods(paths, type) {
+  const methods = new Set();
+  for (const path of paths) {
+    let owner = false;
+    let depth = 0;
+    for (const line of read(path).split(/\r?\n/)) {
+      if (depth === 0) {
+        const header = line.match(/^(?:impl|struct)\s+([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?(?:\.[A-Za-z_.]+)?\s*\{/);
+        owner = header !== null && header[1] === type;
+      } else if (depth === 1 && owner) {
+        const fn = line.match(/^\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/);
+        if (fn && !fn[1].startsWith("__")) methods.add(fn[1]);
+      }
+      for (const char of line.replace(/"(?:[^"\\]|\\.)*"/g, "").replace(/\/\/.*$/, "")) {
+        if (char === "{") depth += 1;
+        else if (char === "}") depth -= 1;
+      }
+      if (depth < 0) depth = 0;
+    }
+  }
+  return methods;
 }
 
 // ---------------------------------------------------------------------------
@@ -3344,9 +3428,21 @@ function buildRows(modules, fixedPairs, collections, surfaces) {
 // ---------------------------------------------------------------------------
 // Owners.
 
+// The live board plus Tower's archive: a ratified decision or a done card
+// retires to history.json, and a declined row or a closed owner must still
+// resolve once it has.
 function towerBoard() {
   if (!existsSync(TOWER_PATH)) return null;
-  return JSON.parse(readFileSync(TOWER_PATH, "utf8"));
+  const board = JSON.parse(readFileSync(TOWER_PATH, "utf8"));
+  const history = readHistoryDoc(dirname(TOWER_PATH));
+  if (!history) return board;
+  const live = new Set((board.decisions || []).map(function (item) { return item.id; }));
+  const liveCards = new Set((board.cards || []).map(function (card) { return card.num; }));
+  return {
+    ...board,
+    decisions: (board.decisions || []).concat((history.decisions || []).filter(function (item) { return !live.has(item.id); })),
+    cards: (board.cards || []).concat((history.cards || []).filter(function (card) { return !liveCards.has(card.num); })),
+  };
 }
 
 function towerCards(board) {
@@ -3450,6 +3546,10 @@ function sourceFiles() {
   return [
     CORE_SOURCE_PATH,
     CORE_SURFACE_INVENTORY_PATH,
+    BUILTIN_METHODS_PATH,
+    BUILTIN_STATICS_PATH,
+    COLLECTIONS_PATH,
+    CORE_SOURCE_PARTS_PATH,
     CORE_CALL_EXTENSIONS_PATH,
     ...readdirSync(join(ROOT, SYNTAX_DIR))
       .filter(function (name) { return name.endsWith(".jet"); })
@@ -4483,7 +4583,7 @@ function validateCoreApiSyntaxCoverage() {
     ["tests/ui/variadic_not_last.stderr", "jet.MisplacedVariadicParameter"],
     ["tests/ui/spread_bad_call.stderr", "jet.SpreadWithoutVariadic"],
     ["tests/ui/yield_type_mismatch.stderr", "jet.YieldTypeMismatch"],
-    ["tests/ui/user_policy_bad_args.stderr", "jet.ArgumentCountMismatch"],
+    ["tests/ui/user_policy_bad_args.stderr", "jet.MissingArgument"],
   ]) {
     const diagnostics = read(path);
     const report = diagnostics.split(/\n\s*\n/).find(function (entry) {
@@ -5127,7 +5227,7 @@ function hostileFixtures() {
       'frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, ' +
       'effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, ' +
       'effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, ' +
-      'interpreter_route: CoreCallInterpreterRoute.NoRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, ' +
+      'symbol: CoreCallSymbol.SourceOwned, source_target: None, ' +
       'coverage: CoreCallCoverage{bits: 1}, aot_direct: false, native_int_result: false, ' +
       'ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}';
     if (actual !== expected) {
@@ -5142,7 +5242,7 @@ function hostileFixtures() {
         record.signature.arity !== 1 || record.signature.max_arity !== 2 ||
         record.effect_kind !== "Net" || record.effect_leaf !== "Time.Wait" ||
         record.capability.kind !== "NativeRequired" || record.capability.provider !== "core.net" ||
-        record.coverage !== CORE_CALL_COVERAGE.SEMA || record.interpreter_route.kind !== "NoRoute" ||
+        record.coverage !== CORE_CALL_COVERAGE.SEMA ||
         record.aot_direct) {
       throw new Error("source-owned builder lost its declaration facts or target: " + coreCallRecordLiteral(record));
     }
@@ -5204,27 +5304,18 @@ function hostileFixtures() {
       "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])",
       "dispatcher_row plain core.jobs covered | CoreCallRecord::new_with_coverage(\"core.jobs\", \"covered\", \"jet_job_queue_default\", true, &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))",
       "dispatcher_row adapter core.web form | sema_web_call(\"core.web\", \"form\", \"jet_web_forms_typed\", &[])",
-      "dispatcher_row receiver - Secret | CoreCallRecord::receiver(&[\"Signature\", \"Secret\"], \"bytes\", &[])",
       "dispatcher_row receiver - METHOD_RECEIPT_ATTACH | CoreCallRecord::receiver_with_symbol(&[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, &[])",
-      "dispatcher_row receiver - LocalDate | CoreCallRecord::receiver(&[\"Date\", \"LocalDate\"], \"year\", &[])",
-      "dispatcher_row receiver - facts_json | CoreCallRecord::receiver_with_coverage(&[\"WebStore\"], \"facts_json\", &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))",
+      "dispatcher_row receiver - collect | CoreCallRecord::receiver_with_symbol(&[\"Query\"], \"collect\", \"\", true, &[true]).with_source_owned().with_source_target(\"core.data.__query_collect\")",
     ].join("\n"));
-    if (declarations.dispatcherRows.length !== 7) {
+    if (declarations.dispatcherRows.length !== 5) {
       throw new Error("dispatcher identity parser lost a valid constructor or receiver form");
     }
   }));
 
-  results.push(rejects("ambient route has no dispatcher row",
-    "ambient route must match exactly one non-receiver dispatcher row", function () {
-    parseCoreSource([
-      "bootstrap Syntax depends_on []",
-      "bootstrap Effects depends_on [Syntax]",
-      "bootstrap Core depends_on [Effects]",
-      "bootstrap Derives depends_on [Core]",
-      "module core.jobs exports {queue}",
-      "dispatcher_row plain core.jobs queue | CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])",
-      "ambient_route core.jobs missing",
-    ].join("\n"));
+  results.push(rejects("dispatcher row names a retired Rust route",
+    "names a retired Rust route", function () {
+    coreCallRecordFromRust("CoreCallRecord::new(\"core.mem\", \"volatile_read\", \"std::ptr::read_volatile\", false, &[false])",
+      "retired-route fixture");
   }));
 
   results.push(rejects("Core API workflow manifest drops a ledger row",

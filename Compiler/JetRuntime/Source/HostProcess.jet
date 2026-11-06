@@ -2,6 +2,8 @@
 // most 32 bits and therefore already have the inline exact-Int carrier form.
 // Shared output is drained before every child/blocking/exit syscall here.
 fn host_call(number: I64, a1: I64, a2: I64, a3: I64) -> I64 {
+    // `jet test`'s read recorder (TestReads.jet) sees every path syscall here.
+    if (test_reads_fd >= I64{0}) -> rt_test_reads_call(number, a1, a2, a3)
     #Unsafe("the audited caller supplies the Linux syscall's valid word arguments") {
         return os_syscall_i64(number, a1, a2, a3, I64{0}, I64{0}, I64{0})
     }
@@ -34,13 +36,13 @@ fn host_i32(value: I64) -> I64 {
 
 #Export(c) fn jet_std_os_getpgrp() -> I64 { host_call(I64{111}, I64{0}, I64{0}, I64{0}) }
 
-// OsExtra.rs:107 jet_sys_getuid_raw: unix getuid(2) cannot fail, so Some.
+// jet_sys_getuid_raw: unix getuid(2) cannot fail, so Some.
 #Export(c) fn jet_sys_getuid_raw(some: I64) -> I64 {
     rt_text_store(some, jet_std_os_getuid())
     I64{1}
 }
 
-// OsExtra.rs:10 std::thread::available_parallelism: the runtime's one probe
+// std::thread::available_parallelism: the runtime's one probe
 // (HostParallelism.jet: cgroup quota, affinity, online fallback) shared with
 // the scheduler pool. Rust's Err is None; Some carries the exact-Int word.
 #Export(c) fn jet_sys_cpu_count_raw(some: I64) -> I64 {

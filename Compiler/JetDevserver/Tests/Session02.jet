@@ -3,7 +3,6 @@ use {
     std.time.[Instant, Duration]
 }
 
-// Rust: crates/jet-devserver/src/Session.rs:2769
 #Test("one_session_keeps_history_last_good_and_listener_boundaries") {
     session :: ResidentDevSession.new("app.jet", 8080, 49152)
     session.note_client("a")
@@ -24,7 +23,6 @@ use {
     assert(json.contains("\"count\":1"))
     assert(json.contains("\"status\":\"accepted\""))
 }
-// Rust: crates/jet-devserver/src/Session.rs:2794
 #Test("session_json_lists_only_bound_listeners") {
     app :: ResidentDevSession.new("app.jet", 0, 49152).json()
     assert(app.contains("\"listeners\":{{\"application\""))
@@ -35,7 +33,6 @@ use {
     assert(!canvas.contains("\"listeners\":{{\"application\""))
     assert(!canvas.contains("\"workbench\""))
 }
-// Rust: crates/jet-devserver/src/Session.rs:2807
 #Test("canvas_command_metadata_does_not_change_program_selection") {
     session :: ResidentDevSession.new("app.jet", 4567, 49152)
     session.record_command("{{\"action_id\":\"canvas.command:run\",\"output\":\"native\",\"target\":\"desktop\",\"client_id\":\"b\"}}")
@@ -43,7 +40,6 @@ use {
     assert(json.contains("\"canvas\":{{\"host\":\"127.0.0.1\",\"port\":4567"))
     assert(json.contains("\"run\":{{\"output\":null,\"target\":null}}"))
 }
-// Rust: crates/jet-devserver/src/Session.rs:2818
 #Test("failed_rebuild_keeps_last_good_views_and_current_source_diagnostics") {
     session :: ResidentDevSession.new("app.jet", 4567, 49152)
     session.observe_source("good-revision")
@@ -66,7 +62,6 @@ use {
         "Error [jet.UnknownFunction]: missing name"
     ] -> assert(json.contains(expected), "session lost {expected}: {json}")
 }
-// Rust: crates/jet-devserver/src/Session.rs:2846
 #Test("first_observed_source_is_the_accepted_session_baseline") {
     session :: ResidentDevSession.new("app.jet", 4567, 49152)
     session.observe_source("initial-revision")
@@ -75,7 +70,6 @@ use {
     assert(json.contains("\"source_revision\":\"current-revision\""))
     assert(json.contains("\"accepted_revision\":\"initial-revision\""))
 }
-// Rust: crates/jet-devserver/src/Session.rs:2856
 #Test("disconnect_reconnect_preserves_project_run_debug_and_last_good_state") {
     session :: ResidentDevSession.new("app.jet", 4567, 49152)
     session.note_client("canvas-a")
@@ -84,7 +78,7 @@ use {
     session.mark_last_good("accepted-revision", "web-build-2")
     session.record_debug_response(
         "{{\"schema_version\":1,\"revision\":\"accepted-revision\",\"source_id\":\"helper.jet\",\"commands\":[\"s\"]}}",
-        "{{\"schema\":\"jet.report/v1\",\"canvas\":{{\"protocol\":\"jet.canvas.debug\",\"session\":{{\"id\":\"canvas-debug-1\",\"state\":\"running\",\"tier\":\"jet-dev-interpreter\",\"source_id\":\"helper.jet\",\"revision\":\"accepted-revision\"}}}}")
+        "{{\"schema\":\"jet.report/v1\",\"canvas\":{{\"protocol\":\"jet.canvas.debug\",\"session\":{{\"id\":\"canvas-debug-1\",\"state\":\"running\",\"tier\":\"jet-dev-replay\",\"source_id\":\"helper.jet\",\"revision\":\"accepted-revision\"}}}}")
     session.drop_client("canvas-a")
     session.note_client("canvas-b")
     json :: session.json()
@@ -99,7 +93,6 @@ use {
     session.record_debug("{{\"schema_version\":1,\"revision\":\"accepted-revision\",\"source_id\":\"helper.jet\",\"session_id\":\"canvas-debug-1\",\"stop\":true}}")
     assert(session.json().contains("\"debugger\":{{\"state\":\"idle\",\"session_id\":null"))
 }
-// Rust: crates/jet-devserver/src/Session.rs:2891
 #Test("client_registry_is_bounded_and_expires_before_admission") {
     session :: ResidentDevSession.new("app.jet", 4567, 49152)
     loop index in 0..MAX_CLIENTS -> session.note_client("client-{index}")

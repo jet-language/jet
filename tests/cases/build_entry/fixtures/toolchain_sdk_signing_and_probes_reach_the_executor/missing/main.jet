@@ -1,0 +1,19 @@
+fn build(b: Build) -[Exec, FS]> {
+    #Impure("probe a library that is not installed") {
+        native :: b.toolchain("native", "x86_64-unknown-linux-gnu")
+        missing :: b.probe("missing", "pkg_config", "jet-no-such-library", native)
+        stamp :: b.action(
+            "stamp",
+            [],
+            ["never.txt"],
+            ["sh", "-c", "printf ran > never.txt"],
+            ["Exec", "FS"],
+            native,
+            [missing]
+        )
+        app :: b.add_executable("app", ["main.jet"], [stamp])
+        b.default(app)
+    }
+}
+
+fn run() {}

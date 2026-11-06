@@ -20,25 +20,23 @@ use {
 }
 
 // GATE #4494: all native subprocesses, filesystem, clocks and sockets remain real.
-// Rust: tests/canvas_cli_lifecycle.rs:9
 #Test("jet_dev_canvas_lifecycle_exit_reuse_and_cleanup") {
     repo :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
     node :: env.var_os("JET_CANVAS_NODE") ?? "node"
+    home :: env.var("HOME").unwrap()
     output :: Command.new(node).current_dir(repo)
         .env("JET_BIN", env.var("CARGO_BIN_EXE_jet").unwrap())
         .env("JET_SOURCE", "Examples/features/tooling/canvas_blueprint_demo.jet")
-        .env("TMPDIR", "/home/nate/.cache/jet-test-scratch")
+        .env("TMPDIR", "{home}/.cache/jet-test-scratch")
         .arg("Tools/canvas-test/native-lifecycle.mjs").output().expect("run native Canvas lifecycle probe")
     assert(output.status.success(), "native Canvas lifecycle failed\n--- stdout ---\n{String.from_utf8_lossy(output.stdout)}\n--- stderr ---\n{String.from_utf8_lossy(output.stderr)}")
     assert(String.from_utf8_lossy(output.stdout).contains("PASS native jet dev --canvas lifecycle"), "{String.from_utf8_lossy(output.stdout)}")
 }
 
-// Rust: tests/dev_corpus.rs:9
 #Test("semantic_corpus_policy_runs_with_the_dev_corpus_gate") {
     CorpusPolicy.load().expect("corpus manifest").check_gate("dev-corpus").expect("dev corpus semantic policy")
 }
 
-// Rust: tests/dev_corpus_gate.rs:13
 #Test("tower_datatree_policy_keeps_mechanical_ops_and_named_exceptions") {
     policy :: CorpusPolicy.load().expect("corpus manifest")
     root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
@@ -47,7 +45,6 @@ use {
     assert(violations.is_empty(), "Tower DataTree corpus policy failed:\n{violations.map((v) -> v.to_string()).collect().join("\n")}")
 }
 
-// Rust: tests/dev_corpus_gate.rs:33
 #Test("tower_datatree_policy_rejects_duplicate_generic_ladders") {
     policy :: CorpusPolicy.load().expect("corpus manifest")
     violations :: policy.evaluate_source(TOWER_DATATREE_POLICY_SITE, "\nfn duplicate_equal(left: DataTree, right: DataTree) -> Bool {{ return true }}\nfn arrays_semantically_equal(left: [DataTree], right: [DataTree]) -> Bool {{ return true }}\nfn truthy(value: DataTree) -> Bool {{ return true }}\nfn javascript_truthy_duplicate(value: DataTree) -> Bool {{ return true }}\n").expect("synthetic Tower source parses")
@@ -55,17 +52,14 @@ use {
     assert(violations.all((violation) -> violation.rule == "datatree-domain-policy"), "one occurrence-scoped DataTree rule must own every rejection: {violations}")
 }
 
-// Rust: tests/dev_corpus_gate.rs:60
 #Test("semantic_corpus_policy_runs_after_dev_domain_checks") {
     CorpusPolicy.load().expect("corpus manifest").check_gate("dev-corpus").expect("dev corpus semantic policy")
 }
 
-// Rust: tests/dev_corpus_gate.rs:68
 #Test("semantic_corpus_policy_runs_with_core_conformance") {
     CorpusPolicy.load().expect("corpus manifest").check_gate("conformance").expect("Core conformance semantic policy")
 }
 
-// Rust: tests/dev_schedule_wave_a.rs:11
 #Test("local_schedule_restart_does_not_replay_a_missed_window") {
     DAY :: U64{86400}
     THREE_AM :: comptime { U64{3 * 3600} }
@@ -78,7 +72,6 @@ use {
     assert_eq(&after_restart.due_at(schedule, DAY * 2 + THREE_AM), ["nightly"])
 }
 
-// Rust: tests/dev_tier_parity.rs:10
 #Test("target_selected_prelude_parity") {
     root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
     hosted :: root.join("tests/target_witness/hosted_default.jet")
@@ -111,7 +104,6 @@ use {
     }
 }
 
-// Rust: tests/impact.rs:8
 #Test("impact_report_upstream_run") {
     bin :: OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())
     path :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/effects/effects.jet")
@@ -122,7 +114,6 @@ use {
     assert(text.contains("upstream"))
 }
 
-// Rust: tests/impact.rs:33
 #Test("impact_json_output") {
     bin :: OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())
     path :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/effects/effects.jet")
@@ -136,7 +127,6 @@ use {
     assert(text.contains("\"check\":{{\"status\":\"passed\""))
 }
 
-// Rust: tests/impact.rs:61
 #Test("impact_unknown_symbol_exits_error") {
     bin :: OSPath(env.var("CARGO_BIN_EXE_jet").unwrap())
     path :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/effects/effects.jet")
@@ -144,7 +134,6 @@ use {
     assert(!out.status.success())
 }
 
-// Rust: tests/notebook.rs:45
 #Test("notebook_declarations_are_file_wide_but_state_cells_stay_ordered") {
     kernel := Kernel.open(None, "entry-order-test").expect("open entry-order notebook kernel")
     comptime_reader :: &kernel.notebook.add_cell(CellKind.Jet, "fn comptime_reader() -> Int {{ return FUTURE_ANSWER }}").id.clone()
@@ -166,13 +155,11 @@ use {
     assert(output.bundle.text_plain.contains('7'))
 }
 
-// Rust: tests/notebook.rs:134
 #Test("shared_session_identical_stale_rules_across_clients") {
     kernel := Kernel.open(None, "env-test").expect("open shared-session notebook kernel")
     a :: &kernel.notebook.add_cell(CellKind.Jet, "x :: 1").id.clone()
     b :: &kernel.notebook.add_cell(CellKind.Jet, "print(\"fx\")").id.clone()
     if &kernel.notebook.cells.find((c) -> c.id == b) == Val(cell) -> &cell.depends_on.push(a.clone())
-    // Rust: tests/notebook.rs:147
     observable_success :: (result: CellExecResult) -> result.ok() && result.bundle.text_plain.contains("fx")
     assert((&kernel.execute_cell(ClientKind.FirstParty, a)).unwrap().ok())
     fx :: &kernel.execute_cell(ClientKind.JupyterAdapter, b).unwrap()
@@ -191,7 +178,6 @@ use {
     assert_eq(view_first.stale_ids, stale_jp)
 }
 
-// Rust: tests/notebook.rs:192
 #Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss") {
     nb := JetNotebook.new("env-doc")
     c1 :: &nb.add_cell(CellKind.Jet, "answer :: 42").id.clone()
@@ -247,7 +233,6 @@ use {
     assert(cell.output.unwrap().bundle.quarantined)
 }
 
-// Rust: tests/notebook.rs:324
 #Test("rich_output_trust_quarantines_imports_and_binds_grants") {
     store :: TrustStore.default()
     bundle := MimeBundle{text_plain: "hi", mime: [(_0: "text/html", _1: "<b>hi</b>")], quarantined: false, widget_id: Val("w1"), requested_origins: ["https://evil.example"], requested_messages: ["click"]}
@@ -278,7 +263,6 @@ use {
     })
 }
 
-// Rust: tests/notebook.rs:383
 #Test("headless_protocol_interrupt_stdin_debug_perf_and_clients") {
     kernel := Kernel.open(None, "proto-env").expect("open headless-protocol notebook kernel")
     out :: run_headless_script(&kernel, ["add-jet y :: 3", "exec first", "visible jupyter", "visible canvas", "visible first", "interrupt", "stdin hello", "debug", "perf", "complete y", "inspect", "export-jet", "export-ipynb"])
@@ -290,7 +274,6 @@ use {
     assert(kernel.debug_attached() && kernel.perf_attached())
 }
 
-// Rust: tests/notebook.rs:413
 #Test("notebook_first_hour_uses_shared_prelude_ambients_and_path") {
     scratch :: Scratch.new("notebook-first-hour")
     document :: scratch.join("journey.jetnb")
@@ -310,7 +293,6 @@ use {
     assert_eq(reopened.notebook.cells[0].source, source)
 }
 
-// Rust: tests/notebook.rs:454
 #Test("notebook_cli_headless_journey_uses_production_session") {
     scratch :: Scratch.new("notebook-cli-headless")
     document :: scratch.join("journey.jetnb")
@@ -332,7 +314,6 @@ use {
     assert(document.is_file(), "headless protocol did not save the notebook")
 }
 
-// Rust: tests/notebook.rs:561
 #Test("notebook_browser_matrix_uses_production_server") {
     if !command_available("node", "NODE") {
         eprintln("skipping notebook browser matrix: node is unavailable")
@@ -373,7 +354,6 @@ use {
     assert(ran > 0)
 }
 
-// Rust: tests/semantic_ops.rs:16
 #Test("tool_fix_pairing_records_rename_and_blame_reads_the_receipt") {
     (root, path) :: fixture("rename")
     before :: "fn report() -[]> Int {{ return 1 }}\nfn run() {{ print(report()) }}\n"
@@ -396,7 +376,6 @@ use {
     _ :: fs.remove_dir_all(root)
 }
 
-// Rust: tests/semantic_ops.rs:48
 #Test("blame_matches_recorded_targets_without_text_inference") {
     (root, path) :: fixture("receipt")
     source :: "fn summarize() -[]> Int {{ return 1 }}\nfn run() {{ print(summarize()) }}\n"

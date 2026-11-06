@@ -3,12 +3,10 @@ use {
     std.fmt.[format]
 }
 
-// Rust: crates/jet-devserver/src/Canvas/query_actions.rs:2206
 fn event_member(name: String) -> CoreCatalogMember {
     CoreCatalogMember(name: name, signature: if name == "scope" { "event.scope()" } else { "core.event.{name}" }, summary: "", source: "", pure: false, available: true, stageable: false, stage_reason_code: "", stage_reason: "", receiver_type: "", unavailable_reason_code: "", unavailable_reason: "")
 }
 
-// Rust: crates/jet-devserver/src/Canvas/query_actions.rs:2228
 #Test("event_catalog_keeps_incomplete_constructors_recoverable") {
     loop name in ["new", "with_policy", "async_result", "hook", "decision_hook"] {
         member :: event_member(name)

@@ -1,12 +1,12 @@
-// NumericConversion.rs:31-56. Fixed-width source bits
-// cross into Float only if their discarded low bits are zero. All U64 values
-// are within F32's finite range, so accepted values need no narrowing round.
-// Native LowerRoute533 carries raw word, flags, borrowed E4 text, raw line;
-// the seed Rust CAbiRoutes17253 adapter uses its own JetCString text header.
-fn numeric_widen_stop(file: I64, line: I64) {
+// Fixed-width source bits cross into Float only if their discarded low bits are
+// zero. All U64 values are within F32's finite range, so accepted values need
+// no narrowing round. Native LowerRoute533 carries raw word, flags, borrowed E4
+// text, raw line; the seed Rust CAbiRoutes17253 adapter uses its own JetCString
+// text header.
+fn numeric_widen_stop(target_f32: Bool, file: I64, line: I64) {
     trap_header(I64{1})
-    // Exact JET_NUMERIC_WIDEN_TRAP text; generated little-endian word literals.
-    trap_write_static(rt_static_text("whole number cannot cross into the decimal without losing precision"))
+    // Exact text of the lowering's inline widening stop (BuildTypes.jet).
+    trap_write_static(if target_f32 -> rt_static_text("whole number has no exact F32; approx(x) rounds it to the nearest F32") else -> rt_static_text("whole number has no exact Float; approx(x) rounds it to the nearest Float"))
     trap_msg_message_end()
     trap_context(sync_load(file), sync_load(wrapping(file + I64{8})), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
     trap_footer(I64{1})
@@ -34,7 +34,7 @@ fn numeric_widen_stop(file: I64, line: I64) {
     }
     if (significant > precision && trailing < significant - precision) {
         // The stop is published: the caller's stop point takes it.
-        numeric_widen_stop(file, line)
+        numeric_widen_stop(target_f32, file, line)
         return 0.0
     }
     if (signed || raw >= I64{0}) -> return Float{raw}
@@ -44,9 +44,9 @@ fn numeric_widen_stop(file: I64, line: I64) {
     return Float{half} * Float{2} + Float{raw.bit_and(I64{1})}
 }
 
-// NumericConversion.rs:59-82 jet_numeric_bit_count. `value` is the raw
-// fixed-width word; `operation`/`width` are the lowering's constant Int words.
-// Operations: 0 ones, 1 zeros, 2 leading zeros, 3 trailing zeros (within
+// `value` is the raw fixed-width word; `operation`/`width` are the lowering's
+// constant Int words. Operations: 0 ones, 1 zeros, 2 leading zeros, 3 trailing
+// zeros (within
 // width), 4 ones of |value|, 5 bit length of |value|.
 fn numeric_bit_set(word: I64, at: I64) -> Bool { ((word >> at).bit_and(I64{1})) != I64{0} }
 #Export(c) fn jet_numeric_bit_count(value: I64, operation: I64, width: I64) -> I64 {
@@ -100,10 +100,10 @@ fn numeric_bit_set(word: I64, at: I64) -> Bool { ((word >> at).bit_and(I64{1})) 
     trailing
 }
 
-// MIREval.rs jet_numeric_int_bit_count over JetBigInt::bit_count: the
-// jet_numeric_bit_count operations on a borrowed exact Int. Operations 0-3
-// read its two's complement within `width` bits; 4 and 5 read its
-// magnitude, past 64 bits by halving a copy.
+// jet_numeric_int_bit_count over JetBigInt::bit_count: the
+// jet_numeric_bit_count operations on a borrowed exact Int. Operations 0-3 read
+// its two's complement within `width` bits; 4 and 5 read its magnitude, past 64
+// bits by halving a copy.
 #Export(c) fn jet_numeric_int_bit_count(value: I64, operation: I64, width: I64) -> I64 {
     if int_inline(value) -> return jet_numeric_bit_count(value, operation, width)
     bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}

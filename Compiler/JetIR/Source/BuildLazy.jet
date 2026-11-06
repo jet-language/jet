@@ -1269,13 +1269,12 @@ fn ir_lines_walk(m: &IRModule, p: IRProgram, b: &IRBuilder, label: String?, vari
 // lazy.line_next(payload, output) -> 0 at end, 1 with the moved line in
 // `output`, -1 stopped: one call of the handle's Core line reader
 // (ir_line_reader_key), a method on the handle or, for a process stream, a
-// function that reads the handle as its one parameter. A read error panics
-// with its display at <core.prelude>:0, as CollectionIoSources.rs's jet_panic
-// does; a panic a task publishes returns, and the source stops. Every stop
-// edge returns -1 (stop_status): iter_source_pull reads only the status, so
-// an edge that left the last call's result there (a pending stop makes the
-// line reader return at once) read as 1 and the eager drain of a kept
-// handle pushed unwritten slots without end.
+// function that reads the handle as its one parameter. A read error panics with
+// its display at <core.prelude>:0, jet_panic does; a panic a task publishes
+// returns, and the source stops. Every stop edge returns -1 (stop_status):
+// iter_source_pull reads only the status, so an edge that left the last call's
+// result there (a pending stop makes the line reader return at once) read as 1
+// and the eager drain of a kept handle pushed unwritten slots without end.
 fn ir_line_next_body(m: &IRModule, p: IRProgram, a: &IRBuilder, handle_ty: Type, span: Span) Never! {
     pointer_row :: ir_pointer_row(&m)
     word_row :: ir_word_row(&m)

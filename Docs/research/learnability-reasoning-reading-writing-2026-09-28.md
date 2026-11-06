@@ -31,7 +31,7 @@ plans or status; nothing here creates a Tower card, ballot, or implementation.
   compiling that stream's in-flight work. Probe results therefore describe the
   working-tree compiler, not a clean release. Findings marked **(recheck)** may
   be transient.
-- Probes ran in `~/.cache/jet-dev/learn-probes/`, a directory with its own
+- Probes ran in `$JET_STATE_ROOT/learn-probes/`, a directory with its own
   `package.jet` granting `[IO, Mem.Alloc]`. Probe sources are reproduced in
   Appendix A.
 - This is not a user study. Any statement about how learners would react is a
@@ -530,7 +530,7 @@ this wall on the first `print`. This is an L7 cliff: authority safety fires
 before the program does anything a learner would consider risky.
 
 **F20 — A loose file inherits a distant package.** Checking a file in
-`~/.cache/jet-dev/scratch/learn-research/probes/` reported E1334 about a
+`$JET_STATE_ROOT/scratch/learn-research/probes/` reported E1334 about a
 symlink in an unrelated sibling project, because an ancestor directory holds a
 `package.jet`. The message names the symlink but not the package root that
 pulled it in. (Environment finding; recorded because it blocked the first
@@ -714,7 +714,7 @@ only end-to-end measurement of reading, writing, and reasoning.
 
 ## Appendix A. Probe programs
 
-All probes ran from `~/.cache/jet-dev/learn-probes/` with the binary noted in
+All probes ran from `$JET_STATE_ROOT/learn-probes/` with the binary noted in
 "Method". Output excerpts appear in the findings.
 
 | Probe | Source | Result |

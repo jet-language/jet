@@ -22,19 +22,23 @@ fn scheduler_test_env(log: I64, mode: I64, value: I64) -> I64 {
     _ := sync_add(sync_load(env), I64{1})
     jet_rt_free(env, I64{32}, I64{8})
 }
-#Export(c) fn jet_rt_scheduler_fixture_exit_body(_closure: I64) {
-    scheduler_test_require(false)
+// An exit closure's word at +24 is the exit log: its body appends the id at
+// +32 to the order word at +0, its release counts at +8.
+#Export(c) fn jet_rt_scheduler_fixture_exit_body(closure: I64) {
+    order :: sync_load(closure + I64{24})
+    sync_store(order, sync_load(order) * I64{10} + sync_load(closure + I64{32}))
 }
 #Export(c) fn jet_rt_scheduler_fixture_exit_release(closure: I64) {
-    _ := sync_add(sync_load(closure + I64{24}), I64{1})
-    jet_rt_free(closure, I64{32}, I64{8})
+    _ := sync_add(sync_load(closure + I64{24}) + I64{8}, I64{1})
+    jet_rt_free(closure, I64{40}, I64{8})
 }
 #Export(c) fn jet_rt_scheduler_fixture_exit_worker(arguments: I64) -> I64 {
-    closure :: jet_rt_alloc(I64{32}, I64{8})
+    closure :: jet_rt_alloc(I64{40}, I64{8})
     sync_store(closure, I64{1})
     sync_store(closure + I64{8}, sync_load(arguments))
     sync_store(closure + I64{16}, sync_load(arguments + I64{8}))
     sync_store(closure + I64{24}, sync_load(arguments + I64{16}))
+    sync_store(closure + I64{32}, sync_load(arguments + I64{24}))
     jet_rt_native_atexit(closure)
     I64{0}
 }
@@ -80,16 +84,24 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     sync_store(meta + I64{48}, I64{274877906946})
     log :: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(log, I64{24})
-    // An OS worker exits without the process exit edge: drop, never run, its
-    // queued closure via the real dynamic TLS destructor and free queue storage.
-    exit_args :: jet_rt_alloc(I64{24}, I64{8})
+    // An exit handler belongs to the process: one an OS worker registers
+    // survives that worker's normal exit, neither run nor released, and runs
+    // at the process exit's handler step between main's earlier and later
+    // registrations.
+    exit_log :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(exit_log, I64{16})
+    exit_args :: jet_rt_alloc(I64{32}, I64{8})
     sync_store(exit_args, sync_load(callbacks + I64{32}))
     sync_store(exit_args + I64{8}, sync_load(callbacks + I64{40}))
-    sync_store(exit_args + I64{16}, log + I64{16})
+    sync_store(exit_args + I64{16}, exit_log)
+    sync_store(exit_args + I64{24}, I64{1})
+    _ := jet_rt_scheduler_fixture_exit_worker(exit_args)
+    sync_store(exit_args + I64{24}, I64{2})
     exit_thread :: thread_spawn(sync_load(callbacks + I64{24}), exit_args)
     scheduler_test_require(exit_thread > I64{0} && thread_join(exit_thread, I64{0}) == I64{0})
-    scheduler_test_require(sync_load(log + I64{16}) == I64{1})
-    jet_rt_free(exit_args, I64{24}, I64{8})
+    scheduler_test_require(sync_load(exit_log) == I64{0} && sync_load(exit_log + I64{8}) == I64{0})
+    sync_store(exit_args + I64{24}, I64{3})
+    _ := jet_rt_scheduler_fixture_exit_worker(exit_args)
     out :: jet_rt_alloc(I64{32}, I64{8})
     root :: scheduler_control_new()
     save :: jet_rt_alloc(I64{32}, I64{8})
@@ -132,10 +144,13 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     jet_scheduler_shield_leave()
     scheduler_test_require(jet_rt_session_status() == I64{1})
     scheduler_control_discard_stop(root)
-    // Panics and R08 faults cross shields immediately; cancellation waits
-    // for the outer shield exit, and is then visible on the same rail.
+    // Stops of kinds 3 and 4 cross shields immediately; cancellation waits
+    // for the outer shield exit, and is then visible on the same rail. A
+    // panic (kind 5) publishes only inside a stop domain (jet_rt_stop_domain):
+    // this bare control is neither a process root nor a task body, so it
+    // refuses one.
     kind := I64{3}
-    loop kind <= (I64{5}) {
+    loop kind <= (I64{4}) {
         jet_scheduler_shield_enter()
         _ := scheduler_control_publish(root, scheduler_stop_new(kind, scheduler_text_new(I64{0})))
         scheduler_test_require(jet_rt_session_poll() == kind)
@@ -144,6 +159,10 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
         scheduler_control_discard_stop(root)
         kind += I64{1}
     }
+    jet_scheduler_shield_enter()
+    scheduler_test_require(!scheduler_control_publish(root, scheduler_stop_new(I64{5}, scheduler_text_new(I64{0}))))
+    scheduler_test_require(jet_rt_session_poll() == I64{0})
+    jet_scheduler_shield_leave()
     jet_scheduler_shield_enter()
     scheduler_control_cancel(root)
     scheduler_test_require(jet_rt_session_poll() == I64{0})
@@ -264,7 +283,9 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     scheduler_test_require(sync_load(out) == I64{91} && sync_load(out + I64{8}) == I64{92})
     jet_rt_free(handles, I64{16}, I64{8})
     jet_rt_free(offsets, I64{16}, I64{8})
-    scheduler_test_require(sync_load(log) == I64{10007})
+    // Every environment released exactly once: the 10000 joined tasks, then
+    // the cancelled, panicked, detached, rejected and two group tasks.
+    scheduler_test_require(sync_load(log) == I64{10006})
     stats :: jet_rt_alloc(I64{24}, I64{8})
     jet_scheduler_blocking_wait_stats(stats)
     scheduler_test_require(sync_load(stats) == I64{0} && sync_load(stats + I64{16}) <= I64{9})
@@ -276,6 +297,14 @@ fn scheduler_test_spawn(callbacks: I64, meta: I64, log: I64, mode: I64, value: I
     jet_rt_free(save, I64{32}, I64{8})
     jet_rt_free(out, I64{32}, I64{8})
     jet_rt_free(log, I64{24}, I64{8})
+    // The process exit's handler step runs each handler once, in
+    // registration order, then releases it; a second drain finds none.
+    jet_rt_task_exit_handlers()
+    scheduler_test_require(sync_load(exit_log) == I64{123} && sync_load(exit_log + I64{8}) == I64{3})
+    jet_rt_task_exit_handlers()
+    scheduler_test_require(sync_load(exit_log) == I64{123} && sync_load(exit_log + I64{8}) == I64{3})
+    jet_rt_free(exit_args, I64{32}, I64{8})
+    jet_rt_free(exit_log, I64{16}, I64{8})
     coll_meta_drop(meta)
     I64{0}
 }

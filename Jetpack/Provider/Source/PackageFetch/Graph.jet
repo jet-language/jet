@@ -39,16 +39,37 @@ fn pkg_fetch_error(code: String, what: String, why: String, fix: String) -> Pack
 fn pkg_fetch_registry_error(name: String, detail: String) -> PackageFetchError Never! {
     pkg_fetch_error("E1207", "registry dependency `{name}` cannot be resolved: {detail}", "registry package identity is source-backed and must be verified before it enters the lock", "restore the trusted immutable registry checkpoint and artifact, then run `jet fetch`")
 }
+// Malformed or tampered registry evidence (E2607) refuses the dependency:
+// fetch reports it as E1207 naming the package, with the evidence detail.
+fn pkg_fetch_registry_evidence_error(name: String, diagnostic: Diagnostic) -> PackageFetchError Never! {
+    if diagnostic.code == "E2607" -> return pkg_fetch_registry_error(name, diagnostic.what)
+    PackageFetchError{diagnostic: diagnostic}
+}
 fn pkg_fetch_lock_error(error: LockError) -> PackageFetchError Never! {
-    if error == .Reported(diagnostic) -> return PackageFetchError{diagnostic: diagnostic}
-    pkg_fetch_error("E1206", error.message(), "the project lock must retain exact package facts", "run `jet fetch` and commit `.jet/lock`")
+    if error == {
+        .Reported(diagnostic) -> return PackageFetchError{diagnostic: diagnostic}
+        .IO(_) -> return pkg_fetch_error("E1224", error.message(), "the project lock must retain exact package facts", "check the project lock permissions and run `jet fetch`")
+        else -> {}
+    }
+    pkg_fetch_error("E1205", error.message(), "the project lock must retain exact package facts", "run `jet fetch` and commit `.jet/lock`")
 }
 fn pkg_fetch_load_manifest(directory: String, name: String) -[FS, Env]> Manifest PackageFetchError! {
     if pkg_manifest_load(directory) == {
         .Val(found) -> Ok(found)
-        .None -> Err(pkg_fetch_error("E1206", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`"))
+        .None -> Err(pkg_fetch_missing_manifest(directory, name))
         .Err(error) -> Err(PackageFetchError{diagnostic: error.diagnostic})
     }
+}
+// The manifest of an installed Hangar object, whose files are shared links.
+fn pkg_fetch_load_store_manifest(directory: String, name: String) -[FS, Env]> Manifest PackageFetchError! {
+    if pkg_store_manifest_load(directory) == {
+        .Val(found) -> Ok(found)
+        .None -> Err(pkg_fetch_missing_manifest(directory, name))
+        .Err(error) -> Err(PackageFetchError{diagnostic: error.diagnostic})
+    }
+}
+fn pkg_fetch_missing_manifest(directory: String, name: String) -> PackageFetchError Never! {
+    pkg_fetch_error("E1215", "dependency `{name}` has no `{PACKAGE_FILE}`", "every Jet package must have a manifest", "add `{PACKAGE_FILE}` to `{directory}`")
 }
 fn pkg_fetch_closure(lock: LockFile, target: String) -> [String] Never! {
     seen := [String]{}
@@ -120,10 +141,10 @@ fn pkg_fetch_resolve(verification: &StoreVerification, roots: HangarRoots, conte
         .Path(path) -> {
             absolute :: if path.starts_with("/") -> pkg_fetch_normalize_path(path) else -> pkg_fetch_normalize_path(files.join(parent, path))
             if parent != resolver.root {
-                if path.starts_with("/") || !(absolute == parent || absolute.starts_with("{parent}/")) -> return Err(pkg_fetch_error("E1206", "path dependency `{name}` escapes its parent package", "the path `{path}` resolves outside `{parent}`", "use a relative path below the declaring package directory"))
-                resolved :: files.canonicalize(absolute) ?? return Err(pkg_fetch_error("E1206", "path dependency `{name}` escapes its parent package", "{err}", "use a relative path below the declaring package directory"))
-                canonical_parent :: files.canonicalize(parent) ?? return Err(pkg_fetch_error("E1206", "could not retain parent package", "{err}", "restore the declaring source directory"))
-                if !(resolved == canonical_parent || resolved.starts_with("{canonical_parent}/")) -> return Err(pkg_fetch_error("E1206", "path dependency `{name}` escapes its parent package", "canonical source is outside the declaring package", "use a relative path below the declaring package directory"))
+                if path.starts_with("/") || !(absolute == parent || absolute.starts_with("{parent}/")) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "the path `{path}` resolves outside `{parent}`", "use a relative path below the declaring package directory"))
+                resolved :: files.canonicalize(absolute) ?? return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "{err}", "use a relative path below the declaring package directory"))
+                canonical_parent :: files.canonicalize(parent) ?? return Err(pkg_fetch_error("E1224", "could not retain parent package", "{err}", "restore the declaring source directory"))
+                if !(resolved == canonical_parent || resolved.starts_with("{canonical_parent}/")) -> return Err(pkg_fetch_error("E1223", "path dependency `{name}` escapes its parent package", "canonical source is outside the declaring package", "use a relative path below the declaring package directory"))
             }
             snapshot :: pkg_source_snapshot_tree(absolute) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
             result :: pkg_fetch_source_node(&verification, roots, context, &resolver, name, LockSource.Path(path), None, snapshot, chain)

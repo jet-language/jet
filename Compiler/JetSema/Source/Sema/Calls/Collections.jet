@@ -36,12 +36,11 @@ fn sema_call_collections_success_type(ty: Type) -> Type Never! {
     }
 }
 
-// Rust builtin-method argument inference (builtin_methods.rs): every argument is inferred under its
-// contract parameter type, so leading-dot variants and anonymous records
-// (`&rows.push(.Ready)`, `&map.add(key, {x: 1})`) take their type from it.
-// A self-typed numeric read (`map.get(id)` with `id: Int` on a `[U64:V]`)
-// checks on its own and then widens into the slot, as Rust
-// `widen_numeric_argument` does after inference.
+// Rust builtin-method argument inference: every argument is inferred under its contract parameter
+// type, so leading-dot variants and anonymous records (`&rows.push(.Ready)`, `&map.add(key, {x:
+// 1})`) take their type from it. A self-typed numeric read (`map.get(id)` with `id: Int` on a
+// `[U64:V]`) checks on its own and then widens into the slot, as Rust `widen_numeric_argument` does
+// after inference.
 fn sema_call_collections_check_argument(argument: CallArg, method: String, index: Int, required: Type, callback: Bool, lending: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     reported :: diagnostics.len()
     previous_lending :: context.lambda_lending_views
@@ -103,11 +102,10 @@ fn sema_call_collections_callback_return(value: TExpr) -> Type Never! {
 }
 
 // A callable value handed to an eager sequence adapter keeps its checked
-// failure route. `fn(T) -> U` carries the default `Err` route, so the call
-// site propagates each element's failure exactly as a direct `f(item)` would.
-// A literal lambda records its own propagation, and a written `Result` return
-// is projected onto the collection result (Rust builtin_methods.rs
-// `callback_value_takes_default_route`).
+// failure route. `fn(T) -> U` carries the default `Err` route, so the call site
+// propagates each element's failure exactly as a direct `f(item)` would. A
+// literal lambda records its own propagation, and a written `Result` return is
+// projected onto the collection result.
 fn sema_call_collections_callback_takes_default_route(receiver: Type, method: String, callback: TExpr) -> Bool Never! {
     if callback.kind == .Lambda(_) -> return false
     receiver_ty :: sema_expr_unwrap_tag(receiver)
@@ -173,10 +171,9 @@ fn sema_call_collections_ownership_params(required_types: [Type]) -> [SemaCallPa
     return params
 }
 
-// Rust builtin_methods.rs F: a literal `RemoveBy` selector of a
-// two-argument `remove` fixes the removal mode before argument inference, so
-// `.Slot` takes an Int position and `.Val` an element; any other selector
-// stays a run-time choice.
+// F: a literal `RemoveBy` selector of a two-argument `remove` fixes the removal
+// mode before argument inference, so `.Slot` takes an Int position and `.Val`
+// an element; any other selector stays a run-time choice.
 fn sema_call_collections_literal_remove_mode(method: String, args: [CallArg]) -> TListRemoveMode? {
     if method != "remove" || args.len() != 2 -> return None
     return if args[1].expr == {
@@ -320,10 +317,10 @@ fn sema_call_try_builtin_collections(receiver: Expr, receiver_value: TExpr, meth
     }
     line :: sema_source_line_at(environment.source_segments, span) ?? 0
     operation := sema_collection_method_operation(contract, updated_args.len(), literal_remove_mode, line, callback_return, callback_mutable, comparator)
-    // Rust builtin_methods.rs runs no convention check on a collection
-    // argument: `^` on one (`&to.push(^item)`) is neither rejected (E0203)
-    // nor recorded as a move here, so the ownership walk reads it like an
-    // unmarked argument. A marked field still lowers as its exact-place move.
+    // The Rust original runs no convention check on a collection argument: `^`
+    // on one (`&to.push(^item)`) is neither rejected (E0203) nor recorded as a
+    // move here, so the ownership walk reads it like an unmarked argument. A
+    // marked field still lowers as its exact-place move.
     marked :: loop argument in updated_args -> argument.convention == AccessConvention.Move
     loop index in 0..<updated_args.len() {
         if updated_args[index].convention == AccessConvention.Move -> updated_args[index].convention = AccessConvention.Read

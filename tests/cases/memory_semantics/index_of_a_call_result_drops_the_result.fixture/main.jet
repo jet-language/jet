@@ -1,0 +1,104 @@
+// An index read off a fresh call result (`make_rows(16)[3]`,
+// `make_map(16)["key 3"]`) drops that result once the read is done: at the
+// end of the statement, or right away for a read in a condition or a
+// body's tail value. Each scenario runs 40,000 times on 16 entries. A
+// result the read never drops keeps 50 MB or more resident, so the
+// resident set may grow by at most 8 MB across a scenario.
+package {
+    name: "index_of_a_call_result_drops_the_result"
+    authority: { allow: [FS.Read] }
+}
+
+use files :: core.files
+
+ROUNDS :: 40000
+GROWTH_LIMIT_KB :: 8192
+
+struct Row {
+    name: String
+    items: [String]
+}
+
+fn status_kb(field: String) -> Int {
+    status :: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+fn make_rows(n: Int) -> [Row] {
+    rows := [Row]{}
+    loop i in 0..<n -> &rows.push(Row{name: "row {i}", items: [String]{"a {i}", "b {i}"}})
+    rows
+}
+
+fn make_map(n: Int) -> [String:Int] {
+    map := [String:Int]{}
+    loop i in 0..<n -> map["key {i}"] = i
+    map
+}
+
+fn make_names(n: Int) -> [String:String] {
+    map := [String:String]{}
+    loop i in 0..<n -> map["key {i}"] = "name {i}"
+    map
+}
+
+// A List element's field, the body's tail value.
+fn element_tail() -> Int {
+    make_rows(16)[3].items.len()
+}
+
+// A List element bound to a variable, which keeps its own share of it.
+fn element_bound() -> Int {
+    row :: make_rows(16)[5]
+    row.name.len() + row.items.len()
+}
+
+// A List element read in an `if` condition, with an early return under it.
+fn element_in_a_condition(flag: Bool) -> Int {
+    if make_rows(16)[2].items.len() == 2 {
+        if flag -> return 1
+        return 2
+    }
+    0
+}
+
+// A Map value, the body's tail value.
+fn map_value_tail() -> Int {
+    make_map(16)["key 3"]
+}
+
+// A String Map value returned.
+fn map_text_returned() -> String {
+    return make_names(16)["key 7"]
+}
+
+// A Map value read in a loop condition, once per pass.
+fn map_value_in_a_loop_condition() -> Int {
+    passes := 0
+    loop passes < make_map(16)["key 4"] -> passes += 1
+    passes
+}
+
+fn measure(name: String, scenario: fn() -> Int) {
+    total := scenario()
+    start :: status_kb("VmRSS:")
+    loop _ in 1..<ROUNDS -> total += scenario()
+    grown :: status_kb("VmRSS:") - start
+    if grown > GROWTH_LIMIT_KB -> panic("{name}: the resident set grew {grown} kB over {ROUNDS} rounds")
+    print("{name}: {total}, every result dropped")
+}
+
+fn run() {
+    measure("element tail", element_tail)
+    measure("element bound", element_bound)
+    measure("element in a condition", () -> element_in_a_condition(true) + element_in_a_condition(false))
+    measure("map value tail", map_value_tail)
+    measure("map text returned", () -> map_text_returned().len())
+    measure("map value in a loop condition", map_value_in_a_loop_condition)
+}

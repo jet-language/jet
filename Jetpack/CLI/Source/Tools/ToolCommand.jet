@@ -326,7 +326,7 @@ fn cli_update_user_tools_locked(verification: &StoreVerification, theme: Theme, 
 
 fn cli_tool_install(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     raw :: parsed.positional.get(1) ?? {
-        theme.error("`jetpack tool install` needs a package ref", "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tool generation.", "try `jetpack tool install ripgrep@nixpkgs`.")
+        theme.error("`jetpack tool install` needs a package ref", "persistent install realizes one `package@source` ref and projects its bins onto `~/.jet/bin` as a tool generation.", "try `jetpack tool install ripgrep@jetpack`.")
         return EXIT_USAGE
     }
     channel_policy :: pkg_policy_for_ref(raw)
@@ -441,8 +441,8 @@ fn cli_reject_unavailable_provider(theme: Theme, raw: String) -[IO, Time.Wait]> 
     theme.error_coded(
         TOOL_DIAG_PROVIDER,
         "tool provider `{source}` isn't available yet",
-        "the package shell spans built-in providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: nixpkgs, github, and bare local paths.",
-        "use a built-in ref (`…@nixpkgs`, `…@github`, or a bare local path), or wait for the `{source}` provider to land."
+        "the package shell spans built-in providers, but `…@{source}` has no hangar realization path yet (JPK-TOOL-PROVIDER). Built-in providers that work today: jetpack, github, and bare local paths.",
+        "use a built-in ref (`…@jetpack`, `…@github`, or a bare local path), or wait for the `{source}` provider to land."
     )
     Val(EXIT_USAGE)
 }
@@ -491,8 +491,8 @@ fn cli_collect_jet_files(dir: String, out: &[String], depth: Int) Never! -[FS]> 
     }
 }
 
-// Every `#Job fn <name>` in `src`, allowing one marker such as `#Every(…)`
-// between `#Job` and `fn`.
+// Every `#Job <name>: fn` (or the retired `#Job fn <name>`) in `src`,
+// allowing one marker such as `#Every(…)` between `#Job` and the head.
 fn cli_task_names_in(src: String) -> [String] Never! {
     raw :: src.bytes()
     needle :: "#Job".bytes()
@@ -505,8 +505,13 @@ fn cli_task_names_in(src: String) -> [String] Never! {
             next
         }
         rest := pkg_bytes_skip_space(raw, at + needle.len())
+        found :: trust_text_find(raw, fn_word, rest)
+        if found >= 0 && cli_task_colon_name(raw, rest, found) == .Val(name) {
+            &names.push(name)
+            at += needle.len()
+            next
+        }
         if pkg_bytes_code(raw, rest) == TRUST_HASH {
-            found :: trust_text_find(raw, fn_word, rest)
             if found >= 0 -> rest = found
         }
         rest = pkg_bytes_skip_space(raw, rest)
@@ -519,6 +524,20 @@ fn cli_task_names_in(src: String) -> [String] Never! {
         at += needle.len()
     }
     names
+}
+
+// The `name` of a `name: fn` head whose `fn` starts at `fn_at`, scanning no
+// further back than `from`; None for any other spelling.
+fn cli_task_colon_name(raw: [U8], from: Int, fn_at: Int) -> String? Never! {
+    colon := fn_at - 1
+    loop colon >= from && (pkg_bytes_code(raw, colon) == 32 || pkg_bytes_code(raw, colon) == 9) -> colon -= 1
+    if colon < from || pkg_bytes_code(raw, colon) != 58 -> return None
+    end := colon
+    loop end > from && (pkg_bytes_code(raw, end - 1) == 32 || pkg_bytes_code(raw, end - 1) == 9) -> end -= 1
+    start := end
+    loop start > from && (trust_text_is_alphanumeric(pkg_bytes_code(raw, start - 1)) || pkg_bytes_code(raw, start - 1) == TRUST_UNDERSCORE) -> start -= 1
+    if start == end -> return None
+    Val(pkg_bytes_text(raw, start, end))
 }
 
 // The receipt's executables as bin/member pairs: `--as` renames (and keeps
@@ -571,13 +590,13 @@ fn cli_check_user_tools_drift(verification: &StoreVerification, theme: Theme, pa
         }
         tool :: found ?? next
         recorded :: if entry.tier == ChannelPolicy.Pinned -> entry.reference else -> entry.resolved
-        if cli_canonical_tool_reference(recorded) == cli_canonical_tool_reference(tool.reference) -> next
+        if recorded == tool.reference -> next
         installed_version :: if tool.version == "" -> cli_tool_reference_version(tool.reference) else -> tool.version
         &drifts.push(ToolDrift{
             name: entry.name,
-            installed_reference: cli_canonical_tool_reference(tool.reference),
+            installed_reference: tool.reference,
             installed_version: installed_version,
-            pinned_reference: cli_canonical_tool_reference(recorded),
+            pinned_reference: recorded,
             pinned_version: cli_tool_reference_version(recorded)
         })
     }

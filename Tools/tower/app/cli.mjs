@@ -10,7 +10,8 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as db from './store.mjs';
 import { openStore, TowerError, PHASE_IDS } from './store.mjs';
-import { DOCS_DIR, findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON, historyFile } from './paths.mjs';
+import { DOCS_DIR, findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON } from './paths.mjs';
+import { SHARD_BYTES, historyFiles, planShards } from './history-shards.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
@@ -18,6 +19,7 @@ import { findDuplicateCandidates } from './card-matching.mjs';
 import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
 import { applyRepairManifest } from './repair.mjs';
+import { machinePersonalInfo } from './personal-info.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -115,6 +117,7 @@ const COMMAND_FLAGS = {
     add: by('title', 'body'),
     update: by('title', 'body', 'status'),
     log: by('text'),
+    remap: by('merge', 'renumber'),
   }},
   idea: { verbs: {
     list: ['all'],
@@ -152,10 +155,12 @@ const COMMAND_FLAGS = {
     status: [],
     show: [],
     restore: by(),
+    shard: by('apply', 'expectRev'),
   }},
   repair: { verbs: {
     apply: by('manifest', 'dryRun', 'expectRev'),
   }},
+  redact: { flags: by('apply', 'expectRev') },
   events: { flags: ['limit'] },
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
@@ -199,9 +204,10 @@ const FLAG_VALUE = {
   unarchive: null, archived: null, draft: null, drafts: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
   readyAcrossEpochs: null, docs: null, docsRoot: 'DIR', scratch: null, note: '"…"',
-  manifest: 'FILE', dryRun: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
+  manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
   hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE',
+  merge: 'G1=G14,G7=G14', renumber: 'G14=G1,G15=G2',
 };
 
 const flagToken = (key) => {
@@ -864,7 +870,21 @@ function cmdGoal(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.updateGoal(s, ref, { logEntry: flags.text ?? pos.slice(2).join(' '), by: flags.by }));
       return out(flags, `logged on goal ${result.id}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown goal verb "${verb}" — list/show/add/update/log`);
+    case 'remap': {
+      const pairs = (raw, flag) => Object.fromEntries(String(raw ?? '').split(',').map(x => x.trim()).filter(Boolean).map((pair) => {
+        const [from, to, extra] = pair.split('=').map(x => x.trim());
+        if (!from || !to || extra !== undefined) throw new TowerError('E_USAGE', `--${flag} takes FROM=TO pairs, got "${pair}"`);
+        return [from, to];
+      }));
+      const merge = pairs(flags.merge, 'merge');
+      const renumber = pairs(flags.renumber, 'renumber');
+      if (!Object.keys(merge).length && !Object.keys(renumber).length) throw new TowerError('E_USAGE', 'goal remap needs --merge or --renumber');
+      const { result } = store.mutate((s, _config, history) => db.remapGoals(s, history, { merge, renumber, by: flags.by }));
+      if (flags.json) return out(flags, null, result);
+      for (const g of result.goals) console.log(`${g.id.padEnd(5)} ${g.status.padEnd(9)} ${g.title}`);
+      return;
+    }
+    default: throw new TowerError('E_USAGE', `unknown goal verb "${verb}" — list/show/add/update/log/remap`);
   }
 }
 
@@ -1200,19 +1220,30 @@ function cmdVerdict(store, { pos, flags }) {
   return out(flags, `verdict ${result.id} recorded on card #${result.cardNum} → ${result.outcome}`, result);
 }
 
-// #461 — tower archive status|show|restore. Cards/decisions retire to
+// #461 — tower archive status|show|restore|shard. Cards/decisions retire to
 // history.json on their own (store.mutate's chokepoint); this surface reads
-// it back and lets the owner walk one back.
+// it back and lets the owner walk one back. `shard` (#6564 c7) moves the
+// archive into size-bounded files once (history-shards.mjs); without --apply
+// it is a dry run that writes nothing.
 function cmdArchive(store, { pos, flags }) {
   const [verb, ref] = pos;
+  const mib = (bytes) => `${(bytes / 1048576).toFixed(1)} MiB`;
+  const shardLines = (shards) => shards.map(shard => `  history/${shard.file}: ${shard.items} items, ${mib(shard.bytes)}`);
+  const largest = (shards) => Math.max(0, ...shards.map(shard => shard.bytes));
   switch (verb) {
     case 'status': {
       const h = store.loadHistory();
-      const hf = historyFile(store.dataDir);
-      const historyBytes = existsSync(hf) ? statSync(hf).size : 0;
+      const files = historyFiles(store.dataDir);
+      const historyBytes = files.bytes;
       const liveBytes = existsSync(store.file) ? statSync(store.file).size : 0;
-      const info = { cards: h.cards.length, decisions: h.decisions.length, events: h.events.length, historyBytes, liveBytes };
-      return out(flags, `history: ${info.cards} cards, ${info.decisions} decisions, ${info.events} events — ${(historyBytes / 1024).toFixed(1)} KB (live tower.json ${(liveBytes / 1024).toFixed(1)} KB)`, info);
+      const info = {
+        cards: h.cards.length, decisions: h.decisions.length, events: h.events.length, historyBytes, liveBytes,
+        layout: files.layout, shards: files.shards.length, largestShardBytes: largest(files.shards),
+      };
+      const where = files.layout === 'shards'
+        ? ` in ${info.shards} shards under history/ (largest ${(info.largestShardBytes / 1024).toFixed(1)} KB)`
+        : '';
+      return out(flags, `history: ${info.cards} cards, ${info.decisions} decisions, ${info.events} events — ${(historyBytes / 1024).toFixed(1)} KB${where} (live tower.json ${(liveBytes / 1024).toFixed(1)} KB)`, info);
     }
     case 'show': {
       const h = store.loadHistory();
@@ -1226,7 +1257,33 @@ function cmdArchive(store, { pos, flags }) {
       const { result } = store.restoreArchived(ref, flags.by);
       return out(flags, `restored ${result.kind} ${result.id}${result.num ? ` (#${result.num})` : ''} from archive`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown archive verb "${verb}" — status/show/restore`);
+    case 'shard': {
+      const files = historyFiles(store.dataDir);
+      if (files.layout === 'shards')
+        return out(flags, [
+          `history is already sharded: ${files.shards.length} shards under history/, ${mib(files.bytes)} in all, largest ${mib(largest(files.shards))}`,
+          ...shardLines(files.shards),
+        ].join('\n'), { applied: false, layout: 'shards', bytes: files.bytes, shards: files.shards });
+      if (!flags.apply) {
+        const plan = planShards(store.loadPair().history);
+        const shards = plan.files.map(({ kind, file, items, bytes, sha256 }) => ({ kind, file, items, bytes, sha256 }));
+        return out(flags, [
+          `dry run: history.json (${mib(files.bytes)}) would become a manifest and ${shards.length} shards under history/, each at most ${mib(SHARD_BYTES)} (largest ${mib(largest(shards))}); rerun with --apply --by X to write`,
+          ...shardLines(shards),
+        ].join('\n'), { applied: false, layout: files.layout, bytes: files.bytes, bound: SHARD_BYTES, shards });
+      }
+      if (!flags.by || flags.by === true) throw new TowerError('E_USAGE', 'archive shard --apply needs --by <agent>');
+      const { state } = store.mutate((s) => db.logEvent(s, {
+        by: flags.by, action: 'archive.shard', ref: 'history.json',
+        note: `the archive moved from history.json to shards under history/, each at most ${mib(SHARD_BYTES)}`,
+      }), { expectRev: flags.expectRev, historyLayout: 'shards' });
+      const after = historyFiles(store.dataDir);
+      return out(flags, [
+        `sharded at rev ${state.meta.rev}: ${after.shards.length} shards under history/, ${mib(after.bytes)} in all, largest ${mib(largest(after.shards))}`,
+        ...shardLines(after.shards),
+      ].join('\n'), { applied: true, rev: state.meta.rev, layout: after.layout, bytes: after.bytes, shards: after.shards });
+    }
+    default: throw new TowerError('E_USAGE', `unknown archive verb "${verb}" — status/show/restore/shard`);
   }
 }
 
@@ -1249,6 +1306,32 @@ function cmdRepair(store, { pos, flags }) {
   return out(flags,
     `repair ${mode}: ${result.fields} fields, ${result.substitutions} substitutions, manifest ${result.manifestHash}`,
     result);
+}
+
+// #6564 c5: without --apply this is a dry run that changes nothing. The rule
+// table comes from this machine (personal-info.mjs, the table the guard reads);
+// run it where the board's text was written, with JET_SCRATCH_ROOT set, so
+// every rule maps as shown. --apply on a board with nothing to redact writes
+// nothing, so the rev and the event log stay as they were.
+function cmdRedact(store, { flags }) {
+  const matcher = machinePersonalInfo();
+  const table = matcher.rules.map(rule => `  ${rule.label}: ${rule.kind === 'word' ? 'word ' : ''}${rule.find} → ${rule.replace}`);
+  const show = (report, head) => [
+    head,
+    `rule table ${report.ruleTable}:`, ...table,
+    'spans per file:', ...Object.entries(report.files).map(([name, n]) => `  ${name}: ${n}`),
+    'spans per section:', ...Object.entries(report.sections).map(([name, n]) => `  ${name}: ${n}`),
+    'spans per rule:', ...Object.entries(report.rules).map(([label, n]) => `  ${label}: ${n}`),
+  ].join('\n');
+  if (flags.apply && (!flags.by || flags.by === true)) throw new TowerError('E_USAGE', 'redact --apply needs --by <agent>');
+  const { state, history } = store.loadPair();
+  const report = db.redactBoardCopy(state, history, matcher);
+  if (!flags.apply)
+    return out(flags, show(report, `dry run: ${report.total} spans would be redacted; rerun with --apply --by X to write`), { ...report, applied: false });
+  if (!report.total)
+    return out(flags, show(report, `nothing to redact; the board is unchanged at rev ${state.meta.rev}`), { ...report, applied: false, rev: state.meta.rev });
+  const { result, state: after } = store.mutate((s, cfg, h) => db.applyRedaction(s, h, flags.by, matcher), { expectRev: flags.expectRev });
+  return out(flags, show(result, `redacted ${result.total} spans at rev ${after.meta.rev}`), { ...result, applied: true, rev: after.meta.rev });
 }
 
 function cmdEvents(store, { flags }) {
@@ -1371,6 +1454,7 @@ ${HELP_SURFACE}
     frozen write guard (E_OWNER_LANE), ratified-decision delete guard (E_HAS_RATIFIED),
     building-release handoff (E_HANDOFF), nonempty card exit criteria (E_CRITERIA),
     durable criterion evidence: a commit on dev or master, or --kind decision|duplicate|obsolete (E_EVIDENCE),
+    no personal or machine information in new text; \`tower redact\` cleans old text (E_PERSONAL_INFO),
     and explicit milestone review (E_MILESTONE).
 `;
 
@@ -1477,6 +1561,7 @@ export async function run(argv) {
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);
       case 'repair':    return cmdRepair(store, sub);
+      case 'redact':    return cmdRedact(store, sub);
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'board':     return cmdBoard(store, sub);
