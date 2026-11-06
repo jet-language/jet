@@ -100,6 +100,7 @@ test('keyless LAN access keeps Host and CSRF boundaries', async () => {
     `[fe80::42]:${PORT}`, `[::1]:${PORT}`,
     `[::ffff:192.168.1.42]:${PORT}`, `[0:0:0:0:0:ffff:c0a8:12a]:${PORT}`,
     `tower.lan:${PORT}`, `tower:${PORT}`,
+    `100.101.102.103:${PORT}`, `tower.example-tailnet.ts.net:${PORT}`,
   ]) {
     const response = await rawGet('/api/state', host);
     assert.equal(response.status, 200, `private LAN Host ${host} is readable`);
@@ -109,6 +110,7 @@ test('keyless LAN access keeps Host and CSRF boundaries', async () => {
     `[2001:4860:4860::8888]:${PORT}`,
     `[::ffff:8.8.8.8]:${PORT}`,
     `[0:0:0:0:0:ffff:cb00:7108]:${PORT}`,
+    `100.128.0.1:${PORT}`,
   ]) {
     const response = await rawGet('/api/state', host);
     assert.equal(response.status, 403, `public Host ${host} is rejected`);
