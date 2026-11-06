@@ -1193,6 +1193,21 @@ sema_call_try_distinct_conversion: fn(owner: Symbol, display_name: String, metho
                 }
             }
         }
+        // A literal beyond i64 keeps its exact decimal (a BigInt constant);
+        // it is still known at compile time, so the interval check sees it.
+        if argument.kind == .CtLit(constant) {
+            if constant == .BigInt(decimal) {
+                if sema_expr_is_integer(source) && sema_expr_is_integer(facts.base) {
+                    literal_in_range = true
+                    // Core Int is exact, so the decimal parses to the literal itself.
+                    outside: if Int.parse(decimal) == {
+                        .Ok(literal) -> literal < bounds.lo || literal > bounds.hi
+                        .Err(_) -> true
+                    }
+                    if outside -> diagnostics.push(sema_error("E0135", argument.span, "`{decimal}` is outside `{display_name}`'s range {bounds.lo}..{bounds.hi}", "a range type only holds values inside its bounds; `{decimal}` can never be a `{display_name}`", "use a value in `{bounds.lo}..{bounds.hi}`, or widen the type's range"))
+                }
+            }
+        }
         // A float literal past the bounds can never convert either; its
         // conversion stays fallible, as any float source's does.
         if args[0].expr == .Float(number, _, _, raw, _) {

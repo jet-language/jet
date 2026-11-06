@@ -2804,10 +2804,16 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     // is the canonical leaf, and such a receiver is inferred against the
     // declaration resolved in its own module (as operator lookup does).
     receiver_canonical: receiver_name.contains("::")
+    // The nominal the caller's scope names wins: a user type shadows a
+    // same-named type of another module (the prelude's `Severity`), so the
+    // other rows never offer their methods to this receiver.
+    caller_row: if sema_registration_module_index(graph, caller_module) == .Val(index) -> index else -> -1
+    scoped_row: sema_type_resolve_nominal_row_at(graph, lookup_type, caller_row)
     found_owner := false
     loop nominal_row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)) {
         owner_index: nominal_row.module_index
         nominal: graph.modules[owner_index].nominals[nominal_row.row]
+        if scoped_row == .Val(scoped) && graph.modules[scoped.module_index].nominals[scoped.row].kind != SemaRegistrationNominalKind.TypeAlias && (scoped.module_index != owner_index || scoped.row != nominal_row.row) -> next
         found_owner = true
         inference_ty := nominal.ty
         if receiver_canonical -> inference_ty = sema_type_resolve_declared(graph, nominal.ty, graph.modules[owner_index].module_identity)
