@@ -1344,9 +1344,19 @@ Typed `csv.decode<T>` owns the native header-to-record policy in Jet. The
 whole-value comma parser retains blank records, doubled quotes, CRLF rules,
 Unicode-scalar columns and the exact `E2701` failure text. It intentionally
 does not impose streaming `EncodingLimits` on the shipped unbounded whole-value
-operation. Each header names a text cell (missing cells are empty; extra cells
-are ignored), and all typed errors are accumulated in data-record order with
-the native `row N` path prefix.
+operation. Each header names a text cell, and a data record must have exactly
+the header's cell count: a short or long record is a `row N` error, never
+padded or truncated. All typed errors are accumulated in data-record order
+with the native `row N` path prefix.
+
+One CSV record contract covers the eager `csv.rows`, `csv.dict_rows`, typed
+`csv.decode<T>`, the `core.data` CSV loader and the streaming `csv.reader`: a
+record ends at LF or CRLF and a bare CR is malformed; a quote may open only an
+empty field; an unclosed quote is `Truncated`; errors carry the same reason,
+one-based line, scalar column and `$[record][field]` path; `header` drops the
+first record; and `skip_blank` drops each record whose fields are all empty.
+Ragged records stay physical in `rows` and the reader, and are errors wherever
+cells map to a header (`dict_rows`, `decode`, the data loader).
 
 CBOR file streams retain the existing `CBORReader`/`CBORWriter` names,
 consuming file factories, optional pull events and IO method effects.

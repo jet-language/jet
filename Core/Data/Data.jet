@@ -3246,7 +3246,7 @@ fn data_loader_decode<T: Decode>(tree: Dyn, text_cells: Bool) -> T [FieldError]!
     }
 }
 
-// Header-named Text cells; a short row's missing cells are null.
+// Header-named Text cells; a record whose cell count differs from the header's is a decode error.
 fn data_loader_csv_tree(text: String, limits: DataLimits) -> Dyn DataError! {
     records :: csv_codec.rows(text, ",", false, false) ?? return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", err.reason))
     if records.len() == 0 -> return Ok(Dyn.Array([Dyn]{}))
@@ -3261,12 +3261,9 @@ fn data_loader_csv_tree(text: String, limits: DataLimits) -> Dyn DataError! {
     loop row in 1..<records.len() {
         fields :: records[row].fields
         if values.len() >= limits.max_output_rows -> return Err(data_loader_error(DataErrorKind.Limit, "data.loader.csv", "max_output_rows {limits.max_output_rows} exceeded"))
-        if fields.len() > header.len() -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
+        if fields.len() != header.len() -> return Err(data_loader_error(DataErrorKind.Decode, "data.loader.csv", "CSV row has {fields.len()} fields; header has {header.len()}"))
         entries := [(key: String, value: Dyn)]{}
-        loop column in 0..<header.len() {
-            cell :: if column < fields.len() -> Dyn.Text(fields[column].copy()) else -> Dyn.Null
-            &entries.push((key: header[column].copy(), value: cell))
-        }
+        loop column in 0..<header.len() -> &entries.push((key: header[column].copy(), value: Dyn.Text(fields[column].copy())))
         &values.push(encoding_stream.object_from_entries(^entries))
     }
     Ok(Dyn.Array(values))
