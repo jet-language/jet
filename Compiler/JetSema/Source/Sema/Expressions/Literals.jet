@@ -244,7 +244,10 @@ sema_expression_list_mark_owned_value: fn(value: Expr, state: &SemaOwnershipStat
                     diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
                     return false
                 }
-                if sema_ownership_active_loan_conflict(state, place, AccessConvention.Move) != None {
+                // A view binding carries its own loan into the list
+                // (sema_ownership_carrier_loan_exempt), so `[first, second]`
+                // over disjoint windows moves both views.
+                if sema_ownership_active_loan_conflict_for_expr(state, place, AccessConvention.Move, value, scopes) != None {
                     diagnostics.push(sema_ownership_diag_live_reference(sema_ownership_place_name(place), span))
                     return false
                 }

@@ -5641,6 +5641,16 @@ sema_expr_check_method_call_expr: fn(receiver: Expr, method: String, method_span
             }
         }
     }
+    // D-CALLSITE-MARK2=A with D-SHAPE-PLACE1=A: a range of a place whose
+    // method writes its receiver (`values[1..3].sort()`) edits a write window
+    // into the owner, as a write parameter's range argument does; a reading
+    // method keeps the plain range value.
+    if !written_place && receiver == .Slice(_, _, _, _, _, _) && sema_receiver_mark_place_root(receiver) != None {
+        if sema_expr_shared_place_call_writes(receiver, method, method_span, owner_type_args, type_args, args, environment, program, scopes, state, tail_store, context) {
+            window: Expr.Place{value: receiver, access: PlaceAccess.Write, span: expr_span(receiver), id: AST_NODE_GENERATED}
+            return sema_expr_check_method_call_expr(window, method, method_span, owner_type_args, type_args, args, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+    }
     // Check the ordinary unmarked call inside a receiver frame, which records
     // the receiver's resolved convention for the shared-place probe above.
     unmarked: sema_receiver_mark_begin(state, receiver)
