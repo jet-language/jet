@@ -299,12 +299,12 @@ fn net_route_accept(listener: I64, operation: I64, output: I64, error: I64) -> I
         if (state != I64{0}) -> break
         code :: net_word(scratch, I64{8})
         if (code != I64{11} && code != I64{4}) -> break
-        _ := jet_socket_ready_raw(jet_socket_listener_fd_raw(listener), I64{1}, I64{-1}, scratch)
-        if net_route_wait_stop(operation, error) {
+        // net_tcp_wait bounds the wait by the context deadline (an
+        // accept_deadline call's) and reports its timeout, a stop or an error.
+        if (net_tcp_wait(jet_socket_listener_fd_raw(listener), I64{1}, operation, scratch, error) == I64{0}) {
             jet_rt_free(scratch, I64{32}, I64{8})
             return I64{0}
         }
-        if (net_word(scratch, I64{8}) != I64{0}) -> break
     }
     code :: net_word(scratch, I64{8})
     jet_rt_free(scratch, I64{32}, I64{8})

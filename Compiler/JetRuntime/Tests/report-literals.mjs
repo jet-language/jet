@@ -5,7 +5,23 @@ import {readFileSync} from 'node:fs';
 const traps = readFileSync(new URL('../Source/TrapMessages.jet', import.meta.url), 'utf8');
 const scheduler = readFileSync(new URL('../Source/SchedulerMessages.jet', import.meta.url), 'utf8');
 
+// The bytes of an `rt_static_text("...")` body, undoing the generators'
+// escapes (Tools/agent/runtime-static-text.mjs).
+const STATIC = /rt_static_text\("((?:[^"\\]|\\.)*)"\)/;
+function staticBytes(body) {
+    return Buffer.from(body.replace(/\\(.)|\{\{|\}\}/g, (match, escape) => {
+        if (escape === undefined) return match[0];
+        const plain = {n: '\n', '\\': '\\', '"': '"'}[escape];
+        if (plain === undefined) throw Error(`unknown static text escape \\${escape}`);
+        return plain;
+    }), 'utf8');
+}
+
+// A literal is either one static text (`<name>_text`) or little-endian
+// signed I64 word rows.
 export function trapLiteral(name) {
+    const text = traps.match(new RegExp(`^fn ${name}_text\\(\\) -> I64 \\{ ${STATIC.source} \\}$`, 'm'))?.[1];
+    if (text !== undefined) return staticBytes(text);
     const body = traps.match(new RegExp(`^fn ${name}\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
     if (!body) throw Error(`missing frozen trap literal ${name}`);
     const bytes = [];
@@ -19,11 +35,9 @@ export function trapLiteral(name) {
 export function schedulerLiteral(name) {
     const body = scheduler.match(new RegExp(`^fn ${name}\\(\\) -> I64 \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
     const length = body?.match(/scheduler_text_new\(I64\{(\d+)\}\)/)?.[1];
-    if (length === undefined) throw Error(`missing frozen scheduler literal ${name}`);
-    const bytes = Buffer.alloc(Number(length));
-    for (const row of body.matchAll(/sync_store\(data \+ I64\{(\d+)\}, I64\{(-?\d+)\}\)/g)) {
-        const offset = Number(row[1]), word = BigInt(row[2]);
-        for (let i = 0; i < Math.min(8, bytes.length - offset); ++i) bytes[offset + i] = Number((word >> BigInt(i * 8)) & 255n);
-    }
+    const text = body?.match(STATIC)?.[1];
+    if (length === undefined || text === undefined) throw Error(`missing frozen scheduler literal ${name}`);
+    const bytes = staticBytes(text);
+    if (bytes.length !== Number(length)) throw Error(`scheduler literal ${name} is ${bytes.length} bytes, not ${length}`);
     return bytes;
 }

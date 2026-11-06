@@ -7,6 +7,7 @@
 
 extern int64_t jet_closure_ref_test_run(void);
 extern void jet_rt_alloc_init(void);
+extern void jet_rt_host_arguments(int64_t argc, int64_t argv, int64_t envp);
 extern int64_t __real_jet_rt_alloc(int64_t size, int64_t align);
 extern void __real_jet_rt_free(int64_t pointer, int64_t size, int64_t align);
 
@@ -70,7 +71,8 @@ void jet_closure_ref_test_enter(void) {
     }
 }
 
-int main(void) {
+int main(int argc, char **argv, char **envp) {
+    jet_rt_host_arguments((int64_t)argc, (int64_t)(uintptr_t)argv, (int64_t)(uintptr_t)envp);
     require(pthread_barrier_init(&first_pair, NULL, 2) == 0, "barrier init failed");
     jet_rt_alloc_init();
     int64_t checksum = jet_closure_ref_test_run();

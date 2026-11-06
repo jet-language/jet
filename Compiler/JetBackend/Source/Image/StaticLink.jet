@@ -182,8 +182,13 @@ struct LinkContext {
     obj_first_section: [Int]
     obj_first_symbol: [Int]
     obj_sym_count: [Int]
-    // Init/fini arrays and SHF_GNU_RETAIN sections: collection roots.
+    // Init/fini arrays, `.init`/`.fini` code and SHF_GNU_RETAIN sections:
+    // collection roots.
     roots: [Int]
+    // The `.init` (0) and `.fini` (1) code sections: each is one function
+    // assembled from pieces in input order (crti.o's prologue, crtn.o's
+    // epilogue), so link_order keeps each group contiguous.
+    init_code: [Int:Int]
     // Conditional roots: an init/fini array section with SHF_INFO_LINK (a
     // runtime lifecycle hook of a service, Image/Object.jet) is live exactly
     // when the section its sh_info names is; per row, that array section and
@@ -275,7 +280,7 @@ fn link_context(bufs: ^[[U8]], base: Int) -> LinkContext Never! {
         obj_name: [String]{}, obj_buffer: [Int]{}, obj_base: [Int]{}, obj_shoff: [Int]{}, obj_names: [Int]{},
         obj_symtab: [Int]{}, obj_strtab: [Int]{}, obj_shndx: [Int]{}, obj_count: [Int]{}, obj_first_global: [Int]{},
         obj_first_section: [Int]{}, obj_first_symbol: [Int]{}, obj_sym_count: [Int]{}, rela: [Int:Int]{}, discarded: [Int:Bool]{}, sym_global: [Int]{}, roots: [Int]{},
-        cond_roots: [Int]{}, cond_guards: [Int]{},
+        cond_roots: [Int]{}, cond_guards: [Int]{}, init_code: [Int:Int]{},
         g_index: [String:Int]{}, g_name: [String]{}, g_kind: [Int]{}, g_section: [Int]{}, g_value: [Int]{}, g_size: [Int]{},
         g_obj: [Int]{}, g_weak_def: [Bool]{}, g_strong_ref: [Bool]{}, g_alias: [Int]{}, g_addr: [Int]{},
         g_common_size: [Int]{}, g_common_align: [Int]{}, comdats: [String:Bool]{}, pending: [Int]{}, pending_head: 0,
@@ -635,6 +640,11 @@ fn link_load_object(c: &LinkContext, b: Int, base: Int, size: Int, name: String)
         } else if kind == LINK_SHT_X86_64_UNWIND || (kind == LINK_SHT_PROGBITS && link_u8(c.bufs, b, names_at + link_u32(c.bufs, b, h) + 1) == 0x65) {
             // `.e...`: an `.eh_frame` an assembler typed PROGBITS.
             &eh.push(k)
+        }
+        name_at :: names_at + link_u32(c.bufs, b, h)
+        if link_name_has(c.bufs, b, name_at, ".init", true) || link_name_has(c.bufs, b, name_at, ".fini", true) {
+            &c.init_code.add(first + k, if link_name_has(c.bufs, b, name_at, ".init", true) -> 0 else -> 1).drop("one row per section")
+            &c.roots.push(first + k)
         }
         if kind == LINK_SHT_INIT_ARRAY || kind == LINK_SHT_FINI_ARRAY || kind == LINK_SHT_PREINIT_ARRAY || (link_u32(c.bufs, b, h + 8).bit_and(0x200000)) != 0 {
             guard :: link_u32(c.bufs, b, h + 44)
@@ -1661,7 +1671,8 @@ fn link_rows_in_order(c: LinkContext) -> [Int] Never! {
 
 // Live section rows of every class, in image order: input order, except the
 // init/fini arrays, which run in ascending priority (`.init_array.NNNNN`
-// before plain `.init_array`).
+// before plain `.init_array`), and the `.init` and `.fini` pieces, each group
+// contiguous at the start of the code.
 fn link_order(c: LinkContext) -> [[Int]] Never! {
     lists := [[Int]]{}
     loop _ in 0..<LINK_CLASSES -> &lists.push([Int]{})
@@ -1670,6 +1681,11 @@ fn link_order(c: LinkContext) -> [[Int]] Never! {
         keys := [Int]{}
         loop row in lists[class] -> &keys.push(link_priority(c, c.live_secs[row]))
         lists[class] = link_sort_by(lists[class], keys)
+    }
+    if c.init_code.len() > 0 {
+        keys := [Int]{}
+        loop row in lists[LINK_TEXT] -> &keys.push(c.init_code.get(c.live_secs[row]) ?? 2)
+        lists[LINK_TEXT] = link_sort_by(lists[LINK_TEXT], keys)
     }
     lists
 }

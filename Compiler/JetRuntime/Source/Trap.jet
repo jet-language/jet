@@ -140,8 +140,21 @@ fn trap_gs_failure() {
     trap_defect_newline()
     loop { trap_defect_exit(I64{101}) }
 }
+// A stop under the process root begins the root's captured report. Any other
+// stop while jet_rt_main runs its entry is a process stop too (spec.md,
+// Cleanup at a process stop): it claims the process exit and runs the exit
+// handlers before its first report byte, so their output precedes the
+// report. One claim wins; a concurrent loser parks, and a stop inside that
+// cleanup exits with the first status (Main.jet main_exit_claim). With no
+// live jet_rt_main (an embedding or library host) the report goes straight
+// to fd 2.
 fn trap_root_prepare() {
-    if (scheduler_report_domain() == I64{1}) -> _ := trap_root(TRAP_ROOT_PREPARE, I64{0}, I64{0}, I64{0})
+    if (scheduler_report_domain() == I64{1}) {
+        _ := trap_root(TRAP_ROOT_PREPARE, I64{0}, I64{0}, I64{0})
+        return
+    }
+    claim :: main_process_stop_code
+    if (claim != I64{0} && main_root_control != I64{0}) -> _ := coll_call1(claim, I64{70})
 }
 
 // Keep both the value and divisor non-positive: neither I64.MIN's negation

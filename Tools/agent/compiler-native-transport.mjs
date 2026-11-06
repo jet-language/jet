@@ -35,7 +35,10 @@ export function runNativeLibrary({ jet, file, prefix, lifecycle = prefix + '.lif
     for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues']) rmSync(prefix + suffix, { force: true });
     const hookEnv = { ...nativeTransportEnvironment(env), JET_FRONT_LIBRARY_OBJECT_OUTPUT: resolve(prefix), JET_FRONT_LIBRARY_LIFECYCLE: resolve(lifecycle) };
     if (exportsFile) hookEnv.JET_FRONT_LIBRARY_EXPORTS = resolve(exportsFile);
-    const run = command(jet, ['check', resolve(file)], { prefix, cwd, env: hookEnv, execute, timeout });
+    // The library seam runs under `jet doc`, as runtime packaging does
+    // (prebuild-runtime.mjs): `jet check` stops before lowering, so it has
+    // no C export rows to build.
+    const run = command(jet, ['doc', resolve(file)], { prefix, cwd, env: hookEnv, execute, timeout });
     let problem = nativeCommandProblem(run);
     if (existsSync(prefix + '.issues')) problem = { verdict: 'no-artifact', detail: readFileSync(prefix + '.issues', 'utf8') };
     if (!problem) for (const suffix of ['.o', '.exports', '.abi.json', '.threads']) if (!existsSync(prefix + suffix)) {

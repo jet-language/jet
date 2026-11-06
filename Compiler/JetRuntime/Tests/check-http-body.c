@@ -1,6 +1,7 @@
 // L9 ABI witness, linked with the real Jet runtime object and admitted pack.
-// Only the session Propagate rail is scripted;
-// reader closures use real Linux pipes. This does not implement a TLS adapter.
+// Stops are real: the witness publishes them on a control it entered, which
+// is what the body's propagate rail reads. Reader closures use real Linux
+// pipes. This does not implement a TLS adapter.
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -33,10 +34,29 @@ extern W jet_rt_http_body_is_drained(W);
 extern W jet_rt_http_body_is_taken(W);
 extern W jet_rt_http_body_content_type(W);
 extern void jet_rt_http_tls_refuse(void);
+extern void jet_rt_thread_attach(void);
+extern W jet_rt_control_new(void);
+extern void jet_rt_control_enter(W, W);
+extern void jet_rt_control_leave(W);
+extern W jet_rt_control_status(W);
+extern _Bool jet_rt_control_publish_stop(W, W, W, W, W, W, W, W);
+extern void jet_rt_scheduler_control_drop(W);
 
-static W delivered, pending;
-W __wrap_jet_rt_session_propagate(void) { return delivered; }
+static W pending, stop_control, stop_save[4];
 static W ptr(void *p) { return (W)(uintptr_t)p; }
+static void stop_scope_begin(void) {
+    stop_control = jet_rt_control_new();
+    jet_rt_control_enter(stop_control, ptr(stop_save));
+}
+static void stop_scope_end(void) {
+    jet_rt_control_leave(ptr(stop_save));
+    jet_rt_scheduler_control_drop(stop_control);
+    stop_control = 0;
+}
+// Publishes a stop of `kind` (1 cancelled .. 4) on the entered control.
+static void deliver(W kind) {
+    assert(jet_rt_control_publish_stop(kind, -1, -1, -1, -1, ptr("stop"), 4, 0));
+}
 static W *words(W p) { return (W *)(uintptr_t)p; }
 static W allocate(W bytes) {
     W p = jet_rt_alloc(bytes, 8);
@@ -139,7 +159,7 @@ static W close_source(W p) {
     Closure *c = (Closure *)(uintptr_t)p;
     assert(close(c->fd) == 0);
     ++closed_count;
-    if (c->mode == 2) delivered = 3;
+    if (c->mode == 2) deliver(3);
     return 0;
 }
 static W read_source(W p, W descriptor) {
@@ -151,7 +171,7 @@ static W read_source(W p, W descriptor) {
         words(detail)[1] = c->value;
         words(detail)[2] = text("bridge-detail");
         d[3] = detail;
-        if (c->mode == 2) delivered = c->value;
+        if (c->mode == 2) deliver(c->value);
         if (c->mode == 3) pending = 1; // requested, not delivered: must not stop
         if (c->mode != 3) return -6;
         jet_rt_http_body_error_drop(detail);
@@ -225,27 +245,33 @@ static void errors_and_stops(void) {
         assert(jet_rt_http_body_chunks_drop(chunks) == 0);
         assert(jet_rt_http_body_drop(body) == 0);
     }
-    for (W stop = 1; stop <= 5; ++stop) {
+    // Every stop kind a plain control accepts; a panic (kind 5) needs a
+    // root or task body and takes the same nonzero propagate path.
+    for (W stop = 1; stop <= 4; ++stop) {
+        stop_scope_begin();
         W body = reader(2, 7, stop, 0, 0, 0), chunks = take(body, 2), result = -1;
         assert(jet_rt_http_body_next(chunks, ptr(&result)) == -5 && result == 0);
-        assert(delivered == stop && jet_rt_http_body_is_drained(body) == 0);
+        assert(jet_rt_control_status(stop_control) == stop && jet_rt_http_body_is_drained(body) == 0);
         assert(jet_rt_http_body_chunks_drop(chunks) == -5);
         assert(jet_rt_http_body_drop(body) == -5);
-        delivered = 0;
+        stop_scope_end();
     }
     W before = released_count;
+    stop_scope_begin();
     W close_body = reader(0, 0, 0, 0, 0, 0);
     Closure *closer = (Closure *)(uintptr_t)words(close_body)[5];
     closer->mode = 2;
-    assert(jet_rt_http_body_close(close_body) == -5 && delivered == 3);
+    assert(jet_rt_http_body_close(close_body) == -5 && jet_rt_control_status(stop_control) == 3);
     assert(jet_rt_http_body_is_taken(close_body) == 1);
     assert(jet_rt_http_body_drop(close_body) == -5);
+    stop_scope_end();
     assert(released_count == before + 2); // stop never skips release cleanup
-    delivered = 0;
+    stop_scope_begin();
     W body = reader(3, 7, 1, 0, 0, 0), chunks = take(body, 2);
-    chunk(chunks, "ab"); assert(pending == 1 && delivered == 0);
+    chunk(chunks, "ab"); assert(pending == 1 && jet_rt_control_status(stop_control) == 0);
     assert(jet_rt_http_body_chunks_drop(chunks) == 0);
     assert(jet_rt_http_body_drop(body) == 0);
+    stop_scope_end();
     pending = 0;
 }
 // Same 1GiB bounded File Take as the Rust reference, with packed native U8
@@ -274,6 +300,8 @@ static void stream_perf(const char *path) {
 }
 int main(int argc, char **argv) {
     jet_rt_alloc_init();
+    // The control the stop cases enter lives in this thread's Jet TCB.
+    jet_rt_thread_attach();
     if (argc == 2 && strcmp(argv[1], "tls") == 0) { jet_rt_http_tls_refuse(); return 99; }
     if (argc == 3 && strcmp(argv[1], "perf") == 0) { stream_perf(argv[2]); return 0; }
     if (argc == 2 && strcmp(argv[1], "taken") == 0) {

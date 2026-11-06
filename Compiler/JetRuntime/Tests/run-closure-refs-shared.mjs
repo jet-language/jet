@@ -3,9 +3,10 @@
 // closure, Rust runtime replacement, serial fallback, or simulated free count.
 // usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE]
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
@@ -26,7 +27,7 @@ function command(name, args, options = {}) {
 if (mode === 'assemble') {
     mkdirSync(join(out, 'Source'), {recursive: true});
     writeFileSync(join(out, 'Source/Fixture.jet'), read('Compiler/JetRuntime/Tests/Fragments.fixture/ClosureRefsShared.jet'));
-    writeFileSync(join(out, 'package.jet'), 'name: "closure_refs_shared"\nversion: "0.0.1"\nedition: "2028"\noutputs: { runtime: .Library{ name: "closure_refs_shared", native: true } }\n');
+    writeFileSync(join(out, 'package.jet'), 'name: "closure_refs_shared"\nversion: "0.0.1"\nedition: "2026"\noutputs: { runtime: .Library{ name: "closure_refs_shared", native: true } }\n');
     writeFileSync(join(out, 'exports.list'), 'jet_closure_ref_test_run\n');
 } else {
     if (!process.env.PQ_JOB || !/^[a-f0-9]{40}$/.test(process.env.COMPOSED_SHA ?? '')) throw Error('held proofq job and immutable composed source pin required');
@@ -43,9 +44,12 @@ if (mode === 'assemble') {
         const object = resolve(objectArg);
         const lower = JSON.parse(readFileSync(join(out, 'lower.json'), 'utf8'));
         if (lower.sha !== process.env.COMPOSED_SHA || lower.objectSha256 !== hash(prefix + '.o')) throw Error('lowering pin changed');
-        command('link', [nativeCCompiler, '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object,
+        // The runtime imports jet_rt_fault_report, which Jet's linker writes
+        // into each image; this platform link takes it from the shared report source.
+        const faultReport = faultReportObject(mkdtempSync(join(out, 'fault-report-')));
+        command('link', [nativeCCompiler, '-std=c11', '-O2', join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c'), prefix + '.o', object, faultReport,
             '-Wl,--wrap=jet_rt_alloc', '-Wl,--wrap=jet_rt_free', '-lpthread', '-ldl', '-lm', '-o', binary]);
-        writeFileSync(join(out, 'link.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, lower, object, objectSha256: hash(object), driverSha256: hash(join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c')), binarySha256: hash(binary)}, null, 2) + '\n');
+        writeFileSync(join(out, 'link.json'), JSON.stringify({sha: process.env.COMPOSED_SHA, lower, object, objectSha256: hash(object), faultReport, faultReportSha256: hash(faultReport), driverSha256: hash(join(repo, 'Compiler/JetRuntime/Tests/closure-refs-shared.c')), binarySha256: hash(binary)}, null, 2) + '\n');
     } else {
         const linked = JSON.parse(readFileSync(join(out, 'link.json'), 'utf8'));
         if (linked.sha !== process.env.COMPOSED_SHA || linked.binarySha256 !== hash(binary)) throw Error('linked witness pin changed');

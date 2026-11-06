@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Explicit Jet-only pack-linked C-ABI test. Missing object/provider fails.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -11,11 +12,14 @@ if (!output || !inputs.some(input => !input.startsWith('-'))) throw Error('usage
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
 const driver = join(out, 'driver');
+// The runtime imports jet_rt_fault_report, which Jet's linker writes into each
+// image; this platform link takes it from the shared report source.
+const faultReport = faultReportObject(mkdtempSync(join(out, 'fault-report-')));
 // Supply real Jet-only objects/archives (KEY/jet_runtime_jet.o, not the startup
 // pack jet_runtime.pack.o); unresolved exports fail, never use a Rust provider.
 const built = spawnSync(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', '-pedantic',
     join(repo, 'Compiler/JetRuntime/Tests/CAbiDriver.c'),
-    ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), '-lpthread', '-ldl', '-lm', '-o', driver], { encoding: 'utf8' });
+    ...inputs.map(input => input.startsWith('-') ? input : resolve(input)), faultReport, '-lpthread', '-ldl', '-lm', '-o', driver], { encoding: 'utf8' });
 writeFileSync(join(out, 'build.log'), `${built.stdout ?? ''}${built.stderr ?? ''}`);
 writeFileSync(join(out, 'build.status.json'), JSON.stringify({ status: built.status, signal: built.signal, error: built.error?.message ?? null }) + '\n');
 if (built.error || built.signal || built.status !== 0) throw Error(`driver link failed: ${built.error ?? built.signal ?? built.stderr}`);

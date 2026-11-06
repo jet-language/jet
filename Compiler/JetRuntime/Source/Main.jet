@@ -48,6 +48,16 @@ fn main_stopped_install(code: I64) {
     }
 }
 
+// jet_rt_process_stop_claim once jet_rt_main has run, else 0: while an entry
+// runs (main_root_control set), a stop outside the process root's capture
+// claims the process exit through it (Trap.jet trap_root_prepare). A program
+// without jet_rt_main links no claim there.
+main_process_stop_code := I64{0}
+
+fn rt_process_stop_claim_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
 fn main_process_end() {
     #Unsafe("an idempotent flag: every writer stores the same 1") {
         main_process_ending = I64{1}
@@ -154,6 +164,12 @@ fn main_exit_cleanup() -> I64 {
     jet_rt_process_exit_finish()
 }
 
+// jet_rt_process_exit_begin(code) as main_process_stop_code calls it.
+#Export(c) fn jet_rt_process_stop_claim(code: I64) -> I64 {
+    jet_rt_process_exit_begin(code)
+    I64{0}
+}
+
 fn rt_main_stopped_address() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
@@ -229,6 +245,9 @@ fn rt_main_stopped_address() -> I64 {
     root :: jet_rt_root_begin(save)
     #Unsafe("only the main thread running jet_rt_main writes its root control") {
         main_root_control = root
+    }
+    #Unsafe("an idempotent install: every writer stores the same code address") {
+        main_process_stop_code = rt_process_stop_claim_address()
     }
     #Unsafe("entry is the loader/object's checked executable System V void(void) address, not a closure header") {
         os_call0_unit(entry)

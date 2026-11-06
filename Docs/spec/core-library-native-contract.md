@@ -571,8 +571,10 @@ gate checks this projection instead of maintaining a parallel symbol list.
 Core `Task` handles are move-only: one consuming joiner uses the completion
 park slot, while lexical cleanup drains the retained state with a wake-all
 completion word. Rejected bounded-group spawns return their admission permit.
-An exiting thread drops unrun `atexit` closures without invoking their bodies,
-matching the reference thread-local queue destructor.
+An `atexit` handler belongs to the process, not to its registering thread: it
+survives that thread's exit and runs, once and in registration order, at the
+process exit's handler step. One process queue holds every handler; its lock
+covers append and batch claim only, and each claimed batch runs outside it.
 `Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
 runtime with Jet callback assertions and uses C only to transport callback
 addresses. Its run phase covers one-, two- and eight-worker pools; root panic
