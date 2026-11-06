@@ -1437,7 +1437,7 @@ jet_cli_compile_target: fn(file: String, name: String, source: String, generated
 }
 
 jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
-    members: jet_cli_build_workspace_members(file, color, options, threads, trace_sink)
+    members: jet_cli_build_workspace_members(file, color, options, threads, false, trace_sink)
     if members.exit_code != JET_DRIVER_EXIT_OK -> return members
     // A workspace index without its own `run: fn` is built once its members are.
     if jet_cli_top_level_function_lines(source, "run").len() == 0 && jet_cli_workspace_index_of(file, color) != None -> return members
@@ -3010,7 +3010,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -3045,9 +3045,11 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> J
             jet_cli_write_notice(notice)
             output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, trace_sink)
         }
-        .BuildPackage(file, color, options, build_args, threads, invocation, notice) -> {
+        .BuildPackage(file, color, options, build_args, threads, invocation, notice, locked) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_build_package(file, color, options, build_args, threads, invocation, trace_sink)
+            check: locked ?? [String]{}
+            checked: if check.len() > 0 -> jet_cli_engine_dispatch(JET_CLI_JETPACK_BINARY, "build --locked", check) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
+            output = if checked.exit_code != 0 -> checked else -> jet_cli_build_package(file, color, options, build_args, threads, invocation, locked != None, trace_sink)
         }
         .LockedBuild(check, build) -> output = jet_cli_locked_build_host(check, build)
         .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {

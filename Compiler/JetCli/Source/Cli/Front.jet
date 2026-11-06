@@ -100,7 +100,10 @@ JetCLIPlan: enum {
     // A package build its `build: fn(b: Build)` in `file` configures; its
     // option calls join `options` as their `build: fn` layer, and its
     // `b.args()` returns `build_args` (the words after `--`).
-    BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String)
+    // `locked` is set by `--locked`: the engine's locked-fetch argv the host
+    // runs first (empty for a package with no manifest), and the build then
+    // checks its generated sources against the lock (E3512). None otherwise.
+    BuildPackage(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, locked: [String]?)
     // `jet run <file>` (or `jet <file>`): build the entry as `jet build`
     // does, then run it with `program_args`. `verbose` (`--verbose`/`-v`
     // before `--`) shows advisory lints; `json` (`--json`) reports the shown
@@ -1106,12 +1109,12 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
                 .Selected(options, notes) -> return JetCLIPlan.Build{file: file.move(), source: source.move(), color: color, options: options.move(), threads: threads, invocation: invocation.move(), notice: "{notice}{notes}", json: json, sbom: sbom, quiet: build_quiet}
             }
         }
-        .BuildPackage(file, color, _, build_args, threads, invocation, notice) -> {
+        .BuildPackage(file, color, _, build_args, threads, invocation, notice, _) -> {
             if jet_argv.contains("--sbom") -> return jet_cli_not_ported("build --sbom of a package build", color)
             source: cli_files.read(file) ?? ""
             if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
-                .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: file.move(), color: color, options: options.move(), build_args: build_args.move(), threads: threads, invocation: invocation.move(), notice: "{notice}{notes}"}
+                .Selected(options, notes) -> return JetCLIPlan.BuildPackage{file: file.move(), color: color, options: options.move(), build_args: build_args.move(), threads: threads, invocation: invocation.move(), notice: "{notice}{notes}", locked: None}
             }
         }
         .Run(file, source, color, _, verbose, json, threads, program_args, invocation, notice, watch, entry) -> {
@@ -1204,8 +1207,9 @@ jet_cli_build: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
 
 // `jet build --locked`: the engine's locked fetch checks `.jet/lock` against
 // the manifest and the verified store, opening no network connection, before
-// the stock build runs. A `build: fn` package's locked generated-input check
-// (E3512) is not built yet, so its `--locked` build is refused.
+// the stock build runs. A `build: fn` package build runs the same check (when
+// it has a manifest), then refuses generated sources that drifted from the
+// lock (E3512) before writing any of them.
 jet_cli_locked_build: fn(raw: [String], jet_argv: [String], args: [String], passthrough: [String]?, color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     unlocked := [String]{}
     loop word in jet_argv {
@@ -1228,7 +1232,18 @@ jet_cli_locked_build: fn(raw: [String], jet_argv: [String], args: [String], pass
             }
             return check
         }
-        .BuildPackage(_, _, _, _, _, _, _) -> return jet_cli_not_ported("build --locked", color)
+        .BuildPackage(file, _, options, build_args, _, invocation, notice, _) -> {
+            check := [String]{}
+            directory: jet_cli_parent(file) ?? "."
+            if jet_cli_manifest_root(directory) != None {
+                engine: jet_cli_package_engine(directory, [String]{"fetch", "--locked", "--quiet"}, color, json)
+                if engine == .InspectB(inspect) {
+                    if inspect == .Engine(_, _, check_argv) -> check = check_argv.copy()
+                }
+                if check.len() == 0 -> return engine
+            }
+            return JetCLIPlan.BuildPackage{file: file.copy(), color: color, options: options.copy(), build_args: build_args.copy(), threads: threads, invocation: invocation.copy(), notice: notice.copy(), locked: Val(check)}
+        }
         else -> return planned
     }
 }
@@ -1261,7 +1276,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
         // members are runnable (`jet build Compiler/`).
         if !jet_argv.contains("--show-default") && jet_cli_option_value(jet_argv, "-p") == None {
             if jet_cli_command_override(directory, "build", color) == {
-                .Entry(found) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: ""}
+                .Entry(found) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: "", locked: None}
                 .Refused(plan) -> return plan.move()
                 .Absent -> {}
             }
@@ -1279,7 +1294,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
             .Entry(found) -> {
                 // A package that declares `build: fn(b: Build)`, in the entry or
                 // in another source file, builds through it.
-                if (found.callable ?? "") == "build" || jet_cli_package_declares_build_entry(found.path) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join("")}
+                if (found.callable ?? "") == "build" || jet_cli_package_declares_build_entry(found.path) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join(""), locked: None}
                 if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
                 planned: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), json, false)
                 if planned == .Check(file, source, _, _, _, _, notice, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet}
@@ -1294,7 +1309,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
         .Check(file, source, _, _, _, _, notice, _, _, _) -> {
             // A file whose package declares `build: fn(b: Build)`, in it, in another
             // source file or in `package.jet`, builds through it.
-            if jet_cli_declares_build_entry(source) || jet_cli_package_declares_build_entry(file) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice}
+            if jet_cli_declares_build_entry(source) || jet_cli_package_declares_build_entry(file) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice, locked: None}
             if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(file, color)
             return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet}
         }
