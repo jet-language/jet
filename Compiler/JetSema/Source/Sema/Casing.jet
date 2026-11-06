@@ -26,12 +26,14 @@ use jet_foundation.[
     TraitImplBlock,
     TraitMethodSig,
     Type,
+    TypeAliasDef,
     TypeParam,
     TypedLitBody,
     SemaNameCase,
     sema_casing_acronym_name,
     sema_casing_canonical,
     sema_casing_has_case,
+    type_name,
     diagnostic_with_edit,
     expr_binary_operands,
 ]
@@ -106,6 +108,33 @@ sema_casing_screaming: fn(name: String, span: Span, category: String, diagnostic
     }
 }
 
+// The zero literal of a number type a file-level `name: Type` names, when the
+// declaration reads as a number written without its value (`limit: Int`): a
+// value-cased name over a number type and no type parameters (D-DECL-COLON1).
+sema_casing_alias_number_zero: fn(definition: TypeAliasDef) -> String? {
+    if definition.type_params.len() != 0 || !sema_casing_has_case(definition.name, SemaNameCase.Snake) -> return None
+    if definition.target == {
+        .Int | .IntN(_, _) | .InlineRange(_, _, _) -> Val("0")
+        .Float | .Float32 -> Val("0.0")
+        else -> None
+    }
+}
+
+// E0324 for a file-level alias that reads as a number: `limit: Int` names a
+// type, so using `limit` as a number can never check; the fix gives it a value
+// as an ALL_CAPS module constant.
+sema_casing_alias_number_diagnostic: fn(definition: TypeAliasDef, zero: String) -> Diagnostic {
+    target: type_name(definition.target)
+    constant: sema_casing_canonical(definition.name, SemaNameCase.Screaming)
+    sema_error(
+        "E0324",
+        definition.name_span,
+        "`{definition.name}: {target}` declares a type alias, so `{definition.name}` isn't a number",
+        "at file level `name: Type` with no value names a type; a number constant writes its value after the type",
+        "give it a value: `{constant}: {target}{{{zero}}}`",
+    )
+}
+
 // Every generic declaration site (functions and methods, structs, enums,
 // aliases) reaches its parameters through this one walk. A `<comptime N: Int>`
 // number parameter parses into `TypeParam.prep`, but number-parameter
@@ -178,7 +207,8 @@ sema_casing_item: fn(item: Item, diagnostics: &[Diagnostic]) {
         }
         .Distinct(definition) -> sema_casing_pascal(definition.name, definition.name_span, "distinct type", diagnostics)
         .TypeAlias(definition) -> {
-            sema_casing_pascal(definition.name, definition.name_span, "type alias", diagnostics)
+            // A number written without its value gets the one E0324 at registration.
+            if sema_casing_alias_number_zero(definition) == None -> sema_casing_pascal(definition.name, definition.name_span, "type alias", diagnostics)
             loop parameter in definition.type_params -> sema_casing_type_parameter(parameter, diagnostics)
         }
         .UnitFamily(definition) -> {

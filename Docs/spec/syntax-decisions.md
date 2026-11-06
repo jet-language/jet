@@ -2977,7 +2977,9 @@ part of a list passed to a writing parameter is a write window by itself, and
 a call never copies on its own. An early move is `x.move()`
 (D-COPY-MOVE-SPELL1=A); a plain field passed to a take parameter is written
 `a.b.move()`. The retired call marks are ordinary parse or type errors; no
-code teaches them (E0203, E0224, E0226, E0434 and E0435 are deleted).
+code teaches them (E0202, E0203, E0224, E0226, E0434 and E0435 are deleted; a
+plain call that changes a `:` binding is E0111, and one that changes a read
+parameter or `self` is E0205, each quoting the callee's signature line).
 
 **D-MOVE-SIGIL1=A — `&&` marks a take** *(ratified 2026-11-06, card #6586)*:
 `&T` in a signature means the function may change the input; `&&T` means it
@@ -2988,6 +2990,21 @@ so it never meets logical `&&`, which sits between two values. `^` has no
 grammar meaning left (no xor and no power; the bitwise method is
 `bit_xor`) and stays an ordinary error until a ballot gives it a job
 (D-SIGIL-FREED2).
+
+**D-DECL-COLON1=A — every declaration is `name: value`** *(ratified
+2026-11-06, card #6586; retires the `name :: value` binding)*: constants,
+functions, `struct`, `enum`, `trait` and `module` declarations, imports
+(`use process: core.process`), the package header (`package: { … }`) and
+instances (`int_cache: cache<Int>(32)`) all introduce a name with `:`. Kind
+parameters go on the kind word (`first: fn<T>(xs: [T]) -> T?`,
+`Box: struct<T> { … }`). Inside `struct`, `trait`, `enum` and foreign-module
+braces, `name: Type` lists members. `impl` and `#Test` blocks keep their form;
+associated types are `Output: type` and `Output: T`; a `name: fn` binding may
+call itself; `{x:Debug}` is unchanged; a brace group of only `name: value`
+entries is a record; a bodiless `fn(…)` at file level is a function type. A
+file-level `x: Int` is a type alias, so a value-cased name over a number type
+is E0324 with the fix `X: Int{0}` (a module constant is ALL_CAPS). The
+retired `::` binding is an ordinary parse error with no teaching diagnostic.
 
 **D-PARAM-CONST1=A — read is Jet's const** *(ratified 2026-10-06)*: Jet has
 no `const` or frozen parameter mark. An unmarked parameter is deep,
