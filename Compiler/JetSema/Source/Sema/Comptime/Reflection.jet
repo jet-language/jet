@@ -57,7 +57,9 @@ use jet_foundation.[
     jet_target_layout_enum_c_tag,
     jet_target_layout_enum_facts_in_module,
     jet_target_layout_from_machine,
+    jet_target_layout_numeric_type,
     jet_target_layout_struct_facts_in_module,
+    jet_target_layout_type_facts,
     measure_expression,
     measure_kind,
     measure_signed_value,
@@ -1281,6 +1283,15 @@ fn sema_comptime_reflection_distinct_layout(engine: TargetLayoutEngine) -> TComp
         None,
         [TComptimeValue]{},
     )
+}
+
+// A builtin scalar named as the subject (`U64.$layout`): its fixed target
+// bytes, the same numbers a declared field of that type is laid out with.
+fn sema_comptime_reflection_builtin_layout(graph: SemaRegistrationGraph, name: String) -> TComptimeValue? {
+    scalar :: if name == "Bool" -> Type.Bool else -> jet_target_layout_numeric_type(name) ?? return None
+    engine :: jet_target_layout_engine_with_registry([Item]{}, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, jet_target_layout_from_machine(graph.target_machine))
+    bytes :: jet_target_layout_type_facts(engine, scalar) ?? return None
+    Val(sema_comptime_reflection_layout_info("default", "builtin scalar", "builtin type", jet_target_layout_engine_target(engine), LayoutFacts{bytes: Val(bytes), fields: [FieldLayoutFacts]{}}, None, None, [TComptimeValue]{}))
 }
 
 fn sema_comptime_reflection_append_trait_contract(

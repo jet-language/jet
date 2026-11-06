@@ -980,6 +980,10 @@ fn sema_fact_subject_value(read: FactRead, name: String, symbol: Symbol?, enviro
     unit :: sema_fact_unit(name, environment, program)
     declared :: item != None || unit != None
     if read == FactRead.Layout || read == FactRead.Name || read == FactRead.Fields {
+        // A builtin scalar has no declaration, only its fixed target layout.
+        if read == FactRead.Layout && symbol == None && program.registration_graph == .Val(graph) {
+            if sema_comptime_reflection_builtin_layout(graph, name) == .Val(layout) -> return Val(SemaFactReadValue{ty: sema_fact_named("LayoutInfo"), value: sema_fact_declared_value(layout)})
+        }
         info :: sema_fact_type_info(symbol, name, environment, program) ?? return None
         field :: if read == FactRead.Layout -> "layout" else -> if read == FactRead.Name -> "name" else -> "fields"
         value :: sema_fact_declared_value(sema_fact_struct_field(info, field) ?? return None)
