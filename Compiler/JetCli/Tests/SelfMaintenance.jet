@@ -1,19 +1,18 @@
 // Assemble separately with the production CLI leaves; do not scan the checkout.
-use jet_cli.[jet_cli_extract_fixture_paths, jet_cli_new_ui_source]
+use jet_cli.[jet_cli_case_fixture, jet_cli_new_ui_source]
 
 maintenance_require: fn(ok: Bool, label: String) Never! {
     if !ok -> panic("self maintenance contract: {label}")
 }
 
 #Test("self_maintenance") {
-    quoted: "\"Examples/a.jet\" \"Docs/spec/b.md\" \"tests/ui/c.stderr\" \"tests/ui_lint/d.warn\" \"tests/cli/e.txt\" \"tests/release/f.snapshot\""
-    paths: jet_cli_extract_fixture_paths(quoted)
-    maintenance_require(paths == [String]{"Examples/a.jet", "Docs/spec/b.md", "tests/ui/c.stderr", "tests/ui_lint/d.warn", "tests/cli/e.txt", "tests/release/f.snapshot"}, "all prefixes and extensions")
-    excluded: "\"Examples/{{name}}.jet\" \"Examples/a{{b.jet\" \"Examples/a.py\" \"docs/spec/b.md\" render_diagnostics(\"tests/ui/shown.jet\" render_all_colored(\"tests/ui/shown.jet\" render_all_json(\"tests/ui/shown.jet\""
-    maintenance_require(jet_cli_extract_fixture_paths(excluded).len() == 0, "templates and display-only paths")
-    maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet\" \"tests/ui/a.jet\"").len() == 2, "duplicates count twice")
-    maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet") == [String]{"tests/ui/a.jet"}, "unterminated quote uses remainder")
-    maintenance_require(jet_cli_extract_fixture_paths("\"tests/ui/a.jet\\").len() == 0, "trailing escape past EOF")
-    maintenance_require(jet_cli_extract_fixture_paths("ééééééééééééééééééééééé\"tests/ui/a.jet\"") == [String]{"tests/ui/a.jet"}, "UTF8 preceding window")
+    maintenance_require((jet_cli_case_fixture("fixture: run_case.fixture") ?? "") == "run_case.fixture", "bare fixture word")
+    maintenance_require((jet_cli_case_fixture("fixture: \"fixtures/quoted\" # why it moved") ?? "") == "fixtures/quoted", "quoted word and reason")
+    maintenance_require((jet_cli_case_fixture("  fixture: 'single'") ?? "") == "single", "indented single-quoted word")
+    maintenance_require(jet_cli_case_fixture("fixture: {{work}}/dir") == None, "templated word")
+    maintenance_require(jet_cli_case_fixture("fixture:") == None, "empty word")
+    maintenance_require(jet_cli_case_fixture("fixture: two words") == None, "two words")
+    maintenance_require(jet_cli_case_fixture("# fixture: commented") == None, "comment line")
+    maintenance_require(jet_cli_case_fixture("step: jet run fixture: x") == None, "other directive")
     maintenance_require(jet_cli_new_ui_source() == "// TODO: describe what this diagnostic demonstrates.\nrun: fn() {{\n    print(definitely_undefined_scaffold_symbol)\n}}\n", "exact diagnostic fixture source")
 }

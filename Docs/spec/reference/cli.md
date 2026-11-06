@@ -43,12 +43,12 @@ span.
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.
 Only the source-file collision is refused; an existing `.stderr` is replaced.
-`jet self devtools check-fixture-paths` checks literal fixture paths in
-`tests/**/*.rs`, excluding diagnostic display labels and dynamic templates.
-Both commands retain their direct confirmation output under `--json` and
-`--quiet`; these flags do not hide generated artifacts.
-Missing-path diagnostics use deterministic directory order; Rust's OS directory
-order is unspecified. Path occurrences, including duplicates, remain counted.
+`jet self devtools check-fixture-paths`, run from the repo root, checks that
+every `fixture:` directive in `tests/cases/**/*.case` names a directory beside
+its case; templated words such as `{work}` exist only at run time and are
+skipped. Both commands retain their direct confirmation output under `--json`
+and `--quiet`; these flags do not hide generated artifacts. Missing paths are
+listed in sorted directory order.
 
 `jet inspect schema status` reads published snapshots and runs the canonical
 load-only E0910 advisory diff; an unavailable source bundle does not prevent
