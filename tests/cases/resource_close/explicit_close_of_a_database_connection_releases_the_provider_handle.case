@@ -1,4 +1,5 @@
 # Port of tests/resource_close.rs:450-475. PENDING-SAME-HEAD. source0.jet verbatim.
+# DB is no default right (E1803), so the run allows it.
 # ORACLE-LITERAL original byte/string stdout assertions.
 # Only generated-Rust structure/text predicates retire; every observable predicate below stays. Only generated Rust jet_db_close count inequality retires; both compile invocations stay.
 # A DBConnection is no Close resource: its scopes share the driver, and its
@@ -9,6 +10,6 @@ step: jet check source0.jet
 exit: 0
 step: jet check source1.jet
 exit: 0
-step: jet run source1.jet
+step: jet run --allow=DB source1.jet
 exit: 0
 stdout: = "open\ntrue\nDBConnection(:memory:, closed)\n"
