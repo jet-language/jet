@@ -1538,12 +1538,13 @@ jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
 
 // What a program `jet run` starts gets besides its image: argv[0] and
 // `os.executable()` are the absolute path of `file`, then `program_args`;
-// this process's environment, passed as it is (X64Launch.env None). A child
-// started from it ends with jet (parent_death; jet runs this on its main thread).
+// this process's environment with `vars` set over it (X64Launch.env None
+// when there are none). A child started from it ends with jet (parent_death;
+// jet runs this on its main thread).
 // Launching its own path again runs it the way it runs now: this jet, this
 // profile and build-option flags, this invocation's authority
 // (`jet run [--profile=…] [--optimize=…] [--gate=…] [-A] [--allow=…] [--deny=…]`).
-jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?) -> X64Launch {
+jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar]) -> X64Launch {
     executable: cli_files.absolute(file) ?? file
     argv := [String]{executable}
     loop argument in program_args -> argv.push(argument.copy())
@@ -1559,7 +1560,7 @@ jet_cli_launch_plan: fn(file: String, program_args: [String], options: BuildOpti
         if rows.allow.len() > 0 -> relaunch.push("--allow={rows.allow.join(",")}")
         if rows.deny.len() > 0 -> relaunch.push("--deny={rows.deny.join(",")}")
     }
-    X64Launch{argv: argv, env: None, executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true}
+    X64Launch{argv: argv, env: jet_cli_launch_env(vars), executable: executable, name: jet_cli_stem(file), relaunch: relaunch, parent_death: true}
 }
 
 #Import(c) jet_cli_scheduler_shutdown: fn() -> I64 = "jet_rt_scheduler_shutdown"
@@ -1595,25 +1596,30 @@ JetCLIRunStep: enum {
     Launch(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool)
 }
 
-// Finish `step` on this thread: run its program (jet_cli_launch), else
-// return its output.
+// Finish `step` on this thread: run its program (jet_cli_launch) with the
+// environment that lets it write a production-failure receipt, else return
+// its output.
 jet_cli_run_step: fn(step: &&JetCLIRunStep) -> JetDriverVerbOutput {
     if step.move() == {
         .Output(output) -> output
-        .Launch(executable, file, binary, program_args, options, invocation, verbose, color) -> jet_cli_launch(executable, file, binary, program_args, options, invocation, verbose, color)
+        .Launch(executable, file, binary, program_args, options, invocation, verbose, color) -> {
+            vars: jet_cli_production_receipt_env(file, program_args)
+            jet_cli_launch(executable, file, binary, program_args, options, invocation, vars, verbose, color)
+        }
     }
 }
 
-// Run the linked program `executable` of `file` with `program_args` on this
-// process's stdin, stdout and stderr, as its built file would run, and end as
+// Run the linked program `executable` of `file` with `program_args`, and
+// `vars` over this process's environment, on this process's stdin, stdout
+// and stderr, as its built file would run, and end as
 // it ends: in memory (Image/Loader.jet) in place of jet when jet is
 // single-threaded, else in a child whose end jet mirrors (its exit code, or
 // death by its signal). When the image can't run from memory (executable
 // memory refused, its address range taken) it is written to the file
 // `binary` and runs from there; `--verbose` says why. Returns only when jet
 // must report or exit itself.
-jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetDriverVerbOutput {
-    launch: jet_cli_launch_plan(file, program_args, options, invocation)
+jet_cli_launch: fn(executable: X64Executable, file: String, binary: String, program_args: [String], options: BuildOptions, invocation: JetCLIInvocationAuthority?, vars: [JetCLIEnvVar], verbose: Bool, color: Bool) -> JetDriverVerbOutput {
+    launch: jet_cli_launch_plan(file, program_args, options, invocation, vars)
     loaded: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {
@@ -3296,17 +3302,16 @@ jet_cli_dev_start: fn(built: JetCLIBuilt, file: String, program_args: [String], 
 }
 
 // Run `jet dev`'s program `executable`: from memory in a child, as
-// jet_cli_launch runs it, else from its file `binary`, written first.
+// jet_cli_launch runs it, else from its file `binary`, written first. It
+// gets the environment that lets it write a production-failure receipt;
 // `port` is the dev server's (JET_DEV_PORT).
 jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, program_args: [String], port: Int?, options: BuildOptions, invocation: JetCLIInvocationAuthority?, verbose: Bool, color: Bool) -> JetCLIDevChild {
-    launch := jet_cli_launch_plan(file, program_args, options, invocation)
+    vars := jet_cli_production_receipt_env(file, program_args)
     if port == .Val(number) {
-        rows := [String]{}
-        loop row in x64_process_env() { if !row.starts_with("JET_DEV_PORT=") -> rows.push(row) }
-        rows.push("JET_DEV_PORT={number}")
-        launch.env = Val(rows)
+        vars.push(JetCLIEnvVar{name: "JET_DEV_PORT", value: "{number}"})
         cli_term.eprint("jet dev: dev server port {number} (JET_DEV_PORT)")
     }
+    launch: jet_cli_launch_plan(file, program_args, options, invocation, vars)
     loaded: x64_executable_load(executable)
     reason := loaded.failure
     if reason == "" {
@@ -3331,7 +3336,7 @@ jet_cli_dev_launch: fn(executable: X64Executable, binary: String, file: String, 
     argv := [String]{binary}
     loop argument in program_args -> argv.push(argument.copy())
     spec := cli_process.cmd(argv)
-    if port == .Val(number) -> spec = spec.env("JET_DEV_PORT", "{number}")
+    loop variable in vars -> spec = spec.env(variable.name.copy(), variable.value.copy())
     if spec.stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).spawn() == {
         .Ok(spawned) -> return JetCLIDevChild.File{child: spawned}
         .Err(error) -> cli_term.eprint(jet_cli_report("E2105", "couldn't run the built program: {error}", jet_cli_why("E2105"), fix, color))
