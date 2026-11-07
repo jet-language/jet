@@ -163,7 +163,7 @@ jet_cli_devtools_ice_report: fn(args: [String], color: Bool, json: Bool) -> JetD
             root = snapshot.roots[0].canonical_path
         }
     }
-    stamp: cli_time.unix_ns() / 1000000000
+    stamp: cli_time.unix_ns() /% 1000000000
     bundle: "{root}/.jet/ice-report/{jet_cli_maintainer_stem(file)}-{stamp}"
     cli_files.create_dir_all(bundle) ?? return jet_cli_maintainer_error("E2105", "couldn't create `{bundle}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
     names: [String]{"source.jet", "versions.txt"}
