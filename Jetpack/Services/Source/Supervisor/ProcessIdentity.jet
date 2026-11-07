@@ -48,7 +48,8 @@ services_read_proc_stat: fn(pid: Int) -[FS]> ServicesProcStat? ServicesError! {
     stat: if services_read_text_bounded(path, SERVICES_MAX_STATE_BYTES) == {
         .Ok(text) -> text
         .Err(error) -> {
-            if services_is_not_found(error) -> return Ok(None)
+            // ESRCH (3): the process exited between the stat and the read.
+            if services_is_not_found(error) || pkg_io_os_code(error) == Val(3) -> return Ok(None)
             return Err(ServicesError.new("couldn't read service process identity `{path}`: {error}"))
         }
     }

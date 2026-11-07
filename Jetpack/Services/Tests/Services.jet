@@ -275,8 +275,10 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     services_test_down(dir, plan)
 
     unreachable := services_test_plan("fixture2", "sleep 30")
-    // An ephemeral port that `sleep` never accepts on.
-    unreachable.ports = [Int]{0}
+    // Loopback port 1 never accepts: an unprivileged process can't listen on
+    // it, and no connect takes it as its source port. A released ephemeral
+    // port can be taken by another process's listener before the probe.
+    unreachable.ready_probe = Val(ReadyProbe.TCP{host: "127.0.0.1", port: 1})
     services_test_up(dir, unreachable)
     assert(!services_wait_healthy(dir, env, unreachable, time.duration_ms(500)), "a port that never accepts must time out, not hang")
     services_test_down(dir, unreachable)
