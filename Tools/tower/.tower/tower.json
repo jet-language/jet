@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6660,
-    "rev": 95600,
+    "nextNum": 6661,
+    "rev": 95612,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -96807,7 +96807,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -96838,11 +96838,11 @@
         {
           "n": 3,
           "text": "The other tests/ui/build_*.jet rows (8 REFUSED after 5e49306946, @programmable_build with no invoking directive) run and pass: each fixture names its invocation and its snapshot matches current jet build output; the ui suite shows no REFUSED build_* row.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T06:19:41.415Z"
+          "evidence": "ffff735682 (MechD-3). In the batch kit $JET_SCRATCH_ROOT/lanes/Main/vb11 (dev 6d50143539 exported tree, s1 jet 3623f662400a4b41), tests/ui build_action_failed, build_action_ungranted, build_enforce_reserved_code, build_entry_bad_sig, build_entry_conflict/run, build_generated_collision/run, build_generated_cycle/run, build_locked_drift/run and build_plan_invalid all PASS, and the ui suite has no REFUSED build_* row.",
+          "at": "2026-11-07T07:51:55.143Z"
         }
       ],
       "refs": [],
@@ -96853,9 +96853,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T03:06:38.842Z",
-      "updated": "2026-11-07T07:07:28.241Z",
+      "updated": "2026-11-07T07:51:57.952Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-07T07:51:57.952Z"
     },
     {
       "id": "c0g6fxb9",
@@ -97461,7 +97462,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97469,7 +97470,18 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Back to G5. CoreCliLead-2 measured it: JetLSP and JetDevserver are about 35k lines of Rust transliterated into Jet that have never compiled. Devserver uses std.sync/std.net/std.io, unwrap, format and tuple patterns. JetLSP depends on JetDevserver: about 480 of its 565 problems are Devserver's and about 85 its own, before sema. Getting either to 0 problems is a port of several days. Until then the full profile keeps running both packages and their Tests, which report KNOWN-FAILING via known-failing.tsv lines naming this card (not excluded). Next steps: (b) port JetLSP against current Core and drop its jet_devserver dependency by moving the 5 EDITOR_* constants into JetLSP; (c) the full Devserver port."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Moved to G1: Compiler/package.jet's full profile runs the packages suite (every package's #Tests under Compiler/ and Jetpack/, tool packages included), so #6096 c65 (fresh clone, --profile full) cannot pass while JetLSP (565 problems), JetLSP/Tests (186), JetDevserver (479) and JetDevserver/Tests (520) do not compile (pkgrerun at dev afcf83c099, seed a0_032). Owner: CoreCliLead-2."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97493,12 +97505,12 @@
       "refs": [],
       "tags": [],
       "goals": [
-        "G1"
+        "G5"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:20.878Z",
-      "updated": "2026-11-07T07:47:41.856Z",
+      "updated": "2026-11-07T07:52:18.096Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -97576,7 +97588,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "ready",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97584,16 +97596,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c1 met at 6d50143539 (G1 part). Moved to G11 for c2, the cost producer port. Its KF lines keep naming this card."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "No exit 101 from the cost surface: `jet lint --cost` and `jet explain --cost` are unbuilt forms in the CLI forms model (registered E2101/E2104 naming this card), so cases cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs and cost_cli_rejects_incomplete_reachable_projection report KNOWN-FAILING #6652, never ERROR, in a release kit.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T06:58:02.980Z"
+          "evidence": "6d50143539 (CoreCliLead-2): lint --cost and explain --cost are unbuilt forms (E2104 naming #6652). In the batch kit $JET_SCRATCH_ROOT/lanes/Main/vb11 (dev 6d50143539 exported tree, s1 jet 3623f662400a4b41), cases cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs, cost_cli_rejects_incomplete_reachable_projection and cost_cli_projects_generic_specializations report KNOWN-FAILING #6652, and the kit has 0 ERROR rows for the cost surface.",
+          "at": "2026-11-07T07:51:53.513Z"
         },
         {
           "n": 2,
@@ -97608,12 +97626,12 @@
       "refs": [],
       "tags": [],
       "goals": [
-        "G1"
+        "G11"
       ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:52.522Z",
-      "updated": "2026-11-07T06:58:03.916Z",
+      "updated": "2026-11-07T07:52:00.112Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -97667,7 +97685,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97680,11 +97698,11 @@
         {
           "n": 1,
           "text": "Case tests/cases/compiled_workloads/compiled_workload_gate_self_check PASS in a release kit (exported tree with no .git).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T06:51:06.776Z"
+          "evidence": "6d50143539 (CoreCliLead-2). In the batch kit $JET_SCRATCH_ROOT/lanes/Main/vb11 (dev 6d50143539 exported tree, s1 jet 3623f662400a4b41), tests/cases/compiled_workloads/compiled_workload_gate_self_check PASS (it was FAIL in the a0_032 kit).",
+          "at": "2026-11-07T07:51:54.332Z"
         }
       ],
       "refs": [],
@@ -97695,9 +97713,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:55.401Z",
-      "updated": "2026-11-07T06:51:06.776Z",
+      "updated": "2026-11-07T07:51:56.516Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T07:51:56.516Z"
     },
     {
       "id": "c0xoy1gg",
@@ -97907,6 +97926,47 @@
       "needsAcceptance": false,
       "created": "2026-11-07T07:34:16.162Z",
       "updated": "2026-11-07T07:34:16.951Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c09f0vsn",
+      "num": 6660,
+      "title": "perf run: observation gaps for task-free programs and completed socket I/O spans",
+      "body": "From #6418 n6 (5f7a43c868, CoreCliLead-2). Two runtime gaps under jet perf run: (1) a program that links no task, channel, value or event installs no observation writer, so perf_run_short_program records nothing; (2) perf_run_keeps_completed_socket_echo_io_span needs --allow=Net, the runtime reports a network wait, and jet reaps the child before the exit publication, so the completed I/O span is lost.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/cases jet_perf_trace_parts rows perf_run_short_program* and perf_run_keeps_completed_socket_echo_io_span PASS on every applicable tier, with no KF line.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T07:52:38.806Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T07:52:37.999Z",
+      "updated": "2026-11-07T07:52:38.806Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -185812,6 +185872,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T07:52:38.806Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09f0vsn",
+      "note": "#1 tests/cases jet_perf_trace_parts rows perf_run_short_program"
+    },
+    {
+      "at": "2026-11-07T07:52:37.999Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c09f0vsn",
+      "note": "perf run: observation gaps for task-free programs and completed socket I/O spans"
+    },
+    {
+      "at": "2026-11-07T07:52:18.096Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0afjv0e",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T07:52:17.251Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0afjv0e",
+      "note": "phase,goals"
+    },
+    {
+      "at": "2026-11-07T07:52:00.112Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlsxzv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T07:51:59.333Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlsxzv",
+      "note": "phase,goals"
+    },
+    {
+      "at": "2026-11-07T07:51:57.952Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gcc21g",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T07:51:56.516Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0b85u2y",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T07:51:55.143Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gcc21g",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-07T07:51:54.332Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0b85u2y",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T07:51:53.513Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0zlsxzv",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T07:47:43.146Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0afjv0e",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T07:47:41.857Z",
       "by": "Main",
