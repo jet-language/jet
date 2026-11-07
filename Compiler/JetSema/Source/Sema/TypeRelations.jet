@@ -1610,8 +1610,9 @@ sema_type_bound_satisfied_at: fn(graph: SemaRegistrationGraph, actual: Type, bou
     // Core Display, so it is Renderable even where core.math declares no row.
     if bound_name == "Renderable" && actual_resolved == .Named(name) && (name == "Decimal" || name == "Fraction") -> return Val(true)
     // A pool `ID<T>` is a compiler-owned slot and generation whose built-in
-    // `==` never touches `T` (D-POOLID-API1), so it meets `Equatable` whatever
-    // `T` is. It has no nominal row to carry an impl; a declared `ID` has one.
+    // `==` compares only those two numbers and never touches `T`, so it meets
+    // `Equatable` whatever `T` is. It has no nominal row to carry an impl; a
+    // declared `ID` has one.
     if bound_name == "Equatable" && actual_resolved == .Apply(name, _) && sema_serde_named_leaf(name) == "ID" && sema_type_resolve_nominal_row_at(graph, actual_resolved, caller) == None -> return Val(true)
     // Rust `TraitRegistry::implements_trait`: a scalar satisfies the builtin
     // trait family by name even where Core declares the trait (`Encode`); a
