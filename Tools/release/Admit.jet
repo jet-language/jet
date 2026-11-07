@@ -736,10 +736,12 @@ pack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
         row(ctx, "pack", "FAIL", "cannot copy s2 to {dir}: {err}")
         return
     }
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
-    // The pack compiles the runtime's vendored C with a host C toolchain,
-    // which only jet-env supplies until jet does.
-    argv: joined(STACK, [String]{files.join(ctx.tree, "Tools/agent/jet-env"), "bash", "-c", NORUST, "norust", "node", files.join(ctx.tree, "Tools/packaging/prebuild-runtime.mjs"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", ctx.tree.copy()})
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JET", ctx.candidate.jet)})
+    // s2, with pack2 beside it, runs the packaging tool; the copy beside the
+    // empty pack directory lowers the runtime. The pack compiles the runtime's
+    // vendored C with a host C toolchain, which only jet-env supplies until
+    // jet does.
+    argv: joined(STACK, [String]{files.join(ctx.tree, "Tools/agent/jet-env"), "bash", "-c", NORUST, "norust", ctx.candidate.jet.copy(), files.join(ctx.tree, "Tools/packaging/PrebuildRuntime.jet"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", ctx.tree.copy()})
     result: run_logged(argv, ctx.tree, vars, log, 3600)
     if result.rc != 0 || !files.exists(files.join(dir, "jet-runtime")) {
         row(ctx, "pack", "FAIL", "the pack rebuild by s2 failed rc={result.rc}: {tail_of(log, 8)}")

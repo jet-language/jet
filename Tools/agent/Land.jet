@@ -929,7 +929,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     // The runtime pack, lowered by the compiler just built, beside it (as
     // chain s1's pack step places it).
     self_jet: "{snap}/Compiler/JetCli/.jet/build/jet"
-    if !runtime_pack(self_jet, snap, "{out}/runtime", identity) -> return 1
+    if !runtime_pack(seed_jet, self_jet, snap, "{out}/runtime", identity) -> return 1
     home: files.dirname(files.canonicalize(self_jet) ?? self_jet.copy())
     files.remove("{home}/jet-runtime") ?? ()
     files.symlink("{out}/runtime/out", "{home}/jet-runtime") ?? {
@@ -954,9 +954,10 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
 }
 
 // The runtime pack of `tree`, lowered by `compiler`, in WORK/out; prints
-// `runtime rc=N issues=K`. The pack builds the runtime's vendored C with a
-// host C toolchain, which jet-env supplies.
-runtime_pack: fn(compiler: String, tree: String, work: String, identity: String) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
+// `runtime rc=N issues=K`. `runner` runs Tools/packaging/PrebuildRuntime.jet.
+// The pack builds the runtime's vendored C with a host C toolchain, which
+// jet-env supplies.
+runtime_pack: fn(runner: String, compiler: String, tree: String, work: String, identity: String) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
     musl: root("JET_PACK_MUSL_LIB", "")
     if musl == "" {
         print("runtime rc=2 issues=0 (set JET_PACK_MUSL_LIB to the static musl lib dir)")
@@ -968,7 +969,8 @@ runtime_pack: fn(compiler: String, tree: String, work: String, identity: String)
     env := compile_env(identity, tree, "")
     env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
     env.push(Setting{name: "JET_PACK_MUSL_LIB", value: musl.copy()})
-    code: run_heavy(tree, 1800, [String]{"{tree}/Tools/agent/jet-env", "node", "{tree}/Tools/packaging/prebuild-runtime.mjs", compiler, pack, "--repo", tree}, env, "{work}/pack")
+    env.push(Setting{name: "JET", value: runner.copy()})
+    code: run_heavy(tree, 1800, [String]{"{tree}/Tools/agent/jet-env", runner, "{tree}/Tools/packaging/PrebuildRuntime.jet", compiler, pack, "--repo", tree}, env, "{work}/pack")
     issues: issue_rows(pack)
     if files.exists("{pack}/native.key") {
         print("runtime rc=0 issues={issues.len()}")

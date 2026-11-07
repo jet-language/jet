@@ -49,7 +49,7 @@ export function readNativeRuntimePack(directory, recipe = null) {
   if (!Array.isArray(abi) || !abi.length || JSON.stringify(abi.map(row => row.symbol).sort()) !== JSON.stringify(names)) {
     throw Error('runtime ABI and checked exports disagree');
   }
-  // Core's vendored C archives (prebuild-runtime.mjs) ship beside the pack.
+  // Core's vendored C archives (PrebuildRuntime.jet) ship beside the pack.
   const vendored = provenance.vendoredC?.archives;
   if (!Array.isArray(vendored) || !vendored.length) throw Error('runtime pack provenance lacks the vendored C archives');
   for (const row of vendored) {

@@ -1,0 +1,690 @@
+#!/usr/bin/env jet
+// Package the full checked Jet runtime beside a hosted compiler. The native
+// library hook lowers Compiler/JetRuntime/sources.list and lifecycle.list as
+// one object; Jet's linker binds only that object and the permitted C
+// platform archives. No Rust compiler, Rust runtime or system linker runs.
+//
+//   JET_PACK_MUSL_LIB=<static musl directory> jet Tools/packaging/PrebuildRuntime.jet <jet> [runtime-dir] [--repo <exact-source-export>] [--identity <id>]
+//
+// The runtime dir defaults to `jet-runtime` beside <jet>; the repo to the
+// working directory. <jet> lowers the runtime under JET_COMPILER_IDENTITY
+// <id> (default the inherited one), so the jet running this tool may be
+// another compiler. The runtime unit is assembled with
+// Tools/agent/CompilerPackages.jet, run by $JET (else `jet` on PATH). The
+// vendored C builds with $CC (default `cc`) and $AR (default `ar`) and nm
+// checks every object for Rust symbols. The pack lands in
+// <runtime-dir>/<key>/ and <runtime-dir>/native.key names it. An existing
+// pack whose recipe matches this toolchain is verified and reused. The last
+// stdout line is the pack object's path.
+//
+// Core's vendored C (Core/Vendor/*) backs Core modules' `c.sqlite3` and
+// `c.mbedtls` imports. It is compiled here, once per runtime key, under the
+// one native C policy (Compiler/JetCli/Source/Cli/native-c-policy.tsv), and
+// shipped as <key>/foreign/<lib>/lib<lib>.a beside the pack, so neither jet's
+// self-compile nor a core.db or core.net.tls program needs a C compiler. User
+// foreign closures link the runtime object with the exact platform archives
+// shipped in <runtime-dir>/foreign/platform (Compiler/JetCli ForeignLink.jet).
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    re: core.regex
+    term: core.term
+}
+
+USAGE: "usage: jet Tools/packaging/PrebuildRuntime.jet <jet> [runtime-dir] [--repo <exact-source-export>] [--identity <id>]"
+RUNTIME_MANIFEST: "Compiler/JetRuntime/sources.list"
+RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
+RUNTIME_LIFECYCLE: "Compiler/JetRuntime/lifecycle.list"
+POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
+// The runtime object's producer: the IR builder/optimizer/selector and the
+// x86-64 encoder, object writer and linker it uses, and the WebAssembly
+// selector and encoder of its web partition.
+BACKEND_SOURCES: [String]{"Compiler/JetIR/Source", "Compiler/JetBackend/Source", "Compiler/JetWeb/Source", "Compiler/JetWasm/Source"}
+VENDOR_BASE_FLAGS: [String]{"-std=c11", "-O2", "-fPIC", "-fno-stack-protector", "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE"}
+// libsqlite3-sys 0.28.0 build.rs120-141,245-249 on Linux.
+SQLITE_FLAGS: [String]{
+    "-DSQLITE_CORE", "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+    "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_ENABLE_COLUMN_METADATA",
+    "-DSQLITE_ENABLE_DBSTAT_VTAB", "-DSQLITE_ENABLE_FTS3",
+    "-DSQLITE_ENABLE_FTS3_PARENTHESIS", "-DSQLITE_ENABLE_FTS5",
+    "-DSQLITE_ENABLE_JSON1", "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+    "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", "-DSQLITE_ENABLE_RTREE",
+    "-DSQLITE_ENABLE_STAT2", "-DSQLITE_ENABLE_STAT4", "-DSQLITE_SOUNDEX",
+    "-DSQLITE_THREADSAFE=1", "-DSQLITE_USE_URI", "-DHAVE_USLEEP=1",
+    "-D_POSIX_THREAD_SAFE_FUNCTIONS", "-DHAVE_ISNAN", "-DHAVE_LOCALTIME_R", "-w",
+}
+// The wrapper environment a Nix cc adds to every compile.
+CC_ENVIRONMENT: [String]{"NIX_CFLAGS_COMPILE", "NIX_CFLAGS_COMPILE_BEFORE", "NIX_HARDENING_ENABLE"}
+// The pack's files with their provenance digest fields.
+PACK_DIGESTS: [(name: String, digest: String)]{
+    (name: "jet_runtime.pack.o", digest: "packSha256"), (name: "jet_runtime.image", digest: "imageSha256"),
+    (name: "jet_runtime_jet.o", digest: "objectSha256"), (name: "runtime.abi.json", digest: "abiSha256"),
+    (name: "runtime.threads", digest: "threadsSha256"),
+}
+PACK_OBJECTS: [String]{"jet_runtime_jet.o", "jet_runtime.pack.o", "jet_runtime.image"}
+WEB_FILES: [String]{"jet_runtime.wasm", "jet_runtime.wasm.tsv"}
+ISSUE_SUFFIXES: [String]{".issues", ".pack-issues"}
+PLATFORM_ARCHIVES: [String]{"libgcc_eh.a", "libgcc.a"}
+NOTICES: [String]{"LICENSE", "VERSION"}
+// At most this many C compilers run at once, beside the runtime build.
+VENDOR_JOBS: 6
+
+InventoryFile: struct {
+    path: String
+    sha256: String
+}
+
+Inventory: struct {
+    sha256: String
+    files: [InventoryFile]
+}
+
+// A vendored C library: `source` is checkout-relative and the tree keeps its
+// relative layout (mbedtls/ and psa/ headers sit under -I).
+Vendored: struct {
+    name: String
+    source: String
+    flags: [String]
+}
+
+// One vendored library's build: its compile units' objects, in unit order.
+Library: struct {
+    name: String
+    root: String
+    objects: [String]
+    archive: String
+}
+
+Policy: struct {
+    flags: [String]
+    hardening_removed: [String]
+}
+
+Toolchain: struct {
+    repo: String
+    jet: String
+    identity: String
+    out: String
+    platform: [String]
+    policy: Policy
+    cc: String
+    ar: String
+    hardening: String?
+}
+
+fail: fn(message: String) -> Never {
+    term.eprint("prebuild-runtime: {message}")
+    process.exit(1)
+}
+
+vendored: fn() -> [Vendored] {
+    [Vendored]{
+        Vendored{name: "sqlite3", source: "Core/Vendor/Sqlite3", flags: SQLITE_FLAGS.copy()},
+        Vendored{name: "mbedtls", source: "Core/Vendor/Mbedtls", flags: [String]{}},
+    }
+}
+
+sha256_file: fn(path: String) -> String {
+    crypto.sha256(files.read_bytes(path) ?? fail("cannot read `{path}`: {err}")).hex()
+}
+
+// The sorted unique paths, each file's sha256, and one sha256 over
+// `<path byte count>:<path>:<size>:<bytes>` per file (ReuseSeedRuntime.jet
+// recomputes the same inventories).
+inventory: fn(repo: String, paths: [String]) -> Inventory {
+    sorted := paths.copy()
+    sorted.sort()
+    total := crypto.new()
+    rows := [InventoryFile]{}
+    loop path in sorted {
+        if rows.len() > 0 && rows[rows.len() - 1].path == path -> next
+        bytes: files.read_bytes(files.join(repo, path)) ?? fail("cannot read `{path}`: {err}")
+        total.update("{path.count_bytes()}:{path}:{bytes.len()}:".bytes())
+        total.update(bytes)
+        rows.push(InventoryFile{path: path.copy(), sha256: crypto.sha256(bytes).hex()})
+    }
+    Inventory{sha256: total.digest(), files: rows}
+}
+
+// Every file under `directory` (checkout-relative) that `keep` accepts, as
+// `directory/<relative path>`, sorted.
+tree_files: fn(repo: String, directory: String, keep: fn(String) -> Bool) -> [String] {
+    found := [String]{}
+    entries: files.walk_files(files.join(repo, directory)) ?? fail("cannot list `{directory}`: {err}")
+    loop entry in entries {
+        if keep(files.basename(entry.relative)) -> found.push(entry.relative.copy())
+    }
+    found.sort()
+    found
+}
+
+vendor_file: fn(name: String) -> Bool { name.ends_with(".c") || name.ends_with(".h") || name == "LICENSE" || name == "VERSION" }
+
+read_policy: fn(repo: String) -> Policy {
+    text: files.read(files.join(repo, POLICY)) ?? fail("cannot read `{POLICY}`: {err}")
+    flags := [String]{}
+    removed := [String]{}
+    lines: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() != 2 || fields[1] == "" -> fail("{POLICY}:{index + 1}: expected \"kind<TAB>value\"")
+        if fields[0] == "flag" {
+            flags.push(fields[1].copy())
+        } else if fields[0] == "hardening-remove" {
+            removed.push(fields[1].copy())
+        } else {
+            fail("{POLICY}:{index + 1}: unknown policy kind `{fields[0]}`")
+        }
+    }
+    Policy{flags: flags, hardening_removed: removed}
+}
+
+// The C compiler child's NIX_HARDENING_ENABLE: every feature but the removed
+// ones. Nix's compiler wrapper adds fortify after caller flags; its setup-hook
+// NIX_HARDENING_DISABLE knob is not consulted by an already-built wrapper.
+child_hardening: fn(enabled: String, removed: [String]) -> String {
+    words: re.split(Regex{"\s+"}, enabled)
+    kept: loop word in words if word != "" && !removed.contains(word) -> word
+    kept.join(" ")
+}
+
+// A C compiler run under the policy's environment.
+cc_spec: fn(tool: Toolchain, argv: [String]) -> ProcessSpec {
+    spec := process.cmd([String]{tool.cc.copy()}).args_extend(argv)
+    if tool.hardening == .Val(enabled) -> spec = spec.env("NIX_HARDENING_ENABLE", enabled)
+    spec
+}
+
+// A command that must exit 0; its stdout.
+output_of: fn(spec: ProcessSpec, what: String) -> String {
+    receipt: spec.output_limit(268435456).run() ?? fail("{what} could not start: {err}")
+    if receipt.code != 0 || receipt.signal != None -> fail("{what} failed ({receipt.code}):\n{receipt.errors}")
+    receipt.output
+}
+
+// A Rust runtime input or Rust symbol in `path`, else "".
+rust_problem: fn(path: String) -> String {
+    if path.ends_with(".rlib") || path.ends_with(".rs") -> return "Rust runtime input forbidden: {path}"
+    receipt: process.cmd([String]{"nm", "--format=posix", path.copy()}).output_limit(268435456).run() ?? return "nm {path} could not start: {err}"
+    if receipt.code != 0 || receipt.signal != None -> return "nm {path} failed ({receipt.code}):\n{receipt.errors}"
+    rows: receipt.output.split("\n").to_list()
+    rust: Regex{"(?:^|\s)(?:_R[A-Z]|_ZN\d|__rust_|__rdl_)"}
+    forbidden: loop row in rows if re.is_match(rust, row) -> row.copy()
+    if forbidden.len() > 0 -> return "Rust symbols in {path}:\n{forbidden.join("\n")}"
+    ""
+}
+
+no_rust: fn(path: String) {
+    problem: rust_problem(path)
+    if problem != "" -> fail(problem)
+}
+
+text_array: fn(items: [String]) -> Dyn { Dyn.Array(loop item in items -> Dyn.Text(item.copy())) }
+
+inventory_value: fn(found: Inventory) -> Dyn {
+    rows: loop row in found.files -> Dyn.Object([String: Dyn]{"path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})
+    Dyn.Object([String: Dyn]{"sha256": Dyn.Text(found.sha256.copy()), "files": Dyn.Array(rows)})
+}
+
+compact: fn(value: Dyn) -> String { json.dumps(value) ?? fail("cannot render JSON: {err}") }
+
+sha256_json: fn(value: Dyn) -> String { crypto.sha256(compact(value).bytes()).hex() }
+
+// The recipe the pack is a function of (format jet-native-runtime-recipe/v1).
+pack_recipe: fn(source: String, backend: String, lifecycle: String, platform: [String], compiler: String, vendor: String) -> String {
+    sha256_json(Dyn.Object([String: Dyn]{
+        "format": Dyn.Text("jet-native-runtime-recipe/v1"),
+        "source": Dyn.Text(source.copy()),
+        "backend": Dyn.Text(backend.copy()),
+        "lifecycle": Dyn.Text(lifecycle.copy()),
+        "platform": text_array(platform),
+        "compiler": Dyn.Text(compiler.copy()),
+        "vendored": Dyn.Text(vendor.copy()),
+    }))
+}
+
+// The pack's content identity, native.key (format jet-native-runtime/v2).
+pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, platform: [String], vendor: [String]) -> String {
+    sha256_json(Dyn.Object([String: Dyn]{
+        "format": Dyn.Text("jet-native-runtime/v2"),
+        "source": Dyn.Text(source.copy()),
+        "abi": Dyn.Text(abi.copy()),
+        "threads": Dyn.Text(threads.copy()),
+        "backend": Dyn.Text(backend.copy()),
+        "lifecycle": Dyn.Text(lifecycle.copy()),
+        "platform": text_array(platform),
+        "vendored": text_array(vendor),
+    }))
+}
+
+field: fn(value: Dyn, key: String) -> Dyn {
+    if value == {
+        .Object(fields) -> {
+            loop entry in fields {
+                if entry.key == key -> return entry.value.copy()
+            }
+        }
+        else -> {}
+    }
+    Dyn.Null
+}
+
+text_of: fn(value: Dyn) -> String {
+    if value == {
+        .Text(found) -> found
+        else -> ""
+    }
+}
+
+items_of: fn(value: Dyn) -> [Dyn] {
+    if value == {
+        .Array(items) -> items
+        else -> [Dyn]{}
+    }
+}
+
+digest_shape: fn(text: String) -> Bool { re.full_match(Regex{"[a-f0-9]{{64}}"}, text) }
+
+// The sorted symbols of a runtime ABI inventory, or [] when it is not a
+// non-empty array.
+abi_symbols: fn(text: String) -> [String] {
+    abi: json.parse(text) ?? return [String]{}
+    symbols := loop row in items_of(abi) -> text_of(field(row, "symbol"))
+    symbols.sort()
+    symbols
+}
+
+export_names: fn(text: String) -> [String] {
+    names := text.trim().split("\n").to_list()
+    names.sort()
+    names
+}
+
+// Why the pack `key` in `out` cannot be reused for this recipe, verified file
+// by file, or "" when it can.
+cache_problem: fn(out: String, key: String, recipe: String) -> String {
+    if !digest_shape(key) -> return "native.key must name one content-addressed runtime directory"
+    root: files.join(out, key)
+    provenance: json.parse(files.read(files.join(root, "provenance.json")) ?? return "cannot read provenance.json: {err}") ?? return "provenance.json is not JSON: {err}"
+    if text_of(field(provenance, "backend")) != "jet-native" || compact(field(provenance, "rustObjects")) != "0" || compact(field(provenance, "llvmObjects")) != "0" || text_of(field(provenance, "runtimeKey")) != key {
+        return "runtime pack must have matching Jet-native, zero-Rust/LLVM provenance"
+    }
+    if text_of(field(provenance, "recipeSha256")) != recipe -> return "runtime pack recipe does not match this toolchain"
+    loop pair in PACK_DIGESTS {
+        expected: text_of(field(provenance, pair.digest))
+        bytes: files.read_bytes(files.join(root, pair.name)) ?? return "cannot read {pair.name}: {err}"
+        if !digest_shape(expected) || crypto.sha256(bytes).hex() != expected -> return "runtime pack digest mismatch: {pair.name}"
+    }
+    abi: files.read(files.join(root, "runtime.abi.json")) ?? return "cannot read runtime.abi.json: {err}"
+    exports: files.read(files.join(root, "runtime.exports")) ?? return "cannot read runtime.exports: {err}"
+    symbols: abi_symbols(abi)
+    if symbols.len() == 0 || symbols != export_names(exports) -> return "runtime ABI and checked exports disagree"
+    archives: items_of(field(field(provenance, "vendoredC"), "archives"))
+    if archives.len() == 0 -> return "runtime pack provenance lacks the vendored C archives"
+    vendor := [String]{}
+    loop row in archives {
+        path: text_of(field(row, "path"))
+        lib: path.removeprefix("foreign/").partition("/").head
+        if !re.full_match(Regex{"[a-z0-9_]+"}, lib) || path != "foreign/{lib}/lib{lib}.a" -> return "vendored C archive path is not foreign/<lib>/lib<lib>.a: {path}"
+        expected: text_of(field(row, "sha256"))
+        bytes: files.read_bytes(files.join(root, path)) ?? return "cannot read {path}: {err}"
+        if !digest_shape(expected) || crypto.sha256(bytes).hex() != expected -> return "runtime pack digest mismatch: {path}"
+        vendor.push(expected)
+    }
+    platform: loop row in items_of(field(provenance, "cPlatformArchives")) -> text_of(field(row, "sha256"))
+    identity: pack_identity(text_of(field(field(provenance, "source"), "sha256")), text_of(field(provenance, "abiSha256")), text_of(field(provenance, "threadsSha256")),
+        text_of(field(field(provenance, "backendInputs"), "sha256")), text_of(field(field(provenance, "lifecycle"), "sha256")), platform, vendor)
+    if identity != key -> return "runtime pack identity does not match native.key"
+    loop name in PACK_OBJECTS {
+        problem: rust_problem(files.join(root, name))
+        if problem != "" -> return problem
+    }
+    loop name in WEB_FILES {
+        if !files.exists(files.join(root, name)) -> return "no {name}"
+    }
+    ""
+}
+
+// Platform archives may come from a read-only store (mode 0444): replace the
+// published copy instead of writing through it, so a second publish succeeds.
+publish_platform: fn(tool: Toolchain) {
+    directory: files.join(tool.out, "foreign/platform")
+    files.create_dir_all(directory) ?? fail("cannot create `{directory}`: {err}")
+    loop path in tool.platform {
+        target: files.join(directory, files.basename(path))
+        files.remove(target) ?? ()
+        files.copy(path, target) ?? fail("cannot copy `{path}`: {err}")
+    }
+}
+
+// The runtime unit: every manifest source with its `use { … }` blocks as one
+// `use` line per row (Tools/agent/CompilerPackages.jet unblock), the distinct
+// `core.` imports first, each source's other imports dropped.
+assemble_runtime: fn(tool: Toolchain, paths: [String], library: String) {
+    runner: process.env_get_or("JET", "jet")
+    argv := [String]{runner, files.join(tool.repo, "Tools/agent/CompilerPackages.jet"), "--root", tool.repo.copy(), "unblock"}
+    loop path in paths -> argv.push(path.copy())
+    nul: String.from_bytes([U8]{U8{0}}) ?? ""
+    unblocked: output_of(process.cmd(argv).cwd(tool.repo), "CompilerPackages.jet unblock").split(nul).to_list()
+    if unblocked.len() < paths.len() -> fail("CompilerPackages.jet unblock returned {unblocked.len()} texts for {paths.len()} sources")
+    core: Regex{"^use (?:\w+: )?core\."}
+    uses := [String]{}
+    bodies := [String]{}
+    loop index in 0..<paths.len() {
+        importing := false
+        kept := [String]{}
+        loop line in unblocked[index].split("\n") {
+            if line.starts_with("use ") {
+                if re.is_match(core, line) && !uses.contains(line) -> uses.push(line.copy())
+                importing = line.contains("[") && !line.contains("]")
+                next
+            }
+            if importing {
+                if line.contains("]") -> importing = false
+                next
+            }
+            kept.push(line.copy())
+        }
+        bodies.push("// [unit source: {paths[index]}]\n{kept.join("\n")}")
+    }
+    files.create_dir_all(library) ?? fail("cannot create `{library}`: {err}")
+    unit := uses.copy()
+    unit.push("")
+    unit.extend(bodies)
+    files.write(files.join(library, "unit.jet"), unit.join("\n")) ?? fail("cannot write the runtime unit: {err}")
+    package: files.read(files.join(tool.repo, RUNTIME_PACKAGE)) ?? fail("cannot read `{RUNTIME_PACKAGE}`: {err}")
+    files.write(files.join(library, "package.jet"), package) ?? fail("cannot write the runtime package: {err}")
+}
+
+// Each vendored library's compile jobs; objects are written under `work`.
+vendored_jobs: fn(tool: Toolchain, work: String, libraries: &[Library], units: &[String]) -> [ProcessSpec] {
+    jobs := [ProcessSpec]{}
+    loop library in vendored() {
+        root: files.join(tool.repo, library.source)
+        objects: files.join(work, "vendored/{library.name}")
+        files.create_dir_all(objects) ?? fail("cannot create `{objects}`: {err}")
+        built := [String]{}
+        loop unit in tree_files(tool.repo, library.source, vendor_file) {
+            if !unit.ends_with(".c") -> next
+            object: files.join(objects, "{unit.replace("/", "_").removesuffix(".c")}.o")
+            argv := VENDOR_BASE_FLAGS.copy()
+            argv.extend(library.flags.copy())
+            argv.extend([String]{"-ffile-prefix-map={root}=/jet/c", "-ffile-prefix-map={objects}=.", "-I", root.copy(), "-c", files.join(root, unit), "-o", object.copy()})
+            argv.extend(tool.policy.flags.copy())
+            jobs.push(cc_spec(tool, argv))
+            units.push("{library.source}/{unit}")
+            built.push(object)
+        }
+        libraries.push(Library{name: library.name.copy(), root: root, objects: built, archive: files.join(objects, "lib{library.name}.a")})
+    }
+    jobs
+}
+
+// The vendored C recipe: source bytes, flags, policy, the compiler and the
+// wrapper environment (format jet-vendored-c/v1).
+vendor_recipe: fn(tool: Toolchain) -> String {
+    inputs := [String]{}
+    loop library in vendored() {
+        loop path in tree_files(tool.repo, library.source, vendor_file) -> inputs.push("{library.source}/{path}")
+    }
+    libraries: loop library in vendored() -> Dyn.Object([String: Dyn]{"name": Dyn.Text(library.name.copy()), "flags": text_array(library.flags)})
+    version: output_of(cc_spec(tool, [String]{"--version"}), "{tool.cc} --version")
+    cc1: output_of(cc_spec(tool, [String]{"-print-prog-name=cc1"}), "{tool.cc} -print-prog-name=cc1").trim()
+    environment := [String]{}
+    loop name in CC_ENVIRONMENT {
+        if name == "NIX_HARDENING_ENABLE" && tool.hardening == .Val(enabled) {
+            environment.push(enabled.copy())
+        } else {
+            environment.push(process.env_get_or(name, ""))
+        }
+    }
+    sha256_json(Dyn.Object([String: Dyn]{
+        "format": Dyn.Text("jet-vendored-c/v1"),
+        "inputs": Dyn.Text(inventory(tool.repo, inputs).sha256),
+        "base": text_array(VENDOR_BASE_FLAGS),
+        "policy": text_array(tool.policy.flags),
+        "libraries": Dyn.Array(libraries),
+        "compiler": text_array([String]{version, cc1}),
+        "environment": text_array(environment),
+    }))
+}
+
+// Keep the runtime build's issue reports when it fails.
+keep_issues: fn(work: String, out: String) {
+    loop suffix in ISSUE_SUFFIXES {
+        path: files.join(work, "jet_runtime_jet{suffix}")
+        if files.exists(path) -> files.copy(path, files.join(out, "runtime{suffix}")) ?? ()
+    }
+}
+
+copy_into: fn(from: String, to: String) {
+    files.copy(from, to) ?? fail("cannot copy `{from}` to `{to}`: {err}")
+}
+
+run: fn() {
+    args: process.args()
+    positional := [String]{}
+    repo := files.cwd() ?? fail("cannot read the working directory: {err}")
+    identity := ""
+    at := 0
+    loop at < args.len() {
+        if args[at] == "--repo" || args[at] == "--identity" {
+            if at + 1 >= args.len() || args[at + 1].starts_with("--") -> fail(USAGE)
+            if args[at] == "--repo" {
+                repo = files.absolute(args[at + 1]) ?? fail("cannot resolve `{args[at + 1]}`: {err}")
+            } else {
+                identity = args[at + 1].copy()
+            }
+            at += 2
+            next
+        }
+        if args[at].starts_with("--") || positional.len() == 2 -> fail(USAGE)
+        positional.push(args[at].copy())
+        at += 1
+    }
+    if positional.len() == 0 -> fail(USAGE)
+    jet: files.absolute(positional[0]) ?? fail("cannot resolve `{positional[0]}`: {err}")
+    out: files.absolute(if positional.len() == 2 -> positional[1] else -> files.join(files.dirname(jet), "jet-runtime")) ?? fail("cannot resolve the runtime directory: {err}")
+    musl: process.env_get_or("JET_PACK_MUSL_LIB", "")
+    if musl == "" -> fail("JET_PACK_MUSL_LIB must name the static musl libc.a directory")
+    policy: read_policy(repo)
+    hardening: if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) -> Val(child_hardening(enabled, policy.hardening_removed)) else -> None
+    tool := Toolchain{repo: repo, jet: jet, identity: identity, out: out, platform: [String]{}, policy: policy, cc: process.env_get_or("CC", "cc"), ar: process.env_get_or("AR", "ar"), hardening: hardening}
+    platform := [String]{files.absolute(files.join(musl, "libc.a")) ?? fail("cannot resolve `{musl}/libc.a`: {err}")}
+    loop name in PLATFORM_ARCHIVES {
+        argv := [String]{"-print-file-name={name}"}
+        argv.extend(policy.flags.copy())
+        path: output_of(cc_spec(tool, argv), "{tool.cc} -print-file-name={name}").trim()
+        if !files.exists(path) -> fail("{tool.cc} did not locate {name}: {path}")
+        platform.push(files.absolute(path) ?? fail("cannot resolve `{path}`: {err}"))
+    }
+    tool.platform = platform
+    manifest: files.read(files.join(repo, RUNTIME_MANIFEST)) ?? fail("cannot read `{RUNTIME_MANIFEST}`: {err}")
+    sources := [String]{}
+    loop raw in manifest.split("\n") {
+        row: raw.trim()
+        if row == "" || row.starts_with("#") -> next
+        if sources.contains(row) -> fail("{RUNTIME_MANIFEST} lists {row} twice")
+        sources.push(row.copy())
+    }
+    if sources.len() == 0 -> fail("{RUNTIME_MANIFEST} lists no source")
+    source_paths := [String]{RUNTIME_MANIFEST, RUNTIME_PACKAGE}
+    source_paths.extend(sources.copy())
+    source: inventory(repo, source_paths)
+    backend_paths := [String]{}
+    loop directory in BACKEND_SOURCES {
+        loop path in tree_files(repo, directory, (name: String) -> name.ends_with(".jet")) -> backend_paths.push("{directory}/{path}")
+    }
+    backend: inventory(repo, backend_paths)
+    lifecycle: inventory(repo, [String]{RUNTIME_LIFECYCLE})
+    platform_rows: loop path in platform -> (path: path.copy(), sha256: sha256_file(path))
+    platform_digests: loop row in platform_rows -> row.sha256.copy()
+    compiler_sha256: sha256_file(jet)
+    vendor_sha256: vendor_recipe(tool)
+    recipe: pack_recipe(source.sha256, backend.sha256, lifecycle.sha256, platform_digests, compiler_sha256, vendor_sha256)
+    if files.exists(files.join(out, "native.key")) {
+        key: (files.read(files.join(out, "native.key")) ?? "").trim()
+        problem: cache_problem(out, key, recipe)
+        if problem == "" {
+            publish_platform(tool)
+            term.print(files.join(out, "{key}/jet_runtime.pack.o"))
+            return
+        }
+        term.eprint("native runtime cache miss: {problem}")
+    }
+    loop path in platform -> no_rust(path)
+    files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
+    work: files.mkdtemp("jet-runtime-pack") ?? fail("cannot create a work directory: {err}")
+    code: build(tool, work, sources, source, backend, lifecycle, platform_rows, compiler_sha256, vendor_sha256, recipe)
+    files.remove_all(work) ?? ()
+    if code != 0 -> process.exit(code)
+}
+
+// Build the pack in `work` and publish it in `tool.out`; 0, else 1 after
+// every failure is reported.
+build: fn(tool: Toolchain, work: String, sources: [String], source: Inventory, backend: Inventory, lifecycle: Inventory, platform_rows: [(path: String, sha256: String)], compiler_sha256: String, vendor_sha256: String, recipe: String) -> Int {
+    library: files.join(work, "library")
+    assemble_runtime(tool, sources, library)
+    prefix: files.join(work, "jet_runtime_jet")
+    pack: files.join(work, "jet_runtime.pack.o")
+    // The pack prelinked at the run base, which `jet run` binds programs to.
+    image: files.join(work, "jet_runtime.image")
+    // The runtime partition of a web build (JetWeb Build.jet) and its receipt.
+    web: files.join(work, "jet_runtime")
+    // The runtime-library seam in the hosted source loader (Request.jet
+    // jet_cli_compile_prepared) under `jet doc`: the checked program stopped
+    // before lowering, then built as IR; under the seam `jet doc` builds no
+    // index or pages.
+    doc := process.cmd([String]{tool.jet.copy(), "doc", files.join(library, "unit.jet")}).cwd(library)
+        .stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+        .env("JET_TOOLCHAIN_ROOT", tool.repo)
+    if tool.identity != "" -> doc = doc.env("JET_COMPILER_IDENTITY", tool.identity)
+    doc = doc
+        .env("JET_FRONT_LIBRARY_OBJECT_OUTPUT", prefix)
+        .env("JET_FRONT_LIBRARY_LIFECYCLE", files.join(tool.repo, RUNTIME_LIFECYCLE))
+        .env("JET_FRONT_RUNTIME_PACK_OUTPUT", pack)
+        .env("JET_FRONT_RUNTIME_IMAGE_OUTPUT", image)
+        .env("JET_FRONT_RUNTIME_PLATFORM_INPUTS", tool.platform.join("\n"))
+        .env("JET_FRONT_RUNTIME_WEB_OUTPUT", web)
+    // The runtime build runs first; the C compilers (sqlite3's single large
+    // unit first) overlap it.
+    libraries := [Library]{}
+    units := [String]{}
+    specs := [ProcessSpec]{doc}
+    specs.extend(vendored_jobs(tool, work, libraries, units))
+    results: process.run_all(specs, VENDOR_JOBS + 1) ?? fail("the runtime and vendored C builds could not start: {err}")
+    problems := [String]{}
+    if results[0] == {
+        .Ok(receipt) -> {
+            if receipt.code != 0 || receipt.signal != None -> problems.push("Jet runtime production failed ({receipt.code})")
+        }
+        .Err(error) -> problems.push("Jet runtime production could not start: {error}")
+    }
+    loop index in 1..<results.len() {
+        unit: units[index - 1]
+        if results[index] == {
+            .Ok(receipt) -> {
+                if receipt.code != 0 || receipt.signal != None {
+                    detail: if receipt.errors == "" -> "" else -> ":\n{receipt.errors}"
+                    problems.push("C compiler on {unit} failed ({receipt.code}){detail}")
+                }
+            }
+            .Err(error) -> problems.push("C compiler on {unit} could not start: {error}")
+        }
+    }
+    if problems.len() > 0 {
+        keep_issues(work, tool.out)
+        term.eprint("prebuild-runtime: {problems.join("\n")}")
+        return 1
+    }
+    loop item in libraries {
+        argv := [String]{tool.ar.copy(), "rcsD", item.archive.copy()}
+        argv.extend(item.objects.copy())
+        _: output_of(process.cmd(argv), "{tool.ar} rcsD {item.archive}")
+        no_rust(item.archive)
+    }
+    built_objects: [String]{"{prefix}.o", pack, image}
+    loop path in built_objects -> no_rust(path)
+    abi_text: files.read("{prefix}.abi.json") ?? fail("cannot read the runtime ABI inventory: {err}")
+    symbols: abi_symbols(abi_text)
+    if symbols.len() == 0 -> fail("runtime ABI inventory is empty")
+    exports: export_names(files.read("{prefix}.exports") ?? fail("cannot read the runtime exports: {err}"))
+    if symbols != exports -> fail("runtime ABI and checked exports disagree")
+    abi_sha256: sha256_file("{prefix}.abi.json")
+    // The thread receipt (Request.jet ir_thread_exports): the exports that can
+    // start a second thread, or `*` when a lifecycle hook can.
+    threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
+    thread_rows: threads.split("\n").to_list()
+    thread_names: loop name in thread_rows if name != "" -> name.copy()
+    if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(name -> !exports.contains(name)) -> fail("runtime thread receipt names a symbol the checked exports lack")
+    threads_sha256: sha256_file("{prefix}.threads")
+    archives: loop item in libraries -> (name: item.name.copy(), path: "foreign/{item.name}/lib{item.name}.a", sha256: sha256_file(item.archive))
+    platform_digests: loop row in platform_rows -> row.sha256.copy()
+    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, platform_digests, loop row in archives -> row.sha256.copy())
+    directory: files.join(tool.out, key)
+    files.create_dir_all(directory) ?? fail("cannot create `{directory}`: {err}")
+    copy_into("{prefix}.o", files.join(directory, "jet_runtime_jet.o"))
+    copy_into("{prefix}.abi.json", files.join(directory, "runtime.abi.json"))
+    copy_into("{prefix}.exports", files.join(directory, "runtime.exports"))
+    copy_into("{prefix}.threads", files.join(directory, "runtime.threads"))
+    copy_into(pack, files.join(directory, "jet_runtime.pack.o"))
+    copy_into(image, files.join(directory, "jet_runtime.image"))
+    copy_into("{web}.wasm", files.join(directory, "jet_runtime.wasm"))
+    copy_into("{web}.wasm.tsv", files.join(directory, "jet_runtime.wasm.tsv"))
+    loop item in libraries {
+        target: files.join(directory, "foreign/{item.name}")
+        files.create_dir_all(target) ?? fail("cannot create `{target}`: {err}")
+        copy_into(item.archive, files.join(target, "lib{item.name}.a"))
+        loop notice in NOTICES {
+            if files.exists(files.join(item.root, notice)) -> copy_into(files.join(item.root, notice), files.join(target, notice))
+        }
+    }
+    provenance: Dyn.Object([String: Dyn]{
+        "backend": Dyn.Text("jet-native"),
+        "runtimeKey": Dyn.Text(key.copy()),
+        "objectSha256": Dyn.Text(sha256_file("{prefix}.o")),
+        "packSha256": Dyn.Text(sha256_file(pack)),
+        "imageSha256": Dyn.Text(sha256_file(image)),
+        "webSha256": Dyn.Text(sha256_file("{web}.wasm")),
+        "rustObjects": Dyn.Int(0),
+        "llvmObjects": Dyn.Int(0),
+        "abiSha256": Dyn.Text(abi_sha256.copy()),
+        "threadsSha256": Dyn.Text(threads_sha256.copy()),
+        "source": inventory_value(source),
+        "backendInputs": inventory_value(backend),
+        "lifecycle": inventory_value(lifecycle),
+        "cPlatformArchives": Dyn.Array(loop row in platform_rows -> Dyn.Object([String: Dyn]{"path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy()), "language": Dyn.Text("C"), "role": Dyn.Text("platform")})),
+        "vendoredC": Dyn.Object([String: Dyn]{
+            "recipeSha256": Dyn.Text(vendor_sha256.copy()),
+            "archives": Dyn.Array(loop row in archives -> Dyn.Object([String: Dyn]{"name": Dyn.Text(row.name.copy()), "path": Dyn.Text(row.path.copy()), "sha256": Dyn.Text(row.sha256.copy())})),
+        }),
+        "compilerSha256": Dyn.Text(compiler_sha256.copy()),
+        "recipeSha256": Dyn.Text(recipe.copy()),
+    })
+    text: "{json.to_string_pretty(provenance) ?? fail("cannot render the provenance: {err}")}\n"
+    files.write(files.join(directory, "provenance.json"), text) ?? fail("cannot write the provenance: {err}")
+    files.write(files.join(tool.out, "provenance.json"), text) ?? fail("cannot write the provenance: {err}")
+    publish_platform(tool)
+    files.write(files.join(tool.out, "native.key.new"), "{key}\n") ?? fail("cannot write native.key: {err}")
+    files.rename(files.join(tool.out, "native.key.new"), files.join(tool.out, "native.key")) ?? fail("cannot publish native.key: {err}")
+    term.print(files.join(directory, "jet_runtime.pack.o"))
+    0
+}
+
+#Test("recipe and identity JSON keep prebuild-runtime.mjs's field order") {
+    assert_eq(compact(Dyn.Object([String: Dyn]{"format": Dyn.Text("f"), "platform": text_array([String]{"a", "b"}), "n": Dyn.Int(0)})), "{{\"format\":\"f\",\"platform\":[\"a\",\"b\"],\"n\":0}}")
+}
+
+#Test("the child hardening drops only the policy's removed features") {
+    assert_eq(child_hardening("bindnow fortify format  fortify3 stackprotector", [String]{"fortify", "fortify3"}), "bindnow format stackprotector")
+}
+
+#Test("ABI symbols and export names compare sorted") {
+    assert_eq(abi_symbols("[{{\"symbol\":\"b\"}},{{\"symbol\":\"a\"}}]"), [String]{"a", "b"})
+    assert_eq(export_names("b\na\n"), [String]{"a", "b"})
+    assert_eq(abi_symbols("{{}}"), [String]{})
+}

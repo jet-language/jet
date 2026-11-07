@@ -26,7 +26,7 @@
 //   jet run Tools/release/Main.jet -- publish OUT
 //
 // Environment: JET_PACK_MUSL_LIB (the static musl lib directory
-// prebuild-runtime.mjs links).
+// Tools/packaging/PrebuildRuntime.jet links).
 // Exit: 0 done, 1 a check failed, 2 the run could not start.
 
 use {
@@ -127,8 +127,9 @@ build_stage: fn(run: BuildRun, name: String, builder: String, identity: String, 
     say("build", "", "{name}: {own} ({result.wall}s)")
     if !pack -> return Stage{dir: dir, identity: own, error: ""}
     pack_log: files.join(run.logs, "{name}-pack.log")
-    packed: run_logged(joined(run.staged, [String]{"node", files.join(run.tree, "Tools/packaging/prebuild-runtime.mjs"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", run.tree.copy()}), run.tree, with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", own)}), pack_log, 3600)
-    if packed.rc != 0 || !files.exists(files.join(dir, "jet-runtime/native.key")) -> return Stage{dir: "", identity: "", error: "{name}: prebuild-runtime.mjs rc={packed.rc}: {tail_of(pack_log, 6)}"}
+    builder_jet: files.join(builder, "jet")
+    packed: run_logged(joined(run.staged, [String]{builder_jet.copy(), files.join(run.tree, "Tools/packaging/PrebuildRuntime.jet"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", run.tree.copy(), "--identity", own.copy()}), run.tree, with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity), set_var("JET", builder_jet)}), pack_log, 3600)
+    if packed.rc != 0 || !files.exists(files.join(dir, "jet-runtime/native.key")) -> return Stage{dir: "", identity: "", error: "{name}: PrebuildRuntime.jet rc={packed.rc}: {tail_of(pack_log, 6)}"}
     Stage{dir: dir, identity: own, error: ""}
 }
 

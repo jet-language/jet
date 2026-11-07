@@ -36,7 +36,7 @@ if (until === 1) {
   if (!process.env.JET) throw Error('JET must name the actual Jet-hosted CLI from this source tree');
   const prefix = join(out, 'jet_runtime_jet');
   for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues', '.pack-issues']) rmSync(prefix + suffix, { force: true });
-  // The library seam runs under `jet doc` (prebuild-runtime.mjs): `jet check`
+  // The library seam runs under `jet doc` (PrebuildRuntime.jet): `jet check`
   // stops before lowering, so it has no C export rows to build.
   const run = spawnSync(resolve(process.env.JET), ['doc', entry], {
     cwd: library,

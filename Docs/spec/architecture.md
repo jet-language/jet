@@ -171,7 +171,7 @@ a standalone runtime object, never just archives.
 `Compiler/JetBackend/Tests/run-runtime-pack-roots.mjs` exercises this boundary
 with real objects, an archive and a consumer, including an unreferenced export.
 
-`Tools/packaging/prebuild-runtime.sh <hosted-jet>` assembles the canonical
+`jet Tools/packaging/PrebuildRuntime.jet <hosted-jet>` assembles the canonical
 `Compiler/JetRuntime/sources.list`, checks it through the Jet-hosted CLI's
 library entry, and lowers its checked exports plus `lifecycle.list` into one
 native object. Jet's linker resolves its permitted musl/libgcc C dependencies;
@@ -1500,7 +1500,7 @@ SQLite uses the sanctioned 3.45.0 amalgamation from `libsqlite3-sys` 0.28.0 in
 never a system SQLite. The upstream `sqlite3.c` SHA-256 is
 `7956a38f236a6be6c0bb30c96ba4f85f19e5a69f6beb6d2c62c9d246972a6775`.
 Core's vendored C (`Core/Vendor/Sqlite3`, `Core/Vendor/Mbedtls`) is compiled
-once when the toolchain is packaged: `prebuild-runtime.mjs` builds each library
+once when the toolchain is packaged: `PrebuildRuntime.jet` builds each library
 under the native C policy and installs `jet-runtime/<key>/foreign/<lib>/lib<lib>.a`
 (with its LICENSE and VERSION) beside the pack. The archive digests are part of
 the runtime key and the vendored sources, flags and C compiler identity part of

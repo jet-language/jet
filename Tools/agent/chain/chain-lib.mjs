@@ -51,14 +51,13 @@ function compilerPackages(tree, ...args) {
 
 // The build stage reads the compiler's source identity inputs (workspace files, every package `jet build Compiler`
 // compiles, Core) plus the Prelude and runtime trees the toolchain root serves and the dev-shell definition;
-// the pack stage reads those plus the packaging recipe (the Tools/packaging modules prebuild-runtime.mjs loads:
-// every non-test .mjs there except prebuild-runtime-reuse.mjs, which the lander's scratch census still writes
-// into the r14 snapshot for its linger workaround and the chain never runs) and every runtime source sources.list names.
+// the pack stage reads those plus the packaging recipe (Tools/packaging/PrebuildRuntime.jet and the
+// Tools/agent/CompilerPackages.jet it assembles the runtime unit with) and every runtime source sources.list names.
 function stageInputs(tree) {
   const build = new Set(compilerPackages(tree, "inputs"));
   for (const extra of ["Compiler/Prelude", "Compiler/JetRuntime", "env.jet", "flake.nix", "flake.lock"]) walk(tree, extra, build);
   const pack = new Set(build);
-  for (const f of walk(tree, "Tools/packaging", new Set())) if (f.endsWith(".mjs") && !f.endsWith(".test.mjs") && !f.endsWith("/prebuild-runtime-reuse.mjs")) pack.add(f);
+  for (const f of ["Tools/packaging/PrebuildRuntime.jet", "Tools/agent/CompilerPackages.jet"]) if (existsSync(join(tree, f))) pack.add(f);
   const list = join(tree, "Compiler/JetRuntime/sources.list");
   if (existsSync(list)) for (const row of readFileSync(list, "utf8").split("\n").map((r) => r.trim())) if (row && !row.startsWith("#") && existsSync(join(tree, row))) pack.add(row);
   return { build, pack };
@@ -128,7 +127,7 @@ const RANK = { check: 0, s1: 1, full: 2 };
 
 function classify(path, inputs) {
   const parts = path.split("/");
-  if (path === "Compiler/JetRuntime/Tests/check-runtime.mjs") return ["full", "runtime pack assembler (prebuild-runtime.mjs runs it)"];
+  if (path === "Tools/packaging/PrebuildRuntime.jet") return ["full", "runtime pack producer"];
   if (parts.some((p) => p === "Tests" || p === "tests")) return ["check", "tests"];
   if (FULL_FILES.has(path)) return ["full", path.startsWith("flake") ? "dev shell definition" : "Compiler workspace file"];
   const fd = FULL_DIRS.find((d) => path.startsWith(d));

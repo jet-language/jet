@@ -1237,8 +1237,8 @@ jet_cli_native_report: fn(file: String, command: String, failure: JetCLINativeFa
         // Every fault is a census row the caller reports first (jet_cli_ice_census).
         .Faulted -> jet_cli_ice("the native route of `jet {command} {file}` stopped on a fault it did not record")
         .Write(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "check that the build directory is writable", color)
-        .RuntimeKey(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the key and the runtime pack", color)
-        .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `Tools/packaging/prebuild-runtime.sh <jet>`, which writes the runtime pack and object", color)
+        .RuntimeKey(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `jet Tools/packaging/PrebuildRuntime.jet <jet>`, which writes the key and the runtime pack", color)
+        .Runtime(what) -> jet_cli_build_failed(what, jet_cli_why("E2105"), "package the runtime beside jet with `jet Tools/packaging/PrebuildRuntime.jet <jet>`, which writes the runtime pack and object", color)
         .Foreign(message) -> jet_cli_build_failed("couldn't realize C dependencies for `{file}`: {message}", jet_cli_why("E2105"), "check the declared C source/library paths and the installed C toolchain", color)
     }
 }

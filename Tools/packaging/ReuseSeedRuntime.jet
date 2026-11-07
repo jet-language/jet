@@ -3,7 +3,7 @@
 // and identity (Docs/spec/contributing/bootstrap.md). The pack is reused only
 // when it was built from this checkout's runtime inputs: its provenance.json
 // lists the source, backend and lifecycle inventories
-// Tools/packaging/prebuild-runtime.mjs hashed, and each is recomputed here the
+// Tools/packaging/PrebuildRuntime.jet hashes, and each is recomputed here the
 // same way and must match file for file. On a match, `<seed>/jet-runtime/`
 // replaces the one beside the compiler and `<seed>/IDENTITY` is copied beside
 // it; on a mismatch nothing is written.
@@ -19,7 +19,7 @@ use {
 RUNTIME_MANIFEST: "Compiler/JetRuntime/sources.list"
 RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
 RUNTIME_LIFECYCLE: "Compiler/JetRuntime/lifecycle.list"
-// The runtime object's producers, as prebuild-runtime.mjs lists them.
+// The runtime object's producers, as PrebuildRuntime.jet lists them.
 BACKEND_SOURCES: [String]{"Compiler/JetIR/Source", "Compiler/JetBackend/Source", "Compiler/JetWeb/Source", "Compiler/JetWasm/Source"}
 
 InventoryFile: struct {
@@ -38,7 +38,7 @@ fail: fn(message: String) -> Never {
     process.exit(1)
 }
 
-// prebuild-runtime.mjs `inventory`: the sorted unique paths, each file's
+// PrebuildRuntime.jet `inventory`: the sorted unique paths, each file's
 // sha256, and one sha256 over `<path byte count>:<path>:<size>:<bytes>` per file.
 inventory: fn(name: String, paths: [String]) -> Inventory {
     sorted := paths
@@ -65,7 +65,7 @@ jet_files: fn(directory: String) -> [String] {
     found
 }
 
-// The three inventories prebuild-runtime.mjs records, for this checkout.
+// The three inventories PrebuildRuntime.jet records, for this checkout.
 checkout_inventories: fn() -> [Inventory] {
     manifest: files.read(RUNTIME_MANIFEST) ?? fail("can't read `{RUNTIME_MANIFEST}`: {err}")
     sources := [String]{RUNTIME_MANIFEST, RUNTIME_PACKAGE}
@@ -154,7 +154,7 @@ run: fn() {
         loop path in paths -> changed.push(path)
     }
     if changed.len() > 0 {
-        fail("the seed's runtime pack `{pack}` was not built from this checkout: {changed.len()} of this checkout's {total} runtime input files differ from the pack's, first `{changed[0]}`.\nUse the latest published Jet release as the seed (its runtime pack matches its commit), or rebuild the runtime pack for this checkout with `Tools/packaging/prebuild-runtime.sh {compiler}`.")
+        fail("the seed's runtime pack `{pack}` was not built from this checkout: {changed.len()} of this checkout's {total} runtime input files differ from the pack's, first `{changed[0]}`.\nUse the latest published Jet release as the seed (its runtime pack matches its commit), or rebuild the runtime pack for this checkout with `jet Tools/packaging/PrebuildRuntime.jet {compiler}`.")
     }
     directory: files.dirname(files.absolute(compiler) ?? fail("can't resolve `{compiler}`: {err}"))
     destination: files.join(directory, "jet-runtime")

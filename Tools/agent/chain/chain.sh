@@ -157,7 +157,7 @@ CPUSET=(); [ -n "${SLOT_CPUS:-}" ] && CPUSET=(taskset -c "$SLOT_CPUS")
 declare -A SHA PK
 MISS=
 build_mat() { MAT=("kind=build" "builder=$1" "builderpack=$2" "inputs=$BIN" "identity=$3" "args=build --threads $4 Compiler" "env=JET_KEEP_GOING=1"); }
-pack_mat() { MAT=("kind=pack" "compiler=$1" "inputs=$PIN" "identity=$2" "musl=$JET_PACK_MUSL_LIB" "args=prebuild-runtime.mjs"); }
+pack_mat() { MAT=("kind=pack" "compiler=$1" "inputs=$PIN" "identity=$2" "musl=$JET_PACK_MUSL_LIB" "args=PrebuildRuntime.jet"); }
 
 # build_stage NAME BUILDER_DIR BUILDER_SHA BUILDER_PACKHASH IDENTITY THREADS
 build_stage() {
@@ -231,12 +231,13 @@ pack_stage() {
     fi
   fi
   if [ "$MODE" != run ]; then MISS=$n; say "$n needs a build (key ${k:0:16})"; return 3; fi
-  say "$n: prebuild-runtime.mjs with $(basename "$cd")"
+  say "$n: PrebuildRuntime.jet with $(basename "$cd")"
   rm -rf "$cd/jet-runtime"; mkdir -p "$WORK/tmp"
-  # The pack compiles the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
-  JET_COMPILER_IDENTITY=$id JET_TOOLCHAIN_ROOT=$ROOT TMPDIR=$WORK/tmp \
+  # The seed runs the tool; the stage's compiler lowers the runtime under the stage identity. The pack compiles
+  # the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
+  JET_COMPILER_IDENTITY=$CID JET=$SEED/jet JET_TOOLCHAIN_ROOT=$ROOT TMPDIR=$WORK/tmp \
     inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1800 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash "$NR" node "$ROOT/Tools/packaging/prebuild-runtime.mjs" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
+    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash "$NR" "$SEED/jet" "$ROOT/Tools/packaging/PrebuildRuntime.jet" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" --identity "$id" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
   if [ "$rc" != 0 ] || [ ! -f "$cd/jet-runtime/native.key" ]; then
     rec "$n" FAILED "$rc" "$w" "$r" - "$k" "no pack; $(errhead "$LOGS/$n.err")"
