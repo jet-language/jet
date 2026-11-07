@@ -2,11 +2,11 @@
 # (.agents/skills/_shared/audit-dispositions.md). Port of scripts/agent/check-audit-dispositions.mjs,
 # removed in 2efc938b3d. The golden is the list: a new report without a table, or a report whose
 # table gains or loses a disposition, changes it, and the golden is updated in the same change.
-# NODE-DEBT: live cards and decisions come from Tools/tower/tower.mjs; remove when Tower is Jet.
-requires: tool:node
+# The live cards and decisions come from Tools/tower/Board.jet, run by the jet under test.
 fixture: audit_reports_list_findings_without_a_disposition.fixture
 copy: {root}/Tools/tower repo/Tools/tower
-step: jet run --allow=Exec,FS.Read {work}/main.jet {root} {work}/repo
+env: JET={jet}
+step: jet run --allow=Env,Exec,FS.Read {work}/main.jet {root} {work}/repo
 exit: 0
 stdout: = audit_reports_list_findings_without_a_disposition.out
 stderr: empty

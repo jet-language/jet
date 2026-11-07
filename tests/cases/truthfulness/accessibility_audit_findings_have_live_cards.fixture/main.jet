@@ -2,6 +2,7 @@ use {
     audit_files: core.files
     audit_parse: core.text.parse
     audit_process: core.process
+    audit_sys: core.sys
     audit_json: core.encoding.json
 }
 
@@ -124,8 +125,10 @@ run: fn() {
             assert(!unique_cards.contains(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
             unique_cards.push(card.copy())
             // TOWER_DATA pins the lookup to this tree's board; left to itself,
-            // Tower follows a linked worktree to the main checkout's live board.
-            output: audit_process.cmd([String]{"node", "Tools/tower/tower.mjs", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")
+            // the board reader follows a linked worktree to the main checkout's
+            // live board. JET is the jet under test (the case sets it).
+            jet: audit_sys.get("JET") ?? panic("JET names the jet that runs Tools/tower/Board.jet")
+            output: audit_process.cmd([String]{jet, "Tools/tower/Board.jet", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")
             assert(output.success, "accessibility finding {row[0]} names missing Tower card {card}:\n{output.errors}")
             report: audit_json.parse(output.output.trim()) ?? panic("Tower lookup for {row[0]} returned invalid JSON: {output.output}")
             value: audit_json.pointer(report, "/num") ?? panic("Tower card JSON must contain a numeric num")
