@@ -724,6 +724,7 @@ specification: fn(id: String) -> Spec? Never! {
             "Text" -> Val((call: Val("text_tests"), witness: "", expected: ""))
             "Unicode" -> Val((call: Val("unicode_tests"), witness: "", expected: ""))
             "Secret" -> Val((call: Val("secret_tests"), witness: "", expected: "secret tests: ok\n"))
+            "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: "", expected: ""))
             "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
             "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
             "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
@@ -745,8 +746,8 @@ specification: fn(id: String) -> Spec? Never! {
             found.expected_file = "{RT}{name}Witness.stdout"
             return Val(found)
         }
-        if name == "FilesWalk" || name == "HostParallelism" {
-            found := spec("native-suite", name, if name == "FilesWalk" -> "{RT}run-files-walk-fixtures.mjs" else -> "{RT}run-host-parallelism-fixtures.mjs")
+        if name == "HostParallelism" {
+            found := spec("native-suite", name, "{RT}run-host-parallelism-fixtures.mjs")
             found.witness = "{RT}{name}Witness.c"
             found.modes = [String]{"assemble", "lower", "audit", "link", "run"}
             return Val(found)
@@ -2191,7 +2192,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
             assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.stdout")))
         }
     }
-    loop name in ([String]{"FilesWalk", "HostParallelism"}) {
+    loop name in ([String]{"HostParallelism"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         assert_eq(text_field(field(entry, "transport"), "type"), "native-suite")
         assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
@@ -2202,15 +2203,15 @@ fragment_registry: fn(name: String) -> Registry Never! {
 
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
-    loop name in ([String]{"Alloc", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
+    loop name in ([String]{"Alloc", "FilesWalk", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
         assert_eq(text_field(transport, "runner"), "Tools/agent/CompilerPackages.jet")
-        if name == "Alloc" {
-            assert_eq(text_field(transport, "call"), "alloc_tests")
+        if name == "Alloc" || name == "FilesWalk" {
+            assert_eq(text_field(transport, "call"), if name == "Alloc" -> "alloc_tests" else -> "files_walk_tests")
             assert(field(transport, "witness") == Dyn.Null)
-            assert(field(transport, "fragments") == texts([String]{"Alloc"}))
+            assert(field(transport, "fragments") == texts([String]{name.copy()}))
             next
         }
         host: if name == {

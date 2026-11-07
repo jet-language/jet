@@ -1,5 +1,6 @@
-// Link with the composed Jet-only runtime and FilesWalkWitness.c (via
-// run-files-walk-fixtures.mjs). The C caller supplies one fresh directory.
+// Composed with the Jet-only runtime by the CompilerRegistries plain row
+// JetRuntime/Tests/FilesWalkTests: files_walk_tests runs both witnesses in one
+// fresh directory under TMPDIR, the row's own scratch.
 files_walk_fixture_path: fn(root: I64, suffix: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, root)
@@ -158,4 +159,18 @@ files_walk_fixture_live: fn(key: I64) -> Bool {
     jet_rt_handle_drop_io_error(rt_text_word(error))
     jet_rt_free(scratch, I64{160}, I64{8})
     I64{0}
+}
+
+// A failed witness stops the process (status 101) with what failed on stderr.
+files_walk_fixture_require: fn(ok: Bool, what: I64) {
+    if ok -> return
+    jet_rt_unreachable(rt_text_data(what), rt_text_len(what))
+}
+
+files_walk_tests: fn() {
+    files_walk_fixture_require(jet_rt_files_ignore_fixture() == I64{0}, rt_static_text("files walk: the gitignore matcher and path components failed"))
+    scratch: rt_env_get(rt_static_text("TMPDIR"))
+    files_walk_fixture_require(scratch != I64{0}, rt_static_text("files walk: TMPDIR names no scratch directory"))
+    root: files_walk_fixture_path(scratch, rt_static_text("/jet-files-walk"))
+    files_walk_fixture_require(jet_rt_files_walk_fixture(root) == I64{0}, rt_static_text("files walk: walk slots, ignore rules or registry lifetime failed"))
 }
