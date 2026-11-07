@@ -280,9 +280,9 @@ impl App {
     // policy.
     __mount: fn(self, prefix: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
         effects := [String]{}
-        if effect_name != "" -> effects.push(effect_name)
+        if effect_name != "" -> effects.push(effect_name.copy())
         security := [String]{}
-        if policy != "" -> security.push(policy)
+        if policy != "" -> security.push(policy.copy())
         guard := self.__state.guard_edit()
         guard.value.mounts.push(__AppMount{prefix: prefix, handler: __app_handler(handler), effects: effects, security: security})
         self.copy()
@@ -290,7 +290,7 @@ impl App {
 
     routes: fn(self, from: String) -> App Never! {
         guard := self.__state.guard_edit()
-        guard.value.routes_from.push(from)
+        guard.value.routes_from.push(from.copy())
         self.copy()
     }
 
@@ -315,7 +315,7 @@ impl App {
 
     security: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
-        guard.value.security.push(policy)
+        guard.value.security.push(policy.copy())
         self.copy()
     }
 
@@ -327,7 +327,7 @@ impl App {
 
     split: fn(self, name: String) -> App Never! {
         guard := self.__state.guard_edit()
-        guard.value.split.push(name)
+        guard.value.split.push(name.copy())
         self.copy()
     }
 
@@ -335,19 +335,19 @@ impl App {
 
     cache: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
-        guard.value.cache.push(policy)
+        guard.value.cache.push(policy.copy())
         self.copy()
     }
 
     a11y: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
-        guard.value.a11y.push(policy)
+        guard.value.a11y.push(policy.copy())
         self.copy()
     }
 
     adapter: fn(self, name: String) -> App Never! {
         guard := self.__state.guard_edit()
-        guard.value.adapters.push(name)
+        guard.value.adapters.push(name.copy())
         self.copy()
     }
 

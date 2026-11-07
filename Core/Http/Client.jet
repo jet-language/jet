@@ -171,10 +171,10 @@ session_cookie: fn(s: Session, cookie: String) -> Session Never! {
             cookies.push(cookie.copy())
             replaced = true
         } else {
-            cookies.push(c)
+            cookies.push(c.copy())
         }
     }
-    if !replaced -> cookies.push(cookie)
+    if !replaced -> cookies.push(cookie.copy())
     Session{headers: s.headers.copy(), cookies: cookies, timeout_ms: s.timeout_ms, retries: s.retries, redirects: s.redirects, user: s.user.copy(), password: s.password.copy(), proxy: s.proxy.copy()}
 }
 
@@ -336,7 +336,7 @@ header_value: fn(line: String) -> String? {
 
 append_header: fn(headers: [String], line: String) -> [String] {
     out := headers.copy()
-    out.push(line)
+    out.push(line.copy())
     out
 }
 
@@ -353,7 +353,7 @@ set_header_line: fn(headers: [String], name: String, value: String) -> [String] 
                 replaced = true
             }
         } else {
-            out.push(line)
+            out.push(line.copy())
         }
     }
     if !replaced -> out.push("{name}: {value}")
@@ -367,7 +367,7 @@ redirect_headers: fn(headers: [String], strip_credentials: Bool) -> [String] Nev
         lower: ascii_lower(name)
         credential := lower == "authorization" || lower == "proxy-authorization" || lower == "cookie" || lower == "host"
         body_header := lower == "content-length" || lower == "content-type" || lower == "content-encoding" || lower == "transfer-encoding" || lower == "expect"
-        if !body_header && (!strip_credentials || !credential) -> out.push(line)
+        if !body_header && (!strip_credentials || !credential) -> out.push(line.copy())
     }
     out
 }

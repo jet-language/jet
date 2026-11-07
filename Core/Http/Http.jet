@@ -554,7 +554,7 @@ headers_set_raw: fn(h: Headers, name: String, value: String) -> Headers Never! {
     want: ascii_lower(name)
     fields := [Header]{}
     loop f in h.fields {
-        if ascii_lower(f.name) != want -> fields.push(f)
+        if ascii_lower(f.name) != want -> fields.push(f.copy())
     }
     fields.push(Header{name: name, value: value})
     Headers{fields: fields}
@@ -787,7 +787,7 @@ headers_remove: fn(h: Headers, name: String) -> Headers Never! {
     want: ascii_lower(name)
     fields := [Header]{}
     loop f in h.fields {
-        if ascii_lower(f.name) != want -> fields.push(f)
+        if ascii_lower(f.name) != want -> fields.push(f.copy())
     }
     Headers{fields: fields}
 }
@@ -1235,7 +1235,7 @@ query_set: fn(q: Query, key: String, value: String) -> Query Never! {
                 replaced = true
             }
         } else {
-            pairs.push(p)
+            pairs.push(p.copy())
         }
     }
     if !replaced {

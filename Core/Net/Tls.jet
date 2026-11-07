@@ -373,11 +373,11 @@ config: fn(host: String) -> ClientConfig Never! { ClientConfig{host: host} }
 
 with_alpn: fn(cfg: ClientConfig, proto: String) -> ClientConfig Never! {
     alpn := [String]{}
-    loop p in cfg.alpn -> alpn.push(p)
+    loop p in cfg.alpn -> alpn.push(p.copy())
     // Keep the requested value visible. connect_host validates the complete
     // list before crossing into the provider, so invalid input cannot become a
     // successful handshake or disappear as a no-op.
-    alpn.push(proto)
+    alpn.push(proto.copy())
     __config_with(cfg, alpn, cfg.trust.copy(), cfg.identity.copy(), cfg.min_version, cfg.max_version)
 }
 
