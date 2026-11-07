@@ -358,8 +358,10 @@ decode_expected: fn(expected: String, tree: Dyn) -> [FieldError] Never! {
     [FieldError]{FieldError{path: "", reason: "expected {expected}, found {__dyn_kind(tree)}"}}
 }
 
-// The decode diagnostic's name for a Dyn variant: Core's one dyn_kind
-// vocabulary (Time and Math decodes report through it too).
+// The decode diagnostic's name for a Dyn variant: the one dyn_kind
+// vocabulary. Time and Math decodes report through it, and
+// Tools/agent/RuntimeGenerators.jet generates the runtime's and the web
+// tier's tables from these arms.
 __dyn_kind: fn(tree: Dyn) -> String Never! {
     if tree == {
         .Null -> "Null"
@@ -406,5 +408,4 @@ wrap32: fn(n: Int) -> Int Never! { n.bit_and(4294967295) }
         }
     }
 }
-
 
