@@ -12,9 +12,11 @@
 // $JET_SCRATCH_ROOT. `small` gives four slots capped at LANES_MEM (1G..8G,
 // default 3G); `heavy` gives two slots capped at GB (at most 12). A busy lane
 // waits for the first free slot. Slots are exclusive file locks, so the lock
-// dies with its holder. Every job runs without core dumps, in its own
-// systemd user scope in jetwork.slice with MemoryMax set to the cap and no
-// swap (Linux systemd user sessions only).
+// dies with its holder. Every job runs without core dumps. With a systemd
+// user session (systemd-run on PATH and the user manager running) it runs in
+// its own user scope in jetwork.slice with MemoryMax set to the cap and no
+// swap, which caps its whole process tree. Without one it runs directly, each
+// of its processes' address space capped at the cap; the verdict is the same.
 //
 // `guard` protects the orchestrator from a global OOM: every 2 s, below 7 GiB
 // of available memory it kills the largest-RSS compiler, build or test job
@@ -111,7 +113,7 @@ run_in_lane: fn(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait
     }
     sys.set_core_file_limit(Val(0), None) ?? ()
     // Failed transient scopes linger and collide with reused PIDs ("already loaded").
-    process.cmd([String]{"systemctl", "--user", "reset-failed"}).run().drop("clearing failed scopes is best effort")
+    if user_scopes() -> process.cmd([String]{"systemctl", "--user", "reset-failed"}).run().drop("clearing failed scopes is best effort")
     loop {
         loop path in lane.slots {
             held: files.try_lock(path) ?? next
@@ -121,18 +123,46 @@ run_in_lane: fn(lane: Lane, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait
     }
 }
 
+// Is a memory-capped systemd user scope available: systemd-run on PATH and
+// the user manager's runtime directory present?
+user_scopes: fn() -[Env, FS]> Bool Never! {
+    runtime: env_or("XDG_RUNTIME_DIR", "")
+    if runtime == "" || !files.exists("{runtime}/systemd") -> return false
+    loop dir in env_or("PATH", "").split(":") {
+        if dir != "" && files.exists("{dir}/systemd-run") -> return true
+    }
+    false
+}
+
+// A lane cap (`6G`, `512M`) in bytes, or None when it is not one of those.
+cap_bytes: fn(memory: String) -> Int? Never! {
+    if memory.ends_with("G") -> return Val((digits_value(memory.removesuffix("G")) ?? return None) * 1073741824)
+    if memory.ends_with("M") -> return Val((digits_value(memory.removesuffix("M")) ?? return None) * 1048576)
+    None
+}
+
 // The lane's slot lock `_slot` stays held until the job ends.
-run_job: fn(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, Time, Time.Wait, IO]> Int Never! {
-    unit: "jw-{lane.name}-{sys.pid()}-{time.unix_ns()}"
-    scoped := [String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"}
+run_job: fn(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, FS, Time, Time.Wait, IO]> Int Never! {
+    scoped := [String]{}
+    scopes: user_scopes()
+    if scopes {
+        unit: "jw-{lane.name}-{sys.pid()}-{time.unix_ns()}"
+        scoped.extend([String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"})
+    }
     loop arg in argv -> scoped.push(arg.copy())
     spec := process.cmd(scoped).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
+    if !scopes {
+        if cap_bytes(lane.memory) == .Val(bytes) -> spec = spec.memory_limit(bytes)
+    }
     if lane.timeout_s == .Val(seconds) -> spec = spec.timeout(time.duration_seconds(seconds))
     loop pair in lane.env -> spec = spec.env(pair.name, pair.value)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return refuse("{lane.name}: {argv[0]} could not start: {err}", 127)
     if results[0] == {
         .Ok(receipt) -> job_code(receipt)
-        .Err(error) -> refuse("{lane.name}: {argv[0]} could not start: {error}", 127)
+        .Err(error) -> if error == {
+            .ResourceLimit(_) -> refuse("{lane.name}: {argv[0]} stopped at its {lane.memory} cap: {error}", 125)
+            else -> refuse("{lane.name}: {argv[0]} could not start: {error}", 127)
+        }
     }
 }
 
@@ -351,4 +381,10 @@ guard: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     assert_eq(job_code(killed), 143)
     slow: process.cmd([String]{"sleep", "5"}).timeout(100ms).run() ?? panic("sleep: {err}")
     assert_eq(job_code(slow), 124)
+}
+
+#Test("a lane cap reads as bytes for the per-process limit") {
+    assert_eq(cap_bytes("6G"), Val(6442450944))
+    assert_eq(cap_bytes("512M"), Val(536870912))
+    assert(cap_bytes("6") == None && cap_bytes("G") == None && cap_bytes("6GB") == None)
 }

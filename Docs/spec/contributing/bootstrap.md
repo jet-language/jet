@@ -25,10 +25,7 @@ Its stage-2 compiler becomes the seed of the next release.
 
 A clone and the latest published release are enough: no Nix, no
 `Tools/agent/jet-env`, nothing in `HOME` and no Jet environment variables, only
-`git`, `curl`, `jq` and OpenSSL 3. Only the landing step needs more:
-the lane check runs `jet check` under `systemd-run --user`, so it needs the
-login session's `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`, which every
-desktop or SSH login sets. This fetches the latest release, checks its signed
+`git`, `curl`, `jq` and OpenSSL 3. This fetches the latest release, checks its signed
 record, clones the release's tag, builds that compiler with the release's seed,
 gives it the seed's runtime pack, runs one row
 of the UI suite with it, runs an example, lands a patch on a scratch copy of

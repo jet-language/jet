@@ -275,9 +275,9 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     // A memory floor alone is not enough: concurrent callers can read "plenty
     // free" in the same instant and then all start together, so at most
     // JET_CHECK_SLOTS lanes hold a slot and the rest wait for one. Each check
-    // runs in its own memory-capped user scope (JET_CHECK_MEM, default 20G:
-    // the whole-compiler check measured 15.4G). A host without a systemd user
-    // session (hosted CI) sets JET_CHECK_MEM=off and relies on its own VM limit.
+    // runs with its address space capped (JET_CHECK_MEM, default 20G: the
+    // whole-compiler check measured 15.4G resident); JET_CHECK_MEM=off runs
+    // it uncapped.
     slots: int_or(env_or("JET_CHECK_SLOTS", "2"), 2)
     lockdir: "{user_cache()}/lane-check-slots"
     files.create_dir_all(lockdir) ?? {
@@ -352,7 +352,28 @@ mem_available_mb: fn() -[FS]> Int Never! {
     0
 }
 
-// `jet` with `command` (`check TARGET` or `check --prelude TARGET`).
+// JET_CHECK_MEM's size (`20G`, `512M`, `4096K` or bare bytes) in bytes, or
+// -1 when it is not one.
+memory_bytes: fn(text: String) -> Int Never! {
+    scale := 1
+    digits := text.copy()
+    if text.ends_with("G") {
+        scale = 1073741824
+        digits = text.removesuffix("G").copy()
+    } else if text.ends_with("M") {
+        scale = 1048576
+        digits = text.removesuffix("M").copy()
+    } else if text.ends_with("K") {
+        scale = 1024
+        digits = text.removesuffix("K").copy()
+    }
+    count: int_or(digits, -1)
+    if count <= 0 -> return -1
+    count * scale
+}
+
+// `jet` with `command` (`check TARGET` or `check --prelude TARGET`), its
+// address space capped at JET_CHECK_MEM (default 20G; `off` for none).
 run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     floor_mb: int_or(env_or("JET_MIN_FREE_MB", "8000"), 8000)
     loop _ in 0..<90 {
@@ -362,18 +383,23 @@ run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[E
         time.sleep(10s)
     }
     memory: env_or("JET_CHECK_MEM", "20G")
-    argv := if memory == "off" -> [String]{} else -> [String]{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0"}
-    argv.push(jet.copy())
+    limit: if memory == "off" -> 0 else -> memory_bytes(memory)
+    if limit < 0 -> return Ran{code: 64, text: "lane-check: JET_CHECK_MEM must be `off` or a size such as 20G, 512M or 4096K, not `{memory}`\n"}
+    argv := [String]{jet.copy()}
     argv.extend(command.copy())
-    spec: process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
+    spec := process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).timeout(1800s).output_limit(1073741824)
+    if limit > 0 -> spec = spec.memory_limit(limit)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
     if results[0] == {
         .Ok(receipt) -> {
             code: if receipt.timed_out -> 124 else -> if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
             Ran{code: code, text: "{receipt.output}{receipt.errors}"}
         }
-        .Err(error) -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
+        .Err(error) -> if error == {
+            .ResourceLimit(_) -> Ran{code: 125, text: "lane-check: {argv[0]} stopped at its memory cap (JET_CHECK_MEM={memory}): {error}\n"}
+            else -> Ran{code: 127, text: "lane-check: {argv[0]} could not start: {error}\n"}
+        }
     }
 }
 
@@ -978,4 +1004,14 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(runtime.runtime)
     assert(core_row(registry, "Core/Encoding") == None && core_row(registry, "Core/Files/Runtime/K") == None)
     assert_eq(core_probe_source("core.encoding"), "use core.encoding\n\nmain: fn() {{\n    print(\"ok\")\n}}\n")
+}
+
+#Test("JET_CHECK_MEM sizes read as bytes; anything else is refused") {
+    assert_eq(memory_bytes("20G"), 21474836480)
+    assert_eq(memory_bytes("512M"), 536870912)
+    assert_eq(memory_bytes("4096K"), 4194304)
+    assert_eq(memory_bytes("65536"), 65536)
+    assert_eq(memory_bytes("G"), -1)
+    assert_eq(memory_bytes("0G"), -1)
+    assert_eq(memory_bytes("20GB"), -1)
 }

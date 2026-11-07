@@ -51,7 +51,7 @@
 // then the runtime pack lowered by the compiler just built (as chain s1's
 // pack step does), then that compiler's own `jet check Compiler/JetCli` (as
 // chain s2 does), each with keep-going and every row of its report listed at
-// its file:line. Each pass runs in its own memory-capped systemd scope.
+// its file:line. Each pass runs with its own memory cap (HEAVY_MEMORY).
 // CENSUS_BUILD=0 stops after the check, CENSUS_SELFCHECK=0 before the
 // self-check. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
 // census of every pass writes the snapshot's preflight receipt, which
@@ -106,10 +106,10 @@ IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
 // The generated CoreSourceRows views: a patch whose only conflict is in them
 // is admitted around them (the batch regenerates them from its sources).
 GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreSources.jet", "Compiler/JetCli/Source/Cli/CoreStructureRows.jet", "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet", "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet", "Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet"}
-// Every heavy pass: its own transient systemd scope with a hard memory cap
-// and no swap (a runaway job is killed alone), low priority, pinned CPUs and
-// the compiler's 1 GiB stack.
-HEAVY_MEMORY: "32G"
+// Every heavy pass: its address space capped at HEAVY_MEMORY (each process of
+// the runtime pack's tree gets its own cap; the other passes are one jet
+// process), low priority, pinned CPUs and the compiler's 1 GiB stack.
+HEAVY_MEMORY: 34359738368
 HEAVY_CPUS: "16-27"
 HEAVY_STACK: "--stack=1073741824:1073741824"
 // The ratchets every commit keeps, each run as `jet TOOL --check`, and how
@@ -722,30 +722,50 @@ Setting: struct {
     value: String
 }
 
-// `argv` as a heavy pass, killed after `seconds` (0: no limit).
-heavy: fn(seconds: Int, argv: [String]) -> [String] Never! {
-    out := [String]{}
-    if seconds > 0 -> out.extend([String]{"timeout", "{seconds}"})
-    out.extend([String]{"systemd-run", "--user", "--scope", "--quiet", "--collect", "-p", "MemoryMax={HEAVY_MEMORY}", "-p", "MemorySwapMax=0", "-p", "CPUWeight=1", "-p", "IOWeight=1", "--"})
-    out.extend([String]{"nice", "-n", "19", "ionice", "-c3", "taskset", "-c", HEAVY_CPUS, "prlimit", HEAVY_STACK, "--"})
+// `argv` as a heavy pass, killed after `seconds` (0: no limit), run as
+// run_logged runs it.
+run_heavy: fn(dir: String, seconds: Int, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
+    out := [String]{"nice", "-n", "19", "ionice", "-c3", "taskset", "-c", HEAVY_CPUS, "prlimit", HEAVY_STACK, "--"}
     out.extend(argv.copy())
-    out
+    spec := process.cmd(out).memory_limit(HEAVY_MEMORY)
+    if seconds > 0 -> spec = spec.timeout(time.duration_seconds(seconds))
+    run_spec(spec, out[0], dir, env, log)
 }
 
 // `argv` run in `dir` with `env` added, its output in LOG.out and LOG.err;
-// the exit code, 128 + the signal on a signal, 127 when it cannot start.
+// the exit code, 128 + the signal on a signal, 124 on a timeout, 125 at a
+// memory cap, 127 when it cannot start.
 run_logged: fn(dir: String, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
-    spec := process.cmd(argv).cwd(dir).output_limit(1073741824)
+    run_spec(process.cmd(argv), argv[0], dir, env, log)
+}
+
+run_spec: fn(base: ProcessSpec, program: String, dir: String, env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
+    spec := base.cwd(dir).output_limit(1073741824)
     loop setting in env -> spec = spec.env(setting.name, setting.value)
-    receipt: spec.run() ?? {
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? {
         files.write("{log}.out", "") ?? ()
-        files.write("{log}.err", "{argv[0]} cannot start: {err}\n") ?? ()
+        files.write("{log}.err", "{program} cannot start: {err}\n") ?? ()
         return 127
     }
-    files.write("{log}.out", receipt.output) ?? ()
-    files.write("{log}.err", receipt.errors) ?? ()
-    if receipt.signal == .Val(number) -> return 128 + number
-    receipt.code
+    if results[0] == {
+        .Ok(receipt) -> {
+            files.write("{log}.out", receipt.output) ?? ()
+            files.write("{log}.err", receipt.errors) ?? ()
+            if receipt.timed_out -> return 124
+            if receipt.signal == .Val(number) -> return 128 + number
+            receipt.code
+        }
+        .Err(error) -> {
+            files.write("{log}.out", "") ?? ()
+            stopped: if error == {
+                .ResourceLimit(_) -> 125
+                else -> 127
+            }
+            what: if stopped == 125 -> "stopped at its memory cap" else -> "cannot start"
+            files.write("{log}.err", "{program} {what}: {error}\n") ?? ()
+            stopped
+        }
+    }
 }
 
 // The environment of a compile of `tree` by a compiler of `identity`, its
@@ -888,7 +908,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     package_dirs: compiler_package_dirs(snap) ?? [String]{}
     seed_jet: "{compiler_dir}/jet"
     check_report: "{out}/check-keep-going.tsv"
-    checked: run_logged(snap, heavy(0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}), compile_env(identity, snap, check_report), "{out}/check")
+    checked: run_heavy(snap, 0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}, compile_env(identity, snap, check_report), "{out}/check")
     check_rows: report_rows(check_report)
     print("check rc={checked} rows={check_rows}")
     show(census_rows(check_report, snap, package_dirs), 21)
@@ -897,7 +917,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
 
     files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
     build_report: "{out}/build-keep-going.tsv"
-    built: run_logged(snap, heavy(1800, [String]{seed_jet, "build", "--threads", "12", "Compiler"}), compile_env(identity, snap, build_report), "{out}/build")
+    built: run_heavy(snap, 1800, [String]{seed_jet, "build", "--threads", "12", "Compiler"}, compile_env(identity, snap, build_report), "{out}/build")
     build_rows: report_rows(build_report)
     print("build rc={built} rows={build_rows}")
     show(census_rows(build_report, snap, package_dirs), 21)
@@ -919,7 +939,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
     if !passes.selfcheck -> return 0
 
     self_report: "{out}/selfcheck-keep-going.tsv"
-    selfchecked: run_logged(snap, heavy(1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCli"}), compile_env(identity, snap, self_report), "{out}/selfcheck")
+    selfchecked: run_heavy(snap, 1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCli"}, compile_env(identity, snap, self_report), "{out}/selfcheck")
     self_rows: report_rows(self_report)
     print("selfcheck rc={selfchecked} rows={self_rows}")
     show(census_rows(self_report, snap, package_dirs), 11)
@@ -948,7 +968,7 @@ runtime_pack: fn(compiler: String, tree: String, work: String, identity: String)
     env := compile_env(identity, tree, "")
     env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
     env.push(Setting{name: "JET_PACK_MUSL_LIB", value: musl.copy()})
-    code: run_logged(tree, heavy(1800, [String]{"{tree}/Tools/agent/jet-env", "node", "{tree}/Tools/packaging/prebuild-runtime.mjs", compiler, pack, "--repo", tree}), env, "{work}/pack")
+    code: run_heavy(tree, 1800, [String]{"{tree}/Tools/agent/jet-env", "node", "{tree}/Tools/packaging/prebuild-runtime.mjs", compiler, pack, "--repo", tree}, env, "{work}/pack")
     issues: issue_rows(pack)
     if files.exists("{pack}/native.key") {
         print("runtime rc=0 issues={issues.len()}")
@@ -1230,7 +1250,7 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
         return 0
     }
     seed: seed_dir()
-    code: run_logged(tree, heavy(1200, [String]{"{seed}/jet", "check", "--threads", "10", "Compiler/JetCli"}), compile_env(read_identity(seed), tree, ""), "{tree}/check")
+    code: run_heavy(tree, 1200, [String]{"{seed}/jet", "check", "--threads", "10", "Compiler/JetCli"}, compile_env(read_identity(seed), tree, ""), "{tree}/check")
     rows: error_rows(files.read("{tree}/check.err") ?? "")
     if code == 0 && rows.len() == 0 {
         print("prescreen: clean")
