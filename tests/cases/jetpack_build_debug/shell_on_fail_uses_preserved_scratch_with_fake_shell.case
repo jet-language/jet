@@ -3,10 +3,10 @@
 fixture: fixtures/shell_on_fail_uses_preserved_scratch_with_fake_shell
 mkdir: root
 env: JETPACK_ROOT={work}/root
-when os windows: env: JETPACK_SHELL_ON_FAIL={work}/root/fake-shell.bat
-when os unix: env: JETPACK_SHELL_ON_FAIL={work}/root/fake-shell
 when os unix: chmod: root/fake-shell 0755
 env: JETPACK_FAILED_SCRATCH_MARKER={work}/root/shell-marker.txt
-step: jetpack env --prep --shell-on-fail --no-color --trust
+step: jetpack env --prep --shell-on-fail --no-color --trust --yes
+when os windows: env: JETPACK_SHELL_ON_FAIL={work}/root/fake-shell.bat
+when os unix: env: JETPACK_SHELL_ON_FAIL={work}/root/fake-shell
 exit: nonzero
 file: root/shell-marker.txt ~ "failed-scratch" # original cwd contains predicate

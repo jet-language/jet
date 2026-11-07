@@ -156,9 +156,10 @@ capture: split_after = prefixed stdout "package graph unchanged: " | "package gr
 cap:split_before: = "{cap:split_after}"
 capture: journal = prefixed stdout "Transition journal: "
 file: {cap:journal} is-file
-file: {cap:journal} first-line = "jet-package-transition-v1" # original journal header line
-capture: journal_before = prefixed file {cap:journal} "before="
-capture: journal_after = prefixed file {cap:journal} "after="
+file: {cap:journal} ^= "jet-package-transition-v1\n" # original journal header line
+capture: journal_text = text file {cap:journal}
+capture: journal_before = prefixed cap:journal_text "before="
+capture: journal_after = prefixed cap:journal_text "after="
 cap:journal_before: nonempty # original journal is present
 cap:journal_after: nonempty # original journal is present
 cap:journal_before: = "{cap:split_before}"
@@ -193,7 +194,8 @@ file: package/env.jet absent
 file: .jet/lock same-as {cap:lock_before_transition}
 file: run.jet same-as {cap:source}
 file: run.jet sha256 = "{cap:source_sha}"
-when file .jet/build/pulse.h is-file: file: .jet/build/pulse.h sha256 = "{cap:header_sha}"
+capture: rollback_header = opt-bytes file .jet/build/pulse.h
+when captured rollback_header: file: .jet/build/pulse.h sha256 = "{cap:header_sha}"
 step rollback_run: jet run run.jet -- --minutes 1
 exit: 0
 stdout: = script_to_system_continuity_preserves_one_source.out
