@@ -3,7 +3,7 @@ use compute: core.compute
 
 cuda_loss: fn(value: Tensor) -> Tensor {
     rooted: compute.sqrt(value) ?? panic("sqrt")
-    return compute.sum_axis(rooted, 1) ?? panic("sum")
+    compute.sum_axis(rooted, 1) ?? panic("sum")
 }
 
 run: fn() {
@@ -15,19 +15,16 @@ run: fn() {
     cpu_gradient_result: compute.gradient(cuda_loss, cpu_gradient_input.copy())
     cpu_gradient: cpu_gradient_result.value
     cpu_gradient_tail: compute.get(cpu_gradient, [0, 0]) ?? panic("cpu_gradient_tail")
-    request: compute.on_device(f32_row, compute.device_cuda())
-    column_request: compute.on_device(f32_column, compute.device_cuda())
-    if request == {
+    if compute.on_device(f32_row, compute.device_cuda()) == {
         .Err(_) -> {
             print("cuda:unavailable")
-            stream: compute.stream_new_on(compute.device_cuda())
-            if stream == {
+            if compute.stream_new_on(compute.device_cuda()) == {
                 .Ok(_) -> panic("cuda stream unexpectedly accepted")
                 .Err(_) -> { print("cuda:stream:rejected") }
             }
         }
         .Ok(cuda_row) -> {
-            cuda_column: column_request ?? panic("cuda_column")
+            cuda_column: compute.on_device(f32_column, compute.device_cuda()) ?? panic("cuda_column")
             if !compute.placement(cuda_row).contains("backend=cuda") -> panic("cuda backend")
             if !compute.placement(cuda_row).contains("profile=F32Strict+Reproducible") -> panic("cuda profile")
             product: compute.matmul(cuda_column, cuda_row) ?? panic("matmul")
@@ -60,8 +57,7 @@ run: fn() {
             if !compute.transfer_show(cpu).contains("from=CUDA") -> panic("transfer source")
             if !compute.transfer_show(cpu).contains("to=CPU") -> panic("transfer destination")
             print("cuda:transfer:{compute.transfer_show(cpu)}")
-            unsupported: compute.det(product)
-            if unsupported == {
+            if compute.det(product) == {
                 .Ok(_) -> panic("cuda det unexpectedly accepted")
                 .Err(_) -> { print("cuda:det:rejected") }
             }
