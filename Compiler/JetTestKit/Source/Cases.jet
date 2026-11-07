@@ -66,9 +66,10 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
 
 // How long a known-failing case waits for each answer (recv, poll, await, a
 // wait with a deadline, repeat while): a product that still never answers
-// fails at this deadline, not the case's own, and one that now answers still
-// shows as an unexpected pass.
-KIT_KNOWN_ANSWER_LIMIT: 10000000000
+// fails at this deadline, not the case's own, so a known failure costs the
+// suite seconds, not the case's full deadline; one that now answers within it
+// still shows as an unexpected pass.
+KIT_KNOWN_ANSWER_LIMIT: 3000000000
 
 // An annotation changes the verdict, and caps the case's waits for an answer
 // at KIT_KNOWN_ANSWER_LIMIT; it never changes the steps or their receipts.
