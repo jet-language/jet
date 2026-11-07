@@ -56,6 +56,7 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [Arithmetic](Dyn/Arithmetic.jet) — Dyn arithmetic and comparisons are checked while running.
 - [BytesDateTime](Dyn/BytesDateTime.jet) — Dyn.Bytes and Dyn.DateTime (owner direction, 2026-10-02): an instant with a fixed UTC offset, and raw bytes.
 - [Codecs](Dyn/Codecs.jet) — Dyn.Bytes and Dyn.DateTime in every codec: CBOR has native byte strings and date-time tags (0 and 1), TOML has native offset date-times, YAML has `!!binary`…
+- [DecodeBytes](Dyn/DecodeBytes.jet) — A Bytes payload decodes into `[U8]`, built in code or read from CBOR, and a decode the compiler runs at build time reports the same words as the running program.
 - [DecodeKinds](Dyn/DecodeKinds.jet) — A decode failure names the Dyn variant it found, and every decoder uses the same word for it: the List and Map decodes, the scalar decodes, and the…
 - [DynAccessors](Dyn/DynAccessors.jet)
 - [Fields](Dyn/Fields.jet) — A Dyn object grows with dotted fields, like a Python object, and every read is checked while the program runs.
