@@ -2,9 +2,9 @@
 use process: core.process
 
 run: fn() {
-    // The timeout must outlast the tree's and its descendant's starts, or the
-    // kill can come before the descendant has published its pid file.
-    timeout: Duration.milliseconds(5000) ?? panic("duration failed")
+    // A short stage deadline: the subject is that it fires and reaps the
+    // tree's descendants, not its length.
+    timeout: Duration.milliseconds(250) ?? panic("duration failed")
     first: process.pipeline([
         process.cmd(["{work}/session_fixture", "tree", "{work}/aot.pid"]).timeout(timeout),
         process.cmd(["cat"])

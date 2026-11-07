@@ -1,18 +1,26 @@
 
 use {
     server: core.http.server
-    net: core.net
+    files: core.files
+    time: core.time
 }
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
-    listener: net.tcp_listen("127.0.0.1:__PORT__") ?? panic("listen")
     mux: server.mux()
     mux.post("/", (req: HTTPRequest) -> {
         body: req.body().text(1024) ?? "rejected"
         return Ok(server.response(200, body))
     })
+    // A short connection deadline, set as a user sets it: the subject is that a
+    // trickled chunked trailer can't hold the request past it, not its length.
+    bound: server.bind("127.0.0.1:__PORT__", mux, deadline: 500ms) ?? panic("bind")
     server_task: task {
-        server.serve_once_listener(listener, mux) ?? panic("serve")
+        bound.serve() ?? panic("serve")
     }
+    // The controller marks the stop once it has read the response.
+    loop !files.exists("__STOP__") {
+        time.sleep(10ms)
+    }
+    bound.shutdown() ?? panic("shutdown")
     server_task.join() ?? panic("serve")
 }
