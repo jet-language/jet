@@ -105,12 +105,6 @@ ds_entry: fn(path: String) -> String {
     path.copy()
 }
 
-// Snapshots that open a second report inside the first one's body. The
-// build-action failure prints the typed `BuildAction::Failed` display line
-// (`Error [jet.BuildProbeFailed]: build action ...`) between the report's
-// Fix and its `More:` link.
-DS_NESTED_OPENER_SNAPSHOTS: [String]{"tests/ui/build_action_failed.stderr"}
-
 // Whether a trimmed line of a report is a non-empty `<label>: ...` part.
 // tests/cli fixtures compared line-trimmed keep the parts without their indent.
 ds_part: fn(line: String, label: String) -> Bool {
@@ -135,7 +129,7 @@ ds_part: fn(line: String, label: String) -> Bool {
     known: ds_known_failing()
     failures := [String]{}
     loop path in ds_report_fixture_snapshot_paths() {
-        if !ds_files.exists(path) || dc_has(known, ds_entry(path)) || dc_has(DS_NESTED_OPENER_SNAPSHOTS, path) -> next
+        if !ds_files.exists(path) || dc_has(known, ds_entry(path)) -> next
         lines: dc_read(path).split("\n").to_list()
         loop (start, line) in lines {
             id: ds_opener(line)
