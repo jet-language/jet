@@ -84052,6 +84052,118 @@
       "completedAt": "2026-11-04T10:43:36.018Z",
       "questions": [],
       "retiredAt": "2026-11-07T10:44:07.989Z"
+    },
+    {
+      "id": "c0yq2y7c",
+      "num": 6531,
+      "title": "jet.report/v3 'file' is the absolute process path, not the project-relative path",
+      "body": "Found 2026-11-01 by CardClose-1 while closing #6488 (E2702 sema emitter). tests/cases e2702_json_redacts_an_absolute_input_to_its_project_path still fails after #6488: the JSON report's file field carries the absolute process path instead of the path relative to the project root, so a report leaks the machine's directory layout and differs between machines. Fix the report projection so every jet.report/v3 file field is project-relative (absolute only outside the project), for every diagnostic, not only E2702. Proof: that case passes and its known-failing row is removed; the ui/cases JSON report rows show no absolute paths under the project.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Conflict found by IrTypes-3 (2026-11-01): c2's case already passes on dev 1620f05362. c1 and c3 ask for a project-relative report file field, but Docs/spec/diagnostics.md lines 134-140 say report file fields are absolute (E2702 is the only exception), and owner answer q07mphiy kept full paths for a refused jet run. c1/c3 wait for an owner ruling; no code change until then."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Criteria 1 and 3 conflict with Docs/spec/diagnostics.md:134-140: report file fields (root, causes, fix_edits) are absolute so a report stays resolvable from any working directory; E2702 is the one exception (D-CRYPTO-DIAG1), now done (criterion 2). tests/cases/cli_parts_surface/machine_report_paths_stay_resolvable_across_repository_layouts.case pins those absolute paths. The spec outranks this card, so no lane will change other reports. OWNER: either the spec changes (every report project-relative plus a root field, so fix_edits stay resolvable) or criteria 1 and 3 go; the card cannot close until then."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Correction to my earlier log: D-CRYPTO-DIAG1 A (typed runtime values plus focused E2702) does not say that other reports keep absolute paths, so it does not narrow this card. DT-24 made the E2702 report project-relative only. Criteria 1 and 3 (every report, and no absolute paths in the ui/cases JSON rows) stay open; machine_report_paths_stay_resolvable_across_repository_layouts.case still shows absolute paths."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Landed on dev at undefined in DeclTypes-24 (patch row: criterion/count 1): PROPOSED CRITERION (card has none), narrowed per Main's option-A ruling to D-CRYPTO-DIAG1's scope: \"An E2702 crypto-misuse report names its source relative to the project root (workspace, repository or package), else to the working directory, else by file name. Every other report keeps its absolute path.\" EVIDENCE: tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case passes on t4 s2, and its #6531 KF row is removed. It FAILs on base 163d4852ad. machine_report_paths_stay_resolvable_across_repository_layouts.case still shows absolute paths (KF #6419 for an unrelated E0102 stream)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "Scope (Main, 2026-11-01): the project-relative report path applies to the E2702 crypto-misuse report, as D-CRYPTO-DIAG1 ratified and as Rust d14eb7c645 did. Other jet.report/v3 rows keep absolute, resolvable paths: cli_parts_surface/machine_report_paths_stay_resolvable_across_repository_layouts pins that contract. Making every report relative would need its own decision. DeclTypes-3 is building the E2702-scoped fix."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every jet.report/v3 file field is project-relative (absolute only outside the project), for every diagnostic, not only E2702.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "60324f013d: jet_cli_report_file (Compiler/JetCli/Source/Cli/Report.jet) applies one rule to every report file field (root, cause, fix_edits) for every code; the E2702-only redaction is removed. Probe on the built compiler: from repo/, src/bad.jet -> src/bad.jet; from repo/tools, ../src/bad.jet -> ../src/bad.jet; files outside the run folder's project stay absolute. New case machine_report_paths_are_relative_to_the_run_folder_inside_the_project PASS; machine_report_paths_stay_resolvable_across_repository_layouts PASS (ported to the status envelope, known-failing row removed). Docs/spec/diagnostics.md states the rule.",
+          "at": "2026-11-04T11:08:56.108Z"
+        },
+        {
+          "n": 2,
+          "text": "tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case passes and its known-failing row is removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "At 60324f013d the case expects project/src/main.jet (relative to the run folder per D-REPORT-PATH1=A) and still forbids {work}; cases --filter e2702_json: both e2702 cases PASS. It has no known-failing row in Tools/testkit/known-failing.tsv.",
+          "at": "2026-11-04T11:08:56.595Z"
+        },
+        {
+          "n": 3,
+          "text": "The ui/cases JSON report rows show no absolute paths under the project.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ui suite on the 60324f013d sources: PASS 1916 / FAIL 318 / KF 114 / REFUSED 33 / ERROR 1, identical per row to the ui28 baseline, with zero absolute file fields in any stream. Cases: the only {work}/... file expectations (check_fix_and_format determinism x2, name_suggestion edit) now expect run-folder-relative names; the remaining absolute expectations are files outside the run folder's project. The name_suggestion and check_fix rows still fail for a separate missing-fix_edits root, filed as #6560.",
+          "at": "2026-11-04T11:08:57.081Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T06:30:20.518Z",
+      "updated": "2026-11-04T11:08:58.064Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T11:08:58.064Z",
+      "questions": [
+        {
+          "id": "q1tlcnr8",
+          "cardId": "c0yq2y7c",
+          "decisionId": "D-REPORT-PATH1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Is the recommended option because it saves from rework or because it is legitimately the best most correct option?",
+          "status": "answered",
+          "answer": "Honest answer: the old recommendation leaned on saving rework. Its main listed gain was no change to the spec, cases or editors, which greenfield rules out as a reason. On the merits, project-relative paths with the root written once are better: a report is byte-identical on every machine (determinism), shows no folder layout, and still opens with one join. The ballot is revised to recommend that (now option A), with its one downside engineered down to a one-line schema rule.",
+          "created": "2026-11-01T20:08:46.240Z",
+          "answeredAt": "2026-11-02",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q258t08w",
+          "cardId": "c0yq2y7c",
+          "decisionId": "D-REPORT-PATH1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Is the recommended option because it saves from rework or because it is legitimately the best most correct option?",
+          "status": "answered",
+          "answer": "Duplicate of q1tlcnr8; answered there.",
+          "created": "2026-11-01T20:08:46.944Z",
+          "answeredAt": "2026-11-02",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-07T11:10:37.009Z"
     }
   ]
 }

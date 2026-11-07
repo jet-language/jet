@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95727,
+    "rev": 95731,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-07T03:30:42.961Z"
+    "completionCursor": "2026-11-07T11:10:36.871Z"
   },
   "epochs": [
     {
@@ -88834,89 +88834,6 @@
       "criteriaLastN": 1
     },
     {
-      "id": "c0yq2y7c",
-      "num": 6531,
-      "title": "jet.report/v3 'file' is the absolute process path, not the project-relative path",
-      "body": "Found 2026-11-01 by CardClose-1 while closing #6488 (E2702 sema emitter). tests/cases e2702_json_redacts_an_absolute_input_to_its_project_path still fails after #6488: the JSON report's file field carries the absolute process path instead of the path relative to the project root, so a report leaks the machine's directory layout and differs between machines. Fix the report projection so every jet.report/v3 file field is project-relative (absolute only outside the project), for every diagnostic, not only E2702. Proof: that case passes and its known-failing row is removed; the ui/cases JSON report rows show no absolute paths under the project.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Conflict found by IrTypes-3 (2026-11-01): c2's case already passes on dev 1620f05362. c1 and c3 ask for a project-relative report file field, but Docs/spec/diagnostics.md lines 134-140 say report file fields are absolute (E2702 is the only exception), and owner answer q07mphiy kept full paths for a refused jet run. c1/c3 wait for an owner ruling; no code change until then."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Criteria 1 and 3 conflict with Docs/spec/diagnostics.md:134-140: report file fields (root, causes, fix_edits) are absolute so a report stays resolvable from any working directory; E2702 is the one exception (D-CRYPTO-DIAG1), now done (criterion 2). tests/cases/cli_parts_surface/machine_report_paths_stay_resolvable_across_repository_layouts.case pins those absolute paths. The spec outranks this card, so no lane will change other reports. OWNER: either the spec changes (every report project-relative plus a root field, so fix_edits stay resolvable) or criteria 1 and 3 go; the card cannot close until then."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Correction to my earlier log: D-CRYPTO-DIAG1 A (typed runtime values plus focused E2702) does not say that other reports keep absolute paths, so it does not narrow this card. DT-24 made the E2702 report project-relative only. Criteria 1 and 3 (every report, and no absolute paths in the ui/cases JSON rows) stay open; machine_report_paths_stay_resolvable_across_repository_layouts.case still shows absolute paths."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Landed on dev at undefined in DeclTypes-24 (patch row: criterion/count 1): PROPOSED CRITERION (card has none), narrowed per Main's option-A ruling to D-CRYPTO-DIAG1's scope: \"An E2702 crypto-misuse report names its source relative to the project root (workspace, repository or package), else to the working directory, else by file name. Every other report keeps its absolute path.\" EVIDENCE: tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case passes on t4 s2, and its #6531 KF row is removed. It FAILs on base 163d4852ad. machine_report_paths_stay_resolvable_across_repository_layouts.case still shows absolute paths (KF #6419 for an unrelated E0102 stream)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Scope (Main, 2026-11-01): the project-relative report path applies to the E2702 crypto-misuse report, as D-CRYPTO-DIAG1 ratified and as Rust d14eb7c645 did. Other jet.report/v3 rows keep absolute, resolvable paths: cli_parts_surface/machine_report_paths_stay_resolvable_across_repository_layouts pins that contract. Making every report relative would need its own decision. DeclTypes-3 is building the E2702-scoped fix."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Every jet.report/v3 file field is project-relative (absolute only outside the project), for every diagnostic, not only E2702.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "60324f013d: jet_cli_report_file (Compiler/JetCli/Source/Cli/Report.jet) applies one rule to every report file field (root, cause, fix_edits) for every code; the E2702-only redaction is removed. Probe on the built compiler: from repo/, src/bad.jet -> src/bad.jet; from repo/tools, ../src/bad.jet -> ../src/bad.jet; files outside the run folder's project stay absolute. New case machine_report_paths_are_relative_to_the_run_folder_inside_the_project PASS; machine_report_paths_stay_resolvable_across_repository_layouts PASS (ported to the status envelope, known-failing row removed). Docs/spec/diagnostics.md states the rule.",
-          "at": "2026-11-04T11:08:56.108Z"
-        },
-        {
-          "n": 2,
-          "text": "tests/cases/crypto_diagnostics/e2702_json_redacts_an_absolute_input_to_its_project_path.case passes and its known-failing row is removed.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "At 60324f013d the case expects project/src/main.jet (relative to the run folder per D-REPORT-PATH1=A) and still forbids {work}; cases --filter e2702_json: both e2702 cases PASS. It has no known-failing row in Tools/testkit/known-failing.tsv.",
-          "at": "2026-11-04T11:08:56.595Z"
-        },
-        {
-          "n": 3,
-          "text": "The ui/cases JSON report rows show no absolute paths under the project.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ui suite on the 60324f013d sources: PASS 1916 / FAIL 318 / KF 114 / REFUSED 33 / ERROR 1, identical per row to the ui28 baseline, with zero absolute file fields in any stream. Cases: the only {work}/... file expectations (check_fix_and_format determinism x2, name_suggestion edit) now expect run-folder-relative names; the remaining absolute expectations are files outside the run folder's project. The name_suggestion and check_fix rows still fail for a separate missing-fix_edits root, filed as #6560.",
-          "at": "2026-11-04T11:08:57.081Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T06:30:20.518Z",
-      "updated": "2026-11-04T11:08:58.064Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T11:08:58.064Z"
-    },
-    {
       "id": "c0h8jjrp",
       "num": 6533,
       "title": "Startup cost: dynamic symbol binding, setlocale and env capture dominate short programs (hello 8.8x, taskfile 22x asm)",
@@ -97411,6 +97328,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c1 group E landed in 7789d81d83 (MechD-3). nested_import_aliases is now KF on a registered E2104 citing #6674, not exit 101. The measured_unit_scale and symbolic_and_measured rows pass, since core.units is now loaded for rounded conversions. The 11 rustc_backed_*_forced_interpreter_* cases are renamed to <family>_comptime_match(es)_run_and_build_exactly, with one fixture plus run and AOT steps (they don't duplicate public_transcript, which only checks comptime). The KF bag and pool rows are renamed."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "a0_033 admitted on dev 6c31e4f192 (master merge 3736205c03). Release REPORT untracked: golden 1, ui 0, cases 3 (release a0_032: 39 cases). The 4: Foundations/Storage/run.jet flaky exit 70 (a0_032 failed o0, candidate failed o2, retry passed all 3); build_entry/runtime_reload_error_rolls_back_action_outputs_and_lock exits 0 where nonzero is expected on both compilers; comptime_sequence_parity/repl_list_and_fixed_list_sequence_methods_are_exact and compiled_workloads/compiled_workload_gate_self_check TIMEOUT at 60 s on both. Sent to PortsLead-2 as one list for c2."
         },
         {
@@ -97481,7 +97403,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:29:02.132Z",
-      "updated": "2026-11-07T11:08:44.669Z",
+      "updated": "2026-11-07T11:14:13.722Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98381,11 +98303,20 @@
         {
           "n": 3,
           "text": "Each Compiler/Prelude file the compiler embeds has one source: the compiler reads the Prelude file itself at build (or generates the embedded copy with a freshness check), not a hand-kept raw-string copy (today PreludeMarkers.jet MARKER_SOURCE, Registration/PreludeDerives.jet, PreludeUnits.jet and JET_CLI_EFFECT_SOURCE duplicate Markers, Derives, Units and Effects byte for byte).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d44f8a7b0b: the 4 hand-kept Prelude copies (MARKER_SOURCE, SEMA_PRELUDE_DERIVE_SOURCE, SEMA_PRELUDE_ERROR_SOURCE, SEMA_PRELUDE_UNITS_SOURCE) are generated from Compiler/Prelude/{Markers,Derives,Errors,Units}.jet by Tools/agent/PreludeSources.jet --write; CoreSourceRows owns the Effects copy. jet test PreludeSources.jet 2/0; --check: 'prelude sources check passed: 4 copies in 3 files match'. ba015c8b05 puts it in Land.jet's RATCHETS, which precommit runs. Refuse row: a drift line in Units.jet without --write gives 'prelude sources: …PreludeUnits.jet differ from Compiler/Prelude' and PRECOMMIT FAILED (rc 1); reverted, PRECOMMIT OK (rc 0).",
+          "at": "2026-11-07T11:14:29.848Z"
+        },
+        {
+          "n": 4,
+          "text": "Every generator whose output is committed has its --check run by Land.jet precommit: CoreSourceRows, OwnedTraitRows, DiagnosticRows (and any other generator with a --check). A seeded drift in each generator's source without --write is refused at landing, and the restored tree passes. The lander runs Land.jet's own list rather than a second copy.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T10:39:35.644Z"
+          "at": "2026-11-07T11:14:30.828Z"
         }
       ],
       "refs": [],
@@ -98396,9 +98327,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:28:04.053Z",
-      "updated": "2026-11-07T10:53:51.175Z",
+      "updated": "2026-11-07T11:14:30.828Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c02188uw",
@@ -171930,133 +171861,6 @@
       "ratifiedAt": "2026-11-01"
     },
     {
-      "id": "D-REPORT-PATH1",
-      "cardId": "c0yq2y7c",
-      "group": "diagnostics",
-      "title": "Whether machine-readable error reports name files by absolute or project-relative path",
-      "situation": "",
-      "gist": "Should machine-readable error reports name files relative to the project root, with the root written once, so reports are identical on every machine?",
-      "lesson": "Tools read Jet's JSON error reports to jump to the failing line. An absolute path always opens from any folder. A project-relative path hides the machine's folder layout but needs the project root to open.",
-      "explainer": "",
-      "story": "Kim's editor runs `jet check --json` from a subfolder and opens each reported file. With absolute paths every report opens. With project-relative paths the editor must first find the project root. Her CI logs, though, show her home folder in every report.",
-      "inWild": "Rust (cargo): JSON messages give file names relative to the workspace root. Source: https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages\n\nTypeScript (tsc): diagnostics print paths relative to the working directory. Source: https://www.typescriptlang.org/docs/handbook/compiler-options.html",
-      "detail": "Docs/spec/diagnostics.md says every jet.report/v3 `file` field is absolute. The one exception is E2702 crypto misuse, which is project-relative so it never carries the machine's folder layout. Card #6531 asks to make every report project-relative.\n\nUnder A, paths are relative to the folder jet ran in. The tool that ran jet opens them with no join, and CI runs from the same folder on every machine, so saved reports match byte for byte.\n\nUnder B, the spec stays: absolute everywhere except E2702.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Paths relative to the folder jet ran in",
-          "detail": "Every file under the folder jet ran in is reported relative to it, with `../` for other files in the project. The tool that ran jet opens each path directly, as with gcc and tsc. Runs from the same project folder give the same bytes on every machine.",
-          "technical": "Report projection makes file fields relative to the invocation folder inside the project. No `root` field and no special rule for E2702 are needed. Files outside the project keep absolute paths, as today. The spec rule and the resolvable-paths case change in one cutover. Editors use the language server, which sends absolute `file://` URIs as the LSP protocol requires (Compiler/JetLSP/Source/LSP/Diagnostics.jet:150).",
-          "code": "{\"code\":\"E0102\",\"file\":\"src/main.jet\",\"line\":3}"
-        },
-        {
-          "key": "B",
-          "name": "Keep absolute paths; E2702 stays the exception",
-          "detail": "Reports keep absolute paths. Only crypto-misuse reports are project-relative.",
-          "technical": "No change. #6531 c1 and c3 are dropped; c2 is met.",
-          "code": "{\"code\":\"E0102\",\"file\":\"/home/kim/app/src/main.jet\",\"line\":3}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust (cargo)",
-          "note": "JSON messages use paths relative to the workspace root. Source: https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages",
-          "code": "\"file_name\": \"src/main.rs\""
-        },
-        {
-          "lang": "TypeScript (tsc)",
-          "note": "Diagnostics print paths relative to the working directory. Source: https://www.typescriptlang.org/docs/handbook/compiler-options.html",
-          "code": "src/main.ts(3,5): error TS2304"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "The tool that ran jet opens every path directly, and reports from the same folder match on every machine.",
-        "gains": [
-          "Reports show no machine folder layout, so E2702 needs no special rule.",
-          "Saved CI reports match byte for byte across machines.",
-          "Scripts and editors open every reported file with no extra step."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps machine-specific folders in every report and a second path rule for E2702."
-          }
-        ],
-        "tradeoff": "Paths follow the folder jet ran in, as gcc and tsc do."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should JSON error reports use paths relative to the folder jet ran in, like gcc and tsc?",
-        "lesson": "Tools read Jet's JSON error reports to open the failing line. Absolute paths differ on every machine. Relative paths plus one root field stay identical and still open.",
-        "trio": {
-          "current": {
-            "note": "Absolute paths, except crypto-misuse reports.",
-            "code": "\"file\":\"/home/kim/app/src/main.jet\""
-          },
-          "wild": {
-            "lang": "Rust (cargo)",
-            "note": "JSON messages use workspace-relative paths. Source: https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages",
-            "code": "\"file_name\": \"src/main.rs\""
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Relative to the run folder",
-            "gist": "Paths relative to where jet ran; absolute only outside the project.",
-            "gains": [
-              "Opens directly and matches across machines."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "\"file\":\"src/main.jet\""
-            }
-          },
-          {
-            "key": "B",
-            "name": "Keep absolute paths",
-            "gist": "Absolute everywhere; crypto misuse stays project-relative.",
-            "gains": [
-              "No cutover of the report format."
-            ],
-            "losses": [
-              "Reports differ per machine and show its folders."
-            ],
-            "proposed": {
-              "code": "\"file\":\"/home/kim/app/src/main.jet\""
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Opens directly and shows no folder layout.",
-          "gains": [
-            "Saved CI reports match on every machine."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Machine folders in every report; a second rule for E2702."
-            }
-          ],
-          "tradeoff": "Paths follow the run folder, like gcc and tsc."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-01T17:37:36.881Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-02"
-    },
-    {
       "id": "D-IMAGE-PACK1",
       "cardId": "c08r6ogl",
       "group": "build",
@@ -184907,32 +184711,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q1tlcnr8",
-      "cardId": "c0yq2y7c",
-      "decisionId": "D-REPORT-PATH1",
-      "by": "owner",
-      "kind": "question",
-      "text": "Is the recommended option because it saves from rework or because it is legitimately the best most correct option?",
-      "status": "answered",
-      "answer": "Honest answer: the old recommendation leaned on saving rework. Its main listed gain was no change to the spec, cases or editors, which greenfield rules out as a reason. On the merits, project-relative paths with the root written once are better: a report is byte-identical on every machine (determinism), shows no folder layout, and still opens with one join. The ballot is revised to recommend that (now option A), with its one downside engineered down to a one-line schema rule.",
-      "created": "2026-11-01T20:08:46.240Z",
-      "answeredAt": "2026-11-02",
-      "answeredBy": "Main"
-    },
-    {
-      "id": "q258t08w",
-      "cardId": "c0yq2y7c",
-      "decisionId": "D-REPORT-PATH1",
-      "by": "owner",
-      "kind": "question",
-      "text": "Is the recommended option because it saves from rework or because it is legitimately the best most correct option?",
-      "status": "answered",
-      "answer": "Duplicate of q1tlcnr8; answered there.",
-      "created": "2026-11-01T20:08:46.944Z",
-      "answeredAt": "2026-11-02",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q0bdg3v5",
       "cardId": "c08s0ppt",
       "decisionId": "D-FIXED-WRAP1",
@@ -186320,6 +186098,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T11:14:30.828Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lb1p4p",
+      "note": "#4 Every generator whose output is committed has its --check ru"
+    },
+    {
+      "at": "2026-11-07T11:14:29.848Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lb1p4p",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-07T11:14:13.722Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005fduo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T11:10:36.871Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-07T11:10:36.871Z"
+    },
     {
       "at": "2026-11-07T11:08:44.669Z",
       "by": "Main",

@@ -13232,6 +13232,134 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-01",
       "retiredAt": "2026-11-07T10:32:35.036Z"
+    },
+    {
+      "id": "D-REPORT-PATH1",
+      "cardId": "c0yq2y7c",
+      "group": "diagnostics",
+      "title": "Whether machine-readable error reports name files by absolute or project-relative path",
+      "situation": "",
+      "gist": "Should machine-readable error reports name files relative to the project root, with the root written once, so reports are identical on every machine?",
+      "lesson": "Tools read Jet's JSON error reports to jump to the failing line. An absolute path always opens from any folder. A project-relative path hides the machine's folder layout but needs the project root to open.",
+      "explainer": "",
+      "story": "Kim's editor runs `jet check --json` from a subfolder and opens each reported file. With absolute paths every report opens. With project-relative paths the editor must first find the project root. Her CI logs, though, show her home folder in every report.",
+      "inWild": "Rust (cargo): JSON messages give file names relative to the workspace root. Source: https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages\n\nTypeScript (tsc): diagnostics print paths relative to the working directory. Source: https://www.typescriptlang.org/docs/handbook/compiler-options.html",
+      "detail": "Docs/spec/diagnostics.md says every jet.report/v3 `file` field is absolute. The one exception is E2702 crypto misuse, which is project-relative so it never carries the machine's folder layout. Card #6531 asks to make every report project-relative.\n\nUnder A, paths are relative to the folder jet ran in. The tool that ran jet opens them with no join, and CI runs from the same folder on every machine, so saved reports match byte for byte.\n\nUnder B, the spec stays: absolute everywhere except E2702.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Paths relative to the folder jet ran in",
+          "detail": "Every file under the folder jet ran in is reported relative to it, with `../` for other files in the project. The tool that ran jet opens each path directly, as with gcc and tsc. Runs from the same project folder give the same bytes on every machine.",
+          "technical": "Report projection makes file fields relative to the invocation folder inside the project. No `root` field and no special rule for E2702 are needed. Files outside the project keep absolute paths, as today. The spec rule and the resolvable-paths case change in one cutover. Editors use the language server, which sends absolute `file://` URIs as the LSP protocol requires (Compiler/JetLSP/Source/LSP/Diagnostics.jet:150).",
+          "code": "{\"code\":\"E0102\",\"file\":\"src/main.jet\",\"line\":3}"
+        },
+        {
+          "key": "B",
+          "name": "Keep absolute paths; E2702 stays the exception",
+          "detail": "Reports keep absolute paths. Only crypto-misuse reports are project-relative.",
+          "technical": "No change. #6531 c1 and c3 are dropped; c2 is met.",
+          "code": "{\"code\":\"E0102\",\"file\":\"/home/kim/app/src/main.jet\",\"line\":3}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (cargo)",
+          "note": "JSON messages use paths relative to the workspace root. Source: https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages",
+          "code": "\"file_name\": \"src/main.rs\""
+        },
+        {
+          "lang": "TypeScript (tsc)",
+          "note": "Diagnostics print paths relative to the working directory. Source: https://www.typescriptlang.org/docs/handbook/compiler-options.html",
+          "code": "src/main.ts(3,5): error TS2304"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The tool that ran jet opens every path directly, and reports from the same folder match on every machine.",
+        "gains": [
+          "Reports show no machine folder layout, so E2702 needs no special rule.",
+          "Saved CI reports match byte for byte across machines.",
+          "Scripts and editors open every reported file with no extra step."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps machine-specific folders in every report and a second path rule for E2702."
+          }
+        ],
+        "tradeoff": "Paths follow the folder jet ran in, as gcc and tsc do."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should JSON error reports use paths relative to the folder jet ran in, like gcc and tsc?",
+        "lesson": "Tools read Jet's JSON error reports to open the failing line. Absolute paths differ on every machine. Relative paths plus one root field stay identical and still open.",
+        "trio": {
+          "current": {
+            "note": "Absolute paths, except crypto-misuse reports.",
+            "code": "\"file\":\"/home/kim/app/src/main.jet\""
+          },
+          "wild": {
+            "lang": "Rust (cargo)",
+            "note": "JSON messages use workspace-relative paths. Source: https://doc.rust-lang.org/cargo/reference/external-tools.html#json-messages",
+            "code": "\"file_name\": \"src/main.rs\""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Relative to the run folder",
+            "gist": "Paths relative to where jet ran; absolute only outside the project.",
+            "gains": [
+              "Opens directly and matches across machines."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "\"file\":\"src/main.jet\""
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep absolute paths",
+            "gist": "Absolute everywhere; crypto misuse stays project-relative.",
+            "gains": [
+              "No cutover of the report format."
+            ],
+            "losses": [
+              "Reports differ per machine and show its folders."
+            ],
+            "proposed": {
+              "code": "\"file\":\"/home/kim/app/src/main.jet\""
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Opens directly and shows no folder layout.",
+          "gains": [
+            "Saved CI reports match on every machine."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Machine folders in every report; a second rule for E2702."
+            }
+          ],
+          "tradeoff": "Paths follow the run folder, like gcc and tsc."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-01T17:37:36.881Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-02",
+      "retiredAt": "2026-11-07T11:10:37.009Z"
     }
   ]
 }
