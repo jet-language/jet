@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6649,
-    "rev": 95443,
+    "nextNum": 6650,
+    "rev": 95450,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97238,6 +97238,92 @@
       "updated": "2026-11-07T05:00:55.883Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c08512l6",
+      "num": 6649,
+      "title": "Package #Tests under Compiler/ and Jetpack/ are red or no longer compile",
+      "body": "A serial jet test of every package under Compiler/ and Jetpack/ (a0_031 on dev e4756389a9, $JET_SCRATCH_ROOT/lanes/Main/pkgrerun.sh) finds failing tests in 10 test packages and 8 test packages that no longer compile. They pass unnoticed because no gate runs them. Compiler/JetCli/Tests (18 failing) is tracked on #6631 c7. Fixture packages (*.fixture) and packages with no #Test blocks are excluded.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A gate runs every package test: jet test Compiler --profile full runs the #Tests of every package under Compiler/ and Jetpack/ that has them (Tests subpackages included), so a red or non-compiling test package fails the profile. A package that no gate should run is deleted, not left unrun.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:21:15.074Z"
+        },
+        {
+          "n": 2,
+          "text": "Compiler/JetParser/Tests (13 failing: keyword before the declared name, unknown top word, ineligible state section, comptime braced values, named rule arguments, ordered groups format, grouped retired markers, abi lowering, doc_on_a_function_requires_task, suffix contract, generated call arguments, clean preparation tokens, root template loop) and Compiler/JetLexer/Tests (3 failing: triple delimiter parity, parser-ready tokens, inline foreign bodies) pass, with each test migrated to the current syntax or deleted when its subject is retired.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:21:15.933Z"
+        },
+        {
+          "n": 3,
+          "text": "Compiler/JetWasm/Tests passes (8 failing: mathkit component decode and bodies, compiler-extension fixtures, text vs binary inputs, shipped text guests, shipped components validate).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:21:16.798Z"
+        },
+        {
+          "n": 4,
+          "text": "The Jetpack package tests pass: Jetpack/EnvModel/Tests (36 failing: committed examples field checks, computed module fields, pinned diagnostics E3402/E1270/E0969/E0971/E0977/E0996, fleet overrides, workspace members), Jetpack/Integrations/Tests (cpp bind descriptor, nested cargo manifest), Jetpack/PackageModel (test profile fields refuse unknown fields), Jetpack/PackageModel/Tests (ada generated source, com winegcc cross compile) and Jetpack/Foundation/Tests (tls fixture pems).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:21:17.656Z"
+        },
+        {
+          "n": 5,
+          "text": "Compiler/JetFoundation and Compiler pass 'later test setting layers replace earlier values', and Compiler/JetDebug/Tests passes a_session_pauses_steps_and_reads_the_native_image.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:21:18.519Z"
+        },
+        {
+          "n": 6,
+          "text": "These test packages compile and pass, or are deleted when dead: Compiler/JetSema/Tests (40 problems), Compiler/JetDriver/Tests (6), Compiler/JetRepl/Tests (51), Compiler/JetCli/Commands (12) and Compiler/JetCli/Commands/Tests (94), Compiler/JetImpact/Tests (path dependency jet_env_model escapes its parent), Compiler/JetFoundation/Data (6), Compiler/JetTestKit/Probes (inline Package facts beside package.jet).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:21:19.378Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T05:21:14.209Z",
+      "updated": "2026-11-07T05:21:19.378Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6
     }
   ],
   "decisions": [
@@ -185141,6 +185227,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T05:21:19.378Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#6 These test packages compile and pass, or are deleted when de"
+    },
+    {
+      "at": "2026-11-07T05:21:18.519Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#5 Compiler/JetFoundation and Compiler pass 'later test setting"
+    },
+    {
+      "at": "2026-11-07T05:21:17.656Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#4 The Jetpack package tests pass: Jetpack/EnvModel/Tests (36 f"
+    },
+    {
+      "at": "2026-11-07T05:21:16.798Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#3 Compiler/JetWasm/Tests passes (8 failing: mathkit component "
+    },
+    {
+      "at": "2026-11-07T05:21:15.933Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#2 Compiler/JetParser/Tests (13 failing: keyword before the dec"
+    },
+    {
+      "at": "2026-11-07T05:21:15.074Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#1 A gate runs every package test: jet test Compiler --profile "
+    },
+    {
+      "at": "2026-11-07T05:21:14.209Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c08512l6",
+      "note": "Package #Tests under Compiler/ and Jetpack/ are red or no longer compile"
+    },
     {
       "at": "2026-11-07T05:18:45.277Z",
       "by": "Main",
