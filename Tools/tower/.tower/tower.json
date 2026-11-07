@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6643,
-    "rev": 95133,
+    "rev": 95150,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55810,7 +55810,26 @@
           "text": "Joint Core + Native conclusion (CoreReview5-2-2): a Source facade privately holding a PUBLIC opaque seed handle DOES exist (encoding/stream JSONPush 870-877: private output: FileWriter; JSONWriter 201 output: JSONPush; constructor factory 1327; FileWriter known in core_types 303 with opaque constructability). That pattern supports option A directly (public, non-constructible native carrier held privately by the facade). What does NOT exist is a PRIVATE internal native kernel identity with constructor privacy + lifecycle / clone / drop carrier metadata (option B). Type.Named is a sufficient representation either way; no new Opaque IR kind is needed. Main's updated recommendation: A, following the JSONPush / FileWriter precedent, unless the owner wants B as a general mechanism for future facades."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-PRIVATE-NATIVE-CARRIER1=A is built: core.http declares its native stream type in a `priv module`, and `Body` is a struct holding it in a `priv` field; Bodies come only from responses, requests, `body_text`, `body_bytes` and `body_empty`.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:43.954Z"
+        },
+        {
+          "n": 2,
+          "text": "Naming the stream type or building a `Body` (or a `Directory` or `FileWriter`) by hand from user code is E0605, with UI snapshots; the HTTP Body cutover lands on the new carrier and the http goldens pass on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:44.885Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "ballot",
@@ -55823,9 +55842,12 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-08T12:42:12.406Z",
-      "updated": "2026-11-01T18:23:43.098Z",
+      "updated": "2026-11-07T03:27:44.885Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [
+        "G3"
+      ],
+      "criteriaLastN": 2
     },
     {
       "id": "c00hgc5h",
@@ -56798,7 +56820,26 @@
           "text": "Interim taken 2026-10-09: Core CSVReader row handoff now copies the fields and resets the borrowed storage (61a4cfa1c), an extra allocation per row; crypto SHA-256 finalizes the pending buffer in place instead (d0989d126, no copy). Revisit CSV if a canonical take/replace API is ratified."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-TAKE-REPLACE1=A is built: one standard operation installs a new value in a writable place and returns the old one, never leaving the borrowed object incomplete; a golden shows it on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:47.293Z"
+        },
+        {
+          "n": 2,
+          "text": "Core CSV row handoff and crypto pending bytes use it instead of the interim copy-then-reset, with no extra allocation per row.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:48.242Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "owner-ballot",
@@ -56810,9 +56851,12 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-06T18:35:45.461Z",
+      "updated": "2026-11-07T03:27:48.242Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [
+        "G10"
+      ],
+      "criteriaLastN": 2
     },
     {
       "id": "c0xgg9f1",
@@ -58411,7 +58455,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Ballot D-JAI-GENERIC1 (per-call generic control: Jai #modify, #bake_constants, #bake_arguments, $$ auto-bake, duck typing; audit rows B15-B20, B24-B26) is drafted with same-program alternatives and passes Tower readiness.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:50.693Z"
+        },
+        {
+          "n": 2,
+          "text": "Once ratified, the chosen form is built with an example golden on O0, O1 and O2 and UI snapshots for its diagnostics.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:51.733Z"
+        }
+      ],
       "refs": [
         "Docs/audits/jai-parity-2026-10-16.md",
         "#5021"
@@ -58428,9 +58491,12 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:42.264Z",
-      "updated": "2026-11-01T07:20:47.443Z",
+      "updated": "2026-11-07T03:27:51.733Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [
+        "G6"
+      ],
+      "criteriaLastN": 2
     },
     {
       "id": "c0dhc7rh",
@@ -59566,7 +59632,26 @@
           "text": "D-ENTRY-CTX1 ratified (A, amended): `fn build(b: Build)`, `fn dev(d: Dev)`, `fn test(t: Test)`, with no return types. Each entry configures the context it receives, and the command uses that context implicitly. There is no bench command or Bench context; benchmarks are measurement-style tests within `jet test`. The cutover retires BuildContext/BuildPlan returns, TestSuite and BenchSuite, migrates every in-repo caller and example, and revisits D-CONF-ENTRY1/D-CMD-OVERRIDE1 wording. The Compiler workspace fn build is the first user."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "From the repository root, `jet build Compiler/` with the `jet` on PATH builds the compiler with no .mjs assembler, no --runtime-dir, no environment variables and no prlimit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:56.361Z"
+        },
+        {
+          "n": 2,
+          "text": "`--trace` prints each phase as it ends (wall, CPU s, cores busy, memory) with a summary; `--trace=<file>` writes Chrome trace events Perfetto reads.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:57.256Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "cli",
@@ -59578,9 +59663,12 @@
       "parentId": "c0fqk5ka",
       "needsAcceptance": false,
       "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-10-28T11:21:25.215Z",
+      "updated": "2026-11-07T03:27:57.256Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [
+        "G5"
+      ],
+      "criteriaLastN": 2
     },
     {
       "id": "c07glrub",
@@ -60606,7 +60694,17 @@
           "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-RAYLIB-DRIVER-LOAD1 (draft for Main to file). The card text is background, not the decision."
         }
       ],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-RAYLIB-DRIVER-LOAD1=A and D-RAY-API1=A are built: `ray` keeps every raylib name and argument order on window and frame values with typed colors, keys and buttons, written in Jet, and software-drawn programs stay single static files that speak the display and sound protocols directly.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T03:27:59.677Z"
+        }
+      ],
       "refs": [],
       "tags": [
         "raylib",
@@ -60617,11 +60715,12 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-21T14:23:04.145Z",
-      "updated": "2026-10-31T04:41:58.072Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-07T03:27:59.677Z",
+      "updatedBy": "Main",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 1
     },
     {
       "id": "c0ba141x",
@@ -76407,7 +76506,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": "Remove the $decision fact field and the syntax-registry decision field, and migrate their consumers. Strip decision IDs from diagnostic rows and from code/comments with a script. Add a guard that fails on a decision ID pattern in Compiler/, Core/ and Jetpack/ sources.",
       "checkSteps": null,
@@ -76462,9 +76561,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:35.773Z",
-      "updated": "2026-11-07T03:20:47.302Z",
+      "updated": "2026-11-07T03:26:26.911Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-07T03:26:26.911Z"
     },
     {
       "id": "c0rqt0kq",
@@ -79634,11 +79734,13 @@
       ],
       "refs": [],
       "tags": [],
-      "goals": [],
+      "goals": [
+        "G5"
+      ],
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:50:54.660Z",
-      "updated": "2026-11-06T17:29:42.363Z",
+      "updated": "2026-11-07T03:24:41.501Z",
       "updatedBy": "Main"
     },
     {
@@ -92480,11 +92582,11 @@
         {
           "n": 6,
           "text": "The JetRuntime/Tests plain transport (CompilerRegistries.jet:1127-1135; Alloc, Scan, Unicode tests) links one runtime, so no second alloc_init resets GS and SIGSEGVs, and the Collections/Text runtime test fragments compile again (jet_int_pow, text_iter_pull arity).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:04:54.734Z"
+          "evidence": "Landed at 1141d403b1. MechD-3 proof: chain s1 jet 49fca30035e67768 (pack1 key 313ed0112d266a38, built from a65e28fc65; Compiler/JetRuntime unchanged to HEAD) runs the plain route of Tools/agent/CompilerRegistries.jet:1130-1160 (check-runtime --assemble-only, library over JetRuntime/package.jet without alloc_check_init, PLAIN_DRIVER C host): Alloc, Collections, Scan, Text, Unicode and Secret all PASS with rc 0, expected stdout and empty stderr; no second-runtime SIGSEGV.",
+          "at": "2026-11-07T03:24:39.724Z"
         }
       ],
       "refs": [],
@@ -92495,7 +92597,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T06:13:43.662Z",
-      "updated": "2026-11-07T02:04:54.734Z",
+      "updated": "2026-11-07T03:24:39.724Z",
       "updatedBy": "Main"
     },
     {
@@ -184119,6 +184221,125 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T03:27:59.677Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0awastn",
+      "note": "#1 D-RAYLIB-DRIVER-LOAD1=A and D-RAY-API1=A are built: `ray` ke"
+    },
+    {
+      "at": "2026-11-07T03:27:58.796Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0awastn",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-07T03:27:57.256Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hnphts",
+      "note": "#2 `--trace` prints each phase as it ends (wall, CPU s, cores b"
+    },
+    {
+      "at": "2026-11-07T03:27:56.361Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0hnphts",
+      "note": "#1 From the repository root, `jet build Compiler/` with the `je"
+    },
+    {
+      "at": "2026-11-07T03:27:53.265Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hnphts",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-07T03:27:51.733Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ygtwb9",
+      "note": "#2 Once ratified, the chosen form is built with an example gold"
+    },
+    {
+      "at": "2026-11-07T03:27:50.694Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ygtwb9",
+      "note": "#1 Ballot D-JAI-GENERIC1 (per-call generic control: Jai #modify"
+    },
+    {
+      "at": "2026-11-07T03:27:49.787Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ygtwb9",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-07T03:27:48.242Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01sunrb",
+      "note": "#2 Core CSV row handoff and crypto pending bytes use it instead"
+    },
+    {
+      "at": "2026-11-07T03:27:47.293Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c01sunrb",
+      "note": "#1 D-TAKE-REPLACE1=A is built: one standard operation installs "
+    },
+    {
+      "at": "2026-11-07T03:27:46.395Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01sunrb",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-07T03:27:44.885Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ayfc4w",
+      "note": "#2 Naming the stream type or building a `Body` (or a `Directory"
+    },
+    {
+      "at": "2026-11-07T03:27:43.954Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ayfc4w",
+      "note": "#1 D-PRIVATE-NATIVE-CARRIER1=A is built: core.http declares its"
+    },
+    {
+      "at": "2026-11-07T03:27:42.363Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ayfc4w",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-07T03:26:26.912Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06f25m1",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T03:24:41.502Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01vsb2c",
+      "note": "goals"
+    },
+    {
+      "at": "2026-11-07T03:24:39.724Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gaxqxg",
+      "note": "#6"
+    },
     {
       "at": "2026-11-07T03:24:24.601Z",
       "by": "Main",
