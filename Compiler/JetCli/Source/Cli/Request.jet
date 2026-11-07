@@ -992,7 +992,12 @@ jet_cli_eval_config: fn() -> JetEvalConfig Never! {
 // read only when compile-time code first runs; None when this toolchain
 // has none.
 jet_cli_native_session: fn() -> Shared<JetEvalNativeSession>? Never! {
-    runtime_dir: jet_cli_runtime_dir()
+    jet_cli_native_session_at(jet_cli_runtime_dir())
+}
+
+// The native session over the runtime pack directory `runtime_dir`; None when
+// it records no runtime key.
+jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSession>? Never! {
     key: jet_cli_runtime_key(runtime_dir) ?? return None
     Val(jet_eval_native_session("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
 }
