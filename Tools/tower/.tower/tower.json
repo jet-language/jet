@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6677,
-    "rev": 95810,
+    "rev": 95815,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47620,29 +47620,29 @@
         {
           "n": 5,
           "text": "(was #1628 c2) The Bytes arm is present in the one copy, and comptime decode reports the same kind as the Prelude [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:44.492Z"
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): Examples/Data/Dyn/DecodeBytes.jet PASS on o0, o1 and o2. Its comptime decodes (AT_BUILD, AT_BUILD_WIRE) print the same Bytes reasons as the run, and the example asserts built == AT_BUILD && read == AT_BUILD_WIRE.",
+          "at": "2026-11-07T16:59:31.945Z"
         },
         {
           "n": 6,
           "text": "(was #1628 c3) A test decodes a Bytes payload and proves the same text and behavior on O0, O1 and O2 [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:45.171Z"
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): Examples/Data/Dyn/DecodeBytes.jet decodes a CBOR Bytes payload to [U8], re-encodes it byte-identically, and PASSes with the same golden output on o0, o1 and o2.",
+          "at": "2026-11-07T16:59:32.891Z"
         },
         {
           "n": 7,
           "text": "(was #1628 c4) Targeted tests pass, including the decode tests and the diagnostic snapshots.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T03:21:22.248Z"
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): the decode tests (DecodeBytes golden on o0/o1/o2, encoding_parity cases) pass and the ui snapshot suite has 0 FAIL.",
+          "at": "2026-11-07T16:59:33.798Z"
         }
       ],
       "refs": [],
@@ -47656,7 +47656,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-07T14:19:29.040Z",
+      "updated": "2026-11-07T16:59:33.798Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -62647,11 +62647,11 @@
         {
           "n": 98,
           "text": "Sema refuses every #Export(c) or library export that can fail (an inferred failure carrier, or a carrier written on the export or on a library component signature) with E3203 at the export's name, and Never! is the infallible spelling. Codegen's check in Compiler/JetIR/Source/BuildLibrary.jet (ir_infallible, 'a native C export is infallible') becomes an internal assertion that checked code never reaches, so no input gets a user error from codegen or an exit 101 there. ui snapshots cover each form.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T14:13:52.898Z"
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): all 6 ui/cffi_e3203_* snapshots PASS (component_declared_failure, enum_rejected, export_declared_failure, export_inferred_failure, non_cabi, struct_needs_layout_c). Compiler/JetIR/Source/BuildLibrary.jet:558 is now an internal assertion (panic 'checked C export has a failure carrier; sema refuses it with E3203').",
+          "at": "2026-11-07T16:59:31.019Z"
         }
       ],
       "refs": [],
@@ -62661,7 +62661,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-07T14:13:54.196Z",
+      "updated": "2026-11-07T16:59:31.019Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -97692,8 +97692,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Batch vb14 at dev 1b48988238 (s1 jet 99d666c031dbb94a): no row in cases, golden or ui has an actual exit of 101. Of the 4 ICE rows in untracked-032a.tsv, encoding_parity cbor_typed_schema_matches_comptime_default_dev_and_deopt and whole_value_codecs_match_aot_comptime_and_default_dev pass. cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs reports the registered E2104 jet.InvalidCommandInput ('jet lint --cost is not built yet', #6652). ffi_callbacks_tasks/foreign_callback_reenters_jet_and_completes_on_a_jet_task reports E2104 ('Passing a Jet function to c.foreign_callback is not built yet', #6366).",
-          "at": "2026-11-07T12:44:47.137Z"
+          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): none of the 4 named rows exits 101. encoding_parity cbor_typed_schema_matches_comptime_default_dev_and_deopt and whole_value_codecs_match_aot_comptime_and_default_dev PASS. cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs is E2104 (unbuilt cost forms), KNOWN-FAILING #6652. foreign_callback_reenters_jet_and_completes_on_a_jet_task is E2104 from sema (320598c665), KNOWN-FAILING #6366. The a0_034 release kit (1b9db7ec41) shows no exit-101 row either.",
+          "at": "2026-11-07T16:59:30.077Z"
         },
         {
           "n": 2,
@@ -97722,7 +97722,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:29:02.132Z",
-      "updated": "2026-11-07T12:44:47.137Z",
+      "updated": "2026-11-07T16:59:30.077Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -186847,6 +186847,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T16:59:33.798Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-07T16:59:32.891Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-07T16:59:31.946Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-07T16:59:31.019Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h18kyi",
+      "note": "#98"
+    },
+    {
+      "at": "2026-11-07T16:59:30.077Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c005fduo",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T16:36:46.150Z",
       "by": "Main",
