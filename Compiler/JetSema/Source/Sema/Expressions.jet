@@ -3492,6 +3492,14 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
 }
 
 sema_expr_try_method_static_routes: fn(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    // `.origin()` is retired: a `#Track` binding's origin is the compile-time
+    // fact `value.$origin`, ahead of any method or root function `origin`.
+    if method == "origin" && args.len() == 0 && receiver == .Ident(name, _, _) {
+        if sema_scope_resolve_index(scopes, name) == .Val(index) && scopes.bindings[index].origin != None {
+            diagnostics.push(sema_error("E0311", method_span, "`.origin()` is retired for tracked values", "a `#Track` binding's origin is a compile-time fact, not a method", "read `value.$origin` in comptime code"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+    }
     task_surface := sema_taskgroup_check_surface_method(receiver, method, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if task_surface.handled -> return task_surface
 

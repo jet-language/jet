@@ -1,2 +1,12 @@
 use sys: core.sys
-run: fn() { print("main\n0.0.0\n{sys.name()}\ndev") }
+// `$build.os` prints its `OS` variant (`Linux`, `MacOS`, `Windows`), which
+// core.sys names in lowercase.
+run: fn() {
+    os: if sys.name() == {
+        "linux" -> "Linux"
+        "macos" -> "MacOS"
+        "windows" -> "Windows"
+        else -> sys.name()
+    }
+    print("main\n0.0.0\n{os}\ndev")
+}

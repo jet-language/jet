@@ -6787,6 +6787,7 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
         .Struct(_, fields) -> {
             if ir_default_err(p, ty) -> return ir_comptime_default_err(m, p, b, ty, row, fields, span)
             if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Fraction"}) -> return ir_comptime_fraction_handle(m, p, b, ty, fields, span)
+            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Decimal"}) -> return ir_comptime_decimal_handle(m, p, b, ty, fields, span)
             return ir_comptime_struct(m, p, b, ty, row, fields, span)
         }
         .Map(entries) -> return ir_comptime_map(m, p, b, ty, row, entries, span)
@@ -6829,6 +6830,32 @@ ir_comptime_fraction_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: T
         parts.push(slot)
     }
     ir_precise_route(m, p, b, ty, "Fraction", "from_parts", parts, span)
+}
+
+// A Decimal constant of a program without core.math, whose Decimal is the
+// runtime handle: its Core fields (negative, magnitude, scale) spelled as the
+// decimal text `from_str` parses, which keeps the written scale.
+ir_comptime_decimal_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [TComptimeField], span: Span) -> Int Never! {
+    negative := false
+    digits := ""
+    scale := -1
+    loop field in fields {
+        if field.name == "negative" && field.value == .Bool(flag) -> negative = flag
+        if field.name == "magnitude" {
+            if field.value == .Int(value) -> digits = "{value}"
+            if field.value == .BigInt(decimal) -> digits = decimal.copy()
+        }
+        if field.name == "scale" && field.value == .Int(value) -> scale = value
+    }
+    if digits == "" || scale < 0 -> return ir_fail_slot(b, span, "Decimal constant without its magnitude and scale")
+    loop digits.len() <= scale -> digits = "0{digits}"
+    point: digits.len() - scale
+    text := if negative -> "-" else -> ""
+    text = "{text}{digits.slice(0, point)}"
+    if scale > 0 -> text = "{text}.{digits.slice(point, digits.len())}"
+    slot: ir_comptime(m, p, b, Type.String, TComptimeValue.String{value: text}, span)
+    if ir_failed(b) -> return -1
+    ir_precise_route(m, p, b, ty, "Decimal", "from_str", [Int]{slot}, span)
 }
 
 // A Map constant: an empty header, then each entry set in order through
