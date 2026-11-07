@@ -11,6 +11,8 @@ use {
     core.crypto.[CryptoError, FileCryptoError, Secret, SharedSecret, Signature, SigningKey, X25519PublicKey, X25519SecretKey, constant_time_equal_bytes]
     crypto: core.crypto
     ct: __core_crypto_ct
+    u32_words.[push_u32le]
+    chacha20_core.[chacha20_rounds, chacha20_state, chacha20_words]
 }
 
 C_AES_RCON: [U8]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
@@ -59,48 +61,51 @@ ed25519_sign_raw: fn(seed: [U8], msg: [U8]) -> [U8] Never! { ct.ed_sign(seed, ms
 
 ed25519_verify_raw: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! { ct.ed_verify(pk, msg, sig) }
 
-
-/// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
-chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
-    [U32]{
-        U32{0x61707865},
-        U32{0x3320646e},
-        U32{0x79622d32},
-        U32{0x6b206574},
-        u32le(key, 0),
-        u32le(key, 4),
-        u32le(key, 8),
-        u32le(key, 12),
-        u32le(key, 16),
-        u32le(key, 20),
-        u32le(key, 24),
-        u32le(key, 28),
-        wrapping(U32{counter}),
-        u32le(nonce, 0),
-        u32le(nonce, 4),
-        u32le(nonce, 8),
+// The ChaCha20 block pieces behind chacha20_block, chacha20_xor and HChaCha20.
+// They are outside the exported core.crypto.expert items, so they are private.
+priv chacha20_core: module {
+    /// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
+    chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
+        [U32]{
+            U32{0x61707865},
+            U32{0x3320646e},
+            U32{0x79622d32},
+            U32{0x6b206574},
+            u32le(key, 0),
+            u32le(key, 4),
+            u32le(key, 8),
+            u32le(key, 12),
+            u32le(key, 16),
+            u32le(key, 20),
+            u32le(key, 24),
+            u32le(key, 28),
+            wrapping(U32{counter}),
+            u32le(nonce, 0),
+            u32le(nonce, 4),
+            u32le(nonce, 8),
+        }
     }
-}
 
-/// The sixteen-word working buffer every block of one call reuses.
-chacha20_words: fn() -> [U32] Never! {
-    w := [U32]{}
-    loop _ in 0..<16 -> w.push(U32{0})
-    w
-}
+    /// The sixteen-word working buffer every block of one call reuses.
+    chacha20_words: fn() -> [U32] Never! {
+        w := [U32]{}
+        loop _ in 0..<16 -> w.push(U32{0})
+        w
+    }
 
-/// The twenty ChaCha rounds of `state` into `w`, before the final addition.
-chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
-    loop i in 0..<16 -> w[i] = state[i]
-    loop _ in 0..<10 {
-        qr(w, 0, 4, 8, 12)
-        qr(w, 1, 5, 9, 13)
-        qr(w, 2, 6, 10, 14)
-        qr(w, 3, 7, 11, 15)
-        qr(w, 0, 5, 10, 15)
-        qr(w, 1, 6, 11, 12)
-        qr(w, 2, 7, 8, 13)
-        qr(w, 3, 4, 9, 14)
+    /// The twenty ChaCha rounds of `state` into `w`, before the final addition.
+    chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+        loop i in 0..<16 -> w[i] = state[i]
+        loop _ in 0..<10 {
+            qr(w, 0, 4, 8, 12)
+            qr(w, 1, 5, 9, 13)
+            qr(w, 2, 6, 10, 14)
+            qr(w, 3, 7, 11, 15)
+            qr(w, 0, 5, 10, 15)
+            qr(w, 1, 6, 11, 12)
+            qr(w, 2, 7, 8, 13)
+            qr(w, 3, 4, 9, 14)
+        }
     }
 }
 
@@ -139,8 +144,12 @@ u32le: fn(bytes: [U8], off: Int) -> U32 Never! {
     U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
 }
 
-push_u32le: fn(out: &[U8], value: U32) Never! {
-    loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+// The little-endian byte push behind the ChaCha20 block output, not part of
+// the expert surface.
+priv u32_words: module {
+    push_u32le: fn(out: &[U8], value: U32) Never! {
+        loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+    }
 }
 
 #Arithmetic(.Wrapping)
