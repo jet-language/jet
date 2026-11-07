@@ -1,5 +1,7 @@
 // Exercise the production aggregate Web host gate and diagnostic builder.
-// The assembler extracts these exact functions from CheckProgram/Diagnostics.
+use jet_foundation.[Diagnostic]
+use jet_sema.[sema_web_host_check_core_usage, sema_web_host_unsupported_core_apis]
+
 wh_expect: fn(usage: String) Never! {
     diagnostics := [Diagnostic]{}
     if sema_web_host_check_core_usage("wasm.browser", [String]{usage}, diagnostics) -> panic("host API admitted on browser: {usage}")
