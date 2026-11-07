@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6651,
-    "rev": 95483,
+    "rev": 95488,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50268,12 +50268,12 @@
         },
         {
           "n": 69,
-          "text": "(was #5993) The 20 remaining expression/type census roots lower or carry their own card: SplitWrite, GetDisjointWrite, TryPush and EditDisjoint on List, statement Reactive, Stream<T> ! Err from source factories (#6108), function-valued parameter type Measure, Pool<Item> types, SharedGuard<Int> carriers and guard dereference provenance, ?HistoryStrategy, comptime SerdeEncode, and jet_rt_handle_show_alloc_error. (census $JET_SCRATCH_ROOT/lanes/Main/land/IrTypes-6065-c6-census.tsv and IrTypes-r4-route-gaps.tsv (IrTypes, 2026-10-29, stack 2bd6cdd29c + g3, testkit-8f, JET_OPT_VERIFY=1).)",
+          "text": "(was #5993) Each of the 14 expression/type census roots lowers on O0, O1 and O2 or is carded: List SplitWrite, GetDisjointWrite and EditDisjoint (tests/run/Ownership/RuntimeDisjointSplitAndIndexesWriteThrough.jet and RuntimeDisjointViewsMatchAOTJITDevAndInterpreter.jet; GetDisjointWrite's result-pattern contract carded #4796); TryPush (Examples/Text/StringTryPush.jet, Examples/Tooling/Testing/TestingHelpers.jet); statement Reactive (tests/run/DataMathReactive/ReactiveStringSignal.jet, Examples/Apps/UI/Reactive.jet); Stream<T> ! Err from source factories (carded #6108); function-valued parameter type Measure (tests/run/IOAndOwnership/GenericInherentMethodsUsePerMethodCloneBounds.jet); Pool<Item> types (cases allocator_families/stale_pool_id_panics_instead_of_reading_reused_slot and multi_file_package/package_members_have_all_tier_parity); SharedGuard<Int> carriers and guard dereference provenance (tests/cases/shared_guards/*.case, 9 cases, formerly ICE exit 101); ?HistoryStrategy (Examples/Tooling/Testing/TestHistory/run.jet); comptime SerdeEncode (carded #5454: comptime_diff/cbor_canonical_typed_corpus_matches_comptime_and_aot); jet_rt_handle_show_alloc_error (Examples/Memory/Allocation/FixedBacking.jet). All named rows PASS in one batch or release kit.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T04:36:36.892Z"
+          "at": "2026-11-07T06:13:22.619Z"
         },
         {
           "n": 70,
@@ -50617,7 +50617,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T10:55:41.702Z",
-      "updated": "2026-11-07T05:56:00.251Z",
+      "updated": "2026-11-07T06:13:22.619Z",
       "updatedBy": "Main",
       "goals": [
         "G1",
@@ -91901,7 +91901,7 @@
       "track": "sidequest",
       "epoch": null,
       "milestoneId": null,
-      "phase": "done",
+      "phase": "building",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -91909,7 +91909,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Reopened by Main: the vb10 kit has pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable as FAIL (E0904 on the Prelude Equatable bound at instantiation). Closing missed that row; c2 owns it. Routed to MechD-3."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -91919,6 +91925,15 @@
           "verifiedBy": null,
           "evidence": "415ffb6673; batch vb10 (dev e4756389a9, s1 kit): golden tests/run/CopyBorrow/PoolIDsCompareBySlotAndGeneration.jet PASS on o0, o1 and o2; cases pool_id_equality/reused_pool_slot_does_not_equal_its_stale_generation and allocator_families/pool_ids_reuse_slots_without_reviving_stale_generations PASS (both FAIL in vb9).",
           "at": "2026-11-07T05:56:03.701Z"
+        },
+        {
+          "n": 2,
+          "text": "A Pool id satisfies a generic Equatable bound without the payload being equatable: case tests/cases/pool_id_equality/pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable.case PASS (vb10 at dev e4756389a9: FAIL, 'jet check' reports E0904 'No trait named Equatable is in scope for the bound on T' at the call equal(left, right) with T = ID<Payload>).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:13:02.513Z"
         }
       ],
       "refs": [
@@ -91931,10 +91946,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T21:12:11.885Z",
-      "updated": "2026-11-07T05:56:10.935Z",
+      "updated": "2026-11-07T06:13:09.767Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-07T05:56:10.934Z"
+      "criteriaLastN": 2
     },
     {
       "id": "c0d0i1i1",
@@ -97365,11 +97379,11 @@
         {
           "n": 5,
           "text": "Compiler/JetFoundation passes 'later test setting layers replace earlier values' (Source/Registry/TestSettings.jet:433 expects the t.coverage refusal text 'not ported to the Jet test runner yet' and gets an empty refusal: either coverage is ported and the test asserts its real behavior, or the refusal text is restored).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:35:58.154Z"
+          "evidence": "b49fb1b11a; pkgrerun.sh in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env) on dev a96e86061b: Compiler/JetFoundation 6 passed, 0 failed ('later test setting layers replace earlier values' included); Compiler/JetFoundation/Tests 216 passed, 0 failed. JetDebug/Tests passed 37/0 in the earlier rerun.",
+          "at": "2026-11-07T06:11:55.668Z"
         },
         {
           "n": 6,
@@ -97398,7 +97412,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:14.209Z",
-      "updated": "2026-11-07T06:07:44.730Z",
+      "updated": "2026-11-07T06:11:55.668Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -185354,6 +185368,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T06:13:22.619Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0max8v8",
+      "note": "#69: PortsLead-2's root table: every root mapped to a proving row or its own card; was: (was #5993) The 20 remaining expression/type census roots lower or carry their own card: SplitWrite, GetDisjointWrite, TryPush and EditDisjoint on List, statement Reactive, Stream<T> ! Err from source"
+    },
+    {
+      "at": "2026-11-07T06:13:09.767Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xq1afz",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T06:13:08.756Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0xq1afz",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T06:13:02.513Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xq1afz",
+      "note": "#2 A Pool id satisfies a generic Equatable bound without the pa"
+    },
+    {
+      "at": "2026-11-07T06:11:55.668Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08512l6",
+      "note": "#5"
+    },
     {
       "at": "2026-11-07T06:07:44.730Z",
       "by": "Main",
