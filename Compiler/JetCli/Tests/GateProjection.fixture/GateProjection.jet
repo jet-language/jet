@@ -1,4 +1,10 @@
 // Forced-build-fact test, using the existing Jet fact resolver.
+use {
+    jet_cli.[jet_cli_gate_append_build_facts, jet_cli_gate_entries_at]
+    jet_foundation.[GateKind, GateLedger, Span]
+    jet_pkg_model.[ContributionLayer, FactContribution, FactKey, FactValue, SourceScope, pkg_fact_resolve]
+}
+
 run: fn() Never! {
     span: Span{start: 7, end: 12}
     contribution: FactContribution.new("Build.Settings.tls", FactValue.Bool{value: false}, SourceScope.Package, ContributionLayer.System, "system.jet").at(span).force_with_reason("fleet certification")

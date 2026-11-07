@@ -1,6 +1,42 @@
-// Production parser contracts over the canonical L2 sources, with the
-// PC_MARKER_SOURCE, PC_MARKER_NAMES and PC_FMT_RUNTIME_SOURCE constants. Any
-// failed assertion exits through panic.
+// Production parser contracts over the canonical L2 sources: the marker
+// registry is jet_foundation's MARKER_SOURCE, and PC_FMT_RUNTIME_SOURCE is the
+// bytes of tests/fixtures/fmt_import_c_bindings.jet. Any failed assertion
+// exits through panic.
+use {
+    jet_foundation.[BinOp, CModuleKind, Expr, MARKER_SOURCE, ParseResult, RuleSite, RustConstKind, Span, TextEdit]
+    jet_lexer.[TOKEN_EOF, TOKEN_GT, TOKEN_SHR, TokenTables, lex]
+    jet_parser.[JetParserState, jet_format_source, jfmt_apply_source_edits, parse_source, parser_current, parser_current_kind, parser_line_starts, parser_prepare_tokens, parser_take_type_close]
+}
+
+PC_FMT_RUNTIME_SOURCE: comptime { ```#Import(c) no_result: fn() = "jet_rt_trap"
+
+#Import(c) scalar: fn(value: I64) -> I64 = "jet_rt_iter_next"
+
+#Import(c) renamed: fn(value: I64) -> I64 = "host-add$raw"
+
+#[Import(c), Unsafe("audited C boundary")]
+attributed: fn(value: I64) -> I64 = "jet_rt_alloc"
+
+#[Unsafe("audited C boundary"), Import(c)]
+attributed_no_result: fn(value: I64) = "jet_rt_thread_reset"
+
+#Import(c) escaped: fn() = "symbol\\path\"quoted{{braces}}"
+
+counter := I64{0}
+
+limit: I64{0}
+``` }
+
+// The marker structs of MARKER_SOURCE, in source order: each `Name: struct {`
+// line at the left margin.
+pc_marker_names: fn() -> [String] {
+    names := [String]{}
+    loop line in MARKER_SOURCE.lines() {
+        if line.ends_with(": struct {{") && !line.starts_with(" ") && !line.starts_with("/") -> names.push(line.removesuffix(": struct {{"))
+    }
+    names
+}
+
 pc_require: fn(ok: Bool, name: String) {
     if !ok -> panic("parser contract failed: {name}")
 }
@@ -110,16 +146,17 @@ pc_explicit_privacy: fn() {
 }
 
 pc_marker_metadata: fn() {
-    parsed: parse_source(PC_MARKER_SOURCE.bytes())
+    parsed: parse_source(MARKER_SOURCE.bytes())
     pc_require(parsed.diagnostics.len() == 0, "complete canonical marker registry parses")
+    markers: pc_marker_names()
     seen := [String]{}
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) {
-            pc_require(PC_MARKER_NAMES.contains(declaration.name), "unregistered marker {declaration.name}")
+            pc_require(markers.contains(declaration.name), "unregistered marker {declaration.name}")
             seen.push(declaration.name)
         }
     }
-    pc_require(seen == PC_MARKER_NAMES, "every marker struct declares one rule, in source order")
+    pc_require(seen == markers, "every marker struct declares one rule, in source order")
     // Rule settings are values after the struct's fields in one list.
     facts: parse_source("Pre: struct {{\n    condition: String\n    message: String\n\n    impl Marker {{\n        sites: [.Function, .Method]\n        repeatable: true\n    }}\n}}\nrun: fn() {{}}\n".bytes())
     pc_require(facts.diagnostics.len() == 0, "named marker metadata parses")
@@ -164,12 +201,12 @@ pc_output_provider: fn() {
         if parsed.program.items[0] == .Const(value) {
             pc_require(value.name == "app" && value.name_span == Span{start: 0, end: 3}, "{kind} preserves the bare binding name span")
             pc_require(value.span == Span{start: 0, end: source.len() - 1}, "{kind} declaration ends at the constructor close")
-            pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist, "{kind} stays a default-private immutable runtime declaration")
+            pc_require(value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist, "{kind} stays a default-public immutable runtime declaration")
             pc_require(value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.persist_span == None && value.resolved_output == None, "{kind} preserves ordinary Const tags")
             pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "Output" else -> false, "{kind} carries the canonical Output type")
             if value.value == .EnumLit(type_name, variant_name, variant_site, args, leading_dot, span, _) {
                 pc_require(type_name == "Output" && variant_name == kind && !leading_dot, "{kind} keeps its qualified closed-sum constructor")
-                pc_require(span == Span{start: 7, end: source.len() - 1} && variant_site == (Val(Span{start: 14, end: 14 + kind.len()})), "{kind} keeps constructor and variant byte spans")
+                pc_require(span == Span{start: 5, end: source.len() - 1} && variant_site == (Val(Span{start: 12, end: 12 + kind.len()})), "{kind} keeps constructor and variant byte spans")
                 pc_require(args.len() == 2, "{kind} retains both named fields")
                 pc_require(if args[0] == .Named(label, _) -> label == "name" else -> false, "{kind} retains first field label")
                 pc_require(if args[1] == .Named(label, argument) && argument == .Ident(name, _, _) -> label == "entry" && name == "run" else -> false, "{kind} retains the bare callable address")
@@ -203,6 +240,13 @@ pc_output_provider: fn() {
     pc_require(if nested.program.items[0] == .CodeModule(value) && value.body == .Val(body) -> body.len() == 2 else -> false, "inline module retains both Output declarations")
 }
 
+// Whether two parser states render the same Debug text, the full-state oracle.
+pc_same_state: fn(state: JetParserState, oracle: JetParserState) -> Bool {
+    left: "{state:Debug}"
+    right: "{oracle:Debug}"
+    left == right
+}
+
 // Kind-only queries are checked against the existing whole-token accessor.
 // This semantic oracle is not a production allocation or timing measurement.
 pc_current_kind_equivalence: fn() {
@@ -226,7 +270,7 @@ pc_current_kind_equivalence: fn() {
         oracle := state.copy()
         expected: parser_current(oracle).kind
         actual: parser_current_kind(state)
-        pc_require(actual == expected && "{state:Debug}" == "{oracle:Debug}", "kind-only query preserves full parser state and the token-accessor verdict")
+        pc_require(actual == expected && pc_same_state(state, oracle), "kind-only query preserves full parser state and the token-accessor verdict")
         if split -> pc_require(actual == TOKEN_GT && state.position == before, "pending GT precedes trivia and does not advance the cursor")
         if !split -> pc_require(state.position > before, "mixed and trivia-only comments advance to the same real token or EOF")
         stable: state.position
@@ -238,7 +282,7 @@ pc_current_kind_equivalence: fn() {
                 oracle = state.copy()
                 expected_pending: parser_current(oracle).kind
                 pc_require(parser_current_kind(state) == expected_pending && expected_pending == TOKEN_GT, "pending split token precedes negative and out-of-range bounds")
-                pc_require(state.position == cursor && "{state:Debug}" == "{oracle:Debug}", "pending GT preserves even an out-of-range cursor and all state")
+                pc_require(state.position == cursor && pc_same_state(state, oracle), "pending GT preserves even an out-of-range cursor and all state")
                 pc_require(parser_current_kind(state) == TOKEN_GT && state.position == cursor, "pending GT remains idempotent")
             }
         }
@@ -249,7 +293,7 @@ pc_current_kind_equivalence: fn() {
             oracle = state.copy()
             expected_at: parser_current(oracle).kind
             actual_at: parser_current_kind(state)
-            pc_require(actual_at == expected_at && "{state:Debug}" == "{oracle:Debug}", "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")
+            pc_require(actual_at == expected_at && pc_same_state(state, oracle), "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")
             if cursor < 0 || cursor >= state.tokens.len() -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "negative, end, and beyond-end cursors return EOF without advancing")
             if cursor == state.tokens.len() - 1 -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "the real EOF token is read without advancing")
             after: state.position
@@ -266,7 +310,7 @@ pc_optional_comparison_rhs: fn(rhs: String, binds: Bool) {
     if binds {
         pc_require(if binding.init == .PatternTest(_, _, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
     } else {
-        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
+        pc_require(if binding.init == .Binary(op, _, value, _, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
     }
 }
 
@@ -281,7 +325,7 @@ pc_optional_comparisons: fn() {
     pc_require(parsed.diagnostics.len() == 0, "inequality remains value equality")
     function: if parsed.program.items[0] == .Func(value) -> value else -> panic("inequality function")
     binding: if function.body[0] == .Val(value) -> value else -> panic("inequality binding")
-    pc_require(if binding.init == .Binary(op, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
+    pc_require(if binding.init == .Binary(op, _, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
     bare: parse_source("run: fn() {{ if shape == {{ Circle(r) -> print(r) }} }}".bytes())
     pc_require(bare.diagnostics.len() == 1 && bare.diagnostics[0].code == "E0367", "bare variant dispatch still teaches the dot")
 }
@@ -304,9 +348,8 @@ pc_qualified_generic_literal: fn() {
         if item == .Func(func) {
             loop statement in func.body {
                 if statement == .Val(binding) {
-                    if binding.init == .StructLit(name, args, namespace, _, _, _, _, _) {
-                        pc_require(name == "TypedHistoryCase", "qualified literal name")
-                        pc_require((namespace ?? "") == "testing", "qualified literal namespace")
+                    if binding.init == .TypedLit(head, _, _, _) && head == .Val(ty) && ty == .Apply(name, args) {
+                        pc_require(name == "testing.TypedHistoryCase", "qualified literal keeps its namespace-qualified name")
                         pc_require(args.len() == 1, "qualified literal generic arguments retained")
                         seen = true
                     }
@@ -320,12 +363,14 @@ pc_qualified_generic_literal: fn() {
 pc_lexical_and_parser_diagnostics: fn() {
     parsed: parse_source("run: fn() {{\n __value: 1 | 2\n print(__value)\n}}\n".bytes())
     reserved := false
-    retired := false
+    parser := false
+    codes := [String]{}
     loop diagnostic in parsed.diagnostics {
+        codes.push(diagnostic.code.copy())
         if diagnostic.code == "E0067" -> reserved = true
-        if diagnostic.code == "E0398" -> retired = true
+        if diagnostic.code == "E0003" -> parser = true
     }
-    pc_require(reserved && retired, "parser teaching survives lexical reserved-name errors")
+    pc_require(reserved && parser, "parser teaching survives lexical reserved-name errors (diagnostics: {codes.join(", ")})")
 }
 
 // After `==`, `Name{` is a struct pattern only when its
@@ -342,7 +387,7 @@ pc_named_struct_pattern_rhs_init: fn(source: String, label: String) -> Expr {
 pc_named_struct_pattern_rhs: fn() {
     loop rhs in ([String]{"I64{{0}}", "I64{{-4}}"}) {
         init: pc_named_struct_pattern_rhs_init("run: fn() {{ result: errno == {rhs} }}", rhs)
-        pc_require(if init == .Binary(op, _, _, _) -> op == BinOp.Eq else -> false, "typed literal stays value equality: {rhs}")
+        pc_require(if init == .Binary(op, _, _, _, _) -> op == BinOp.Eq else -> false, "typed literal stays value equality: {rhs}")
     }
     constant: parse_source("run: fn() {{\n if kind == CONST {{ print(kind) }}\n if kind == Limit {{ print(kind) }}\n}}\n".bytes())
     pc_require(constant.diagnostics.len() == 0, "a name compared before an `if` body stays a value")

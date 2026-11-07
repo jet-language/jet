@@ -1,4 +1,13 @@
 name: "rust_foreign_fixture"
 version: "0.1.0"
 edition: "2026"
-authority: { allow: [IO] }
+deps: {
+    jet_cli: ../../../JetCli,
+    jet_driver: ../../../JetDriver,
+    jet_foundation: ../../../JetFoundation,
+    jet_parser: ../../../JetParser,
+    // jet_cli's own Jetpack dependencies are reachable only beside a Jetpack
+    // directory this root declares (E1223).
+    jet_env_model: ../../../../Jetpack/EnvModel,
+}
+authority: { allow: [Env, FS, IO] }
