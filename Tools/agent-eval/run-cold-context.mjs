@@ -494,7 +494,6 @@ function jetEnvironment(env = process.env) {
   const next = { ...env };
   const config = String(next.NIX_CONFIG ?? "").trim();
   next.NIX_CONFIG = config ? `${config}\nwarn-dirty = false` : "warn-dirty = false";
-  next.JET_NIX_TMP_CLEANED = "1";
   return next;
 }
 

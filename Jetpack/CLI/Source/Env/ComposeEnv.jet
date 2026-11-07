@@ -155,10 +155,6 @@ NativeActivation: enum {
     Disabled
 }
 
-NixShellScratch: enum {
-    NotCreated
-}
-
 // Typed host facts for the Jet-native shell projection. The variable maps
 // are only the child-process adapter; paths and markers stay typed until
 // then. Paths inside realized outputs are lease text the shell renders for
@@ -169,7 +165,6 @@ NativeEnvironmentProjection: struct {
     tzdir: LeaseText?
     loader_paths: [LeaseText]
     activation: NativeActivation
-    nix_shell_scratch: NixShellScratch
 
     from_realized: fn(project_root: String, realized: [(name: String, output: LeaseText)], dev_tools: [(command: String, binary: String)], inherited_loader_path: String?) -[Env]> NativeEnvironmentProjection Never! {
         native_bin_dirs := [String]{}
@@ -195,9 +190,7 @@ NativeEnvironmentProjection: struct {
                 if path != "" -> loader_paths.push(LeaseText.plain(path))
             }
         }
-        // Jetpack never creates Nix shell scratch directories; the marker
-        // records that the old one-time cleanup boundary is satisfied.
-        NativeEnvironmentProjection{project_root, native_bin_dirs, tzdir, loader_paths, activation: NativeActivation.Disabled, nix_shell_scratch: NixShellScratch.NotCreated}
+        NativeEnvironmentProjection{project_root, native_bin_dirs, tzdir, loader_paths, activation: NativeActivation.Disabled}
     }
 
     bin_dirs: fn(self) -> [String] Never! {
@@ -208,9 +201,6 @@ NativeEnvironmentProjection: struct {
         vars := [String: String]{"JET_ROOT": self.project_root}
         if self.activation == {
             .Disabled -> vars[ENV_DISABLE_VAR] = "1"
-        }
-        if self.nix_shell_scratch == {
-            .NotCreated -> vars["JET_NIX_TMP_CLEANED"] = "1"
         }
         vars
     }
