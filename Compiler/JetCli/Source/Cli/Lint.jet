@@ -1,4 +1,5 @@
-// Lint --complexity and the JSON-aware --a11y host.
+// Lint --complexity and the JSON-aware --a11y host. `lint --cost` is an
+// unbuilt form: no cost producer exists yet.
 use {
     jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     cli_time: core.time
@@ -12,11 +13,8 @@ use {
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USAGE,
         JET_DRIVER_EXIT_USER_ERROR,
-        TCostReport,
     ]
     jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, diagnostic_from_registry, diagnostic_line_at, diagnostic_render_all]
-    jet_driver.[JetDriverIceRow, jet_driver_cost_query, jet_driver_ice_record, jet_driver_ice_text]
-    jet_foundation.[TCostKind, TCostState, diagnostic_registry_row, checked_cost_operation, checked_cost_fix]
 }
 
 jet_cli_lint_errors: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, json: Bool) -> JetDriverVerbOutput {
@@ -159,61 +157,4 @@ jet_cli_lint_complexity_report: fn(file: String, source: String, budget: Int?, c
         if json -> stdout = "{jet_cli_status_json(jet_cli_status_array(rows))}\n"
     }
     JetDriverVerbOutput{stdout: stdout, stderr: if !json && exceeded.len() > 0 -> diagnostic_render_all(file, source, exceeded, color) else -> "", exit_code: if exceeded.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR}
-}
-
-jet_cli_cost_same: fn(left: Diagnostic, right: Diagnostic) -> Bool Never! {
-    left.code == right.code && left.severity == right.severity && left.span == right.span && left.what == right.what && left.why == right.why && left.fix == right.fix
-}
-jet_cli_cost_add: fn(rows: &[Diagnostic], diagnostic: Diagnostic) Never! {
-    loop previous in rows {
-        if jet_cli_cost_same(previous, diagnostic) {
-            return
-        }
-    }
-    rows.push(diagnostic.copy())
-}
-jet_cli_cost_diagnostics: fn(report: TCostReport, sema: [Diagnostic]) -> [Diagnostic] Never! {
-    rows := [Diagnostic]{}
-    loop diagnostic in sema {
-        if diagnostic.code == "L2510" -> jet_cli_cost_add(rows, diagnostic)
-    }
-    registry: diagnostic_registry_row("L2510") ?? panic("L2510 must be registered")
-    loop site in report.sites {
-        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || site.kind == TCostKind.ViewMaterialization -> next
-        operation: checked_cost_operation(site.kind)
-        fix: checked_cost_fix(site.kind)
-        diagnostic: diagnostic_from_registry("L2510", Val(site.span), registry.what.replace("{{operation}}", operation), registry.why, registry.fix.replace("{{fix_text}}", fix))
-        jet_cli_cost_add(rows, diagnostic)
-    }
-    rows
-}
-// A cost query that produced no report met a specialization the compiler
-// does not lower: a compiler fault (AGENTS.md I2), one ICE row per gap.
-jet_cli_lint_cost_gap: fn(file: String, gaps: [String]) -> JetDriverVerbOutput {
-    census := [JetDriverIceRow]{}
-    loop gap in gaps -> jet_driver_ice_record(census, "-", "cost.project", "unlowered", gap)
-    if census.len() == 0 -> jet_driver_ice_record(census, "-", "cost.project", "unlowered", "the checked projection did not complete")
-    jet_cli_ice("the cost projection of `{file}` failed: {jet_driver_ice_text(census)}")
-}
-
-jet_cli_lint_cost: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
-    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Doc)
-    if prepared == {
-        .Refused(refusal) -> output = refusal.move()
-        .Prepared(request, snapshot) -> {
-            query: jet_driver_cost_query(request)
-            diagnostics: jet_driver_present_diagnostics(query.compile.diagnostics, snapshot, query.compile.generated_source_files)
-            errors: jet_cli_errors(diagnostics)
-            if errors.len() > 0 -> jet_cli_finish(jet_cli_lint_errors(file, source, errors, color, json))
-            if query.compile.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
-            report: query.report ?? jet_cli_finish(jet_cli_lint_cost_gap(file, query.gaps))
-            lints: jet_cli_cost_diagnostics(report, diagnostics)
-            if lints.len() == 0 -> jet_cli_finish(JetDriverVerbOutput{stdout: if json -> jet_cli_render_all_json(jet_cli_report_base(file), file, source, [Diagnostic]{}) else -> "ok: `{file}` has no hidden dynamic costs in loops\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
-            count: lints.len()
-            stderr: if json -> jet_cli_render_all_json(jet_cli_report_base(file), file, source, lints) else -> "{diagnostic_render_all(file, source, lints, color)}\n{count} hidden dynamic cost warning{if count == 1 -> "" else -> "s"} found\n"
-            jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR})
-        }
-    }
-    output
 }

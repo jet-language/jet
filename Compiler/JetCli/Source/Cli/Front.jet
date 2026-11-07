@@ -1840,6 +1840,7 @@ jet_cli_lint: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, j
     if categories != 1 {
         return jet_cli_fail("E2102", "usage: jet lint --a11y|--complexity|--cost <file.jet>", "`lint` needs exactly one category flag", "run `jet lint --a11y <file.jet>`, `jet lint --complexity <file.jet>`, or `jet lint --cost <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
     }
+    if cost -> return jet_cli_not_ported("lint --cost", color)
     target: args[1]
     file := target
     notice := ""
@@ -1855,7 +1856,7 @@ jet_cli_lint: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, j
         if !cli_files.is_file(target) && cli_files.is_file("{target}.jet") -> file = "{target}.jet"
     }
     source: cli_files.read(file) ?? return jet_cli_report_done(notice, "E2105", "can't find the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
-    JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice, category: if complexity -> "complexity" else if cost -> "cost" else -> "a11y", raw: jet_argv, json: json}
+    JetCLIPlan.Lint{file: file, source: source, color: color, notice: notice, category: if complexity -> "complexity" else -> "a11y", raw: jet_argv, json: json}
 }
 
 // A command run with no target: its help on stderr (unless `quiet`) as a

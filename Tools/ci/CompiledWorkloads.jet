@@ -52,6 +52,8 @@ TIER_REPORT_HEADER: "version\ttask_id\tlanguage\tplatform\ttarget\ttier\tstatus\
 PEER_COVERAGE_HEADER: "version\tpeer_key\ttask_id\tselection\tlanguage\tprogram\tsource\tsource_revision\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tstatus\tplatform\ttarget\ttier\tcommand\tevidence"
 PEER_MEASUREMENT_HEADER: "version\tpeer_key\ttask_id\tselection\tlanguage\tmetric\tsamples\tmedian\tmin\tmax\trelative_stdev\tunit\tstatus\tevidence\tplatform\ttarget\ttier"
 REVIEW_HEADER: "version\treviewer\treviewed_candidate\tcompiler_sha256\tcontract_sha256\tsource_closure_sha256\treport_sha256\tworkload_fairness\tpeer_fairness\tauthority_fairness\tmeasurement_fairness\ttier_fairness\tloss_ownership\tstatus\tevidence\treview_workflow\treview_run\treview_actor"
+// The synthetic candidate commit the self-check's report and review name.
+SELF_CHECK_CANDIDATE: "1111111111111111111111111111111111111111"
 
 #Error
 Problem: struct {
@@ -2042,10 +2044,10 @@ SelfCheck: struct {
 self_check: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int {
     contract: static_contract(root) ?? return gate_failed(err)
     term.print(contract.summary)
-    candidate: head_commit(root) ?? {
-        term.eprint("compiled workload gate self-check: {err.message}")
-        return 1
-    }
+    // The self-check proves the gate on a synthetic report, so its candidate is
+    // a fixed synthetic commit rather than the tree's: an exported release tree
+    // has no git history to name one.
+    candidate: SELF_CHECK_CANDIDATE
     work: "{scratch_root()}/compiled-workload-gate.{time.unix_ns()}"
     files.create_dir_all("{work}/pass") ?? {
         term.eprint("compiled workload gate self-check: `{work}` cannot be created: {err}")
