@@ -211,6 +211,14 @@ cases_test_source: fn(root: String, name: String, text: String) {
     assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "wait: interrupted")))
 }
 
+#Test("a ledger row owns a build the product refuses as unsupported, at every tier") {
+    refused: KitOutcome{verdict: kit_expect_verdict("UNSUPPORTED", "front end/build exit 1: Error [jet.InvalidCommandInput]: `compute.jvp` is not built yet"), run: kit_steps_action_run()}
+    owned: kit_cases_known_verdict(refused, "#6627 jvp has no lowering yet")
+    assert_eq(owned.verdict.status, "KNOWN-FAILING")
+    assert(owned.verdict.detail.starts_with("#6627 jvp has no lowering yet: front end/build exit 1"))
+    assert_eq(kit_cases_known_verdict(refused, "").verdict.status, "UNSUPPORTED")
+}
+
 #Test("a ledger row owns a seam refusal only when its reason names that exact seam") {
     refused: KitOutcome{verdict: kit_expect_verdict("REFUSED", "store-ingest"), run: kit_steps_action_run()}
     owned: kit_cases_known_verdict(refused, "#3590 REFUSED: store-ingest Store is not a package")
