@@ -375,9 +375,11 @@ guard: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
 }
 
 #Test("a job's exit code is its own, 128+N for a signal and 124 for a timeout") {
-    ok: process.cmd([String]{"sh", "-c", "exit 3"}).run() ?? panic("sh: {err}")
-    assert_eq(job_code(ok), 3)
-    killed: process.cmd([String]{"sh", "-c", "kill -TERM $$"}).run() ?? panic("sh: {err}")
+    ok: process.cmd([String]{"false"}).run() ?? panic("false: {err}")
+    assert_eq(job_code(ok), 1)
+    child: process.cmd([String]{"sleep", "30"}).spawn() ?? panic("sleep: {err}")
+    child.terminate() ?? panic("terminate: {err}")
+    killed: child.wait() ?? panic("wait: {err}")
     assert_eq(job_code(killed), 143)
     slow: process.cmd([String]{"sleep", "5"}).timeout(100ms).run() ?? panic("sleep: {err}")
     assert_eq(job_code(slow), 124)

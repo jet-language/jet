@@ -215,16 +215,23 @@ check_rows: fn(root: String, text: String, scratch: String, run_dir: String) -[E
             .Ok(_) -> {}
             .Err(error) -> return fail("cannot copy {row.source}: {error}")
         }
-        build: process.cmd([String]{"sh", "-c", "exec \"$0\" jet build --target=web main.jet >build.log 2>&1", "{root}/{JET_ENV}"})
+        // The build's output, then its errors, are kept in build.log.
+        build: process.cmd([String]{"{root}/{JET_ENV}", "jet", "build", "--target=web", "main.jet"})
             .cwd(case_dir)
             .env("JET_ROOT", root)
             .env("TMPDIR", scratch)
-        built: if build.run() == {
-            .Ok(receipt) -> receipt.code == 0
-            .Err(_) -> false
+            .output_limit(16777216)
+        built := false
+        log := [U8]{}
+        if build.run() == {
+            .Ok(receipt) -> {
+                built = receipt.code == 0 && receipt.signal == None
+                log = "{receipt.output}{receipt.errors}".bytes()
+            }
+            .Err(error) -> log = "{JET_ENV} could not start: {error}\n".bytes()
         }
+        files.write_bytes("{case_dir}/build.log", log).drop("build.log is only a record of the build")
         if !built {
-            log: files.read_bytes("{case_dir}/build.log") ?? [U8]{}
             errors := term.stderr()
             errors.write(String.from_bytes_lossy(first_lines(log, 120))).drop("web bundle stderr")
             return fail("build failed: {row.workload}")
