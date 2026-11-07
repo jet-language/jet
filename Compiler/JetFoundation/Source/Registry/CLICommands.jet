@@ -684,9 +684,11 @@ JetCLIFormSpec: struct {
     argv: [String]
 }
 
-// The command model. Help, completions and man leave out every form a row
-// marks unported; its E2104 "not built yet" report names the row's card, and
-// `jet help --all` lists the rows.
+// The command model. The usage page, completions and man leave out every form
+// a row marks unported (a group's own help page lists its whole family); the
+// E2104 "not built yet" report names the row's card, and `jet help --all`
+// lists the rows. A row names only a form with no implementation: `jet perf`
+// lists its family, so the rows are its actions.
 JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
     // Whole commands.
     {form: "db", ported: false, card: 6418, argv: [String]{"db"}},
@@ -694,8 +696,13 @@ JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
     {form: "package", ported: false, card: 6418, argv: [String]{"package"}},
     {form: "flash", ported: false, card: 6418, argv: [String]{"flash"}},
     {form: "notebook", ported: false, card: 6418, argv: [String]{"notebook"}},
-    {form: "perf", ported: false, card: 6418, argv: [String]{"perf", "run"}},
     // Group actions.
+    {form: "perf run", ported: false, card: 6418, argv: [String]{"perf", "run"}},
+    {form: "perf test", ported: false, card: 6418, argv: [String]{"perf", "test"}},
+    {form: "perf attach", ported: false, card: 6418, argv: [String]{"perf", "attach"}},
+    {form: "perf view", ported: false, card: 6418, argv: [String]{"perf", "view"}},
+    {form: "perf compare", ported: false, card: 6418, argv: [String]{"perf", "compare"}},
+    {form: "perf export", ported: false, card: 6418, argv: [String]{"perf", "export"}},
     {form: "self update", ported: false, card: 6418, argv: [String]{"self", "update"}},
     {form: "self lsp", ported: false, card: 6386, argv: [String]{"self", "lsp"}},
     {form: "self exec", ported: false, card: 6418, argv: [String]{"self", "exec"}},

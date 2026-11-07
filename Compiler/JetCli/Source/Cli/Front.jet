@@ -2082,7 +2082,11 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             }
         }
     }
-    if argv[0] == "perf" -> return jet_cli_not_ported(argv[0], color)
+    // `jet perf` lists its family; no action of it runs yet.
+    if argv[0] == "perf" {
+        form: if argv.len() > 1 && jet_cli_form_card("perf {argv[1]}") != None -> "perf {argv[1]}" else -> "perf"
+        return jet_cli_not_ported(form, color)
+    }
 
     // The program's words: everything after the first standalone `--`, or
     // every word after the file of the `jet <file>` shorthand (a `--` right

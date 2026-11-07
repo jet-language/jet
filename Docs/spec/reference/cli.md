@@ -224,6 +224,7 @@ jet debug [<file.jet>]               Debug a program from Jet source
 jet registry <command>               Publish and manage packages
 jet env <command>                    Open the project development shell
 jet new <name> [--template cli|ui|web|overrides] Create a Jet project
+jet perf <command>                   Collect and inspect performance traces
 jet budget [args]                    Check performance limits or update baselines
 jet help [<command>] [--sort frequency|az|za] Show command help
 jet update [args]                    Update dependency or toolchain pins
@@ -267,10 +268,13 @@ One table, the command model (`JET_CLI_FORMS` in
 forms this compiler has not built yet: a command (`db`), a group action
 (`self lsp`), a flag of a command (`build --lib`), a flag value
 (`build --target wasm.wasi`) or a project shape (`<workspace with a missing
-member>`). A form no row names is built. Help, `jet self man` and the shell
-completions leave every unbuilt form out; running one answers E2104, whose Fix
-names the Tower card that owns its port. `jet help --all` prints the usage page
-followed by the full not-built list with those cards.
+member>`). A form no row names is built. The usage page, `jet self man` and
+the shell completions leave every unbuilt form out; a group's own help page
+(`jet perf help`, `jet help self`) lists its whole family. Running an unbuilt
+form answers E2104, whose Fix names the Tower card that owns its port. `jet
+help --all` prints the usage page followed by the full not-built list with
+those cards. A command's own help shows each of its flags with that command's
+meaning only.
 
 `jet try` reports compiler-query and checked-index failures through its existing
 typed output error boundary before publishing a speculative verdict. Disk and

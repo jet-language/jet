@@ -172,15 +172,17 @@ jet_cli_action_help_summary: fn(group: String, action: JetCLIActionSpec) -> Stri
     action.summary.copy()
 }
 
-// One group's usage block: its own usage row, then one row per action form
-// the command model marks ported.
-jet_cli_group_usage: fn(name: String) -> String Never! {
+// One group's usage block: its own usage row, then one row per action form.
+// The usage page, man and completions list only the actions the command model
+// marks ported; the group's own help page (`family`) lists its whole family,
+// and running an unbuilt action answers E2104 naming its card.
+jet_cli_group_usage: fn(name: String, family: Bool) -> String Never! {
     index: jet_cli_group_index(name) ?? return ""
     group: JET_CLI_COMMANDS[index]
     out := ""
     if group.usage == .Val(usage) -> out = "  {JET_CLI_BINARY} {jet_cli_pad(usage, 48)} {group.summary}\n"
     loop action in group.actions {
-        if !jet_cli_form_ported("{group.name} {action.name}") -> next
+        if !family && !jet_cli_form_ported("{group.name} {action.name}") -> next
         summary: jet_cli_action_help_summary(group.name, action)
         loop usage in action.usage.split("\n").to_list() {
             out = "{out}  {JET_CLI_BINARY} {group.name} {jet_cli_pad(usage, 48)} {summary}\n"
@@ -291,19 +293,45 @@ jet_cli_flag_takes: fn(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
 }
 
 // Flags attached to one command: the scoped flags that name it plus the global
-// output flags, each with its help text after the scope prefix. A flag the
-// command model marks unported for the command is left out.
+// output flags. A scoped flag shows only the ported clauses that scope it to
+// this command, each without its scope prefix, so a flag with a meaning per
+// command shows this command's; a flag with no such clause (the command model
+// marks it unported for the command) is left out.
 jet_cli_flags_for_command: fn(name: String) -> [JetCLIFlagSpec] Never! {
     flags := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
         commands: jet_cli_flag_commands(spec.help) ?? [String]{}
-        if !commands.contains(name) && !JET_CLI_GLOBAL_FLAGS.contains(spec.long) -> next
+        global: JET_CLI_GLOBAL_FLAGS.contains(spec.long)
+        if !commands.contains(name) && !global -> next
         if !jet_cli_form_ported("{name} {spec.long}") -> next
         shown: jet_cli_flag_ported_help(spec) ?? next
-        help: if jet_cli_flag_scope(shown) == .Val(parts) -> parts[1] else -> shown
-        flags.push(JetCLIFlagSpec{long: spec.long, help: help})
+        help: jet_cli_flag_help_for(shown, name)
+        if help == "" && !global -> next
+        flags.push(JetCLIFlagSpec{long: spec.long, help: if help == "" -> shown else -> help})
     }
     flags
+}
+
+// The help one command's usage shows for a flag's help line: the text of each
+// `With <forms>: ` clause whose forms name the command (with the unscoped
+// clauses that continue it), without the prefix and starting with a capital;
+// an unscoped (global) flag's whole line.
+jet_cli_flag_help_for: fn(help: String, name: String) -> String Never! {
+    if jet_cli_flag_commands(help) == None -> return help.copy() // copy: the caller keeps its line.
+    texts := [String]{}
+    taken := false
+    loop clause in help.split("; ").to_list() {
+        if jet_cli_flag_scope(clause) == .Val(parts) {
+            commands: jet_cli_flag_commands(clause) ?? [String]{}
+            taken = commands.contains(name)
+            if !taken -> next
+            text: parts[1]
+            texts.push("{text.slice(0..<1).to_upper()}{text.slice(1..<text.len())}")
+            next
+        }
+        if taken -> texts.push(clause.copy()) // copy: the clause list keeps its row.
+    }
+    texts.join("; ")
 }
 
 // The words of a command-model form: `=` is a space.
@@ -505,7 +533,9 @@ jet_cli_usage_page: fn(order: String) -> String Never! {
     }
     loop index in commands {
         command: JET_CLI_COMMANDS[index]
-        if command.actions.len() > 0 && jet_cli_form_ported(command.name) -> out = "{out}\n{jet_cli_group_label(command.name)} Commands:\n{jet_cli_group_usage(command.name)}"
+        if command.actions.len() == 0 || !jet_cli_form_ported(command.name) -> next
+        usage: jet_cli_group_usage(command.name, false)
+        if usage != "" -> out = "{out}\n{jet_cli_group_label(command.name)} Commands:\n{usage}"
     }
     out = "{out}\nFlags:\n"
     loop spec in JET_CLI_FLAGS {
@@ -553,10 +583,11 @@ jet_cli_flag_help_rows: fn(flags: [JetCLIFlagSpec]) -> String Never! {
     out
 }
 
-// `jet <group> help` for an exhaustive group (and `env`): summary, then usage.
+// `jet <group> help` for an exhaustive group (and `env`): summary, then the
+// group's whole family.
 jet_cli_group_help: fn(name: String) -> String Never! {
     index: jet_cli_group_index(name) ?? return ""
-    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n{jet_cli_group_usage(name)}"
+    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n{jet_cli_group_usage(name, true)}"
 }
 
 // `jet <cmd> --help` and `jet help <cmd>`.
@@ -564,7 +595,7 @@ jet_cli_command_help: fn(name: String) -> String Never! {
     // `diff`/`merge` carry their own structural usage (StructuralMerge.jet).
     if jet_cli_structural_help(name) == .Val(bespoke) -> return bespoke
     if jet_cli_group_index(name) == .Val(index) {
-        out := "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n{jet_cli_group_usage(name)}"
+        out := "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n{jet_cli_group_usage(name, true)}"
         if name == "db" -> out = "{out}\nFlags:\n{jet_cli_flag_help_rows(jet_cli_flags_for_command(name))}"
         return out
     }
