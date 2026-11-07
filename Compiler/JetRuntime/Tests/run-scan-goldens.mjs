@@ -10,8 +10,7 @@ import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { candidateJetc0 } from "../../JetBackend/Tests/jet-front.mjs";
-import { runNativeLibrary } from "../../../Tools/agent/compiler-native-transport.mjs";
-import { parseRuntimeExports, runtimeLifecycleList } from "../../../Tools/agent/runtime-route-abi.mjs";
+import { runNativeLibrary, runtimeLifecycleList } from "../../../Tools/agent/compiler-native-transport.mjs";
 import { faultReportObject } from "../../../Tools/packaging/fault-report-object.mjs";
 import { nativeCCompiler } from "../../../Tools/packaging/native-c-compiler.mjs";
 
@@ -124,7 +123,7 @@ try {
   mkdirSync(join(unit, "Source"), { recursive: true });
   writeFileSync(join(unit, "Source/Fixture.jet"), source);
   writeFileSync(join(unit, "package.jet"), readFileSync(join(root, "Compiler/JetRuntime/package.jet")));
-  writeFileSync(join(unit, "lifecycle.list"), runtimeLifecycleList(parseRuntimeExports(source, "Source/Fixture.jet")));
+  writeFileSync(join(unit, "lifecycle.list"), runtimeLifecycleList(source));
   const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(unit, "Source/Fixture.jet"), prefix: join(unit, "fixture"), lifecycle: join(unit, "lifecycle.list"), env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, "store") } });
   if (problem) throw new Error(`lower: ${problem.verdict}: ${problem.detail}`);
   // The fixture object imports jet_rt_fault_report, which Jet's linker writes

@@ -14,7 +14,7 @@ function fixture(body) {
   const tree = mkdtempSync(join(tmpdir(), 'jet-host-carriers-'));
   try {
     // Preserve the generator's real module boundary in the isolated tree.
-    for (const path of [script, 'Tools/agent/runtime-abi-symbols.mjs', rows, ...outputs]) {
+    for (const path of [script, 'Tools/agent/runtime-static-text.mjs', rows, ...outputs]) {
       mkdirSync(dirname(join(tree, path)), { recursive: true });
       copyFileSync(join(root, path), join(tree, path));
     }

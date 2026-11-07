@@ -7,8 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'compile', 'link', 'run'].includes(mode)) throw Error('usage: run-host-fixtures.mjs OUT assemble|lower|audit|compile|link|run');
@@ -23,7 +22,7 @@ if (mode === 'assemble') {
   // check-runtime appends the HostSpawn test fragment to the one runtime unit.
   command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only', '--test', 'HostSpawn']);
   const source = readFileSync(join(dir, 'unit.jet'), 'utf8');
-  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(source, 'unit.jet')));
+  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(source));
 } else if (mode === 'lower') {
   const prefix = join(dir, 'fixture');
   const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(dir, 'unit.jet'), prefix, lifecycle: join(dir, 'lifecycle.list'), timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 0), env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });

@@ -2,10 +2,19 @@
 // Receipts record real command outcomes; artifacts, not a bootstrap completion
 // string, establish whether the requested native feed was produced.
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { parseRuntimeExports, runtimeLifecycleList } from './runtime-route-abi.mjs';
+import { fileURLToPath } from 'node:url';
+import { toolJet } from './roots.mjs';
+
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+
+// lifecycle.list for a library object built from exactly the runtime source
+// text `source`: Tools/agent/RuntimeGenerators.jet lifecycle, run by the tool jet.
+export function runtimeLifecycleList(source) {
+    return execFileSync(toolJet(), ['Tools/agent/RuntimeGenerators.jet', 'lifecycle', '-'], { cwd: repo, input: source, encoding: 'utf8', maxBuffer: 128 << 20, stdio: ['pipe', 'pipe', 'inherit'] });
+}
 
 export const nativeTransportPackage = 'name: "compiler_registry_transport"\nversion: "0.0.1"\nedition: "2026"\nauthority: { allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }\n';
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -31,7 +40,7 @@ function command(jet, args, { prefix, cwd, env, execute = spawnSync, timeout = N
 
 export function runNativeLibrary({ jet, file, prefix, lifecycle = prefix + '.lifecycle.list', exports: exportsFile = null, env = process.env, cwd = dirname(file), execute, timeout }) {
     mkdirSync(dirname(lifecycle), { recursive: true });
-    if (!existsSync(lifecycle)) writeFileSync(lifecycle, runtimeLifecycleList(parseRuntimeExports(readFileSync(file, 'utf8'), file)));
+    if (!existsSync(lifecycle)) writeFileSync(lifecycle, runtimeLifecycleList(readFileSync(file, 'utf8')));
     for (const suffix of ['.o', '.exports', '.abi.json', '.threads', '.issues']) rmSync(prefix + suffix, { force: true });
     const hookEnv = { ...nativeTransportEnvironment(env), JET_FRONT_LIBRARY_OBJECT_OUTPUT: resolve(prefix), JET_FRONT_LIBRARY_LIFECYCLE: resolve(lifecycle) };
     if (exportsFile) hookEnv.JET_FRONT_LIBRARY_EXPORTS = resolve(exportsFile);

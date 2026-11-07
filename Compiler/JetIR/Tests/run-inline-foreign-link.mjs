@@ -2,11 +2,11 @@
 // Compile and execute the Jetpack inline-bridge build-script template.
 // Usage: node Compiler/JetIR/Tests/run-inline-foreign-link.mjs OUTDIR [SELFHOST.JET]
 import assert from 'node:assert/strict';
-import {spawnSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {dirname,resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {runtimeExportSignatures} from '../../../Tools/agent/runtime-route-abi.mjs';
+import {toolJet} from '../../../Tools/agent/roots.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const out=process.argv[2]&&resolve(process.argv[2]);
 if(!out)throw Error('usage: run-inline-foreign-link.mjs OUTDIR [SELFHOST.JET]');
@@ -54,7 +54,9 @@ for(const fixture of cases){
  }catch(error){rows.push({label,status:'fail',error:error.message});}
 }
 if(process.argv[3]){
- const unit=resolve(process.argv[3]),source=readFileSync(unit,'utf8'),providers=runtimeExportSignatures(root),entries=[];
+ const unit=resolve(process.argv[3]),source=readFileSync(unit,'utf8'),entries=[];
+ // Each runtime #Export(c) symbol and the runtime source that provides it.
+ const providers=new Map(execFileSync(toolJet(),['Tools/agent/RuntimeGenerators.jet','exports'],{cwd:root,encoding:'utf8',maxBuffer:64<<20}).trim().split('\n').map(row=>row.split('\t')));
  const pattern=/^\s*#\[[^\n]*\bFFI\((c|cpp)\)[^\n]*\]\s*\n\s*(?:pub\s+)?([A-Za-z_]\w*):\s*fn\b[^]*?\{\s*"""([^]*?)"""\s*\}/gm;
  for(const match of source.matchAll(pattern))entries.push({language:match[1],name:match[2],source:match[3],line:source.slice(0,match.index).split('\n').length});
  const definitions=new Map(),objects=[],failures=[];
@@ -69,7 +71,7 @@ if(process.argv[3]){
   for(const symbol of symbols(defined.stdout))definitions.set(symbol,entry.name);
   objects.push({...entry,object,undefined:symbols(undefinedSymbols.stdout)});
  }
- const references=objects.flatMap(entry=>entry.undefined.map(symbol=>({from:entry.name,line:entry.line,symbol,definedBy:definitions.get(symbol)??null,nativeProvider:providers.get(symbol)?.path??null}))),projectMissing=references.filter(row=>/^(?:jet_|os_)/.test(row.symbol)&&!row.definedBy&&!row.nativeProvider);
+ const references=objects.flatMap(entry=>entry.undefined.map(symbol=>({from:entry.name,line:entry.line,symbol,definedBy:definitions.get(symbol)??null,nativeProvider:providers.get(symbol)??null}))),projectMissing=references.filter(row=>/^(?:jet_|os_)/.test(row.symbol)&&!row.definedBy&&!row.nativeProvider);
  const bridgeProof=objects.length?command('census-bridge-proof',objects.some(entry=>entry.language==='cpp')?cxx:cc,['-shared','-Wl,--no-undefined',...objects.map(entry=>entry.object),'-o',join(out,'census/bridge.so')],root):{status:null};
  const census={unit,entries:entries.map(({source,...entry})=>entry),compiled:objects.length,failures,bridgeProofStatus:bridgeProof.status,crossTranslationUnitReferences:references.filter(row=>row.definedBy),runtimeReferences:references.filter(row=>/^jet_/.test(row.symbol)),allUndefinedReferences:references,missingProjectSymbols:projectMissing};
  writeFileSync(join(out,'census.json'),JSON.stringify(census,null,2)+'\n');

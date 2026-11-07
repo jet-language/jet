@@ -6,8 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-parallel-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -24,7 +23,7 @@ if (mode === 'assemble') {
   const unit = paths.map(path => readFileSync(join(root, path), 'utf8')).join('\n');
   writeFileSync(join(dir, 'Source/Fixture.jet'), unit);
   writeFileSync(join(dir, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(unit, 'Source/Fixture.jet')));
+  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(unit));
   writeFileSync(join(dir, 'sources.receipt.json'), JSON.stringify({ paths }, null, 2) + '\n');
 } else if (mode === 'lower') {
   const prefix = join(dir, 'fixture');

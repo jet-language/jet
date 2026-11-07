@@ -37,13 +37,12 @@ allocator `.init_array` entry. Rust-tier allocator bodies remain only as
 ledgered seed/verification paths that die at Rust cutover; native packs never
 link those bodies.
 
-Internal runtime C symbols use the acronym-aware snake projection owned by
-`Tools/agent/runtime-abi-symbols.mjs`; the route generator emits that same
-projection for Lower. For example, the `HTTPClient` symbol atom is
+Internal runtime C symbols use the acronym-aware snake projection of
+`runtime_abi_atom` (`Compiler/JetIR/Source/RuntimeRoutes.jet`), which Lower
+applies; `Tools/agent/gen-runtime-host-carriers.mjs` emits its host carrier
+exports with the same projection. For example, the `HTTPClient` symbol atom is
 `http_client`. Runtime type names, declaration keys, variant identities and
 layout metadata remain nominal: only the ABI symbol atoms are projected.
-Isolated runtime-generator fixtures copy that shared projection module alongside
-the real generator and registry inputs; they do not replace its module boundary.
 Providers, generated adapters and compiler callers use one spelling, with
 collision rejection before a symbol cutover.
 Inside the runtime's assembled source unit, calls use existing Jet provider

@@ -6,8 +6,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } fr
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['--assemble', '--lower', '--run'].includes(mode) || process.argv.length !== 4) {
@@ -34,7 +33,7 @@ if (mode === '--assemble') {
         .replace('= "jet_rt_progress_state_advance"', '= "coll_stop_progress_advance"');
     writeFileSync(unit, assembled.slice(0, iterStart) + iter + assembled.slice(iterEnd));
     appendFileSync(join(out, 'Source/Fixture.jet'), '\n' + readFileSync(join(repo, 'Compiler/JetRuntime/Tests/Fragments.fixture/CollectionsStopTests.jet'), 'utf8'));
-    writeFileSync(join(out, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(readFileSync(unit, 'utf8'), 'Source/Fixture.jet')));
+    writeFileSync(join(out, 'lifecycle.list'), runtimeLifecycleList(readFileSync(unit, 'utf8')));
 } else if (mode === '--lower') {
     const prefix = join(out, 'fixture');
     const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(out, 'Source/Fixture.jet'), prefix, lifecycle: join(out, 'lifecycle.list'), timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 120000), env: { ...process.env, JET_TOOLCHAIN_ROOT: repo, JET_STORE_DIR: join(out, 'store'), RUST_MIN_STACK: '8388608' } });

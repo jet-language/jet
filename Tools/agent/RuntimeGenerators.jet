@@ -1,10 +1,18 @@
 #!/usr/bin/env jet
 // The runtime's generated tables, from their one source each.
 // Usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only]
+//        jet Tools/agent/RuntimeGenerators.jet lifecycle FILE...
+//        jet Tools/agent/RuntimeGenerators.jet exports
 //   (default)        rewrite every stale output
 //   --check          write nothing; report every stale output
 //   --defects-only   regenerate only the private trap defect rows, refusing
 //                    when the frozen ordinary trap projection differs
+//   lifecycle        print the lifecycle.list of a library object built from
+//                    exactly the runtime sources FILE... (`-`: stdin; a
+//                    fixture's unit)
+//   exports          print `SYMBOL<TAB>FILE` for each #Export(c) function of
+//                    the runtime sources sources.list names, in its order
+// Run it from the repository root; every path is relative to it.
 use {
     crypto: core.crypto
     json: core.encoding.json
@@ -39,14 +47,18 @@ write_output: fn(path: String, text: String) GeneratorError! {
     files.write(path, text) ?? return Err(generator_fail("cannot write {path}: {err}"))
 }
 
-runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
+USAGE: "usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only] | lifecycle FILE... | exports"
+
+runtime_generators_main: fn(args: [String]) -[FS, IO]> String GeneratorError! {
+    if args.len() > 0 && args[0] == "lifecycle" -> return unit_lifecycle_list(args)
+    if args.len() == 1 && args[0] == "exports" -> return runtime_export_files()
     check := false
     defects_only := false
     loop arg in args {
         if {
             arg == "--check" -> check = true
             arg == "--defects-only" -> defects_only = true
-            else -> return Err(generator_fail("usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only]"))
+            else -> return Err(generator_fail(USAGE))
         }
     }
     registry: files.read(REGISTRY_PATH) ?? return Err(generator_fail("cannot read {REGISTRY_PATH}: {err}"))
@@ -118,6 +130,41 @@ runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     if check -> return Ok("runtime generated tables are current")
     Ok("")
+}
+
+// `lifecycle FILE...` (`args` with its mode word): the lifecycle.list of
+// exactly those runtime sources, without its final newline. A FILE `-` is
+// the source text on stdin.
+unit_lifecycle_list: fn(args: [String]) -[FS, IO]> String GeneratorError! {
+    if args.len() < 2 -> return Err(generator_fail(USAGE))
+    problems := [String]{}
+    sources := [RuntimeSource]{}
+    loop at in 1..<args.len() {
+        path: args[at]
+        if path == "-" {
+            if term.read_all_input() == {
+                .Ok(text) -> sources.push(RuntimeSource{path: "stdin", text: text})
+                .Err(error) -> problems.push("cannot read stdin: {error}")
+            }
+            next
+        }
+        if files.read(path) == {
+            .Ok(text) -> sources.push(RuntimeSource{path: path.copy(), text: text}) // copy: `args` keeps its rows
+            .Err(error) -> problems.push("cannot read {path}: {error}")
+        }
+    }
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    list: lifecycle_list(sources) ?? return Err(err)
+    list.removesuffix("\n")
+}
+
+// `exports`: `SYMBOL<TAB>FILE` for each runtime #Export(c) function, in
+// sources.list order.
+runtime_export_files: fn() -[FS]> String GeneratorError! {
+    sources: read_runtime_sources() ?? return Err(err)
+    rows := [String]{}
+    loop export in placed_exports(sources) ?? return Err(err) -> rows.push("{export.name}\t{export.path}")
+    rows.join("\n")
 }
 
 run: fn() {
@@ -1191,12 +1238,19 @@ runtime_exports: fn(source: String, path: String) -> ParsedExports Never! {
     ParsedExports{exports: exports, problems: problems}
 }
 
-// lifecycle.list for the given runtime sources: one `symbol init|fini N
-// [guards]` row per hook, in symbol order.
-lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
+// One #Export(c) function of a runtime source set and the file declaring it.
+PlacedExport: struct {
+    name: String
+    path: String
+    lifecycle: String
+}
+
+// Every #Export(c) function of `sources`, in source order; a duplicate, a bad
+// declaration and an empty set are refused, every one at once.
+placed_exports: fn(sources: [RuntimeSource]) -> [PlacedExport] GeneratorError! {
     problems := [String]{}
     names := [String]{}
-    rows := [String]{}
+    placed := [PlacedExport]{}
     loop source in sources {
         parsed: runtime_exports(source.text, source.path)
         loop problem in parsed.problems -> problems.push(problem)
@@ -1205,12 +1259,23 @@ lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
                 problems.push("duplicate runtime #Export(c) {export.name}")
                 next
             }
-            names.push(export.name)
-            if export.lifecycle != "" -> rows.push("{export.name} {export.lifecycle}")
+            names.push(export.name.copy()) // copy: the row keeps the name too
+            placed.push(PlacedExport{name: export.name, path: source.path.copy(), lifecycle: export.lifecycle}) // copy: one row per export of the source
         }
     }
     if names.len() == 0 -> problems.push("empty runtime #Export(c) declarations")
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    placed
+}
+
+// lifecycle.list for the given runtime sources: one `symbol init|fini N
+// [guards]` row per hook, in symbol order.
+lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
+    placed: placed_exports(sources) ?? return Err(err)
+    rows := [String]{}
+    loop export in placed {
+        if export.lifecycle != "" -> rows.push("{export.name} {export.lifecycle}")
+    }
     rows.sort()
     lines := [String]{
         "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535> [<guard storage>,...].",
@@ -1295,8 +1360,59 @@ render_lifecycle_list: fn() -[FS]> String GeneratorError! {
     assert_eq(runtime_exports(commented, "M.jet").problems.join("|"), "M.jet: jet_net_raw_resolve_ordered parameter 1 requires the reviewed low-16-bit mask")
     narrow: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: U8) -> I64 {{ kind }}\n"
     assert_eq(runtime_exports(narrow, "M.jet").problems.len(), 0)
+    unmasked: "#Export(c) jet_rt_record_new_jet_resolve_error: fn(kind: I64, flag: I64) -> I64 {{\n    // flag.bit_and(I64{{255}})\n    flag\n}}\n"
+    assert_eq(runtime_exports(unmasked, "M.jet").problems.join("|"), "M.jet: jet_rt_record_new_jet_resolve_error parameter 1 requires the reviewed low-8-bit mask")
     open: "#Export(c) jet_net_raw_resolve_ordered: fn(host: I64, port: I64) -> I64 {{\n    port.bit_and(I64{{65535}})\n"
     assert_eq(runtime_exports(open, "M.jet").problems.join("|"), "M.jet: unterminated masked export jet_net_raw_resolve_ordered")
+}
+
+// The quoted names after each `marker` in `text`.
+quoted_after: fn(text: String, marker: String) -> [String] Never! {
+    pieces: text.split(marker).to_list()
+    names := [String]{}
+    loop at in 1..<pieces.len() -> names.push(pieces[at].partition("\"").head.copy())
+    names
+}
+
+// Record Lists cross every route as handle buffers (the IR's route calls),
+// whatever the provider's ownership. The census freezes the routes whose
+// carriers hold a List of a schema record, so a new Jet provider returning or
+// reading one is reviewed against that contract (a provider handing back
+// inline rows surfaces as a pointer-sized allocation in the first
+// `entry.field` read), and keeps the native witness that reads a field of
+// `files.list_dir`'s result.
+#Test("a route carrying a List of schema records is a reviewed handle-buffer route") {
+    path: "Compiler/JetIR/Source/RuntimeRoutes.jet"
+    routes: files.read(path) ?? panic("{path} did not read: {err}")
+    schemas: quoted_after(routes, "IRRecordSchema{{jet_name: \"")
+    found := [String]{}
+    loop line in routes.lines() {
+        symbols: quoted_after(line, "IRRoute{{symbol: \"")
+        if symbols.len() != 1 -> next
+        loop name in quoted_after(line, "List{{elem: IRRouteCarrier.Handle{{name: \"") {
+            if schemas.contains(name) && !found.contains(symbols[0]) -> found.push(symbols[0].copy()) // copy: `symbols` keeps its row
+        }
+    }
+    found.sort()
+    // Seed adapters always exchanged handle buffers; the Jet-owned rows
+    // (jet_dyn_field, jet_rt_codec_*, jet_std_fs_list_dir_raw) build or read
+    // the same shape.
+    reviewed: [String]{
+        "jet_binary_pattern_match", "jet_dyn_at", "jet_dyn_bool", "jet_dyn_field", "jet_dyn_float", "jet_dyn_int", "jet_dyn_text",
+        "jet_log_record_emit_raw",
+        "jet_net_dns_srv", "jet_net_dns_srv_at_lookup", "jet_net_dns_srv_lookup",
+        "jet_ring_log_debug_fields", "jet_ring_log_error_fields", "jet_ring_log_info_fields", "jet_ring_log_warn_fields",
+        "jet_rt_codec_decode_bool", "jet_rt_codec_decode_char", "jet_rt_codec_decode_float", "jet_rt_codec_decode_i16", "jet_rt_codec_decode_i32",
+        "jet_rt_codec_decode_i64", "jet_rt_codec_decode_i8", "jet_rt_codec_decode_int", "jet_rt_codec_decode_string", "jet_rt_codec_decode_u16",
+        "jet_rt_codec_decode_u32", "jet_rt_codec_decode_u64", "jet_rt_codec_decode_u8", "jet_rt_codec_parse_json", "jet_rt_codec_parse_toml",
+        "jet_rt_codec_parse_yaml", "jet_rt_codec_under", "jet_std_fs_list_dir_raw", "jet_text_pattern_match",
+    }
+    expected := [String]{}
+    loop symbol in reviewed {
+        if routes.contains("IRRoute{{symbol: \"{symbol}\"") -> expected.push(symbol.copy()) // copy: `reviewed` keeps its rows
+    }
+    expected.sort()
+    assert_eq(found, expected)
 }
 
 #Test("every runtime source file is in the manifest") {

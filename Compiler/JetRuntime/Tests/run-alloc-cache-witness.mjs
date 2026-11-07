@@ -10,8 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-alloc-cache-witness.mjs OUT assemble|lower|audit|link|run');
@@ -32,7 +31,7 @@ if (mode === 'assemble') {
   // keeps every hook, so this fixture drops the checked heap's init row
   // (Alloc.jet jet_rt_alloc_check_init): the stress mode runs the allocator
   // a program built without `--checked-alloc` runs.
-  const lifecycle = runtimeLifecycleList(parseRuntimeExports(unit, 'Source/Fixture.jet')).split('\n').filter(line => !line.startsWith('jet_rt_alloc_check_init ')).join('\n');
+  const lifecycle = runtimeLifecycleList(unit).split('\n').filter(line => !line.startsWith('jet_rt_alloc_check_init ')).join('\n');
   writeFileSync(join(dir, 'lifecycle.list'), lifecycle);
   writeFileSync(join(dir, 'sources.receipt.json'), JSON.stringify({ paths }, null, 2) + '\n');
 } else if (mode === 'lower') {

@@ -9,8 +9,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['--assemble', '--lower', '--global', '--initializer', '--allocator'].includes(mode)) {
@@ -30,7 +29,7 @@ if (mode === '--assemble') {
     if (entry < 0) throw Error('Global source witness lost its program entry');
     const globalUnit = global.slice(0, entry) + '\n' + read('Compiler/JetRuntime/Tests/Fragments.fixture/FloatAbi.jet');
     writeFileSync(join(out, 'global/Source/Fixture.jet'), globalUnit);
-    writeFileSync(join(out, 'global/lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(globalUnit, 'Source/Fixture.jet')));
+    writeFileSync(join(out, 'global/lifecycle.list'), runtimeLifecycleList(globalUnit));
     execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--test', 'Alloc'], { stdio: 'inherit' });
     let unit = readFileSync(join(out, 'init/unit.jet'), 'utf8');
     const testHead = 'alloc_tests: fn() {\n';
@@ -40,7 +39,7 @@ if (mode === '--assemble') {
     unit += '\n#Export(c)\nruntime_fixture_root: fn() -> I64 { alloc_root }\n\n#Export(c)\nruntime_fixture_tests: fn() { alloc_tests() }\n';
     writeFileSync(join(out, 'init/Source/Fixture.jet'), unit);
     rmSync(join(out, 'init/unit.jet'));
-    writeFileSync(join(out, 'init/lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(unit, 'Source/Fixture.jet')));
+    writeFileSync(join(out, 'init/lifecycle.list'), runtimeLifecycleList(unit));
     for (const name of ['global', 'init']) writeFileSync(join(out, name, 'package.jet'), read('Compiler/JetRuntime/package.jet'));
 } else if (mode === '--lower') {
     const failures = [];

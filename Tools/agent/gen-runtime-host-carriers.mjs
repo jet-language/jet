@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { runtimeAbiAtom } from "./runtime-abi-symbols.mjs";
 import { staticText, staticTextWorthy } from "./runtime-static-text.mjs";
 // Host C carriers use the checked Core registry's declaration-order tags.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -51,6 +50,15 @@ for (const [name, message] of [["host_stdout_name", "stdout"], ["host_stderr_nam
   if (staticTextWorthy(message)) jet.push(`    jet_rt_string_builder_push(text, ${staticText(message)})`);
   else words(message, "rt_text_push_word(text, ");
   jet.push("    jet_rt_string_builder_finish(text)", "}");
+}
+// The internal C ABI atom of `name`: the acronym-aware snake projection
+// (D-ACRO-CASE1) that Compiler/JetIR/Source/RuntimeRoutes.jet runtime_abi_atom
+// applies for Lower, e.g. `HTTPClient` -> `http_client`.
+function runtimeAbiAtom(name) {
+  if (!/^[A-Za-z0-9_.]+$/.test(name)) throw new Error(`invalid runtime ABI atom ${name}`);
+  return name.split(/[_.]/).filter(Boolean).map(segment => segment
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()).join('_');
 }
 for (const kind of kinds.filter((name) => name !== "ResourceLimit")) {
   const tag = `HOST_IO_KIND_${kind.replace(/([a-z])([A-Z])/g, "$1_$2").toUpperCase()}`;

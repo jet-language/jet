@@ -7,8 +7,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, statSy
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (mode === 'reference') {
@@ -30,7 +29,7 @@ if (mode === 'assemble') {
   const source = paths.map(path => readFileSync(join(root, path), 'utf8')).join('\n');
   writeFileSync(join(unit, 'Source/Fixture.jet'), source);
   writeFileSync(join(unit, 'package.jet'), readFileSync(join(root, 'Compiler/JetRuntime/package.jet')));
-  writeFileSync(join(unit, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(source, 'Source/Fixture.jet')));
+  writeFileSync(join(unit, 'lifecycle.list'), runtimeLifecycleList(source));
   writeFileSync(join(out, 'sources.receipt.json'), JSON.stringify({ paths }, null, 2) + '\n');
 } else if (mode === 'lower') {
   const prefix = join(unit, 'fixture');

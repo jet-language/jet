@@ -9,8 +9,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nativePackHash, readNativeRuntimePack } from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import { fileObject } from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { parseRuntimeExports, runtimeLifecycleList } from '../../../Tools/agent/runtime-route-abi.mjs';
+import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, compiler, runtime, ...extra] = process.argv.slice(2);
 const test = extra.length === 2 && extra[0] === '--test' ? extra[1] : null;
@@ -51,7 +50,7 @@ if (test) {
   command('assemble-fixture', process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), unit, '--assemble-only', '--test', test]);
   const file = join(unit, 'unit.jet'), text = readFileSync(file, 'utf8'), prefix = join(unit, 'fixture');
   const lifecycle = join(unit, 'lifecycle.list');
-  writeFileSync(lifecycle, runtimeLifecycleList(parseRuntimeExports(text, 'unit.jet')));
+  writeFileSync(lifecycle, runtimeLifecycleList(text));
   const lowered = runNativeLibrary({ jet, file, prefix, lifecycle, env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });
   receipt('lower-fixture.json', lowered);
   if (lowered.problem) throw Error(`native ${test} fixture: ${lowered.problem.detail}`);
