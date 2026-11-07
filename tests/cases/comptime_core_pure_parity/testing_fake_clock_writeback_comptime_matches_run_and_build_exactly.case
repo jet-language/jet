@@ -1,0 +1,15 @@
+# tests/comptime_core_pure_parity.rs::rustc_backed_testing_fake_clock_writeback_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly at tests/comptime_core_pure_parity.rs:1363; hand-port
+# Claim: `EXPECTED: comptime { testing_fake_clock_writeback_view() }` is evaluated natively at compile time and equals what the same `testing_fake_clock_writeback_view()` returns at run time, under `jet run` and in the built binary; both lines are the original's exact transcript.
+fixture: testing_fake_clock_writeback_comptime_matches_run_and_build_exactly/input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run run.jet
+exit: 0
+stdout: = "6|10|12|12|12;7|7|7|1\n6|10|12|12|12;7|7|7|1\n"
+stderr: empty
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "6|10|12|12|12;7|7|7|1\n6|10|12|12|12;7|7|7|1\n"
+stderr: empty

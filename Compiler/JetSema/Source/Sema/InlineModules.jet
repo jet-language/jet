@@ -332,24 +332,50 @@ sema_inline_module_lowered: fn(definition: CodeModule) -> Bool Never! {
 // (`use core.[math.abs]`, `pub use exported: core.math.abs`) lowers too: its
 // members read it through the file-level Core alias sema_inline_core_imports adds.
 sema_inline_module_lowerable: fn(definition: CodeModule, file_imports: [ImportDecl]) -> Bool Never! {
-    if definition.body == None -> return false
+    definition.body != None && sema_inline_module_refused_import(definition, file_imports) == None
+}
+
+// The first import of `definition` that keeps its body from lowering (see
+// sema_inline_module_lowerable).
+sema_inline_module_refused_import: fn(definition: CodeModule, file_imports: [ImportDecl]) -> ImportDecl? Never! {
     loop declaration in definition.imports {
         if declaration.kind == {
             .Unqualified(module_alias, _, items, _, _) -> {
                 if module_alias == "core" || module_alias.starts_with("core.") {
                     loop item in items {
-                        if sema_inline_core_member("{module_alias}.{item.original}") == None -> return false
+                        if sema_inline_core_member("{module_alias}.{item.original}") == None -> return Val(declaration.copy())
                     }
                 }
             }
             .Module(name, _) -> {
-                if name != "core" && !name.starts_with("core.") -> return false
-                if !sema_inline_file_binds_module(file_imports, declaration.alias, name) && sema_inline_core_member(name) == None -> return false
+                if name != "core" && !name.starts_with("core.") -> return Val(declaration.copy())
+                if !sema_inline_file_binds_module(file_imports, declaration.alias, name) && sema_inline_core_member(name) == None -> return Val(declaration.copy())
             }
-            else -> return false
+            else -> return Val(declaration.copy())
         }
     }
-    true
+    None
+}
+
+// The E2104 for an inline module, or one nested in it, that stays unlowered
+// because of its own import: lifting that import out with the members is not
+// built yet.
+sema_inline_module_import_unbuilt: fn(definition: CodeModule, file_imports: [ImportDecl]) -> Diagnostic? Never! {
+    body: definition.body ?? return None
+    if sema_inline_module_refused_import(definition, file_imports) == .Val(declaration) {
+        target: if declaration.kind == {
+            .File(path, _) -> path.copy()
+            .Module(name, _) -> name.copy()
+            .Unqualified(module_alias, _, _, _, _) -> module_alias.copy()
+        }
+        return Val(sema_error("E2104", declaration.span, "an inline module's own import of `{target}` is not built yet", "This `jet` cannot yet lift the import of `{target}` out of `module {definition.name}` with the module's members, and no other `jet` can check it.", "Import `{target}` at the top of the file, under an alias no other import uses, for now; inline module imports need their Jet lowering first (card #6674)."))
+    }
+    loop item in body {
+        if item == .CodeModule(child) {
+            if sema_inline_module_import_unbuilt(child, file_imports) == .Val(diagnostic) -> return Val(diagnostic)
+        }
+    }
+    None
 }
 
 // A Core member path (`core.math.abs`) as the qualified target lifted members

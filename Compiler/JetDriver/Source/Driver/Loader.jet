@@ -3331,6 +3331,10 @@ JetDriverCoreIdentifierDemand: struct {
     // unit conversions lower to their `Core/Math/Math.jet` exact-conversion
     // helpers, so core.math loads.
     unit_family: Bool{false}
+    // A `Dest.from_<unit>_rounded(…)` call: a rounded conversion across a
+    // measured unit wraps its scalar in a `core.units` Measurement
+    // (`__measurement_result`), so core.units loads.
+    rounded_conversion: Bool{false}
     // A generic `.decode<T>()` call or a `FieldError.under(…)` call: Dyn decode
     // and `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
     // (BuildDyn.jet ir_dyn_decode, ir_decode_under), so core.encoding loads.
@@ -3466,7 +3470,10 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && token_decoded(tables, tokens[index]).starts_with("from_") {
                 receiver: token_decoded(tables, tokens[index - 2])
                 first: Int.from_u8(receiver.bytes()[0])
-                if first >= 65 && first <= 90 -> demand.unit_family = true
+                if first >= 65 && first <= 90 {
+                    demand.unit_family = true
+                    if token_decoded(tables, tokens[index]).ends_with("_rounded") -> demand.rounded_conversion = true
+                }
             }
             if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
@@ -3578,6 +3585,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         if output.stream_event_time -> demand.stream_event_time = true
         if output.codec_decode -> demand.codec_decode = true
         if output.unit_family -> demand.unit_family = true
+        if output.rounded_conversion -> demand.rounded_conversion = true
         loop bare in output.bare_names {
             if !demand.bare_names.contains(bare) -> demand.bare_names.push(bare)
         }
@@ -4686,6 +4694,17 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
             jet_driver_reach_open(reach, "core.math")
             owner_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.math", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
             if owner_index == .Val(index) {
+                if !queued[index] {
+                    queued[index] = true
+                    pending.push(index)
+                }
+            }
+        }
+        if demand.rounded_conversion {
+            if !bare_modules.contains("core.units") -> bare_modules.push("core.units")
+            jet_driver_reach_open(reach, "core.units")
+            units_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.units", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if units_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)
