@@ -1,6 +1,6 @@
 // What a release directory holds, read from disk. A directory is either a
-// build of Tools/agent/publish-release.mjs (COMMIT, SEED and BUILD.json) or a
-// release Tools/agent/release-compiler.mjs admitted (RELEASE.json). Both ship
+// directory `build` made (COMMIT, SEED and BUILD.json) or a release `admit`
+// admitted (RELEASE.json). Both ship
 // the seed files SHA256SUMS lists. Nothing here judges the facts; Gate.jet does.
 
 use {
@@ -9,7 +9,7 @@ use {
     json: core.encoding.json
 }
 
-// What a seed directory ships (release-compiler.mjs SEED_FILES); jetpack is
+// What a seed directory ships; jetpack is
 // absent from some, and a missing name is skipped as there. RELEASE names the
 // release, so jet can download its own C toolchain pack.
 SEED_FILES: [String]{"jet", "jet-cc", "jet-cxx", "jet-c++", "jetpack", "jet-runtime", "IDENTITY", "RELEASE"}
@@ -51,7 +51,7 @@ Release: struct {
     jet_sha256: String
     commit: String
     seed: String
-    // An admitted release keeps the name release-compiler.mjs gave it.
+    // An admitted release keeps the name `admit` gave it.
     name: String
     target: String
     s2: String
@@ -136,7 +136,7 @@ file_artifact: fn(path: String, shown: String) -[FS]> Artifact Problem! {
 }
 
 // Every regular file under `root`, by relative path, each level sorted by
-// name; symbolic links are skipped (release-compiler.mjs fileHashes).
+// name; symbolic links are skipped.
 tree_artifacts: fn(root: String, prefix: String, out: &[Artifact]) Never! -[FS]> {
     entries: files.list_dir(root) ?? return
     names := [String]{}
@@ -191,7 +191,7 @@ read_release: fn(dir: String) -[FS]> Release Never! {
     required := [String]{"jet", "jet-runtime", "IDENTITY", "SHA256SUMS"}
     if !admitted -> required.extend([String]{"COMMIT", "SEED", "BUILD.json"})
     loop name in required {
-        if !files.exists(files.join(dir, name)) -> release.problems.push(problem(INPUT, "{dir} lacks {name}: not a publish-release.mjs build or a release-compiler.mjs release"))
+        if !files.exists(files.join(dir, name)) -> release.problems.push(problem(INPUT, "{dir} lacks {name}: not a release directory `build` made or a release `admit` admitted"))
     }
     if release.problems.len() > 0 -> return release
     release.identity = first_line(read_text(files.join(dir, "IDENTITY")) ?? "")

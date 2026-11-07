@@ -1,0 +1,231 @@
+// `build COMMIT`: build a compiler release from a dev commit, for
+// `candidate` and `publish` to gate, record and publish as the next a0_NNN
+// GitHub release.
+//
+//   jet run Tools/release/Main.jet -- build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)
+//
+// build starts only with COMMIT's collect-all preflight receipt for the seed
+// DIR (`Tools/agent/Land.jet receipt`, written by `Land.jet census`);
+// --check-gate says whether it would start and stops. It exports COMMIT (it
+// must be on dev) and runs the bootstrap chain of
+// Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on
+// PATH: the seed builds s1, s1 packs its runtime and builds s2, s2 packs its
+// runtime and builds s3, and s2 and s3 must be byte-identical. Every stage
+// runs in the export as its working directory, so the images record source
+// directories relative to it. OUT (new or empty, outside the checkout and
+// /tmp) receives s2 as the release: jet, its aliases, jet-runtime/, IDENTITY
+// (`<seed version>#<sha256 of jet>`), COMMIT, SEED (the seed's identity),
+// BUILD.json (the runner target and the identities of s1, s2 and s3) and
+// SHA256SUMS. A shipped file that names this machine's personal information
+// (the rules of Tools/agent/LaneCheck.jet --patterns) or a build directory
+// fails the build. Logs stay in OUT/logs.
+//
+// Then, in a checkout of COMMIT, once per runner (shard and target):
+//   JET=OUT/jet JET_CI_EVIDENCE_DIR=EVDIR jet Tools/agent/VerifyFull.jet
+//   jet run Tools/release/Main.jet -- candidate OUT --evidence EVDIR...
+//   jet run Tools/release/Main.jet -- publish OUT
+//
+// Environment: JET_PACK_MUSL_LIB (the static musl lib directory
+// prebuild-runtime.mjs links).
+// Exit: 0 done, 1 a check failed, 2 the run could not start.
+
+use {
+    files: core.files
+    json: core.encoding.json
+    term: core.term
+}
+
+BUILD_USAGE: "usage: jet run Tools/release/Main.jet -- build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)"
+
+BuildOptions: struct {
+    commit: String
+    seed: String
+    out: String
+    threads: Int
+    check_gate: Bool
+    errors: [String]
+}
+
+// The options of `build`; every problem is collected at once.
+parse_build_args: fn(args: [String]) -> BuildOptions Never! {
+    options := BuildOptions{commit: "", seed: "", out: "", threads: 8, check_gate: false, errors: [String]{}}
+    index := 0
+    loop index < args.len() {
+        flag: args[index]
+        if flag == "--seed" || flag == "--out" || flag == "--threads" {
+            index += 1
+            value: if index < args.len() -> args[index].copy() else -> ""
+            if {
+                flag == "--threads" && (!is_count(value) || value.starts_with("0")) -> options.errors.push("--threads needs a positive whole number, not {if value == "" -> "nothing" else -> value}")
+                flag == "--threads" -> options.threads = Int.parse(value) ?? 8
+                index >= args.len() -> options.errors.push("{flag} needs a value")
+                flag == "--seed" -> options.seed = value
+                else -> options.out = value
+            }
+        } else if flag == "--check-gate" {
+            options.check_gate = true
+        } else if flag.starts_with("-") {
+            options.errors.push("unknown option {flag}")
+        } else if options.commit != "" {
+            options.errors.push("one commit, not {options.commit} and {flag}")
+        } else {
+            options.commit = flag.copy()
+        }
+        index += 1
+    }
+    if options.commit == "" -> options.errors.push("COMMIT is required")
+    if options.seed == "" -> options.errors.push("--seed is required")
+    if options.out == "" && !options.check_gate -> options.errors.push("--out is required")
+    options
+}
+
+build_fail: fn(code: Int, message: String) -[IO]> Int Never! {
+    if code == 2 -> term.eprint(BUILD_USAGE)
+    loop line in message.split("\n").to_list() -> term.eprint("build: {line}")
+    code
+}
+
+// Whether COMMIT `sha` is on one of `refs`.
+on_any: fn(root: String, sha: String, refs: [String]) -[Exec, Time.Wait]> Bool Never! {
+    loop ref in refs {
+        if git_in(root, [String]{"rev-parse", "--verify", "-q", ref}).rc == 0 && git_in(root, [String]{"merge-base", "--is-ancestor", sha, ref}).rc == 0 -> return true
+    }
+    false
+}
+
+// One built stage: its directory and identity, or why it failed.
+Stage: struct {
+    dir: String
+    identity: String
+    error: String
+}
+
+BuildRun: struct {
+    root: String
+    tree: String
+    work: String
+    logs: String
+    version: String
+    threads: Int
+    vars: [Var]
+    staged: [String]
+}
+
+// `builder` (a directory with jet and jet-runtime/) builds the stage `name`,
+// which then packs its runtime when `pack`.
+build_stage: fn(run: BuildRun, name: String, builder: String, identity: String, pack: Bool) -[Env, Exec, FS, IO, Time, Time.Wait]> Stage Never! {
+    built: files.join(run.tree, "Compiler/JetCli/.jet/build/jet")
+    remove_tree(files.dirname(built))
+    log: files.join(run.logs, "{name}.log")
+    vars: with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", identity)})
+    result: run_logged(joined(run.staged, [String]{files.join(builder, "jet"), "build", "--threads", "{run.threads}", "Compiler"}), run.tree, vars, log, 3600)
+    if result.rc != 0 || !files.exists(built) -> return Stage{dir: "", identity: "", error: "{name}: jet build Compiler rc={result.rc}: {tail_of(log, 6)}"}
+    dir: files.join(run.work, name)
+    files.create_dir_all(dir) ?? return Stage{dir: "", identity: "", error: "{name}: cannot create {dir}: {err}"}
+    copy_file(built, files.join(dir, "jet"), true) ?? return Stage{dir: "", identity: "", error: "{name}: cannot copy {built}: {err}"}
+    own: "{run.version}#{sha256_file(files.join(dir, "jet"))}"
+    say("build", "", "{name}: {own} ({result.wall}s)")
+    if !pack -> return Stage{dir: dir, identity: own, error: ""}
+    pack_log: files.join(run.logs, "{name}-pack.log")
+    packed: run_logged(joined(run.staged, [String]{"node", files.join(run.tree, "Tools/packaging/prebuild-runtime.mjs"), files.join(dir, "jet"), files.join(dir, "jet-runtime"), "--repo", run.tree.copy()}), run.tree, with_vars(run.vars, [Var]{set_var("JET_COMPILER_IDENTITY", own)}), pack_log, 3600)
+    if packed.rc != 0 || !files.exists(files.join(dir, "jet-runtime/native.key")) -> return Stage{dir: "", identity: "", error: "{name}: prebuild-runtime.mjs rc={packed.rc}: {tail_of(pack_log, 6)}"}
+    Stage{dir: dir, identity: own, error: ""}
+}
+
+build_main: fn(args: [String], root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    options: parse_build_args(args)
+    if options.errors.len() > 0 -> return build_fail(2, options.errors.join("\n"))
+    parsed: git_in(root, [String]{"rev-parse", "--verify", "{options.commit}^{{commit}}"})
+    if parsed.rc != 0 -> return build_fail(2, "{options.commit} is not a commit of {root}")
+    sha: parsed.out
+    if !on_any(root, sha, [String]{"refs/heads/dev", "refs/remotes/origin/dev"}) -> return build_fail(2, "{short(sha, 10)} is not on dev")
+    seed: absolute_or(options.seed)
+    missing := [String]{}
+    loop name in STAGE_FILES {
+        if !files.exists(files.join(seed, name)) -> missing.push(name.copy())
+    }
+    if missing.len() > 0 -> return build_fail(2, "seed {seed} lacks {missing.join(", ")}")
+    seed_identity: (read_text(files.join(seed, "IDENTITY")) ?? "").trim().copy()
+    version: seed_identity.partition("#").head.copy()
+    seed_sha: sha256_file(files.join(seed, "jet"))
+    if !version.starts_with("jet@") || version.len() < 5 || version.contains(" ") || seed_identity.partition("#").tail != seed_sha -> return build_fail(2, "seed IDENTITY {seed_identity} does not name the seed's jet (sha256 {short(seed_sha, 16)})")
+    admission: preflight_gate("publish-release", root, seed, sha)
+    if !admission.admitted {
+        term.eprint(admission.text)
+        return 2
+    }
+    if options.check_gate {
+        print(admission.text)
+        return 0
+    }
+    musl: env_or("JET_PACK_MUSL_LIB", MUSL_DEFAULT)
+    if !files.exists(files.join(musl, "libc.a")) -> return build_fail(2, "no musl libc.a in {musl} (JET_PACK_MUSL_LIB)")
+    out: absolute_or(options.out)
+    if files.exists(out) && files.list_dir(out) == .Ok(entries) && entries.len() > 0 -> return build_fail(2, "{out} is not empty")
+    if inside(root, out) -> return build_fail(2, "{out} is inside the checkout")
+    files.create_dir_all(out) ?? return build_fail(2, "cannot create {out}: {err}")
+    real_out: files.realpath(out) ?? out.copy()
+    if inside(files.realpath("/tmp") ?? "/tmp", real_out) -> return build_fail(2, "{out} is on RAM-backed /tmp; use a disk path")
+
+    work: files.join(out, "work")
+    logs: files.join(out, "logs")
+    tree: files.join(work, "tree")
+    tmp: files.join(work, "tmp")
+    made: [String]{work, logs, tmp}
+    loop dir in made -> files.create_dir_all(dir) ?? return build_fail(1, "cannot create {dir}: {err}")
+    if export_commit(root, sha, tree) == .Val(why) -> return build_fail(1, why)
+    // Where the stages find their tools: the export's jet-env, under the
+    // stack, with no Rust on PATH.
+    run: BuildRun{
+        root: root.copy(), tree: tree.copy(), work: work.copy(), logs: logs.copy(), version: version.copy(), threads: options.threads,
+        vars: [Var]{set_var("JET_PACK_MUSL_LIB", musl), set_var("TMPDIR", tmp), set_var("JET_TOOLCHAIN_ROOT", tree), drop_var("JET")},
+        staged: joined(STACK, [String]{files.join(tree, "Tools/agent/jet-env"), "bash", "-c", NORUST, "norust"}),
+    }
+    say("build", "", "chain of {short(sha, 10)} from seed {seed_identity} in {work}")
+    s1: build_stage(run, "s1", seed, seed_identity, true)
+    if s1.error != "" -> return build_fail(1, s1.error)
+    s2: build_stage(run, "s2", s1.dir, s1.identity, true)
+    if s2.error != "" -> return build_fail(1, s2.error)
+    s3: build_stage(run, "s3", s2.dir, s2.identity, false)
+    if s3.error != "" -> return build_fail(1, s3.error)
+    if s2.identity != s3.identity -> return build_fail(1, "no fixed point: s2 {s2.identity} != s3 {s3.identity}")
+
+    copy_file(files.join(s2.dir, "jet"), files.join(out, "jet"), true) ?? return build_fail(1, "cannot copy s2 into {out}: {err}")
+    link_compiler_aliases(out) ?? return build_fail(1, "cannot link the compiler aliases in {out}: {err}")
+    if !copy_tree(files.join(s2.dir, "jet-runtime"), files.join(out, "jet-runtime")) -> return build_fail(1, "cannot copy {s2.dir}/jet-runtime into {out}")
+    // Tools/release reads the runner target and the chain's fixed point from
+    // BUILD.json.
+    record: Dyn.Object([String: Dyn]{
+        "target": Dyn.Text(host_target()),
+        "chain": Dyn.Object([String: Dyn]{"s1": Dyn.Text(s1.identity.copy()), "s2": Dyn.Text(s2.identity.copy()), "s3": Dyn.Text(s3.identity.copy())}),
+    })
+    encoded: json.to_string_pretty(record) ?? return build_fail(1, "BUILD.json cannot be encoded: {err}")
+    failed: write_all([(path: String, text: String)]{
+        (path: files.join(out, "IDENTITY"), text: "{s2.identity}\n"),
+        (path: files.join(out, "COMMIT"), text: "{sha}\n"),
+        (path: files.join(out, "SEED"), text: "{seed_identity}\n"),
+        (path: files.join(out, "BUILD.json"), text: "{encoded}\n"),
+    })
+    if failed == .Val(why) -> return build_fail(1, why)
+    files.write(files.join(out, "SHA256SUMS"), sums_text(shipped_artifacts(out))) ?? return build_fail(1, "cannot write SHA256SUMS: {err}")
+    literals := [String]{root.copy(), files.realpath(root) ?? root.copy(), out.copy(), real_out.copy(), seed.copy(), files.realpath(seed) ?? seed.copy()}
+    seed_jet: [String]{"env", "JET_COMPILER_IDENTITY={seed_identity}", "JET_TOOLCHAIN_ROOT={root}", files.join(seed, "jet")}
+    findings: personal_problems(root, out, shipped_names(out), literals, Programs{gh: [String]{"gh"}, jet: seed_jet})
+    remove_tree(work)
+    if findings.len() > 0 {
+        shown := [String]{}
+        loop found in findings {
+            if shown.len() < 8 -> shown.push(found.text.copy())
+        }
+        return build_fail(1, "shipped files name personal information or build paths: {shown.join("; ")}")
+    }
+    lines: [String]{
+        "BUILT {out}: {s2.identity} (s2 == s3) from {sha}.",
+        "Gate it in a checkout of that commit, once per runner, then record and publish it:",
+        "  JET={files.join(out, "jet")} JET_CI_EVIDENCE_DIR=<EVDIR> jet Tools/agent/VerifyFull.jet",
+        "  jet run Tools/release/Main.jet -- candidate {out} --evidence <EVDIR>",
+        "  jet run Tools/release/Main.jet -- publish {out} --dry-run",
+    }
+    print(lines.join("\n"))
+    0
+}

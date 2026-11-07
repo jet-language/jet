@@ -339,8 +339,8 @@ in one pass:
   launch that fixes it. Launching to "see what fails next" is forbidden. The
   launchers enforce it: a clean census writes the snapshot's receipt
   (`Land.jet receipt`, keyed on the compiler source identity and the seed),
-  and `chain.sh` full, `release-compiler.mjs` and `publish-release.mjs build`
-  refuse to start without the receipt for their tree and seed; `--check-gate`
+  and `chain.sh` full and `Tools/release/Main.jet` `admit` and `build` refuse
+  to start without the receipt for their tree and seed; `--check-gate`
   gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
