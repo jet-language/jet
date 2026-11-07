@@ -7,6 +7,8 @@ env: S5_ROOT={work}
 copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
 copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet requests/HTTP.jet
 write: app.jet app.source
+step: jet check app.jet # the dev server serves only an app that compiles; a broken app fails here, not at the readiness wait
+exit: 0
 session app raw: jet dev app.jet
 stderr: null
 recv app line until ^= "App preview: " timeout 60s # original waits for the dev server readiness line
