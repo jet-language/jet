@@ -2208,6 +2208,13 @@ host that lacks one the fixture reports SKIP-HOST and does not run, whatever
 its known-failing row. The lines in a `.fixed.jet` companion gate only the
 companion's rows. Every fixture that builds a Rust bridge declares
 `// @requires tool:cargo`; the missing-Cargo fixture never does.
+The repository's own `#Test` claims that drive a host tool (Node, LLDB,
+Cargo, clang++) start with the testkit's `kit_require_tool(name) ?? return`:
+with the tool absent from PATH the claim reports skip, and the `packages`
+profile records its row as skipped; with it present the claim runs. Jetpack's
+bootstrap unit lists the helper's one file, `JetTestKit/Source/RequireTool.jet`,
+for its Integrations claims. This is testkit plumbing, not a user-facing
+conditional skip.
 The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
 in external scratch, where each project case compiles rooted at its own
 directory. A loose case's source root is its whole directory, and the compiler

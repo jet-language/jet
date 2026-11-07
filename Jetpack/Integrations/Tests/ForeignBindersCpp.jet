@@ -1,12 +1,16 @@
-// Claims ported from jet_pkg_model::CppBind tests.
+// Claims ported from jet_pkg_model::CppBind tests. The bind runs the host's
+// clang++ and ar, and reports skip without them on PATH.
 use {
     jetpack_integrations.[
         CppBindOptions, CppTemplateInstantiation, pkg_cpp_bind, pkg_ffi_host_target,
     ]
+    jet_testkit.[kit_require_tool]
     files: core.files
 }
 
 #Test("cpp bind emits canonical descriptor effect and provenance") {
+    _: kit_require_tool("clang++") ?? return
+    _: kit_require_tool("ar") ?? return
     scratch: files.temp_dir("jet_cpp_bind") ?? panic("scratch directory")
     root: scratch.path
     header: files.join(root, "math.hpp")

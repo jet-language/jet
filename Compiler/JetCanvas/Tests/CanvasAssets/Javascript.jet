@@ -1,15 +1,17 @@
 use {
     canvas_javascript_test_process: core.process
     jet_canvas.[canvas_js]
+    jet_testkit.[kit_require_tool]
 }
 
 // Retaining actual independent Node syntax checks and the byte-exact load-order
-// oracle, not its incidental glue LOC assertion. Missing Node/assets or a
-// failed harness is fatal, never skipped.
+// oracle, not its incidental glue LOC assertion. Without Node on PATH the claim
+// reports skip; missing assets or a failed harness is fatal.
 #Test("canvas_javascript_assets_are_independently_syntax_checked_and_ordered") {
-    child: canvas_javascript_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/javascript-assets.mjs"})
+    node: kit_require_tool("node") ?? return
+    child: canvas_javascript_test_process.cmd([String]{node, "Compiler/JetCanvas/Tests/CanvasAssets/javascript-assets.mjs"})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
-        .spawn() ?? panic("Canvas JavaScript proof requires Node and its asset harness")
+        .spawn() ?? panic("Canvas JavaScript proof requires its asset harness")
     child.stdin.write_text(canvas_js()) ?? panic("Canvas JavaScript proof input failed")
     child.stdin.close()
     receipt: child.wait() ?? panic("Canvas JavaScript proof failed to finish")

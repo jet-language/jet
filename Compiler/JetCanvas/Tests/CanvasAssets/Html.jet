@@ -1,15 +1,17 @@
 use {
     canvas_html_test_process: core.process
     jet_canvas.[canvas_html, canvas_html_for, canvas_html_query]
+    jet_testkit.[kit_require_tool]
 }
 
 // Real JavaScript execution of the public Jet-produced HTML, not source-string
-// assertions and not copied bootstrap JS. Node is required: missing Node or a
-// harness failure is a test failure, never a skip or a success fallback.
-canvas_html_test_bootstrap: fn(scenario: String, html: String) -[Exec, IO, Time.Wait]> {
-    child: canvas_html_test_process.cmd([String]{"node", "Compiler/JetCanvas/Tests/CanvasAssets/bootstrap-dom.mjs", scenario})
+// assertions and not copied bootstrap JS. Without Node on PATH the claim
+// reports skip; a harness failure is a test failure, never a success fallback.
+canvas_html_test_bootstrap: fn(scenario: String, html: String) -[Exec, IO, Time.Wait, FS, Env]> {
+    node: kit_require_tool("node") ?? return
+    child: canvas_html_test_process.cmd([String]{node, "Compiler/JetCanvas/Tests/CanvasAssets/bootstrap-dom.mjs", scenario})
         .stdin(.Stream).stdout(.Capture).stderr(.Capture)
-        .spawn() ?? panic("Canvas bootstrap requires Node and the scenario harness")
+        .spawn() ?? panic("Canvas bootstrap requires its scenario harness")
     child.stdin.write_text(html) ?? panic("Canvas bootstrap HTML input failed")
     child.stdin.close()
     receipt: child.wait() ?? panic("Canvas bootstrap JS evaluation failed to finish")

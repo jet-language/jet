@@ -17,6 +17,7 @@ use {
     jet_pkg_model.[
         FFIHandleFact, FFILinkClosure, ForeignLanguage, pkg_sha256_hex,
     ]
+    jet_testkit.[kit_require_tool]
     files: core.files
     process: core.process
 }
@@ -199,14 +200,16 @@ dependencies = [
     assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp(ForeignLanguage.Rust)}"))
 }
 
+// Builds with the host's cargo, and reports skip without it on PATH.
 #Test("generated cargo manifest builds when nested in workspace") {
+    cargo: kit_require_tool("cargo") ?? return
     scratch: files.temp_dir("ffi-manifest") ?? panic("scratch")
     root: files.join(scratch.path, "crate")
     target: files.join(scratch.path, "target")
     files.create_dir_all(files.join(root, "src")) ?? panic("create nested manifest source")
     files.write(files.join(root, "Cargo.toml"), pkg_ffi_emit_cargo_toml("nested_ffi_probe", [String: String]{}, false)) ?? panic("write generated nested manifest")
     files.write(files.join(root, "src/lib.rs"), "fn probe() -> i64 {{ 7 }}\n") ?? panic("write generated nested source")
-    receipt: process.cmd([String]{"cargo", "build", "--offline", "--manifest-path", files.join(root, "Cargo.toml"), "--target-dir", target}).run() ?? panic("run cargo for generated nested manifest")
+    receipt: process.cmd([String]{cargo, "build", "--offline", "--manifest-path", files.join(root, "Cargo.toml"), "--target-dir", target}).run() ?? panic("run cargo for generated nested manifest")
     assert(receipt.success)
 }
 

@@ -1,9 +1,11 @@
 // The native debug session: LLDB's stop, frame and local reports read as Jet
-// positions and values, and a real session over a program's O0 native image.
+// positions and values, and a real session over a program's O0 native image,
+// which reports skip without LLDB on PATH.
 use {
     native_test_process: core.process
     native_test_files: core.files
     jet_debug.[NativeDebugError, NativeSession, NativeStopKind, native_debug_parse_frame, native_debug_parse_locals, native_debug_parse_stop]
+    jet_testkit.[kit_require_tool]
 }
 
 #Test("frames_name_the_jet_function_file_and_line") {
@@ -68,6 +70,7 @@ native_test_toolchain_root: fn() -> String Never! {
 }
 
 #Test("a_session_pauses_steps_and_reads_the_native_image") {
+    _: kit_require_tool("lldb") ?? return
     jet: native_test_process.which("jet") ?? panic("the Jet dev shell puts `jet` on PATH")
     scratch: native_test_files.temp_dir("jet-debug-native") ?? panic("scratch: {err}")
     root: scratch.path
