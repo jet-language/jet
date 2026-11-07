@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6664,
-    "rev": 95636,
+    "rev": 95644,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69770,6 +69770,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c69, c70 and c71 met: groups B, C and D are on dev (c515c4ea10, fab74a230c, f40bd500ae, 5889cdb664). c67 is met except for the baseline: entries on the packages, selfhost and perf profiles (CoreCliLead-2's pending commit). The jetpack profile was renamed packages in the cutover. c68 (15 Tools/agent gate scripts) is with TestSystemLead-2, briefed as one list in 7 groups; scripts with no live caller are deleted without porting."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Decision (Main, 2026-11-06), replacing the scope note above: c3 stays as worded. Every test and gate script in Tools/agent gets ported. A1-A4 go first; orchestration (B) and generators/one-offs (C) follow under c3, and A3/A4 land after A1/A2 because the lander and the release use them live."
         },
         {
@@ -70848,29 +70853,29 @@
         {
           "n": 69,
           "text": "c3 split A2: the suite runners are JetTestKit code or Compiler/test.jet profiles and the scripts are deleted: run-feature-examples.mjs, goldens-census.mjs, compiler-diff.mjs (as a profile baseline compare), suite/suite.sh and suite/gsel.mjs (as `jet test Compiler --profile` with filters).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T01:38:18.974Z"
+          "evidence": "c515c4ea10 deletes run-feature-examples.mjs, goldens-census.mjs, compiler-diff and Tools/agent/suite/ (suite.sh, gsel.mjs); Tools/agent/Suite.jet and jet test Compiler --profile with a filter replace them. Checked at dev 8583f858a0: Tools/agent/suite does not exist.",
+          "at": "2026-11-07T08:41:48.141Z"
         },
         {
           "n": 70,
           "text": "c3 split A3: the landing gates are in Land.jet or LaneCheck.jet and the scripts are deleted: land/precommit.sh, land/prescreen.sh, land/preflight-receipt.mjs and its test, land/runtime-pack-check.sh, land/census-errors.mjs, land/census-snap.sh, chain/trapscan.mjs. Lands after A1 and A2, since the lander uses them live.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T01:38:19.785Z"
+          "evidence": "fab74a230c ports census, precommit, prescreen, receipt and trapscan into Tools/agent/Land.jet and Chain.jet and deletes land/precommit.sh, prescreen.sh, preflight-receipt.mjs (+test), runtime-pack-check.sh, census-errors.mjs, census-snap.sh and chain/trapscan.mjs. Checked at dev 8583f858a0: land/ holds only batch-land, lander, publish-base, publish-latest, release-train and unstick.",
+          "at": "2026-11-07T08:41:49.315Z"
         },
         {
           "n": 71,
           "text": "c3 split A4: the S5 proof gates and the release gate are Jet and the scripts are deleted: s5/s5-gates.mjs, s5/s5-boundary.mjs, s5/s5-fixtures.mjs, s5/s5-runtime.mjs, s5/receipts.mjs, s5/s5-lib.mjs, release-compiler.mjs (extending Tools/release). Lands last.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T01:38:20.580Z"
+          "evidence": "f40bd500ae deletes Tools/agent/s5 (the S5 proof-phase scripts); 5889cdb664 moves release admit and build into Tools/release (Jet) and deletes release-compiler.mjs and publish-release.mjs; a499bfc612 makes the Tools/release tests hermetic (27 passed, 0 failed). Checked at dev 8583f858a0: neither file exists.",
+          "at": "2026-11-07T08:41:50.458Z"
         },
         {
           "n": 72,
@@ -70895,7 +70900,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T07:17:02.714Z",
+      "updated": "2026-11-07T08:42:51.768Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -74034,11 +74039,11 @@
         {
           "n": 72,
           "text": "(was #5902) (was #5898) Port the jet-visible assertions lost with 13 retired Rust test files (modules, cross, build_cache_normalization, ...): each listed assertion is either covered by an existing Jet test, UI snapshot",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:24:21.737Z"
+          "evidence": "All 54 assertions from the retired Rust test files are accounted for in $JET_SCRATCH_ROOT/lanes/PortsLead/c72/c72-assertions.tsv (PortsLead-2): 44 are covered by existing Jet tests or snapshots, 1 was ported (the 4259fbe18b InlineScriptDeps #Test 'missing and hostile inline dependency material fails closed without creating state' covers (a) E1253 with no cache or lock tree and (b) 'cannot be hashed safely'), 7 are on #3239 c56 (diagnostics landed in 22d31cef15), the fuzz_sema runner and target dossier lens are on #6663, and 1 row covers 3 files with no user-visible contract. Main's package run at dev 2431f488f8 with seed a0_032: Jetpack/PackageModel/Tests 448 passed, 0 failed.",
+          "at": "2026-11-07T08:41:00.721Z"
         },
         {
           "n": 73,
@@ -74072,7 +74077,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-07T06:22:07.617Z",
+      "updated": "2026-11-07T08:41:00.722Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -94105,7 +94110,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c4 progress: MechD-3's 59d955887b (store capacity checks replay a footprint tally instead of scanning every entry) cut golden wall from 1086 s to 118.7 s on fab74a230c s1, all rows passing (4318 PASS, 0 FAIL). The per-program median is 348 ms over 3 tiers, about 0.12 s per tier, against the 0.1 s target. About 90% of each tier is re-checking Core identically for every program; caching checked Core by content key is the remaining c4 lever, and df runs about 6 times per build. c5 still needs a run on the batch machine (118.7 s against the 90 s target)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94165,7 +94176,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-07T03:32:29.904Z",
+      "updated": "2026-11-07T08:48:18.434Z",
       "updatedBy": "Main"
     },
     {
@@ -97445,6 +97456,24 @@
           "verifiedBy": null,
           "evidence": "release kit a0_032 (dev 2ec700da30, $JET_SCRATCH_ROOT/../release/2ec700da303b/kit): cases cli_parts_runtime/test_profile_code_suites_report_rows.case and test_profiles_bound_fan_out_and_compare_baselines.case PASS (8a36682cd6: a failing row fails the run whatever the recorded baseline says).",
           "at": "2026-11-07T07:08:19.852Z"
+        },
+        {
+          "n": 8,
+          "text": "The Jetpack engine areas' #Tests (Jetpack/Store, Provider, Recipe, CLI, Services and Image Tests; these areas have no package.jet, so package_dirs in Compiler/test.jet skips them) run as per-claim rows in jet test Compiler --profile packages, which full includes. Each failing claim passes or carries a known-failing line naming its owning card. Their only runner today is Jetpack/Bootstrap/check.sh --tests (shell plus assemble.mjs), and no gate calls it: release admit runs check.sh without --tests. That runner is ported to Jet or replaced, in one cutover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T08:48:17.621Z"
+        },
+        {
+          "n": 9,
+          "text": "The package rows that fail on dev a499bfc612 in jet test Compiler --profile packages (CoreCliLead-2 bare run, 2146 rows) pass or are deleted when dead. Rows: Compiler/JetBackend/Tests (no run.jet or #Test: delete), Compiler/JetImpact (PathDependencyEscape jet_env_model), Compiler/JetRuntime (UnknownFunction os_store_i64; the runtime has to be tested in the mode it is built in), Compiler/Prelude (ReservedDunderName __live_arg; likewise), and Jetpack/Publication/Tests (api_diff_detects_removed_fn, api_diff_detects_changed_signature, 'api snapshot rows keep each line as its signature'). Package rows that need a tool outside the release environment (node, ssh) either stop needing it or declare it as a host requirement and SKIP-HOST, like the cases suite's tool: rows.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T08:48:43.492Z"
         }
       ],
       "refs": [],
@@ -97455,9 +97484,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:14.209Z",
-      "updated": "2026-11-07T07:08:19.852Z",
+      "updated": "2026-11-07T08:48:43.492Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 9
     },
     {
       "id": "c0afjv0e",
@@ -186043,6 +186072,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T08:48:43.492Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#9 The package rows that fail on dev a499bfc612 in jet test Com"
+    },
+    {
+      "at": "2026-11-07T08:48:18.434Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ctwqw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T08:48:17.621Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#8 The Jetpack engine areas' #Tests (Jetpack/Store, Provider, R"
+    },
+    {
+      "at": "2026-11-07T08:42:51.768Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T08:41:50.458Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#71"
+    },
+    {
+      "at": "2026-11-07T08:41:49.315Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#70"
+    },
+    {
+      "at": "2026-11-07T08:41:48.141Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#69"
+    },
+    {
+      "at": "2026-11-07T08:41:00.722Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0h06654",
+      "note": "#72"
+    },
     {
       "at": "2026-11-07T08:39:14.125Z",
       "by": "Main",
