@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6666,
-    "rev": 95661,
+    "rev": 95666,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69770,6 +69770,16 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c68 group 3 landed in 57468656ec: core-conformance.mjs is deleted; Tools/hardening is the one conformance checker. FIXTURE_BINDINGS moved to tests/conformance/fixture-bindings.tsv, and the 3 stale special-routes.tsv lines are fixed, so hardening --write exits 0 (4236 rows). Left over: Tools/gauntlet's integrated gate still reads .jet/core-conformance-check.txt, which nothing produces now (follow-up with TestSystemLead-2). The full corelib_parity.py run is red from its stale Python regex parser, about 3000 false unimplemented members."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c68 group 1 landed in ba7c0e2dc8: safety-gate.mjs, safety-fuzz.mjs and safety-gate-job.sh became Tools/agent/SafetyGate.jet (7/7 #Tests). Its caller is VerifyFull's new safety-gate row; safety-schedule.mjs is deleted and safety.md is corrected. Node and Jet corpora and summaries are byte-identical apart from the header. Remaining in c68: group 3 core-conformance, group 2 check-core-surface-ledger, and the live remainder of groups 5-7, which ports with its importers."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "f734592975 deletes 8 c68 group 5-7 scripts with no live caller: native-route-environment (+test), native-route-handles, native-route-records, classify-native-route-glue, and the JetRuntime test-native-route-{handles,records} and test-runtime-abi-symbols scripts. Still live: runtime-route-abi, compiler-native-transport and compiler-packages are imported by about 50 node fixture runners that CompilerRegistries.jet runs from VerifyFull. runtime-abi-symbols is imported by runtime-route-abi and gen-runtime-host-carriers. runtime-static-text is imported by the gen-runtime-*-messages generators. These port with their importers, which c3 also covers."
         },
         {
@@ -70910,7 +70920,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T09:12:45.659Z",
+      "updated": "2026-11-07T09:28:03.078Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -97395,6 +97405,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c9 progress: a1a6c69d62 (CoreCliLead-2) adds kit_require_tool in Compiler/JetTestKit/Source/RequireTool.jet. It reuses the runtime's one skip path (jet_rt_test_skip_scope) and has no spelling outside TestKit; 11 host-tool claims call it and their 11 KF lines are gone. Bare PATH (git+coreutils): JetCanvas 8 skipped, JetDebug 36 passed and 1 skipped, Integrations 92 passed and 2 skipped. Dev PATH: all 11 pass. The packages profile exits 0 bare. Still open in c9: the 7 dev rows (JetBackend/Tests, JetImpact, JetRuntime, Prelude, and 3 Publication api_diff), KF under this card, which need an owner."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Rerun in the batch environment: JetWasm/Tests 16/0, JetCli/Tests 97/0 (+1 expected-fail), EnvModel/Tests 148/0, Integrations/Tests 94/0, Foundation/Tests 93/0, JetDebug/Tests 37/0. Still red: JetParser/Tests 13, JetLexer/Tests 3, JetFoundation 1, PackageModel 1, PackageModel/Tests 1 (ada), and the 8 non-compiling test packages in c6. c3 met; c4/c5 corrected; c7 added (quick-profile baseline hides failures)."
         },
         {
@@ -97470,11 +97485,11 @@
         {
           "n": 8,
           "text": "The Jetpack engine areas' #Tests (Jetpack/Store, Provider, Recipe, CLI, Services and Image Tests; these areas have no package.jet, so package_dirs in Compiler/test.jet skips them) run as per-claim rows in jet test Compiler --profile packages, which full includes. Each failing claim passes or carries a known-failing line naming its owning card. Their only runner today is Jetpack/Bootstrap/check.sh --tests (shell plus assemble.mjs), and no gate calls it: release admit runs check.sh without --tests. That runner is ported to Jet or replaced, in one cutover.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T08:48:17.621Z"
+          "evidence": "4af5a352ef: the Jetpack engine areas' #Tests run as per-claim rows in jet test Compiler --profile packages, and the check.sh --tests runner is cut over. MechD-3 lane run, s1 at 4af5a352ef with the hosted jetpack: 2974 rows, PASS 2919, FAIL 0, KNOWN-FAILING 33 (engine 13: 9 under #3590, 4 under #6649; CLI 9), UNSUPPORTED 11, ERROR, REFUSED and TIMEOUT 0. Jetpack/Store, ArtifactStore included, has no non-pass row. The only other non-pass rows were the 11 UNEXPECTED-PASS host-tool rows, whose KF lines a1a6c69d62 removed (they skip without the tool and pass with it). JetOS is frozen by owner order and not run. Confirm in the next Main batch's packages profile.",
+          "at": "2026-11-07T09:34:09.537Z"
         },
         {
           "n": 9,
@@ -97494,7 +97509,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:14.209Z",
-      "updated": "2026-11-07T08:48:43.492Z",
+      "updated": "2026-11-07T09:34:09.537Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -98268,11 +98283,11 @@
         {
           "n": 3,
           "text": "Regression in the vb12 batch against the a0_032 kit: pkg/cli_keygen_and_key_backup_write_the_signing_key passes again (the JET_KEYS_DIR key paths print in full where the case expects the kit to show <redacted>).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T09:13:24.931Z"
+          "evidence": "7a89d6fa80: the root was 23cb38c5f2's streamed child output skipping the Core receipt's secret-env redaction. kit_exec_redact now applies the same redaction to the text views; the bytes stay exact. MechD-3 lane run with s1 of the tree: pkg/cli_keygen_and_key_backup_write_the_signing_key PASS and the new JetTestKit redaction test passes. To be confirmed in the next Main batch.",
+          "at": "2026-11-07T09:26:26.260Z"
         }
       ],
       "refs": [],
@@ -98283,7 +98298,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T09:13:07.024Z",
-      "updated": "2026-11-07T09:13:24.931Z",
+      "updated": "2026-11-07T09:26:26.260Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     }
@@ -186189,6 +186204,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T09:34:09.537Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08512l6",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-07T09:33:19.940Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08512l6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T09:28:03.078Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T09:26:26.260Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0onvbda",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-07T09:19:04.728Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T09:13:37.221Z",
       "by": "Main",
