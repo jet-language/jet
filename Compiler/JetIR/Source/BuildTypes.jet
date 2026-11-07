@@ -3094,16 +3094,18 @@ ir_store_lent: fn(m: &IRModule, b: &IRBuilder, holder: Int, offset: Int, payload
     }
 }
 
-// Ends each box a read argument was lent to, after the call. The call's
-// owner is usually the box's last: the box (and its wrapper) is freed and
-// the payload stays with its holder alone. A callee that kept a share of the
-// box (`v.copy()` of a union parameter) leaves the box to that share, so the
-// payload bits in it get an owner of their own (ir_copy_fixup_at). Sema
+// Ends each box a read argument was lent to, after the call, the outermost
+// first (an Option holding a lent trait box ends before that box). The
+// call's owner is usually the box's last: the box (and its wrapper) is freed
+// and the payload stays with its holder alone. A callee that kept a share of
+// the box (`v.copy()` of a union parameter) leaves the box to that share, so
+// the payload bits in it get an owner of their own (ir_copy_fixup_at). Sema
 // refuses a copy of a value with no clone (E0211), so that share never holds
 // a handle.
 ir_box_lends_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, lends: [IRBoxLend]) Never! {
     bool_row: ir_type_row(m, Type.Bool) ?? 0
-    loop lend in lends {
+    loop at in 0..<lends.len() {
+        lend: lends[lends.len() - 1 - at]
         last: ir_runtime(m, b, "jet_rt_block_release", [Int]{lend.boxed}, bool_row)
         ir_open_if(b.f, last, b.line)
         if lend.wrapper >= 0 {

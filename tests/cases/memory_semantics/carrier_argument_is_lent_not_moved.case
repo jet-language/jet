@@ -1,0 +1,17 @@
+# A borrowed value passed to a read parameter inside a carrier built at the
+# call (`Val(x)`, `Ok(x)`, a tuple literal) is lent to the call (#6677).
+# Before the fix, the carrier took the value over and disarmed its holder's
+# close, and nothing closed it after the call, so the Directory leaked open
+# past its scope. The checked allocator traps a double free or a use after
+# free.
+fixture: carrier_argument_is_lent_not_moved.fixture
+env: NO_COLOR=1
+step: jet run --checked-alloc --optimize=none main.jet
+exit: 0 # o0
+stdout: = carrier_argument_is_lent_not_moved.out # o0
+step: jet run --checked-alloc --optimize=basic main.jet
+exit: 0 # o1
+stdout: = carrier_argument_is_lent_not_moved.out # o1
+step: jet run --checked-alloc --optimize=full main.jet
+exit: 0 # o2
+stdout: = carrier_argument_is_lent_not_moved.out # o2
