@@ -386,13 +386,13 @@ rt_thread_entry_address: fn() -> I64 {
 // A larger soft RLIMIT_STACK (the native compiler stages run under prlimit,
 // since O0 frames are larger than Rust's) also sizes every runtime thread, so
 // work moved onto a scheduler worker gets the main thread's recursion budget.
-// RLIM_INFINITY and failures keep 192 MiB; the reservation is capped at 8 GiB.
+// RLIM_INFINITY, failures and a comptime child (no host probe) keep 192 MiB; capped at 8 GiB.
 thread_stack_bytes: fn() -> I64 {
     scratch: jet_rt_alloc(I64{16}, I64{8})
     thread_zero(scratch, I64{16})
     status := I64{-1}
     #Unsafe("getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer") {
-        status = os_syscall_i64(I64{97}, I64{3}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+        status = if comptime_serving() -> I64{-1} else -> os_syscall_i64(I64{97}, I64{3}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
     }
     soft: sync_load(scratch)
     jet_rt_free(scratch, I64{16}, I64{8})
