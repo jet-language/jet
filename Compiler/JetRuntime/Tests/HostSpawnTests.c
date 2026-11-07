@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <sched.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -65,7 +66,7 @@ static int helper(int argc,char **argv) {
     if (!strcmp(argv[1],"echo")) { char b[8]; assert(read(0,b,4)==4); assert(write(1,b,4)==4); const char *v=getenv("BINARY"); assert(v && (unsigned char)*v==255); assert(write(1,v,1)==1); assert(write(2,"err",3)==3); return 7; }
     if (!strcmp(argv[1],"wait")) { assert(getpgrp()==getpid()); assert(write(1,"ready",5)==5); char b; assert(read(0,&b,1)==1); return 9; }
     if (!strcmp(argv[1],"mapped")) { assert(argc==5); struct stat a,b; assert(!fstat(198,&a) && !fstat(199,&b)); assert(a.st_ino==inode(argv[2]) && b.st_ino==inode(argv[3])); char *cwd=getcwd(NULL,0); assert(cwd && !strcmp(cwd,argv[4])); free(cwd); assert(write(1,"mapped",6)==6); return 0; }
-    if (!strcmp(argv[1],"limits")) { assert(getsid(0)==getpid()); struct rlimit r; assert(!getrlimit(RLIMIT_CPU,&r) && r.rlim_cur==2 && r.rlim_max==3); assert(!getrlimit(RLIMIT_AS,&r) && r.rlim_cur==268435456); assert(!getrlimit(RLIMIT_NOFILE,&r) && r.rlim_cur==64); assert(write(1,"limits",6)==6); return 0; }
+    if (!strcmp(argv[1],"limits")) { assert(argc==3 && getsid(0)==getpid()); struct rlimit r; assert(!getrlimit(RLIMIT_CPU,&r) && r.rlim_cur==2 && r.rlim_max==3); assert(!getrlimit(RLIMIT_AS,&r) && r.rlim_cur==268435456); assert(!getrlimit(RLIMIT_NOFILE,&r) && r.rlim_cur==64); cpu_set_t only; assert(!sched_getaffinity(0,sizeof only,&only) && CPU_COUNT(&only)==1 && CPU_ISSET(atoi(argv[2]),&only)); assert(write(1,"limits",6)==6); return 0; }
     if (!strcmp(argv[1],"pty")) { struct winsize size; struct termios mode; assert(isatty(0)&&isatty(1)&&isatty(2)); assert(!ioctl(0,TIOCGWINSZ,&size) && size.ws_col==61 && size.ws_row==23); assert(!tcgetattr(0,&mode) && !(mode.c_lflag&(ECHO|ICANON))); assert(write(1,"ready",5)==5); char b; assert(read(0,&b,1)==1); assert(!ioctl(0,TIOCGWINSZ,&size) && size.ws_col==72 && size.ws_row==31); assert(write(1,"resized",7)==7); return 0; }
     abort();
 }
@@ -89,7 +90,7 @@ int main(int argc,char **argv) {
     assert(fixture_process_cpu_seconds_raw(INT64_MAX)==INT64_MAX/1000);
     assert(fixture_process_cpu_seconds_raw(INT64_MAX-998)==INT64_MAX/1000);
     char executable[4096]; ssize_t n=readlink("/proc/self/exe",executable,sizeof(executable)-1); assert(n>0); executable[n]=0;
-    W spec[28]={0}; spec[7]=1; spec[8]=2; spec[9]=2; spec[10]=2;
+    W spec[29]={0}; spec[7]=1; spec[8]=2; spec[9]=2; spec[10]=2;
     char *env[]={"BINARY=\xff",NULL}, *echo[]={executable,"echo",NULL}; Error e; char bytes[32];
     Child *c=spawn(spec, executable, echo, env);
     assert(jet_process_write_raw(c,0,"b\0in",4,&e)==4); good(&e); jet_process_close_stream_raw(c,0,&e); good(&e);
@@ -113,7 +114,9 @@ int main(int argc,char **argv) {
     struct stat astat,bstat; assert(!fstat(198,&astat)&&!fstat(199,&bstat)); char ai[32],bi[32]; snprintf(ai,sizeof ai,"%llu",(unsigned long long)bstat.st_ino); snprintf(bi,sizeof bi,"%llu",(unsigned long long)astat.st_ino);
     char *mapped[]={executable,"mapped",ai,bi,other,NULL}; c=spawn(spec, executable, mapped, env); read_exact(c,1,bytes,6); assert(!memcmp(bytes,"mapped",6)); wait_code(c,0); jet_process_drop_raw(c); spec[26]=0; jet_fd_drop_raw(fa);jet_fd_drop_raw(fb);
     spec[21]=1;
-    spec[15]=1;spec[16]=1001;spec[17]=1;spec[18]=268435456;spec[19]=1;spec[20]=64; char *limits[]={executable,"limits",NULL}; c=spawn(spec, executable, limits, env);read_exact(c,1,bytes,6);assert(!memcmp(bytes,"limits",6));wait_code(c,0);jet_process_drop_raw(c);spec[15]=spec[17]=spec[19]=0;
+    // The limits child also runs on exactly the one CPU its affinity mask (word 28) names: this process's first.
+    cpu_set_t mine,only; assert(!sched_getaffinity(0,sizeof mine,&mine)); int first=0; while(!CPU_ISSET(first,&mine)) ++first; CPU_ZERO(&only); CPU_SET(first,&only); char first_text[16]; snprintf(first_text,sizeof first_text,"%d",first); _Static_assert(sizeof(cpu_set_t)==128,"PROCESS_CPU_SET_BYTES");
+    spec[15]=1;spec[16]=1001;spec[17]=1;spec[18]=268435456;spec[19]=1;spec[20]=64;spec[28]=(W)(intptr_t)&only; char *limits[]={executable,"limits",first_text,NULL}; c=spawn(spec, executable, limits, env);read_exact(c,1,bytes,6);assert(!memcmp(bytes,"limits",6));wait_code(c,0);jet_process_drop_raw(c);spec[15]=spec[17]=spec[19]=spec[28]=0;
     spec[21]=0;
     spec[21]=1;
     Terminal terminal={61,23,0}; spec[22]=1;spec[23]=(W)(intptr_t)&terminal;char *pty[]={executable,"pty",NULL};c=spawn(spec, executable, pty, env);read_exact(c,1,bytes,5);jet_process_resize_raw(c,72,31,&e);good(&e);assert(jet_process_write_raw(c,0,"x",1,&e)==1);good(&e);read_exact(c,3,bytes,7);assert(!memcmp(bytes,"resized",7));assert(jet_process_read_raw(c,1,bytes,1,&e)==0);good(&e);wait_code(c,0);jet_process_close_stream_raw(c,3,&e);good(&e);jet_process_drop_raw(c);spec[22]=0;spec[23]=0;
@@ -152,7 +155,7 @@ int main(int argc,char **argv) {
     char too_long[5000];memset(too_long,'x',sizeof too_long-1);too_long[sizeof too_long-1]=0;assert(!jet_process_path_canonicalize_raw(too_long,&length,&capacity,&e));posix(&e,0,ENAMETOOLONG);
     Text *message=jet_host_os_error_text_raw(1,ENOENT);assert(message && message->len>0);jet_rt_string_drop(message);
     // Reviewed private carrier transfer/clone retains directories and deep E4s.
-    W owned[28]={0};Text borrowed=text(root);owned[1]=1;owned[2]=(W)(intptr_t)jet_rt_string_clone(&borrowed);void *packed=jet_process_spec_take_raw(owned),*clone=jet_process_spec_clone_raw(packed);jet_process_spec_drop_raw(packed);jet_process_spec_drop_raw(clone);
+    W owned[29]={0};Text borrowed=text(root);owned[1]=1;owned[2]=(W)(intptr_t)jet_rt_string_clone(&borrowed);owned[28]=(W)(intptr_t)jet_rt_alloc(128,8);memset((void *)(intptr_t)owned[28],0,128);void *packed=jet_process_spec_take_raw(owned),*clone=jet_process_spec_clone_raw(packed);jet_process_spec_drop_raw(packed);jet_process_spec_drop_raw(clone);
     assert(!unlink(nonutf)&&!unlink(symlink1)&&!unlink(symlink2)&&!rmdir(other)&&!rmdir(root));
     puts("process raw: ok");
 }

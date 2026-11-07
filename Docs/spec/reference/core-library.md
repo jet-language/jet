@@ -2313,6 +2313,18 @@ The macOS backend refuses memory and open-file limits, Windows refuses
 open-file limits, and unsupported targets refuse the corresponding native
 CPU, memory, or open-file requests.
 
+`.cpu_affinity(cpus: [Int])` runs the child only on the listed CPUs: the
+child sets its own affinity before it executes the program, so no
+instruction of the program runs elsewhere, and its descendants inherit the
+set. The receipt and plan limits carry `cpu-affinity=0-3,8` (the CPUs
+ascending, each run as `first-last`) only when the spec sets them. An empty
+list is `IOError.InvalidInput` (`cpu_affinity needs at least one CPU`), as
+is a negative CPU (`cpu -1 is negative; CPUs are numbered from 0`) and a CPU
+past the 1024-CPU affinity set (`cpu 2048 is past the 1024-CPU affinity
+set`); nothing starts. A set the kernel refuses, such as one with no CPU
+online or allowed to the caller, fails the launch with the kernel's error.
+`Examples/Systems/Process/ProcessAffinity.jet` is the golden.
+
 #### Authority and output boundaries
 
 An authority is explicit at the process boundary. `Authority.from_rights` can

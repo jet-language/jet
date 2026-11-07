@@ -296,7 +296,7 @@ sema_process_parsed_args_method: fn(receiver: Expr, receiver_value: TExpr, metho
 }
 
 sema_process_spec_known_method: fn(method: String) -> Bool Never! {
-    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "open_file_limit" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
+    method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "env" || method == "arg" || method == "args_extend" || method == "terminal" || method == "env_clear" || method == "detached" || method == "abilities" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "open_file_limit" || method == "cpu_affinity" || method == "under" || method == "plan" || method == "run" || method == "run_checked" || method == "spawn"
 }
 
 sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics: &[Diagnostic]) -> Type? {
@@ -320,7 +320,7 @@ sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics:
         "abilities" -> {
             if argc == 0 -> return Val(Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.TerminalFactSet}, inner: Type.Apply{name: "Set", args: [Type]{Type.String}}})
         }
-        "timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit" -> {
+        "timeout" | "cpu_time_limit" | "output_limit" | "memory_limit" | "open_file_limit" | "cpu_affinity" -> {
             if argc == 1 -> return Val(spec)
         }
         "under" -> {
@@ -348,7 +348,7 @@ sema_process_spec_result: fn(method: String, argc: Int, span: Span, diagnostics:
         method == "arg" || method == "args_extend" || method == "under" -> {
             sema_process_wrong_arity(method, 1, argc, span, diagnostics)
         }
-        method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "open_file_limit" -> {
+        method == "cwd" || method == "env_remove" || method == "stdin" || method == "stdout" || method == "stderr" || method == "timeout" || method == "cpu_time_limit" || method == "output_limit" || method == "memory_limit" || method == "open_file_limit" || method == "cpu_affinity" -> {
             sema_process_wrong_arity(method, 1, argc, span, diagnostics)
         }
         else -> {
@@ -366,6 +366,7 @@ sema_process_spec_arg_types: fn(method: String, argc: Int) -> [Type] Never! {
         "env" -> [Type]{Type.String, Type.String}
         "timeout" | "cpu_time_limit" -> [Type]{sema_process_named("Duration")}
         "output_limit" | "memory_limit" | "open_file_limit" -> [Type]{Type.Int}
+        "cpu_affinity" -> [Type]{Type.List{element: Type.Int}}
         "under" -> [Type]{sema_process_named("Authority")}
         "terminal" -> {
             if argc == 1 -> [Type]{sema_process_named("TerminalPolicy")} else -> [Type]{}

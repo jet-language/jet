@@ -53,6 +53,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [EnvOverlay](Process/EnvOverlay.jet)
 - [OSFacts](Process/OSFacts.jet) — System facts live in core.sys; core.sys stays environment vars.
 - [OSProcessControl](Process/OSProcessControl.jet)
+- [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
 - [ProcessPassDirectory](Process/ProcessPassDirectory.jet)

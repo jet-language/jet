@@ -8,12 +8,13 @@
 typedef struct { unsigned char *data; int64_t len, capacity; } Text;
 typedef struct { int64_t len, capacity; Text **data; } List;
 typedef struct { int64_t cols, rows, mode; } Policy;
+typedef struct { int64_t len, capacity; int64_t *data; } Words;
 typedef struct {
     List *cmd; Text *cwd; int64_t env_clear; List *env_set, *env_remove;
     int64_t *in; int64_t out, err; int64_t *timeout, *output, *cpu, *memory, *files;
-    int64_t detached; Policy *terminal; Text *wire; List *directories; int64_t parent_death;
+    int64_t detached; Policy *terminal; Text *wire; List *directories; int64_t parent_death; Words *cpu_affinity;
 } Spec;
-_Static_assert(sizeof(Spec)==144 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136, "native Spec144");
+_Static_assert(sizeof(Spec)==152 && offsetof(Spec,terminal)==112 && offsetof(Spec,wire)==120 && offsetof(Spec,directories)==128 && offsetof(Spec,parent_death)==136 && offsetof(Spec,cpu_affinity)==144, "native Spec152");
 _Static_assert(sizeof(List)==24 && sizeof(Policy)==24, "canonical nested carriers");
 extern void jet_rt_alloc_init(void);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -45,6 +46,7 @@ extern Spec *jet_process_spec_memory_limit(Spec *,int64_t);
 extern Spec *jet_process_spec_open_file_limit(Spec *,int64_t);
 extern Spec *jet_process_spec_timeout(Spec *,int64_t);
 extern Spec *jet_process_spec_cpu_time_limit(Spec *,int64_t);
+extern Spec *jet_process_spec_cpu_affinity(Spec *,const int64_t *,int64_t);
 extern Spec *jet_process_spec_terminal(Spec *);
 extern Spec *jet_process_spec_terminal_with_policy(Spec *,const Policy *);
 static struct { void *p; int64_t bytes,align; unsigned frees; } watched[256];
@@ -82,13 +84,14 @@ static void watch_list(List *list,bool pairs) {
     for(int64_t i=0;i<list->len*(pairs?2:1);++i) watch_text(list->data[i]);
 }
 static void watch_spec(Spec *s) {
-    watch(s,144,8); watch_list(s->cmd,false); watch_text(s->cwd);
+    watch(s,152,8); watch_list(s->cmd,false); watch_text(s->cwd);
     watch_list(s->env_set,true); watch_list(s->env_remove,false);
     if(s->in) watch(s->in,8,8);
     int64_t *limits[]={s->timeout,s->output,s->cpu,s->memory,s->files};
     for(size_t i=0;i<5;++i) if(limits[i]) watch(limits[i],8,8);
     if(s->terminal) watch(s->terminal,24,8);
     watch_text(s->wire);
+    if(s->cpu_affinity) { watch(s->cpu_affinity,24,8); if(s->cpu_affinity->capacity) watch(s->cpu_affinity->data,s->cpu_affinity->capacity*8,8); }
 }
 static void done(void) { assert(intercepted>0); for(size_t i=0;i<count;++i) assert(watched[i].frees==1); count=0; }
 static Text *text(const char *s) { return jet_rt_string_from_static(s,(int64_t)strlen(s)); }
@@ -100,7 +103,7 @@ static Spec *own(const Spec *s) { return jet_rt_handle_clone_process_spec(s); }
 static void defaults(Spec *s) {
     assert(s->cmd->len==0 && !s->cwd && !s->env_clear && s->env_set->len==0 && s->env_remove->len==0);
     assert(!s->in && s->out==2 && s->err==2 && !s->timeout && *s->output==67108864);
-    assert(!s->cpu && !s->memory && !s->files && !s->detached && !s->terminal && !s->wire);
+    assert(!s->cpu && !s->memory && !s->files && !s->detached && !s->terminal && !s->wire && !s->cpu_affinity);
     assert((const void *)jet_rt_handle_field_process_spec_env_clear(s)==(const void *)&s->env_clear);
     assert((const void *)jet_rt_handle_field_process_spec_detached(s)==(const void *)&s->detached);
     assert(!*jet_rt_handle_field_process_spec_env_clear(s) && !*jet_rt_handle_field_process_spec_detached(s));
@@ -183,6 +186,25 @@ static void limits(void) {
     }
     jet_rt_int_drop(hi); jet_rt_int_drop(lo); jet_rt_int_drop(above); jet_rt_int_drop(below); jet_rt_handle_drop_process_spec(a);
 }
+// `.cpu_affinity(cpus)` keeps the list as given, larger Ints saturated, for
+// the launch check; the last call replaces it, and it takes part in clone,
+// equality and drop.
+static void affinity(void) {
+    Spec *a=jet_std_process_cmd(NULL,0);
+    int64_t hi=jet_int_owned_from_i64(INT64_MAX), lo=jet_int_owned_from_i64(INT64_MIN);
+    int64_t above=jet_int_add(hi,1), below=jet_int_sub(lo,1);
+    int64_t cpus[]={3,0,-2,above,below};
+    Spec *b=jet_process_spec_cpu_affinity(own(a),cpus,5); defaults(a);
+    Words *w=b->cpu_affinity; assert(w && w->len==5 && w->data[0]==3 && w->data[1]==0 && w->data[2]==-2 && w->data[3]==INT64_MAX && w->data[4]==-INT64_MAX);
+    assert(!jet_rt_handle_eq_process_spec(a,b));
+    Spec *c=jet_rt_handle_clone_process_spec(b); assert(c->cpu_affinity!=b->cpu_affinity && c->cpu_affinity->data!=w->data && jet_rt_handle_eq_process_spec(b,c));
+    ++c->cpu_affinity->data[4]; assert(!jet_rt_handle_eq_process_spec(b,c)); --c->cpu_affinity->data[4];
+    replace(&c,jet_process_spec_cpu_affinity(c,cpus,1)); assert(c->cpu_affinity->len==1 && c->cpu_affinity->data[0]==3 && !jet_rt_handle_eq_process_spec(b,c));
+    Spec *empty=jet_process_spec_cpu_affinity(own(a),NULL,9); assert(empty->cpu_affinity && empty->cpu_affinity->len==0 && !jet_rt_handle_eq_process_spec(a,empty));
+    watch_spec(a); watch_spec(b); watch_spec(c); watch_spec(empty);
+    jet_rt_handle_drop_process_spec(a); jet_rt_handle_drop_process_spec(b); jet_rt_handle_drop_process_spec(c); jet_rt_handle_drop_process_spec(empty);
+    jet_rt_int_drop(hi); jet_rt_int_drop(lo); jet_rt_int_drop(above); jet_rt_int_drop(below); done();
+}
 static void modes_and_debug(void) {
     static const unsigned char raw[]={'\0','\t','\n','\r','"','\\','\'',0xcc,0x81};
     Text *input=jet_rt_string_from_static(raw,(int64_t)sizeof(raw)); Text *plain=text("x"); Text *args[]={input,plain};
@@ -214,6 +236,6 @@ int main(int argc,char **argv) {
         else return 64;
         assert(!"range stop returned");
     }
-    clone_cases(); limits(); modes_and_debug(); jet_rt_handle_drop_process_spec(NULL);
+    clone_cases(); limits(); affinity(); modes_and_debug(); jet_rt_handle_drop_process_spec(NULL);
     puts("ProcessSpec producers/ownership/equality/render OK");
 }

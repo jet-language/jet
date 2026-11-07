@@ -141,6 +141,13 @@ process_execution_policy_digest: fn(spec: I64) -> I64 {
     process_execution_material_field(text, rt_static_text("stderr"), process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
     process_execution_material_field(text, rt_static_text("detached"), if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) == I64{0}) -> rt_static_text("false") else -> rt_static_text("true"))
     process_execution_material_field(text, rt_static_text("terminal"), if (fd_word(spec, PROCESS_SPEC_TERMINAL) == I64{0}) -> rt_static_text("none") else -> rt_static_text("requested"))
+    // Only a spec that pins CPUs adds the field, so every other digest stays.
+    cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
+    if (cpus != I64{0}) {
+        affinity: process_execution_affinity_text(cpus)
+        process_execution_material_field(text, rt_static_text("cpu-affinity"), affinity)
+        jet_rt_string_drop(affinity)
+    }
     material: jet_rt_string_builder_finish(text)
     digest: process_execution_hash(material)
     jet_rt_string_drop(material)
@@ -165,6 +172,15 @@ process_execution_limits: fn(spec: I64) -> I64 {
         at += I64{1}
     }
     process_text_list_drop(keys, false)
+    // `cpu-affinity=0-3,8`, only when the spec pins CPUs.
+    cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
+    if (cpus != I64{0}) {
+        affinity: process_execution_affinity_text(cpus)
+        entry: scheduler_text_concat(rt_static_text("cpu-affinity="), affinity)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(entry)
+        jet_rt_string_drop(affinity)
+    }
     list
 }
 // Policy secret values first, then secret-named environment values.

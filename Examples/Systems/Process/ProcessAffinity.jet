@@ -1,0 +1,54 @@
+// `.cpu_affinity(cpus)` runs the child only on the listed CPUs: the child
+// sets its own affinity before it starts the program, so no instruction of
+// the program runs elsewhere. The receipt's limits name the set
+// (`cpu-affinity=0-3,8`). An empty list, a negative CPU, or a CPU past the
+// 1024-CPU affinity set is `IOError.InvalidInput` before anything starts; a
+// set the kernel refuses (no CPU of it online or allowed) fails the launch.
+package: {
+    name: "process_affinity"
+    authority: { allow: [Env, Exec, Exec.Args, FS.Read, IO, Mem.Alloc, Time.Wait] }
+}
+
+use {
+    files: core.files
+    process: core.process
+    os: core.sys
+}
+
+// The CPUs this process may run on, as the kernel lists them (`0-15`, `3,5-7`).
+allowed_cpus: fn() -> String IOError! {
+    loop line in files.read("/proc/self/status").lines() {
+        if line.starts_with("Cpus_allowed_list:") -> return (line.split(":").to_list().get(1) ?? "").trim()
+    }
+    ""
+}
+
+why: fn(error: IOError) -> String {
+    if error == {
+        .InvalidInput(context) -> "InvalidInput: {context.cause ?? ""}"
+        else -> "another error"
+    }
+}
+
+refuse: fn(exe: String, cpus: [Int]) {
+    if process.run_spec(process.cmd([exe, "cpus"]).cpu_affinity(cpus)) == {
+        .Ok(_) -> print("refused: no")
+        .Err(error) -> print("refused: {why(error)}")
+    }
+}
+
+run: fn() IOError! {
+    exe: os.executable()
+    if (process.args().get(0) ?? "") == "cpus" {
+        print(allowed_cpus())
+        process.exit(0)
+    }
+    // This process's first CPU, so the run works under any outer affinity.
+    first: Int.parse((allowed_cpus().split(",").to_list().get(0) ?? "").split("-").to_list().get(0) ?? "") ?? 0
+    receipt: process.run_spec(process.cmd([exe, "cpus"]).cpu_affinity([first, first]).stdout(.Capture))
+    print("child runs only on the CPU it was given: {receipt.output.trim() == "{first}"}")
+    print("receipt names the set: {receipt.limits.contains("cpu-affinity={first}")}")
+    refuse(exe, [])
+    refuse(exe, [-1])
+    refuse(exe, [2048])
+}

@@ -1,4 +1,4 @@
-// Plain ProcessSpec144 -> borrowed HostSpawn Spec224. No Rust layouts.
+// Plain ProcessSpec152 -> borrowed HostSpawn Spec232. No Rust layouts.
 process_execution_first: fn(spec: I64) -> I64 {
     cmd: fd_word(spec, PROCESS_SPEC_CMD)
     if (fd_word(cmd, I64{0}) == I64{0}) -> { I64{0} } else -> { fd_word(fd_word(cmd, I64{16}), I64{0}) }
@@ -153,10 +153,81 @@ process_execution_nul_drop: fn(columns: I64, list: I64) {
     }
     jet_rt_free(columns, (fd_word(list, I64{0}) + I64{1}) * I64{8}, I64{8})
 }
+// Why launch refuses `.cpu_affinity(cpus)`, as an owned InvalidInput text, or
+// 0: the list is empty, or a CPU is below 0 or past the PROCESS_CPU_SET_CPUS
+// set the child's sched_setaffinity mask holds.
+process_execution_affinity_refusal: fn(cpus: I64) -> I64 {
+    if (fd_word(cpus, I64{0}) == I64{0}) -> return jet_rt_string_clone(rt_static_text("cpu_affinity needs at least one CPU"))
+    at := I64{0}
+    loop at < fd_word(cpus, I64{0}) {
+        cpu: fd_word(fd_word(cpus, I64{16}), at * I64{8})
+        if (cpu < I64{0} || cpu >= PROCESS_CPU_SET_CPUS) {
+            text: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(text, rt_static_text("cpu "))
+            rt_text_push_number(text, cpu)
+            if (cpu < I64{0}) {
+                jet_rt_string_builder_push(text, rt_static_text(" is negative; CPUs are numbered from 0"))
+            } else {
+                jet_rt_string_builder_push(text, rt_static_text(" is past the "))
+                rt_text_push_number(text, PROCESS_CPU_SET_CPUS)
+                jet_rt_string_builder_push(text, rt_static_text("-CPU affinity set"))
+            }
+            return jet_rt_string_builder_finish(text)
+        }
+        at += I64{1}
+    }
+    I64{0}
+}
+// The CPU list as the PROCESS_CPU_SET_BYTES mask sched_setaffinity reads
+// (bit `cpu % 8` of byte `cpu / 8`); the caller frees it. A CPU outside the
+// set has no bit: launch has refused it already, and a plan leaves it out.
+process_execution_affinity_mask: fn(cpus: I64) -> I64 {
+    mask: jet_rt_alloc(PROCESS_CPU_SET_BYTES, I64{8})
+    coll_zero(mask, PROCESS_CPU_SET_BYTES)
+    at := I64{0}
+    loop at < fd_word(cpus, I64{0}) {
+        cpu: fd_word(fd_word(cpus, I64{16}), at * I64{8})
+        if (cpu >= I64{0} && cpu < PROCESS_CPU_SET_CPUS) {
+            byte: wrapping(mask + cpu / I64{8})
+            rt_text_put(byte, rt_text_byte(byte).bit_or(I64{1} << (cpu % I64{8})))
+        }
+        at += I64{1}
+    }
+    mask
+}
+process_execution_affinity_has: fn(mask: I64, cpu: I64) -> Bool {
+    rt_text_byte(wrapping(mask + cpu / I64{8})).bit_and(I64{1} << (cpu % I64{8})) != I64{0}
+}
+// `.cpu_affinity(cpus)` as its limits value: the CPUs ascending, each run
+// as `first-last` (`0-3,8`).
+process_execution_affinity_text: fn(cpus: I64) -> I64 {
+    mask: process_execution_affinity_mask(cpus)
+    text: jet_rt_string_builder_new()
+    start := I64{-1}
+    wrote := false
+    cpu := I64{0}
+    loop cpu <= PROCESS_CPU_SET_CPUS {
+        set: if (cpu == PROCESS_CPU_SET_CPUS) -> false else -> process_execution_affinity_has(mask, cpu)
+        if (set && start < I64{0}) -> start = cpu
+        if (!set && start >= I64{0}) {
+            if wrote -> jet_rt_string_builder_push(text, rt_static_text(","))
+            rt_text_push_number(text, start)
+            if (cpu - I64{1} != start) {
+                jet_rt_string_builder_push(text, rt_static_text("-"))
+                rt_text_push_number(text, cpu - I64{1})
+            }
+            wrote = true
+            start = I64{-1}
+        }
+        cpu += I64{1}
+    }
+    jet_rt_free(mask, PROCESS_CPU_SET_BYTES, I64{8})
+    jet_rt_string_builder_finish(text)
+}
 process_execution_pack: fn(spec: I64) -> I64 {
     held_cwd: process_execution_held_cwd(spec)
-    mechanical: jet_rt_alloc(I64{224}, I64{8})
-    coll_zero(mechanical, I64{224})
+    mechanical: jet_rt_alloc(SPAWN_SPEC_BYTES, I64{8})
+    coll_zero(mechanical, SPAWN_SPEC_BYTES)
     fd_put(mechanical, I64{0}, fd_word(spec, PROCESS_SPEC_CMD))
     fd_put(mechanical, I64{8}, if (fd_word(spec, PROCESS_SPEC_CWD) == I64{0} || held_cwd) -> { I64{0} } else -> { I64{1} })
     fd_put(mechanical, I64{16}, fd_word(spec, PROCESS_SPEC_CWD))
@@ -187,6 +258,8 @@ process_execution_pack: fn(spec: I64) -> I64 {
         fd_put(mechanical, I64{72}, PROCESS_STREAM_NULL)
         fd_put(mechanical, I64{80}, PROCESS_STREAM_NULL)
     }
+    cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
+    if (cpus != I64{0}) -> fd_put(mechanical, I64{224}, process_execution_affinity_mask(cpus))
     mechanical
 }
 // Owner ruling (relaunch): a program `jet run` runs from memory that
@@ -253,6 +326,15 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
         _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be detached")), err)
         return I64{0}
     }
+    cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
+    if (cpus != I64{0}) {
+        refusal: process_execution_affinity_refusal(cpus)
+        if (refusal != I64{0}) {
+            _ := process_execution_invalid(spec, refusal, err)
+            jet_rt_string_drop(refusal)
+            return I64{0}
+        }
+    }
     // `.Stdout` names the child's stdout, so only stderr can take it.
     stdin: fd_word(spec, PROCESS_SPEC_STDIN)
     if (fd_word(spec, PROCESS_SPEC_STDOUT) == PROCESS_STREAM_STDOUT || (stdin != I64{0} && fd_word(stdin, I64{0}) == PROCESS_STREAM_STDOUT)) {
@@ -293,7 +375,9 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
     // errno through HostSpawn's CLOEXEC pipe; the kind follows that errno as
     // file I/O's does (ENOENT NotFound, EACCES PermissionDenied, ...).
     if (child == I64{0}) -> _ := compiler_fs_errno(HOST_IO_OP_RESOLVE, process_execution_resource(spec), fd_word(facts, I64{40}), err)
-    jet_rt_free(mechanical, I64{224}, I64{8})
+    affinity: fd_word(mechanical, I64{224})
+    if (affinity != I64{0}) -> jet_rt_free(affinity, PROCESS_CPU_SET_BYTES, I64{8})
+    jet_rt_free(mechanical, SPAWN_SPEC_BYTES, I64{8})
     process_execution_nul_drop(candidate_columns, candidates)
     process_execution_nul_drop(argv, words)
     if (relaunch != I64{0}) -> process_text_list_drop(relaunch, false)

@@ -1,4 +1,4 @@
-// Spec144 is a native private value carrier, not Rust or HostSpawn Spec224.
+// Spec152 is a native private value carrier, not Rust or HostSpawn Spec232.
 // CAbiRoutes builders BORROW parent/inputs and return an independent clone.
 // DataABI owns offsets; TextDebug and UiCarriersBasic own nested codecs.
 process_raw_box: fn(value: I64) -> I64 {
@@ -73,6 +73,34 @@ process_text_list_push: fn(list: I64, text: I64) {
     encoding_store(slot, jet_rt_string_clone(text))
     encoding_store(wrapping(list + DATA_SEQUENCE_LENGTH), encoding_word(wrapping(list + DATA_SEQUENCE_LENGTH)) + I64{1})
 }
+// An owned List24 of plain words (`.cpu_affinity`'s CPUs), or 0 when unset.
+process_word_list_clone: fn(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    length: encoding_word(wrapping(value + DATA_SEQUENCE_LENGTH))
+    result: data_sequence_new(length, DATA_TREE_ELEMENT_BYTES)
+    coll_copy(encoding_word(wrapping(value + DATA_SEQUENCE_DATA)), encoding_word(wrapping(result + DATA_SEQUENCE_DATA)), length * DATA_TREE_ELEMENT_BYTES)
+    encoding_store(wrapping(result + DATA_SEQUENCE_LENGTH), length)
+    result
+}
+process_word_list_drop: fn(value: I64) {
+    if (value == I64{0}) -> return
+    capacity: encoding_word(wrapping(value + DATA_SEQUENCE_CAPACITY))
+    if (capacity != I64{0}) -> jet_rt_free(encoding_word(wrapping(value + DATA_SEQUENCE_DATA)), capacity * DATA_TREE_ELEMENT_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+process_word_list_eq: fn(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    length: encoding_word(wrapping(a + DATA_SEQUENCE_LENGTH))
+    if length != encoding_word(wrapping(b + DATA_SEQUENCE_LENGTH)) -> return false
+    left: encoding_word(wrapping(a + DATA_SEQUENCE_DATA))
+    right: encoding_word(wrapping(b + DATA_SEQUENCE_DATA))
+    at := I64{0}
+    loop at < length * DATA_TREE_ELEMENT_BYTES {
+        if encoding_word(wrapping(left + at)) != encoding_word(wrapping(right + at)) -> return false
+        at += DATA_TREE_ELEMENT_BYTES
+    }
+    true
+}
 #Export(c) jet_rt_handle_clone_process_spec: fn(value: I64) -> I64 {
     process_spec_clone(value, true)
 }
@@ -99,6 +127,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     encoding_store(wrapping(result + PROCESS_SPEC_TERMINAL), if (terminal == I64{0}) -> I64{0} else -> jet_rt_handle_clone_terminal_policy(terminal))
     encoding_store(wrapping(result + PROCESS_SPEC_POLICY_WIRE), process_optional_text_clone(encoding_word(wrapping(value + PROCESS_SPEC_POLICY_WIRE))))
     encoding_store(wrapping(result + PROCESS_SPEC_DIRECTORIES), if directories -> spawn_dirs_clone(encoding_word(wrapping(value + PROCESS_SPEC_DIRECTORIES))) else -> I64{0})
+    encoding_store(wrapping(result + PROCESS_SPEC_CPU_AFFINITY), process_word_list_clone(encoding_word(wrapping(value + PROCESS_SPEC_CPU_AFFINITY))))
     result
 }
 #Export(c) jet_rt_handle_drop_process_spec: fn(value: I64) {
@@ -115,6 +144,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     }
     jet_rt_handle_drop_terminal_policy(encoding_word(wrapping(value + PROCESS_SPEC_TERMINAL)))
     jet_rt_string_drop(encoding_word(wrapping(value + PROCESS_SPEC_POLICY_WIRE)))
+    process_word_list_drop(encoding_word(wrapping(value + PROCESS_SPEC_CPU_AFFINITY)))
     directories: encoding_word(wrapping(value + PROCESS_SPEC_DIRECTORIES))
     if directories != (I64{0}) {
         index := I64{0}
@@ -142,6 +172,7 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     }
     if (encoding_word(wrapping(a + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) != (encoding_word(wrapping(b + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) -> return false
     if encoding_word(wrapping(a + PROCESS_SPEC_PARENT_DEATH)) != encoding_word(wrapping(b + PROCESS_SPEC_PARENT_DEATH)) -> return false
+    if !process_word_list_eq(encoding_word(wrapping(a + PROCESS_SPEC_CPU_AFFINITY)), encoding_word(wrapping(b + PROCESS_SPEC_CPU_AFFINITY))) -> return false
     left: encoding_word(wrapping(a + PROCESS_SPEC_TERMINAL))
     right: encoding_word(wrapping(b + PROCESS_SPEC_TERMINAL))
     if (left == I64{0} || right == I64{0}) {
@@ -301,6 +332,31 @@ jet_process_limit_i64: fn(value: I64) -> I64 {
 #Export(c) jet_process_spec_output_limit: fn(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_OUTPUT_LIMIT, jet_process_limit_i64(limit)) }
 #Export(c) jet_process_spec_memory_limit: fn(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_MEMORY_LIMIT, jet_process_limit_i64(limit)) }
 #Export(c) jet_process_spec_open_file_limit: fn(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_OPEN_FILE_LIMIT, jet_process_limit_i64(limit)) }
+// An exact Int as a word: inline values as they are, larger ones saturated,
+// so the launch check still sees their sign and that they are out of range.
+process_int_saturated: fn(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    if int_negative(value) -> I64{-9223372036854775807} else -> I64{9223372036854775807}
+}
+// `.cpu_affinity(cpus)`: the CPUs the child may run on, set with
+// sched_setaffinity in the child before exec. The list is kept as given;
+// launch refuses an empty one or a CPU outside the PROCESS_CPU_SET_CPUS set
+// (process_execution_affinity_mask).
+#Export(c) jet_process_spec_cpu_affinity: fn(value: I64, data: I64, length: I64) -> I64 {
+    result: value
+    process_word_list_drop(encoding_word(wrapping(result + PROCESS_SPEC_CPU_AFFINITY)))
+    count: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
+    cpus: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    target: encoding_word(wrapping(cpus + DATA_SEQUENCE_DATA))
+    at := I64{0}
+    loop at < count {
+        encoding_store(wrapping(target + at * DATA_TREE_ELEMENT_BYTES), process_int_saturated(encoding_word(wrapping(data + at * DATA_TREE_ELEMENT_BYTES))))
+        at += I64{1}
+    }
+    encoding_store(wrapping(cpus + DATA_SEQUENCE_LENGTH), count)
+    encoding_store(wrapping(result + PROCESS_SPEC_CPU_AFFINITY), cpus)
+    result
+}
 process_spec_mode: fn(value: I64, mode: I64, field: I64) -> I64 {
     // Frozen CAbiRoutes range_stop, not exact Int native() conversion.
     if (mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_STDOUT) {

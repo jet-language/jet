@@ -2836,70 +2836,70 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 235,
+      "line": 245,
       "column": 17,
       "reason": "Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 314,
+      "line": 324,
       "column": 13,
       "reason": "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 403,
+      "line": 419,
       "column": 13,
       "reason": "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 413,
+      "line": 429,
       "column": 5,
       "reason": "rt_sigprocmask reads the parent's saved mask word in this spawn's block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 457,
+      "line": 476,
       "column": 5,
       "reason": "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 828,
+      "line": 847,
       "column": 9,
       "reason": "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 843,
+      "line": 862,
       "column": 5,
       "reason": "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 854,
+      "line": 873,
       "column": 5,
       "reason": "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 859,
+      "line": 878,
       "column": 9,
       "reason": "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 870,
+      "line": 889,
       "column": 5,
       "reason": "successful realpath NUL-terminates its result within the PATH_MAX byte buffer"
     },
@@ -9989,16 +9989,16 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 203:9 | "private scratch lends sockaddr/socklen and packed lends length mutable bytes; MSG_TRUNC returns the complete datagram length while writing at most length bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 212:17 | "recvfrom initialized used compact bytes; the caller owns used mutable native U8 elements" |
 | Compiler | Compiler/JetRuntime/Source/HostSockets.jet | 236:5 | "path lends its immutable E4 bytes for std-compatible sockaddr_un validation" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 235:17 | "Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 314:13 | "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 403:13 | "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 413:5 | "rt_sigprocmask reads the parent's saved mask word in this spawn's block" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 457:5 | "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 828:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 843:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 854:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 859:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 870:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 245:17 | "Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 324:13 | "rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 419:13 | "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 429:5 | "rt_sigprocmask reads the parent's saved mask word in this spawn's block" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 476:5 | "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 847:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 862:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 873:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 878:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 889:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 52:5 | "bytes borrows one live NUL-terminated startup string" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 84:5 | "host argument registration is single-threaded and precedes user code" |
