@@ -81,14 +81,16 @@ deadlines do not interrupt those
 closes. A new panic during cleanup with a pending Stop is process-fatal (70),
 the same abort a panic during unwinding gets. No additional TLS state
 or specialized plain cleanup call graph is introduced.
-The Source acceptance runner
-`Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
-`defer close(resource)` examples, checking native task publication, plain
-task/root fatal report parity, LIFO closes exactly once, cancellation held
-through closing and delivered at the next wait, fatal panic inside closing,
-and the plain no-task output against its existing byte golden. Its
-`assemble/lower/link/run` modes require the fresh composed runtime for execution;
-source parsing alone is not a behavioral receipt.
+Gated rows prove these rules on every tier:
+- the goldens `tests/run/Ownership/ReleaseDeferPanic` and `ReleaseDeferLifo` and
+  the case `resource_close/cleanup_runs_once_in_lifo_order_on_all_scope_exits`
+  prove that the registered closes run once, in LIFO order, on every exit;
+- the golden `tests/run/Ownership/ReleaseDeferClosePanic` proves that a panic
+  inside a close is process-fatal;
+- the case `task_control_tiers/a_cancel_at_cleanup_entry_waits_out_the_close_on_every_tier`
+  proves that a cancel arriving at cleanup entry waits until the close
+  finishes, then stops the task at its next wait.
+Both rows are known-failing under #5989.
 
 Native expectation probes consume only a pending panic with a recorded raw
 `E3001`, `E3010`, `E3011` or `R0801`–`R0803` stop in the innermost matching
