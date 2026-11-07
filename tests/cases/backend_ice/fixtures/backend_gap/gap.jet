@@ -10,11 +10,11 @@ use compute: core.compute
 loss: fn(w: Tensor) -> Tensor { compute.mul(w.copy(), w) ?? panic("loss") }
 
 nine: fn() {
-    _slope: compute.gradient(loss)
+    _pullback: compute.vjp(loss)
     print("made")
 }
 
-#Test("nine takes one gradient") {
+#Test("nine takes one pullback") {
     nine()
 }
 
