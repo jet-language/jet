@@ -46,6 +46,7 @@ use jet_foundation.[
     PerfLit,
     PolicyDeclaration,
     ProtocolDecl,
+    RuleSite,
     SerdeWireShape,
     Span,
     StateDecl,
@@ -856,7 +857,7 @@ jfmt_fmt_derive_decl: fn(f: &JetFmt, derive_def: DeriveDef) {
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1
-    jfmt_fmt_derive_body_items(f, derive_def.body)
+    jfmt_fmt_derive_body_items(f, derive_def.body, false)
     f.indent -= 1
     jfmt_emit_leading(f, derive_def.span.end)
     jfmt_end_template_block(f)
@@ -870,22 +871,25 @@ jfmt_fmt_item_template_loop: fn(f: &JetFmt, loop_item: ItemTemplateLoop) {
     jfmt_write(f, " {{")
     jfmt_newline(f)
     f.indent += 1
-    jfmt_fmt_derive_body_items(f, loop_item.body)
+    jfmt_fmt_derive_body_items(f, loop_item.body, false)
     f.indent -= 1
     jfmt_emit_leading(f, loop_item.span.end)
     jfmt_end_template_block(f)
 }
 
 // Format typed derive, marker, and generated-source bodies through their AST.
-// These bodies share one representation, so one walk closes all three.
-jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
+// These bodies share one representation, so one walk closes all three. `code`
+// marks an `expand` body, whose functions keep the `fn name(…)` spelling.
+jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem], code: Bool) {
     loop index in 0..<body.len() {
         body_item: body[index]
         if index > 0 && !f.at_line_start -> jfmt_newline(f)
         item_start: jfmt_derive_body_item_start(f, body_item)
         jfmt_emit_leading(f, item_start)
         if body_item == {
-            .Item(item) -> jfmt_fmt_item(f, item)
+            .Item(item) -> {
+                if code && item == .Func(func) -> jfmt_fmt_func_spelled(f, func, true) else -> jfmt_fmt_item(f, item)
+            }
             .Stmt(stmt) -> jfmt_fmt_stmt(f, stmt)
             .Loop(var, _, source, inner, _) -> {
                 jfmt_write(f, "comptime loop ")
@@ -895,7 +899,7 @@ jfmt_fmt_derive_body_items: fn(f: &JetFmt, body: [DeriveBodyItem]) {
                 jfmt_write(f, " {{")
                 jfmt_newline(f)
                 f.indent += 1
-                jfmt_fmt_derive_body_items(f, inner)
+                jfmt_fmt_derive_body_items(f, inner, code)
                 f.indent -= 1
                 jfmt_end_template_block(f)
             }
@@ -1245,6 +1249,7 @@ jfmt_fmt_trait: fn(f: &JetFmt, t: TraitDef) {
             next
         }
         m: t.methods[member.index]
+        jfmt_fmt_rules_before(f, RuleSite.Method, m.name_span.start)
         jfmt_fmt_callable_markers(f, m.markers)
         jfmt_write(f, m.name)
         jfmt_write(f, ": fn")
@@ -1307,6 +1312,7 @@ jfmt_fmt_extern_rust: fn(f: &JetFmt, block: ExternRustBlock) {
 }
 
 jfmt_fmt_extern_fn: fn(f: &JetFmt, ef: ExternFn) {
+    if ef.close == .Val(closer) -> jfmt_write(f, "#Close({closer.name}) ")
     if ef.undo == .Val(inverse) -> jfmt_write(f, "#Undo({inverse.name}) ")
     if ef.abi == .Val(abi) -> jfmt_write(f, "#ABI({abi.name}) ")
     jfmt_write(f, ef.name)
@@ -1684,16 +1690,32 @@ jfmt_fmt_callable_markers: fn(f: &JetFmt, markers: [Marker]) {
     }
 }
 
-jfmt_fmt_func: fn(f: &JetFmt, func: Func) {
+jfmt_fmt_func: fn(f: &JetFmt, func: Func) { jfmt_fmt_func_spelled(f, func, false) }
+
+// `prefix` spells the declaration `fn name(…)`: a statement-position function in
+// a marker's `expand` body, where `name: fn` would read as a binding.
+jfmt_fmt_func_spelled: fn(f: &JetFmt, func: Func, prefix: Bool) {
     jfmt_fmt_callable_markers(f, func.markers)
     // (card #2789), respelled by preserve
     // the build-time callable mark on capability constructors. It sits after
     // any markers, directly before `fn`, exactly where `method_in_type` reads it.
     // A name path (`Shape.area`) prints before `fn`; the build-time
     // `comptime` mark stays first after the markers.
+    // A member `priv` (parsed onto the method) survives; a narrowed module
+    // body's methods carry no written keyword.
+    if !func.is_pub && jfmt_source_priv_before(f, func.name_span.start) -> jfmt_write(f, "priv ")
     if func.is_comptime -> jfmt_write(f, "comptime ")
-    jfmt_write(f, func.name)
-    jfmt_write(f, ": fn")
+    if prefix {
+        jfmt_write(f, "fn ")
+        jfmt_write(f, func.name)
+    } else {
+        if func.external_type == .Val(owner) {
+            jfmt_write(f, owner.name)
+            jfmt_write(f, ".")
+        }
+        jfmt_write(f, func.name)
+        jfmt_write(f, ": fn")
+    }
     type_source: jfmt_source_list_span_after(f, func.name_span.end, JFMT_DELIM_ANGLE)
     jfmt_fmt_type_params(f, func.type_params, type_source)
     jfmt_write(f, "(")
@@ -1869,6 +1891,8 @@ jfmt_fmt_param_list: fn(f: &JetFmt, params: [Param], source: JetFmtSourceList?) 
 }
 
 jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
+    param_start: if p.public_label == .Val(label) -> label.span.start else -> p.name_span.start
+    jfmt_fmt_rules_before(f, RuleSite.Parameter, param_start)
     if p.root {
         jfmt_write(f, "#")
         jfmt_write(f, "Root")
@@ -1886,6 +1910,8 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
         // `&self` / `&&self`: the sigil attaches to `self`, no type printed.
         if sigil.len() > 0 -> jfmt_write(f, sigil)
         jfmt_write(f, p.name)
+        // The receiver footprint `self.log` / `self.[log, hits]`.
+        if p.declared_footprint == .Val(fields) -> jfmt_fmt_receiver_footprint(f, fields, p.name_span.end)
     } else {
         // `timeout seconds: Int` — public label, then local name.
         if p.public_label == .Val(label) {
@@ -1930,6 +1956,22 @@ jfmt_fmt_param: fn(f: &JetFmt, p: Param) {
         jfmt_fmt_expr(f, default, JFMT_PREC_OR_FALLBACK)
         jfmt_write(f, "}}")
     }
+}
+
+// A receiver footprint after `self`: one field reads `.log` unless the source
+// spelled the member spread `.[log]`; none or several read `.[log, hits]`.
+jfmt_fmt_receiver_footprint: fn(f: &JetFmt, fields: [NamedSpan], self_end: Int) {
+    if fields.len() == 1 && jfmt_bytes_rfind(f.src_bytes, fields[0].span.start, "[") < self_end {
+        jfmt_write(f, ".")
+        jfmt_write(f, fields[0].name)
+        return
+    }
+    jfmt_write(f, ".[")
+    loop index in 0..<fields.len() {
+        if index > 0 -> jfmt_write(f, ", ")
+        jfmt_write(f, fields[index].name)
+    }
+    jfmt_write(f, "]")
 }
 
 // Reprint a function return `from` clause.
@@ -2096,7 +2138,7 @@ jfmt_fmt_marker_impl: fn(f: &JetFmt, declaration: MarkerDecl, start: Int, expand
         jfmt_write(f, "expand: fn(self, target: Target) {{")
         jfmt_newline(f)
         f.indent += 1
-        jfmt_fmt_derive_body_items(f, template)
+        jfmt_fmt_derive_body_items(f, template, true)
         f.indent -= 1
         if expand == .Val(span) -> jfmt_emit_leading(f, span.end)
         jfmt_end_template_block(f)
@@ -2404,6 +2446,8 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
         jfmt_fmt_meta_attr(f, meta)
         jfmt_newline(f)
     }
+    // `#Name $limit: 1`: a module binding's markers are its Declaration-site rows.
+    jfmt_fmt_rules_before(f, RuleSite.Declaration, c.span.start)
     // `#Persist` on a bare binding (not on `comptime`).
     // Preserve `:` vs `:=`.
     if c.is_persist {

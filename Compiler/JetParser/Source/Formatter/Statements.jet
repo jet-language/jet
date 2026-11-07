@@ -20,19 +20,31 @@ use {
         PolicyDeclaration,
         PolicyKey,
         PolicyValue,
+        RuleSite,
         Span,
         Stmt,
         SwitchArm,
+        expr_source_start,
         expr_span,
         type_name,
     ]
     jet_lexer.[
         TOKEN_BLOCK_COMMENT,
         TOKEN_CHAR,
+        TOKEN_EQ_EQ,
+        TOKEN_GE,
+        TOKEN_GT,
         TOKEN_KW_ELSE,
         TOKEN_LBRACE,
+        TOKEN_LBRACKET,
+        TOKEN_LE,
         TOKEN_LINE_COMMENT,
+        TOKEN_LPAREN,
+        TOKEN_LT,
+        TOKEN_NOT_EQ,
         TOKEN_RAW_STRING,
+        TOKEN_RBRACKET,
+        TOKEN_RPAREN,
         TOKEN_STRING,
     ]
 }
@@ -678,12 +690,39 @@ jfmt_fmt_loop_label: fn(f: &JetFmt, label: NamedSpan?) {
     if label == .Val(named) -> jfmt_write(f, "{named.name}: ")
 }
 
+// `#Allow(…) stmt` and `#Unregistered stmt`: the rows whose target starts
+// where this statement starts.
+jfmt_fmt_statement_rules: fn(f: &JetFmt, stmt: Stmt) {
+    if f.inline_rules.len() == 0 -> return
+    start: if stmt == {
+        .Expr(expr) -> expr_source_start(expr)
+        else -> jfmt_stmt_start(stmt)
+    }
+    jfmt_fmt_rules_before(f, RuleSite.Statement, start)
+}
+
+// `} else comptime if …` chains when the source spells it so; a braced else
+// body holding a lone `comptime if` keeps its braces.
+jfmt_comptime_else_chain: fn(f: JetFmt, body: [Stmt]) -> Bool {
+    if body.len() != 1 -> return false
+    if body[0] == {
+        .ComptimeIf(_, _, _, _, span, _) -> {
+            index := span.start - 1
+            if index >= f.src_bytes.len() -> return false
+            loop index >= 0 && (f.src_bytes[index] == 32 || f.src_bytes[index] == 9 || f.src_bytes[index] == 10 || f.src_bytes[index] == 13) -> index -= 1
+            index >= 3 && f.src_bytes[index - 3] == 101 && f.src_bytes[index - 2] == 108 && f.src_bytes[index - 1] == 115 && f.src_bytes[index] == 101
+        }
+        else -> false
+    }
+}
+
 jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
     is_switched: if stmt == {
         .Switched(_, _, _) -> true
         else -> false
     }
     if !is_switched {
+        jfmt_fmt_statement_rules(f, stmt)
         if jfmt_block_marker(stmt, f.policy_declarations) == .Val(marker) -> jfmt_fmt_block_marker(f, marker, jfmt_stmt_span(stmt).start)
     }
     if stmt == {
@@ -898,12 +937,17 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             f.indent -= 1
             jfmt_end_block(f)
             if else_body == .Val(eb) {
-                jfmt_write(f, " else {{")
-                jfmt_newline(f)
-                f.indent += 1
-                jfmt_fmt_block_stmts(f, eb)
-                f.indent -= 1
-                jfmt_end_block(f)
+                if jfmt_comptime_else_chain(f, eb) {
+                    jfmt_write(f, " else ")
+                    jfmt_fmt_stmt(f, eb[0])
+                } else {
+                    jfmt_write(f, " else {{")
+                    jfmt_newline(f)
+                    f.indent += 1
+                    jfmt_fmt_block_stmts(f, eb)
+                    f.indent -= 1
+                    jfmt_end_block(f)
+                }
             }
         }
         // `comptime if $build.os == { … }` — the OS-dispatch
@@ -1446,21 +1490,41 @@ jfmt_switch_cond_slot: fn(op: BinOp, child: Expr, base: Int) -> Int Never! {
     base
 }
 
-// Read the comparison marker from source between the subject and `{`.
+// Read the comparison marker from source: the comparison token after the
+// subject that the arms' `{` directly follows. A method-call subject is spanned
+// at its method name, so a generic `<T>` and an argument list may sit between.
 jfmt_dispatch_op_from_source: fn(f: JetFmt, subject: Expr) -> BinOp? Never! {
-    index := expr_span(subject).end
-    if index < 0 || index > f.src_bytes.len() -> return None
-    loop index < f.src_bytes.len() && jfmt_is_ascii_space(f.src_bytes[index]) -> index += 1
-    if index >= f.src_bytes.len() -> return None
-    first: Int.from_u8(f.src_bytes[index])
-    second: if index + 1 < f.src_bytes.len() -> Int.from_u8(f.src_bytes[index + 1]) else -> -1
+    start: expr_span(subject).end
+    depth := 0
+    pending := BinOp?{None}
+    loop token in f.source_toks {
+        if token.span.start < start || jfmt_is_comment_kind(token.kind) -> next
+        kind: token.kind
+        if pending != None {
+            if kind == TOKEN_LBRACE -> return pending
+            pending = None
+        }
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET {
+            depth += 1
+        } else if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET {
+            depth -= 1
+            if depth < 0 -> return None
+        } else if depth == 0 {
+            if kind == TOKEN_LBRACE -> return None
+            pending = jfmt_dispatch_token_op(kind)
+        }
+    }
+    None
+}
+
+jfmt_dispatch_token_op: fn(kind: Int) -> BinOp? Never! {
     if {
-        first == 61 && second == 61 -> Val(BinOp.Eq)
-        first == 33 && second == 61 -> Val(BinOp.Ne)
-        first == 60 && second == 61 -> Val(BinOp.Le)
-        first == 62 && second == 61 -> Val(BinOp.Ge)
-        first == 60 -> Val(BinOp.Lt)
-        first == 62 -> Val(BinOp.Gt)
+        kind == TOKEN_EQ_EQ -> Val(BinOp.Eq)
+        kind == TOKEN_NOT_EQ -> Val(BinOp.Ne)
+        kind == TOKEN_LE -> Val(BinOp.Le)
+        kind == TOKEN_GE -> Val(BinOp.Ge)
+        kind == TOKEN_LT -> Val(BinOp.Lt)
+        kind == TOKEN_GT -> Val(BinOp.Gt)
         else -> None
     }
 }
@@ -1561,7 +1625,13 @@ jfmt_fmt_binding: fn(f: &JetFmt, b: Binding) {
         jfmt_fmt_meta_attr(f, meta)
         jfmt_write(f, " ")
     }
-    loop marker in b.markers -> jfmt_write(f, "#{marker.name} ")
+    // `#Track name: value`, `#Meta(category: "speed") name: value`: the marker
+    // keeps its arguments.
+    loop marker in b.markers {
+        jfmt_write(f, "#")
+        jfmt_fmt_marker(f, marker)
+        jfmt_write(f, " ")
+    }
     // Compile time is always the explicit
     // `name: comptime { value }`.
     if b.is_comptime {

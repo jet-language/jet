@@ -7,6 +7,7 @@
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
+        AppliedRuleApplication,
         BinOp,
         Diagnostic,
         DIAGNOSTIC_ERROR,
@@ -14,12 +15,15 @@ use {
         Expr,
         FencedStatement,
         Func,
+        ImportDecl,
         Item,
         MARKER_HTML,
         MARKER_NO_PRELUDE,
+        MARKER_TARGET,
         Marker,
         PolicyDeclaration,
         Program,
+        RuleSite,
         Span,
         Stmt,
         SwitchArm,
@@ -35,6 +39,7 @@ use {
         TOKEN_COMMA,
         TOKEN_EOF,
         TOKEN_GT,
+        TOKEN_KW_PRIV,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LINE_COMMENT,
@@ -111,6 +116,10 @@ JetFmt: struct {
     expected_return_type: Type?
     // Keep a marked statement's control body scoped.
     force_control_braces: Bool
+    // `#Allow(…)` and unregistered markers that prefix one statement, and an
+    // unregistered marker written as a value: the parser keeps them only as
+    // Statement- and Expression-site rule rows.
+    inline_rules: [AppliedRuleApplication]{[AppliedRuleApplication]{}}
 }
 
 // Rust `Option<(Span, usize)>` from `source_list_span_after`.
@@ -363,6 +372,18 @@ jfmt_first_token_at: fn(f: JetFmt, start: Int) -> Int Never! {
 
 jfmt_is_comment_kind: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
+}
+
+// The author wrote `priv` directly before a member name (`priv step: fn…`):
+// the last code token before `name_start` is the `priv` keyword.
+jfmt_source_priv_before: fn(f: JetFmt, name_start: Int) -> Bool Never! {
+    index := f.source_toks.len() - 1
+    loop index >= 0 {
+        token: f.source_toks[index]
+        if token.span.end <= name_start && !jfmt_is_comment_kind(token.kind) -> return token.kind == TOKEN_KW_PRIV
+        index -= 1
+    }
+    false
 }
 
 jfmt_is_generated_label: fn(name: String) -> Bool Never! {
@@ -900,6 +921,42 @@ jfmt_emit_leading: fn(f: &JetFmt, pos: Int) Never! {
     }
 }
 
+// Imports print before the items that precede them in source, so only the
+// pending top-level comments may lead the imports. A comment inside an earlier
+// item leaves the queue while the imports print (jfmt_return_item_comments
+// puts it back for that item's own body).
+jfmt_hold_item_comments: fn(f: &JetFmt, items: [Item], imports: [ImportDecl]) -> [JetFmtComment] Never! {
+    limit := 0
+    loop import in imports {
+        if import.span.end > limit -> limit = import.span.end
+    }
+    kept := [JetFmtComment]{}
+    held := [JetFmtComment]{}
+    loop index in f.comment_i..<f.comments.len() {
+        comment: f.comments[index]
+        inside: if comment.span.start >= limit -> false else -> (loop item in items {
+            if jfmt_item_span_start(f, item) <= comment.span.start && comment.span.start < jfmt_item_span_end(item) -> break true
+        } ?? false)
+        if inside -> held.push(comment.copy()) else -> kept.push(comment.copy())
+    }
+    if held.len() > 0 {
+        loop f.comments.len() > f.comment_i -> _ := f.comments.pop()
+        loop comment in kept -> f.comments.push(comment.copy())
+    }
+    held
+}
+
+// The held item comments rejoin the queue ahead of every comment the imports
+// left: they sit before the last import in source.
+jfmt_return_item_comments: fn(f: &JetFmt, held: [JetFmtComment]) Never! {
+    if held.len() == 0 -> return
+    rest := [JetFmtComment]{}
+    loop index in f.comment_i..<f.comments.len() -> rest.push(f.comments[index].copy())
+    loop f.comments.len() > f.comment_i -> _ := f.comments.pop()
+    loop comment in held -> f.comments.push(comment.copy())
+    loop comment in rest -> f.comments.push(comment.copy())
+}
+
 jfmt_emit_trailing: fn(f: &JetFmt, end: Int) Never! {
     loop f.comment_i < f.comments.len() {
         // copy: the pending comment (owner: f.comments) is written through `&f`; a view into
@@ -1052,11 +1109,14 @@ jfmt_delimiter_closes: fn(delimiter: Int, kind: Int) -> Bool Never! {
 }
 
 // The first `delimiter` group at or after `start`: its whole span and the
-// offset of its closing token.
+// offset of its closing token. A `start` inside a source token (an
+// interpolation in a string) has no group of its own among the source tokens.
 jfmt_source_list_span_after: fn(f: JetFmt, start: Int, delimiter: Int) -> JetFmtSourceList? Never! {
     depth := 0
     open_start := Int?{None}
-    loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
+    first: jfmt_first_token_at(f, start)
+    if first > 0 && f.source_toks[first - 1].span.end > start -> return None
+    loop index in first..<f.source_toks.len() {
         token: f.source_toks[index]
         is_open: jfmt_delimiter_opens(delimiter, token.kind)
         is_close: jfmt_delimiter_closes(delimiter, token.kind)
@@ -1557,7 +1617,55 @@ jfmt_new: fn(prog: Program, src: String, source_toks: [Token], simplify: Bool) -
         simplify: simplify,
         expected_return_type: None,
         force_control_braces: false,
+        inline_rules: jfmt_inline_rules(prog.applied_rules),
     }
+}
+
+jfmt_inline_rules: fn(applications: [AppliedRuleApplication]) -> [AppliedRuleApplication] Never! {
+    rules := [AppliedRuleApplication]{}
+    loop application in applications {
+        if application.target == None -> next
+        if jfmt_rule_at(application, RuleSite.Statement) || jfmt_rule_at(application, RuleSite.Expression) || jfmt_rule_at(application, RuleSite.Parameter) || jfmt_rule_at(application, RuleSite.Method) || jfmt_rule_at(application, RuleSite.Declaration) -> rules.push(application.copy())
+    }
+    rules
+}
+
+// Writes `#Name ` for each kept rule of `site` that prefixes the construct
+// starting at `start`. A statement or declaration row targets the construct;
+// a parameter or trait-member row targets its own marker, which the
+// construct follows.
+jfmt_fmt_rules_before: fn(f: &JetFmt, site: RuleSite, start: Int) {
+    loop application in f.inline_rules {
+        if !jfmt_rule_at(application, site) -> next
+        if application.target == .Val(target) {
+            anchor: if site == RuleSite.Parameter || site == RuleSite.Method -> jfmt_trim_start_bytes(f.src_bytes, target.end) else -> target.start
+            if anchor == start {
+                jfmt_write(f, "#")
+                jfmt_fmt_marker(f, application.marker)
+                jfmt_write(f, " ")
+            }
+        }
+    }
+}
+
+jfmt_rule_at: fn(application: AppliedRuleApplication, site: RuleSite) -> Bool Never! {
+    if application.site == .Val(actual) -> return actual == site
+    false
+}
+
+// The unregistered marker a value position held (the parser keeps a `()` in
+// its place); false when `span` is an ordinary `()`.
+jfmt_fmt_expression_rule: fn(f: &JetFmt, span: Span) -> Bool {
+    loop application in f.inline_rules {
+        if application.target == .Val(target) {
+            if target.start == span.start && target.end == span.end && jfmt_rule_at(application, RuleSite.Expression) {
+                jfmt_write(f, "#")
+                jfmt_fmt_marker(f, application.marker)
+                return true
+            }
+        }
+    }
+    false
 }
 
 // Rust `format_program_with_tokens`; comments come from the source tokens.
@@ -1603,7 +1711,9 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
     if prog.imports.len() > 0 {
         if !first -> jfmt_blank_line_between_items(f)
         first = false
+        held: jfmt_hold_item_comments(f, prog.items, prog.imports)
         jfmt_fmt_import_groups(f, prog.imports)
+        jfmt_return_item_comments(f, held)
     }
     if has_ordered_file_rules && !ordered_file_rules_precede_imports {
         if !first -> jfmt_blank_line_between_items(f)
@@ -1660,23 +1770,31 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
         jfmt_newline(f)
         jfmt_emit_trailing(f, policy_span.end)
     }
-    // User settings stay on the declaration plane.
-    loop declaration in prog.user_policy_declarations {
-        if !first -> jfmt_blank_line_between_items(f)
-        first = false
-        jfmt_emit_leading(f, declaration.span.start)
-        jfmt_fmt_user_policy_decl(f, declaration)
-        jfmt_emit_trailing(f, declaration.span.end)
-    }
-    // Loose statements interleave with items by position.
+    // Loose statements and user settings interleave with items by position.
     item_i := 0
     stmt_i := 0
+    policy_i := 0
     previous_was_script := false
-    loop item_i < prog.items.len() || stmt_i < prog.script_body.len() {
+    loop item_i < prog.items.len() || stmt_i < prog.script_body.len() || policy_i < prog.user_policy_declarations.len() {
+        item_start: if item_i < prog.items.len() -> jfmt_item_span_start(f, prog.items[item_i]) else -> -1
+        stmt_start: if stmt_i < prog.script_body.len() -> jfmt_stmt_span(prog.script_body[stmt_i]).start else -> -1
+        if policy_i < prog.user_policy_declarations.len() {
+            declaration: prog.user_policy_declarations[policy_i]
+            if (item_start < 0 || declaration.span.start < item_start) && (stmt_start < 0 || declaration.span.start < stmt_start) {
+                if !first -> jfmt_blank_line_between_items(f)
+                first = false
+                jfmt_emit_leading(f, declaration.span.start)
+                jfmt_fmt_user_policy_decl(f, declaration)
+                jfmt_emit_trailing(f, declaration.span.end)
+                policy_i += 1
+                previous_was_script = false
+                next
+            }
+        }
         emit_stmt: if {
-            stmt_i == prog.script_body.len() -> false
-            item_i == prog.items.len() -> true
-            else -> jfmt_stmt_span(prog.script_body[stmt_i]).start < jfmt_item_span_start(f, prog.items[item_i])
+            stmt_start < 0 -> false
+            item_start < 0 -> true
+            else -> stmt_start < item_start
         }
         // A marker or an effect name prints inside the type that declares it.
         if !emit_stmt && jfmt_item_prints_inside_type(prog.items, item_i) {
@@ -1702,17 +1820,50 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
             previous_was_script = true
         } else {
             item: prog.items[item_i]
-            item_start: jfmt_item_span_start(f, item)
-            jfmt_emit_leading(f, item_start)
+            leading_at: jfmt_item_span_start(f, item)
+            jfmt_emit_leading(f, leading_at)
             jfmt_fmt_item(f, item)
             jfmt_emit_trailing(f, jfmt_item_span_end(item))
             item_i += 1
             previous_was_script = false
         }
     }
+    jfmt_fmt_trailing_file_markers(f, prog, ordered_file_rules, first)
     jfmt_emit_remaining_comments(f)
     if !jfmt_out_ends_with(f, "\n") -> f.out.push(U8{10})
     jfmt_out_text(f)
+}
+
+// A marker after the last declaration attaches to nothing; the parser keeps it
+// as a File-site fact for sema to reject, and it stays where it was written.
+jfmt_fmt_trailing_file_markers: fn(f: &JetFmt, prog: Program, ordered_file_rules: [Marker], first: Bool) {
+    written := !first
+    loop application in prog.rule_facts {
+        if application.target != None || !jfmt_rule_at(application, RuleSite.File) -> next
+        marker: application.marker
+        if marker.name == MARKER_NO_PRELUDE || marker.name == MARKER_TARGET || marker.name == MARKER_HTML -> next
+        if jfmt_trailing_marker_followed(f, prog, ordered_file_rules, marker.span.start) -> next
+        if written -> jfmt_blank_line_between_items(f)
+        written = true
+        jfmt_emit_leading(f, marker.span.start)
+        jfmt_write(f, "#")
+        jfmt_fmt_marker(f, marker)
+        jfmt_newline(f)
+    }
+}
+
+// The marker at `start` is a printed file rule, or code follows it.
+jfmt_trailing_marker_followed: fn(f: JetFmt, prog: Program, ordered_file_rules: [Marker], start: Int) -> Bool Never! {
+    loop ordered in ordered_file_rules {
+        if ordered.span.start == start -> return true
+    }
+    loop item in prog.items {
+        if jfmt_item_span_start(f, item) > start -> return true
+    }
+    loop stmt in prog.script_body {
+        if jfmt_stmt_span(stmt).start > start -> return true
+    }
+    false
 }
 
 // Lex, parse, then format. Parse errors propagate; sema is not required.
