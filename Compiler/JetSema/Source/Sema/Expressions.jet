@@ -3424,6 +3424,7 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     }
     nested: path.leaves.len() > 0
     if sema_call_core_math_exact_crossing(module_name, method, args, environment, program, scopes, state, tail_store, context) == .Val(crossed) -> return sema_expr_try_core_module_method(receiver, method, method_span, type_args, crossed, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    sema_call_core_unbuilt_note(module_name, method, method_span, environment, program, unbuilt)
     guard := sema_call_try_scope_guard(module_name, method, alias, alias_span, args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     if guard.handled -> return SemaMethodSpecialCheck{handled: true, value: guard.value}
     ui := sema_call_try_ui_core_call(module_name, method, alias, alias_span, args, type_args, method_span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -3446,7 +3447,6 @@ sema_expr_core_module_method_checked: fn(receiver: Expr, method: String, method_
     }
     if sema_call_core_crypto_expert_gate(module_name, method, method_span, context, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     if sema_call_core_vault_build_time_gate(module_name, method, method_span, scopes, environment.function_name, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_core_unbuilt_note(module_name, method, method_span, environment, program, unbuilt)
     if !nested && sema_call_core_variadic_print(environment, program, scopes, alias, method, args.len(), alias_span, context) {
         printed := sema_call_check_ambient_print(Call{name: "{alias}.{method}", name_span: method_span, type_args: type_args, args: args}, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: printed.value}

@@ -943,6 +943,96 @@ sema_checked_foreign_by_reference_field: fn(graph: SemaRegistrationGraph, ty: Ty
     }
 }
 
+// What a call of the C import registered under `target` asks the native
+// backend (ir_foreign_call) to do that it has no C ABI marshalling for yet:
+// a calling convention other than C, a non-handle pointer, a struct, payload
+// enum, Option, tuple, map or Result by value, or a List whose elements have
+// no C array layout. None when every part crosses, or the target is no C
+// import.
+sema_checked_foreign_c_marshal_gap: fn(graph: SemaRegistrationGraph, target: SymbolID) -> String? Never! {
+    row: sema_registration_callable_row(graph, target.key) ?? return None
+    if row == .Foreign(module_index, index) {
+        module_identity: graph.modules[module_index].module_identity
+        registered: graph.modules[module_index].foreign_functions[index]
+        if registered.owner != SemaRegistrationForeignOwner.CModule -> return None
+        if registered.abi.c_abi_name == .Val(name) && name != "C" -> return Val("call a C function through `#ABI({name})`")
+        loop parameter in registered.declaration.params {
+            if !sema_checked_foreign_c_marshals(graph, parameter.ty, module_identity, parameter.convention == AccessConvention.Write) -> return Val("pass the `{type_name(parameter.ty)}` parameter `{parameter.name}` to C")
+        }
+        returned: registered.declaration.return_type ?? return None
+        if !sema_checked_foreign_c_marshals(graph, returned, module_identity, false) -> return Val("return a `{type_name(returned)}` from C")
+    }
+    None
+}
+
+// Whether the native backend marshals `ty` across a C call: by value for a
+// read, moved or returned value, by address for a `written` one. An F32
+// crosses only as a List element. A C handle or a Jet function (a callback,
+// refused on its own) crosses.
+sema_checked_foreign_c_marshals: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, written: Bool) -> Bool Never! {
+    qualified: sema_checked_qualify_type(graph, ty, module_identity)
+    if qualified == {
+        .Int | .String | .Char | .Bool -> !written
+        .Float32 -> false
+        .List(element) -> sema_checked_foreign_c_array_element(graph, element, module_identity)
+        .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .FixedList(_, _) -> false
+        .Apply(name, args) -> !(name == "Ptr" && args.len() == 1)
+        .Tagged(_, inner) -> sema_checked_foreign_c_marshals(graph, inner, module_identity, written)
+        .Named(name) -> {
+            if name == "Int" || name == "String" || name == "Char" || name == "Bool" -> return !written
+            if name == "F32" -> return false
+            if sema_checked_foreign_builtin_type(name) -> return true
+            nominal_row: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return true
+            nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            if nominal.source == .SourceAST(item) {
+                if item == {
+                    // A written struct of machine scalars crosses as its bytes.
+                    .Struct(_) -> return written
+                    .Enum(definition) -> {
+                        loop variant in definition.variants {
+                            if variant.payload == .Unit -> next
+                            return false
+                        }
+                    }
+                    .Distinct(definition) -> return sema_checked_foreign_c_marshals(graph, definition.base, nominal.symbol.module_name, written)
+                    .TypeAlias(definition) -> return sema_checked_foreign_c_marshals(graph, definition.target, nominal.symbol.module_name, written)
+                    else -> {}
+                }
+            }
+            true
+        }
+        else -> true
+    }
+}
+
+// Whether a List of `ty` crosses as a C array: its elements are machine
+// integers, floats, Bools or structs, never an exact Int, text, an enum or a
+// container.
+sema_checked_foreign_c_array_element: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String) -> Bool Never! {
+    qualified: sema_checked_qualify_type(graph, ty, module_identity)
+    if qualified == {
+        .Int | .String | .Char | .List(_) | .Option(_) | .Tuple(_) | .Map(_, _, _) | .Result(_, _) | .Shared(_) | .Union(_) | .FixedList(_, _) | .Fn(_, _, _, _, _, _) -> false
+        .Apply(name, args) -> !(name == "Ptr" && args.len() == 1)
+        .Tagged(_, inner) -> sema_checked_foreign_c_array_element(graph, inner, module_identity)
+        .Named(name) -> {
+            if name == "Int" || name == "String" || name == "Char" -> return false
+            if sema_checked_foreign_builtin_type(name) -> return true
+            nominal_row: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return true
+            nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+            if nominal.source == .SourceAST(item) {
+                if item == {
+                    .Enum(_) -> return false
+                    .Distinct(definition) -> return sema_checked_foreign_c_array_element(graph, definition.base, nominal.symbol.module_name)
+                    .TypeAlias(definition) -> return sema_checked_foreign_c_array_element(graph, definition.target, nominal.symbol.module_name)
+                    else -> {}
+                }
+            }
+            true
+        }
+        else -> true
+    }
+}
+
 sema_checked_foreign_type_error: fn(ty: Type, span: Span, c_abi: Bool) -> Diagnostic {
     if {
         c_abi -> sema_error("E3203", span, "`{type_name(ty)}` is not a C-compatible type for a foreign function parameter or return.", "`#Import` / `#Export` functions must use types with a stable C ABI at the edge.", "Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.")
