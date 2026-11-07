@@ -7,7 +7,7 @@ use {
         evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode, evidence_producer_name,
         canonical_json_bytes, comparison_record_to_json, ComparisonStatus, comparison_status_as_str,
     ]
-    jet_pkg_model.[AuthorityResolver, WorkspaceDeclarationCache]
+    jet_pkg_model.[AuthorityResolver, COMPILER_VERSION, WorkspaceDeclarationCache]
     receipt_crypto: core.crypto
     cli_sys: core.sys
     cli_files: core.files
@@ -125,9 +125,9 @@ jet_cli_comparison_persist: fn(run: JetCLIComparisonRun, target: String, argv: [
     target_digest: jet_cli_receipt_target_identity(cache, target, claim.inputs)
     index := jet_cli_record_index_load(receipt_root)
     path: ".jet/receipts/objects/{claim.key}"
-    comparison_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-comparison-v1"}
+    comparison_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-comparison-v1"}
     comparison_entry: jet_cli_comparison_index_entry(index, comparison_identity, "comparison", artifact_id, path, bytes.len(), consumed, [JetCLIRecordLink]{}, false)
-    receipt_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-receipt-v2"}
+    receipt_identity: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-receipt-v2"}
     receipt_bytes: jet_cli_receipt_encode(published)
     receipt_entry: jet_cli_comparison_index_entry(index, receipt_identity, "receipt", claim.key, path, receipt_bytes.len(), consumed, produced, false)
     jet_cli_record_index_upsert_many_and_store(index, receipt_root, [JetCLIRecordIndexEntry]{comparison_entry.move(), receipt_entry.move()})

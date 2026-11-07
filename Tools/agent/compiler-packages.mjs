@@ -129,7 +129,8 @@ export function compilerInputs(repo, roots = compilerInputRoots(repo)) {
 }
 
 // The compiler's source identity, `name@version#<id>` (the CLI's JET_CLI_BINARY
-// and JET_CLI_VERSION): SHA-256 over the domain `jet.compiler-source.v2`, a NUL,
+// and the package model's COMPILER_VERSION, the one `jet` version constant):
+// SHA-256 over the domain `jet.compiler-source.v2`, a NUL,
 // then for every compiler input in byte order its big-endian u64 path length,
 // path, u64 byte length and bytes. A chain stage passes it to the compiler it
 // runs as JET_COMPILER_IDENTITY.
@@ -142,9 +143,11 @@ export function compilerSourceIdentity(repo) {
         hash.update(length(Buffer.byteLength(path))).update(path).update(length(bytes.length)).update(bytes);
     }
     const registry = readFileSync(join(root, 'Compiler/JetCli/Source/Cli/Registry.jet'), 'utf8');
+    const manifest = readFileSync(join(root, 'Jetpack/PackageModel/Source/Manifest/Manifest.jet'), 'utf8');
     const name = /^JET_CLI_BINARY: "([^"]+)"$/m.exec(registry)?.[1];
-    const version = /^JET_CLI_VERSION: "([^"]+)"$/m.exec(registry)?.[1];
-    if (!name || !version) throw Error('Compiler/JetCli/Source/Cli/Registry.jet declares no JET_CLI_BINARY or JET_CLI_VERSION');
+    const version = /^COMPILER_VERSION: "([^"]+)"$/m.exec(manifest)?.[1];
+    if (!name) throw Error('Compiler/JetCli/Source/Cli/Registry.jet declares no JET_CLI_BINARY');
+    if (!version) throw Error('Jetpack/PackageModel/Source/Manifest/Manifest.jet declares no COMPILER_VERSION');
     return `${name}@${version}#${hash.digest('hex')}`;
 }
 

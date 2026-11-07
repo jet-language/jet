@@ -5,13 +5,14 @@
 // both front doors mean one thing (I9).
 use {
     jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
-    jet_pkg_model.[pkg_version_line]
+    jet_pkg_model.[COMPILER_VERSION, pkg_version_line]
 }
 
-// jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`; the `jet` package version.
+// jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`. The `jet` version is
+// the package model's COMPILER_VERSION, the one constant `jet --version`, help,
+// `jet new` and the compiler identity read.
 JET_CLI_BINARY: "jet"
 JET_CLI_LANG_NAME: "Jet"
-JET_CLI_VERSION: "0.1.0"
 
 // The flags every command accepts.
 JET_CLI_GLOBAL_FLAGS: [String]{"--json", "--quiet", "--color"}
@@ -352,7 +353,7 @@ jet_cli_commands_in: fn(order: String) -> [Int] Never! {
 
 // `jet help`: every canonical command, each group's actions, then every flag.
 jet_cli_usage_page: fn(order: String) -> String Never! {
-    out := "Welcome to {JET_CLI_LANG_NAME}! (v{JET_CLI_VERSION})\n\nUsage:\n"
+    out := "Welcome to {JET_CLI_LANG_NAME}! (v{COMPILER_VERSION})\n\nUsage:\n"
     commands: jet_cli_commands_in(order)
     loop index in commands {
         command: JET_CLI_COMMANDS[index]

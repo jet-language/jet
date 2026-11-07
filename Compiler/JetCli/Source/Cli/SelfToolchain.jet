@@ -5,7 +5,7 @@ use {
     cli_files: core.files
     cli_process: core.process
     jet_foundation.[diagnostic_render_all]
-    jet_pkg_model.[WorkspaceDeclarationCache]
+    jet_pkg_model.[COMPILER_VERSION, WorkspaceDeclarationCache]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
     jetpack_foundation.[TOOLCHAIN_EXEC_MARKER_ENV]
     jetpack_trust.[JetPinDecision, trust_pin_decide, trust_pin_handoff_line, trust_pin_report]
@@ -45,7 +45,7 @@ jet_cli_pinned_toolchain: fn(raw: [String], target: String?, color: Bool, quiet:
     }
     root: found ?? return None
     offline: raw.contains("--offline") || raw.contains("--locked")
-    if trust_pin_decide(root, JET_CLI_VERSION, offline) == {
+    if trust_pin_decide(root, COMPILER_VERSION, offline) == {
         .RunNative -> return None
         .Report(diagnostic) -> return Val(JetCLIPlan.Refused{report: diagnostic, color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
         .ReExec(binary, channel, version) -> return Val(JetCLIPlan.Done{output: jet_cli_pinned_exec(binary, channel, version, raw, quiet)})
@@ -55,7 +55,7 @@ jet_cli_pinned_toolchain: fn(raw: [String], target: String?, color: Bool, quiet:
 // The pinned binary runs the same argv on inherited stdio, marked so it runs
 // natively; its exit status is this run's (a signal-ended child exits 1).
 jet_cli_pinned_exec: fn(binary: String, channel: String, version: String, raw: [String], quiet: Bool) -> JetDriverVerbOutput {
-    if !quiet -> jet_cli_write_notice("{trust_pin_handoff_line(channel, version, JET_CLI_VERSION)}\n")
+    if !quiet -> jet_cli_write_notice("{trust_pin_handoff_line(channel, version, COMPILER_VERSION)}\n")
     command := [String]{binary}
     loop argument in raw -> command.push(argument.copy())
     receipt: cli_process.cmd(command).env(TOOLCHAIN_EXEC_MARKER_ENV, version).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit).run() ?? return jet_cli_report_output("", "E2105", "couldn't exec the pinned toolchain `{binary}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", false, JET_DRIVER_EXIT_USER_ERROR)

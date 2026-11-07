@@ -26,7 +26,7 @@ use {
         diagnostic_render_all,
         marker_source_read,
     ]
-    jet_pkg_model.[WorkspaceDeclarationCache]
+    jet_pkg_model.[COMPILER_VERSION, WorkspaceDeclarationCache]
     jetpack_foundation.[CONFIG_FILE, ENV_FILE]
     jet_env_model.[envmodel_evaluate_env]
 }
@@ -657,8 +657,8 @@ jet_cli_query_engine_protocol: fn(bin: String) -[Exec, Time.Wait]> String? Never
 jet_cli_engine_dispatch: fn(engine: String, verb: String, argv: [String]) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
     bin: jet_cli_find_engine_binary(engine) ?? return jet_cli_missing_engine(engine, verb, if engine == JET_CLI_JETPACK_BINARY -> jet_cli_named_engine() else -> None)
     reply: jet_cli_query_engine_protocol(bin)
-    if reply != Val(JET_CLI_VERSION) {
-        return jet_cli_version_skew(engine, JET_CLI_VERSION, reply)
+    if reply != Val(COMPILER_VERSION) {
+        return jet_cli_version_skew(engine, COMPILER_VERSION, reply)
     }
     command := [String]{bin}
     loop argument in argv -> command.push(argument.copy())

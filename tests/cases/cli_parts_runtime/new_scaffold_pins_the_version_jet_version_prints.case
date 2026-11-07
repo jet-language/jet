@@ -1,0 +1,14 @@
+# One version constant: `jet new` writes the version `jet --version` prints
+# into the scaffolded manifest's `jet:` field and the new lock's toolchain pin.
+# {jet-semver} is read from the `jet --version` banner of the jet under test.
+step: jet --version
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: ^= "Jet VERSION\n" # the release lines after the version are not part of this claim
+step: jet new demo
+cwd: {work}/
+env: NO_COLOR=1
+exit: 0
+file: demo/package.jet ~ "\njet: \"{jet-semver}\"\n" # the scaffolded manifest's `jet:` field
+file: demo/.jet/lock ~ "\ntoolchain = \"{jet-semver}\"\n" # the lock's build stamp names the toolchain
+file: demo/.jet/lock ~ "\nversion = \"{jet-semver}\"\n" # and its toolchain pin

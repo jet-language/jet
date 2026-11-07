@@ -151,6 +151,7 @@ use {
     jet_plugin.[jet_plugin_link]
     jet_sema.[SEMA_CLI_ENTRY_NAME, SemaCheckedForeignFunction, sema_no_run_diagnostic, sema_user_template_ct_value]
     jet_pkg_model.[
+        COMPILER_VERSION,
         ClaimsGrade,
         LockFile,
         ManifestEntry,
@@ -2159,7 +2160,7 @@ jet_cli_new_manifest: fn(name: String, template: String, annotated: Bool) -> Str
         "web" -> allow = "{allow}, Browser"
         else -> {}
     }
-    head: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{JET_CLI_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\nauthority: {{ allow: [{allow}] }}\n\n"
+    head: "name: \"{name}\"\nversion: \"0.1.0\"\njet: \"{COMPILER_VERSION}\"\ndescription: \"\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"\"\nauthority: {{ allow: [{allow}] }}\n\n"
     if annotated -> return "{head}// Jet package dependencies:\n// deps: {{\n//     helpers:  ../helpers,\n//     parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},\n// }}\n"
     "{head}deps: {{}}\n"
 }
@@ -2200,7 +2201,7 @@ jet_cli_git_output: fn(root: String, args: [String]) -> String? {
 // The `.jet/lock` of a new project: the running toolchain pin and the build
 // stamp, written as `write` lays them out.
 jet_cli_new_lock: fn(root: String) -> String {
-    version: JET_CLI_VERSION
+    version: COMPILER_VERSION
     parts: version.split(".").to_list()
     channel: if parts.len() >= 2 -> "{parts[0]}.{parts[1]}" else -> version
     platform: "{cli_sys.arch()}-{cli_sys.name()}"
@@ -3238,7 +3239,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         }
         .Output(file, address, color, json) -> output = jet_cli_output_run(file, address, color, json)
         .Doctor(online, apply, cross_target, color) -> output = jet_cli_doctor(online, apply, cross_target, color)
-        .UpdateJet(root, channel, color, json, quiet) -> output = jet_cli_update_jet_pin(root, channel, JET_CLI_VERSION, color, json, quiet)
+        .UpdateJet(root, channel, color, json, quiet) -> output = jet_cli_update_jet_pin(root, channel, COMPILER_VERSION, color, json, quiet)
         .AuditCopies(file, source, color, json, notice) -> {
             jet_cli_write_notice(notice)
             output = jet_cli_audit_copies(file, source, color, json)
