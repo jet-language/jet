@@ -44,13 +44,15 @@ if (mode === 'assemble') {
   command('disassembly', 'objdump', ['-dr', object]);
 } else if (mode === 'render') {
   mkdirSync(out, { recursive: true });
-  const stems = readFileSync(join(root, 'Compiler/JetRuntime/Tests/link-render-cases.list'), 'utf8').trim().split('\n');
-  const run = spawnSync(process.execPath, [join(root, 'Tools/agent/run-feature-examples.mjs'), '--json', ...stems], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27 });
+  // The typed-render goldens: the listed golden rows, run by `jet test` at the none level (`jet run`).
+  const cases = join(root, 'Compiler/JetRuntime/Tests/link-render-cases.list'), report = join(out, 'typed-render-goldens.json');
+  const ids = readFileSync(cases, 'utf8').trim().split('\n');
+  const run = spawnSync(process.env.JET ?? 'jet', ['test', 'Compiler', '--profile', 'golden', '--optimize=none', `--cases=${cases}`, `--results=${report}`], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 27 });
   writeFileSync(join(out, 'typed-render-goldens.receipt.json'), JSON.stringify({ status: run.status, signal: run.signal, error: run.error?.message ?? null, stdout: run.stdout, stderr: run.stderr }, null, 2) + '\n');
-  if (run.error || ![0, 1].includes(run.status)) throw Error(`typed-render-goldens: ${run.error?.message ?? run.status}\n${run.stderr ?? ''}`);
-  const results = new Map(JSON.parse(run.stdout).results.map(result => [result.stem, result.status]));
-  for (const stem of stems) {
-    if (results.get(stem) !== 'passed') throw Error(`typed render ${stem}: ${results.get(stem) ?? 'missing result'}`);
+  if (run.error || ![0, 1].includes(run.status) || !existsSync(report)) throw Error(`typed-render-goldens: ${run.error?.message ?? run.status}\n${run.stderr ?? ''}`);
+  const results = new Map(JSON.parse(readFileSync(report, 'utf8')).results.map(result => [result.case, result.status]));
+  for (const id of ids) {
+    if (results.get(id) !== 'PASS') throw Error(`typed render ${id}: ${results.get(id) ?? 'missing result'}`);
   }
 } else if (mode === 'link') {
   // Aggregated fixture.o already contains the complete Jet runtime.

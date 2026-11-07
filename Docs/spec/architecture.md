@@ -1089,20 +1089,14 @@ compiler identity (`JET_COMPILER_IDENTITY`, read in
 [`Request.jet`](../../Compiler/JetCli/Source/Cli/Request.jet)) keys its receipts;
 an identity string is not proof that two compiler binaries are identical.
 
-Behavioral parity between any two compiler binaries (#670) is a separate,
-reusable proof: [`Tools/agent/compiler-diff.mjs`](../../Tools/agent/compiler-diff.mjs)
-runs the golden, UI and differential corpora through a pinned `--reference`
-and a `--candidate` compiler under deterministic roots and a scrubbed
-environment. It compares panics, exit status, diagnostics, stdout, stderr and
-side-effect files phase by phase (`check`, `run`, `build`)
-and reports the first divergence with its case, phase, expected and candidate
-values and a repro directory. A missing binary or tool exits 2 and is never a
-match. Each compiler file is pinned by identity at startup and re-verified
-around every invocation, and a `systemd-run` launch failure is not an
-observation: a binary deleted or replaced mid-run also exits 2. `--canary`
-runs the checked cases in `tests/compiler-diff/` through a wrapper that plants
-known divergences, proving detection without editing source. The comparator
-claims behavior only; artifact identity stays with
+Behavioral parity between two compiler binaries (#670) is a separate proof:
+each compiler runs the same corpus suites (`jet test Compiler --profile
+<suite> --compiler=<jet> --results=FILE`), and the two row documents are
+compared per suite, case and tier. A row one compiler passes and the other
+fails is a divergence, with the row's status, detail, exit and diff;
+[`Tools/release/Admit.jet`](../../Tools/release/Admit.jet) gates each release
+this way against the current one. A refused, skipped or missing row is never
+a match. The comparison claims behavior only; artifact identity stays with
 #815.
 
 

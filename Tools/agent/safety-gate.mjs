@@ -3,11 +3,10 @@
 // Native producers publish native_safety in dev-artifacts.json (see safety.md).
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { generateCase, generateCoreCase } from "./safety-fuzz.mjs";
-import { collectGoldenEntries } from "./compiler-diff.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 export const TIERS = ["O0", "O1", "O2"];
@@ -19,6 +18,26 @@ export const ADDITIONAL_COVERAGE = [
 ];
 export const hash = (data) => createHash("sha256").update(data).digest("hex");
 const slugOf = (stem) => stem.replace(/[^A-Za-z0-9_-]+/gu, "_");
+// The golden entries under Examples, as kit_golden_collect (Compiler/JetTestKit/Source/Golden.jet) finds them:
+// every flat `.jet` is an entry, a `run.jet` folder is one entry, and a package or workspace folder without
+// `run.jet` is not an entry.
+export function collectGoldenEntries(exDir = join(repo, "Examples")) {
+  const entries = [];
+  const visit = (dir) => {
+    for (const child of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      if (child.name.startsWith(".")) continue;
+      const path = join(dir, child.name);
+      if (child.isDirectory()) {
+        if (existsSync(join(path, "run.jet"))) entries.push({ path: join(path, "run.jet"), stem: relative(exDir, path).replaceAll("\\", "/") });
+        else if (!existsSync(join(path, "package.jet")) && !existsSync(join(path, "workspace.jet"))) visit(path);
+      } else if (child.isFile() && child.name.endsWith(".jet") && child.name !== "package.jet" && child.name !== "workspace.jet") {
+        entries.push({ path, stem: relative(exDir, path).replaceAll("\\", "/").slice(0, -".jet".length) });
+      }
+    }
+  };
+  if (existsSync(exDir)) visit(exDir);
+  return entries.sort((a, b) => (a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0));
+}
 export function compareNative(directory, cases) {
   const rowsPath = join(directory, "results.tsv");
   const rows = existsSync(rowsPath) ? new Map(readFileSync(rowsPath, "utf8").trim().split("\n").filter(Boolean).map((line) => line.split("\t"))) : new Map();

@@ -1,0 +1,251 @@
+#!/usr/bin/env jet
+// Suite runs one `jet test Compiler` profile of a tree against a compiler
+// snapshot with its matching jetpack.
+// Usage:
+//   jet Tools/agent/Suite.jet TAG TREE JETDIR PROFILE [jet test settings...]
+// It snapshots JETDIR (an s1 dir) to $SUITE_OUT/jet-TAG, runs
+// `jet test Compiler --profile PROFILE` from TREE with the snapshot as
+// `--compiler`, and writes the run's output to $SUITE_OUT/PROFILE-TAG.txt.
+// PROFILE is a Compiler/package.jet test profile (golden, ui, cases, corpora
+// for all three, ...); the settings are `jet test` flags such as --filter=X,
+// --cases=FILE, --optimize=none,full or --results=FILE.
+// The running jet is SUITE_RUNNER, else the snapshot itself: a jet older than
+// the test setting rows needs a newer SUITE_RUNNER, which keeps the slicing,
+// baselines and verdicts while the snapshot builds and runs rows.
+// SUITE_OUT defaults to $JET_SCRATCH_ROOT/lanes/Main/q/sg. Roots: the table of
+// Tools/agent/roots.sh.
+// jetpack: the corpora use the jetpack beside the snapshot's jet. A snapshot
+// without one gets JETPACK when set, else base/SHA/jetpack, where SHA is
+// JETDIR/COMMIT, else TREE/.chain-base (a hosted engine built from the same
+// commit as the jet under test). Tools/agent/land/publish-base.sh gives every
+// published base its jetpack; a cases or corpora run without one prints WARN
+// first and last.
+// SUITE_JOBS and SUITE_MEMORY (e.g. 8G) override the pool's entry count and
+// memory budget; otherwise the pool sizes itself.
+// The last line printed is `rc=<exit of the run> <its last output line>`.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+// The whole run's wall-clock bound.
+RUN_TIMEOUT: 6800s
+
+Pool: struct {
+    jetpack: String
+    warn: String
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() < 4 {
+        term.eprint("usage: jet Tools/agent/Suite.jet TAG TREE JETDIR PROFILE [jet test settings...]")
+        process.exit(2)
+    }
+    process.exit(suite(args[0], args[1], args[2], args[3], args[4..<args.len()]))
+}
+
+suite: fn(label: String, tree: String, jetdir: String, profile: String, settings: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
+    sg: env_or("SUITE_OUT", "{scratch_root()}/lanes/Main/q/sg")
+    base: root("JET_BASE_ROOT", "{scratch_root()}/discovery/base")
+    // The rows stage in memory (the testkit's scratch is /dev/shm, counted
+    // against the pool's memory budget), so no row waits on a slow scratch disk
+    // (#6610 c4: a golden shard took 546 s on the lanes' build disk, 67 s in
+    // memory). The runner's own TMPDIR lives under the state root.
+    fs: "{state_root()}/scratch/Main/sgfs"
+    dirs: [String]{"{sg}/tmp", "{fs}/tmp"}
+    loop dir in dirs {
+        files.create_dir_all(dir) ?? return fail("cannot create {dir}: {err}")
+    }
+    sha: first_line("{jetdir}/COMMIT") ?? first_line("{tree}/.chain-base") ?? ""
+    pool: choose_jetpack(jetdir, sha, base, profile)
+    if pool.warn != "" {
+        print(pool.warn)
+        term.eprint(pool.warn)
+    }
+    snapshot: "{sg}/jet-{label}"
+    if jetdir != snapshot {
+        code: take_snapshot(jetdir, sg, fs, label)
+        if code != 0 -> return code
+    }
+    // The corpora find their engine beside the compiler before PATH: give a
+    // snapshot without one the jetpack chosen above, or engine-dispatch cases
+    // reach a stale PATH jetpack and fail E1227 (wave 11, 2026-10-31).
+    if pool.jetpack != "" && !files.exists("{snapshot}/jetpack") {
+        files.symlink(pool.jetpack, "{snapshot}/jetpack") ?? return fail("cannot link {snapshot}/jetpack: {err}")
+    }
+    runner: env_or("SUITE_RUNNER", "{snapshot}/jet")
+    print("runner: {runner}")
+    identity: first_line("{base}/latest/IDENTITY") ?? return fail("{base}/latest/IDENTITY is unreadable")
+    // Suite rows run host tools (C compilers, rustc, interpreters) that only
+    // jet-env supplies until jet does.
+    argv := [String]{"{tree}/Tools/agent/jet-env", runner, "test", "Compiler", "--profile", profile.copy(), "--compiler={snapshot}/jet"}
+    jobs: env_or("SUITE_JOBS", "")
+    if jobs != "" -> argv.push("--jobs={jobs}")
+    memory: env_or("SUITE_MEMORY", "")
+    if memory != "" -> argv.push("--memory={memory}")
+    loop setting in settings -> argv.push(setting.copy())
+    out: "{sg}/{profile}-{label}.txt"
+    ran: process.cmd(argv).cwd(tree).env("JET_COMPILER_IDENTITY", identity).env("JET_TOOLCHAIN_ROOT", tree).env("TMPDIR", "{fs}/tmp")
+        .timeout(RUN_TIMEOUT).output_limit(1073741824).run() ?? return fail("{argv[0]} could not start: {err}")
+    text: "{ran.output}{ran.errors}"
+    files.write(out, text) ?? return fail("cannot write {out}: {err}")
+    code: exit_code(ran)
+    tail := ""
+    loop line in text.trim_end().lines() -> tail = line.copy()
+    print("rc={code} {first_bytes(tail, 240)}")
+    if pool.warn != "" -> print(pool.warn)
+    code
+}
+
+// The jetpack the run gives a snapshot without its own, and the warning a
+// cases or corpora run without the snapshot's own jetpack prints.
+choose_jetpack: fn(jetdir: String, sha: String, base: String, profile: String) -[Env, FS, IO]> Pool Never! {
+    named: env_or("JETPACK", "")
+    if named != "" {
+        print("jetpack: JETPACK {named}")
+        return Pool{jetpack: named, warn: ""}
+    }
+    if files.exists("{jetdir}/jetpack") {
+        print("jetpack: beside {jetdir}/jet")
+        return Pool{jetpack: "", warn: ""}
+    }
+    if sha != "" && executable("{base}/{sha}/jetpack") {
+        print("jetpack: {base}/{sha}/jetpack")
+        return Pool{jetpack: "{base}/{sha}/jetpack", warn: ""}
+    }
+    if profile != "cases" && profile != "corpora" {
+        print("jetpack: none (profile {profile} does not use it)")
+        return Pool{jetpack: "", warn: ""}
+    }
+    commit: if sha == "" -> "unknown commit" else -> sha.copy()
+    shown: if sha == "" -> "?" else -> sha.copy()
+    rerun: if sha == "" -> "COMMIT" else -> sha.copy()
+    // Fall back to the newest published jetpack (a STAND-IN) so engine cases
+    // compare like for like with the base run instead of erroring; a wave that
+    // changes Jetpack must still be proved with its own jetpack.
+    standin: newest_jetpack(base)
+    if standin != "" -> return Pool{jetpack: standin.copy(), warn: "WARN: STAND-IN JETPACK for {commit}: no {base}/{shown}/jetpack, using {standin}; Jetpack source changes in this tree are NOT exercised"}
+    Pool{jetpack: "", warn: "WARN: NO JETPACK for {commit} (no {base}/{shown}/jetpack): ~156 jetpack cases rows will ERROR 'jetpack binary required'; build it with: SLOT_SMALL=0 Tools/agent/chain/build-slot.sh bash Tools/agent/land/publish-base.sh --jetpack-run {rerun}"}
+}
+
+// The resolved jetpack of the most recently modified published base that
+// has one, "" when none does.
+newest_jetpack: fn(base: String) -[FS]> String Never! {
+    entries: files.list_dir(base) ?? return ""
+    best := ""
+    best_ns := 0
+    loop entry in entries {
+        if !entry.is_dir || !executable("{entry.path}/jetpack") -> next
+        meta: files.stat(entry.path, links: .Follow) ?? next
+        ns: meta.modified.to_unix_ns() ?? next
+        if best == "" || ns > best_ns {
+            best = files.canonicalize("{entry.path}/jetpack") ?? "{entry.path}/jetpack"
+            best_ns = ns
+        }
+    }
+    best
+}
+
+// Copy JETDIR to the root filesystem ($fs/jet-TAG) once per changed jet;
+// $sg/jet-TAG is a symlink to it, so callers keep one path. The ui and cases
+// runs of one tag start together and share this snapshot, so the copy holds
+// $sg/jet-TAG.lock.
+take_snapshot: fn(jetdir: String, sg: String, fs: String, label: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
+    held_copy: "{fs}/jet-{label}"
+    link: "{sg}/jet-{label}"
+    _held: files.lock("{link}.lock") ?? return fail("cannot lock {link}.lock: {err}")
+    if !same_bytes("{jetdir}/jet", "{held_copy}/jet") {
+        stale: [String]{held_copy, link}
+        loop gone in stale {
+            if files.exists(gone) || files.is_symlink(gone) -> files.remove_all(gone) ?? return fail("cannot remove {gone}: {err}")
+        }
+        // `cp -r` keeps the snapshot's own symlinks (its jetpack, its runtime
+        // pack) as links.
+        copied: process.cmd([String]{"cp", "-r", jetdir, held_copy}).run() ?? return fail("cp could not start: {err}")
+        if copied.code != 0 || copied.signal != None -> return fail("cannot copy {jetdir} to {held_copy}: {copied.errors.trim_end()}")
+    }
+    if !files.exists("{link}/jet") {
+        if files.is_symlink(link) -> files.remove(link) ?? return fail("cannot remove {link}: {err}")
+        files.symlink(held_copy, link) ?? return fail("cannot link {link}: {err}")
+    }
+    0
+}
+
+same_bytes: fn(left: String, right: String) -[FS]> Bool Never! {
+    if !files.exists(right) -> return false
+    a: files.read_bytes(left) ?? return false
+    b: files.read_bytes(right) ?? return false
+    a == b
+}
+
+executable: fn(path: String) -[FS]> Bool Never! {
+    meta: files.stat(path, links: .Follow) ?? return false
+    meta.is_file && (meta.mode).bit_and(0o111) != 0
+}
+
+exit_code: fn(receipt: ProcessReceipt) -> Int Never! {
+    if receipt.timed_out -> return 124
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+first_line: fn(path: String) -[FS]> String? Never! {
+    text: files.read(path) ?? return None
+    loop line in text.lines() {
+        if line.trim() == "" -> return None
+        return Val(line.trim())
+    }
+    None
+}
+
+first_bytes: fn(text: String, limit: Int) -> String Never! {
+    if text.count_bytes() <= limit -> return text.copy()
+    kept := [U8]{}
+    loop byte in text.bytes() {
+        if kept.len() >= limit -> break
+        kept.push(byte)
+    }
+    String.from_bytes_lossy(kept)
+}
+
+fail: fn(message: String) -[IO]> Int Never! {
+    term.eprint("suite: {message}")
+    1
+}
+
+// --- roots (Tools/agent/roots.sh) -------------------------------------------
+
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: process.env_get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The value `${XDG_CONFIG_HOME:-~/.config}/jet/env` assigns to `name`, the
+// file the shell tools source first.
+env_file_value: fn(name: String) -[Env, FS]> String? Never! {
+    home: env_or("HOME", "")
+    path: "{env_or("XDG_CONFIG_HOME", "{home}/.config")}/jet/env"
+    text: files.read(path) ?? return None
+    found := ""
+    seen := false
+    loop raw in text.lines() {
+        line: raw.trim().removeprefix("export ").trim()
+        parts: line.partition("=")
+        if parts.sep == "" || parts.head != name -> next
+        value := parts.tail
+        quoted: (value.starts_with("\"") && value.ends_with("\"")) || (value.starts_with("'") && value.ends_with("'"))
+        if value.len() >= 2 && quoted -> value = value.removeprefix("\"").removesuffix("\"").removeprefix("'").removesuffix("'")
+        found = value.replace("$HOME", home)
+        seen = true
+    }
+    if seen -> Val(found) else -> None
+}
+
+root: fn(name: String, fallback: String) -[Env, FS]> String Never! { env_or(name, env_file_value(name) ?? fallback) }
+
+state_root: fn() -[Env, FS]> String Never! { root("JET_STATE_ROOT", "{env_or("XDG_CACHE_HOME", "{env_or("HOME", "")}/.cache")}/jet-dev") }
+
+scratch_root: fn() -[Env, FS]> String Never! { root("JET_SCRATCH_ROOT", state_root()) }

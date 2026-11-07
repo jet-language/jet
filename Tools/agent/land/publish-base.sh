@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # publish-base.sh COMMIT : keep the lander's batch-verified compiler for dev commit COMMIT as a lane baseline.
 #   $JET_BASE_ROOT/<sha>/{jet,jet-runtime/,IDENTITY,COMMIT}  (newest 6 published; base/latest -> newest)
-#   base/<sha>/goldens.json : one golden census (Tools/agent/run-feature-examples.mjs --json, gsel.mjs selection minus
-#   GOLD_EXCLUDE, default io/os_process_control) with that compiler and its pack, from an export of <sha>;
+#   base/<sha>/goldens.json : one golden census (the Examples rows of `jet test Compiler --profile golden` at the none
+#   level, minus GOLD_EXCLUDE, default Systems/Process/OSProcessControl; its --results document) with that compiler
+#   and its pack, from an export of <sha>;
 #   goldens.meta says how it ran, goldens.failed replaces it when the census produced no counts.
 # Source: $JET_SCRATCH_ROOT/discovery/b2/install-latest, which must say COMMIT (publish-latest.sh runs first).
 # It also stores that compiler as the s1 (and its pack as pack1) of the census tree in the chain.sh stage store, so a
@@ -17,7 +18,6 @@ M=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SELF=$M/publish-base.sh
 SLOT=$M/../chain/build-slot.sh
 CHAIN=$M/../chain/chain.sh
-GSEL=$M/../suite/gsel.mjs
 REPO=$JET_DEV_WORKTREE
 IL=$JET_SCRATCH_ROOT/discovery/b2/install-latest
 B=$JET_BASE_ROOT
@@ -41,38 +41,51 @@ golden_worker() {
 }
 
 golden_run() { # inside the slot: census the newest wanted commit
-  local sha d w t s rc sel n out
+  local sha d w t s rc sel n out counts
   sha=$(awk 'NR==1' "$B/.golden-want" 2>/dev/null); d=$B/$sha
   [ -n "$sha" ] && [ -d "$d" ] && [ ! -e "$d/goldens.json" ] && [ ! -e "$d/goldens.failed" ] || exit 0
   w=$B/.work/${sha:0:9}; t=$w/tree
-  rm -rf "$w"; mkdir -p "$t" "$w/scratch" "$w/tmp"
+  rm -rf "$w"; mkdir -p "$t" "$w/state" "$w/tmp"
   trap "rm -rf '$w'" EXIT
   say "goldens ${sha:0:10}: export"
   git -C "$REPO" archive "$sha" | tar -x -C "$t" || { echo "export failed" > "$d/goldens.failed"; exit 1; }
-  local ex=${GOLD_EXCLUDE-io/os_process_control}
-  sel=$w/select.txt
-  node "$GSEL" "$t" $ex > "$sel" && [ -s "$sel" ] || { echo "golden selection failed" > "$d/goldens.failed"; exit 1; }
-  n=$(wc -l < "$sel"); out=$w/goldens.json
+  local ex=${GOLD_EXCLUDE-Systems/Process/OSProcessControl}
+  sel=$w/select.txt; out=$w/goldens.json
+  # The census rows: the golden profile's Examples rows (`--list`: suite<TAB>path) minus the GOLD_EXCLUDE example
+  # stems; each stem must drop at least one row, or the exclusion could not hold.
+  (cd "$t" && JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t "$d/jet" test Compiler --profile golden --optimize=none --list) \
+    > "$w/listed.txt" 2> "$w/goldens.err"
+  awk -F'\t' -v ex="$ex" '
+    BEGIN { n = split(ex, x, " ") }
+    $1 == "golden" && index($2, "Examples/") == 1 {
+      for (i = 1; i <= n; i++) if ($2 == "Examples/" x[i] ".jet" || $2 == "Examples/" x[i] || index($2, "Examples/" x[i] "/") == 1) { hit[i]++; next }
+      print $2
+    }
+    END { for (i = 1; i <= n; i++) if (!hit[i]) { print "exclusion " x[i] " matched no example" > "/dev/stderr"; exit 1 } }' \
+    "$w/listed.txt" > "$sel" 2>> "$w/goldens.err" && [ -s "$sel" ] \
+    || { { echo "golden selection failed"; awk '{l[NR]=$0} END{for(i=(NR>20?NR-19:1);i<=NR;i++) print l[i]}' "$w/goldens.err"; } > "$d/goldens.failed"; exit 1; }
+  n=$(wc -l < "$sel")
   s=$(date +%s)
   say "goldens ${sha:0:10}: $n examples with $d/jet"
   # Golden examples run host tools (C compilers, interpreters) that only jet-env supplies until jet does.
-  (cd "$t" && JET=$d/jet JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t JET_TEST_SCRATCH_DIR=$w/scratch TMPDIR=$w/tmp \
+  (cd "$t" && JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t JET_TEST_STATE_DIR=$w/state TMPDIR=$w/tmp \
     systemd-run --user --scope -q -p MemoryMax=24G -p MemorySwapMax=0 timeout 7200 \
     prlimit --core=0 --stack=1073741824:1073741824 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$t/Tools/agent/jet-env" \
-    node Tools/agent/run-feature-examples.mjs --no-env --jobs 6 --timeout 120 --json $(awk 1 "$sel") > "$out" 2> "$w/goldens.err")
+    "$d/jet" test Compiler --profile golden --optimize=none "--cases=$sel" --jobs=6 --time-limit=120s "--results=$out" \
+    > "$w/goldens.log" 2> "$w/goldens.err")
   rc=$?
   [ -d "$d" ] || exit 0
-  # jet-env may print warnings on stdout ahead of the JSON; keep the JSON object only.
-  node -e 'const f=process.argv[1],fs=require("fs"),t=fs.readFileSync(f,"utf8"),i=t.indexOf("\n{");if(!t.startsWith("{")&&i>=0)fs.writeFileSync(f,t.slice(i+1))' "$out" 2>/dev/null
-  if node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if(!j.counts) process.exit(1)' "$out" 2>/dev/null; then
+  # The results document opens with the compiler and its counts: {"jet":…,"counts":{…,"suites":[…]},"results":[…]}.
+  counts=$(awk 'match($0, /"counts":\{[^}]*\}/) { print substr($0, RSTART + 9, RLENGTH - 9); exit }' "$out" 2>/dev/null)
+  if [ -n "$counts" ]; then
     mv "$out" "$d/goldens.json.tmp" && mv "$d/goldens.json.tmp" "$d/goldens.json"
     printf '%s\n' "commit=$sha" "compiler=$d/jet" "identity=$(<"$d/IDENTITY")" "examples=$n" "exclude=$ex" \
-      "args=--no-env --jobs 6 --timeout 120 --json" "rc=$rc" "secs=$(( $(date +%s) - s ))" "cpus=${SLOT_CPUS:-}" \
-      "counts=$(node -e 'console.log(JSON.stringify(require(process.argv[1]).counts))' "$d/goldens.json")" "finished=$(date '+%F %T')" > "$d/goldens.meta"
+      "args=--profile golden --optimize=none --cases --jobs=6 --time-limit=120s" "rc=$rc" "secs=$(( $(date +%s) - s ))" "cpus=${SLOT_CPUS:-}" \
+      "counts=$counts" "finished=$(date '+%F %T')" > "$d/goldens.meta"
     say "goldens ${sha:0:10}: $(awk -F= '$1=="counts"{print $2}' "$d/goldens.meta") in $(( $(date +%s) - s ))s"
   else
-    { echo "rc=$rc: no counts after $(( $(date +%s) - s ))s; stdout bytes $(wc -c < "$out" 2>/dev/null)"; echo "-- stderr tail"; awk '{l[NR]=$0} END{for(i=(NR>60?NR-59:1);i<=NR;i++) print l[i]}' "$w/goldens.err"; echo "-- stdout tail"; awk '{l[NR]=$0} END{for(i=(NR>20?NR-19:1);i<=NR;i++) print substr(l[i],1,400)}' "$out"; } > "$d/goldens.failed"
-    cp "$w/goldens.err" "$d/goldens.err" 2>/dev/null; cp "$out" "$d/goldens.stdout" 2>/dev/null
+    { echo "rc=$rc: no counts after $(( $(date +%s) - s ))s; results bytes $(wc -c < "$out" 2>/dev/null)"; echo "-- stderr tail"; awk '{l[NR]=$0} END{for(i=(NR>60?NR-59:1);i<=NR;i++) print l[i]}' "$w/goldens.err"; echo "-- stdout tail"; awk '{l[NR]=$0} END{for(i=(NR>20?NR-19:1);i<=NR;i++) print substr(l[i],1,400)}' "$w/goldens.log"; } > "$d/goldens.failed"
+    cp "$w/goldens.err" "$d/goldens.err" 2>/dev/null; cp "$w/goldens.log" "$d/goldens.stdout" 2>/dev/null
     say "goldens ${sha:0:10}: FAILED rc=$rc"
   fi
   jetpack_build "$sha" "$t" "$w/tmp"
@@ -89,7 +102,7 @@ jetpack_reuse() { # SHA : 0 when base/SHA/jetpack exists or was copied from an i
     prev=$(basename "$(dirname "$p")")
     [ "$prev" != "$sha" ] && [ -f "$B/$prev/jetpack.receipt" ] || continue
     git -C "$REPO" diff --quiet "$prev" "$sha" -- "${JP_INPUTS[@]}" 2>/dev/null || continue
-    # Receipt first: suite.sh keys on the jetpack file, so it never sees a jetpack without its receipt.
+    # Receipt first: Tools/agent/Suite.jet keys on the jetpack file, so it never sees a jetpack without its receipt.
     { awk 1 "$B/$prev/jetpack.receipt"; echo "reused-for: $sha"; echo "reused-from: $prev (no change under ${JP_INPUTS[*]} between them)"; } > "$d/.jetpack.receipt.tmp" \
       && mv "$d/.jetpack.receipt.tmp" "$d/jetpack.receipt" || return 1
     cp "$p" "$d/.jetpack.tmp" && mv "$d/.jetpack.tmp" "$d/jetpack" || return 1
