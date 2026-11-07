@@ -1312,13 +1312,25 @@ scheduler_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO,
 // return, `ledger-stop` the same row through the R0802 stop with one
 // `exit: 70` line; the two ledgers are byte-equal, each a fresh owner-only
 // file (0600) in an owner-only directory (0700). The logical-environment and
-// link-native hosts link against the same object. Every failure is reported.
+// link-native hosts link against the same object and run: each prints exactly
+// the lines its C source `puts`. Every failure is reported.
 world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     out: lane.out.copy()
     repo: lane.repo.copy()
     failures := [String]{}
     loop name in WORLD_SENTRY_LINKED {
-        link(lane, "{repo}/{RT}{name}.c", object, "{out}/native/{name}") ?? failures.push("{name} link: {err.message}")
+        source: "{repo}/{RT}{name}.c"
+        host: "{out}/native/{name}"
+        if link(lane, source, object, host) == {
+            .Err(failed) -> failures.push("{name} link: {failed.message}")
+            .Ok(_) -> {
+                expected: puts_lines(source) ?? {
+                    failures.push("{name}: {err.message}")
+                    next
+                }
+                failures.extend(step_failures(name, execute(lane, host, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), expected, ""))
+            }
+        }
     }
     ledgers: "{out}/ledgers"
     files.remove_all(ledgers) ?? ()
@@ -1403,7 +1415,12 @@ crypto_verdict: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> 
 witness_stdout: fn(repo: String, name: String) -[FS]> String Problem! {
     stdout_file: "{repo}/{RT}{name}Witness.stdout"
     if files.exists(stdout_file) -> return files.read(stdout_file) ?? return Err(problem("`{stdout_file}` cannot be read: {err}"))
-    source: files.read("{repo}/{RT}{name}Witness.c") ?? return Err(problem("`{RT}{name}Witness.c` cannot be read: {err}"))
+    puts_lines("{repo}/{RT}{name}Witness.c")
+}
+
+// The lines the C source at `path` `puts`, each ending in a newline.
+puts_lines: fn(path: String) -[FS]> String Problem! {
+    source: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
     puts: regex.compile("puts\\((\"(?:\\\\.|[^\"\\\\])*\")\\);") ?? return Err(problem("puts pattern: {err}"))
     out := ""
     loop found in puts.matches(source) {
