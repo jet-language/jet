@@ -145,15 +145,6 @@ mkdir -p ~/.local/jet && tar -xzf jet-*-linux-x64.tar.gz -C ~/.local/jet
 export PATH="$HOME/.local/jet:$PATH"
 ```
 
-> **For now, one extra step.** The release binary doesn't yet carry its core
-> library inside itself, so it needs the matching source next to it. That is
-> being fixed. Until then:
->
-> ```sh
-> git clone --depth 1 --branch "$(cat ~/.local/jet/RELEASE)" https://github.com/jet-language/jet ~/.local/jet-src
-> export JET_TOOLCHAIN_ROOT="$HOME/.local/jet-src"
-> ```
-
 Then start a project:
 
 ```console

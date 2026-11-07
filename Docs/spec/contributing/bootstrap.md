@@ -69,8 +69,9 @@ check fails, stop: the downloaded `jet` is not what the release signed.
 Releases tagged before the key was committed (a0_030 and earlier) don't carry
 it; check those with the key file of a later checkout.
 
-`jet` reads the Core library from the checkout that holds its input, and its
-identity from the `IDENTITY` file beside it; `JET_TOOLCHAIN_ROOT` and
+`jet` reads the Core library from the checkout that holds its input (outside
+a checkout, from the Core sources built into it), and its identity from the
+`IDENTITY` file beside it; `JET_TOOLCHAIN_ROOT` and
 `JET_COMPILER_IDENTITY` override both ([Environment
 variables](../reference/environment.md)). `ReuseSeedRuntime.jet` recomputes the
 source, backend and lifecycle inventories that the seed pack's

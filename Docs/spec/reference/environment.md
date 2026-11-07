@@ -64,7 +64,7 @@ one exists instead of adding another spelling for the same job.
 | `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `$JET`. |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
 | `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget. |
-| `JET_TOOLCHAIN_ROOT` | path | Names the Jet toolchain source tree, the directory holding `Core/` and `Compiler/Prelude/`, that the Core library bodies are read from. Unset, `jet` uses the nearest directory at or above the input that holds both, else its executable's directory when that holds both; with none, every compile refuses (E2105) and names the three places. |
+| `JET_TOOLCHAIN_ROOT` | path | Names the Jet toolchain source tree, the directory holding `Core/` and `Compiler/Prelude/`, that the Core library bodies are read from. Unset, `jet` uses the nearest directory at or above the input that holds both; with none, it compiles against the Core sources built into it. Checkout tools that read the tree's other files (`jet devtools grammars`, the diagnostic coverage report) refuse (E2105) and name both places. |
 | `JET_UI_FILTER` | repository-relative fixture substring | Selects UI diagnostic or lint fixtures. |
 | `JET_UPDATE_GOLDEN` | `1` | Updates the existing expected channel for the selected golden example; requires `JET_GOLDEN_FILTER`. |
 | `JET_UPDATE_SNAPSHOTS` | `1` | Updates compiler-owned snapshot output in explicitly supported workflows, and the files `core.testing.snap` and `core.testing.golden` compare against (`jet test -u` sets it); review the diff immediately. |

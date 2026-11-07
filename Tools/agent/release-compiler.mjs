@@ -30,7 +30,7 @@
 // The suites start only once the cheap checks (chain, pack, jetpack) are
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
-// Pass: assembles SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
+// Pass: assembles SEEDS/a0_NNN (the next number) with jet (its Core sources built in), jet-runtime/, jetpack,
 // IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS, RELEASE.json, RELEASE.md,
 // MERGE_MSG, TAG_MSG and evidence/, then publishes it, each step only after the one before
 // succeeds: COMMIT must be on origin/dev; `git tag -a a0_NNN -F TAG_MSG COMMIT`;
@@ -324,14 +324,16 @@ function releaseInfo(seeds) {
     const link = join(seeds, 'current');
     if (!existsSync(link)) return { error: `${link} does not exist` };
     const dir = realpathSync(link);
-    const missing = ['jet', 'IDENTITY', 'toolchain', 'jet-runtime'].filter(name => !existsSync(join(dir, name)));
+    const missing = ['jet', 'IDENTITY', 'jet-runtime'].filter(name => !existsSync(join(dir, name)));
     if (missing.length) return { error: `current release ${dir} lacks ${missing.join(', ')}` };
     const identity = readFileSync(join(dir, 'IDENTITY'), 'utf8').trim();
     const source = existsSync(join(dir, 'SOURCE')) ? readFileSync(join(dir, 'SOURCE'), 'utf8').trim() : '';
+    // The release's own tree, for the release-side suites, is an export of the commit SOURCE names.
+    const commit = /^[0-9a-f]{40}\b/.exec(source)?.[0] ?? '';
+    if (!commit) return { error: `current release ${dir} names no commit in SOURCE` };
     return {
         dir, name: basename(dir), identity, version: identity.split('#')[0], jet: join(dir, 'jet'), jetSha: sha256File(join(dir, 'jet')),
-        toolchain: join(dir, 'toolchain'), jetpack: existsSync(join(dir, 'jetpack')) ? join(dir, 'jetpack') : '', source,
-        commit: /^[0-9a-f]{40}\b/.exec(source)?.[0] ?? '',
+        jetpack: existsSync(join(dir, 'jetpack')) ? join(dir, 'jetpack') : '', source, commit,
     };
 }
 
@@ -490,7 +492,7 @@ async function jetpackCensus(ctx, side, jet, identity, root) {
 async function jetpackStage(ctx, gate) {
     const { release, candidate } = ctx;
     const recorded = join(release.dir, 'evidence/jetpack-candidate.keys');
-    const cache = join(ctx.workRoot, 'cache', `jetpack-${createHash('sha256').update(`${release.jetSha}\0${release.commit || release.toolchain}`).digest('hex').slice(0, 16)}.keys`);
+    const cache = join(ctx.workRoot, 'cache', `jetpack-${createHash('sha256').update(`${release.jetSha}\0${release.commit}`).digest('hex').slice(0, 16)}.keys`);
     const readKeys = path => readFileSync(path, 'utf8').split('\n').filter(Boolean);
     let before;
     if (existsSync(recorded)) before = { keys: readKeys(recorded), detail: `recorded in ${release.name}/evidence` };
@@ -693,7 +695,6 @@ function assemble(ctx, gate, plan) {
     linkCompilerAliases(temp);
     cpSync(candidate.runtime, join(temp, 'jet-runtime'), { recursive: true, verbatimSymlinks: true });
     if (candidate.jetpack) { copyFileSync(candidate.jetpack, join(temp, 'jetpack')); chmodSync(join(temp, 'jetpack'), 0o755); }
-    exportCommit(sha, join(temp, 'toolchain'));
     const verified = `self-host chain from ${release.name} without Rust reaches the fixed point s2 == s3 (jet ${candidate.sha.slice(0, 16)}); runtime pack rebuilt by s2 is byte-identical; golden/ui/cases ${gains.suites} rows gained, ${lost.length} lost${lost.length ? ` (${[...new Set(lost.map(row => row.disposition.card))].join(', ')})` : ''}; ${ctx.jetpackSummary}${candidate.jetpack ? '; jetpack engine built by s2' : ''}`;
     writeFileSync(join(temp, 'IDENTITY'), `${candidate.identity}\n`);
     writeFileSync(join(temp, 'RELEASE'), `${next}\n`);
@@ -707,7 +708,7 @@ function assemble(ctx, gate, plan) {
     writeFileSync(join(ctx.work, 'current.env'), [
         '# Newest verified self-hosted compiler (written by release-compiler.mjs; jet-use installs it).',
         `LABEL="${next} (dev ${sha.slice(0, 9)}, ${date}, verified: s2 == s3 ${candidate.sha.slice(0, 16)}, no Rust; ${gains.total} gains, ${lost.length} lost over ${release.name})"`,
-        `JET=${dest}/jet`, `JET_IDENTITY=${candidate.identity}`, `SOURCE=${dest}/toolchain`, '',
+        `JET=${dest}/jet`, `JET_IDENTITY=${candidate.identity}`, '',
     ].join('\n'));
     const body = [`Verified ${sha.slice(0, 10)}: ${verified}.`, `Identity ${candidate.identity}.`, `Evidence: ${dest}/RELEASE.md`].join('\n\n');
     writeFileSync(join(temp, 'MERGE_MSG'), `Merge dev: ${next} ${summary}\n\n${body}\n`);
@@ -795,7 +796,7 @@ async function release(options, pre) {
     say(`release gate of ${sha.slice(0, 10)} against ${release.name}; next name ${ctx.next}; work ${work}`);
     exportCommit(sha, ctx.tree);
     writeFileSync(join(ctx.tree, '.chain-base'), `${sha}\n`);
-    cpSync(release.toolchain, ctx.releaseTree, { recursive: true, verbatimSymlinks: true });
+    exportCommit(release.commit, ctx.releaseTree);
     await chainStage(ctx, gate);
     await ccPackStage(ctx, gate);
     if (ctx.candidate) {
