@@ -2,7 +2,7 @@
 # Claim: vendor copies greeter into vendor/greeter (tests/pkg.rs:6355)
 # Claim: vendor manifest records name and fingerprint (tests/pkg.rs:6365)
 # Claim: locked offline build compiles (tests/pkg.rs:6378)
-# Fixture migrated: Rust Publish::vendor replaced by jet registry vendor --vendor-dir vendor (see tests/cases/pkg/cli_vendor_dir_flag_relocates.case); run.jet calls the dependency qualified, `greeter.greet()`, and step-3.sh prints the vendor manifest the name predicate reads
+# Fixture migrated: Rust Publish::vendor replaced by jet registry vendor --vendor-dir vendor (see tests/cases/pkg/cli_vendor_dir_flag_relocates.case); run.jet calls the dependency qualified, `greeter.greet()`, and the name predicate reads the vendor manifest
 fixture: vendored_offline_locked_build.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -11,9 +11,8 @@ step: jet fetch
 exit: 0 # tests/pkg.rs:6345 initial fetch
 step: jet registry vendor --vendor-dir vendor
 exit: 0 # tests/pkg.rs:6351 vendor succeeds
-step: sh {work}/step-3.sh
-exit: 0 # tests/pkg.rs:6355-6367 greeter vendored, manifest names greeter
-stdout: ~ "\"name\": \"greeter\"" # tests/pkg.rs:6355-6367 greeter vendored, manifest names greeter
-stdout: ~ "\"fingerprint\": \"sha256-" # tests/pkg.rs:6365 the manifest records greeter's locked fingerprint
+file: vendor/greeter is-dir
+file: vendor/manifest.json ~ "\"name\": \"greeter\"" # tests/pkg.rs:6355-6367 greeter vendored, manifest names greeter
+file: vendor/manifest.json ~ "\"fingerprint\": \"sha256-" # tests/pkg.rs:6365 the manifest records greeter's locked fingerprint
 step: jet build --offline --locked run.jet
 exit: 0 # tests/pkg.rs:6378 vendored project compiles offline

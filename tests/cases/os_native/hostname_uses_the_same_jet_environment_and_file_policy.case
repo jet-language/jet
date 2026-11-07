@@ -4,7 +4,7 @@
 # value cannot be spelled in a case `env:` line, which trims; an unpadded name stands in.
 requires: os-name:linux
 fixture: hostname_uses_the_same_jet_environment_and_file_policy.fixture
-step: sh -c 'if [ -r /etc/hostname ]; then cat /etc/hostname; else echo localhost; fi'
+step: jet run --allow=FS.Read etc_hostname.jet
 exit: 0
 capture: file_host = text stdout.trim
 step: jet build --allow=Env,FS.Read main.jet

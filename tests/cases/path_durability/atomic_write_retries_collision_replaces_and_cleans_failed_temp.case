@@ -14,6 +14,5 @@ file: target.bin ^= "new" # tests/path_durability.rs:248 the first atomic write 
 file: target.bin size = 3 # tests/path_durability.rs:248
 file: target.bin mode = 0640 # tests/path_durability.rs:249-256 replacement keeps the target permissions
 entries: . kind file name ^= ".jet_tmp_" = 1 # tests/path_durability.rs:257-266 only the forced stale collision remains
-step: sh -c "cat .jet_tmp_*"
-exit: 0
-stdout: = "stale" # tests/path_durability.rs:267 the stale temp is untouched
+capture: stale = sole-entry . kind file name ^= ".jet_tmp_"
+file: {cap:stale} = "stale" # tests/path_durability.rs:267 the stale temp is untouched

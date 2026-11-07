@@ -1,12 +1,13 @@
 # tests/net_tls.rs::comptime_fetch_rejects_hardlinks_to_outside_files at tests/net_tls.rs:100; hand-port
 # A hardlink inside the source directory to a file outside it is rejected by compile-time fetch with E3414.
 requires: os:unix
-requires: tool:sh
 fixture: comptime_fetch_rejects_hardlinks_to_outside_files.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: sh -c "mkdir -p {work}/proj && ln {work}/outside.txt {work}/proj/linked-secret && sed s#WORK#{work}#g hardlink.in > {work}/proj/main.jet"
-exit: 0
+mkdir: proj
+hardlink: outside.txt proj/linked-secret
+capture: source = text file.replace("WORK", "{work}") hardlink.in
+write: proj/main.jet = "{cap:source}"
 step: jet check proj/main.jet
 exit: nonzero # tests/net_tls.rs:115-116 compile-time fetch must reject hardlinks to outside files
 stderr: ~ "[jet.FetchFailed]" # tests/net_tls.rs:117
