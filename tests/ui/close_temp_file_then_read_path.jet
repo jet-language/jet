@@ -1,0 +1,8 @@
+// E0121: a clonable Core owner read after its consuming close.
+use files: core.files
+
+run: fn() {
+    owner: files.temp_file("closed-owner") ?? panic("temp")
+    close(owner)
+    print(owner.path)
+}

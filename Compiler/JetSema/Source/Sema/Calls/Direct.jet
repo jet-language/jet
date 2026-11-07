@@ -398,7 +398,11 @@ sema_call_check_ambient_close: fn(call: Call, environment: SemaScopeEnvironment,
             return None
         }
     }
-    if !sema_stmt_move_direct(argument.expr, state, scopes, "`close`", diagnostics) -> return None
+    // `close(name)` consumes the owner exactly, like a `&&` argument: a later
+    // use of `name` is E0121 and never turns the move into a hidden copy.
+    exact: sema_ownership_unmarked_moves_name(argument.expr)
+    moved: if exact -> sema_ownership_mark_move(state, argument.expr, scopes, "`close`", diagnostics) else -> sema_stmt_move_direct(argument.expr, state, scopes, "`close`", diagnostics)
+    if !moved -> return None
     Val(sema_tree_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
 }
 
