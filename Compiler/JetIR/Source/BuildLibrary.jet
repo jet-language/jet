@@ -549,13 +549,13 @@ ir_export_native_type: fn(ty: Type) -> String? Never! {
 // The native object has no generated boundary, so an export is an
 // infallible top-level C function: by-value primitive parameters and a
 // primitive or void result. Every problem of the signature is listed. Sema
-// already refused an export whose body infers a carrier it does not declare
-// (E3203, sema_guest_check_export_failures), so a carrier here is one a
-// library component signature declares.
+// refuses every export that can fail (E3203: sema_guest_check_surfaces for
+// a declared carrier, sema_guest_check_export_failures for an inferred one),
+// so a carrier here is a compiler defect.
 ir_export_signature_problems: fn(function: FnBody) -> [String] Never! {
     problems := [String]{}
     if !ir_top_level(function) || function.generic_params.len() != 0 -> problems.push("is not a monomorphic top-level function")
-    if !ir_infallible(function) -> problems.push("declares a failure carrier; the native object has no generated boundary to return it through")
+    if !ir_infallible(function) -> panic("checked C export `{function.name}` has a failure carrier; sema refuses it with E3203")
     loop param in function.params {
         if param.convention == AccessConvention.Write {
             problems.push("parameter `{param.name}` is written; C exports take primitives by value")
