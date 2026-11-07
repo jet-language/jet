@@ -18,7 +18,13 @@ session guard_0 raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {fr
 session guard_1 raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:guard_1} guard_1.json
 session invalid raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:invalid} invalid.json
 session codec_surrogate raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:codec_surrogate} codec_surrogate.json
-sleep: 500ms
+await: file forced.ready timeout 30s
+await: file default.ready timeout 30s
+await: file profile.ready timeout 30s
+await: file guard_0.ready timeout 30s
+await: file guard_1.ready timeout 30s
+await: file invalid.ready timeout 30s
+await: file codec_surrogate.ready timeout 30s
 step run_forced: jet run browser_bidi_dev.jet
 cwd: forced
 exit: 0

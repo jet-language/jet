@@ -9,7 +9,7 @@ write: browser_bidi_network.jet native_bidi_network_events_inspection_and_interc
 step: jet build browser_bidi_network.jet
 exit: 0
 session network raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:network} network.json
-sleep: 500ms
+await: file network.ready timeout 30s
 step run: built
 exit: 0
 stdout: ~ "network.beforeRequestSent\n" # original predicate: stdout.contains

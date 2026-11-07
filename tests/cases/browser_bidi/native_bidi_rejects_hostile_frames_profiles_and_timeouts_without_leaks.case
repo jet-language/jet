@@ -18,7 +18,16 @@ session not_ready raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshak
 session surrogate raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:surrogate} surrogate.json
 session closed_protocol raw: node {root}/tests/fixtures/browser_bidi_mock.mjs handshake {free-port:closed_protocol} closed_protocol.json
 session malformed_session raw: node {root}/tests/fixtures/browser_bidi_mock.mjs malformed-session {free-port:malformed_session}
-sleep: 500ms
+await: file hostile-malformed.ready timeout 30s
+await: file hostile-mismatched-id.ready timeout 30s
+await: file hostile-protocol-error.ready timeout 30s
+await: file hostile-timeout.ready timeout 30s
+await: file hostile-no-cdp.ready timeout 30s
+await: file invalid_number.ready timeout 30s
+await: file not_ready.ready timeout 30s
+await: file surrogate.ready timeout 30s
+await: file closed_protocol.ready timeout 30s
+await: file malformed-session.ready timeout 30s
 step run: built
 exit: 0
 stdout: = native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks.1.out

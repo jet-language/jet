@@ -11,7 +11,9 @@ exit: 0
 session no_cdp raw: node {root}/tests/fixtures/browser_bidi_mock.mjs hostile-no-cdp {free-port:no_cdp}
 session matrix_wire raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:matrix_wire} matrix_wire.json
 session matrix_closed raw: node {root}/tests/fixtures/browser_bidi_mock.mjs script {free-port:matrix_closed} matrix_closed.json
-sleep: 500ms
+await: file hostile-no-cdp.ready timeout 30s
+await: file matrix_wire.ready timeout 30s
+await: file matrix_closed.ready timeout 30s
 step run: built
 exit: 0
 stdout: = native_bidi_browser_surface_hostile_matrix.1.out
