@@ -503,20 +503,7 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
             else -> passed += 1
         }
     }
-    if options.json {
-        failure_kind: if failed > 0 -> jet_cli_status_text("budget") else if unavailable > 0 -> jet_cli_status_text("evidence") else -> JetCLIStatusValue.Null
-        budget: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("applied", jet_cli_status_bool(false)),
-            jet_cli_status_field("diagnostics", jet_cli_status_array([JetCLIStatusValue]{})),
-            jet_cli_status_field("exit_code", jet_cli_status_int(exit_code)),
-            jet_cli_status_field("failure_kind", failure_kind),
-            jet_cli_status_field("plan", JetCLIStatusValue.Null),
-            jet_cli_status_field("report", jet_cli_budget_status_value(built.report)),
-            jet_cli_status_field("report_path", jet_cli_status_text(report_path)),
-            jet_cli_status_field("results", jet_cli_status_array(loop row in built.results -> jet_cli_budget_status_value(jet_cli_budget_result_json(row)))),
-        })
-        return JetDriverVerbOutput{stdout: "{jet_cli_status_render(options.command, exit_code == 0, [JetCLIStatusField]{jet_cli_status_field("budget", budget)})}\n", stderr: "", exit_code: exit_code}
-    }
+    if options.json -> return jet_cli_budget_json(options, built, report_path, JetCLIStatusValue.Null, false, exit_code)
     annotate: options.annotations == "github" || (options.annotations == "auto" && cli_sys.get("GITHUB_ACTIONS") == Val("true"))
     stderr := ""
     loop row in built.results {
@@ -560,6 +547,32 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
         stderr = "{stderr}{line}\n"
     }
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: exit_code}
+}
+
+// Rust `emit_json`: the `budget` status of a built report, with the update
+// plan (Null for `check`) and whether it was applied.
+jet_cli_budget_json: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, report_path: String, plan: JetCLIStatusValue, applied: Bool, exit_code: Int) -> JetDriverVerbOutput {
+    failed := false
+    unavailable := false
+    loop row in built.results {
+        if jet_cli_budget_result_rank(row) == {
+            1 -> failed = true
+            2 -> unavailable = true
+            else -> {}
+        }
+    }
+    failure_kind: if failed -> jet_cli_status_text("budget") else if unavailable -> jet_cli_status_text("evidence") else -> JetCLIStatusValue.Null
+    budget: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("applied", jet_cli_status_bool(applied)),
+        jet_cli_status_field("diagnostics", jet_cli_status_array([JetCLIStatusValue]{})),
+        jet_cli_status_field("exit_code", jet_cli_status_int(exit_code)),
+        jet_cli_status_field("failure_kind", failure_kind),
+        jet_cli_status_field("plan", plan),
+        jet_cli_status_field("report", jet_cli_budget_status_value(built.report)),
+        jet_cli_status_field("report_path", jet_cli_status_text(report_path)),
+        jet_cli_status_field("results", jet_cli_status_array(loop row in built.results -> jet_cli_budget_status_value(jet_cli_budget_result_json(row)))),
+    })
+    JetDriverVerbOutput{stdout: "{jet_cli_status_render(options.command, exit_code == 0, [JetCLIStatusField]{jet_cli_status_field("budget", budget)})}\n", stderr: "", exit_code: exit_code}
 }
 
 // A GitHub workflow-command message: `%`, CR and LF escaped.

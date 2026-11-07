@@ -1,19 +1,25 @@
 # Port of tests/cli_parts/budget.rs:721-801; fixture sources copied verbatim.
-# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
-# PENDING-GRAMMAR: JSON, is-file, canonical (batch-four).
+# The status envelope is jet.status/v1 (schema-first, `reports`); the Rust-era
+# sorted envelope is gone (#6418).
 fixture: fixtures/update
 step: jet budget update --baseline ci/linux --bootstrap --reason "initial evidence" --json
 exit: 0
-json: stdout canonical # original predicate
+stdout: machine-output = [status]
+stdout: ^= "{\"schema\":\"jet.status/v1\",\"action\":\"update\",\"ok\":true,\"reports\":[],\"budget\":{\"applied\":false," # the plan is reported before anything is applied
 json: stdout doc $.budget.applied = false
+json: stdout doc $.budget.plan.baseline = "ci/linux"
 json: stdout doc $.budget.plan.requires_confirmation = false
 json: stdout doc $.budget.plan.rows #= 2
 json: stdout doc $.budget.plan.rows[0].operation = "create"
 json: stdout doc $.budget.plan.rows[0].artifact = "report"
 json: stdout doc $.budget.plan.rows[1].operation = "advance"
 json: stdout doc $.budget.plan.rows[1].artifact = "baseline"
+json: stdout doc $.budget.plan.rows[1].path = ".jet/perf/baselines/names/ci/linux.json"
+json: stdout doc $.budget.plan.rows[1].from_id = null
 file: .jet absent
 step: jet budget update --baseline ci/linux --bootstrap --reason "initial evidence" --json --yes
 exit: 0
-stdout: ~ "\"applied\":true" # original predicate
+stdout: machine-output = [status]
+json: stdout doc $.budget.applied = true
+json: stdout doc $.budget.plan.rows[1].operation = "advance"
 file: .jet/perf/baselines/names/ci/linux.json is-file

@@ -5,13 +5,16 @@
 // published report is never rewritten. A budget whose provider this `jet`
 // has not built, or that compares against a named baseline's history, which
 // this `jet` can't read yet, refuses with E2104 before any artifact is
-// written. `jet budget update` is refused the same way.
+// written. `jet budget update` measures the same way, then plans advancing a
+// named baseline to the report (BudgetStore.jet); nothing is written until
+// `--yes` or a confirmed terminal prompt applies the plan.
 use {
     budget_crypto: core.crypto
+    budget_term: core.term
     cli_files: core.files
     cli_sys: core.sys
     cli_time: core.time
-    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
+    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id]
     jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_kind]
     jet_pkg_model.[COMPILER_VERSION]
@@ -48,7 +51,6 @@ jet_cli_budget_failure: fn(message: String) -> JetCLIBudgetFailure Never! {
 // working directory, and its entry is the stock project entry.
 jet_cli_budget_plan: fn(raw: [String], color: Bool) -> JetCLIPlan Never! {
     options: jet_cli_budget_parse(raw) ?? return jet_cli_fail("E2102", err.message, jet_cli_why("E2102"), JET_CLI_BUDGET_USAGE, color, JET_DRIVER_EXIT_USAGE)
-    if options.command == "update" -> return jet_cli_not_ported("budget update", color)
     cwd: cli_sys.current_dir() ?? return JetCLIPlan.Done{output: jet_cli_budget_tool_failure(options, "cannot resolve current workspace: {jet_cli_io_error_text(err)}", color)}
     source_root: jet_cli_manifest_root(cwd) ?? cwd
     root: cli_files.realpath(source_root) ?? source_root
@@ -115,9 +117,9 @@ jet_cli_budget_parse: fn(raw: [String]) -> JetCLIBudgetOptions JetCLIBudgetFailu
     Ok(out)
 }
 
-// `jet budget check` (JetCLIPlan.Budget): the checked specs of the project
-// entry `entry` under `root` for the native target and dev profile, and their
-// report.
+// `jet budget check` and `jet budget update` (JetCLIPlan.Budget): the checked
+// specs of the project entry `entry` under `root` for the native target and
+// dev profile, and their report.
 jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String, color: Bool) -> JetDriverVerbOutput {
     measured_start: jet_cli_rfc3339(cli_time.unix_ns())
     prepared: jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Check)
@@ -193,9 +195,109 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
     }
     built: jet_cli_budget_build(root, ordered, facts, toolchain, sources, measured_start, profile) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     report_path: ".jet/perf/reports/{built.report_id}.json"
-    held: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "reports"}, true) ?? return jet_cli_budget_tool_failure(options, "report write refused: {err.message}", color)
-    created: held.publish_immutable("{built.report_id}.json", built.bytes, None, JET_CLI_BUDGET_REPORT_LIMIT) ?? return jet_cli_budget_tool_failure(options, "report write refused: {err.message}", color)
+    if options.command == "update" && (built.fail == 0 || options.accept_regression || options.bootstrap) -> return jet_cli_budget_update(options, root, built, report_path, color)
+    created: jet_cli_budget_publish_report(root, built) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     jet_cli_budget_emit(options, built, report_path, created)
+}
+
+// Rust `run`'s update half over a report that may advance the baseline: the
+// plan is shown first, and only `--yes`, or `y` at the prompt on a terminal,
+// writes the report and advances the baseline.
+jet_cli_budget_update: fn(options: JetCLIBudgetOptions, root: String, built: JetCLIBudgetBuilt, report_path: String, color: Bool) -> JetDriverVerbOutput {
+    baseline: options.baseline ?? ""
+    reason: options.reason ?? ""
+    // copy: the options keep their reason.
+    kind: if options.bootstrap -> JetCLIBudgetUpdateKind.Bootstrap(reason.copy()) else if options.accept_regression -> JetCLIBudgetUpdateKind.AcceptRegression(reason.copy()) else -> JetCLIBudgetUpdateKind.Pass
+    plan: jet_cli_budget_plan_update(root, baseline, built.report, built.report_id, kind, jet_cli_rfc3339(cli_time.unix_ns())) ?? return jet_cli_budget_report_failure(options, built.report_id, "baseline plan refused: {err.message}", color)
+    created: jet_cli_budget_report_created(root, built) ?? return jet_cli_budget_report_failure(options, built.report_id, "report inspection refused: {err.message}", color)
+    if options.json {
+        if options.yes {
+            jet_cli_budget_accept(root, plan, built) ?? return jet_cli_budget_report_failure(options, built.report_id, err.message, color)
+        }
+        rows: [JetCLIStatusValue]{
+            jet_cli_budget_plan_row(if created -> "create" else -> "reuse", "report", report_path, None, built.report_id),
+            jet_cli_budget_plan_row("advance", "baseline", ".jet/perf/baselines/names/{baseline}.json", plan.prior_head_report_id, built.report_id),
+        }
+        planned: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("baseline", jet_cli_status_text(baseline.copy())), // copy: the options keep their baseline.
+            jet_cli_status_field("requires_confirmation", jet_cli_status_bool(false)),
+            jet_cli_status_field("rows", jet_cli_status_array(rows)),
+        })
+        return jet_cli_budget_json(options, built, report_path, planned, options.yes, JET_DRIVER_EXIT_OK)
+    }
+    old: plan.prior_head_report_id ?? "none"
+    stderr := "{if created -> "+" else -> "~"} report {built.report_id}\n~ baseline {baseline} {old} -> {built.report_id}\n"
+    interactive: budget_term.stdin().is_tty()
+    apply := options.yes
+    if !apply && interactive {
+        // The plan precedes the prompt on the terminal.
+        console := budget_term.stderr()
+        console.write(stderr).drop("budget plan")
+        stderr = ""
+        apply = jet_cli_budget_confirm()
+    }
+    if apply {
+        if jet_cli_budget_accept(root, plan, built) == .Err(failure) {
+            refused: jet_cli_budget_report_failure(options, built.report_id, failure.message, color)
+            return JetDriverVerbOutput{stdout: refused.stdout, stderr: "{stderr}{refused.stderr}", exit_code: refused.exit_code}
+        }
+    } else if interactive {
+        stderr = "{stderr}plan cancelled; no baseline changed\n"
+    } else {
+        stderr = "{stderr}plan only; pass -y or --yes to apply in a non-interactive shell\n"
+    }
+    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// Rust `confirm_update`: `y` or `yes`, in any case, applies.
+jet_cli_budget_confirm: fn() -> Bool {
+    console := budget_term.stderr()
+    console.write("Apply? [y/N] ").drop("budget prompt")
+    input := budget_term.stdin()
+    answer: input.read_line() ?? ""
+    word: sema_budget_ascii_lower(answer.trim())
+    word == "y" || word == "yes"
+}
+
+// Rust `plan_row`.
+jet_cli_budget_plan_row: fn(operation: String, artifact: String, path: String, from_id: String?, id: String) -> JetCLIStatusValue Never! {
+    // copy: the plan keeps its prior head and the report its id.
+    from_value: if from_id == .Val(prior) -> jet_cli_status_text(prior.copy()) else -> JetCLIStatusValue.Null
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("artifact", jet_cli_status_text(artifact)),
+        jet_cli_status_field("from_id", from_value),
+        jet_cli_status_field("id", jet_cli_status_text(id.copy())),
+        jet_cli_status_field("operation", jet_cli_status_text(operation)),
+        jet_cli_status_field("path", jet_cli_status_text(path.copy())),
+        jet_cli_status_field("to_id", jet_cli_status_text(id.copy())),
+    })
+}
+
+// Rust `write_report`: the report, published immutably; true when this run
+// created it.
+jet_cli_budget_publish_report: fn(root: String, built: JetCLIBudgetBuilt) -> Bool JetCLIBudgetFailure! {
+    held: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "reports"}, true) ?? return Err(jet_cli_budget_failure("report write refused: {err.message}"))
+    created: held.publish_immutable("{built.report_id}.json", built.bytes, None, JET_CLI_BUDGET_REPORT_LIMIT) ?? return Err(jet_cli_budget_failure("report write refused: {err.message}"))
+    Ok(created)
+}
+
+// Rust `inspect_report`: whether publishing the report would create it.
+jet_cli_budget_report_created: fn(root: String, built: JetCLIBudgetBuilt) -> Bool JetCLIBudgetFailure! {
+    parts: [String]{".jet", "perf", "reports"}
+    present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure(err.message))
+    if !present -> return Ok(true)
+    held: JetCLIRootedDirectory.open(root, parts, false) ?? return Err(jet_cli_budget_failure(err.message))
+    if held.read("{built.report_id}.json", JET_CLI_BUDGET_REPORT_LIMIT) == {
+        .Val(existing) -> Ok(existing != built.bytes)
+        .None -> Ok(true)
+        .Err(error) -> Err(jet_cli_budget_failure(error.message))
+    }
+}
+
+// The report, then the baseline advanced to it.
+jet_cli_budget_accept: fn(root: String, plan: JetCLIBudgetUpdatePlan, built: JetCLIBudgetBuilt) JetCLIBudgetFailure! {
+    _: jet_cli_budget_publish_report(root, built) ?? return Err(err)
+    jet_cli_budget_apply_update(root, plan, built.report, built.bytes) ?? return Err(jet_cli_budget_failure("baseline apply refused: {err.message}"))
 }
 
 // Rust `subject`: the measured member sources, sorted, the profile, and the target.
@@ -306,10 +408,20 @@ jet_cli_budget_compiler_failure: fn(options: JetCLIBudgetOptions, entry: String,
 
 // Rust `tool_failure`: E2908 before a valid report was produced.
 jet_cli_budget_tool_failure: fn(options: JetCLIBudgetOptions, why: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_budget_failure_output(options, why, "budget command failed before a valid report was produced", color)
+}
+
+// Rust `tool_failure_with_report`: E2908 after the report `report_id` was
+// built but before it was accepted.
+jet_cli_budget_report_failure: fn(options: JetCLIBudgetOptions, report_id: String, why: String, color: Bool) -> JetDriverVerbOutput Never! {
+    jet_cli_budget_failure_output(options, why, "budget command failed · report {report_id} was not accepted", color)
+}
+
+jet_cli_budget_failure_output: fn(options: JetCLIBudgetOptions, why: String, summary: String, color: Bool) -> JetDriverVerbOutput Never! {
     diagnostic: diagnostic_from_registry("E2908", None, "performance budget operation failed", why, "correct the named failure and retry")
     if options.json {
         report: jet_cli_report_json(diagnostic, None, "", "", 0)
         return JetDriverVerbOutput{stdout: jet_cli_budget_failed_status(options.command, [String]{report}, "tool"), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
-    JetDriverVerbOutput{stdout: "", stderr: "{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}budget command failed before a valid report was produced\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    JetDriverVerbOutput{stdout: "", stderr: "{diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color)}{summary}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }
