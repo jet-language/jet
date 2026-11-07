@@ -1,7 +1,14 @@
 // SETUP-PORT original root basename marker replacement; no product assertions.
-use core.files
-run: fn(root: String, source: String) {
+// It sits beside the `app` package, not in it: a file of the package would
+// share its namespace, so it would need the very producer source it writes.
+use {
+    files: core.files
+    process: core.process
+}
+run: fn() {
+    args: process.args()
+    root: args[0]
     marker: files.basename(root).replace("-", "_")
-    template: files.read(source)
-    files.write_all(root + "/deps/producer/producer.jet", template.replace("__MARKER__", marker))
+    template: files.read(args[1]) ?? panic("read {args[1]}: {err}")
+    files.write(files.join(root, "app/deps/producer/producer.jet"), template.replace("__MARKER__", marker)) ?? panic("write producer.jet: {err}")
 }

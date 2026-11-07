@@ -1,9 +1,20 @@
 # Port of tests/build_entry.rs:399-600; original sources and compatible edit verbatim.
 # PENDING-SAME-HEAD + PENDING-SEAM(build-plan-exec) nominal metrics/events/source labels; no success substitution.
+# The package is `app`; setup.jet and the templates stay outside it, since a package
+# file shares the namespace whose `use producer` needs the source setup.jet writes.
 fixture: fixtures/enum_dependency_change_invalidates_compiler_package_chain
-step: jet run setup.jet -- {work} cold.template
+step: jet run --allow=FS.Read,FS.Write setup.jet -- {work} cold.template
 step: jet build main.jet --allow=Exec,FS
-step: jet run setup.jet -- {work} changed.template
+cwd: app
+step: {work}/app/.jet/build/app
+stdout: = "7\n"
+step: jet run --allow=FS.Read,FS.Write setup.jet -- {work} changed.template
 step: jet build main.jet --allow=Exec,FS
-step: jet run setup.jet -- {work} compatible.template
+cwd: app
+step: {work}/app/.jet/build/app
+stdout: = "7\n"
+step: jet run --allow=FS.Read,FS.Write setup.jet -- {work} compatible.template
 step: jet build main.jet --allow=Exec,FS
+cwd: app
+step: {work}/app/.jet/build/app
+stdout: = "7\n"
