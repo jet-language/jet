@@ -1,0 +1,39 @@
+--- main.jet
++++ main.jet
+@@ -12,18 +12,18 @@
+-    outer.inner.name ?? ""
+-}
+-
+-indexed: fn(outer: Outer) -> String {
+-    outer.names[0] ?? ""
+-}
+-
+-picked_name: fn(outer: Outer) -> String {
+-    picked: outer.inner.name ?? return ""
+-    picked
+-}
+-
+-run: fn() {
+-    outer: Outer{inner: Inner{name: "Ada"}, names: [String?]{"Lin"}}
+-    print(first_name(outer))
+-    print(indexed(outer))
+-    print(picked_name(outer))
+-}
++    outer.inner.name.copy() ?? ""
++}
++
++indexed: fn(outer: Outer) -> String {
++    outer.names[0].copy() ?? ""
++}
++
++picked_name: fn(outer: Outer) -> String {
++    picked: outer.inner.name ?? return ""
++    picked.copy()
++}
++
++run: fn() {
++    outer: Outer{inner: Inner{name: "Ada"}, names: [String?]{"Lin"}}
++    print(first_name(outer))
++    print(indexed(outer))
++    print(picked_name(outer))
++}

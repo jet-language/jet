@@ -1,4 +1,3 @@
-
 #Policy(copies: .Explicit)
 Inner: struct {
     name: String?
@@ -10,13 +9,21 @@ Outer: struct {
 }
 
 first_name: fn(outer: Outer) -> String {
+    outer.inner.name ?? ""
+}
+
+indexed: fn(outer: Outer) -> String {
+    outer.names[0] ?? ""
+}
+
+picked_name: fn(outer: Outer) -> String {
     picked: outer.inner.name ?? return ""
     picked
 }
 
-indexed: fn(outer: Outer) -> String {
-    picked: outer.names[0] ?? return ""
-    picked
+run: fn() {
+    outer: Outer{inner: Inner{name: "Ada"}, names: [String?]{"Lin"}}
+    print(first_name(outer))
+    print(indexed(outer))
+    print(picked_name(outer))
 }
-
-run: fn() { print(0) }
