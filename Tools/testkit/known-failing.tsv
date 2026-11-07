@@ -341,7 +341,7 @@ tests/cases/fmt/fmt_simplify_one_line_return_is_ast_equal_and_stable.case	#6005	
 tests/cases/fmt/fmt_map_type_spacing_is_canonical_and_value_spacing_stays.case	#6005	expected output stream predicate not matched on HEAD (no replayable first error)
 tests/cases/fmt/fmt_preserves_named_payload_variant_dot_brace.case	#6005	Error [E0003]: Something unexpected appeared after this line, found `{`
 tests/cases/cli_compiler_speed/explicit_project_link_build_is_reproducible_and_content_sensitive.case	#5454	exit 127: `cc: command not found` for `cc -c native/answer.c` (host has no C compiler on PATH)
-tests/cases/cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects.case	#5454	exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71
+tests/cases/cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects.case	#5454	the cold `jet build main.jet --profile=debug --verbose` now exits 0 but prints no `[build] runtime   ->` stage line on stderr (only the effect summary), so the stdlib-object reuse/repair receipts are never shown
 tests/cases/cli_compiler_speed/release_build_timing_runs_inner_cache_and_invalidates_on_source_edit.case	#5454	stderr predicate `[build] cache miss -> compiling` absent: `jet build main.jet --profile=release --verbose` exits 0 with empty stderr
 tests/cases/cli_compiler_speed/second_identical_build_replays_receipt.case	#5454	stderr predicate `up to date:` absent: second identical debug build exits 0 with empty stderr
 tests/cases/cli_compiler_speed/production_build_reports_missing_explicit_linker_as_tool_error.case	#5454	exit 0; expected 1: build with RUSTC_LINKER={work}/missing-linker succeeds instead of reporting L2101
@@ -352,7 +352,7 @@ tests/cases/authority/authority_plan_refuses_before_spawn_on_all_hosted_tiers.ca
 tests/cases/authority/authority_process_binds_exact_resource_grants.case	#5454	jet run main.jet: refused (exit 0, expected 0; stdout is "refused ", expected "planned ")
 tests/cases/authority/authority_process_linux_bwrap_runs_and_denies_host_read.case	#5454	jet run ok/main.jet: Error [E1004]: `core.process` has no item `workspace` (exit 1, expected 0; stdout is "", expected "sandboxed ")
 tests/cases/authority/authority_process_plan_and_receipt_share_the_policy_digest.case	#5454	process.workspace() plan() returns Err, so the run prints `refused` instead of the two `true` digest lines
-tests/cases/authority/erased_devtools_publications_do_not_feed_panel_state.case	#5454	jet check main.jet: Error [E0766]: This call to `core.devtools.publish` is missing `package` (exit 1, expected 1; stderr lacks "E1414")
+tests/cases/authority/erased_devtools_publications_do_not_feed_panel_state.case	#5454	`jet check main.jet` exits 0 with only L0530 warnings; the erased devtools publication is accepted, and no E1414 is reported
 tests/cases/authority/script_confirmation_prompt_accepts_enter_and_refuses_n.case	#5454	on a terminal `jet run spawn/spawn.jet` refuses with E1803 (`Exec` undecided) instead of showing the D-SCRIPT-CONFIRM1 `Run it? [Y/n/always]` prompt
 tests/cases/cffi/cffi_close_capability_round_trips_through_the_native_c_boundary.case	#5454	`jet build main.jet` exits 1 with E0905 "`Handle` isn't `Close`": the foreign close contract does not give the C handle a `Close` impl
 tests/cases/cffi/cffi_write_capability_round_trips_through_the_native_c_boundary.case	#5454	`jet build main.jet` ICEs (exit 101): "ir.build unlowered: foreign C result … Pair has no native C ABI marshalling"
