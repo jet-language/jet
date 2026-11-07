@@ -572,7 +572,12 @@ sema_stmt_value_block_tail_lints: fn(statements: [Stmt], diagnostics: &[Diagnost
     }
     if statements[count - 1] == {
         .Return(value, span) -> {
-            if value != None -> diagnostics.push(sema_lint("L0530", Span{start: span.start, end: span.start + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail"))
+            if value == .Val(returned) {
+                // The fix deletes `return` and the blank run after it, so the
+                // value is left as the block tail.
+                lint: sema_lint("L0530", Span{start: span.start, end: span.start + "return".len()}, "an explicit `return` is used on the final value line", "an unadorned expression on the final value line is Jet's implicit return; `return` is for early exits", "remove the final `return` and leave the expression as the block tail")
+                diagnostics.push(diagnostic_with_edit_grade(lint, TextEdit{span: Span{start: span.start, end: expr_source_start(returned)}, new_text: ""}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.Formatting))
+            }
         }
         .Switch(_, arms, else_body, _) -> {
             loop arm in arms -> sema_stmt_value_block_tail_lints(arm.body, diagnostics)
