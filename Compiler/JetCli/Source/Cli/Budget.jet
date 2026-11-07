@@ -182,14 +182,12 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
 // and each ServiceProbe service's readiness collected, then the refusal of
 // what this `jet` can't measure, then the selected artifact built when a
 // BuildArtifact budget sizes it, then the report, published immutably.
-// `profile` is the measured compile's.
+// Sema admits only the closed provider set, so every provider here is one
+// `jet budget` knows. `profile` is the measured compile's.
 jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, active: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
     ordered := active
     ordered = loop fresh in ordered -> fresh
     ordered.sort_by((left: JetDriverBudgetSpec, right: JetDriverBudgetSpec) -> left.spec.name <=> right.spec.name)
-    loop row in ordered {
-        if !JET_CLI_BUDGET_PROVIDERS.contains(sema_budget_provider_kind(row.spec.provider)) -> return jet_cli_budget_tool_failure(options, "provider `{row.spec.provider}` for budget `{row.spec.name}` has no command-owned measurement implementation", color)
-    }
     toolchain: jet_cli_budget_toolchain(entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     loop row in ordered {
         if sema_budget_provider_kind(row.spec.provider) == "CompilerProbe" {

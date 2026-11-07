@@ -333,21 +333,19 @@ kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: &[U8]) -> String {
     ""
 }
 
-// The names Core's process receipt treats as secret (any of these, ASCII
-// case-insensitive, inside a variable's name).
-KIT_EXEC_SECRET_NAMES: [String]{"secret", "token", "password", "passwd", "credential", "key"}
-
 // The receipt's redaction of captured output: each nonempty value of a
 // secret-named variable the step sets reads `<redacted>`, longest value
 // first. Streamed output bypasses the receipt, so the kit applies it to the
-// text its predicates read; the exact bytes stay unredacted.
+// text its predicates read; the exact bytes stay unredacted. A secret name
+// holds one of the parts Core's process receipt treats as secret, ASCII
+// case-insensitive.
 kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
     secrets := [String]{}
     loop variable in overlay {
         value: variable.value ?? next
         name: variable.name.to_ascii_lower()
         secret := false
-        loop marker in KIT_EXEC_SECRET_NAMES {
+        loop marker in ([String]{"secret", "token", "password", "passwd", "credential", "key"}) {
             if name.contains(marker) -> secret = true
         }
         if !secret || value == "" -> next
