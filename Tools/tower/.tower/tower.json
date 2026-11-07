@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6651,
-    "rev": 95453,
+    "rev": 95460,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92420,12 +92420,30 @@
       "criteria": [
         {
           "n": 1,
-          "text": "A type holding a clone:false field is non-copyable: an implicit copy is a move or a registered diagnostic with a UI snapshot; the case that segfaulted passes on O0, O1 and O2, and core.web.browser drops its Shared<__BrowserWire> workaround.",
+          "text": "A value holding a WsConn is non-copyable: an implicit copy is a move, and copying it from a read param or self is a registered diagnostic with a UI snapshot (tests/ui/ws_conn_holder_is_not_copied). Golden tests/run/Net/WsConnHolderMovesItsSocket passes on O0, O1 and O2, and core.web.browser no longer has Shared<__BrowserWire>.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:30:32.922Z"
+          "at": "2026-11-07T05:34:32.899Z"
+        },
+        {
+          "n": 2,
+          "text": "One rule for every clone:false handle, not a WsConn special case: every type holding a clone:false field is non-copyable in sema, with the WsConn-specific check removed. Receiver is classified by its real semantics: if its copies soundly share one reference-counted queue, it is not clone:false and its registration says so; otherwise Core/Tasks moves it instead of copying. The Core runtime pack builds, and every clone:false holder in Core either moves or is rejected.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:34:33.731Z"
+        },
+        {
+          "n": 3,
+          "text": "Equality on a clone:false handle (for example a.wire == b.wire on WsConn) is a registered sema diagnostic with a UI snapshot, or a defined comparison that lowers on every tier; it is never accepted by sema and then an internal compiler error in the backend.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:34:34.577Z"
         }
       ],
       "refs": [],
@@ -92436,9 +92454,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-05T22:41:56.346Z",
-      "updated": "2026-11-07T03:30:32.922Z",
+      "updated": "2026-11-07T05:34:34.577Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 3
     },
     {
       "id": "c0t9jcat",
@@ -97215,7 +97233,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "TestSystemLead-2: p79 (per-run in-memory FFI cache) queued; kf97 cold cache, every FFI row ran in 0.3-2.0 s (47-60 s TIMEOUTs before). Leak and snapshot copy found during the work are c2 and c3."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97225,6 +97249,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T05:00:55.882Z"
+        },
+        {
+          "n": 2,
+          "text": "A killed or failed FFI build leaves no .workspaces directory behind in the testkit FFI state (today they leak up to 868 MB per key; the state directory reached 3.4 GB): the workspace is removed on every exit path, and a test kills a build mid-way and finds no leftover.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:31:06.389Z"
+        },
+        {
+          "n": 3,
+          "text": "jet_cli_rust_foreign_snapshot does not copy the whole shared cargo target into every private build: a private build reuses the shared target by reference (or copies only its own crate outputs), and its disk use per key is recorded under 50 MB.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:31:07.787Z"
         }
       ],
       "refs": [],
@@ -97235,9 +97277,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:00:47.568Z",
-      "updated": "2026-11-07T05:00:55.883Z",
+      "updated": "2026-11-07T05:31:09.361Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 3
     },
     {
       "id": "c08512l6",
@@ -97256,7 +97298,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Rows c2-c6 came from a census run without JET_COMPILER_IDENTITY, JET_TOOLCHAIN_ROOT or jet-env (MechC found it: the 18 JetCli failures pass in the batch environment). Rerunning in the batch environment (pkgrerun.sh, fixed); rows will be corrected to its result before work starts."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97321,7 +97369,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:14.209Z",
-      "updated": "2026-11-07T05:21:19.378Z",
+      "updated": "2026-11-07T05:22:56.855Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -185277,6 +185325,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T05:34:34.577Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iv7hyj",
+      "note": "#3 Equality on a clone:false handle (for example a.wire == b.wi"
+    },
+    {
+      "at": "2026-11-07T05:34:33.731Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iv7hyj",
+      "note": "#2 One rule for every clone:false handle, not a WsConn special "
+    },
+    {
+      "at": "2026-11-07T05:34:32.899Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0iv7hyj",
+      "note": "#1: Split: MechD-3's 122a4de916 covers WsConn; the general clone:false rule is c2 (a blanket rule broke pack1 on Core/Tasks Receiver copies).; was: A type holding a clone:false field is non-copyable: an implicit copy is a move or a registered diagnostic with a UI snapshot; the case that segfaulted passes on O0, O1 and O2, and core.web.browser dro"
+    },
+    {
+      "at": "2026-11-07T05:31:09.361Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pr0hh0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T05:31:07.788Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pr0hh0",
+      "note": "#3 jet_cli_rust_foreign_snapshot does not copy the whole shared"
+    },
+    {
+      "at": "2026-11-07T05:31:06.389Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pr0hh0",
+      "note": "#2 A killed or failed FFI build leaves no .workspaces directory"
+    },
+    {
+      "at": "2026-11-07T05:22:56.855Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08512l6",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T05:21:22.708Z",
       "by": "Main",
