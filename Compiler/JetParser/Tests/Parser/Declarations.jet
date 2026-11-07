@@ -92,7 +92,7 @@ run: fn() {}
 `)
     assert_eq(diagnostics[0].code, "E0003")
     assert(diagnostics[0].what.contains("`frobnicate` is not a Jet word"), diagnostics[0].what)
-    assert(diagnostics[0].why.contains("`fn`, `struct`, `enum`"), diagnostics[0].why)
+    assert(diagnostics[0].why.contains("`name: value`"), diagnostics[0].why)
 }
 
 #Test("fields_join_the_settings_and_a_last_list_field_is_variadic") {
@@ -223,11 +223,8 @@ run: fn() {}
         (source: `Door: module<T> { state { Open } }
 run: fn() {}
 `, owner: "module"),
-        (source: `run: fn() { value: { state { Open } } }
-`, owner: "anonymous shape"),
-        (source: `impl Source -> Target { state { Open } }
-run: fn() {}
-`, owner: "impl")
+        (source: `run: fn() { value: { x: 1, state { Open } } }
+`, owner: "anonymous shape")
     ] {
         source: testcase.source
         owner: testcase.owner

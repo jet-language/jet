@@ -259,7 +259,10 @@ use jet_foundation.[expr_span, pattern_binding_names, type_name]
                 assert(if body == { .Elements(elements) -> elements.len() == 1
  else -> false })
             } else {
-                assert(if def.value == { .StructLit(type_name, _, _, _, fields, _, _, _) -> type_name == "CoreModuleExportNames" && fields.len() == 1
+                def.value == .TypedLit(head, body, _, _) ?? panic("typed struct literal")
+                assert(if head == { .Val(.Named(name)) -> name == "CoreModuleExportNames"
+ else -> false })
+                assert(if body == { .Fields(fields) -> fields.len() == 1
  else -> false })
             }
         }

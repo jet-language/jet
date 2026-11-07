@@ -55,6 +55,8 @@ parser_distinct_ahead: fn(state: &JetParserState) -> Bool Never! {
 // parses as a constant binding and sema reclassifies it as an alias when the
 // path names a type (sema_alias_classify). `Name: distinct Base` is a
 // nominal type. There is no `alias` keyword. A `:` inside `<…>` is a bound.
+// A `state { … }` right-hand side takes the alias path so the alias reports
+// the ineligible state section (E0158).
 parser_type_alias_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool {
     if parser_kind_at(state, offset) != TOKEN_IDENT -> return false
     after := offset + 1
@@ -78,6 +80,7 @@ parser_type_alias_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool {
     first: after + 1
     if parser_kind_at(state, first) == TOKEN_IDENT && parser_value_at(state, first) == "distinct" -> return false
     if generic -> return true
+    if parser_kind_at(state, first) == TOKEN_IDENT && parser_value_at(state, first) == "state" && parser_kind_at(state, first + 1) == TOKEN_LBRACE -> return true
     if !parser_type_starts(parser_kind_at(state, first)) || parser_bare_path_rhs_at(state, first) -> return false
     parser_type_only_rhs_at(state, first)
 }
@@ -225,7 +228,16 @@ parser_parse_unit_family: fn(state: &JetParserState, modifiers: ParsedItemModifi
             found ?? Marker{name: "UnitFamily", negated: false, name_span: parser_current(state).span, args: [MarkerCallArg]{}, arg_labels: [CallLabel?]{}, span: parser_current(state).span, ct: None}
         }
     }
-    family_expr: parser_marker_expression(marker, 0)
+    // Arguments bind by label first (`base: meter, family: Length` keeps its
+    // written order), then by position: family, dimension, base.
+    family_index := 0
+    loop index in 0..<marker.args.len() {
+        if parser_marker_label(marker, index) == "family" {
+            family_index = index
+            break
+        }
+    }
+    family_expr: parser_marker_expression(marker, family_index)
     family := ""
     family_span := marker.span
     if family_expr == {
@@ -245,7 +257,8 @@ parser_parse_unit_family: fn(state: &JetParserState, modifiers: ParsedItemModifi
     }
     dimension := UnitDimensionDecl?{None}
     base := NamedSpan?{None}
-    loop index in 1..<marker.args.len() {
+    loop index in 0..<marker.args.len() {
+        if index == family_index -> next
         value: parser_marker_expression(marker, index)
         label: parser_marker_label(marker, index)
         if {
@@ -254,7 +267,7 @@ parser_parse_unit_family: fn(state: &JetParserState, modifiers: ParsedItemModifi
                     if expr == .Ident(name, span, _) -> base = Val(NamedSpan{name: name, span: span})
                 }
             }
-            index == 1 && (label == "" || label == "dimension") -> {
+            label == "dimension" || (index == 1 && label == "") -> {
                 if value == .Val(expr) {
                     if expr == {
                         .Ident(name, span, _) -> {

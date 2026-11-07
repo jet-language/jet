@@ -307,10 +307,14 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             saved_blocks: state.block_spans.len()
             saved_else_arms: state.else_arms.len()
             parsed: parser_parse_function(state, modifiers, true)
-            if parser_function_signature_only(state, parsed, modifiers, saved_diagnostics) {
+            if parser_function_signature_only(parsed, modifiers) {
+                lone_missing_body: state.diagnostics.len() == saved_diagnostics + 1 && state.diagnostics[saved_diagnostics].code == "E0081"
                 parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
                 value: parser_parse_function_type_alias(state, modifiers)
-                return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+                if lone_missing_body || state.diagnostics.len() == saved_diagnostics -> return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+                parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+                function: parser_parse_function(state, modifiers, true)
+                return ParsedItemOrImport{item: Val(Item.Func{value: function.value}), handled: true}
             }
             return ParsedItemOrImport{item: Val(Item.Func{value: parsed.value}), handled: true}
         }
@@ -2473,14 +2477,16 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
 
 // At file and module scope an unmarked `name: fn(…)` with no
 // body names a function type, as `Name: Type` names any other type. The item
-// parse reads it as a function first; a lone E0081 there means the signature
-// had no body, and the same tokens then reparse as the alias.
-parser_function_signature_only: fn(state: JetParserState, parsed: ParsedFunction, modifiers: ParsedItemModifiers, diagnostics_before: Int) -> Bool Never! {
+// parse reads it as a function first; when that finds no body, the same tokens
+// reparse as the alias. A lone E0081 means the signature only lacked its body;
+// otherwise the alias stands when it parses cleanly (`fn(Int? E!) IOError!`
+// has unnamed parameters a function head rejects), and the function's own
+// diagnostics stand when it does not.
+parser_function_signature_only: fn(parsed: ParsedFunction, modifiers: ParsedItemModifiers) -> Bool Never! {
     if parsed.has_body || modifiers.markers.len() > 0 || modifiers.is_comptime -> return false
     // A head pattern stays allowed: `(Int)` reads as a unit variant head until
     // the reparse reads it as the parameter type it is.
-    if parsed.value.type_params.len() > 0 || parsed.value.external_type != None -> return false
-    state.diagnostics.len() == diagnostics_before + 1 && state.diagnostics[diagnostics_before].code == "E0081"
+    parsed.value.type_params.len() == 0 && parsed.value.external_type == None
 }
 
 // `name: fn(…) -> R` without a body, from its moved `fn` keyword: the alias of
