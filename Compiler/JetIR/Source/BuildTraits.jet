@@ -113,9 +113,12 @@ ir_trait_boxes: fn(p: IRProgram, b: &IRBuilder, values: [Int], target: Type) -> 
 }
 
 // `value` boxed as a trait value of `target`: a box of 8 + its payload size
-// (at least a word) holding the concrete type's key at 0 and the owned
-// payload at 8. A value that already is a trait value is kept.
-ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, span: Span) -> Int Never! {
+// (at least a word) holding the concrete type's key at 0 and the payload at
+// 8. A value that already is a trait value is kept. The box owns its payload,
+// except that a read call argument (`lend`) another holder keeps is lent: its
+// bits go into the box with no new owner, as ir_union_lend lends a union's,
+// and `lends` gets the box, which ir_box_lends_end ends after the call.
+ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written: Type, lend: Bool, lends: &[IRBoxLend], span: Span) -> Int Never! {
     target: ir_fact(p, b, written, span)
     if ir_failed(b) -> return -1
     bounds: if ir_untag(target) == .TraitObject(names) -> names else -> { return ir_fail_slot(b, span, "trait boxing target {ir_type_name(target)} is not a single checked trait") }
@@ -124,16 +127,24 @@ ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written:
     if ir_untag(concrete) == .TraitObject(_) -> return ir_expr(m, p, b, value)
     row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
     size := 0
+    payload_row := -1
     if !ir_unit_type(concrete) {
-        payload_row: ir_value_type(m, p, concrete) ?? return ir_type_fail(b, span, concrete)
+        payload_row = ir_value_type(m, p, concrete) ?? return ir_type_fail(b, span, concrete)
         size = m.types[payload_row].size
     }
     slot: ir_expr(m, p, b, value)
     if ir_failed(b) -> return -1
     payload_key: ir_trait_key(m, p, concrete)
-    boxed: ir_box_alloc(m, b, 8 + ir_align8(size), row)
+    box_bytes: 8 + ir_align8(size)
+    boxed: ir_box_alloc(m, b, box_bytes, row)
     key: ir_word_const(m, b, payload_key)
     ir_emit(b.f, IROp.Store, -1, boxed, 0, key, b.line)
+    if lend && slot >= 0 && payload_row >= 0 && !b.fresh[slot] && ir_has_drop(m, b, slot) {
+        ir_store_lent(m, b, boxed, 8, slot, payload_row)
+        lends.push(IRBoxLend{boxed: boxed, box_bytes: box_bytes, wrapper: -1, wrapper_bytes: 0, row: payload_row, offset: 8})
+        b.fresh[boxed] = false
+        return boxed
+    }
     if slot >= 0 {
         owned: ir_own(m, p, b, slot)
         ir_store_at(m, p, b, boxed, 8, owned)

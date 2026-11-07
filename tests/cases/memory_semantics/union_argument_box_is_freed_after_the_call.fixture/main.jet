@@ -1,0 +1,50 @@
+// The union box a read argument is lent to (#6677) is freed after each call,
+// and the lent value is neither copied nor dropped by it. A million calls
+// with a lent String and a lent Directory leave the resident set where it
+// was: a leaked box is at least 16 bytes a call, about 32 MB over the run.
+package: {
+    name: "union_argument_box_is_freed_after_the_call"
+    authority: { allow: [FS, FS.Read, FS.Write, IO] }
+}
+
+use files: core.files
+
+CALLS: 1_000_000
+GROWTH_LIMIT_KB: 8192
+
+status_kb: fn(field: String) -[FS.Read]> Int {
+    status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
+    loop line in status.split("\n") {
+        if !line.starts_with(field) -> next
+        loop part in line.slice(field.len(), line.len()).trim().split(" ") {
+            if part.len() > 0 -> return Int.parse(part.copy()) ?? panic("{field} field")
+        }
+    }
+    panic("no {field} line")
+}
+
+measure: fn(value: String | Int) -> Int {
+    if value == {
+        .String(text) -> text.count_bytes()
+        .Int(number) -> number
+    }
+}
+
+kind: fn(handle: Directory | FileReader) -> Int {
+    if handle == {
+        .Directory(_) -> 1
+        .FileReader(_) -> 2
+    }
+}
+
+run: fn() {
+    scratch: files.temp_dir("union-lend-loop")
+    directory: files.open_directory(scratch.path)
+    text: "a lent line of text, longer than any inline form"
+    total := measure(text) + kind(directory)
+    start: status_kb("VmRSS:")
+    loop _ in 1..<CALLS -> total += measure(text) + kind(directory)
+    grown: status_kb("VmRSS:") - start
+    if grown > GROWTH_LIMIT_KB -> panic("the resident set grew {grown} kB over {CALLS} calls")
+    print("{CALLS} lent calls: total {total}, the boxes freed")
+}

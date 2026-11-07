@@ -1906,7 +1906,11 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
         .TaskGroupAll(tasks) -> return ir_task_group_value(m, p, b, expression_ty, tasks, 0, span)
         .TaskGroupAny(tasks) -> return ir_task_group_value(m, p, b, expression_ty, tasks, 1, span)
         .TaskGroupRace(tasks) -> return ir_task_group_value(m, p, b, expression_ty, tasks, 2, span)
-        .TraitBox(value, target) -> return ir_trait_box(m, p, b, value, target, span)
+        .TraitBox(value, target) -> {
+            // A trait value built outside a call argument owns its payload.
+            owned := [IRBoxLend]{}
+            return ir_trait_box(m, p, b, value, target, false, owned, span)
+        }
         // A distinct value lays out as its base, so construction and raw
         // extraction are the value itself (a Transparent convert).
         .DistinctCtor(argument) | .DistinctRaw(argument) -> return ir_expr(m, p, b, argument)
@@ -3190,6 +3194,7 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
     moves := [Bool]{}
     backs := receiver_backs
     bridges := [IRWriteBack]{}
+    lends := [IRBoxLend]{}
     if receiver >= 0 {
         if ir_receiver_access(p.functions[row].kind) == "move" -> ir_close_disarm(b, receiver)
         slots.push(if ir_receiver_access(p.functions[row].kind) == "move" -> ir_own(m, p, b, receiver) else -> receiver)
@@ -3224,10 +3229,13 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         if ir_failed(b) -> return -1
         param_row: ir_value_type(m, p, param_ty) ?? return ir_fail_slot(b, span, "argument type {ir_type_name(param_ty)}")
         slot := -1
+        // A read argument is lent to the trait or union box it is passed in;
+        // a move parameter's box owns its payload.
+        lend: params[index].convention != .Move
         if arg.box_as_trait == .Val(target) {
-            slot = ir_trait_box(m, p, b, arg.value, target, span)
+            slot = ir_trait_box(m, p, b, arg.value, target, lend, lends, span)
         } else if arg.widen_to_union == .Val(union_ty) {
-            slot = ir_widen_union(m, p, b, arg.value, union_ty, span)
+            slot = if lend -> ir_widen_union_lent(m, p, b, arg.value, union_ty, lends, span) else -> ir_widen_union(m, p, b, arg.value, union_ty, span)
         } else {
             slot = ir_value_as(m, p, b, arg.value, param_row, span)
         }
@@ -3241,7 +3249,7 @@ ir_call_row: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: 
         slots.push(if params[index].convention == .Move -> ir_own(m, p, b, slot) else -> slot)
         moves.push(params[index].convention == .Move)
     }
-    ir_call_row_emit(m, p, b, row, type_args, slots, moves, backs, bridges, span)
+    ir_call_row_emit(m, p, b, row, type_args, slots, moves, backs, bridges, lends, span)
 }
 
 // The call of non-generic function row `row` on argument values already
@@ -3263,14 +3271,15 @@ ir_call_row_typed_values: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int
         slots.push(if moving -> ir_own(m, p, b, value) else -> value)
         moves.push(moving)
     }
-    ir_call_row_emit(m, p, b, row, type_args, slots, moves, [IRWriteBack]{}, [IRWriteBack]{}, span)
+    ir_call_row_emit(m, p, b, row, type_args, slots, moves, [IRWriteBack]{}, [IRWriteBack]{}, [IRBoxLend]{}, span)
 }
 
 // The Call of function row `row` on its argument `slots` (moved where
-// `moves`), the write-backs reloaded after it and each List copy of an
-// inline `[T#N]` (`bridges`: the List as the cell, the `[T#N]` as the slot)
-// put back.
-ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], moves: [Bool], backs: [IRWriteBack], bridges: [IRWriteBack], span: Span) -> Int Never! {
+// `moves`), the write-backs reloaded after it, each List copy of an inline
+// `[T#N]` (`bridges`: the List as the cell, the `[T#N]` as the slot) put
+// back, and each trait or union box a read argument was lent to (`lends`)
+// freed.
+ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_args: [Type], slots: [Int], moves: [Bool], backs: [IRWriteBack], bridges: [IRWriteBack], lends: [IRBoxLend], span: Span) -> Int Never! {
     // #5473: a derived `equal`/`compare` of a payload-free enum compares the
     // discriminant words in place; the callee is not built.
     if slots.len() == 2 && type_args.len() == 0 {
@@ -3278,6 +3287,7 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
         if role != "" {
             value: ir_tag_method_value(m, p, b, role, slots[0], slots[1], span)
             loop slot in slots -> ir_release(m, b, slot)
+            ir_box_lends_end(m, p, b, lends)
             return value
         }
     }
@@ -3305,6 +3315,7 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
             ir_release(m, b, slot)
         }
     }
+    ir_box_lends_end(m, p, b, lends)
     ir_stop_check(m, b)
     dst
 }
@@ -7234,7 +7245,7 @@ ir_require_eq_hook: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMetho
     right_moves: params[0].convention == .Move
     left_arg: if left_moves -> ir_own(m, p, b, left) else -> left
     right_arg: if right_moves -> ir_own(m, p, b, right) else -> right
-    returned: ir_call_row_emit(m, p, b, row, owner_args, [Int]{left_arg, right_arg}, [Bool]{left_moves, right_moves}, [IRWriteBack]{}, [IRWriteBack]{}, span)
+    returned: ir_call_row_emit(m, p, b, row, owner_args, [Int]{left_arg, right_arg}, [Bool]{left_moves, right_moves}, [IRWriteBack]{}, [IRWriteBack]{}, [IRBoxLend]{}, span)
     b.fresh[left] = left_fresh
     b.fresh[right] = right_fresh
     result_ty: if method.name == "compare" -> Type.Named{name: "Ordering"} else -> Type.Bool
