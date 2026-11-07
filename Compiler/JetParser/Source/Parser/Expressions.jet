@@ -1395,7 +1395,9 @@ parser_parse_task_surface: fn(state: &JetParserState, depth: Int) -> ParsedExpr 
         return ParsedExpr{expr: parser_task_spawn(state, head, take_names, LambdaBody.Expr{value: value.expr}, value.span), span: span.move()}
     }
     // A brace body holding one tail expression folds into an expression
-    // body, so every tier sees one task-value shape.
+    // body, so every tier sees one task-value shape. A lone finite loop
+    // (`loop i in 0..<n { … }`) stays a statement body: as an expression it
+    // would be a value loop owing a `break value`.
     saved_position: state.position
     saved_diagnostics: state.diagnostics.len()
     saved_blocks: state.block_spans.len()
@@ -1403,7 +1405,7 @@ parser_parse_task_surface: fn(state: &JetParserState, depth: Int) -> ParsedExpr 
     open: parser_bump(state)
     tail: parser_parse_expression(state, 1, depth + 1)
     if parser_current_kind(state) == TOKEN_SEMI && parser_kind_at(state, 1) == TOKEN_RBRACE -> parser_bump(state)
-    if parser_current_kind(state) == TOKEN_RBRACE && !parser_error_since(state, saved_diagnostics) {
+    if parser_current_kind(state) == TOKEN_RBRACE && !parser_error_since(state, saved_diagnostics) && !parser_task_tail_is_finite_loop(tail.expr) {
         close: parser_bump(state)
         body_span: parser_cover(open.span, close.span)
         return ParsedExpr{expr: parser_task_spawn(state, head, take_names, LambdaBody.Expr{value: tail.expr}, body_span), span: parser_cover(head, close.span)}
@@ -1411,6 +1413,13 @@ parser_parse_task_surface: fn(state: &JetParserState, depth: Int) -> ParsedExpr 
     parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
     block: parser_parse_block(state)
     ParsedExpr{expr: parser_task_spawn(state, head, take_names, LambdaBody.Block{body: block.statements}, block.span), span: parser_cover(head, block.span)}
+}
+
+parser_task_tail_is_finite_loop: fn(tail: Expr) -> Bool Never! {
+    if tail == .CallValue(callee, _, _, _) {
+        if callee == .Lambda(lambda, _) -> return lambda.meta.result_loop && lambda.meta.requires_exhaustion_route
+    }
+    false
 }
 
 parser_parse_collection: fn(state: &JetParserState, depth: Int) -> ParsedExpr {

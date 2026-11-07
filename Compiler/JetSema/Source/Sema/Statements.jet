@@ -8445,6 +8445,11 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
         if !dead_result.complete -> complete = false
     }
     dead_edges := [String]{}
+    // A dead `break value` still types its loop (`loop { break(outer, 1)
+    // break 2 }` is an Int loop): the frames open at the mark keep the result
+    // type the dead line gave them.
+    dead_frame_types := [Type?]{}
+    loop frame_index in 0..<dead_mark.saved.loop_value_frames.len() -> dead_frame_types.push(context.loop_value_frames[frame_index].ty)
     loop edge_index in dead_mark.failure_edges..<context.failure_edges.len() -> dead_edges.push(context.failure_edges[edge_index])
     dead_direct_source: context.failure_direct_source
     dead_members := [Type]{}
@@ -8464,6 +8469,9 @@ sema_stmt_check_unreachable_statement: fn(statement: Stmt, index: Int, statement
     loop failure_case in dead_cases -> context.failure_union_cases.push(failure_case)
     loop union_edge in dead_union_edges -> context.failure_union_edges.push(union_edge)
     context.failure_union_general = dead_general
+    loop frame_index in 0..<dead_frame_types.len() {
+        if context.loop_value_frames[frame_index].ty == None && dead_frame_types[frame_index] != None -> context.loop_value_frames[frame_index].ty = dead_frame_types[frame_index]
+    }
     complete
 }
 
