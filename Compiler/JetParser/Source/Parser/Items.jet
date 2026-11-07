@@ -1480,7 +1480,7 @@ parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult
             if plain_arrow {
                 parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
             } else {
-                // D-FAIL-UNIT1=A: the error contract precedes the effect arrow.
+                // The error contract precedes the effect arrow.
                 contract: parser_source_slice(state, parsed.span.start, parsed.span.end)
                 arrow: parser_source_slice(state, effect_start, parsed.span.start).trim()
                 parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible error contract comes before the effect arrow", "a function that can fail but returns no value has no result after its effect arrow; its error contract is written first", "write `{contract} {arrow}`, as in `save: fn(path: String) IOError! -[FS]>`")
