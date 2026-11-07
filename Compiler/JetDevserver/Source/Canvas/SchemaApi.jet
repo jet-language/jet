@@ -53,7 +53,7 @@ graph_json_for_entry_source: fn(entry: OSPath, source_id: String?) -> String Err
     graph_json_for_file(path).map_err((diags) -> graph_json_error_for_file(path, diags))
 }
 graph_json_for_entry_source_with_live_pid: fn(entry: OSPath, source_id: String?, pid: U32) -> String Err! {
-    snapshot: LiveInspect.read(pid).map_err((message) -> canvas_machine_error("canvas.graph", query_error("live", message)))?
+    snapshot: live_inspect_read(pid).map_err((error) -> canvas_machine_error("canvas.graph", query_error("live", error.message)))?
     runtime_events: runtime_events_json(snapshot).map_err((error) -> canvas_machine_error("canvas.graph", error))?
     path: resolve_entry_source_path(entry, source_id).map_err((error) -> canvas_machine_error("canvas.graph", error))?
     project_file_with_runtime(path, .Some(runtime_events)).map((projection) -> canvas_machine_success("canvas.graph", projection.json)).map_err((diags) -> graph_json_error_for_file(path, diags))

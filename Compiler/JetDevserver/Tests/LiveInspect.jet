@@ -1,72 +1,97 @@
+// The jet.live.v1 view over the runtime's raw records, and the devserver
+// reader over real filesystem fixtures. The JETLIVE1 codec itself is
+// witnessed by JetCli's Tests/LiveInspect.jet.
 use {
-    jet_devserver.LiveInspect.[LiveRuntimeWindow, decode_raw_snapshot, read, render, runtime_window, snapshot_path]
-    fs: std.fs
-    core.sys.target.[selected_family]
+    jet_devserver.[live_inspect_read, live_view_json]
+    jet_foundation.[jet_live_bind, jet_live_decode, jet_live_snapshot_path]
+    live_sys: core.sys
+    live_process: core.process
+    live_files: core.files
+    live_time: core.time
 }
 
-#Test("render_uses_only_bounded_runtime_facts") {
-    snapshot: "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\"}}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{{\"id\":1,\"parent\":0,\"state\":\"running\",\"wait\":\"\",\"deadline_ms\":null,\"cancelled\":false}},{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}}],\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}],\"effects\":{{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":4,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}}}"
-    rendered: render(snapshot)
-    assert(rendered.contains("task 2"))
-    assert(rendered.contains("channel send"))
-    assert(rendered.contains("depth 4/4"))
-    assert(!rendered.contains("payload"))
+// The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
+// words; a text is its byte length (all ones when absent) and its bytes.
+live_view_u64: fn(out: &[U8], value: U64) Never! {
+    loop index in 0..<8 -> out.push(U8{Int.from_u64((value >> (index * 8)).bit_and(U64{255}))})
 }
-#Test("runtime_window_is_optional_and_strictly_shaped") {
-    snapshot: (runtime: String) -> "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{runtime}}}"
-    assert_eq(runtime_window(snapshot("")).unwrap(), .None)
-    assert_eq(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}}")).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .Val(5), exit: true }))
-    assert_eq(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":false}}")).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: false }))
-    assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":-1,\"cpu_ns\":null,\"exit\":true}}")).is_err())
-    assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":-1,\"exit\":true}}")).is_err())
-    assert(runtime_window(snapshot(",\"runtime\":{{\"elapsed_ns\":7,\"exit\":true}}")).is_err())
+live_view_words: fn(out: &[U8], words: [U64]) Never! {
+    loop word in words -> live_view_u64(out, word)
 }
-// The runtime's raw record decodes into the jet.live.v1 view the canvas reads.
-#Test("raw_records_decode_into_the_live_view") {
-    words: (out: &[U8], values: [U64]) -> { loop value in values -> out.extend_from_slice(value.to_le_bytes()) }
-    text: (out: &[U8], value: String) -> {
-        out.extend_from_slice(U64{value.len()}.to_le_bytes())
-        out.extend_from_slice(value.as_bytes())
+live_view_text: fn(out: &[U8], text: String) Never! {
+    live_view_u64(out, U64{text.bytes().len()})
+    loop byte in text.bytes() -> out.push(byte)
+}
+// Process `pid`, writer boot-clock start `boot_ns` at 100 ticks per second,
+// one task blocked on a channel send, one unbounded channel and, when
+// `event_sequence` is set, one event record.
+live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
+    out := [U8]{}
+    live_view_words(out, [U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
+    loop text in ([String]{"session", "app.jet", "build-1", "rev-1", "world\n1"}) -> live_view_text(out, text)
+    live_view_words(out, [U64]{U64{1}, U64{1}, U64{2}, U64{3}, U64{0}, U64{2}, U64{0}, U64{0}, U64{0}, U64{18446744073709551615}})
+    live_view_text(out, "channel send")
+    live_view_words(out, [U64]{U64{2}, U64{1}, U64{0}, U64{0}, U64{0}, U64{0}, U64{1}, U64{0}, U64{0}})
+    if event_sequence == .Val(sequence) {
+        live_view_words(out, [U64]{U64{4}, U64{1}, U64{sequence}})
+        live_view_text(out, "Event")
+        live_view_words(out, [U64]{U64{1}, U64{1}, U64{1}, U64{1}})
+        live_view_text(out, "Queued")
+        live_view_words(out, [U64]{U64{0}, U64{0}, U64{0}, U64{0}})
+        live_view_text(out, "None")
+        live_view_u64(out, U64{0})
+        live_view_text(out, "None")
+        live_view_text(out, "None")
     }
-    bytes := [U8]{}
-    words(bytes, [3550338754064696650, 1, 42, 1, 7, 20_000_000_000, 3, 100, 1, 1, 2, 64, 1, 0])
-    loop value in ["session", "app.jet", "build-1", "rev-1", "world\n1"] -> text(bytes, value)
-    words(bytes, [1, 1, 2, 3, 0, 2, 0, 0, 0, U64.MAX])
-    text(bytes, "channel send")
-    words(bytes, [2, 1, 0, 0, 0, 0, 1, 0, 0])
-    words(bytes, [0])
-    snapshot: decode_raw_snapshot(bytes.copy(), .None).unwrap()
-    assert_eq(runtime_window(snapshot).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .None, exit: true }))
-    rendered: render(snapshot)
-    assert(rendered.contains("world=world 1"))
-    assert(rendered.contains("task 2     parent 3     blocked  wait=channel send"))
-    assert(rendered.contains("effects: compute=0 waiting=1 channel=1 time=0 io=0"))
-    assert(rendered.contains("channel 0     depth 0/∞"))
-    assert(rendered.contains("(no runtime event observations)"))
-    bound: decode_raw_snapshot(bytes.copy(), .Val("42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0")).unwrap()
-    assert(bound.contains("\"start_id\":\"1234\""))
-    assert_eq(runtime_window(bound).unwrap(), .Val(LiveRuntimeWindow { elapsed_ns: 7, cpu_ns: .Val(40_000_000), exit: true }))
-    assert(decode_raw_snapshot(bytes.copy(), .Val("42 (app) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 2001 0")).unwrap_err().contains("does not belong"))
-    trailing := bytes.copy()
-    trailing.push(0)
-    assert(decode_raw_snapshot(trailing, .None).unwrap_err().contains("trailing bytes"))
-    assert(decode_raw_snapshot(bytes[0..bytes.len() - 1].to_vec(), .None).unwrap_err().contains("truncated"))
+    live_view_u64(out, U64{0})
+    out
 }
-#Test("reader_rejects_symlinks_and_open_permissions") {
-    if selected_family() != "unix" -> return
-    // GATE #4494: real filesystem symlink, process id and permission primitives.
-    pid: std.process.id().saturating_add(1_000_000_000)
-    path: snapshot_path(pid)
-    target: path.with_extension("hostile-target")
-    _: fs.remove_file(path)
-    _: fs.remove_file(target)
-    fs.write(target, "attacker-controlled").unwrap()
-    std.os.unix.fs.symlink(target, path).unwrap()
-    assert(read(pid).unwrap_err().contains("not a regular file"))
-    fs.remove_file(path).unwrap()
-    fs.write(path, "{{}}").unwrap()
-    fs.set_permissions(path, fs.Permissions.from_mode(0o644)).unwrap()
-    assert(read(pid).unwrap_err().contains("permissions expose"))
-    fs.remove_file(path).unwrap()
-    fs.remove_file(target).unwrap()
+
+#Test("raw_records_project_into_the_live_view") {
+    snapshot: jet_live_decode(live_view_fixture(42, U64{20000000000}, 1, None)) ?? panic(err.message)
+    view: live_view_json(snapshot)
+    assert(view.starts_with("{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world\\n1\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"unbound\",\"captured_ms\":1,"))
+    assert(view.contains("\"tasks\":[{{\"id\":2,\"parent\":3,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":null,\"cancelled\":false}}]"))
+    assert(view.contains("\"channels\":[{{\"id\":0,\"depth\":0,\"capacity\":null,\"send_waiters\":0,\"recv_waiters\":0,\"closed\":false}}]"))
+    assert(view.contains("\"effects\":{{\"compute\":0,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}}"))
+    assert(view.contains("\"resources\":{{\"workers\":1,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}}"))
+    assert(view.ends_with("\"event_observations\":[],\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":true}}}}"))
+    bound := jet_live_decode(live_view_fixture(42, U64{20000000000}, 1, Val(1))) ?? panic(err.message)
+    jet_live_bind(bound, "42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0") ?? panic(err.message)
+    bound_view: live_view_json(bound)
+    assert(bound_view.contains("\"start_id\":\"1234\""))
+    assert(bound_view.contains("\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":40000000,\"exit\":true}}"))
+    assert(bound_view.contains("\"event_observations\":[{{\"sequence\":1,\"source\":\"Event\",\"event_id\":1,\"owner_id\":1,\"subscription_id\":1,\"dispatch_id\":1,\"lifecycle\":\"Queued\",\"queued\":0,\"blocked\":0,\"running\":0,\"capacity\":0,\"overflow\":\"None\",\"priority\":0,\"failure\":\"None\",\"terminal\":\"None\"}}]"))
+}
+
+live_view_rejected: fn(pid: Int, message: String) {
+    if live_inspect_read(pid) == {
+        .Err(error) -> assert(error.message.contains(message))
+        .Ok(_) -> panic("unsafe live snapshot accepted: {message}")
+    }
+}
+#Test("reader_serves_only_private_fresh_bound_snapshots") {
+    // /proc start identity is the Linux/Android transport's actual authority.
+    platform: live_sys.name()
+    if platform != "linux" && platform != "android" -> return
+    pid: live_process.current_pid()
+    path: jet_live_snapshot_path(pid)
+    target: "{path}.hostile-target"
+    // Any process start precedes a writer that started at the latest boot time.
+    latest: U64{9223372036854775807}
+    now: live_time.unix_ns() /% 1000000
+    live_files.write_bytes(path, live_view_fixture(pid, latest, now, Val(1))) ?? panic("snapshot fixture")
+    live_files.set_mode(path, 0o600) ?? panic("private snapshot fixture")
+    view: live_inspect_read(pid) ?? panic(err.message)
+    assert(view.contains("\"pid\":{pid},") && !view.contains("\"start_id\":\"unbound\"") && view.contains("\"lifecycle\":\"Queued\""))
+    live_files.write_bytes(path, live_view_fixture(pid, latest, now, Val(0))) ?? panic("invalid event sequence fixture")
+    live_view_rejected(pid, "live runtime event observations are invalid")
+    live_files.set_mode(path, 0o644) ?? panic("hostile snapshot mode")
+    live_view_rejected(pid, "permissions expose runtime state")
+    live_files.remove(path) ?? panic("snapshot cleanup")
+    live_files.write(target, "attacker-controlled") ?? panic("hostile target")
+    live_files.symlink(target, path) ?? panic("hostile final link")
+    live_view_rejected(pid, "not a regular file")
+    live_files.remove(path) ?? panic("link cleanup")
+    live_files.remove(target) ?? panic("target cleanup")
 }

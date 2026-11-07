@@ -171,7 +171,7 @@ the program through time, or keep a standing per-variable history buffer.
 
 ## Implementation homes
 
-- Live scheduler: `Compiler/JetDevserver/Source/LiveInspect.jet`
+- Live scheduler: `Compiler/JetFoundation/Source/Devtools/LiveSnapshot.jet` (codec and transport), viewed by `Compiler/JetCli/Source/Cli/LiveReport.jet` and `Compiler/JetDevserver/Source/LiveInspect.jet`
 - GC promotions: `Compiler/JetCli/Source/Cli/GcReport.jet`
 - Wall-clock session: `Compiler/JetCli/Source/Cli/Perf/` and `Compiler/JetFoundation/Source/Trace/JetTrace.jet`
 - Browser rows: `Compiler/JetDevserver/Source/BrowserTrace.jet`, merged by `Compiler/JetCli/Source/Cli/Perf/BrowserCapture.jet`

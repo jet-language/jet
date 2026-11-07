@@ -1,10 +1,15 @@
-// The one JETLIVE1 codec. The runtime publishes raw facts (JetRuntime
-// ObserveLive.jet) as little-endian words, with each text written as a byte
-// length (all ones when absent) followed by the bytes. This codec validates
-// the record and derives the view: record order, the effect and resource
-// counters, and the process facts read from /proc. No runtime fact is
+// The one JETLIVE1 codec and transport. The runtime publishes raw facts
+// (JetRuntime ObserveLive.jet) as little-endian words, with each text written
+// as a byte length (all ones when absent) followed by the bytes. This codec
+// validates the record and derives the view: record order, the effect and
+// resource counters, and the process facts read from /proc. No runtime fact is
 // inferred. `jet inspect live` (jet_cli) and the devserver's live inspector
-// both read snapshots through it.
+// both read snapshots through `jet_live_read`.
+use {
+    live_files: core.files
+    live_sys: core.sys
+    live_time: core.time
+}
 
 JetLiveValue: struct { value_id: String, type_identity: String, disposition: String, reason: String, rendered_value: String? }
 JetLiveTask: struct { id: Int, parent: Int, state: String, wait: String, deadline_ms: Int?, cancelled: Bool }
@@ -280,4 +285,56 @@ jet_live_bind: fn(snapshot: &JetLiveSnapshot, stat: String) JetLiveSnapshotError
         }
     }
     return
+}
+
+// The runtime's canonical snapshot path for process `pid`.
+jet_live_snapshot_path: fn(pid: Int) -[Env]> String {
+    dir: live_sys.temp_dir()
+    if dir == "/" -> return "/jet-observe-{pid}.json"
+    "{dir}/jet-observe-{pid}.json"
+}
+jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotError! {
+    if !live_files.is_dir("/proc/{pid}") -> return Err(jet_live_error("process {pid} is no longer running"))
+    reader: live_files.open("/proc/{pid}/stat") ?? return Err(jet_live_error("cannot verify process {pid} identity"))
+    bytes := [U8]{}
+    loop {
+        chunk: reader.read(65537 - bytes.len()) ?? return Err(jet_live_error("cannot verify process {pid} identity"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> bytes.push(byte)
+        if bytes.len() > 65536 -> return Err(jet_live_error("process identity exceeds its bound"))
+    }
+    Ok(String.from_bytes(bytes) ?? return Err(jet_live_error("cannot verify process {pid} identity")))
+}
+// The secure transport: the descriptor opened without following a final link
+// is retained for the whole bounded read. An explicit path is the private
+// boundary filesystem witnesses use; command callers pass
+// `jet_live_snapshot_path(pid)`. The snapshot must belong to `pid`, be fresh,
+// and on Linux/Android carry the process start identity from /proc.
+jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetLiveSnapshotError! {
+    if pid <= 0 || pid > 4294967295 -> return Err(jet_live_error("process id must be greater than zero and fit u32"))
+    entry: live_files.stat(path) ?? return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
+    if !entry.is_file || entry.is_symlink -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
+    reader: live_files.open(path, links: .Refuse) ?? return Err(jet_live_error("cannot securely open live runtime snapshot for process {pid}"))
+    before: reader.stat() ?? return Err(jet_live_error("cannot inspect live runtime snapshot: {err}"))
+    if !before.is_file -> return Err(jet_live_error("live runtime snapshot is not a regular file"))
+    if live_sys.is_unix() {
+        if (before.mode.bit_and(0o077)) != 0 -> return Err(jet_live_error("live runtime snapshot permissions expose runtime state"))
+        if before.owner != Val(live_sys.getuid()) -> return Err(jet_live_error("live runtime snapshot belongs to another user"))
+    }
+    if before.size > 1048576 -> return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
+    bytes := List<U8>.try_with_capacity(if before.size < 65536 -> before.size else -> 65536) ?? panic("live snapshot allocation failed")
+    loop {
+        room: 1048577 - bytes.len()
+        chunk: reader.read(if room < 65536 -> room else -> 65536) ?? return Err(jet_live_error("cannot read live runtime snapshot: {err}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> bytes.push(byte)
+        if bytes.len() > 1048576 -> return Err(jet_live_error("live runtime snapshot exceeds the 1 MiB safety limit"))
+    }
+    snapshot := jet_live_decode(bytes) ?? return Err(jet_live_error("live runtime snapshot has an invalid or unsafe schema: {err.message}"))
+    if snapshot.pid != pid -> return Err(jet_live_error("live runtime snapshot does not belong to process {pid}"))
+    now_ms: live_time.unix_ns() /% 1000000
+    if now_ms > snapshot.captured_ms && now_ms - snapshot.captured_ms > 2000 -> return Err(jet_live_error("process {pid} is not publishing a live runtime snapshot"))
+    platform: live_sys.name()
+    if platform == "linux" || platform == "android" -> jet_live_bind(snapshot, jet_live_process_stat(pid))
+    Ok(snapshot)
 }

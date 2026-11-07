@@ -722,15 +722,15 @@ handle_connection_with_root_and_policy: fn(stream: TcpStream, status: &DevStatus
         if method != "GET" -> return method_not_allowed(stream)
         pid: query_param(target, "pid").and_then((value) -> value.parse<U32>().ok()).ok_or_else(() -> Error.new(ErrorKind.InvalidInput, "missing live pid"))
         source_id: query_param(target, "source_id").unwrap_or_default()
-        return if jet_devserver.LiveInspect.read(pid) == {
+        return if live_inspect_read(pid) == {
             .Ok(snapshot) -> {
                 revision: current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
                 session.remember_last_good_view("runtime", source_id, revision, snapshot)
                 write_response(stream, "200 OK", "application/json; charset=utf-8", snapshot.as_bytes())
             }
-            .Err(message) -> if session.last_good_view("runtime", source_id) == {
+            .Err(error) -> if session.last_good_view("runtime", source_id) == {
                 .Val((_revision, snapshot)) -> write_response(stream, "200 OK", "application/json; charset=utf-8", snapshot.as_bytes())
-                .None -> write_response(stream, "404 Not Found", "text/plain; charset=utf-8", message.as_bytes())
+                .None -> write_response(stream, "404 Not Found", "text/plain; charset=utf-8", error.message.as_bytes())
             }
         }
     }
