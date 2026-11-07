@@ -10,7 +10,8 @@
 // deliberately NOT recognized here.
 //
 // Run `tree-sitter generate` in this directory after editing, then rebuild the
-// wasm via Tools/editors/zed/install.sh (FORCE=1).
+// wasm via Tools/editors/zed/install.sh (FORCE=1). tests/guards/grammar.jet
+// parses every Examples/**/*.jet with it and fails on any ERROR or MISSING node.
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
@@ -96,7 +97,7 @@ module.exports = grammar({
     // D-ECO-INLINEPACKAGE1=A: the carrier is contextual source structure.
     // PackageFacts owns its field grammar; tree-sitter only recognizes the
     // balanced record shell so editor spans remain intact.
-    inline_package: ($) => seq("package", $.record_literal),
+    inline_package: ($) => seq("package", ":", $.record_literal),
 
     record_literal: ($) => seq("{", repeat($._item), "}"),
 
@@ -159,12 +160,15 @@ module.exports = grammar({
     // `name: fn<T>(params) -> Ret E! -[Effects]> { body }`; a signature with no
     // body (trait methods) or an extern `= "symbol"` ends at the first
     // non-signature element. `fn(Int) -> Int` is the anonymous function type.
+    // A marker template (`expand: fn(self, target: Target) { … }`) emits its
+    // functions in the keyword form `fn name(params) { … }`.
     function_def: ($) =>
       prec.right(
         seq(
           // `Point.render: fn(self)` defines a method of an existing type.
           optional($._decl_label),
           "fn",
+          optional(field("name", $.identifier)),
           optional(field("type_parameters", $.type_parameters)),
           field("parameters", $.parameters),
           repeat($._signature_part),
