@@ -14,11 +14,16 @@ WorkloadArgs: struct {
 run: fn(args: WorkloadArgs) {
     input: args.input
     jet: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
-    project := "project"
+    // The copy goes outside this adapter's package, and each `jet` runs in
+    // it: inside the package, the copied sources would share its namespace,
+    // and the `jet test` evidence would land in the adapter's directory.
+    scratch: fs.tmpdir("jet-build-test-recovery-") ?? panic("cannot create scratch directory")
+    project: "{scratch}/project"
     fs.copy_dir(input, project) ?? panic("cannot copy build/test project")
     timeout: Duration.seconds(30) ?? panic("bad timeout")
 
     invalid: process.cmd([String]{jet.copy(), "check", "{project}/invalid.jet"})
+        .cwd(project)
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
@@ -27,6 +32,7 @@ run: fn(args: WorkloadArgs) {
     print("invalid=failed")
 
     checked: process.cmd([String]{jet.copy(), "check", "{project}/build_test_recovery.jet"})
+        .cwd(project)
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
@@ -34,6 +40,7 @@ run: fn(args: WorkloadArgs) {
     if checked.timed_out || checked.code != 0 -> panic("valid source did not build")
 
     tested: process.cmd([String]{jet.copy(), "test", "--release", "{project}/build_test_recovery.jet"})
+        .cwd(project)
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
@@ -41,6 +48,7 @@ run: fn(args: WorkloadArgs) {
     if tested.timed_out || tested.code != 0 -> panic("valid test did not pass")
 
     ran: process.cmd([String]{jet.copy(), "run", "--release", "{project}/build_test_recovery.jet"})
+        .cwd(project)
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
@@ -48,5 +56,5 @@ run: fn(args: WorkloadArgs) {
     if ran.timed_out || ran.code != 0 -> panic("valid source run failed")
     print("recovery=ok")
     print("test={ran.output.trim()}")
-    fs.remove_all(project) ?? panic("cannot clean build/test project")
+    fs.remove_all(scratch) ?? panic("cannot clean build/test project")
 }
