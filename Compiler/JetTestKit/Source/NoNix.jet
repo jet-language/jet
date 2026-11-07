@@ -80,9 +80,9 @@ kit_no_nix_patch: fn(source: String, destination: String) -> String Err! {
     }
 }
 
-// Build the launcher once per bootstrap directory, from a copy of its package
-// so parallel cases never share one build output. The build runs with the
-// kit's environment, not the step's (an `env-clear` step has no HOME).
+// Build the namespace launcher once per bootstrap directory, from a copy of
+// its package so parallel cases never share one build output. The build runs
+// with the kit's environment, not the step's (an `env-clear` step has no HOME).
 kit_no_nix_launcher: fn(env: KitEnv, bootstrap: String) -> String Err! {
     directory: files.join(bootstrap, "launcher")
     output: files.join(directory, "bin")
@@ -156,39 +156,38 @@ kit_no_nix_failure: fn(step: KitStep, run: KitRun) -> KitVerdict? {
 // A `host-port:` golden row runs its program in a network namespace of its
 // own, so the fixed port it binds is free whatever the host holds: a user
 // namespace that maps the caller to root holds a fresh network namespace,
-// whose loopback `ip` raises before the program starts. The `sh` that raises
-// it and then becomes the program is a named exclusion from the no-shell rule:
-// Core has no unshare or exec leaf, so no Jet process can enter the namespace,
-// raise its loopback and then become the program in it.
-KIT_NETNS_RAISE: "ip=\"$1\"; shift; \"$ip\" link set lo up || exit 125; exec \"$@\""
-
-// unshare, sh and ip, or why this host has no private network namespace.
+// whose loopback the launcher (`no_nix --netns`) raises with the host `ip`
+// before it runs the program.
 kit_netns_helpers: fn() -> [String] Err! {
     if sys.name() != "linux" -> return Err("a private network namespace requires Linux")
     helpers := [String]{}
-    loop name in ["unshare", "sh", "ip"] {
+    loop name in ["unshare", "ip"] {
         helper: kit_no_nix_helper(name) ?? return Err("a private network namespace requires `{name}`")
         helpers.push(helper)
     }
     Ok(helpers)
 }
 
-kit_netns_wrap: fn(helpers: [String], argv: [String]) -> [String] {
-    result := [String]{helpers[0], "--user", "--map-root-user", "--net", helpers[1], "-c", KIT_NETNS_RAISE, "sh", helpers[2]}
-    loop argument in argv -> result.push(argument.copy())
-    result
-}
-
-kit_netns_argv: fn(argv: [String]) -> [String] Err! {
+// unshare's argv for `argv` in a fresh network namespace; an empty `argv` is
+// the probe that only raises the loopback. The launcher is built under
+// SCRATCH/netns, shared by the row's probe and its steps.
+kit_netns_argv: fn(env: KitEnv, argv: [String], scratch: String) -> [String] Err! {
     helpers: kit_netns_helpers() ?? return Err("{err}")
-    Ok(kit_netns_wrap(helpers, argv))
+    bootstrap: files.join(scratch, "netns")
+    files.create_dir_all(bootstrap) ?? return Err("netns bootstrap mkdir: {err}")
+    launcher: kit_no_nix_launcher(env, bootstrap) ?? return Err(err)
+    result := [String]{helpers[0], "--user", "--map-root-user", "--net", launcher, "--netns", helpers[1]}
+    loop argument in argv -> result.push(argument.copy())
+    Ok(result)
 }
 
 // SKIP-HOST with the reason when this host can't give a row its own network
 // namespace: a helper is missing, or a probe can't raise a loopback in one.
-kit_netns_required: fn() -> KitVerdict? {
-    helpers: kit_netns_helpers() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: {err}"))
-    probe: process.cmd(kit_netns_wrap(helpers, [helpers[1], "-c", "true"])).stdout(.Capture).stderr(.Capture).run() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: private network namespace probe: {err}"))
+// A launcher that doesn't build is the kit's ERROR, not the host's.
+kit_netns_required: fn(env: KitEnv, scratch: String) -> KitVerdict? {
+    _ := kit_netns_helpers() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: {err}"))
+    argv: kit_netns_argv(env, [String]{}, scratch) ?? return Val(kit_expect_verdict("ERROR", "host-port: {err}"))
+    probe: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Val(kit_expect_verdict("SKIP-HOST", "host-port: private network namespace probe: {err}"))
     if probe.code != 0 -> return Val(kit_expect_verdict("SKIP-HOST", "host-port: this host refuses a private network namespace: {probe.errors.trim()}"))
     None
 }

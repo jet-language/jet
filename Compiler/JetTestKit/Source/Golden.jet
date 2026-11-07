@@ -243,7 +243,7 @@ kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: S
     // of its own, where the port is always free; a host that can't give it
     // one skips the row.
     if plan.host_port != 0 {
-        if kit_netns_required() == .Val(skipped) -> return KitOutcome{verdict: skipped, run: last}
+        if kit_netns_required(env, scratch) == .Val(skipped) -> return KitOutcome{verdict: skipped, run: last}
     }
     source: files.join(scratch, "source")
     work: files.join(source, entry.project)

@@ -1,6 +1,8 @@
-// The `isolate: no-nix` launcher, ported from tests/support/no_nix_namespace.rs.
-// Compiler/JetTestKit/Source/NoNix.jet builds it once per case and starts it
-// under the host `unshare`, which it runs a second time:
+// The kit's namespace launcher, ported from tests/support/no_nix_namespace.rs
+// and the host-port shell wrapper. Compiler/JetTestKit/Source/NoNix.jet builds
+// it once per case and starts it under the host `unshare`.
+//
+// `isolate: no-nix` runs it twice:
 //
 //   no_nix --outer BOOTSTRAP UNSHARE FLAGS... NO_NIX INNER...
 //
@@ -12,13 +14,20 @@
 // inside the new user and mount namespaces stages the store roots the
 // subject and the host tools need, hides /nix behind an empty tmpfs and runs
 // the subject. The mounts are the host `mount` and `umount`, run as children.
-// Every subject argument arrives as argv, never as shell source.
 //
-// One difference from the shell launcher: Core has no exec leaf, so the
-// subject runs as this launcher's child with inherited stdio, and the
-// launcher exits with its status (a signal death as 128+n, as sh reports it).
-// The child is marked to die with the launcher (process.run_all), so a kit
-// timeout that kills the launcher reaches the subject too.
+// A `host-port:` row runs it once, inside a fresh user and network namespace:
+//
+//   no_nix --netns IP [SUBJECT ARGS...]
+//
+// raises the namespace's loopback with the host `ip` (exit 125 when it
+// can't), then runs the subject; with no subject it is the kit's probe.
+//
+// Every subject argument arrives as argv, never as shell source. Core has no
+// exec leaf, so the subject runs as this launcher's child with inherited
+// stdio, and the launcher exits with its status (a signal death as 128+n, as
+// sh reports it). The child is marked to die with the launcher
+// (process.run_all), so a kit timeout that kills the launcher reaches the
+// subject too.
 use {
     files: core.files
     process: core.process
@@ -34,6 +43,7 @@ NO_NIX_FAILED: "JET_TESTKIT_NO_NIX_SETUP_FAILED"
 run: fn() {
     args: process.args()
     if args.len() > 1 && args[0] == "--outer" -> no_nix_outer(args[1], args.slice(2, args.len()))
+    if args.len() > 1 && args[0] == "--netns" -> no_nix_netns(args[1], args.slice(2, args.len()))
     if args.len() < 14 -> no_nix_fail("the launcher takes BOOTSTRAP, 6 tools, 3 images, COUNT, HOST_PATH, the subjects and the step")
     no_nix_inner(args)
 }
@@ -76,6 +86,31 @@ no_nix_outer: fn(bootstrap: String, argv: [String]) -> Never {
     status: no_nix_wait(process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit), argv[0])
     if !files.exists(files.join(bootstrap, "entered")) -> no_nix_say("{NO_NIX_FAILED}\n")
     no_nix_exit(status)
+}
+
+// The network-namespace runner. A loopback that won't come up is 125, a
+// subject that can't start 127, as the shell wrapper's `exit 125` and `exec`.
+no_nix_netns: fn(ip: String, argv: [String]) -> Never {
+    raise: process.cmd([ip, "link", "set", "lo", "up"]).stdout(.Inherit).stderr(.Inherit)
+    raised: no_nix_netns_run(raise, ip, 125)
+    if raised != 0 -> process.exit(125)
+    if argv.len() == 0 -> process.exit(0)
+    no_nix_exit(no_nix_netns_run(process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit), argv[0], 127))
+}
+
+// `spec`'s status as a child that dies with this process (a signal death as
+// 128+n); one that can't start stops the launcher with `refused`.
+no_nix_netns_run: fn(spec: ProcessSpec, what: String, refused: Int) -> Int {
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? no_nix_netns_refuse("{what} could not start: {err}", refused)
+    if results[0] == {
+        .Ok(receipt) -> if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
+        .Err(error) -> no_nix_netns_refuse("{what} could not start: {error}", refused)
+    }
+}
+
+no_nix_netns_refuse: fn(reason: String, code: Int) -> Never {
+    no_nix_say("netns: {reason}\n")
+    process.exit(code)
 }
 
 // A host tool run before the subject, on the host PATH; its output is the
