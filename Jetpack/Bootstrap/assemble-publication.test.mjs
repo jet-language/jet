@@ -61,7 +61,7 @@ test("publication emits only the canonical Engine closure plus one fixed forward
 
 test("ordinary modes retain test semantics without emitting the fixed Tools entry", async () => {
   await fixture(async ({ root, invoke }) => {
-    for (const mode of ["check", "aot", "run"]) {
+    for (const mode of ["check", "aot"]) {
       const result = invoke(mode, { JETPACK_BOOTSTRAP_OWN_AREA: "Engine" });
       assert.equal(result.status, 0, result.stderr);
       const map = JSON.parse(await readFile(resolve(root, `scratch/${mode}/jetpack.map.json`), "utf8"));
@@ -70,9 +70,16 @@ test("ordinary modes retain test semantics without emitting the fixed Tools entr
       assert.deepEqual(map.test_areas, ["Engine"]);
       const source = await readFile(resolve(root, `scratch/${mode}/project/src/jetpack.jet`), "utf8");
       assert.equal(source.includes("native_runtime_pack_publisher"), false);
-      assert.equal(source.includes('#Test("store fixture")'), mode !== "run");
-      assert.equal((source.match(/\brun: fn\(\)/g) ?? []).length, mode === "run" ? 1 : 0);
+      assert.equal(source.includes('#Test("store fixture")'), true);
+      assert.equal((source.match(/\brun: fn\(\)/g) ?? []).length, 0);
     }
+    const engine = invoke("aot", { JETPACK_BOOTSTRAP_OWN_AREA: "Engine", JETPACK_BOOTSTRAP_TEST_AREAS: "Engine" });
+    assert.equal(engine.status, 0, engine.stderr);
+    const engineMap = JSON.parse(await readFile(resolve(root, "scratch/aot/jetpack.map.json"), "utf8"));
+    assert.deepEqual(engineMap.test_areas, ["Engine"]);
+    const unknown = invoke("aot", { JETPACK_BOOTSTRAP_TEST_AREAS: "CLI" });
+    assert.notEqual(unknown.status, 0);
+    assert.match(unknown.stderr, /JETPACK_BOOTSTRAP_TEST_AREAS names CLI/);
   });
 });
 

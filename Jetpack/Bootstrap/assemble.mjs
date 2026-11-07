@@ -6,9 +6,8 @@
 // Modes:
 //   check  implementation + tests as `#Test` claims, for `jet check` (tests are
 //          type-checked in the fast loop, not first discovered by --tests)
-//   aot    the same unit, for `jet test`
-//   run    implementation + the same test bodies as functions, driven by one
-//          generated `run: fn()` for the default `jet run` tier (I9)
+//   aot    the same unit, for `jet test` (the packages suite of
+//          Compiler/test.jet runs it, one row per claim)
 //   hosted implementation only + Jetpack/run.jet, for the standalone native
 //          `jetpack` engine binary (`jet build`)
 //   publication  INTERNAL Engine implementation closure + the one registered
@@ -23,7 +22,7 @@ import { compilerSliceDrift } from "./compiler-slice.mjs";
 import { CORE_IMPORT_LINE, unblockUses } from "../../Tools/agent/compiler-packages.mjs";
 
 const mode = process.argv[2] ?? "check";
-if (!["check", "aot", "run", "hosted", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, run, hosted, or internal publication`);
+if (!["check", "aot", "hosted", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, hosted, or internal publication`);
 
 const bootstrapDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(bootstrapDir, "../..");
@@ -271,10 +270,9 @@ if (skipped.length > 0) {
   console.log(`note: ${skipped.length} unlisted file(s) in dependency areas are not part of this unit (another writer's work in progress)`);
 }
 
-// A top-level test claim starts at column zero; its body is ordinary function
-// statements. The run tier renders the same body as a plain function. Claim
-// names are plain text (no interpolation holes or escapes) so both tiers
-// print the identical claim ledger.
+// A top-level test claim starts at column zero. Claim names are plain text (no
+// interpolation holes or escapes) so the source map's claim ledger names
+// exactly what `jet test` prints.
 const claimHead = /^#Test\("([^"\\{}]+)"\)\s*\{\s*$/;
 const testNames = [];
 function renderTests(text, sourcePath, section) {
@@ -285,16 +283,11 @@ function renderTests(text, sourcePath, section) {
     const match = claimHead.exec(line);
     if (match === null) {
       if (/^\s*#Test\b/.test(line)) fail(`${sourcePath}:${index + 1}: write test claims as a column-zero \`#Test("plain name") {\` line; names cannot contain quotes, backslashes, or braces`);
-      if (/^\s+\.(setup|expect_fail|timeout|skip|measure)\b/.test(line)) {
-        fail(`${sourcePath}:${index + 1}: Jetpack tests run on every tier; test scope members are not available under jet run`);
-      }
       continue;
     }
     claims += 1;
     if (testNames.some((claim) => claim.name === match[1])) fail(`${sourcePath}:${index + 1}: duplicate test claim "${match[1]}"`);
-    const fnName = `jetpack_test_claim_${testNames.length}`;
-    testNames.push({ name: match[1], fnName, section });
-    if (mode === "run") lines[index] = `${fnName}: fn() {`;
+    testNames.push({ name: match[1], section });
   }
   // Shared test helpers live in `*Support.jet` files: helpers only, never claims.
   const support = sourcePath.endsWith("Support.jet");
@@ -304,8 +297,16 @@ function renderTests(text, sourcePath, section) {
 }
 
 // Proving one area runs only that area's tests; each dependency area proves its
-// own tests in its own unit.
-const unitTests = mode === "publication" || mode === "hosted" ? [] : ownArea === null ? tests : tests.filter((entry) => entry.section === ownArea);
+// own tests in its own unit. JETPACK_BOOTSTRAP_TEST_AREAS (comma-separated
+// tests.list sections) keeps only those sections' claims: the packages suite
+// runs the engine areas that have no package.jet this way.
+const testAreas = mode === "publication" || mode === "hosted" ? null : process.env.JETPACK_BOOTSTRAP_TEST_AREAS || null;
+const testSections = testAreas === null ? null : new Set(testAreas.split(",").map((section) => section.trim()).filter((section) => section !== ""));
+for (const section of testSections ?? []) {
+  if (!tests.some((entry) => entry.section === section)) fail(`JETPACK_BOOTSTRAP_TEST_AREAS names ${section}, which has no tests.list section with claims`);
+}
+const unitTests = mode === "publication" || mode === "hosted" ? []
+  : tests.filter((entry) => (ownArea === null || entry.section === ownArea) && (testSections === null || testSections.has(entry.section)));
 const units = [...sources, ...unitTests];
 if (mode === "hosted") {
   const sourcePath = "Jetpack/run.jet";
@@ -397,16 +398,6 @@ for (const entry of units) {
   });
 }
 
-if (mode === "run") {
-  // One driver prints the same claim ledger the AOT harness proves, so a
-  // failure on either tier names the same claim. A failing claim stops the
-  // process (E3001); check.sh resumes after it with JETPACK_CLAIM_FROM set to
-  // the next claim's index, so one run reports every failing claim.
-  append("// [jetpack-bootstrap generated: default-tier test driver]\nuse jetpack_bootstrap_sys: core.sys\nrun: fn() {\n");
-  append(`    from: Int.parse(jetpack_bootstrap_sys.get("JETPACK_CLAIM_FROM") ?? "0") ?? 0\n`);
-  for (const [index, { name, fnName }] of testNames.entries()) append(`    if from <= ${index} {\n        ${fnName}()\n        print("pass ${name}")\n    }\n`);
-  append(`    print("jetpack-bootstrap: claims done")\n}\n`);
-}
 if (mode === "publication") {
   // Preserve the publisher's typed failure for the canonical entry reporter.
   append("// [jetpack-bootstrap generated: internal native runtime-pack publisher]\nrun: fn() NativeRuntimePackError! {\n    native_runtime_pack_publisher()\n}\n");
@@ -435,7 +426,7 @@ await writeFile(mapPath, `${JSON.stringify({
   // Each staged embed_file copy and the repository file it came from.
   embedded_files: [...embeddedFiles].map(([copy, target]) => ({ copy: `src/${copy}`, source_file: relative(sourceRootDir, target).split(sep).join("/") })),
   tests: testNames.map(({ name }) => name),
-  // Each claim's tests.list area, for known-failing `jetpack-claim:<Area>/<claim>` rows.
+  // Each claim's tests.list section: the packages suite's row is `Jetpack/<section>: <claim>`.
   test_areas: testNames.map(({ section }) => section),
 }, null, 2)}\n`, "utf8");
 console.log(`assembled ${units.length} Jet sources (${mode}, ${testNames.length} test claims) into ${unitPath}`);
