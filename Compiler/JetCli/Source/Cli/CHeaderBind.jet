@@ -255,10 +255,8 @@ jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAu
         bound: pkg_cbind_bind_files(header_text, request.lib, overlay) ?? {
             return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "{err.message}.", jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
-        if bound.handle_skipped.len() > 0 {
-            details := [String]{}
-            loop entry in bound.handle_skipped -> details.push("`{entry.typedef_name}`: {entry.reason}")
-            return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "opaque handle bindings were unresolved: {details.join("; ")}.", jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
+        if jet_cli_c_bind_unresolved(bound) == .Val(why) {
+            return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), why, jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
         held: JetCLIRootedDirectory.open(root, JET_CLI_C_BINDINGS_PARTS, true) ?? return Val(jet_cli_c_bind_write_refused(request.header, request.lib, err.message, color))
         provenance: jet_cli_c_bind_provenance(root, held.path, request.lib, request.lib, header_path, header_text, bound) ?? {
@@ -272,6 +270,16 @@ jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAu
 
 jet_cli_c_bind_write_refused: fn(header: String, lib: String, why: String, color: Bool) -> JetDriverVerbOutput Never! {
     jet_cli_report_output("", "E3208", jet_cli_c_bind_what(header), "the binding cache could not be written ({why}).", jet_cli_c_bind_fix(lib), color, JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// The E3208 why of a bind that left opaque handles unresolved, None when it
+// left none. Neither the command nor the refresh publishes such a binding: a
+// handle without its close contract cannot cross the C boundary safely.
+jet_cli_c_bind_unresolved: fn(bound: CBindFiles) -> String? Never! {
+    if bound.handle_skipped.len() == 0 -> return None
+    details := [String]{}
+    loop entry in bound.handle_skipped -> details.push("`{entry.typedef_name}`: {entry.reason}")
+    Val("opaque handle bindings were unresolved: {details.join("; ")}.")
 }
 
 // Whether `<lib>.jet` exists under `root` with a `.hash` naming exactly
@@ -332,6 +340,10 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
     overlay := overlays.get(library) ?? HandleOverlay.empty()
     loop link in links -> overlay = overlay.with_link(link)
     bound: pkg_cbind_bind_files(header_text, library, overlay) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "{err.message}.", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
+    if jet_cli_c_bind_unresolved(bound) == .Val(why) {
+        named: overlay_path ?? "<overlay>"
+        return jet_cli_fail("E3208", jet_cli_c_bind_what(header), why, "add `#Close(close_function)` to `{named}` in the overlay", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
     cwd: cli_files.cwd() ?? "."
     absolute: if header.starts_with("/") -> header else -> jet_cli_entry_join(cwd, header)
     root: cli_files.realpath(jet_cli_source_root(absolute)) ?? return jet_cli_c_bind_io_error(header, "could not resolve the project root of {header} ({err})", color)
