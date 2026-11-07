@@ -129,6 +129,7 @@ run: fn() { print(int_cache.size()) }
         "Point: struct {{}}\nimpl Point {{\n    fn area(self) -> Int {{ 1 }}\n}}\n",
         "Shape: trait {{\n    type Output\n}}\n",
         "run: fn() {{\n    point :: 3\n    print(point)\n}}\n",
+        "run: fn() {{\n    fn helper() -> Int {{ 1 }}\n    print(helper())\n}}\n",
     }
     loop source in sources {
         diagnostics: parser_test_errors(source)
@@ -137,5 +138,4 @@ run: fn() { print(int_cache.size()) }
             assert(diagnostic.edit == .None, "{source}: {diagnostic.code} carries an edit")
         }
     }
-    _: parser_test_program("run: fn() {{\n    fn helper() -> Int {{ 1 }}\n    print(helper())\n}}\n")
 }

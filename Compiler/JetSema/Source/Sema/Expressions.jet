@@ -22,6 +22,7 @@ use {
         CallContractRow,
         CtValue,
         Diagnostic,
+        diagnostic_registry_row,
         Dimension,
         DimensionAxis,
         EffectRowEntry,
@@ -4055,6 +4056,9 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
         _ := sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
+    // Reading the expiry observes the secret's injected clock, a `Time`
+    // read: a pure body refuses it (E3403).
+    if !sema_time_record_intrinsic(Type.Named{name: "Unit"}, "Time", "ExpiringSecret.with", method_span, environment, program, scopes, context, diagnostics) -> return None
     loan_expected: Type.Fn{params: [Type]{sema_expiring_secret_loan_type(secret_type)}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     loan_reports := [Diagnostic]{}
     scope_mark: sema_scope_mark(scopes)
@@ -4082,6 +4086,18 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
         result = Type.Named{name: "Unit"}
     }
     Val(sema_node(context, Type.Result{ok: result, err: Type.Named{name: "Expired"}}, NodeKind.Unit, method_span))
+}
+
+// `$here` is the `SourceLocation` of where it is written. `$caller` reaches
+// here only outside a parameter default (call sites and declarations replace
+// it there), which is E2427.
+sema_expr_check_site_root: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if name == "$caller" {
+        row: diagnostic_registry_row("E2427") ?? panic("E2427 must have a registry row")
+        diagnostics.push(sema_error("E2427", span, row.what, row.why, row.fix))
+        return None
+    }
+    sema_check_expression(sema_site_location_expr("SourceLocation", environment, program, scopes, span), expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_expr_check_identifier: fn(name: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
@@ -5315,6 +5331,13 @@ sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: 
     if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
         _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, diagnostics)
     }
+    // A Manual clock owns its timeline, so its semantic copy is a fork
+    // (Clock.__fork) that ticks on its own, never a second handle on the
+    // shared state. Core's Clock declares the fork itself.
+    if sema_call_is_clock_type(checked.ty) && !sema_module_is_core_source(environment.module_identity) {
+        fork := Expr.MethodCall{receiver: value.copy(), method: "__fork", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+        return sema_check_expression(fork, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    }
     window_copy: sema_call_compute_window_copy(checked, span, expected, environment, program, diagnostics)
     if window_copy.handled -> return window_copy.value
     sema_expr_check_copy_typed(checked, span, expected, environment, program, context, diagnostics, sema_expr_copy_string_view(value, scopes), false)
@@ -5496,7 +5519,7 @@ sema_check_expression_inner: fn(expr: Expr, expected: Type?, environment: SemaSc
         .Bool(value, span, _) -> sema_expr_expected_owned(sema_node(context, Type.Bool, NodeKind.BoolLit{value: value}, span), expected, environment, program, diagnostics)
         .Unit(span, _) -> sema_expr_expected_owned(sema_node(context, Type.Named{name: "Unit"}, NodeKind.Unit, span), expected, environment, program, diagnostics)
         .Str(parts, span, _) -> sema_expr_check_string(parts, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        .Ident(name, span, _) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
+        .Ident(name, span, _) -> if name == "$here" || name == "$caller" -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .Paren(value, span, _) -> sema_expr_check_paren(value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
         .Unary(op, operand, span, _) -> sema_expr_check_unary(op, operand, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         .Binary(op, left, right, span, _) -> sema_expr_check_binary(op, left, right, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -5536,7 +5559,7 @@ sema_check_expression_cold: fn(expr: Expr, expected: Type?, environment: SemaSco
             None
         }
         .UnitLit(raw, int_value, float_value, suffix, suffix_span, span, _) -> sema_expression_unit_literal(raw, int_value, float_value, suffix, suffix_span, span, expected, environment, program, scopes, context, diagnostics)
-        .Ident(name, span, _) -> if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
+        .Ident(name, span, _) -> if name == "$here" || name == "$caller" -> sema_expr_check_site_root(name, span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else if sema_ownership_is_share_site(state, span) -> sema_expr_check_shared_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics) else -> sema_expr_check_identifier(name, span, expected, environment, program, scopes, state, context, diagnostics)
         .ComptimeName(name, span, value, _) -> sema_expr_check_comptime_name(name, span, value, expected, environment, program, scopes, state, context, diagnostics)
         .Paren(value, span, _) -> {
             checked: sema_check_expression(value, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
@@ -6011,7 +6034,10 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     // the chain check's frame off every other expression level.
     if sema_expr_is_bare_member_chain(expr) {
         bare_member: sema_expr_check_bare_member_chain(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        if bare_member.handled -> return sema_check_expression_recorded(expr, bare_member.value, context)
+        if bare_member.handled {
+            if bare_member.value == None -> sema_expr_mark_failed_call_reads(expr, scopes, state)
+            return sema_check_expression_recorded(expr, bare_member.value, context)
+        }
     }
     if !sema_enter_source_nesting(context, expr_span(expr), diagnostics) -> return None
     // A call root auto-propagates its Result carrier
@@ -6037,11 +6063,30 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     }
     // The checked value moves out and back: binding it while `checked` was
     // still returned copied the whole checked tree at every level.
-    value := checked ?? return None
+    value := checked ?? {
+        sema_expr_mark_failed_call_reads(expr, scopes, state)
+        return None
+    }
     if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
     sema_cell_guard_check_construct(expr, value.ty, diagnostics)
     sema_check_record_expr_id(expr, value, context)
     Val(value.move())
+}
+
+// A call that fails to check (an unresolved callee or member) still reads
+// the names in its arguments, so they are no unused bindings whose `_name`
+// rename `jet fix` would apply to a binding the call uses.
+sema_expr_mark_failed_call_reads: fn(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) {
+    names := [String]{}
+    if expr == {
+        .Call(call, _) -> loop argument in call.args -> sema_function_memory_collect_expr_idents(argument.expr, names)
+        .MethodCall(_, _, _, _, _, args, _) | .OptMethodCall(_, _, _, _, args, _, _) | .CallValue(_, args, _, _) -> loop argument in args -> sema_function_memory_collect_expr_idents(argument.expr, names)
+        else -> return
+    }
+    loop name in names {
+        index: sema_scope_resolve_index(scopes, name) ?? next
+        state.used_keys[scopes.bindings[index].symbol.id.key] = true
+    }
 }
 
 // An expression form checked outside the common exit (a ranged view

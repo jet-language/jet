@@ -13,6 +13,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "cli_e1219", argv: ["build", "$file", "--profile=turbo"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "retired_gate_flag", argv: ["run", "$file", "--allow-impure"], parent: false, exit: "nonzero", streams: "both", capability: ""},
         {name: "cli_build", argv: ["build", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
+        // A programmable build entry's `jet build` under the invocation grants
+        // the directive spells, as `--allow` takes them (`@build_grants Exec`).
+        {name: "build_grants", argv: ["build", "$file", "--allow=$arg"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
         {name: "jetpack_e1250", argv: ["build", "main.jet", "--offline"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
@@ -25,9 +28,12 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "command_override_conflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
         {name: "compiler_extension", argv: [], parent: false, exit: "any", streams: "", capability: ""},
-        {name: "requires", argv: [], parent: false, exit: "any", streams: "", capability: ""}
+        {name: "requires", argv: [], parent: false, exit: "any", streams: "", capability: ""},
+        // Marks a programmable build entry; an invocation row (`build_grants`)
+        // runs it, and one with none is refused (kit_ui_invocation).
+        {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "build_grants", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "programmable_build", "target", "cost_cli"] {
+    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "build_locked", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "target", "cost_cli"] {
         rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -98,8 +104,10 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         if !known -> call.refused = "unported fixture directive: {name}"
     }
     if call.refused != "" -> return call
+    selected := false
     loop row in rows {
         if row.argv.len() == 0 || kit_ui_arg(source, row.name) == None -> next
+        selected = true
         call.argv = []
         maximum: (kit_ui_arg(source, "complexity_cli") ?? "").replace("\t", " ").split(" ").filter(word -> word != "").to_list()
         if row.name == "complexity_cli" && maximum.len() < 2 {
@@ -121,6 +129,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         }
         break
     }
+    if !selected && kit_ui_arg(source, "programmable_build") != None -> call.refused = "missing CLI fixture API: programmable_build"
     call
 }
 

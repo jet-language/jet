@@ -419,7 +419,10 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
         alias := if unit.package_identity == load.package_identity -> "" else -> unit.module_name
         source_owner := true
         if checked_projection {
-            if seen.get(graph_module.module_identity) != None || registered.module_identity != graph_module.module_identity || jet_driver_module_identity(unit.package_identity, unit.relative_path) != graph_module.module_identity || registered.package_identity != unit.package_identity || graph_module.package_identity != unit.package_identity || registered.source_file != unit.path || graph_module.source_file != unit.path || registered.source_origin != unit.source_origin -> return [JetDriverDocModule]{}
+            // A Core unit carries the loader's Core identity (its path or its
+            // source owner key); every other unit is keyed by its relative path.
+            unit_identity: if jet_driver_unit_is_core(unit) -> jet_driver_unit_module_identity(unit) else -> jet_driver_module_identity(unit.package_identity, unit.relative_path)
+            if seen.get(graph_module.module_identity) != None || registered.module_identity != graph_module.module_identity || unit_identity != graph_module.module_identity || registered.package_identity != unit.package_identity || graph_module.package_identity != unit.package_identity || registered.source_file != unit.path || graph_module.source_file != unit.path || registered.source_origin != unit.source_origin -> return [JetDriverDocModule]{}
             seen[graph_module.module_identity] = true
             if jet_driver_unit_is_core(unit) {
                 if unit.root_index != -1 || unit.root_identity != JET_DRIVER_CORE_SOURCE_ROOT || unit.package_identity != unit.path || unit.path != "{JET_DRIVER_CORE_SOURCE_ROOT}/{unit.relative_path}" || unit.source_origin != SemaSourceOrigin.CompilerGenerated -> return [JetDriverDocModule]{}
@@ -834,6 +837,9 @@ JetDriverComptimeFunctionClosure: struct {
     // site of the reachable functions is pure (sema_comptime_call_facts_pure).
     dependencies: [String]{[String]{}}
     pure: Bool{true}
+    // The foreign functions the closure reaches, which no check reads as Jet
+    // (SemaComptimeFunctionResult.foreign): a call of one stops the run.
+    foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
 }
 
 JetDriverComptimeWaitRow: struct {
@@ -929,6 +935,7 @@ jet_driver_comptime_function_closure: fn(
     }
     jet_driver_comptime_precise_refs(graph, index, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
     functions := [FnBody]{}
+    foreign := [SemaCheckedForeignFunction]{}
     waiting := [String]{}
     complete := true
     incomplete := [SemaTotalityRow]{}
@@ -947,6 +954,10 @@ jet_driver_comptime_function_closure: fn(
         }
         if reused_row < 0 && memory_plan.len() == 0 -> memory_plan.push(sema_function_memory_plan_from_graph(graph))
         checked := if reused_row >= 0 -> checked_functions[reused_row] else -> sema_check_comptime_function(graph, environment, program, probe, available, memory_plan[0], values, current.module_identity, current.function_key)
+        if checked.foreign == .Val(row) {
+            foreign.push(row.copy())
+            next
+        }
         loop dependency in checked.waiting_dependencies -> jet_driver_comptime_wait_add(waiting, dependency)
         if soft {
             loop dependency in checked.dependencies -> jet_driver_comptime_wait_add(dependencies, dependency)
@@ -997,7 +1008,7 @@ jet_driver_comptime_function_closure: fn(
     // A waiting closure is checked again once its dependencies land; its rows
     // are not all checked yet, so its obligations settle then.
     if waiting.len() == 0 && !sema_comptime_failure_closure_settle(graph, failure_closure, diagnostics) -> complete = false
-    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete: incomplete, dependencies: dependencies, pure: pure}
+    JetDriverComptimeFunctionClosure{functions: functions, waiting_dependencies: waiting, complete: complete, incomplete: incomplete, dependencies: dependencies, pure: pure, foreign: foreign}
 }
 
 // The run's comptime staging: `program` holds (its one row, once `staged`:
@@ -1042,6 +1053,9 @@ JetDriverComptimeBatch: struct {
     // (jet_driver_comptime_entry_bare), so the batch builds with no
     // declaration rows.
     bare: Bool
+    // The union of the entries' reached foreign functions, each once
+    // (JetDriverComptimeFunctionClosure.foreign).
+    foreign: [SemaCheckedForeignFunction]{[SemaCheckedForeignFunction]{}}
 }
 
 // What evaluating a batch did to the run.
@@ -1415,8 +1429,15 @@ jet_driver_comptime_batch_new: fn() -> JetDriverComptimeBatch Never! {
 }
 
 // Appends an item to `batch`, moving the functions of its checked closure
-// that the batch does not hold yet out of `functions` (left empty).
-jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], plain: TComptimeValue?) Never! {
+// that the batch does not hold yet out of `functions` (left empty), and
+// adding the foreign functions it reaches that the batch does not hold yet.
+jet_driver_comptime_batch_add: fn(batch: &JetDriverComptimeBatch, source: SemaComptimeItemSource, request: SemaComptimeItemRequest, functions: &[FnBody], foreign: [SemaCheckedForeignFunction], plain: TComptimeValue?) Never! {
+    loop row in foreign {
+        held: loop previous in batch.foreign {
+            if previous.symbol_id.key == row.symbol_id.key -> break true
+        } ?? false
+        if !held -> batch.foreign.push(row.copy())
+    }
     reversed := [FnBody]{}
     loop functions.len() > 0 {
         function := functions.pop() ?? { break }
@@ -1447,6 +1468,7 @@ jet_driver_comptime_batch_single: fn(batch: JetDriverComptimeBatch, index: Int) 
         single.functions.push(batch.functions[row])
     }
     if entry.plain == None && !jet_driver_comptime_entry_bare(entry.request, entry.function_keys) -> single.bare = false
+    single.foreign = batch.foreign.copy()
     single.keys[entry.source.key] = true
     single.entries.push(entry.copy())
     single
@@ -2114,7 +2136,7 @@ jet_driver_comptime_run: fn(
                         .Ok(value) -> {
                             if batch.entries.len() > 0 {
                                 no_functions := [FnBody]{}
-                                jet_driver_comptime_batch_add(batch, source, comptime_request, no_functions, Val(value))
+                                jet_driver_comptime_batch_add(batch, source, comptime_request, no_functions, [SemaCheckedForeignFunction]{}, Val(value))
                                 next
                             }
                             values.push(jet_driver_comptime_item_value(source, value, body_type(comptime_request.expression.tree, comptime_request.expression.root)))
@@ -2135,7 +2157,7 @@ jet_driver_comptime_run: fn(
                         // Behind a batch, the literal's value lands in its turn.
                         if batch.entries.len() > 0 {
                             no_functions := [FnBody]{}
-                            jet_driver_comptime_batch_add(batch, source, comptime_request, no_functions, Val(plain))
+                            jet_driver_comptime_batch_add(batch, source, comptime_request, no_functions, [SemaCheckedForeignFunction]{}, Val(plain))
                             next
                         }
                         values.push(jet_driver_comptime_item_value(source, plain, body_type(comptime_request.expression.tree, comptime_request.expression.root)))
@@ -2238,7 +2260,7 @@ jet_driver_comptime_run: fn(
                 }
                 scanned_functions = checked_functions.len()
                 if jet_driver_comptime_batchable(source) {
-                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, None)
+                    jet_driver_comptime_batch_add(batch, source, comptime_request, closure.functions, closure.foreign, None)
                     next
                 }
                 if batch.entries.len() > 0 {
@@ -2255,7 +2277,7 @@ jet_driver_comptime_run: fn(
                     }
                 }
                 alone := jet_driver_comptime_batch_new()
-                jet_driver_comptime_batch_add(alone, source, comptime_request, closure.functions, None)
+                jet_driver_comptime_batch_add(alone, source, comptime_request, closure.functions, closure.foreign, None)
                 flushed := jet_driver_comptime_flush(request, alone, values, checked_functions, trace, programs[0], staging, counters, diagnostics)
                 if flushed.progressed || flushed.demoted.len() > 0 -> made_progress = true
                 if flushed.stop == .Val(stopped) {
@@ -3624,8 +3646,10 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     registration_graph.plugin_facts = jet_driver_plugin_facts(request)
     if request.mode == JetDriverCompileMode.Check -> registration_graph.check_tests = true
     if checked_projection || request.mode == JetDriverCompileMode.Doc -> registration_graph.retain_programs = true
-    // A compile that lowers checks Core bodies on demand (CoreDemand.jet);
-    // JET_KEEP_GOING checks every body.
+    if request.doc_core_on_demand -> registration_graph.retained_core_demand = true
+    // A compile that lowers, a Check compile and a `doc_core_on_demand` Doc
+    // compile check Core bodies on demand (CoreDemand.jet); JET_KEEP_GOING
+    // checks every body.
     lowers: request.mode == JetDriverCompileMode.Program || request.mode == JetDriverCompileMode.Test || request.mode == JetDriverCompileMode.Eval || request.mode == JetDriverCompileMode.RootRun
     if lowers && !kg.enabled -> registration_graph.core_lowering_roots = Val(jet_driver_core_lowering_roots(registration_graph))
     if registration_graph.internal_problem != None {

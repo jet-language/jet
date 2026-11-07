@@ -214,7 +214,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1338,
+  "total": 1340,
   "counts": {
     "Compiler": 679,
     "Core": 186,
@@ -222,7 +222,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 35,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 414
+    "tests": 416
   },
   "regions": [
     {
@@ -1054,7 +1054,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetCli/Source/Cli/Host.jet",
-      "line": 1531,
+      "line": 1539,
       "column": 9,
       "reason": "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit"
     },
@@ -3980,7 +3980,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/Shared.jet",
-      "line": 437,
+      "line": 452,
       "column": 9,
       "reason": "runtime-init runs before any other thread exists"
     },
@@ -9138,6 +9138,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/run/Comptime/ForeignBranchNotTaken.jet",
+      "line": 11,
+      "column": 1,
+      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/Comptime/ForeignBranchNotTaken.jet",
+      "line": 23,
+      "column": 9,
+      "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "tests",
       "file": "tests/run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet",
       "line": 16,
       "column": 5,
@@ -9605,8 +9619,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 414 |
-| **total** | **1338** |
+| tests | 416 |
+| **total** | **1340** |
 
 ### Regions
 
@@ -9730,7 +9744,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1209:5 | "the allocation receipt pairs this owner with its original free address and exact size/alignment" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1217:5 | "the admitted runtime signature or pinned clone/drop role was checked before invoking its fixed word ABI" |
 | Compiler | Compiler/JetBackend/Source/OS/Linux.jet | 1225:1 | "calls machine code; the caller vouches for its three-word System V signature" |
-| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1531:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
+| Compiler | Compiler/JetCli/Source/Cli/Host.jet | 1539:9 | "I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the runtime's unmapped process exit" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 383:5 | "unlinkat borrows a held parent and CString" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 387:5 | "adopt only a successful openat descriptor" |
 | Compiler | Compiler/JetDevserver/Source/WebHost02.jet | 394:5 | "adopt only a successful openat descriptor" |
@@ -10148,7 +10162,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Secret.jet | 188:5 | "secret is a live exclusively borrowed native24B Secret header; len/cap/data follow the native List layout and all byte owners remain inside its buffer" |
 | Compiler | Compiler/JetRuntime/Source/Sentry.jet | 14:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Shared.jet | 62:5 | "x86 pause only hints that this thread is waiting in a spin loop; no memory is touched" |
-| Compiler | Compiler/JetRuntime/Source/Shared.jet | 437:9 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/Shared.jet | 452:9 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 17:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/SharedTransactions.jet | 23:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Sync.jet | 6:5 | "borrows an aligned live synchronization word" |
@@ -10885,6 +10899,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 28:5 | "AES-256-GCM protocol interoperability" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
+| tests | tests/run/Comptime/ForeignBranchNotTaken.jet | 11:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
+| tests | tests/run/Comptime/ForeignBranchNotTaken.jet | 23:9 | "call the audited register-only assembly contract" |
 | tests | tests/run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet | 16:5 | "fixed AEAD tamper vector" |
 | tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 104:5 | "known-answer check reads the RFC 7748 shared secret" |
 | tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 166:5 | "expert known-answer vectors need raw key bytes" |

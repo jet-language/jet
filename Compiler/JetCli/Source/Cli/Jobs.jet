@@ -17,11 +17,13 @@ jet_cli_compile_jobs: fn(file: String, color: Bool, json: Bool) -> JetDriverVerb
     if prepared == {
         .Refused(output) -> return output.move()
         .Prepared(request, snapshot) -> {
+            // copy: the request moves into the projection below.
+            profile: request.profile.copy()
             projection: jet_driver_checked_projection(request.move())
             diagnostics: jet_driver_present_diagnostics(projection.compile.diagnostics, snapshot, projection.compile.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 {
                 source: cli_files.read(file) ?? ""
-                if json -> return jet_cli_check_json_outcome(file, source, diagnostics, 0)
+                if json -> return jet_cli_check_json_outcome(file, source, diagnostics, 0, profile)
                 return jet_driver_check_outcome(file, source, diagnostics, color, false)
             }
             if projection.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)

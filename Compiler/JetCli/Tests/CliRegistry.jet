@@ -8,7 +8,7 @@ use {
         JET_CLI_SYNTAX_ROWS, JetCLISyntaxKind, jet_cli_closest_command, jet_cli_command_index,
         jet_cli_completions_bash, jet_cli_completions_fish, jet_cli_completions_powershell,
         jet_cli_completions_zsh, jet_cli_group_usage, jet_cli_handler_index,
-        jet_cli_flag_commands, jet_cli_flag_spec, jet_cli_flag_takes, jet_cli_flags_for_command,
+        jet_cli_flag_commands, jet_cli_flag_spec, jet_cli_flag_takes, jet_cli_flags_for_command, jet_cli_form_ported,
         jet_cli_is_canonical_top_level, jet_cli_is_known_flag, jet_cli_man_page, jet_cli_moved_command,
         jet_cli_nested_command, jet_cli_rule_explanation, jet_cli_rule_named, jet_cli_syntax_lookup,
     ]
@@ -73,6 +73,9 @@ cli_registry_typo_suggestions: fn() Never! {
     cli_registry_require((jet_cli_closest_command("env") ?? "") == "env", "env is a canonical group")
 }
 
+// `self update` is not built yet (command model), so its keyless override
+// stays registered for the front's flag check but help, man and completions
+// leave it out with the action.
 cli_registry_completions: fn() Never! {
     count := 0
     loop flag in JET_CLI_FLAGS {
@@ -80,21 +83,19 @@ cli_registry_completions: fn() Never! {
     }
     cli_registry_require(count == 1, "--allow-unofficial is registered once")
     cli_registry_require(jet_cli_is_known_flag("--allow-unofficial"), "--allow-unofficial is a known flag")
-    cli_registry_require(jet_cli_group_usage("self").contains("--allow-unofficial"), "self usage names --allow-unofficial")
-    cli_registry_require(jet_cli_man_page().contains("--allow-unofficial"), "the man page names --allow-unofficial")
-    // fish declares a long option as `-l <name>`, the other shells as `--<name>`.
-    cli_registry_require(jet_cli_completions_bash().contains("--allow-unofficial"), "bash completion lacks --allow-unofficial")
-    cli_registry_require(jet_cli_completions_zsh().contains("--allow-unofficial"), "zsh completion lacks --allow-unofficial")
-    cli_registry_require(jet_cli_completions_fish().contains("-l allow-unofficial"), "fish completion lacks -l allow-unofficial")
-    cli_registry_require(jet_cli_completions_powershell().contains("--allow-unofficial"), "powershell completion lacks --allow-unofficial")
+    cli_registry_require(!jet_cli_form_ported("self update"), "self update is not built yet")
+    cli_registry_require(!jet_cli_group_usage("self", false).contains("--allow-unofficial"), "self usage leaves out unported --allow-unofficial")
+    cli_registry_require(jet_cli_group_usage("self", true).contains("self update"), "self's own help lists its whole family")
+    cli_registry_require(!jet_cli_man_page().contains("--allow-unofficial"), "the man page leaves out unported --allow-unofficial")
+    cli_registry_require(!jet_cli_completions_bash().contains("--allow-unofficial"), "bash completion leaves out unported --allow-unofficial")
+    cli_registry_require(!jet_cli_completions_fish().contains("-l allow-unofficial"), "fish completion leaves out unported -l allow-unofficial")
     scripts: [String]{jet_cli_completions_bash(), jet_cli_completions_zsh(), jet_cli_completions_fish(), jet_cli_completions_powershell()}
     loop script in scripts {
         loop command in JET_CLI_COMMANDS {
-            if jet_cli_is_canonical_top_level(command.name) {
-                cli_registry_require(script.contains(command.name), "completion missing command {command.name}")
-            }
+            if !jet_cli_form_ported(command.name) -> next
+            if jet_cli_is_canonical_top_level(command.name) -> cli_registry_require(script.contains(command.name), "completion missing command {command.name}")
             loop action in command.actions {
-                cli_registry_require(script.contains(action.name), "completion missing {command.name} {action.name}")
+                if jet_cli_form_ported("{command.name} {action.name}") -> cli_registry_require(script.contains(action.name), "completion missing {command.name} {action.name}")
             }
         }
     }

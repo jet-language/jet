@@ -10,13 +10,14 @@
 // deliberately NOT recognized here.
 //
 // Run `tree-sitter generate` in this directory after editing, then rebuild the
-// wasm via Tools/editors/zed/install.sh (FORCE=1).
+// wasm via Tools/editors/zed/install.sh (FORCE=1). tests/guards/grammar.jet
+// parses every Examples/**/*.jet with it and fails on any ERROR or MISSING node.
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
 const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Transition", "Unsafe", "add", "as", "change", "client", "derive", "distinct", "effect", "enum", "extern", "fact", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "tag", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
-const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "comptime", "it", "self", "shared"];
+const JET_HIGHLIGHT_KEYWORD_OTHER = ["$build", "$caller", "$here", "$package", "$phase", "$program", "@SOURCE", "@TYPES", "comptime", "it", "self", "shared"];
 const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
@@ -96,7 +97,7 @@ module.exports = grammar({
     // D-ECO-INLINEPACKAGE1=A: the carrier is contextual source structure.
     // PackageFacts owns its field grammar; tree-sitter only recognizes the
     // balanced record shell so editor spans remain intact.
-    inline_package: ($) => seq("package", $.record_literal),
+    inline_package: ($) => seq("package", ":", $.record_literal),
 
     record_literal: ($) => seq("{", repeat($._item), "}"),
 
@@ -159,12 +160,15 @@ module.exports = grammar({
     // `name: fn<T>(params) -> Ret E! -[Effects]> { body }`; a signature with no
     // body (trait methods) or an extern `= "symbol"` ends at the first
     // non-signature element. `fn(Int) -> Int` is the anonymous function type.
+    // A marker template (`expand: fn(self, target: Target) { … }`) emits its
+    // functions in the keyword form `fn name(params) { … }`.
     function_def: ($) =>
       prec.right(
         seq(
           // `Point.render: fn(self)` defines a method of an existing type.
           optional($._decl_label),
           "fn",
+          optional(field("name", $.identifier)),
           optional(field("type_parameters", $.type_parameters)),
           field("parameters", $.parameters),
           repeat($._signature_part),

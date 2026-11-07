@@ -387,22 +387,22 @@ __app_serve: fn(app: App, port: Int) Never! -[Net, FS.Read, Time]> {
     loop route in state.routes {
         target: app.copy()
         path: route.path.copy()
-        mux.__route("GET", route.path, (request: HTTPRequest) -> Ok(__app_page_response(target, path, request)), "")
+        mux.__route_core("GET", route.path, (request: HTTPRequest) -> Ok(__app_page_response(target, path, request)), "")
     }
     loop action in state.actions {
         if action.handler == .Val(handler) {
-            mux.__route("POST", "/actions/{action.name}", (request: HTTPRequest) -> Ok(__app_action_response(handler, request)), "")
+            mux.__route_core("POST", "/actions/{action.name}", (request: HTTPRequest) -> Ok(__app_action_response(handler, request)), "")
         }
     }
     loop mount in state.mounts {
         base: __app_trim_slashes(mount.prefix)
         handler: mount.handler.copy()
-        mux.__route("GET", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
-        mux.__route("POST", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
+        mux.__route_core("GET", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
+        mux.__route_core("POST", "{base}/*jet_app_mount_path", (request: HTTPRequest) -> Ok(__app_mount_response(handler, request)), "")
     }
     if state.assets.len() > 0 -> http_server.static_files(mux, "/assets", state.assets[0])
     fallback: app.copy()
-    mux.__route("GET", "/*jet_app_unmatched", (request: HTTPRequest) -> Ok(__app_not_found_response(fallback, request)), "")
+    mux.__route_core("GET", "/*jet_app_unmatched", (request: HTTPRequest) -> Ok(__app_not_found_response(fallback, request)), "")
     server: http_server.__bind_entry("127.0.0.1:{port}", mux, None, None) ?? panic("web app could not listen on 127.0.0.1:{port}: {err}")
     _: server.serve() ?? panic("web app server failed: {err}")
 }

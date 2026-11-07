@@ -6,37 +6,48 @@
 // redundant default file aliases; typed-literal constructor dot removal;
 // formatter-added arm blocks, bare-lambda parens, leading-dot variant patterns,
 // struct shorthand labels and separators; and a required default alias on a
-// dotted module import. Two rules follow later ratified spellings: the
-// redundant default alias in the `name: path` use form, and the
-// choice between `-> statement` and a braced control body.
+// dotted module import. Later ratified spellings add: the redundant default
+// alias in the `name: path` and `name: "file"` use forms; a one-member import
+// list; import grouping; a leading parameter sigil riding the type; `Unit` as
+// `()`; `Result<T, E>` as `T E!`; empty marker parentheses; dropped positional
+// names in a function type; named tuple type member order; the `,` ending a
+// wrapped loop header; the choice between `-> statement` and a braced
+// control body; and `->` before a foreign declaration's return type.
 // No rule can reorder or drop an expression operand, operator, marker payload,
 // comment or string interpolation. Not ported: the `=>` arrow rules
 // (`retired_result_arrow_removal`, the LambdaArrow half of
 // `canonical_arrow_rewrite`). The Jet lexer has no `=>` token, so neither
 // rewrite can occur. The pinned parse-invalid UI list is the set the Jet parser
-// rejects today (`jfmt_check_parse_accepts`), not the Rust list. Known failing
-// on #6005: on dev the corpus has 146 failures. `jet fmt` drops or changes
-// tokens in 131 files, cannot parse 11 example programs, and writes 4 outputs
-// that no longer lex.
+// rejects today (`jfmt_check_parse_accepts`), not the Rust list. A UI fixture
+// whose parse recovers through a teaching diagnostic spells a retired form on
+// purpose; fmt rewrites it to canon, so its output must lex and parse with no
+// teaching diagnostic left instead of keeping every token.
 use {
     fl_files: core.files
     jet_cli.[jet_cli_fmt_ordinary]
+    jet_driver.[jet_driver_inline_package]
     jet_foundation.[name_text]
     jet_lexer.[
-        STRING_PART_BYTE, STRING_PART_INTERPOLATION, STRING_PART_TEXT, StringPart, TOKEN_BANG, TOKEN_BLOCK_COMMENT,
+        STRING_PART_BYTE, STRING_PART_INTERPOLATION, STRING_PART_TEXT, StringPart, TOKEN_AMP, TOKEN_AND_AND, TOKEN_BANG, TOKEN_BLOCK_COMMENT, TOKEN_OR_OR,
         TOKEN_CHAR, TOKEN_COLON, TOKEN_COMMA, TOKEN_DOT, TOKEN_EOF, TOKEN_EQ, TOKEN_EQ_EQ, TOKEN_FLOAT,
         TOKEN_GT, TOKEN_HASH, TOKEN_IDENT, TOKEN_INT, TOKEN_KW_ELSE, TOKEN_KW_ENUM, TOKEN_KW_FN, TOKEN_KW_IF, TOKEN_KW_IMPL, TOKEN_KW_LOOP, TOKEN_KW_PUB,
-        TOKEN_KW_STRUCT, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_NULL,
-        TOKEN_PIPE, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_STRING,
+        TOKEN_KW_STRUCT, TOKEN_KW_USE, TOKEN_LBRACE, TOKEN_LBRACKET, TOKEN_LINE_COMMENT, TOKEN_LPAREN, TOKEN_LT, TOKEN_MINUS, TOKEN_NULL,
+        TOKEN_PIPE, TOKEN_QUESTION, TOKEN_RAW_STRING, TOKEN_RBRACE, TOKEN_RBRACKET, TOKEN_RETURN, TOKEN_RPAREN, TOKEN_SEMI, TOKEN_SLASH, TOKEN_STAR, TOKEN_STRING,
         TOKEN_UNIFIED_ARROW, TOKEN_UNIT_NUMBER, Token, TokenTables, lex, token_decoded, token_string_parts,
     ]
-    jet_parser.[jfmt_check_parse_accepts, parse_source]
+    jet_parser.[jfmt_check_parse_accepts, jfmt_is_teaching_parse_diag, parse_source]
 }
 
 // Spellings from Compiler/JetFoundation/Data/Syntax, which this package
 // cannot import.
 FL_KW_AS: "as"
+FL_KW_FROM: "from"
 FL_TYPE_ERR: "Err"
+FL_TYPE_RESULT: "Result"
+FL_TYPE_UNIT: "Unit"
+FL_CODE_BODYLESS_FN: "E0081"
+FL_CODE_RESERVED_NAME: "E0067"
+FL_ADAPTATION_AFTER_FILE: "after.jet"
 FL_MARKER_TARGET: "Target"
 FL_MARKER_HTML: "HTML"
 FL_MARKER_NO_PRELUDE: "NoPrelude"
@@ -44,11 +55,13 @@ FL_PACKAGE_FILE: "package.jet"
 FL_WORKSPACE_FILE: "workspace.jet"
 FL_PAYLOAD_FILE: "pkg.jet"
 
-// One lexed token, detached from its source's name table.
+// One lexed token, detached from its source's name table. `own_line` marks a
+// comment that starts its source line.
 FmtTok: struct {
     kind: Int
     text: String
     parts: [FmtPart]
+    own_line: Bool{false}
 }
 
 FmtPart: struct {
@@ -117,15 +130,27 @@ fl_lex_codes: fn(src: String) -> String {
 }
 
 fl_lex: fn(src: String, path: String) -> [FmtTok] {
-    lexed: lex(src.bytes())
+    bytes: src.bytes()
+    lexed: lex(bytes)
     if lexed.diagnostics.len() > 0 -> panic("lex failed on {path}:{fl_lex_codes(src)}")
     out := [FmtTok]{}
-    loop token in lexed.tokens -> out.push(fl_tok(lexed.tables, token))
+    loop token in lexed.tokens {
+        converted := fl_tok(lexed.tables, token)
+        if fl_is_comment(token.kind) -> converted.own_line = fl_starts_line(bytes, token.span.start)
+        out.push(converted)
+    }
     out
 }
 
+// Only blanks sit between the previous line break and `start`.
+fl_starts_line: fn(bytes: [U8], start: Int) -> Bool {
+    cursor := start - 1
+    loop cursor >= 0 && (bytes[cursor] == 32 || bytes[cursor] == 9) -> cursor -= 1
+    cursor < 0 || bytes[cursor] == 10 || bytes[cursor] == 13
+}
+
 fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
-    tokens: fl_canonicalize_control_arrow_bodies(fl_canonicalize_external_methods(fl_canonicalize_static_generic_calls(fl_expand_marker_groups(fl_canonicalize_file_prefix(fl_lex(src, path))))))
+    tokens: fl_canonicalize_fn_type_names(fl_canonicalize_control_arrow_bodies(fl_canonicalize_external_methods(fl_canonicalize_static_generic_calls(fl_expand_marker_groups(fl_canonicalize_file_prefix(fl_lex(src, path)))))))
     enum_commas: fl_enum_group_commas(tokens)
     field_commas: fl_declaration_field_commas(tokens)
     kept := [FmtTok]{}
@@ -155,19 +180,204 @@ fl_canonical_tokens: fn(src: String, path: String) -> [FmtTok] {
         }
         // The same redundant default alias in the `name: path` use
         // spelling: `json: core.encoding.json` binds what
-        // `core.encoding.json` binds.
-        if fl_redundant_default_module_alias(kept, index) {
+        // `core.encoding.json` binds, and `text: "./text"` what `"./text"`
+        // binds.
+        if fl_redundant_default_module_alias(kept, index) || fl_redundant_file_binding_alias(kept, index) {
             index += 2
+            next
+        }
+        // `use math.[clamp]` and `use math.clamp` import the same member when
+        // the module path has no dot.
+        if fl_single_member_import_list(kept, index) {
+            canonical.push(kept[index])
+            canonical.push(kept[index + 2])
+            index += 4
+            next
+        }
+        // The access sigil rides the type: `&&s: T` is `s: &&T`.
+        if fl_leading_param_sigil(kept, index) {
+            canonical.push(kept[index + 1])
+            canonical.push(kept[index + 2])
+            canonical.push(kept[index])
+            index += 3
+            next
+        }
+        // The unit type `Unit` is `()`.
+        if fl_unit_type_name(kept, index) {
+            canonical.push(fl_synthetic(TOKEN_LPAREN, "("))
+            canonical.push(fl_synthetic(TOKEN_RPAREN, ")"))
+            index += 1
+            next
+        }
+        // Empty marker parentheses are the retired spelling of the bare
+        // marker: `#Inline()` is `#Inline`.
+        if kept[index].kind == TOKEN_HASH && fl_is_ident(kept, index + 1) && fl_kind(kept, index + 2) == TOKEN_LPAREN && fl_kind(kept, index + 3) == TOKEN_RPAREN {
+            canonical.push(kept[index])
+            canonical.push(kept[index + 1])
+            index += 4
+            next
+        }
+        // `Result<T, E>` is the error contract `T E!`.
+        if fl_is_ident(kept, index) && kept[index].text == FL_TYPE_RESULT && fl_kind(kept, index + 1) == TOKEN_LT && fl_is_ident(kept, index + 2) && fl_kind(kept, index + 3) == TOKEN_COMMA && fl_is_ident(kept, index + 4) && fl_kind(kept, index + 5) == TOKEN_GT {
+            canonical.push(kept[index + 2])
+            if kept[index + 4].text != FL_TYPE_ERR -> canonical.push(kept[index + 4])
+            canonical.push(fl_synthetic(TOKEN_BANG, "!"))
+            index += 6
+            next
+        }
+        // The prefix declaration spelling `fn name(` is `name: fn(`.
+        if kept[index].kind == TOKEN_KW_FN && fl_is_ident(kept, index + 1) && fl_kind(kept, index + 2) == TOKEN_LPAREN {
+            canonical.push(kept[index + 1])
+            canonical.push(fl_synthetic(TOKEN_COLON, ":"))
+            canonical.push(kept[index])
+            index += 2
+            next
+        }
+        // A parenthesized optional return type: `-> (Int?)` is `-> Int?`, and
+        // so after an effect arrow `-[E]> (Int?)`.
+        if (fl_kind(kept, index - 1) == TOKEN_UNIFIED_ARROW || (fl_kind(kept, index - 1) == TOKEN_GT && fl_kind(kept, index - 2) == TOKEN_RBRACKET)) && kept[index].kind == TOKEN_LPAREN && fl_is_ident(kept, index + 1) && fl_kind(kept, index + 2) == TOKEN_QUESTION && fl_kind(kept, index + 3) == TOKEN_RPAREN {
+            canonical.push(kept[index + 1])
+            canonical.push(kept[index + 2])
+            index += 4
+            next
+        }
+        // A foreign declaration's return type may omit `->`:
+        // `fn(a: Int) Int = "sym"` is `fn(a: Int) -> Int = "sym"`.
+        if fl_bare_foreign_return(kept, index) {
+            canonical.push(kept[index])
+            canonical.push(fl_synthetic(TOKEN_UNIFIED_ARROW, "->"))
+            index += 1
+            next
+        }
+        // A late effect row parses to the leading one:
+        // `fn() -> String -[E]>` is `fn() -[E]> String`.
+        late_row_end: fl_late_effect_row_end(kept, index)
+        if late_row_end > 0 {
+            loop cursor in index + 2..<late_row_end -> canonical.push(kept[cursor])
+            canonical.push(kept[index + 1])
+            index = late_row_end
+            next
+        }
+        // `T: A | B` in a generic parameter list is `T: [A, B]`.
+        bounds_end: fl_piped_generic_bounds_end(kept, index)
+        if bounds_end > 0 {
+            canonical.push(fl_synthetic(TOKEN_LBRACKET, "["))
+            loop cursor in index..<bounds_end {
+                if kept[cursor].kind == TOKEN_PIPE -> canonical.push(fl_synthetic(TOKEN_COMMA, ",")) else -> canonical.push(kept[cursor])
+            }
+            canonical.push(fl_synthetic(TOKEN_RBRACKET, "]"))
+            index = bounds_end
             next
         }
         canonical.push(kept[index])
         index += 1
     }
-    canonical
+    fl_drop_and_groups_in_or(fl_flatten_use_groups(canonical))
 }
 
-// `name: a.b.name` inside a use declaration, where the alias repeats the
-// path's last segment.
+// `&&` binds tighter than `||`, so parentheses around an `&&` chain that is a
+// direct `||` operand group nothing: `(a && b) || c` is `a && b || c`.
+fl_drop_and_groups_in_or: fn(tokens: [FmtTok]) -> [FmtTok] {
+    dropped := [Bool]{}
+    loop _ in 0..<tokens.len() -> dropped.push(false)
+    loop index in 0..<tokens.len() {
+        if tokens[index].kind != TOKEN_LPAREN -> next
+        before: fl_kind(tokens, index - 1)
+        close: fl_matching(tokens, index, TOKEN_LPAREN, TOKEN_RPAREN)
+        if close < 0 -> next
+        after: fl_kind(tokens, close + 1)
+        if before != TOKEN_OR_OR && after != TOKEN_OR_OR -> next
+        if !fl_logic_operand_left_edge(before) || !fl_logic_operand_right_edge(tokens, close + 1) -> next
+        depth := 0
+        and_chain := false
+        loop cursor in index + 1..<close {
+            kind: tokens[cursor].kind
+            if fl_is_opener(kind) -> depth += 1
+            if fl_is_closer(kind) -> depth -= 1
+            if depth != 0 -> next
+            if kind == TOKEN_AND_AND -> and_chain = true
+            // Only `&&` and operands tighter than it may sit at the top level.
+            if kind == TOKEN_OR_OR || kind == TOKEN_COMMA || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_PIPE {
+                and_chain = false
+                break
+            }
+        }
+        if !and_chain -> next
+        dropped[index] = true
+        dropped[close] = true
+    }
+    out := [FmtTok]{}
+    loop index in 0..<tokens.len() {
+        if !dropped[index] -> out.push(tokens[index])
+    }
+    out
+}
+
+// A token that ends the expression context before a logic operand group.
+fl_logic_operand_left_edge: fn(kind: Int) -> Bool {
+    kind == TOKEN_OR_OR || kind == TOKEN_AND_AND || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_COMMA || kind == TOKEN_COLON || kind == TOKEN_EQ || kind == TOKEN_KW_IF || kind == TOKEN_KW_ELSE || kind == TOKEN_RETURN || kind == TOKEN_UNIFIED_ARROW
+}
+
+// The token after a logic operand group binds no tighter than `&&`.
+fl_logic_operand_right_edge: fn(tokens: [FmtTok], index: Int) -> Bool {
+    kind: fl_kind(tokens, index)
+    if kind == TOKEN_IDENT -> return tokens[index].text != FL_KW_AS
+    kind == TOKEN_OR_OR || kind == TOKEN_AND_AND || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_RBRACE || kind == TOKEN_LBRACE || kind == TOKEN_COMMA || kind == TOKEN_EOF || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_KW_IF || kind == TOKEN_KW_LOOP || kind == TOKEN_RETURN
+}
+
+// A `use { … }` group and one `use` per row parse to the same imports: each
+// group row gets its own `use` keyword and the group braces go.
+fl_flatten_use_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
+    out := [FmtTok]{}
+    index := 0
+    loop index < tokens.len() {
+        if tokens[index].kind == TOKEN_KW_USE && fl_kind(tokens, index + 1) == TOKEN_LBRACE {
+            close: fl_matching(tokens, index + 1, TOKEN_LBRACE, TOKEN_RBRACE)
+            if close > index + 1 {
+                depth := 0
+                loop cursor in index + 2..<close {
+                    kind: tokens[cursor].kind
+                    if depth == 0 && fl_use_row_start(tokens, index + 1, cursor) -> out.push(tokens[index].copy())
+                    if fl_is_opener(kind) -> depth += 1
+                    if fl_is_closer(kind) -> depth -= 1
+                    out.push(tokens[cursor].copy())
+                }
+                index = close + 1
+                next
+            }
+        }
+        out.push(tokens[index].copy())
+        index += 1
+    }
+    out
+}
+
+// Whether `cursor`, at the top level of the use group opened at `open`,
+// starts an import row. Comments ride with the row after them.
+fl_use_row_start: fn(tokens: [FmtTok], open: Int, cursor: Int) -> Bool {
+    kind: tokens[cursor].kind
+    if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return false
+    if kind != TOKEN_IDENT && kind != TOKEN_STRING && kind != TOKEN_HASH && kind != TOKEN_KW_PUB -> return false
+    if kind == TOKEN_IDENT && tokens[cursor].text == FL_KW_AS -> return false
+    if cursor == open + 1 -> return true
+    previous: tokens[cursor - 1]
+    if previous.kind == TOKEN_LINE_COMMENT || previous.kind == TOKEN_BLOCK_COMMENT -> return true
+    if previous.kind == TOKEN_DOT || previous.kind == TOKEN_COLON || previous.kind == TOKEN_LBRACKET || previous.kind == TOKEN_COMMA || previous.kind == TOKEN_HASH || previous.kind == TOKEN_KW_PUB -> return false
+    !(previous.kind == TOKEN_IDENT && previous.text == FL_KW_AS)
+}
+
+// A token inside a use declaration: directly after `use`, a row of a
+// `use { … }` group, or within one import path.
+fl_in_use: fn(tokens: [FmtTok], index: Int) -> Bool {
+    open: fl_enclosing_brace(tokens, index)
+    if open >= 0 && fl_kind(tokens, open - 1) == TOKEN_KW_USE -> return true
+    cursor := index - 1
+    loop cursor >= 0 && (fl_kind(tokens, cursor) == TOKEN_IDENT || fl_kind(tokens, cursor) == TOKEN_DOT || fl_kind(tokens, cursor) == TOKEN_COLON) -> cursor -= 1
+    fl_kind(tokens, cursor) == TOKEN_KW_USE
+}
+
+// `name: a.b.name` or `name: name` inside a use declaration, where the alias
+// repeats the path's last segment.
 fl_redundant_default_module_alias: fn(tokens: [FmtTok], index: Int) -> Bool {
     if fl_kind(tokens, index) != TOKEN_IDENT || fl_kind(tokens, index + 1) != TOKEN_COLON || fl_kind(tokens, index + 2) != TOKEN_IDENT -> return false
     open: fl_enclosing_brace(tokens, index)
@@ -177,7 +387,108 @@ fl_redundant_default_module_alias: fn(tokens: [FmtTok], index: Int) -> Bool {
     loop fl_kind(tokens, last + 1) == TOKEN_DOT && fl_kind(tokens, last + 2) == TOKEN_IDENT -> last += 2
     after: fl_kind(tokens, last + 1)
     if after == TOKEN_DOT || after == TOKEN_LBRACKET -> return false
-    last > index + 2 && tokens[last].text == tokens[index].text
+    tokens[last].text == tokens[index].text
+}
+
+// `name: "dir/name"` inside a use declaration: the alias repeats the file
+// path's last segment.
+fl_redundant_file_binding_alias: fn(tokens: [FmtTok], index: Int) -> Bool {
+    if fl_kind(tokens, index) != TOKEN_IDENT || fl_kind(tokens, index + 1) != TOKEN_COLON || fl_kind(tokens, index + 2) != TOKEN_STRING -> return false
+    open: fl_enclosing_brace(tokens, index)
+    in_use: fl_kind(tokens, index - 1) == TOKEN_KW_USE || (open >= 0 && fl_kind(tokens, open - 1) == TOKEN_KW_USE)
+    if !in_use -> return false
+    path: fl_plain_string_value(tokens[index + 2].parts) ?? return false
+    segments: path.split("/").to_list()
+    segments[segments.len() - 1] == tokens[index].text
+}
+
+// `.[name]` after a dotless module name in a use declaration.
+fl_single_member_import_list: fn(tokens: [FmtTok], index: Int) -> Bool {
+    if fl_kind(tokens, index) != TOKEN_DOT || fl_kind(tokens, index + 1) != TOKEN_LBRACKET || fl_kind(tokens, index + 2) != TOKEN_IDENT || fl_kind(tokens, index + 3) != TOKEN_RBRACKET -> return false
+    if fl_kind(tokens, index - 1) != TOKEN_IDENT || fl_kind(tokens, index - 2) == TOKEN_DOT -> return false
+    fl_in_use(tokens, index)
+}
+
+// `&name:` or `&&name:` opening a parameter, after any bare `#Marker`.
+fl_leading_param_sigil: fn(tokens: [FmtTok], index: Int) -> Bool {
+    kind: fl_kind(tokens, index)
+    if kind != TOKEN_AMP && kind != TOKEN_AND_AND -> return false
+    if fl_kind(tokens, index + 1) != TOKEN_IDENT || fl_kind(tokens, index + 2) != TOKEN_COLON -> return false
+    head := index - 1
+    loop fl_kind(tokens, head) == TOKEN_IDENT && fl_kind(tokens, head - 1) == TOKEN_HASH -> head -= 2
+    before: fl_kind(tokens, head)
+    before == TOKEN_LPAREN || before == TOKEN_COMMA
+}
+
+// `T: A | B` in a `fn<…>` or `struct<…>` parameter list parses to the bound
+// list `T: [A, B]`. The end of the bounds starting at `index`, or -1.
+fl_piped_generic_bounds_end: fn(tokens: [FmtTok], index: Int) -> Int {
+    if fl_kind(tokens, index) != TOKEN_IDENT || fl_kind(tokens, index - 1) != TOKEN_COLON || fl_kind(tokens, index - 2) != TOKEN_IDENT -> return -1
+    end := index + 1
+    loop fl_kind(tokens, end) == TOKEN_PIPE && fl_kind(tokens, end + 1) == TOKEN_IDENT -> end += 2
+    if end == index + 1 || (fl_kind(tokens, end) != TOKEN_COMMA && fl_kind(tokens, end) != TOKEN_GT) -> return -1
+    // Back over the earlier parameters, `Name` or `Name: bounds`, to the `<`.
+    cursor := index - 3
+    loop cursor >= 0 && fl_generic_param_token(tokens[cursor].kind) -> cursor -= 1
+    if fl_kind(tokens, cursor) != TOKEN_LT -> return -1
+    owner: fl_kind(tokens, cursor - 1)
+    if owner == TOKEN_KW_FN || owner == TOKEN_KW_STRUCT -> end else -> -1
+}
+
+fl_generic_param_token: fn(kind: Int) -> Bool {
+    kind == TOKEN_IDENT || kind == TOKEN_PIPE || kind == TOKEN_COLON || kind == TOKEN_COMMA || kind == TOKEN_LBRACKET || kind == TOKEN_RBRACKET
+}
+
+// `-> Type -[E]>`: a single-name return type before a late effect row. The
+// index after the row's `>`, or -1.
+fl_late_effect_row_end: fn(tokens: [FmtTok], index: Int) -> Int {
+    if fl_kind(tokens, index) != TOKEN_UNIFIED_ARROW || fl_kind(tokens, index + 1) != TOKEN_IDENT || fl_kind(tokens, index + 2) != TOKEN_MINUS || fl_kind(tokens, index + 3) != TOKEN_LBRACKET -> return -1
+    close: fl_matching(tokens, index + 3, TOKEN_LBRACKET, TOKEN_RBRACKET)
+    if close < 0 || fl_kind(tokens, close + 1) != TOKEN_GT -> return -1
+    close + 2
+}
+
+// `fn(a: Int) Int = "sym"`: a foreign declaration's return type written
+// without `->`, which the parser reads as `fn(a: Int) -> Int = "sym"`. True at
+// the parameter list's `)` when a type follows and the declaration ends at
+// `= "…"`.
+fl_bare_foreign_return: fn(tokens: [FmtTok], index: Int) -> Bool {
+    if fl_kind(tokens, index) != TOKEN_RPAREN -> return false
+    after: fl_kind(tokens, index + 1)
+    if after != TOKEN_IDENT && after != TOKEN_QUESTION && after != TOKEN_LBRACKET && after != TOKEN_LPAREN -> return false
+    depth := 0
+    open := index
+    loop open >= 0 {
+        kind: tokens[open].kind
+        if kind == TOKEN_RPAREN -> depth += 1
+        if kind == TOKEN_LPAREN -> depth -= 1
+        if depth == 0 -> break
+        open -= 1
+    }
+    if open < 1 || tokens[open - 1].kind != TOKEN_KW_FN -> return false
+    depth = 0
+    cursor := index + 1
+    loop cursor < tokens.len() {
+        kind: tokens[cursor].kind
+        if {
+            kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LT -> depth += 1
+            kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || kind == TOKEN_GT -> depth -= 1
+            kind == TOKEN_EQ && depth == 0 -> return fl_kind(tokens, cursor + 1) == TOKEN_STRING
+            kind == TOKEN_COMMA && depth == 0 -> return false
+            kind == TOKEN_LBRACE || kind == TOKEN_RBRACE || kind == TOKEN_BANG || kind == TOKEN_MINUS || kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_KW_FN -> return false
+            else -> {}
+        }
+        if depth < 0 -> return false
+        cursor += 1
+    }
+    false
+}
+
+// The type name `Unit`, not a path head, call or constructor.
+fl_unit_type_name: fn(tokens: [FmtTok], index: Int) -> Bool {
+    if fl_kind(tokens, index) != TOKEN_IDENT || tokens[index].text != FL_TYPE_UNIT -> return false
+    after: fl_kind(tokens, index + 1)
+    after != TOKEN_DOT && after != TOKEN_LPAREN && after != TOKEN_LT && after != TOKEN_COLON
 }
 
 fl_is_opener: fn(kind: Int) -> Bool { kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET }
@@ -223,6 +534,9 @@ fl_control_body_end: fn(tokens: [FmtTok], arrow: Int) -> Int {
             next
         }
         if depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_EOF || kind == TOKEN_KW_ELSE) -> return cursor
+        // The lexer's line-break `;` follows the comments before the next
+        // statement; a comment on its own line already sits after the body.
+        if depth == 0 && tokens[cursor].own_line && cursor > arrow + 1 -> return cursor
     }
     tokens.len()
 }
@@ -253,6 +567,88 @@ fl_canonicalize_control_arrow_bodies: fn(tokens: [FmtTok]) -> [FmtTok] {
     }
     loop _ in 0..<closes[tokens.len()] -> out.push(fl_synthetic(TOKEN_RBRACE, "}}"))
     out
+}
+
+// A function type keeps no names for its positional parameters (labels follow
+// `*`), and `from name` names a parameter by its synthetic `_N` owner, so
+// `fn(line: String) -> View<str> from line` is `fn(String) -> View<str> from _0`.
+fl_canonicalize_fn_type_names: fn(tokens: [FmtTok]) -> [FmtTok] {
+    dropped := [Bool]{}
+    loop _ in 0..<tokens.len() -> dropped.push(false)
+    renamed := [String:String]{}
+    out := [FmtTok]{}
+    loop index in 0..<tokens.len() {
+        if tokens[index].kind != TOKEN_KW_FN || fl_kind(tokens, index + 1) != TOKEN_LPAREN -> next
+        close: fl_matching(tokens, index + 1, TOKEN_LPAREN, TOKEN_RPAREN)
+        if close < 0 || fl_fn_has_body(tokens, close) -> next
+        names := [String:Int]{}
+        position := 0
+        depth := 0
+        labels := false
+        loop cursor in index + 2..<close {
+            kind: tokens[cursor].kind
+            if fl_is_opener(kind) || kind == TOKEN_LT {
+                depth += 1
+                next
+            }
+            if fl_is_closer(kind) || kind == TOKEN_GT {
+                depth -= 1
+                next
+            }
+            if depth != 0 -> next
+            if kind == TOKEN_STAR {
+                labels = true
+                next
+            }
+            starts: fl_kind(tokens, cursor - 1) == TOKEN_LPAREN || fl_kind(tokens, cursor - 1) == TOKEN_COMMA
+            if starts && kind != TOKEN_SLASH {
+                if !labels && kind == TOKEN_IDENT && fl_kind(tokens, cursor + 1) == TOKEN_COLON {
+                    dropped[cursor] = true
+                    dropped[cursor + 1] = true
+                    names[tokens[cursor].text] = position
+                }
+                position += 1
+            }
+        }
+        // `from line | other`: each named source after the return type.
+        cursor := close + 1
+        loop cursor < tokens.len() && tokens[cursor].kind != TOKEN_SEMI && tokens[cursor].kind != TOKEN_COMMA && !fl_is_closer(tokens[cursor].kind) && tokens[cursor].kind != TOKEN_LBRACE {
+            if fl_is_ident(tokens, cursor) && tokens[cursor].text == FL_KW_FROM {
+                source := cursor + 1
+                loop fl_is_ident(tokens, source) {
+                    if names.get(tokens[source].text) == .Val(slot) -> renamed["{source}"] = "_{slot}"
+                    if fl_kind(tokens, source + 1) != TOKEN_PIPE -> break
+                    source += 2
+                }
+                break
+            }
+            cursor += 1
+        }
+    }
+    loop index in 0..<tokens.len() {
+        if dropped[index] -> next
+        if renamed.get("{index}") == .Val(name) {
+            out.push(fl_synthetic(TOKEN_IDENT, name))
+            next
+        }
+        out.push(tokens[index])
+    }
+    out
+}
+
+// A `{` body follows the parameter list that closes at `close` before the
+// declaration ends.
+fl_fn_has_body: fn(tokens: [FmtTok], close: Int) -> Bool {
+    depth := 0
+    loop cursor in close + 1..<tokens.len() {
+        kind: tokens[cursor].kind
+        if depth == 0 && kind == TOKEN_LBRACE -> return true
+        if depth == 0 && (kind == TOKEN_SEMI || kind == TOKEN_EOF || kind == TOKEN_COMMA || kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET) -> return false
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET || kind == TOKEN_LT -> depth += 1
+        // The `>` closing an effect arrow `-[E]>` closes no `<`.
+        if kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET || (kind == TOKEN_GT && depth > 0) -> depth -= 1
+    }
+    false
 }
 
 fl_all_trivia: fn(tokens: [FmtTok]) -> Bool {
@@ -303,11 +699,21 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
                 rest.push(token)
             }
         }
+        // fmt prints imports first, so an import after the directive emits the
+        // comments the spanless directive cannot hold; otherwise the next item.
         target := -1
         loop candidate in directive + 1..<groups.len() {
-            if groups[candidate].category == 3 {
+            if groups[candidate].category == 1 {
                 target = candidate
                 break
+            }
+        }
+        if target < 0 {
+            loop candidate in directive + 1..<groups.len() {
+                if groups[candidate].category == 3 {
+                    target = candidate
+                    break
+                }
             }
         }
         // Rust drains the displaced trivia even when no item follows.
@@ -320,7 +726,10 @@ fl_canonicalize_file_prefix: fn(tokens: [FmtTok]) -> [FmtTok] {
     loop import in 0..<groups.len() {
         if groups[import].category != 1 -> next
         hoisted := [FmtTok]{}
+        // An earlier import keeps its own comments: fmt prints every import in
+        // one `use` group under the first import's comments.
         loop earlier in 0..<import {
+            if groups[earlier].category == 1 -> next
             retained := [FmtTok]{}
             depth := 0
             loop token in groups[earlier].tokens {
@@ -645,6 +1054,12 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
             formatted_i = union.formatted
             next
         }
+        tuple: fl_reordered_named_tuple_type(original, original_i, formatted, formatted_i)
+        if tuple.ok {
+            original_i = tuple.original
+            formatted_i = tuple.formatted
+            next
+        }
         if fl_typed_literal_dot_rewrite(original, original_i, formatted, formatted_i) {
             original_i += 1
             next
@@ -677,11 +1092,20 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
             formatted_i += 2
             next
         }
+        // The other direction: fmt contracts `z: z` to the shorthand `z`.
+        if fl_formatted_struct_shorthand_expansion(original, original_i) {
+            original_i += 2
+            next
+        }
         if fl_formatted_default_module_alias(formatted, formatted_i) {
             formatted_i += 2
             next
         }
         if fl_formatted_struct_separator(formatted, formatted_i) {
+            formatted_i += 1
+            next
+        }
+        if fl_formatted_loop_header_comma(formatted, formatted_i) && fl_kind(original, original_i) == TOKEN_LBRACE {
             formatted_i += 1
             next
         }
@@ -692,6 +1116,28 @@ fl_ordered_token_diff: fn(path: String, original: [FmtTok], formatted: [FmtTok])
     ""
 }
 
+// The `,` a wrapped `loop` header ends with before its `{` body.
+fl_formatted_loop_header_comma: fn(tokens: [FmtTok], index: Int) -> Bool {
+    if fl_kind(tokens, index) != TOKEN_COMMA || fl_kind(tokens, index + 1) != TOKEN_LBRACE -> return false
+    depth := 0
+    cursor := index - 1
+    loop cursor >= 0 {
+        kind: tokens[cursor].kind
+        if fl_is_closer(kind) {
+            depth += 1
+        } else if fl_is_opener(kind) {
+            if depth == 0 -> return false
+            depth -= 1
+        } else if depth == 0 && kind == TOKEN_COMMA {
+            return false
+        } else if depth == 0 && kind == TOKEN_KW_LOOP {
+            return true
+        }
+        cursor -= 1
+    }
+    false
+}
+
 fl_reordered_simple_union_type: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> FmtStep {
     if !fl_simple_union_type_annotation(original, original_i) || !fl_simple_union_type_annotation(formatted, formatted_i) -> return fl_no_step()
     left: fl_simple_union_members(original, original_i)
@@ -699,6 +1145,36 @@ fl_reordered_simple_union_type: fn(original: [FmtTok], original_i: Int, formatte
     if left.end < 0 || right.end < 0 -> return fl_no_step()
     if fl_sorted(left.members) != fl_sorted(right.members) -> return fl_no_step()
     FmtStep{ok: true, original: left.end, formatted: right.end}
+}
+
+// A named tuple type orders its members by label (the parser's
+// `type_tuple_fields_canonical`), so `(key: String, index: Int)` and
+// `(index: Int, key: String)` are one type.
+fl_reordered_named_tuple_type: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> FmtStep {
+    left: fl_named_tuple_type_members(original, original_i)
+    right: fl_named_tuple_type_members(formatted, formatted_i)
+    if left.end < 0 || right.end < 0 -> return fl_no_step()
+    if fl_sorted(left.members) != fl_sorted(right.members) -> return fl_no_step()
+    FmtStep{ok: true, original: left.end, formatted: right.end}
+}
+
+// The members of `(label: Type, …)` whose first label is at `start`, every
+// member type one capitalized name; `end` is the index after `)`, or -1.
+fl_named_tuple_type_members: fn(tokens: [FmtTok], start: Int) -> (members: [String], end: Int) {
+    none: (members: [String]{}, end: -1)
+    if fl_kind(tokens, start - 1) != TOKEN_LPAREN -> return none
+    members := [String]{}
+    cursor := start
+    loop {
+        if !fl_is_ident(tokens, cursor) || fl_kind(tokens, cursor + 1) != TOKEN_COLON || !fl_is_ident(tokens, cursor + 2) || !fl_uppercase_start(tokens[cursor + 2].text) -> return none
+        members.push("{tokens[cursor].text}: {tokens[cursor + 2].text}")
+        after: fl_kind(tokens, cursor + 3)
+        if after == TOKEN_RPAREN -> break
+        if after != TOKEN_COMMA -> return none
+        cursor += 4
+    }
+    if members.len() < 2 -> return none
+    (members: members, end: cursor + 4)
 }
 
 fl_typed_literal_dot_rewrite: fn(original: [FmtTok], original_i: Int, formatted: [FmtTok], formatted_i: Int) -> Bool {
@@ -1004,23 +1480,65 @@ fl_is_config: fn(path: String) -> Bool {
 fl_parse_invalid: fn(src: String) -> Bool {
     lexed: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return true
+    // fmt refuses a malformed inline `package:` carrier (E1360-E1362) before it parses.
+    if jet_driver_inline_package(src).error != None -> return true
     !jfmt_check_parse_accepts(parse_source(src.bytes()).diagnostics)
 }
 
-// Run from the repository root. Known failing: #6005 c18 owns this corpus pass
-// (146 token-stream failures).
-#Test("fmt_is_lossless_on_supported_source_corpus", expected_fail: true) {
+// A fixture whose parse recovers through a teaching diagnostic (or E0081)
+// spells a retired or invalid form on purpose; fmt rewrites it to canon.
+fl_teaching_codes: fn(src: String) -> [String] {
+    codes := [String]{}
+    loop diagnostic in parse_source(src.bytes()).diagnostics {
+        if jfmt_is_teaching_parse_diag(diagnostic.code) || diagnostic.code == FL_CODE_BODYLESS_FN -> codes.push(diagnostic.code.copy())
+    }
+    codes
+}
+
+// "" when the canonical rewrite of a teaching fixture lexes and parses with no
+// teaching diagnostic left. A teaching diagnostic with no mechanical canon (a
+// one-member marker group needs the author's choice) stays exactly as written:
+// the same teaching codes and every ordered token kept.
+fl_check_rewrites_to_canon: fn(path: String, src: String, formatted: String) -> String {
+    if fl_lex_codes(formatted) != "" -> return "fmt output does not lex on {path}:{fl_lex_codes(formatted)}"
+    if fl_parse_invalid(formatted) -> return "fmt output of teaching fixture {path} does not parse"
+    left: fl_teaching_codes(formatted)
+    if left.len() == 0 -> return ""
+    if left.join(", ") == fl_teaching_codes(src).join(", ") && fl_ordered_sources_diff(src, formatted) == "" -> return ""
+    "fmt left teaching diagnostics {left.join(", ")} on {path}"
+}
+
+// An FFI adaptation's `after.jet` shows the generated facade, whose
+// `__jet_ffi_` binders lex only in the compiler-reserved lane (E0067). It is
+// generated projection output, not user program source.
+fl_is_generated_projection: fn(path: String, src: String) -> Bool {
+    if fl_file_name(path) != FL_ADAPTATION_AFTER_FILE -> return false
+    diagnostics: lex(src.bytes()).diagnostics
+    if diagnostics.len() == 0 -> return false
+    loop diagnostic in diagnostics {
+        if diagnostic.code != FL_CODE_RESERVED_NAME -> return false
+    }
+    true
+}
+
+// Run from the repository root.
+#Test("fmt_is_lossless_on_supported_source_corpus") {
     example_files: fl_collect_sorted("Examples")
     ui_files: fl_collect_sorted("tests/ui")
     failures := [String]{}
     example_programs := 0
     example_configs := 0
+    example_generated := 0
     loop path in example_files {
         if fl_is_config(path) {
             example_configs += 1
             next
         }
         src: fl_files.read(path.copy()) ?? panic("cannot read {path}: {err}")
+        if fl_is_generated_projection(path, src) {
+            example_generated += 1
+            next
+        }
         formatted: fl_format(src)
         if !formatted.ok {
             failures.push("example program failed to parse for fmt on {path}:{formatted.codes}")
@@ -1060,6 +1578,9 @@ fl_parse_invalid: fn(src: String) -> Bool {
             formatted: fl_format(src)
             if !formatted.ok {
                 failures.push("parse-valid UI fixture failed formatter parse on {path}:{formatted.codes}")
+            } else if fl_teaching_codes(src).len() > 0 {
+                problem: fl_check_rewrites_to_canon(path, src, formatted.text)
+                if problem != "" -> failures.push(problem)
             } else {
                 problem: fl_check_preserves(path, src, formatted.text)
                 if problem != "" -> failures.push(problem)
@@ -1069,7 +1590,7 @@ fl_parse_invalid: fn(src: String) -> Bool {
     }
     assert(mismatches.len() == 0, "UI corpus parser-validity mismatches ({mismatches.len()} found):\n{mismatches.join("\n")}")
     assert(failures.len() == 0, "formatter token-stream failures ({failures.len()} found):\n{failures.join("\n")}")
-    assert(example_files.len() == example_programs + example_configs, "every example .jet file must be program source or explicit package/workspace config")
+    assert(example_files.len() == example_programs + example_configs + example_generated, "every example .jet file must be program source, explicit package/workspace config or a generated adaptation facade")
     assert(ui_files.len() == ui_parse_valid + ui_parse_invalid + ui_configs, "every UI .jet fixture must be classified by its actual formatter parse result")
     loop index in 1..<pinned.len() -> assert(fl_text_before(pinned[index - 1], pinned[index]), "UI parse-invalid manifest must be sorted and duplicate-free: {pinned[index]}")
     assert(actual_invalid == pinned, "discovered parser-invalid UI set must exactly equal the pinned manifest")
@@ -1101,6 +1622,28 @@ fl_parse_invalid: fn(src: String) -> Bool {
         {"loop arrow body", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(i)\n}}\n"},
         {"if arrow body expanded", "run: fn() {{\n    if ok -> return 1\n    print(0)\n}}\n", "run: fn() {{\n    if ok {{\n        return 1\n    }}\n    print(0)\n}}\n"},
         {"else arrow bodies", "run: fn() {{\n    if ok {{\n        a()\n    }} else {{\n        b()\n    }}\n}}\n", "run: fn() {{\n    if ok -> a() else -> b()\n}}\n"},
+        {"redundant file binding alias", "use {{\n    store: \"./data/store\"\n}}\nrun: fn() {{}}\n", "use {{\n    \"./data/store\"\n}}\nrun: fn() {{}}\n"},
+        {"single-member import list", "use core.[files]\nrun: fn() {{}}\n", "use core.files\nrun: fn() {{}}\n"},
+        {"leading parameter sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: &&String) {{}}\n"},
+        {"unit type name", "f: fn() -> Unit {{}}\n", "f: fn() -> () {{}}\n"},
+        {"import grouping", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.files\n    core.term\n}}\nrun: fn() {{}}\n"},
+        {"named tuple type order", "f: fn(p: (x: Int, y: Int)) {{}}\n", "f: fn(p: (y: Int, x: Int)) {{}}\n"},
+        {"wrapped loop header comma", "run: fn() {{\n    loop x in [1, 2] {{\n        print(x)\n    }}\n}}\n", "run: fn() {{\n    loop x in\n        [1, 2], {{\n        print(x)\n    }}\n}}\n"},
+        {"empty marker parentheses", "#Inline()\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
+        {"function type parameter names", "S: struct {{ f: fn(line: String) -> View<str> from line }}\n", "S: struct {{ f: fn(String) -> View<str> from _0 }}\n"},
+        {"result type contract", "f: fn() -> Result<Int, IOError> {{ 1 }}\n", "f: fn() -> Int IOError! {{ 1 }}\n"},
+        {"optional return type parens", "f: fn() -> (Int?) {{ None }}\n", "f: fn() -> Int? {{ None }}\n"},
+        {"prefix declaration spelling", "S: struct {{ impl Marker {{ expand: fn(self, target: Target) {{ fn made() -> Int {{ 1 }} }} }} }}\n", "S: struct {{ impl Marker {{ expand: fn(self, target: Target) {{ made: fn() -> Int {{ 1 }} }} }} }}\n"},
+        {"and group in or", "run: fn() {{ print(a && b || c) }}\n", "run: fn() {{ print((a && b) || c) }}\n"},
+        {"arrow body before an own-line comment", "run: fn() {{\n    if a -> b()\n\n    // note\n    c()\n}}\n", "run: fn() {{\n    if a {{\n        b()\n    }}\n\n    // note\n    c()\n}}\n"},
+        {"spanless directive comment leads the next import", "// note\n#Target(Web)\nuse core.json\n\nrun: fn() {{}}\n", "// note\nuse core.json\n#Target(Web)\n\nrun: fn() {{}}\n"},
+        {"piped generic bounds", "twice: fn<T: A | B>(x: T) -> T {{ x }}\n", "twice: fn<T: [A, B]>(x: T) -> T {{ x }}\n"},
+        {"late effect row", "store: fn(g: fn() -> Int -[IO]>) {{}}\n", "store: fn(g: fn() -[IO]> Int) {{}}\n"},
+        {"optional return after an effect arrow", "pick: fn() -[]> (Window?) {{ None }}\n", "pick: fn() -[]> Window? {{ None }}\n"},
+        {"marked parameter sigil", "bad: fn(#Root &value: Int) {{}}\n", "bad: fn(#Root value: &Int) {{}}\n"},
+        {"pattern field shorthand", "run: fn() {{ if e == .Named{{z: z}} -> print(z) }}\n", "run: fn() {{ if e == .Named{{z}} -> print(z) }}\n"},
+        {"parameter names before an effect arrow", "close: fn(&&handle: Handle) -[FFI.Java]> {{}}\n", "close: fn(handle: &&Handle) -[FFI.Java]> {{}}\n"},
+        {"foreign return without an arrow", "#Import c.m: module {{\n    get: fn(a: Int) Int = \"get\"\n}}\n", "#Import c.m: module {{\n    get: fn(a: Int) -> Int = \"get\"\n}}\n"},
     }
     loop case in allowed {
         diff: fl_ordered_sources_diff(case[1], case[2])
@@ -1136,6 +1679,26 @@ fl_parse_invalid: fn(src: String) -> Bool {
         {"control-arrow rule keeps the body", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(0)\n}}\n"},
         {"control-arrow rule keeps the statement boundary", "run: fn() {{\n    loop i in 0..<3 {{\n        print(i)\n    }}\n    done()\n}}\n", "run: fn() {{\n    loop i in 0..<3 -> print(i) done()\n}}\n"},
         {"control-arrow rule leaves value-position arrows", "run: fn() {{\n    xs: loop i in 0..<3 -> i\n}}\n", "run: fn() {{\n    xs: loop i in 0..<3 {{ i }}\n}}\n"},
+        {"file-binding alias rule requires the default alias", "use {{\n    other: \"./data/store\"\n}}\nrun: fn() {{}}\n", "use {{\n    \"./data/store\"\n}}\nrun: fn() {{}}\n"},
+        {"single-member import rule keeps the member", "use core.[files]\nrun: fn() {{}}\n", "use core.term\nrun: fn() {{}}\n"},
+        {"sigil rule keeps the sigil", "f: fn(&&s: String) {{}}\n", "f: fn(s: String) {{}}\n"},
+        {"unit rule leaves a Unit value path", "run: fn() {{ x: Unit.default() }}\n", "run: fn() {{ x: ().default() }}\n"},
+        {"import grouping keeps import order", "use core.files\nuse core.term\nrun: fn() {{}}\n", "use {{\n    core.term\n    core.files\n}}\nrun: fn() {{}}\n"},
+        {"named tuple rule keeps member types", "f: fn(p: (x: Int, y: Int)) {{}}\n", "f: fn(p: (y: Int, x: Float)) {{}}\n"},
+        {"loop comma rule requires a loop header", "run: fn() {{\n    if ok {{\n        print(1)\n    }}\n}}\n", "run: fn() {{\n    if ok, {{\n        print(1)\n    }}\n}}\n"},
+        {"empty-paren rule keeps marker arguments", "#Inline(always)\nf: fn() {{}}\n", "#Inline\nf: fn() {{}}\n"},
+        {"function-type rule keeps declaration parameter names", "f: fn(line: String) {{}}\n", "f: fn(String) {{}}\n"},
+        {"function-type rule keeps labels", "S: struct {{ f: fn(*, label: Bool) }}\n", "S: struct {{ f: fn(*, Bool) }}\n"},
+        {"result rule keeps the error type", "f: fn() -> Result<Int, IOError> {{ 1 }}\n", "f: fn() -> Int ParseError! {{ 1 }}\n"},
+        {"optional-paren rule requires a return arrow", "run: fn() {{ x: (a?) }}\n", "run: fn() {{ x: a? }}\n"},
+        {"prefix-declaration rule keeps the name", "run: fn() {{ fn made() -> Int {{ 1 }} }}\n", "run: fn() {{ other: fn() -> Int {{ 1 }} }}\n"},
+        {"and-group rule keeps a negated group", "run: fn() {{ print(!(a && b) || c) }}\n", "run: fn() {{ print(!a && b || c) }}\n"},
+        {"and-group rule keeps a group under a tighter operator", "run: fn() {{ print(c || (a && b) == d) }}\n", "run: fn() {{ print(c || a && b == d) }}\n"},
+        {"arrow-body comment rule keeps a same-line comment in the body", "run: fn() {{\n    if a -> b() // note\n    c()\n}}\n", "run: fn() {{\n    if a {{\n        b()\n    }}\n    // note\n    c()\n}}\n"},
+        {"piped-bound rule keeps a union parameter type", "run: fn(x: Int | Float) {{}}\n", "run: fn(x: [Int, Float]) {{}}\n"},
+        {"late-effect-row rule keeps the row", "store: fn(g: fn() -> Int -[IO]>) {{}}\n", "store: fn(g: fn() -[FS]> Int) {{}}\n"},
+        {"pattern shorthand rule keeps a renamed binding", "run: fn() {{ if e == .Named{{z: y}} -> print(y) }}\n", "run: fn() {{ if e == .Named{{z}} -> print(y) }}\n"},
+        {"foreign-return rule keeps a function type parameter", "run: fn(cb: fn(Int) Int) {{}}\n", "run: fn(cb: fn(Int) -> Int) {{}}\n"},
     }
     loop case in paired_forbidden {
         assert(fl_ordered_sources_diff(case[1], case[2]) != "", "paired forbidden neighbor was accepted: {case[0]}")
@@ -1163,6 +1726,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/assign_in_condition.jet",
         "tests/ui/auto_derive_invalid_sign.jet",
         "tests/ui/bad_escape.jet",
+        "tests/ui/bidi_control_in_source.jet",
         "tests/ui/binpat_bad_width.jet",
         "tests/ui/binpat_multibyte_needs_endian.jet",
         "tests/ui/binpat_rest_not_final.jet",
@@ -1175,7 +1739,6 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/cffi_e3206_reserved_segment.jet",
         "tests/ui/cffi_e3261/run.jet",
         "tests/ui/cffi_enum_boundaries/cffi_enum_unknown_tag_width_stays_at_the_checked_boundary/run.jet",
-        "tests/ui/cffi_string_literal_interior_nul.jet",
         "tests/ui/chained_comparison_mixed_direction.jet",
         "tests/ui/char_escape_unknown.jet",
         "tests/ui/compiler_api/flow_pipe_shape_has_no_foreign_guess.jet",
@@ -1196,16 +1759,18 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/dunder_marker_not_generated.jet",
         "tests/ui/dunder_reserved.jet",
         "tests/ui/e0001_unprintable_nul.jet",
-        "tests/ui/e2501_bad_handle_method.jet",
+        "tests/ui/e0063_at_applied_rule.jet",
+        "tests/ui/e0158_state_section_on_enum.jet",
+        "tests/ui/e0391_comptime_block_as_value.jet",
         "tests/ui/effects/effect_family_case_with_payload.jet",
         "tests/ui/effects/effect_irreversible_body_is_not_a_fact.jet",
         "tests/ui/empty_map_colon_retired.jet",
         "tests/ui/enum_backing_on_struct.jet",
         "tests/ui/enum_group_payload.jet",
         "tests/ui/enum_multi_positional_payload.jet",
-        "tests/ui/env_config_decode_error.jet",
-        "tests/ui/env_config_secret_redacted.jet",
         "tests/ui/error_contract_union_needs_parens.jet",
+        "tests/ui/fact_plane_type_position.jet",
+        "tests/ui/fact_read_type_position.jet",
         "tests/ui/fact_root_unknown.jet",
         "tests/ui/fact_root_unknown_dollar_word.jet",
         "tests/ui/fenced_name_bad_position.jet",
@@ -1222,15 +1787,11 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/generics/generic_call_diagnostics_cover_arity_and_bound_failures_4.jet",
         "tests/ui/if_expr_missing_else.jet",
         "tests/ui/impl_generic_head_teaches_bare_type.jet",
-        "tests/ui/import_cycle/b.jet",
-        "tests/ui/import_cycle/run.jet",
-        "tests/ui/inline_package_conflict/run.jet",
         "tests/ui/inline_package_cycle/run.jet",
         "tests/ui/inline_package_duplicate.jet",
         "tests/ui/inline_package_malformed.jet",
         "tests/ui/inline_package_not_first.jet",
         "tests/ui/inline_package_stale_lock/run.jet",
-        "tests/ui/inline_package_traversal.jet",
         "tests/ui/inline_range_nonliteral_bound.jet",
         "tests/ui/interp_debug_label_empty.jet",
         "tests/ui/interp_empty.jet",
@@ -1259,8 +1820,8 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/migration_unknown_op.jet",
         "tests/ui/module_unknown_namespace.jet",
         "tests/ui/module_wildcard.jet",
+        "tests/ui/module_wildcard_core_root.jet",
         "tests/ui/modules/env_role_module_field_without_call_commas_reports_once.jet",
-        "tests/ui/move_mark_borrowed.jet",
         "tests/ui/named_pattern_mixed_positions.jet",
         "tests/ui/nested_option.jet",
         "tests/ui/off_debug_attr_on_expression.jet",
@@ -1291,9 +1852,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/result_handler_missing_failure.jet",
         "tests/ui/return_arrow_split.jet",
         "tests/ui/run_entry/script_top_level_recovery_always_consumes_a_token.jet",
-        "tests/ui/runtime_e3014.jet",
         "tests/ui/schedule_every_without_job.jet",
-        "tests/ui/sema_soundness/compound_updates_require_their_operator.jet",
         "tests/ui/shebang_not_at_file_start.jet",
         "tests/ui/shield_arguments.jet",
         "tests/ui/source_nesting_limit.jet",
@@ -1329,6 +1888,7 @@ fl_ui_parse_invalid: fn() -> [String] {
         "tests/ui/unclosed_paren_call.jet",
         "tests/ui/uninit_no_type.jet",
         "tests/ui/union_codable_custom_shape_unknown.jet",
+        "tests/ui/unit_fallible_contract_precedes_effect_arrow.jet",
         "tests/ui/unit_family/bare_float_does_not_coerce_into_unit.jet",
         "tests/ui/unit_family_bad_denominator.jet",
         "tests/ui/unit_family_base_metadata.jet",

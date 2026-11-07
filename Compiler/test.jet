@@ -1,5 +1,5 @@
 // The compiler workspace's code suites, run by the test
-// profiles of package.jet: `jet test Compiler --profile jetpack`, `selfhost`
+// profiles of package.jet: `jet test Compiler --profile packages`, `selfhost`
 // or `perf`. Each runs in its own child, where JET names the jet under test
 // and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
 // parent. A row is one check; the profile compares the rows with
@@ -11,8 +11,11 @@ use {
     sys: core.sys
 }
 
-// The Jetpack packages a `jetpack` run tests at once.
-JETPACK_JOBS: 4
+// The packages a `packages` run tests at once.
+PACKAGE_JOBS: 4
+
+// The trees whose packages a `packages` run tests, from the checkout.
+PACKAGE_TREES: [String]{"Compiler", "Jetpack"}
 
 // What the compiler's deepest recursion needs, as the bootstrap chain gives it.
 BUILD_STACK: 1073741824
@@ -32,7 +35,7 @@ SELFHOST_STAGES: "Compiler/JetCli/.jet/selfhost"
 PERF_COLUMN: "225K"
 
 test: fn(t: Test) -> Int {
-    t.suite("jetpack", jetpack_rows)
+    t.suite("packages", package_suite_rows)
     t.suite("selfhost", selfhost_rows)
     t.suite("perf", perf_rows)
     t.run()
@@ -93,46 +96,83 @@ failure_line: fn(text: String) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// jetpack: one row per #Test of each Jetpack package, `<package>: <test>`,
-// from `jet test Jetpack/<package>`; the packages are each area and its
-// `Tests` package. A package whose tests didn't run is the failing row
-// `<package>`. Claims that drive the jet CLI run the jet under test, named
-// by JET_BIN as Jetpack/Bootstrap/check.sh names it.
-jetpack_rows: fn(rows: TestRows) {
+// packages: one row per #Test of every package under PACKAGE_TREES that the
+// `tests` suite doesn't run, `<package>: <test>`, from `jet test <package>`.
+// The `tests` suite runs the workspace members; this suite runs everything
+// else: each member's `Tests` package, the tool packages beside the members,
+// and every Jetpack package. A package whose tests didn't run (one that
+// doesn't compile, say) is the failing row `<package>`. Fixture packages are
+// test data, not packages under test. Claims that drive the jet CLI run the
+// jet under test, named by JET_BIN as Jetpack/Bootstrap/check.sh names it.
+package_suite_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
-    listed: files.list_dir(files.join(setup.checkout, "Jetpack")) ?? {
-        rows.fail("Jetpack", "couldn't list `Jetpack`: {err}")
+    members: workspace_members(setup) ?? {
+        rows.fail("Compiler", err.message)
         return
     }
     packages := [String]{}
-    loop entry in listed {
-        if !entry.is_dir -> next
-        if files.is_file(files.join(entry.path, "package.jet")) -> packages.push(entry.name.copy())
-        if files.is_file(files.join(entry.path, "Tests/package.jet")) {
-            packages.push("{entry.name}/Tests")
+    loop tree in PACKAGE_TREES {
+        package_dirs(setup.checkout, tree, members, packages) ?? {
+            rows.fail(tree, err.message)
+            return
         }
     }
     packages.sort()
     specs := [ProcessSpec]{}
     loop package in packages {
-        specs.push(jet_command(setup, setup.jet, [String]{"test", "Jetpack/{package}"}).env("JET_BIN", setup.jet))
+        specs.push(jet_command(setup, setup.jet, [String]{"test", package}).env("JET_BIN", setup.jet))
     }
-    results: process.run_all(specs, JETPACK_JOBS) ?? {
-        rows.fail("Jetpack", "couldn't start the package runs: {err}")
+    results: process.run_all(specs, PACKAGE_JOBS) ?? {
+        rows.fail("packages", "couldn't start the package runs: {err}")
         return
     }
     loop (index, package) in packages {
         if results[index] == {
-            .Ok(receipt) -> { jetpack_package_rows(rows, package, receipt) }
-            .Err(error) -> rows.fail(package, "couldn't run `jet test Jetpack/{package}`: {error}")
+            .Ok(receipt) -> { package_rows(rows, package, receipt) }
+            .Err(error) -> rows.fail(package, "couldn't run `jet test {package}`: {error}")
         }
+    }
+}
+
+// The member directories of the Compiler workspace, `Compiler/<member>`, from
+// the `members: [...]` list of its package.jet: the packages the `tests`
+// suite runs.
+workspace_members: fn(setup: SuiteSetup) -> [String] Err! {
+    path: files.join(setup.checkout, "Compiler/package.jet")
+    text: files.read(path) ?? return Err("couldn't read `{path}`: {err}")
+    start: text.find("members: [")
+    if start < 0 -> return Err("`{path}` has no `members: [` list")
+    rest: text.slice(start, text.len())
+    end: rest.find("]")
+    if end < 0 -> return Err("`{path}` doesn't close its `members` list")
+    members := [String]{}
+    loop (index, part) in rest.slice(0, end).split("\"").to_list() {
+        if index % 2 == 1 -> members.push("Compiler/{part}")
+    }
+    if members.len() == 0 -> return Err("`{path}` lists no members")
+    Ok(members)
+}
+
+// Adds every package directory at or below `relative` (from `checkout`) to
+// `found`, except the workspace root, the `members`, build output, hidden
+// directories and fixtures.
+package_dirs: fn(checkout: String, relative: String, members: [String], found: &[String]) Err! {
+    directory: files.join(checkout, relative)
+    if relative != "Compiler" && !members.contains(relative) && files.is_file(files.join(directory, "package.jet")) {
+        found.push(relative.copy())
+    }
+    listed: files.list_dir(directory) ?? return Err("couldn't list `{relative}`: {err}")
+    loop entry in listed {
+        if !entry.is_dir || entry.name.starts_with(".") || entry.name.ends_with(".fixture") -> next
+        if entry.name == "fixtures" || entry.name == "Fixtures" -> next
+        package_dirs(checkout, "{relative}/{entry.name}", members, found) ?? return Err(err.message)
     }
 }
 
 // A package's rows from its `<test>: <verdict>` lines; a run that ended
 // without a summary, or failed with no failing test, is the row `<package>`;
 // a package with no #Test blocks is that row, skipped.
-jetpack_package_rows: fn(rows: TestRows, package: String, receipt: ProcessReceipt) {
+package_rows: fn(rows: TestRows, package: String, receipt: ProcessReceipt) {
     if receipt.errors.contains("[jet.NoTestsFound]") || receipt.output.contains("[jet.NoTestsFound]") {
         rows.skip(package, "no #Test blocks")
         return
@@ -158,7 +198,7 @@ jetpack_package_rows: fn(rows: TestRows, package: String, receipt: ProcessReceip
     }
     if !summary || (!receipt.success && !failed) {
         detail: failure_line(receipt.errors)
-        rows.fail(package, "`jet test Jetpack/{package}` exited {receipt.code}: {if detail == "" -> failure_line(receipt.output) else -> detail}")
+        rows.fail(package, "`jet test {package}` exited {receipt.code}: {if detail == "" -> failure_line(receipt.output) else -> detail}")
     }
 }
 

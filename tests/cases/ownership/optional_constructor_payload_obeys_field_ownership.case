@@ -1,5 +1,10 @@
-# tests/ownership.rs::optional_constructor_payload_obeys_field_ownership: the original's literal expectations; Jet does not meet them yet (assert not satisfied, tests/known-failing.tsv).
+# tests/ownership.rs::optional_constructor_payload_obeys_field_ownership, migrated to the implicit-copy ownership model
+# (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet): `Val(first)` copies the Node into `second`, so `first` stays
+# live and the later `first.next = Val(second)` and reads are legal.
 fixture: optional_constructor_payload_obeys_field_ownership/input
 step: jet check run.jet
-exit: nonzero # tests/ownership.rs:6483 expect_err
-stderr: ~ "[jet.UseAfterMove]" # tests/ownership.rs:6484 assert!
+exit: 0 # tests/ownership.rs:6483
+stderr: !~ "[jet." # no diagnostic
+step: jet run run.jet
+exit: 0
+stdout: = "1\n2\n"

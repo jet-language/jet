@@ -9,6 +9,7 @@ use {
     cli_sys: core.sys
     prove_crypto: core.crypto
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_is_a11y_lint, jet_driver_present_diagnostics]
+    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     jet_foundation.[
         CanonicalJSONParser, ContractClause, DerivationDisposition, DerivationMethod, Diagnostic, DiagnosticMoment, Func, Item, Span,
         EvidenceExpectation, EvidenceKind, EvidenceOutcome, EvidenceRecord,
@@ -435,7 +436,7 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
         jet_cli_prove_field("compiler", jet_cli_compiler_identity() ?? "unversioned"),
         jet_cli_prove_field("jet_version", COMPILER_VERSION),
         jet_cli_prove_field("target", jet_cli_prove_triple()),
-        jet_cli_prove_field("profile", "dev"),
+        jet_cli_prove_field("profile", JET_BUILD_DEFAULT_PROFILE),
         jet_cli_prove_field("build_inputs", build_inputs),
         jet_cli_prove_field("lock", lock_digest),
     })
@@ -459,7 +460,7 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
         lock_digest: lock_digest,
         build_digest: build_digest,
         core_abi: core_abi,
-        profile: "dev",
+        profile: JET_BUILD_DEFAULT_PROFILE,
         mir_hash: mir_hash.copy(),
         mir_json: jet_cli_prove_mir_json(mir_hash, members),
     })
@@ -721,7 +722,7 @@ jet_cli_prove_tests: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             .env(EVIDENCE_REPORT_ID_ENV, "prove:{short}")
             .env(EVIDENCE_TOOLCHAIN_ENV, COMPILER_VERSION)
             .env(EVIDENCE_TARGET_ENV, jet_cli_prove_triple())
-            .env(EVIDENCE_PROFILE_ENV, "dev")
+            .env(EVIDENCE_PROFILE_ENV, identity.profile)
             .env(EVIDENCE_SOURCE_REVISION_ENV, identity.source_digest)
             .env(EVIDENCE_BUILD_REVISION_ENV, identity.build_digest)
             .env(EVIDENCE_REVISION_ENV, identity.mir_hash)
@@ -1280,7 +1281,7 @@ jet_cli_prove_report: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
     target: "{{\"inputSha256\":{foundation_json_quote(identity.input_sha256)},\"kind\":{foundation_json_quote(identity.kind)},\"members\":[{target_members.join(",")}],\"mir\":{identity.mir_json},\"root\":{foundation_json_quote(identity.root)}}}"
     triple: foundation_json_quote(jet_cli_prove_triple())
     tool: "{{\"jet\":{foundation_json_quote(COMPILER_VERSION)},\"proofProducer\":\"jet-prove\",\"targetTriple\":{triple}}}"
-    candidate: "{{\"source\":{{\"sha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"contentSha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"inputSha256\":{jet_cli_prove_digest_json(identity.input_sha256)}}},\"compiler\":{{\"sha256\":{jet_cli_prove_digest_json(identity.build_digest)},\"version\":{foundation_json_quote(COMPILER_VERSION)}}},\"configuration\":{{\"coreAbi\":{foundation_json_quote(identity.core_abi)},\"lockSha256\":{jet_cli_prove_digest_json(identity.lock_digest)},\"profile\":\"dev\"}},\"generatedArtifact\":{{\"semanticMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"optimizedMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"mir\":{identity.mir_json}}},\"targetTool\":{{\"triple\":{triple},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}"
+    candidate: "{{\"source\":{{\"sha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"contentSha256\":{jet_cli_prove_digest_json(identity.source_digest)},\"inputSha256\":{jet_cli_prove_digest_json(identity.input_sha256)}}},\"compiler\":{{\"sha256\":{jet_cli_prove_digest_json(identity.build_digest)},\"version\":{foundation_json_quote(COMPILER_VERSION)}}},\"configuration\":{{\"coreAbi\":{foundation_json_quote(identity.core_abi)},\"lockSha256\":{jet_cli_prove_digest_json(identity.lock_digest)},\"profile\":{foundation_json_quote(identity.profile)}}},\"generatedArtifact\":{{\"semanticMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"optimizedMirSha256\":{jet_cli_prove_digest_json(identity.mir_hash)},\"mir\":{identity.mir_json}}},\"targetTool\":{{\"triple\":{triple},\"adapter\":\"mir-v1\"}},\"proofModel\":{{\"id\":\"jet-prove-v1\"}},\"proofChecker\":{{\"id\":\"jet-prove-v1\"}}}}"
     result: jet_cli_prove_result(exit_code, tests, contracts, budgets, solver)
     text: "{{\"derivations\":[{derivations.join(",")}],\"diagnostics\":[{diagnostics.join(",")}],\"evidence\":[{evidence.join(",")}],\"evidencePolicy\":\"allow_incomplete\",\"grade\":{quoted_grade},\"exitCode\":{exit_code},\"result\":\"{result}\",\"schemaVersion\":1,\"candidateIdentity\":{candidate},\"summaries\":{summaries},\"target\":{target},\"tool\":{tool}}}"
     jet_cli_prove_canonical(text)

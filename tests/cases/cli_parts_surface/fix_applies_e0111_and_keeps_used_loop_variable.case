@@ -1,0 +1,12 @@
+# #6613 c1: on a loop that assigns a `:` binding, `jet fix` applies the
+# behavior-preserving E0111 `:` -> `:=` edit, and the loop variable the refused
+# assignment reads stays `n` (no unused-binding `_n` rename).
+fixture: fixtures/oops
+step: jet fix {work}/oops.jet
+env: NO_COLOR=1
+exit: 0
+file: oops.jet = oops-fixed.bytes
+step: jet run {work}/oops.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "6" # 1 + 2 + 3: the fixed loop still reads `n`

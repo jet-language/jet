@@ -388,11 +388,14 @@ jet_cli_rust_foreign_validate_output: fn(directory: cli_files.Directory) JetDriv
 // Each key's digest/provenance sidecars are not Cargo output: only that key's
 // builder publishes them (jet_cli_rust_foreign_publish_sidecars), so a copy
 // of the shared tree never carries another key's sidecars back over newer ones.
-// The private workspace's copy is never flushed: the workspace is deleted.
+// No helper crate's products are copied either: the build only reuses the
+// dependencies the helpers share, and its own crate's products are the ones
+// it is rebuilding. The private workspace's copy is never flushed: the
+// workspace is deleted.
 jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli_files.Directory) JetDriverRustForeignError! -[FS, Env]> {
     entries: source.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private Cargo output: {err}"))
     loop entry in entries {
-        if jet_cli_rust_foreign_unpublished(entry.name) -> next
+        if jet_cli_rust_foreign_unpublished(entry.name) || jet_cli_rust_foreign_helper_product(entry.name) -> next
         if !entry.name_is_unicode -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output contains a non-Unicode filename"))
         info: source.entry_stat(entry.name) ?? return Err(jet_cli_rust_foreign_io("couldn't stat private Cargo output: {err}"))
         if info.is_symlink || (!info.is_dir && !info.is_file) -> return Err(jet_cli_rust_foreign_sandbox_error("Cargo output `{entry.path}` is not a private regular file or directory"))
@@ -414,6 +417,11 @@ jet_cli_rust_foreign_copy_tree: fn(source: cli_files.Directory, destination: cli
 jet_cli_rust_foreign_unpublished: fn(name: String) -> Bool Never! {
     if name == ".jet-publication-lock" || name == "metadata-source" || name == "cargo-home" || name == "home" -> return true
     name.starts_with("jet_ffi_") && (name.ends_with(".sha256") || name.ends_with(".provenance"))
+}
+// A helper crate's own Cargo products (`jet_ffi_<key>-<hash>`,
+// `libjet_ffi_<key>.a`, ...), as opposed to the dependencies helpers share.
+jet_cli_rust_foreign_helper_product: fn(name: String) -> Bool Never! {
+    name.starts_with("jet_ffi_") || name.starts_with("libjet_ffi_")
 }
 // Publish validated private Cargo output into the shared target by rename.
 // The workspace lies on the cache's file system, so no byte is copied and
@@ -490,36 +498,12 @@ jet_cli_rust_foreign_verified: fn(plan: JetDriverRustForeignPlan, source: String
     Ok(provenance == expected_present)
 }
 
-// Remove only this helper's private fingerprint/dependency products. Removing
-// just Cargo's uplift archive could re-bless a corrupt unverified deps archive.
-jet_cli_rust_foreign_remove_tree: fn(directory: cli_files.Directory, name: String) JetDriverRustForeignError! -[FS]> {
-    info: directory.entry_stat(name) ?? return Err(jet_cli_rust_foreign_io("couldn't inspect invalid private FFI product: {err}"))
-    if info.is_dir && !info.is_symlink {
-        child: directory.open_directory(name) ?? return Err(jet_cli_rust_foreign_io("couldn't hold invalid private FFI product: {err}"))
-        entries: child.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list invalid private FFI product: {err}"))
-        loop entry in entries -> jet_cli_rust_foreign_remove_tree(child, entry.name)
-        directory.remove_directory(name) ?? return Err(jet_cli_rust_foreign_io("couldn't remove invalid private FFI directory: {err}"))
-    } else {
-        directory.remove(name) ?? return Err(jet_cli_rust_foreign_io("couldn't remove invalid private FFI product: {err}"))
-    }
-    Ok(())
-}
-jet_cli_rust_foreign_invalidate: fn(directory: cli_files.Directory, crate_name: String) JetDriverRustForeignError! -[FS]> {
-    loop name in ([String]{"deps", ".fingerprint", "build"}) {
-        child: directory.open_directory(name) ?? next
-        entries: child.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list private FFI dependencies: {err}"))
-        loop entry in entries {
-            if entry.name.starts_with("{crate_name}-") || entry.name.starts_with("lib{crate_name}-") -> jet_cli_rust_foreign_remove_tree(child, entry.name)
-        }
-    }
-    Ok(())
-}
-
 // The private workspace of one Cargo run. It lies under the key folder, on
 // the shared target's file system, so a build publishes its output by
 // rename. Under the immutable outer-trace wrapper it is retained in
 // `.trace-workspaces` until the audit; otherwise its owner removes it when
-// the run ends. The caller holds the full-key OS lock.
+// the run ends. The caller holds the full-key OS lock, so any other workspace
+// under the key is a killed run's leftover, removed before this one is made.
 JetCLIRustForeignWorkspace: struct { path: String, retain: Bool }
 impl JetCLIRustForeignWorkspace.Close {
     close: fn(&&self) -[FS]> {
@@ -535,9 +519,12 @@ jet_cli_rust_foreign_workspace: fn(source: String) -[FS, Env]> JetCLIRustForeign
     }
     workspaces: owner.open_directory(folder) ?? return Err(jet_cli_rust_foreign_io("couldn't hold FFI workspace folder: {err}"))
     entries: workspaces.list() ?? return Err(jet_cli_rust_foreign_io("couldn't list FFI workspaces: {err}"))
+    if !retain {
+        loop entry in entries -> cli_files.remove_all("{workspaces.path}/{entry.name}").drop("a leftover private FFI workspace only holds scratch output")
+    }
     // Exclusive creation refuses a substituted or colliding name rather than
     // reusing its inputs.
-    name: "{cli_sys.getpid()}-{entries.len()}"
+    name: "{cli_sys.getpid()}-{if retain -> entries.len() else -> 0}"
     created: workspaces.create_directory(name, Val(448)) ?? return Err(jet_cli_rust_foreign_io("couldn't create exclusive FFI workspace: {err}"))
     Ok(JetCLIRustForeignWorkspace{path: created.path.copy(), retain: retain})
 }
@@ -587,19 +574,10 @@ jet_cli_rust_foreign_build: fn(plan: JetDriverRustForeignPlan, cache: String, so
     jet_cli_rust_foreign_write(private_src, "lib.rs", plan.source.bytes(), false)
     shared: cli_files.open_directory(target_dir) ?? return Err(jet_cli_rust_foreign_io("couldn't hold shared Cargo output: {err}"))
     jet_cli_rust_foreign_snapshot(shared, private_output, target_dir)
-    // Invalid uplift artifacts cannot be blessed by Cargo without recompiling.
-    private_release_path: "{private_output.path}/{plan.target}/release"
-    if cli_files.is_dir(private_release_path) {
-        stale: cli_files.open_directory(private_release_path) ?? return Err(jet_cli_rust_foreign_io("couldn't hold private Cargo release directory: {err}"))
-        stale.remove("lib{plan.crate_name}.a").drop("an absent invalid artifact is expected")
-        stale.remove("{plan.crate_name}.sha256").drop("an absent invalid sidecar is expected")
-        stale.remove("{plan.crate_name}.provenance").drop("an absent invalid sidecar is expected")
-        jet_cli_rust_foreign_invalidate(stale, plan.crate_name)
-    }
     resolved: jet_cli_rust_foreign_resolve(plan, cache, bwrap, cargo, registry, private_source, private_output)
     built: jet_cli_rust_foreign_run(bwrap, cargo, private_source.path, private_output.path, registry, [String]{"build", "--release", "--target", plan.target, "--manifest-path", "/work/source/Cargo.toml"})
     if !built.success -> return Err(jet_cli_rust_foreign_cargo_error(plan, built.errors, cache, true))
-    private_release: cli_files.open_directory(private_release_path) ?? return Err(jet_cli_rust_foreign_io("FFI build finished without its complete artifact set"))
+    private_release: cli_files.open_directory("{private_output.path}/{plan.target}/release") ?? return Err(jet_cli_rust_foreign_io("FFI build finished without its complete artifact set"))
     archive: "lib{plan.crate_name}.a"
     bytes: jet_cli_rust_foreign_read(private_release, archive) ?? return Err(jet_cli_rust_foreign_io("FFI build finished but `{archive}` is missing: {err.what}"))
     digest: jet_cli_rust_foreign_digest(bytes)

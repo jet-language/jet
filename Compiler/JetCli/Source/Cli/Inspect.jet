@@ -6,6 +6,7 @@
 // belong to InspectB.jet. A plane, scope, or action whose Jet port has not
 // landed is refused with E2104, never guessed.
 use {
+    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     cli_files: core.files
     cli_sys: core.sys
     cli_time: core.time
@@ -236,9 +237,8 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
             loop option in request.options -> gate_args.push(option.copy())
             return JetCLIPlan.Gates{file: file, args: gate_args, color: color, json: json, notice: notice}
         }
-        else -> {}
+        else -> panic("inspect plane has no provider: {plane}")
     }
-    jet_cli_with_notices([String]{notice}, jet_cli_not_ported("inspect {plane}", color))
 }
 
 // `jet inspect decisions` up to the projection: the profile name (`--release`
@@ -338,7 +338,7 @@ jet_cli_inspect: fn(argv: [String], jet_argv: [String], args: [String], color: B
         else -> {}
     }
     if jet_cli_inspect_b(argv, command, jet_argv, args, color, quiet, json, threads) == .Val(plan) -> return plan
-    jet_cli_not_ported(command, color)
+    jet_cli_not_ported(jet_cli_dispatch_form(args), color)
 }
 
 // `run_impact` up to the check: `--depth=N` and exactly an entry file and a
@@ -1467,7 +1467,7 @@ jet_cli_inspect_replay_artifact: fn(job: JetCLIInspectJob, artifact: String, abs
     if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
     stat: cli_files.stat(resolved) ?? return jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR)
     if stat.is_symlink || !stat.is_file -> return jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_not_ported_output("inspect --replay <replay artifact>", job.color)
+    jet_cli_not_ported_output("inspect --replay", job.color)
 }
 
 // Carry out one inspect job: check the entry as `check_projection` does (a
@@ -1613,7 +1613,7 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     }
     source: job.file
     if job.json {
-        check: jet_cli_inspect_check_value(source, elapsed_ms, diagnostics)
+        check: jet_cli_inspect_check_value(source, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)
         definition_value: if definition_module == .Val(name) -> jet_cli_status_text(name) else -> JetCLIStatusValue.Null
         impact: jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("symbol", jet_cli_status_text(symbol)),
@@ -1634,7 +1634,7 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
         status: if found -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.impact", found, [JetCLIStatusField]{jet_cli_status_field("impact", impact)})}\n", stderr: "", exit_code: status}
     }
-    out := jet_cli_inspect_check_text(source, elapsed_ms, diagnostics)
+    out := jet_cli_inspect_check_text(source, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)
     if !found {
         out = "{out}symbol `{symbol}` not found in index\n"
         if references.len() == 0 && call_sites.len() == 0 -> return JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
@@ -1655,17 +1655,18 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
 
 // `check_result_value` for a passed explicit-file check: the `jet.check/v1`
 // record impact and expand carry.
-jet_cli_inspect_check_value: fn(source: String, elapsed_ms: Int, diagnostics: Int) -> JetCLIStatusValue Never! {
+jet_cli_inspect_check_value: fn(source: String, elapsed_ms: Int, diagnostics: Int, profile: String) -> JetCLIStatusValue Never! {
     fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text("passed"))}
-    loop field in jet_cli_check_result_fields(source, elapsed_ms, diagnostics) -> fields.push(field)
+    loop field in jet_cli_check_result_fields(source, elapsed_ms, diagnostics, profile) -> fields.push(field)
     jet_cli_status_object(fields)
 }
 
 // The `jet.check/v1` fields of a passed explicit-file check. A clean
 // `jet check --json <file>` carries them on its status envelope, whose `ok`
 // is the verdict (the envelope has no legacy `status` key); the record impact
-// and expand nest also leads with `status: passed`.
-jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: Int) -> [JetCLIStatusField] Never! {
+// and expand nest also leads with `status: passed`. `profile` is the profile
+// the check compiled under.
+jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: Int, profile: String) -> [JetCLIStatusField] Never! {
     rows := [JetCLIStatusValue]{}
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
         rows.push(jet_cli_status_object([JetCLIStatusField]{
@@ -1678,7 +1679,7 @@ jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: In
     }
     provenance: jet_cli_status_object([JetCLIStatusField]{
         jet_cli_status_field("source", jet_cli_status_text(source)),
-        jet_cli_status_field("profile", jet_cli_status_text("dev")),
+        jet_cli_status_field("profile", jet_cli_status_text(profile)),
         jet_cli_status_field("front_end", jet_cli_status_text(JET_CLI_CHECK_FRONT_END)),
         jet_cli_status_field("programmable_build", jet_cli_status_text("not-selected")),
         jet_cli_status_field("diagnostics", jet_cli_status_int(diagnostics)),
@@ -1694,8 +1695,8 @@ jet_cli_check_result_fields: fn(source: String, elapsed_ms: Int, diagnostics: In
 }
 
 // `check_result_text` for a passed explicit-file check.
-jet_cli_inspect_check_text: fn(source: String, elapsed_ms: Int, diagnostics: Int) -> String Never! {
-    out := "check: passed (source={source}, profile=dev, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
+jet_cli_inspect_check_text: fn(source: String, elapsed_ms: Int, diagnostics: Int, profile: String) -> String Never! {
+    out := "check: passed (source={source}, profile={profile}, scope=explicit-file, schema_version=1, elapsed_ms={elapsed_ms}, front_end={JET_CLI_CHECK_FRONT_END}, programmable_build=not-selected, diagnostics={diagnostics})\n"
     loop row in JET_CLI_EXPLICIT_FILE_PROOF_ROWS {
         out = "{out}proof: output=not-applicable {row[0]} [not applicable] {row[1]} (diagnostic={row[2]})\n"
     }
@@ -1719,7 +1720,7 @@ jet_cli_inspect_expand_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
         "memory" -> facts = jet_cli_expand_memory(result.doc_modules, index)
         "layout" -> facts = jet_cli_expand_layout(result.doc_modules)
         "origin" -> facts = jet_cli_expand_origin(result.doc_modules)
-        else -> return jet_cli_not_ported_output("inspect expand --facts {selection}", false)
+        else -> panic("expand lens has no projection: {selection}")
     }
     lens := JET_CLI_EXPAND_LENSES[0]
     loop spec in JET_CLI_EXPAND_LENSES {
@@ -1727,9 +1728,9 @@ jet_cli_inspect_expand_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
     }
     if job.json {
         values: [JetCLIStatusValue]{jet_cli_expand_lens_value(lens, facts)}
-        return JetDriverVerbOutput{stdout: jet_cli_expand_json(index, selection, values, jet_cli_inspect_check_value(job.file, elapsed_ms, diagnostics)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: jet_cli_expand_json(index, selection, values, jet_cli_inspect_check_value(job.file, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    JetDriverVerbOutput{stdout: jet_cli_expand_text(index, lens, facts, jet_cli_inspect_check_text(job.file, elapsed_ms, diagnostics)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: jet_cli_expand_text(index, lens, facts, jet_cli_inspect_check_text(job.file, elapsed_ms, diagnostics, JET_BUILD_DEFAULT_PROFILE)), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // `explicit_file_proof_rows`: name, detail, diagnostic.

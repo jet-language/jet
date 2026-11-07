@@ -1,14 +1,21 @@
-# tests/ownership.rs::edit_disjoint_callback_views_reject_every_retaining_boundary: the original's literal expectations; Jet does not meet them yet (assert not satisfied, tests/known-failing.tsv).
+# tests/ownership.rs::edit_disjoint_callback_views_reject_every_retaining_boundary, migrated to the implicit-copy
+# ownership model (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet). o1-o3 keep the lent view past its callback and
+# are rejected as before. o4 returns the lent view from `leak`, which sema rejects as a returned view without a stable
+# owner relationship.
 fixture: edit_disjoint_callback_views_reject_every_retaining_boundary/input
 step: jet check o1/run.jet
 exit: nonzero # tests/ownership.rs:5234 expect_err
 stderr: ~ "[jet.OwnerMovedWhileViewed]" # tests/ownership.rs:5235 assert!
+stderr: ~ "Fix: Use the view inside that scope, and keep only owned values outside it" # the diagnostic's fix
 step: jet check o2/run.jet
 exit: nonzero # tests/ownership.rs:5234 expect_err
 stderr: ~ "[jet.OwnerMovedWhileViewed]" # tests/ownership.rs:5235 assert!
+stderr: ~ "Fix: Use the view inside that scope, and keep only owned values outside it" # the diagnostic's fix
 step: jet check o3/run.jet
 exit: nonzero # tests/ownership.rs:5234 expect_err
 stderr: ~ "[jet.OwnerMovedWhileViewed]" # tests/ownership.rs:5235 assert!
+stderr: ~ "Fix: Use the view inside that scope, and keep only owned values outside it" # the diagnostic's fix
 step: jet check o4/run.jet
 exit: nonzero # tests/ownership.rs:5234 expect_err
-stderr: ~ "[jet.OwnerMovedWhileViewed]" # tests/ownership.rs:5235 assert!
+stderr: ~ "[jet.ViewOutlivesOwner]" # the registered diagnostic
+stderr: ~ "Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`" # and its fix

@@ -357,10 +357,15 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
         }
     }
 
+    // An empty bind is refused, never published as an empty module: the
+    // report names each prototype the binder skipped and why.
     if bound.len() == 0 {
+        reasons := [String]{}
+        loop entry in skipped -> reasons.push("skipped `{entry.name}`: {entry.reason}")
         unresolved := [String]{}
         loop entry in discovery.unresolved -> unresolved.push("`{entry.typedef_name}`: {entry.reason}")
-        suffix: if unresolved.len() == 0 -> "" else -> "; opaque handle bindings were unresolved: {unresolved.join("; ")}"
+        if unresolved.len() > 0 -> reasons.push("opaque handle bindings were unresolved: {unresolved.join("; ")}")
+        suffix: if reasons.len() == 0 -> "" else -> "; {reasons.join("; ")}"
         return Err(CBindError{message: "no bindable C function prototypes found for `{lib}`{suffix}"})
     }
 

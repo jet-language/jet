@@ -1,0 +1,29 @@
+# A SIGKILLed FFI helper build can't remove its private workspace, so the next
+# build of that key sweeps it under the key's build lock
+# (Compiler/JetCli/Source/Cli/RustForeign.jet jet_cli_rust_foreign_workspace).
+# The first run publishes the helper and names the key folder; removing the
+# shared target makes the second run rebuild, and it is killed once its
+# workspace holds the helper's sources. The third run rebuilds and leaves no
+# workspace behind, the killed one included. Like the std round trip, this case
+# needs cargo and rustc.
+fixture: rust_extern_build_killed_mid_way_leaves_no_workspace_behind.fixture
+env: NO_COLOR=1
+env: JET_FFI_CACHE_DIR={work}/ffi
+requires: os-name:linux
+requires: tool:cargo
+requires: tool:rustc
+step: jet run main.jet
+exit: 0
+stdout: = "40\n"
+capture: key = sole-entry ffi kind dir name != "deps"
+remove: ffi/deps
+spawn killed: jet run main.jet
+await: entry {cap:key}/.workspaces with-file source/Cargo.toml capture workspace timeout 120s every 10ms
+signal killed: KILL
+wait: killed
+exit: any # the build is SIGKILLed mid-way; its status is not part of the contract
+file: {cap:workspace} is-dir
+step: jet run main.jet
+exit: 0
+stdout: = "40\n"
+entries: ffi recursive parent = ".workspaces" = 0

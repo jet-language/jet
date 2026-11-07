@@ -1,7 +1,13 @@
 // Typed error report: the `jet.err/v1` wire built from typed error facts, never
 // reconstructed from rendered text. The private execution journey
 // (thread-local) stays with the runtime host.
-use error_report_json: core.encoding.json
+use {
+    error_report_json: core.encoding.json
+    core.encoding.[EncodingError, EncodingErrorKind, EncodingLimits]
+}
+
+// The Rust strict reader's container depth: the 65th nested container is refused.
+JET_ERROR_REPORT_JSON_DEPTH: 64
 
 // The Rust original reports wire failures as the Rust error string.
 #Error
@@ -82,17 +88,31 @@ JetErrorReport: struct {
         "{{{fields.join(",")}}}"
     }
 
-    // JetErrorReport::from_json: strict JSON (duplicate keys refused), then
-    // the typed decode, then the canonical round trip.
+    // JetErrorReport::from_json: the Rust strict reader (duplicate keys
+    // refused, 64 containers, no byte ceiling, its refusal messages), then the
+    // typed decode, then the canonical round trip.
     from_json: fn(text: String) -> JetErrorReport JetErrorReportError! {
-        value: if error_report_json.parse(text) == {
+        limits := EncodingLimits.safe()
+        limits.max_depth = JET_ERROR_REPORT_JSON_DEPTH
+        limits.max_item_bytes = if text.bytes().len() > 0 -> text.bytes().len() else -> 1
+        value: if error_report_json.parse_with_limits(text, limits) == {
             .Ok(value) -> value
-            .Err(error) -> { return Err(jet_error_report_error("invalid error report: {error.reason}")) }
+            .Err(error) -> { return Err(jet_error_report_error("invalid error report: {jet_error_report_json_reason(error)}")) }
         }
         report: jet_error_report_from_json(value)
         if report.to_json() != text -> return Err(jet_error_report_error("error report is not canonical"))
         Ok(report)
     }
+}
+
+// Core's refusal in the Rust strict reader's words: a value missing at its
+// position (also at the end of input) is "expected a JSON value", and the 65th
+// container is "nested too deeply".
+jet_error_report_json_reason: fn(error: EncodingError) -> String Never! {
+    if error.kind == EncodingErrorKind.Truncated || error.reason.starts_with("expected a JSON value") -> return "expected a JSON value"
+    depth_refusal: "nesting exceeds max_depth ({JET_ERROR_REPORT_JSON_DEPTH})"
+    if error.reason == depth_refusal -> return "JSON value is nested too deeply"
+    error.reason.copy()
 }
 
 jet_error_journey_json: fn(frame: JetErrorJourneyFrame) -> String Never! {
@@ -201,7 +221,9 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
     Ok(JetErrorReport{code: code, message: message, typed_identity: typed_identity, causes: causes, context_frames: context, origin: origin, source_journey: journey, conversion_history: conversions, details: details})
 }
 // `jet_error_json_encode_value`: protocol quoting (every Unicode control
-// escaped) and Rust f64 Display, in the object's own field order.
+// escaped) and Rust f64 Display, in the object's own field order. A number
+// lexeme with a fraction or exponent is the Float the Rust reader read, so
+// `1.0` re-encodes as `1`; an integer lexeme stays exact.
 jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
     if value == {
         .Null -> "null"
@@ -209,7 +231,11 @@ jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
         .Int(number) -> "{number}"
         .Float(number) -> foundation_float_display(number)
         .Text(text) -> foundation_json_quote(text)
-        .Number(lexeme) -> lexeme.copy()
+        .Number(lexeme) -> {
+            if !lexeme.contains(".") && !lexeme.contains("e") && !lexeme.contains("E") -> return lexeme.copy()
+            number: Float.parse(lexeme) ?? return lexeme.copy()
+            foundation_float_display(number)
+        }
         // Bytes encode as their base64 text, a DateTime as its RFC 3339 text.
         .Bytes(_) -> foundation_json_quote(value.to_text() ?? "")
         .DateTime(_) -> foundation_json_quote(value.to_text() ?? "")

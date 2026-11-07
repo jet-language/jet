@@ -1,6 +1,6 @@
 # Port of tests/process_sessions.rs:314-371; source verbatim after original format expansion,
-# except for a 5s stage timeout: under host load a nice'd tree and descendant can take over a
-# second to start, and 100ms (or 1s) could fire before the descendant had published its pid.
+# except for a 250ms stage timeout: the subject is that the deadline fires and reaps the tree's
+# descendants, so it is short enough to keep the row in the default profile.
 # ORACLE-LITERAL; PENDING-SAME-HEAD; original cfg(unix); have_rustc guard erased.
 # Each tier's descendants are judged right after the step that spawned them, by
 # the fixture's `reaped` mode: gone, a zombie, exiting (PF_EXITING), or holding a

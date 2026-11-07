@@ -1249,7 +1249,7 @@ ImmutableAssignment: struct {
         detail: true
         edit: .SourceEdit
         no_fix: None
-        fix_safety: .APIChanging
+        fix_safety: .BehaviorPreserving
         what: fn(self) -> String { "`x` was made with `:`, so it can't change" }
         why: fn(self) -> String { "Only `:=` bindings (and `&` parameters) can be changed" }
         fix: fn(self) -> String { "Declare it with `x := ...` instead" }
@@ -6531,6 +6531,23 @@ InvalidForeignBoundaryEvidence: struct {
     }
 }
 
+CBindingMemberMissing: struct {
+    lib: String
+    member: String
+
+    impl Diagnostic {
+        code: "E3217"
+        stage: [.Sema]
+        meaning: "A C library module has no binding for the named member"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Generate the library's binding from its header, or declare the member in an `#Import c.<lib>: module` overlay."
+        what: fn(self) -> String { "C library `{self.lib}` has no binding named `{self.member}`." }
+        why: fn(self) -> String { "Neither the binding cache `.jet/bindings/c/{self.lib}.jet` nor an `#Import c.{self.lib}: module` overlay declares `{self.member}`; without a cache the library binds nothing." }
+        fix: fn(self) -> String { "Import the header by path (`use name: \"<dir>/{self.lib}.h\"`) so the compiler binds it, refresh the cache with `jet inspect bind <header.h> --pkg {self.lib}`, or declare `{self.member}` in `#Import c.{self.lib}: module`." }
+    }
+}
+
 UnsupportedForeignLanguage: struct {
     impl Diagnostic {
         code: "E3220"
@@ -11704,6 +11721,16 @@ FunctionValueNotNever: struct {
         what: fn(self) -> String { "Function value does not satisfy `fn() Never`." }
         why: fn(self) -> String { "`fn() Never` promises the callable never completes, so a returning function has the wrong contract." }
         fix: fn(self) -> String { "Pass a function declared `Never`, or change the expected function type." }
+    }
+}
+
+CallerSiteMisplaced: struct {
+    impl Diagnostic {
+        code: "E2427"
+        detail: true
+        what: fn(self) -> String { "`$caller` is legal only as a parameter default or inside an #Expand macro." }
+        why: fn(self) -> String { "`$caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
+        fix: fn(self) -> String { "Declare a parameter `at: SourceLocation{{$caller}}` and read `at`, or write `$here` for this line." }
     }
 }
 

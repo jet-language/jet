@@ -265,7 +265,7 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     port: reservation.ports[0]
     assert(port != 0)
     assert(net.tcp_listen("127.0.0.1:{port}") == .Err(_), "the parent reservation must prevent a competing bind")
-    services_release_ports(reservation)
+    reservation.release()
     _: net.tcp_listen("127.0.0.1:{port}") ?? panic("the reservation must release before the child is spawned")
 }
 

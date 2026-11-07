@@ -5179,6 +5179,10 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         diagnostic := sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `&` can be changed", "declare it with `{name} := ...` instead")
         if binding.binding_sigil == .Val(sigil) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
         diagnostics.push(diagnostic)
+        // The refused value is still checked, so the names it reads count as
+        // used: `total = total + n` must not leave `n` an unused binding whose
+        // `_n` rename `jet fix` would apply.
+        _ := sema_check_expression(expr, binding.symbol.ty, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
     if binding.symbol.ty == None {
@@ -7997,8 +8001,17 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
             }
             .While(condition, body, span, arrow_body, label) -> {
                 sema_shared_access_lint_busy_wait(condition, body, scopes, diagnostics)
-                cond: sema_check_expression(condition, None, environment, program, scopes, state, tail_store, context, diagnostics)
+                // `loop items.pop() == .Val(item) { … }` binds the payload for
+                // each pass, checked as `loop { if items.pop() == .Val(item) { … }
+                // else { break } }` so the pattern test runs before every pass.
+                binding_loop: sema_expression_condition_binds(condition)
+                if binding_loop {
+                    gate: Stmt.Switch{subject: Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, arms: [SwitchArm]{SwitchArm{cond: condition.copy(), body: body.copy(), span: expr_span(condition)}}, else_body: Val([Stmt]{Stmt.Break{span: span}}), span: span}
+                    if !sema_stmt_check_loop([Stmt]{gate}, span, arrow_body, label, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output) -> complete = false
+                }
+                cond: if binding_loop -> TExpr?{None} else -> sema_check_expression(condition, None, environment, program, scopes, state, tail_store, context, diagnostics)
                 if {
+                    binding_loop -> {}
                     cond == None -> {
                         complete = false
                     }
@@ -8039,30 +8052,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                 }
             }
             .Loop(body, span, arrow_body, label) -> {
-                loop_fork: sema_ownership_mark(state)
-                sema_scope_enter(scopes, state, "loop@{span.start}")
-                label_name := String?{None}
-                label_valid := true
-                if label != None {
-                    label_name = Val(label.name)
-                    if !sema_scope_push_loop_label(scopes, label.name) {
-                        diagnostics.push(sema_already_defined(label.name, label.span))
-                        label_valid = false
-                    }
-                }
-                loop_frame_index := context.loop_value_frames.len()
-                sema_loop_value_push_frame(context, label_name, loop_fork)
-                previous_arrow_loop_body := context.arrow_loop_body
-                context.arrow_loop_body = arrow_body
-                nested := sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "loop.body@{span.start}", loop_depth + 1)
-                context.arrow_loop_body = previous_arrow_loop_body
-                if label != None -> sema_scope_pop_loop_label(scopes)
-                sema_single_use_leave_scope(scopes, state, diagnostics)
-                if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, false, false, environment, program, diagnostics) -> label_valid = false
-                if {
-                    !nested.complete || !label_valid -> complete = false
-                    else -> output.push(TStmt.Loop{label: label_name, body: nested.value, span: span})
-                }
+                if !sema_stmt_check_loop(body, span, arrow_body, label, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth, output) -> complete = false
             }
             // An arm must fall through to the statement loop's `index += 1`:
             // a `next` here re-checks the same statement forever, pushing one
@@ -8202,6 +8192,34 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
     scopes.failure_carrier = previous_failure_carrier
     scopes.loop_depth = previous_loop_depth
     SemaStatementResult{value: output, complete: complete}
+}
+
+// A `loop { … }` statement: its label and value frame, then its body one
+// loop level deeper. False when the loop does not check.
+sema_stmt_check_loop: fn(body: [Stmt], span: Span, arrow_body: Bool, label: NamedSpan?, return_type: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], loop_depth: Int, output: &[TStmt]) -> Bool {
+    loop_fork: sema_ownership_mark(state)
+    sema_scope_enter(scopes, state, "loop@{span.start}")
+    label_name := String?{None}
+    label_valid := true
+    if label != None {
+        label_name = Val(label.name)
+        if !sema_scope_push_loop_label(scopes, label.name) {
+            diagnostics.push(sema_already_defined(label.name, label.span))
+            label_valid = false
+        }
+    }
+    loop_frame_index := context.loop_value_frames.len()
+    sema_loop_value_push_frame(context, label_name, loop_fork)
+    previous_arrow_loop_body := context.arrow_loop_body
+    context.arrow_loop_body = arrow_body
+    nested := sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "loop.body@{span.start}", loop_depth + 1)
+    context.arrow_loop_body = previous_arrow_loop_body
+    if label != None -> sema_scope_pop_loop_label(scopes)
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    if !sema_stmt_close_loop_value_frame(context, loop_frame_index, nested.value, state, loop_fork, false, false, environment, program, diagnostics) -> label_valid = false
+    if !nested.complete || !label_valid -> return false
+    output.push(TStmt.Loop{label: label_name, body: nested.value, span: span})
+    true
 }
 
 // Whether a checked statement is an expression statement of type `Never`;

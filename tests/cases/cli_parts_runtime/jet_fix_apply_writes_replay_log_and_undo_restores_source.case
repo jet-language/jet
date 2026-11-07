@@ -10,7 +10,8 @@ file: {cap:log} is-file
 file: {cap:log} ~ "\"operation\": \"fix\"" # original predicate
 file: {cap:log} ~ "\"kind\":\"rewrite\"" # original predicate
 file: {cap:log} ~ "\"rule_id\":\"jet-fix\"" # original predicate
-file: run.jet ~ "io.print(\"line\")" # original predicate
+file: run.jet ~ "    print(\"line\")" # the safe E0102 fix renames `println` to `print`
+file: run.jet !~ "println" # no other spelling of the call is left
 step: jet inspect codemod undo {cap:log}
 env: NO_COLOR=1
 exit: 0

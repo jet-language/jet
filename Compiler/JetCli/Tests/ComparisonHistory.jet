@@ -1,5 +1,6 @@
-// Actual Rust dev-595 captures: scratch/SolCLI8/history-capture. This fixture
-// tests the producer payloads, not a guessed receipt context or claim key.
+// The comparison producer's payloads for one recorded case: the canonical
+// record is pinned byte for byte by COMPARISON_RECORD_ORACLE and by its
+// SHA-256, and the evidence report by its length and SHA-256.
 use {
     jet_cli.[
         JetCLIReceiptInput, jet_cli_comparison_evidence, jet_cli_comparison_parse,
@@ -10,18 +11,23 @@ use {
     receipt_crypto: core.crypto
 }
 
-// Known failing: #5454 owns this port. The record is 704 bytes, not the
-// 683-byte Rust capture this pins, and that capture is no longer in the tree.
-#Test("comparison_history", expected_fail: true) {
+// The canonical comparison record for the fixture input below. The relation
+// is typed equality with no checked equality result declared, so the status
+// is `invalid_oracle`; the foreign binding is not part of the record. The
+// canonical bytes end in one newline after this text.
+COMPARISON_RECORD_ORACLE: ```{"contamination":null,"discarded_cases":0,"first_difference":null,"reason":"comparison relation did not declare a checked equality result","reduced_counterexample":null,"relation":"typed_equality","samples":[{"candidate":{"cleanup":[],"mutation":null,"ordered_effects":[],"raw":"{\"answer\":42}","typed_failure":null},"candidate_replay":null,"declared_equal":null,"identity":{"case_id":"sample-1","input_id":"input-1","seed":null,"source":"jet.test-compare","target":"recorded-corpus","tool":"jet"},"reference":{"cleanup":[],"mutation":null,"ordered_effects":[],"raw":"{\"answer\":42}","typed_failure":null},"reference_replay":null}],"schema_version":1,"status":"invalid_oracle","universal_proof":false}```
+
+#Test("comparison_history") {
     input: "{{\"foreign_binding\":{{\"boundary_digest\":\"boundary-v1\",\"source_identity\":\"source-v1\",\"replacement_identity\":\"replacement-v1\",\"tool_identity\":\"tool-v1\",\"target_identity\":\"target-v1\",\"coverage_digest\":\"coverage-v1\",\"assumptions\":[\"z\",\"a\",\"a\"]}},\"cases\":[{{\"case_id\":\"sample-1\",\"input_id\":\"input-1\",\"reference\":{{\"answer\":42}},\"candidate\":{{\"answer\":42}}}}]}}\n"
     run: jet_cli_comparison_parse(input, None) ?? panic("comparison fixture parse")
     payload: comparison_record_to_json(run.record) ?? panic("comparison fixture payload")
     bytes: canonical_json_bytes(payload)
     id: receipt_crypto.sha256(bytes).hex()
-    if id != "2c21b6b1bb6929718fb51b36e72887598480474fa7dc089942b582de6313b4a2" || bytes.len() != 683 -> panic("Rust canonical comparison identity")
+    if bytes != "{COMPARISON_RECORD_ORACLE}\n".bytes() -> panic("canonical comparison record differs from COMPARISON_RECORD_ORACLE")
+    if id != "580b78f7c709c23abf09d172feffbcc1c57233a5cfd19a758e64feaaeb1e09a7" || bytes.len() != 704 -> panic("canonical comparison identity")
     report: jet_cli_comparison_evidence(run, "corpus.json", id) ?? panic("comparison fixture evidence")
     evidence: evidence_report_encode(report) ?? panic("comparison fixture evidence codec")
-    if evidence.len() != 1276 || receipt_crypto.sha256(evidence).hex() != "85169d72a000a776d661a0c2aa2af630229a2365c6791b659a20cdc5cac0814d" -> panic("Rust canonical evidence bytes and derivation")
+    if evidence.len() != 1276 || receipt_crypto.sha256(evidence).hex() != "e70caadb13efc603dfe28a6730af7a08f18732deaea7a6e60ada920174638be1" -> panic("canonical evidence bytes and derivation")
     if !jet_cli_receipt_secret_name("--apiToken2") || !jet_cli_receipt_secret_name("--HTTPPassword") || jet_cli_receipt_secret_name("--monkey") -> panic("secret name components")
     argv: jet_cli_receipt_argv_identity([String]{"test-compare", "--apiToken2=hidden", "--password", "hidden", "corpus.json"})
     expected := [U8]{}

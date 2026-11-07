@@ -204,12 +204,14 @@ sema_copy_site_check_owned_walk: fn(value: TExpr, environment: SemaScopeEnvironm
         .Field(_, _) | .Index(_, _, _, _, _, _) | .OptField(_, _, _) -> {
             if walk.taken -> return true
             if !sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics) -> return false
+            if !walk.binds_view && !sema_copy_site_refuse_in_place_copy(value, environment, program, scopes, context, diagnostics) -> return false
             walk.binds_view || sema_copy_site_require_move_mark(value, environment, program, scopes, state, context, diagnostics)
         }
         .Local(local) -> {
             if walk.taken -> return true
             if walk.forwarded && !sema_copy_site_refuse_forwarded_param(value, local.name, environment, program, scopes, context, diagnostics) -> return false
             if !sema_copy_site_refuse_resource_copy(value, environment, program, scopes, context, diagnostics) -> return false
+            if !walk.binds_view && !sema_copy_site_refuse_in_place_copy(value, environment, program, scopes, context, diagnostics) -> return false
             walk.binds_view || sema_copy_site_require_move_mark(value, environment, program, scopes, state, context, diagnostics)
         }
         // An authored copy or a window is not a payload move.
@@ -447,6 +449,39 @@ sema_copy_site_refuse_resource_copy: fn(value: TExpr, environment: SemaScopeEnvi
     if !facts.complete || !facts.holds_resource -> return true
     diagnostics.push(sema_error("E0211", value.span, "`{type_name(value.ty)}` can't be copied out of the place it is read from", "it holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource", fix))
     false
+}
+
+// Spec "Named views and places": a read-only place entering an owning slot is
+// materialized as an owned copy, and `copies: .Explicit` makes that copy
+// written. A field or element of storage this scope does not own, or a name
+// that reads its place through a view (sema_copy_site_in_place_fix), keeps its
+// value, so the owning position copies it: E0120 with the Safe `.copy()` edit
+// at the end of the whole place. True when the read is no such copy.
+sema_copy_site_refuse_in_place_copy: fn(value: TExpr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, context: SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    if !scopes.copies_explicit || sema_ownership_type_is_copy(value.ty) || sema_copy_site_is_type_parameter(value.ty, context) -> return true
+    if sema_copy_site_in_place_fix(value, scopes) == None -> return true
+    place: sema_copy_site_place_text(value)
+    subject: if place == "" -> "this element" else -> "`{place}`"
+    written: if place == "" -> "the element's `.copy()`" else -> "`{place}.copy()`"
+    // A field or element span covers only its last projection; the report
+    // covers the whole place it reads.
+    span: Span{start: sema_copy_site_place_start(value), end: value.span.end}
+    diagnostic: sema_error("E0120", span, "{subject} is read in place, so it cannot fill an owned value as-is", "the place keeps its value, so this owning position would copy it, and `copies: .Explicit` is active, so the copy must be written", "copy it explicitly with {written}")
+    facts: sema_copy_classify(value.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, false)
+    if facts.complete && facts.cloneable && !facts.resource {
+        diagnostics.push(diagnostic_with_edit_grade(diagnostic, TextEdit{span: Span{start: value.span.end, end: value.span.end}, new_text: ".copy()"}, DiagnosticFixApplicability.Safe, DiagnosticFixSafety.BehaviorPreserving))
+    } else {
+        diagnostics.push(diagnostic)
+    }
+    false
+}
+
+// Where the place `value` reads starts: its root name's offset.
+sema_copy_site_place_start: fn(value: TExpr) -> Int Never! {
+    if value.kind == {
+        .Field(base, _) | .OptField(base, _, _) | .Index(base, _, _, _, _, _) -> sema_copy_site_place_start(base)
+        else -> value.span.start
+    }
 }
 
 // The fix for a read in place that an owning position would copy, or None

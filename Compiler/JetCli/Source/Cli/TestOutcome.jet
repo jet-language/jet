@@ -9,6 +9,7 @@ use {
     cli_time: core.time
     receipt_crypto: core.crypto
     jet_driver.[JetDriverAuthorizedSourceRoot]
+    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     jet_foundation.[
         BuildOptions, Diagnostic, EvidenceAttachment, EvidenceBuild, EvidenceDiagnostic, EvidenceExpectation, EvidenceKind, EvidenceOutcome,
         EvidenceProducerKind, EvidenceRecord, EvidenceReport,
@@ -267,7 +268,7 @@ jet_cli_test_outcome: fn(file: String, source: String, build_options: BuildOptio
     // never collide in `.jet/evidence` (Rust `test_report_id`).
     report_id: jet_cli_test_env(EVIDENCE_REPORT_ID_ENV, "test:{short}:{cli_process.current_pid()}:{cli_time.unix_ns()}")
     profile_tag: "{build_options_key(build_options)};aot-target=native"
-    default_profile: if build_options.profile == "" -> "dev" else -> build_options.profile.copy()
+    default_profile: if build_options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> build_options.profile.copy()
     build: EvidenceBuild{
         toolchain: jet_cli_test_env(EVIDENCE_TOOLCHAIN_ENV, COMPILER_VERSION),
         target: jet_cli_test_env(EVIDENCE_TARGET_ENV, jet_cli_host_triple(cli_sys.arch(), cli_sys.name())),

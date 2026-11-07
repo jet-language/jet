@@ -1,10 +1,11 @@
 // One executable crosses two native boundaries.  The C
 // adapter owns a gzFile-backed reader and returns an explicit handle; Jet owns
 // that handle until the matching close call.  zlibVersion is a direct C import,
-// while b64encode is a real Rust-crate bridge.
+// while b64encode is a real Rust-crate bridge. The adapter's header binds on a
+// cache miss: `.jet/bindings/c/zreader.jet` is generated from native/zreader.h.
 use {
     zl: c.z
-    z: c.zreader
+    z: "native/zreader.h"
 }
 
 #Import c.z: module {

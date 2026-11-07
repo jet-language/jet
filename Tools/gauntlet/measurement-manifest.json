@@ -510,7 +510,7 @@
         "edit_files": {"jet": "jet/units_4.jet", "nix": "nix/src/units_4.c"}
       },
       "peers": [
-        {"id": "jet", "required": true, "builds": "jet build in the package root; JET_CACHE_DIR under the work dir"},
+        {"id": "jet", "required": true, "builds": "jet build in the package root; JET_STORE_DIR under the work dir"},
         {"id": "nix", "required": true, "builds": "the system daemon store with substitution off for local cells; a private local store and a file:// binary cache for cold_cache"}
       ],
       "cells": [
@@ -541,7 +541,7 @@
         {
           "id": "cold_cache",
           "meaning": "build a checkout with no local build state while a populated cache or substituter holds the current build",
-          "prepare": "jet: remove the package's .jet directory and keep JET_CACHE_DIR; nix: copy the current output to the file:// cache and delete it from the private store",
+          "prepare": "jet: remove the package's .jet directory and keep JET_STORE_DIR; nix: copy the current output to the file:// cache and delete it from the private store",
           "jet": ["{jet}", "build"],
           "nix": ["nix", "build", "--store", "{nix_store}", "--no-link", "--print-out-paths", "--option", "substituters", "{nix_cache}", "--option", "require-sigs", "false", "{flake}"],
           "target": {"ratio_lt": 1.0}
@@ -549,7 +549,7 @@
         {
           "id": "scratch",
           "meaning": "hermetic from-scratch build of the project with its toolchain present",
-          "prepare": "jet: remove the package's .jet directory and empty JET_CACHE_DIR; nix: --rebuild runs the derivation again in its sandbox",
+          "prepare": "jet: remove the package's .jet directory and empty JET_STORE_DIR; nix: --rebuild runs the derivation again in its sandbox",
           "jet": ["{jet}", "build"],
           "nix": ["nix", "build", "--no-link", "--print-out-paths", "--rebuild", "--option", "substitute", "false", "{flake}"],
           "target": {"ratio_lt": 1.0}

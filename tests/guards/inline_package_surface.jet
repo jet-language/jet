@@ -7,7 +7,7 @@ s2_inline_package_canonical_surface_has_one_generated_shape: fn() {
     assert(decision.contains("D-ECO-INLINEPACKAGE1=A — one optional leading inline"))
     tree: s2_inline_surface_files.read("Tools/editors/tree-sitter/grammar.js") ?? panic("read tree-sitter grammar")
     assert(tree.contains("source_file: ($) => seq(optional($.inline_package), repeat($._item))"))
-    assert(tree.contains("inline_package: ($) => seq(\"package\", $.record_literal)"))
+    assert(tree.contains("inline_package: ($) => seq(\"package\", \":\", $.record_literal)"))
     vscode: s2_inline_surface_files.read("Tools/editors/vscode/syntaxes/jet.tmLanguage.json") ?? panic("read VSCode syntax")
     assert(vscode.contains("D-ECO-INLINEPACKAGE1=A"))
     textmate: s2_inline_surface_files.read("Tools/editors/jet.tmGrammar") ?? panic("read TextMate syntax")

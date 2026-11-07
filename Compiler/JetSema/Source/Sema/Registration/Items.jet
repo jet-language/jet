@@ -826,6 +826,11 @@ SemaRegistrationGraph: struct {
     // module's settled program (derived impls, inferred failure contracts) in
     // `SemaGraphResult.programs`.
     retain_programs: Bool{false}
+    // A retaining compile whose reader takes only the user modules
+    // (`jet fix`): its Core bodies wait for demand all the same
+    // (CoreDemand.jet), so a Core module's kept program has only the bodies a
+    // checked body named checked.
+    retained_core_demand: Bool{false}
     // This rule demand (sema_serde_index_codec_methods): every generated
     // codec impl registers its header only. `codec_method_rows` maps each
     // generated codec method key to its impl row; `codec_demand` collects the

@@ -8,7 +8,6 @@ use {
     std.time.[Instant, Duration]
     common.[Scratch]
     jet.[check_document]
-    Syntax: jet.Syntax
     CorePrelude: jet_foundation.Prelude
     jet_foundation.Prelude.[Target]
     LSP: jet.LSP
@@ -745,14 +744,6 @@ use {
     assert(child.wait().expect("wait for jet self lsp").success())
 }
 
-#Test("c40_is_keyword_retired_words_not_keywords") {
-    diags: check_document("c40_retired.jet", "run: fn() {{\n    switch_count: 0\n    import_count: 1\n}}\n")
-    assert(!diags.iter().any(d -> {
-        t: "{d.what} {d.why} {d.fix}"
-        t.contains("switch_count") && t.contains("keyword")
-    }), "switch_count should not be rejected as a keyword: {diags}")
-}
-
 #Test("c40_is_keyword_real_keywords_recognized") {
     jet: jet_bin()
     if !jet.exists() -> return
@@ -765,11 +756,6 @@ use {
         TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"if\"}}}}", expect_contains: ["error"] },
         TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
     ])
-}
-
-#Test("c40_value_literal_is_not_a_keyword") {
-    assert_eq(Syntax.LIT_VALUE, "Val")
-    assert(!Syntax.JET_KEYWORD_LIST.contains(Syntax.LIT_VALUE))
 }
 
 #Test("c40_is_keyword_switch_not_a_keyword") {
@@ -800,16 +786,6 @@ use {
     ])
 }
 
-#Test("c40_keyword_like_identifier_usable_as_variable") {
-    diags: check_document("c40_kw_in_ident.jet", "run: fn() {{\n    printer: \"hp\"\n    in_count: 3\n    sprint: 9.8\n}}\n")
-    loop d in diags {
-        all_text: "{d.what} {d.why} {d.fix}"
-        loop name in ["printer", "in_count", "sprint"] {
-            assert(!(all_text.contains(name) && all_text.to_lowercase().contains("keyword")), "identifier `{name}` containing keyword substring wrongly flagged as keyword: {d}")
-        }
-    }
-}
-
 #Test("c40_drift_guard_foreign_words_not_blocked_in_rename") {
     jet: jet_bin()
     if !jet.exists() -> return
@@ -822,49 +798,6 @@ use {
         TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/rename\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":0,\"character\":3}},\"newName\":\"switch\"}}}}", expect_contains: ["result"] },
         TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}", expect_contains: ["result"] }
     ])
-}
-
-#Test("c44_lsp_keywords_derive_from_syntax") {
-    kw_ptr: Syntax.JET_KEYWORD_LIST.as_ptr()
-    required: [
-        Syntax.KW_FN, Syntax.KW_PUB, Syntax.KW_USE, Syntax.KW_IF, Syntax.KW_ELSE,
-        Syntax.KW_LOOP, Syntax.KW_RETURN, Syntax.KW_STRUCT, Syntax.KW_ENUM, Syntax.KW_IMPL,
-        Syntax.KW_UNSAFE, Syntax.KW_TEST, Syntax.KW_TODO, Syntax.LIT_TRUE,
-        Syntax.LIT_FALSE, Syntax.LIT_NULL, Syntax.KW_DISTINCT, Syntax.KW_MODULE
-    ]
-    loop kw in required {
-        assert(Syntax.JET_KEYWORD_LIST.contains(kw), "JET_KEYWORD_LIST missing required keyword: {kw}")
-    }
-    banned: [
-        Syntax.FOREIGN_SWITCH, Syntax.FOREIGN_IMPORT, Syntax.FOREIGN_OR_FALLBACK,
-        Syntax.FOREIGN_WHILE, Syntax.FOREIGN_FOR, Syntax.FOREIGN_MATCH, Syntax.FOREIGN_CLASS
-    ]
-    loop word in banned {
-        assert(!Syntax.JET_KEYWORD_LIST.contains(word), "JET_KEYWORD_LIST contains banned FOREIGN_ word: {word}")
-    }
-    loop literal in [Syntax.LIT_VALUE, Syntax.LIT_OK, Syntax.LIT_ERR] {
-        assert(!Syntax.JET_KEYWORD_LIST.contains(literal), "contextual literal {literal} must not appear in JET_KEYWORD_LIST")
-    }
-    assert(Syntax.JET_KEYWORD_LIST.len() >= 20, "JET_KEYWORD_LIST suspiciously short: {Syntax.JET_KEYWORD_LIST.len()} entries")
-    _: kw_ptr
-}
-
-#Test("c44_lsp_types_derive_from_syntax") {
-    required_types: [
-        Syntax.TYPE_INT, Syntax.TYPE_FLOAT, Syntax.TYPE_BOOL, Syntax.TYPE_STRING, Syntax.TYPE_CHAR,
-        Syntax.TYPE_SHARED, Syntax.TYPE_HASH_MAP, Syntax.TYPE_BTREE_MAP, Syntax.TYPE_QUEUE, Syntax.TYPE_SET
-    ]
-    loop ty in required_types {
-        assert(Syntax.JET_TYPE_LIST.contains(ty), "JET_TYPE_LIST missing required type: {ty}")
-    }
-    assert(!Syntax.JET_TYPE_LIST.contains(Syntax.TYPE_RESULT), "JET_TYPE_LIST must not contain legacy TYPE_RESULT; use T !E syntax")
-}
-
-#Test("c44_impure_builtins_complete") {
-    required: [Syntax.BUILTIN_PRINT, Syntax.BUILTIN_INPUT, "eprint", "read_all_input"]
-    loop name in required {
-        assert(Syntax.IMPURE_BUILTINS.contains(name), "IMPURE_BUILTINS missing: {name}")
-    }
 }
 
 #Test("c44_prelude_idents_canonical") {

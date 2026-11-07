@@ -2,7 +2,7 @@
 // reads the effective writer's text, and `jet explain <fact>` resolves and
 // prints the whole chain through the one contribution law (pkg_fact_resolve).
 use {
-    jet_foundation.[BuildSettingOverride, COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic]
+    jet_foundation.[BuildSettingOverride, COMPILER_BUILD_CPU_CACHE_LINE_GENERIC, Diagnostic, JET_BUILD_DEFAULT_PROFILE]
     jet_pkg_model.[ContributionLayer, EffectiveFact, FactContribution, FactError, FactKey, FactValue, LockedBuildContribution, SourceScope, pkg_fact_resolve]
     jet_sema.[SemaBuildFacts]
 }
@@ -229,8 +229,8 @@ jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, package: J
         }
         "Build.OS" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.os}, "<target>")}
         "Build.Profile" -> {
-            writers := [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: "dev"}, "<default>")}
-            if facts.profile != "dev" -> writers.push(FactContribution.new(key, FactValue.Text{value: facts.profile}, SourceScope.Package, ContributionLayer.CommandLine, "command line:--profile={facts.profile}"))
+            writers := [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: JET_BUILD_DEFAULT_PROFILE}, "<default>")}
+            if facts.profile != JET_BUILD_DEFAULT_PROFILE -> writers.push(FactContribution.new(key, FactValue.Text{value: facts.profile}, SourceScope.Package, ContributionLayer.CommandLine, "command line:--profile={facts.profile}"))
             return writers
         }
         "Build.Stamp.Git" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.OptionalText{value: facts.stamp_git}, jet_driver_stamp_source(stamped, "git"))}

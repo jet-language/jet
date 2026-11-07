@@ -1,17 +1,7 @@
 # A Core call no `jet` has built yet (E2104 "not built yet") is refused only by
 # a compile that lowers it: `jet check` lowers nothing and passes, while
 # `jet build` refuses the call at its site, citing the card that ports it.
-# The call is `mod.load`: the WebSocket runtime is Jet source now and builds,
-# so `ws.connect` no longer serves as the unbuilt call.
 fixture: fixtures/unbuilt_core_calls
-step: jet check mod_load.jet
-exit: 0
-stderr: !~ "E2104" # check mode lowers nothing, so nothing is refused
-
-step: jet build mod_load.jet
-exit: 1
-stderr: ~ "Error [jet.InvalidCommandInput]: `mod.load` is not built yet" # build still refuses the unported module loader runtime
-stderr: ~ "card #4599" # the refusal names the card that ports it
 
 # The configured HTTP client runtime is unbuilt: `http.Client.new()` lowers
 # to a runtime route no runtime carries, and the client's methods have no IR

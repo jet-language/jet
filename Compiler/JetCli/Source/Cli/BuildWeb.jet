@@ -2,10 +2,13 @@
 // partition of the checked program (JetWeb Build.jet), linked against the
 // runtime partition packaged beside jet, and the host files that load the
 // two, written to the output directory (jet_cli_output_dir_path): app.wasm,
-// rt.wasm, web.manifest.json, app.js and jet_dom_runtime.js. `node app.js`
-// runs the program; a page imports app.js and calls `jet_main`.
+// rt.wasm, web.manifest.json, app.js, jet_dom_runtime.js and index.html.
+// `node app.js` runs the program, and so does index.html, the default page.
 use {
     cli_files: core.files
+    cli_server: core.http.server
+    cli_term: core.term
+    cli_time: core.time
     jet_driver.[
         JetDriverAuthorizedSourceSnapshot,
         JetDriverCompileResult,
@@ -13,11 +16,12 @@ use {
         JetDriverLoweringInputs,
         JetDriverVerbOutput,
         JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USER_ERROR,
         jet_driver_entry_root_path,
         jet_driver_ice_record,
     ]
     jet_foundation.[BuildOptions, cli_schema_embed_wasm_record]
-    jet_web.[web_app_js, web_dom_runtime_js, web_program]
+    jet_web.[web_app_js, web_dom_runtime_js, web_index_html, web_program]
 }
 
 // The runtime partition and its receipt in the runtime key's directory
@@ -63,6 +67,7 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if jet_cli_web_write_text(file, color, "{build_dir}/web.manifest.json", web.manifest) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js()) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/jet_dom_runtime.js", web_dom_runtime_js()) == .Val(failure) -> return failure
+    if jet_cli_web_write_text(file, color, "{build_dir}/index.html", web_index_html()) == .Val(failure) -> return failure
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
@@ -75,4 +80,88 @@ jet_cli_web_write: fn(file: String, color: Bool, path: String, bytes: [U8]) -[FS
 jet_cli_web_write_text: fn(file: String, color: Bool, path: String, text: String) -[FS]> JetDriverVerbOutput? Never! {
     cli_files.write(path, text) ?? return Val(jet_cli_native_report(file, "build", JetCLINativeFailure.Write{what: "couldn't write {path}: {err}"}, color))
     None
+}
+
+// `jet dev` of a browser program (Front.jet jet_cli_dev_web_selected): the
+// web build `jet build --target web` writes, served from its directory on
+// 127.0.0.1:`port` (0: the listener picks one) and rebuilt on every change
+// to the package's sources. Each good build writes its revision beside the
+// build as `__jet_dev_version`, so `GET /__jet_dev_version` answers the
+// revision of the last good build. A failed rebuild prints its report and the
+// last good build stays served; a first build that fails ends the session
+// with its report, and so does a preview server that stops.
+jet_cli_dev_web_loop: fn(file: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, port: Int, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+    root: jet_cli_manifest_root(jet_cli_parent(file) ?? ".") ?? (jet_cli_parent(file) ?? ".")
+    stamp := jet_cli_dev_stamp(root, [String]{})
+    first: jet_cli_dev_web_build(file, color, options, threads, invocation, trace_sink)
+    if first.output.exit_code != JET_DRIVER_EXIT_OK -> return first.output
+    jet_cli_write_output(first.output)
+    revision := 1
+    version_path: "{first.build_dir}/__jet_dev_version"
+    if jet_cli_web_write_text(file, color, version_path, "{revision}") == .Val(refused) -> return refused
+    state: shared JetCLIDevWebState{stopped: None}
+    mux: cli_server.mux()
+    cli_server.static_files(mux, "", first.build_dir)
+    fix: "pass a free port with `--port=N`, or leave `--port` out to let the preview listener choose one"
+    bound: cli_server.bind("127.0.0.1:{port}", mux) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "couldn't listen for the app preview on 127.0.0.1:{port}: {err}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    address: bound.local_addr() ?? "127.0.0.1:{port}"
+    cli_term.print("App preview: http://{address}/")
+    task.group dev_web {
+        serving: task {
+            if bound.serve() == {
+                .Ok(_) -> jet_cli_dev_web_stop(state, "the preview server shut down")
+                .Err(error) -> jet_cli_dev_web_stop(state, "{error}")
+            }
+        }
+        loop jet_cli_dev_web_stopped(state) == None {
+            cli_term.eprint("jet dev: watching {root} (Ctrl-C to stop)")
+            loop jet_cli_dev_stamp(root, [String]{}) == stamp && jet_cli_dev_web_stopped(state) == None -> cli_time.sleep(200ms)
+            if jet_cli_dev_web_stopped(state) != None -> break
+            stamp = jet_cli_dev_stamp(root, [String]{})
+            cli_term.eprint("jet dev: change detected, rebuilding")
+            built: jet_cli_dev_web_build(file, color, options, threads, invocation, trace_sink)
+            jet_cli_write_output(built.output)
+            if built.output.exit_code != JET_DRIVER_EXIT_OK -> next
+            revision += 1
+            if jet_cli_web_write_text(file, color, version_path, "{revision}") == .Val(refused) -> jet_cli_write_output(refused)
+        }
+        serving.join().drop("the preview server's stop is reported from its state")
+    }
+    reason: jet_cli_dev_web_stopped(state) ?? "the preview server stopped"
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "the app preview on http://{address}/ stopped: {reason}", jet_cli_why("E2105"), fix, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Why the preview server of a web `jet dev` session stopped, once it has.
+JetCLIDevWebState: struct {
+    stopped: String?
+}
+
+jet_cli_dev_web_stopped: fn(state: Shared<JetCLIDevWebState>) -> String? {
+    permit: state.guard_read()
+    permit.value.stopped.copy()
+}
+
+jet_cli_dev_web_stop: fn(state: Shared<JetCLIDevWebState>, reason: String) {
+    permit := state.guard_edit()
+    permit.value.stopped = Val(reason)
+}
+
+// One web build of `file` (jet_cli_build_result under `os: web`) and the
+// directory it writes.
+JetCLIDevWebBuilt: struct {
+    output: JetDriverVerbOutput
+    build_dir: String
+}
+
+jet_cli_dev_web_build: fn(file: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetCLIDevWebBuilt {
+    compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
+    if compiled.move() == {
+        .Refused(refusal) -> JetCLIDevWebBuilt{output: refusal, build_dir: ""}
+        .Checked(result, inputs, snapshot) -> {
+            build_dir: jet_cli_output_dir_path(snapshot, options)
+            source: cli_files.read(file) ?? ""
+            output: jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, false, false, true, false, result, inputs, snapshot)
+            JetCLIDevWebBuilt{output: output, build_dir: build_dir}
+        }
+    }
 }

@@ -632,8 +632,18 @@ parser_unclosed_delimiter: fn(state: &JetParserState, construct: String) -> Bool
     opener: parser_innermost_open_delimiter(state) ?? return false
     close: parser_closer_text(opener.kind)
     if parser_text(state, token) == close -> return false
+    // An error already reported between the opener and the cutoff (an
+    // unclosed text that swallowed the closer) explains the cut on its own.
+    if parser_error_within(state, opener.span.start, token.span.start) -> return true
     parser_report_unclosed(state, opener, cutoff, construct)
     true
+}
+
+parser_error_within: fn(state: JetParserState, start: Int, end: Int) -> Bool Never! {
+    loop diagnostic in state.diagnostics {
+        if diagnostic.severity == 1 && diagnostic.span == .Val(span) && span.start >= start && span.start < end -> return true
+    }
+    false
 }
 
 parser_report_unclosed: fn(state: &JetParserState, opener: Token, cutoff: String, construct: String) {

@@ -1,5 +1,11 @@
-# tests/ownership.rs::enum_pattern_payload_keeps_its_original_owner_live: the original's literal expectations; Jet does not meet them yet (assert not satisfied, tests/known-failing.tsv).
+# tests/ownership.rs::enum_pattern_payload_keeps_its_original_owner_live, migrated to the implicit-copy ownership model
+# (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet): the slice `values[0..1]` is an owned [Int] copied out of the
+# argument, so the payload `part` does not view `values`, and `values.push(9)` beside it is legal. The payload keeps its
+# own value.
 fixture: enum_pattern_payload_keeps_its_original_owner_live/input
 step: jet check run.jet
-exit: nonzero # tests/ownership.rs:5433 expect_err
-stderr: ~ "[jet.OwnerMovedWhileViewed]" # tests/ownership.rs:5434 assert!
+exit: 0 # tests/ownership.rs:5433
+stderr: !~ "Error [" # only the RedundantFinalReturn warning
+step: jet run run.jet
+exit: 0
+stdout: = "7\n"

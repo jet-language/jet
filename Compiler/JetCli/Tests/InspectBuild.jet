@@ -12,7 +12,7 @@ use {
     jet_cli.[
         JET_CLI_EXIT_ICE, jet_cli_build_compile_observation, jet_cli_build_duration,
         jet_cli_build_nodes_host, jet_cli_build_nodes_report, jet_cli_build_query_failure,
-        jet_cli_build_report, jet_cli_driver_request,
+        jet_cli_build_report, jet_cli_driver_request, jet_cli_native_session_at,
     ]
     jet_build_session.[
         BuildSessionPolicy, BuildSessionValue, build_plan_graph, build_session_call,
@@ -20,6 +20,8 @@ use {
     ]
     jetpack_artifact_store.[BuildNodeRecord, BuildRecord, ObjectHandle]
     build_math: core.math
+    build_sys: core.sys
+    build_process: core.process
 }
 inspect_build_require: fn(ok: Bool, message: String) Never! {
     if !ok -> panic("InspectBuild: {message}")
@@ -163,12 +165,18 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost its plan"), "internal query failures retain ICE exit and stream")
 }
 
-// Known failing: #5454 owns this port. Planning `build: fn` runs compile-time
-// code, and a unit test has no runtime image (CLISeams.jet: E0956 names
-// jet_runtime.image), so the planned query is incomplete here.
-#Test("inspect_build planned fn build", expected_fail: true) {
+// The compiler under test, never this test binary, owns the runtime pack:
+// planning `build: fn` runs compile-time code over its jet_runtime.image.
+inspect_build_runtime_dir: fn() -> String {
+    jet: build_sys.get("JET") ?? (build_process.which("jet") ?? panic("set JET to the compiler under test"))
+    parts := jet.split("/").to_list()
+    _ := parts.pop()
+    "{parts.join("/")}/jet-runtime"
+}
+#Test("inspect_build planned fn build") {
     scope := JetDriverBuildQueryScope{}
     planned := inspect_build_request()
+    planned.eval_config.native = Val(jet_cli_native_session_at(inspect_build_runtime_dir()) ?? panic("the compiler under test has no runtime pack"))
     planned.authorized_sources.roots[0].files[0].source = "build: fn(b: Build) {{}}\nrun: fn() {{}}"
     planned_response := jet_driver_query_build_nodes(planned, scope)
     planned_request := planned_response.request.move()

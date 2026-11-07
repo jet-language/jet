@@ -64,6 +64,11 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
             assert_eq(call.refused, row.capability)
             next
         }
+        // A build entry marker alone names no invocation to run it with.
+        if row.name == "programmable_build" {
+            assert_eq(call.refused, "missing CLI fixture API: programmable_build")
+            next
+        }
         assert_eq(call.refused, "")
         if row.argv.len() > 0 {
             assert_eq(call.parent, row.parent)
@@ -78,6 +83,10 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     }
     assert(kit_ui_invocation("// @unknown_fact\n", "a.jet", false).refused.contains("unknown_fact"))
     assert(kit_ui_invocation("// @complexity_cli branches\n", "a.jet", false).refused != "")
+    granted: kit_ui_invocation("// @programmable_build\n// @build_grants Exec\n", "tests/ui/b.jet", false)
+    assert_eq(granted.refused, "")
+    assert_eq(granted.argv, ["build", "tests/ui/b.jet", "--allow=Exec"])
+    assert_eq(granted.streams, "stderr")
     assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
 }
 

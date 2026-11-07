@@ -128,7 +128,10 @@ BrowserReceipt: struct {
     cleaned: fn(self) -> Bool Never! { self.cleaned }
 }
 
+// The session's one WebSocket and its protocol state, shared by every copy of
+// a handle; the last copy closes the socket.
 __BrowserState: struct {
+    conn: WsConn
     next_id: Int
     closed: Bool
     session_started: Bool
@@ -147,16 +150,7 @@ __BrowserScope: struct {
     closed: Bool
 }
 
-// The session's one WebSocket. Every copy of a handle reaches it through this
-// shared cell, and the last copy closes it. A struct that held the `WsConn`
-// directly would be copied bit-for-bit and dropped twice (#6581); remove this
-// cell once #6581 lands.
-__BrowserWire: struct {
-    conn: WsConn
-}
-
 Browser: struct {
-    __wire: Shared<__BrowserWire>
     __state: Shared<__BrowserState>
 
     abilities: fn(self) -> BrowserAbilities Never! {
@@ -745,8 +739,8 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
     conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
-    browser: Browser{__wire: shared __BrowserWire{conn: conn.move()}, __state: shared __BrowserState{
-        next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
+    browser: Browser{__state: shared __BrowserState{
+        conn: conn.move(), next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}
     }}
     status: browser_command(browser, "session.status", empty_object())
@@ -937,21 +931,21 @@ remaining_ms: fn(started: Instant, timeout_ms: Int) -[Time]> Int BrowserError! {
 }
 
 browser_ws_timeout: fn(browser: Browser, timeout_ms: Int) BrowserError! -[Net]> {
-    wire: browser.__wire.guard_read()
-    core.web.browser.__ws_set_timeout(wire.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
+    state: browser.__state.guard_read()
+    core.web.browser.__ws_set_timeout(state.value.conn, timeout_ms) ?? return Err(browser_ws_error(err))
     Ok()
 }
 
 browser_ws_send: fn(browser: Browser, text: String) BrowserError! -[Net]> {
-    wire: browser.__wire.guard_read()
-    wire.value.conn.send_text(text) ?? return Err(browser_ws_error(err))
+    state: browser.__state.guard_read()
+    state.value.conn.send_text(text) ?? return Err(browser_ws_error(err))
     Ok()
 }
 
 browser_recv_json: fn(browser: Browser, started: Instant, timeout_ms: Int) -[Net, Time]> Dyn BrowserError! {
     browser_ws_timeout(browser, remaining_ms(started, timeout_ms))
-    wire: browser.__wire.guard_read()
-    message: wire.value.conn.recv() ?? return Err(browser_ws_error(err))
+    state: browser.__state.guard_read()
+    message: state.value.conn.recv() ?? return Err(browser_ws_error(err))
     body: message.text() ?? return Err(browser_ws_error(err))
     value: json.parse(body) ?? return Err(BrowserError{kind: "protocol"})
     if !(value == .Object(_)) -> return Err(BrowserError{kind: "protocol"})

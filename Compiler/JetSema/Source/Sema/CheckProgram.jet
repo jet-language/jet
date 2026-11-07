@@ -463,6 +463,9 @@ SemaComptimeFunctionResult: struct {
     // Incomplete only because of failure obligations against unannotated
     // callees: a solve over the callees' rows discharges or emits them.
     obligations_pending: Bool{false}
+    // An inline foreign (`#FFI`) function's checked foreign row: it has no
+    // Jet body to check, and a compile-time call of it stops the run.
+    foreign: SemaCheckedForeignFunction?{None}
 }
 
 // A checked item expression as a flat body of its own; its Flat nodes are
@@ -2061,6 +2064,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         }
         if func.params[param_index].variadic -> parameter_ty = Type.List{element: parameter_ty}
         parameter_ty = sema_function_resolve_declared(updated, program, parameter_ty, module_identity, generic_params)
+        // A `group: Group` parameter is the caller's live group: a `task` in
+        // this body spawns into it, and the caller's `task.group` joins it.
+        if parameter_ty == (Type.Named{name: "Group"}) -> sema_taskgroup_push_parameter(context, func.params[param_index].name)
         // E0502: a map in a declared parameter type needs a key-eligible key.
         if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, diagnostics) -> complete = false
         default_expr := TExpr?{None}
@@ -2076,7 +2082,10 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
             default_context.arena = context.arena.move()
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork: sema_ownership_fork(state)
-            checked_default: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}, Val(parameter_ty), updated, program, scopes, state, tail_store, default_context, diagnostics)
+            // A `$caller` default checks as the location literal each call gets.
+            declared_default: func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}
+            caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, scopes, caller_span)) else -> Expr?{None}
+            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, state, tail_store, default_context, diagnostics)
             context.arena = default_context.arena.move()
             default_context.arena = BodyFlat{tree: body_tree_new(), arena: body_tree_new(), into_arena: true}
             sema_ownership_fork_rollback(state, default_fork)
@@ -2149,6 +2158,12 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         resolved_return := declared_return
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)
         if !sema_type_check_declared_map_keys(updated, program, resolved_return, func.return_type_span ?? func.name_span, diagnostics) -> complete = false
+        // E1110: a group is call-stack-only spawn authority that flows down
+        // through a direct parameter; a returned group would outlive the
+        // block that joins it.
+        if sema_stmt_contains_taskgroup(resolved_return) {
+            diagnostics.push(sema_error("E1110", func.return_type_span ?? func.name_span, "`Group` cannot be returned", "a task group is call-stack-only spawn authority; a returned group would outlive the block that joins it", "pass `group: Group` down to the helper that spawns instead of returning it"))
+        }
     }
     // `check_kernel_marker`: the declaration and worker-boundary obligations of
     // `#Kernel(.parallel)` (E1102); its effect and body obligations wait for
@@ -2185,6 +2200,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     // Imported Core bodies and generated functions have no user source to fix.
     if returns_value && !func.compiler_generated && !updated.module_identity.starts_with("<corelib>/") -> sema_stmt_value_block_tail_lints(func.body, diagnostics)
     statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
+    // The caller's group joins every task this body spawned into a `Group`
+    // parameter, so those handles owe no `join` here.
+    sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
     context.lost_tail_span = None
     context.value_tail_span = None
     loop site in state.share_found -> share_found.push(site)
@@ -2447,6 +2465,18 @@ sema_comptime_find_function_source: fn(graph: SemaRegistrationGraph, module_iden
     sema_comptime_indexed_function_source(graph, module_index, function_key)
 }
 
+// The checked foreign row of the inline foreign (`#FFI`) function registered
+// under `function_key`. Its validation findings are the module check's to
+// report (sema_checked_foreign_functions), so this lookup drops them.
+sema_comptime_inline_foreign_row: fn(graph: SemaRegistrationGraph, function_key: String) -> SemaCheckedForeignFunction? {
+    row: sema_registration_callable_row(graph, function_key) ?? return None
+    if row == .Function(declaring, index) {
+        reported := [Diagnostic]{}
+        return sema_checked_inline_foreign_row(graph, graph.modules[declaring], graph.modules[declaring].functions[index], reported)
+    }
+    None
+}
+
 // The staged source of the callable registered under `function_key`, through
 // its SymbolId (Rust `ct_funcs` keyed table); `module_index` >= 0 keeps
 // only a row that module declares.
@@ -2521,6 +2551,16 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
         incomplete_reasons: [String]{"`{function_key}` has no registered comptime function source in module `{module_identity}`"},
     }
     source: sema_comptime_find_function_source(graph, module_identity, function_key) ?? return unresolved
+    if source.declaration.inline_foreign != None {
+        unresolved.incomplete_reasons = [String]{}
+        unresolved.foreign = sema_comptime_inline_foreign_row(graph, function_key)
+        if unresolved.foreign == None {
+            unresolved.incomplete_reasons.push("the inline foreign function `{source.declaration.name}` has no checked foreign row")
+            return unresolved
+        }
+        unresolved.complete = true
+        return unresolved
+    }
     // Any function a compile-time body reaches runs while building; the
     // native run's effect gate (E3401) rejects an effectful call. No
     // `comptime fn` or `pure` marker is required.
@@ -8997,7 +9037,7 @@ sema_finalize_graph: fn(resolved: &&SemaRegistrationGraph, trail: &SemaGraphTrai
     resolved_graph.derive_checked = [String:Bool]{}
     incremental: if session == .Val(_) -> true else -> false
     web_checks: sema_web_partition_active(resolved_graph)
-    sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None) && !resolved_graph.retain_programs && !incremental && !web_checks)
+    sema_core_demand_index(resolved_graph, (resolved_graph.check_tests || resolved_graph.core_lowering_roots != None || resolved_graph.retained_core_demand) && (!resolved_graph.retain_programs || resolved_graph.retained_core_demand) && !incremental && !web_checks)
     all_modules: loop module_index in 0..<resolved_graph.modules.len() -> module_index
     modules := [SemaGraphModuleResult]{}
     // The body pass's facts serve the codec and derive waves after it while

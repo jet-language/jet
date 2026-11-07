@@ -191,9 +191,24 @@ sema_call_static_unshadowed_params: fn(owner_params: [SemaInferenceTypeParam], m
 
 sema_call_static_owner_resolution: fn(owner_params: [SemaInferenceTypeParam], owner_type_args: [Type], signature: Type, args: [CallArg], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     explicit_args: loop ty in owner_type_args -> sema_call_resolved_type(ty, environment, program)
-    inference_context := sema_inference_context(environment.module_identity, environment.package_identity, owner_params, environment.generic_params, expected)
-    if owner_type_args.len() > 0 -> return sema_infer_validate_explicit(program.registration_graph, inference_context, explicit_args, span, diagnostics)
-    if owner_params.len() == 0 -> return Val(SemaInferenceResult{substitutions: [SemaInferenceBinding]{}, type_args: [Type]{}, parameters: [Type]{}, return_type: None, evidence: [SemaInferenceBoundEvidence]{}, complete: true, compatible: true})
+    if owner_type_args.len() > 0 {
+        explicit_context := sema_inference_context(environment.module_identity, environment.package_identity, owner_params, environment.generic_params, expected)
+        return sema_infer_validate_explicit(program.registration_graph, explicit_context, explicit_args, span, diagnostics)
+    }
+    // An owner parameter the method's signature never names (`Box.make<U>`
+    // under `Box<T>`) takes no part in the call: nothing can settle it and
+    // nothing reads it, so it instantiates at Unit.
+    named := [SemaInferenceTypeParam]{}
+    unnamed := [SemaInferenceBinding]{}
+    loop param in owner_params {
+        if sema_inference_type_mentions_param(signature, param.name) {
+            named.push(param.copy())
+        } else {
+            unnamed.push(SemaInferenceBinding{name: param.name, ty: Type.Named{name: "Unit"}, source: "static method owner the signature never names"})
+        }
+    }
+    inference_context := sema_inference_context(environment.module_identity, environment.package_identity, named, environment.generic_params, expected)
+    if named.len() == 0 -> return Val(SemaInferenceResult{substitutions: unnamed, type_args: [Type]{}, parameters: [Type]{}, return_type: None, evidence: [SemaInferenceBoundEvidence]{}, complete: true, compatible: true})
 
     params: sema_call_params_from_type(signature) ?? return None
     probe_args := args
@@ -201,7 +216,7 @@ sema_call_static_owner_resolution: fn(owner_params: [SemaInferenceTypeParam], ow
     binding: sema_call_bind_direct("static method", signature, probe_args, span, probe_diagnostics) ?? return None
     facts: sema_call_collect_inference_facts(params, binding, args, environment, program, scopes, state, tail_store, context)
     return_type: sema_call_signature_return(signature)
-    result: sema_infer_callable(program.registration_graph, inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, probe_diagnostics) ?? {
+    result := sema_infer_callable(program.registration_graph, inference_context, facts.parameter_types, return_type, facts.argument_types, [Type]{}, span, probe_diagnostics) ?? {
         // An argument that settles an owner parameter but misses its bound
         // is that missing implementation, not an uninferrable owner.
         loop diagnostic in probe_diagnostics {
@@ -223,6 +238,7 @@ sema_call_static_owner_resolution: fn(owner_params: [SemaInferenceTypeParam], ow
             if owned && !sema_inference_assignable(program.registration_graph, inference_context, result.parameters[index], facts.argument_types[index]) -> return None
         }
     }
+    loop unnamed_binding in unnamed -> result.substitutions.push(unnamed_binding)
     Val(result)
 }
 
@@ -1107,7 +1123,7 @@ sema_call_expiring_secret_new_accepts: fn(args: [CallArg], environment: SemaScop
 
 sema_call_is_clock_type: fn(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(name) -> name == "Clock" || sema_core_canonical_leaf(name, "core.time", "Core/time/time.jet") == (Val("Clock"))
+        .Named(name) -> name == "Clock" || sema_core_canonical_leaf(name, "core.time", "Core/Time/Time.jet") == (Val("Clock"))
         .Tagged(_, inner) -> sema_call_is_clock_type(inner)
         else -> false
     }

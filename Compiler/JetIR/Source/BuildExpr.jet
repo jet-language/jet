@@ -1901,10 +1901,12 @@ ir_expr: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> Int N
         .PtrFromAddr(address, _) -> return ir_ptr_from_addr(m, p, b, expression_ty, address, span)
         .LayoutLiteral(value) -> return ir_layout_literal(m, p, b, expression_ty, value, span)
         .LayoutCompare(op, lhs, rhs) -> return ir_layout_compare(m, p, b, expression_ty, op, lhs, rhs, span)
-        else -> {
-            kind_name: ir_expr_kind_name(ir_body_node(p, b, expression).kind)
-            return ir_fail_slot(b, span, "expression {kind_name}")
-        }
+        // A select's start, receive and timeout links lower only inside its
+        // SelectWait chain (ir_select_table), and Uninit only as a binding's
+        // initializer (ir_bind_uninit); alone they hold no value. Sema stands
+        // an InvariantViolation only where it has already refused the program.
+        // No wildcard: a new NodeKind fails this match until it has a lowering.
+        .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .Uninit | .InvariantViolation(_, _) -> return ir_fail_slot(b, span, "expression {ir_expr_kind_name(node.kind)}")
     }
 }
 
@@ -4071,7 +4073,6 @@ ir_pattern_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, sha
         .Binary(parts, _) -> return ir_binary_pattern_test(m, p, b, subject, parts, span)
         .List(items, rest, _) -> return ir_list_pattern_test(m, p, b, subject, items, rest, span)
         .Map(entries, rest, _) -> return ir_map_pattern_test(m, p, b, subject, entries, rest, span)
-        else -> return ir_fail_slot(b, span, "pattern {ir_shape_name(shape)}")
     }
 }
 
@@ -6785,6 +6786,7 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
         }
         .Struct(_, fields) -> {
             if ir_default_err(p, ty) -> return ir_comptime_default_err(m, p, b, ty, row, fields, span)
+            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Fraction"}) -> return ir_comptime_fraction_handle(m, p, b, ty, fields, span)
             return ir_comptime_struct(m, p, b, ty, row, fields, span)
         }
         .Map(entries) -> return ir_comptime_map(m, p, b, ty, row, entries, span)
@@ -6808,6 +6810,25 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
         }
         else -> return ir_fail_slot(b, span, "constant value {ir_comptime_name(value)}")
     }
+}
+
+// A Fraction constant of a program without core.math, whose Fraction is the
+// runtime handle: its Core fields (num_value, den_value) through the
+// `from_parts` route, as `Int / Int` builds one.
+ir_comptime_fraction_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [TComptimeField], span: Span) -> Int Never! {
+    parts := [Int]{}
+    names: [String]{"num_value", "den_value"}
+    loop name in names {
+        found := TComptimeValue?{None}
+        loop field in fields {
+            if field.name == name -> found = Val(field.value.copy())
+        }
+        value: found ?? return ir_fail_slot(b, span, "Fraction constant without its {name}")
+        slot: ir_comptime(m, p, b, Type.Int, value, span)
+        if ir_failed(b) -> return -1
+        parts.push(slot)
+    }
+    ir_precise_route(m, p, b, ty, "Fraction", "from_parts", parts, span)
 }
 
 // A Map constant: an empty header, then each entry set in order through

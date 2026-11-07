@@ -8,6 +8,9 @@
 use {
     cli_files: core.files
     cli_sys: core.sys
+    // The Core sources this jet was built with, for a compile with no
+    // toolchain tree (jet_cli_core_sources).
+    core.devtools.[toolchain_core_source]
     jet_foundation.[
         AppAuthorizedDirectory,
         BuildOptions,
@@ -229,9 +232,9 @@ jet_cli_runtime_pack: fn(result: &&JetDriverCompileResult, prefix: String, objec
     result
 }
 
-// Names the Jet toolchain source tree: the directory that holds `Core/`. The
-// Rust host embeds those bodies; the Jet host reads them from this tree.
-// Unset, the tree is found (jet_cli_toolchain_root).
+// Names the Jet toolchain source tree: the directory that holds `Core/`.
+// Unset, the tree is found (jet_cli_toolchain_root); with no tree, jet
+// compiles against the Core sources built into it (jet_cli_core_sources).
 JET_CLI_TOOLCHAIN_ROOT_ENV: "JET_TOOLCHAIN_ROOT"
 // This compiler's identity (`name@version#<source id>`). Unset, it is read from
 // the IDENTITY file beside the jet executable (jet_cli_compiler_identity).
@@ -272,9 +275,11 @@ JetCLIToolchainRoot: enum {
     Missing(what: String, fix: String)
 }
 
-// The toolchain source tree: JET_TOOLCHAIN_ROOT, else the nearest directory at or
-// above `input` that holds a toolchain (a Jet checkout), else the toolchain
-// installed beside the jet executable. Missing names all three places.
+// The toolchain source tree: JET_TOOLCHAIN_ROOT, else the nearest directory at
+// or above `input` that holds a toolchain (a Jet checkout, whose own Core
+// takes precedence for contributors). Missing names both places; a compile
+// then reads the Core sources built into jet, and only the tools that need
+// a checkout's other files refuse.
 jet_cli_toolchain_root: fn(input: String) -> JetCLIToolchainRoot Never! {
     if cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) == .Val(root) -> return JetCLIToolchainRoot.Found{root: root}
     start: cli_files.realpath(input) ?? input
@@ -284,11 +289,9 @@ jet_cli_toolchain_root: fn(input: String) -> JetCLIToolchainRoot Never! {
         if current == "/" -> break
         current = jet_cli_parent(current) ?? break
     }
-    installed: jet_cli_executable_dir()
-    if jet_cli_is_toolchain(installed) -> return JetCLIToolchainRoot.Found{root: installed}
     JetCLIToolchainRoot.Missing{
-        what: "can't find the Jet toolchain sources: `{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, no directory at or above `{start}` holds `Core/` and `Compiler/Prelude/`, and `{installed}` beside jet holds no installed toolchain",
-        fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, run jet on a file inside a Jet checkout, or install the toolchain beside jet",
+        what: "can't find the Jet toolchain sources: `{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set and no directory at or above `{start}` holds `Core/` and `Compiler/Prelude/`",
+        fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, or run jet inside a Jet checkout",
     }
 }
 
@@ -890,13 +893,15 @@ jet_cli_threads_left: fn(physical: Int, logical: Int, online: Int, stat: String)
 }
 
 // The Core library rows of the toolchain tree (jet_cli_toolchain_root of
-// `input`, the entry), or the refusal that stops the request. Each body is read when the
-// compile first schedules its row (jet_driver_core_text_file), so a compile
-// reads only the Core files its imports reach; every file is checked to be
-// present here, so a missing one still refuses the request up front.
-// `checked` says the caller already found every row a regular file (the
-// `jet run` keeper's toolchain read), so they aren't checked twice. Every
-// compile also needs this compiler's identity, so its absence refuses here too.
+// `input`, the entry), else the Core sources built into jet
+// (core.devtools.toolchain_core_source), or the refusal that stops the
+// request. Each body is read when the compile first schedules its row
+// (jet_driver_core_text_file), so a compile reads only the Core files its
+// imports reach; every tree file is checked to be present here, so a missing
+// one still refuses the request up front. `checked` says the caller already
+// found every row a regular file (the `jet run` keeper's toolchain read), so
+// they aren't checked twice. Every compile also needs this compiler's
+// identity, so its absence refuses here too.
 JetCLICoreSources: enum {
     Loaded(sources: [JetDriverCoreSource])
     Missing(what: String, fix: String)
@@ -907,15 +912,19 @@ jet_cli_core_sources: fn(input: String, checked: Bool) -> JetCLICoreSources Neve
         missing: jet_cli_identity_missing()
         return JetCLICoreSources.Missing{what: missing.what, fix: missing.fix}
     }
-    toolchain: if jet_cli_toolchain_root(input) == {
-        .Found(root) -> root
-        .Missing(what, fix) -> { return JetCLICoreSources.Missing{what: what, fix: fix} }
-    }
     core_sources := [JetDriverCoreSource]{}
-    loop row in CORE_SOURCE_OWNED_ROWS {
-        core_path: jet_cli_authority_path(toolchain, row.path)
-        if !checked && !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
-        core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
+    if jet_cli_toolchain_root(input) == .Found(toolchain) {
+        loop row in CORE_SOURCE_OWNED_ROWS {
+            core_path: jet_cli_authority_path(toolchain, row.path)
+            if !checked && !cli_files.is_file(core_path) -> return JetCLICoreSources.Missing{what: "can't read the Core library source `{core_path}`", fix: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"}
+            core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(core_path, JetCLICoreSourceReader{})})
+        }
+    } else {
+        // Each row's file is its repository path, so a Core file's comptime
+        // inputs (`Core/<dir>/<asset>`) resolve among the built-in sources too.
+        loop row in CORE_SOURCE_OWNED_ROWS {
+            core_sources.push(JetDriverCoreSource{module_name: row.module_name, alias: row.alias, path: row.path, owner: row.owner, owned_members: row.owned_members, runtime: row.runtime, text: jet_driver_core_text_file(row.path, JetCLIBuiltinCoreSourceReader{})})
+        }
     }
     JetCLICoreSources.Loaded{sources: core_sources}
 }
@@ -932,6 +941,20 @@ impl JetCLICoreSourceReader.JetDriverCoreSourceReader {
     read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
         bytes: cli_files.read_bytes(file) ?? return Err(JetDriverBuildInputError{message: jet_cli_io_error_text(err)})
         Ok(bytes)
+    }
+}
+
+// The read of one Core row from the sources built into jet, by its
+// repository path (`Core/App/App.jet`).
+JetCLIBuiltinCoreSourceReader: struct {}
+
+impl JetCLIBuiltinCoreSourceReader.JetDriverCoreSourceReader {
+    read: fn(self, file: String) -[FS.Read]> String? {
+        toolchain_core_source(file)
+    }
+    read_bytes: fn(self, file: String) -[FS.Read]> [U8] JetDriverBuildInputError! {
+        text: toolchain_core_source(file) ?? return Err(JetDriverBuildInputError{message: "`{file}` is not a Core source built into this jet"})
+        Ok(text.bytes())
     }
 }
 
@@ -992,7 +1015,12 @@ jet_cli_eval_config: fn() -> JetEvalConfig Never! {
 // read only when compile-time code first runs; None when this toolchain
 // has none.
 jet_cli_native_session: fn() -> Shared<JetEvalNativeSession>? Never! {
-    runtime_dir: jet_cli_runtime_dir()
+    jet_cli_native_session_at(jet_cli_runtime_dir())
+}
+
+// The native session over the runtime pack directory `runtime_dir`; None when
+// it records no runtime key.
+jet_cli_native_session_at: fn(runtime_dir: String) -> Shared<JetEvalNativeSession>? Never! {
     key: jet_cli_runtime_key(runtime_dir) ?? return None
     Val(jet_eval_native_session("{runtime_dir}/{key}/{JET_CLI_RUNTIME_IMAGE_FILE}", JetCLINativeImageReader{}))
 }
@@ -1230,11 +1258,12 @@ JetCLIOverlay: struct {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-// `settings` are the command line's `--set` writers (`jet check`).
-jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
+// `settings` are the command line's `--set` writers and `profile` the
+// `--profile` it selects ("" keeps the request's default; `jet check`).
+jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -1323,11 +1352,11 @@ jet_cli_prepare_refusal: fn(what: String, fix: String, color: Bool) -> JetDriver
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(prepared, None, trace_sink, settings)
+    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -1340,8 +1369,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 
 // Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
 // records every comptime input file the compile reads (`embed_file`,
-// `embed_bytes`, `find`); `settings` are the `--set` writers.
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
+// `embed_bytes`, `find`); `settings` are the `--set` writers; a non-empty
+// `profile` is the selected `--profile`.
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1350,6 +1380,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
             selected.setting_overrides = settings
+            if profile != "" -> selected.profile = profile
             library_prefix: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()

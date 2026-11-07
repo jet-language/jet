@@ -1,0 +1,166 @@
+// `jet build`'s executables in the machine-wide ArtifactStore (JET_STORE_DIR,
+// the store `jet cache` manages): an unchanged build restores its binary, with
+// the runtime it links, instead of building it again. A stored binary whose
+// bytes no longer match its digest is removed by the restore, reported in one
+// note line, and rebuilt.
+use {
+    cli_files: core.files
+    cli_sys: core.sys
+    jet_backend.[X64Executable]
+    jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverLoweringInputs, JetDriverVerbOutput]
+    jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key, sha256_hex, sha256_hex_bytes]
+    jet_pkg_model.[COMPILER_VERSION]
+    jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
+}
+
+// A built `jet build` executable: its path and the lines its build reports
+// on stderr before the effect summary.
+JetCLIStoredBuild: enum {
+    Written(path: String, log: String)
+    Failed(output: JetDriverVerbOutput)
+}
+
+// `jet build`'s executable `name`, restored from the store when a build of
+// the same key stored it (jet_cli_build_cache_key), else built through
+// jet_cli_build_binary and stored. `verbose` reports the runtime pack and the
+// cache decision as `[build]` lines. A store that can't be opened or written
+// leaves the build uncached.
+jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: BuildOptions, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot, verbose: Bool) -[Env, FS, Exec, Time, Rand]> JetCLIStoredBuild Never! {
+    log := ""
+    if verbose -> log = "[build] runtime   -> packaged {jet_cli_runtime_key(jet_cli_runtime_dir()) ?? "missing"}\n"
+    store := ArtifactStore?{None}
+    key := ""
+    if result.internal_problem == None && result.complete {
+        if jet_cli_build_option_gate_refusal(snapshot.roots[0].canonical_path, options, color) == .Val(refused) -> return JetCLIStoredBuild.Failed{output: refused}
+        key = jet_cli_build_cache_key(file, name, options, snapshot) ?? ""
+        if key == "" {
+            if verbose -> log = "{log}[build] cache off -> this compiler, its runtime or its Core sources can't be identified\n"
+        } else {
+            if ArtifactStore.from_env() == {
+                .Ok(opened) -> store = Val(opened)
+                .Err(error) -> {
+                    if verbose -> log = "{log}[build] cache off -> {error.message()}\n"
+                }
+            }
+        }
+    }
+    build_dir: jet_cli_output_dir_path(snapshot, options)
+    binary: "{build_dir}/{name}"
+    if store == .Val(opened) {
+        if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return JetCLIStoredBuild.Failed{output: refused}
+        if jet_cli_build_restore(opened, key, binary, snapshot.roots[0].canonical_path) == {
+            .Ok(restored) -> {
+                if restored == {
+                    .Hit(_, _) -> {
+                        if verbose -> log = "{log}[build] cache hit -> reused cached binary\n"
+                        return JetCLIStoredBuild.Written{path: binary, log: log}
+                    }
+                    .Corrupt -> log = "{log}note: removed a corrupt cached binary of `{name}` from the store; rebuilding it\n"
+                    .Missing -> {}
+                }
+            }
+            .Err(reason) -> {
+                if verbose -> log = "{log}[build] cache off -> {reason}\n"
+            }
+        }
+        if verbose -> log = "{log}[build] cache miss -> compiling\n"
+    }
+    built := jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot)
+    if built.move() == {
+        .Failed(failure) -> JetCLIStoredBuild.Failed{output: failure}
+        .Image(executable, path) -> JetCLIStoredBuild.Written{path: path, log: "{log}{jet_cli_build_store(store, key, path, executable, verbose)}"}
+    }
+}
+
+// The side keys of a stored build: its split debug file and the id its
+// symbol-store copy is named by (jet_cli_symbols_file).
+jet_cli_build_side_key: fn(key: String, side: String) -> String Never! {
+    sha256_hex("{key}:{side}")
+}
+
+// Restore the executable of `key` to `binary`, with its side debug file and
+// its copy in the symbol store of the package at `root`. A side entry the
+// store no longer holds makes the whole build a miss; the error is why the
+// store couldn't be read or the restored files written.
+jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, root: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore Err! {
+    id := ""
+    debug := [U8]{}
+    sides: [String]{"build-id", "debug"}
+    loop side in sides {
+        found: store.lookup_artifact(jet_cli_build_side_key(key, side)) ?? return Err(err.message())
+        if found == {
+            .Hit(artifact) -> {
+                bytes: cli_files.read_bytes(artifact.path) ?? return Ok(ArtifactRestore.Missing)
+                if side == "debug" -> debug = bytes else -> id = String.from_bytes(bytes) ?? return Ok(ArtifactRestore.Corrupt)
+            }
+            .Corrupt -> return Ok(ArtifactRestore.Corrupt)
+            .Missing -> return Ok(ArtifactRestore.Missing)
+        }
+    }
+    restored: store.restore_file(key, binary) ?? return Err(err.message())
+    if restored == {
+        .Hit(_, _) -> {}
+        else -> return Ok(restored)
+    }
+    if debug.len() > 0 {
+        cli_files.write_bytes("{binary}.debug", debug) ?? return Err("couldn't write {binary}.debug: {err}")
+    }
+    if id != "" {
+        dir: "{root}/.jet/symbols/.build-id/{id.slice(0, 2)}"
+        cli_files.create_dir_all(dir) ?? return Err("couldn't create the symbol store {dir}: {err}")
+        cli_files.write_bytes("{dir}/{id.slice(2, id.len())}.debug", debug) ?? return Err("couldn't write the symbol store {dir}: {err}")
+    }
+    Ok(restored)
+}
+
+// Store the built executable at `path` under `key`, its side entries first,
+// so a stored executable always has them; the `--verbose` line it reports.
+jet_cli_build_store: fn(store: ArtifactStore?, key: String, path: String, executable: X64Executable, verbose: Bool) -[FS, Env, Exec, Time, Rand]> String Never! {
+    opened: store ?? return ""
+    id: if executable.build_id.len() > 0 -> sha256_hex_bytes(executable.build_id) else -> ""
+    if opened.publish_bytes(jet_cli_build_side_key(key, "build-id"), id.bytes(), false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if opened.publish_bytes(jet_cli_build_side_key(key, "debug"), executable.debug_file, false) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if opened.publish_file(key, path) == .Err(error) -> return jet_cli_build_store_off(verbose, error.message())
+    if verbose -> "[build] cache store -> saved binary\n" else -> ""
+}
+
+jet_cli_build_store_off: fn(verbose: Bool, reason: String) -> String Never! {
+    if verbose -> "[build] cache off -> {reason}\n" else -> ""
+}
+
+// The store key of `name`'s executable: this compiler (its identity, else its
+// file's), the runtime pack it links, the Core sources it compiles, the build
+// options and host, and every source of the authorized snapshot, each part
+// length-framed and hashed together. None when the compiler, its runtime or
+// its Core sources can't be identified.
+jet_cli_build_cache_key: fn(file: String, name: String, options: BuildOptions, snapshot: JetDriverAuthorizedSourceSnapshot) -[FS, Env]> String? Never! {
+    parts := [String]{"jet-build-binary-v1", COMPILER_VERSION, name, build_options_key(options), "{cli_sys.arch()}-{cli_sys.name()}"}
+    compiler: if jet_cli_compiler_identity() == {
+        .Val(identity) -> identity
+        None -> jet_cli_identity_key("file", cli_files.stat(cli_sys.executable()) ?? return None)
+    }
+    parts.push(compiler)
+    parts.push(jet_cli_runtime_key(jet_cli_runtime_dir()) ?? return None)
+    toolchain: if jet_cli_toolchain_root(file) == {
+        .Found(root) -> root
+        .Missing(_, _) -> { return None }
+    }
+    loop row in CORE_SOURCE_OWNED_ROWS {
+        path: jet_cli_authority_path(toolchain, row.path)
+        parts.push(row.path)
+        parts.push(jet_cli_identity_key("file", cli_files.stat(path) ?? return None))
+    }
+    loop root in snapshot.roots {
+        loop source in root.files {
+            parts.push(source.path)
+            parts.push(sha256_hex(source.source))
+        }
+        loop source in root.foreign_cache_files {
+            parts.push(source.path)
+            parts.push(sha256_hex(source.source))
+        }
+    }
+    loop dependency in snapshot.script_dependencies -> parts.push("{dependency.name}={dependency.content_hash}")
+    framed: loop part in parts -> "{part.len()}:{part}"
+    Val(sha256_hex(framed.join("\n")))
+}

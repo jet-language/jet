@@ -97,10 +97,10 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     meta: f.meta ?? panic("meta")
     assert(!(loop field in meta.fields { if field == .Tunable(_) -> break true } ?? false))
     found := false
-    loop application in p.applied_rules {
-        if application.marker.name == "Transition" {
+    loop marker in f.markers {
+        if marker.name == "Transition" {
             labels := [String?]{}
-            loop label in application.marker.arg_labels -> labels.push(if label == .Val(named) -> Val(named.name) else -> None)
+            loop label in marker.arg_labels -> labels.push(if label == .Val(named) -> Val(named.name) else -> None)
             assert(labels == [String?]{Val("to"), Val("from")})
             found = true
             break
@@ -146,7 +146,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
 #Test("ordered_function_and_file_groups_format_idempotently") {
     loop testcase in [
         (source: "use core.mem\n#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]\nadd: fn() {{\n    \"\"\"void add(void) {{}}\"\"\"\n}}\n", expected: "#[Policy(copies: .Explicit), Meta(category: \"ffi\"), Job, Unsafe(\"register ABI\", obligations: .None), FFI(c)]"),
-        (source: "#[HTML(\"index.html\"), PubFile, Target(Web), NoPrelude]\nmain: fn() {{}}\n", expected: "#[HTML(Path{{\"index.html\"}}), PubFile, Target(Web), NoPrelude]")
+        (source: "#[HTML(\"index.html\"), PubFile, Target(Wasm), NoPrelude]\nmain: fn() {{}}\n", expected: "#[HTML(\"index.html\"), PubFile, Target(Wasm), NoPrelude]")
     ] {
         expected: testcase.expected
         once: entry02_format(testcase.source)
@@ -154,11 +154,18 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
         assert(once == entry02_format(once))
     }
 }
-#Test("grouped_retired_function_markers_keep_known_teaching") {
-    loop src in ["#[Pure, Job]\nwork: fn() {{}}\n", "#[InlineAlways, Job]\nwork: fn() {{}}\n", "#[Pure(), Job]\nwork: fn() {{}}\n", "#[InlineAlways(), Job]\nwork: fn() {{}}\n"] {
-        ds: entry02_errors(src)
-        _: entry02_diag(ds, "E0927")
-        loop diagnostic in ds -> assert(diagnostic.code != "E0930" && diagnostic.code != "E0355")
+// Retired `#Pure`/`#InlineAlways` are unknown applied rules; the closed rule
+// registry is sema's (E0927, tests/ui/E0927_retired_pure_*). The parser keeps
+// each group entry as written and adds no arity or site error of its own.
+#Test("grouped_retired_function_markers_reach_sema_as_written") {
+    loop testcase in [
+        (source: "#[Pure, Job]\nwork: fn() {{}}\n", name: "Pure"),
+        (source: "#[InlineAlways, Job]\nwork: fn() {{}}\n", name: "InlineAlways"),
+        (source: "#[Pure(), Job]\nwork: fn() {{}}\n", name: "Pure"),
+        (source: "#[InlineAlways(), Job]\nwork: fn() {{}}\n", name: "InlineAlways")
+    ] {
+        f: entry02_func(entry02_program(testcase.source), "work")
+        assert(loop marker in f.markers { if marker.name == testcase.name -> break true } ?? false, testcase.source)
     }
 }
 #Test("abi_function_markers_route_to_the_c_declaration_diagnostic") {
@@ -182,9 +189,12 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     assert(found)
     _: entry02_diag(entry02_errors("#Import c.demo: module {{\n    #[ABI(sysv64), MustUse] ping: fn() = \"ping\"\n}}\n"), "E3212")
 }
-#Test("doc_on_a_function_requires_task") {
+// `#Doc` on a function needs its `Job` companion; the registry's companion
+// rule is checked by sema (E0355), so the parser accepts both forms.
+#Test("doc_on_a_function_parses_with_and_without_its_job_companion") {
     _: entry02_program("#[Doc(\"task text\"), Job] work: fn() {{}}\n")
-    _: entry02_diag(entry02_errors("#Doc(\"helper text\") helper: fn() {{}}\n"), "E0355")
+    helper: entry02_func(entry02_program("#Doc(\"helper text\") helper: fn() {{}}\n"), "helper")
+    assert(loop marker in helper.markers { if marker.name == "Doc" -> break true } ?? false)
 }
 #Test("ffi_inline_tier_formats_idempotently") {
     loop src in ["#FFI(c) add: fn(a: Int, b: Int) -> Int {{\n    \"\"\"long add(long a, long b) {{ return a + b; }}\n\"\"\"\n}}\n", "use core.mem\n#[Unsafe(\"cycle counter\"), FFI(asm)] rdtsc: fn() -> U64 {{\n    \"\"\"rdtsc ; -> return\n\"\"\"\n}}\n"] {

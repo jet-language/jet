@@ -1363,9 +1363,12 @@ jet_cli_workspace_test_members: fn(dir: String, use_override: Bool, color: Bool,
     JetCLIWorkspaceTest.Members{names: names, directories: directories}
 }
 
-// `missing_bare_entry`: no file and no project (E2104).
+// `missing_bare_entry`: no file and no project (E2104). `jet dev` names what
+// it lacks: a file to watch.
 jet_cli_missing_bare_entry: fn(command: String, cwd: String, color: Bool) -[FS, Env]> JetCLIPlan Never! {
-    jet_cli_fail("E2104", "no file given and no `package.jet` found in this directory or above", jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
+    missing: "no file given and no `package.jet` found in this directory or above"
+    what: if command == "dev" -> "`jet dev` needs a file to watch: {missing}" else -> missing
+    jet_cli_fail("E2104", what, jet_cli_why("E2104"), "run `jet {command} <file.jet>` or cd into a project", color, JET_DRIVER_EXIT_USAGE)
 }
 
 // `resolve_command_target` for a directory `raw`: the shared bare rule when it

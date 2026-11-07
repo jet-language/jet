@@ -1908,15 +1908,16 @@ ir_shared_guard_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, g
     ir_load_at(m, b, payload, 0, row)
 }
 
-// The address of the cell's slot a guard lends: an edit permit's through
-// jet_rt_native_shared_edit_guard_edit, a read permit's through
-// jet_rt_native_shared_read_guard_deref. -1 with `b` failed on an error.
+// The address of the cell's slot a guard lends, whichever permit it holds:
+// a spelled `SharedGuard<T>` parameter, result or field reads and edits its
+// slot as the guard acquired from guard_read/guard_edit does. -1 with `b`
+// failed on an error.
 ir_shared_guard_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guard: Int, span: Span) -> Int Never! {
-    editable: ir_shared_guard_editable(ir_ty(p, b, guard)) ?? return ir_fail_slot(b, span, "Shared guard dereference without its checked read/edit provenance")
+    if ir_shared_guard_inner(ir_ty(p, b, guard)) == None -> return ir_fail_slot(b, span, "Shared guard dereference of a value that is not a SharedGuard")
     held: ir_expr(m, p, b, guard)
     if ir_failed(b) || held < 0 -> return -1
     pointer_row: ir_pointer_row(m)
-    payload: ir_runtime(m, b, if editable -> "jet_rt_native_shared_edit_guard_edit" else -> "jet_rt_native_shared_read_guard_deref", [Int]{held}, pointer_row)
+    payload: ir_runtime(m, b, "jet_rt_native_shared_guard_payload", [Int]{held}, pointer_row)
     if b.fresh[held] {
         b.fresh[held] = false
         ir_hold_statement_guard(b, held, -1, true)

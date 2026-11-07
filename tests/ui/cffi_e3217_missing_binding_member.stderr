@@ -1,0 +1,8 @@
+Error [jet.CBindingMemberMissing]: C library `c` has no binding named `strlen`.
+  --> tests/ui/cffi_e3217_missing_binding_member.jet:4:11
+    |
+  4 |     print(libc.strlen("hello"))
+    |           ^^^^
+ Why: Neither the binding cache `.jet/bindings/c/c.jet` nor an `#Import c.c: module` overlay declares `strlen`; without a cache the library binds nothing.
+ Fix: Import the header by path (`use name: "<dir>/c.h"`) so the compiler binds it, refresh the cache with `jet inspect bind <header.h> --pkg c`, or declare `strlen` in `#Import c.c: module`.
+More: jet-lang.dev/e/E3217

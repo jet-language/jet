@@ -840,7 +840,7 @@ sema_expression_module_member_unknown: fn(graph: SemaRegistrationGraph, module_i
             target: graph.modules[target_index]
             if target.module_identity.starts_with("<corelib>/") -> return Val(sema_expression_core_member_unknown(target, member, member_span))
             if sema_registration_direct_symbol(target, member) != None -> return Val(sema_error("E0605", member_span, "`{alias}.{member}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{alias}.{member}` from inside its module, or remove `priv` from its module or field"))
-            return Val(sema_call_import_member_unknown(member, member_span))
+            return Val(sema_call_import_member_unknown(target.module_name, member, member_span))
         }
     }
     None

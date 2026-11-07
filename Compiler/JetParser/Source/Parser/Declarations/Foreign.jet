@@ -171,34 +171,40 @@ parser_parse_extern_fn: fn(state: &JetParserState, allow_missing_semicolon: Bool
     abi := NamedSpan?{None}
     undo := NamedSpan?{None}
     close_name := NamedSpan?{None}
-    if parser_current_kind(state) == TOKEN_HASH {
-        loop parser_current_kind(state) == TOKEN_HASH {
-            marker: parser_parse_marker(state)
-            if marker.name == {
-                "ABI" -> {
-                    if abi != None {
-                        parser_foreign_error(state, marker.span, "a foreign declaration may have only one `#ABI` marker", "the calling convention is one property of one binding", "remove the repeated `#ABI(...)` marker")
-                    }
-                    abi = parser_foreign_marker_name(marker, 0)
-                    if abi == None -> parser_foreign_error(state, marker.span, "`ABI` needs an identifier calling convention", "foreign ABI metadata is a fixed name", "write `#ABI(C)` or another identifier")
+    markers := [Marker]{}
+    loop parser_current_kind(state) == TOKEN_HASH {
+        if parser_kind_at(state, 1) == TOKEN_LBRACKET {
+            group: parser_parse_marker_group_list(state)
+            loop marker in group.markers -> markers.push(marker.copy())
+        } else {
+            markers.push(parser_parse_marker(state))
+        }
+        parser_skip_semicolons(state)
+    }
+    loop marker in markers {
+        if marker.name == {
+            "ABI" -> {
+                if abi != None {
+                    parser_foreign_error(state, marker.span, "a foreign declaration may have only one `#ABI` marker", "the calling convention is one property of one binding", "remove the repeated `#ABI(...)` marker")
                 }
-                "Undo" -> {
-                    if undo != None {
-                        parser_foreign_error(state, marker.span, "a foreign declaration may have only one `#Undo` marker", "one binding has one compensating function", "remove the repeated `#Undo(...)` marker")
-                    }
-                    undo = parser_foreign_marker_name(marker, 0)
-                    if undo == None -> parser_foreign_error(state, marker.span, "`Undo` needs an identifier function name", "foreign cleanup metadata names one binding", "write `#Undo(inverse)`")
-                }
-                "Close" -> {
-                    if close_name != None {
-                        parser_foreign_error(state, marker.span, "a foreign declaration may have only one `#Close` marker", "one returned handle has one close function", "remove the repeated `#Close(...)` marker")
-                    }
-                    close_name = parser_foreign_marker_name(marker, 0)
-                    if close_name == None -> parser_foreign_error(state, marker.span, "`Close` needs an identifier function name", "foreign handle metadata names one binding", "write `#Close(close)`")
-                }
-                else -> parser_foreign_error(state, marker.span, "unknown foreign declaration marker", "foreign declarations accept ABI, Undo, and Close metadata", "remove the marker or use `#ABI`, `#Undo`, or `#Close`")
+                abi = parser_foreign_marker_name(marker, 0)
+                if abi == None -> parser_foreign_error(state, marker.span, "`ABI` needs an identifier calling convention", "foreign ABI metadata is a fixed name", "write `#ABI(C)` or another identifier")
             }
-            parser_skip_semicolons(state)
+            "Undo" -> {
+                if undo != None {
+                    parser_foreign_error(state, marker.span, "a foreign declaration may have only one `#Undo` marker", "one binding has one compensating function", "remove the repeated `#Undo(...)` marker")
+                }
+                undo = parser_foreign_marker_name(marker, 0)
+                if undo == None -> parser_foreign_error(state, marker.span, "`Undo` needs an identifier function name", "foreign cleanup metadata names one binding", "write `#Undo(inverse)`")
+            }
+            "Close" -> {
+                if close_name != None {
+                    parser_foreign_error(state, marker.span, "a foreign declaration may have only one `#Close` marker", "one returned handle has one close function", "remove the repeated `#Close(...)` marker")
+                }
+                close_name = parser_foreign_marker_name(marker, 0)
+                if close_name == None -> parser_foreign_error(state, marker.span, "`Close` needs an identifier function name", "foreign handle metadata names one binding", "write `#Close(close)`")
+            }
+            else -> parser_foreign_error(state, marker.span, "unknown foreign declaration marker", "foreign declarations accept ABI, Undo, and Close metadata", "remove the marker or use `#ABI`, `#Undo`, or `#Close`")
         }
     }
     start: parser_current(state).span

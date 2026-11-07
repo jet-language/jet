@@ -225,22 +225,33 @@ jet_cli_try_stage: fn(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -> [JetC
             checked_rename = true
             index: jet_cli_try_index(plan.entry, baseline)
             loop definition in index.definitions {
-                if definition.def.name == from -> jet_cli_try_group_edit(groups, positions, jet_cli_try_canonical(definition.def.module_path), TextEdit{span: definition.def.def_span, new_text: to})
+                if definition.def.name == from -> jet_cli_try_group_edit(groups, positions, jet_cli_try_module_file(baseline, definition.def.module_path), TextEdit{span: definition.def.def_span, new_text: to})
             }
             loop reference in index.references {
-                if reference.name == from -> jet_cli_try_group_edit(groups, positions, jet_cli_try_canonical(reference.module_path), TextEdit{span: reference.span, new_text: to})
+                if reference.name == from -> jet_cli_try_group_edit(groups, positions, jet_cli_try_module_file(baseline, reference.module_path), TextEdit{span: reference.span, new_text: to})
             }
             if groups.len() == 0 -> return Err(JetCLITryError.Read{error: jet_cli_read_error("try plan found no `{from}` symbols")})
         }
     }
     jet_cli_try_stage_files(groups, baseline.sources, checked_rename)
 }
+// The canonical file of a checked index module path. The index names a module
+// by its display path; the retained projection's doc module carries the
+// physical file it was loaded from, as `jet codemod` maps it.
+jet_cli_try_module_file: fn(baseline: &JetCLITryChecked, module_path: String) -> String Never! {
+    if baseline.checked.product == .RetainedCheckedProjection(projection) {
+        loop doc_module in projection.compile.doc_modules {
+            if doc_module.path == module_path -> return jet_cli_try_canonical(doc_module.physical_path)
+        }
+    }
+    jet_cli_try_canonical(module_path)
+}
 jet_cli_try_semantic_ops: fn(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -> [JetCLISemOp] JetCLITryError! {
     if plan.action == .Rename(from, to) {
         index: jet_cli_try_index(plan.entry, baseline)
         targets := [JetCLISemOpTarget]{}
         loop fact in index.definition_facts {
-            if fact.name == from -> targets.push(JetCLISemOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: "{fact.module_path}::{to}", kind: fact.kind, module_path: fact.module_path})
+            if fact.name == from -> targets.push(JetCLISemOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: "{fact.module_path}::{to}", kind: fact.kind, module_path: jet_cli_try_module_file(baseline, fact.module_path)})
         }
         return Ok([JetCLISemOp]{JetCLISemOp{kind: "rename", rule_id: Val(plan.name), from: Val(from), to: Val(to), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}}})
     }
@@ -346,7 +357,12 @@ jet_cli_try_run: fn(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput 
         if change.path == entry -> entry_source = Val(String.from_bytes(change.after) ?? return jet_cli_try_fail("try overlay contains non-UTF-8 source"))
     }
     source: entry_source ?? baseline.entry_source
-    operations: jet_cli_try_semantic_ops(plan, baseline) ?? return jet_cli_try_error_output(err)
+    operations := jet_cli_try_semantic_ops(plan, baseline) ?? return jet_cli_try_error_output(err)
+    // A text-edit plan journals each staged file's textual rewrite, as `jet fix`
+    // does, so the kept bytes carry their semantic operation.
+    if plan.action == .Edits(_) {
+        loop change in changes -> operations.extend(jet_cli_fix_rewrite(change.before, change.after))
+    }
     verdict: jet_cli_try_verdict(queries, before, plan.entry, changes, source) ?? return jet_cli_try_error_output(err)
     receipt: jet_cli_try_receipt(plan.name, changes, verdict)
     if jet_cli_errors(verdict.diagnostics).len() > 0 -> return jet_cli_try_output(plan, verdict, receipt, false, json, source)

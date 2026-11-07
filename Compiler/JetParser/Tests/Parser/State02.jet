@@ -7,7 +7,9 @@ use {
 program: fn(source: String) -> Program { parser_test_program(source) }
 
 #Test("clean_preparation_reuses_byte_identical_tokens") {
-    lexed := lex("run: fn() {{ value: 1 }}\n".bytes())
+    // A colon declaration is rewritten during preparation, so a clean source
+    // here is a plain statement line.
+    lexed := lex("print(1)\n".bytes())
     assert(lexed.diagnostics.is_empty())
     expected := [Token]{}
     loop token in lexed.tokens {
@@ -127,7 +129,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 }
 
 #Test("root_template_loop_parses_closed_type_list_and_declarations") {
-    parsed: program("\nprep loop T in [Point] {{\n    impl T {{\n        generated: fn(self) -> String {{ \"generated\" }}\n    }}\n    #Test(\"generated\") {{\n        .measure {{\n            assert(true)\n        }}\n    }}\n}}\n")
+    parsed: program("\ncomptime loop T in [Point] {{\n    impl T {{\n        generated: fn(self) -> String {{ \"generated\" }}\n    }}\n    #Test(\"generated\") {{\n        .measure {{\n            assert(true)\n        }}\n    }}\n}}\n")
     loop_item: loop item in parsed.items { if item == .TemplateLoop(value) -> break value } ?? panic("root template loop")
     assert(loop_item.body.len() == 2)
     assert(if loop_item.body[0] == { .Item(item) -> if item == { .Impl(_) -> true else -> false } else -> false })

@@ -54,7 +54,8 @@ jet test Compiler                                           # quick: every membe
 jet test Compiler --profile golden                          # Examples and tests/run
 jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
 jet test Compiler --profile cases                           # tests/cases
-jet test Compiler --profile full                            # the #Tests and all three corpora
+jet test Compiler --profile packages                        # the #Tests of every other package under Compiler/ and Jetpack/
+jet test Compiler --profile full                            # every package's #Tests, all three corpora, selfhost and perf
 jet test Compiler --profile corpora                         # all three corpora, no #Tests
 jet test Compiler --profile golden Basics/FizzBuzz          # rows whose ID contains the filter
 JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json
@@ -165,7 +166,10 @@ counts them beside its processes, and the entry's peak (its claim below)
 includes them. `JET_TEST_STATE_DIR` (default `$JET_SCRATCH_ROOT/testkit/state`,
 else `jet/testkit/state` in the user cache; disk-backed, never `/tmp` or the
 checkout) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
-time and peak, and `ffi/` is the FFI cache every run shares.
+time and peak, and `ffi/` is the FFI cache that runs staged on disk share. A
+run staged in memory keeps its own FFI cache beside its rows and drops it with
+them: a cold helper realizes there in about a second, while a shared on-disk
+cache under host I/O load charged its first row over a minute.
 Selected entries run in one `task.group`. Measured entries start longest
 first, after every unmeasured one. An entry starts once fewer than `--jobs N`
 run and its claim fits in the memory budget beside the running ones'; the

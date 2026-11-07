@@ -4,7 +4,7 @@
 // render returns the exact bytes the Rust host prints for the same request, so
 // both front doors mean one thing (I9).
 use {
-    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
+    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FORMS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec, JetCLIFormSpec]
     jet_pkg_model.[COMPILER_VERSION, pkg_version_line]
 }
 
@@ -173,12 +173,16 @@ jet_cli_action_help_summary: fn(group: String, action: JetCLIActionSpec) -> Stri
 }
 
 // One group's usage block: its own usage row, then one row per action form.
-jet_cli_group_usage: fn(name: String) -> String Never! {
+// The usage page, man and completions list only the actions the command model
+// marks ported; the group's own help page (`family`) lists its whole family,
+// and running an unbuilt action answers E2104 naming its card.
+jet_cli_group_usage: fn(name: String, family: Bool) -> String Never! {
     index: jet_cli_group_index(name) ?? return ""
     group: JET_CLI_COMMANDS[index]
     out := ""
     if group.usage == .Val(usage) -> out = "  {JET_CLI_BINARY} {jet_cli_pad(usage, 48)} {group.summary}\n"
     loop action in group.actions {
+        if !family && !jet_cli_form_ported("{group.name} {action.name}") -> next
         summary: jet_cli_action_help_summary(group.name, action)
         loop usage in action.usage.split("\n").to_list() {
             out = "{out}  {JET_CLI_BINARY} {group.name} {jet_cli_pad(usage, 48)} {summary}\n"
@@ -263,10 +267,18 @@ jet_cli_word_group: fn(word: String) -> String? Never! {
 }
 
 // Does the registry row of `spec` let `command` take it? Unscoped flags go
-// with every command. A group's action (`jet inspect digest`, dispatched as
-// `digest`) takes its group's flags, and a group that keeps its own word
-// (`jet inspect expand`, dispatched as `inspect`) takes its actions' flags.
+// with every command; a short form (`-u`) goes where its long form goes. A
+// group's action (`jet inspect digest`, dispatched as `digest`) takes its
+// group's flags, and a group that keeps its own word (`jet inspect expand`,
+// dispatched as `inspect`) takes its actions' flags.
 jet_cli_flag_takes: fn(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
+    short_prefix: "Short form of "
+    if spec.help.starts_with(short_prefix) {
+        long: spec.help.slice(short_prefix.len()..<spec.help.len())
+        loop other in JET_CLI_FLAGS {
+            if other.long == long -> return jet_cli_flag_takes(other, command)
+        }
+    }
     commands: jet_cli_flag_commands(spec.help) ?? return true
     if commands.contains(command) -> return true
     if jet_cli_word_group(command) == .Val(group) {
@@ -281,16 +293,169 @@ jet_cli_flag_takes: fn(spec: JetCLIFlagSpec, command: String) -> Bool Never! {
 }
 
 // Flags attached to one command: the scoped flags that name it plus the global
-// output flags, each with its help text after the scope prefix.
+// output flags. A scoped flag shows only the ported clauses that scope it to
+// this command, each without its scope prefix, so a flag with a meaning per
+// command shows this command's; a flag with no such clause (the command model
+// marks it unported for the command) is left out.
 jet_cli_flags_for_command: fn(name: String) -> [JetCLIFlagSpec] Never! {
     flags := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FLAGS {
         commands: jet_cli_flag_commands(spec.help) ?? [String]{}
-        if !commands.contains(name) && !JET_CLI_GLOBAL_FLAGS.contains(spec.long) -> next
-        help: if jet_cli_flag_scope(spec.help) == .Val(parts) -> parts[1] else -> spec.help.copy()
-        flags.push(JetCLIFlagSpec{long: spec.long, help: help})
+        global: JET_CLI_GLOBAL_FLAGS.contains(spec.long)
+        if !commands.contains(name) && !global -> next
+        if !jet_cli_form_ported("{name} {spec.long}") -> next
+        shown: jet_cli_flag_ported_help(spec) ?? next
+        help: jet_cli_flag_help_for(shown, name)
+        if help == "" && !global -> next
+        flags.push(JetCLIFlagSpec{long: spec.long, help: if help == "" -> shown else -> help})
     }
     flags
+}
+
+// The help one command's usage shows for a flag's help line: the text of each
+// `With <forms>: ` clause whose forms name the command (with the unscoped
+// clauses that continue it), without the prefix and starting with a capital;
+// an unscoped (global) flag's whole line.
+jet_cli_flag_help_for: fn(help: String, name: String) -> String Never! {
+    if jet_cli_flag_commands(help) == None -> return help.copy() // copy: the caller keeps its line.
+    texts := [String]{}
+    taken := false
+    loop clause in help.split("; ").to_list() {
+        if jet_cli_flag_scope(clause) == .Val(parts) {
+            commands: jet_cli_flag_commands(clause) ?? [String]{}
+            taken = commands.contains(name)
+            if !taken -> next
+            text: parts[1]
+            texts.push("{text.slice(0..<1).to_upper()}{text.slice(1..<text.len())}")
+            next
+        }
+        if taken -> texts.push(clause.copy()) // copy: the clause list keeps its row.
+    }
+    texts.join("; ")
+}
+
+// The words of a command-model form: `=` is a space.
+jet_cli_form_words: fn(form: String) -> [String] Never! {
+    form.replace("=", " ").split(" ").to_list().filter(word -> word != "")
+}
+
+// How closely the model row `row` decides `form`: -1 when it does not; a
+// shape row decides a form that ends in its shape (`build <shape>`,
+// `inspect provenance <shape>`); otherwise more matched words win, then more
+// literal (not placeholder) words. A placeholder stands for a value or name,
+// never for a flag.
+jet_cli_form_score: fn(row: String, form: String) -> Int Never! {
+    if row.starts_with("<") {
+        if form.ends_with(" {row}") -> return 1000000
+        return -1
+    }
+    words: jet_cli_form_words(form)
+    pattern: jet_cli_form_words(row)
+    if pattern.len() > words.len() -> return -1
+    literal := 0
+    loop index in 0..<pattern.len() {
+        word: pattern[index]
+        if word.starts_with("<") && word.ends_with(">") {
+            if words[index].starts_with("-") -> return -1
+            next
+        }
+        if word != words[index] -> return -1
+        literal += 1
+    }
+    pattern.len() * 1000 + literal
+}
+
+// A form spelled with an action's dispatch word, spelled as the action:
+// `self-update --apply` is `self update --apply`.
+jet_cli_form_normal: fn(form: String) -> String Never! {
+    words: jet_cli_form_words(form)
+    if words.len() == 0 || jet_cli_word_group(words[0]) == None -> return form.copy() // copy: the caller keeps its form.
+    head: jet_cli_dispatch_form([String]{words[0].copy()}) // copy: the word list keeps its word.
+    "{head}{form.slice(words[0].len()..<form.len())}"
+}
+
+// The command-model row that decides `form`, if one does (JET_CLI_FORMS).
+jet_cli_form_row: fn(form: String) -> JetCLIFormSpec? Never! {
+    normal: jet_cli_form_normal(form)
+    best := -1
+    best_score := -1
+    loop index in 0..<JET_CLI_FORMS.len() {
+        score: jet_cli_form_score(JET_CLI_FORMS[index].form, normal)
+        if score > best_score {
+            best = index
+            best_score = score
+        }
+    }
+    if best < 0 -> return None
+    Val(JET_CLI_FORMS[best].copy()) // copy: the registry keeps its row.
+}
+
+// Does this `jet` run `form`? A form no model row decides is ported.
+jet_cli_form_ported: fn(form: String) -> Bool Never! {
+    row: jet_cli_form_row(form) ?? return true
+    row.ported
+}
+
+// The Tower card that owns the port of an unported `form`, if the model names one.
+jet_cli_form_card: fn(form: String) -> Int? Never! {
+    row: jet_cli_form_row(form) ?? return None
+    if row.ported -> return None
+    Val(row.card)
+}
+
+// A flag's help line as help, completions and man print it: each `With
+// <forms>: ` clause keeps the forms whose `<form> <flag>` is ported and goes
+// when none is left; None for a scoped flag with no clause left.
+jet_cli_flag_ported_help: fn(spec: JetCLIFlagSpec) -> String? Never! {
+    if jet_cli_flag_commands(spec.help) == None -> return Val(spec.help.copy()) // copy: the registry keeps its row.
+    kept := [String]{}
+    loop clause in spec.help.split("; ").to_list() {
+        scoped: clause.starts_with("with ") || clause.starts_with("With ")
+        rest: if scoped -> clause.slice(5..<clause.len()) else -> clause.copy() // copy: the clause list keeps its row.
+        scope: rest.split(":").to_list()
+        if !scoped || scope.len() < 2 {
+            kept.push(clause.copy()) // copy: the clause list keeps its row.
+            next
+        }
+        forms := [String]{}
+        loop form in scope[0].split("/").to_list() {
+            if jet_cli_form_ported("{form} {spec.long}") -> forms.push(form.copy()) // copy: the form list keeps its row.
+        }
+        if forms.len() == 0 -> next
+        kept.push("with {forms.join("/")}:{rest.slice(scope[0].len() + 1..<rest.len())}")
+    }
+    if kept.len() == 0 -> return None
+    text: kept.join("; ")
+    if text.starts_with("with ") -> return Val("W{text.slice(1..<text.len())}")
+    Val(text)
+}
+
+// The form a dispatch word and its next word name: `self-update` is `self
+// update`, `devtools bless` is `self devtools bless`; a top-level command is
+// its own word.
+jet_cli_dispatch_form: fn(argv: [String]) -> String Never! {
+    word: argv[0]
+    group: jet_cli_word_group(word) ?? return word.copy() // copy: the argv keeps its word.
+    index: jet_cli_group_index(group) ?? return word.copy() // copy: the argv keeps its word.
+    loop action in JET_CLI_COMMANDS[index].actions {
+        handler: jet_cli_handler_index(action.handler) ?? next
+        if action.name != word && JET_CLI_HANDLERS[handler].dispatch_word != word -> next
+        if argv.len() > 1 && !argv[1].starts_with("-") -> return "{group} {action.name} {argv[1]}"
+        return "{group} {action.name}"
+    }
+    word.copy() // copy: the argv keeps its word.
+}
+
+// `jet help --all`: every form the command model marks unported, with the
+// Tower card that owns its port.
+jet_cli_not_built_page: fn() -> String Never! {
+    out := "\nNot built yet:\n"
+    loop row in JET_CLI_FORMS {
+        if row.ported -> next
+        form: if row.form.starts_with("<") -> "{JET_CLI_BINARY} <command> {row.form}" else -> "{JET_CLI_BINARY} {row.form}"
+        out = "{out}  {jet_cli_pad(form, 48)} #{row.card}\n"
+    }
+    out
 }
 
 // The registry row of a known flag (`--flag` or `--flag=value`).
@@ -351,20 +516,32 @@ jet_cli_commands_in: fn(order: String) -> [Int] Never! {
     ordered
 }
 
-// `jet help`: every canonical command, each group's actions, then every flag.
+// A command help, the palette, completions and man list: canonical at the top
+// level and ported in the command model.
+jet_cli_command_listed: fn(name: String) -> Bool Never! {
+    jet_cli_is_canonical_top_level(name) && jet_cli_form_ported(name)
+}
+
+// `jet help`: every listed command, each group's ported actions, then every
+// flag with its ported scopes.
 jet_cli_usage_page: fn(order: String) -> String Never! {
     out := "Welcome to {JET_CLI_LANG_NAME}! (v{COMPILER_VERSION})\n\nUsage:\n"
     commands: jet_cli_commands_in(order)
     loop index in commands {
         command: JET_CLI_COMMANDS[index]
-        if jet_cli_is_canonical_top_level(command.name) -> out = "{out}  {jet_cli_pad(jet_cli_command_usage(command.name), 36)} {command.summary}\n"
+        if jet_cli_command_listed(command.name) -> out = "{out}  {jet_cli_pad(jet_cli_command_usage(command.name), 36)} {command.summary}\n"
     }
     loop index in commands {
         command: JET_CLI_COMMANDS[index]
-        if command.actions.len() > 0 -> out = "{out}\n{jet_cli_group_label(command.name)} Commands:\n{jet_cli_group_usage(command.name)}"
+        if command.actions.len() == 0 || !jet_cli_form_ported(command.name) -> next
+        usage: jet_cli_group_usage(command.name, false)
+        if usage != "" -> out = "{out}\n{jet_cli_group_label(command.name)} Commands:\n{usage}"
     }
     out = "{out}\nFlags:\n"
-    loop spec in JET_CLI_FLAGS -> out = "{out}  {jet_cli_pad(spec.long, 28)} {spec.help}\n"
+    loop spec in JET_CLI_FLAGS {
+        help: jet_cli_flag_ported_help(spec) ?? next
+        out = "{out}  {jet_cli_pad(spec.long, 28)} {help}\n"
+    }
     out
 }
 
@@ -392,7 +569,7 @@ jet_cli_palette: fn() -> String Never! {
         out = "{out}\n{category}\n"
         loop index in commands {
             command: JET_CLI_COMMANDS[index]
-            if !jet_cli_is_canonical_top_level(command.name) || jet_cli_palette_category(command.name) != category -> next
+            if !jet_cli_command_listed(command.name) || jet_cli_palette_category(command.name) != category -> next
             out = "{out}  {jet_cli_pad("{JET_CLI_BINARY} {command.name}", 18)} {command.summary}\n"
         }
     }
@@ -406,10 +583,11 @@ jet_cli_flag_help_rows: fn(flags: [JetCLIFlagSpec]) -> String Never! {
     out
 }
 
-// `jet <group> help` for an exhaustive group (and `env`): summary, then usage.
+// `jet <group> help` for an exhaustive group (and `env`): summary, then the
+// group's whole family.
 jet_cli_group_help: fn(name: String) -> String Never! {
     index: jet_cli_group_index(name) ?? return ""
-    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n{jet_cli_group_usage(name)}"
+    "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n{jet_cli_group_usage(name, true)}"
 }
 
 // `jet <cmd> --help` and `jet help <cmd>`.
@@ -417,7 +595,7 @@ jet_cli_command_help: fn(name: String) -> String Never! {
     // `diff`/`merge` carry their own structural usage (StructuralMerge.jet).
     if jet_cli_structural_help(name) == .Val(bespoke) -> return bespoke
     if jet_cli_group_index(name) == .Val(index) {
-        out := "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n{jet_cli_group_usage(name)}"
+        out := "{JET_CLI_BINARY} {name} — {JET_CLI_COMMANDS[index].summary}\n\n{jet_cli_group_usage(name, true)}"
         if name == "db" -> out = "{out}\nFlags:\n{jet_cli_flag_help_rows(jet_cli_flags_for_command(name))}"
         return out
     }

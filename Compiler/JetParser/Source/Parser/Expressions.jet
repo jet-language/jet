@@ -1819,6 +1819,9 @@ parser_parse_call_args: fn(state: &JetParserState, depth: Int, allow_marker_labe
     args := [CallArg]{}
     if parser_current_kind(state) != TOKEN_RPAREN {
         loop {
+            // A call cut off before its next argument reports its opener, not
+            // a missing value at the cutoff.
+            if parser_unclosed_delimiter(state, "call") -> return args
             argument_span := parser_current(state).span
             spread := parser_current_kind(state) == TOKEN_DOT_DOT_DOT
             if spread -> parser_bump(state)

@@ -7,8 +7,10 @@
 // `registries` runs every case, the opt-in ones too, against no baseline:
 // Tools/agent/CompilerRegistries.jet's testkit entry. `corpora` runs every corpus
 // suite and none of the #Tests: Tools/agent/goldens-census.mjs's corpus pass.
-// The code suites jetpack (every Jetpack package's #Tests), selfhost (the fixed point
-// s2 == s3) and perf (the self-compile against its budget) are test.jet's.
+// The code suites packages (the #Tests of every other package under Compiler/ and Jetpack/:
+// each member's Tests package, the tool packages and every Jetpack package), selfhost (the
+// fixed point s2 == s3) and perf (the self-compile against its budget) are test.jet's.
+// `full` runs every suite, so each package's #Tests run in it.
 name: "compiler"
 version: "0.0.1"
 edition: "2026"
@@ -42,10 +44,10 @@ test: {
     ui: TestProfile{ suites: [ui, ui_lint], baseline: "../tests/known-failing.tsv" },
     cases: TestProfile{ suites: [cases], baseline: "../tests/known-failing.tsv" },
     registries: TestProfile{ suites: [cases], opt_in: true },
-    jetpack: TestProfile{ suites: [jetpack] },
+    packages: TestProfile{ suites: [packages] },
     selfhost: TestProfile{ suites: [selfhost] },
     perf: TestProfile{ suites: [perf] },
-    full: TestProfile{ suites: [tests, golden, run, ui, ui_lint, cases, jetpack, selfhost, perf], baseline: "../tests/known-failing.tsv" },
+    full: TestProfile{ suites: [tests, golden, run, ui, ui_lint, cases, packages, selfhost, perf], baseline: "../tests/known-failing.tsv" },
     corpora: TestProfile{ suites: [golden, run, ui, ui_lint, cases], baseline: "../tests/known-failing.tsv" },
 }
 defaults: { test: quick }

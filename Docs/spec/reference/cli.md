@@ -206,70 +206,71 @@ measures from the guides, examples, and tests; `jet help --sort az` lists the
 same commands A to Z and `jet help --sort za` Z to A:
 
 ```text
-jet run [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
-jet build [<file.jet|dir>] | build --verify <receipt-id> Create a native executable
+jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
+jet build [<file.jet|dir>]           Create a native executable
 jet check [<file.jet|dir>]           Check code without creating a binary
 jet inspect <command>                Explore code, builds, packages, and bindings
-jet explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir> Explain a diagnostic code, build fact, generic-module value, or typed cost
-jet dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>] Watch and run a program; optionally open Canvas or a local app
-jet test [<file.jet|dir>] [<filter>] [--watch] [--fresh] [--docs] [--where=<expr>] [--capture=<failed|all|none>] [--browser=<chromium,firefox,webkit>] [--browser-retries=<n>] [--browser-reporter=<text|json|html>] [--browser-ui] [--browser-visual] [--browser-trace] [--browser-scaffold=<name>] [--grade=generated] [--iterations=<n>] [--time=<s>] [--seed=<n>] [--corpus=<dir>] Run tests
-jet fmt [args]                       Format Jet and configured project files
-jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix memory`
-jet debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames] Debug a program from Jet source
+jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--fresh] [--docs] [-u] Run tests
+jet explain <CODE|FACT> [file]       Explain a diagnostic code, build fact, generic-module value, or typed cost
+jet dev [<file.jet|dir>] [-- <args>] Watch and run a program
 jet self <command>                   Manage the Jet installation and editor tools
+jet repl [<file.jet>] [--project <dir>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
+jet fmt [args]                       Format Jet and configured project files
 jet os <command>                     Manage Jetos machines and images
+jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix memory`
 jet prove [args]                     Create a proof report for code and tests
 jet fetch [args]                     Download locked dependencies
-jet new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove] Create a Jet project or backend source scaffold
+jet debug [<file.jet>]               Debug a program from Jet source
 jet registry <command>               Publish and manage packages
-jet update [args]                    Update dependency or toolchain pins
 jet env <command>                    Open the project development shell
-jet perf <command>                   Collect and inspect performance traces
-jet help [<command>] [--sort frequency|az|za] Show command help
-jet image [args]                     Build a declared container image
-jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
-jet init [args]                      Create package settings in this directory
-jet repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>] Try Jet code interactively
-jet jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>] List, inspect, or watch named project jobs
+jet new <name> [--template cli|ui|web|overrides] Create a Jet project
 jet budget [args]                    Check performance limits or update baselines
+jet help [<command>] [--sort frequency|az|za] Show command help
+jet update [args]                    Update dependency or toolchain pins
+jet eval <file.jet|expression>       Evaluate pure Jet and print the value (`--json` for JSON)
+jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
+jet init [args]                      Create package settings in this directory
 jet audit [args]                     Inspect implicit copies, exercised memory witnesses, or dependencies
-jet package --kind <desktop|game> --target <linux-appimage|macos-app|windows-msix> [--executable <path>|<source.jet>] [--output <path>] [--profile <dev|release|name>] [--phase <build,cook,stage,package,export,deploy,run>] [--backend <aot>] [--renderer <headless|raylib>] [--cook-mode <fast|reproducible|scripts-only>] [--export-preset <default|store|headless>] [--deploy-to <path>] [--crash-reporter <off|on|opt-in>] [--crash-consent <not-requested|granted|denied>] [--dry-run] [--explain] [--resume|--cancel] [--clean|--scripts-only] [--run-now] [--package <id>] [--name <name>] [--version <version>] [--icon <path>] [--icon-format <png|icns|ico|svg>] [--icon-size <pixels>] [--publisher <name>] [--description <text>] [--update-channel <channel>] [--update-url <url>] Create a desktop or game application bundle
-jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
-jet flash --target <board.name> [--image <firmware.elf>] [--audit <target.json>] [--adapter <probe-rs|openocd|emulator>] Flash firmware to a target board
-jet gc <command>                     Show values moved into automatic memory management
+jet image [args]                     Build a declared container image
 jet import <language> <dir> [--dry-run|--update] Convert supported source code into editable Jet
-jet status [<file.jet|dir>]          Show what the project has proved
-jet version [args]                   Show the Jet version
-jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
-jet notebook [args]                  Open a Jet notebook (.jetnb) or Jupyter adapter
-jet bind <name> [--shape automatic|native] [--freeze]
-bind --policy automatic|frozen
-bind <name> --update --preview
-bind <name> --update --accept <candidate-digest> Resolve and record a checked foreign binding plan
+jet jobs [<name>]                    List named project jobs or show one
+jet gc <command>                     Show values moved into automatic memory management
 jet clean [args]                     Remove unused package-store data
+jet merge [args]                     Merge Jet programs without losing code structure
+jet add [args]                       Add and download a dependency
+jet status [<file.jet|dir>]          Show what the project has proved
+jet doc [--json|--check] [<file.jet|dir>] Generate reference documentation
 jet emit [args]                      Print generated build output
 jet lint --a11y|--complexity|--cost <file.jet> Run optional code-quality checks
-jet add [args]                       Add and download a dependency
-jet trust [args]                     Review or change trusted authority
-jet review <base.jet> <head.jet>     Review meaning, authority, and proof changes
-jet search <query>                   Search the local package catalog
-jet cache <command>                  Manage the machine-wide artifact store
-jet doc [--json|--check] [<file.jet|dir>] Generate reference documentation
-jet split [args]                     Extract closed Package facts into Configs or members
+jet version [args]                   Show the Jet version
+jet bind <header.h> --pkg <lib>      Resolve and record a checked foreign binding plan
+jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
 jet diff [args]                      Compare two Jet programs by meaning
-jet remote [args]                    Manage host-owned remote builders
-jet merge [args]                     Merge Jet programs without losing code structure
-jet project <command>                Inspect project files and modules
-jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
-jet db [PATH] [--query SQL | --script PATH] Run a bounded SQL console and manage database migrations
 jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|dir>] Find code by type, effect, or example
-jet remove [args]                    Remove a dependency
-jet fill <file.jet[:line]>           Propose checked code for typed goals
-jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
-jet try <plan.json>                  Speculatively apply a plan and re-check its claims
+jet trust [args]                     Review or change trusted authority
+jet c++ [options] <sources>          Compile and link C++ with the pinned Jetpack toolchain
+jet search <query>                   Search the local package catalog
 jet fold [args]                      Reverse a recorded Package source transition
+jet split [args]                     Extract closed Package facts into Configs or members
+jet cache <command>                  Manage the machine-wide artifact store
+jet project <command>                Inspect project files and modules
+jet remote [args]                    Manage host-owned remote builders
+jet try <plan.json>                  Speculatively apply a plan and re-check its claims
+jet fill <file.jet[:line]>           Propose checked code for typed goals
+jet remove [args]                    Remove a dependency
+jet test-compare <corpus.json> [--relation=<name>] [--json] Compare one recorded observation corpus against its relation
 jet crash < <report.txt>             Name the functions and lines of a release crash report
 ```
+
+One table, the command model (`JET_CLI_FORMS` in
+`Compiler/JetFoundation/Source/Registry/CLICommands.jet`), says which `jet`
+forms this compiler has not built yet: a command (`db`), a group action
+(`self lsp`), a flag of a command (`build --lib`), a flag value
+(`build --target wasm.wasi`) or a project shape (`<workspace with a missing
+member>`). A form no row names is built. Help, `jet self man` and the shell
+completions leave every unbuilt form out; running one answers E2104, whose Fix
+names the Tower card that owns its port. `jet help --all` prints the usage page
+followed by the full not-built list with those cards.
 
 `jet try` reports compiler-query and checked-index failures through its existing
 typed output error boundary before publishing a speculative verdict. Disk and
@@ -556,7 +557,8 @@ nothing and points at `jet fmt --check`), and `jet help <command>` lists
 exactly the flags the command takes.
 
 - `--target` selects a triple, `board.<name>`, or named database target;
-  `--profile` selects `release`, `debug`, `ci`, `hardened`, or a named bundle.
+  `--profile` selects `release`, `debug`, or a named bundle (`ci` and
+  `hardened` are not built yet).
 - `--allow=RIGHTS` and `--deny=RIGHTS` set effect roots or leaves for
   `run`, `build`, `jobs`, `repl`, and `db`; `-A` (`--allow-all`) allows every
   right on `run` and `build`; `jet inspect gates` records these and the other
@@ -603,8 +605,9 @@ the file's own directory for a loose file, with every `.jet` file under it (dot 
 generated C/C++ binding caches. The Core library bodies are read from the Jet
 toolchain source tree, the directory that holds `Core/` and `Compiler/Prelude/`:
 `JET_TOOLCHAIN_ROOT` when set, else the nearest such directory at or above the
-input, else `jet`'s own directory when it holds both (see
-[Environment variables](environment.md)); the Core row table and the canonical effect source are generated
+input, so a checkout's own Core wins; with neither, `jet` compiles against the
+Core sources built into it ([`Core/EmbeddedSources.jet`](../../../Core/EmbeddedSources.jet),
+see [Environment variables](environment.md)); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
 by `jet Tools/agent/CoreSourceRows.jet`, which
 `node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
@@ -645,7 +648,8 @@ or `-v` comes before `--`; a verbose run reports them before the program
 starts. `--json` reports the same problems as the standard `diagnostics` JSON
 status envelope on stderr, leaving stdout to the program; it never changes the
 exit status. Run flags other than `--release`, `--profile`, `--verbose`, `--quiet`,
-`--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are refused with E2104 until they are ported.
+`--json`, `--color`, `--threads`, `--trace`, `--allow`, `-A`, and `--deny` are
+refused with E2104, naming the card the command model gives them, until they are ported.
 
 A script is a standalone program wherever it lives: its source snapshot is the
 script alone, and the source walk of a package leaves every script out.
@@ -797,9 +801,10 @@ limit for each test and check. Each run's output follows a
 rows (each test and its outcome) are compared with the baseline
 `.jet/test/<profile>/tests.rows` (`tests-<level>.rows` per level): a test the
 baseline has passing that now fails or is gone is lost and fails the profile
-with exit 1, while a failure the baseline already holds does not. A run with no
-baseline, or under `-u`, records its rows as the baseline and keeps its own
-exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows)`
+with exit 1. A failing test fails the profile even when the baseline already
+holds that failure: the baseline names what moved, never what may fail. A run
+with no baseline, or under `-u`, records its rows as the baseline and keeps
+its own exit. A code suite, declared in `test.jet` as `t.suite("perf", perf_rows)`
 (D-TEST-SUITE2=A; the name is a string literal, E0635), runs as its own child
 `jet test <package>/test.jet` that runs no #Test and calls only that suite's
 function with a `TestRows`; each `pass(id)`, `fail(id, detail)` and

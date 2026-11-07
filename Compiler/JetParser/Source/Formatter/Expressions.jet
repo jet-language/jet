@@ -515,6 +515,8 @@ jfmt_cmp_op_before_brace: fn(bytes: [U8], rest: Int, end: Int) -> BinOp? Never! 
     last := brace
     loop last > rest && (bytes[last - 1] == 32 || bytes[last - 1] == 9 || bytes[last - 1] == 10 || bytes[last - 1] == 13) -> last -= 1
     if {
+        // `if cond -> { … }` is a braced arm body, not a `>` table.
+        jfmt_bytes_ends_at(bytes, rest, last, "->") -> None
         jfmt_bytes_ends_at(bytes, rest, last, "==") -> Val(BinOp.Eq)
         jfmt_bytes_ends_at(bytes, rest, last, "!=") -> Val(BinOp.Ne)
         jfmt_bytes_ends_at(bytes, rest, last, "<=") -> Val(BinOp.Le)
@@ -1312,7 +1314,14 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
         // (c7shift): a pattern-literal argument.
         .StrMatchLit(parts, span, _) -> {
             typed_head: jfmt_is_typed_head_body(f, span)
-            jfmt_fmt_str_match_parts(f, parts, typed_head)
+            if !typed_head && jfmt_str_match_has_computed_hole(f, span) {
+                // The parts keep only each hole's name; a computed hole
+                // (`{id + 1}`, which check reports) prints as written.
+                written: jfmt_src_text(f, span.start, span.end)
+                jfmt_write(f, written)
+            } else {
+                jfmt_fmt_str_match_parts(f, parts, typed_head)
+            }
         }
         // The byte-mode sibling.
         .BinMatchLit(parts, _, _) -> jfmt_fmt_bin_match_parts(f, parts)
@@ -1328,7 +1337,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             jfmt_write(f, suffix)
         }
         .Bool(value, _, _) -> jfmt_write(f, if value -> "true" else -> "false")
-        .Unit(_, _) -> jfmt_write(f, "()")
+        .Unit(span, _) -> if !jfmt_fmt_expression_rule(f, span) -> jfmt_write(f, "()")
         .Char(value, _, _) -> jfmt_write(f, jfmt_fmt_char(value))
         .ListLit(elements, span, _) -> {
             // Plain formatting preserves explicit constructor heads.
@@ -2198,6 +2207,35 @@ jfmt_is_typed_head_body: fn(f: JetFmt, span: Span) -> Bool Never! {
     jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_starts_at(f.src_bytes, span.start, "String")
 }
 
+// A bare pattern string whose source holds a `{…}` hole that is not a bare
+// name, optionally typed.
+jfmt_str_match_has_computed_hole: fn(f: JetFmt, span: Span) -> Bool Never! {
+    if !jfmt_src_valid(f, span.start, span.end) -> return false
+    bytes: f.src_bytes
+    index := span.start
+    loop index < span.end {
+        if bytes[index] != 123 {
+            index += 1
+            next
+        }
+        if index + 1 < span.end && bytes[index + 1] == 123 {
+            index += 2
+            next
+        }
+        cursor := index + 1
+        loop cursor < span.end && bytes[cursor] != 125 && bytes[cursor] != 58 {
+            byte: bytes[cursor]
+            name_byte: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95
+            if !name_byte -> return true
+            cursor += 1
+        }
+        if cursor == index + 1 -> return true
+        loop cursor < span.end && bytes[cursor] != 125 -> cursor += 1
+        index = cursor + 1
+    }
+    false
+}
+
 jfmt_fmt_call: fn(f: &JetFmt, call: Call) {
     jfmt_write(f, call.name)
     jfmt_fmt_call_type_args(f, call.type_args, call.name_span.end)
@@ -2367,7 +2405,7 @@ jfmt_fmt_call_args_or_trailing_block: fn(f: &JetFmt, args: [CallArg], source_sta
         jfmt_write(f, " {{")
         jfmt_newline(f)
         f.indent += 1
-        if template_arg.flags.template_items == .Val(items) -> jfmt_fmt_derive_body_items(f, items)
+        if template_arg.flags.template_items == .Val(items) -> jfmt_fmt_derive_body_items(f, items, false)
         f.indent -= 1
         jfmt_emit_leading(f, template_arg.span.end)
         if !f.at_line_start -> jfmt_newline(f)

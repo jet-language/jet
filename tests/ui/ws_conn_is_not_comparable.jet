@@ -1,0 +1,32 @@
+// #6581: a `WsConn` is a runtime socket handle with no equality, so `==`
+// on two of them, or on values that hold one, is a checker diagnostic,
+// never a backend failure.
+use ws: core.net.ws
+
+Wire: struct {
+    conn: WsConn
+}
+
+#Equatable
+Pair: struct {
+    id: Int
+    wire: Wire
+}
+
+Holder: struct {
+    wire: Wire
+}
+
+conns: fn(a: WsConn, b: WsConn) -> Bool {
+    a != b
+}
+
+wires: fn(a: Holder, b: Holder) -> Bool {
+    a.wire == b.wire
+}
+
+pairs: fn(a: Pair, b: Pair) -> Bool {
+    a == b
+}
+
+run: fn() {}

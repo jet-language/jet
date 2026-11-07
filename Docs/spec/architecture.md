@@ -128,15 +128,6 @@ path. Library feeds require fresh object, export and ABI files; command
 completion alone is not a native pass. Checked-program observers are explicit Jet
 drivers compiled from the canonical compiler aggregate, cached per pinned
 toolchain, rather than a bootstrap factory or a retired Rust observer.
-The [S5 drivers](../../Tools/agent/s5/make-jobs.sh) execute from the immutable
-source export. Queue completion is not a pass: consumers require the real
-`driver.rc`, a completed same-pin phase receipt and its decisive PASS rows.
-Receipts are published atomically; interruption preserves partial evidence
-and records a driver failure. A pack publication binds its runtime key and
-digest to `native.key` and the selected object. Prepared golden corpora are
-hash-checked and consumed without rerunning preparation.
-`S5_SHARED_HOST_JOB` and `S5_SHARED_PACK_JOB` select the producer job names
-when drafting holds; artifact schemas and source-pin checks remain unchanged.
 
 The compiler frontend receipt must retain the full foreign Cargo diagnostics,
 including cached bridge fingerprint output when an inline-FFI error hides
@@ -242,6 +233,14 @@ its only home: its route, record and import rows are edited by hand, sorted,
 together with the runtime `#Export(c)` they name. After provider admission
 changes, run `jet Tools/agent/LaneCheck.jet --runtime-generators` to check the
 generated runtime message tables.
+
+The runtime handle table lives in the foundation registry
+(`Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet`), because both
+compiler halves read it: the IR lays a handle out by its row, and the checker
+reads the same row's `clone` and `eq`. A handle no declaration lays out and
+whose row has no `clone` has one owner, so it and any value holding it move
+instead of copying; one without `eq` has no `==`, so nothing holding it derives
+`Equatable` (#6581).
 
 Native `[U8]` payloads are packed one-byte elements, matching checked
 `StorageLayout(U8)` and the C ABI's `u8` buffer. The runtime's
@@ -1967,9 +1966,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   (`jet-runtime/<key>/jet_runtime.pack.o`, see the Pipeline section); no Rust
   runtime, Rust std or rustc participates. The linker keeps only what the
   program uses ("only link what's needed"). The output is one self-contained
-  native binary. A size-minimal profile is decision S15; the Jet CLI does not
-  yet accept `jet build --small` (`JET_CLI_BUILD_UNPORTED_FLAGS` in
-  `Compiler/JetCli/Source/Cli/Front.jet`). The default leans toward speed.
+  native binary. A size-minimal profile is decision S15, selected with
+  `jet build --small` (the `small` build option in
+  `Compiler/JetFoundation/Source/Registry/BuildOptions.jet`). The default leans toward speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
   runs a single file with no manifest, no project folder, and no config.
   Inside a package, a bare `jet run` resolves the same complete program from
@@ -2196,8 +2195,9 @@ suite pass.
 
 Testkit runs each case's commands directly, as the case wrote them; no
 wrapper or outer process trace stands between a row and the `jet` under test.
-The FFI helper cache is the kit state's `ffi` directory unless a case sets its
-own `JET_FFI_CACHE_DIR`, which is passed through verbatim.
+The FFI helper cache is the run's own `ffi` directory when the rows stage in
+memory, else the kit state's `ffi` directory, unless a case sets its own
+`JET_FFI_CACHE_DIR`, which is passed through verbatim.
 The missing-Cargo fixture always runs with a case-local PATH containing no
 Cargo or rustup shim and a cleared case-private foreign cache. Installed tools
 or a warmed helper cannot turn its E0703 contract into a skipped observation.

@@ -1,0 +1,18 @@
+# Port of tests/devtools.rs::devtools_check_fixture_paths_runs_clean_on_this_repo (343-367),
+# re-pointed at the Jet case corpus: `jet self devtools check-fixture-paths` counts every
+# `fixture:` directive in tests/cases/**/*.case, passes when each names a directory beside its
+# case, and names each missing one with a user-error exit.
+mkdir: clean/tests/cases/demo/good.fixture
+write: clean/tests/cases/demo/good.case = "fixture: good.fixture\nstep: jet run main.jet\nexit: 0\n"
+step: jet self devtools check-fixture-paths
+cwd: clean
+exit: 0
+stdout: = "check-fixture-paths: 1 fixture path(s) across 1 case(s), all present\n"
+stderr: empty
+mkdir: broken/tests/cases/demo
+write: broken/tests/cases/demo/broken.case = "fixture: gone.fixture\nstep: jet run main.jet\nexit: 0\n"
+step: jet self devtools check-fixture-paths
+cwd: broken
+exit: nonzero
+stdout: empty
+stderr: = "check-fixture-paths: 1 missing fixture path(s):\n  tests/cases/demo/broken.case -> `gone.fixture` is not a directory beside the case\n"

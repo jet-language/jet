@@ -307,10 +307,14 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             saved_blocks: state.block_spans.len()
             saved_else_arms: state.else_arms.len()
             parsed: parser_parse_function(state, modifiers, true)
-            if parser_function_signature_only(state, parsed, modifiers, saved_diagnostics) {
+            if parser_function_signature_only(parsed, modifiers) {
+                lone_missing_body: state.diagnostics.len() == saved_diagnostics + 1 && state.diagnostics[saved_diagnostics].code == "E0081"
                 parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
                 value: parser_parse_function_type_alias(state, modifiers)
-                return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+                if lone_missing_body || state.diagnostics.len() == saved_diagnostics -> return ParsedItemOrImport{item: Val(Item.TypeAlias{value: value}), handled: true}
+                parser_rewind(state, saved_position, saved_diagnostics, saved_blocks, saved_else_arms)
+                function: parser_parse_function(state, modifiers, true)
+                return ParsedItemOrImport{item: Val(Item.Func{value: function.value}), handled: true}
             }
             return ParsedItemOrImport{item: Val(Item.Func{value: parsed.value}), handled: true}
         }
@@ -1440,6 +1444,7 @@ parser_result_type_follows_arrow: fn(state: &JetParserState) -> Bool {
 // body parser, so `f: fn() -> expr` still reads as a one-line body.
 parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult {
     prefix_effect: parser_func_effect_starts_here(state)
+    effect_start: parser_current(state).span.start
     effects: parser_parse_opt_func_effects(state)
     arrow_return := false
     plain_arrow := false
@@ -1476,7 +1481,14 @@ parser_parse_callable_result: fn(state: &JetParserState) -> ParsedCallableResult
         return_type = Val(parsed.ty)
         return_type_span = Val(parsed.span)
         if arrow_return && parser_is_unit_fallible(parsed.ty) {
-            parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
+            if plain_arrow {
+                parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
+            } else {
+                // The error contract precedes the effect arrow.
+                contract: parser_source_slice(state, parsed.span.start, parsed.span.end)
+                arrow: parser_source_slice(state, effect_start, parsed.span.start).trim()
+                parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible error contract comes before the effect arrow", "a function that can fail but returns no value has no result after its effect arrow; its error contract is written first", "write `{contract} {arrow}`, as in `save: fn(path: String) IOError! -[FS]>`")
+            }
         }
     }
     ParsedCallableResult{return_type: return_type.move(), return_type_span: return_type_span.move(), effects: effects.effects, via: effects.via, prefix_effect: prefix_effect.move(), plain_arrow: plain_arrow}
@@ -2465,14 +2477,16 @@ parser_parse_type_alias: fn(state: &JetParserState, modifiers: ParsedItemModifie
 
 // At file and module scope an unmarked `name: fn(…)` with no
 // body names a function type, as `Name: Type` names any other type. The item
-// parse reads it as a function first; a lone E0081 there means the signature
-// had no body, and the same tokens then reparse as the alias.
-parser_function_signature_only: fn(state: JetParserState, parsed: ParsedFunction, modifiers: ParsedItemModifiers, diagnostics_before: Int) -> Bool Never! {
+// parse reads it as a function first; when that finds no body, the same tokens
+// reparse as the alias. A lone E0081 means the signature only lacked its body;
+// otherwise the alias stands when it parses cleanly (`fn(Int? E!) IOError!`
+// has unnamed parameters a function head rejects), and the function's own
+// diagnostics stand when it does not.
+parser_function_signature_only: fn(parsed: ParsedFunction, modifiers: ParsedItemModifiers) -> Bool Never! {
     if parsed.has_body || modifiers.markers.len() > 0 || modifiers.is_comptime -> return false
     // A head pattern stays allowed: `(Int)` reads as a unit variant head until
     // the reparse reads it as the parameter type it is.
-    if parsed.value.type_params.len() > 0 || parsed.value.external_type != None -> return false
-    state.diagnostics.len() == diagnostics_before + 1 && state.diagnostics[diagnostics_before].code == "E0081"
+    parsed.value.type_params.len() == 0 && parsed.value.external_type == None
 }
 
 // `name: fn(…) -> R` without a body, from its moved `fn` keyword: the alias of

@@ -1,0 +1,19 @@
+// D-FAIL-UNIT1=A: a unit-fallible function writes its error contract before
+// its effect arrow. `build` is the ratified order and checks; `later` puts the
+// contract after the arrow and gets E0003 with the reordered header as the fix.
+MakeError: enum { Failed }
+
+build: fn(n: Int) MakeError! -[IO]> {
+    if n < 0 -> return Err(MakeError.Failed)
+    print(n)
+}
+
+later: fn(n: Int) -[IO]> MakeError! {
+    if n < 0 -> return Err(MakeError.Failed)
+    print(n)
+}
+
+run: fn() {
+    build(1) ?? print("failed")
+    later(1) ?? print("failed")
+}

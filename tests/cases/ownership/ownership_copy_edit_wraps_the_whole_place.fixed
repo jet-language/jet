@@ -1,22 +1,29 @@
-
 #Policy(copies: .Explicit)
-struct Inner {
+Inner: struct {
     name: String?
 }
 
-struct Outer {
+Outer: struct {
     inner: Inner
     names: [String?]
 }
 
-fn first_name(outer: Outer) -> String {
-    picked :: ~outer.inner.name ?? return ""
-    picked
+first_name: fn(outer: Outer) -> String {
+    outer.inner.name.copy() ?? ""
 }
 
-fn indexed(outer: Outer) -> String {
-    picked :: ~outer.names[0] ?? return ""
-    picked
+indexed: fn(outer: Outer) -> String {
+    outer.names[0].copy() ?? ""
 }
 
-fn run() { print(0) }
+picked_name: fn(outer: Outer) -> String {
+    picked: outer.inner.name ?? return ""
+    picked.copy()
+}
+
+run: fn() {
+    outer: Outer{inner: Inner{name: "Ada"}, names: [String?]{"Lin"}}
+    print(first_name(outer))
+    print(indexed(outer))
+    print(picked_name(outer))
+}

@@ -633,7 +633,7 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
         .Apply(name, args) -> {
             sema_check_private_module_type(name, span, environment, program, diagnostics)
             if sema_failure_written_name_unknown(name, generic_names, environment, program) -> sema_unknown_generic_type_name(name, span, diagnostics)
-            sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, diagnostics)
+            sema_check_expiring_secret_declared_type(ty, span, generic_names, environment, program, diagnostics)
             loop arg in args -> sema_check_failure_contract_type(arg, span, false, generic_names, environment, program, diagnostics)
         }
         // E0363: only concrete closed member types.
@@ -658,14 +658,18 @@ sema_check_private_module_type: fn(name: String, span: Span, environment: SemaSc
 }
 
 // `ExpiringSecret<T>` wraps only the closed secret family (E0112). Core's own
-// declarations name the wrapper over their formal `T`.
-sema_check_expiring_secret_declared_type: fn(ty: Type, span: Span, generic_names: [String], environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+// declarations name the wrapper over their formal `T`. The bare wrapper name
+// resolves to no declaration, so its member is resolved on its own.
+sema_check_expiring_secret_declared_type: fn(ty: Type, span: Span, generic_names: [String], environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     resolved := ty
-    if environment.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
+    if program.registration_graph == .Val(graph) -> resolved = sema_type_resolve_declared_recursive(graph, ty, sema_scope_caller_row(environment, graph), environment.generic_params)
     if resolved == .Apply(name, args) {
         if !sema_is_expiring_secret_name(name) -> return
         if args.len() == 1 {
             if sema_is_expiring_secret_member_type(args[0]) -> return
+            if program.registration_graph == .Val(graph) {
+                if sema_is_expiring_secret_member_type(sema_type_resolve_declared_recursive(graph, args[0], sema_scope_caller_row(environment, graph), environment.generic_params)) -> return
+            }
             if sema_module_is_core_source(environment.module_identity) && args[0] == .Named(formal) && generic_names.contains(formal) -> return
         }
         diagnostics.push(sema_error("E0112", span, "`ExpiringSecret<T>` requires a secret type", "only Secret, SigningKey, and X25519SecretKey have the audited move-only zeroizing contract required by this wrapper", "use `ExpiringSecret<crypto.Secret>`, `ExpiringSecret<crypto.SigningKey>`, or `ExpiringSecret<crypto.X25519SecretKey>`"))
