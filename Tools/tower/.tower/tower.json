@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6630,
-    "rev": 93975,
+    "rev": 93978,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -77008,6 +77008,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c46: the conversion question is ballot D-FLOAT-INT1 (what Int{f} means for a Float). Correction to the earlier note: Type{value} is already the ratified scalar conversion (D-DOTCTOR3 amendment, syntax-decisions.md:1214-1239); only Float to Int is open. c46's work (no to_* conversions left in core.math) uses Type{value} or Target.from_source either way."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c46 (conversions), owner note 2026-11-06: owner recalls conversions use the literal constructor form (Int{myFloatVar}). The ratified rule in Docs/spec/syntax-decisions.md:1122 is D-SHAPE-CONVERT1=A, Target.from_source(value) (Float.from_fraction(f)); no ratified Target{value} conversion form was found. c46 stays open until the owner confirms which form rules; no code changes until then."
         },
         {
@@ -77571,7 +77576,7 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-07T01:04:06.188Z",
+      "updated": "2026-11-07T01:24:50.241Z",
       "updatedBy": "Main"
     },
     {
@@ -94784,7 +94789,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Owner 2026-11-06: devserver work belongs in the developer-experience goal (G5), under #6386 developer tools, not G2; the toolchain is already Rust-free and this card restores a dev tool."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94808,12 +94819,12 @@
       "refs": [],
       "tags": [],
       "goals": [
-        "G2"
+        "G5"
       ],
-      "parentId": null,
+      "parentId": "c0ozzmvc",
       "needsAcceptance": false,
       "created": "2026-11-05T22:56:23.334Z",
-      "updated": "2026-11-06T21:35:46.994Z",
+      "updated": "2026-11-07T01:23:10.068Z",
       "updatedBy": "Main"
     },
     {
@@ -183921,6 +183932,160 @@
       "outcome": "A",
       "comment": "Owner ruled in chat 2026-11-06. Build card #6614; its c1 (adversarial review) gates every build criterion.",
       "ratifiedAt": "2026-11-06"
+    },
+    {
+      "id": "D-FLOAT-INT1",
+      "cardId": "c0w1wcfc",
+      "group": "conversions",
+      "title": "What `Int{f}` means when f is a Float",
+      "situation": "",
+      "gist": "Conversions are written `Type{value}`. Should that also turn a Float into an Int, and what happens to a fraction?",
+      "lesson": "`Type{value}` is already Jet's conversion form: `Float{n}`, `U8{n}`, `Int{I64{v}}`. The one gap is Float to Int, which today is an error that points to `Int.from_float(f)`. The choice is whether `Int{f}` works, and whether a fraction stops the program or is cut off.",
+      "explainer": "",
+      "story": "Ana has `pos: Float` and wants a list index. Today she writes `Int{pos}`, gets E0112, and has to learn `Int.from_float(pos) ?? 0`. Under the recommended option she writes `Int{math.trunc(pos)}` (or `math.round(pos)`), and `Int{pos}` alone works whenever pos holds a whole number.",
+      "inWild": "Rust `f as i64` truncates and saturates (NaN becomes 0). Python `int(3.7)` truncates and raises on NaN. Swift `Int(3.7)` truncates and traps on NaN or infinity; `Int(exactly: 3.5)` returns nil. Go `int(f)` truncates and is undefined out of range.",
+      "detail": "Today `Int{decimal}` is E0112 when decimal is a Float (D-DOTCTOR3 amendment, syntax-decisions.md:1236). `Int.from_float(f)` truncates toward zero and returns None for NaN, infinity or a value outside Int. `math.round(f)` rounds to nearest. The reverse direction already converts with `Type{value}`: `Float{n}` stops with E3010 when the Int has no exact Float.\n\nOption A makes `Int{f}` exact, the mirror of `Float{n}`. A whole number in range converts; NaN, infinity, a fraction or an out-of-range value stops the program. A literal body is checked at compile time: `Int{3.0}` is 3 and `Int{3.5}` is an error. To cut a fraction, say so: `Int{math.trunc(f)}`, `Int{math.floor(f)}` or `math.round(f)`. `Int.from_float(f)` stays for code that must recover.\n\nOption B keeps today's rule.\n\nOption C makes `Int{f}` truncate toward zero like Python, Swift and Rust, stopping only on NaN, infinity or out of range.\n\nNo option changes `Float{n}`, the integer heads `U8{n}` and `I64{n}`, or `F32{f}`. Under A and C, `I64{f}`, `U8{f}` and the other integer heads follow the same rule as `Int{f}`.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Exact: Int{f} needs a whole number",
+          "detail": "`Int{f}` converts a whole-number Float and stops the program on a fraction, NaN, infinity or a value outside Int. Truncation and rounding are written out. `Int.from_float(f)` stays for the recoverable case.",
+          "code": "pos: Float{2.0}\nlo: Int{pos}                // 2; Int{2.5} would stop\ncut: Int{math.trunc(2.7)}   // 2\nn: math.round(2.5)          // 3"
+        },
+        {
+          "key": "B",
+          "name": "Keep: Int{f} is an error",
+          "detail": "A Float never converts through `Int{...}`. Write `Int.from_float(f) ?? fallback` to truncate, or `math.round(f)`.",
+          "code": "pos: Float{2.0}\nlo: Int.from_float(pos) ?? 0\nn: math.round(pos)"
+        },
+        {
+          "key": "C",
+          "name": "Truncate: Int{f} drops the fraction",
+          "detail": "`Int{f}` truncates toward zero and stops only on NaN, infinity or a value outside Int.",
+          "code": "lo: Int{2.7}    // 2\nneg: Int{-2.7}  // -2"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "It gives the spelling you expected, `Int{f}`, and mirrors the rule Jet already has for `Float{n}`: a conversion is exact or it stops. A fraction is never lost without the code saying so.",
+        "tradeoff": "A fraction is caught at run time, not at check time, because the checker cannot know whether a Float value is whole. A literal body is still checked at compile time.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Every other scalar conversion is `Type{value}`; Float to Int is the one exception, and it is the one beginners reach for first."
+          },
+          {
+            "key": "C",
+            "reason": "Silent truncation is a classic bug: `Int{-0.5}` is 0 and `Int{2.9999}` is 2 with no sign that a fraction was dropped. Jet's `Float{n}` already refuses inexact results."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Code that wants truncation writes `Int{math.trunc(f)}` instead of a bare `Int{f}`.",
+            "mitigation": "The stop message names `math.trunc`, `math.floor` and `math.round`, and `jet fix` offers each one."
+          },
+          {
+            "loss": "Two forms remain: `Int{f}` stops, `Int.from_float(f)` returns None.",
+            "mitigation": "They differ in failure handling, the same way an indexing stop differs from `.get()`. Beginners use `Int{f}`; recovery code uses `from_float`."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should `Int{f}` turn a Float into an Int, and what happens to a fraction?",
+        "lesson": "`Type{value}` already converts numbers. Float to Int is the one gap.",
+        "trio": {
+          "current": {
+            "note": "Today Int{f} is an error; from_float truncates and returns None on NaN or overflow.",
+            "code": "lo: Int{pos}                  // E0112\nlo: Int.from_float(pos) ?? 0  // works"
+          },
+          "wild": {
+            "lang": "Swift",
+            "note": "Swift truncates by default and offers an exact form.",
+            "code": "Int(3.7)          // 3\nInt(exactly: 3.5) // nil"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Exact or stop",
+            "gist": "Int{f} works for whole numbers and stops on a fraction.",
+            "gains": [
+              "Your spelling",
+              "Never drops a fraction silently",
+              "Mirrors Float{n}"
+            ],
+            "losses": [
+              "Fractions are caught at run time"
+            ],
+            "proposed": {
+              "code": "lo: Int{pos}\ncut: Int{math.trunc(pos)}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the error",
+            "gist": "Int{f} is E0112; use Int.from_float.",
+            "gains": [
+              "No change"
+            ],
+            "losses": [
+              "The one conversion that is not Type{value}"
+            ],
+            "proposed": {
+              "code": "lo: Int.from_float(pos) ?? 0"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Truncate",
+            "gist": "Int{f} drops the fraction.",
+            "gains": [
+              "Shortest"
+            ],
+            "losses": [
+              "Silent loss of the fraction"
+            ],
+            "proposed": {
+              "code": "lo: Int{2.7}  // 2"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Your spelling, and nothing is lost without the code saying so.",
+          "gains": [
+            "Int{f} works",
+            "Matches Float{n}"
+          ],
+          "losses": [
+            {
+              "loss": "Truncation is written out.",
+              "mitigation": "The stop message and jet fix offer trunc, floor and round."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Keeps the one exception to Type{value}."
+            },
+            {
+              "key": "C",
+              "reason": "Drops fractions silently."
+            }
+          ],
+          "tradeoff": "Fractions are caught when the program runs, not at check time."
+        }
+      },
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-07T01:24:45.114Z"
     }
   ],
   "questions": [
@@ -186980,6 +187145,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T01:24:50.241Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w1wcfc",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:24:45.114Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-FLOAT-INT1",
+      "note": "What `Int{f}` means when f is a Float"
+    },
+    {
+      "at": "2026-11-07T01:23:10.068Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0t9jcat",
+      "note": "logEntry,goals,parent,parentId"
+    },
     {
       "at": "2026-11-07T01:11:26.117Z",
       "by": "Main",
