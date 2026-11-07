@@ -4677,9 +4677,13 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     if binding.name == "err" -> diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, diagnostics) -> return None
-    // `y: x` would move an arena view to a
-    // new, possibly longer-lived binding.
-    _ := sema_ownership_report_arena_view_escape(state, binding.init, "be stored in another binding", scopes, diagnostics)
+    // `y: x` would move an arena view to a new, possibly longer-lived
+    // binding. The escape is the binding's one fault: the name is declared
+    // unchecked, so the move out of the arena slot reports no second E0201.
+    if sema_ownership_report_arena_view_escape(state, binding.init, "be stored in another binding", scopes, diagnostics) {
+        sema_stmt_declare_unchecked_binding(binding, environment, program, scopes)
+        return None
+    }
     if binding.uninit -> return sema_stmt_check_uninit_binding(binding, environment, program, scopes, state, context, diagnostics)
     if binding.arena_view -> return None
     // A lambda is already its value, and a function is no compile-time data:
