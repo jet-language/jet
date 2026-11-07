@@ -2231,25 +2231,53 @@ sema_expression_if_absent_test_swaps: fn(else_value: Expr, name: String) -> Bool
 
 // A value arm written `-> next` is the loop-control word unless a name `next`
 // is in scope (the parser cannot tell the two apart): the arm runs `next` and
-// has no value, as the braced `-> { next }` does.
-sema_expression_if_next_word: fn(value: Expr, scopes: SemaScopeTable) -> Bool Never! {
-    if value == .Ident(name, _, _) -> return name == "next" && sema_scope_resolve_index(scopes, name) == None
+// has no value, as the braced `-> { next }` does. A name the arm's own pattern
+// binds (`.Ok(next) -> next`) is in scope for that arm, so the then arm
+// (`then_arm`) also reads the names `condition` binds; the else arm does not.
+sema_expression_if_next_word: fn(value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> Bool Never! {
+    if value == .Ident(name, _, _) {
+        if name != "next" || sema_scope_resolve_index(scopes, name) != None -> return false
+        if then_arm {
+            bound := [BindName]{}
+            sema_expression_condition_binding_names(condition, bound)
+            loop binding in bound {
+                if binding.name == name -> return false
+            }
+        }
+        return true
+    }
     false
 }
 
-sema_expression_if_next_body: fn(body: [Stmt], value: Expr, scopes: SemaScopeTable) -> [Stmt] {
+// The names a condition's pattern tests bind for its success branch: the
+// top-level test and every test along a `&&` chain.
+sema_expression_condition_binding_names: fn(condition: Expr, names: &[BindName]) Never! {
+    if condition == {
+        .PatternTest(_, pattern, _, _) -> sema_pattern_test_binding_names(pattern, names)
+        .Paren(inner, _, _) -> sema_expression_condition_binding_names(inner, names)
+        .Binary(op, left, right, _, _) -> {
+            if op == BinOp.And {
+                sema_expression_condition_binding_names(left, names)
+                sema_expression_condition_binding_names(right, names)
+            }
+        }
+        else -> {}
+    }
+}
+
+sema_expression_if_next_body: fn(body: [Stmt], value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> [Stmt] {
     out := body.copy()
-    if sema_expression_if_next_word(value, scopes) -> out.push(Stmt.Continue{span: expr_span(value)})
+    if sema_expression_if_next_word(value, scopes, condition, then_arm) -> out.push(Stmt.Continue{span: expr_span(value)})
     out
 }
 
-sema_expression_if_next_value: fn(value: Expr, scopes: SemaScopeTable) -> Expr {
-    if sema_expression_if_next_word(value, scopes) -> return Expr.NoElse{span: expr_span(value), id: AST_NODE_GENERATED}
+sema_expression_if_next_value: fn(value: Expr, scopes: SemaScopeTable, condition: Expr, then_arm: Bool) -> Expr {
+    if sema_expression_if_next_word(value, scopes, condition, then_arm) -> return Expr.NoElse{span: expr_span(value), id: AST_NODE_GENERATED}
     value.copy()
 }
 
 sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    if sema_expression_if_next_word(then_value, scopes) || sema_expression_if_next_word(else_value, scopes) -> return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, scopes), sema_expression_if_next_value(then_value, scopes), sema_expression_if_next_body(else_body, else_value, scopes), sema_expression_if_next_value(else_value, scopes), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    if sema_expression_if_next_word(then_value, scopes, condition, true) || sema_expression_if_next_word(else_value, scopes, condition, false) -> return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, scopes, condition, true), sema_expression_if_next_value(then_value, scopes, condition, true), sema_expression_if_next_body(else_body, else_value, scopes, condition, false), sema_expression_if_next_value(else_value, scopes, condition, false), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     type_param: sema_expression_type_table_param(condition, environment, scopes)
     if type_param == .Val(param) -> return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     dispatch_subject: sema_expression_if_dispatch_subject(condition, else_value)

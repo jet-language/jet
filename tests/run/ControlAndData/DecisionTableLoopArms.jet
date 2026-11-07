@@ -1,7 +1,10 @@
 // Loop control and early returns as decision-table arms, and loop conditions
 // that bind a pattern: `next` and `break` as value-table arms, `return
 // Err(...)` as an arm of a statement table and of a value table, and
-// `loop xs.pop() == .Val(x)`, re-tested before every pass.
+// `loop xs.pop() == .Val(x)`, re-tested before every pass. A name `next` the
+// arm's own pattern binds (`.Ok(next) -> next`) is that binding, inside a
+// loop or outside one; a sibling arm that binds nothing still reads `next` as
+// loop control.
 #Error
 Problem: enum {
     Negative(Int)
@@ -62,6 +65,29 @@ binding_conditions: fn() {
     print("found {found} left {words.len()}")
 }
 
+first_ok: fn(n: Int) -> Int Problem! {
+    first: if check(n) == {
+        .Ok(next) -> next
+        .Err(failure) -> return Err(failure)
+    }
+    Ok(first + 1)
+}
+
+bound_next: fn() {
+    sum := 0
+    inputs: [Int]{4, -3, 5}
+    loop n in inputs {
+        value: if check(n) == {
+            .Ok(next) -> next
+            .Err(_) -> next
+        }
+        sum += value
+    }
+    print("bound next {sum}")
+    print("{first_ok(4) ?? -1}")
+    print("{first_ok(-3) ?? -1}")
+}
+
 run: fn() {
     value_arms()
     print("{check(4) ?? -1}")
@@ -69,4 +95,5 @@ run: fn() {
     print("{halve(8) ?? -1}")
     print("{halve(-8) ?? -1}")
     binding_conditions()
+    bound_next()
 }
