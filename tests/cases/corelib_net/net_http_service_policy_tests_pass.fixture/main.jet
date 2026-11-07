@@ -44,13 +44,28 @@ use {
     }
 }
 
+// The resolver's error record crosses into the Core-declared layout field by
+// field; a host the resolver rejects is that NetError, never a fault.
 #Test("bad bracketed IPv6 keeps its exact platform resolver address") {
     if net.socket_addr("[zz]", 80) == {
         .Err(error) -> {
             assert(net.error_operation(error) == Val("resolve socket address"))
             assert(net.error_address(error) == Val("[zz]:80"))
+            assert(net.error_message(error).starts_with("resolve socket address failed: "))
         }
         .Ok(_) -> assert(false)
+    }
+}
+
+#Test("unclosed or empty brackets are invalid host text before any lookup") {
+    loop host in ["[", "[::1", "[]"] {
+        if net.socket_addr(host, 80) == {
+            .Err(error) -> {
+                assert(net.error_operation(error) == "socket_addr")
+                assert(net.error_address(error) == Val((host)))
+            }
+            .Ok(_) -> assert(false)
+        }
     }
 }
 
