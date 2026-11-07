@@ -196,7 +196,9 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // explicit-file check adds the check's scope and proof rows on stdout
 // (first-hour.md lesson 3). `finish` ends the process with the outcome once the
 // compile ran, skipping the teardown of its result.
-jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], trace_sink: JetCLITraceSink?, finish: Bool) -> JetDriverVerbOutput {
+// `recording` publishes the outcome as the invocation's receipt before the
+// process ends (CheckReceipt.jet).
+jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     watch: cli_time.start()
     if !project {
         if jet_cli_missing_project_context(file, source) == .Val(missing) {
@@ -227,7 +229,10 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
             if jet_cli_errors(diagnostics).len() == 0 {
                 if result.internal_problem == .Val(problem) -> output = jet_cli_ice(problem)
             }
-            if finish -> jet_cli_finish(output)
+            if finish {
+                if recording == .Val(claimed) && jet_cli_check_snapshot_inputs(snapshot) == .Val(sources) -> jet_cli_check_receipt_publish(claimed, output, sources)
+                jet_cli_finish(output)
+            }
         }
     }
     output
@@ -3069,9 +3074,20 @@ jet_cli_alias_args: fn(argv: [String]) -> [String] Never! {
 jet_cli_main: fn(args: [String]) -> Int {
     plan: jet_cli_front(args)
     owned: jet_cli_owned_flags(args)
-    done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, jet_cli_trace_flag(owned)) else -> jet_cli_execute(plan)
+    recording := JetCLICheckRecording?{None}
+    if jet_cli_check_receipt_begin(args, plan) == {
+        .Replay(replayed) -> {
+            jet_cli_write_output(replayed)
+            return replayed.exit_code
+        }
+        .Record(claimed) -> recording = Val(claimed)
+        .Skip -> {}
+    }
+    done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, jet_cli_trace_flag(owned), recording) else -> jet_cli_execute(plan)
     output: jet_cli_json_outcome(jet_cli_wants_json(owned), done)
     jet_cli_write_output(output)
+    // A check that ends here (refused before its compile) is still recorded.
+    if recording == .Val(claimed) -> jet_cli_check_receipt_publish(claimed, output, [JetCLIReceiptInput]{})
     output.exit_code
 }
 
@@ -3085,10 +3101,10 @@ jet_cli_main: fn(args: [String]) -> Int {
 // thread_stack_bytes, at least 192 MiB). The program `jet run` launches keeps
 // the main thread and every stack default. The trace sink is made on the
 // worker, the thread the compile runs on.
-jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?) -> JetDriverVerbOutput {
+jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     steps := [JetCLIRunStep]{}
     task.group compile_stack {
-        compiling: task jet_cli_execute_compiling(plan, trace)
+        compiling: task jet_cli_execute_compiling(plan, trace, recording)
         steps.push(compiling.join() ?? panic(compiler_threads_failure_text(err)))
     }
     step := steps.pop() ?? panic("the compile thread lost its step")
@@ -3097,7 +3113,7 @@ jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, trace: String?) -> JetDriverVe
 
 // A compiling plan, on its worker (jet_cli_compile_on_worker): `jet run`
 // stops at the step the main thread finishes; every other verb at its output.
-jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, trace: String?) -> JetCLIRunStep {
+jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, trace: String?, recording: JetCLICheckRecording?) -> JetCLIRunStep {
     trace_sink: jet_cli_trace_sink(trace)
     if plan == .Run(file, source, color, options, verbose, json, threads, program_args, invocation, notice, watch, entry) {
         if !watch {
@@ -3105,7 +3121,7 @@ jet_cli_execute_compiling: fn(plan: &&JetCLIPlan, trace: String?) -> JetCLIRunSt
             return jet_cli_compile_run(file, entry, source, color, options, verbose, json, threads, program_args, invocation, trace_sink)
         }
     }
-    JetCLIRunStep.Output{output: jet_cli_execute(plan, trace_sink)}
+    JetCLIRunStep.Output{output: jet_cli_execute(plan, trace_sink, recording)}
 }
 
 // A verb's output, written to the process's stdout and stderr.
@@ -3140,7 +3156,7 @@ jet_cli_locked_build_host: fn(check: [String], build: [String]) -> JetDriverVerb
 
 // Carry out one plan; a host step that finishes as a plan runs that plan.
 // `trace_sink` traces a compiling verb's compile (`jet_cli_main`).
-jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> JetDriverVerbOutput {
+jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: 0}
     if plan == {
         .Done(done) -> output = done.move()
@@ -3148,7 +3164,7 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}) -> J
         .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
         .Check(file, source, color, quiet, threads, project, notice, json, verbose, settings) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, trace_sink, true)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, trace_sink, true, recording)
         }
         .CheckWorkspace(files, sources, color, quiet, threads, notice, json, settings) -> {
             jet_cli_write_notice(notice)

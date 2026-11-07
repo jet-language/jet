@@ -205,24 +205,60 @@ jet_cli_comparison_input_paths: fn(cache: &WorkspaceDeclarationCache, target: St
 }
 
 jet_cli_receipt_claim: fn(verb: String, paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim JetCLIReadError! {
-    identity := jet_cli_receipt_context_identity(verb, argv, terminal)
+    identity: jet_cli_receipt_context_identity(verb, argv, terminal)
     inputs := [JetCLIReceiptInput]{}
     loop path in paths {
         canonical: cli_files.realpath(path) ?? return Err(jet_cli_read_error("could not canonicalize input {path}: {jet_cli_io_error_text(err)}"))
         observed: jet_cli_receipt_observe_input(JetCLIReceiptInput{path: canonical, digest: ""})
         inputs.push(observed)
     }
-    inputs.sort_by((left: JetCLIReceiptInput, right: JetCLIReceiptInput) -> left.path <=> right.path)
+    Ok(jet_cli_receipt_claim_of(verb, identity, inputs))
+}
+
+// The claim over already observed `inputs`: `identity` framed with each
+// input's path and digest in path order, one row per path.
+jet_cli_receipt_claim_of: fn(verb: String, identity: [U8], inputs: [JetCLIReceiptInput]) -> JetCLIReceiptClaim Never! {
+    framed := identity
+    sorted := inputs
+    sorted.sort_by((left: JetCLIReceiptInput, right: JetCLIReceiptInput) -> left.path <=> right.path)
     previous := ""
     unique := [JetCLIReceiptInput]{}
-    loop input in inputs {
+    loop input in sorted {
         if input.path == previous -> next
         previous = input.path
-        jet_cli_receipt_frame(identity, input.path.bytes())
-        jet_cli_receipt_frame(identity, input.digest.bytes())
+        jet_cli_receipt_frame(framed, input.path.bytes())
+        jet_cli_receipt_frame(framed, input.digest.bytes())
         unique.push(input)
     }
-    Ok(JetCLIReceiptClaim{verb: verb, key: receipt_crypto.sha256(identity).hex(), inputs: unique})
+    JetCLIReceiptClaim{verb: verb, key: receipt_crypto.sha256(framed).hex(), inputs: unique}
+}
+
+// Rust `receipt_secret_values`: the non-empty values of secret-named
+// environment variables and argv options, longest first, so redaction never
+// leaves the tail of a longer secret behind.
+jet_cli_receipt_secret_values: fn(argv: [String]) -[Env]> [String] Never! {
+    values := [String]{}
+    names: cli_sys.vars() ?? [String]{}
+    loop name in names {
+        if !jet_cli_receipt_secret_environment(name) -> next
+        value: cli_sys.get(name) ?? next
+        if value != "" -> values.push(value)
+    }
+    loop (index, argument) in argv {
+        pieces: argument.split("=").to_list()
+        if pieces.len() > 1 {
+            value: argument.removeprefix("{pieces[0]}=")
+            if jet_cli_receipt_secret_name(pieces[0]) && value != "" -> values.push(value)
+        } else if jet_cli_receipt_secret_name(argument) && index + 1 < argv.len() && argv[index + 1] != "" {
+            values.push(argv[index + 1])
+        }
+    }
+    values.sort_by((left: String, right: String) -> right.bytes().len() <=> left.bytes().len())
+    unique := [String]{}
+    loop value in values {
+        if !unique.contains(value) -> unique.push(value)
+    }
+    unique
 }
 
 jet_cli_receipt_canonical_member: fn(input: JetCLIReceiptInput, cwd: String, members: &[JetCLIReceiptInput]) JetCLIReadError! {
