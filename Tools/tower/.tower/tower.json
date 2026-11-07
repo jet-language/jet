@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95752,
+    "rev": 95755,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -95340,6 +95340,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T01:04:03.651Z"
+        },
+        {
+          "n": 2,
+          "text": "A jet check of a small program returns within 1 s of its result being known, even on a contended disk, and its receipt stays durable. Today one check writes .jet/receipts and records as 4 objects plus a records index, each made durable separately: 0.35 s of compile, then 49-84 s of fsync under lane load on $JET_SCRATCH_ROOT (after_close_reader, 11-07). Make the write cost one barrier per check: the objects first, then one fsync of the directory and index, or the write handed off with the next command waiting on it. A measured row pins the time under write load, and a kill during the write leaves either the old index or the complete new one.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T12:38:49.030Z"
         }
       ],
       "refs": [],
@@ -95350,8 +95359,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T01:04:02.406Z",
-      "updated": "2026-11-07T03:10:42.315Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-07T12:38:49.030Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c0y05z3o",
@@ -98392,7 +98402,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98414,11 +98424,11 @@
         {
           "n": 2,
           "text": "jet check on the case's after_close_reader program finishes, with a result, in under 10 s; a regression row pins the hang.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T10:28:24.828Z"
+          "evidence": "0faeee0254: in tests/cases/core_files_opaque_handles/file_manual_close_consumes_the_checked_provider_owner.case, the step 'jet check after_close_reader/main.jet' carries limit: time=10, and the temp and writer checks carry the same limit. The case passes in a kit run in 9.4 s. A cold check of a fresh copy on tmpfs takes 0.53 s, a warm one 0.02 s, and JET_TRACE_FILE shows the compile done by 0.35 s. The slow in-tree times (49-84 s under lane load) are durable receipt fsyncs, not a check hang; that is now #6629.",
+          "at": "2026-11-07T12:38:38.896Z"
         }
       ],
       "refs": [],
@@ -98429,9 +98439,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:28:11.595Z",
-      "updated": "2026-11-07T12:29:54.265Z",
+      "updated": "2026-11-07T12:38:40.642Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-07T12:38:40.642Z"
     },
     {
       "id": "c0jstfps",
@@ -186150,6 +186161,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T12:38:49.030Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ycgz3f",
+      "note": "#2 A jet check of a small program returns within 1 s of its res"
+    },
+    {
+      "at": "2026-11-07T12:38:40.642Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02188uw",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T12:38:38.896Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02188uw",
+      "note": "#2"
+    },
     {
       "at": "2026-11-07T12:30:36.500Z",
       "by": "Main",
