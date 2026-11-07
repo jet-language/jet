@@ -45,6 +45,9 @@ REGISTRY_TIMEOUT_MS: 3500000
 TRANSPORT_TIMEOUT_MS: 600000
 REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2026\"\n"
 TRANSPORT_PACKAGE: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\nedition: \"2026\"\nauthority: {{ allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }}\n"
+// The C host of a plain transport: it registers the process arguments a stop
+// reports, attaches the main thread and runs the fragment's exported entry.
+PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern void jet_rt_plain_fixture(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); jet_rt_thread_attach(); jet_rt_plain_fixture(); jet_rt_thread_detach(); return 0; }}\n"
 // The ICU root primary order of the ASCII names a repository holds: the order
 // the inventory walk lists directory entries in.
 ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
@@ -668,7 +671,7 @@ specification: fn(id: String) -> Spec? Never! {
             "Scan" -> Val((call: Val("scan_tests"), expected: ""))
             "Text" -> Val((call: Val("text_tests"), expected: ""))
             "Unicode" -> Val((call: Val("unicode_tests"), expected: ""))
-            "Secret" -> Val((call: None, expected: "secret tests: ok\n"))
+            "Secret" -> Val((call: Val("secret_tests"), expected: "secret tests: ok\n"))
             else -> None
         }
         if plain == .Val(table) {
@@ -1125,14 +1128,36 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         return Ok(())
     }
     if found.kind == "plain" {
+        // One runtime per image: the fragment and the runtime sources lower
+        // as a library that a C host links, as the suite transports do. A
+        // program would link this runtime copy beside the pack's, whose
+        // startup thread state the fragment's own init then overwrites.
         raw: "{out}/raw"
         native: "{out}/native"
-        files.create_dir_all(native) ?? return Err(problem("`{native}` cannot be created: {err}"))
+        files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
         node(lane, found.runner, [String]{raw, "--assemble-only", "--test", found.name}) ?? return Err(err)
         unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
-        entry: if found.call == .Val(call) -> "\nrun: fn() {{ {call}() }}\n" else -> ""
-        files.write("{native}/unit.jet", "{unit}{entry}") ?? return Err(problem("`{native}/unit.jet` cannot be written: {err}"))
-        return program(lane, "{native}/unit.jet", found.expected)
+        call: found.call ?? return Err(problem("plain transport {found.name} names no entry"))
+        fixture: "{native}/Source/Fixture.jet"
+        files.write(fixture, "{unit}\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
+        package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
+        files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
+        // The fragments witness the allocator a program built without
+        // `--checked-alloc` runs, so the checked heap's init hook stays out.
+        rows: files.read("{repo}/Compiler/JetRuntime/lifecycle.list") ?? return Err(problem("`Compiler/JetRuntime/lifecycle.list` cannot be read: {err}"))
+        kept := [String]{}
+        loop row in rows.split("\n") {
+            if !row.starts_with("jet_rt_alloc_check_init ") -> kept.push(row.copy())
+        }
+        lifecycle: "{native}/lifecycle.list"
+        files.write(lifecycle, kept.join("\n")) ?? return Err(problem("`{lifecycle}` cannot be written: {err}"))
+        library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
+        driver: "{native}/driver.c"
+        files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        binary: "{native}/driver"
+        link(lane, driver, "{native}/fixture.o", binary) ?? return Err(err)
+        ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(ran, found.expected, "")
     }
     if found.kind == "c" -> return c_verdict(lane, found)
     if found.kind == "indices" {

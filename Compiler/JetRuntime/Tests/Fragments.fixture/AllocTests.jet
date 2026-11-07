@@ -158,12 +158,20 @@ alloc_test_full_slabs: fn() {
     }
     alloc_cache_flush()
     head: alloc_head(arena, I64{4096})
-    #Unsafe("after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked onto the free-slab stack") {
+    #Unsafe("after all payloads are freed, the class keeps its emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS and counts each; any further empty slab went onto the free-slab stack") {
         retained: os_load_i64(wrapping(head + I64{64}))
-        alloc_test_require(retained != I64{0} && os_load_i64(head) == retained)
-        alloc_test_require(os_load_i64(retained) == I64{0})
-        alloc_test_require(os_load_i64(wrapping(retained + I64{8})) == I64{0})
-        alloc_test_require(os_load_i64(wrapping(retained + I64{24})) == I64{0})
+        alloc_test_require(retained > I64{0} && retained <= ALLOC_RETAINED_EMPTY_SLABS)
+        empty := I64{0}
+        previous := I64{0}
+        slab := os_load_i64(head)
+        loop slab != (I64{0}) {
+            alloc_test_require(os_load_i64(wrapping(slab + I64{8})) == previous)
+            alloc_test_require(os_load_i64(wrapping(slab + I64{40})) == arena)
+            if (os_load_i64(wrapping(slab + I64{24})) == I64{0}) { empty = wrapping(empty + I64{1}) }
+            previous = slab
+            slab = os_load_i64(slab)
+        }
+        alloc_test_require(empty == retained)
     }
 }
 
