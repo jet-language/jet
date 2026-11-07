@@ -1,0 +1,33 @@
+// Port of tests/diagnostics_coverage.rs:213-302. The Rust Prelude `JetShow`
+// impl and type-declaration scans retire with the Rust Prelude; the surviving
+// relationship is the canonical printable set the checker admits without a
+// source impl (`sema_call_reflection_synthetic_printable`).
+use jet_sema.[sema_call_reflection_synthetic_printable]
+
+#Test("prelude_jet_show_rows_match_canonical_printable_types") {
+    rows: [String]{"ComputeDevice", "SyncText", "SyncCounter", "SyncMap", "SyncList", "ServiceRestart", "ServiceDelivery", "ServiceRuntime", "ServiceStateStore"}
+    seen := [String]{}
+    loop name in rows {
+        assert(!seen.contains(name), "duplicate canonical Prelude JetShow row `{name}`")
+        seen.push(name.copy())
+        assert(sema_call_reflection_synthetic_printable(name), "Prelude JetShow type `{name}` lost its automatic printable row")
+    }
+}
+
+#Test("prelude_jet_show_exclusions_remain_explicit_only") {
+    exclusions: [[String]]{
+        [String]{"Tensor", "Tensor has an explicit state-aware renderer; it is not an automatic printable row"},
+        [String]{"ComputeStream", "ComputeStream identity is runtime-local, so its explicit renderer omits the identity"},
+        [String]{"SparseTensor", "SparseTensor uses the explicit `jet_compute_sparse_show` projection"},
+        [String]{"ServiceTree", "ServiceTree owns runtime workers and uses the explicit `jet_services_tree_show` projection"},
+        [String]{"ServiceEndpoint", "ServiceEndpoint uses the explicit `jet_services_endpoint_show` projection"},
+    }
+    seen := [String]{}
+    loop row in exclusions {
+        name: row[0]
+        assert(!seen.contains(name), "duplicate explicit Prelude JetShow exclusion `{name}`")
+        seen.push(name.copy())
+        assert(row[1].trim() != "", "explicit Prelude JetShow exclusion `{name}` needs a narrow reason")
+        assert(!sema_call_reflection_synthetic_printable(name), "excluded Prelude JetShow type `{name}` has an automatic printable row: {row[1]}")
+    }
+}

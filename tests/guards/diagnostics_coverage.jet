@@ -251,6 +251,35 @@ dc_report_codes: fn(text: String) -> [String] {
     assert_eq(missing.join(" "), "")
 }
 
+// tests/diagnostics_coverage.rs:740-784: compare the one expected-unimplemented
+// baseline with the registry projection. A listed code that is now emitted
+// leaves the list; a listed code that is neither unimplemented nor emitted
+// (its row was retired, reserved or deleted) is a missing baseline entry; an
+// unimplemented row the list does not name is unexpected. "" when they agree.
+dc_baseline_failure: fn(listed: [String], unimplemented: [String], emitted: [String]) -> String {
+    now_emitted := [String]{}
+    missing := [String]{}
+    loop code in listed {
+        if dc_has(emitted, code) {
+            dc_add(now_emitted, code)
+        } else if !dc_has(unimplemented, code) {
+            dc_add(missing, code)
+        }
+    }
+    unexpected := [String]{}
+    loop code in unimplemented {
+        if !dc_has(listed, code) -> dc_add(unexpected, code)
+    }
+    now_emitted.sort()
+    missing.sort()
+    unexpected.sort()
+    failures := [String]{}
+    if now_emitted.len() > 0 -> failures.push("DC_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  {now_emitted.join("\n  ")}")
+    if missing.len() > 0 -> failures.push("DC_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  {missing.join("\n  ")}")
+    if unexpected.len() > 0 -> failures.push("Codes registered in the typed rows but never emitted; stage each in DC_SPEC_AHEAD_OF_IMPL with its card:\n  {unexpected.join("\n  ")}")
+    failures.join("\n")
+}
+
 // tests/diagnostics_coverage.rs:2003: a registered row that is neither
 // reserved nor retired in the registry and that no source emits is listed
 // with a `staged #<card>` reason, and a listed code that is now emitted must
@@ -269,19 +298,23 @@ dc_report_codes: fn(text: String) -> [String] {
     }
     assert(e0745 == "retired", "E0745 is a retired reservation and must remain in the typed rows")
     emitted: dc_emitted_codes()
-    listed: DC_SPEC_AHEAD_OF_IMPL.map(row -> row.code)
-    now_emitted := [String]{}
-    loop code in listed {
-        if dc_has(emitted, code) -> now_emitted.push(code)
-    }
-    unlisted := [String]{}
+    unimplemented := [String]{}
     loop row in rows {
-        if row.status != "reserved" && row.status != "retired" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) && !dc_has(listed, row.code) -> unlisted.push(row.code)
+        if row.status != "reserved" && row.status != "retired" && !dc_has(DC_EXCLUDED_CODES, row.code) && !dc_has(emitted, row.code) -> dc_add(unimplemented, row.code)
     }
-    now_emitted.sort()
-    unlisted.sort()
-    assert_eq("now emitted, remove from the list: {now_emitted.join(" ")}", "now emitted, remove from the list: ")
-    assert_eq("registered but never emitted: {unlisted.join(" ")}", "registered but never emitted: ")
+    assert_eq(dc_baseline_failure(DC_SPEC_AHEAD_OF_IMPL.map(row -> row.code), unimplemented, emitted), "")
+}
+
+// tests/diagnostics_coverage.rs:790: the baseline comparison refuses a
+// removed entry, an added row and a substitution, and passes when they agree.
+#Test("coverage_baseline_rejects_removal_addition_and_substitution") {
+    baseline: [String]{"E2101", "E3001"}
+    emitted := [String]{}
+    assert_eq(dc_baseline_failure(baseline, ["E2101"], emitted), "DC_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001")
+    assert_eq(dc_baseline_failure(["E2101"], ["E2101", "E3001"], emitted), "Codes registered in the typed rows but never emitted; stage each in DC_SPEC_AHEAD_OF_IMPL with its card:\n  E3001")
+    assert_eq(dc_baseline_failure(baseline, ["E2101", "E4000"], emitted), "DC_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001\nCodes registered in the typed rows but never emitted; stage each in DC_SPEC_AHEAD_OF_IMPL with its card:\n  E4000")
+    assert_eq(dc_baseline_failure(baseline, baseline, emitted), "")
+    assert_eq(dc_baseline_failure(baseline, ["E2101"], ["E3001"]), "DC_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  E3001")
 }
 
 // tests/diagnostics_coverage.rs:1525 (I2): rustc codes never become Jet

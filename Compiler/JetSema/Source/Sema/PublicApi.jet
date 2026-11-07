@@ -138,7 +138,7 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
     }
 }
 
-// A name that starts with `_` is soft-public (D-SHAPE-INTERNAL1): callers may
+// A name that starts with `_` is soft-public: callers may
 // reach it, but it carries no SemVer promise, and Jet-reserved `__` spellings
 // are part of no package's API.
 sema_public_api_named: fn(name: String) -> Bool Never! {
@@ -188,7 +188,7 @@ sema_public_api_lifted_name: fn(name: String, prefix: String, modules: [String:B
 // not its source name. A type of a `core.units` family the prelude injected
 // is written with its dimension identity (`Meter[core.units%3A%3ALength:1]`),
 // so it differs from a same-named local nominal; a local declaration of the
-// same name shadows the prelude member (D-DIMENSION-OPEN1) and keeps its
+// same name shadows the prelude member and keeps its
 // bare name, its own family row carrying its identity. A type an inline
 // module's lowering lifted reads as its source path (`bench.Report`).
 sema_public_api_spellings: fn(items: [Item], modules: [String:Bool], inherited: [String:String]) -> [String:String] Never! {
