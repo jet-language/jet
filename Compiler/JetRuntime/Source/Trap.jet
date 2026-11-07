@@ -29,7 +29,7 @@ trap_put: fn(address: I64, value: I64) {
 }
 
 trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
-    #Unsafe("audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process") {
+    #Unsafe("audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor") {
         return os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
     }
 }

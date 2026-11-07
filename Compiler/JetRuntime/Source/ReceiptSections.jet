@@ -306,8 +306,17 @@ receipt_section_capacity: fn(directory: I64, payload_bytes: I64) -> Bool {
 // missing one is created with mode 0700, tolerating a concurrent creator.
 receipt_section_directory: fn(directory: I64) -> Bool {
     name: fd_c_path(directory)
-    length: rt_text_len(directory)
     facts: jet_rt_alloc(I64{128}, I64{8})
+    safe: receipt_section_directory_at(name, rt_text_len(directory), facts)
+    jet_rt_free(facts, I64{128}, I64{8})
+    fd_c_path_drop(name, directory)
+    safe
+}
+
+// receipt_section_directory over a caller-owned NUL-terminated copy `name` of
+// `length` bytes and a 128-byte stat fact row: no allocation, so a root stop's
+// development receipt (ProductionReceipt.jet) can use it too.
+receipt_section_directory_at: fn(name: I64, length: I64, facts: I64) -> Bool {
     safe := true
     at := I64{0}
     loop safe && at <= length {
@@ -333,7 +342,9 @@ receipt_section_directory: fn(directory: I64) -> Bool {
                     safe = false
                     break
                 }
-                made: host_call(I64{83}, name, I64{448}, I64{0})
+                // mkdir: trap_syscall, not host_call, whose read recorder
+                // allocates (and records no mkdir).
+                made: trap_syscall(I64{83}, name, I64{448}, I64{0}, I64{0}, I64{0}, I64{0})
                 if (made != I64{0} && made != I64{-17}) {
                     safe = false
                     break
@@ -343,15 +354,15 @@ receipt_section_directory: fn(directory: I64) -> Bool {
         }
         at += I64{1}
     }
-    jet_rt_free(facts, I64{128}, I64{8})
-    fd_c_path_drop(name, directory)
     safe
 }
 
 receipt_section_write_all: fn(fd: I64, data: I64, length: I64) -> Bool {
     written := I64{0}
     loop written < length {
-        result: host_call(I64{1}, fd, wrapping(data + written), length - written)
+        // write: trap_syscall, not host_call, whose read recorder allocates
+        // (and records no write).
+        result: trap_syscall(I64{1}, fd, wrapping(data + written), length - written, I64{0}, I64{0}, I64{0})
         if (result == I64{-4}) -> next
         if (result <= I64{0}) -> return false
         written += result

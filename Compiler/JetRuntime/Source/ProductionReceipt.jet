@@ -7,10 +7,17 @@
 // target and the stop's code, file, line and function reach it, never its
 // message, source text, locals, argument values or environment values. With no
 // complete environment, or an unsafe directory, nothing is written.
+//
+// Every root stop links this, so it costs a program nothing it would not
+// otherwise link: it reads a main's startup envp in place
+// (host_startup_environment_value), renders into one anonymous mapping and
+// makes its syscalls through trap_syscall. No allocator, thread block or
+// environment index is reached from here.
 
 // O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC.
 PRODUCTION_RECEIPT_OPEN: I64{524481}
 PRODUCTION_RECEIPT_CWD_BYTES: I64{4096}
+PRODUCTION_RECEIPT_FACTS_BYTES: I64{128}
 
 // trap_header numbering: 0 E3001, 1 E3010, else E3011.
 production_receipt_code: fn(code: I64) -> I64 {
@@ -19,196 +26,244 @@ production_receipt_code: fn(code: I64) -> I64 {
     rt_static_text("E3011")
 }
 
+production_receipt_env: fn(key: I64) -> I64 { host_startup_environment_value(key) }
+
 production_receipt_write: fn(code: I64, file: I64, file_len: I64, line: I64, function: I64, function_len: I64) {
-    directory: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_DIRECTORY"))
+    directory: production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_DIRECTORY"))
     if (directory == I64{0}) -> return
-    entry: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_ENTRY"))
-    source: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST"))
-    closure: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST"))
-    input: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST"))
-    count: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT"))
-    count_digest: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST"))
-    target: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET"))
-    target_digest: rt_env_get(rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST"))
-    complete: entry != I64{0} && source != I64{0} && closure != I64{0} && input != I64{0} && count_digest != I64{0} && target != I64{0} && target_digest != I64{0} && production_receipt_count_ok(count)
-    if complete {
-        failure_file: production_receipt_path(file, file_len, entry)
-        receipt: jet_rt_string_builder_new()
-        jet_rt_string_builder_push(receipt, rt_static_text("jet-development-receipt-v1\n"))
-        production_receipt_line(receipt, rt_static_text("act"), rt_static_text(""), rt_static_text("production-failure"))
-        production_receipt_line(receipt, rt_static_text("closure"), rt_static_text(""), closure)
-        // Ordered by (name, digest) as the renderer sorts them.
-        production_receipt_line(receipt, rt_static_text("input"), rt_static_text("argv"), input)
-        production_receipt_line(receipt, rt_static_text("input"), rt_static_text("argv-count"), count_digest)
-        production_receipt_line(receipt, rt_static_text("input"), rt_static_text("entry"), source)
-        production_receipt_line(receipt, rt_static_text("input"), rt_static_text("target"), target_digest)
-        production_receipt_line(receipt, rt_static_text("action"), rt_static_text("planned"), rt_static_text("sha256-2baa4c66edeaf54e166ff66bdd4c914c3076a7621a98c90f9a577c9b825be3b3"))
-        production_receipt_line(receipt, rt_static_text("activation-proof"), rt_static_text(""), rt_static_text("sha256-b8846cc6a6dfb698b445cafa1f316a814f70d56520598e8efcdbd42970999378"))
-        production_receipt_line(receipt, rt_static_text("parent-generation"), rt_static_text(""), rt_static_text(""))
-        witness: jet_rt_string_builder_new()
-        jet_rt_string_builder_push(witness, rt_static_text("jet-runtime;target="))
-        jet_rt_string_builder_push(witness, target)
-        jet_rt_string_builder_push(witness, rt_static_text(";argv-count="))
-        jet_rt_string_builder_push(witness, count)
-        jet_rt_string_builder_push(witness, rt_static_text(";redaction=by-construction"))
-        production_receipt_line(receipt, rt_static_text("witness"), rt_static_text(""), witness)
-        jet_rt_string_drop(witness)
-        production_receipt_line(receipt, rt_static_text("failure-path"), rt_static_text("code"), production_receipt_code(code))
-        production_receipt_line(receipt, rt_static_text("failure-path"), rt_static_text("file"), failure_file)
-        digits: jet_rt_string_builder_new()
-        rt_text_push_number(digits, line)
-        production_receipt_line(receipt, rt_static_text("failure-path"), rt_static_text("line"), digits)
-        jet_rt_string_drop(digits)
-        named: jet_rt_string_builder_new()
-        if (function_len == I64{0}) -> jet_rt_string_builder_push(named, rt_static_text("<unknown>"))
-        else -> rt_text_append(named, function, function_len)
-        production_receipt_line(receipt, rt_static_text("failure-path"), rt_static_text("function"), named)
-        jet_rt_string_drop(named)
-        production_receipt_line(receipt, rt_static_text("outcome"), rt_static_text(""), rt_static_text("failed"))
-        production_receipt_publish(directory, receipt)
-        jet_rt_string_drop(receipt)
-        jet_rt_string_drop(failure_file)
+    present := production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_ENTRY")) != I64{0}
+    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST")) != I64{0}
+    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST")) != I64{0}
+    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST")) != I64{0}
+    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST")) != I64{0}
+    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET")) != I64{0}
+    present = present && production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST")) != I64{0}
+    if !(present && production_receipt_count_ok(production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT")))) -> return
+    // One scratch mapping: the working directory, the stat fact row, then
+    // `directory/receipt` NUL-terminated (the mapping is zero-filled).
+    directory_len: host_startup_byte_length(directory)
+    scratch_bytes: PRODUCTION_RECEIPT_CWD_BYTES + PRODUCTION_RECEIPT_FACTS_BYTES + directory_len + I64{16}
+    scratch: production_receipt_map(scratch_bytes)
+    if (scratch == I64{0}) -> return
+    cwd: scratch
+    facts: wrapping(scratch + PRODUCTION_RECEIPT_CWD_BYTES)
+    name: wrapping(facts + PRODUCTION_RECEIPT_FACTS_BYTES)
+    // getcwd counts the NUL it wrote.
+    written: trap_syscall(I64{79}, cwd, PRODUCTION_RECEIPT_CWD_BYTES, I64{0}, I64{0}, I64{0}, I64{0})
+    cwd_len: if (written > I64{1}) -> written - I64{1} else -> I64{0}
+    length: production_receipt_render(I64{0}, code, file, file_len, line, function, function_len, cwd, cwd_len)
+    receipt: production_receipt_map(length)
+    if (receipt != I64{0}) {
+        _ := production_receipt_render(receipt, code, file, file_len, line, function, function_len, cwd, cwd_len)
+        rt_text_bytes_copy(name, directory, directory_len)
+        if receipt_section_directory_at(name, directory_len, facts) {
+            suffix: rt_static_text("/receipt")
+            rt_text_bytes_copy(wrapping(name + directory_len), rt_text_data(suffix), rt_text_len(suffix))
+            production_receipt_publish(name, facts, receipt, length)
+        }
+        production_receipt_unmap(receipt, length)
     }
-    jet_rt_string_drop(directory)
-    jet_rt_string_drop(entry)
-    jet_rt_string_drop(source)
-    jet_rt_string_drop(closure)
-    jet_rt_string_drop(input)
-    jet_rt_string_drop(count)
-    jet_rt_string_drop(count_digest)
-    jet_rt_string_drop(target)
-    jet_rt_string_drop(target_digest)
+    production_receipt_unmap(scratch, scratch_bytes)
+}
+
+// A fresh zero-filled private mapping of `bytes`, or 0.
+production_receipt_map: fn(bytes: I64) -> I64 {
+    address: trap_syscall(I64{9}, I64{0}, bytes, I64{3}, I64{34}, I64{-1}, I64{0})
+    if (address < I64{0}) -> return I64{0}
+    address
+}
+
+production_receipt_unmap: fn(address: I64, bytes: I64) {
+    _ := trap_syscall(I64{11}, address, bytes, I64{0}, I64{0}, I64{0}, I64{0})
 }
 
 // The argument count is a decimal number, as the CLI wrote it.
 production_receipt_count_ok: fn(count: I64) -> Bool {
     if (count == I64{0}) -> return false
-    length: rt_text_len(count)
+    length: host_startup_byte_length(count)
     if (length == I64{0} || length > I64{19}) -> return false
-    data: rt_text_data(count)
     at := I64{0}
     loop at < length {
-        byte: rt_text_byte(wrapping(data + at))
+        byte: rt_text_byte(wrapping(count + at))
         if (byte < I64{48} || byte > I64{57}) -> return false
         at += I64{1}
     }
     true
 }
 
-// One `kind\thex(name)\thex(value)\n` record line.
-production_receipt_line: fn(target: I64, kind: I64, name: I64, value: I64) {
-    jet_rt_string_builder_push(target, kind)
-    rt_text_push_word(target, I64{9}, I64{1})
-    production_receipt_hex(target, rt_text_data(name), rt_text_len(name))
-    rt_text_push_word(target, I64{9}, I64{1})
-    production_receipt_hex(target, rt_text_data(value), rt_text_len(value))
-    rt_text_push_word(target, I64{10}, I64{1})
-}
-
-production_receipt_hex: fn(target: I64, data: I64, length: I64) {
-    at := I64{0}
-    loop at < length {
-        byte: rt_text_byte(wrapping(data + at))
-        high: byte >> I64{4}
-        low: byte.bit_and(I64{15})
-        rt_text_push_word(target, if (high < I64{10}) -> high + I64{48} else -> high + I64{87}, I64{1})
-        rt_text_push_word(target, if (low < I64{10}) -> low + I64{48} else -> low + I64{87}, I64{1})
-        at += I64{1}
+// The receipt's bytes at `buffer`, or only their count when `buffer` is 0;
+// the length either way.
+production_receipt_render: fn(buffer: I64, code: I64, file: I64, file_len: I64, line: I64, function: I64, function_len: I64, cwd: I64, cwd_len: I64) -> I64 {
+    empty: rt_static_text("")
+    at := production_receipt_put_text(buffer, I64{0}, rt_static_text("jet-development-receipt-v1\n"))
+    at = production_receipt_line(buffer, at, rt_static_text("act"), empty, rt_static_text("production-failure"))
+    at = production_receipt_env_line(buffer, at, rt_static_text("closure"), empty, rt_static_text("JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST"))
+    // Ordered by (name, digest) as the renderer sorts them.
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("argv"), rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST"))
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("argv-count"), rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST"))
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("entry"), rt_static_text("JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST"))
+    at = production_receipt_env_line(buffer, at, rt_static_text("input"), rt_static_text("target"), rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST"))
+    at = production_receipt_line(buffer, at, rt_static_text("action"), rt_static_text("planned"), rt_static_text("sha256-2baa4c66edeaf54e166ff66bdd4c914c3076a7621a98c90f9a577c9b825be3b3"))
+    at = production_receipt_line(buffer, at, rt_static_text("activation-proof"), empty, rt_static_text("sha256-b8846cc6a6dfb698b445cafa1f316a814f70d56520598e8efcdbd42970999378"))
+    at = production_receipt_line(buffer, at, rt_static_text("parent-generation"), empty, empty)
+    at = production_receipt_open(buffer, at, rt_static_text("witness"), empty)
+    at = production_receipt_hex_text(buffer, at, rt_static_text("jet-runtime;target="))
+    at = production_receipt_hex_env(buffer, at, rt_static_text("JET_DEVELOPMENT_RECEIPT_TARGET"))
+    at = production_receipt_hex_text(buffer, at, rt_static_text(";argv-count="))
+    at = production_receipt_hex_env(buffer, at, rt_static_text("JET_DEVELOPMENT_RECEIPT_INPUT_COUNT"))
+    at = production_receipt_hex_text(buffer, at, rt_static_text(";redaction=by-construction"))
+    at = production_receipt_put_byte(buffer, at, I64{10})
+    at = production_receipt_line(buffer, at, rt_static_text("failure-path"), rt_static_text("code"), production_receipt_code(code))
+    at = production_receipt_open(buffer, at, rt_static_text("failure-path"), rt_static_text("file"))
+    at = production_receipt_hex_path(buffer, at, file, file_len, cwd, cwd_len)
+    at = production_receipt_put_byte(buffer, at, I64{10})
+    at = production_receipt_open(buffer, at, rt_static_text("failure-path"), rt_static_text("line"))
+    at = production_receipt_hex_number(buffer, at, line)
+    at = production_receipt_put_byte(buffer, at, I64{10})
+    at = production_receipt_open(buffer, at, rt_static_text("failure-path"), rt_static_text("function"))
+    if (function_len == I64{0}) {
+        at = production_receipt_hex_text(buffer, at, rt_static_text("<unknown>"))
+    } else {
+        at = production_receipt_hex(buffer, at, function, function_len)
     }
+    at = production_receipt_put_byte(buffer, at, I64{10})
+    at = production_receipt_line(buffer, at, rt_static_text("outcome"), empty, rt_static_text("failed"))
+    at
 }
 
-// The stop's file as the receipt names it: the entry when the stop has none;
-// a `<…>` pseudo-file as it is; an absolute path relative to the working
-// directory; `<external>` for a path outside it.
-production_receipt_path: fn(file: I64, file_len: I64, entry: I64) -> I64 {
+// One `kind\thex(name)\thex(value)\n` record line.
+production_receipt_line: fn(buffer: I64, at: I64, kind: I64, name: I64, value: I64) -> I64 {
+    cursor: production_receipt_open(buffer, at, kind, name)
+    production_receipt_put_byte(buffer, production_receipt_hex_text(buffer, cursor, value), I64{10})
+}
+
+// A record line whose value is the environment variable `key`.
+production_receipt_env_line: fn(buffer: I64, at: I64, kind: I64, name: I64, key: I64) -> I64 {
+    cursor: production_receipt_open(buffer, at, kind, name)
+    production_receipt_put_byte(buffer, production_receipt_hex_env(buffer, cursor, key), I64{10})
+}
+
+// `kind\thex(name)\t`: a record line up to its value.
+production_receipt_open: fn(buffer: I64, at: I64, kind: I64, name: I64) -> I64 {
+    cursor := production_receipt_put_text(buffer, at, kind)
+    cursor = production_receipt_put_byte(buffer, cursor, I64{9})
+    cursor = production_receipt_hex_text(buffer, cursor, name)
+    production_receipt_put_byte(buffer, cursor, I64{9})
+}
+
+production_receipt_put_text: fn(buffer: I64, at: I64, text: I64) -> I64 {
+    length: rt_text_len(text)
+    if (buffer != I64{0}) -> rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(text), length)
+    at + length
+}
+
+production_receipt_put_byte: fn(buffer: I64, at: I64, byte: I64) -> I64 {
+    if (buffer != I64{0}) -> rt_text_put(wrapping(buffer + at), byte)
+    at + I64{1}
+}
+
+production_receipt_hex_text: fn(buffer: I64, at: I64, text: I64) -> I64 {
+    production_receipt_hex(buffer, at, rt_text_data(text), rt_text_len(text))
+}
+
+production_receipt_hex_env: fn(buffer: I64, at: I64, key: I64) -> I64 {
+    value: production_receipt_env(key)
+    production_receipt_hex(buffer, at, value, host_startup_byte_length(value))
+}
+
+production_receipt_hex: fn(buffer: I64, at: I64, data: I64, length: I64) -> I64 {
+    cursor := at
+    index := I64{0}
+    loop index < length {
+        cursor = production_receipt_hex_byte(buffer, cursor, rt_text_byte(wrapping(data + index)))
+        index += I64{1}
+    }
+    cursor
+}
+
+production_receipt_hex_byte: fn(buffer: I64, at: I64, byte: I64) -> I64 {
+    high: byte >> I64{4}
+    low: byte.bit_and(I64{15})
+    cursor: production_receipt_put_byte(buffer, at, if (high < I64{10}) -> high + I64{48} else -> high + I64{87})
+    production_receipt_put_byte(buffer, cursor, if (low < I64{10}) -> low + I64{48} else -> low + I64{87})
+}
+
+// The decimal digits of the nonnegative `value`, hex-encoded.
+production_receipt_hex_number: fn(buffer: I64, at: I64, value: I64) -> I64 {
+    ten: I64{10}
+    divisor := I64{1}
+    loop value >= divisor * ten -> divisor *= ten
+    cursor := at
+    loop {
+        cursor = production_receipt_hex_byte(buffer, cursor, I64{48} + (value /% divisor) % ten)
+        divisor = divisor /% ten
+        if (divisor == I64{0}) { break }
+    }
+    cursor
+}
+
+// The stop's file as the receipt names it, hex-encoded: the entry when the
+// stop has none; a `<…>` pseudo-file as it is; an absolute path relative to
+// the working directory, with `\` written as `/`; `<external>` for a path
+// outside it.
+production_receipt_hex_path: fn(buffer: I64, at: I64, file: I64, file_len: I64, cwd: I64, cwd_len: I64) -> I64 {
     data := file
     length := file_len
     if (length == I64{0}) {
-        data = rt_text_data(entry)
-        length = rt_text_len(entry)
+        data = production_receipt_env(rt_static_text("JET_DEVELOPMENT_RECEIPT_ENTRY"))
+        length = host_startup_byte_length(data)
     }
-    out: jet_rt_string_builder_new()
-    if (length == I64{0}) {
-        jet_rt_string_builder_push(out, rt_static_text("<unknown>"))
-        return out
-    }
-    if (rt_text_byte(data) == I64{60}) {
-        rt_text_append(out, data, length)
-        return out
-    }
+    if (length == I64{0}) -> return production_receipt_hex_text(buffer, at, rt_static_text("<unknown>"))
+    if (rt_text_byte(data) == I64{60}) -> return production_receipt_hex(buffer, at, data, length)
     start := I64{0}
     if (rt_text_byte(data) == I64{47}) {
-        start = production_receipt_cwd_prefix(data, length)
-        if (start < I64{0}) {
-            jet_rt_string_builder_push(out, rt_static_text("<external>"))
-            return out
-        }
+        start = production_receipt_cwd_prefix(data, length, cwd, cwd_len)
+        if (start < I64{0}) -> return production_receipt_hex_text(buffer, at, rt_static_text("<external>"))
     }
-    at := start
-    loop at < length {
-        byte: rt_text_byte(wrapping(data + at))
-        rt_text_push_word(out, if (byte == I64{92}) -> I64{47} else -> byte, I64{1})
-        at += I64{1}
+    if production_receipt_external(data, start, length) -> return production_receipt_hex_text(buffer, at, rt_static_text("<external>"))
+    cursor := at
+    index := start
+    loop index < length {
+        cursor = production_receipt_hex_byte(buffer, cursor, production_receipt_path_byte(data, index))
+        index += I64{1}
     }
-    if production_receipt_external(out) {
-        jet_rt_string_drop(out)
-        external: jet_rt_string_builder_new()
-        jet_rt_string_builder_push(external, rt_static_text("<external>"))
-        return external
-    }
-    out
+    cursor
 }
 
-// Empty, `.`, `..`, `../…` or `/…`: not a path inside the project.
-production_receipt_external: fn(path: I64) -> Bool {
-    length: rt_text_len(path)
-    if (length == I64{0}) -> return true
-    data: rt_text_data(path)
-    first: rt_text_byte(data)
+// A path byte as the receipt writes it: `\` is `/`.
+production_receipt_path_byte: fn(data: I64, index: I64) -> I64 {
+    byte: rt_text_byte(wrapping(data + index))
+    if (byte == I64{92}) -> I64{47} else -> byte
+}
+
+// The written path from `start`: empty, `.`, `..`, `../…` or `/…` is not a
+// path inside the project.
+production_receipt_external: fn(data: I64, start: I64, length: I64) -> Bool {
+    count: length - start
+    if (count == I64{0}) -> return true
+    first: production_receipt_path_byte(data, start)
     if (first == I64{47}) -> return true
     if (first != I64{46}) -> return false
-    if (length == I64{1}) -> return true
-    second: rt_text_byte(wrapping(data + I64{1}))
-    if (second != I64{46}) -> return false
-    length == I64{2} || rt_text_byte(wrapping(data + I64{2})) == I64{47}
+    if (count == I64{1}) -> return true
+    if (production_receipt_path_byte(data, start + I64{1}) != I64{46}) -> return false
+    count == I64{2} || production_receipt_path_byte(data, start + I64{2}) == I64{47}
 }
 
 // How many leading bytes of the absolute path `data` name the working
-// directory and its separator, or -1 when the path is not inside it.
-production_receipt_cwd_prefix: fn(data: I64, length: I64) -> I64 {
-    buffer: jet_rt_alloc(PRODUCTION_RECEIPT_CWD_BYTES, I64{8})
-    // getcwd counts the NUL it wrote.
-    written: host_call(I64{79}, buffer, PRODUCTION_RECEIPT_CWD_BYTES, I64{0})
-    prefix := I64{-1}
-    if (written > I64{1}) {
-        cwd_len: written - I64{1}
-        if (cwd_len == I64{1}) {
-            prefix = I64{1}
-        } else if (length > cwd_len && rt_text_equal_bytes(data, buffer, cwd_len) && rt_text_byte(wrapping(data + cwd_len)) == I64{47}) {
-            prefix = cwd_len + I64{1}
-        }
-    }
-    jet_rt_free(buffer, PRODUCTION_RECEIPT_CWD_BYTES, I64{8})
-    prefix
+// directory `cwd` and its separator, or -1 when the path is not inside it.
+production_receipt_cwd_prefix: fn(data: I64, length: I64, cwd: I64, cwd_len: I64) -> I64 {
+    if (cwd_len == I64{0}) -> return I64{-1}
+    if (cwd_len == I64{1}) -> return I64{1}
+    if (length > cwd_len && rt_text_equal_bytes(data, cwd, cwd_len) && rt_text_byte(wrapping(data + cwd_len)) == I64{47}) -> return cwd_len + I64{1}
+    I64{-1}
 }
 
-// `directory/receipt`, created 0600 only when absent; an existing receipt
-// (the first failure's) stays. The directory chain is created 0700 and never
-// passes through a symbolic link.
-production_receipt_publish: fn(directory: I64, receipt: I64) {
-    if !receipt_section_directory(directory) -> return
-    path: receipt_section_join(directory, rt_static_text("/"), rt_static_text("receipt"))
-    name: fd_c_path(path)
-    facts: jet_rt_alloc(I64{128}, I64{8})
-    found: receipt_section_lstat(name, facts)
-    jet_rt_free(facts, I64{128}, I64{8})
-    if (found == I64{-2}) {
-        fd: host_call(I64{2}, name, PRODUCTION_RECEIPT_OPEN, I64{384})
-        if (fd >= I64{0}) {
-            _ := receipt_section_write_all(fd, rt_text_data(receipt), rt_text_len(receipt))
-            _ := host_call(I64{3}, fd, I64{0}, I64{0})
-        }
-    }
-    fd_c_path_drop(name, path)
-    jet_rt_string_drop(path)
+// The terminated `name` (`directory/receipt`), created 0600 only when absent;
+// an existing receipt (the first failure's) stays.
+production_receipt_publish: fn(name: I64, facts: I64, receipt: I64, length: I64) {
+    if (receipt_section_lstat(name, facts) != I64{-2}) -> return
+    fd: trap_syscall(I64{2}, name, PRODUCTION_RECEIPT_OPEN, I64{384}, I64{0}, I64{0}, I64{0})
+    if (fd < I64{0}) -> return
+    _ := receipt_section_write_all(fd, receipt, length)
+    _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
 }

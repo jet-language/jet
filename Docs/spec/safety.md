@@ -214,9 +214,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1337,
+  "total": 1338,
   "counts": {
-    "Compiler": 678,
+    "Compiler": 679,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -2909,142 +2909,149 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 34,
+      "line": 38,
       "column": 5,
       "reason": "runtime-init runs before any other thread exists"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 48,
+      "line": 52,
       "column": 5,
       "reason": "bytes borrows one live NUL-terminated startup string"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 80,
+      "line": 84,
       "column": 5,
       "reason": "host argument registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 90,
+      "line": 95,
       "column": 5,
       "reason": "host argument registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 104,
+      "line": 109,
       "column": 5,
       "reason": "startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 118,
+      "line": 123,
       "column": 5,
       "reason": "pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 136,
+      "line": 141,
       "column": 5,
       "reason": "rows exclusively owns raw_count index records; startup lends every pointed-to NUL string"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 157,
+      "line": 162,
       "column": 5,
       "reason": "storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 169,
+      "line": 174,
       "column": 5,
       "reason": "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 199,
+      "line": 204,
       "column": 5,
       "reason": "bytes lends one live NUL-terminated startup string"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 213,
+      "line": 218,
       "column": 5,
       "reason": "startup lends length bytes; data exclusively owns length initialized packed bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 226,
+      "line": 231,
       "column": 5,
       "reason": "output lends a 24-byte native [U8] header and receives ownership of data"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 240,
+      "line": 245,
       "column": 5,
       "reason": "row borrows a complete immutable startup index record"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 255,
+      "line": 260,
       "column": 5,
       "reason": "row borrows its immutable record; data_out lends one writable pointer word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 264,
+      "line": 269,
       "column": 5,
       "reason": "row borrows its immutable record; data_out lends one writable pointer word"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 280,
+      "line": 285,
       "column": 5,
       "reason": "startup lends argc initialized argv pointers and their immutable NUL strings"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 294,
+      "line": 299,
       "column": 5,
       "reason": "argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 316,
+      "line": 321,
       "column": 9,
       "reason": "argv[1] is an immutable startup string of `length` bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 362,
+      "line": 367,
       "column": 5,
       "reason": "startup lends argc initialized argv pointers and their immutable NUL strings"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostStartup.jet",
-      "line": 380,
+      "line": 385,
       "column": 5,
       "reason": "the startup index and key bytes are immutable borrowed data"
+    },
+    {
+      "package": "Compiler",
+      "file": "Compiler/JetRuntime/Source/HostStartup.jet",
+      "line": 419,
+      "column": 9,
+      "reason": "a main's startup envp is a live, null-terminated pointer array"
     },
     {
       "package": "Compiler",
@@ -3574,14 +3581,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ReceiptSections.jet",
-      "line": 325,
+      "line": 334,
       "column": 13,
       "reason": "the path copy owns its terminator byte and every byte before it"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/ReceiptSections.jet",
-      "line": 342,
+      "line": 353,
       "column": 13,
       "reason": "the path copy owns every byte before its terminator"
     },
@@ -4367,7 +4374,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "file": "Compiler/JetRuntime/Source/Trap.jet",
       "line": 32,
       "column": 5,
-      "reason": "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process"
+      "reason": "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor"
     },
     {
       "package": "Compiler",
@@ -9592,14 +9599,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 678 |
+| Compiler | 679 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 414 |
-| **total** | **1337** |
+| **total** | **1338** |
 
 ### Regions
 
@@ -9988,26 +9995,27 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 826:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 831:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 842:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 34:5 | "runtime-init runs before any other thread exists" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 48:5 | "bytes borrows one live NUL-terminated startup string" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 80:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 90:5 | "host argument registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 104:5 | "startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 118:5 | "pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 136:5 | "rows exclusively owns raw_count index records; startup lends every pointed-to NUL string" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 157:5 | "storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 169:5 | "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 199:5 | "bytes lends one live NUL-terminated startup string" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 213:5 | "startup lends length bytes; data exclusively owns length initialized packed bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 226:5 | "output lends a 24-byte native [U8] header and receives ownership of data" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 240:5 | "row borrows a complete immutable startup index record" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 255:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 264:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 280:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 294:5 | "argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 316:9 | "argv[1] is an immutable startup string of `length` bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 362:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
-| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 380:5 | "the startup index and key bytes are immutable borrowed data" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 38:5 | "runtime-init runs before any other thread exists" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 52:5 | "bytes borrows one live NUL-terminated startup string" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 84:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 95:5 | "host argument registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 109:5 | "startup lends the immutable, null-terminated envp pointer array and its NUL-terminated entries" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 123:5 | "pending exclusively owns raw_count + 2 words; registration is single-threaded and precedes user code" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 141:5 | "rows exclusively owns raw_count index records; startup lends every pointed-to NUL string" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 162:5 | "storage exclusively owns total_bytes; each source row lends its NUL string for this capture call, and published rows point only into the owned block" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 174:5 | "the index is published once: by single-threaded registration, or inside host_environment_require's once before it completes" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 204:5 | "bytes lends one live NUL-terminated startup string" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 218:5 | "startup lends length bytes; data exclusively owns length initialized packed bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 231:5 | "output lends a 24-byte native [U8] header and receives ownership of data" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 245:5 | "row borrows a complete immutable startup index record" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 260:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 269:5 | "row borrows its immutable record; data_out lends one writable pointer word" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 285:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 299:5 | "argv[1] is an immutable startup string of `length` bytes; data lends the job name's static bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 321:9 | "argv[1] is an immutable startup string of `length` bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 367:5 | "startup lends argc initialized argv pointers and their immutable NUL strings" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 385:5 | "the startup index and key bytes are immutable borrowed data" |
+| Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 419:9 | "a main's startup envp is a live, null-terminated pointer array" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 21:5 | "value borrows a complete immutable startup NUL string; output lends one writable U64 word" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 48:5 | "value borrows length immutable captured startup bytes; no pointer escapes" |
 | Compiler | Compiler/JetRuntime/Source/HostStartupOutputFacts.jet | 82:5 | "the held Host lock lends 16 writable bytes of its existing ioctl scratch; the canonical lookup retains no key pointer" |
@@ -10083,8 +10091,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 34:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/Reactive.jet | 74:5 | "the observer id is a label nothing reads back; a racing creator can only repeat a label" |
 | Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 235:5 | "the terminated path and the 128-byte stat fact row are live for the syscall" |
-| Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 325:13 | "the path copy owns its terminator byte and every byte before it" |
-| Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 342:13 | "the path copy owns every byte before its terminator" |
+| Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 334:13 | "the path copy owns its terminator byte and every byte before it" |
+| Compiler | Compiler/JetRuntime/Source/ReceiptSections.jet | 353:13 | "the path copy owns every byte before its terminator" |
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 31:5 | "count addresses the aligned prefix word of a live refcounted block the caller holds" |
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 37:5 | "count addresses the aligned prefix word of a block the caller just allocated and still owns exclusively" |
 | Compiler | Compiler/JetRuntime/Source/Refcount.jet | 43:5 | "LOCK XADD on the aligned prefix word of a live refcounted block; the caller's reference keeps it live" |
@@ -10196,7 +10204,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 14:5 | "the caller borrows exactly one initialized byte of a live UTF-8 carrier" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 20:5 | "the caller owns eight writable bytes in a scratch mapping or allocated JetText storage" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 26:5 | "address is one writable byte in the allocated debug-text buffer; value is a byte" |
-| Compiler | Compiler/JetRuntime/Source/Trap.jet | 32:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process" |
+| Compiler | Compiler/JetRuntime/Source/Trap.jet | 32:5 | "audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor" |
 | Compiler | Compiler/JetRuntime/Source/Trap.jet | 89:9 | "the OS leaf borrows a stack word; generated calls have 1..8 valid bytes" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 468:5 | "a web page's module runs on one thread" |
 | Compiler | Compiler/JetRuntime/Source/UiBackends.jet | 514:5 | "only an attached web build records, on its one thread" |

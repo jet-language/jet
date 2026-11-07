@@ -14,6 +14,10 @@ host_argv := I64{0}
 
 host_envp := I64{0}
 
+// 1 when host_envp is a main's startup stack, whose pointer array and strings
+// live as long as the process; an entryless host only lends its envp.
+host_envp_lives := I64{0}
+
 host_env_rows := I64{0}
 
 host_env_length := I64{0}
@@ -80,6 +84,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool) {
     #Unsafe("host argument registration is single-threaded and precedes user code") {
         host_argv = argv
         host_envp = envp
+        host_envp_lives = if main -> I64{1} else -> I64{0}
     }
     capture: host_env_capture_code
     if (capture != I64{0}) {
@@ -397,6 +402,37 @@ host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
         }
     }
     I64{0}
+}
+
+// The startup value of `key` read straight from a main's live envp: the first
+// matching row (the index's rule), invalid UTF-8 as absent, and 0 for an
+// entryless host. No index and no allocation, so a root stop that reads it
+// (ProductionReceipt.jet) links neither the environment capture nor the
+// allocator.
+host_startup_environment_value: fn(key: I64) -> I64 {
+    if (host_envp_lives == I64{0} || host_envp == I64{0}) -> return I64{0}
+    key_data: rt_text_data(key)
+    key_length: rt_text_len(key)
+    index := I64{0}
+    loop {
+        entry := I64{0}
+        #Unsafe("a main's startup envp is a live, null-terminated pointer array") {
+            entry = os_load_i64(wrapping(host_envp + index * I64{8}))
+        }
+        if (entry == I64{0}) -> return I64{0}
+        if (host_environment_split(entry) == key_length && rt_text_equal_bytes(entry, key_data, key_length)) {
+            value: wrapping(entry + key_length + I64{1})
+            length: host_startup_byte_length(value)
+            at := I64{0}
+            loop at < length {
+                width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
+                if (width < I64{0}) -> return I64{0}
+                at = wrapping(at + width)
+            }
+            return value
+        }
+        index = wrapping(index + I64{1})
+    }
 }
 
 // std::env::var parity for internal runtime flags: invalid UTF-8 is absent.
