@@ -19,8 +19,14 @@ collection_static_rows: fn() -> [CollectionStaticRow] Never! {
     values
 }
 
+// The owner's element type comes from the declared return slot; `??` checks
+// its subject without a slot, so the contextual call is its own call root.
+collection_static_try_contextual: fn() -> [String] {
+    List.try_with_capacity(2)
+}
+
 collection_static_contextual: fn() -> [String] Never! {
-    List.try_with_capacity(2) ?? panic("allocation failed")
+    collection_static_try_contextual() ?? panic("allocation failed")
 }
 
 #Test("collection_static_fixtures") {

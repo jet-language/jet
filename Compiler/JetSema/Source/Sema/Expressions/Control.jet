@@ -451,10 +451,15 @@ sema_expression_carrier_payload: fn(ty: Type) -> Type? {
 
 // A call root that may acquire the automatic propagation `Try`. Contextual
 // `Ok`/`Err` constructors build a carrier, and a finite value loop keeps its
-// own exhaustion route.
-sema_expression_propagating_call: fn(expr: Expr) -> Bool Never! {
+// own exhaustion route. A user declaration that owns the `Ok`/`Err` spelling
+// is an ordinary call and propagates like one.
+sema_expression_propagating_call: fn(expr: Expr, scopes: SemaScopeTable) -> Bool Never! {
     if expr == {
-        .Call(call, _) -> call.name != "Ok" && call.name != "Err"
+        .Call(call, _) -> {
+            if call.name != "Ok" && call.name != "Err" -> return true
+            index: sema_scope_resolve_index(scopes, call.name) ?? return false
+            !sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err")
+        }
         .MethodCall(_, _, _, _, _, _, _) -> true
         .CallValue(callee, args, _, _) -> !sema_call_value_is_inline_loop(callee, args)
         else -> false

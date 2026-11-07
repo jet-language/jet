@@ -6057,7 +6057,7 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
         else -> false
     }
     if !grouping -> context.failure_carrier_root = false
-    propagates: !grouping && !carrier_root && sema_expression_propagating_call(expr)
+    propagates: !grouping && !carrier_root && sema_expression_propagating_call(expr, scopes)
     previous_success_view: context.failure_success_view
     context.failure_success_view = propagates
     checked := sema_check_expression_inner(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)

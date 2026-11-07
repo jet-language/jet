@@ -38,9 +38,11 @@ sema_comptime_body_sources_index: fn(context: &SemaCheckContext) Never! {
 }
 
 // Lambda merges append every canonical row, including duplicates, in order.
-// Only capture deduplicates, returning the first existing row.
+// Only capture deduplicates, returning the first existing row; the index
+// keeps a key's first row, so truncation can drop each appended row's entry.
 sema_comptime_body_source_append: fn(context: &SemaCheckContext, source: SemaComptimeBodySource) Never! {
     context.comptime_body_sources.push(source.copy())
+    sema_comptime_body_source_index(context, context.comptime_body_sources.len() - 1)
 }
 
 sema_comptime_body_sources_truncate: fn(context: &SemaCheckContext, length: Int) Never! {
@@ -252,9 +254,6 @@ sema_comptime_body_capture: fn(
         site_span: site_span,
         prepared: sema_comptime_body_prepared_locals(environment, scopes),
         impure: sema_scope_inside_impure(scopes),
-    }
-    loop previous in context.comptime_body_sources {
-        if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
     }
     sema_comptime_body_source_append(context, source)
     source

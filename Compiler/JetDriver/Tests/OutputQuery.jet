@@ -20,7 +20,7 @@ output_query_request: fn(source: String, triple: String) -> JetDriverCompileRequ
     request
 }
 #Test("output_query") {
-    source: "APP: Output.Executable{{name: \"demo\", entry: start}}\nShape: struct {{ pointer: Usize, number: Int }}\nstart: fn() {{}}"
+    source: "APP: Output.Executable{{name: \"demo\", entry: start}}\nShape: struct {{ label: String, number: Int }}\nstart: fn() {{}}"
     loop triple in ["x86_64-unknown-linux-gnu", "i686-unknown-linux-gnu"] {
         result: jet_driver_output_query(output_query_request(source, triple), None)
         output_query_require(result.compile.complete && result.compile.internal_problem == None, "checked producer completes")

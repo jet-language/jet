@@ -57,10 +57,10 @@ seams_entry_name: fn(front: JetDriverLoweringInputsResult) -> String? Never! {
 }
 
 seams_registration_inputs: fn(request: JetDriverCompileRequest, expected_source_rows: Int) {
-    load: jet_driver_load(request)
+    load := jet_driver_load(request)
     seams_require(load.complete && !jet_driver_has_errors(load.diagnostics), "registration fixture uses the real completed loader")
     diagnostics := [Diagnostic]{}
-    inputs: jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, [SemaForeignProviderInput]{}, diagnostics) ?? panic("canonical registration inputs missing")
+    inputs: jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, [SemaForeignProviderInput]{}, diagnostics, request.core_sources, false) ?? panic("canonical registration inputs missing")
     seams_require(diagnostics.len() == 0 && inputs.len() == load.modules.len(), "one canonical registration input per loaded module")
     source_rows := 0
     loop position in 0..<inputs.len() {
@@ -76,22 +76,19 @@ seams_registration_inputs: fn(request: JetDriverCompileRequest, expected_source_
             expected: unit.source_segments[segment_index]
             seams_require(actual.generated.start == expected.generated.start && actual.generated.end == expected.generated.end && actual.source_file == expected.source_file && actual.source_start == expected.source_start && actual.line_starts == expected.line_starts && actual.origin == expected.origin, "canonical source segments survive unchanged")
         }
-        found_source := false
         loop file in load.source_files {
-            if file.path == unit.path {
-                seams_require(row.source == file.source, "real source bytes survive including empty Core and private files")
-                found_source = true
-            }
+            if file.path == unit.path -> seams_require(row.source == file.source, "real source bytes survive including empty Core and private files")
         }
-        if found_source -> source_rows += 1
-        else -> seams_require(row.source == "" && unit.root_index == -1 && unit.file_index == -1 && unit.root_identity == JET_DRIVER_CORE_SOURCE_ROOT, "only explicit metadata ABI fallback lacks a source-file row")
+        // The metadata ABI fallback is the one Core unit with no catalog file.
+        if unit.root_index >= 0 || unit.file_index >= 0 -> source_rows += 1
+        else -> seams_require(row.source == "" && unit.root_identity == JET_DRIVER_CORE_SOURCE_ROOT, "only explicit metadata ABI fallback lacks a catalog source file")
     }
-    seams_require(source_rows == expected_source_rows, "source and metadata-only rows remain distinct")
+    seams_require(source_rows == expected_source_rows, "source and metadata-only rows remain distinct: {source_rows} source rows of {inputs.len()}, expected {expected_source_rows}")
 }
 
 seams_checked_projection: fn() {
     source: "serve: fn() -> Int {{ 7 }}"
-    retained: jet_driver_checked_projection(seams_request(source, JetDriverCompileMode.Check))
+    retained: jet_driver_checked_projection(seams_request(source, JetDriverCompileMode.Program))
     seams_require(retained.compile.complete && retained.compile.internal_problem == None, "retained Check stops after the actual completed front end")
     entry: retained.entry_module ?? panic("checked canonical entry missing")
     seams_require(retained.source_modules.contains(entry) && retained.compile.doc_modules[entry].source == source && retained.compile.doc_modules[entry].physical_path == "/seams-fixture/main.jet", "canonical entry binds the owned immutable source")
@@ -100,18 +97,19 @@ seams_checked_projection: fn() {
     loop module_row in retained.compile.doc_modules {
         seams_require(module_row.name_ledger != None && module_row.memory_facts != None && module_row.gate_ledger != None, "retained checked ledgers are not fabricated or discarded")
     }
-    fallback_request: seams_request("use tools: core.devtools\nserve: fn() -> Int {{ 7 }}", JetDriverCompileMode.Check)
+    fallback_request: seams_request("use tools: core.devtools\nserve: fn() -> Int {{ 7 }}", JetDriverCompileMode.Program)
     seams_registration_inputs(fallback_request, 1)
     fallback: jet_driver_checked_projection(fallback_request)
-    seams_require(fallback.compile.complete && fallback.compile.doc_modules.len() == 2 && fallback.source_modules.len() == 1, "explicit ABI-only Core fallback stays checked but is not a Review source")
-    real_request := seams_request("use tools: core.devtools\nserve: fn() -> Int {{ 7 }}", JetDriverCompileMode.Check)
+    // Program mode also checks the compiler-owned Prelude effect module, which is never a Review source.
+    seams_require(fallback.compile.complete && fallback.compile.doc_modules.len() == 3 && fallback.source_modules.len() == 1, "explicit ABI-only Core fallback stays checked but is not a Review source")
+    real_request := seams_request("use tools: core.devtools\nserve: fn() -> Int {{ 7 }}", JetDriverCompileMode.Program)
     real_request.core_sources = [JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
         {module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
     }
     seams_registration_inputs(real_request, 3)
     real: jet_driver_checked_projection(real_request)
-    seams_require(real.compile.complete && real.compile.doc_modules.len() == 3 && real.source_modules.len() == 3, "empty real Core source and its private source remain source owners")
+    seams_require(real.compile.complete && real.compile.doc_modules.len() == 4 && real.source_modules.len() == 3, "empty real Core source and its private source remain source owners")
     found_core := false
     found_private := false
     loop position in real.source_modules {
@@ -123,9 +121,9 @@ seams_checked_projection: fn() {
         if module_row.module_name == "core.devtools.fixture_private" -> found_private = true
     }
     seams_require(found_core && found_private, "private and public Core source identities survive the bijection")
-    empty: jet_driver_checked_projection(seams_request("", JetDriverCompileMode.Check))
+    empty: jet_driver_checked_projection(seams_request("", JetDriverCompileMode.Program))
     seams_require(empty.compile.complete && empty.source_modules.len() == 1, "an empty authorized file is still a real source owner")
-    failed: jet_driver_checked_projection(seams_request("serve: fn() {{ undefined_call() }}", JetDriverCompileMode.Check))
+    failed: jet_driver_checked_projection(seams_request("serve: fn() {{ undefined_call() }}", JetDriverCompileMode.Program))
     seams_require(!failed.compile.complete && failed.source_modules.len() == 0 && failed.entry_module == None, "failed checking does not publish a complete projection")
     legacy: jet_driver_compile(seams_request(source, JetDriverCompileMode.Doc))
     seams_require(legacy.complete && legacy.doc_modules.len() == 1, "legacy Doc keeps its existing user-only path")
@@ -154,19 +152,19 @@ seams_checked_projection: fn() {
     // Named jobs remain callable under their declared name, even with a stock
     // run: the same declared body is the checked entry of every mode, and the
     // executing modes evaluate it.
-    job_source: "#Job serve: fn() -> Int {{ 7 }}\ncaller: fn() -> Int {{ serve() }}\nrun: fn() -> Int {{ 9 }}"
+    job_source: "#Job serve: fn() -> Int {{ 7 }}\ncaller: fn() -> Int {{ serve() }}\nrun: fn() {{ }}"
     loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Program, JetDriverCompileMode.Doc}) {
         request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
         front: jet_driver_lowering_inputs(request, None)
-        seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job check")
+        seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job check: {mode:Debug} {front.compile.internal_problem:Debug} {front.compile.diagnostics.map(diagnostic -> "{diagnostic.code} {diagnostic.what}")}")
         seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
     }
     loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Eval, JetDriverCompileMode.RootRun}) {
         request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
         front := jet_driver_lowering_inputs(request, None)
-        seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job compile")
+        seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job compile: {mode:Debug} {front.compile.internal_problem:Debug} {front.compile.diagnostics.map(diagnostic -> "{diagnostic.code} {diagnostic.what}")}")
         seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
         inputs := front.inputs.move() ?? panic("selected checked inputs missing")
         // The entry builds and loads; with no runtime image (a test has no
@@ -213,7 +211,7 @@ seams_checked_projection: fn() {
     schema_error := false
     loop diagnostic in breaking.diagnostics { if diagnostic.code == "E0910" -> schema_error = true }
     seams_require(schema_error && !breaking.complete, "schema fails in the checker")
-    schema_check := seams_request("#PublishedSchema Account: struct {{\n    name: String\n    verified: Bool\n}}\nserve: fn() {{ }}", JetDriverCompileMode.Check)
+    schema_check := seams_request("#PublishedSchema Account: struct {{\n    name: String\n    verified: Bool\n}}\nserve: fn() {{ }}", JetDriverCompileMode.Program)
     schema_check.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
     schema_retained: jet_driver_checked_projection(schema_check)
     seams_require(!schema_retained.compile.complete && schema_retained.source_modules.len() == 0, "retained schema failure is still a checker failure")

@@ -3,7 +3,7 @@
 use {
     jet_parser.[parse_source]
     jet_sema.[SemaSourceSegment, check_program, sema_atomic_field_inner]
-    jet_foundation.[DIAGNOSTIC_ERROR]
+    jet_foundation.[DIAGNOSTIC_ERROR, body_node, body_stmt, body_type]
 }
 
 atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomic: Bool) {
@@ -21,14 +21,15 @@ atomic_field_test_source: fn(name: String, source: String, accepted: Bool, atomi
     // incomplete independently; require the whole function's checked tree.
     if checked.functions.len() != 1 -> panic("{name}: field function was not checked")
     found := false
-    loop statement in checked.functions[0].body {
-        if statement == .Return(.Val(value), _) {
-            if value.kind == .StructLit(fields, _, _) {
+    function: checked.functions[0]
+    loop statement in function.body {
+        if body_stmt(function.tree, statement) == .Return(.Val(value), _) {
+            if body_node(function.tree, value).kind == .StructLit(fields) {
                 if fields.len() != 1 -> panic("{name}: field order/count changed")
                 field: fields[0]
                 if atomic {
-                    if sema_atomic_field_inner(field.field.ty) == None || field.value.ty != field.field.ty -> panic("{name}: field lost its Atomic carrier")
-                    if field.value.kind == .StaticCall(owner, _, method, _, args) {
+                    if sema_atomic_field_inner(field.field.ty) == None || body_type(function.tree, field.value) != field.field.ty -> panic("{name}: field lost its Atomic carrier")
+                    if body_node(function.tree, field.value).kind == .StaticCall(owner, _, method, _, args) {
                         if owner == .Prelude(_, path, generics) {
                             if path != "JetAtomic" || generics.len() != 1 || method.name != "new" || args.len() != 1 -> panic("{name}: wrong Atomic constructor")
                         } else {

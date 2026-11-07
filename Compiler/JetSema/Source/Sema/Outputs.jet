@@ -247,6 +247,34 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                     diagnostics.push(sema_output_error(member.span, "Output entry is not a function reference", "text names, calls, and runtime reflection are not Output links", "write a bare or qualified function reference, such as `entry: run`"))
                     return None
                 }
+                if exported.symbol.kind == SymbolKind.Module && exported.source_module_identity == graph.modules[current].module_identity {
+                    // `bank.package_scope.launch`: an inline module of a file
+                    // module, visible to the requester as its export says.
+                    // Its members are lifted beside it under their dotted
+                    // path, which no member-by-member hop spells.
+                    last: path.members[path.members.len() - 1]
+                    modules := [String]{}
+                    loop position in index..<path.members.len() - 1 -> modules.push(path.members[position].name.copy())
+                    lifted: sema_inline_member_name(modules.join("."), last.name)
+                    names: loop item in path.members -> item.name
+                    member_path: names.join(".")
+                    nested_visible: sema_output_nested_modules_visible(graph.modules[current], path.members, index, owner.package_identity)
+                    if nested_visible == (Val(true)) {
+                        if sema_registration_resolve_export(graph, current, lifted, owner.module_identity, owner.package_identity, [String]{}) == .Val(found) {
+                            references.push(sema_output_import_reference(graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
+                            source_name = Val(last.name.copy())
+                            // copy: as for the export row below.
+                            resolved = Val(SemaRegistrationResolvedSymbol{place: SemaRegistrationSymbolPlace.Detached{symbol: found.symbol.copy()}, source_module_identity: found.source_module_identity.copy(), target_module_identity: found.source_module_identity.copy(), visibility: found.visibility})
+                            break
+                        }
+                    }
+                    if nested_visible == (Val(false)) || sema_registration_direct_symbol(graph.modules[current], lifted) != None {
+                        diagnostics.push(sema_output_error(last.span, "function `{path.root}.{member_path}` is private", "an Output can only invoke code visible from its declaring module", "make each module on `{member_path}` and `{last.name}: fn` visible to this package, or keep the Output beside it"))
+                    } else {
+                        diagnostics.push(sema_output_error(last.span, "module `{path.root}` has no function `{member_path}`", "Output entries use ordinary module member resolution", "update `entry:` to a function that exists"))
+                    }
+                    return None
+                }
                 references.push(sema_output_import_reference(graph.modules[current], exported.source_module_identity, member.name, exported.symbol.span, exported.visibility))
                 current = sema_registration_module_index(graph, exported.source_module_identity) ?? return None
             } else {
@@ -267,6 +295,30 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
     if callable == .Function(module_index, function_index) -> return Val(SemaOutputTarget{module_index: module_index, function_index: function_index, source_name: source_name ?? graph.modules[module_index].functions[function_index].declaration.name.copy(), references: references.move()})
     diagnostics.push(sema_output_error(expr_span(entry), "Output entry `{sema_resolved_name(graph, symbol)}` is not an ordinary safe Jet function", "package tools invoke checked Jet functions without granting an FFI or unsafe authority boundary", "wrap the boundary in an ordinary safe Jet function and reference that function"))
     None
+}
+
+// Whether `members[from]` up to the last member's module is a path of inline
+// modules declared in `module_row`: None when it isn't, else whether each
+// module nested in `members[from]` is visible to `requester_package` (`pub`,
+// or `priv(package)` in that package; a `priv` module only to its parent).
+// `members[from]` itself is visible as its export says.
+sema_output_nested_modules_visible: fn(module_row: SemaRegistrationModule, members: [ExprMember], from: Int, requester_package: String) -> Bool? Never! {
+    if from + 1 >= members.len() -> return None
+    items := module_row.program.items
+    visible := true
+    loop position in from..<members.len() - 1 {
+        found := [Item]?{None}
+        loop item in items {
+            if item == .CodeModule(definition) && definition.name == members[position].name {
+                body: definition.body ?? return None
+                if position > from && !definition.is_pub && !(definition.is_package_pub && module_row.package_identity == requester_package) -> visible = false
+                found = Val(body)
+                break
+            }
+        }
+        items = found ?? return None
+    }
+    Val(visible)
 }
 
 sema_output_has_import: fn(module_row: SemaRegistrationModule, name: String) -> Bool {

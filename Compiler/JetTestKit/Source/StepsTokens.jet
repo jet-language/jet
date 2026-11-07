@@ -205,13 +205,16 @@ kit_steps_case_port_names: fn(context: KitStepCtx) -> [String] {
 }
 
 // One probe run reserves every port a case names: the probe holds all its listeners until it has printed
-// them, so the ports are distinct. The probe is built in the case's own scratch, never in the shared tree,
-// so parallel cases do not race on one build output.
+// them, so the ports are distinct. The probe package (its package.jet and free_port.jet) is built in the
+// case's own scratch, never in the shared tree, so parallel cases do not race on one build output.
 kit_steps_free_ports: fn(context: KitStepCtx, count: Int) -> [Int] Err! {
     directory: files.join(context.scratch, "free-port")
     files.create_dir_all(directory) ?? return Err("free-port probe directory: {err}")
+    source: files.join(context.env.root, "Compiler/JetTestKit/Probes")
+    loop name in ["package.jet", "free_port.jet"] {
+        files.copy(files.join(source, name), files.join(directory, name)) ?? return Err("free-port probe copy of {name}: {err}")
+    }
     probe: files.join(directory, "free_port.jet")
-    files.copy(files.join(context.env.root, "Compiler/JetTestKit/Probes/free_port.jet"), probe) ?? return Err("free-port probe copy: {err}")
     result: kit_exec_invoke(context.env, [context.env.jet, "run", probe, "--", "{count}"], directory, context.scratch, "") ?? return Err("free-port probe: {err}")
     if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed (exit {result.code}): {result.error} {result.stderr}")
     ports := [Int]{}

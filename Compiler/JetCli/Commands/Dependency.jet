@@ -14,8 +14,8 @@ use {
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
     cli_files: core.files
     jet_cli.[
-        JET_CLI_PACKAGE_FILE, jet_cli_diagnostic_copy, jet_cli_find_project_entry,
-        jet_cli_io_error_text, jet_cli_reports_status_json,
+        JET_CLI_DEFAULT_ENTRY_FILE, JET_CLI_PACKAGE_FILE, jet_cli_diagnostic_copy, jet_cli_entry_join,
+        jet_cli_find_project_entry, jet_cli_io_error_text, jet_cli_report_base, jet_cli_reports_status_json,
     ]
 }
 
@@ -82,7 +82,7 @@ jet_cli_dependency_input_at_entry: fn(root: String, entry: String, color: Bool, 
     facts: found ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {entry}", None, color, json))
     if inline == .Val(block) {
         manifest: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(jet_cli_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
-        return Ok(JetCLIPackageInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: source.authority})
+        return Ok(JetCLIPackageInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: source.authority.move()})
     }
     jet_cli_package_input_from_facts(root, facts, color, json)
 }
@@ -95,5 +95,5 @@ jet_cli_package_input_from_facts: fn(root: String, facts: PackageFacts, color: B
     path: located ?? return Err(jet_cli_dependency_cli_error("E2105", "couldn't locate {JET_CLI_PACKAGE_FILE}", None, color, json))
     carrier: jet_cli_dependency_read(path, color, json)
     manifest: pkg_to_manifest(facts, carrier.raw) ?? return Err(jet_cli_dependency_source_error(path, carrier.raw, err.diagnostic))
-    Ok(JetCLIPackageInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: carrier.authority})
+    Ok(JetCLIPackageInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: carrier.authority.move()})
 }

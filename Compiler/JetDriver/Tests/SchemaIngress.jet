@@ -44,7 +44,10 @@ use {
     if encoding.outcome == {
         .IO(error, actual) -> {
             assert(actual == Val((bytes)))
-            assert(error == IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("stream did not contain valid UTF-8")}))
+            if error == {
+                .InvalidInput(context) -> assert(context.operation == .Read && (context.resource ?? "") == path && context.os_code == None && context.cause == Val("stream did not contain valid UTF-8"))
+                else -> panic("schema UTF-8 failure was not an invalid-input read")
+            }
         }
         else -> panic("schema UTF-8 failure lost actual bytes or read classification")
     }
@@ -53,7 +56,7 @@ use {
     schema_test_files.create_dir_all(path) ?? panic("unreadable schema fixture directory")
     unreadable: jet_driver_read_schema_dependency(root, "Account")
     if unreadable.outcome == {
-        .IO(_, bytes) -> assert(bytes == None)
+        .IO(_, unread) -> assert(unread == None)
         else -> panic("schema IO failure was not retained")
     }
     schema_test_files.remove_all(root) ?? panic("schema fixture cleanup")

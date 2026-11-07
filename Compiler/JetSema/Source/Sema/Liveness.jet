@@ -234,6 +234,12 @@ sema_liveness_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMod
             sema_liveness_note_site(candidates, graph, source_index, callee.key, call.span, call.caller_key)
         }
     }
+    // An Output entry is an application root: the function it links (only
+    // ever one visible to the Output's module) is consumed.
+    loop reference in graph.output_name_references {
+        row: name_rows_get_text(candidates.keys, reference.symbol.id.key) ?? next
+        candidates.reached[row] = true
+    }
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
         start: verdicts.len()

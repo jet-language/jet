@@ -1244,7 +1244,6 @@ SemaCheckContextMark: struct {
     name_references: Int
     comptime_requests: Int
     comptime_body_sources: Int
-    comptime_body_values: Int
     compute_calls: Int
     autodiff_obligations: Int
     copy_events: Int
@@ -1279,7 +1278,6 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
         name_references: context.name_references.len(),
         comptime_requests: context.comptime_requests.len(),
         comptime_body_sources: context.comptime_body_sources.len(),
-        comptime_body_values: context.comptime_body_values.length,
         compute_calls: context.compute_calls.len(),
         autodiff_obligations: context.autodiff_obligations.len(),
         copy_events: context.copy_events.len(),
@@ -1317,7 +1315,9 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             name_references: [SemaNameReferenceFact]{},
             comptime_requests: [SemaComptimeRequest]{},
             comptime_body_sources: [SemaComptimeBodySource]{},
-            comptime_body_values: SemaComptimeBodyValues{},
+            // copy: the publication view (shared facts owner and visible
+            // length); rollback restores it, including a replaced generation.
+            comptime_body_values: context.comptime_body_values.copy(),
             comptime_body_source_modules: [String:Int]{},
             comptime_body_source_rows: [[String:Int]]{},
             compute_calls: [SemaComputeCallFact]{},
@@ -1387,7 +1387,7 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: SemaCheckConte
     loop context.name_references.len() > mark.name_references -> _ := context.name_references.pop()
     loop context.comptime_requests.len() > mark.comptime_requests -> _ := context.comptime_requests.pop()
     sema_comptime_body_sources_truncate(context, mark.comptime_body_sources)
-    sema_comptime_body_values_truncate(context, mark.comptime_body_values)
+    context.comptime_body_values = mark.saved.comptime_body_values.copy()
     loop context.compute_calls.len() > mark.compute_calls -> _ := context.compute_calls.pop()
     loop context.autodiff_obligations.len() > mark.autodiff_obligations -> _ := context.autodiff_obligations.pop()
     loop context.copy_events.len() > mark.copy_events -> _ := context.copy_events.pop()

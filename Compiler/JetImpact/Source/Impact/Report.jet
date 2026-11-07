@@ -1,6 +1,6 @@
 // Impact report records over SemIndex facts.
 use {
-    jet_semindex.[SemIndex, SymbolDef, SymbolRef, CallEdge]
+    jet_semindex.[SemIndex, SemDefinition, SemRef, SemCall]
     jet_foundation.[foundation_json_quote]
 }
 
@@ -29,26 +29,9 @@ ImpactReport: struct {
     upstream_callers: [ImpactEdge]
     downstream_callees: [ImpactEdge]
 
-    // Rust ImpactReport::analyze (44–72). All queries retain the original name,
-    // even when qualified resolution finds a definition by its leaf spelling.
+    // Rust ImpactReport::analyze (44–72) over one checked program's index.
     analyze: fn(index: SemIndex, symbol: String, depth_limit: Int) -> ImpactReport Never! {
-        resolved: impact_resolve_symbol(index, symbol)
-        found: resolved != None
-        definition_module := String?{None}
-        if resolved == .Val(definition) -> definition_module = Val(definition[0].module_path.copy())
-        references: impact_direct_references(index, symbol)
-        call_sites: impact_direct_call_sites(index, symbol)
-        upstream_callers := [ImpactEdge]{}
-        downstream_callees := [ImpactEdge]{}
-        if found {
-            upstream_callers = impact_transitive_callers(index, symbol, depth_limit)
-            downstream_callees = impact_transitive_callees(index, symbol, depth_limit)
-        }
-        ImpactReport{
-            symbol: symbol.copy(), found, depth_limit, definition_module,
-            references: references.move(), call_sites: call_sites.move(),
-            upstream_callers: upstream_callers.move(), downstream_callees: downstream_callees.move(),
-        }
+        impact_report(index.definitions, index.references, index.calls, symbol, depth_limit)
     }
 
     // Rust ImpactReport::to_json and nested edge_json/ref_json (74–115).
@@ -94,38 +77,56 @@ ImpactReport: struct {
     }
 }
 
-// Rust resolve_symbol (173–180): last ::, first matching exact/suffix module.
-// Returned views borrow the index and contain exactly one definition.
-impact_resolve_symbol: fn(index: SemIndex, query: String) -> View<SymbolDef>? Never! {
+// The report over an index's definition, reference and call rows. All
+// queries retain the original name, even when qualified resolution finds a
+// definition by its leaf spelling; depth zero still reports direct uses.
+impact_report: fn(definitions: [SemDefinition], references: [SemRef], calls: [SemCall], symbol: String, depth_limit: Int) -> ImpactReport Never! {
+    definition_module: impact_resolve_module(definitions, symbol)
+    found: definition_module != None
+    direct_references := [ImpactRef]{}
+    loop reference in references {
+        if reference.name == symbol -> direct_references.push(impact_ref_to_impact(reference, 1))
+    }
+    call_sites := [ImpactEdge]{}
+    loop call in calls {
+        if call.callee == symbol -> call_sites.push(impact_edge_to_impact(call, 1))
+    }
+    upstream_callers := [ImpactEdge]{}
+    downstream_callees := [ImpactEdge]{}
+    if found {
+        upstream_callers = impact_transitive_edges(calls, symbol, depth_limit, true)
+        downstream_callees = impact_transitive_edges(calls, symbol, depth_limit, false)
+    }
+    ImpactReport{
+        symbol: symbol.copy(), found, depth_limit, definition_module,
+        references: direct_references.move(), call_sites: call_sites.move(),
+        upstream_callers: upstream_callers.move(), downstream_callees: downstream_callees.move(),
+    }
+}
+
+// Rust resolve_symbol (173–180): split at the last `::`; the first definition
+// whose module is that prefix, or ends with it, is the symbol. An unqualified
+// query is the first definition of that name.
+impact_resolve_module: fn(definitions: [SemDefinition], query: String) -> String? Never! {
     bytes: query.bytes()
     separator := -1
     loop position in 0..<(bytes.len() - 1) {
         if bytes[position] == (U8{58}) && bytes[position + 1] == (U8{58}) -> separator = position
     }
-    if separator < 0 -> return index.lookup(query)
+    if separator < 0 {
+        loop definition in definitions {
+            if definition.def.name == query -> return Val(definition.def.module_path.copy())
+        }
+        return None
+    }
     module_path: String.from_bytes(bytes[0..<separator]) ?? panic("separator is an ASCII UTF-8 boundary")
     name: String.from_bytes(bytes[(separator + 2)..<bytes.len()]) ?? panic("separator is an ASCII UTF-8 boundary")
-    definitions: index.definitions()
-    // #4395: enumerate the owner-backed view; do not call unsupported View.len.
-    loop (position, definition) in definitions {
-        if definition.name == name && (definition.module_path == module_path || definition.module_path.ends_with(module_path)) {
-            window: definitions[position..position]
-            return Val(window)
+    loop definition in definitions {
+        if definition.def.name == name && (definition.def.module_path == module_path || definition.def.module_path.ends_with(module_path)) {
+            return Val(definition.def.module_path.copy())
         }
     }
     None
-}
-
-// Rust direct_references/direct_call_sites (182–196), including depth-zero use.
-impact_direct_references: fn(index: SemIndex, symbol: String) -> [ImpactRef] Never! {
-    out := [ImpactRef]{}
-    loop reference in index.references_to(symbol) -> out.push(impact_ref_to_impact(reference[0], 1))
-    out
-}
-impact_direct_call_sites: fn(index: SemIndex, symbol: String) -> [ImpactEdge] Never! {
-    out := [ImpactEdge]{}
-    loop edge in index.call_sites(symbol) -> out.push(impact_edge_to_impact(edge[0], 1))
-    out
 }
 
 // Rust seen (caller, callee) identity and VecDeque frontier (198–243).
@@ -134,58 +135,40 @@ impact_direct_call_sites: fn(index: SemIndex, symbol: String) -> [ImpactEdge] Ne
 ImpactEdgeKey: struct { caller: String, callee: String }
 ImpactFrontier: struct { name: String, depth: Int }
 
-impact_transitive_callers: fn(index: SemIndex, callee: String, depth_limit: Int) -> [ImpactEdge] Never! {
+// Breadth-first over the call rows from `start`: `upstream` follows calls into
+// the frontier name (its callers), otherwise calls out of it (its callees).
+// Each (caller, callee) pair is reported once, at its shortest depth.
+impact_transitive_edges: fn(calls: [SemCall], start: String, depth_limit: Int, upstream: Bool) -> [ImpactEdge] Never! {
     out := [ImpactEdge]{}
     seen_edges := [ImpactEdgeKey:Bool]{}
     frontier := Queue<ImpactFrontier>.new()
-    frontier.push_back(ImpactFrontier{name: callee.copy(), depth: 0})
+    frontier.push_back(ImpactFrontier{name: start.copy(), depth: 0})
     loop {
         current: (frontier.pop_front()) ?? break
         if current.depth >= depth_limit -> next
-        loop window in index.call_sites(current.name) {
-            edge: window[0]
-            key: ImpactEdgeKey{caller: edge.caller.copy(), callee: edge.callee.copy()}
+        loop call in calls {
+            if upstream && call.callee != current.name -> next
+            if !upstream && call.caller != current.name -> next
+            key: ImpactEdgeKey{caller: call.caller.copy(), callee: call.callee.copy()}
             if seen_edges.has_key(key) -> next
             seen_edges[key] = true
             next_depth: current.depth + 1
-            out.push(impact_edge_to_impact(edge, next_depth))
-            frontier.push_back(ImpactFrontier{name: edge.caller.copy(), depth: next_depth})
-        }
-    }
-    out
-}
-impact_transitive_callees: fn(index: SemIndex, caller: String, depth_limit: Int) -> [ImpactEdge] Never! {
-    out := [ImpactEdge]{}
-    seen_edges := [ImpactEdgeKey:Bool]{}
-    frontier := Queue<ImpactFrontier>.new()
-    frontier.push_back(ImpactFrontier{name: caller.copy(), depth: 0})
-    // Read one owner-backed view: preserve current index order without copying
-    // the complete call graph on every BFS expansion.
-    edges: index.call_edges()
-    loop {
-        current: (frontier.pop_front()) ?? break
-        if current.depth >= depth_limit -> next
-        loop edge in edges {
-            if edge.caller != current.name -> next
-            key: ImpactEdgeKey{caller: edge.caller.copy(), callee: edge.callee.copy()}
-            if seen_edges.has_key(key) -> next
-            seen_edges[key] = true
-            next_depth: current.depth + 1
-            out.push(impact_edge_to_impact(edge, next_depth))
-            frontier.push_back(ImpactFrontier{name: edge.callee.copy(), depth: next_depth})
+            out.push(impact_edge_to_impact(call, next_depth))
+            reached: if upstream -> call.caller.copy() else -> call.callee.copy()
+            frontier.push_back(ImpactFrontier{name: reached, depth: next_depth})
         }
     }
     out
 }
 
 // Rust ref_to_impact/edge_to_impact (245–264): byte spans are never re-sliced.
-impact_ref_to_impact: fn(reference: SymbolRef, depth: Int) -> ImpactRef Never! {
+impact_ref_to_impact: fn(reference: SemRef, depth: Int) -> ImpactRef Never! {
     ImpactRef{depth, name: reference.name.copy(), module_path: reference.module_path.copy(),
         span_start: reference.span.start, span_end: reference.span.end}
 }
-impact_edge_to_impact: fn(edge: CallEdge, depth: Int) -> ImpactEdge Never! {
-    ImpactEdge{depth, caller: edge.caller.copy(), callee: edge.callee.copy(), module_path: edge.module_path.copy(),
-        span_start: edge.call_span.start, span_end: edge.call_span.end}
+impact_edge_to_impact: fn(call: SemCall, depth: Int) -> ImpactEdge Never! {
+    ImpactEdge{depth, caller: call.caller.copy(), callee: call.callee.copy(), module_path: call.module_path.copy(),
+        span_start: call.span.start, span_end: call.span.end}
 }
 impact_edge_json: fn(edge: ImpactEdge) -> String Never! {
     "{{\"depth\":{edge.depth},\"caller\":{foundation_json_quote(edge.caller)},\"callee\":{foundation_json_quote(edge.callee)},\"module_path\":{foundation_json_quote(edge.module_path)},\"span\":{{\"start\":{edge.span_start},\"end\":{edge.span_end}}}}}"
