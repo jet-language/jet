@@ -86,8 +86,7 @@ function manifest() {
       inputs: {
         matrix: "Tools/gauntlet/matrix.json",
         status: "Tools/gauntlet/status.json",
-        conformance_inventory: ".jet/core-conformance-inventory.json",
-        conformance_summary: ".jet/core-conformance-check.txt",
+        conformance_manifest: ".jet/hardening-manifest.json",
         tier_census: "Docs/audits/tier-census.json",
         compiler_speed: "Tools/perf/baseline.json",
         entries_dir: "Tools/gauntlet/entries",
@@ -201,8 +200,7 @@ function gateInputs({ mode = "batch", verificationOverrides = {}, peer = "python
     manifest: "Tools/gauntlet/measurement-manifest.json",
     matrix: "Tools/gauntlet/matrix.json",
     status: "Tools/gauntlet/status.json",
-    conformance_inventory: ".jet/core-conformance-inventory.json",
-    conformance_summary: ".jet/core-conformance-check.txt",
+    conformance_manifest: ".jet/hardening-manifest.json",
     tier_census: "Docs/audits/tier-census.json",
     compiler_speed: "Tools/perf/baseline.json",
     entries_dir: "Tools/gauntlet/entries",
@@ -219,8 +217,14 @@ function gateInputs({ mode = "batch", verificationOverrides = {}, peer = "python
       path: "Tools/gauntlet/entries/fixture/entry.json",
       value: { mode, languages: [peer], cells: [CELL] },
     }]]),
-    conformanceInventory: ["fixture.public_function"],
-    conformanceSummary: "core conformance denominator: 1 public function(s); 1 program(s); 0 carve-out(s); 0 uncovered row(s)",
+    conformanceManifest: {
+      schema: "jet.hardening.surface.v1",
+      denominator: { rows: 2, by_status: { covered: 1, excluded: 1 } },
+      rows: [
+        { stable_id: "module:core.fixture.covered", status: "covered" },
+        { stable_id: "module:core.fixture.excluded", status: "excluded" },
+      ],
+    },
     tierCensus: census(),
     compilerSpeed: compilerSpeed(),
     performanceSurfaceEvidence: {
@@ -230,8 +234,7 @@ function gateInputs({ mode = "batch", verificationOverrides = {}, peer = "python
     files: {
       status: { stat },
       matrix: { text: null },
-      conformanceInventory: { stat },
-      conformanceSummary: { stat },
+      conformanceManifest: { stat },
       performanceSurfaceEvidence: { stat },
     },
     loadErrors: [],
@@ -285,4 +288,20 @@ test("rejects malformed, failed, and mode-mismatched output verification", () =>
     assert.ok(result.findings.some((finding) => finding.kind === "wrong-output" && finding.cell === CELL && finding.tier === "aot"), `${label} proof must fail as wrong-output`);
     assert.equal(tierResult(result, "aot").verdict, "unmeasured", `${label} proof must not retain a ratio win`);
   }
+});
+
+test("the conformance check reads the Tools/hardening manifest and fails on an uncovered or miscounted row", () => {
+  assert.equal(gate(gateInputs()).checks.conformance.status, "pass");
+  const uncovered = gateInputs();
+  uncovered.conformanceManifest.rows.push({ stable_id: "module:core.fixture.missing", status: "missing" });
+  uncovered.conformanceManifest.denominator = { rows: 3, by_status: { covered: 1, excluded: 1, missing: 1 } };
+  const failed = gate(uncovered);
+  assert.equal(failed.checks.conformance.status, "fail");
+  assert.ok(failed.findings.some((finding) => finding.kind === "conformance" && finding.cause === "conformance manifest reports 1 uncovered row(s)"));
+  const miscounted = gateInputs();
+  miscounted.conformanceManifest.denominator.rows = 3;
+  assert.ok(gate(miscounted).findings.some((finding) => finding.kind === "summary-mismatch"));
+  const foreign = gateInputs();
+  foreign.conformanceManifest.schema = "core-conformance";
+  assert.equal(gate(foreign).checks.conformance.status, "fail");
 });
