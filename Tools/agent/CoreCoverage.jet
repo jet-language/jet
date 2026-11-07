@@ -5,10 +5,12 @@
 // host-embedded Jet programs do. Every public declaration (methods included)
 // has its own row. Unresolved dynamic receivers stay uncovered rather than
 // crediting same-named methods. The census measures the user-callable Core
-// surface: a reserved `__` name (a user call is jet.ReservedDunderName) and an
-// extern declaration (`name: fn(…) = "symbol"`, no Jet body) are outside it,
+// surface: a reserved `__` name (a user call is jet.ReservedDunderName), an
+// extern declaration (`name: fn(…) = "symbol"`, no Jet body) and every member
+// of a compiler-private source part (Compiler/Prelude/CoreSourceParts.tsv: not
+// a Core module, not importable, its members not user items) are outside it,
 // counted on their own line, and reached only through the public functions
-// that call them.
+// that call them. Prelude functions and types are in scope unqualified.
 //
 // Usage (from anywhere in the checkout):
 //     jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]
@@ -28,6 +30,7 @@ use {
 
 TOOL: "/Tools/agent/CoreCoverage.jet"
 RATCHET: "Tools/agent/core-coverage-ratchet.json"
+PARTS: "Compiler/Prelude/CoreSourceParts.tsv"
 USAGE: "usage: jet Tools/agent/CoreCoverage.jet [--check|--write] [--json]\n--check: reject an untested public function the ratchet does not list\n--write: initialize the ratchet, then only remove names\n--json: include each declaration and its source evidence"
 SKIPPED_NAMES: [String]{"expected", "node_modules", "target"}
 HOST_EXTENSIONS: [String]{".rs", ".mjs", ".js"}
@@ -90,6 +93,8 @@ Function: struct {
     tests: [String]
     // An extern declaration: its body is a foreign symbol, not Jet.
     foreign: Bool
+    // Declared in a compiler-private source part (PARTS).
+    part: Bool
 }
 
 ModuleRow: struct {
@@ -459,10 +464,10 @@ body_kind: fn(source: [U8], close: Int) -> String Never! {
 }
 
 // Whether a declaration is outside the user-callable Core surface: an extern
-// member has no Jet body, and a user call to a reserved `__` name (its own or
-// its owner type's) is jet.ReservedDunderName.
+// member has no Jet body, a part member is no user item, and a user call to a
+// reserved `__` name (its own or its owner type's) is jet.ReservedDunderName.
 outside_surface: fn(row: Function) -> Bool Never! {
-    if row.foreign -> return true
+    if row.foreign || row.part -> return true
     loop part in row.name.split(".") {
         if part.starts_with("__") -> return true
     }
@@ -683,6 +688,7 @@ public_functions: fn(path: String, source_text: String) -> [Function] Never! {
             examples: [String]{},
             tests: [String]{},
             foreign: body == "extern",
+            part: false,
         })
     }
     rows
@@ -705,12 +711,16 @@ table_of: fn(functions: [Function]) -> Table Never! {
 
 first_part: fn(name: String) -> String Never! { name.partition(".").head.copy() }
 
-// The aliases a program starts with: `core`, `app`, every prelude function
-// and, for a doctest, the names of its own module.
+// The aliases a program starts with: `core`, `app`, every prelude function and
+// type (a user names them unqualified) and, for a doctest, the names of its
+// own module.
 initial_aliases: fn(table: Table, context: String) -> [String: String] Never! {
     aliases := [String: String]{"core": "core", "app": "app"}
     loop index in 0..<table.ids.len() {
-        if table.units[index] == "core.prelude" && !table.names[index].contains(".") -> aliases[table.names[index].copy()] = table.ids[index].copy()
+        if table.units[index] == "core.prelude" {
+            head: first_part(table.names[index])
+            aliases[head.copy()] = "core.prelude.{head}"
+        }
         if context != "" && table.units[index] == context {
             head: first_part(table.names[index])
             aliases[head.copy()] = "{context}.{head}"
@@ -1089,6 +1099,21 @@ read_source: fn(root: String, path: String) -[FS]> String CoverageError! {
     Ok(String.from_bytes_lossy(raw))
 }
 
+// The paths of the compiler-private Core source parts: the third column of
+// each PARTS row.
+part_paths: fn(root: String) -[FS]> [String: Bool] CoverageError! {
+    source: read_source(root, PARTS) ?? return Err(err)
+    paths := [String: Bool]{}
+    loop line in source.split("\n") {
+        if line == "" || line.starts_with("#") -> next
+        columns := [String]{}
+        loop column in line.split("\t") -> columns.push(column.copy())
+        if columns.len() < 3 || columns[2] == "" -> return Err(fail("`{PARTS}`: a part row names no path: {line}"))
+        paths[columns[2].copy()] = true
+    }
+    Ok(paths)
+}
+
 record: fn(functions: &[Function], seen: &[String: Bool], table: Table, program: String, file: String, kind: Int, initial: [String: String]) {
     lines: newlines(program.bytes())
     loop call in call_sites(program, table, initial) {
@@ -1105,6 +1130,7 @@ record: fn(functions: &[Function], seen: &[String: Bool], table: Table, program:
 }
 
 census: fn(root: String) -[FS]> Report CoverageError! {
+    parts: part_paths(root) ?? return Err(err)
     listed := [String]{}
     files_under(root, "Core", listed) ?? return Err(err)
     paths := [String]{}
@@ -1114,7 +1140,10 @@ census: fn(root: String) -[FS]> Report CoverageError! {
     loop path in listed {
         if !path.ends_with(".jet") -> next
         source: read_source(root, path) ?? return Err(err)
-        loop row in public_functions(path, source) {
+        part: parts.has_key(path)
+        loop found in public_functions(path, source) {
+            row := found.copy()
+            row.part = part
             if outside_surface(row) -> excluded.push(row) else -> functions.push(row)
         }
         paths.push(path.copy())
@@ -1413,6 +1442,7 @@ report_json: fn(report: Report) -> Dyn Never! {
             "file": Dyn.Text(row.file.copy()),
             "line": Dyn.Int(row.line),
             "extern": Dyn.Bool(row.foreign),
+            "part": Dyn.Bool(row.part),
         }))
     }
     Dyn.Object([String: Dyn]{
@@ -1423,13 +1453,19 @@ report_json: fn(report: Report) -> Dyn Never! {
     })
 }
 
-// The excluded count line: how many declarations the census leaves out, by kind.
+// The excluded count line: how many declarations the census leaves out, by
+// kind (an extern first, then a part member, then a reserved name).
 excluded_line: fn(report: Report) -> String Never! {
     externs := 0
+    parts := 0
     loop row in report.excluded {
-        if row.foreign -> externs += 1
+        if {
+            row.foreign -> externs += 1
+            row.part -> parts += 1
+            else -> {}
+        }
     }
-    "excluded: {report.excluded.len()} declarations outside the user-callable surface ({externs} extern, {report.excluded.len() - externs} reserved `__` names)"
+    "excluded: {report.excluded.len()} declarations outside the user-callable surface ({externs} extern, {parts} in compiler-private parts, {report.excluded.len() - externs - parts} reserved `__` names)"
 }
 
 // The exit status of one run; failures are reported on stderr.
@@ -1578,6 +1614,7 @@ fixture_tree: fn() -[FS]> String Never! {
     put(root, "Examples/Basics/demo.jet", "use d: core.demo\nrun: fn() {{ d.example_only(); d.example_only() }}")
     put(root, "Examples/expected/fake.jet", "run: fn() {{ core.demo.unused() }}")
     put(root, "tests/demo.rs", "let program = r#\"run: fn() {{ core.demo.test_only() }}\"#;")
+    put(root, PARTS, "# module\towner\tpath\talias\towns\timpls\n")
     root
 }
 
@@ -1602,17 +1639,34 @@ find_function: fn(report: Report, name: String) -> Function Never! {
     files.remove_all(root) ?? ()
 }
 
-#Test("reserved __ names and extern declarations are excluded from the surface; a plain public function still counts") {
+#Test("reserved __ names, extern declarations and part members are excluded from the surface; a plain public function still counts") {
     root: files.mkdtemp("core-coverage-surface") ?? panic("a temporary directory cannot be made: {err}")
     put(root, "Core/demo/demo.jet", "plain: fn() {{}}\n__hook: fn() {{}}\nShape: struct {{\n    __area: fn(self) -> Int Never! {{ 0 }}\n}}\n__Tape: struct {{\n    depth: fn(self) -> Int Never! {{ 0 }}\n}}\n#Import c.lib: module {{\n    symbol: fn() -> I64 = \"lib_symbol\"\n}}\n")
+    // A part's members are no user items, the ones it exports to its owner included.
+    put(root, "Core/demo/Part.jet", "owned: fn() {{}}\nhelper: fn() {{}}\n")
+    put(root, PARTS, "# module\towner\tpath\talias\towns\timpls\n__demo_part\tcore.demo\tCore/demo/Part.jet\t__demo_part\towned\t\n")
     put(root, "Examples/Basics/none.jet", "run: fn() {{}}")
     put(root, "tests/none.jet", "run: fn() {{}}")
     report: census(root) ?? panic(err.message)
     assert_eq(report.functions.map(row -> row.name.copy()), [String]{"plain"})
     assert_eq(report.total_public, 1)
     assert_eq(report.total_uncovered, 1)
-    assert_eq(report.excluded.map(row -> "{row.name} {row.foreign}"), [String]{"__hook false", "Shape.__area false", "__Tape.depth false", "symbol true"})
-    assert_eq(excluded_line(report), "excluded: 4 declarations outside the user-callable surface (1 extern, 3 reserved `__` names)")
+    excluded := report.excluded.map(row -> "{row.name} {row.foreign} {row.part}")
+    excluded.sort()
+    assert_eq(excluded, [String]{"Shape.__area false false", "__Tape.depth false false", "__hook false false", "helper false true", "owned false true", "symbol true false"})
+    assert_eq(excluded_line(report), "excluded: 6 declarations outside the user-callable surface (1 extern, 2 in compiler-private parts, 3 reserved `__` names)")
+    files.remove_all(root) ?? ()
+}
+
+#Test("a prelude type is in scope unqualified, so a call through its value is credited") {
+    root: files.mkdtemp("core-coverage-prelude") ?? panic("a temporary directory cannot be made: {err}")
+    put(root, "Core/Prelude/Prelude.jet", "Place: struct {{\n    file: String\n}}\nimpl Place.Display {{ display: fn(self) -> String {{ self.file }} }}\n")
+    put(root, PARTS, "# module\towner\tpath\talias\towns\timpls\n")
+    put(root, "Examples/Basics/none.jet", "run: fn() {{}}")
+    put(root, "tests/place.jet", "run: fn() {{\n    at: Place{{file: \"a.jet\"}}\n    print(at.display())\n}}\n")
+    report: census(root) ?? panic(err.message)
+    assert_eq(find_function(report, "Place.display").tests, [String]{"tests/place.jet:3"})
+    assert_eq(report.total_uncovered, 0)
     files.remove_all(root) ?? ()
 }
 
