@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6638,
-    "rev": 94525,
+    "rev": 94532,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54090,7 +54090,7 @@
       "track": "sidequest",
       "epoch": "e11",
       "milestoneId": null,
-      "phase": "building",
+      "phase": "done",
       "priority": "P0",
       "plan": "Plan (2026-10-26, Main, replaces the pre-R7 plan). The Rust implementation is gone (R7a c9129d174, R7a2, R7c); the compiler, runtime pack, seed (a0_019) and chain build with no cargo/rustc. 197 .rs files remain at dev 2aa6fe9402. Remaining work, in delivery order:\n\n1. U7 Jet-hosted jetpack (the deleted Rust jetpack binary has no replacement yet).\n   - Step 1 Engine (3703d7a2fe) and step 2 JetOS/Image/Integrations/Services/Publication (05f851b632) landed: each `Jetpack/Bootstrap/check.sh --area` = 0 errors.\n   - Step 3 Secrets (local age v1 port over the age/age-keygen tools until core.crypto.vault owns the store, #3668) + CLI: patch $JET_SCRATCH_ROOT/lanes/Main/out/u7-secrets-cli.patch, proof = check --area CLI 0 errors + check --area Secrets --tests.\n   - Step 4: `check.sh --hosted` builds the jetpack binary; then the 278 tests/cases/jetpack* cases on it. Core gaps it needs stay on #5935.\n2. G3: tests/**/*.rs (42 files, none run since the cargo workspace is deleted). Census $JET_SCRATCH_ROOT/lanes/O0Image/g3/CENSUS.md: port or retire every #[test] with evidence, delete in batches (G3-1, G3-2 landed). Next: G3-3 verify the 112 name/golden matches (jetpack_engine, syntax_reconciliation, retirement_ratchet); G3-4 the 58 Jet #Tests; then the 83 open fns (cffi 23, pkg 11); last diagnostic_pages (needs a Jet page renderer), corpus_policy/agent_workloads/fmt_lossless (#5483 linter), common/support, tests/suites.txt. tests/lsp.rs waits on D-DEVSERVER1 (#5931).\n3. RustBridge removal (#5482, 96 .rs under Jetpack/Integrations): owner order is port every provider first (mbedTLS 3.6 + Monocypher over C FFI for TLS/crypto; core.plugin onto a JetIR wasm pipeline), then delete the bridge. core.plugin guest calls are currently E0102 (`Plugin` has no method), so the plugin examples fail until that lands.\n4. Kept by owner exception, not work: Tools/perf + Tools/gauntlet Rust peers (D2), Examples ffi rust host (user `extern rust`), Zed wasm-src, cargo/nix fixtures that model Rust packages.\nClose when 1-3 are done and every remaining .rs is in an exception class above.",
       "checkSteps": null,
@@ -54099,6 +54099,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Rust is removed from the toolchain (c1 on dev 2c40493778: the only .rs files left are benchmark peers, the Rust FFI example and the Zed extension); every remaining parity row lives on its goal card."
+        },
         {
           "at": "2026-11-07",
           "by": "Main",
@@ -54719,11 +54724,12 @@
         {
           "n": 6,
           "text": "(was #3690) Provider leaves are either Jet source via ratified F4/F5 facilities or listed as owner-approved remaining Rust with the vetted engine named.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:50:33.665Z"
+          "evidence": "Superseded by c9 on this card, which carries the identical text (c9 is met).",
+          "at": "2026-11-07T02:50:55.541Z",
+          "closure": "obsolete"
         },
         {
           "n": 7,
@@ -55022,8 +55028,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 2026-10-31 (wave 9b tree): w11: (1) p/fwd4717.jet (fn fwd(p: &P) { bump(p) }) -> E0202 \"Parameter `p` requires the write-access marker `&` at the call site\"; (2) p/lamqq4717b.jet `ys :: xs.map(n -> maybe(n) ?? panic(\"none\"))` passed to fn total(zs: [Int]) prints 3 and [1, 2] exit 0 on o0/o1/o2 (no `Int Never!` leak; also p/lamqq4717.jet `?? 0` / `?? (n * 10)` lambdas print [1, 0, 2] / [1, 50, 2]); (3) p/qqbreak4717.jet `v :: maybe(i) ?? break` in a loop prints 0/1/2/after exit 0 with no L0525/E0402",
-          "at": "2026-10-31T17:01:22.992Z"
+          "evidence": "a0_029 seed (dev 42f746371b), 2026-11-06 probes in $JET_SCRATCH_ROOT/lanes/Main/critpass/p64: (2) lam.jet `xs.map(n -> maybe(n) ?? panic(\"none\"))` into total(zs: [Int]) prints 2 and [1, 2], no Never leak; (3) qqbreak.jet `v := maybe(i) ?? break` prints 0 1 2 after with no L0525/E0402 (and tests/ui/qq_break_outside_loop.jet PASS on eb94f67b7a). (1) is overtaken: call marks are retired, so a bare forward `bump(p)` of a `&P` parameter is the canonical spelling and `fwd(&p)` warns E0434.",
+          "at": "2026-11-07T02:50:47.971Z"
         },
         {
           "n": 65,
@@ -55181,11 +55187,11 @@
         {
           "n": 91,
           "text": "(was #4766) (was #3881) [#3719] Probe p16 reports only the unclosed `(` with a caret. Snapshots cover `(`, `[`, `{` and `{` inside interpolation, each with a single report. A guard fails if any parser diagnostic names the synthetic terminator `;`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:50:42.998Z"
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/ui/unclosed_paren_call.jet (candidate-ui-3.log:1028), unclosed_bracket_list.jet (ui-2.log:1019), unclosed_brace_block.jet (ui-4.log:863) and unclosed_brace_interpolation.jet (ui-1.log:940) PASS, one error each.",
+          "at": "2026-11-07T02:50:44.382Z"
         },
         {
           "n": 92,
@@ -55193,8 +55199,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "CardClose-1 verdict 2026-10-31: w12 jet check p/mix4717.jet: `a || b && c` (5:16) and `a && b || c` (6:11) each give registered \"E0082 `&&` and `||` are mixed here without parentheses\"; --json shows \"applicability\":\"safe\", \"safety\":\"behavior-preserving\". `(a || b) && c`, `a || b || c` and `a && b && c` are accepted. `jet fix` on a copy (sc/fix4717/m.jet) gives \"applied 2 fixes\" -> `a || (b && c)` / `(a && b) || c`, which runs and prints true/true/true/true/false. `jet fmt` then keeps the parentheses (exit 0, lines unchanged). E0082 is an error, so every source the w12 golden/cases suites compile is migrated",
-          "at": "2026-10-31T19:52:26.003Z"
+          "evidence": "eb94f67b7a a0_030 candidate kit: tests/ui/logic_mix_or_then_and.jet (candidate-ui-4.log:803), logic_mix_and_then_or.jet (ui-2.log:949), logic_mix_grouped_ok.jet (ui-3.log:696) and tests/cases/fmt/fmt_never_emits_an_unparenthesized_and_or_mix.case PASS.",
+          "at": "2026-11-07T02:50:46.176Z"
         },
         {
           "n": 93,
@@ -55339,13 +55345,14 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-06T10:08:37.412Z",
-      "updated": "2026-11-07T02:50:42.998Z",
+      "updated": "2026-11-07T02:50:58.790Z",
       "updatedBy": "Main",
       "goals": [
         "G14",
         "G2"
       ],
-      "criteriaLastN": 108
+      "criteriaLastN": 108,
+      "completedAt": "2026-11-07T02:50:58.790Z"
     },
     {
       "id": "c044vq6e",
@@ -185839,6 +185846,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T02:50:58.790Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rqi33c",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-07T02:50:55.541Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-07T02:50:47.971Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#64"
+    },
+    {
+      "at": "2026-11-07T02:50:47.098Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0rqi33c",
+      "note": "#64: Re-met with commit-bound evidence."
+    },
+    {
+      "at": "2026-11-07T02:50:46.176Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#92"
+    },
+    {
+      "at": "2026-11-07T02:50:45.326Z",
+      "by": "Main",
+      "action": "card.criteria-reopen",
+      "ref": "c0rqi33c",
+      "note": "#92: Re-met with commit-bound evidence."
+    },
+    {
+      "at": "2026-11-07T02:50:44.383Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rqi33c",
+      "note": "#91"
+    },
     {
       "at": "2026-11-07T02:50:42.998Z",
       "by": "Main",
