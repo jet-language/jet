@@ -1,12 +1,14 @@
 #!/usr/bin/env jet
 // Tower's board reads in Jet (#6676): the read-only `show` and `list` verbs
-// that gates use, answering with the JSON the Tower CLI prints for them.
+// that gates use, answering with the JSON the Tower CLI prints for them, and
+// the Docs/spec reference lint (`lint --docs`, #457), whose one home this is.
 // Usage (from the repository root):
 //   jet Tools/tower/Board.jet card show REF [--json] [--data DIR|FILE]
 //   jet Tools/tower/Board.jet card list --json [--data DIR|FILE]
 //   jet Tools/tower/Board.jet decision show ID [--json] [--data DIR|FILE]
 //   jet Tools/tower/Board.jet decision list --json [--open] [--drafts] [--card REF] [--data DIR|FILE]
 //   jet Tools/tower/Board.jet milestone list --json [--archived] [--epoch ID] [--data DIR|FILE]
+//   jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json] [--data DIR|FILE]
 // The board is --data, else TOWER_DATA (a data directory or a tower.json),
 // else the nearest `.tower/tower.json` above the working directory, else this
 // checkout's Tools/tower/.tower. A board inside a linked git worktree is a
@@ -16,8 +18,10 @@
 // as Tower normalizes and projects them: a card carries its clearance, linked
 // decisions and questions, open question count and lane; a milestone its
 // progress. Lists need --json; a refusal prints `tower: <message>` on stderr,
-// `{"error":CODE,"message":...}` on stdout under --json, and exits 1.
-// Tower writes stay in Tools/tower/tower.mjs.
+// `{"error":CODE,"message":...}` on stdout under --json, and exits 1. The lint
+// prints its findings (a `{rule, ref, msg}` array under --json) and exits 1
+// when there are any. Tower writes and the board lint rules stay in
+// Tools/tower/tower.mjs.
 use {
     crypto: core.crypto
     files: core.files
@@ -25,6 +29,7 @@ use {
     process: core.process
     sys: core.sys
     term: core.term
+    unicode: core.text
 }
 
 TOOL: "/Tools/tower/Board.jet"
@@ -32,8 +37,11 @@ MAX_JSON_BYTES: 268435456
 MANIFEST_BYTES: 1048576
 HISTORY_LAYOUT: "tower.history-shards/v1"
 HISTORY_KINDS: [String]{"decisions", "cards", "events"}
-BOOLEAN_FLAGS: [String]{"json", "archived", "open", "drafts"}
-VALUE_FLAGS: [String]{"data", "card", "epoch"}
+BOOLEAN_FLAGS: [String]{"json", "archived", "open", "drafts", "docs"}
+VALUE_FLAGS: [String]{"data", "card", "epoch", "docs-root"}
+DOCS_DIR: "Docs"
+SPEC_EXTENSIONS: [String]{".md", ".json", ".txt"}
+CARD_WORDS: [String]{"card", "cards", "issue", "issues"}
 
 #Error
 Failure: struct {
@@ -69,10 +77,21 @@ Archive: struct {
 
 run: fn() {
     args: process.args()
-    request: parse_request(args) ?? return refuse(err, args.contains("--json"))
+    request := parse_request(args) ?? return refuse(err, args.contains("--json"))
     json_out: request.flags.has_key("json")
-    place: locate(request, process.env_get("TOWER_DATA") ?? "", files.cwd() ?? "/", repo_root()) ?? return refuse(err, json_out)
+    cwd: files.cwd() ?? "/"
+    if request.flags.has_key("docs-root") {
+        rooted: resolve(cwd, request.flags.get("docs-root") ?? ".")
+        request.flags["docs-root"] = rooted
+    }
+    place: locate(request, process.env_get("TOWER_DATA") ?? "", cwd, repo_root()) ?? return refuse(err, json_out)
     if place.note != "" -> term.eprint(place.note)
+    if request.words.len() == 1 && request.words[0] == "lint" {
+        linted: lint_request(request, place) ?? return refuse(err, json_out)
+        print(linted.shown)
+        if linted.findings > 0 -> process.exit(1)
+        return
+    }
     answer: answer_request(request, place) ?? return refuse(err, json_out)
     print(answer)
 }
@@ -853,7 +872,232 @@ answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
         }
         return pretty(Dyn.Array(list))
     }
-    Err(fail("E_USAGE", "Tools/tower/Board.jet reads `card show|list`, `decision show|list` and `milestone list`; other Tower commands stay in Tools/tower/tower.mjs"))
+    Err(fail("E_USAGE", "Tools/tower/Board.jet reads `card show|list`, `decision show|list` and `milestone list`, and lints `--docs`; other Tower commands stay in Tools/tower/tower.mjs"))
+}
+
+// --- Docs lint (ported from lint.mjs ruleSpecReferenceGaps, D-ONCE-LEDGER1=A)
+
+// The docs root: --docs-root (resolved against the working directory by
+// `run`), else the project's Docs: this checkout's for its own
+// Tools/tower/.tower, else the one beside the board directory.
+docs_default: fn(place: Place) -> String Never! {
+    tower_home: "/Tools/tower/.tower"
+    project: if place.dir.ends_with(tower_home) -> place.dir.removesuffix(tower_home) else -> parent_of(place.dir)
+    "{project}/{DOCS_DIR}"
+}
+
+// `lint --docs`: the findings as Tower prints them, and how many there are.
+lint_request: fn(request: Request, place: Place) -[FS]> (shown: String, findings: Int) Failure! {
+    if request.words.len() != 1 || !request.flags.has_key("docs") {
+        return Err(fail("E_USAGE", "Tools/tower/Board.jet lints only `lint --docs` (the Docs/spec reference scan); `tower lint` runs the board rules"))
+    }
+    docs: request.flags.get("docs-root") ?? docs_default(place)
+    found: docs_findings(place, docs) ?? return Err(err)
+    if request.flags.has_key("json") {
+        shown: pretty(Dyn.Array(found)) ?? return Err(err)
+        return Ok((shown: shown, findings: found.len()))
+    }
+    if found.len() == 0 -> return Ok((shown: "(clean)", findings: 0))
+    lines := loop item in found -> "{text(field(item, "rule"))}  {text(field(item, "ref"))}  {text(field(item, "msg"))}"
+    Ok((shown: lines.join("\n"), findings: found.len()))
+}
+
+// Card and decision IDs cited under `docs`/spec that have no live or archived
+// Tower record, one finding per ID listing every `Docs/spec/...:LINE` citing it.
+docs_findings: fn(place: Place, docs: String) -[FS]> [Dyn] Failure! {
+    live: load_live(place) ?? return Err(err)
+    archive: load_archive(place) ?? return Err(err)
+    known_cards := [String: Bool]{}
+    loop card in live.cards {
+        if integer(field(card, "num")) == .Val(num) -> known_cards["{num}"] = true
+    }
+    loop card in archive.cards {
+        if integer(field(card, "num")) == .Val(num) -> known_cards["{num}"] = true
+    }
+    known_decisions := [String: Bool]{}
+    loop decision in live.decisions -> known_decisions[text(field(decision, "id"))] = true
+    loop decision in archive.decisions -> known_decisions[text(field(decision, "id"))] = true
+    spec: "{docs}/spec"
+    paths := [String]{}
+    if files.is_dir(spec) -> spec_files(spec, paths) ?? return Err(err)
+    cards := Citations{order: [String]{}, slots: [String: Int]{}, locations: [[String]]{}}
+    decisions := Citations{order: [String]{}, slots: [String: Int]{}, locations: [[String]]{}}
+    loop path in paths {
+        source: files.read(path) ?? return Err(fail("E_IO", "cannot read {path}: {err}"))
+        shown: "{DOCS_DIR}/{path.removeprefix("{docs}/")}"
+        loop (index, line) in source.split("\n").to_list() {
+            bytes: line.bytes()
+            at: "{shown}:{index + 1}"
+            if card_context(bytes) {
+                loop ref in card_refs(bytes) {
+                    if !known_cards.has_key(card_key(ref)) -> cite(cards, ref, at)
+                }
+            }
+            loop id in decision_ids(bytes) {
+                if !placeholder_decision(id) && !known_decisions.has_key(id) -> cite(decisions, id, at)
+            }
+        }
+    }
+    found := [Dyn]{}
+    card_order := cards.order.copy()
+    card_order.sort_by((left: String, right: String) -> numeric_order(left, right))
+    loop ref in card_order {
+        slot: cards.slots.get(ref) ?? next
+        found.push(finding("spec-card-ref-missing", ref, "{cards.locations[slot].join(", ")} cites {ref}, but Tower has no card record"))
+    }
+    decision_order := decisions.order.copy()
+    decision_order.sort_by((left: String, right: String) -> unicode.collate(left, right))
+    loop id in decision_order {
+        slot: decisions.slots.get(id) ?? next
+        found.push(finding("spec-decision-ref-missing", id, "{decisions.locations[slot].join(", ")} cites {id}, but Tower has no decision record"))
+    }
+    Ok(found)
+}
+
+// Every place each missing ID is cited, in first-citation order.
+Citations: struct {
+    order: [String]
+    slots: [String: Int]
+    locations: [[String]]
+}
+
+cite: fn(citations: &Citations, id: String, at: String) Never! {
+    if citations.slots.get(id) == .Val(slot) {
+        citations.locations[slot].push(at.copy())
+        return
+    }
+    citations.slots[id.copy()] = citations.order.len()
+    citations.order.push(id.copy())
+    citations.locations.push([String]{at.copy()})
+}
+
+finding: fn(rule: String, ref: String, msg: String) -> Dyn Never! {
+    object([(key: String, value: Dyn)]{(key: "rule", value: Dyn.Text(rule.copy())), (key: "ref", value: Dyn.Text(ref.copy())), (key: "msg", value: Dyn.Text(msg.copy()))})
+}
+
+// The text spec files under `dir` as lint.mjs walks them: entries in
+// localeCompare order, dot names skipped, symlinked directories not entered.
+spec_files: fn(dir: String, out: &[String]) Failure! -[FS]> {
+    listed := files.list_dir(dir) ?? return Err(fail("E_IO", "cannot list {dir}: {err}"))
+    listed.sort_by((left: DirEntry, right: DirEntry) -> unicode.collate(left.name, right.name))
+    loop entry in listed {
+        if entry.name.starts_with(".") -> next
+        path: "{dir}/{entry.name}"
+        if entry.is_dir && !files.is_symlink(path) {
+            spec_files(path, out) ?? return Err(err)
+        } else {
+            folded: entry.name.lower()
+            if SPEC_EXTENSIONS.any(extension -> folded.ends_with(extension)) -> out.push(path)
+        }
+    }
+    Ok(())
+}
+
+// `\w` in a JavaScript regular expression without the u flag.
+ascii_word: fn(byte: U8) -> Bool Never! {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122})) || byte == (U8{95})
+}
+
+upper_or_digit: fn(byte: U8) -> Bool Never! {
+    (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90}))
+}
+
+// The matches of `/\bD-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g` in one line: the
+// longest run of `-SEGMENT`s that a word boundary ends.
+decision_ids: fn(bytes: [U8]) -> [String] Never! {
+    found := [String]{}
+    at := 0
+    loop at + 2 < bytes.len() {
+        if bytes[at] != (U8{68}) || bytes[at + 1] != (U8{45}) || (at > 0 && ascii_word(bytes[at - 1])) {
+            at += 1
+            next
+        }
+        end := -1
+        cursor := at + 1
+        loop cursor + 1 < bytes.len() && bytes[cursor] == (U8{45}) && upper_or_digit(bytes[cursor + 1]) {
+            cursor += 1
+            loop cursor < bytes.len() && upper_or_digit(bytes[cursor]) {
+                cursor += 1
+            }
+            if cursor == bytes.len() || !ascii_word(bytes[cursor]) -> end = cursor
+        }
+        if end < 0 {
+            at += 1
+            next
+        }
+        found.push(String.from_bytes_lossy(bytes[at..<end]))
+        at = end
+    }
+    found
+}
+
+// The matches of `/#(\d+)\b/g` in one line outside inline code (an even
+// count of backticks before them).
+card_refs: fn(bytes: [U8]) -> [String] Never! {
+    found := [String]{}
+    ticks := 0
+    at := 0
+    loop at < bytes.len() {
+        if bytes[at] == (U8{96}) -> ticks += 1
+        if bytes[at] != (U8{35}) {
+            at += 1
+            next
+        }
+        end := at + 1
+        loop end < bytes.len() && bytes[end] >= (U8{48}) && bytes[end] <= (U8{57}) {
+            end += 1
+        }
+        if end == at + 1 || (end < bytes.len() && ascii_word(bytes[end])) {
+            at += 1
+            next
+        }
+        if ticks % 2 == 0 -> found.push(String.from_bytes_lossy(bytes[at..<end]))
+        at = end
+    }
+    found
+}
+
+// A line cites cards only when its prose names cards or issues, or a
+// decision ID carries its owning card list; `[U8#4096]` is no card.
+card_context: fn(bytes: [U8]) -> Bool Never! {
+    at := 0
+    loop at < bytes.len() {
+        if !ascii_word(bytes[at]) {
+            at += 1
+            next
+        }
+        start: at
+        loop at < bytes.len() && ascii_word(bytes[at]) {
+            at += 1
+        }
+        if CARD_WORDS.contains(String.from_bytes_lossy(bytes[start..<at]).lower()) -> return true
+    }
+    decision_ids(bytes).len() > 0
+}
+
+// `/^D-(?:X+|Y+|EXAMPLE|TODO)$/i`.
+placeholder_decision: fn(id: String) -> Bool Never! {
+    rest: id.upper().removeprefix("D-")
+    if rest == "EXAMPLE" || rest == "TODO" -> return true
+    rest != "" && (rest == "X".repeat(rest.len()) || rest == "Y".repeat(rest.len()))
+}
+
+// `Number(ref.slice(1))` spelled as a card number key.
+card_key: fn(ref: String) -> String Never! {
+    digits := ref.removeprefix("#")
+    loop digits.len() > 1 && digits.starts_with("0") {
+        digits = digits.removeprefix("0")
+    }
+    digits
+}
+
+// `localeCompare(.., { numeric: true })` over `#N` refs.
+numeric_order: fn(left: String, right: String) -> Ordering Never! {
+    a: card_key(left)
+    b: card_key(right)
+    if a.len() != b.len() -> return a.len() <=> b.len()
+    if a != b -> return a <=> b
+    left <=> right
 }
 
 // --- Tests -------------------------------------------------------------------
@@ -991,4 +1235,40 @@ refusal: fn(place: Place, args: [String]) -[FS]> String Never! {
     assert_eq(resolve("/a/b", "../c/./d"), "/a/c/d")
     assert_eq(hex_commit("0123456789abcdef0123456789abcdef01234567"), true)
     assert_eq(hex_commit("0123456789ABCDEF0123456789abcdef01234567"), false)
+}
+
+#Test("board lints Docs/spec references the way tower lint --docs did") {
+    place: fixture_place("lint", fixture_history())
+    docs: "{place.dir}/project/Docs"
+    files.create_dir_all("{docs}/spec/nested") ?? panic("fixture: {err}")
+    files.write("{docs}/spec/law.md", "Card #7 and #99 cite D-OPEN, D-MISSING1 and D-XXX.\nNo context here: #95.\nIssue `#98` stays code; D-Lower, xD-NOPE and D-AB_C are no IDs; D-OLD is archived.\n") ?? panic("fixture: {err}")
+    files.write("{docs}/spec/nested/more.md", "cards #99 and #0100 and D-MISSING1\n") ?? panic("fixture: {err}")
+    files.write("{docs}/spec/.hidden.md", "card #55 D-HIDDEN\n") ?? panic("fixture: {err}")
+    files.write("{docs}/spec/skip.rs", "card #53 D-SKIPPED\n") ?? panic("fixture: {err}")
+    request: parse_request([String]{"lint", "--docs", "--docs-root", docs, "--json"}) ?? panic("request: {err.message}")
+    linted: lint_request(request, place) ?? panic("lint: {err.message}")
+    assert_eq(linted.findings, 3)
+    shown := [String]{}
+    loop item in items(json.parse(linted.shown) ?? panic("lint is not JSON: {err}")) {
+        shown.push("{text(field(item, "rule"))}|{text(field(item, "ref"))}|{text(field(item, "msg"))}")
+    }
+    assert_eq(shown, [String]{
+        "spec-card-ref-missing|#99|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites #99, but Tower has no card record",
+        "spec-card-ref-missing|#0100|Docs/spec/nested/more.md:1 cites #0100, but Tower has no card record",
+        "spec-decision-ref-missing|D-MISSING1|Docs/spec/law.md:1, Docs/spec/nested/more.md:1 cites D-MISSING1, but Tower has no decision record",
+    })
+    bare: parse_request([String]{"lint", "--docs", "--docs-root", "{place.dir}/none"}) ?? panic("request: {err.message}")
+    clean: lint_request(bare, place) ?? panic("lint: {err.message}")
+    assert_eq(clean.shown, "(clean)")
+    assert_eq(clean.findings, 0)
+    board_only: parse_request([String]{"lint", "--json"}) ?? panic("request: {err.message}")
+    assert_eq(lint_code(board_only, place), "E_USAGE")
+    assert_eq(docs_default(Place{dir: "/repo/Tools/tower/.tower", file: "", note: ""}), "/repo/Docs")
+    assert_eq(docs_default(Place{dir: "/work/.tower", file: "", note: ""}), "/work/Docs")
+    files.remove_all(place.dir) ?? ()
+}
+
+lint_code: fn(request: Request, place: Place) -[FS]> String Never! {
+    lint_request(request, place) ?? return err.code
+    "answered"
 }

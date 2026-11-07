@@ -16,9 +16,11 @@
 // inputs stay visible in the inventory, never counted as executed registries.
 // A package registry runs in place inside its Tests package; a JetRuntime Test
 // registry runs as an assembled standalone file; the native runtime and
-// backend registries run through their transports, which drive the existing
-// fixture runners under Compiler/*/Tests and check their real native verdicts.
+// backend registries run through their transports, which assemble each
+// fixture with Tools/agent/CompilerPackages.jet, lower it through the
+// candidate jet, link its C host and check the real native verdict.
 use {
+    base64: core.encoding.base64
     crypto: core.crypto
     files: core.files
     json: core.encoding.json
@@ -53,8 +55,15 @@ PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_h
 // the inventory walk lists directory entries in.
 ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
 CRYPTO: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoWipe", "CryptoX25519", "Sha256"}
+// The crypto witnesses whose committed stdout files pin a sha256 in their
+// fixtures JSON, and the counts the World entropy provider must refuse
+// before any provider call.
+CRYPTO_FROZEN: [String]{"CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoOsEntropy", "CryptoWipe"}
+WORLD_ENTROPY_COUNTS: [String]{"0", "-1", "1048577", "7"}
+// The process witnesses and the flags their C hosts compile with.
+PROCESS_WITNESSES: [String]{"ProcessExecution", "TerminalProcess"}
+FREESTANDING_CFLAGS: [String]{"-std=c11", "-O1", "-fno-stack-protector", "-fno-PIE", "-no-pie", "-fno-builtin", "-Wall", "-Wextra", "-Werror"}
 C_FIXTURES: [String]{"EnvironmentLeaves", "FaultSchedule", "IterCharge", "ProgressState", "HostFault", "FloatBits", "TerminalColor", "TrapReport", "VaultHooks", "VaultProvider", "Thread", "HostSpawn", "CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}
-FOUR_MODES: [String]{"assemble", "lower", "link", "run"}
 // The fragments the world/sentry C host drives, composed into one unit in
 // this order, and the C hosts that link against the same object.
 WORLD_SENTRY: [String]{"World", "Sentry", "TestScope", "AllocationPolicy"}
@@ -138,8 +147,6 @@ Spec: struct {
     kind: String
     name: String
     runner: String
-    modes: [String]
-    crypto: Bool
     call: String?
     expected: String
     witness: String
@@ -178,7 +185,6 @@ Lane: struct {
     runtime_dir: String
     pack: String
     object: String
-    node: String
     evidence: [Dyn]
 }
 
@@ -682,7 +688,7 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
 // --- transports ---------------------------------------------------------------
 
 spec: fn(kind: String, name: String, runner: String) -> Spec Never! {
-    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, cflags: STRICT_CFLAGS.copy(), calls: [RunnerCall]{}}
+    Spec{kind: kind, name: name, runner: runner, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, cflags: STRICT_CFLAGS.copy(), calls: [RunnerCall]{}}
 }
 
 runner_call: fn(mode: String, witness: String, expected: String) -> RunnerCall Never! {
@@ -690,24 +696,36 @@ runner_call: fn(mode: String, witness: String, expected: String) -> RunnerCall N
 }
 
 // The fragments a plain transport's unit composes, in order: the Shared
-// transaction, condition and observe witnesses build on the channel one.
+// transaction, condition and observe witnesses build on the channel one, and
+// every crypto witness links the one object all the crypto fragments compose.
 plain_fragments: fn(name: String) -> [String] Never! {
     if WORLD_SENTRY.contains(name) -> return WORLD_SENTRY.copy()
+    if CRYPTO.contains(name) -> return CRYPTO.copy()
     if name == {
+        "SharedThread" -> [String]{"Thread", "SharedThread"}
         "Stm" -> [String]{"Channel", "Stm"}
         "Sync" -> [String]{"Channel", "Stm", "Sync"}
         "Observe" -> [String]{"Channel", "Stm", "Sync", "Observe"}
         "SharedPublication" -> [String]{"Channel", "SharedPublication"}
+        "CollectionsStop" -> [String]{"Collections", "CollectionsStop"}
         else -> [String]{name.copy()}
     }
 }
 
 // The flags a plain transport's C host compiles with: the sync host selects
-// its condition and observe witnesses by define.
+// its condition and observe witnesses by define, and the process and codec
+// hosts build freestanding, the process ones with their Jet fixture hooks.
 plain_cflags: fn(name: String) -> [String] Never! {
     flags := STRICT_CFLAGS.copy()
     if name == {
         "Channel" -> return [String]{"-O2", "-DJET_CHANNEL_INTERNAL"}
+        "SharedThread" -> return [String]{"-DJET_SHARED_TLS_FIXTURE"}
+        "CollectionsStop" -> return [String]{"-Wall", "-Wextra", "-Werror"}
+        "ProcessExecution" | "TerminalProcess" -> {
+            flags = FREESTANDING_CFLAGS.copy()
+            flags.push("-DJET_PROCESS_JET_FIXTURES=1")
+        }
+        "CodecCSV" | "CodecEnv" | "DynCodec" | "CompilerFileLeaves" -> flags = FREESTANDING_CFLAGS.copy()
         "Sync" -> flags.push("-DJET_CONDITION_FIXTURE")
         "Observe" -> flags.extend([String]{"-DJET_CONDITION_FIXTURE", "-DJET_OBSERVE_FIXTURE"})
         else -> {}
@@ -727,6 +745,37 @@ sync_expected: fn(name: String) -> String Never! {
     if name != "Stm" -> lines.push("Condition FIFO/drain/pending/wait/cancel/unheld access+drop ok")
     if name == "Observe" -> lines.push("Observe empty/parked exact report/owned once ok")
     "{lines.join("\n")}\n"
+}
+
+// The collections stop host's exact stdout: every stopped-result family and
+// every focused review edge restores the allocator's live payload total.
+collections_stop_expected: fn() -> String Never! {
+    out := ""
+    loop family in 0..<13 -> out = "{out}family {family}: live payloads restored\n"
+    loop edge in 0..<11 -> out = "{out}review {edge}: live payloads restored\n"
+    out
+}
+
+// The collections stop unit instruments only the iterator source: its frees
+// and its progress advances go through the fragment's wrappers, which
+// delegate the real call once and then stop via the real budget rail.
+collections_stop_unit: fn(unit: String) -> String Problem! {
+    marker: "// [unit source: "
+    segments := [String]{}
+    instrumented := false
+    loop segment in unit.split(marker) {
+        if instrumented || !segment.starts_with("Compiler/JetRuntime/Source/Iter.jet]") {
+            segments.push(segment.copy())
+            next
+        }
+        loop call in ([String]{"jet_rt_free(", "jet_rt_progress_state_advance("}) {
+            if !segment.contains(call) -> return Err(problem("the iterator source never calls `{call}`"))
+        }
+        segments.push(segment.replace("jet_rt_free(", "coll_stop_free(").replace("jet_rt_progress_state_advance(", "coll_stop_progress_advance("))
+        instrumented = true
+    }
+    if !instrumented -> return Err(problem("the unit has no canonical iterator source boundary"))
+    Ok(segments.join(marker))
 }
 
 // The committed Jet runners under Compiler/JetRuntime/Tests and their runs.
@@ -759,14 +808,9 @@ runner_calls: fn(name: String) -> [RunnerCall] Never! {
 specification: fn(id: String) -> Spec? Never! {
     if id.starts_with("JetRuntime/Tests/") {
         name: id.removeprefix("JetRuntime/Tests/").removesuffix("Tests")
-        if CRYPTO.contains(name) {
-            found := spec("suite", "", "{RT}run-crypto-fixtures.mjs")
-            found.modes = FOUR_MODES.copy()
-            found.crypto = true
-            return Val(found)
-        }
-        // A plain transport calls its entry from the generated driver, or
-        // runs the committed C host `witness` that drives the fragment.
+        // A plain transport calls its entry from the generated driver, runs
+        // the committed C host `witness` that drives the fragment, or for a
+        // codec fixture generates the driver around its export.
         plain: if name == {
             "Alloc" -> Val((call: Val("alloc_tests"), witness: "", expected: "alloc tests: ok\n"))
             "Collections" -> Val((call: Val("collections_tests"), witness: "", expected: ""))
@@ -783,7 +827,11 @@ specification: fn(id: String) -> Spec? Never! {
             "Channel" -> Val((call: None, witness: "{RT}channel-fixture.c", expected: ""))
             "Stm" | "Sync" | "Observe" -> Val((call: None, witness: "{RT}sync-fixture.c", expected: sync_expected(name)))
             "SharedPublication" -> Val((call: None, witness: "{RT}shared-publication-fixture.c", expected: "Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n"))
-            else -> None
+            "SharedThread" -> Val((call: None, witness: "{RT}thread-fixture.c", expected: ""))
+            "CollectionsStop" -> Val((call: None, witness: "{RT}collections-stop.c", expected: collections_stop_expected()))
+            "ProcessExecution" | "TerminalProcess" -> Val((call: None, witness: "{RT}{name}Witness.c", expected: ""))
+            "CodecCSV" | "CodecEnv" | "DynCodec" | "CompilerFileLeaves" -> Val((call: None, witness: "", expected: ""))
+            else -> if CRYPTO.contains(name) -> Val((call: None, witness: "{RT}{name}Witness.c", expected: "")) else -> None
         }
         if plain == .Val(table) {
             found := spec("plain", name, "Tools/agent/CompilerPackages.jet")
@@ -792,26 +840,10 @@ specification: fn(id: String) -> Spec? Never! {
             found.expected = table.expected.copy()
             found.fragments = plain_fragments(name)
             found.cflags = plain_cflags(name)
+            if PROCESS_WITNESSES.contains(name) || CRYPTO_FROZEN.contains(name) -> found.expected_file = "{RT}{name}Witness.stdout"
             return Val(found)
         }
-        if ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves"}).contains(name) -> return Val(spec("codec-fixture", name, "{RT}run-native-codec-file-leaves.mjs"))
-        if name == "ProcessExecution" || name == "TerminalProcess" {
-            found := spec("process-fixture", name, "{RT}run-process-witnesses.mjs")
-            found.witness = "{RT}{name}Witness.c"
-            found.expected_file = "{RT}{name}Witness.stdout"
-            return Val(found)
-        }
-        suite: if name == {
-            "SharedThread" -> Val((runner: "run-thread-fixtures.mjs", modes: [String]{"assemble", "lower", "shared-link", "shared-run"}))
-            "CollectionsStop" -> Val((runner: "run-collections-stop.mjs", modes: [String]{"--assemble", "--lower", "--run"}))
-            else -> None
-        }
-        if suite == .Val(table) {
-            found := spec("suite", name, "{RT}{table.runner}")
-            found.modes = table.modes.copy()
-            return Val(found)
-        }
-        if C_FIXTURES.contains(name) -> return Val(spec("c", name, "{BE}run-runtime.mjs"))
+        if C_FIXTURES.contains(name) -> return Val(spec("c", name, "Tools/agent/CompilerPackages.jet"))
         calls: runner_calls(name)
         if calls.len() > 0 {
             found := spec("runner", name, "{RT}{name}.jet")
@@ -855,11 +887,7 @@ specification: fn(id: String) -> Spec? Never! {
 // The manifest's view of a transport: exactly the fields its kind uses.
 spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
     entries := [String: Dyn]{"type": Dyn.Text(found.kind.copy())}
-    if found.kind == "suite" {
-        entries["runner"] = Dyn.Text(found.runner.copy())
-        entries["modes"] = texts(found.modes)
-        if found.crypto -> entries["crypto"] = Dyn.Bool(true) else -> entries["name"] = Dyn.Text(found.name.copy())
-    } else if found.kind == "indices" || found.kind == "roots" || found.kind == "link" {
+    if found.kind == "indices" || found.kind == "roots" || found.kind == "link" {
         entries["runner"] = Dyn.Text(found.runner.copy())
     } else {
         entries["name"] = Dyn.Text(found.name.copy())
@@ -903,6 +931,7 @@ prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: St
     sources := [String]{row.source.copy()}
     if found.witness != "" -> sources.push(found.witness.copy())
     if found.expected_file != "" -> sources.push(found.expected_file.copy())
+    if found.kind == "plain" && CRYPTO.contains(found.name) -> sources.extend(crypto_inputs(found.name))
     loop name in found.fragments {
         fragment: "{RT}Fragments.fixture/{name}Tests.jet"
         if !sources.contains(fragment) -> sources.push(fragment)
@@ -944,14 +973,6 @@ prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: St
     Val(Dyn.Object(entry.copy()))
 }
 
-// The library a suite's lower mode builds: its file, object prefix,
-// lifecycle list and, for crypto, the exports list.
-suite_library: fn(found: Spec, out: String) -> (file: String, prefix: String, lifecycle: String, exports: String) Never! {
-    if found.name == "SharedThread" -> return (file: "{out}/shared/Source/Fixture.jet", prefix: "{out}/shared/fixture", lifecycle: "{out}/shared/lifecycle.list", exports: "")
-    folder: if found.name == "CollectionsStop" -> out.copy() else -> "{out}/unit"
-    (file: "{folder}/Source/Fixture.jet", prefix: "{folder}/fixture", lifecycle: "{folder}/lifecycle.list", exports: if found.crypto -> "{folder}/exports.list" else -> "")
-}
-
 // The argument vectors the C driver of a `c` transport runs with.
 driver_runs: fn(found: Spec, out: String) -> [[String]] Never! {
     if found.name == "CompilerEnv" -> return [[String]]{[String]{}, [String]{"empty"}}
@@ -959,10 +980,37 @@ driver_runs: fn(found: Spec, out: String) -> [[String]] Never! {
     [[String]]{[String]{}}
 }
 
-// The arguments of a codec or process fixture runner.
-fixture_args: fn(repo: String, found: Spec, out: String, jet: String, runtime_dir: String) -> [String] Never! {
-    folder: if found.kind == "codec-fixture" -> "codec" else -> "process"
-    [String]{"{repo}/{found.runner}", "{out}/{folder}", jet.copy(), runtime_dir.copy(), "--test", found.name.copy()}
+// The C export a codec or file-leaf fragment tests, or "" for any other name.
+codec_export: fn(name: String) -> String Never! {
+    if name == {
+        "CodecCSV" -> "jet_rt_codec_csv_fixture"
+        "CodecEnv" -> "jet_rt_codec_env_fixture"
+        "DynCodec" -> "jet_rt_dyn_codec_fixture"
+        "CompilerFileLeaves" -> "jet_rt_compiler_file_leaves_fixture"
+        else -> ""
+    }
+}
+
+// The generated C driver of a codec fixture: it runs the export as the body
+// of jet_rt_main and exits with the runtime status, else the export's. The
+// file-leaf export takes the path it writes, which the driver then unlinks.
+codec_driver: fn(name: String, export: String) -> String Never! {
+    leaves: name == "CompilerFileLeaves"
+    signature: if leaves -> "int64_t" else -> "void"
+    call: if leaves -> "Text *path = jet_rt_string_from_static(fixture_path, (int64_t)strlen(fixture_path));\nfixture_result = {export}((int64_t)(intptr_t)path);\njet_rt_string_drop(path);" else -> "fixture_result = {export}();"
+    declaration: if leaves -> "static char *fixture_path;\n" else -> ""
+    setup: if leaves -> "if (argc != 2) return 99;\nfixture_path = argv[1];\n" else -> ""
+    cleanup: if leaves -> "if (unlink(fixture_path) != 0 && fixture_result == 0 && status == 0) return 98;\n" else -> ""
+    "#include <stdint.h>\n#include <string.h>\n#include <unistd.h>\ntypedef struct Text Text;\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t, char **, char **);\nextern int32_t jet_rt_main(void (*body)(void));\nextern Text *jet_rt_string_from_static(const void *, int64_t);\nextern void jet_rt_string_drop(Text *);\nextern int64_t {export}({signature});\nstatic int64_t fixture_result;\n{declaration}static void exercise(void) {{\n{call}\n}}\nint main(int argc, char **argv) {{\n{setup}jet_rt_host_arguments(argc, argv, environ);\nint32_t status = jet_rt_main(exercise);\n{cleanup}return status != 0 ? status : (int)fixture_result;\n}}\n"
+}
+
+// The committed inputs a crypto row's verdict reads beside its witness.
+crypto_inputs: fn(name: String) -> [String] Never! {
+    if name == "AgeV1" -> return [String]{"{RT}AgeV1Fixtures.json"}
+    if !CRYPTO_FROZEN.contains(name) -> return [String]{}
+    inputs := [String]{"{RT}{name}Fixtures.json"}
+    if name == "CryptoOsEntropy" -> inputs.push("{RT}CryptoOsEntropyWorld.stderr")
+    inputs
 }
 
 c_driver: fn(name: String, repo: String) -> String? Never! {
@@ -982,7 +1030,7 @@ c_driver: fn(name: String, repo: String) -> String? Never! {
     if name == "HostFault" -> return Val("{head}extern int64_t jet_rt_host_fault_fixture(int64_t,_Bool);\nint main(int argc,char **argv) {{ (void)argv; return (int)jet_rt_host_fault_fixture((intptr_t)\"A\",argc>1); }}\n")
     if name == "FloatBits" -> return Val("{head}extern int64_t jet_rt_test_f64_bits(double);\nextern double jet_rt_test_f64_from_bits(int64_t);\nint main(void) {{ const uint64_t words[]={{0,UINT64_C(0x8000000000000000),1,UINT64_C(0x7ff0000000000000),UINT64_C(0xfff0000000000000),UINT64_C(0x7ff8000000000001),UINT64_C(0x3ff0000000000000),UINT64_C(0xffffffffffffffff)}}; for(unsigned i=0;i<sizeof(words)/sizeof(*words);i++) {{ double value; memcpy(&value,&words[i],8); if((uint64_t)jet_rt_test_f64_bits(value)!=words[i]) return 1; value=jet_rt_test_f64_from_bits((int64_t)words[i]); uint64_t back; memcpy(&back,&value,8); if(back!=words[i]) return 2; }} return 0; }}\n")
     if name == "TerminalColor" -> return Val("{head}#include <pthread.h>\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern int64_t jet_rt_terminal_color_fixture(void);\nstatic void *worker(void *unused) {{ (void)unused; jet_rt_thread_attach(); int64_t code=jet_rt_terminal_color_fixture(); jet_rt_thread_detach(); return (void *)(intptr_t)code; }}\nint main(void) {{ if(jet_rt_terminal_color_fixture()) return 1; pthread_t thread; void *result; if(pthread_create(&thread,NULL,worker,NULL)||pthread_join(thread,&result)) return 2; return result!=NULL; }}\n")
-    if name == "TrapReport" -> return Val("#define main registry_cabi_main\n#include \"{repo}/{RT}CAbiDriver.c\"\n#undef main\nextern int64_t jet_rt_trap_report_fixture(int64_t,int64_t,_Bool);\nextern void jet_rt_panic_message(const void *,int64_t);\nstatic int64_t callback(int64_t kind) {{ if(kind==0) jet_rt_panic_message(\"registry boom\",13); else if(kind==1) numeric_stop(); else if(kind==2) require(); else if(kind==3) require_eq(); else panic_case(); return 0; }}\nint main(int argc,char **argv) {{ if(argc!=3) return 2; return (int)jet_rt_trap_report_fixture((intptr_t)callback,strtol(argv[1],NULL,10),!strcmp(argv[2],\"captured\")); }}\n")
+    if name == "TrapReport" -> return Val("#define main registry_cabi_main\n#include \"{repo}/{RT}CAbiDriver.c\"\n#undef main\n#include <stdlib.h>\nextern int64_t jet_rt_trap_report_fixture(int64_t,int64_t,_Bool);\nextern void jet_rt_panic_message(const void *,int64_t);\nstatic int64_t callback(int64_t kind) {{ if(kind==0) jet_rt_panic_message(\"registry boom\",13); else if(kind==1) numeric_stop(); else if(kind==2) require(); else if(kind==3) require_eq(); else panic_case(); return 0; }}\nint main(int argc,char **argv) {{ if(argc!=3) return 2; return (int)jet_rt_trap_report_fixture((intptr_t)callback,strtol(argv[1],NULL,10),!strcmp(argv[2],\"captured\")); }}\n")
     None
 }
 
@@ -1163,14 +1211,6 @@ evidence_row: fn(command: String, args: [String], cwd: String, code: Dyn, signal
     })
 }
 
-node: fn(lane: &Lane, runner: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
-    argv := [String]{"{lane.repo}/{runner}"}
-    loop arg in args -> argv.push(arg.copy())
-    binary: lane.node.copy()
-    cwd: lane.out.copy()
-    execute(lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-}
-
 // A repository Jet tool, run by the jet running this script (jet_cli).
 jet_tool: fn(lane: &Lane, script: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
     argv := [String]{"{lane.repo}/{script}"}
@@ -1285,17 +1325,6 @@ read_json: fn(path: String) -[FS]> Dyn Problem! {
     parsed
 }
 
-truthy: fn(value: Dyn) -> Bool Never! {
-    if value == {
-        .Null -> false
-        .Bool(flag) -> flag
-        .Text(text) -> text != ""
-        .Int(number) -> number != 0
-        .Number(lexeme) -> lexeme != "0"
-        else -> true
-    }
-}
-
 copy_tree: fn(from: String, to: String) Problem! -[FS]> {
     files.create_dir_all(to) ?? return Err(problem("`{to}` cannot be created: {err}"))
     listed: files.list_dir(from) ?? return Err(problem("`{from}` cannot be listed: {err}"))
@@ -1344,7 +1373,7 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
     files.create_dir_all(out) ?? return Err(problem("`{out}` cannot be created: {err}"))
     files.create_dir_all(log_dir) ?? return Err(problem("`{log_dir}` cannot be created: {err}"))
     staged: stage_toolchain(jet, runtime, "{log_dir}/toolchain") ?? return Err(err)
-    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), pack: runtime.pack.copy(), object: runtime.object.copy(), node: process.which("node") ?? "node", evidence: [Dyn]{}}
+    lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), pack: runtime.pack.copy(), object: runtime.object.copy(), evidence: [Dyn]{}}
     if drive(lane, found) == {
         .Ok(_) -> {}
         .Err(failure) -> return (ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy())
@@ -1352,37 +1381,17 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
     (ran: Ran{code: 0, signal: None, timed_out: false, stdout: text_field(entry, "stdout"), stderr: ""}, evidence: lane.evidence.copy())
 }
 
-// The transport body: the fixture runner's modes, the native build or
-// library, the C driver, and the exact verdict its kind admits.
+// The transport body: the native build or library, the C driver, and the
+// exact verdict its kind admits.
 drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     out: lane.out.copy()
     repo: lane.repo.copy()
-    node_bin: lane.node.copy()
     staged: lane.jet.copy()
-    if found.kind == "codec-fixture" || found.kind == "process-fixture" {
-        args: fixture_args(repo, found, out, lane.jet, lane.runtime_dir)
-        execute(lane, node_bin, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-        result: read_json("{args[1]}/fixture-result.json") ?? return Err(err)
-        ok: int_field(result, "status") == Val(0) && text_field(result, "test") == found.name
-        if found.kind == "codec-fixture" && !(ok && field(result, "stdout") == .Text("") && field(result, "stderr") == .Text("")) -> return Err(problem("named native codec/file fixture receipt differs"))
-        if found.kind == "process-fixture" && !(ok && text_field(result, "witness") == "{found.name}Witness") -> return Err(problem("named native process fixture receipt differs"))
-        return Ok(())
-    }
-    if found.kind == "suite" {
-        node(lane, found.runner, [String]{out, found.modes[0]}) ?? return Err(err)
-        selected: suite_library(found, out)
-        library(lane, selected.file, selected.prefix, selected.lifecycle, selected.exports) ?? return Err(err)
-        loop mode in found.modes[2..<found.modes.len()] -> node(lane, found.runner, [String]{out, mode}) ?? return Err(err)
-        // The final run modes execute the actual C driver and check literal
-        // output, stops and ledgers; never admit assembly-only or reference.
-        if found.crypto -> crypto_verdict(lane) ?? return Err(err)
-        return Ok(())
-    }
     if found.kind == "plain" {
         // One runtime per image: the fragment and the runtime sources lower
-        // as a library that a C host links, as the suite transports do. A
-        // program would link this runtime copy beside the pack's, whose
-        // startup thread state the fragment's own init then overwrites.
+        // as a library that a C host links. A program would link this
+        // runtime copy beside the pack's, whose startup thread state the
+        // fragment's own init then overwrites.
         raw: "{out}/raw"
         native: "{out}/native"
         files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
@@ -1392,28 +1401,33 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
             unit_args.push(name.copy())
         }
         jet_tool(lane, found.runner, unit_args) ?? return Err(err)
-        unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
+        assembled: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
+        unit: if found.name == "CollectionsStop" -> collections_stop_unit(assembled) ?? return Err(err) else -> assembled.copy()
         entry: if found.call == .Val(call) -> "\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n" else -> ""
-        if entry == "" && found.witness == "" -> return Err(problem("plain transport {found.name} names no entry"))
+        export: codec_export(found.name)
+        if entry == "" && found.witness == "" && export == "" -> return Err(problem("plain transport {found.name} names no entry"))
         fixture: "{native}/Source/Fixture.jet"
         files.write(fixture, "{unit}{entry}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
         package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
         files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
         // The fragments witness the allocator a program built without
-        // `--checked-alloc` runs, so the checked heap's init hook stays out.
+        // `--checked-alloc` runs, so the checked heap's init hook stays out;
+        // a process witness is a C host that links the runtime object itself,
+        // so it runs checked and observes the checked heap's frees.
+        checked: PROCESS_WITNESSES.contains(found.name)
         rows: files.read("{repo}/Compiler/JetRuntime/lifecycle.list") ?? return Err(problem("`Compiler/JetRuntime/lifecycle.list` cannot be read: {err}"))
         kept := [String]{}
         loop row in rows.split("\n") {
-            if !row.starts_with("jet_rt_alloc_check_init ") -> kept.push(row.copy())
+            if checked || !row.starts_with("jet_rt_alloc_check_init ") -> kept.push(row.copy())
         }
         lifecycle: "{native}/lifecycle.list"
         files.write(lifecycle, kept.join("\n")) ?? return Err(problem("`{lifecycle}` cannot be written: {err}"))
         library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
-        driver := "{native}/driver.c"
-        if found.witness != "" {
-            driver = "{repo}/{found.witness}"
-        } else {
-            files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        generated: "{native}/driver.c"
+        driver: if found.witness != "" -> "{repo}/{found.witness}" else -> generated.copy()
+        if found.witness == "" {
+            source: if export != "" -> codec_driver(found.name, export) else -> PLAIN_DRIVER.copy()
+            files.write(generated, source) ?? return Err(problem("`{generated}` cannot be written: {err}"))
         }
         binary: "{native}/driver"
         link_with(lane, found.cflags, driver, "{native}/fixture.o", binary) ?? return Err(err)
@@ -1421,8 +1435,12 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         if found.fragments == WORLD_SENTRY -> return world_sentry_verdict(lane, binary, "{native}/fixture.o")
         if found.name == "Channel" -> return channel_verdict(lane, binary)
         if found.name == "SharedPublication" -> return publication_verdict(lane, binary, "{native}/fixture.o", found.expected)
-        ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-        return exact(ran, found.expected, "")
+        if CRYPTO.contains(found.name) -> return crypto_verdict(lane, found.name, binary)
+        expected: if found.expected_file != "" -> files.read("{repo}/{found.expected_file}") ?? return Err(problem("`{found.expected_file}` cannot be read: {err}")) else -> found.expected.copy()
+        // The file-leaf export writes, reads back and removes the path given.
+        args: if found.name == "CompilerFileLeaves" -> [String]{"{out}/file-leaves.data"} else -> [String]{}
+        ran: execute(lane, binary, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(ran, expected, "")
     }
     if found.kind == "c" -> return c_verdict(lane, found)
     if found.kind == "runner" -> return runner_verdict(lane, found)
@@ -1592,30 +1610,86 @@ step_failures: fn(step: String, result: Ran Problem!, stdout: String, stderr: St
     failures
 }
 
-crypto_verdict: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
-    name: (lane.id.split("/").to_list().last() ?? "").removesuffix("Tests")
-    receipts := [String]{}
+// A crypto row runs its own KAT witness against the one composed object:
+// exact stdout from the committed literal, empty stderr, the World entropy
+// stops, and for AgeV1 every frozen open and seal vector.
+crypto_verdict: fn(lane: &Lane, name: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    failures := [String]{}
     if name == "AgeV1" {
-        frozen: read_json("{lane.repo}/{RT}AgeV1Fixtures.json") ?? return Err(err)
-        loop group in ([String]{"cases", "seals"}) {
-            loop test in array_field(frozen, group) -> receipts.push("{lane.out}/run-{text_field(test, "name")}.receipt.json")
-        }
+        failures.extend(age_failures(lane, binary) ?? return Err(err))
     } else {
-        receipts.push("{lane.out}/run-{name}.receipt.json")
-    }
-    loop path in receipts {
-        receipt: read_json(path) ?? return Err(err)
-        if int_field(receipt, "status") != Val(0) || truthy(field(receipt, "signal")) || truthy(field(receipt, "error")) || field(receipt, "stderr") != .Text("") {
-            return Err(problem("selected crypto witness execution differs"))
+        expected: witness_stdout(lane.repo, name) ?? return Err(err)
+        if expected == "" -> failures.push("{name}: the witness commits no stdout literal")
+        if CRYPTO_FROZEN.contains(name) {
+            metadata: read_json("{lane.repo}/{RT}{name}Fixtures.json") ?? return Err(err)
+            if crypto.sha256(expected).hex() != text_field(metadata, "stdoutSha256") -> failures.push("{name}: the frozen stdout reference is damaged")
         }
-        if name == "AgeV1" {
-            if field(receipt, "stdout") != .Text("") -> return Err(problem("AgeV1 vector output differs"))
+        timeout: if name == "CryptoEd25519Signature" -> 300000 else -> 60000
+        failures.extend(step_failures(name, execute(lane, binary, [String]{}, lane.out.copy(), [Setting]{}, 0, timeout), expected, ""))
+        if name == "CryptoOsEntropy" -> failures.extend(world_entropy_failures(lane, binary) ?? return Err(err))
+    }
+    if failures.len() > 0 -> return Err(problem("crypto verdict: {failures.join("; ")}"))
+    Ok(())
+}
+
+// The deterministic World refuses every listed count with the frozen stop.
+world_entropy_failures: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] Problem! {
+    metadata: read_json("{lane.repo}/{RT}CryptoOsEntropyFixtures.json") ?? return Err(err)
+    world: field(metadata, "world")
+    path: "{lane.repo}/{RT}CryptoOsEntropyWorld.stderr"
+    expected: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
+    code: int_field(world, "exitCode") ?? return Err(problem("CryptoOsEntropyFixtures.json names no World exit code"))
+    failures := [String]{}
+    if crypto.sha256(expected).hex() != text_field(world, "stderrSha256") -> failures.push("CryptoOsEntropy: the frozen World stop reference is damaged")
+    loop count in WORLD_ENTROPY_COUNTS {
+        failures.extend(step_failures("world {count}", execute(lane, binary, [String]{"world", count.copy()}, lane.out.copy(), [Setting]{}, code, 60000), "", expected))
+    }
+    Ok(failures)
+}
+
+// A frozen AgeV1 cipher: base64 in the fixtures JSON, pinned by its sha256.
+age_cipher: fn(test: Dyn) -> [U8] Problem! {
+    name: text_field(test, "name")
+    cipher: base64.decode(text_field(test, "cipher")) ?? return Err(problem("{name}: the frozen cipher is not base64: {err}"))
+    if crypto.sha256(cipher).hex() != text_field(test, "cipherSha256") -> return Err(problem("{name}: the frozen cipher is damaged"))
+    Ok(cipher)
+}
+
+// Every frozen AgeV1 vector: each case opens (or is refused) to its plaintext
+// digest, and each seal reproduces its frozen cipher byte for byte.
+age_failures: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] Problem! {
+    frozen: read_json("{lane.repo}/{RT}AgeV1Fixtures.json") ?? return Err(err)
+    material: "{lane.out}/age-material"
+    files.create_dir_all(material) ?? return Err(problem("`{material}` cannot be created: {err}"))
+    failures := [String]{}
+    loop test in array_field(frozen, "cases") {
+        name: text_field(test, "name")
+        cipher: age_cipher(test) ?? return Err(err)
+        path: "{material}/{name}.age"
+        files.write_bytes(path, cipher) ?? return Err(problem("`{path}` cannot be written: {err}"))
+        valid: if field(test, "valid") == .Bool(true) -> "1" else -> "0"
+        plain: if field(test, "plainSha256") == .Text(digest) -> digest.copy() else -> "-"
+        failures.extend(step_failures("open {name}", execute(lane, binary, [String]{"open", text_field(test, "identity"), path, valid, plain}, lane.out.copy(), [Setting]{}, 0, 60000), "", ""))
+    }
+    loop test in array_field(frozen, "seals") {
+        name: text_field(test, "name")
+        cipher: age_cipher(test) ?? return Err(err)
+        plain: base64.decode(text_field(test, "plain")) ?? return Err(problem("{name}: the frozen plaintext is not base64: {err}"))
+        count: int_field(test, "recipientCount") ?? return Err(problem("{name}: the frozen seal names no recipient count"))
+        plain_path: "{material}/{name}.plain"
+        cipher_path: "{material}/{name}.age"
+        capture_path: "{material}/{name}.capture.age"
+        files.write_bytes(plain_path, plain) ?? return Err(problem("`{plain_path}` cannot be written: {err}"))
+        files.write_bytes(cipher_path, cipher) ?? return Err(problem("`{cipher_path}` cannot be written: {err}"))
+        sealed: step_failures("seal {name}", execute(lane, binary, [String]{"seal", text_field(test, "identity"), plain_path, cipher_path, "{count}", capture_path}, lane.out.copy(), [Setting]{}, 0, 60000), "", "")
+        if sealed.len() > 0 {
+            failures.extend(sealed)
             next
         }
-        expected: witness_stdout(lane.repo, name) ?? return Err(err)
-        if expected == "" || field(receipt, "stdout") != .Text(expected) -> return Err(problem("selected crypto stdout differs from committed C witness literal"))
+        captured: files.read_bytes(capture_path) ?? return Err(problem("`{capture_path}` cannot be read: {err}"))
+        if captured != cipher -> failures.push("seal {name}: the Jet capture differs from the frozen cipher")
     }
-    Ok(())
+    Ok(failures)
 }
 
 // A witness's committed stdout: its .stdout file, or else the lines its C
@@ -1641,7 +1715,11 @@ puts_lines: fn(path: String) -[FS]> String Problem! {
 c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     out: lane.out.copy()
     repo: lane.repo.copy()
-    node(lane, found.runner, [String]{out, "--until", "assemble", "--test", found.name}) ?? return Err(err)
+    // The runtime unit with this fixture's test fragment, as the package's
+    // Source/Runtime.jet beside its manifest.
+    jet_tool(lane, found.runner, [String]{"--root", repo, "runtime-unit", "{out}/library", "--test", found.name}) ?? return Err(err)
+    files.create_dir_all("{out}/library/Source") ?? return Err(problem("`{out}/library/Source` cannot be created: {err}"))
+    files.rename("{out}/library/unit.jet", "{out}/library/Source/Runtime.jet") ?? return Err(problem("`{out}/library/unit.jet` cannot be moved: {err}"))
     library(lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list", "") ?? return Err(err)
     source: if found.name == {
         "VaultHooks" | "VaultProvider" -> "{repo}/{RT}{found.name}Witness.c"
@@ -1739,7 +1817,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         reason := ""
         if !row.entry && row.names.len() == 0 -> reason = "hand-ABI fixture has no run or Test entry; its exact native/C witness must be registered"
         if row.package == "JetRuntime" && !standalone -> reason = "runtime hand-ABI registries require their native C fixture driver/runtime source assembly; not a compiler Test harness"
-        if row.package == "JetBackend" && row.entry -> reason = "backend artifact/FFI registry needs its existing run-*.mjs source assembly plus native artifact execution/checker; a returned fn run is not its success verdict"
+        if row.package == "JetBackend" && row.entry -> reason = "backend artifact/FFI registry needs its fixture source assembly plus native artifact execution/checker; a returned fn run is not its success verdict"
         id: registry.id.copy()
         cwd: "{out}/{id}"
         sources: [String]{row.source.copy()}
@@ -2264,27 +2342,42 @@ fragment_registry: fn(name: String) -> Registry Never! {
     }
 }
 
-#Test("codec and process transports drive the selected real fixture") {
+#Test("crypto, codec and process rows are plain transports over their real fixtures") {
     repo: test_repo()
-    loop name in ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess"}) {
+    loop name in ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess", "AgeV1", "CryptoHash", "CryptoOsEntropy", "Sha256"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
-        out: text_field(entry, "cwd")
-        codec: name.starts_with("Codec") || name.starts_with("Dyn") || name == "CompilerFileLeaves"
-        runner: if codec -> "run-native-codec-file-leaves.mjs" else -> "run-process-witnesses.mjs"
-        folder: if codec -> "codec" else -> "process"
-        assert_eq(fixture_args(repo, found, out, "/native/jet", "/native/jet-runtime"), [String]{"{repo}/Compiler/JetRuntime/Tests/{runner}", "{out}/{folder}", "/native/jet", "/native/jet-runtime", "--test", name})
-        if !codec {
-            sources: array_field(entry, "sources")
-            assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
-            assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.stdout")))
+        assert_eq(found.kind, "plain")
+        sources: array_field(entry, "sources")
+        codec: codec_export(name) != ""
+        assert_eq(codec, name.starts_with("Codec") || name.starts_with("Dyn") || name == "CompilerFileLeaves")
+        if codec {
+            assert_eq(found.witness, "")
+            assert_eq(found.fragments, [String]{name})
+            assert_eq(found.cflags, FREESTANDING_CFLAGS)
+            assert(codec_driver(name, codec_export(name)).contains("{codec_export(name)}("))
+        } else {
+            assert_eq(found.witness, "Compiler/JetRuntime/Tests/{name}Witness.c")
+            assert(sources.contains(Dyn.Text(found.witness.copy())))
+        }
+        if PROCESS_WITNESSES.contains(name) {
+            assert_eq(found.expected_file, "Compiler/JetRuntime/Tests/{name}Witness.stdout")
+            assert(found.cflags.contains("-DJET_PROCESS_JET_FIXTURES=1"))
+        }
+        if CRYPTO.contains(name) {
+            assert_eq(found.fragments, CRYPTO)
+            loop input in crypto_inputs(name) -> assert(sources.contains(Dyn.Text(input.copy())))
         }
     }
+    assert(codec_driver("CompilerFileLeaves", "jet_rt_compiler_file_leaves_fixture").contains("unlink(fixture_path)"))
+    assert_eq(crypto_inputs("CryptoOsEntropy"), [String]{"{RT}CryptoOsEntropyFixtures.json", "{RT}CryptoOsEntropyWorld.stderr"})
+    assert_eq(crypto_inputs("AgeV1"), [String]{"{RT}AgeV1Fixtures.json"})
+    assert_eq(crypto_inputs("Sha256"), [String]{})
 }
 
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
-    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication"}) {
+    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication", "SharedThread", "CollectionsStop"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
@@ -2306,6 +2399,8 @@ fragment_registry: fn(name: String) -> Registry Never! {
             "Parallel" | "Scheduler" | "Channel" -> "Compiler/JetRuntime/Tests/{name.lower()}-fixture.c"
             "Stm" | "Sync" | "Observe" -> "Compiler/JetRuntime/Tests/sync-fixture.c"
             "SharedPublication" -> "Compiler/JetRuntime/Tests/shared-publication-fixture.c"
+            "SharedThread" -> "Compiler/JetRuntime/Tests/thread-fixture.c"
+            "CollectionsStop" -> "Compiler/JetRuntime/Tests/collections-stop.c"
             else -> "Compiler/JetRuntime/Tests/world-sentry-fixture.c"
         }
         assert(field(transport, "call") == Dyn.Null)
@@ -2314,6 +2409,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
             "TestSuite" -> "test suite: ok\n"
             "Stm" | "Sync" | "Observe" -> sync_expected(name)
             "SharedPublication" -> "Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n"
+            "CollectionsStop" -> collections_stop_expected()
             else -> ""
         }
         assert_eq(text_field(transport, "expected"), expected)
@@ -2325,6 +2421,8 @@ fragment_registry: fn(name: String) -> Registry Never! {
             "Sync" -> [String]{"Channel", "Stm", "Sync"}
             "Observe" -> [String]{"Channel", "Stm", "Sync", "Observe"}
             "SharedPublication" -> [String]{"Channel", "SharedPublication"}
+            "CollectionsStop" -> [String]{"Collections", "CollectionsStop"}
+            "SharedThread" -> [String]{"Thread", "SharedThread"}
             else -> if WORLD_SENTRY.contains(name) -> WORLD_SENTRY.copy() else -> [String]{name.copy()}
         }
         assert(field(transport, "fragments") == texts(fragments))
@@ -2335,12 +2433,34 @@ fragment_registry: fn(name: String) -> Registry Never! {
         assert_eq(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/shared-weak-fixture.c")), name == "SharedPublication")
         cflags: if name == {
             "Channel" -> [String]{"-O2", "-DJET_CHANNEL_INTERNAL"}
+            "SharedThread" -> [String]{"-DJET_SHARED_TLS_FIXTURE"}
+            "CollectionsStop" -> [String]{"-Wall", "-Wextra", "-Werror"}
             "Sync" -> [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-DJET_CONDITION_FIXTURE"}
             "Observe" -> [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-DJET_CONDITION_FIXTURE", "-DJET_OBSERVE_FIXTURE"}
             else -> [String]{"-std=c11", "-Wall", "-Wextra", "-Werror"}
         }
         assert(field(transport, "cflags") == texts(cflags))
     }
+}
+
+#Test("the collections stop row instruments only the iterator source and expects every family") {
+    iter: "// [unit source: Compiler/JetRuntime/Source/Iter.jet]\nx: jet_rt_free(a)\njet_rt_progress_state_advance(state)\n"
+    unit: "head jet_rt_free(h)\n{iter}// [unit source: Compiler/JetRuntime/Source/Text.jet]\njet_rt_free(t)\njet_rt_progress_state_advance(t)\n"
+    instrumented: collections_stop_unit(unit) ?? panic(err.message)
+    assert_eq(instrumented, "head jet_rt_free(h)\n// [unit source: Compiler/JetRuntime/Source/Iter.jet]\nx: coll_stop_free(a)\ncoll_stop_progress_advance(state)\n// [unit source: Compiler/JetRuntime/Source/Text.jet]\njet_rt_free(t)\njet_rt_progress_state_advance(t)\n")
+    loop refused in ([String]{"// [unit source: Compiler/JetRuntime/Source/Text.jet]\njet_rt_free(t)\n", "// [unit source: Compiler/JetRuntime/Source/Iter.jet]\njet_rt_free(a)\n"}) {
+        if collections_stop_unit(refused) == {
+            .Ok(_) -> panic("a unit without both iterator calls was instrumented")
+            .Err(_) -> {}
+        }
+    }
+    lines: collections_stop_expected().split("\n").to_list()
+    assert_eq(lines.len(), 25)
+    assert_eq(lines[0], "family 0: live payloads restored")
+    assert_eq(lines[12], "family 12: live payloads restored")
+    assert_eq(lines[13], "review 0: live payloads restored")
+    assert_eq(lines[23], "review 10: live payloads restored")
+    assert_eq(lines[24], "")
 }
 
 #Test("a transport entry keeps its registry id and a runner row runs its calls") {

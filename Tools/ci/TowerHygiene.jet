@@ -9,10 +9,11 @@
 //   JET_TOWER_LINT_SCOPE   lint scope, relative to the checkout (default docs)
 //   TOWER_DATA             Tower store directory or tower.json (default Tools/tower/.tower)
 //   JET_TOWER_HYGIENE_REPORT  report path (default .tmp/tower-hygiene/<commit>-<shard>.txt)
+//   JET                    the jet that runs the board reader (default jet)
 //
-// Tower lint runs twice through node until Tower is a Jet program (#6311);
-// the gate proves both runs agree, emit a JSON finding array and leave the
-// store byte-for-byte unchanged. Exit 1 unless every check passes.
+// The Docs/spec reference lint (`jet Tools/tower/Board.jet lint --docs`) runs
+// twice; the gate proves both runs agree, emit a JSON finding array and leave
+// the store byte-for-byte unchanged. Exit 1 unless every check passes.
 use {
     crypto: core.crypto
     files: core.files
@@ -144,7 +145,7 @@ abort: fn(text: String) Never! -[Exec, IO]> {
     process.exit(1)
 }
 
-// Tower lint's `--json` shape: an array of {rule, ref, msg} text findings.
+// The board lint's `--json` shape: an array of {rule, ref, msg} text findings.
 finding_array: fn(text: String) -> Bool Never! {
     parsed: json.parse(text) ?? return false
     if parsed == {
@@ -163,8 +164,8 @@ finding_array: fn(text: String) -> Bool Never! {
     }
 }
 
-lint: fn(node: String, tower: String, root: String, docs_root: String) -[Exec, Time.Wait]> Lint Never! {
-    spec: process.cmd([String]{node, tower, "lint", "--docs", "--docs-root", docs_root, "--json"}).cwd(root).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
+lint: fn(jet: String, board: String, root: String, data: String, docs_root: String) -[Exec, Time.Wait]> Lint Never! {
+    spec: process.cmd([String]{jet, board, "lint", "--docs", "--docs-root", docs_root, "--data", data, "--json"}).cwd(root).stdin(.Inherit).stdout(.Capture).stderr(.Capture).output_limit(1073741824)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Lint{status: "127", output: "", errors: "{err}\n"}
     receipt: results[0] ?? return Lint{status: "127", output: "", errors: "{err}\n"}
     code: if receipt.signal == .Val(number) -> 128 + number else -> receipt.code
@@ -173,7 +174,8 @@ lint: fn(node: String, tower: String, root: String, docs_root: String) -[Exec, T
 
 run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
     root: repo_root()
-    tower: "{root}/Tools/tower/tower.mjs"
+    board: "{root}/Tools/tower/Board.jet"
+    jet: env_or("JET", "jet")
     scope_input: env_or("JET_TOWER_LINT_SCOPE", "docs")
     runner_os := env_or("RUNNER_OS", "")
     runner_arch := env_or("RUNNER_ARCH", "")
@@ -207,19 +209,7 @@ run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
         report_path = "{root}/.tmp/tower-hygiene/unsafe-report.txt"
     }
 
-    node := process.which("node") ?? ""
-    node_version := "unavailable"
-    if node == "" {
-        errors.push("node runner is unavailable")
-    } else {
-        node_version = output_of([String]{node, "--version"}) ?? "unavailable"
-        if node_version == "unavailable" {
-            node = ""
-            errors.push("node runner did not report a version")
-        }
-    }
-
-    if !files.is_file(tower) -> errors.push("Tower entrypoint is missing: {tower}")
+    if !files.is_file(board) -> errors.push("Tower board reader is missing: {board}")
     if !files.is_dir(docs_root) -> errors.push("configured Tower lint scope is missing: {docs_root}")
     spec_root := "{docs_root}/spec"
     if !files.is_dir(spec_root) -> errors.push("configured Tower lint scope has no Docs/spec directory: {spec_root}")
@@ -244,38 +234,32 @@ run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
     report_parent: files.dirname(report_path)
     files.create_dir_all(report_parent) ?? return abort("cannot create the report directory {report_parent}: {err}")
 
-    tower_before := "unavailable"
-    if node != "" {
-        tower_before = hash_tree(tower_dir) ?? "unavailable"
-        if tower_before == "unavailable" -> errors.push("Tower store could not be fingerprinted before lint")
-    }
+    tower_before := hash_tree(tower_dir) ?? "unavailable"
+    if tower_before == "unavailable" -> errors.push("Tower store could not be fingerprinted before lint")
 
     first := Lint{status: "not-run", output: "", errors: ""}
     repeat := Lint{status: "not-run", output: "", errors: ""}
-    if node != "" && files.is_file(tower) && files.is_dir(spec_root) && !lint_blocked {
-        first = lint(node, tower, root, docs_root)
-        repeat = lint(node, tower, root, docs_root)
+    if files.is_file(board) && files.is_dir(spec_root) && !lint_blocked {
+        first = lint(jet, board, root, tower_file, docs_root)
+        repeat = lint(jet, board, root, tower_file, docs_root)
     } else if lint_blocked {
         errors.push("Tower lint was not run because the Tower store is not in a safe read-only state")
     } else {
-        errors.push("Tower lint was not run because a required runner, entrypoint, or scope is missing")
+        errors.push("Tower lint was not run because the board reader or scope is missing")
     }
 
-    tower_after := "unavailable"
-    if node != "" {
-        tower_after = hash_tree(tower_dir) ?? "unavailable"
-        if tower_after == "unavailable" -> errors.push("Tower store could not be fingerprinted after lint")
-        if tower_before == "unavailable" || tower_after == "unavailable" || tower_before == "missing" || tower_after == "missing" {
-            read_only = "fail"
-            errors.push("Tower store fingerprint is unavailable; read-only state is unproven")
-        } else if lint_blocked {
-            read_only = "blocked"
-        } else if tower_before != tower_after {
-            read_only = "fail"
-            errors.push("Tower store changed during read-only lint")
-        } else {
-            read_only = "pass"
-        }
+    tower_after: hash_tree(tower_dir) ?? "unavailable"
+    if tower_after == "unavailable" -> errors.push("Tower store could not be fingerprinted after lint")
+    if tower_before == "unavailable" || tower_after == "unavailable" || tower_before == "missing" || tower_after == "missing" {
+        read_only = "fail"
+        errors.push("Tower store fingerprint is unavailable; read-only state is unproven")
+    } else if lint_blocked {
+        read_only = "blocked"
+    } else if tower_before != tower_after {
+        read_only = "fail"
+        errors.push("Tower store changed during read-only lint")
+    } else {
+        read_only = "pass"
     }
 
     lint_json := "not-run"
@@ -308,7 +292,7 @@ run: fn() -[Env, Exec, FS, IO, Time.Wait]> {
         "candidate_commit={candidate}",
         "runner_os={runner_os}",
         "runner_arch={runner_arch}",
-        "node={node_version}",
+        "board=Tools/tower/Board.jet",
         "scope_input={scope_input}",
         "docs_root={docs_root}",
         "spec_root={spec_root}",

@@ -10,7 +10,7 @@ import { openStore, empty } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 import { lint, ruleDoneWithoutEvidence, ruleClaimedIdle, ruleMissingAttribution,
-  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers, ruleSpecReferenceGaps,
+  ruleBallotGaps, ruleStaleDraft, ruleOrphanBlockers,
   ruleCriteriaEvidenceConflicts, ruleDuplicateSuspects, ruleUnhomedCard } from '../app/lint.mjs';
 
 const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
@@ -221,40 +221,6 @@ test('orphan-blockers: a ref resolvable via history cards is not orphaned', () =
   assert.deepEqual(ruleOrphanBlockers(st.load(), history), []);
 });
 
-// ---- 7. --docs mode: spec-reference-gaps -----------------------------------------
-
-test('ruleSpecReferenceGaps: reports missing card and decision records in Docs/spec', () => {
-  const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'spec', 'nested'), { recursive: true });
-  writeFileSync(join(docsRoot, 'spec', 'law.md'),
-    'Card #999 and #998 own this law. D-MISSING1 has the decision.\n');
-  writeFileSync(join(docsRoot, 'spec', 'nested', 'example.md'),
-    'D-MISSING1 is repeated here.\n');
-
-  const findings = ruleSpecReferenceGaps(empty('T'), { cards: [], decisions: [] }, { docsRoot });
-  assert.deepEqual(findings.map(f => [f.rule, f.ref]), [
-    ['spec-card-ref-missing', '#998'],
-    ['spec-card-ref-missing', '#999'],
-    ['spec-decision-ref-missing', 'D-MISSING1'],
-  ]);
-  assert.match(findings[0].msg, /Docs\/spec\/law\.md:1/);
-});
-
-test('ruleSpecReferenceGaps: accepts live/history records and ignores code literals', () => {
-  const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'spec'), { recursive: true });
-  writeFileSync(join(docsRoot, 'spec', 'law.md'),
-    'Card #1 and card #2 are recorded.\nD-LIVE1 is recorded. D-XXX is a placeholder.\n`[U8#4096]` is a type.\n');
-  const s = { cards: [{ num: 1 }], decisions: [{ id: 'D-LIVE1' }] };
-  const history = { cards: [{ num: 2 }], decisions: [] };
-  assert.deepEqual(ruleSpecReferenceGaps(s, history, { docsRoot }), []);
-});
-
-test('ruleSpecReferenceGaps: no Docs/spec dir is clean, never throws', () => {
-  const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-nodocs-'));
-  assert.deepEqual(ruleSpecReferenceGaps(empty('T'), { cards: [], decisions: [] }, { docsRoot }), []);
-});
-
 // ---- 8. criteria integrity ---------------------------------------------------
 
 test('criteria-evidence-conflict: flags met and verified rows with disputed evidence', () => {
@@ -332,26 +298,16 @@ test('card home: the store refuses an epoch-less frozen card and lint flags one 
 
 // ---- 9. lint() aggregator ------------------------------------------------------------
 
-test('lint(): combines core rules; --docs adds the spec scan only when asked', () => {
+test('lint(): combines the core rules over the board and history', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-XYZ2', title: 't', ...ballot() }));
   st.mutate((s) => db.ratify(s, 'D-XYZ2', 'A', null, 'owner'));
   st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'owner' }, cfg)); // owner bypass, no evidence → finding
 
-  const docsRoot = mkdtempSync(join(tmpdir(), 'tower-lint-docs-'));
-  mkdirSync(join(docsRoot, 'spec'), { recursive: true });
-  writeFileSync(join(docsRoot, 'spec', 'open.md'), 'Card #999 and D-MISSING2 still need a record.\n');
-
-  const s = st.load();
-  const history = st.loadHistory();
-  const withoutDocs = lint(s, history, { docs: false, docsRoot });
-  assert.ok(withoutDocs.some(f => f.rule === 'done-without-evidence'));
-  assert.ok(!withoutDocs.some(f => f.rule === 'spec-card-ref-missing'));
-
-  const withDocs = lint(s, history, { docs: true, docsRoot });
-  assert.ok(withDocs.some(f => f.rule === 'spec-card-ref-missing' && f.ref === '#999'));
-  assert.ok(withDocs.some(f => f.rule === 'spec-decision-ref-missing' && f.ref === 'D-MISSING2'));
+  const findings = lint(st.load(), st.loadHistory());
+  assert.ok(findings.some(f => f.rule === 'done-without-evidence'));
+  assert.ok(!findings.some(f => f.rule.startsWith('spec-')));
 });
 
 // ---- 10. burndown scope --------------------------------------------------------------
@@ -415,18 +371,6 @@ test('cli: tower lint --json exits 1 for shared open test references', () => {
   assert.equal(r.code, 1);
   const findings = JSON.parse(r.out);
   assert.ok(findings.some(f => f.rule === 'duplicate-suspect' && f.ref === '#1,#2'));
-});
-
-test('cli: tower lint --docs finds missing references in Docs/spec rooted at --docs-root', () => {
-  const cwd = mkdtempSync(join(tmpdir(), 'tower-lint-cli-docs-'));
-  run(cwd, ['init', '--name', 'Lint Docs Test']);
-  mkdirSync(join(cwd, 'Docs', 'spec'), { recursive: true });
-  writeFileSync(join(cwd, 'Docs', 'spec', 'open.md'), 'Card #999 and D-CLIDOC1 have no record.\n');
-
-  const r = run(cwd, ['lint', '--docs', '--json'], false);
-  const findings = JSON.parse(r.out);
-  assert.ok(findings.some(f => f.rule === 'spec-card-ref-missing' && f.ref === '#999'));
-  assert.ok(findings.some(f => f.rule === 'spec-decision-ref-missing' && f.ref === 'D-CLIDOC1'));
 });
 
 test('cli: tower next --burndown scopes to current epoch + sidequests', () => {

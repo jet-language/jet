@@ -1,0 +1,78 @@
+#!/usr/bin/env jet
+// Deterministic CLI double for staging, stream, environment and companion tests.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+switch: fn(name: String) -[Env]> String Never! { process.env_get(name) ?? "" }
+
+arg: fn(args: [String], index: Int) -> String Never! { if index < args.len() -> args[index].copy() else -> "" }
+
+say: fn(text: String) -[IO]> {
+    errors := term.stderr()
+    errors.write(text).drop("fixture stderr")
+}
+
+fail: fn(text: String, code: Int) -[Exec, IO]> Never {
+    say(text)
+    process.exit(code)
+}
+
+// `flag` is the argument after the verb: `--verbose` for a lint run.
+check: fn(file: String, flag: String) {
+    if !files.is_file(file) -> fail("fixture was not staged\n", 9)
+    extension: switch("JET_COMPILER_EXTENSION")
+    if {
+        file.contains("extension") && (files.basename(extension) != "hook.wasm" || !files.is_file(extension)) -> fail("wrong extension\n", 9)
+        !file.contains("extension") && extension != "" -> fail("leaked extension\n", 9)
+    }
+    schemas: switch("JET_SCHEMA_CACHE_DIR")
+    if {
+        file.contains("published") && !files.is_file("{schemas}/Record.snapshot") -> fail("missing published schema\n", 9)
+        !file.contains("published") && schemas != "" -> fail("leaked schema cache\n", 9)
+    }
+    if file.ends_with("project/run.jet") && !files.is_file("{files.dirname(file)}/.jet/authored") -> fail("fixture state not staged\n", 9)
+    if file.contains("lint") {
+        if flag != "--verbose" -> fail("lint requires verbose\n", 9)
+        say("Warning [jet.SameEnumGuardTable]: lint\n\nok: `{file}` has no errors (1 warning)\nrun `jet explain L0302` to learn more\n")
+        return
+    }
+    if file.contains("clean") || file.contains("published") || file.contains("extension") || file.ends_with(".fixed.jet") -> return
+    fail("Error [jet.OperatorTypeMismatch]: mismatch\n\n1 problem found\nrun `jet explain E0109` to learn more\n", 1)
+}
+
+build: fn(file: String, mode: String) {
+    if !files.is_file(file) -> fail("fixed was not staged\n", 9)
+    if file.contains("crash") -> fail("fixed companion crashed\n", 70)
+    if mode == "--offline" {
+        if file != "main.jet" || !files.is_file("package.jet") -> fail("unlocked fixture was not staged\n", 9)
+        fail("Error [jet.UnlockedToolchainChannel]: unlocked toolchain\n", 1)
+    }
+    // A real build writes the entry's artifact under `.jet/build`, named for
+    // its stem; a bare file name's directory is the working one.
+    parent: files.dirname(file)
+    directory: if parent == "" -> ".jet/build" else -> "{parent}/.jet/build"
+    artifact: "{directory}/{files.stem(file)}"
+    files.create_dir_all(directory) ?? fail("build directory: {err}\n", 1)
+    files.write(artifact, "#!/usr/bin/env jet\nrun: fn() {{}}\n") ?? fail("artifact write: {err}\n", 1)
+    files.chmod(artifact, 493) ?? fail("artifact mode: {err}\n", 1)
+}
+
+run: fn() {
+    args: process.args()
+    verb: arg(args, 0)
+    flag: arg(args, 1)
+    first: if flag == "--verbose" -> 2 else -> 1
+    file: arg(args, first)
+    if verb == {
+        "check" -> check(file, flag)
+        "build" -> build(file, arg(args, first + 1))
+        "run" -> {
+            if !files.is_file(file) -> fail("fixed was not staged\n", 9)
+            if file.contains("crash") -> fail("fixed companion crashed\n", 70)
+        }
+        else -> fail("unexpected test invocation\n", 9)
+    }
+}

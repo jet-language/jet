@@ -161,8 +161,8 @@ cannot fabricate Lean discharge/standing-safety-net qualification.
 The missing historical display comparator and AGE testkit generator are retired
 Rust-oracle modes (owner #38(b)/#59), not native-suite failures. Report their
 individual rows as `UNCOVERED`, print them, and require a Tower card; never label
-them PASS. The native golden union and `run-crypto-fixtures` AGE decoder/sealer
-tests remain mandatory and their failures still block the final native gate.
+them PASS. The native golden union and the AgeV1 registry row's AGE open and
+seal vectors remain mandatory and their failures still block the final native gate.
 S5 native runners select the admitted `JET` from the same-source runtime-pack
 publication; its executable hash must match `candidate_jetc0`. Do not pass the
 retired `JET_FRONT_JETC0` factory override into native suite runners.

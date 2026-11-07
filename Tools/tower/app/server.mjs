@@ -523,11 +523,8 @@ export function serve(store, port = 7878, open = false) {
       }
       // #457 — durability sweeper, same rules as `tower lint`.
       if (req.method === 'GET' && url.pathname === '/api/lint') {
-        const q = url.searchParams;
         const s = live.state();
-        const history = live.archive();
-        const docsRoot = join(projectRoot(store.dataDir), DOCS_DIR);
-        return send(res, 200, lint(s, history, { docs: q.get('docs') === '1', docsRoot }), { revision: s.meta.rev });
+        return send(res, 200, lint(s, live.archive()), { revision: s.meta.rev });
       }
       // #462 — one-shot agent work packet. ?card=&agent=&claim=0|1 (claim
       // only takes effect when both an agent AND claim=1 are given).

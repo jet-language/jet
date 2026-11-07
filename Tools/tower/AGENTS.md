@@ -51,8 +51,10 @@ tower next --ready-across-epochs  # every unblocked card board-wide —
                               # the parallel-safe set (D-TWR-OPS2)
 tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpad
                               # (archive → Docs/archive/, hidden from Docs UI)
-tower lint [--json] [--docs] # durability sweeper over the live board (+
-                              # Docs/spec/** reference scan with --docs); exit 1
+tower lint [--json]          # durability sweeper over the live board; exit 1
+                              # on any finding, 0 clean
+jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json]
+                              # Docs/spec/** reference scan, read-only; exit 1
                               # on any finding, 0 clean
 tower question list --open   # owner questions — block only affected slices
 tower message list [--all]   # open card messages, or every one with --all
@@ -229,10 +231,11 @@ outcome. CLI ratify, `clearance`, batch clearance, `--quote`, and caller-supplie
 ### Milestone review
 
 All linked cards done makes a milestone `review-ready`. Commit the frozen
-source, then open the closeout token before broad proof:
+source, then record the closeout token and check it before broad proof:
 
 ```
-jet Tools/agent/CloseoutGate.jet open <id> --by orchestrator
+tower milestone closeout <id> --commit "$(git rev-parse HEAD)" --by orchestrator
+jet Tools/agent/CloseoutGate.jet check <id>
 tower milestone criteria <id> --meet 1 --evidence "built" --by orchestrator
 tower milestone criteria <id> --verify 1 --evidence "reviewed" --by reviewer
 tower milestone verify <id> --evidence "milestone review complete" --by reviewer
@@ -324,15 +327,18 @@ its own function, returning `{rule, ref, msg}` findings):
 | `orphan-blockers` | a `blockedBy` ref that resolves to no live card, history card, or live decision |
 | `blocker-unpopulated` | epoch-track `planning` card with a plan but empty `blockedBy` (and no `blockedBy: none` marker) — D-TWR-OPS2 |
 
-`--docs` scans every text spec file under `Docs/spec/**`. It reports card and
-decision IDs that have no live or historical Tower record. This keeps Tower as
-the decision home while the spec remains its rendered reading surface.
+`jet Tools/tower/Board.jet lint --docs` scans every text spec file under
+`Docs/spec/**`. It reports card and decision IDs that have no live or
+historical Tower record (`spec-card-ref-missing`, `spec-decision-ref-missing`).
+This keeps Tower as the decision home while the spec remains its rendered
+reading surface. It reads the board read-only and needs no node.
 
 ```
 tower lint                 # human output: one line per finding, exit 1/0
 tower lint --json          # machine output
-tower lint --docs          # also scan Docs/spec/** references
-tower lint --docs-root DIR # override the docs root (default: <project>/docs)
+jet Tools/tower/Board.jet lint --docs          # scan Docs/spec/** references
+jet Tools/tower/Board.jet lint --docs --json   # the same findings as JSON
+jet Tools/tower/Board.jet lint --docs --docs-root DIR  # override the docs root (default: <project>/Docs)
 ```
 
 ## Guards (agent-hard, owner-soft)
@@ -411,7 +417,7 @@ GET  /api/stream?rev=&boot=         SSE: `state` (full index), then `delta`
                                      patches per change; a client already at
                                      rev gets `hello` and only later deltas
 GET  /api/next?agent=me&limit=5     canonical work picker
-GET  /api/lint?docs=0|1             durability sweeper findings (#457)
+GET  /api/lint                     durability sweeper findings (#457)
 GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
                                      card= → picks the top card via next's
                                      picker; claims only when agent= AND

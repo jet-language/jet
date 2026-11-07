@@ -113,9 +113,8 @@ Trap proofs compare the native status, signal and exact stdout/stderr against
 the committed golden, not a retired Rust execution. The freestanding
 display witness links the sealed C-client object and its provenance-listed C
 platform archives, rather than the program pack's startup.
-Native fixture feeds run through
-[`NativeTransport`](../../Tools/agent/NativeTransport.jet), which the fixture
-runners reach through `Compiler/JetBackend/Tests/jet-front.mjs`: the production
+Native fixture feeds run through the transports of
+[`CompilerRegistries`](../../Tools/agent/CompilerRegistries.jet): the production
 CLI's `doc FILE` library-object seam and `build FILE` program path. Library
 feeds require fresh object, export and ABI files; command completion alone is
 not a native pass. Checked-program observers are explicit Jet
@@ -130,8 +129,8 @@ its seven generic inputs then need only the return register and two syscall
 clobbers, rather than sixteen simultaneous general-purpose register slots.
 Before scheduling a cutover job, syntax-check its shell script and check every
 referenced input script/path exists. Outputs created by earlier steps are
-identified separately; the runtime assembly driver is
-`Compiler/JetBackend/Tests/run-runtime.mjs`, not a JetRuntime test script.
+identified separately; the runtime unit assembler is
+`Tools/agent/CompilerPackages.jet runtime-unit`, not a JetRuntime test script.
 
 The bootstrap completion owner may initiate Source resource retirement after
 its caller consumes the factory result and grants retirement permission; a
@@ -241,9 +240,8 @@ Native `[U8]` payloads are packed one-byte elements, matching checked
 `RT_HOST_U8_STRIDE` is 1; byte-list allocation, indexing, copying and freeing
 share that fact across Dyn, files, networking, text, crypto and codecs.
 HTTP Body chunk buffers use the same layout, including borrowed input windows.
-`run-native-codec-file-leaves.mjs` gates the admitted RC object with a C client
-that checks all 256 byte values through List pack/unpack and multi-chunk HTTP
-Body transfer; it rejects an object whose pinned source declares another stride.
+The codec and file-leaf rows of `Tools/agent/CompilerRegistries.jet` run
+their runtime fragments on that layout through the runtime's C ABI.
 
 A nested `[[U8]]` crosses a route only to a Jet runtime provider: the
 outer data pointer and length address native 24-byte `[len, cap, data]` headers
