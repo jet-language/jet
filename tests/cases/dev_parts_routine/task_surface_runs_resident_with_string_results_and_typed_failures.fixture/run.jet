@@ -31,15 +31,13 @@ run: fn() {
 
         cancelled: task late_text()
         cancelled.cancel()
-        cancelled_result: cancelled.join()
-        if cancelled_result == {
+        if cancelled.join() == {
             .Err(error) -> { print(failure_label(error)) }
             .Ok(_) -> { print("wrong cancellation") }
         }
 
         failed: task { panic("boom") }
-        failed_result: failed.join()
-        if failed_result == {
+        if failed.join() == {
             .Err(error) -> { print(failure_label(error)) }
             .Ok(_) -> { print("wrong panic") }
         }
