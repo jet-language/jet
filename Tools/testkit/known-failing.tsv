@@ -108,9 +108,7 @@ tests/cases/compute_extended/f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle
 tests/cases/compute_parity/named_gradient_composes_into_second_derivative.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient (autodiff runtime tape waits on ballot)
 tests/cases/core_set_foundations/core_set_order_ownership_and_algebra_match_across_tiers.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/core_set_foundations/core_set_order_ownership_and_algebra_match_across_tiers.jet` yet:\nfrom_li
 tests/cases/core_set_foundations/core_set_public_carrier_keeps_backend_order_on_all_tiers.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/core_set_foundations/core_set_public_carrier_keeps_backend_order_on_all_tiers.jet` yet:\nrun [f
-tests/cases/corelib_parts_runtime/core_default_time_literal_binds_without_caller_units.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
-tests/cases/determinism/assume_deterministic_suppresses_e3403.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/devtools/devtools_bless_rejects_unknown_target.case	#5454	assert not satisfied: original assert! not satisfied: [false]
+tests/cases/devtools/devtools_bless_rejects_unknown_target.case	#5454	`jet self devtools bless … --dry-run` exits 2 with E2104 "`jet devtools` is not built yet"
 tests/cases/dsl_blocks/boundary_typed_heads_validate_and_compile.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/effect_roots/retired_flat_ffi_spellings_are_rejected_by_the_compiler.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -137,11 +135,10 @@ tests/cases/ownership/open_dynamic_trait_view_dispatch_is_rejected.case	#5454	as
 tests/cases/ownership/optional_constructor_payload_obeys_field_ownership.case	#5454	assert not satisfied: original expect_err not satisfied
 tests/cases/ownership/return_fallback_view_does_not_reach_the_enclosing_call.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/ownership/wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves.case	#5454	assert not satisfied: original expect not satisfied
-tests/cases/pure/pure_fn_inferred_owned_string_copy_compiles.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry.case	#5454	no "forked" line: `clock.copy()` shares the Manual timeline because the compiler's copy does not route through Clock.__fork (core_source_value_hook knows only Solver show/debug), so the fork's tick expires the original
-tests/cases/secrets_expiry/expiring_secret_loan_can_call_cross_file_read_helpers.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/secrets_expiry/expiring_secret_loan_can_call_read_helpers.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/secrets_expiry/expiring_secret_system_observation_is_not_pure.case	#5454	assert not satisfied: original assert! not satisfied: [false]
+tests/cases/secrets_expiry/expiring_secret_loan_can_call_cross_file_read_helpers.case	#5454	`jet check o1/run.jet` E0108 at `secret.with((borrowed) -> helper.inspect_key(borrowed))`: "This needs (VerifyKey) Never!, but the value is VerifyKey" against `with`'s `callback: fn(T) -> R Never!`
+tests/cases/secrets_expiry/expiring_secret_loan_can_call_read_helpers.case	#5454	`jet check o1/run.jet` E0108 at `secret.with((borrowed) -> inspect_key(borrowed))`: "This needs (VerifyKey) Never!, but the value is VerifyKey" against `with`'s `callback: fn(T) -> R Never!`
+tests/cases/secrets_expiry/expiring_secret_system_observation_is_not_pure.case	#5454	`jet check run.jet` E0112 refuses `&ExpiringSecret<crypto.SigningKey>` ("requires a secret type") though its own fix names `crypto.SigningKey`
 tests/cases/taskgroup_params/lexical_group_joins_anonymous_helper_spawn.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/taskgroup_params/lexical_group_joins_anonymous_helper_spawn.jet` yet:\nrun [function:lexical_gr
 tests/cases/collections_and_methods/list_remove_modes_and_surface_gaps.case	#5454	verify-intent: ref build failed: E0224 This call writes `xs`, but it has no `&` mark
 tests/cases/control_and_data/codable_union_distinct_member_uses_base_wire_shape.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/control_and_data/codable_union_distinct_member_uses_base_wire_shape.jet` yet:\nrun [functio
@@ -173,9 +170,9 @@ tests/cases/comptime_core_pure_parity/rustc_backed_rank_matches_aot_comptime_for
 tests/cases/comptime_core_pure_parity/rustc_backed_sequential_inline_hofs_match_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: closure method Partition
 tests/cases/comptime_core_pure_parity/rustc_backed_set_matches_aot_comptime_forced_interpreter_and_default_dev_fallback_exactly.case	#5454	ICE comptime.build unlowered: set builtin HashSet::clear
 tests/cases/comptime_core_pure_parity/time_plane_comptime_matches_aot_and_dev_tiers.case	#5454	ref build failed: E0003 A nested comptime-reachable function has no unique registered module owner
-tests/cases/corelib_parts_runtime/core_default_time_literal_ignores_caller_unit_of_same_name.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
-tests/cases/effects/retired_effect_marker_is_e0066.case	#5454	assert not satisfied: original assert_eq! not satisfied: [["E0081","E0003"],["E0066"]]
-tests/cases/taskgroup_params/taskgroup_cannot_escape_in_a_closure.case	#5454	assert not satisfied: original assert_eq! not satisfied: [["E0403"],["E1110","E0403"]]
+tests/cases/corelib_parts_runtime/core_default_time_literal_ignores_caller_unit_of_same_name.case	#5454	`local: 5ms` binds the prelude Duration, not the file's `#UnitFamily(Lag) { ms }` member, so `local.to_float()` is E0311 on Duration
+tests/cases/effects/retired_effect_marker_is_e0066.case	#5454	`calc: fn() #(FS) -> Int` stops in the parser with E0003/E0081 at `#`, so the retired effect marker never reaches the E0066 diagnostic
+tests/cases/taskgroup_params/taskgroup_cannot_escape_in_a_closure.case	#5454	`jet check o1/run.jet` reports only E1110 TaskOutsideGroup; the original also counts one FailureDomainMismatch
 tests/cases/comptime_core_pure_parity/public_transcript_covers_bag_methods_exactly.case	#5454	E0506 `Tally<TallyToken>` is not valid — `TallyToken` is not hashable
 tests/cases/comptime_core_pure_parity/public_transcript_covers_bits_methods_exactly.case	#5454	E0956 The comptime evaluator can't build this item's code yet: bits_view [function:main.bits_view]: runtime route JetBitSet::new
 tests/cases/comptime_core_pure_parity/public_transcript_covers_civil_and_measurement_value_methods_exactly.case	#5454	E0003 A nested comptime-reachable function has no unique registered module owner
