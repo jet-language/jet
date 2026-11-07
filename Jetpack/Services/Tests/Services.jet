@@ -122,6 +122,28 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     assert(files.is_file(services_supervisor_error_path(services_service_dir(dir, "fixture"))))
 }
 
+// A failed dependency stops its live dependents once, under the state lock; a
+// dependent started after that would never be stopped, so it is refused.
+#Test("a dependent whose dependency already failed is not started") {
+    dir: services_test_scratch("dependency-already-failed")
+    database_dir: services_service_dir(dir, "database")
+    files.create_dir_all(database_dir) ?? panic("database state dir")
+    services_write_lifecycle(database_dir, services_lifecycle_for(ServiceAuthority.Unsupported, 1, ServicePhase.Failed, "service exited unexpectedly", None, [String]{})) ?? panic("write database lifecycle")
+    plan := services_test_plan("api", "sleep 30")
+    plan.after = [String]{"database"}
+    env := services_test_env()
+    error: services_test_error_of(services_up_one(services_test_host(), dir, env, plan))
+    assert(error.contains("dependency `database` failed"), error)
+    api_dir: services_service_dir(dir, "api")
+    found: services_read_lifecycle(api_dir) ? present -> present ! failure -> panic("read lifecycle")
+    facts: found ?? panic("the refused dependent must retain lifecycle facts")
+    assert_eq(facts.phase, ServicePhase.Failed)
+    assert_eq(facts.recovery, "dependency-failed")
+    assert(!files.exists(services_pid_path(api_dir)))
+    supervisor: files.read(services_supervisor_error_path(api_dir)) ?? panic("read supervisor error")
+    assert_eq(supervisor, "dependency `database` failed")
+}
+
 #Test("up is idempotent") {
     dir: services_test_scratch("up-idempotent")
     plan: services_test_plan("fixture", "sleep 30")
