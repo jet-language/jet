@@ -358,7 +358,9 @@ use compiler: core.compiler
 `core.mod.load` loads a project-contained compiled Jet library under an explicit
 read grant. The provider validates the artifact, package boundary, and ABI
 before library code runs; the returned `Mod` owns its provider handle and
-releases it when dropped.
+releases it when dropped. The statically linked native runtime has no dynamic
+loader: it grants, reads, checks, digests and stages the library, then refuses
+to map it with `ModError.Unsupported`.
 
 ```jet
 use library: core.mod
