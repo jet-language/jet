@@ -26,32 +26,21 @@ JetCLICheckRecording: struct {
     target: String
 }
 
+// A check either replays its current receipt or runs; a run carries the
+// claim its outcome publishes, or None when it runs unrecorded.
 JetCLICheckReceiptStep: enum {
-    Skip
     Replay(output: JetDriverVerbOutput)
-    Record(recording: JetCLICheckRecording)
+    Run(recording: JetCLICheckRecording?)
 }
 
-// Rust `target_path`/`has_explicit_target` options whose next word is a value.
-JET_CLI_RECEIPT_VALUE_FLAGS: [String]{"-p", "--project", "--output", "--target", "--profile", "--builder", "--filter", "--edition", "--scope", "--kind", "--set", "--port", "--seed", "--iterations", "--time", "--corpus", "--lens", "--save", "--unsave", "--replay"}
-
-// The positional after the `check` verb, if the invocation names a target.
-jet_cli_check_receipt_target: fn(args: [String]) -> String? Never! {
-    skip_next := false
+// The positional after the `check` verb, if the invocation names a target:
+// the jet-owned words read as the front door reads them (jet_cli_positionals),
+// so the receipt claims the target the check compiles.
+jet_cli_check_receipt_target: fn(owned: [String]) -> String? Never! {
     verb_seen := false
-    loop arg in args {
-        if skip_next {
-            skip_next = false
-            next
-        }
-        if JET_CLI_RECEIPT_VALUE_FLAGS.contains(arg) {
-            skip_next = true
-            next
-        }
-        if arg == "--" -> break
-        if arg.starts_with("-") -> next
-        if verb_seen -> return Val(arg)
-        if arg == "check" -> verb_seen = true
+    loop word in jet_cli_positionals(owned) {
+        if verb_seen -> return Val(word.copy())
+        if word == "check" -> verb_seen = true
     }
     None
 }
@@ -269,10 +258,10 @@ jet_cli_check_receipt_current: fn(receipt: JetCLIReceipt, identity: [U8], paths:
 }
 
 // Rust `run_if_needed` up to the act: a `jet check` plan replays its current
-// receipt, or returns the claim its outcome publishes. Store failures are
+// receipt, or runs with the claim its outcome publishes. Store failures are
 // optional-history notices; the check then runs unrecorded.
 jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheckReceiptStep {
-    if cli_sys.get("JET_RECEIPT_BYPASS") != None -> return JetCLICheckReceiptStep.Skip
+    if cli_sys.get("JET_RECEIPT_BYPASS") != None -> return JetCLICheckReceiptStep.Run{recording: None}
     file := ""
     notice := ""
     if plan == {
@@ -280,21 +269,21 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
             file = found
             notice = written
         }
-        else -> return JetCLICheckReceiptStep.Skip
+        else -> return JetCLICheckReceiptStep.Run{recording: None}
     }
     // Rust `OutputFlags::parse(argv).verbose`: the flag, whatever the target.
     owned: jet_cli_owned_flags(args)
     verbose: owned.contains("--verbose") || owned.contains("-v")
     cwd: cli_sys.current_dir() ?? {
         jet_cli_write_notice(jet_cli_history_notice("resolving receipt working directory", jet_cli_io_error_text(err)))
-        return JetCLICheckReceiptStep.Skip
+        return JetCLICheckReceiptStep.Run{recording: None}
     }
     cache := WorkspaceDeclarationCache.new()
-    target: jet_cli_check_receipt_target(args)
+    target: jet_cli_check_receipt_target(owned)
     project_root: jet_cli_receipt_project_root(cache, jet_cli_parent(file) ?? cwd)
     context: jet_cli_receipt_context_identity("check", args, jet_cli_terminal_bits()) ?? {
         jet_cli_write_notice(jet_cli_history_notice("claiming a receipt", err.message))
-        return JetCLICheckReceiptStep.Skip
+        return JetCLICheckReceiptStep.Run{recording: None}
     }
     context_key: receipt_crypto.sha256(context).hex()
     identity := context
@@ -307,15 +296,15 @@ jet_cli_check_receipt_begin: fn(args: [String], plan: JetCLIPlan) -> JetCLICheck
         .None -> {}
         .Err(error) -> {
             jet_cli_write_notice(jet_cli_history_notice("reading a cached receipt", error.message))
-            return JetCLICheckReceiptStep.Skip
+            return JetCLICheckReceiptStep.Run{recording: None}
         }
     }
-    if paths.len() == 0 -> return JetCLICheckReceiptStep.Skip
+    if paths.len() == 0 -> return JetCLICheckReceiptStep.Run{recording: None}
     inputs: jet_cli_check_receipt_inputs(paths) ?? {
         jet_cli_write_notice(jet_cli_history_notice("claiming a receipt", err.message))
-        return JetCLICheckReceiptStep.Skip
+        return JetCLICheckReceiptStep.Run{recording: None}
     }
-    JetCLICheckReceiptStep.Record{recording: JetCLICheckRecording{project_root: project_root, context_key: context_key, identity: identity, inputs: inputs, argv: args, target: file}}
+    JetCLICheckReceiptStep.Run{recording: Val(JetCLICheckRecording{project_root: project_root, context_key: context_key, identity: identity, inputs: inputs, argv: args, target: file})}
 }
 
 // Each source a compile read, at the digest of the bytes it read; None when

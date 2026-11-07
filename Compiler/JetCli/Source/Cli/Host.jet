@@ -3081,8 +3081,7 @@ jet_cli_main: fn(args: [String]) -> Int {
             jet_cli_write_output(replayed)
             return replayed.exit_code
         }
-        .Record(claimed) -> recording = Val(claimed)
-        .Skip -> {}
+        .Run(claimed) -> recording = claimed
     }
     done: if jet_cli_plan_compiles(plan) -> jet_cli_compile_on_worker(plan, jet_cli_trace_flag(owned), recording) else -> jet_cli_execute(plan)
     output: jet_cli_json_outcome(jet_cli_wants_json(owned), done)
