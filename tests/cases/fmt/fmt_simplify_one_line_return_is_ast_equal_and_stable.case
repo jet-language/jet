@@ -12,30 +12,20 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt one/plain.jet
 exit: 0 # tests/fmt.rs:1161 plain format
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:1162-1169
-stdout: ~ "answer: fn() -> Int { return 42 }" # tests/fmt.rs:1162-1169
-stdout: !~ ":: 42" # tests/fmt.rs:1162-1169
+file: one/plain.jet ~ "answer: fn() -> Int { return 42 }" # tests/fmt.rs:1162-1169
+file: one/plain.jet !~ ":: 42" # tests/fmt.rs:1162-1169
 step: jet fmt --simplify one/simp.jet
 exit: 0 # tests/fmt.rs:1172-1174 simplify
-step: sh {work}/step-4.sh
-exit: 0 # tests/fmt.rs:1174 exact output
-stdout: = "answer: fn() -> Int { 42 }\n" # tests/fmt.rs:1174 exact output
+file: one/simp.jet = "answer: fn() -> Int { 42 }\n" # tests/fmt.rs:1174 exact output
 step: jet fmt --simplify --check one/simp.jet
 exit: 0 # tests/fmt.rs:1189-1190 second simplify pass is identical
 step: jet fmt --simplify one/wide.jet
 exit: 0 # tests/fmt.rs:1194-1195 wide simplify
-step: sh {work}/step-7.sh
-exit: 0 # tests/fmt.rs:1196-1199 wide body braced
-stdout: !~ " :: " # tests/fmt.rs:1196-1199 wide body braced
+file: one/wide.jet !~ " :: " # tests/fmt.rs:1196-1199 wide body braced
 step: jet fmt --simplify one/commented.jet
 exit: 0 # tests/fmt.rs:1202-1203 commented simplify
-step: sh {work}/step-9.sh
-exit: 0 # tests/fmt.rs:1204-1207 commented body braced
-stdout: !~ " :: 42" # tests/fmt.rs:1204-1207 commented body braced
+file: one/commented.jet !~ " :: 42" # tests/fmt.rs:1204-1207 commented body braced
 step: jet fmt --simplify one/nested.jet
 exit: 0 # tests/fmt.rs:1211-1212 nested commented simplify
-step: sh {work}/step-11.sh
-exit: 0 # tests/fmt.rs:1213-1220 nested body braced, comment kept
-stdout: ~ "// keep this note" # tests/fmt.rs:1213-1220 nested body braced, comment kept
-stdout: !~ " :: " # tests/fmt.rs:1213-1220 nested body braced, comment kept
+file: one/nested.jet ~ "// keep this note" # tests/fmt.rs:1213-1220 nested body braced, comment kept
+file: one/nested.jet !~ " :: " # tests/fmt.rs:1213-1220 nested body braced, comment kept

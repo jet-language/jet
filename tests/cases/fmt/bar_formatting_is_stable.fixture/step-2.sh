@@ -1,1 +1,0 @@
-cat bar/a.jet

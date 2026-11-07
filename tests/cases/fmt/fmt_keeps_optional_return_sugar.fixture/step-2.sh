@@ -1,1 +1,0 @@
-cat opt/a.jet

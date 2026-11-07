@@ -10,16 +10,12 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt bar/a.jet
 exit: 0 # tests/fmt.rs:321 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:323-325
-stdout: ~ ".Ready | .Waiting ->" # tests/fmt.rs:323-325
+file: bar/a.jet ~ ".Ready | .Waiting ->" # tests/fmt.rs:323-325
 step: jet fmt --check bar/a.jet
 exit: 0 # tests/fmt.rs:326-327 stable
 step: jet fmt bar/b.jet
 exit: 0 # tests/fmt.rs:330 formats
-step: sh {work}/step-5.sh
-exit: 0 # tests/fmt.rs:332
-stdout: ~ "bit_or(2)" # tests/fmt.rs:332
+file: bar/b.jet ~ "bit_or(2)" # tests/fmt.rs:332
 step: jet fmt --check bar/b.jet
 exit: 0 # tests/fmt.rs:337-338 stable
 step: jet fmt bar/c.jet

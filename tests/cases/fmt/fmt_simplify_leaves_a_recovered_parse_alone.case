@@ -10,9 +10,5 @@ step: jet fmt rec/broken_a.jet
 exit: 0 # tests/fmt.rs:1233 plain format of recovered source succeeds
 step: jet fmt --simplify rec/broken_b.jet
 exit: 0 # tests/fmt.rs:1234-1235 simplify succeeds
-step: sh {work}/step-3.sh
-exit: 0 # tests/fmt.rs:1236-1239 simplified == plain
-stdout: = "SAME\n" # tests/fmt.rs:1236-1239 simplified == plain
-step: sh {work}/step-4.sh
-exit: 0 # tests/fmt.rs:1240-1243
-stdout: !~ ":: 42" # tests/fmt.rs:1240-1243
+file: rec/broken_b.jet == rec/broken_a.jet # tests/fmt.rs:1236-1239 simplified == plain
+file: rec/broken_b.jet !~ ":: 42" # tests/fmt.rs:1240-1243

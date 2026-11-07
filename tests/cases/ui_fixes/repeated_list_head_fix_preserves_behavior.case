@@ -14,9 +14,7 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fix main/main.jet --dry-run
 exit: 0 # tests/ui_fixes.rs:309-320
-step: sh {work}/step-2.sh
-exit: 0 # tests/ui_fixes.rs:321-325 dry-run leaves source unchanged
-stdout: = repeated_list_head_fix_preserves_behavior-2.out # tests/ui_fixes.rs:321-325 dry-run leaves source unchanged
+file: main/main.jet = repeated_list_head_fix_preserves_behavior-2.out # tests/ui_fixes.rs:321-325 dry-run leaves source unchanged
 step: jet run main/main.jet
 exit: 0 # tests/ui_fixes.rs:331 before output
 stdout: = repeated_list_head_fix_preserves_behavior-3.out # tests/ui_fixes.rs:331 before output
@@ -25,11 +23,9 @@ exit: 0 # tests/ui_fixes.rs:332 before output
 stdout: = repeated_list_head_fix_preserves_behavior-4.out # tests/ui_fixes.rs:332 before output
 step: jet fix main/main.jet
 exit: 0 # tests/ui_fixes.rs:351-362
-step: sh {work}/step-6.sh
-exit: 0 # tests/ui_fixes.rs:363-366
-stdout: ~ "[LineItem]{" # tests/ui_fixes.rs:363-366
-stdout: ~ "// field comment stays with the first item" # tests/ui_fixes.rs:363-366
-stdout: ~ "// The second item keeps its position" # tests/ui_fixes.rs:363-366
+file: main/main.jet ~ "[LineItem]{" # tests/ui_fixes.rs:363-366
+file: main/main.jet ~ "// field comment stays with the first item" # tests/ui_fixes.rs:363-366
+file: main/main.jet ~ "// The second item keeps its position" # tests/ui_fixes.rs:363-366
 step: jet check main/main.jet
 exit: 0 # tests/ui_fixes.rs:369-373
 stderr: !~ "L0523" # tests/ui_fixes.rs:369-373
@@ -43,28 +39,20 @@ exit: 0 # tests/ui_fixes.rs:401 after output
 stdout: = repeated_list_head_fix_preserves_behavior-10.out # tests/ui_fixes.rs:401 after output
 step: jet fmt fmt/fmt.jet
 exit: 0 # tests/ui_fixes.rs:419-430
-step: sh {work}/step-12.sh
-exit: 0 # tests/ui_fixes.rs:431-437
-stdout: ~ "// field comment stays with the first item" # tests/ui_fixes.rs:431-437
-stdout: ~ "// The second item keeps its position" # tests/ui_fixes.rs:431-437
-stdout: !~ "[LineItem]{" # tests/ui_fixes.rs:431-437
+file: fmt/fmt.jet ~ "// field comment stays with the first item" # tests/ui_fixes.rs:431-437
+file: fmt/fmt.jet ~ "// The second item keeps its position" # tests/ui_fixes.rs:431-437
+file: fmt/fmt.jet !~ "[LineItem]{" # tests/ui_fixes.rs:431-437
 step: jet fix generic/generic.jet
 exit: 0 # tests/ui_fixes.rs:461-464
-step: sh {work}/step-14.sh
-exit: 0 # tests/ui_fixes.rs:463
-stdout: ~ "[Box<Int>]{" # tests/ui_fixes.rs:463
+file: generic/generic.jet ~ "[Box<Int>]{" # tests/ui_fixes.rs:463
 step: jet check generic/generic.jet
 exit: 0 # tests/ui_fixes.rs:465-472
 stderr: !~ "L0523" # tests/ui_fixes.rs:465-472
 step: jet fix fixed/fixed_shape.jet
 exit: 0 # tests/ui_fixes.rs:489-498 no growable-list edit
-step: sh {work}/step-17.sh
-exit: 0 # tests/ui_fixes.rs:491-498
-stdout: ~ "fixed: fn() -> [LineItem#2] {" # tests/ui_fixes.rs:491-498
-stdout: !~ "[LineItem#2]{" # tests/ui_fixes.rs:491-498
+file: fixed/fixed_shape.jet ~ "fixed: fn() -> [LineItem#2] {" # tests/ui_fixes.rs:491-498
+file: fixed/fixed_shape.jet !~ "[LineItem#2]{" # tests/ui_fixes.rs:491-498
 step: jet fix commented/commented.jet
 exit: 0 # tests/ui_fixes.rs:513-522 no edit when constructor comment
-step: sh {work}/step-19.sh
-exit: 0 # tests/ui_fixes.rs:516-522
-stdout: ~ "LineItem /* keep this constructor spelling */ {label" # tests/ui_fixes.rs:516-522
-stdout: !~ "[LineItem]{" # tests/ui_fixes.rs:516-522
+file: commented/commented.jet ~ "LineItem /* keep this constructor spelling */ {label" # tests/ui_fixes.rs:516-522
+file: commented/commented.jet !~ "[LineItem]{" # tests/ui_fixes.rs:516-522

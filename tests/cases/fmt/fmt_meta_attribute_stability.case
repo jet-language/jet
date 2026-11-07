@@ -9,10 +9,8 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet fmt run.jet
 exit: 0 # tests/fmt.rs:503 formats
-step: sh {work}/step-2.sh
-exit: 0 # tests/fmt.rs:504-510 needles present
-stdout: ~ "#Meta(category: \"Movement\", tunable)" # tests/fmt.rs:504-510 needles present
-stdout: ~ "step_speed: fn(speed: Int) -> Int {" # tests/fmt.rs:504-510 needles present
-stdout: ~ "stepped: speed + 1" # tests/fmt.rs:504-510 needles present
+file: run.jet ~ "#Meta(category: \"Movement\", tunable)" # tests/fmt.rs:504-510 needles present
+file: run.jet ~ "step_speed: fn(speed: Int) -> Int {" # tests/fmt.rs:504-510 needles present
+file: run.jet ~ "stepped: speed + 1" # tests/fmt.rs:504-510 needles present
 step: jet fmt --check run.jet
 exit: 0 # tests/fmt.rs:511-512 stable

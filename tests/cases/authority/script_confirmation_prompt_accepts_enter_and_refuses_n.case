@@ -12,13 +12,12 @@ exit: 0 # Enter: prompt shown, spawn runs
 stdout: ~ "spawn.jet will:" # Enter: prompt shown, spawn runs
 stdout: ~ "starts other programs" # Enter: prompt shown, spawn runs
 stdout: ~ "Run it? [Y/n/always]" # Enter: prompt shown, spawn runs
-step: sh {work}/step-2.sh
-exit: 0 # yes.txt created on Enter
+file: yes.txt exists # yes.txt created on Enter
+remove: yes.txt
 step: script -qec "jet run spawn/spawn.jet no.txt" /dev/null
 stdin: script_confirmation_prompt_accepts_enter_and_refuses_n.stdin-3.txt
 exit: 1 # n: exit 1 with prompt shown
 stdout: ~ "spawn.jet will:" # n: exit 1 with prompt shown
 stdout: ~ "starts other programs" # n: exit 1 with prompt shown
 stdout: ~ "Run it? [Y/n/always]" # n: exit 1 with prompt shown
-step: sh {work}/step-4.sh
-exit: 0 # no.txt absent on n
+file: no.txt absent # no.txt absent on n

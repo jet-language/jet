@@ -7,10 +7,16 @@ fixture: explicit_project_link_build_is_reproducible_and_content_sensitive.fixtu
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: sh {work}/step-1.sh
+step: cc -c native/answer.c -o native/answer.o
+cwd: left
+exit: 0 # left C object
+step: ar rcs native/libanswer.a native/answer.o
 cwd: left
 exit: 0 # left C archive
-step: sh {work}/step-2.sh
+step: cc -c native/answer.c -o native/answer.o
+cwd: right
+exit: 0 # right C object
+step: ar rcs native/libanswer.a native/answer.o
 cwd: right
 exit: 0 # right C archive
 step: jet run --release src/main.jet
@@ -27,10 +33,11 @@ env: NO_COLOR=1
 env: JET_RECEIPT_BYPASS=1
 exit: 0 # right link run
 stdout: = "42\n" # right link run
-step: sh {work}/step-5.sh
+copy: answer43.c left/native/answer.c
+step: cc -c native/answer.c -o native/answer.o
 cwd: left
-exit: 0 # rewrite archive source to 43
-step: sh {work}/step-6.sh
+exit: 0 # rebuild the C object
+step: ar rcs native/libanswer.a native/answer.o
 cwd: left
 exit: 0 # rebuild archive
 step: jet run --release src/main.jet
