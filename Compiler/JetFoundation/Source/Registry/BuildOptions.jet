@@ -321,10 +321,15 @@ build_option_join: fn(words: [String]) -> String Never! {
 // names them.
 JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir"}
 
+// The profile a compile selects when no `--profile` names one: every compile
+// request starts at it (JetDriverCompileRequest), and every record that names
+// the selected profile names it then.
+JET_BUILD_DEFAULT_PROFILE: "dev"
+
 // The options' identity in a cache key: the profile, then each resolved row
 // that shapes the image, then each `--set` setting value.
 build_options_key: fn(options: BuildOptions) -> String Never! {
-    out := if options.profile == "" -> "dev" else -> options.profile
+    out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
     loop choice in options.values {
         if !JET_BUILD_OPTIONS_UNKEYED.contains(choice.name) -> out = "{out};{choice.name}={choice.value}"
     }

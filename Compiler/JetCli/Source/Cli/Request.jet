@@ -1235,11 +1235,12 @@ JetCLIOverlay: struct {
 // policy-marked copy of the entry; nothing is written), traced through
 // `trace_sink`: the process's one sink, which `jet_cli_main` opens for
 // `build`, `run`, `check`, `test` and `emit` (`--trace`, JET_TRACE_FILE).
-// `settings` are the command line's `--set` writers (`jet check`).
-jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
+// `settings` are the command line's `--set` writers and `profile` the
+// `--profile` it selects ("" keeps the request's default; `jet check`).
+jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) -> overlays.push(JetCLIOverlay{path: file, source: replacement})
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -1328,11 +1329,11 @@ jet_cli_prepare_refusal: fn(what: String, fix: String, color: Bool) -> JetDriver
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
 // driver's phases.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(prepared, None, trace_sink, settings)
+    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -1345,8 +1346,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 
 // Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
 // records every comptime input file the compile reads (`embed_file`,
-// `embed_bytes`, `find`); `settings` are the `--set` writers.
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}) -> JetCLICompiled {
+// `embed_bytes`, `find`); `settings` are the `--set` writers; a non-empty
+// `profile` is the selected `--profile`.
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1355,6 +1357,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             // copy: the caller keeps its handle on the one shared log.
             selected.comptime_input_log = input_log.copy()
             selected.setting_overrides = settings
+            if profile != "" -> selected.profile = profile
             library_prefix: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()

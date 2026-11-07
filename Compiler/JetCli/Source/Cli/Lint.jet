@@ -1,5 +1,6 @@
 // Lint --complexity and the JSON-aware --a11y host.
 use {
+    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     cli_time: core.time
     jet_driver.[
         JetDriverVerbOutput,
@@ -88,7 +89,7 @@ jet_cli_lint_architecture: fn(file: String, color: Bool) -> JetCLIArchitectureIn
                 return JetCLIArchitectureInspection{rows: [], check: None, reason: Val("the checked semantic projection was unavailable; no architecture claim was emitted ({reasons.join("; ")})")}
             }
             if result.internal_problem == .Val(problem) -> return JetCLIArchitectureInspection{rows: [], check: None, reason: Val("the checked semantic projection was unavailable; no architecture claim was emitted ({problem})")}
-            return JetCLIArchitectureInspection{rows: jet_cli_architecture_rows(jet_cli_checked_semindex(result)), reason: None, check: Val(jet_cli_inspect_check_value(file, watch.elapsed_millis(), diagnostics.len()))}
+            return JetCLIArchitectureInspection{rows: jet_cli_architecture_rows(jet_cli_checked_semindex(result)), reason: None, check: Val(jet_cli_inspect_check_value(file, watch.elapsed_millis(), diagnostics.len(), JET_BUILD_DEFAULT_PROFILE))}
         }
     }
 }

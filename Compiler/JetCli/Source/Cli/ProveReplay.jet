@@ -859,7 +859,8 @@ jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, pro
     members: jet_cli_prove_members(target) ?? return Err(err)
     group: JetCLIProveGroup{entry: 0, diagnostics: [Diagnostic]{}, files: files, has_tests: true, sites: [JetCLIProveTestSite]{}, floor: None}
     base: jet_cli_prove_identity(target, members, [JetCLIProveGroup]{group}) ?? return Err(err)
-    selected: if profile == "" -> "dev" else -> profile
+    // copy: `base` is copied whole into `identity` below.
+    selected: if profile == "" -> base.profile.copy() else -> profile
     fields := [JetCLIProveField]{jet_cli_prove_field("mir", base.mir_hash), jet_cli_prove_field("profile", selected)}
     loop setting in settings -> fields.push(jet_cli_prove_field("set {setting.name}", setting.value))
     mir_hash: jet_cli_prove_digest("jet-record-mir-v1", fields)

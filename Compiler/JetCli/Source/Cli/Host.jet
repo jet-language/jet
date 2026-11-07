@@ -2,6 +2,7 @@
 // door, carry out its plan, and write the bytes. The process entry passes
 // argv without the program name and exits with the returned status.
 use {
+    jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     cli_files: core.files
     cli_process: core.process
     cli_sys: core.sys
@@ -198,18 +199,21 @@ jet_cli_errors: fn(diagnostics: [Diagnostic]) -> [Diagnostic] Never! {
 // (first-hour.md lesson 3). `finish` ends the process with the outcome once the
 // compile ran, skipping the teardown of its result.
 // `recording` publishes the outcome as the invocation's receipt before the
-// process ends (CheckReceipt.jet).
-jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
+// process ends (CheckReceipt.jet). `profile` is the `--profile` the compile
+// selects ("" for the default); the machine and verbose outcomes name it.
+jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String, trace_sink: JetCLITraceSink?, finish: Bool, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
     watch: cli_time.start()
+    // copy: `profile` still selects the compile below.
+    selected: if profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> profile.copy()
     if !project {
         if jet_cli_missing_project_context(file, source) == .Val(missing) {
-            if json -> return jet_cli_check_json_outcome(file, source, [Diagnostic]{missing}, watch.elapsed_millis())
+            if json -> return jet_cli_check_json_outcome(file, source, [Diagnostic]{missing}, watch.elapsed_millis(), selected)
             return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, [Diagnostic]{missing}, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
     }
     lacks_run: project && jet_cli_entry_lacks_callable(source, jet_cli_project_entry_callable(file))
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings)
+    compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, trace_sink, settings, profile)
     if compiled == {
         .Refused(refusal) -> output = refusal.move()
         .Compiled(result, snapshot) -> {
@@ -218,8 +222,8 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
             if jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None && result.rust_foreign.entries.len() > 0 {
                 if jet_cli_rust_foreign_check(result.rust_foreign, result.foreign_link) == .Err(error) -> diagnostics.push(jet_cli_rust_foreign_diagnostic(error))
             }
-            output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis()) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
-            if verbose && !project && !json && output.exit_code == JET_DRIVER_EXIT_OK -> output.stdout = jet_cli_inspect_check_text(file, watch.elapsed_millis(), diagnostics.len())
+            output = if json -> jet_cli_check_json_outcome(file, source, diagnostics, watch.elapsed_millis(), selected) else -> jet_driver_check_outcome(file, source, diagnostics, color, quiet)
+            if verbose && !project && !json && output.exit_code == JET_DRIVER_EXIT_OK -> output.stdout = jet_cli_inspect_check_text(file, watch.elapsed_millis(), diagnostics.len(), selected)
             // `emit_check_outcome`: a human check also prints each `#Todo` goal card (no candidates; `jet fill` checks those).
             if result.typed_goals && !json && !quiet && jet_cli_errors(diagnostics).len() == 0 && result.internal_problem == None {
                 if jet_cli_check_goal_cards(file, color) == {
@@ -243,10 +247,10 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
 // checks in project scope; its compile loads every other member, and a
 // failing member's errors are reported inline before its E0626. Each outcome
 // is written as it finishes; the exit status is the most severe one.
-jet_cli_check_workspace: fn(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, settings: [BuildSettingOverride], trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+jet_cli_check_workspace: fn(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool, settings: [BuildSettingOverride], profile: String, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     exit_code := JET_DRIVER_EXIT_OK
     loop index in 0..<files.len() {
-        output: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, settings, trace_sink, false)
+        output: jet_cli_compile_check(files[index], sources[index], color, quiet, threads, true, json, false, settings, profile, trace_sink, false)
         jet_cli_write_output(output)
         if output.exit_code > exit_code -> exit_code = output.exit_code
     }
@@ -355,8 +359,8 @@ jet_cli_test_member: fn(index: Int, argv: [String], env: [String]) -> JetCLITest
 // `diagnostics` status (exit 1); visible warnings alone are a passing one; a
 // clean explicit-file check is one passing `check` status carrying the
 // `jet.check/v1` fields, since every `--json` command answers with the
-// `jet.status/v1` object.
-jet_cli_check_json_outcome: fn(file: String, source: String, diagnostics: [Diagnostic], elapsed_ms: Int) -[FS, Env]> JetDriverVerbOutput Never! {
+// `jet.status/v1` object. `profile` is the profile the check compiled under.
+jet_cli_check_json_outcome: fn(file: String, source: String, diagnostics: [Diagnostic], elapsed_ms: Int, profile: String) -[FS, Env]> JetDriverVerbOutput Never! {
     base: jet_cli_report_base(file)
     errors: jet_cli_errors(diagnostics)
     if errors.len() > 0 {
@@ -369,7 +373,7 @@ jet_cli_check_json_outcome: fn(file: String, source: String, diagnostics: [Diagn
     if lints.len() > 0 {
         return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", true, base, file, source, lints), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    JetDriverVerbOutput{stdout: "{jet_cli_status_render("check", true, jet_cli_check_result_fields(file, elapsed_ms, diagnostics.len()))}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "{jet_cli_status_render("check", true, jet_cli_check_result_fields(file, elapsed_ms, diagnostics.len(), profile))}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 // Resolution's stderr notices (a migrated retired entry, `--show-default`)
@@ -3139,7 +3143,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -3162,13 +3166,13 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         .Done(done) -> output = done.move()
         .Refused(report, color, exit_code, notice) -> output = JetDriverVerbOutput{stdout: "", stderr: "{notice}{diagnostic_render_all("", "", [Diagnostic]{report}, color)}", exit_code: exit_code}
         .Diagnostics(file, source, report, color, notice) -> output = jet_cli_diagnostics_output(file, source, report, color, false, notice)
-        .Check(file, source, color, quiet, threads, project, notice, json, verbose, settings) -> {
+        .Check(file, source, color, quiet, threads, project, notice, json, verbose, settings, profile) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, trace_sink, true, recording)
+            output = jet_cli_compile_check(file, source, color, quiet, threads, project, json, verbose, settings, profile, trace_sink, true, recording)
         }
-        .CheckWorkspace(files, sources, color, quiet, threads, notice, json, settings) -> {
+        .CheckWorkspace(files, sources, color, quiet, threads, notice, json, settings, profile) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, trace_sink)
+            output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, trace_sink)
         }
         .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet) -> {
             jet_cli_write_notice(notice)

@@ -82,12 +82,13 @@ JetCLIPlan: enum {
     // it and renders the outcome, as machine reports when `json`. `verbose`
     // (`--verbose`/`-v` on an explicit-file `jet check`) adds the check's scope
     // and proof rows on stdout (first-hour.md lesson 3). `settings` are the
-    // `--set name=value` writers the compile folds (BuildFactChain.jet).
-    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool, verbose: Bool, settings: [BuildSettingOverride])
+    // `--set name=value` writers the compile folds (BuildFactChain.jet);
+    // `profile` is the `--profile` it compiles under ("" for the default).
+    Check(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, project: Bool, notice: String, json: Bool, verbose: Bool, settings: [BuildSettingOverride], profile: String)
     // `jet check` of a workspace root (no `-p`): the entry and bytes of each
     // member no other member depends on (Host.jet `jet_cli_check_workspace`),
-    // each compiled under the `--set` writers.
-    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride])
+    // each compiled under the `--set` writers and the `--profile`.
+    CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride], profile: String)
     // `jet build <file>`: the entry and its bytes; `options` are the build
     // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows; `json` reports its
@@ -863,7 +864,7 @@ jet_cli_jobs: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
     if jet_cli_resolve_bare_entry("jobs", directory, jet_cli_option_value(jet_argv, "-p"), false, color, notices) == {
         .Entry(entry) -> {
             planned: jet_cli_read_entry(entry.path, "jobs", color, quiet, threads, true, notices.join(""), json, false)
-            if planned == .Check(file, _, _, _, _, _, notice, _, _, _) -> return JetCLIPlan.Jobs{file: file, color: color, json: json, notice: notice}
+            if planned == .Check(file, _, _, _, _, _, notice, _, _, _, _) -> return JetCLIPlan.Jobs{file: file, color: color, json: json, notice: notice}
             return planned
         }
         .Refused(plan) -> return jet_cli_with_notices(notices, plan)
@@ -921,15 +922,15 @@ jet_cli_check_workspace_plan: fn(directory: String, color: Bool, quiet: Bool, th
     sources := [String]{}
     loop entry in entries {
         planned: jet_cli_read_entry(entry, "check", color, quiet, threads, true, notice, json, false)
-        if planned == .Check(file, source, _, _, _, _, _, _, _, _) {
+        if planned == .Check(file, source, _, _, _, _, _, _, _, _, _) {
             files.push(file)
             sources.push(source)
         } else {
             return Val(planned)
         }
     }
-    if files.len() == 1 -> return Val(JetCLIPlan.Check{file: files[0], source: sources[0], color: color, quiet: quiet, threads: threads, project: true, notice: notice, json: json, verbose: false, settings: [BuildSettingOverride]{}})
-    Val(JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: [BuildSettingOverride]{}})
+    if files.len() == 1 -> return Val(JetCLIPlan.Check{file: files[0], source: sources[0], color: color, quiet: quiet, threads: threads, project: true, notice: notice, json: json, verbose: false, settings: [BuildSettingOverride]{}, profile: ""})
+    Val(JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: [BuildSettingOverride]{}, profile: ""})
 }
 
 // Read the entry `jet_cli_check` chose (`run_native_execution` source read): an
@@ -944,12 +945,13 @@ jet_cli_read_entry: fn(file: String, command: String, color: Bool, quiet: Bool, 
         fix: if default_entry && jet_cli_has_manifest_above(parent) -> "create `run.jet` in the project, or run `jet {command} <file.jet>`" else -> "check the spelling, or run jet from the folder that contains it"
         return jet_cli_report_done(notice, "E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
-    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: [BuildSettingOverride]{}}
+    JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: [BuildSettingOverride]{}, profile: ""}
 }
 
-// `jet check` under its `--set name=value` writers (jet_cli_setting_flags):
-// the check compiles what `jet run` with the same writers would, so an
-// undeclared or conflicting writer is refused here too.
+// `jet check` under its `--set name=value` writers (jet_cli_setting_flags)
+// and its `--profile`: the check compiles what `jet run` with the same
+// writers and profile would, so an undeclared or conflicting writer, or a
+// profile no member declares, is refused here too (jet_cli_build_options).
 jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     settings := [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
@@ -958,17 +960,50 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     }
     planned: jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
     if planned == {
-        .Check(file, source, _, _, _, project, notice, _, verbose, _) -> JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: settings}
-        .CheckWorkspace(files, sources, _, _, _, notice, _, _) -> JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: settings}
+        .Check(file, source, _, _, _, project, notice, _, verbose, _, _) -> {
+            if jet_cli_check_profile(jet_argv, [String]{file}, [String]{source}, color) == {
+                .Refused(refusal) -> refusal.move()
+                // copy: `profile` is a payload view of the resolved name.
+                .Given(profile) -> JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: settings, profile: profile.copy()}
+            }
+        }
+        .CheckWorkspace(files, sources, _, _, _, notice, _, _, _) -> {
+            if jet_cli_check_profile(jet_argv, files, sources, color) == {
+                .Refused(refusal) -> refusal.move()
+                // copy: `profile` is a payload view of the resolved name.
+                .Given(profile) -> JetCLIPlan.CheckWorkspace{files: files, sources: sources, color: color, quiet: quiet, threads: threads, notice: notice, json: json, settings: settings, profile: profile.copy()}
+            }
+        }
         else -> planned
     }
+}
+
+JetCLICheckProfile: enum {
+    Given(profile: String)
+    Refused(plan: JetCLIPlan)
+}
+
+// The `--profile` a check compiles under, resolved against each checked
+// file's package as `jet run` resolves it: "" when none is named or it is the
+// stock `debug`, else the refusal of a profile a package does not declare.
+jet_cli_check_profile: fn(jet_argv: [String], files: [String], sources: [String], color: Bool) -[FS, Env]> JetCLICheckProfile Never! {
+    if jet_cli_profile_name(jet_argv) == "" -> return JetCLICheckProfile.Given{profile: ""}
+    profile := ""
+    loop (index, file) in files {
+        if jet_cli_build_options(jet_argv, "check", file, sources[index], color, true) == {
+            .Refused(refusal) -> return JetCLICheckProfile.Refused{plan: refusal.move()}
+            // copy: `options` is a payload view of the resolved options.
+            .Selected(options, _) -> profile = options.profile.copy()
+        }
+    }
+    JetCLICheckProfile.Given{profile: profile}
 }
 
 // `jet doc [<file>]`: the entry resolves as `jet check` resolves it.
 jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, json: Bool, check: Bool) -[FS, Env]> JetCLIPlan Never! {
     entry: jet_cli_check(jet_argv, args, "doc", color, quiet, None, json)
     if entry == {
-        .Check(file, source, _, _, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
+        .Check(file, source, _, _, _, _, _, _, _, _, _) -> return JetCLIPlan.Doc{file: file, source: source, color: color, json: json, check: check}
         else -> {}
     }
     entry
@@ -1365,7 +1400,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
                 if (found.callable ?? "") == "build" || jet_cli_package_declares_build_entry(found.path) -> return JetCLIPlan.BuildPackage{file: found.path, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notices.join(""), locked: None}
                 if (passthrough ?? [String]{}).len() > 0 -> return jet_cli_build_args_refused(found.path, color)
                 planned: jet_cli_read_entry(found.path, "build", color, quiet, threads, false, notices.join(""), json, false)
-                if planned == .Check(file, source, _, _, _, _, notice, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet}
+                if planned == .Check(file, source, _, _, _, _, notice, _, _, _, _) -> return JetCLIPlan.Build{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, json: json, sbom: jet_argv.contains("--sbom"), quiet: quiet}
                 return planned
             }
             .Refused(plan) -> return jet_cli_with_notices(notices, plan)
@@ -1374,7 +1409,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
     }
     entry: jet_cli_check(jet_argv, args, "build", color, quiet, threads, json)
     if entry == {
-        .Check(file, source, _, _, _, _, notice, _, _, _) -> {
+        .Check(file, source, _, _, _, _, notice, _, _, _, _) -> {
             // A file whose package declares `build: fn(b: Build)`, in it, in another
             // source file or in `package.jet`, builds through it.
             if jet_cli_declares_build_entry(source) || jet_cli_package_declares_build_entry(file) -> return JetCLIPlan.BuildPackage{file: file, color: color, options: build_options_stock("build"), build_args: passthrough ?? [String]{}, threads: threads, invocation: invocation, notice: notice, locked: None}
@@ -1445,7 +1480,7 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
     command: if watch -> "dev" else -> "run"
     entry: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
     if entry == {
-        .Check(file, source, _, _, _, _, notice, _, _, _) -> {
+        .Check(file, source, _, _, _, _, notice, _, _, _, _) -> {
             // A web-targeted program builds browser artifacts; only an
             // explicit `--target` asks for a native run of it. A full-stack
             // App entry is a server, and `jet run` serves it.

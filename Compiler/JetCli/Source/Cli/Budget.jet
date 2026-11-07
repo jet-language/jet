@@ -125,12 +125,14 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
     if prepared == {
         .Refused(output) -> return output.move()
         .Prepared(request, snapshot) -> {
+            // copy: the request moves into the projection below.
+            profile: request.profile.copy()
             projection: jet_driver_budget_projection(request.move())
             diagnostics: jet_driver_present_diagnostics(projection.compile.diagnostics, snapshot, projection.compile.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 -> return jet_cli_budget_compiler_failure(options, entry, diagnostics, color)
             if projection.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
             loop spec in projection.budget_specs {
-                if !jet_cli_budget_applies(spec) -> next
+                if !jet_cli_budget_applies(spec, profile) -> next
                 kind: sema_budget_provider_kind(spec.provider)
                 return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
             }
@@ -141,14 +143,24 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
                     sources.push(JetCLIBudgetSource{path: file.path.removeprefix(prefix), sha256: budget_crypto.sha256(file.source.bytes()).hex()})
                 }
             }
-            return jet_cli_budget_check(options, root, entry, sources, measured_start, color)
+            return jet_cli_budget_check(options, root, entry, sources, measured_start, profile, color)
         }
     }
 }
 
-// Rust `applicable(spec, "native", "dev")`.
-jet_cli_budget_applies: fn(spec: BudgetSpec) -> Bool Never! {
-    jet_cli_budget_axis_applies(spec.applicability.targets, "native", "Native") && jet_cli_budget_axis_applies(spec.applicability.profiles, "dev", "Dev")
+// Rust `applicable(spec, "native", profile)`: `profile` is the one the
+// measured compile selected.
+jet_cli_budget_applies: fn(spec: BudgetSpec, profile: String) -> Bool Never! {
+    jet_cli_budget_axis_applies(spec.applicability.targets, "native", "Native") && jet_cli_budget_axis_applies(spec.applicability.profiles, profile, jet_cli_budget_title(profile))
+}
+
+// `word` with its first ASCII letter upper-cased: the spelling a budget's
+// applicability writes a profile or target variant in (`Dev`, `Native`).
+jet_cli_budget_title: fn(word: String) -> String Never! {
+    bytes := word.bytes()
+    if bytes.len() > 0 && bytes[0] >= 97 && bytes[0] <= 122 -> bytes[0] = bytes[0] - 32
+    // copy: an unchanged word when its bytes are not text.
+    String.from_bytes(bytes) ?? word.copy()
 }
 
 jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String) -> Bool Never! {
@@ -162,10 +174,10 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
 }
 
 // The report of a check with no applicable budget: no measurement, a pass
-// summary, published immutably.
-jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, sources: [JetCLIBudgetSource], measured_start: String, color: Bool) -> JetDriverVerbOutput {
+// summary, published immutably. `profile` is the measured compile's.
+jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
     toolchain: jet_cli_budget_toolchain(entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
-    subject: jet_cli_budget_subject(root, sources, measured_start, jet_cli_rfc3339(cli_time.unix_ns()))
+    subject: jet_cli_budget_subject(root, sources, measured_start, jet_cli_rfc3339(cli_time.unix_ns()), profile)
     evidence_id: perf_stable_id(perf_report_object_new([CanonicalJSONField]{
         CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array([CanonicalJSON]{})},
         CanonicalJSONField{key: "subject", value: subject.copy()},
@@ -222,8 +234,8 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
     JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// Rust `subject`: the measured member sources, sorted, and the target.
-jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String) -> CanonicalJSON {
+// Rust `subject`: the measured member sources, sorted, the profile, and the target.
+jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String, profile: String) -> CanonicalJSON {
     ordered := sources
     ordered = loop fresh in ordered -> fresh
     ordered.sort_by((left: JetCLIBudgetSource, right: JetCLIBudgetSource) -> if left.path == right.path -> left.sha256 <=> right.sha256 else -> left.path <=> right.path)
@@ -237,7 +249,7 @@ jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured
         CanonicalJSONField{key: "measured_end", value: CanonicalJSON.String(measured_end)},
         CanonicalJSONField{key: "measured_start", value: CanonicalJSON.String(measured_start)},
         CanonicalJSONField{key: "member_sources", value: CanonicalJSON.Array(members)},
-        CanonicalJSONField{key: "profile", value: CanonicalJSON.String("dev")},
+        CanonicalJSONField{key: "profile", value: CanonicalJSON.String(profile)},
         CanonicalJSONField{key: "target_class", value: CanonicalJSON.String("native")},
         CanonicalJSONField{key: "target_id", value: CanonicalJSON.String(target_id)},
         CanonicalJSONField{key: "target_triple", value: CanonicalJSON.String(jet_cli_host_triple(cli_sys.arch(), cli_sys.name()))},
