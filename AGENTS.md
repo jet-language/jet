@@ -330,18 +330,18 @@ in one pass:
 - **Expensive launches are gated, never bypassed.** A stage0, self-hosting
   chain, release build or any other run costing more than about 15 minutes
   starts only after a clean collect-all preflight of that exact commit:
-  `Tools/agent/land/census-snap.sh` (the seed's keep-going `jet check` and
+  `jet Tools/agent/Land.jet census` (the seed's keep-going `jet check` and
   `jet build` of the compiler, the runtime pack and the self-check, every row
-  of every phase in one report; the lander runs it through `precommit.sh`
-  before every compiler commit) and `Tools/agent/chain/chain.sh TREE LEVEL
-  --dry-run`, which names every stage the launch would build. Every row is
-  clean or carries a written disposition naming the commit in this launch that
-  fixes it. Launching to "see what fails next" is forbidden. The launchers
-  enforce it: a clean census writes the snapshot's receipt
-  (`Tools/agent/land/preflight-receipt.mjs`, keyed on the compiler source
-  identity and the seed), and `chain.sh` full, `release-compiler.mjs` and
-  `publish-release.mjs build` refuse to start without the receipt for their
-  tree and seed; `--check-gate` gives the answer without launching.
+  of every phase in one report; the lander runs it through `Land.jet
+  precommit` before every compiler commit) and `Tools/agent/chain/chain.sh
+  TREE LEVEL --dry-run`, which names every stage the launch would build. Every
+  row is clean or carries a written disposition naming the commit in this
+  launch that fixes it. Launching to "see what fails next" is forbidden. The
+  launchers enforce it: a clean census writes the snapshot's receipt
+  (`Land.jet receipt`, keyed on the compiler source identity and the seed),
+  and `chain.sh` full, `release-compiler.mjs` and `publish-release.mjs build`
+  refuse to start without the receipt for their tree and seed; `--check-gate`
+  gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census

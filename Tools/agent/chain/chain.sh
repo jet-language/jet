@@ -13,7 +13,7 @@
 #       --auto picks LEVEL from the paths TREE changes against its base and prints why.
 #       --dry-run prints the level, the stage keys it can resolve and which stages the store holds; builds nothing.
 #       full and full+threads (self-hosting) start only with TREE's collect-all preflight receipt for the seed
-#       (Tools/agent/land/preflight-receipt.mjs, written by census-snap.sh); --check-gate says which and stops.
+#       (`Tools/agent/Land.jet receipt`, written by `Land.jet census`); --check-gate says which and stops.
 #       Output (default TREE/.chain): RESULT (TSV: stage status rc wall_s peak_rss_mb sha256 key note; last row
 #       `verdict`), REPORT.md, s1/ s2/ s3/ t1/ (jet [+ jet.o], jet-runtime/ beside it), logs/, keys/.
 #
@@ -38,6 +38,9 @@ SELF=$HERE/chain.sh
 LIB=$HERE/chain-lib.mjs
 SLOT=$HERE/build-slot.sh
 NR=$HERE/norust.sh
+TOOLS=$(cd "$HERE/../../.." && pwd)
+# tool FILE ARG...: the Jet tool Tools/agent/FILE of this checkout, run by the seed.
+tool() { (cd "$TOOLS" && JET_COMPILER_IDENTITY=$CID JET_TOOLCHAIN_ROOT=$TOOLS "$SEED/jet" "Tools/agent/$1" "${@:2}"); }
 REPO=$JET_DEV_WORKTREE
 SEEDS=$JET_SEEDS
 R14=$JET_SCRATCH_ROOT/discovery/r14
@@ -196,7 +199,7 @@ build_stage() {
   SHA[$n]=$(sha "$OUT/$n/jet")
   # #5662: a seed without the census fix installs keep-going `todo` traps with no row; the binary tells.
   local traps=0
-  node "$HERE/trapscan.mjs" "$OUT/$n/jet" > "$LOGS/$n-traps.txt"
+  tool Chain.jet trapscan "$OUT/$n/jet" > "$LOGS/$n-traps.txt"
   case $? in 0) ;; 1) traps=$(wc -l < "$LOGS/$n-traps.txt") ;; *) traps=scan-failed ;; esac
   if [ "$rc" = 0 ] && [ "$rows" = 0 ] && [ "$traps" = 0 ]; then
     printf '%s\n' "stage=$n" "kind=build" "sha256=${SHA[$n]}" "wall_s=$w" "rss_mb=$r" "lane=$(lane_of)" "tree=$TREE" "${mat[@]}" | store_put "$k" build "$OUT/$n"
@@ -326,7 +329,7 @@ fi
 # relaunch under build-slot.sh passed the gate already.
 if [ -n "$GATE" ] || [ -z "$DRY$INNER" ]; then
   case $LEVEL in
-    full|full+threads) node "$HERE/../land/preflight-receipt.mjs" check chain.sh "$TREE" "$SEED" || exit 2;;
+    full|full+threads) tool Land.jet receipt check chain.sh "$TREE" "$SEED" || exit 2;;
     *) [ -n "$GATE" ] && echo "chain.sh: level $LEVEL is ungated (full and full+threads need a preflight receipt)";;
   esac
   [ -n "$GATE" ] && exit 0

@@ -5,7 +5,7 @@
 //   node Tools/agent/publish-release.mjs build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)
 //
 // build starts only with COMMIT's collect-all preflight receipt for the seed DIR
-// (Tools/agent/land/preflight-receipt.mjs, written by census-snap.sh); --check-gate says whether it
+// (`Tools/agent/Land.jet receipt`, written by `Land.jet census`); --check-gate says whether it
 // would start and stops. It exports COMMIT (it must be on dev) and runs the bootstrap chain of
 // Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on PATH: the seed builds
 // s1, s1 packs its runtime and builds s2, s2 packs its runtime and builds s3, and s2 and s3 must
@@ -31,8 +31,7 @@ import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, re
 import { machinePersonalInfo } from '../tower/app/personal-info.mjs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MUSL_DEFAULT, NORUST, SEED_FILES, STACK, fileHashes, linkCompilerAliases, sha256File, sumsOf } from './release-compiler.mjs';
-import { commitSourceIdentity, gate, refusal } from './land/preflight-receipt.mjs';
+import { MUSL_DEFAULT, NORUST, SEED_FILES, STACK, fileHashes, linkCompilerAliases, preflightGate, sha256File, sumsOf } from './release-compiler.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const REPO = resolve(dirname(SCRIPT), '../..');
@@ -132,13 +131,13 @@ function build(options) {
     const seedIdentity = readFileSync(join(seed, 'IDENTITY'), 'utf8').trim();
     const [version, seedSha] = seedIdentity.split('#');
     if (!/^jet@\S+$/.test(version) || seedSha !== sha256File(join(seed, 'jet'))) return fail(2, `seed IDENTITY ${seedIdentity} does not name the seed's jet (sha256 ${sha256File(join(seed, 'jet')).slice(0, 16)})`);
-    const admission = gate(commitSourceIdentity(REPO, sha), seedIdentity);
+    const admission = preflightGate('publish-release', seed, sha);
     if (!admission.admitted) {
-        process.stderr.write(`${refusal('publish-release', admission.reason, seed, sha)}\n`);
+        process.stderr.write(`${admission.text}\n`);
         return 2;
     }
     if (options.checkGate) {
-        process.stdout.write(`publish-release: admitted by ${admission.reason}\n`);
+        process.stdout.write(`${admission.text}\n`);
         return 0;
     }
     const musl = process.env.JET_PACK_MUSL_LIB || MUSL_DEFAULT;

@@ -2,7 +2,7 @@
 # batch-land.sh <list file>: land many lane patches with ONE verification (collect-all).
 # List lines: <lane>\t<abs msg file>\t<abs patch file>, in dependency order.
 # Under the commit lock: apply each patch that still applies (cumulative), regenerate the runtime stop
-# exports, run precommit.sh once on every touched path, then commit each patch as its own commit (plus
+# exports, run `Land.jet precommit` once on every touched path, then commit each patch as its own commit (plus
 # one commit for regenerated files). On precommit failure: revert exactly what was applied. Report:
 # $JET_RUN_ROOT/batch-land.log. Roots: Tools/agent/roots.sh; the batch lands on $JET_DEV_WORKTREE.
 # Stacks: a lane's patches in one list are a stack (each may build on the ones before it). Once one of them
@@ -79,7 +79,7 @@ say "RuntimeGenerators rc=$grc $(printf '%s' "$gen" | tail -2 | tr '\n' ' ')"
 declare -A inbatch=(); for f in "${all[@]}"; do [ -n "$f" ] && inbatch[$f]=1; done
 mapfile -t genfiles < <(git status --porcelain --untracked-files=no | awk '{print $2}' | while read -r f; do [ -n "${inbatch[$f]+x}" ] || echo "$f"; done)
 say "regenerated: ${genfiles[*]:-none}"
-res=$(bash "$M/precommit.sh" "${all[@]}" "${genfiles[@]}" 2>&1); prc=$?
+res=$(JET_COMPILER_IDENTITY="$(awk 1 "$JET_SEED/IDENTITY")" JET_TOOLCHAIN_ROOT="$PWD" "$JET_SEED/jet" Tools/agent/Land.jet precommit "${all[@]}" "${genfiles[@]}" 2>&1); prc=$?
 printf '%s\n' "$res" | grep -vE '^nm: |^skip ' | tail -25 | tee -a "$LOG"
 if [ $prc -ne 0 ]; then say "PRECOMMIT FAILED for the batch; reverting"; revert_all; exit 5; fi
 # Jobs whose patches share a file cannot be committed separately (staging a whole file takes the other job's

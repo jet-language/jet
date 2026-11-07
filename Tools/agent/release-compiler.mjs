@@ -6,8 +6,8 @@
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
 // $JET_SEEDS, Tools/agent/roots.mjs). The run starts only with COMMIT's collect-all preflight
-// receipt for the current release (Tools/agent/land/preflight-receipt.mjs, written by
-// census-snap.sh); --check-gate says whether it would start and stops. The tool runs every check and
+// receipt for the current release (`Tools/agent/Land.jet receipt`, written by `Land.jet census`);
+// --check-gate says whether it would start and stops. The tool runs every check and
 // reports all of them; it does not stop at the first failure:
 //   chain     chain.sh builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             under norust.sh, and must reach the fixed point (s2 == s3).
@@ -69,7 +69,6 @@ import {
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { commitSourceIdentity, gate, refusal } from './land/preflight-receipt.mjs';
 import { seedsRoot, stateRoot } from './roots.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -94,6 +93,20 @@ export function shardPool(options, shards, slotMemory = process.env.SLOT_MEMORY_
     const pool = [`--memory=${Math.max(1, Math.floor(gib / shards))}G`];
     if (options.jobs > 0) pool.push(`--jobs=${options.jobs}`);
     return pool;
+}
+
+// The preflight gate (`Land.jet receipt commit`, run by the seed in `seedDir`): is a launch of
+// COMMIT `sha` by that seed admitted by a receipt? `text` is the admission line, or the refusal
+// that names the census to run.
+export function preflightGate(launcher, seedDir, sha) {
+    let identity = '';
+    try { identity = readFileSync(join(seedDir, 'IDENTITY'), 'utf8').trim(); } catch { return { admitted: false, text: `${launcher}: seed ${seedDir} has no IDENTITY` }; }
+    const run = spawnSync(join(seedDir, 'jet'), ['Tools/agent/Land.jet', 'receipt', 'commit', launcher, REPO, sha, seedDir], {
+        cwd: REPO, encoding: 'utf8', maxBuffer: 16 << 20,
+        env: { ...process.env, JET_COMPILER_IDENTITY: identity, JET_TOOLCHAIN_ROOT: REPO },
+    });
+    const text = `${run.stdout ?? ''}${run.stderr ?? ''}`.trim() || `${launcher}: the preflight gate did not run (${run.error?.message ?? `exit ${run.status}`})`;
+    return { admitted: run.status === 0, text };
 }
 
 // ---- pure helpers (release-compiler.test.mjs) ----
@@ -368,7 +381,7 @@ function preconditions(options) {
     }
     if (workRoot === seeds || workRoot.startsWith(`${seeds}/`)) errors.push('the work root must be outside the seeds directory');
     // The preflight gate, once the run could otherwise start: COMMIT's receipt from a census by the current release.
-    const admission = errors.length ? null : gate(commitSourceIdentity(REPO, sha), release.identity);
+    const admission = errors.length ? null : preflightGate('release-compiler', release.dir, sha);
     return { errors, seeds, workRoot, chain, musl, sha, release, dispositions, admission };
 }
 
@@ -852,11 +865,11 @@ async function main() {
         return 2;
     }
     if (!pre.admission.admitted) {
-        process.stderr.write(`${refusal('release-compiler', pre.admission.reason, pre.release.dir, pre.sha)}\n`);
+        process.stderr.write(`${pre.admission.text}\n`);
         return 2;
     }
     if (options.checkGate) {
-        process.stdout.write(`release-compiler: admitted by ${pre.admission.reason}\n`);
+        process.stdout.write(`${pre.admission.text}\n`);
         return 0;
     }
     let lock = '';
