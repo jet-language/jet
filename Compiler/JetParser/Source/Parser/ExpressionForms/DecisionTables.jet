@@ -67,10 +67,13 @@ parser_expression_form_error: fn(state: &JetParserState, code: String, span: Spa
 }
 
 // A direct control statement cannot be a value arm. Decide that from tokens
-// before callable-tail speculation; recursively reparsing such guard tables
-// as values and then statements makes a balanced table exponentially costly.
-// Braced control arms still participate in ordinary value parsing.
-parser_guard_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
+// before callable-tail speculation; recursively reparsing such tables as
+// values and then statements makes a balanced table exponentially costly, and
+// a statement table read as a value would take the next line's leading `-`
+// as a subtraction. This covers guard tables (`if {`) and dispatch tables
+// (`if subject == {`). Braced control arms still participate in ordinary
+// value parsing.
+parser_if_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
     // Unlike cursor queries, this lexical probe must not normalize state.
     if state.pending_type_gt || state.position < 0 -> return false
     index := state.position
@@ -78,7 +81,11 @@ parser_guard_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
     if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_KW_IF -> return false
     index += 1
     loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
-    if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_LBRACE -> return false
+    if index >= state.tokens.len() -> return false
+    if state.tokens[index].kind != TOKEN_LBRACE {
+        index = parser_dispatch_table_open(state, index)
+        if index < 0 -> return false
+    }
     index += 1
     braces := 1
     parens := 0
@@ -106,9 +113,35 @@ parser_guard_table_has_statement_arm: fn(state: JetParserState) -> Bool Never! {
     false
 }
 
+// The token index of a dispatch table's `{` (`if subject == {`), scanning the
+// subject from `start`; -1 when the `if` has no dispatch table.
+parser_dispatch_table_open: fn(state: JetParserState, start: Int) -> Int Never! {
+    index := start
+    parens := 0
+    brackets := 0
+    loop index < state.tokens.len() {
+        kind: state.tokens[index].kind
+        if kind == TOKEN_EOF -> return -1
+        if parens == 0 && brackets == 0 {
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_LBRACE || kind == TOKEN_UNIFIED_ARROW -> return -1
+            if kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_LT || kind == TOKEN_LE || kind == TOKEN_GT || kind == TOKEN_GE {
+                open := index + 1
+                loop open < state.tokens.len() && parser_is_trivia(state.tokens[open].kind) -> open += 1
+                if open < state.tokens.len() && state.tokens[open].kind == TOKEN_LBRACE -> return open
+            }
+        }
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+        index += 1
+    }
+    -1
+}
+
 parser_expression_form_if_ahead: fn(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(state) != TOKEN_KW_IF -> return false
-    if parser_kind_at(state, 1) == TOKEN_LBRACE -> return !parser_guard_table_has_statement_arm(state)
+    if parser_kind_at(state, 1) == TOKEN_LBRACE -> return !parser_if_table_has_statement_arm(state)
     offset := 1
     parens := 0
     brackets := 0
@@ -129,7 +162,7 @@ parser_expression_form_if_ahead: fn(state: &JetParserState) -> Bool Never! {
         if parens == 0 && brackets == 0 && braces == 0 {
             if kind == TOKEN_UNIFIED_ARROW -> return true
             if kind == TOKEN_EQ_EQ || kind == TOKEN_NOT_EQ || kind == TOKEN_LT || kind == TOKEN_LE || kind == TOKEN_GT || kind == TOKEN_GE {
-                if parser_kind_at(state, offset + 1) == TOKEN_LBRACE -> return true
+                if parser_kind_at(state, offset + 1) == TOKEN_LBRACE -> return !parser_if_table_has_statement_arm(state)
             }
         }
         offset += 1
@@ -356,7 +389,7 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int, resul
         // tried as the branch value and kept when it parses cleanly; any
         // other line, or a failed try, is an ordinary statement.
         before: state.position
-        if !parser_guard_table_has_statement_arm(state) && parser_value_tail_ahead(state) {
+        if !parser_if_table_has_statement_arm(state) && parser_value_tail_ahead(state) {
             saved_position: state.position
             saved_diagnostics: state.diagnostics.len()
             saved_blocks: state.block_spans.len()
@@ -394,8 +427,18 @@ parser_expression_form_value_block: fn(state: &JetParserState, depth: Int, resul
     }
 }
 
+// A `return` or `break` arm leaves the table: its control statement is the
+// branch body and the branch has no value, as a braced exiting branch. A
+// `next` arm parses as a name, which may be a local called `next`; sema
+// reads it as the loop-control word when no such name is in scope.
 parser_expression_form_selected_value: fn(state: &JetParserState, depth: Int) -> ParserExpressionFormValueBranch {
     if parser_current_kind(state) == TOKEN_LBRACE -> return parser_expression_form_value_block(state, depth + 1, false)
+    if parser_current_kind(state) == TOKEN_RETURN || parser_current_kind(state) == TOKEN_BREAK {
+        start: parser_current(state).span
+        control: parser_parse_statement(state)
+        end: parser_prev_token_end(state)
+        return ParserExpressionFormValueBranch{body: [Stmt]{control}, value: Expr.NoElse{span: Span{start: end, end: end}, id: parser_node_id(state)}, span: Span{start: start.start, end: end}}
+    }
     value: parser_parse_expression(state, 1, depth + 1)
     ParserExpressionFormValueBranch{body: [Stmt]{}, value: value.expr, span: value.span}
 }

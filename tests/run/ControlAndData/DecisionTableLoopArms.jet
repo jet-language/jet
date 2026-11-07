@@ -1,0 +1,72 @@
+// Loop control and early returns as decision-table arms, and loop conditions
+// that bind a pattern: `next` and `break` as value-table arms, `return
+// Err(...)` as an arm of a statement table and of a value table, and
+// `loop xs.pop() == .Val(x)`, re-tested before every pass.
+#Error
+Problem: enum {
+    Negative(Int)
+}
+
+check: fn(n: Int) -> Int Problem! {
+    if {
+        n < 0 -> return Err(Problem.Negative(n))
+        else -> {}
+    }
+    Ok(n * 2)
+}
+
+halve: fn(n: Int) -> Int Problem! {
+    kept: if {
+        n < 0 -> return Err(Problem.Negative(n))
+        else -> n /% 2
+    }
+    Ok(kept)
+}
+
+value_arms: fn() {
+    total := 0
+    loop n in 0..<6 {
+        kept: if {
+            n % 2 == 0 -> next
+            else -> n
+        }
+        total += kept
+    }
+    print("odd sum {total}")
+    picked := 0
+    loop n in 0..<10 {
+        step: if n == {
+            1 -> next
+            7 -> break
+            else -> n * 10
+        }
+        picked += step
+    }
+    print("picked {picked}")
+}
+
+binding_conditions: fn() {
+    items := [Int]{3, 1, 2, 5}
+    seen := 0
+    loop items.pop() == .Val(item) {
+        if item == 1 -> next
+        seen += item
+    }
+    print("seen {seen} left {items.len()}")
+    words := [String]{"a", "stop", "b"}
+    found := 0
+    loop words.pop() == .Val(word) {
+        if word == "stop" -> break
+        found += 1
+    }
+    print("found {found} left {words.len()}")
+}
+
+run: fn() {
+    value_arms()
+    print("{check(4) ?? -1}")
+    print("{check(-3) ?? -1}")
+    print("{halve(8) ?? -1}")
+    print("{halve(-8) ?? -1}")
+    binding_conditions()
+}

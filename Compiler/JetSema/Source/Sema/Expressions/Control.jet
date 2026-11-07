@@ -2229,7 +2229,27 @@ sema_expression_if_absent_test_swaps: fn(else_value: Expr, name: String) -> Bool
     !sema_expression_if_continues_dispatch(else_value, name)
 }
 
+// A value arm written `-> next` is the loop-control word unless a name `next`
+// is in scope (the parser cannot tell the two apart): the arm runs `next` and
+// has no value, as the braced `-> { next }` does.
+sema_expression_if_next_word: fn(value: Expr, scopes: SemaScopeTable) -> Bool Never! {
+    if value == .Ident(name, _, _) -> return name == "next" && sema_scope_resolve_index(scopes, name) == None
+    false
+}
+
+sema_expression_if_next_body: fn(body: [Stmt], value: Expr, scopes: SemaScopeTable) -> [Stmt] {
+    out := body.copy()
+    if sema_expression_if_next_word(value, scopes) -> out.push(Stmt.Continue{span: expr_span(value)})
+    out
+}
+
+sema_expression_if_next_value: fn(value: Expr, scopes: SemaScopeTable) -> Expr {
+    if sema_expression_if_next_word(value, scopes) -> return Expr.NoElse{span: expr_span(value), id: AST_NODE_GENERATED}
+    value.copy()
+}
+
 sema_expression_if: fn(condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_expression_if_next_word(then_value, scopes) || sema_expression_if_next_word(else_value, scopes) -> return sema_expression_if(condition, sema_expression_if_next_body(then_body, then_value, scopes), sema_expression_if_next_value(then_value, scopes), sema_expression_if_next_body(else_body, else_value, scopes), sema_expression_if_next_value(else_value, scopes), span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     type_param: sema_expression_type_table_param(condition, environment, scopes)
     if type_param == .Val(param) -> return sema_expression_type_table(param, condition, then_body, then_value, else_body, else_value, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     dispatch_subject: sema_expression_if_dispatch_subject(condition, else_value)
