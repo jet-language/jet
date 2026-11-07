@@ -477,16 +477,28 @@ sema_call_http_middleware: fn(receiver: Expr, receiver_value: TExpr, args: [Call
     parameter := SemaCallParam{label: "middleware", name: "middleware", zone: ParamZone.Either, default: None, default_ref: None, convention: AccessConvention.Move, ty: Val(callback_type), variadic: false}
     ownership := sema_ownership_check_method_call(state, "middleware", receiver, AccessConvention.Read, [SemaCallParam]{parameter}, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_call_http_mux_source_call(receiver_value, "__middleware", [TCallArg]{sema_call_http_static_tree_arg(callback, updated_args[0])}, span, expected, environment, program, scopes, context, diagnostics)
+    sema_call_http_mux_source_call(receiver_value, "__middleware", [TCallArg]{sema_call_http_static_tree_arg(callback, updated_args[0])}, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // Mux registration lowers to the mux's own source methods; the checked
-// arguments carry their conventions.
-sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: [TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+// arguments carry their conventions. A parameter the registration leaves out
+// takes its declared default, which is `$caller` (the `at: SourceLocation` of
+// `HTTPMux.__route`): the place of this call, as at any call.
+sema_call_http_mux_source_call: fn(receiver_value: TExpr, method: String, args: &&[TCallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     if program.registration_graph == .Val(graph) {
         candidates := sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_value.ty, method, [Type]{}, [Type]{}, span, environment, program, diagnostics)
         candidate := candidates.pop() ?? panic("HTTPMux.{method} is not registered")
-        built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: args}, span)
+        params: sema_call_params_from_type_after(candidate.signature, candidate.receiver_offset) ?? panic("HTTPMux.{method} has no parameter list")
+        filled := args.move()
+        loop index in filled.len()..<params.len() {
+            reference: params[index].default_ref ?? panic("HTTPMux.{method} parameter `{params[index].name}` has no default")
+            declared: sema_registration_resolve_default(graph, reference) ?? panic("HTTPMux.{method} parameter `{params[index].name}` lost its default")
+            if !sema_site_is_caller(declared) -> panic("HTTPMux.{method} parameter `{params[index].name}` has a default other than `$caller`")
+            declared_ty: params[index].ty ?? panic("HTTPMux.{method} parameter `{params[index].name}` has no type")
+            location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(sema_call_resolved_type(declared_ty, environment, program)), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+            filled.push(sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(declared, span)))
+        }
+        built := sema_tree_node(Type.Named{name: "Unit"}, TExprKind.MethodCall{receiver: receiver_value, method: candidate.method.move(), type_args: [Type]{}, args: filled.move()}, span)
         sema_call_http_record_effect("Net", "HTTPMux.{method}", built.ty, span, environment, program, scopes, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(built, expected, environment, program, diagnostics)}
     } else {
