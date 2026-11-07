@@ -11,7 +11,7 @@ use {
 run: fn() {
     data := json.parse("{{\"b\":2,\"a\":1}}") ?? panic("json")
     print(json.canonical(data) ?? panic("value is not canonical JSON"))
-    print(json.events(data).contains("object_start $"))
+    print(json.events(data).contains(.ObjectStart))
     rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
     print(rows.len())
     print((jsonl.to_string(rows) ?? panic("JSONL encode")).contains("\"a\":1"))
