@@ -1339,7 +1339,9 @@ ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         failed += 1
         lines := [String]{}
         loop line in process.combined_output(receipt).trim_end().split("\n") -> lines.push(line.copy())
-        show(lines, 40)
+        // The verdict is at the end (CoreCoverage prints its module table first).
+        tail: if lines.len() > 40 -> lines.len() - 40 else -> 0
+        show(lines[tail..<lines.len()], 40)
         print("PRECOMMIT: {tool} --check failed (exit {receipt.code})")
     }
     failed
