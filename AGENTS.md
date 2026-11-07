@@ -201,6 +201,19 @@ and the beginner and expert paths. Do not ballot implementation choices an
 approved contract already covers. A question is not approval, and a ratified
 outcome stays in force until the owner changes it.
 
+This is a standing owner order, repeated hundreds of times: no agent asks the
+owner questions. No questions in chat, none as card logs, notes or "owner
+question" entries, and none that hold work. Within approved scope, the agent
+decides, records the decision as fact on the card, and keeps working. An
+owner-only choice goes on a ballot and the work moves to independent criteria
+meanwhile. Workers send their questions to the orchestrator, and it answers them
+the same way.
+
+The orchestrator stays on the open goals in rank order, G1 and G2 first, until
+every criterion is met. Implementers write the code, land it on LaneCheck and
+report the commit; the orchestrator tests it in batches and sends every failure
+back to its implementer to fix.
+
 Tower is the only work ledger. Every incomplete stream has exactly one card
 recording its phase, plan, dependencies, criteria, and handoff state. Workers
 never write to Tower, close cards, or keep a competing task list. The
@@ -355,6 +368,15 @@ in one pass:
   one owner, and land them as one batch before the next expensive build or
   check. A rebuild that exists only to reveal the next error is a process
   failure.
+- **A tightened rule sweeps everything first.** A change that makes sema,
+  a guard or a gate stricter is checked, before it lands, against every Jet
+  source the rule can reach: Core, Compiler, Jetpack, Tools, Examples and every
+  tests/ tree, case fixture and template. Every hit is fixed in the same batch.
+  Checking only what the compiler build or one suite touches is a serial
+  discovery.
+- **A failed gate is read whole.** When a release, chain or suite fails, read
+  every lost row of every suite, sweep for the same root across the whole
+  repository, and fix the full list as one batch before the next run.
 - **Gate every commit cheaply first.** Parse and check each touched file,
   regenerate and commit generated outputs with their sources, and run the
   generator checks against the exact source a build will use, so no expensive
