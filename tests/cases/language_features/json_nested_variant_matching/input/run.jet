@@ -2,9 +2,9 @@ use json: core.encoding.json
 run: fn() {
     raw: "{{\"port\":\"8080\",\"name\":\"api\"}}"
     data: json.decode(raw) ?? panic("bad json")
-    if data == .Object(entries) {
-        port: entries["port"]
-        name: entries["name"]
+    if data == .Object(_) {
+        port: data.field("port") ?? Dyn.Null
+        name: data.field("name") ?? Dyn.Null
         if port == .Int(n) {
             print(n + 1)
         }
