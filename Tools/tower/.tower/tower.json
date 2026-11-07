@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95765,
+    "rev": 95767,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69805,6 +69805,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 remainder (Main audit on dev bd42ba0383, 11-07). c3 still fails 'no receipt or gate needs a non-Jet tool'. Live non-Jet calls in gates: (1) Compiler/test.jet:266 (the packages profile) and Tools/agent/LaneCheck.jet:92 run node Jetpack/Bootstrap/assemble.mjs. (2) Tools/agent/CompilerRegistries.jet (lines 663-724, 1168, 1851) dispatches proofs to Node runners: Compiler/JetRuntime/Tests/check-runtime.mjs and run-{crypto,native-codec-file-leaves,process-witnesses,files-walk,host-parallelism,world-sentry,channel,thread,parallel,scheduler,testsuite}-fixtures/collections-stop/runtime.mjs, plus JetBackend run-link.mjs and run-runtime-pack-roots.mjs. (3) Tools/agent/Land.jet:951 runs node Tools/packaging/prebuild-runtime.mjs for the runtime pack. Node tests still under Tools/agent: clean-nix-tmp.test.mjs, gen-runtime-host-carriers.test.mjs and jet-state.test.mjs; their tools are ported to Jet with #Tests, or deleted when dead. Web-tier harnesses (.mjs named by tests/cases/web_*, browser_*) are JS by nature and out of scope. Tools/agent/jet-env stays as the bootstrap (11-05 scope)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c68 status after 1d8912363b: 14 of the 15 named scripts are ported or deleted (SafetyGate.jet, core-conformance deleted 57468656ec, CoreCoverage.jet, runtime ABI 651487f536, runtime-static-text and NativeTransport.jet 1d8912363b, native-route-* and classify-native-route-glue deleted, CompilerPackages.jet eff920f961/2c40da09c3/90a3e5e672). The last one is check-core-surface-ledger.mjs, which TestSystemLead-2 is porting as c3 group 2(b); that port closes both rows."
         },
         {
@@ -70919,11 +70924,11 @@
         {
           "n": 68,
           "text": "c3 split A1: the compiler and runtime gate scripts in Tools/agent are Jet programs beside LaneCheck.jet, each deleted in the commit that ports it, its .test.mjs ported to Jet tests: safety-gate.mjs, safety-gate-job.sh, safety-fuzz.mjs, check-core-surface-ledger.mjs, core-conformance.mjs, core-coverage-census.mjs (with core-coverage-ratchet.json), runtime-abi-symbols.mjs, runtime-route-abi.mjs, runtime-static-text.mjs, native-route-environment.mjs, native-route-handles.mjs, native-route-records.mjs, classify-native-route-glue.mjs, compiler-native-transport.mjs, compiler-packages.mjs.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T01:38:18.173Z"
+          "evidence": "5202bd0699 (TestSystemLead-2) ports the last script on the list, check-core-surface-ledger.mjs, to Tools/agent/CoreSurfaceLedger.jet (--write, --check, --core-api-release-check, --hostile-fixtures). The gen-core-tables tables now come from Tools/agent/CoreSourceRows.jet. The same commit deletes check-core-surface-ledger.mjs, gen-core-tables.mjs, core-runtime-wrapper.test.mjs and core-type-references.test.mjs and switches every caller (LaneCheck, CompiledWorkloads, ci.yml, both core_surface_ledger case rows). Main 11-07 on dev bd42ba0383: JET=<seed> JET_TOOLCHAIN_ROOT=<tree> jet Tools/agent/CoreSurfaceLedger.jet --check gives rc=0 ('source-derived, verified against 11 recorded competitor surfaces', 'independent acceptance verified tasks=29'), and none of the 4 files is tracked. Worker rows: both core_surface_ledger cases PASS, and the tool #Tests pass (CoreSurfaceLedger 4/0, CoreSourceRows 6/0, LaneCheck 4/0).",
+          "at": "2026-11-07T14:28:28.411Z"
         },
         {
           "n": 69,
@@ -70975,7 +70980,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T13:09:22.751Z",
+      "updated": "2026-11-07T14:28:29.469Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -186217,6 +186222,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T14:28:29.469Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T14:28:28.411Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#68"
+    },
     {
       "at": "2026-11-07T14:27:33.354Z",
       "by": "Main",
