@@ -1,0 +1,22 @@
+// #6581: a struct that holds a `WsConn` owns the socket, so a read parameter
+// of it can't be copied into an owned field; the copy and the caller would
+// both close the one connection.
+use ws: core.net.ws
+
+Wire: struct {
+    conn: WsConn
+
+    child: fn(self) -> Child {
+        Child{wire: self}
+    }
+}
+
+Child: struct {
+    wire: Wire
+}
+
+wrap: fn(wire: Wire) -> Child {
+    Child{wire: wire}
+}
+
+run: fn() {}

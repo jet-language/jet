@@ -254,10 +254,13 @@ sema_copy_walk_key: fn(identity: String, actual: Type) -> String Never! {
 }
 
 // `TCPStream` is the Core spelling of the stream `TcpStream` names; both own
-// one socket, which the runtime closes once (#6450).
+// one socket, which the runtime closes once (#6450). A `WsConn` owns its
+// socket the same way (#6581). A runtime row's `clone: false` alone does not
+// make a handle single-owner: a channel `Receiver` has no clone row, yet its
+// copies share one queue (Core/Tasks copies it).
 sema_copy_named_is_builtin_resource: fn(name: String) -> Bool Never! {
     if name == {
-        "FileReader" | "FileWriter" | "FileScope" | "FileLock" | "TcpStream" | "TCPStream" | "UnixStream" | "TLSStream" | "Arena" | "Bump" | "Pool" | "Fixed" -> true
+        "FileReader" | "FileWriter" | "FileScope" | "FileLock" | "TcpStream" | "TCPStream" | "UnixStream" | "TLSStream" | "WsConn" | "Arena" | "Bump" | "Pool" | "Fixed" -> true
         else -> false
     }
 }

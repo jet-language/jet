@@ -1,0 +1,54 @@
+// #6581: a struct holding a `WsConn` owns the socket, so it moves into the
+// struct that keeps it instead of being copied; the one connection is closed
+// once. Copying a read `Wire` into two `Child`s used to duplicate the handle,
+// and the run hung or crashed when both copies dropped it.
+package: {
+    name: "ws_conn_holder_moves_its_socket"
+    authority: { allow: [IO, Mem.Alloc, Net, Time, FS.Read] }
+}
+
+use {
+    net: core.net
+    ws: core.net.ws
+    server: core.http.server
+}
+
+Wire: struct {
+    conn: WsConn
+}
+
+Child: struct {
+    wire: Wire
+}
+
+adopt: fn(wire: &&Wire) -> Child {
+    Child{wire: wire}
+}
+
+handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    sock: ws.upgrade(req) ?? panic("upgrade")
+    message: sock.recv() ?? panic("recv")
+    text: message.text() ?? panic("text")
+    sock.send_text("echo:{text}") ?? panic("send")
+    sock.close(1000, "") ?? panic("close")
+    return Ok(server.response(500, "unused"))
+}
+
+run: fn() {
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    addr: listener.local_addr() ?? panic("address")
+    mux: server.mux()
+    mux.get("/live", (req: HTTPRequest) -> handle(req))
+    serving: task { server.serve_once_listener(listener, mux) ?? panic("serve") }
+    wire: Wire{conn: ws.connect("ws://{addr}/live") ?? panic("connect")}
+    held: adopt(wire)
+    held.wire.conn.send_text("ping") ?? panic("client send")
+    reply := held.wire.conn.recv() ?? panic("client recv")
+    loop !reply.is_text() {
+        reply = held.wire.conn.recv() ?? panic("client recv")
+    }
+    print(reply.text() ?? panic("reply text"))
+    closed: held.wire.conn.recv() ?? panic("client close")
+    print("closed {closed.is_close()}")
+    serving.join() ?? panic("server join")
+}
