@@ -1348,8 +1348,7 @@ publish_release: fn(ctx: Ctx, dest: String) -[Env, Exec, FS, IO, Time, Time.Wait
         shown: step.argv.join(" ")
         say("release", ctx.log, "publish: {shown}")
         files.append_all(log, "$ {shown}\n") ?? ()
-        code := 127
-        if logged_spec(step.argv, ctx.root, vars, log, 0, true).run() == .Ok(done) -> code = if done.signal != None -> 128 else -> done.code
+        code: run_logged(step.argv, ctx.root, vars, log, 0, append: true).rc
         if code != 0 {
             state.step = step.name.copy()
             state.detail = if step.name == "on origin/dev" -> "{short(ctx.sha, 10)} is not on origin/dev; push dev first" else -> "exit {code}: {tail_of(log, 3)}"

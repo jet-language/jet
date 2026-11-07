@@ -165,14 +165,29 @@ remove_tree: fn(dir: String) Never! -[FS, Exec, Time.Wait]> {
     files.remove_all(dir) ?? ()
 }
 
-// COMMIT of the checkout `repo` unpacked into `dir`, which is emptied first.
+// COMMIT of the checkout `repo` written into `dir`, which is emptied first:
+// git reads the commit into a private index beside `dir` and checks every
+// entry of it out under `dir`.
 export_commit: fn(repo: String, commit: String, dir: String) -[FS, Exec, Time.Wait]> String? Never! {
     remove_tree(dir)
     files.create_dir_all(dir) ?? return Val("cannot create {dir}: {err}")
-    argv: [String]{"bash", "-c", "set -o pipefail; git -C \"$0\" archive \"$1\" | tar -x -C \"$2\"", repo.copy(), commit.copy(), dir.copy()}
-    receipt: process.cmd(argv).cwd(repo).output_limit(268435456).run() ?? return Val("git archive {commit} failed: {err}")
-    if receipt.code != 0 || receipt.signal != None -> return Val("git archive {commit} failed: {receipt.errors.trim()}")
-    None
+    index: "{dir.removesuffix("/")}.index"
+    files.remove(index) ?? ()
+    failed := git_indexed(repo, index, [String]{"read-tree", commit.copy()})
+    if failed == "" -> failed = git_indexed(repo, index, [String]{"--work-tree={dir}", "checkout-index", "--all", "--force"})
+    files.remove(index) ?? ()
+    if failed == "" -> None else -> Val("{failed} ({commit})")
+}
+
+// `git -C repo ARGS` on the index file `index`: "" when it succeeds, else
+// why it failed.
+git_indexed: fn(repo: String, index: String, args: [String]) -[Exec, Time.Wait]> String Never! {
+    argv := [String]{"git", "-C", repo.copy()}
+    argv.extend(args.copy())
+    step: if args[0].starts_with("--") -> args[1] else -> args[0]
+    receipt: process.cmd(argv).cwd(repo).env("GIT_INDEX_FILE", index).output_limit(268435456).run() ?? return "git {step} failed: {err}"
+    if receipt.code != 0 || receipt.signal != None -> return "git {step} failed: {receipt.errors.trim()}"
+    ""
 }
 
 // `git -C repo ARGS`: exit status and trimmed output.
@@ -183,24 +198,15 @@ git_in: fn(repo: String, args: [String]) -[Exec, Time.Wait]> (rc: Int, out: Stri
     (rc: if receipt.signal == .Val(_) -> 128 else -> receipt.code, out: receipt.output.trim().copy(), err: receipt.errors.trim().copy())
 }
 
-// The command a logged run starts: its output in `log` (appended when
-// `append`), pinned to the build slot's CPUs when there is one, and killed
-// with its whole process group after `seconds` (then SIGKILL 30 s later).
-logged_argv: fn(argv: [String], log: String, seconds: Int, append: Bool) -[Env]> [String] Never! {
-    redirect: if append -> "exec \"$@\" >> \"$0\" 2>&1" else -> "exec \"$@\" > \"$0\" 2>&1"
-    out := [String]{"bash", "-c", redirect, log.copy()}
+// The command a logged run starts: killed when this process dies, pinned to
+// the build slot's CPUs when there is one, and killed with its whole process
+// group after `seconds` (then SIGKILL 30 s later).
+logged_argv: fn(argv: [String], seconds: Int) -[Env]> [String] Never! {
+    out := [String]{"setpriv", "--pdeathsig", "KILL", "--"}
     if seconds > 0 -> out.extend([String]{"timeout", "-k", "30", "{seconds}"})
     if sys.get("SLOT_CPUS") == .Val(cpus) && cpus != "" -> out.extend([String]{"taskset", "-c", cpus.copy()})
     out.extend(argv.copy())
     out
-}
-
-logged_spec: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: Int, append: Bool) -[Env, Exec]> ProcessSpec Never! {
-    spec := process.cmd(logged_argv(argv, log, seconds, append)).cwd(cwd).output_limit(1048576)
-    loop change in vars {
-        spec = if change.drop -> spec.env_remove(change.name) else -> spec.env(change.name, change.value)
-    }
-    spec
 }
 
 finished_of: fn(code: Int, signalled: Bool, seconds: Int, wall: Int) -> Finished Never! {
@@ -208,14 +214,54 @@ finished_of: fn(code: Int, signalled: Bool, seconds: Int, wall: Int) -> Finished
     Finished{rc: rc, timed_out: seconds > 0 && (rc == 124 || rc == 137) && wall >= seconds, wall: wall}
 }
 
-// Runs `argv` in `cwd` with `vars` to completion, its output in `log`.
-run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: Int) -[Env, Exec, FS, Time, Time.Wait]> Finished Never! {
+// Runs `argv` in `cwd` with `vars` to completion. Its output and errors go
+// into `log` as they arrive (appended to it when `append`).
+run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: Int, append: Bool{false}) -[Env, Exec, FS, Time, Time.Wait]> Finished Never! {
     watch: time.start()
-    receipt: logged_spec(argv, cwd, vars, log, seconds, false).run() ?? {
+    if !append -> files.write(log, "") ?? return Finished{rc: 127, timed_out: false, wall: 0}
+    spec := process.cmd(logged_argv(argv, seconds)).cwd(cwd).stdout(.Stream).stderr(.Stream)
+    loop change in vars {
+        spec = if change.drop -> spec.env_remove(change.name) else -> spec.env(change.name, change.value)
+    }
+    child: spec.spawn() ?? {
         files.append_all(log, "\n{argv[0]}: {err}\n") ?? ()
         return Finished{rc: 127, timed_out: false, wall: 0}
     }
+    // Both pipes drain at once, so a child that fills one never stalls.
+    task.group pumps(limit: 2) {
+        errors: task pump_stderr(child.stderr, log)
+        pump_stdout(child.stdout, log)
+        errors.join() ?? ()
+    }
+    receipt: child.wait() ?? {
+        files.append_all(log, "\n{argv[0]}: {err}\n") ?? ()
+        return Finished{rc: 127, timed_out: false, wall: time.elapsed(watch).ns /% 1000000000}
+    }
     finished_of(receipt.code, receipt.signal != None, seconds, time.elapsed(watch).ns /% 1000000000)
+}
+
+// Copies each piece of a child's output into `log` as it arrives; a failed
+// write still drains the pipe.
+pump_stdout: fn(stream: ProcessStdoutStream, log: String) Never! -[Exec, FS, Time.Wait]> {
+    writer: files.append(log) ?? {
+        loop _ in stream.chunks(65536) {}
+        return
+    }
+    loop chunk in stream.chunks(65536) {
+        writer.write_all(chunk) ?? ()
+        writer.flush() ?? ()
+    }
+}
+
+pump_stderr: fn(stream: ProcessStderrStream, log: String) Never! -[Exec, FS, Time.Wait]> {
+    writer: files.append(log) ?? {
+        loop _ in stream.chunks(65536) {}
+        return
+    }
+    loop chunk in stream.chunks(65536) {
+        writer.write_all(chunk) ?? ()
+        writer.flush() ?? ()
+    }
 }
 
 // One run of a parallel batch.
@@ -229,26 +275,10 @@ Job: struct {
 
 // Runs every job at once and returns their results in order.
 run_batch: fn(jobs: [Job]) -[Env, Exec, FS, Time, Time.Wait]> [Finished] Never! {
-    specs := [ProcessSpec]{}
-    loop job in jobs -> specs.push(logged_spec(job.argv, job.cwd, job.vars, job.log, job.seconds, false))
-    watch: time.start()
     out := [Finished]{}
-    results: process.run_all(specs, if jobs.len() > 0 -> jobs.len() else -> 1) ?? {
-        loop job in jobs {
-            files.append_all(job.log, "\n{job.argv[0]}: {err}\n") ?? ()
-            out.push(Finished{rc: 127, timed_out: false, wall: 0})
-        }
-        return out
-    }
-    wall: time.elapsed(watch).ns /% 1000000000
-    loop (index, result) in results {
-        if result == {
-            .Ok(receipt) -> out.push(finished_of(receipt.code, receipt.signal != None, jobs[index].seconds, wall))
-            .Err(failed) -> {
-                files.append_all(jobs[index].log, "\n{jobs[index].argv[0]}: {failed}\n") ?? ()
-                out.push(Finished{rc: 127, timed_out: false, wall: wall})
-            }
-        }
+    task.group batch(limit: if jobs.len() > 0 -> jobs.len() else -> 1) {
+        handles: loop job in jobs -> task run_logged(job.argv.copy(), job.cwd.copy(), job.vars.copy(), job.log.copy(), job.seconds)
+        loop handle in handles -> out.push(handle.join() ?? Finished{rc: 127, timed_out: false, wall: 0})
     }
     out
 }

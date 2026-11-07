@@ -641,6 +641,68 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     files.remove_all(dir) ?? ()
 }
 
+#Test("a commit exports with its modes and links, leaves the worktree and index alone, and a bad commit is named") {
+    dir: files.mkdtemp("jet-release-export-") ?? panic("scratch: {err}")
+    repo: files.join(dir, "repo")
+    put(files.join(repo, "sub/a.txt"), "one\n")
+    put(files.join(repo, "run"), "#!/bin/sh\n")
+    files.set_mode(files.join(repo, "run"), 493) ?? panic("chmod: {err}")
+    files.symlink("sub/a.txt", files.join(repo, "link")) ?? panic("symlink: {err}")
+    git_args := [String]{"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"}
+    assert_eq(git_in(repo, [String]{"init", "--quiet"}).rc, 0)
+    assert_eq(git_in(repo, [String]{"add", "--all"}).rc, 0)
+    git_args.extend([String]{"commit", "--quiet", "-m", "fixture"})
+    committed: git_in(repo, git_args)
+    assert_eq(committed.rc, 0)
+    sha: git_in(repo, [String]{"rev-parse", "HEAD"}).out
+    put(files.join(repo, "sub/a.txt"), "edited\n")
+    out: files.join(dir, "out")
+    put(files.join(out, "stale.txt"), "left over\n")
+    assert_eq(export_commit(repo, sha, out), None)
+    assert_eq(files.read(files.join(out, "sub/a.txt")) ?? panic("read: {err}"), "one\n")
+    assert(!files.exists(files.join(out, "stale.txt")))
+    assert(!files.exists("{out}.index"))
+    run: files.stat(files.join(out, "run")) ?? panic("stat run: {err}")
+    text: files.stat(files.join(out, "sub/a.txt")) ?? panic("stat a.txt: {err}")
+    assert_eq((run.mode /% 64) % 2, 1)
+    assert_eq((text.mode /% 64) % 2, 0)
+    assert_eq(files.read_link(files.join(out, "link")) ?? panic("readlink: {err}"), "sub/a.txt")
+    assert_eq(git_in(repo, [String]{"status", "--porcelain"}).out, "M sub/a.txt")
+    zeros: "0".repeat(40)
+    bad: export_commit(repo, zeros, files.join(dir, "bad")) ?? panic("a missing commit exported")
+    assert(bad.starts_with("git read-tree failed: "))
+    assert(bad.ends_with(" ({zeros})"))
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a logged run copies its output and errors into the log, appends when asked, times out, and a batch keeps job order") {
+    dir: files.mkdtemp("jet-release-logged-") ?? panic("scratch: {err}")
+    log: files.join(dir, "run.log")
+    put(log, "stale\n")
+    version: run_logged([String]{"git", "--version"}, dir, [Var]{}, log, 60)
+    assert_eq("{version.rc} {version.timed_out}", "0 false")
+    first: files.read(log) ?? panic("read: {err}")
+    assert(first.starts_with("git version "))
+    probe: [Var]{set_var("GIT_CONFIG_COUNT", "1"), set_var("GIT_CONFIG_KEY_0", "release.probe"), set_var("GIT_CONFIG_VALUE_0", "seen")}
+    assert_eq(run_logged([String]{"git", "config", "--get", "release.probe"}, dir, probe, log, 0, append: true).rc, 0)
+    missing: run_logged([String]{"jet-release-no-such-tool"}, dir, [Var]{}, log, 0, append: true)
+    assert_eq(missing.rc, 127)
+    after: files.read(log) ?? panic("read: {err}")
+    assert(after.starts_with("{first}seen\n"))
+    assert(after.contains("jet-release-no-such-tool"))
+    slow: run_logged([String]{"sleep", "30"}, dir, [Var]{}, files.join(dir, "slow.log"), 1)
+    assert_eq("{slow.rc} {slow.timed_out}", "124 true")
+    jobs: [Job]{
+        Job{argv: [String]{"git", "rev-parse", "--verify", "no-such-ref"}, cwd: dir.copy(), vars: [Var]{}, log: files.join(dir, "a.log"), seconds: 60},
+        Job{argv: [String]{"git", "--version"}, cwd: dir.copy(), vars: [Var]{}, log: files.join(dir, "b.log"), seconds: 60},
+    }
+    results: run_batch(jobs)
+    assert_eq("{results[0].rc} {results[1].rc}", "128 0")
+    assert((files.read(files.join(dir, "a.log")) ?? "").contains("fatal: "))
+    assert((files.read(files.join(dir, "b.log")) ?? "").starts_with("git version "))
+    files.remove_all(dir) ?? ()
+}
+
 #Test("admit options collect every problem at once") {
     assert_eq(parse_admit_args([String]{"--shards", "x", "--bogus"}).errors, [String]{"--shards needs a whole number, not x", "unknown option --bogus", "COMMIT is required"})
     assert_eq(parse_admit_args([String]{"abc", "--min-gains", "0"}).min_gains, 0)
