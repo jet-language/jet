@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95739,
+    "rev": 95743,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -93936,6 +93936,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T19:02:30.892Z"
+        },
+        {
+          "n": 6,
+          "text": "The two step timeouts set for #6651 c2 are removed and both rows pass on the default 60 s step limit under full-kit load: tests/cases/compiled_workloads/compiled_workload_gate_self_check.case (19 s alone; warm 11.6 s splits into contract 2.2 s, synthetic report 2.1 s, 33 check_report calls with about 63 ms of start-up each, then tier, peer, sample and tier-receipt checks) and tests/cases/comptime_sequence_parity/repl_list_and_fixed_list_sequence_methods_are_exact.case (50 REPL turns at about 0.4 s each).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T12:03:34.226Z"
         }
       ],
       "refs": [],
@@ -93950,8 +93959,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-07T11:59:04.773Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-07T12:03:34.226Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6
     },
     {
       "id": "c0pcddhe",
@@ -97356,6 +97366,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c2 rows (PortsLead-2): Storage fixed in 0e5e74a753 (a pool-demo race: 27/2000 exit 70 before, 2000/2000 after). runtime_reload fixed in a1a393ce91: add_executable compiled only sources[0]; every listed target source is now compiled or checked, and a missing listed source is refused with E2105 before any action runs or the lock is written. New cases target_listed_second_source_is_compiled (O0, O1 and O2 print 'helper says 42') and library_listed_second_source_is_checked fail on a0_033 and pass with the fix; 186 kit build rows give PASS 157, KF 29, FAIL 0. The 2 TIMEOUT rows are slow, not hung (19 s and 21 s alone); Main gives each step timeout: 180s naming #6610, and #6610 has the row to remove them."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c1 group E landed in 7789d81d83 (MechD-3). nested_import_aliases is now KF on a registered E2104 citing #6674, not exit 101. The measured_unit_scale and symbolic_and_measured rows pass, since core.units is now loaded for rounded conversions. The 11 rustc_backed_*_forced_interpreter_* cases are renamed to <family>_comptime_match(es)_run_and_build_exactly, with one fixture plus run and AOT steps (they don't duplicate public_transcript, which only checks comptime). The KF bag and pool rows are renamed."
         },
         {
@@ -97431,7 +97446,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:29:02.132Z",
-      "updated": "2026-11-07T11:14:13.722Z",
+      "updated": "2026-11-07T12:03:35.301Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98306,6 +98321,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c4 isn't met yet: at dev HEAD 963f74b975 the lander's precommit (looping over Land.jet ratchets with seed a0_033; 10 checks in 23 s) fails Tools/agent/DiagnosticRows.jet --check on Docs/site/dist/e/E-ERR-PROPAGATE and E1206. Diagnostics.jet hasn't changed since 78aa137994, so the output depends on the jet running the generator. TestSystemLead-2 is fixing the root. The other 9 checks pass."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Ruling on c1: option B. The compiler gains a check mode that checks Compiler/Prelude files as generated prelude source (lex_generated plus the same unit context the compiler embeds them in), and LaneCheck uses it once a seed has it. Until then LaneCheck reports a touched Prelude file as unchecked ('needs a seed with the prelude check mode'), never as CHECK OK. The row-DSL inputs (Core.jet, CoreSurfaceInventory.jet, CoreSourceParts.tsv) are checked by their generator --check, which is their real consumer. No baseline-diff gate. c3 added for the duplicated raw-string copies."
         }
       ],
@@ -98313,11 +98333,11 @@
         {
           "n": 1,
           "text": "LaneCheck checks a touched Compiler/Prelude file in its embedded mode: an untouched Prelude file gives CHECK OK on dev, and a seeded type error in a Prelude file gives CHECK FAILED naming it.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T10:28:25.663Z"
+          "evidence": "78aa137994: jet check --prelude checks a Compiler/Prelude source as the embedded prelude, and LaneCheck routes Prelude files to it. With s1: clean Facts.jet and Traits.jet give CHECK OK. A seeded Facts.jet gives 'CHECK FAILED — 1 error(s)' with 'Facts.jet:71:5: Error [jet.ReturnTypeMismatch]'. A seeded Traits.jet reports both its errors (the OwnedTraitRows --check failure and the type error). A seeded marker gives 'Marker #ZzBroken builds no marker rule', and a seeded conversion 'impl ZzNotFamily -> Err is no Core error family conversion'. On a seed with no prelude mode it prints PRELUDE UNCHECKED with rc 1, never CHECK OK. jet test Tools/agent/LaneCheck.jet 4/0.",
+          "at": "2026-11-07T12:13:46.304Z"
         },
         {
           "n": 2,
@@ -98355,7 +98375,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:28:04.053Z",
-      "updated": "2026-11-07T11:14:30.828Z",
+      "updated": "2026-11-07T12:13:47.124Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -186126,6 +186146,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T12:13:47.124Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lb1p4p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T12:13:46.304Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lb1p4p",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T12:03:35.301Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005fduo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T12:03:34.226Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00ctwqw",
+      "note": "#6 The two step timeouts set for #6651 c2 are removed and both "
+    },
     {
       "at": "2026-11-07T11:59:04.773Z",
       "by": "Main",
