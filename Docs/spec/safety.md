@@ -60,7 +60,7 @@ the source-level authority.
 
 ## Standing native safety gate
 
-`Tools/agent/safety-gate.mjs OUT ARTIFACTS_JSON [SEED COUNT]` runs the
+`jet Tools/agent/SafetyGate.jet OUT ARTIFACTS_JSON [SEED COUNT]` runs the
 Core unsafe-region/safe-abstraction audit and the two unsafe-wrapper diagnostic
 fixtures, generates independent-model programs plus stateful Core API programs,
 and checks admitted native **O0, O1 and O2** outputs. The Core programs exercise
@@ -107,23 +107,20 @@ native `memory/last_use_moves` golden. The ordinary tier golden slice also
 includes `memory/last_use_moves` and `memory/last_use_field_moves`. A golden
 pass alone is not a substitute for the whole-class receipt.
 
-The single local proofq definition is `Tools/agent/safety-gate-job.sh`.
-`Tools/agent/safety-schedule.mjs --watch` polls admitted artifacts every minute
-and schedules it on each changed admission, and every **six hours** with a
-rotating seed. Only one safety job may be queued/running. It snapshots the
-artifacts JSON, pins the tooling tree, runs exact-tree pre-verification through
-`cheap.sh`, and passes `pq-preflight` before enqueueing. Do not start the
-watcher on a mutable private branch; the integrator starts it from the landed
-dev tooling. It uses the existing proof queue, respects `PAUSE`, and does not
-create hosted CI or a nightly job. Paths can be set with `SAFETY_ARTIFACTS`,
-`SAFETY_STATE`, `SAFETY_SCRATCH`, `PQ_ROOT`; `SAFETY_COUNT` controls each of the
-two generated case families (default 50).
+The caller is `Tools/agent/VerifyFull.jet`: its `safety-gate` row runs the
+full gate into its scratch directory when `JET_SAFETY_ARTIFACTS` names the
+admitted artifacts JSON. Without it, the row runs
+`SafetyGate.jet --source OUT JET [SEED COUNT]`: the two unsafe-wrapper
+fixtures against the exact-head compiler VerifyFull has pinned, plus the
+generated corpus checked against its model. That source leg covers no native
+tier, so it never stands in for the full gate. VerifyFull pins the source tree;
+there is no hosted CI, nightly job or watcher. `COUNT` sets each of the two
+generated case families (default 50; `SEED` defaults to 4).
 
 The gate records `PASS` (exit 0), findings `FAIL` (1), infrastructure error
-(2), or unavailable coverage `GAP` (3). Pre-verification findings block
-enqueueing; an owner-authorized gap receipt remains non-green in the queued
-run. It is never converted to a success. Receipts bind artifact hash, source
-head, seed, corpus hash, all findings and every coverage gap.
+(2), or unavailable coverage `GAP` (3). An owner-authorized gap receipt
+remains non-green; it is never converted to a success. Receipts bind artifact
+hash, source head, seed, corpus hash, all findings and every coverage gap.
 
 The checker is the registry's current-head debug compiler while a stale
 release entry remains; a native producer can instead bind

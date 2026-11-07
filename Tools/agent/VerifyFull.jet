@@ -144,6 +144,13 @@ run: fn() {
         ran: run_child(state, gate[0], argv)
         record(state, ran.row)
     }
+    // The standing native safety gate (Docs/spec/safety.md): the full gate when
+    // JET_SAFETY_ARTIFACTS names admitted native artifacts, else its source leg
+    // with this compiler as the exact-head checker.
+    artifacts: env_or("JET_SAFETY_ARTIFACTS", "")
+    safety: if artifacts != "" -> [String]{binary, "{root}/Tools/agent/SafetyGate.jet", "{scratch}/safety", artifacts} else -> [String]{binary, "{root}/Tools/agent/SafetyGate.jet", "--source", "{scratch}/safety", binary}
+    safety_ran: run_child(state, "safety-gate", safety)
+    record(state, safety_ran.row)
     head: state.pin ?? ""
     loop suite in suites {
         if suite != "registries" {
@@ -523,6 +530,7 @@ fixture_tree: fn(tree: String, runner: String, export: String) -[FS]> [String] {
         (path: "Tools/agent/VerifyFull.jet", text: runner.copy()),
         (path: "Tools/agent/CoreCoverage.jet", text: "// fixture gate: passes\n"),
         (path: "Tools/agent/CoreModuleCheck.jet", text: "// fixture gate: passes\n"),
+        (path: "Tools/agent/SafetyGate.jet", text: "// fixture gate: passes\n"),
         (path: "fixture-export.txt", text: "{export}\n"),
         (path: "bin/jet", text: FIXTURE_JET),
         (path: "bin/git", text: FIXTURE_GIT),
@@ -587,27 +595,30 @@ fixture_checkout: fn() -[FS, Env]> String {
         report: read_document("{evidence}/verify-full.json") ?? panic("{mode}: verify-full.json is missing or not JSON")
         rows: array_field(report, "rows")
         status: (scope: String) -> text_field(fixture_row(rows, scope), "status")
-        if mode == "pass" -> assert(rows.all(row -> text_field(row, "status") == "PASS"))
-        if mode == "ordinary" {
-            assert_eq(int_field(fixture_row(rows, "golden"), "code"), Val(17))
-            loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "PASS")
+        if mode == {
+            "pass" -> assert(rows.all(row -> text_field(row, "status") == "PASS"))
+            "ordinary" -> {
+                assert_eq(int_field(fixture_row(rows, "golden"), "code"), Val(17))
+                loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "PASS")
+            }
+            "refused" -> {
+                assert_eq(status("ui"), "FAIL")
+                assert(text_field(fixture_row(rows, "ui"), "reason").contains("non-PASS"))
+                assert_eq(status("cases"), "PASS")
+            }
+            "signal" -> {
+                assert_eq(status("golden"), "FAIL")
+                loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "BLOCKED")
+            }
+            "registry" -> assert_eq(status("registries"), "FAIL")
+            "corrupt" -> assert_eq(status("source-integrity-after"), "FAIL")
+            "pinned" -> {
+                assert_eq(status("source-integrity-before"), "PASS")
+                assert_eq(status("source-export"), "")
+            }
+            "closeout" -> assert_eq(rows.len(), 1)
+            else -> panic("unknown fixture mode {mode}")
         }
-        if mode == "refused" {
-            assert_eq(status("ui"), "FAIL")
-            assert(text_field(fixture_row(rows, "ui"), "reason").contains("non-PASS"))
-            assert_eq(status("cases"), "PASS")
-        }
-        if mode == "signal" {
-            assert_eq(status("golden"), "FAIL")
-            loop suite in ([String]{"ui", "cases", "registries"}) -> assert_eq(status(suite), "BLOCKED")
-        }
-        if mode == "registry" -> assert_eq(status("registries"), "FAIL")
-        if mode == "corrupt" -> assert_eq(status("source-integrity-after"), "FAIL")
-        if mode == "pinned" {
-            assert_eq(status("source-integrity-before"), "PASS")
-            assert_eq(status("source-export"), "")
-        }
-        if mode == "closeout" -> assert_eq(rows.len(), 1)
     }
     files.remove_all(container) ?? panic("fixture cleanup: {err}")
     files.remove_all(external) ?? panic("fixture cleanup: {err}")
