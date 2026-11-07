@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95713,
+    "rev": 95720,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97008,7 +97008,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97027,11 +97027,11 @@
         {
           "n": 1,
           "text": "A case creates a symlink to a missing target: files.exists follows the link and returns false, and the link-level query (the Core API that does not follow links) returns true. The rule is stated in the core.files doc comment. Passes on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:00:26.854Z"
+          "evidence": "8583f858a0 made files.exists follow a final link. 1cac917708 adds doc comments on Core/Files/Files.jet exists (follows the link, so a broken link is false) and lexists (the link itself), a lexists assertion on the broken link in tests/cases/core_files_foundations/core_files_metadata_predicates_follow_links_and_keep_errors_false.case, and a jet build --release step with checked stdout beside jet run (O0) and jet build (O1). The case PASSes (PortsLead-2, s1 of HEAD) and passed on O0 and O1 in Main batch vb13.",
+          "at": "2026-11-07T10:55:37.817Z"
         }
       ],
       "refs": [],
@@ -97042,9 +97042,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:00:25.991Z",
-      "updated": "2026-11-07T10:39:04.769Z",
+      "updated": "2026-11-07T10:55:39.783Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T10:55:39.783Z"
     },
     {
       "id": "c0s2gaqp",
@@ -97405,6 +97406,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c1 group D landed in 2a65339fc0 (MechD-3). 13 KF rows that exited 101 now pass and lose their KF lines: list_remove_modes, the bits, set and rank transcripts and their rustc_backed twins, both sequential inline-HOF cases, stable_partition, codable_union, and both core_set_foundations cases (StringSet had a stale handle row). public_transcript_covers_remaining_core_pure_families now exits 0, and its KF line records only display-form differences. The staged-merge ICE text now names the function and cause; Core's saturating_sub_ns was missing Never!. Lane regression run: 369 cases, 0 FAIL. #6672's fix (704276a947) and groups A+B (320598c665) cover the rest; group E is next."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c1 groups A and B landed in 320598c665 (MechD-3). Sema now reports E2104, not exit 101, for jvp/vjp (#6627), files.scope (#6419) and unmarshalled C ABI calls (#6366: struct, pointer, payload enum, F32, #ABI(sysv64)). FileReader.path lowers (runtime export added), so core_files_opaque_handles/file_handle_paths passes and loses its KF line. file_manual_close's real failure is now a missing UseAfterMove at check, and BackendBattery gives E3001 (exit 70). MechD-3 cases run over cffi, compute_extended, core_files_opaque_handles and corelib unbuilt: FAIL 0. Group D (Partition, Set/Bits clear, Decimal compound) is in progress."
         },
         {
@@ -97465,7 +97471,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:29:02.132Z",
-      "updated": "2026-11-07T10:27:48.071Z",
+      "updated": "2026-11-07T10:59:02.793Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98037,7 +98043,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98066,11 +98072,11 @@
         {
           "n": 1,
           "text": "jet Tools/agent/CoreCoverage.jet --check exits 0 on dev: each of the 296 functions either gains a #Test or golden that exercises it, or is removed as dead Core, and the ratchet file only shrinks (it is never rewritten upward).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T08:50:46.177Z"
+          "evidence": "Dev HEAD 1cac917708, exported and checked with seed a0_032 (PortsLead-2): jet Tools/agent/CoreCoverage.jet --check exits 0 with 0 untested lines; 'total: 6165 public functions; 3410 uncovered'; 'excluded: 1438 declarations outside the user-callable surface (64 extern, 585 in compiler-private parts, 789 reserved __ names)'; 'Core coverage ratchet OK: every untested function is listed'. The ratchet only went down, 4825 to 4002 to 3410, never up. Commits: 763e3d3b74 (208 entries re-keyed 1:1), d4534c678a, e23b797ef8, 19875cde22, 53edc3789a, 64631225ff (helpers made private only when nothing outside their module calls them), dca47438a1 and 2605935bcc (rule: externs, reserved __ names and compiler-private part members are not user-callable; prelude type aliases), 24f17ec4b6 (new cases for CBORError.kind_name, ScreenPoint.new, WorldDelta.new and SourceLocation.display). UnsafeRatchet --check rc 0 (1342 regions).",
+          "at": "2026-11-07T10:55:34.826Z"
         }
       ],
       "refs": [],
@@ -98081,9 +98087,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:50:40.290Z",
-      "updated": "2026-11-07T10:32:34.898Z",
+      "updated": "2026-11-07T10:55:36.533Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T10:55:36.533Z"
     },
     {
       "id": "c0onvbda",
@@ -98484,7 +98491,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98497,11 +98504,11 @@
         {
           "n": 1,
           "text": "jet Tools/agent/Land.jet precommit refuses a patch that leaves UnsafeRatchet.jet --check or CoreCoverage.jet --check red: a seeded patch that shifts an #Unsafe line without refreshing safety.md is refused, and so is one that adds an untested public Core function; the same patch with the refresh or a test is admitted.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T10:46:14.154Z"
+          "evidence": "13cbf10241 and 076e5a8799: jet Tools/agent/Land.jet precommit runs Tools/agent/UnsafeRatchet.jet --check and Tools/agent/CoreCoverage.jet --check with the seed on every commit, and on failure shows the last 40 lines of output (the verdict). The live lander's precommit got the same loop, and these commits landed through it. Refuse row: a tree with one safety.md #Unsafe line shifted (Crypto 1258:5 to 1257:5) and app.canonical_providers removed from the coverage ratchet exits 1 with 'unsafe ratchet: baseline … has stale generated rows', 'untested: app canonical_providers … (Core/App/App.jet:91)' and PRECOMMIT FAILED. Admit row: the restored tree gives 'ratchet … UnsafeRatchet.jet ok', 'ratchet … CoreCoverage.jet ok' and PRECOMMIT OK (exit 0). LaneCheck Land.jet CHECK OK; Land.jet #Tests 9/9. The old precommit never ran either ratchet (the gap predates the port).",
+          "at": "2026-11-07T11:00:41.299Z"
         }
       ],
       "refs": [],
@@ -98512,9 +98519,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:46:06.219Z",
-      "updated": "2026-11-07T10:46:14.154Z",
+      "updated": "2026-11-07T11:00:43.060Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T11:00:43.060Z"
     },
     {
       "id": "c00emhw5",
@@ -186303,6 +186311,55 @@
   ],
   "events": [
     {
+      "at": "2026-11-07T11:00:43.060Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qclgcg",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T11:00:41.299Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qclgcg",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T10:59:02.793Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005fduo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:55:39.784Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0swo1p3",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T10:55:37.817Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0swo1p3",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T10:55:36.534Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005c3wh",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T10:55:34.826Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c005c3wh",
+      "note": "#1"
+    },
+    {
       "at": "2026-11-07T10:54:41.621Z",
       "by": "Main",
       "action": "card.criteria-add",
@@ -189787,713 +189844,6 @@
       "action": "card.update",
       "ref": "c0iqh0og",
       "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:30:28.030Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0zyuv5p",
-      "note": "#1 The AOT test batch isolates per-claim env and cwd (or runs s"
-    },
-    {
-      "at": "2026-11-07T03:30:27.168Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zyuv5p",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:30:24.357Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fgw1zd",
-      "note": "#1 `jet test Compiler/JetCli` passes 'budget view projects only"
-    },
-    {
-      "at": "2026-11-07T03:30:23.529Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fgw1zd",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:30:22.144Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0qowqlz",
-      "note": "#1 A consuming method drops self: after calling it on a struct "
-    },
-    {
-      "at": "2026-11-07T03:30:15.205Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qowqlz",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:30:07.617Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0iuwxty",
-      "note": "#1 remove, add and index-write on a read-only Pool parameter ar"
-    },
-    {
-      "at": "2026-11-07T03:30:06.654Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iuwxty",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:30:05.011Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h114mv",
-      "note": "#1 One runner executes every Core #Test on O0, O1 and O2 (Core-"
-    },
-    {
-      "at": "2026-11-07T03:30:04.054Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h114mv",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:30:02.243Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0z2nw1h",
-      "note": "#1 `Receiver<T>` carries any sendable type; `after`, `interval`"
-    },
-    {
-      "at": "2026-11-07T03:30:01.035Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0z2nw1h",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:59.312Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0odfeu7",
-      "note": "#1 A `#Test` with typed parameters runs as a property with deri"
-    },
-    {
-      "at": "2026-11-07T03:29:58.113Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0odfeu7",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:54.682Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0itgqr6",
-      "note": "#1 Core declares `Package`, `Project` and `Env` record types; J"
-    },
-    {
-      "at": "2026-11-07T03:29:53.367Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0itgqr6",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:51.748Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08o25e8",
-      "note": "#2 `#Policy(classified: ...)` makes the compiler refuse a class"
-    },
-    {
-      "at": "2026-11-07T03:29:49.478Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08o25e8",
-      "note": "#1 Licenses are SPDX values with `Custom(String)`, parsed and c"
-    },
-    {
-      "at": "2026-11-07T03:29:48.500Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08o25e8",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:46.908Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wv2wmp",
-      "note": "#2 `#Policy(no_alloc)` and `#Policy(vectorize)` fail the build "
-    },
-    {
-      "at": "2026-11-07T03:29:42.442Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0wv2wmp",
-      "note": "#1 `#Layout(packed)` and first-argument align (D-JAI-LAYOUT1=A)"
-    },
-    {
-      "at": "2026-11-07T03:29:41.491Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wv2wmp",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:39.843Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0pf4ki0",
-      "note": "#1 `trait Language` is declared in Core; the c binder implement"
-    },
-    {
-      "at": "2026-11-07T03:29:38.882Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pf4ki0",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:37.298Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#2 The parser and sema marker switches read the declared marker"
-    },
-    {
-      "at": "2026-11-07T03:29:36.431Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0fymc7l",
-      "note": "#1 `impl T.Diagnostic` and `impl T.Lint` register package codes"
-    },
-    {
-      "at": "2026-11-07T03:29:35.605Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fymc7l",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:34.181Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c015lbud",
-      "note": "#1 The three web programs (date-fns, chart.js, a web component)"
-    },
-    {
-      "at": "2026-11-07T03:29:33.351Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c015lbud",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:31.935Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00n89mp",
-      "note": "#1 The three Rust-crate programs (regex, serde_json, a crate wi"
-    },
-    {
-      "at": "2026-11-07T03:29:31.115Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00n89mp",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:29.777Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03kbmfy",
-      "note": "#1 The three Python programs (statistics, numpy, pandas with ma"
-    },
-    {
-      "at": "2026-11-07T03:29:28.943Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03kbmfy",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:27.578Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c05aa8kj",
-      "note": "#1 The three isolation programs (a C decoder under `.Wasm`, a c"
-    },
-    {
-      "at": "2026-11-07T03:29:22.914Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c05aa8kj",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:21.426Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03yyxl3",
-      "note": "#1 `#Export(c, python, js)` libraries build with `jet build --l"
-    },
-    {
-      "at": "2026-11-07T03:29:20.471Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03yyxl3",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:29:18.917Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c03t8ic0",
-      "note": "#1 The three callback programs (qsort with a capturing comparat"
-    },
-    {
-      "at": "2026-11-07T03:29:18.030Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03t8ic0",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:54.591Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0x2wq8a",
-      "note": "#1 The three gallery programs (libm, zlib, libpng) call C throu"
-    },
-    {
-      "at": "2026-11-07T03:28:53.282Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x2wq8a",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:51.629Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mwaylu",
-      "note": "#1 The three gallery programs (a #Blocking C call that does not"
-    },
-    {
-      "at": "2026-11-07T03:28:50.712Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mwaylu",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:49.103Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0l5a4vu",
-      "note": "#1 The three gallery apps (sqlite notes CLI, raylib window, ray"
-    },
-    {
-      "at": "2026-11-07T03:28:48.081Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l5a4vu",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:46.472Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0cdnofm",
-      "note": "#2 Every gap is attributed to a root (startup, RC and locks, bo"
-    },
-    {
-      "at": "2026-11-07T03:28:45.634Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0cdnofm",
-      "note": "#1 Every asm-parity ceiling cell, every gauntlet cell against e"
-    },
-    {
-      "at": "2026-11-07T03:28:44.837Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cdnofm",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:43.464Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c02qdoro",
-      "note": "#2 fft and tensormap no longer call Core fabs through to_bits/f"
-    },
-    {
-      "at": "2026-11-07T03:28:42.622Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c02qdoro",
-      "note": "#1 Small runtime-routed Core leaves are inlinable across packag"
-    },
-    {
-      "at": "2026-11-07T03:28:41.763Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02qdoro",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:40.305Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08tik7v",
-      "note": "#2 Once ratified, TempFile/TempDir/FileLock `.path` follows the"
-    },
-    {
-      "at": "2026-11-07T03:28:39.502Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c08tik7v",
-      "note": "#1 Ballot for a read-only field form (readable outside the modu"
-    },
-    {
-      "at": "2026-11-07T03:28:38.701Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08tik7v",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:19.303Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0he880u",
-      "note": "#1 Package-level audit trail: an imperative change writes back "
-    },
-    {
-      "at": "2026-11-07T03:28:18.432Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0he880u",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:16.902Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0yozzfl",
-      "note": "#1 Two independent builds of every published package from the s"
-    },
-    {
-      "at": "2026-11-07T03:28:14.771Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0yozzfl",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:13.085Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gpih2e",
-      "note": "#1 The owner question on grafts (allowed or not) is a ratified "
-    },
-    {
-      "at": "2026-11-07T03:28:12.169Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gpih2e",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:08.344Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0nr5mre",
-      "note": "#1 `jetpack` answers \"is this package affected by advisory X?\" "
-    },
-    {
-      "at": "2026-11-07T03:28:07.366Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nr5mre",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:05.763Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ba141x",
-      "note": "#1 D-LINK-MODEL1=A is built: each linked part has its own linka"
-    },
-    {
-      "at": "2026-11-07T03:28:02.442Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ba141x",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:28:00.888Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0awastn",
-      "note": "#2 A raylib example game runs headless (rendering to memory wit"
-    },
-    {
-      "at": "2026-11-07T03:27:59.677Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0awastn",
-      "note": "#1 D-RAYLIB-DRIVER-LOAD1=A and D-RAY-API1=A are built: `ray` ke"
-    },
-    {
-      "at": "2026-11-07T03:27:58.796Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0awastn",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:27:57.256Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hnphts",
-      "note": "#2 `--trace` prints each phase as it ends (wall, CPU s, cores b"
-    },
-    {
-      "at": "2026-11-07T03:27:56.361Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0hnphts",
-      "note": "#1 From the repository root, `jet build Compiler/` with the `je"
-    },
-    {
-      "at": "2026-11-07T03:27:53.265Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hnphts",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:27:51.733Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ygtwb9",
-      "note": "#2 Once ratified, the chosen form is built with an example gold"
-    },
-    {
-      "at": "2026-11-07T03:27:50.694Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ygtwb9",
-      "note": "#1 Ballot D-JAI-GENERIC1 (per-call generic control: Jai #modify"
-    },
-    {
-      "at": "2026-11-07T03:27:49.787Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ygtwb9",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:27:48.242Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01sunrb",
-      "note": "#2 Core CSV row handoff and crypto pending bytes use it instead"
-    },
-    {
-      "at": "2026-11-07T03:27:47.293Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01sunrb",
-      "note": "#1 D-TAKE-REPLACE1=A is built: one standard operation installs "
-    },
-    {
-      "at": "2026-11-07T03:27:46.395Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01sunrb",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:27:44.885Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ayfc4w",
-      "note": "#2 Naming the stream type or building a `Body` (or a `Directory"
-    },
-    {
-      "at": "2026-11-07T03:27:43.954Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ayfc4w",
-      "note": "#1 D-PRIVATE-NATIVE-CARRIER1=A is built: core.http declares its"
-    },
-    {
-      "at": "2026-11-07T03:27:42.363Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ayfc4w",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:26:26.912Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06f25m1",
-      "note": "phase"
-    },
-    {
-      "at": "2026-11-07T03:24:41.502Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01vsb2c",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:24:39.724Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gaxqxg",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-07T03:24:24.601Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0s8gang",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:24:22.915Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0itvqcw",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:24:21.175Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07rizte",
-      "note": "goals"
-    },
-    {
-      "at": "2026-11-07T03:23:40.040Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c04g9zai",
-      "note": "#3 End metric: every required cell can be written in Jet with i"
-    },
-    {
-      "at": "2026-11-07T03:23:38.988Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c04g9zai",
-      "note": "#2 Each missing technique gets an owner ballot with its plain a"
-    },
-    {
-      "at": "2026-11-07T03:23:37.956Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c04g9zai",
-      "note": "#1 Every technique an asm-parity reference uses that Jet code c"
-    },
-    {
-      "at": "2026-11-07T03:23:36.857Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c04g9zai",
-      "note": "Expert performance APIs: every technique the asm-parity ceilings use is expressible in Jet"
-    },
-    {
-      "at": "2026-11-07T03:23:35.231Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06z2egd",
-      "note": "#2 End metric: Jet is shortest or tied on every task family wit"
-    },
-    {
-      "at": "2026-11-07T03:23:33.715Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c06z2egd",
-      "note": "#1 A matched task corpus of at least 50 common scripting, data,"
-    },
-    {
-      "at": "2026-11-07T03:23:32.656Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c06z2egd",
-      "note": "Concision and builtins: the shortest correct code for common tasks"
-    },
-    {
-      "at": "2026-11-07T03:23:31.238Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01paimh",
-      "note": "#3 End metric: Jet scores best on every task family; every loss"
-    },
-    {
-      "at": "2026-11-07T03:23:30.165Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01paimh",
-      "note": "#2 Each task is scored for readers (human or model: accuracy an"
-    },
-    {
-      "at": "2026-11-07T03:23:29.066Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c01paimh",
-      "note": "#1 A reasoning benchmark defines task families (predict the out"
-    },
-    {
-      "at": "2026-11-07T03:23:27.984Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c01paimh",
-      "note": "Reasoning about code: Jet beats every language on how well readers and tools can reason about a program"
-    },
-    {
-      "at": "2026-11-07T03:23:26.616Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0g6fxb9",
-      "note": "#2 End metric: Jet wins every cell and metric against every pee"
-    },
-    {
-      "at": "2026-11-07T03:23:25.544Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0g6fxb9",
-      "note": "#1 A matched script cell family (hello, a 50-line text-processi"
-    },
-    {
-      "at": "2026-11-07T03:23:24.506Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0g6fxb9",
-      "note": "Scripting speed and startup: beat Lua, LuaJIT, Python, Node, Bun, Deno and Perl"
-    },
-    {
-      "at": "2026-11-07T03:23:23.077Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0h8jjrp",
-      "note": "#2 End metric: startup is as fast as physically possible: exec-"
-    },
-    {
-      "at": "2026-11-07T03:23:22.012Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0agsbqj",
-      "note": "#3 End metric: required cells beat their asm-parity ceilings (J"
     }
   ],
   "nextNum": 368,
