@@ -5728,7 +5728,12 @@ opt-in (D-PKGSIGN1). `jet registry vendor`, `jet inspect audit`, `jet build --sb
 package and asks sema for its public API rows (every public fn with its solved
 effect row, struct with its fields, enum with its variants, trait with its
 required and defaulted members, method, `impl`, distinct, type, const and unit
-family; another module's names carry the module prefix). It uploads them as
+family; another module's names carry the module prefix, and an inline
+module's members carry their module path). A soft-public `_name` is no row
+(D-SHAPE-INTERNAL1). A unit family is a row only when the package declares
+it; a signature that names a standard `core.units` type spells it with its
+dimension identity (`Meter[core.units%3A%3ALength:1]`). A `#CLI` field that
+fills a bare positional ends in `[positional N]`. It uploads them as
 `apis/<name>/<version>.api` beside the artifact and compares them with the
 registry's snapshot for the highest published version below the new one,
 yanked or not; the local `.jet/cache/api/<name>.api` copy feeds the lock

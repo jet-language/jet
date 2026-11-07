@@ -80,12 +80,10 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
 }
 
 // tests/pkg.rs:5949 cli_typed_default_is_not_frozen_as_positional (c62).
-// Known failing: the API rows of a `#CLI` struct do not record which
-// required field fills which bare positional (spec.md "Each supported `#CLI`
-// field maps to exactly one long flag ... Declaration order is part of the
-// command interface"), so a reorder that changes positional binding is not a
-// contract change. The typed default half already holds.
-#Test("cli_typed_default_is_not_frozen_as_positional", expected_fail: true) {
+// A typed default keeps its field a flag (`= _`), and the required field's
+// bare positional is frozen: declaration order is part of the command
+// interface (spec.md "Field mapping").
+#Test("cli_typed_default_is_not_frozen_as_positional") {
     root: pap_root("cli-default")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
@@ -94,17 +92,14 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
     port: pap_find(api, "Config.port").signature
     assert_eq(port, "field Config.port: Int = _")
     required: pap_find(api, "Config.required").signature
-    assert(required.contains("positional 0"), "the required field fills positional 0 and the API freezes that, got `{required}`")
+    assert_eq(required, "field Config.required: Int [positional 0]")
 }
 
 // tests/pkg.rs:5967 physical_unit_api_freeze_and_semver_share_one_canonical_signature (c24).
-// Known failing: a package that only names a standard unit family freezes
-// that family as its own row (`unit Length[core.units%3A%3ALength:1] ...
-// owner core.units`): sema_public_api_items pushes every public unit family
-// it meets (Compiler/JetSema/Source/Sema/PublicApi.jet:84) without checking
-// its owner, so moving `keep` from a Length to a Time bound also reports the
-// vanished core.units Length family as a breaking change (2 changes, not 1).
-#Test("physical_unit_api_freeze_and_semver_share_one_canonical_signature", expected_fail: true) {
+// Only the families a package declares are its rows: a package that names
+// the standard Length family through a bound freezes its `keep`, not the
+// core.units family, so moving `keep` to a Time bound is one change.
+#Test("physical_unit_api_freeze_and_semver_share_one_canonical_signature") {
     root: pap_root("unit-freeze")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
@@ -131,11 +126,9 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
 }
 
 // tests/pkg.rs:6066 soft_public_names_are_not_semver_promises (c24).
-// Known failing: an underscore name is soft-public and carries no SemVer
-// promise (release-policy.md, D-STRUCT-LIFE1), but sema_public_api_named
-// (Compiler/JetSema/Source/Sema/PublicApi.jet:102) drops only `__` names, so
-// `_unstable` is frozen and its removal is reported as breaking.
-#Test("soft_public_names_are_not_semver_promises", expected_fail: true) {
+// An underscore name is soft-public and carries no SemVer promise
+// (D-SHAPE-INTERNAL1), so it is never frozen.
+#Test("soft_public_names_are_not_semver_promises") {
     root: pap_root("soft")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
@@ -166,10 +159,8 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
 // snapshot that is not api_version 4 is refused), so the port keeps the
 // behavior that survives: two inline modules' same-named leaves stay two
 // distinct rows, and the published snapshot of them reads back with no
-// change against the current API. Known failing: jet_cli_publish_public_api
-// (Compiler/JetCli/Source/Cli/Publish.jet:501) yields no rows at all for an
-// entry file whose public items sit in inline modules.
-#Test("v2_snapshot_upgrade_matches_duplicate_inline_leaves", expected_fail: true) {
+// change against the current API.
+#Test("v2_snapshot_upgrade_matches_duplicate_inline_leaves") {
     root: pap_root("inline-leaves")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
@@ -205,21 +196,17 @@ pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreak
 }
 
 // tests/pkg.rs:6218 physical_unit_trait_methods_use_canonical_dimensions (c13).
-// The Rust row spelled the prelude unit's whole identity; the port keeps the
-// behavior it guarded: the prelude `Meter` (core.units Length) and a local
-// same-named nominal family are different public types, and the frozen
-// snapshot keeps the producer's row. Known failing: the row spells the
-// parameter type by its bare name (type_name in sema_public_api_params,
-// Compiler/JetSema/Source/Sema/PublicApi.jet:131), so swapping the canonical
-// unit for a local nominal one leaves `Measure.scale` unchanged; and the
-// package freezes the core.units Length family it only names as its own row
-// (PublicApi.jet:84), so the diff reports `Length`, not `Measure.scale`.
-#Test("physical_unit_trait_methods_use_canonical_dimensions", expected_fail: true) {
+// The prelude `Meter` is spelled with its canonical dimension, so it and a
+// local same-named nominal family (which shadows the prelude member,
+// D-DIMENSION-OPEN1) are different public types; the frozen snapshot keeps
+// the producer's row, and the package freezes no core.units family.
+#Test("physical_unit_trait_methods_use_canonical_dimensions") {
     root: pap_root("unit-trait")
     owner: PapFixtureRoot{path: root}
     defer close(owner)
     prelude_api: pap_api(root, "prelude", "physics", "Measure: trait {{\n    scale: fn(value: Meter) -> Meter\n}}\n")
     method: pap_find(prelude_api, "Measure.scale")
+    assert_eq(method.signature, "require Measure.scale(value: Meter[core.units%3A%3ALength:1]) Meter[core.units%3A%3ALength:1]")
     frozen: pap_frozen("physics", prelude_api)
     assert_eq(pap_find(frozen, "Measure.scale").signature, method.signature)
     local_api: pap_api(root, "local", "physics", "#UnitFamily(Length, base: meter) {{\n    meter\n}}\nMeasure: trait {{\n    scale: fn(value: Meter) -> Meter\n}}\n")
