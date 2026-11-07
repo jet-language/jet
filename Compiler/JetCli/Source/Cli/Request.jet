@@ -132,18 +132,20 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 }
 
 // Packaging uses the ordinary hosted source loader: the checked
-// NativeLibrary program (the compile stopped before lowering, without an
-// entry) built as IR from its `#Export(c)` rows (ir_build_library) at O1,
-// checked by IR Lint after the build and after the optimizer, and written
-// as `{prefix}.o` with its export list, ABI receipt and thread receipt
-// (ir_thread_exports: the exports that can start a second thread).
-jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: String, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
+// NativeLibrary program (the compile stopped before lowering) built as IR
+// from its `#Export(c)` rows (ir_build_library) at O1, checked by IR Lint
+// after the build and after the optimizer, and written as `{prefix}.o` with
+// its export list, ABI receipt and thread receipt (ir_thread_exports: the
+// exports that can start a second thread). The rows alone root the library:
+// an entry module's `run: fn` is no startup here, only an export when it is
+// `#Export(c)`. `lifecycle` is the lifecycle list's path
+// (JET_FRONT_LIBRARY_LIFECYCLE).
+jet_cli_runtime_library: fn(front: &&JetDriverLoweringInputsResult, prefix: String, lifecycle: String?, compiler_threads: CompilerThreads) -> JetDriverCompileResult {
     owned := front.move()
     result := owned.compile.move()
     if !result.complete || result.internal_problem != None -> return result
     checked := owned.inputs.move() ?? return jet_driver_compile_escaped_failure("the runtime front end returned no checked inputs")
-    if checked.entry_key != None -> return jet_driver_compile_escaped_failure("runtime feed requires a checked NativeLibrary artifact")
-    lifecycle_path: cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE") ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
+    lifecycle_path: lifecycle ?? return jet_driver_compile_escaped_failure("runtime packaging requires the lifecycle list")
     lifecycle_text: cli_files.read(lifecycle_path) ?? return jet_driver_compile_escaped_failure("cannot read runtime lifecycle list: {err}")
     rows: loop row in checked.c_exports -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
     declarations := jet_driver_checked_declarations(checked)
@@ -1386,7 +1388,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             library_prefix: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
-            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
+            result := if library_prefix == .Val(prefix) -> jet_cli_runtime_library(jet_cli_lowering_inputs(selected, trace_sink), prefix, cli_sys.get("JET_FRONT_LIBRARY_LIFECYCLE"), compiler_threads) else -> jet_cli_compile_request(selected, trace_sink)
             // The host's phases after the compile (Host.jet's native backend
             // route) trace through the same sink, which the result carries,
             // and compile on the request's threads.
