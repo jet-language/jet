@@ -673,12 +673,23 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(row_ids(retried.flaky), [String]{"b.jet"})
 }
 
-#Test("an untracked row is a failure no known-failing line or refusal accounts for") {
+#Test("an untracked row is a failure no known-failing line accounts for, a refusal no ledger line owns included") {
     before: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "KNOWN-FAILING")}
-    after: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "KNOWN-FAILING"), kit_row("c.jet", "o0", "ERROR"), kit_row("d.jet", "o0", "REFUSED"), kit_row("e.jet", "o0", "TIMEOUT")}
+    after: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "KNOWN-FAILING"), kit_row("c.jet", "o0", "ERROR"), kit_row("d.jet", "o0", "REFUSED"), kit_row("e.jet", "o0", "TIMEOUT"), kit_row("f.jet", "o0", "SKIP-HOST"), kit_row("g.jet", "o0", "OPT-IN")}
     result: compare_suites(before, after, [SuiteRow]{}, [Disposition]{})
-    assert_eq(row_ids(result.untracked), [String]{"a.jet", "c.jet", "e.jet"})
+    assert_eq(row_ids(result.untracked), [String]{"a.jet", "c.jet", "d.jet", "e.jet"})
     assert_eq(result.release_untracked, 1)
+}
+
+#Test("a kit with one untracked failing row is refused and one with none is admitted, whatever the release had") {
+    release: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "FAIL"), kit_row("c.jet", "o0", "PASS")}
+    one: untracked_row("ui", compare_suites(release, [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "PASS")}, [SuiteRow]{}, [Disposition]{}))
+    assert_eq("{one.check} {one.status}", "untracked:ui FAIL")
+    assert_eq(one.detail, "1 failing row(s) with no known-failing line (release 2); full list in REPORT.md")
+    none: untracked_row("ui", compare_suites(release, [SuiteRow]{kit_row("a.jet", "o0", "KNOWN-FAILING"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "PASS")}, [SuiteRow]{}, [Disposition]{}))
+    assert_eq("{none.check} {none.status}", "untracked:ui PASS")
+    refused: untracked_row("ui", compare_suites(release, [SuiteRow]{kit_row("a.jet", "o0", "REFUSED"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "PASS")}, [SuiteRow]{}, [Disposition]{}))
+    assert_eq(refused.status, "FAIL")
 }
 
 #Test("a dispositioned lost row is tracked by its card, not untracked") {

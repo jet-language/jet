@@ -24,7 +24,10 @@
 //             run by s2 with `--compiler` naming the current release, then s2) on COMMIT's
 //             fixtures, compared per (suite, case, tier). A row the release passes and s2
 //             fails twice is lost; a lost row needs a disposition line
-//             `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in --dispositions.
+//             `suite<TAB>case<TAB>tier|*<TAB>#card<TAB>reason` in --dispositions. No failing
+//             row may be untracked: each one needs a known-failing line, a host skip or an
+//             opt-in, or (for a lost row) a disposition; a REFUSED row no ledger line owns
+//             counts as untracked.
 //   gains     rows s2 passes that the release fails, plus Jetpack rows s2 no longer shows;
 //             at least --min-gains (default 10) of them.
 // The suites start only once the cheap checks (chain, pack, jetpack) are
@@ -77,8 +80,10 @@ ADMIT_USAGE: "usage: jet run Tools/release/Main.jet -- admit COMMIT [--summary T
 // size) in CC_PACK_ASSETS.
 CC_PACK_SOURCE: "Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet"
 // Testkit statuses a failing row may carry and still be tracked: a
-// known-failing line, a refusal, a host skip or an opt-in row.
-TRACKED_FAILURES: [String]{"KNOWN-FAILING", "REFUSED", "SKIP-HOST", "OPT-IN"}
+// known-failing line, a host skip or an opt-in row. The testkit turns a
+// refusal a known-failing line owns into KNOWN-FAILING, so a REFUSED row that
+// remains has no owning line and is untracked.
+TRACKED_FAILURES: [String]{"KNOWN-FAILING", "SKIP-HOST", "OPT-IN"}
 
 AdmitOptions: struct {
     commit: String
@@ -257,9 +262,16 @@ Compared: struct {
 
 passes: fn(status: String) -> Bool Never! { status == "PASS" || status == "UNEXPECTED-PASS" }
 
-// A failing row no known-failing line, refusal or release disposition
-// accounts for: nothing tracks it.
+// A failing row no known-failing line or release disposition accounts for:
+// nothing tracks it.
 is_untracked: fn(status: String) -> Bool Never! { !passes(status) && !TRACKED_FAILURES.contains(status) }
+
+// The untracked gate row of one suite: any untracked failing row fails the
+// release, however many the current release had (shown for comparison).
+untracked_row: fn(suite: String, compared: Compared) -> GateRow Never! {
+    count: compared.untracked.len()
+    GateRow{check: "untracked:{suite}", status: if count > 0 -> "FAIL" else -> "PASS", detail: "{count} failing row(s) with no known-failing line (release {compared.release_untracked}); full list in REPORT.md"}
+}
 
 row_key: fn(suite: String, id: String, tier: String) -> String Never! { "{suite}\t{id}\t{tier}" }
 
@@ -1066,10 +1078,9 @@ suites_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
         } else {
             row(ctx, "suite:{suite}", "PASS", summary)
         }
-        // Untracked failures may only shrink: every one is listed in
-        // REPORT.md, and a release with more fails.
-        count: compared.untracked.len()
-        row(ctx, "untracked:{suite}", if count > compared.release_untracked -> "FAIL" else -> "PASS", "{count} failing row(s) with no known-failing line (release {compared.release_untracked}); full list in REPORT.md")
+        // Every untracked failure is listed in REPORT.md; any one fails.
+        untracked: untracked_row(suite, compared)
+        row(ctx, untracked.check, untracked.status, untracked.detail)
     }
     unused := [String]{}
     loop entry in ctx.dispositions {
