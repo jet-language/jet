@@ -16,6 +16,8 @@ use jet_foundation.[
     type_name,
     Item,
     TraitImplBlock,
+    IR_RUNTIME_HANDLES,
+    ir_runtime_handle_row,
 ]
 
 // One comparability query. A recursive type (`Expr: enum { Neg(inner: Expr) }`)
@@ -111,8 +113,9 @@ sema_comparability_implements: fn(environment: SemaScopeEnvironment, program: Se
 
 // An auto-derived `Equatable` is blocked when some field reaches, through
 // auto-derived types without a generated block, a declared type of the program
-// that neither derives nor implements `Equatable` (`#!Equatable`). A revisited
-// type adds no obligation; a name that resolves to no declared item leaves the
+// that neither derives nor implements `Equatable` (`#!Equatable`), or a runtime
+// handle registered without `eq` (`WsConn`, #6581). A revisited type adds no
+// obligation; any other name that resolves to no declared item leaves the
 // decision to its registered implementation.
 sema_comparability_auto_blocked: fn(graph: SemaRegistrationGraph, module_identity: String, item: Item, visited: &[String:Bool]) -> Bool Never! {
     if sema_comparability_generated_block(item, "Equatable") -> return false
@@ -153,7 +156,7 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
             false
         }
         .Named(name) -> {
-            resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return false
+            resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return sema_comparability_handle_without_eq(name)
             if sema_resolved_kind(graph, resolved) != SymbolKind.Type -> return false
             row: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return false
             key: "{resolved.target_module_identity}::{sema_resolved_name(graph, resolved)}"
@@ -172,6 +175,14 @@ sema_comparability_auto_blocked_type: fn(graph: SemaRegistrationGraph, module_id
         }
         else -> false
     }
+}
+
+// A runtime handle whose registration has no `jet_rt_handle_eq_<runtime>`
+// routine: no tier can compare two of them, so nothing holding one derives
+// `Equatable`.
+sema_comparability_handle_without_eq: fn(name: String) -> Bool Never! {
+    row: ir_runtime_handle_row(name) ?? return false
+    !IR_RUNTIME_HANDLES[row].eq
 }
 
 sema_comparability_generated_block: fn(item: Item, trait_name: String) -> Bool Never! {

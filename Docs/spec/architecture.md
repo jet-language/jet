@@ -234,6 +234,14 @@ together with the runtime `#Export(c)` they name. After provider admission
 changes, run `jet Tools/agent/LaneCheck.jet --runtime-generators` to check the
 generated runtime message tables.
 
+The runtime handle table lives in the foundation registry
+(`Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet`), because both
+compiler halves read it: the IR lays a handle out by its row, and the checker
+reads the same row's `clone` and `eq`. A handle no declaration lays out and
+whose row has no `clone` has one owner, so it and any value holding it move
+instead of copying; one without `eq` has no `==`, so nothing holding it derives
+`Equatable` (#6581).
+
 Native `[U8]` payloads are packed one-byte elements, matching checked
 `StorageLayout(U8)` and the C ABI's `u8` buffer. The runtime's
 `RT_HOST_U8_STRIDE` is 1; byte-list allocation, indexing, copying and freeing

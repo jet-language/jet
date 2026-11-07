@@ -10,7 +10,7 @@ use {
     jet_lexer.[lex_generated]
     jet_parser.[parse_lexed_with_source, parser_line_starts]
     jet_ir.[IRRecordSchema, IR_RECORD_SCHEMAS, IR_GENERATED_RECORDS, ir_route_symbol, ir_route_builder_lowered, ir_environment_route, ir_runtime_route, ir_runtime_handle, ir_runtime_handle_field, ir_host_value_name, ir_handle_civil_time_route, ir_handle_precise_route, ir_handle_math_route, ir_compiler_owned_core_fields, ir_compiler_owned_record_fields, ir_compiler_owned_type_rows]
-    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_variants]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CORE_MODULE_EXPORTS, CORE_CALLS, CORE_RECORD_FIELD_ROWS, CORE_CALL_COVERAGE_AOT, AccessConvention, CoreCallSignatureRequest, CoreCallSymbol, Type, TypeTupleField, core_call, core_call_coverage_contains, core_sig_fixed, core_enum_variants, ir_runtime_handle_row]
     jet_eval.[jet_eval_compiler_value_method_record]
 }
 
@@ -18,6 +18,7 @@ BUILD_ROUTES_PATH: "Compiler/JetIR/Source/BuildRoutes.jet"
 BUILD_TYPES_PATH: "Compiler/JetIR/Source/BuildTypes.jet"
 ROUTE_HANDLE_PATH: "Compiler/JetIR/Source/RouteHandle.jet"
 RUNTIME_ROUTES_PATH: "Compiler/JetIR/Source/RuntimeRoutes.jet"
+RUNTIME_HANDLES_PATH: "Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet"
 RUNTIME_RECORDS_PATH: "Compiler/JetIR/Source/RuntimeRecords.jet"
 COMPILER_OWNED_PATH: "Compiler/JetIR/Source/CompilerOwned.jet"
 EVAL_VALUES_PATH: "Compiler/JetEval/Source/CompilerValueMethods.jet"
@@ -443,7 +444,9 @@ nominal_row: fn(id: String, module_name: String, name: String, core: ParsedCore,
         }
     }
     if ir_runtime_handle(name) == .Val(handle) {
-        return SurfaceRow{id: id.copy(), kind: "nominal_type", owner: module_name.copy(), member: name.copy(), route: Val(Route{kind: "ir-runtime-handle", path: RUNTIME_ROUTES_PATH, line: file_line(route_files, RUNTIME_ROUTES_PATH, "jet_name: \"{name}\""), symbol: handle.runtime.copy()}), problem: "", declared_aot: false, result_type: name.copy(), result_class: "value"}
+        // A native provider row stays in RuntimeRoutes.jet; the handle table is the foundation's.
+        path: if ir_runtime_handle_row(name) != None -> RUNTIME_HANDLES_PATH else -> RUNTIME_ROUTES_PATH
+        return SurfaceRow{id: id.copy(), kind: "nominal_type", owner: module_name.copy(), member: name.copy(), route: Val(Route{kind: "ir-runtime-handle", path: path.copy(), line: file_line(route_files, path, "jet_name: \"{name}\""), symbol: handle.runtime.copy()}), problem: "", declared_aot: false, result_type: name.copy(), result_class: "value"}
     }
     unrouted(id, "nominal_type", module_name, name, "no Core source, compiler-owned type or runtime handle declares `{name}`")
 }

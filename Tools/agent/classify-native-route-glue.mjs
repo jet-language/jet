@@ -59,11 +59,11 @@ export function classifyNativeInventory(inventory, routes, source) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [inventory, routes, output] = process.argv.slice(2);
-  if (!inventory || !routes || !output) throw new Error('usage: classify-native-route-glue.mjs <inventory.tsv> <RuntimeRoutes.jet> <report.json>');
+  const [inventory, routes, handles, output] = process.argv.slice(2);
+  if (!inventory || !routes || !handles || !output) throw new Error('usage: classify-native-route-glue.mjs <inventory.tsv> <RuntimeRoutes.jet> <RuntimeHandles.jet> <report.json>');
   const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const cache = new Map();
-  const report = classifyNativeInventory(readFileSync(inventory, 'utf8'), readFileSync(routes, 'utf8'), (path) => {
+  const report = classifyNativeInventory(readFileSync(inventory, 'utf8'), readFileSync(routes, 'utf8') + readFileSync(handles, 'utf8'), (path) => {
     if (!cache.has(path)) cache.set(path, existsSync(`${root}/${path}`) ? readFileSync(`${root}/${path}`, 'utf8') : null);
     return cache.get(path);
   });
