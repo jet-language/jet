@@ -1,7 +1,7 @@
 /* Real Jet providers; checked-heap alloc/free observers.
  * Compose 301f6b608 (TextDebug), 2442d5d80 (bad-tag stop).
  * argv[1]: char-debug-goldens.bin for all 1,112,064 scalars, rebuilt by
- * run-ui-key-witness.mjs from the tracked CharDebugPlain.ranges.
+ * UiWitness.jet (key) from the tracked CharDebugPlain.ranges.
  * No C renderer/model substitutes for the Jet renderer being exercised. */
 #include <assert.h>
 #include <stdbool.h>

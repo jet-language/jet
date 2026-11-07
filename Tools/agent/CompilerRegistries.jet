@@ -122,7 +122,8 @@ Kit: struct {
 
 // How a native registry is driven: the runner under Compiler/*/Tests and the
 // verdict that admits it. `blocked` names a registry without a transport.
-// `fragments` names the fragments a plain transport's unit composes.
+// `fragments` names the fragments a plain transport's unit composes; `calls`
+// the runs of a committed Jet runner.
 Spec: struct {
     kind: String
     name: String
@@ -135,6 +136,17 @@ Spec: struct {
     expected_file: String
     blocked: String
     fragments: [String]
+    calls: [RunnerCall]
+}
+
+// One run of a committed Jet runner and its exact stdout (stderr stays
+// empty). `witness` is the C host the transport links against the runtime
+// object and hands over; without one the runner links its own fixture against
+// the link inputs. `mode` is the operand that selects the run, if any.
+RunnerCall: struct {
+    mode: String
+    witness: String
+    expected: String
 }
 
 Runtime: struct {
@@ -659,7 +671,38 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
 // --- transports ---------------------------------------------------------------
 
 spec: fn(kind: String, name: String, runner: String) -> Spec Never! {
-    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}}
+    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, calls: [RunnerCall]{}}
+}
+
+runner_call: fn(mode: String, witness: String, expected: String) -> RunnerCall Never! {
+    RunnerCall{mode: mode, witness: if witness == "" -> "" else -> "{RT}{witness}.c", expected: "{expected}\n"}
+}
+
+// The committed Jet runners under Compiler/JetRuntime/Tests and their runs.
+runner_calls: fn(name: String) -> [RunnerCall] Never! {
+    if name == {
+        "RunDuration" -> [RunnerCall]{runner_call("", "", "Jet-only Duration C ABI fixture passed")}
+        "RunAllocParity" -> [RunnerCall]{runner_call("", "", "alloc parity: 10 checked-allocator cases passed")}
+        "RunNativeLayout" -> [RunnerCall]{runner_call("", "", "Layout6: 12 draft literals exact; native/seed 42 observations + 3 fatal modes + ownership OK")}
+        "RunNativeTextNormalize" -> [RunnerCall]{runner_call("", "", "NFC2 Unicode17 20034 rows / both routes / ownership OK")}
+        "RunIntCabi" -> [RunnerCall]{runner_call("", "", "exact Int ABI: 9962 numeric/float cases + 6 stopped reports, clone/drop and concurrent hazard fixture; Jet-only provider")}
+        "RunIntWiden" -> [RunnerCall]{runner_call("", "", "Jet-only exact Int widening C ABI fixture passed")}
+        "RunCompilerNeededMath" -> [RunnerCall]{runner_call("", "", "Jet-only compiler math C ABI fixture passed")}
+        "RunExecutionFixtures" -> [RunnerCall]{runner_call("", "execution-fixture", "native execution witness: all cases passed")}
+        "StopWitness" -> [RunnerCall]{
+            runner_call("data-sequence", "DataTreeWitness", "8 Dyn List/Entries std Vec bounds/capacity process goldens passed"),
+            runner_call("scalar-reflect", "ScalarReflectWitness", "ScalarReflect bounds: exit 101, exact unsigned-index body and stdout flushed"),
+        }
+        "UiWitness" -> [RunnerCall]{
+            runner_call("choices", "UiCarriersChoicesWitness", "UI choices: ownership and record-variant stop byte-identical"),
+            runner_call("events", "UiEventsWitness", "UI events: real-provider ownership byte-identical"),
+            runner_call("form-action-error", "UiFormActionErrorWitness", "UI ActionError: real consumed producers and transitive ownership byte-identical"),
+            runner_call("key", "UiKeyWitness", "UI Key: exhaustive real-provider oracle and record-variant stop byte-identical"),
+            runner_call("raylib-metadata", "UiRaylibMetadataWitness", "UI raylib metadata and canonical Cursor: real-provider ownership byte-identical"),
+            runner_call("view-snapshots", "UiViewSnapshotsWitness", "UI view snapshots: real-provider ownership byte-identical"),
+        }
+        else -> [RunnerCall]{}
+    }
 }
 
 specification: fn(id: String) -> Spec? Never! {
@@ -723,6 +766,12 @@ specification: fn(id: String) -> Spec? Never! {
             return Val(found)
         }
         if C_FIXTURES.contains(name) -> return Val(spec("c", name, "{BE}run-runtime.mjs"))
+        calls: runner_calls(name)
+        if calls.len() > 0 {
+            found := spec("runner", name, "{RT}{name}.jet")
+            found.calls = calls
+            return Val(found)
+        }
         found := spec("blocked", name, "")
         found.blocked = "No registered transport for {id}; the source must not be counted without an exact native verdict"
         return Val(found)
@@ -755,6 +804,9 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
         if found.expected_file != "" -> entries["expectedFile"] = Dyn.Text(found.expected_file.copy())
         if found.kind == "native-suite" -> entries["modes"] = texts(found.modes)
+        if found.kind == "runner" {
+            entries["calls"] = Dyn.Array(found.calls.map(call -> Dyn.Object([String: Dyn]{"mode": Dyn.Text(call.mode.copy()), "witness": Dyn.Text(call.witness.copy()), "expected": Dyn.Text(call.expected.copy())})))
+        }
     }
     entries["runnerSha256"] = Dyn.Text(runner_sha256.copy())
     Dyn.Object(entries.copy())
@@ -767,10 +819,19 @@ transport_home: fn(source: String) -[Exec, IO]> String Never! {
     fragment.replace_first(source, "/")
 }
 
-prepare_transport: fn(repo: String, row: Census, out: String, adapter: String) -[Env, Exec, FS, IO]> Dyn? Never! {
-    home: transport_home(row.source)
-    id: home.removeprefix("Compiler/").removesuffix(".jet")
-    found: specification(id) ?? return None
+// The transport a registry id names: its Tests package's file, without the
+// fixture directory it lives in or the `.run` of an entry beside its Tests.
+transport_key: fn(id: String) -[Exec, IO]> String Never! {
+    transport_home("Compiler/{id}").removeprefix("Compiler/").removesuffix(".run")
+}
+
+// The manifest entry of a registry a transport drives; it keeps the
+// registry's id, so the run accounts for exactly the censused registries.
+prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: String) -[Env, Exec, FS, IO]> Dyn? Never! {
+    row: registry.row
+    id: registry.id.copy()
+    home: "Compiler/{transport_key(id)}"
+    found: specification(transport_key(id)) ?? return None
     sources := [String]{row.source.copy()}
     if found.witness != "" -> sources.push(found.witness.copy())
     if found.expected_file != "" -> sources.push(found.expected_file.copy())
@@ -781,7 +842,10 @@ prepare_transport: fn(repo: String, row: Census, out: String, adapter: String) -
     if found.fragments == WORLD_SENTRY {
         loop name in WORLD_SENTRY_LINKED -> sources.push("{RT}{name}.c")
     }
-    witness: "{home.removesuffix(".jet")}.c"
+    loop call in found.calls {
+        if call.witness != "" && !sources.contains(call.witness) -> sources.push(call.witness.copy())
+    }
+    witness: "{home}.c"
     if found.kind == "c" && files.exists("{repo}/{witness}") -> sources.push(witness)
     entry := [String: Dyn]{
         "id": Dyn.Text(id.copy()),
@@ -1102,14 +1166,45 @@ program: fn(lane: &Lane, file: String, expected: String) Problem! -[Env, Exec, F
 // The runtime imports jet_rt_fault_report, which Jet's linker writes into each
 // image; this platform link assembles it from the shared report source.
 link: fn(lane: &Lane, source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    report_object: fault_report(lane) ?? return Err(err)
+    args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
+    execute(lane, env_or("CC", "cc"), args, lane.out.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    Ok(())
+}
+
+// The object that defines jet_rt_fault_report, assembled into the lane.
+fault_report: fn(lane: &Lane) -[Env, Exec, FS, IO, Time, Time.Wait]> String Problem! {
     cwd: lane.out.copy()
     repo: lane.repo.copy()
     report: "{cwd}/fault-report.S"
     report_object: "{cwd}/fault-report.o"
     files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
-    execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
-    execute(lane, env_or("CC", "cc"), args, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    report_object
+}
+
+// A committed Jet runner, run from the repository root by the lane's jet:
+// each call's C witness is linked against the runtime object and handed over,
+// and a runner without one links its fixture against the same link inputs.
+// Every call must print exactly its line and nothing on stderr.
+runner_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    script: "{lane.repo}/{found.runner}"
+    loop call in found.calls {
+        label: if call.mode == "" -> "run" else -> call.mode.copy()
+        args := [String]{"-A", script.copy()}
+        if call.witness == "" {
+            report_object: fault_report(lane) ?? return Err(err)
+            args.extend([String]{"{out}/{label}", lane.object.copy(), report_object, "-lpthread", "-ldl", "-lm"})
+        } else {
+            binary: "{out}/{label}.bin"
+            link(lane, "{lane.repo}/{call.witness}", lane.object.copy(), binary) ?? return Err(err)
+            if call.mode != "" -> args.extend([String]{call.mode.copy(), "{out}/{label}"})
+            args.push(binary)
+        }
+        ran: execute(lane, lane.jet.copy(), args, lane.repo.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        exact(ran, call.expected, "") ?? return Err(problem("{found.name} {label}: {err.message}"))
+    }
     Ok(())
 }
 
@@ -1168,7 +1263,7 @@ stage_toolchain: fn(jet: String, runtime: Runtime, out: String) -[FS]> String Pr
 
 run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> (ran: Ran, evidence: [Dyn]) Problem! {
     id: text_field(entry, "id")
-    found: specification(id) ?? return Err(problem("unknown transport {id}"))
+    found: specification(transport_key(id)) ?? return Err(problem("unknown transport {id}"))
     if found.blocked != "" -> return Err(problem(found.blocked))
     runner_sha: text_field(field(entry, "transport"), "runnerSha256")
     if int_field(entry, "testCount") != Val(1) || text_field(entry, "sha256") != (sha256_path(adapter) ?? "") || runner_sha != (sha256_path("{repo}/{found.runner}") ?? "") {
@@ -1267,6 +1362,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         return exact(ran, found.expected, "")
     }
     if found.kind == "c" -> return c_verdict(lane, found)
+    if found.kind == "runner" -> return runner_verdict(lane, found)
     if found.kind == "indices" {
         node(lane, found.runner, [String]{out, "--indices"}) ?? return Err(err)
         return program(lane, "{out}/unit.jet", "link section indexes: pass\n")
@@ -1523,7 +1619,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         mode: registry.mode
         standalone: row.package == "JetRuntime" && mode == "test"
         if !standalone {
-            if prepare_transport(repo, row, out, adapter) == .Val(transport) {
+            if prepare_transport(repo, registry, out, adapter) == .Val(transport) {
                 entries.push(transport)
                 next
             }
@@ -1582,7 +1678,10 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
             next
         }
         text: files.read("{repo}/{row.source}") ?? return fail("`{row.source}` cannot be read: {err}")
-        body: "\n// [compiler registry source: {row.source}]\n{strip_imports(text)}\n"
+        // The source's launch line is a comment once the source no longer
+        // starts the file.
+        launch: if text.starts_with("#!") -> "//" else -> ""
+        body: "\n// [compiler registry source: {row.source}]\n{launch}{strip_imports(text)}\n"
         names: tests_in(body) ?? return fail(err.message)
         entry["sha256"] = Dyn.Text(crypto.sha256(body.bytes()).hex())
         entry["testNames"] = texts(names)
@@ -2029,17 +2128,22 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
     assert_eq(lines[7], "run: fn() {{ }}")
 }
 
+// The registry of a runtime fragment, as registry_rows censuses it.
+fragment_registry: fn(name: String) -> Registry Never! {
+    source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet"
+    row: Census{package: "JetRuntime", source: source.copy(), sha256: "", names: [String]{}, entry: false, role: "registry"}
+    Registry{row: row, id: source.removeprefix("Compiler/").removesuffix(".jet"), mode: "run"}
+}
+
 #Test("runtime C transports run their complete witness variants") {
     repo: test_repo()
     loop name in ([String]{"CompilerEnv", "CompilerRoutes", "CompilerNeededJSON", "CompilerNeededURL", "CompilerNeededMathText", "DynNative"}) {
-        source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet"
-        row: Census{package: "JetRuntime", source: source, sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "c")
         assert_eq(text_field(transport, "name"), name)
         assert_eq(int_field(entry, "testCount"), Val(1))
-        found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
         out: text_field(entry, "cwd")
         expected: if name == "CompilerEnv" -> [[String]]{[String]{}, [String]{"empty"}} else if name == "CompilerRoutes" -> [[String]]{[String]{out}} else -> [[String]]{[String]{}}
         assert_eq(driver_runs(found, out), expected)
@@ -2051,9 +2155,8 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
 #Test("codec, process and native-suite transports drive the selected real fixture") {
     repo: test_repo()
     loop name in ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess"}) {
-        row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
-        found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
         out: text_field(entry, "cwd")
         codec: name.starts_with("Codec") || name.starts_with("Dyn") || name == "CompilerFileLeaves"
         runner: if codec -> "run-native-codec-file-leaves.mjs" else -> "run-process-witnesses.mjs"
@@ -2066,11 +2169,10 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
         }
     }
     loop name in ([String]{"FilesWalk", "HostParallelism"}) {
-        row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         assert_eq(text_field(field(entry, "transport"), "type"), "native-suite")
         assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
-        found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
+        found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
         assert_eq(found.modes, [String]{"assemble", "lower", "audit", "link", "run"})
     }
 }
@@ -2078,8 +2180,7 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
     loop name in ([String]{"Alloc", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
-        row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
-        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
         assert_eq(text_field(transport, "runner"), "Tools/agent/CompilerPackages.jet")
@@ -2107,6 +2208,26 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
         } else {
             assert(field(transport, "fragments") == texts([String]{name.copy()}))
         }
+    }
+}
+
+#Test("a transport entry keeps its registry id and a runner row runs its calls") {
+    repo: test_repo()
+    fragment: prepare_transport(repo, fragment_registry("Alloc"), "/native/registries", "{repo}{TOOL}") ?? panic("Alloc: no transport")
+    assert_eq(text_field(fragment, "id"), "JetRuntime/Tests/Fragments.fixture/AllocTests")
+    assert_eq(transport_key("JetRuntime/Tests/Fragments.fixture/AllocTests"), "JetRuntime/Tests/AllocTests")
+    row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/UiWitness.jet", sha256: "", names: [String]{"t"}, entry: true, role: "registry"}
+    entry: prepare_transport(repo, Registry{row: row, id: "JetRuntime/Tests/UiWitness.run", mode: "run"}, "/native/registries", "{repo}{TOOL}") ?? panic("UiWitness: no transport")
+    assert_eq(text_field(entry, "id"), "JetRuntime/Tests/UiWitness.run")
+    transport: field(entry, "transport")
+    assert_eq(text_field(transport, "type"), "runner")
+    assert_eq(text_field(transport, "runner"), "Compiler/JetRuntime/Tests/UiWitness.jet")
+    assert_eq(array_field(transport, "calls").len(), 6)
+    assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/UiKeyWitness.c")))
+    loop name in ([String]{"RunDuration", "RunIntWiden", "RunCompilerNeededMath", "RunExecutionFixtures", "StopWitness"}) {
+        found: specification("JetRuntime/Tests/{name}") ?? panic("{name}: no specification")
+        assert_eq(found.kind, "runner")
+        assert(found.calls.all(call -> call.expected.ends_with("\n")))
     }
 }
 

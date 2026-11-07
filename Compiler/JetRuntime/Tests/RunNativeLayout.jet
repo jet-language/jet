@@ -1,0 +1,215 @@
+#!/usr/bin/env jet
+// Native Layout witness against the frozen seed observations: the twelve reused
+// draft literals NativeLayoutText.jet writes are checked byte for byte, then
+// NativeLayoutWitness.c links the supplied Jet-only runtime and runs the
+// LayoutVectors.txt vectors. Every observation must equal LayoutSeed.json's
+// (values within 1e-7), each seed fatal mode must exit 70 with its seed message
+// on stderr, and the ownership/registry/clone/drop pass must complete. The seed
+// oracle itself is frozen: its Rust reference was retired (owner #38/#59).
+// OUT keeps the build log and every run's log.
+// Usage (from the repository root):
+//   jet Compiler/JetRuntime/Tests/RunNativeLayout.jet OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE... [LINK_ARG...]
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    re: core.regex
+    term: core.term
+}
+
+HERE: "Compiler/JetRuntime/Tests"
+TEXT: "Compiler/JetRuntime/Source/NativeLayoutText.jet"
+POLICY: "Compiler/JetCli/Source/Cli/native-c-policy.tsv"
+OWNERSHIP: "Layout6 ownership/registry/clone/drop OK"
+LITERAL_BYTES: 432
+
+Policy: struct {
+    flags: [String]
+    removed: [String]
+}
+
+fail: fn(message: String) -> Never {
+    term.eprint(message)
+    process.exit(1)
+}
+
+// path.resolve against the working directory.
+resolve: fn(cwd: String, path: String) -> String {
+    full: if path.starts_with("/") -> path.copy() else -> "{cwd}/{path}"
+    parts := [String]{}
+    loop part in full.split("/").to_list() {
+        if part == ".." {
+            if parts.len() > 0 -> _: parts.pop()
+        } else if part != "" && part != "." {
+            parts.push(part)
+        }
+    }
+    "/{parts.join("/")}"
+}
+
+field: fn(tree: Dyn, name: String) -> String {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name && entry.value == .Text(text) -> return text.copy()
+        }
+    }
+    ""
+}
+
+byte: fn(value: Int) -> U8 { U8.from_int(value) ?? U8{0} }
+
+// The literal block as NativeLayoutText.jet fills it: each
+// `layout_put(wrapping(root + I64{at}), I64{value})` stores value as a
+// little-endian word at byte `at` (pointer rows add root and are skipped).
+literal_block: fn(source: String) -> [U8] {
+    pattern: re.compile("layout_put\\(wrapping\\(root \\+ I64\\{{([0-9]+)\\}}\\), I64\\{{([0-9]+)\\}}\\)") ?? fail("literal pattern: {err}")
+    block := [U8]{}
+    loop _ in 0..<LITERAL_BYTES -> block.push(U8{0})
+    loop found in pattern.matches(source) {
+        at: Int.parse(found.group(1) ?? "") ?? 0
+        rest := Int.parse(found.group(2) ?? "") ?? 0
+        loop k in 0..<8 {
+            if at + k < LITERAL_BYTES -> block[at + k] = byte(rest % 256)
+            rest = rest /% 256
+        }
+    }
+    block
+}
+
+word: fn(block: [U8], at: Int) -> Int {
+    value := 0
+    loop k in 0..<8 -> value = value * 256 + Int.from_u8(block[at + 7 - k])
+    value
+}
+
+// Which of the twelve (pointer, length) literals differ from the draft
+// spellings; the pointers are the fixed offsets below.
+literal_departures: fn(block: [U8]) -> [Int] {
+    expected: [String]{"layout constraint expression has more than 16 distinct terms", "constraint#", " (<=)", " (>=)", " (==)", "suggest(", ")", "(layout has no feasible solution)", "layout \"", "\" has no feasible solution — conflicting constraints: ", ", ", "."}
+    offsets: [Int]{192, 256, 272, 280, 288, 296, 304, 312, 352, 360, 416, 424}
+    bad := [Int]{}
+    loop index in 0..<expected.len() {
+        length: word(block, index * 16 + 8)
+        start: offsets[index]
+        if start + length > block.len() {
+            bad.push(index)
+            next
+        }
+        if String.from_bytes_lossy(block[start..<start + length]) != expected[index] -> bad.push(index)
+    }
+    bad
+}
+
+load_policy: fn(root: String) -> Policy {
+    text: files.read("{root}/{POLICY}") ?? fail("cannot read {POLICY}: {err}")
+    flags := [String]{}
+    removed := [String]{}
+    lines: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line: lines[index]
+        if line == "" || line.starts_with("#") -> next
+        fields: line.split("\t").to_list()
+        if fields.len() != 2 || fields[1] == "" -> fail("native-c-policy.tsv:{index + 1}: expected \"kind<TAB>value\"")
+        if fields[0] == "flag" {
+            flags.push(fields[1])
+        } else if fields[0] == "hardening-remove" {
+            removed.push(fields[1])
+        } else {
+            fail("native-c-policy.tsv:{index + 1}: unknown policy kind {fields[0]}")
+        }
+    }
+    Policy{flags: flags, removed: removed}
+}
+
+// `$CC` (default `cc`) with `args` and the policy flags, as
+// Tools/packaging/NativeCCompiler.jet runs it.
+native_cc: fn(policy: Policy, args: [String]) -> ProcessSpec {
+    removed: policy.removed
+    spec := process.cmd([process.env_get_or("CC", "cc")]).args_extend(args).args_extend(policy.flags)
+    if process.env_get("NIX_HARDENING_ENABLE") == .Val(enabled) {
+        words: re.split(Regex{"\s+"}, enabled)
+        kept: loop word in words if word != "" && !removed.contains(word) -> word
+        spec = spec.env("NIX_HARDENING_ENABLE", kept.join(" "))
+    }
+    spec
+}
+
+// One logged run: `exit=<code>` then its stdout and stderr in OUT/<label>.log.
+logged: fn(spec: ProcessSpec, log: String) -> ProcessReceipt {
+    receipt: spec.run() ?? fail("{log}: {err}")
+    code: if receipt.signal == .Val(number) -> "null (signal {number})" else -> "{receipt.code}"
+    files.write(log, "exit={code}\n{receipt.output}{receipt.errors}") ?? fail("cannot write {log}: {err}")
+    receipt
+}
+
+// The observation that differs from the frozen one, if any: `v` rows hold
+// their first three words and a value within 1e-7; every other row is exact.
+observation_differs: fn(actual: String, expected: String) -> Bool {
+    if !expected.starts_with("v ") -> return actual != expected
+    got: actual.split(" ").to_list()
+    want: expected.split(" ").to_list()
+    if got.len() < 4 || want.len() < 4 -> return true
+    if got[0..<3].join(" ") != want[0..<3].join(" ") -> return true
+    a: Float.parse(got[3]) ?? return true
+    e: Float.parse(want[3]) ?? return true
+    gap: if a > e -> a - e else -> e - a
+    !(gap <= 0.0000001)
+}
+
+run: fn() {
+    root: files.cwd() ?? fail("cannot read the working directory: {err}")
+    args: process.args()
+    if args.len() < 2 || args[0] == "" -> fail("usage: RunNativeLayout.jet OUT JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE... [LINK_ARG...]")
+    out: resolve(root, args[0])
+    files.create_dir_all(out) ?? fail("cannot create {out}: {err}")
+    source: files.read("{root}/{TEXT}") ?? fail("cannot read {TEXT}: {err}")
+    bad: literal_departures(literal_block(source))
+    if bad.len() > 0 -> fail("Layout literal {bad[0]} bytes/length mismatch")
+    vectors_path: "{root}/{HERE}/LayoutVectors.txt"
+    vectors: files.read_bytes(vectors_path) ?? fail("cannot read LayoutVectors.txt: {err}")
+    seed_text: files.read("{root}/{HERE}/LayoutSeed.json") ?? fail("cannot read LayoutSeed.json: {err}")
+    seed: json.parse(seed_text) ?? fail("LayoutSeed.json is not JSON: {err}")
+    frozen: field(seed, "stdout")
+    if crypto.sha256(vectors).hex() != field(seed, "vectors_sha256") || crypto.sha256(frozen.bytes()).hex() != field(seed, "stdout_sha256") {
+        fail("frozen oracle/vector checksum mismatch")
+    }
+    binary: "{out}/native-layout"
+    cc_args := [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "{root}/{HERE}/NativeLayoutWitness.c"}
+    loop input in args[1..<args.len()] -> cc_args.push(if input.starts_with("-") -> input.copy() else -> resolve(root, input))
+    cc_args.extend([String]{"-lm", "-pthread", "-o", binary.copy()})
+    built: logged(native_cc(load_policy(root), cc_args).cwd(root.copy()), "{out}/native-link.log")
+    if built.signal != None || built.code != 0 -> fail("native-link: exit {built.code}; see {out}/native-link.log")
+    executed: logged(process.cmd([String]{binary.copy(), vectors_path.copy()}).cwd(root.copy()).output_limit(16777216), "{out}/native-execute.log")
+    if executed.signal != None || executed.code != 0 -> fail("native-execute: exit {executed.code}; see {out}/native-execute.log")
+    actual := executed.output.trim().split("\n").to_list()
+    if actual.len() == 0 || actual[actual.len() - 1] != OWNERSHIP -> fail("ownership witness did not complete")
+    _: actual.pop()
+    rows: frozen.trim().split("\n").to_list()
+    expected: rows.filter(row -> !row.starts_with("p "))
+    if expected.len() != actual.len() -> fail("native observation count mismatch: {actual.len()} != {expected.len()}")
+    loop index in 0..<expected.len() {
+        if observation_differs(actual[index], expected[index]) -> fail("observation mismatch {index}: {actual[index]} != {expected[index]}")
+    }
+    fatal := 0
+    loop row in rows {
+        if !row.starts_with("p ") -> next
+        parts: row.removeprefix("p ").split("|").to_list()
+        mode: parts[0]
+        message: parts[1..<parts.len()].join("|")
+        stopped: logged(process.cmd([String]{binary.copy(), "--fatal", mode.copy()}).cwd(root.copy()), "{out}/{mode}.log")
+        if stopped.signal != None || stopped.code != 70 || !stopped.errors.contains(message) -> fail("fatal {mode} did not preserve seed message/exit70")
+        fatal += 1
+    }
+    print("Layout6: 12 draft literals exact; native/seed {expected.len()} observations + {fatal} fatal modes + ownership OK")
+}
+
+#Test("literal words decode little-endian and values hold within 1e-7") {
+    block: literal_block("    layout_put(wrapping(root + I64{{8}}), I64{{3}})\n    layout_put(wrapping(root + I64{{192}}), I64{{6513249}})\n")
+    assert_eq(word(block, 8), 3)
+    assert_eq(String.from_bytes_lossy(block[192..<195]), "abc")
+    assert(!observation_differs("v a b 1.00000001", "v a b 1.0"))
+    assert(observation_differs("v a b 1.001", "v a b 1.0"))
+    assert(observation_differs("v a c 1.0", "v a b 1.0"))
+    assert(observation_differs("o x", "o y"))
+}
