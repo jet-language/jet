@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6633,
-    "rev": 94250,
+    "nextNum": 6634,
+    "rev": 94259,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -40016,38 +40016,42 @@
         {
           "n": 183,
           "text": "(was #3508 c6) [retarget] Import-only and ordinary helper use do not implicitly execute dependency build entries or hooks [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:32:02.753Z"
+          "evidence": "Moved to #6632 c66 (G7, package manager) at the owner's direction on 2026-11-06; the criterion is tracked there.",
+          "at": "2026-11-07T02:18:47.074Z",
+          "closure": "duplicate"
         },
         {
           "n": 184,
           "text": "(was #3508 c7) [retarget] Plan fragments and generated modules merge transactionally; collisions and denied effects leave no partial publication [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:32:03.561Z"
+          "evidence": "Moved to #6632 c67 (G7, package manager) at the owner's direction on 2026-11-06; the criterion is tracked there.",
+          "at": "2026-11-07T02:18:49.092Z",
+          "closure": "duplicate"
         },
         {
           "n": 185,
           "text": "(was #3508 c8) [retarget] Equivalent shared-prep generation is possible without misusing fn build on non-AOT tiers [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:32:04.372Z"
+          "evidence": "Moved to #6632 c68 (G7, package manager) at the owner's direction on 2026-11-06; the criterion is tracked there.",
+          "at": "2026-11-07T02:18:51.120Z",
+          "closure": "duplicate"
         },
         {
           "n": 186,
           "text": "(was #3508 c9) [retarget] An Examples/ golden (bindings package via b.include) passes on the self-hosted compiler path [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:32:05.107Z"
+          "evidence": "Moved to #6632 c69 (G7, package manager) at the owner's direction on 2026-11-06; the criterion is tracked there.",
+          "at": "2026-11-07T02:18:53.142Z",
+          "closure": "duplicate"
         },
         {
           "n": 187,
@@ -40168,7 +40172,7 @@
       "parentId": "c0v95zs3",
       "needsAcceptance": false,
       "created": "2026-09-27T23:27:03.232Z",
-      "updated": "2026-11-07T02:18:44.828Z",
+      "updated": "2026-11-07T02:18:53.142Z",
       "updatedBy": "Main",
       "goals": [
         "G2"
@@ -98689,6 +98693,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T02:18:45.789Z"
+        },
+        {
+          "n": 67,
+          "text": "(moved from #3590 c184) (was #3508 c7) [retarget] Plan fragments and generated modules merge transactionally; collisions and denied effects leave no partial publication [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:18:48.094Z"
+        },
+        {
+          "n": 68,
+          "text": "(moved from #3590 c185) (was #3508 c8) [retarget] Equivalent shared-prep generation is possible without misusing fn build on non-AOT tiers [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:18:50.100Z"
+        },
+        {
+          "n": 69,
+          "text": "(moved from #3590 c186) (was #3508 c9) [retarget] An Examples/ golden (bindings package via b.include) passes on the self-hosted compiler path [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:18:52.152Z"
         }
       ],
       "refs": [],
@@ -98699,7 +98730,47 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T02:16:33.944Z",
-      "updated": "2026-11-07T02:18:45.789Z",
+      "updated": "2026-11-07T02:18:52.152Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0zy8wm1",
+      "num": 6633,
+      "title": "Alloc cache gating disagrees between alloc and free (Alloc.jet:1012 vs :1056)",
+      "body": "Found by MechD 2026-11-06 while fixing the JetRuntime plain transport (#6594). Compiler/JetRuntime Alloc.jet:1056 gates the cached free on alloc_root+200 (the tracked count) while the allocation fast path at :1012 gates on alloc_root+144 (mode). When anything is tracked, frees bypass the cache but allocations still pop it. Confirm with a runtime test that tracks one allocation and then cycles cached sizes; fix so both paths read the same gate.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "ready",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A runtime test tracks an allocation and cycles cached sizes; alloc and free gate on the same root field, and the test passes on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T02:21:26.379Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T02:21:25.580Z",
+      "updated": "2026-11-07T02:21:26.379Z",
       "updatedBy": "Main"
     }
   ],
@@ -186604,6 +186675,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T02:21:26.379Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0zy8wm1",
+      "note": "#1 A runtime test tracks an allocation and cycles cached sizes;"
+    },
+    {
+      "at": "2026-11-07T02:21:25.580Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0zy8wm1",
+      "note": "Alloc cache gating disagrees between alloc and free (Alloc.jet:1012 vs :1056)"
+    },
+    {
+      "at": "2026-11-07T02:18:53.142Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0uwol3w",
+      "note": "#186"
+    },
+    {
+      "at": "2026-11-07T02:18:52.152Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00tcdfc",
+      "note": "#69 (moved from #3590 c186) (was #3508 c9) [retarget] An Example"
+    },
+    {
+      "at": "2026-11-07T02:18:51.120Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0uwol3w",
+      "note": "#185"
+    },
+    {
+      "at": "2026-11-07T02:18:50.100Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00tcdfc",
+      "note": "#68 (moved from #3590 c185) (was #3508 c8) [retarget] Equivalent"
+    },
+    {
+      "at": "2026-11-07T02:18:49.092Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0uwol3w",
+      "note": "#184"
+    },
+    {
+      "at": "2026-11-07T02:18:48.094Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00tcdfc",
+      "note": "#67 (moved from #3590 c184) (was #3508 c7) [retarget] Plan fragm"
+    },
+    {
+      "at": "2026-11-07T02:18:47.075Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0uwol3w",
+      "note": "#183"
+    },
     {
       "at": "2026-11-07T02:18:45.789Z",
       "by": "Main",
