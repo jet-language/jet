@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6651,
-    "rev": 95460,
+    "rev": 95465,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97302,6 +97302,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "Rerun in the batch environment: JetWasm/Tests 16/0, JetCli/Tests 97/0 (+1 expected-fail), EnvModel/Tests 148/0, Integrations/Tests 94/0, Foundation/Tests 93/0, JetDebug/Tests 37/0. Still red: JetParser/Tests 13, JetLexer/Tests 3, JetFoundation 1, PackageModel 1, PackageModel/Tests 1 (ada), and the 8 non-compiling test packages in c6. c3 met; c4/c5 corrected; c7 added (quick-profile baseline hides failures)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Rows c2-c6 came from a census run without JET_COMPILER_IDENTITY, JET_TOOLCHAIN_ROOT or jet-env (MechC found it: the 18 JetCli failures pass in the batch environment). Rerunning in the batch environment (pkgrerun.sh, fixed); rows will be corrected to its result before work starts."
         }
       ],
@@ -97327,29 +97332,29 @@
         {
           "n": 3,
           "text": "Compiler/JetWasm/Tests passes (8 failing: mathkit component decode and bodies, compiler-extension fixtures, text vs binary inputs, shipped text guests, shipped components validate).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:21:16.798Z"
+          "evidence": "pkgrerun.sh rerun in the batch environment (a0_031 + IDENTITY, JET_TOOLCHAIN_ROOT, jet-env), dev at 5384202a82: Compiler/JetWasm/Tests 16 passed, 0 failed. The earlier 8 failures came from the census's missing environment, not code.",
+          "at": "2026-11-07T05:35:56.404Z"
         },
         {
           "n": 4,
-          "text": "The Jetpack package tests pass: Jetpack/EnvModel/Tests (36 failing: committed examples field checks, computed module fields, pinned diagnostics E3402/E1270/E0969/E0971/E0977/E0996, fleet overrides, workspace members), Jetpack/Integrations/Tests (cpp bind descriptor, nested cargo manifest), Jetpack/PackageModel (test profile fields refuse unknown fields), Jetpack/PackageModel/Tests (ada generated source, com winegcc cross compile) and Jetpack/Foundation/Tests (tls fixture pems).",
+          "text": "The Jetpack package tests pass: Jetpack/PackageModel ('test profile fields refuse unknown fields, bad values and empty suites') and Jetpack/PackageModel/Tests ('ada generated source uses current callable and effect shapes'). EnvModel/Tests, Integrations/Tests and Foundation/Tests already pass (148/0, 94/0, 93/0) in the batch environment.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T05:21:17.656Z"
+          "at": "2026-11-07T05:35:57.283Z"
         },
         {
           "n": 5,
-          "text": "Compiler/JetFoundation and Compiler pass 'later test setting layers replace earlier values', and Compiler/JetDebug/Tests passes a_session_pauses_steps_and_reads_the_native_image.",
+          "text": "Compiler/JetFoundation passes 'later test setting layers replace earlier values' (Source/Registry/TestSettings.jet:433 expects the t.coverage refusal text 'not ported to the Jet test runner yet' and gets an empty refusal: either coverage is ported and the test asserts its real behavior, or the refusal text is restored).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T05:21:18.519Z"
+          "at": "2026-11-07T05:35:58.154Z"
         },
         {
           "n": 6,
@@ -97359,6 +97364,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T05:21:19.378Z"
+        },
+        {
+          "n": 7,
+          "text": "The quick profile can't hide a failure: today jet test Compiler compares against Compiler/.jet/test/quick/tests.rows, a git-ignored baseline that the first run records, failures included (it holds the jet_foundation failure and still exits 0: '236 rows ... 0 lost, 0 changed, 0 new'). A failing row fails the run whatever the baseline says, so a fresh clone's first run and every later run are red while any member test fails.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T05:35:59.010Z"
         }
       ],
       "refs": [],
@@ -97369,9 +97383,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:21:14.209Z",
-      "updated": "2026-11-07T05:22:56.855Z",
+      "updated": "2026-11-07T05:35:59.847Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 7
     },
     {
       "id": "c0afjv0e",
@@ -185325,6 +185339,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T05:35:59.847Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08512l6",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T05:35:59.010Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08512l6",
+      "note": "#7 The quick profile can't hide a failure: today jet test Compi"
+    },
+    {
+      "at": "2026-11-07T05:35:58.154Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c08512l6",
+      "note": "#5: Corrected to the rerun in the batch environment: JetDebug/Tests passes 37/0.; was: Compiler/JetFoundation and Compiler pass 'later test setting layers replace earlier values', and Compiler/JetDebug/Tests passes a_session_pauses_steps_and_reads_the_native_image."
+    },
+    {
+      "at": "2026-11-07T05:35:57.283Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c08512l6",
+      "note": "#4: Corrected to the rerun in the batch environment; the earlier list came from a census without the compiler identity.; was: The Jetpack package tests pass: Jetpack/EnvModel/Tests (36 failing: committed examples field checks, computed module fields, pinned diagnostics E3402/E1270/E0969/E0971/E0977/E0996, fleet overrides, wo"
+    },
+    {
+      "at": "2026-11-07T05:35:56.404Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08512l6",
+      "note": "#3"
+    },
     {
       "at": "2026-11-07T05:34:34.577Z",
       "by": "Main",
