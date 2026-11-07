@@ -147,7 +147,7 @@ run_job: fn(lane: Lane, argv: [String], _slot: FileLock) -[Env, Exec, FS, Time, 
     scopes: user_scopes()
     if scopes {
         unit: "jw-{lane.name}-{sys.pid()}-{time.unix_ns()}"
-        scoped.extend([String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"})
+        scoped.extend([String]{"systemd-run", "--user", "--slice=jetwork.slice", "--scope", "-q", "--expand-environment=no", "--unit={unit}", "-p", "MemoryMax={lane.memory}", "-p", "MemorySwapMax=0"})
     }
     loop arg in argv -> scoped.push(arg.copy())
     spec := process.cmd(scoped).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)

@@ -186,7 +186,7 @@ build_stage() {
   say "$n: $(basename "$bd") builds Compiler (--threads $th)"
   rm -rf "$TREE/Compiler/JetCli/.jet/build" "$OUT/$n"; mkdir -p "$OUT/$n"
   JET_COMPILER_IDENTITY=$id JET_TOOLCHAIN_ROOT=$ROOT JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$LOGS/$n-keep-going.tsv" TMPDIR=$WORK/tmp \
-    inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 3600 \
+    inroot systemd-run --user --scope -q --expand-environment=no -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 3600 \
     prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash -c "$NORUST" norust "$bd/jet" build --threads "$th" Compiler > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? rows; rows=$(awk 'NR>1' "$LOGS/$n-keep-going.tsv" 2>/dev/null | wc -l)
   local w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
@@ -239,7 +239,7 @@ pack_stage() {
   # The seed runs the tool; the stage's compiler lowers the runtime under the stage identity. The pack compiles
   # the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
   JET_COMPILER_IDENTITY=$CID JET=$SEED/jet JET_TOOLCHAIN_ROOT=$ROOT TMPDIR=$WORK/tmp \
-    inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1800 \
+    inroot systemd-run --user --scope -q --expand-environment=no -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1800 \
     prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash -c "$NORUST" norust "$SEED/jet" "$ROOT/Tools/packaging/PrebuildRuntime.jet" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" --identity "$id" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
   if [ "$rc" != 0 ] || [ ! -f "$cd/jet-runtime/native.key" ]; then
@@ -273,7 +273,7 @@ check_stage() {
     n=check-$(printf '%s' "$m" | tr '/' '_')
     say "check $m with $(basename "$SEED")"
     (cd "$TREE" && JET_COMPILER_IDENTITY=$CID JET_TOOLCHAIN_ROOT=$TREE JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$LOGS/$n-keep-going.tsv" TMPDIR=$WORK/tmp \
-      systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1200 \
+      systemd-run --user --scope -q --expand-environment=no -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1200 \
       prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash -c "$NORUST" norust "$SEED/jet" check --threads 12 "$m" > "$LOGS/$n.out" 2> "$LOGS/$n.err")
     rc=$?; rows=$(awk 'NR>1' "$LOGS/$n-keep-going.tsv" 2>/dev/null | wc -l)
     read -r w r <<< "$(timefile "$LOGS/$n.time")"

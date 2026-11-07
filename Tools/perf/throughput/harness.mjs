@@ -229,7 +229,7 @@ function jetOutcome(sample, status, buildDir) {
 }
 
 function scoped(config, argv) {
-  return ['systemd-run', '--user', '--scope', '-q', '-p', `MemoryMax=${config.memoryMax}`, '-p', 'MemorySwapMax=0',
+  return ['systemd-run', '--user', '--scope', '-q', '--expand-environment=no', '-p', `MemoryMax=${config.memoryMax}`, '-p', 'MemorySwapMax=0',
     'bash', '-c', 'ulimit -c 0; ulimit -s 1048576; exec "$@"', 'scoped', ...argv];
 }
 

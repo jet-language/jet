@@ -212,7 +212,7 @@ export function parseCompiler(spec) {
 const quote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
 
 function argvFor(config, compiler, run) {
-  const scope = argv => ['systemd-run', '--user', '--scope', '-q', '-p', `MemoryMax=${config.memoryMax}`, '-p', 'MemorySwapMax=0',
+  const scope = argv => ['systemd-run', '--user', '--scope', '-q', '--expand-environment=no', '-p', `MemoryMax=${config.memoryMax}`, '-p', 'MemorySwapMax=0',
     'bash', '-c', 'ulimit -c 0; ulimit -s 1048576; exec "$@"', 'scoped', ...argv];
   const common = { JET_STORE_DIR: run.store, JET_TRACE_FILE: run.trace, JET_PHASE_COUNTERS: '1', TMPDIR: run.dir, NO_COLOR: '1' };
   if (compiler.kind === 'bootstrap') {
