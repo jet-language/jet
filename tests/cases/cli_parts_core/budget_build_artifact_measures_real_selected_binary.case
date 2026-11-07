@@ -1,11 +1,11 @@
 # Port of tests/cli_parts/core.rs:862-932; original sources/predicates retained.
-# PENDING-SAME-HEAD: runtime not run.
-# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+# The status envelope is jet.status/v1 (schema-first, `reports`); the Rust-era
+# sorted envelope is gone (#6418).
 fixture: fixtures/budget_artifact
 step: jet budget check --json
 exit: 0
 stderr: empty
-json: stdout canonical # original predicate
+stdout: machine-output = [status]
 json: stdout doc $ : object # original pattern
 json: stdout doc $.budget : object # canonical_field
 json: stdout doc $.budget.report : object # original pattern

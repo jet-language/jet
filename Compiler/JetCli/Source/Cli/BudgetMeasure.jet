@@ -3,7 +3,8 @@
 // identity and a context key over the subject, toolchain and provider; its
 // samples come from its provider and its decision from the budget engine's
 // `perf_evaluate`. The CompilerFacts provider measures the facts of the
-// checked program the driver hands over.
+// checked program the driver hands over; BuildArtifact and ServiceProbe
+// measure the inputs BudgetProviders.jet gathers.
 use {
     cli_files: core.files
     cli_sys: core.sys
@@ -69,19 +70,18 @@ JetCLIBudgetBuilt: struct {
 }
 
 // Rust `build_report` for budgets measured without history: `ordered` is
-// sorted by name, `toolchain` the running compiler's identity.
-jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, toolchain: CanonicalJSON, sources: [JetCLIBudgetSource], measured_start: String, profile: String) -> JetCLIBudgetBuilt JetCLIBudgetFailure! {
+// sorted by name, `toolchain` the running compiler's identity, `artifact`
+// the built program when a BuildArtifact budget sizes it, and `services`
+// the collected ServiceProbe readiness samples.
+jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, toolchain: CanonicalJSON, sources: [JetCLIBudgetSource], measured_start: String, profile: String, artifact: JetCLIBudgetArtifact?, services: [JetCLIBudgetService]) -> JetCLIBudgetBuilt JetCLIBudgetFailure! {
     providers := [CanonicalJSON]{}
     loop row in ordered -> providers.push(jet_cli_budget_provider(row.spec.provider))
     package: jet_cli_budget_package(root)
     prefix: jet_cli_entry_join(root, "")
     measured := [JetCLIBudgetMeasured]{}
     loop (index, row) in ordered -> measured.push(jet_cli_budget_base(row, providers[index], package, prefix, profile))
-    loop (index, row) in ordered {
-        value: jet_cli_budget_compiler_fact(row.spec.metric, facts)
-        measured[index].samples = [PerfRational]{perf_rational_integer(value)}
-    }
-    subject: jet_cli_budget_subject(root, sources, measured_start, jet_cli_rfc3339(cli_time.unix_ns()), profile)
+    loop (index, row) in ordered -> measured[index].samples = jet_cli_budget_samples(row.spec, facts, artifact, services)
+    subject: jet_cli_budget_subject(root, sources, measured_start, jet_cli_rfc3339(cli_time.unix_ns()), profile, jet_cli_budget_artifact_json(artifact))
     subject_fields: jet_cli_budget_fields(subject)
     tool_fields: jet_cli_budget_fields(toolchain)
     loop index in 0..<measured.len() {
@@ -336,6 +336,8 @@ jet_cli_budget_compiler_fact: fn(metric: String, facts: JetDriverBudgetFacts) ->
 // Rust `provider`: the host identity a measurement is taken under, with its
 // fingerprint over every other field.
 jet_cli_budget_provider: fn(provider: String) -> CanonicalJSON JetCLIBudgetFailure! {
+    kind: sema_budget_provider_kind(provider)
+    protocol: jet_cli_budget_provider_version(kind)
     cpu_arch: jet_cli_host_triple(cli_sys.arch(), cli_sys.name()).before("-")
     if cpu_arch == "" -> return Err(jet_cli_budget_failure("host triple has no architecture"))
     cpuinfo: cli_files.read("/proc/cpuinfo") ?? return Err(jet_cli_budget_failure("cannot read CPU identity: {jet_cli_io_error_text(err)}"))
@@ -349,14 +351,14 @@ jet_cli_budget_provider: fn(provider: String) -> CanonicalJSON JetCLIBudgetFailu
         CanonicalJSONField{key: "cpu_arch", value: CanonicalJSON.String(cpu_arch)},
         CanonicalJSONField{key: "cpu_model", value: CanonicalJSON.String(cpu_model)},
         CanonicalJSONField{key: "identity", value: CanonicalJSON.String(sema_budget_provider_identity(provider) ?? "")},
-        CanonicalJSONField{key: "isolation", value: CanonicalJSON.String("process")},
+        CanonicalJSONField{key: "isolation", value: CanonicalJSON.String(protocol.isolation)},
         CanonicalJSONField{key: "kernel", value: CanonicalJSON.String(kernel)},
-        CanonicalJSONField{key: "kind", value: CanonicalJSON.String(sema_budget_provider_kind(provider))},
+        CanonicalJSONField{key: "kind", value: CanonicalJSON.String(kind)},
         CanonicalJSONField{key: "logical_cpus", value: CanonicalJSON.Integer("{cli_sys.cpu_count()}")},
         CanonicalJSONField{key: "memory_bytes", value: CanonicalJSON.Integer("{memory_kib * 1024}")},
         CanonicalJSONField{key: "os", value: CanonicalJSON.String(cli_sys.name())},
         CanonicalJSONField{key: "power_governor", value: CanonicalJSON.String(power_governor)},
-        CanonicalJSONField{key: "version", value: CanonicalJSON.String("1")},
+        CanonicalJSONField{key: "version", value: CanonicalJSON.String(protocol.version)},
     })
     fingerprint: perf_stable_id(body)
     fields := jet_cli_budget_fields(body)

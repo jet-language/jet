@@ -1,13 +1,14 @@
 // `jet budget check`: check the project entry, collect its performance budget
-// specs, measure each applicable one (BudgetMeasure.jet), and write the
-// canonical budget report under `.jet/perf/reports`. The report is verified
-// by the budget engine's own verifier before it is published, and a
-// published report is never rewritten. A budget whose provider this `jet`
-// has not built, or that compares against a named baseline's history, which
-// this `jet` can't read yet, refuses with E2104 before any artifact is
-// written. `jet budget update` measures the same way, then plans advancing a
-// named baseline to the report (BudgetStore.jet); nothing is written until
-// `--yes` or a confirmed terminal prompt applies the plan.
+// specs, measure each applicable one (BudgetMeasure.jet, with the inputs
+// BudgetProviders.jet gathers), and write the canonical budget report under
+// `.jet/perf/reports`. The report is verified by the budget engine's own
+// verifier before it is published, and a published report is never
+// rewritten. A budget whose provider this `jet` has not built, or that
+// compares against a named baseline's history, which this `jet` can't read
+// yet, refuses with E2104 before any artifact is written. `jet budget
+// update` measures the same way, then plans advancing a named baseline to
+// the report (BudgetStore.jet); nothing is written until `--yes` or a
+// confirmed terminal prompt applies the plan.
 use {
     budget_crypto: core.crypto
     budget_term: core.term
@@ -16,7 +17,7 @@ use {
     cli_time: core.time
     jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
     jet_foundation.[CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id]
-    jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_kind]
+    jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_identity, sema_budget_provider_kind, sema_budget_safe_relative_path]
     jet_pkg_model.[COMPILER_VERSION]
 }
 
@@ -177,9 +178,11 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
 }
 
 // Rust `build_report` and `emit_check` over the applicable specs `active`:
-// the toolchain identity first, then the refusal of what this `jet` can't
-// measure, then the report, published immutably. `profile` is the measured
-// compile's.
+// the toolchain identity first, then each CompilerProbe workload resolved
+// and each ServiceProbe service's readiness collected, then the refusal of
+// what this `jet` can't measure, then the selected artifact built when a
+// BuildArtifact budget sizes it, then the report, published immutably.
+// `profile` is the measured compile's.
 jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, active: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
     ordered := active
     ordered = loop fresh in ordered -> fresh
@@ -189,15 +192,84 @@ jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: Stri
     }
     toolchain: jet_cli_budget_toolchain(entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     loop row in ordered {
+        if sema_budget_provider_kind(row.spec.provider) == "CompilerProbe" {
+            jet_cli_budget_compile_workload(root, row.spec, profile) ?? return jet_cli_budget_tool_failure(options, err.message, color)
+        }
+    }
+    services := [JetCLIBudgetService]{}
+    loop row in ordered {
+        if sema_budget_provider_kind(row.spec.provider) != "ServiceProbe" -> next
+        name: sema_budget_provider_identity(row.spec.provider) ?? ""
+        collected := false
+        loop service in services {
+            if service.name == name -> collected = true
+        }
+        if collected -> next
+        service: jet_cli_budget_service(root, name) ?? return jet_cli_budget_tool_failure(options, err.message, color)
+        services.push(service)
+    }
+    sized := false
+    loop row in ordered {
         kind: sema_budget_provider_kind(row.spec.provider)
-        if kind != "CompilerFacts" -> return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
+        metric: sema_budget_provider_kind(row.spec.metric)
+        if kind == "BuildArtifact" {
+            if metric != "BinarySize" && metric != "ArtifactSize" -> return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `BuildArtifact` provider measures only artifact size, not `{metric}`", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that runs the built artifact", color, JET_DRIVER_EXIT_USAGE)
+            sized = true
+        } else if kind != "CompilerFacts" && kind != "ServiceProbe" {
+            return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
+        }
         if row.spec.comparison_fact.baseline == .Val(baseline) -> return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: it compares against baseline `{baseline}`, and baseline history is not built", jet_cli_why("E2104"), "compare the budget with `Absolute`, or measure it with a `jet` that has baseline history", color, JET_DRIVER_EXIT_USAGE)
     }
-    built: jet_cli_budget_build(root, ordered, facts, toolchain, sources, measured_start, profile) ?? return jet_cli_budget_tool_failure(options, err.message, color)
+    artifact := JetCLIBudgetArtifact?{None}
+    if sized {
+        built_artifact: jet_cli_budget_build_artifact(root, entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
+        artifact = Val(built_artifact)
+    }
+    built: jet_cli_budget_build(root, ordered, facts, toolchain, sources, measured_start, profile, artifact, services) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     report_path: ".jet/perf/reports/{built.report_id}.json"
     if options.command == "update" && (built.fail == 0 || options.accept_regression || options.bootstrap) -> return jet_cli_budget_update(options, root, built, report_path, color)
     created: jet_cli_budget_publish_report(root, built) ?? return jet_cli_budget_tool_failure(options, err.message, color)
     jet_cli_budget_emit(options, built, report_path, created)
+}
+
+// Rust `compile_descriptor`: a CompilerProbe workload the resident compiler
+// can't run, or whose edit patch is unreadable, is refused before anything
+// is measured.
+jet_cli_budget_compile_workload: fn(root: String, spec: BudgetSpec, profile: String) JetCLIBudgetFailure! {
+    workload: spec.compile_workload ?? return Err(jet_cli_budget_failure("CompilerProbe budget `{spec.name}` has no resolved workload"))
+    if !(workload.mode == "Clean" || workload.mode == "NoChange" || workload.mode == "Edit") || workload.target == "" || profile == "" -> return Err(jet_cli_budget_failure("compile workload has an unsupported mode, empty target, or empty profile"))
+    if workload.target != "cli" -> return Err(jet_cli_budget_failure("compile workload target `{workload.target}` is unsupported by the resident fixture compiler"))
+    if !jet_cli_budget_compile_profile(root, profile) -> return Err(jet_cli_budget_failure("compile workload profile `{profile}` is unsupported by the resident fixture compiler"))
+    if workload.mode == "Edit" && workload.patch == None -> return Err(jet_cli_budget_failure("CompileProbe Edit workload has no patch path"))
+    if workload.mode != "Edit" && workload.patch != None -> return Err(jet_cli_budget_failure("only an Edit workload may name a patch path"))
+    if workload.patch == .Val(patch) {
+        if !sema_budget_safe_relative_path(patch) -> return Err(jet_cli_budget_failure("compile workload patch path is not project-relative"))
+        segments: patch.split("/").to_list()
+        parts := [String]{}
+        loop index in 0..<segments.len() - 1 {
+            parts.push(segments[index])
+        }
+        name: segments[segments.len() - 1]
+        present: JetCLIRootedDirectory.present(root, parts) ?? return Err(jet_cli_budget_failure("compile workload patch is unavailable: {err.message}"))
+        if !present -> return Err(jet_cli_budget_failure("compile workload patch is unavailable: `{patch}` is absent"))
+        held: JetCLIRootedDirectory.open(root, parts, false) ?? return Err(jet_cli_budget_failure("compile workload patch is unavailable: {err.message}"))
+        if held.read(name, JET_CLI_BUDGET_REPORT_LIMIT) == {
+            .Val(_) -> {}
+            .None -> { return Err(jet_cli_budget_failure("compile workload patch is unavailable: `{patch}` is absent")) }
+            .Err(error) -> { return Err(jet_cli_budget_failure("cannot read compile workload patch: {error.message}")) }
+        }
+    }
+}
+
+// Rust `validate_compile_profile`: a stock profile, or one the package's
+// `build` block declares.
+jet_cli_budget_compile_profile: fn(root: String, profile: String) -> Bool {
+    if profile == "dev" || profile == "release" || profile == "debug" || profile == "ci" || profile == "small" -> return true
+    manifest: jet_cli_root_manifest(root) ?? return false
+    loop declared in manifest.profiles {
+        if declared.name == profile -> return true
+    }
+    false
 }
 
 // Rust `run`'s update half over a report that may advance the baseline: the
@@ -300,8 +372,9 @@ jet_cli_budget_accept: fn(root: String, plan: JetCLIBudgetUpdatePlan, built: Jet
     jet_cli_budget_apply_update(root, plan, built.report, built.bytes) ?? return Err(jet_cli_budget_failure("baseline apply refused: {err.message}"))
 }
 
-// Rust `subject`: the measured member sources, sorted, the profile, and the target.
-jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String, profile: String) -> CanonicalJSON {
+// Rust `subject`: the measured member sources, sorted, the built artifact
+// (Null when no budget sizes one), the profile, and the target.
+jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured_start: String, measured_end: String, profile: String, artifact: CanonicalJSON) -> CanonicalJSON {
     ordered := sources
     ordered = loop fresh in ordered -> fresh
     ordered.sort_by((left: JetCLIBudgetSource, right: JetCLIBudgetSource) -> if left.path == right.path -> left.sha256 <=> right.sha256 else -> left.path <=> right.path)
@@ -311,7 +384,7 @@ jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured
     })
     target_id: jet_cli_budget_package(root)
     perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "artifact", value: CanonicalJSON.Null},
+        CanonicalJSONField{key: "artifact", value: artifact},
         CanonicalJSONField{key: "measured_end", value: CanonicalJSON.String(measured_end)},
         CanonicalJSONField{key: "measured_start", value: CanonicalJSON.String(measured_start)},
         CanonicalJSONField{key: "member_sources", value: CanonicalJSON.Array(members)},
