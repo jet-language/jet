@@ -121,7 +121,7 @@ pkg_inline_deps_test_unresolved: fn(dep: InlineDep, script_dir: String) -[FS, En
 
 // tests/build_cache_normalization.rs:191-238: an unknown package and a hostile
 // source tree both fail closed with E1253 and leave no cache, lock or `.jet`
-// tree behind.
+// tree behind; the hostile one says its source cannot be hashed safely.
 #Test("missing and hostile inline dependency material fails closed without creating state") {
     missing: files.temp_dir("jet-script-deps-missing") ?? panic("scratch")
     dependency: pkg_inline_deps_test_dep("missing_buildnorm")
@@ -144,6 +144,8 @@ pkg_inline_deps_test_unresolved: fn(dep: InlineDep, script_dir: String) -[FS, En
         .InvalidTree(_) -> {}
         else -> panic("a hostile tree must be an invalid tree failure")
     }
-    assert_eq(pkg_inline_deps_e1253(hostile_dependency, hostile_error).code, "E1253")
+    hostile_diagnostic: pkg_inline_deps_e1253(hostile_dependency, hostile_error)
+    assert_eq(hostile_diagnostic.code, "E1253")
+    assert(hostile_diagnostic.why.contains("cannot be hashed safely"), "the hostile failure must explain that the source cannot be hashed safely")
     assert(!files.exists(files.join(hostile.path, "standalone.jet.lock")), "a hostile dependency must not write a lock")
 }
