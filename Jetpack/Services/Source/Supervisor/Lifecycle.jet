@@ -144,7 +144,7 @@ services_launch: fn(project_dir: String, env: &ShellEnv, plan: DevServicePlan, r
         return Err(err)
     }
     sockets.release()
-    services_release_ports(allocated)
+    allocated.release()
     child := spec.spawn() ?? return Err(ServicesError.new("couldn't start `{plan.name}`: {err}"))
     state: services_capture_process_state(child, authority) ?? return Err(err)
     attached: services_attach_authority(authority) ?? {
