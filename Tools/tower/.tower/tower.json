@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95843,
+    "rev": 95844,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -90747,121 +90747,6 @@
       "criteriaLastN": 8
     },
     {
-      "id": "c0cwzm7q",
-      "num": 6562,
-      "title": "Markers inside a declaration body: #X :: value lines (D-MARKER-INBODY1 A)",
-      "body": "Ratified D-MARKER-INBODY1=A (2026-11-04). Any marker on a declaration with a braced body (struct, enum, trait, impl block, inline module, function, method) may be written inside that body as `#X :: value`. It means exactly what `#X(args)` above the declaration means; both fill one marker list. Values: `true` applies with defaults, `false` refuses where `#!X` is allowed, one name, string or number needs no parentheses, and any other argument list is written in parentheses with the marker argument grammar. A Bool argument is always parenthesized.\n\nOwner amendment at ratification: the lines may be ANYWHERE in the body, not only at the top. The owner's reasoning: the member declarations are the most important part of a struct, so markers need not come first. The ballot's 'leading lines' rule is therefore void. Consequence (adversarial finding 7): type-marker facts that the parser applies before the body today (Items.jet:1901-1904 layout and type markers, :2019-2020 enum markers) must instead apply after the whole body is read, wherever the line sits.\n\nKept rules: a declaration writes its own markers all above or all inside; mixing is refused with a jet fix that moves the whole set either way. Markers added by tools or templates go where the declaration's markers already are, and above when it has none. A wrong site gets the same site error as above. Blocks, lambdas and tests keep `#X` at their head. jet fmt keeps the author's placement and drops parentheses around one simple argument.\n\nDepends on nothing for most markers; `#FX` on types additionally needs D-EFFTYPE-MODEL1's site change (c09kjhit).",
-      "kind": "feature",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": "1. Parser: in every braced declaration body, a member starting with `#` Path followed by `::` is a marker line; parse the value with the marker argument parser (plus true/false); collect them and append to the declaration's marker list after the body. Move the parser-time type-marker facts (layout, derives, SingleUse, MustUse, enum markers) to after the body. 2. Sema: refuse mixing above and inside, a wrong site, `false` where `#!X` is not allowed, and an unparenthesized Bool. Each refusal is a registered code with what/why/fix and a UI snapshot. 3. jet fix: move a declaration's whole marker set inside or above. 4. Formatter: print the lines in place; one simple argument without parentheses. 5. Registry, editor grammars, highlight guard and docs. 6. Examples with goldens on every tier.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "D-MARKER-MOVE1 A (ratified 2026-11-04) is implemented in 37eae4f5d6: jet fix --markers inside|above (FixCommands.jet, InBodyMarkers.jet), and plain jet fix moves a mixed set above. Cases marker_inbody x6, including ui_fixes/marker_inbody_moves_whole_set, pass on 125e2e8f89 (Prep-2 check). The editor code actions have no test yet, tracked as #4917."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "Main 2026-11-04 (derived rule, recorded so the owner can overrule): in a FUNCTION body, # X :: lines are accepted only at the body's top statement level. Inside a nested block or a lambda they get E0355 (Block site), because a nested position would suggest a scope the marker does not have. In type, module and impl bodies they go anywhere among the members, per the owner's ANYWHERE."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "Main 2026-11-04: Prep finding. Markers written above a trait, a top-level impl or an inline module are dropped silently today: no AST field holds them (probe $JET_SCRATCH_ROOT/lanes/Main/prep/inbody_sites.jet). This card adds those carriers, and markers on those declarations are then checked (site errors) both above and inside. The jet fix move in both directions waits on ballot D-MARKER-MOVE1; every other criterion proceeds."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`#X :: value` lines parse anywhere inside struct, enum, trait, impl, inline module, function and method bodies, and produce exactly the marker list `#X(args)` above produces; a test compares the two forms' facts and output for at least Layout, Deprecated, Codable, Debug false, MustUse and Inline.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 76b385b498 on dev (batch 3; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. marker_inbody/impl_and_module_markers_above_and_inside PASS: in-struct #Commutative above vs inside both print 3; an in-struct #Target(OS.Linux) impl gates and runs (linux: a), was E0355; a module declaration's #Deprecated above vs inside are both E0355 at the Module site, were silently dropped.",
-          "at": "2026-11-04T18:22:45.020Z"
-        },
-        {
-          "n": 2,
-          "text": "Type-marker facts (layout, derives, SingleUse, MustUse, enum markers) take effect identically when the line is the last member of the body; a case proves it for #Layout(c) and a derive.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: cases marker_inbody/type_marker_facts_apply_from_the_last_line PASS.",
-          "at": "2026-11-04T17:46:45.910Z"
-        },
-        {
-          "n": 3,
-          "text": "Mixing above and inside on one declaration, a wrong site, `false` without a `#!X` form, and an unparenthesized Bool argument each report a registered code with what/why/fix text and a UI snapshot.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: ui marker_inbody/{mixing_above_and_inside (E0942), bool_argument_needs_parentheses, complex_value_needs_parentheses (E0943), false_without_signed_form, wrong_site_block_line, wrong_site_trait_marker (E0355)} 6/6 PASS.",
-          "at": "2026-11-04T17:46:46.485Z"
-        },
-        {
-          "n": 4,
-          "text": "jet fix moves a declaration's whole marker set inside and back above, round-tripping byte-identical after jet fmt; a case covers struct and function.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: cases ui_fixes/marker_inbody_moves_whole_set (struct and fn, inside and above, fmt, idempotent, round trip) PASS.",
-          "at": "2026-11-04T17:46:47.389Z"
-        },
-        {
-          "n": 5,
-          "text": "jet fmt keeps placement, prints one simple argument without parentheses, and is idempotent; a fmt case covers it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 76b385b498 on dev (batch 3; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. fmt/marker_inbody_keeps_placement PASS and idempotent (formatting twice): enum marker lines stay before the variant that follows; #MustUse above a trait signature and #Inline :: true in a trait default body are printed; above-markers of an error conversion and a module declaration are printed.",
-          "at": "2026-11-04T18:22:45.484Z"
-        },
-        {
-          "n": 6,
-          "text": "The syntax registry, editor grammars and highlight guard know the new line shape; an example with golden output on every tier shows a struct and a function using it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: golden types/inbody_markers PASS on o0/o1/o2; guard tests/guards/grammar_highlight.jet: 93 passed / 9 failed vs base 92/9 with the same 9 failing (#6188 known-failing); lane-check CHECK OK for Examples/features/types/inbody_markers.jet. The tree-sitter corpus was not run (no tree-sitter CLI on the host).",
-          "at": "2026-11-04T17:46:48.046Z"
-        },
-        {
-          "n": 7,
-          "text": "ErrorConv impls keep their above-markers (dropped today, per the batch-2 receipt at 37eae4f5d6), with a case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed 76b385b498 on dev (batch 3; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. marker_inbody/error_conversion_keeps_above_markers PASS: user marker Audited (sites [.Impl]) above impl FileErr -> AppErr checks and the program runs (42, converted); #Deprecated(\"old\") there is E0355 at the Impl site.",
-          "at": "2026-11-04T18:22:45.927Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "owner-direction",
-        "markers",
-        "syntax"
-      ],
-      "goals": [
-        "G6"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-04T12:34:11.861Z",
-      "updated": "2026-11-04T20:14:01.938Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T18:22:57.806Z"
-    },
-    {
       "id": "c0n8pmxe",
       "num": 6563,
       "title": "Every closed card is durable: no work lives only on the scratch disk",
@@ -99117,11 +99002,11 @@
         {
           "n": 5,
           "text": "The optional-wrapping path lends too: Val(folder) passed where a Named? (Option of a trait) is expected no longer leaks or moves the borrowed Directory (ir_present/ir_store_at). A case row proves the handle stays open across two such calls and closes once. The other ir_present/ir_store_at widenings of a borrowed operand are audited in the same pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T19:27:23.372Z"
+          "evidence": "8ac163916e: at a read call a borrowed argument is lent to the Option, Ok/Result or tuple carrier built there. On its s1: case memory_semantics/carrier_argument_is_lent_not_moved runs Option, Folder?, Named?, Result and tuple under --checked-alloc at o0/o1/o2 (each handle open across two calls, closed once); cases filter _argument_: 26 PASS, 1 known-failing #5454 unrelated; golden Types 210/210; LaneCheck CHECK OK on BuildExpr and BuildTypes.",
+          "at": "2026-11-07T20:19:33.143Z"
         }
       ],
       "refs": [],
@@ -99130,7 +99015,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-07T19:53:57.471Z",
+      "updated": "2026-11-07T20:19:33.143Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -174126,165 +174011,6 @@
       "ratifiedAt": "2026-11-04"
     },
     {
-      "id": "D-MARKER-MOVE1",
-      "cardId": "c0cwzm7q",
-      "group": "other",
-      "title": "How does an author ask jet fix to move a declaration's markers inside or back above?",
-      "situation": "D-MARKER-INBODY1 A lets a declaration write its markers above it as #X(args), or inside its body as #X :: value lines. Card #6562 says jet fix moves a declaration's whole marker set inside and back above. jet fix today only applies the edits that diagnostics carry, and it has two flags, --dry-run and --all. When a declaration is not mixed there is no diagnostic, so nothing tells jet fix which way to move.",
-      "gist": "Which command moves markers between above and inside?",
-      "lesson": "jet fix applies the fix that comes with each error. A declaration that writes all its markers in one place is correct and has no error, so moving its markers needs an explicit request.",
-      "explainer": "",
-      "story": "Ana's struct has five markers above it and twenty fields. She wants the markers inside, after the fields, as the owner allowed. She also wants a way to put them back above before a release.",
-      "inWild": "Compiler/JetCli/Source/Cli/Front.jet:1848 JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains(\"--dry-run\"), all: jet_argv.contains(\"--all\"), …}\nCompiler/JetFoundation/Source/Diagnostics/Diagnostic.jet:259 fn diagnostic_with_alternative_edit(…)",
-      "detail": "WHAT IS RATIFIED\n\nD-MARKER-INBODY1 A: both placements fill one marker list. Mixing on one declaration is refused, with a jet fix that moves the whole set either way. jet fmt keeps the author's placement.\n\nWHAT IS OPEN\n\nHow to ask for the move when nothing is mixed. The mixing error can carry one fix plus one alternative edit (diagnostic_with_alternative_edit), but jet fix applies only the primary one.",
-      "options": [
-        {
-          "key": "A",
-          "name": "A placement flag on jet fix",
-          "detail": "jet fix --markers inside FILE moves every declaration's marker set in FILE into its body; jet fix --markers above FILE moves them all above. Each line is added at the end of the body, in the original marker order. Without the flag, jet fix fixes a mixed declaration by moving its whole set above. An editor offers both directions as code actions on any declaration.",
-          "technical": "One new flag on the existing Fix plan, parsed in Front.jet beside --dry-run and --all. The rewrite is one TextEdit per declaration over its marker and body span, so jet fix's apply path stays unchanged.",
-          "code": "jet fix --markers inside src/shapes.jet\njet fix --markers above src/shapes.jet\n\n// a mixed declaration: `jet fix` moves the whole set above\n#Codable\nstruct Point {\n    x: Int\n    #Debug :: false\n}"
-        },
-        {
-          "key": "B",
-          "name": "Editor code actions only",
-          "detail": "The move is a code action in the editor (LSP) on a declaration's markers. On the command line, jet fix only fixes mixed declarations, using the primary fix (above). The card's round-trip proof uses the LSP fix path.",
-          "technical": "No CLI change. The round trip cannot be run from a script without an LSP client.",
-          "code": "// editor: \"Move markers inside\" / \"Move markers above\" on `struct Point`"
-        },
-        {
-          "key": "C",
-          "name": "jet fmt chooses placement",
-          "detail": "jet fmt --markers inside|above rewrites placement as a formatting option.",
-          "technical": "Against the ratified rule that jet fmt keeps the author's placement.",
-          "code": "jet fmt --markers inside src/shapes.jet"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "The card asks jet fix to move markers both ways. A flag is the smallest addition that does this from the command line, and it keeps jet fmt placement-neutral as ratified.",
-        "gains": [
-          "The round trip runs in a case test.",
-          "No change to how jet fix applies edits."
-        ],
-        "losses": [
-          {
-            "loss": "A new CLI flag to document.",
-            "mitigation": "It sits beside --dry-run and --all in jet fix --help and the CLI docs."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B cannot be scripted, so the card's round-trip case cannot run in the suite."
-          },
-          {
-            "key": "C",
-            "reason": "C contradicts the ratified rule that jet fmt keeps placement."
-          }
-        ],
-        "tradeoff": "One more jet fix flag, for a scriptable move in both directions."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main (separate from the author, Prep). The pass checked that the ratified in-body ballot already promises a move in both directions, so only the trigger is new, and that A changes nothing without the flag."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Which command moves markers between above and inside?",
-        "lesson": "A declaration with all its markers in one place has no error, so the move needs an explicit request.",
-        "trio": {
-          "current": {
-            "note": "Today markers are only written above.",
-            "code": "#Codable\n#Layout(c)\nstruct Point { x: Int }"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "rustfmt and clippy --fix never move attributes; the author moves them by hand.",
-            "code": "#[derive(Debug)]\n#[repr(C)]\nstruct Point { x: i32 }"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "A placement flag on jet fix",
-            "gist": "jet fix --markers inside|above FILE.",
-            "gains": [
-              "Scriptable both ways."
-            ],
-            "losses": [
-              "One new flag."
-            ],
-            "proposed": {
-              "code": "jet fix --markers inside src/shapes.jet"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Editor code actions only",
-            "gist": "Only the editor moves markers.",
-            "gains": [
-              "No CLI change."
-            ],
-            "losses": [
-              "Not scriptable."
-            ],
-            "proposed": {
-              "code": "// editor code action"
-            }
-          },
-          {
-            "key": "C",
-            "name": "jet fmt chooses placement",
-            "gist": "A formatter option.",
-            "gains": [
-              "One command for style."
-            ],
-            "losses": [
-              "Breaks the ratified fmt rule."
-            ],
-            "proposed": {
-              "code": "jet fmt --markers inside src/shapes.jet"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Smallest scriptable addition; fmt stays placement-neutral.",
-          "gains": [
-            "Round trip runs in a case."
-          ],
-          "losses": [
-            {
-              "loss": "New flag.",
-              "mitigation": "Documented beside --dry-run and --all."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Not scriptable."
-            },
-            {
-              "key": "C",
-              "reason": "Breaks the fmt rule."
-            }
-          ],
-          "tradeoff": "One flag, for a scriptable move."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-04T13:54:43.517Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-04"
-    },
-    {
       "id": "D-EFFTYPE-MODVALUE1",
       "cardId": "c09kjhit",
       "group": "other",
@@ -187064,6 +186790,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T20:19:33.143Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fs42sy",
+      "note": "#5"
+    },
     {
       "at": "2026-11-07T20:02:41.046Z",
       "by": "Main",

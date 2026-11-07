@@ -84164,6 +84164,123 @@
         }
       ],
       "retiredAt": "2026-11-07T11:10:37.009Z"
+    },
+    {
+      "id": "c0cwzm7q",
+      "num": 6562,
+      "title": "Markers inside a declaration body: #X :: value lines (D-MARKER-INBODY1 A)",
+      "body": "Ratified D-MARKER-INBODY1=A (2026-11-04). Any marker on a declaration with a braced body (struct, enum, trait, impl block, inline module, function, method) may be written inside that body as `#X :: value`. It means exactly what `#X(args)` above the declaration means; both fill one marker list. Values: `true` applies with defaults, `false` refuses where `#!X` is allowed, one name, string or number needs no parentheses, and any other argument list is written in parentheses with the marker argument grammar. A Bool argument is always parenthesized.\n\nOwner amendment at ratification: the lines may be ANYWHERE in the body, not only at the top. The owner's reasoning: the member declarations are the most important part of a struct, so markers need not come first. The ballot's 'leading lines' rule is therefore void. Consequence (adversarial finding 7): type-marker facts that the parser applies before the body today (Items.jet:1901-1904 layout and type markers, :2019-2020 enum markers) must instead apply after the whole body is read, wherever the line sits.\n\nKept rules: a declaration writes its own markers all above or all inside; mixing is refused with a jet fix that moves the whole set either way. Markers added by tools or templates go where the declaration's markers already are, and above when it has none. A wrong site gets the same site error as above. Blocks, lambdas and tests keep `#X` at their head. jet fmt keeps the author's placement and drops parentheses around one simple argument.\n\nDepends on nothing for most markers; `#FX` on types additionally needs D-EFFTYPE-MODEL1's site change (c09kjhit).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "1. Parser: in every braced declaration body, a member starting with `#` Path followed by `::` is a marker line; parse the value with the marker argument parser (plus true/false); collect them and append to the declaration's marker list after the body. Move the parser-time type-marker facts (layout, derives, SingleUse, MustUse, enum markers) to after the body. 2. Sema: refuse mixing above and inside, a wrong site, `false` where `#!X` is not allowed, and an unparenthesized Bool. Each refusal is a registered code with what/why/fix and a UI snapshot. 3. jet fix: move a declaration's whole marker set inside or above. 4. Formatter: print the lines in place; one simple argument without parentheses. 5. Registry, editor grammars, highlight guard and docs. 6. Examples with goldens on every tier.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "D-MARKER-MOVE1 A (ratified 2026-11-04) is implemented in 37eae4f5d6: jet fix --markers inside|above (FixCommands.jet, InBodyMarkers.jet), and plain jet fix moves a mixed set above. Cases marker_inbody x6, including ui_fixes/marker_inbody_moves_whole_set, pass on 125e2e8f89 (Prep-2 check). The editor code actions have no test yet, tracked as #4917."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Main 2026-11-04 (derived rule, recorded so the owner can overrule): in a FUNCTION body, # X :: lines are accepted only at the body's top statement level. Inside a nested block or a lambda they get E0355 (Block site), because a nested position would suggest a scope the marker does not have. In type, module and impl bodies they go anywhere among the members, per the owner's ANYWHERE."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Main 2026-11-04: Prep finding. Markers written above a trait, a top-level impl or an inline module are dropped silently today: no AST field holds them (probe $JET_SCRATCH_ROOT/lanes/Main/prep/inbody_sites.jet). This card adds those carriers, and markers on those declarations are then checked (site errors) both above and inside. The jet fix move in both directions waits on ballot D-MARKER-MOVE1; every other criterion proceeds."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`#X :: value` lines parse anywhere inside struct, enum, trait, impl, inline module, function and method bodies, and produce exactly the marker list `#X(args)` above produces; a test compares the two forms' facts and output for at least Layout, Deprecated, Codable, Debug false, MustUse and Inline.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 76b385b498 on dev (batch 3; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. marker_inbody/impl_and_module_markers_above_and_inside PASS: in-struct #Commutative above vs inside both print 3; an in-struct #Target(OS.Linux) impl gates and runs (linux: a), was E0355; a module declaration's #Deprecated above vs inside are both E0355 at the Module site, were silently dropped.",
+          "at": "2026-11-04T18:22:45.020Z"
+        },
+        {
+          "n": 2,
+          "text": "Type-marker facts (layout, derives, SingleUse, MustUse, enum markers) take effect identically when the line is the last member of the body; a case proves it for #Layout(c) and a derive.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: cases marker_inbody/type_marker_facts_apply_from_the_last_line PASS.",
+          "at": "2026-11-04T17:46:45.910Z"
+        },
+        {
+          "n": 3,
+          "text": "Mixing above and inside on one declaration, a wrong site, `false` without a `#!X` form, and an unparenthesized Bool argument each report a registered code with what/why/fix text and a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: ui marker_inbody/{mixing_above_and_inside (E0942), bool_argument_needs_parentheses, complex_value_needs_parentheses (E0943), false_without_signed_form, wrong_site_block_line, wrong_site_trait_marker (E0355)} 6/6 PASS.",
+          "at": "2026-11-04T17:46:46.485Z"
+        },
+        {
+          "n": 4,
+          "text": "jet fix moves a declaration's whole marker set inside and back above, round-tripping byte-identical after jet fmt; a case covers struct and function.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: cases ui_fixes/marker_inbody_moves_whole_set (struct and fn, inside and above, fmt, idempotent, round trip) PASS.",
+          "at": "2026-11-04T17:46:47.389Z"
+        },
+        {
+          "n": 5,
+          "text": "jet fmt keeps placement, prints one simple argument without parentheses, and is idempotent; a fmt case covers it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 76b385b498 on dev (batch 3; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. fmt/marker_inbody_keeps_placement PASS and idempotent (formatting twice): enum marker lines stay before the variant that follows; #MustUse above a trait signature and #Inline :: true in a trait default body are printed; above-markers of an error conversion and a module declaration are printed.",
+          "at": "2026-11-04T18:22:45.484Z"
+        },
+        {
+          "n": 6,
+          "text": "The syntax registry, editor grammars and highlight guard know the new line shape; an example with golden output on every tier shows a struct and a function using it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 37eae4f5d6 on dev (batch 2; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch2.receipt.md), on s1 jet 906f73d6451c5ab0: golden types/inbody_markers PASS on o0/o1/o2; guard tests/guards/grammar_highlight.jet: 93 passed / 9 failed vs base 92/9 with the same 9 failing (#6188 known-failing); lane-check CHECK OK for Examples/features/types/inbody_markers.jet. The tree-sitter corpus was not run (no tree-sitter CLI on the host).",
+          "at": "2026-11-04T17:46:48.046Z"
+        },
+        {
+          "n": 7,
+          "text": "ErrorConv impls keep their above-markers (dropped today, per the batch-2 receipt at 37eae4f5d6), with a case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 76b385b498 on dev (batch 3; receipt $JET_SCRATCH_ROOT/lanes/Main/land/Batch3.receipt.md). Proven on tree t-b3c6562 = 348c3649f1 + Batch3.patch, s1 jet 12bf6c9dc5d77ff1; against base the cases (453), ui and golden lists show only NEW PASS rows; lane-check CHECK OK x7. marker_inbody/error_conversion_keeps_above_markers PASS: user marker Audited (sites [.Impl]) above impl FileErr -> AppErr checks and the program runs (42, converted); #Deprecated(\"old\") there is E0355 at the Impl site.",
+          "at": "2026-11-04T18:22:45.927Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "owner-direction",
+        "markers",
+        "syntax"
+      ],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-04T12:34:11.861Z",
+      "updated": "2026-11-04T20:14:01.938Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T18:22:57.806Z",
+      "questions": [],
+      "retiredAt": "2026-11-07T20:19:33.283Z"
     }
   ]
 }

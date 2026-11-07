@@ -13360,6 +13360,166 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-02",
       "retiredAt": "2026-11-07T11:10:37.009Z"
+    },
+    {
+      "id": "D-MARKER-MOVE1",
+      "cardId": "c0cwzm7q",
+      "group": "other",
+      "title": "How does an author ask jet fix to move a declaration's markers inside or back above?",
+      "situation": "D-MARKER-INBODY1 A lets a declaration write its markers above it as #X(args), or inside its body as #X :: value lines. Card #6562 says jet fix moves a declaration's whole marker set inside and back above. jet fix today only applies the edits that diagnostics carry, and it has two flags, --dry-run and --all. When a declaration is not mixed there is no diagnostic, so nothing tells jet fix which way to move.",
+      "gist": "Which command moves markers between above and inside?",
+      "lesson": "jet fix applies the fix that comes with each error. A declaration that writes all its markers in one place is correct and has no error, so moving its markers needs an explicit request.",
+      "explainer": "",
+      "story": "Ana's struct has five markers above it and twenty fields. She wants the markers inside, after the fields, as the owner allowed. She also wants a way to put them back above before a release.",
+      "inWild": "Compiler/JetCli/Source/Cli/Front.jet:1848 JetCLIPlan.Fix{file: file, dry_run: jet_argv.contains(\"--dry-run\"), all: jet_argv.contains(\"--all\"), …}\nCompiler/JetFoundation/Source/Diagnostics/Diagnostic.jet:259 fn diagnostic_with_alternative_edit(…)",
+      "detail": "WHAT IS RATIFIED\n\nD-MARKER-INBODY1 A: both placements fill one marker list. Mixing on one declaration is refused, with a jet fix that moves the whole set either way. jet fmt keeps the author's placement.\n\nWHAT IS OPEN\n\nHow to ask for the move when nothing is mixed. The mixing error can carry one fix plus one alternative edit (diagnostic_with_alternative_edit), but jet fix applies only the primary one.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A placement flag on jet fix",
+          "detail": "jet fix --markers inside FILE moves every declaration's marker set in FILE into its body; jet fix --markers above FILE moves them all above. Each line is added at the end of the body, in the original marker order. Without the flag, jet fix fixes a mixed declaration by moving its whole set above. An editor offers both directions as code actions on any declaration.",
+          "technical": "One new flag on the existing Fix plan, parsed in Front.jet beside --dry-run and --all. The rewrite is one TextEdit per declaration over its marker and body span, so jet fix's apply path stays unchanged.",
+          "code": "jet fix --markers inside src/shapes.jet\njet fix --markers above src/shapes.jet\n\n// a mixed declaration: `jet fix` moves the whole set above\n#Codable\nstruct Point {\n    x: Int\n    #Debug :: false\n}"
+        },
+        {
+          "key": "B",
+          "name": "Editor code actions only",
+          "detail": "The move is a code action in the editor (LSP) on a declaration's markers. On the command line, jet fix only fixes mixed declarations, using the primary fix (above). The card's round-trip proof uses the LSP fix path.",
+          "technical": "No CLI change. The round trip cannot be run from a script without an LSP client.",
+          "code": "// editor: \"Move markers inside\" / \"Move markers above\" on `struct Point`"
+        },
+        {
+          "key": "C",
+          "name": "jet fmt chooses placement",
+          "detail": "jet fmt --markers inside|above rewrites placement as a formatting option.",
+          "technical": "Against the ratified rule that jet fmt keeps the author's placement.",
+          "code": "jet fmt --markers inside src/shapes.jet"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The card asks jet fix to move markers both ways. A flag is the smallest addition that does this from the command line, and it keeps jet fmt placement-neutral as ratified.",
+        "gains": [
+          "The round trip runs in a case test.",
+          "No change to how jet fix applies edits."
+        ],
+        "losses": [
+          {
+            "loss": "A new CLI flag to document.",
+            "mitigation": "It sits beside --dry-run and --all in jet fix --help and the CLI docs."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B cannot be scripted, so the card's round-trip case cannot run in the suite."
+          },
+          {
+            "key": "C",
+            "reason": "C contradicts the ratified rule that jet fmt keeps placement."
+          }
+        ],
+        "tradeoff": "One more jet fix flag, for a scriptable move in both directions."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main (separate from the author, Prep). The pass checked that the ratified in-body ballot already promises a move in both directions, so only the trigger is new, and that A changes nothing without the flag."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Which command moves markers between above and inside?",
+        "lesson": "A declaration with all its markers in one place has no error, so the move needs an explicit request.",
+        "trio": {
+          "current": {
+            "note": "Today markers are only written above.",
+            "code": "#Codable\n#Layout(c)\nstruct Point { x: Int }"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "rustfmt and clippy --fix never move attributes; the author moves them by hand.",
+            "code": "#[derive(Debug)]\n#[repr(C)]\nstruct Point { x: i32 }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "A placement flag on jet fix",
+            "gist": "jet fix --markers inside|above FILE.",
+            "gains": [
+              "Scriptable both ways."
+            ],
+            "losses": [
+              "One new flag."
+            ],
+            "proposed": {
+              "code": "jet fix --markers inside src/shapes.jet"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Editor code actions only",
+            "gist": "Only the editor moves markers.",
+            "gains": [
+              "No CLI change."
+            ],
+            "losses": [
+              "Not scriptable."
+            ],
+            "proposed": {
+              "code": "// editor code action"
+            }
+          },
+          {
+            "key": "C",
+            "name": "jet fmt chooses placement",
+            "gist": "A formatter option.",
+            "gains": [
+              "One command for style."
+            ],
+            "losses": [
+              "Breaks the ratified fmt rule."
+            ],
+            "proposed": {
+              "code": "jet fmt --markers inside src/shapes.jet"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Smallest scriptable addition; fmt stays placement-neutral.",
+          "gains": [
+            "Round trip runs in a case."
+          ],
+          "losses": [
+            {
+              "loss": "New flag.",
+              "mitigation": "Documented beside --dry-run and --all."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Not scriptable."
+            },
+            {
+              "key": "C",
+              "reason": "Breaks the fmt rule."
+            }
+          ],
+          "tradeoff": "One flag, for a scriptable move."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-04T13:54:43.517Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04",
+      "retiredAt": "2026-11-07T20:19:33.283Z"
     }
   ]
 }
