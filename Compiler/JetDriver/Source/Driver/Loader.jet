@@ -913,11 +913,18 @@ jet_driver_dependency_is_git: fn(source: String) -> Bool {
     source.starts_with("{{") && source.contains("git:")
 }
 
+// The package entry is the function a singular intent (`jet run`, `jet build`)
+// selects. Check Outputs stay plural under `jet test`
+// (D-ECO-OUTPUT-DEFAULT1), so a Check entry never competes for it.
 jet_driver_manifest_entry_function: fn(source_path: String, tokens: [Token], tables: TokenTables, open_index: Int, close_index: Int, diagnostics: &[Diagnostic]) -> JetDriverPackageEntry? {
     entry := JetDriverPackageEntry?{None}
     index := open_index + 1
     loop index < close_index {
         token: tokens[index]
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == "Check" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_LBRACE {
+            index = (jet_driver_manifest_matching_brace(tokens, index + 1) ?? close_index) + 1
+            next
+        }
         if token.kind == TOKEN_IDENT && token_decoded(tables, token) == "entry" && index + 1 < close_index && tokens[index + 1].kind == TOKEN_COLON {
             value_index: index + 2
             if value_index >= close_index || (tokens[value_index].kind != TOKEN_IDENT && !jet_driver_is_manifest_string(tokens[value_index].kind)) {
@@ -3315,8 +3322,9 @@ JetDriverCoreIdentifierDemand: struct {
     // and the `.key_by`/`.window` stages after it run
     // their `Core/Data/Data.jet` source stages, so core.data loads.
     stream_event_time: Bool{false}
-    // A `#UnitFamily` declaration: its explicit conversions lower to their
-    // `Core/Math/Math.jet` exact-conversion helpers, so core.math loads.
+    // A `#UnitFamily` declaration or a `Dest.from_<unit>(…)` call: explicit
+    // unit conversions lower to their `Core/Math/Math.jet` exact-conversion
+    // helpers, so core.math loads.
     unit_family: Bool{false}
     // A generic `.decode<T>()` call or a `FieldError.under(…)` call: Dyn decode
     // and `FieldError.under` lower to their `Core/Encoding/Encoding.jet` helpers
@@ -3444,6 +3452,15 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             }
             if name == names.regex_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LBRACE -> demand.regex_source = true
             if name == names.unit_family_name && index > from && tokens[index - 1].kind == TOKEN_HASH -> demand.unit_family = true
+            // `Dest.from_<unit>(x)` (or `_rounded`): an explicit conversion
+            // between Prelude unit types lowers to its `Core/Math/Math.jet`
+            // exact helper. Syntactic, as for `.abs`: Sema alone decides
+            // whether `Dest` is a unit type.
+            if index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && token_decoded(tables, tokens[index]).starts_with("from_") {
+                receiver: token_decoded(tables, tokens[index - 2])
+                first: Int.from_u8(receiver.bytes()[0])
+                if first >= 65 && first <= 90 -> demand.unit_family = true
+            }
             if (name == names.pattern_matches_name || name == names.pattern_match_name) && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.regex_source = true
             if name == names.test_suite_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
             if name == names.expect_name && (index == from || tokens[index - 1].kind != TOKEN_DOT) && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN -> demand.test_suite = true
