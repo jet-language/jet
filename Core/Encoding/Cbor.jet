@@ -7,6 +7,7 @@ use {
     parser: __core_encoding_cbor_parse
     codec: __core_encoding_cbor_stream
     core.files.[FileReader, FileWriter]
+    typed_errors.[typed_parse_error]
 }
 
 CBORReader: struct {
@@ -260,8 +261,12 @@ decode: fn<Target: Decode>(bytes: [U8], options: CBOROptions{CBOROptions.safe()}
     Ok(value)
 }
 
-typed_parse_error: fn(error: CBORError) -> FieldError Never! {
-    FieldError{path: error.path.removeprefix("$"), reason: "CBOR {error.kind_name()} at byte {error.byte_offset}: {error.reason}"}
+// The parse failure behind `decode<T>`, as one FieldError: not part of the
+// cbor surface.
+priv typed_errors: module {
+    typed_parse_error: fn(error: CBORError) -> FieldError Never! {
+        FieldError{path: error.path.removeprefix("$"), reason: "CBOR {error.kind_name()} at byte {error.byte_offset}: {error.reason}"}
+    }
 }
 
 #Test("CBOR whole-value parser preserves limits and indefinite forms") {

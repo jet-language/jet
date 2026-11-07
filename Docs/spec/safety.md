@@ -4985,77 +4985,77 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 320,
+      "line": 322,
       "column": 5,
       "reason": "vault key import: validate a serialized wrapped carrier at the typed crypto boundary"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 326,
+      "line": 328,
       "column": 5,
       "reason": "vault key import: expose the authenticated wrapped carrier, not plaintext key material"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 331,
+      "line": 333,
       "column": 5,
       "reason": "vault key import: construct the typed recipient unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 336,
+      "line": 338,
       "column": 5,
       "reason": "vault key import: construct the typed passphrase unlock request"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 715,
+      "line": 717,
       "column": 5,
       "reason": "the expert API explicitly authorizes authenticated legacy-v1 migration"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1256,
+      "line": 1258,
       "column": 5,
       "reason": "crypto expert: Argon2id password hashing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 1283,
+      "line": 1285,
       "column": 5,
       "reason": "crypto expert: Argon2id password verification"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2177,
+      "line": 2187,
       "column": 5,
       "reason": "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2275,
+      "line": 2285,
       "column": 5,
       "reason": "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2284,
+      "line": 2294,
       "column": 5,
       "reason": "crypto expert: typed signing keys validate the Ed25519 seed width"
     },
     {
       "package": "Core",
       "file": "Core/Crypto/Crypto.jet",
-      "line": 2290,
+      "line": 2300,
       "column": 5,
       "reason": "crypto expert: typed verification validates public key and signature widths before strict verification"
     },
@@ -5314,21 +5314,21 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 2437,
+      "line": 2416,
       "column": 9,
       "reason": "native path bytes originate from the host environment and are split at ASCII boundaries"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3336,
+      "line": 3345,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
     {
       "package": "Core",
       "file": "Core/Data/Data.jet",
-      "line": 3670,
+      "line": 3679,
       "column": 5,
       "reason": "inspect existing private Decode carriers only inside checked Core data source"
     },
@@ -5454,14 +5454,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 99,
+      "line": 100,
       "column": 5,
       "reason": "inspect private typed carriers without changing public Dyn variants"
     },
     {
       "package": "Core",
       "file": "Core/Encoding/Cbor.jet",
-      "line": 168,
+      "line": 169,
       "column": 5,
       "reason": "validated private carriers retain byte strings for typed Encode"
     },
@@ -10317,17 +10317,17 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
-| Core | Core/Crypto/Crypto.jet | 320:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
-| Core | Core/Crypto/Crypto.jet | 326:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
-| Core | Core/Crypto/Crypto.jet | 331:5 | "vault key import: construct the typed recipient unlock request" |
-| Core | Core/Crypto/Crypto.jet | 336:5 | "vault key import: construct the typed passphrase unlock request" |
-| Core | Core/Crypto/Crypto.jet | 715:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
-| Core | Core/Crypto/Crypto.jet | 1256:5 | "crypto expert: Argon2id password hashing" |
-| Core | Core/Crypto/Crypto.jet | 1283:5 | "crypto expert: Argon2id password verification" |
-| Core | Core/Crypto/Crypto.jet | 2177:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
-| Core | Core/Crypto/Crypto.jet | 2275:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
-| Core | Core/Crypto/Crypto.jet | 2284:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
-| Core | Core/Crypto/Crypto.jet | 2290:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
+| Core | Core/Crypto/Crypto.jet | 322:5 | "vault key import: validate a serialized wrapped carrier at the typed crypto boundary" |
+| Core | Core/Crypto/Crypto.jet | 328:5 | "vault key import: expose the authenticated wrapped carrier, not plaintext key material" |
+| Core | Core/Crypto/Crypto.jet | 333:5 | "vault key import: construct the typed recipient unlock request" |
+| Core | Core/Crypto/Crypto.jet | 338:5 | "vault key import: construct the typed passphrase unlock request" |
+| Core | Core/Crypto/Crypto.jet | 717:5 | "the expert API explicitly authorizes authenticated legacy-v1 migration" |
+| Core | Core/Crypto/Crypto.jet | 1258:5 | "crypto expert: Argon2id password hashing" |
+| Core | Core/Crypto/Crypto.jet | 1285:5 | "crypto expert: Argon2id password verification" |
+| Core | Core/Crypto/Crypto.jet | 2187:5 | "crypto expert: the authenticated envelope owns the one-time Poly1305 key and MAC framing" |
+| Core | Core/Crypto/Crypto.jet | 2285:5 | "crypto expert: typed key agreement validates key widths and rejects all-zero shared secrets" |
+| Core | Core/Crypto/Crypto.jet | 2294:5 | "crypto expert: typed signing keys validate the Ed25519 seed width" |
+| Core | Core/Crypto/Crypto.jet | 2300:5 | "crypto expert: typed verification validates public key and signature widths before strict verification" |
 | Core | Core/Crypto/ExpertCt.jet | 13:5 | "Core fixed-limb workspace reserves its complete operation-owned word capacity before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 39:5 | "Core fixed-limb extraction reserves its exact public output width before filling" |
 | Core | Core/Crypto/ExpertCt.jet | 325:5 | "Core Ed25519 hashing reserves the exact combined public part lengths before filling" |
@@ -10364,9 +10364,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Crypto/Vault.jet | 371:5 | "vault typed revocation commit provider boundary" |
 | Core | Core/Crypto/Vault.jet | 377:5 | "vault passphrase export provider boundary" |
 | Core | Core/Crypto/Vault.jet | 384:5 | "vault recipient export provider boundary" |
-| Core | Core/Data/Data.jet | 2437:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
-| Core | Core/Data/Data.jet | 3336:5 | "inspect existing private Decode carriers only inside checked Core data source" |
-| Core | Core/Data/Data.jet | 3670:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 2416:9 | "native path bytes originate from the host environment and are split at ASCII boundaries" |
+| Core | Core/Data/Data.jet | 3345:5 | "inspect existing private Decode carriers only inside checked Core data source" |
+| Core | Core/Data/Data.jet | 3679:5 | "inspect existing private Decode carriers only inside checked Core data source" |
 | Core | Core/Db/Db.jet | 1468:9 | "this consuming Close owns the sole SQLite database pointer, including open-error handles; close_v2 permits live statements to finalize later" |
 | Core | Core/Db/Db.jet | 1475:9 | "this consuming Close owns the sole statement pointer; SQLite permits finalize(NULL) and rusqlite drops finalize's status" |
 | Core | Core/Db/Db.jet | 1503:1 | "SQLite owns a live NUL-terminated error/name buffer; strlen and unpack finish before any following engine call" |
@@ -10384,8 +10384,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Core | Core/Db/Db.jet | 1915:5 | "SQLite's allocator counter is read-only; this test owns its connections and retains no foreign column pointers" |
 | Core | Core/Db/Db.jet | 1919:5 | "all test handles have reached Close before reading SQLite's allocator counter" |
 | Core | Core/Db/Db.jet | 1924:5 | "failed opens, including non-null error handles, have already reached Close" |
-| Core | Core/Encoding/Cbor.jet | 99:5 | "inspect private typed carriers without changing public Dyn variants" |
-| Core | Core/Encoding/Cbor.jet | 168:5 | "validated private carriers retain byte strings for typed Encode" |
+| Core | Core/Encoding/Cbor.jet | 100:5 | "inspect private typed carriers without changing public Dyn variants" |
+| Core | Core/Encoding/Cbor.jet | 169:5 | "validated private carriers retain byte strings for typed Encode" |
 | Core | Core/Encoding/CborStream.jet | 218:9 | "the retained key copies exactly the already validated text bytes" |
 | Core | Core/Encoding/CborStream.jet | 321:17 | "the exact CBOR text allocation passed strict UTF-8 validation" |
 | Core | Core/Encoding/Csv.jet | 141:9 | "input is a String; original complete UTF-8 scalars and ASCII quote escapes entered the field" |

@@ -1,0 +1,18 @@
+// CBORError.kind_name names the kind of each parse failure, and of an error
+// a caller builds itself.
+use cbor: core.encoding.cbor
+
+report: fn(label: String, bytes: [U8]) {
+    if cbor.parse(bytes) == {
+        .Ok(value) -> print("{label}: parsed {value}")
+        .Err(error) -> print("{label}: {error.kind_name()} at byte {error.byte_offset}")
+    }
+}
+
+run: fn() {
+    report("missing argument byte", [U8]{24})
+    report("trailing item", [U8]{0, 0})
+    report("break outside indefinite item", [U8]{255})
+    built: cbor.CBORError{kind: cbor.CBORErrorKind.Limit, byte_offset: 9, path: "$", reason: "too deep"}
+    print("built: {built.kind_name()}")
+}
