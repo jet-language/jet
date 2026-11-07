@@ -1,0 +1,15 @@
+# #6418: each unbuilt REPL form gives one registered E2104 refusal naming its card.
+fixture: repl_unbuilt_forms_refuse_naming_their_card.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet repl
+unset: JET_REPL_HISTORY
+stdin: repl_unbuilt_forms_refuse_naming_their_card.fixture/input.in
+exit: 0
+stderr: ~ "`jet repl :history` is not built yet" # the meta-command refusal
+stderr: ~ "(card #6418)" # the refusal names the card that owns the port
+stdout: ~ "after-refusal" # the session keeps running input after a refusal
+step: jet repl --console
+exit: nonzero
+stderr: ~ "`jet repl --console` is not built yet" # the flag refusal
+stderr: ~ "(card #6418)" # the refusal names the card that owns the port

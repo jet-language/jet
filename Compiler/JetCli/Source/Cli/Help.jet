@@ -1,9 +1,15 @@
 // `help`: one renderer for `jet help <command>` and the command's --help
 // spelling. Order validation is independent of output selection, so invalid
-// --sort still reports a usage error under --json.
+// --sort still reports a usage error under --json. A command the command model
+// marks unported has no help: asking for it is its E2104 report. `--all` adds
+// the model's list of forms not built yet.
 jet_cli_help: fn(jet_argv: [String], args: [String], bespoke: String?, color: Bool, json: Bool) -> JetCLIPlan Never! {
     order: jet_cli_help_order(jet_argv)
     if !jet_cli_is_help_order(order) -> return jet_cli_bad_help_order(order, color)
-    if args.len() > 1 -> return jet_cli_renderable(bespoke ?? jet_cli_command_help(args[1]), json)
+    if args.len() > 1 {
+        if !jet_cli_form_ported(args[1]) -> return jet_cli_not_ported(args[1], color)
+        return jet_cli_renderable(bespoke ?? jet_cli_command_help(args[1]), json)
+    }
+    if jet_argv.contains("--all") -> return jet_cli_renderable("{jet_cli_usage_page(order)}{jet_cli_not_built_page()}", json)
     jet_cli_renderable(jet_cli_usage_page(order), json)
 }

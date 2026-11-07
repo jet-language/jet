@@ -1,0 +1,17 @@
+# #6418: `jet eval` runs a print and a small program on the shared path, with the output `jet run` gives.
+fixture: eval_matches_run_for_a_print_and_a_small_program.fixture
+env: NO_COLOR=1
+step run_print: jet run print.jet
+exit: 0
+stdout: = "hello from jet\n"
+step: jet eval print.jet
+exit: 0
+stdout: == run_print
+stderr: empty
+step run_program: jet run program.jet
+exit: 0
+stdout: = eval_matches_run_for_a_print_and_a_small_program.fixture/program.out
+step: jet eval program.jet
+exit: 0
+stdout: == run_program
+stderr: empty

@@ -1967,9 +1967,9 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   (`jet-runtime/<key>/jet_runtime.pack.o`, see the Pipeline section); no Rust
   runtime, Rust std or rustc participates. The linker keeps only what the
   program uses ("only link what's needed"). The output is one self-contained
-  native binary. A size-minimal profile is decision S15; the Jet CLI does not
-  yet accept `jet build --small` (`JET_CLI_BUILD_UNPORTED_FLAGS` in
-  `Compiler/JetCli/Source/Cli/Front.jet`). The default leans toward speed.
+  native binary. A size-minimal profile is decision S15, selected with
+  `jet build --small` (the `small` build option in
+  `Compiler/JetFoundation/Source/Registry/BuildOptions.jet`). The default leans toward speed.
 - **R9 — A file is a complete program.** `jet run foo.jet` compiles and
   runs a single file with no manifest, no project folder, and no config.
   Inside a package, a bare `jet run` resolves the same complete program from

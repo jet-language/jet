@@ -236,9 +236,8 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
             loop option in request.options -> gate_args.push(option.copy())
             return JetCLIPlan.Gates{file: file, args: gate_args, color: color, json: json, notice: notice}
         }
-        else -> {}
+        else -> panic("inspect plane has no provider: {plane}")
     }
-    jet_cli_with_notices([String]{notice}, jet_cli_not_ported("inspect {plane}", color))
 }
 
 // `jet inspect decisions` up to the projection: the profile name (`--release`
@@ -338,7 +337,7 @@ jet_cli_inspect: fn(argv: [String], jet_argv: [String], args: [String], color: B
         else -> {}
     }
     if jet_cli_inspect_b(argv, command, jet_argv, args, color, quiet, json, threads) == .Val(plan) -> return plan
-    jet_cli_not_ported(command, color)
+    jet_cli_not_ported(jet_cli_dispatch_form(args), color)
 }
 
 // `run_impact` up to the check: `--depth=N` and exactly an entry file and a
@@ -1467,7 +1466,7 @@ jet_cli_inspect_replay_artifact: fn(job: JetCLIInspectJob, artifact: String, abs
     if jet_cli_replay_parent_problem(resolved) == .Val(problem) -> return jet_cli_replay_fail(job, "E3622", unavailable, problem, recapture, JET_DRIVER_EXIT_USER_ERROR)
     stat: cli_files.stat(resolved) ?? return jet_cli_replay_fail(job, "E3622", unavailable, "could not inspect `{path}`: {err}", recapture, JET_DRIVER_EXIT_USER_ERROR)
     if stat.is_symlink || !stat.is_file -> return jet_cli_replay_fail(job, "E3622", unavailable, "replay artifact is not a regular file: {path}", recapture, JET_DRIVER_EXIT_USER_ERROR)
-    jet_cli_not_ported_output("inspect --replay <replay artifact>", job.color)
+    jet_cli_not_ported_output("inspect --replay", job.color)
 }
 
 // Carry out one inspect job: check the entry as `check_projection` does (a
@@ -1719,7 +1718,7 @@ jet_cli_inspect_expand_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
         "memory" -> facts = jet_cli_expand_memory(result.doc_modules, index)
         "layout" -> facts = jet_cli_expand_layout(result.doc_modules)
         "origin" -> facts = jet_cli_expand_origin(result.doc_modules)
-        else -> return jet_cli_not_ported_output("inspect expand --facts {selection}", false)
+        else -> panic("expand lens has no projection: {selection}")
     }
     lens := JET_CLI_EXPAND_LENSES[0]
     loop spec in JET_CLI_EXPAND_LENSES {

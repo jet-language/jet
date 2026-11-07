@@ -411,14 +411,16 @@ jet_cli_fail: fn(code: String, what: String, why: String, fix: String, color: Bo
     JetCLIPlan.Refused{report: diagnostic_from_registry(code, None, what, why, fix), color: color, exit_code: exit_code, notice: ""}
 }
 
-// A real `jet` command that is not built yet: refused, never guessed.
-jet_cli_not_ported: fn(command: String, color: Bool) -> JetCLIPlan Never! {
-    JetCLIPlan.Done{output: jet_cli_not_ported_output(command, color)}
+// A real `jet` command form that is not built yet: refused, never guessed.
+jet_cli_not_ported: fn(form: String, color: Bool) -> JetCLIPlan Never! {
+    JetCLIPlan.Done{output: jet_cli_not_ported_output(form, color)}
 }
 
-// The bytes and status of that refusal, for a host-side projection.
-jet_cli_not_ported_output: fn(command: String, color: Bool) -> JetDriverVerbOutput Never! {
-    jet_cli_report_output("", "E2104", "`jet {command}` is not built yet", "This `jet` has no implementation of this command form yet, and no other `jet` can run it.", "Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first.", color, JET_DRIVER_EXIT_USAGE)
+// The bytes and status of that refusal, for a host-side projection. The Fix
+// line names the Tower card the command model (JET_CLI_FORMS) gives the form.
+jet_cli_not_ported_output: fn(form: String, color: Bool) -> JetDriverVerbOutput Never! {
+    owner: if jet_cli_form_card(form) == .Val(card) -> " (card #{card})" else -> ""
+    jet_cli_report_output("", "E2104", "`jet {form}` is not built yet", "This `jet` has no implementation of this command form yet, and no other `jet` can run it.", "Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first{owner}.", color, JET_DRIVER_EXIT_USAGE)
 }
 
 jet_cli_prefix: fn(items: [String], end: Int) -> [String] Never! {
@@ -972,15 +974,6 @@ jet_cli_doc: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, js
     entry
 }
 
-// Build flags whose Jet port has not landed: refused, never ignored.
-JET_CLI_BUILD_UNPORTED_FLAGS: [String]{
-    "--lib", "--verify", "--import",
-    "--builder", "--output",
-    // Refused until the shared watch engine
-    // drives `jet build`, never a silent single build.
-    "--watch",
-}
-
 JetCLITargetFlag: enum {
     Absent
     // `--target` with no value, or with a flag where the value belongs.
@@ -1185,7 +1178,7 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
             }
         }
         .BuildPackage(file, color, _, build_args, threads, invocation, notice, _) -> {
-            if jet_argv.contains("--sbom") -> return jet_cli_not_ported("build --sbom of a package build", color)
+            if jet_argv.contains("--sbom") -> return jet_cli_not_ported("build <package build with --sbom>", color)
             source: cli_files.read(file) ?? ""
             if jet_cli_build_options(jet_argv, "build", file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
@@ -1329,7 +1322,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
     if jet_cli_option_flags_refusal(jet_argv, color) == .Val(refusal) -> return refusal
     loop argument in jet_argv {
         head: argument.split("=").to_list()[0]
-        if JET_CLI_BUILD_UNPORTED_FLAGS.contains(head) -> return jet_cli_not_ported("build {head}", color)
+        if head.starts_with("-") && !jet_cli_form_ported("build {head}") -> return jet_cli_not_ported("build {head}", color)
     }
     invocation := JetCLIInvocationAuthority?{None}
     if jet_cli_authority_flags(jet_argv, color) == {
@@ -1340,7 +1333,7 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<triple>` or `--target <triple>` before the source file", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            if name != "web" -> return jet_cli_not_ported("build --target={name}", color)
+            if !jet_cli_form_ported("build --target={name}") -> return jet_cli_not_ported("build --target={name}", color)
         }
     }
     // A package (no file given, or a directory): its `build: fn(b: Build)` when it declares one,
@@ -1430,7 +1423,8 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
         }
         head: argument.split("=").to_list()[0]
         if JET_CLI_RUN_PORTED_FLAGS.contains(head) || build_option_flag_row(head) != None || !jet_cli_is_known_flag(head) -> next
-        return jet_cli_not_ported("run {head}", color)
+        command: if watch -> "dev" else -> "run"
+        return jet_cli_not_ported("{command} {head}", color)
     }
     // `dispatch_nixpkgs_run`: `jet run <package>@nixpkgs`.
     if !shorthand && args.len() > 1 {
@@ -1468,10 +1462,6 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
     entry
 }
 
-// `jet test` flags whose Jet port has not landed: refused, never ignored.
-// The setting flags (JET_TEST_SETTINGS) refuse their unported rows themselves.
-JET_CLI_TEST_UNPORTED_FLAGS: [String]{"--browser-scaffold"}
-
 jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
     jet_cli_fail("E2104", what, jet_cli_why("E2104"), "use the canonical `jet test` flag spelling", color, JET_DRIVER_EXIT_USAGE)
 }
@@ -1482,8 +1472,8 @@ jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {
 // one, as `jet build` runs its `build: fn`. The tested file's doctests run as
 // claims of the same harness (Doctests.jet). Each setting flag writes the
 // flag layer of the test settings (TestSettingLayers.jet), over a profile's
-// and `test: fn`'s; the result cache and JET_CLI_TEST_UNPORTED_FLAGS are not
-// ported yet.
+// and `test: fn`'s; the result cache and the flags the command model
+// (JET_CLI_FORMS) marks unported are not ported yet.
 jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, threads: Int?) -[FS, Env, Exec]> JetCLIPlan Never! {
     if jet_cli_option_flags_refusal(jet_cli_test_build_argv(jet_argv, ""), color) == .Val(refusal) -> return refusal
     options := JetCLITestOptions{build: build_options_stock("test"), capture: "failed", filter: None, shuffle_seed: None, serial: false, trace_tiers: false, update_snapshots: false, docs: false, measure: false, json: false, profile: "", project_root: None, status: ""}
@@ -1507,7 +1497,7 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
             if !row.ported -> return jet_cli_not_ported("test {name}", color)
             // A bare `--shuffle` seeds from the clock, which the Jet host
             // does not read yet.
-            if name == "--shuffle" && inline == None -> return jet_cli_not_ported("test --shuffle", color)
+            if name == "--shuffle" && inline == None -> return jet_cli_not_ported("test <--shuffle without a seed>", color)
             raw := inline ?? ""
             if inline == None {
                 if row.kind == TestSettingKind.Switch {
@@ -1534,7 +1524,7 @@ jet_cli_test: fn(jet_argv: [String], color: Bool, quiet: Bool, verbose: Bool, th
             index += 1
         }
         if {
-            JET_CLI_TEST_UNPORTED_FLAGS.contains(name) -> return jet_cli_not_ported("test {name}", color)
+            name.starts_with("-") && !jet_cli_form_ported("test {name}") -> return jet_cli_not_ported("test {name}", color)
             name == "--show-default" -> show_default = true
             name == "--json" -> options.json = true
             argument.starts_with("-") -> {}
@@ -1694,7 +1684,8 @@ jet_cli_test_file: fn(jet_argv: [String], file: String, color: Bool, verbose: Bo
 // the Jetpack engine explains its Hangar record or last realization attempt.
 // The `--reload` and `--cost` views stay refused.
 jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    if jet_cli_has(jet_argv, "--reload") || jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain", color)
+    if jet_cli_has(jet_argv, "--reload") -> return jet_cli_not_ported("explain --reload", color)
+    if jet_cli_has(jet_argv, "--cost") -> return jet_cli_not_ported("explain --cost", color)
     if jet_cli_has(jet_argv, "--web-graph") {
         if args.len() < 2 -> return jet_cli_done("", "usage: jet explain --web-graph <file.jet>\n", JET_DRIVER_EXIT_USAGE)
         return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "web-graph", file: jet_cli_inspect_absolute(args[1]), subject: None, json: json, color: false, threads: threads, notice: "", project: false}}
@@ -2023,7 +2014,10 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         exhaustive = JET_CLI_COMMANDS[index].exhaustive
         second_asks: argv.len() > 1 && (argv[1] == "help" || jet_cli_is_help_flag(argv[1]))
         asks_help: if group == "env" -> second_asks else -> argv.len() == 1 || second_asks
-        if (exhaustive || group == "env") && asks_help -> return jet_cli_renderable(jet_cli_group_help(group), json)
+        if (exhaustive || group == "env") && asks_help {
+            if !jet_cli_form_ported(group) -> return jet_cli_not_ported(group, color)
+            return jet_cli_renderable(jet_cli_group_help(group), json)
+        }
     }
     if argv.len() > 1 {
         // copy: `argv[1]` stays in its list (owner: `argv`; no move out of an element, E0225) and
@@ -2097,7 +2091,11 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         }
     }
     if output_name == .Val(output) {
-        allowed: command == "run" || (command == "dev" && jet_argv.contains("--canvas")) || (command == "build" && library) || command == "package"
+        // A named output for `jet build` or a plain `jet dev` is a form of
+        // the command model that is not built yet.
+        if command == "build" && !library -> return jet_cli_not_ported("build --output", color)
+        if command == "dev" && !jet_argv.contains("--canvas") -> return jet_cli_not_ported("dev --output", color)
+        allowed: command == "run" || command == "dev" || command == "build" || command == "package"
         if !allowed || output == "" {
             return jet_cli_fail("E2104", "`--output` needs a runnable Output address or `jet build --lib`", jet_cli_why("E2104"), "write `jet run --output <address> <file.jet>`, or `jet build --lib --output <name> <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
         }
@@ -2138,7 +2136,10 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
 
     owns_flags: JET_CLI_OWNS_FLAGS.contains(command)
     bespoke_help: command == "bind" || command == "diff" || command == "merge" || command == "perf"
-    if jet_cli_any_help_flag(jet_argv) && !(owns_flags && bespoke_help) -> return jet_cli_renderable(jet_cli_command_help(command), json)
+    if jet_cli_any_help_flag(jet_argv) && !(owns_flags && bespoke_help) {
+        if !jet_cli_form_ported(command) -> return jet_cli_not_ported(command, color)
+        return jet_cli_renderable(jet_cli_command_help(command), json)
+    }
     threads := Int?{None}
     if jet_cli_threads(jet_argv, command, color) == {
         .Refused(refusal) -> return refusal
@@ -2183,6 +2184,8 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
                 "new-ui" | "reduce" | "ice-report" -> return JetCLIPlan.Maintenance{action: tool, args: jet_cli_tail(argv, 2), color: color, json: json}
                 // Rust ignores extra words after `check-fixture-paths`.
                 "check-fixture-paths" -> return JetCLIPlan.Maintenance{action: tool, args: [String]{}, color: color, json: json}
+                // Bare `jet self devtools` names its tools.
+                "" -> return jet_cli_done("", jet_cli_command_help("devtools"), JET_DRIVER_EXIT_USAGE)
                 else -> {}
             }
         }
@@ -2200,9 +2203,10 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         // the `dev: fn` its command home declares, else the stock `jet run` entry.
         // `--canvas`, `--app` and `--share` are their own dev hosts, not this loop.
         "dev" -> {
-            if !jet_argv.contains("--canvas") && !jet_cli_has(jet_argv, "--app") && !jet_cli_has(jet_argv, "--share") {
-                return jet_cli_run(jet_argv, args, passthrough, false, true, color, quiet, verbose, threads)
-            }
+            if jet_argv.contains("--canvas") -> return jet_cli_not_ported("dev --canvas", color)
+            if jet_cli_has(jet_argv, "--app") -> return jet_cli_not_ported("dev --app", color)
+            if jet_cli_has(jet_argv, "--share") -> return jet_cli_not_ported("dev --share", color)
+            return jet_cli_run(jet_argv, args, passthrough, false, true, color, quiet, verbose, threads)
         }
         "test" -> return jet_cli_test(jet_argv, color, quiet, verbose, threads)
         "prove" -> return jet_cli_prove(jet_cli_tail(jet_cli_command_first(argv, command), 1), color, json)
@@ -2301,5 +2305,5 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         }
         return plan
     }
-    jet_cli_not_ported(command, color)
+    jet_cli_not_ported(jet_cli_dispatch_form(args), color)
 }

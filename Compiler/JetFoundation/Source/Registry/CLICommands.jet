@@ -96,7 +96,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         exhaustive: true,
         usage: None,
         actions: [JetCLIActionSpec]{
-            {name: "publish", usage: "publish --to <registry> [--no-sign]", summary: "Publish the current package", handler: "Publish", also_canonical_top_level: false},
+            {name: "publish", usage: "publish [--force] [--no-sign]", summary: "Publish the current package", handler: "Publish", also_canonical_top_level: false},
             {name: "yank", usage: "yank <version> [--message <reason>]", summary: "Stop new installs of a published version", handler: "Yank", also_canonical_top_level: false},
             {name: "keygen", usage: "keygen [--registry <name>] [--force]", summary: "Create a package-signing key", handler: "Keygen", also_canonical_top_level: false},
             {name: "key", usage: "key backup [<dest>] [--registry <name>]", summary: "Manage the package-signing key", handler: "Key", also_canonical_top_level: false},
@@ -120,14 +120,14 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         exhaustive: true,
         usage: None,
         actions: [JetCLIActionSpec]{
-            {name: "types", usage: "types [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show registered type and operator facts", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "rights", usage: "rights [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show required and granted rights", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "claims", usage: "claims [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show receipt-backed claims", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "shapes", usage: "shapes [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show semantic shapes and projections", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "decisions", usage: "decisions [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show compiler decisions and their evidence", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "structure", usage: "structure [TARGET] [--core] [--live PID | --replay ARTIFACT]", summary: "Show structure and lifecycle facts", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "build", usage: "build [TARGET] [--coverage] [--live PID | --replay ARTIFACT]", summary: "Show build identity, provenance, and coverage", handler: "InspectPlane", also_canonical_top_level: false},
-            {name: "gates", usage: "gates [TARGET] [--live PID | --replay ARTIFACT]", summary: "Show the complete compile-time gate ledger", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "types", usage: "types [TARGET] [--live PID]", summary: "Show registered type and operator facts", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "rights", usage: "rights [TARGET] [--live PID]", summary: "Show required and granted rights", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "claims", usage: "claims [TARGET] [--live PID]", summary: "Show receipt-backed claims", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "shapes", usage: "shapes [TARGET] [--live PID]", summary: "Show semantic shapes and projections", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "decisions", usage: "decisions [TARGET] [--live PID]", summary: "Show compiler decisions and their evidence", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "structure", usage: "structure [TARGET] [--core] [--live PID]", summary: "Show structure and lifecycle facts", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "build", usage: "build [TARGET] [--coverage] [--live PID]", summary: "Show build identity, provenance, and coverage", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "gates", usage: "gates [TARGET] [--live PID]", summary: "Show the complete compile-time gate ledger", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: "Graph", also_canonical_top_level: false},
             {name: "query", usage: "query build <file.jet>", summary: "Search code and build information", handler: "Query", also_canonical_top_level: false},
             {name: "explain-build", usage: "explain-build <target|action|file> <file.jet>", summary: "Explain why a target, action, or file is rebuilt", handler: "ExplainBuild", also_canonical_top_level: false},
@@ -143,7 +143,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
             {name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: "Codemod", also_canonical_top_level: false},
             {name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: "Audit", also_canonical_top_level: true},
             {name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: "Sbom", also_canonical_top_level: false},
-            {name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: "Bind", also_canonical_top_level: true},
+            {name: "bind", usage: "bind <header.h> --pkg <lib>", summary: "Generate Jet bindings from a foreign header", handler: "Bind", also_canonical_top_level: true},
             {name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: "Logs", also_canonical_top_level: false},
             {name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: "Info", also_canonical_top_level: false},
             {name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: "Outdated", also_canonical_top_level: false},
@@ -157,7 +157,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         summary: "Resolve and record a checked foreign binding plan",
         frequency_rank: 41,
         exhaustive: false,
-        usage: Val("bind <name> [--shape automatic|native] [--freeze]\nbind --policy automatic|frozen\nbind <name> --update --preview\nbind <name> --update --accept <candidate-digest>"),
+        usage: Val("bind <header.h> --pkg <lib>"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -182,7 +182,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
             {name: "doctor", usage: "doctor", summary: "Find and fix toolchain problems", handler: "Doctor", also_canonical_top_level: false},
             {name: "completions", usage: "completions", summary: "Print shell completions", handler: "Completions", also_canonical_top_level: false},
             {name: "man", usage: "man", summary: "Print the Jet manual", handler: "Man", also_canonical_top_level: false},
-            {name: "devtools", usage: "devtools", summary: "Run Jet maintenance tools", handler: "Devtools", also_canonical_top_level: false},
+            {name: "devtools", usage: "devtools grammars|new-example|new-ui|reduce|ice-report|check-fixture-paths", summary: "Run Jet maintenance tools", handler: "Devtools", also_canonical_top_level: false},
             {name: "lsp", usage: "lsp", summary: "Start the language server", handler: "Lsp", also_canonical_top_level: false},
             {name: "exec", usage: "exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args]", summary: "Execute one command in an authority-bound workspace", handler: "Exec", also_canonical_top_level: false},
         },
@@ -221,10 +221,10 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
     },
     {
         name: "jobs",
-        summary: "List, inspect, or watch named project jobs",
+        summary: "List named project jobs or show one",
         frequency_rank: 29,
         exhaustive: false,
-        usage: Val("jobs [--graph|--status|--explain|--watch[=<on|off>]] [<name>]"),
+        usage: Val("jobs [<name>]"),
         actions: [JetCLIActionSpec]{},
     },
     // Generation is source-ordered, explicit, and receipt-backed;
@@ -292,7 +292,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         summary: "Create a native executable",
         frequency_rank: 2,
         exhaustive: false,
-        usage: Val("build [<file.jet|dir>] | build --verify <receipt-id>"),
+        usage: Val("build [<file.jet|dir>]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -329,10 +329,10 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
     },
     {
         name: "dev",
-        summary: "Watch and run a program; optionally open Canvas or a local app",
+        summary: "Watch and run a program",
         frequency_rank: 7,
         exhaustive: false,
-        usage: Val("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
+        usage: Val("dev [<file.jet|dir>] [-- <args>]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -348,7 +348,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         summary: "Debug a program from Jet source",
         frequency_rank: 15,
         exhaustive: false,
-        usage: Val("debug [<file.jet>] [--record=NAME|--replay=NAME] [--dap] [--raw-frames]"),
+        usage: Val("debug [<file.jet>]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -364,7 +364,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         summary: "Try Jet code interactively",
         frequency_rank: 9,
         exhaustive: false,
-        usage: Val("repl [<file.jet>] [--project <dir>] [--console] [--sandbox data] [--console-ttl <milliseconds>] [--allow=<RIGHTS>] [--deny=<RIGHTS>]"),
+        usage: Val("repl [<file.jet>] [--project <dir>] [--allow=<RIGHTS>] [--deny=<RIGHTS>]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -385,10 +385,10 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
     },
     {
         name: "new",
-        summary: "Create a Jet project or backend source scaffold",
+        summary: "Create a Jet project",
         frequency_rank: 18,
         exhaustive: false,
-        usage: Val("new <name> [--template cli|ui|web|overrides] | new service|route|job|migration <name> [--path <path>] [--route <path>] [--model <name>] [--up|--sql <SQL>] [--down <SQL>] [--risk <note>] [--lock <shared|exclusive>] [--version <n>] [--preview|--apply|--remove]"),
+        usage: Val("new <name> [--template cli|ui|web|overrides]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -436,7 +436,7 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         summary: "Explain a diagnostic code, build fact, generic-module value, or typed cost",
         frequency_rank: 6,
         exhaustive: false,
-        usage: Val("explain <CODE|FACT> [file] | explain --cost <file.jet> | explain --reload <file.jet|dir>"),
+        usage: Val("explain <CODE|FACT> [file]"),
         actions: [JetCLIActionSpec]{},
     },
     {
@@ -667,6 +667,183 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
     },
 } }
 
+// One form of the command model: the words after `jet` that select a
+// command (`db`), a group action (`self lsp`), a flag of a command (`build
+// --lib`), a flag value (`build --target wasm.wasi`) or, starting with `<`, a
+// shape of a project or invocation any command can meet (`<workspace with a
+// missing member>`). In a form `=` is a space and a `<...>` word stands for
+// any one word that is not a flag. `ported` says whether this `jet` runs the
+// form; while it does not, `card` is the Tower card that owns its port. A
+// form no row decides is ported. `argv` is the invocation the command-model
+// census runs (`<file>` is a scratch program); a form it cannot reach from an
+// empty directory has none.
+JetCLIFormSpec: struct {
+    form: String
+    ported: Bool
+    card: Int
+    argv: [String]
+}
+
+// The command model. Help, completions and man leave out every form a row
+// marks unported; its E2104 "not built yet" report names the row's card, and
+// `jet help --all` lists the rows.
+JET_CLI_FORMS: comptime { [JetCLIFormSpec]{
+    // Whole commands.
+    {form: "db", ported: false, card: 6418, argv: [String]{"db"}},
+    {form: "generate", ported: false, card: 6418, argv: [String]{"generate"}},
+    {form: "package", ported: false, card: 6418, argv: [String]{"package"}},
+    {form: "flash", ported: false, card: 6418, argv: [String]{"flash"}},
+    {form: "notebook", ported: false, card: 6418, argv: [String]{"notebook"}},
+    {form: "perf", ported: false, card: 6418, argv: [String]{"perf", "run"}},
+    // Group actions.
+    {form: "self update", ported: false, card: 6418, argv: [String]{"self", "update"}},
+    {form: "self lsp", ported: false, card: 6386, argv: [String]{"self", "lsp"}},
+    {form: "self exec", ported: false, card: 6418, argv: [String]{"self", "exec"}},
+    {form: "self devtools bless", ported: false, card: 5454, argv: [String]{"self", "devtools", "bless"}},
+    {form: "os push", ported: false, card: 6604, argv: [String]{"os", "push"}},
+    {form: "registry publish --to", ported: false, card: 6632, argv: [String]{"registry", "publish", "--to", "x"}},
+    {form: "budget update", ported: false, card: 6418, argv: [String]{"budget", "update", "--baseline", "x"}},
+    {form: "new service", ported: false, card: 6418, argv: [String]{"new", "service", "x"}},
+    {form: "new route", ported: false, card: 6418, argv: [String]{"new", "route", "x"}},
+    {form: "new job", ported: false, card: 6418, argv: [String]{"new", "job", "x"}},
+    {form: "new migration", ported: false, card: 6418, argv: [String]{"new", "migration", "x"}},
+    // Bindings: a C header binds; a named binding plan and C++ do not yet.
+    {form: "bind <name>", ported: false, card: 6418, argv: [String]{"bind", "mylib"}},
+    {form: "bind --shape", ported: false, card: 6418, argv: [String]{"bind", "mylib", "--shape", "native"}},
+    {form: "bind --freeze", ported: false, card: 6418, argv: [String]{"bind", "mylib", "--freeze"}},
+    {form: "bind --policy", ported: false, card: 6418, argv: [String]{"bind", "--policy", "frozen"}},
+    {form: "bind --update", ported: false, card: 6418, argv: [String]{"bind", "mylib", "--update", "--preview"}},
+    {form: "inspect bind <name>", ported: false, card: 6418, argv: [String]{"inspect", "bind", "mylib"}},
+    // A Windows host only; elsewhere it is E3260.
+    {form: "inspect bind com", ported: false, card: 6418, argv: [String]{}},
+    // Needs a project root.
+    {form: "inspect sbom", ported: false, card: 6418, argv: [String]{}},
+    {form: "inspect --replay", ported: false, card: 6418, argv: [String]{}},
+    {form: "inspect expand <all lenses>", ported: false, card: 6418, argv: [String]{}},
+    {form: "inspect <plane> --profile <name>", ported: false, card: 6418, argv: [String]{}},
+    {form: "explain --reload", ported: false, card: 6418, argv: [String]{"explain", "--reload", "<file>"}},
+    {form: "explain --cost", ported: false, card: 6418, argv: [String]{"explain", "--cost", "<file>"}},
+    {form: "prove --save", ported: false, card: 6418, argv: [String]{"prove", "--save=x", "<file>"}},
+    {form: "prove --unsave", ported: false, card: 6418, argv: [String]{"prove", "--unsave=x", "<file>"}},
+    {form: "repl --console", ported: false, card: 6418, argv: [String]{"repl", "--console"}},
+    {form: "repl --sandbox", ported: false, card: 6418, argv: [String]{"repl", "--sandbox", "data"}},
+    {form: "repl --console-ttl", ported: false, card: 6418, argv: [String]{"repl", "--console-ttl", "5"}},
+    // REPL session commands.
+    {form: "repl ?<language or Core name>", ported: false, card: 6418, argv: [String]{}},
+    {form: "repl :rerun", ported: false, card: 6418, argv: [String]{}},
+    {form: "repl :history", ported: false, card: 6418, argv: [String]{}},
+    {form: "debug --dap", ported: false, card: 6386, argv: [String]{"debug", "--dap", "<file>"}},
+    {form: "debug --raw-frames", ported: false, card: 6386, argv: [String]{"debug", "--raw-frames", "<file>"}},
+    {form: "debug --record", ported: false, card: 6418, argv: [String]{"debug", "--record=x", "<file>"}},
+    {form: "debug --replay", ported: false, card: 6418, argv: [String]{"debug", "--replay=x", "<file>"}},
+    {form: "jobs --graph", ported: false, card: 6632, argv: [String]{"jobs", "--graph"}},
+    {form: "jobs --status", ported: false, card: 6632, argv: [String]{"jobs", "--status"}},
+    {form: "jobs --explain", ported: false, card: 6632, argv: [String]{"jobs", "--explain"}},
+    {form: "jobs --watch", ported: false, card: 6632, argv: [String]{"jobs", "--watch"}},
+    // Build flags, targets and profiles.
+    {form: "build --lib", ported: false, card: 6418, argv: [String]{"build", "--lib", "<file>"}},
+    {form: "build --verify", ported: false, card: 6418, argv: [String]{"build", "--verify", "x"}},
+    {form: "build --import", ported: false, card: 6418, argv: [String]{"build", "--import", "<file>"}},
+    {form: "build --builder", ported: false, card: 6418, argv: [String]{"build", "--builder=x", "<file>"}},
+    {form: "build --output", ported: false, card: 6418, argv: [String]{"build", "--output=x", "<file>"}},
+    // Refused until the shared watch engine drives `jet build`, never a silent single build.
+    {form: "build --watch", ported: false, card: 6418, argv: [String]{"build", "--watch", "<file>"}},
+    {form: "build --target <name>", ported: false, card: 6418, argv: [String]{"build", "--target=hosted", "<file>"}},
+    {form: "build --target web", ported: true, card: 0, argv: [String]{"build", "--target=web", "<file>"}},
+    {form: "build --target wasm.browser", ported: false, card: 5201, argv: [String]{"build", "--target=wasm.browser", "<file>"}},
+    {form: "build --target wasm.no-os", ported: false, card: 5201, argv: [String]{"build", "--target=wasm.no-os", "<file>"}},
+    {form: "build --target wasm.wasi", ported: false, card: 5201, argv: [String]{"build", "--target=wasm.wasi", "<file>"}},
+    {form: "build --profile ci", ported: false, card: 6418, argv: [String]{"build", "--profile=ci", "<file>"}},
+    {form: "build --profile hardened", ported: false, card: 6418, argv: [String]{"build", "--profile=hardened", "<file>"}},
+    {form: "run --profile ci", ported: false, card: 6418, argv: [String]{"run", "--profile=ci", "<file>"}},
+    {form: "run --profile hardened", ported: false, card: 6418, argv: [String]{"run", "--profile=hardened", "<file>"}},
+    {form: "dev --profile ci", ported: false, card: 6418, argv: [String]{"dev", "--profile=ci", "<file>"}},
+    {form: "dev --profile hardened", ported: false, card: 6418, argv: [String]{"dev", "--profile=hardened", "<file>"}},
+    {form: "test --profile ci", ported: false, card: 6418, argv: [String]{"test", "--profile=ci", "<file>"}},
+    {form: "test --profile hardened", ported: false, card: 6418, argv: [String]{"test", "--profile=hardened", "<file>"}},
+    // `jet run` flags (JET_CLI_RUN_PORTED_FLAGS lists the ported ones).
+    {form: "run --env", ported: false, card: 6418, argv: [String]{"run", "--env=x", "<file>"}},
+    {form: "run --fixtures", ported: false, card: 6418, argv: [String]{"run", "--fixtures=x", "<file>"}},
+    {form: "run --gc-trace", ported: false, card: 6418, argv: [String]{"run", "--gc-trace", "<file>"}},
+    {form: "run --locked", ported: false, card: 6418, argv: [String]{"run", "--locked", "<file>"}},
+    {form: "run --no-color", ported: false, card: 6418, argv: [String]{"run", "--no-color", "<file>"}},
+    {form: "run --observe", ported: false, card: 6418, argv: [String]{"run", "--observe", "<file>"}},
+    {form: "run --offline", ported: false, card: 6418, argv: [String]{"run", "--offline", "<file>"}},
+    {form: "run --output", ported: false, card: 6418, argv: [String]{"run", "--output=x", "<file>"}},
+    {form: "run --preset", ported: false, card: 6418, argv: [String]{"run", "--preset=x", "<file>"}},
+    {form: "run --record", ported: false, card: 6418, argv: [String]{"run", "--record=x", "<file>"}},
+    {form: "run --target", ported: false, card: 6418, argv: [String]{"run", "--target=x", "<file>"}},
+    {form: "run --watch", ported: false, card: 6418, argv: [String]{"run", "--watch", "<file>"}},
+    {form: "run <package>@nixpkgs", ported: false, card: 6632, argv: [String]{"run", "hello@nixpkgs"}},
+    // `jet dev` hosts and flags.
+    {form: "dev --canvas", ported: false, card: 6386, argv: [String]{"dev", "--canvas", "<file>"}},
+    {form: "dev --app", ported: false, card: 6386, argv: [String]{"dev", "--app=f", "<file>"}},
+    {form: "dev --share", ported: false, card: 6386, argv: [String]{"dev", "--share=lan", "<file>"}},
+    {form: "dev --canvas-audit", ported: false, card: 6386, argv: [String]{"dev", "--canvas-audit", "<file>"}},
+    {form: "dev --canvas-authority", ported: false, card: 6386, argv: [String]{"dev", "--canvas-authority=x", "<file>"}},
+    {form: "dev --canvas-host", ported: false, card: 6386, argv: [String]{"dev", "--canvas-host=x", "<file>"}},
+    {form: "dev --canvas-port", ported: false, card: 6386, argv: [String]{"dev", "--canvas-port=1", "<file>"}},
+    {form: "dev --canvas-transport", ported: false, card: 6386, argv: [String]{"dev", "--canvas-transport=x", "<file>"}},
+    {form: "dev --env", ported: false, card: 6386, argv: [String]{"dev", "--env=x", "<file>"}},
+    {form: "dev --fixtures", ported: false, card: 6386, argv: [String]{"dev", "--fixtures=x", "<file>"}},
+    {form: "dev --gc-trace", ported: false, card: 6386, argv: [String]{"dev", "--gc-trace", "<file>"}},
+    {form: "dev --output", ported: false, card: 6386, argv: [String]{"dev", "--output=x", "<file>"}},
+    {form: "dev --no-capture", ported: false, card: 6386, argv: [String]{"dev", "--no-capture", "<file>"}},
+    {form: "dev --offline", ported: false, card: 6386, argv: [String]{"dev", "--offline", "<file>"}},
+    {form: "dev --preset", ported: false, card: 6386, argv: [String]{"dev", "--preset=x", "<file>"}},
+    {form: "dev --record", ported: false, card: 6386, argv: [String]{"dev", "--record=x", "<file>"}},
+    {form: "dev --restart", ported: false, card: 6386, argv: [String]{"dev", "--restart", "<file>"}},
+    {form: "dev --swap", ported: false, card: 6386, argv: [String]{"dev", "--swap", "<file>"}},
+    {form: "dev --target", ported: false, card: 6386, argv: [String]{"dev", "--target=x", "<file>"}},
+    {form: "dev --token", ported: false, card: 6386, argv: [String]{"dev", "--token=x", "<file>"}},
+    {form: "dev --try-anyway", ported: false, card: 6386, argv: [String]{"dev", "--try-anyway", "<file>"}},
+    // `jet test` flags; an unported test setting (TestSettings.jet) has its flag's row here.
+    {form: "test --where", ported: false, card: 6418, argv: [String]{"test", "--where=x", "<file>"}},
+    {form: "test --watch", ported: false, card: 6418, argv: [String]{"test", "--watch", "<file>"}},
+    {form: "test --time", ported: false, card: 6015, argv: [String]{"test", "--time=5", "<file>"}},
+    {form: "test --corpus", ported: false, card: 6015, argv: [String]{"test", "--corpus=d", "<file>"}},
+    {form: "test --browser", ported: false, card: 4954, argv: [String]{"test", "--browser=x", "<file>"}},
+    {form: "test --browser-retries", ported: false, card: 4954, argv: [String]{"test", "--browser-retries=2", "<file>"}},
+    {form: "test --browser-reporter", ported: false, card: 4954, argv: [String]{"test", "--browser-reporter=x", "<file>"}},
+    {form: "test --browser-ui", ported: false, card: 4954, argv: [String]{"test", "--browser-ui", "<file>"}},
+    {form: "test --browser-visual", ported: false, card: 4954, argv: [String]{"test", "--browser-visual", "<file>"}},
+    {form: "test --browser-trace", ported: false, card: 4954, argv: [String]{"test", "--browser-trace", "<file>"}},
+    {form: "test --browser-scaffold", ported: false, card: 6418, argv: [String]{"test", "--browser-scaffold", "<file>"}},
+    // Shapes: what the command meets, after the words that name the command.
+    // A bare `--shuffle` seeds from the clock, which the Jet host does not read yet.
+    {form: "<--shuffle without a seed>", ported: false, card: 6418, argv: [String]{"test", "--shuffle", "<file>"}},
+    // Only a native test run is instrumented; a corpus row never is.
+    {form: "<corpus run with --coverage>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<package build with --sbom>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<package whose run default names no output>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<project without an entry>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<unreadable project entry>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<project the Jet compiler refuses>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<project that does not check>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<lock changed during the check>", ported: false, card: 6418, argv: [String]{}},
+    {form: "<unreadable workspace index>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace with a computed `members:` expression>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace whose `find` directory is missing>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace member outside the workspace root>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace with a missing member>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace member without package.jet>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace with a duplicate or nested member>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<workspace with two members of one name>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<project with a workspace lock>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a foreign source>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `[[workspace_member]]` record>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `[[browser]]` record>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `[[build.contribution]]` record>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `[[workspace_overlay]]` record>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `[[workspace_overlay_package]]` record>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `[[workspace_build_grant]]` record>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `workspace_source_digest` row>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `workspace_policy_allow_unfree` row>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a `workspace_policy_build_deny` row>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a root authority row>", ported: false, card: 6632, argv: [String]{}},
+    {form: "<lock with a Nix closure record>", ported: false, card: 6632, argv: [String]{}},
+} }
+
 // Every jet flag: the fixed rows, with one row per build option
 // (BuildOptions.jet) after `--profile` and one per `jet test` setting
 // (TestSettings.jet) after `--explain-partition`. A setting whose flag is a
@@ -719,10 +896,10 @@ jet_cli_test_setting_help: fn(setting: TestSettingRow) -> String Never! {
     "With test: {jet_cli_test_setting_text(setting)}"
 }
 
-// A setting's help after its `With test: ` scope.
+// A setting's help after its `With test: ` scope. Help leaves out the flag of
+// an unported setting through the command model (JET_CLI_FORMS).
 jet_cli_test_setting_text: fn(setting: TestSettingRow) -> String Never! {
-    ported: if setting.ported -> "" else -> " (not ported to the Jet test runner yet)"
-    "{setting.help}{ported}; {test_setting_spellings(setting)}"
+    "{setting.help}; {test_setting_spellings(setting)}"
 }
 
 JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
@@ -767,7 +944,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery"},
     {long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin"},
     {long: "--lib", help: "With build: Emit the native Library and C header"},
-    {long: "--output", help: "With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)"},
+    {long: "--output", help: "With build/run/dev/jobs/package: Select a named output, which Canvas uses as the initial selection; with build --lib: Select the native Library"},
     {long: "--locked", help: "With build/fetch/jobs/run/inspect gates: Require locked dependency and provenance facts"},
     {long: "--effect", help: "With find: Require an effect such as FS.Read"},
     {long: "--example", help: "With find: Search by input/output example"},
@@ -807,13 +984,13 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--entry", help: "With generate: Source file containing the generator job"},
     {long: "--keep", help: "With try: Keep a clean speculative edit"},
     {long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>"},
-    {long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving"},
+    {long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving; with help: Also list every form this `jet` has not built yet, with the Tower card that owns its port"},
     {long: "--markers", help: "With fix: Move every marker set above its declaration or into its body --markers <inside|above>"},
     {long: "--try-anyway", help: "With dev --canvas/inspect gates: Evaluate past unsupported features (no guarantees)"},
     {long: "--restart", help: "With dev: Always rerun from scratch after a save"},
     {long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes"},
     {long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path"},
-    {long: "--watch", help: "With run/dev/test/jobs/build: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once"},
+    {long: "--watch", help: "With run/dev/test/jobs/build: Re-run on dependency changes (--watch=off runs once); with test: off by default, keys r=failed, a=all, o=output; with jobs: --watch[=<on|off>]"},
     {long: "--graph", help: "With jobs: Show the checked job dependency graph"},
     {long: "--status", help: "With jobs: Show fresh or stale status for declared jobs"},
     {long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts"},
@@ -938,7 +1115,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "-u", help: "Short form of --update-snapshots"},
     // (ratified 2026-06-25): named optimization bundles.
     {long: "--release", help: "With build/run/dev/jobs/test/inspect: Optimize for release"},
-    {long: "--profile", help: "With build/run/dev/jobs/package/test/check: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle"},
+    {long: "--profile", help: "With build/run/dev/jobs/package/test/check: How hard to optimize: release, debug, or a named optimization bundle"},
     // Command-line contribution to one typed package setting.
     {long: "--set", help: "With build/run/dev/jobs/test/check: Set one declared package setting as key=value"},
     // The compiler's thread cap; never the program's own threads.

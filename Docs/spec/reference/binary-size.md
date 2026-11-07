@@ -3,9 +3,8 @@
 Jet's size profile is selected with `jet build --small`. This page is for
 release engineers and package authors checking the final executable against a
 budget. The size gate was a Rust integration test and is retired with the
-Rust suite; the Jet CLI does not yet accept `--small`
-(`JET_CLI_BUILD_UNPORTED_FLAGS` in
-[`Front.jet`](../../../Compiler/JetCli/Source/Cli/Front.jet)).
+Rust suite; `--small` is the `small` build option of
+[`BuildOptions.jet`](../../../Compiler/JetFoundation/Source/Registry/BuildOptions.jet).
 
 ## What the size profile measures
 
