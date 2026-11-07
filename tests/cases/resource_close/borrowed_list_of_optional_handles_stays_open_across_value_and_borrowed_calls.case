@@ -1,0 +1,19 @@
+# Card #6559: a list of structs holding FileReader? handles, passed by value
+# to a loop and then twice through `&list[i].file == .Val(input)` (seek and
+# read), keeps every handle open: no fault and the same bytes each time.
+fixture: borrowed_list_of_optional_handles_stays_open_across_value_and_borrowed_calls.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run -A main.jet
+exit: 0
+stdout: = "names: 3\nbytes: 12\nagain: 12\n"
+step: jet build -A main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "names: 3\nbytes: 12\nagain: 12\n"
+step: jet build -A --release main.jet
+exit: 0
+step release: built
+exit: 0
+stdout: = "names: 3\nbytes: 12\nagain: 12\n"

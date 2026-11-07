@@ -1,0 +1,53 @@
+use files: core.files
+use sys: core.sys
+
+SnapshotFile: struct {
+    relative: String
+    file: FileReader?
+    id: FileID
+}
+
+open_all: fn(dir: String) -> [SnapshotFile] IOError! {
+    out := [SnapshotFile]{}
+    loop entry in files.list_dir(dir) {
+        file: files.open(entry.path)
+        info: file.stat()
+        if !info.is_file -> next
+        out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
+    }
+    Ok(out)
+}
+
+names: fn(executables: [SnapshotFile]) -> Int {
+    total := 0
+    loop executable in executables -> total += executable.relative.len()
+    total
+}
+
+digest: fn(executables: &[SnapshotFile]) -> Int IOError! {
+    total := 0
+    loop index in 0..<executables.len() {
+        if executables[index].file == None -> return Ok(-2)
+        if &executables[index].file == .Val(input) {
+            input.seek(0)
+            loop {
+                chunk: input.read(4)
+                if chunk.len() == 0 -> break
+                total += chunk.len()
+            }
+        }
+    }
+    Ok(total)
+}
+
+run: fn() {
+    dir: "/tmp/jet-6559-{sys.pid()}"
+    files.create_dir_all(dir) ?? panic("mkdir")
+    files.write(files.join(dir, "a"), "hello") ?? panic("a")
+    files.write(files.join(dir, "bb"), "worlds!") ?? panic("bb")
+    executables := open_all(dir) ?? panic("open")
+    print("names: {names(executables)}")
+    print("bytes: {digest(executables) ?? -1}")
+    print("again: {digest(executables) ?? -1}")
+    files.remove_all(dir) ?? panic("rm")
+}
