@@ -19,6 +19,15 @@ PACKAGE_JOBS: 4
 // The trees whose packages a `packages` run tests, from the checkout.
 PACKAGE_TREES: [String]{"Compiler", "Jetpack"}
 
+// The packages the compiler assembles from their sources instead of building
+// them as packages, so they have no standalone `jet test`: the bootstrap chain
+// links JetRuntime's sources.list into the native runtime library, and the
+// `registries` profile runs its Test registries as assembled standalone files
+// (Tools/agent/CompilerRegistries.jet). The compiler embeds Prelude's sources
+// through the generated registry files; Prelude has no #Test. A `packages` run
+// reports each as a skipped row.
+ASSEMBLED_PACKAGES: [String]{"Compiler/JetRuntime", "Compiler/Prelude"}
+
 // The tests.list sections whose areas have no package.jet: Store, Provider
 // and Recipe (`Engine`, one dependency cycle), Services, Image and CLI. Their
 // claims run as one unit Jetpack/Bootstrap/assemble.mjs assembles. JetOS is
@@ -114,8 +123,8 @@ failure_line: fn(text: String) -> String {
 // every Jetpack package, and the Jetpack engine areas that have no package
 // (jetpack_engine_rows). A package whose tests didn't run (one that doesn't
 // compile, say) is the failing row `<package>`. Fixture packages are test
-// data, not packages under test. Claims that drive the jet CLI run the jet
-// under test, named by JET_BIN.
+// data, not packages under test; an ASSEMBLED_PACKAGES package is a skipped
+// row. Claims that drive the jet CLI run the jet under test, named by JET_BIN.
 package_suite_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
     members: workspace_members(setup) ?? {
@@ -130,6 +139,7 @@ package_suite_rows: fn(rows: TestRows) {
         }
     }
     packages.sort()
+    loop package in ASSEMBLED_PACKAGES -> rows.skip(package, "assembled by the compiler from its sources, not built as a package")
     specs := [ProcessSpec]{}
     loop package in packages {
         specs.push(jet_command(setup, setup.jet, [String]{"test", package}).env("JET_BIN", setup.jet))
@@ -281,11 +291,11 @@ workspace_members: fn(setup: SuiteSetup) -> [String] Err! {
 }
 
 // Adds every package directory at or below `relative` (from `checkout`) to
-// `found`, except the workspace root, the `members`, build output, hidden
-// directories and fixtures.
+// `found`, except the workspace root, the `members`, ASSEMBLED_PACKAGES,
+// build output, hidden directories and fixtures.
 package_dirs: fn(checkout: String, relative: String, members: [String], found: &[String]) Err! {
     directory: files.join(checkout, relative)
-    if relative != "Compiler" && !members.contains(relative) && files.is_file(files.join(directory, "package.jet")) {
+    if relative != "Compiler" && !members.contains(relative) && !ASSEMBLED_PACKAGES.contains(relative) && files.is_file(files.join(directory, "package.jet")) {
         found.push(relative.copy())
     }
     listed: files.list_dir(directory) ?? return Err("couldn't list `{relative}`: {err}")
