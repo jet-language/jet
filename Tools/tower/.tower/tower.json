@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6659,
-    "rev": 95589,
+    "rev": 95592,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97273,7 +97273,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97292,11 +97292,11 @@
         {
           "n": 1,
           "text": "On a cold test state (empty JET_TEST_STATE_DIR and FFI caches), jet test Compiler --profile golden, ui and cases run over the FFI rows (Foundations/Bridges, Interop/FFI, tests/ui/ffi_*, tests/cases/ffi_rust, ffi_runtime_stop_keeps_one_jet_source_frame, transact_ffi_with_undo_registers_rollback_hook) report 0 TIMEOUT with the default limits: the shared cold realization is done once, before the rows, and is not charged to any row's wall clock.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:00:55.882Z"
+          "evidence": "$JET_SCRATCH_ROOT/lanes/Main/coldffi.sh at dev 6d50143539 with seed a0_032 (empty JET_TEST_STATE_DIR and private HOME, so no FFI cache): jet test Compiler --profile golden Examples/Interop/FFI (18 rows), --profile ui ffi (80 rows) and --profile cases ffi (87 rows, incl. ffi_rust/*, diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame and effects/transact_ffi_with_undo_registers_rollback_hook): 0 TIMEOUT across 185 rows; slowest row 5.6 s; the cold Rust FFI rows took 1.2-2.7 s. (Examples/Foundations/Bridges no longer exists.) Commits a496f3c2c0 (an in-memory run keeps its FFI cache in memory) and 34290833a9.",
+          "at": "2026-11-07T07:11:14.017Z"
         },
         {
           "n": 2,
@@ -97310,11 +97310,11 @@
         {
           "n": 3,
           "text": "jet_cli_rust_foreign_snapshot does not copy the whole shared cargo target into every private build: a private build reuses the shared target by reference (or copies only its own crate outputs), and its disk use per key is recorded under 50 MB.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:31:07.787Z"
+          "evidence": "34290833a9 (an FFI build copies only the shared dependencies it needs, not the whole cargo target): TestSystemLead-2 measured 28 KiB per key plus a 44080 KiB shared target and 0 workspaces; $JET_SCRATCH_ROOT/lanes/Main/coldffi.sh at dev 6d50143539 with seed a0_032 (empty JET_TEST_STATE_DIR and private HOME, so no FFI cache) left 24 KiB in the test state after 185 FFI rows (the cache was memory-backed and went with the run scratch).",
+          "at": "2026-11-07T07:11:14.915Z"
         }
       ],
       "refs": [],
@@ -97325,9 +97325,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:00:47.568Z",
-      "updated": "2026-11-07T07:08:18.998Z",
+      "updated": "2026-11-07T07:11:16.570Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-07T07:11:16.570Z"
     },
     {
       "id": "c08512l6",
@@ -185748,6 +185749,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T07:11:16.570Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pr0hh0",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T07:11:14.915Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pr0hh0",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-07T07:11:14.017Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pr0hh0",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T07:09:36.617Z",
       "by": "Main",
