@@ -5179,6 +5179,10 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
         diagnostic := sema_error("E0111", name_span, "`{name}` was made with `:`, so it can't change", "only `:=` bindings and parameters declared with the write mark `&` can be changed", "declare it with `{name} := ...` instead")
         if binding.binding_sigil == .Val(sigil) -> diagnostic = diagnostic_with_edit(diagnostic, TextEdit{span: sigil, new_text: " :="})
         diagnostics.push(diagnostic)
+        // The refused value is still checked, so the names it reads count as
+        // used: `total = total + n` must not leave `n` an unused binding whose
+        // `_n` rename `jet fix` would apply.
+        _ := sema_check_expression(expr, binding.symbol.ty, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
     if binding.symbol.ty == None {

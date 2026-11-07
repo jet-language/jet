@@ -6,14 +6,10 @@ step: jet fix {work}/typo.jet
 env: NO_COLOR=1
 exit: 0
 file: typo.jet = typo-fixed.bytes
-# E0111's registry fix class is api-changing, and `jet fix` applies only formatting and
-# behavior-preserving edits unless given `--all` (Docs/spec/syntax-decisions.md:7819-7820),
-# so the plain run reports the edit for review and `--all` applies it.
+# E0111's local-binding edit (`:` -> `:=`) only lets the assignment the source
+# already writes compile, so its registry fix class is behavior-preserving and
+# the plain `jet fix` applies it (Docs/spec/syntax-decisions.md:7984; #6613 c1).
 step: jet fix {work}/immutable.jet
-env: NO_COLOR=1
-exit: 0
-stderr: ~ "no changes made (1 suggestion need review)" # an api-changing edit is reported, not applied, without --all
-step: jet fix --all {work}/immutable.jet
 env: NO_COLOR=1
 exit: 0
 file: immutable.jet = immutable-fixed.bytes
