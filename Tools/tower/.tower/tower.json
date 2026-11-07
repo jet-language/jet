@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6678,
-    "rev": 95824,
+    "rev": 95825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99018,7 +99018,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Root (CoreCliLead-2): in ir_call_row, a read argument widened to a union is boxed through ir_union_box, then ir_store_at, then ir_own. That clones a value that has a clone (every borrowed String passed to a union parameter is copied) and moves one that has none (a handle gets closed under its holder), and the box is dropped after the call. Struct fields, ? and returns already own their value through ir_own, matching the non-union paths. The named-fn value adapter (BuildExpr around 6725) has the same widening. Fix: a lent union box (payload bits stored with no owner; after the call only the box is freed), about 80 lines in BuildTypes/BuildExpr, with no new IR representation."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -99054,7 +99060,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-07T18:37:00.294Z",
+      "updated": "2026-11-07T18:41:38.243Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     }
@@ -186925,6 +186931,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T18:41:38.243Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fs42sy",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T18:37:00.294Z",
       "by": "Main",
