@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6630,
-    "rev": 93978,
+    "nextNum": 6631,
+    "rev": 94000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50778,6 +50778,21 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-06), replacing the design note above. c66: build it. Port the grant, canonical-path, symlink, read and header-parse steps to a runtime Mod.jet. Map Jet mod objects with the runtime's own loader (mmap plus relocation, no dlopen), and carry the compiler identity into the runtime for the E1338 check. \"Always Unsupported\" is not an option. c4: port whole-invocation receipt replay (Rust ReceiptStore run_if_needed, lookup_context, replay_receipt) for `jet check`, so the receipt-invalidation case runs as written. Owner: CoreCliLead, after `--coverage` slice 1."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c66 (ModLoadErrors): blocked on design, not port. No jet_mod_* runtime export exists; ModGrant's read: [String] can't cross as a runtime record (ir_record_member_crosses refuses List.Text); the native runtime is static musl with no dlopen, and has no compiler identity for the E1338 version check. CoreCliLead proposed making Mod.load always Unsupported on native; Main declined (a self-mapping loader is possible without dlopen, so that would be a product decision). c4: case (1) check_fixed_dynamic_size_reports_e0103_without_internal_failure PASSES on 76cbe208be; case (2) check_receipt_invalidates_when_higher_priority_entry_appears fails because whole-invocation receipt replay (Rust ReceiptStore run_if_needed/lookup_context/replay_receipt, ~4.6k lines) was never ported. c4 stays open; retargeting the case would change the criterion."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c73 landed 76cbe208be (CoreCliLead): the runtime writes the production-failure receipt on root stops; awaiting Main's batch run. Not yet ported: the Rust index_production_receipt record-index entry; the c73 case does not need it, so it stays an open gap on this card."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c52: Examples/features/serde/field_metadata_edges.jet -> tests/run/Encoding/FieldMetadataEdges.jet; c66: Examples/features/packages/mod_load_errors.jet -> tests/run/Packages/ModLoadErrors.jet."
@@ -52040,7 +52055,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T10:55:41.702Z",
-      "updated": "2026-11-06T22:29:17.013Z",
+      "updated": "2026-11-07T01:40:45.898Z",
       "updatedBy": "Main",
       "goals": [
         "G1",
@@ -71814,6 +71829,21 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-06), replacing the scope note above: c3 stays as worded. Every test and gate script in Tools/agent gets ported. A1-A4 go first; orchestration (B) and generators/one-offs (C) follow under c3, and A3/A4 land after A1/A2 because the lander and the release use them live."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c3 split per TestSystemLead (2026-11-06): A1-A4 added as criteria. Owner question, non-blocking: c3 as worded may cover every Tools/agent script. The plan proposes that orchestration (B: chain/*, the lander and its batch, capped, unstick, publish-*, release-train, s5-build, finish-driver, make-jobs, stage-frozen-inputs, shared-publications, safety-schedule, roots.*, jet-env, jet-state, clean-nix-tmp, cc-pack.nix) stays as scripts because it drives processes and judges nothing. It also proposes that generators (12 gen-*.mjs, partly ported by RuntimeGenerators.jet), lexical-ledger.mjs and the one-off codemod-implicit-take.mjs and lost-work-audit.mjs go to a separate card. Narrowing c3 that way needs the owner; until then c3 stays as worded."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "TestSystemLead 2026-11-06: c21: all 55 tests/cases/prove/*.case rows on its s1: PASS 53, KNOWN-FAILING 2 (both #6418 rows: run_recorded_alias_time_receipt_replays_without_execution, prove_projects_compatible_canonical_budget_identity_without_measuring); waits on Main's batch run. c67: structure in place (Compiler/test.jet 05b748d439; Compiler/package.jet profiles quick, golden, ui, cases, registries, jetpack, selfhost, perf, full, corpora; default test: quick; no root test.jet); needs profile runs. c3: Tools/testkit is empty; Tools/agent holds 59 .mjs/.sh files plus chain/, land/, s5/, suite/, all live; needs a plan or split. c15: remaining ui known-failing rows belong to #6425 (59), #6006 (11), #4275 (9) and others."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "OWNER QUESTION (c2 reword): the profiles quick/golden/ui/cases/jetpack/selfhost/perf/full exist in Compiler/package.jet with baselines and run as 'jet test Compiler --profile <p>'; there is no root test.jet, and adding a root package is new layout. Proposed c2 text: 'Compiler/package.jet declares the quick, golden, ui, cases, jetpack, selfhost, perf and full profiles, and jet test Compiler --profile <p> runs each.' Approve the reword, or keep c2 and authorise a root test package."
@@ -72866,6 +72896,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T23:09:22.324Z"
+        },
+        {
+          "n": 68,
+          "text": "c3 split A1: the compiler and runtime gate scripts in Tools/agent are Jet programs beside LaneCheck.jet, each deleted in the commit that ports it, its .test.mjs ported to Jet tests: safety-gate.mjs, safety-gate-job.sh, safety-fuzz.mjs, check-core-surface-ledger.mjs, core-conformance.mjs, core-coverage-census.mjs (with core-coverage-ratchet.json), runtime-abi-symbols.mjs, runtime-route-abi.mjs, runtime-static-text.mjs, native-route-environment.mjs, native-route-handles.mjs, native-route-records.mjs, classify-native-route-glue.mjs, compiler-native-transport.mjs, compiler-packages.mjs.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:38:18.173Z"
+        },
+        {
+          "n": 69,
+          "text": "c3 split A2: the suite runners are JetTestKit code or Compiler/test.jet profiles and the scripts are deleted: run-feature-examples.mjs, goldens-census.mjs, compiler-diff.mjs (as a profile baseline compare), suite/suite.sh and suite/gsel.mjs (as `jet test Compiler --profile` with filters).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:38:18.974Z"
+        },
+        {
+          "n": 70,
+          "text": "c3 split A3: the landing gates are in Land.jet or LaneCheck.jet and the scripts are deleted: land/precommit.sh, land/prescreen.sh, land/preflight-receipt.mjs and its test, land/runtime-pack-check.sh, land/census-errors.mjs, land/census-snap.sh, chain/trapscan.mjs. Lands after A1 and A2, since the lander uses them live.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:38:19.785Z"
+        },
+        {
+          "n": 71,
+          "text": "c3 split A4: the S5 proof gates and the release gate are Jet and the scripts are deleted: s5/s5-gates.mjs, s5/s5-boundary.mjs, s5/s5-fixtures.mjs, s5/s5-runtime.mjs, s5/receipts.mjs, s5/s5-lib.mjs, release-compiler.mjs (extending Tools/release). Lands last.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:38:20.580Z"
         }
       ],
       "refs": [
@@ -72881,7 +72947,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T01:04:04.626Z",
+      "updated": "2026-11-07T01:40:44.852Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -78614,6 +78680,16 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "Decision (Main, 2026-11-06), replacing the guard-policy note above: the closed-list guard stays as written. Payload sum types migrate like any other closed list, through declaration rows plus a --check generator; PortsLead is doing this for the 37 JetDevserver enums."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Guard-policy question (Main, 2026-11-06): tests/guards/closed_lists.jet counts every top-level enum with 3+ members in Compiler, Core and Jetpack, including payload sum types such as JetDevserver's TerminalAction, TerminalDiffOperation, CanvasPreviewInput and CanvasPreviewError. Those are data types with one consumer, not shared vocabularies, so moving them to a declaration TSV plus generator (the guard's prescribed form, which PortsLead is building for 37 JetDevserver enums) adds ceremony without a second view to keep in sync. Whether the guard should exempt payload sum types needs a decision before the 1006-row migration baseline is worked down."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Owner ruling 2026-11-06 (chat, second cut questions): c21/c22: typed text keeps its ratified spelling (SQL{\"...\"}, HTML{\"...\"}, D-UNIFYLIT1=A); the work is internal: heads dispatch through the ratified CheckedText members (D-TEXTHEAD-HOLES1=A) instead of a by-name table, so a user type can use the same Head{\"...\"} form. The rows stay on #6206."
         },
         {
@@ -79028,7 +79104,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T19:13:30.568Z",
-      "updated": "2026-11-07T01:03:47.419Z",
+      "updated": "2026-11-07T01:40:43.387Z",
       "updatedBy": "Main"
     },
     {
@@ -96400,6 +96476,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Follow-up on c78da98b1b: the a0_030 candidate also rejects Core sites that the compiler build never reaches (Core/App/App.jet:307,310,312; Core/Web/Storage/Local.jet:22 and Session.jet:22; Core/Web/Browser.jet:1428), which broke 4 golden examples at o0-o2.  only reaches Core bodies a program calls (an import-everything probe, even with JET_DEBUG_LOWER_ALL=1, reports nothing), so no tool today can census a sema rule change across all of Core. Main is sweeping every Examples/ and tests/run program with the candidate s2 and lands one batch fix."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner ruling 2026-11-06: A, calls never copy. Method owning arguments (push/add/extend…) are take parameters like keep(item): a read parameter or later-used name gives E0201/E0209 unless written .copy(). This follows D-CALLSITE-MARK2=A ('a call never copies on its own'). Cutover: the sema rule plus a collect-all codemod inserting .copy() (>=958 sites at census), in one commit. [item] and Box{items: item} are not covered by this ruling."
@@ -96435,7 +96516,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:23:08.815Z",
-      "updated": "2026-11-06T20:27:47.512Z",
+      "updated": "2026-11-07T01:29:07.898Z",
       "updatedBy": "Main"
     },
     {
@@ -97694,6 +97775,109 @@
       "needsAcceptance": false,
       "created": "2026-11-07T01:04:02.406Z",
       "updated": "2026-11-07T01:04:03.651Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c0y05z3o",
+      "num": 6630,
+      "title": "SemIndex: port the behaviors only the deleted jet_semindex drafts had",
+      "body": "41cdddb6cf (#6582 c1, SemIndex move slice 1) moved jet_cli's working SemIndex types and builder into jet_semindex and deleted jet_semindex's never-compiled duplicates. Those deleted files (Compiler/JetSemIndex/Source/ at 76cbe208be) describe behaviors the working copy lacks. Each criterion ports one of them into jet_semindex, called by jet_cli, with a test or case proving it. Source: PortsLead's report 2026-11-06.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Type dossier: a type dossier query with its status envelope, JSON and text forms (old SemIndex/Queries.jet:138, SemIndex/Facts.jet:114, Codec/Dossier.jet:9-141), with members sorted as semindex_sort_members did (Queries.jet:196-206); JetLSP Tests/Integration/SemindexTests.jet:79,157,564-599 pass against it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:08.131Z"
+        },
+        {
+          "n": 2,
+          "text": "Structural audit: added, removed and changed declarations between two indexes (old Queries.jet:172 structural_audit, :217 semindex_structural_signature).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:09.036Z"
+        },
+        {
+          "n": 3,
+          "text": "Package facts and workspace overlays: package_facts_for_entry, E1215, the overlay policy and the E1202 stale-lock check (old Queries.jet:76,83; Open.jet:58-128); SemIndexJSON.jet stops writing null for package facts; Rust parity rows tests.tsv:3170-3176 pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:09.931Z"
+        },
+        {
+          "n": 4,
+          "text": "Overlay-based open: opening an index over unsaved editor overlays (old Entry.jet:23-96, Open.jet:146-185).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:10.813Z"
+        },
+        {
+          "n": 5,
+          "text": "Query API: derivation windows, invalidate_derivations, references_to, call_sites, effect_of, lookup and lookup_identity (old Queries.jet:54-134).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:11.693Z"
+        },
+        {
+          "n": 6,
+          "text": "LSP symbol database and hover: build_symbol_db, propagation hints, state-graph hovers, the inferred hover tail and breadcrumb hints (old Finalize.jet:64-299, Structure.jet:427); Rust parity row tests.tsv:3177 passes.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:12.637Z"
+        },
+        {
+          "n": 7,
+          "text": "Semantic blame (old Receipts/SemanticOps.jet:265,281) is reachable from a jet command, or a ratified decision drops it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:13.518Z"
+        },
+        {
+          "n": 8,
+          "text": "The doc graph takes native paths, as the old Docs/Graph.jet:21 DocSource with OsPath did, instead of String paths.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:32:14.444Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": "c0ozzmvc",
+      "needsAcceptance": false,
+      "created": "2026-11-07T01:32:07.215Z",
+      "updated": "2026-11-07T01:32:14.444Z",
       "updatedBy": "Main"
     }
   ],
@@ -187146,6 +187330,160 @@
   ],
   "events": [
     {
+      "at": "2026-11-07T01:40:45.898Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0max8v8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:40:44.852Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:40:43.387Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:38:21.379Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:38:20.580Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#71 c3 split A4: the S5 proof gates and the release gate are Jet"
+    },
+    {
+      "at": "2026-11-07T01:38:19.785Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#70 c3 split A3: the landing gates are in Land.jet or LaneCheck."
+    },
+    {
+      "at": "2026-11-07T01:38:18.974Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#69 c3 split A2: the suite runners are JetTestKit code or Compil"
+    },
+    {
+      "at": "2026-11-07T01:38:18.173Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0pgowhn",
+      "note": "#68 c3 split A1: the compiler and runtime gate scripts in Tools/"
+    },
+    {
+      "at": "2026-11-07T01:33:50.210Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0scf8mn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:32:27.306Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:32:14.444Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#8 The doc graph takes native paths, as the old Docs/Graph.jet:"
+    },
+    {
+      "at": "2026-11-07T01:32:13.518Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#7 Semantic blame (old Receipts/SemanticOps.jet:265,281) is rea"
+    },
+    {
+      "at": "2026-11-07T01:32:12.637Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#6 LSP symbol database and hover: build_symbol_db, propagation "
+    },
+    {
+      "at": "2026-11-07T01:32:11.693Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#5 Query API: derivation windows, invalidate_derivations, refer"
+    },
+    {
+      "at": "2026-11-07T01:32:10.813Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#4 Overlay-based open: opening an index over unsaved editor ove"
+    },
+    {
+      "at": "2026-11-07T01:32:09.932Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#3 Package facts and workspace overlays: package_facts_for_entr"
+    },
+    {
+      "at": "2026-11-07T01:32:09.036Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#2 Structural audit: added, removed and changed declarations be"
+    },
+    {
+      "at": "2026-11-07T01:32:08.131Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0y05z3o",
+      "note": "#1 Type dossier: a type dossier query with its status envelope,"
+    },
+    {
+      "at": "2026-11-07T01:32:07.215Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0y05z3o",
+      "note": "SemIndex: port the behaviors only the deleted jet_semindex drafts had"
+    },
+    {
+      "at": "2026-11-07T01:29:41.321Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0max8v8",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:29:07.898Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pcddhe",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T01:25:43.257Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0max8v8",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-07T01:24:50.241Z",
       "by": "Main",
       "action": "card.update",
@@ -190504,713 +190842,6 @@
       "action": "card.update",
       "ref": "c09brw5t",
       "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:26.782Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c09brw5t",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:24.835Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0du93i4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:23.896Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0du93i4",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:21.788Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01oyhqk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:20.891Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01oyhqk",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:17.013Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:16.172Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c081c9o8",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:14.397Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0heplig",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:13.593Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0heplig",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:11.765Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vqsfl8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:11.009Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0810bga",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:10.243Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vqsfl8",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:09.575Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0810bga",
-      "note": "addTags,tags"
-    },
-    {
-      "at": "2026-11-06T18:40:07.739Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:06.928Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jd9jl3",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:06.171Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0a0gmpl",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:05.446Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0jd9jl3",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:03.642Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:02.818Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02a1ynr",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:40:01.408Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y5r79w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:40:00.557Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c018gdah",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:59.759Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y5r79w",
-      "note": "criteria,body"
-    },
-    {
-      "at": "2026-11-06T18:39:59.048Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c018gdah",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:55.447Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02t52c5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:54.588Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02t52c5",
-      "note": "criteria,body"
-    },
-    {
-      "at": "2026-11-06T18:39:53.845Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kob6cb",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:52.974Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kob6cb",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:51.609Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7zq8s",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:50.776Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0y7zq8s",
-      "note": "criteria,body"
-    },
-    {
-      "at": "2026-11-06T18:39:49.947Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iuv3zr",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:48.963Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iuv3zr",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:47.328Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tl2yuc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:46.451Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0tl2yuc",
-      "note": "criteria,title,body"
-    },
-    {
-      "at": "2026-11-06T18:39:44.982Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kdgbf8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:44.118Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02lvwje",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:43.352Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0kdgbf8",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:42.675Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02lvwje",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:40.818Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m58g8t",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:40.012Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m58g8t",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:38.176Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0776o2m",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:37.369Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0776o2m",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:35.417Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vsqf8a",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:34.536Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vsqf8a",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:32.343Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:31.271Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rqi33c",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:27.758Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00rqc09",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:26.909Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00rqc09",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:24.946Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00sxc6r",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:23.641Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00sxc6r",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:21.503Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0max8v8",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:20.647Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0max8v8",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:18.727Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08rdp62",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:17.886Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08rdp62",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:15.860Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07rizte",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:14.830Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07rizte",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:12.845Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xnvmrf",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:11.967Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xnvmrf",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:09.762Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l389gj",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:08.668Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l389gj",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:06.363Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n1stxi",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:05.376Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n1stxi",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:39:02.697Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ttcd0k",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:39:01.730Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ttcd0k",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:59.239Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c047t3lg",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:58.318Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c047t3lg",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:56.192Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iiv9ft",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:55.042Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0iiv9ft",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:52.935Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:52.036Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:38:47.603Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c025w7rd",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:46.691Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c025w7rd",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:43.765Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qus24o",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:42.898Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qus24o",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:40.345Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:39.398Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fi6uj5",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:37.280Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03ai7mm",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:36.442Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03ai7mm",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:31.904Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0svneex",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:30.924Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0svneex",
-      "note": "criteria"
-    },
-    {
-      "at": "2026-11-06T18:38:28.977Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l0ygs4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:28.054Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0l0ygs4",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:26.065Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uyfbge",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:25.276Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uyfbge",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:23.285Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ym70o1",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:22.467Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ym70o1",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:20.660Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0eymgfx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:19.855Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0eymgfx",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:17.827Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:16.860Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7t4qu",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:14.858Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01231wx",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:13.934Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01231wx",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:09.877Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uasubv",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:08.802Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uasubv",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:38:06.739Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cshs43",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:38:05.853Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cshs43",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:37:52.414Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0duj9rp",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:37:51.403Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0duj9rp",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:37:46.873Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j1k587",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:37:45.072Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j1k587",
-      "note": "criteria,plan"
-    },
-    {
-      "at": "2026-11-06T18:37:42.301Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pr2dsz",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-06T18:37:41.412Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pr2dsz",
-      "note": "criteria,plan"
     }
   ],
   "nextNum": 368,
