@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95901,
+    "rev": 95904,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69987,6 +69987,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 remaining scope (inventory at 7debbff095): Tools/agent, Tools/ci and Tools/testkit hold no non-Jet gate script; roots.sh and roots.mjs are root-variable libraries that Jet gates only cite in comments. Gates still need non-Jet tools on three paths. (1) Compiler/JetTestKit/Assets/no-nix.sh, the cases isolate:no-nix launcher: TestSystemLead-2 is porting it to a Jet helper. (2) The node browser runners, about 9.9k lines in Tools/{canvas-test,web-test,notebook-test,web-dev-test} plus Tools/agent-eval/dx/manifest.js. Callers: Tools/ci/CompiledWorkloads.jet web_browser_run (driver.mjs, serve.mjs and a node harness), 14 tests/cases rows (web_dev static server x5, web_browser x3, notebook chromium and firefox, canvas_cli_lifecycle, hybrid overlay, reference loops x2), JetLSP Integration CanvasScenarios(.Tests) and CanvasCliLifecycleTests. They depend on #5072 c3 (D-BROWSER-AUTO1=A Browser.launch, with Chromium BiDi through chromedriver provisioned by jetpack browser provision); core.web.browser speaks only BiDi, and Chromium 152 exposes CDP only. A Firefox 157 native-BiDi connect also times out, which is a Core defect. PortsLead-2 owns the order: Firefox connect fix, launch, then the runner ports. serve.mjs goes to Tools/web-test/Serve.jet first, and that is in the lander. (3) node runs the web tier's generated JavaScript in 161 case files; that is the code under test, not tooling, as in 76500069b1."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3 items 1-6 landed in 20e614404c (TestSystemLead-2): deleted JetBackend/Tests/{jet-front,run-runtime}.mjs, JetRuntime/Tests/run-{collections-stop,crypto-fixtures,native-codec-file-leaves,process-witnesses,thread-fixtures}.mjs, JetTestKit golden/{compiler,echo,notice,program,where,wrong}.sh and ui/compiler.sh, plus Tools/agent/NativeTransport.jet. CompilerRegistries run of the 39 ported rows: 35/39 PASS. Four registry-transport rows now fail at their fixtures; the old node runners stopped before reaching them, so they are not new: Fragments CompilerNeededURLTests (driver exit 1), IterChargeTests (exit 5), ProgressStateTests (exit 70, E3010 at Runtime.jet:61897) and TerminalProcessTests (TerminalProcessWitness.c:85 observe_free assert, signal 6). They are registries-profile rows, not full-profile rows. Left for c3: Compiler/JetTestKit/Assets/no-nix.sh, the cases gate's isolate:no-nix launcher, which TestSystemLead-2 is porting to a Jet helper now."
         },
         {
@@ -71246,7 +71251,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T23:12:41.365Z",
+      "updated": "2026-11-07T23:30:02.134Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73801,6 +73806,16 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c65 rows rerun at dev dbe15056d6 (fresh-clone env, seed a0_034). tests/guards: 121/121 (the closed-lists guard is fixed). tests/guards/corpus_ast: 34 passed, 2 failed. (1) The corpus policy dogfood gate has 377 findings under root Jetpack: dogfood-json 246, dogfood-path-containment 130 (path.starts_with must be Path.is_within), dogfood-url-query 1. Owned by #3590 c196 (G7). (2) The retired failure surface row comes from the unported Compiler/JetDevserver and JetLSP sources (BrowserWebAdapter.jet:150 and others), owned by #6650 c1. So c65 depends on #6650 c1 and c2 (G5) and #3590 c196 (G7), plus the 24 Jetpack CLI and Engine rows (their messages come from the full.json of the 4df47ce6da run) and a quiet perf rerun."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c65 fresh-clone run at 4df47ce6da (env -i, a minimal PATH, seed a0_034, no cargo or rustc on PATH). The packages suite has 3165 rows: 3102 passed, 30 failed. selfhost: 3/3. perf: 16 rows, 4 passed, 7 failed, all front-end phase budgets at --column 225K, measured while the machine was loaded, so a quiet rerun is needed. Failing groups: (a) Compiler/JetDevserver and Compiler/JetLSP (with their Tests rows): never ported to current Jet. At dev dbe15056d6, jet test reports 479 and 565 parse and import errors over about 32.5k source lines, owned by #6650 c1 (G5), so c65 depends on #6650 c1 and c2. (b) Jetpack/CLI, 11 rows: image registry missing tool, imported_locked_package without nix, jetpack env positional modules, real_cargo_project_import (needs cargo: it must skip-host on a no-cargo machine, not fail), sandbox FIFO output, 4 services production presets, services wait timeout. (c) Jetpack/Engine, 13 rows: recipe sandbox, host escape, network denial, credentials, native-path refusals, the shared hostile corpus, store cleanup quarantine, lease recovery, incomplete generation, and the native runtime split. (d) tests/guards: the closed_lists guard (fixed by df0a4c1961 and 15b9773dee, now 121/121), corpus_ast dogfood gate, and failure surface retired spelling. The full profile then spends more than 45 minutes in jetpack env fetch-toolchain: a sync-per-file write at about 250 KB/s, the first-install cost #6592 covers."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c65 proof plan (Main, 11-07). The full profile runs with the installed jet, so the clean clone has to use a seed released from the same commit. A run of dev bd42ba0383 with the older a0_033 seed gave 33 FAIL and 19 ERROR, all from seed-versus-tree drift: budget update unbuilt (exit 2), help/man/completion goldens regenerated for 1c2d6f25ad, the new cffi_e3203 snapshots, and ICEs fixed after a0_033. 0 profile rows were untracked. Next: once batch vb17 has 0 untracked rows, release a0_034 at that commit (Tools/release/Main.jet admit), then rerun fresh-c65.sh with a0_034 on that commit."
         },
         {
@@ -74478,7 +74493,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T02:09:17.141Z",
-      "updated": "2026-11-07T15:15:07.033Z",
+      "updated": "2026-11-07T23:47:13.931Z",
       "updatedBy": "Main",
       "criteriaLastN": 74
     },
@@ -187004,6 +187019,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T23:47:13.931Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T23:43:20.634Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h06654",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T23:30:02.134Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T23:17:31.203Z",
       "by": "Main",
