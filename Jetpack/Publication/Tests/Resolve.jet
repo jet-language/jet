@@ -170,7 +170,7 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
     root_candidate := publication_resolve_test_candidate("1.0.0", [PublicationVersionConstraint]{publication_resolve_test_constraint("shared", "^1", "app")})
     root_candidate.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.9.0+rejected")}
     root_candidate.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.1.0") ?? panic("fixture")}
-    &root_candidate.strict.push("shared")
+    root_candidate.strict.push("shared")
     candidates: [String: [PublicationSolverCandidate]]{
         "app": [PublicationSolverCandidate]{root_candidate},
         "shared": [PublicationSolverCandidate]{publication_resolve_test_candidate("1.9.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.1.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("1.2.0", [PublicationVersionConstraint]{}), publication_resolve_test_candidate("2.0.0", [PublicationVersionConstraint]{})}}
@@ -251,8 +251,8 @@ publication_resolve_test_solve: fn(roots: [PublicationVersionConstraint], candid
     b.rejected["shared"] = [PublicationSemVer]{publication_resolve_test_version("1.8.0")}
     a.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.2.0") ?? panic("fixture")}
     b.preferred["shared"] = [PublicationVersionReq]{publication_parse_version_req("=1.3.0") ?? panic("fixture")}
-    &a.strict.push("shared")
-    &b.strict.push("shared")
+    a.strict.push("shared")
+    b.strict.push("shared")
     roots: [PublicationVersionConstraint]{publication_resolve_test_constraint("b", "*", "root"), publication_resolve_test_constraint("a", "*", "root"), publication_resolve_test_constraint("a", "^1", "duplicate root")}
     candidates: [String: [PublicationSolverCandidate]]{
         "a": [PublicationSolverCandidate]{a},

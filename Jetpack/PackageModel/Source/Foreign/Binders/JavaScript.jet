@@ -35,7 +35,7 @@ pkg_javascript_bind: fn(declaration_path: String, declarations: String, runtime_
     provenance: pkg_binder_read_text(provenance_path, "could not read binding provenance")
     rendered: pkg_bridge_render_scalar_jet(abi, descriptor, functions) ?? return Err(pkg_binder_scalar_bridge_error(err))
     bound := [String]{}
-    loop function in functions -> &bound.push(function.name)
+    loop function in functions -> bound.push(function.name)
     Ok(ScalarBindResult{source: rendered, bound: bound, archive: archive, worker: worker, provenance: provenance})
 }
 
@@ -88,7 +88,7 @@ pkg_javascript_parse: fn(source: String) -> [ScalarBridgeFunction] ForeignBindEr
         loop existing in functions {
             if existing.name == name -> return Err(ForeignBindError.Source("line {number}: declaration {name} is repeated"))
         }
-        &functions.push(ScalarBridgeFunction{name: name, params: params, result: result})
+        functions.push(ScalarBridgeFunction{name: name, params: params, result: result})
     }
     if functions.len() == 0 -> return Err(ForeignBindError.Source("the TypeScript declarations have no exported typed scalar functions"))
     Ok(functions)
@@ -106,7 +106,7 @@ pkg_javascript_parse_params: fn(source: String, line: Int) -> [ForeignScalar] Fo
         annotation: pkg_binder_tail(param, colon + 1).trim()
         if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("line {line}: {name} is not a bindable JavaScript parameter"))
         scalar: pkg_javascript_scalar(annotation) ?? return Err(ForeignBindError.Source("line {line}: JavaScript type {annotation} is outside the typed scalar ABI"))
-        &out.push(scalar)
+        out.push(scalar)
     }
     Ok(out)
 }
@@ -124,14 +124,14 @@ pkg_javascript_render_worker: fn(functions: [ScalarBridgeFunction]) -> String Ne
     out := [String]{"import {{ pathToFileURL }} from \"node:url\";\n\nconst KINDS = {{\n"}
     loop function in functions {
         kinds := [String]{}
-        loop scalar in function.params -> &kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
-        &out.push("  {pkg_binder_debug_quote(function.name)}: [{kinds.join(", ")}],\n")
+        loop scalar in function.params -> kinds.push(pkg_binder_debug_quote(pkg_binder_scalar_kind(scalar)))
+        out.push("  {pkg_binder_debug_quote(function.name)}: [{kinds.join(", ")}],\n")
     }
-    &out.push("}};\nconst RESULTS = {{\n")
+    out.push("}};\nconst RESULTS = {{\n")
     loop function in functions {
-        &out.push("  {pkg_binder_debug_quote(function.name)}: {pkg_binder_debug_quote(pkg_binder_scalar_kind(function.result))},\n")
+        out.push("  {pkg_binder_debug_quote(function.name)}: {pkg_binder_debug_quote(pkg_binder_scalar_kind(function.result))},\n")
     }
-    &out.push(PKG_JS_WORKER_TAIL)
+    out.push(PKG_JS_WORKER_TAIL)
     out.join("")
 }
 

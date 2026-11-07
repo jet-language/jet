@@ -1,10 +1,10 @@
 
-drain: fn(hs: ^[Task<Int>]) -[]> Int {
+drain: fn(hs: &&[Task<Int>]) -[]> Int {
     total := 0
     loop h in hs { total += h.join() ?? 0 }
     total
 }
 run: fn() {
     handles: [task 1, task 2]
-    print(drain(^handles))
+    print(drain(handles))
 }

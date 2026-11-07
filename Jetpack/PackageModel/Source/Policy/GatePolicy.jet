@@ -15,7 +15,7 @@ PackageGateError: struct {
 
     message: fn(self) -> String Never! {
         messages := [String]{}
-        loop diagnostic in self.diagnostics -> &messages.push(diagnostic.what)
+        loop diagnostic in self.diagnostics -> messages.push(diagnostic.what)
         messages.join("; ")
     }
 }
@@ -60,12 +60,12 @@ pkg_load_organization_gate_policy: fn() -[FS, Env]> [PolicyDeclaration] PackageG
 // crates/jet-driver/src/Loader.rs:403 `project_gate_declarations`.
 pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
     declarations := pkg_load_organization_gate_policy()
-    loaded: pkg_package_facts_for_root(&cache, root) ? found -> found ! error -> return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})
+    loaded: pkg_package_facts_for_root(cache, root) ? found -> found ! error -> return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})
     if loaded == .Val(facts) {
         loop declaration in facts.policy.declarations {
             projected := declaration
             projected.source = facts.origin
-            &declarations.push(projected)
+            declarations.push(projected)
         }
     }
     Ok(declarations)
@@ -74,7 +74,7 @@ pkg_project_gate_declarations: fn(cache: &WorkspaceDeclarationCache, root: Strin
 // crates/jet-driver/src/Loader.rs:391 `check_project_gate`.
 pkg_check_project_gate: fn(root: String, key: PolicyKey, site: String) PackageGateError! -[FS, Env]> {
     cache := WorkspaceDeclarationCache.new()
-    declarations: pkg_project_gate_declarations(&cache, root)
+    declarations: pkg_project_gate_declarations(cache, root)
     if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic}})
 }
 
@@ -94,14 +94,14 @@ pkg_check_invocation_flags: fn(root: String, args: [String]) PackageGateError! -
     }
     if !gated -> return Ok(())
     cache := WorkspaceDeclarationCache.new()
-    declarations: pkg_project_gate_declarations(&cache, root)
+    declarations: pkg_project_gate_declarations(cache, root)
     diagnostics := [Diagnostic]{}
     loop argument in args {
         key: pkg_invocation_gate_key(argument) ?? next
         site: "command line ({argument})"
-        if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+        if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
         if argument == "--allow" || argument.starts_with("--allow=") {
-            if pkg_gate_refusal(PolicyKey.DependencyGrant, site, None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+            if pkg_gate_refusal(PolicyKey.DependencyGrant, site, None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
         }
     }
     if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics})
@@ -128,17 +128,17 @@ pkg_check_workspace_overlay_gates: fn(cache: &WorkspaceDeclarationCache, root: S
         if grant.effects.len() > 0 -> gated = true
     }
     if !gated -> return Ok(())
-    declarations: pkg_project_gate_declarations(&cache, root)
+    declarations: pkg_project_gate_declarations(cache, root)
     diagnostics := [Diagnostic]{}
     loop overlay in policy.overlays {
         loop package in overlay.packages {
             if !pkg_is_forced_override(package) -> next
-            if pkg_gate_refusal(PolicyKey.ForcePin, "workspace.jet overlay {overlay.name} package {package.package} .Force", None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+            if pkg_gate_refusal(PolicyKey.ForcePin, "workspace.jet overlay {overlay.name} package {package.package} .Force", None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
         }
     }
     loop grant in policy.build_grants {
         if grant.effects.len() == 0 -> next
-        if pkg_gate_refusal(PolicyKey.DependencyGrant, "workspace.jet build grant {grant.subject}", None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+        if pkg_gate_refusal(PolicyKey.DependencyGrant, "workspace.jet build grant {grant.subject}", None, declarations) == .Val(diagnostic) -> diagnostics.push(diagnostic)
     }
     if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics})
 }

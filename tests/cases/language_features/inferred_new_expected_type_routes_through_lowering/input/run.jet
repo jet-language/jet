@@ -13,7 +13,7 @@ GenericHolder: struct<T> {
 }
 
 impl GenericHolder {
-    new: fn(value: ^T) -> GenericHolder<T> {
+    new: fn(value: &&T) -> GenericHolder<T> {
         return GenericHolder<T>{ value: value, step: (n: Int) -> n + 9 }
     }
 
@@ -48,7 +48,7 @@ run: fn() {
     nested: GenericHolder<GenericHolder<Int>>.new(.new(7))
     nested_explicit: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
     callback: increment
-    callback_holder: GenericHolder<fn(Int) -> Int>.new(^callback)
+    callback_holder: GenericHolder<fn(Int) -> Int>.new(callback)
     explicit: Counter.new(4)
     print(read(.new(5)))
     print("{bound.value}{holder.counter.value}{explicit.value}")

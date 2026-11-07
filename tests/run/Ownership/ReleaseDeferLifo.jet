@@ -1,0 +1,15 @@
+Resource: struct {
+    name: String
+}
+
+impl Resource.Close {
+    close: fn(&&self) { print("close {self.name}") }
+}
+
+run: fn() {
+    first := Resource{name: "first"}
+    defer close(first)
+    second := Resource{name: "second"}
+    defer close(second)
+    print("body")
+}

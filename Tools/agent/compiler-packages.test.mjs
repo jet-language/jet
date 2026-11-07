@@ -37,7 +37,8 @@ test('the source identity covers compiler inputs only', t => {
         'Compiler/package.jet': 'name: "compiler"\n',
         'Compiler/JetCli/package.jet': manifest('jet_cli'),
         'Compiler/JetCli/run.jet': 'run: fn() {}\n',
-        'Compiler/JetCli/Source/Cli/Registry.jet': 'JET_CLI_BINARY: "jet"\nJET_CLI_VERSION: "0.0.1"\n',
+        'Compiler/JetCli/Source/Cli/Registry.jet': 'JET_CLI_BINARY: "jet"\n',
+        'Jetpack/PackageModel/Source/Manifest/Manifest.jet': 'COMPILER_VERSION: "0.0.1"\n',
         'Compiler/JetCli/Tests/package.jet': manifest('jet_cli_tests'),
         'Compiler/JetCli/Tests/T.jet': 't: fn() {}\n',
         'Core/Text.jet': 'text: fn() {}\n',
@@ -107,6 +108,21 @@ test('a fixture unit blanks package imports and repeated Core imports in place a
     assert.ok(unit.includes('use core.text.[      Glyph]'), 'a repeated grouped Core member is blanked in place');
     assert.ok(unit.indexOf('found: fn()') < unit.indexOf('cli: fn()'), 'dependencies come first');
     assert.equal(compilerFixtureUnit(root, ['Compiler/JetFoundation']).includes('cli: fn()'), false);
+});
+
+test('a fixture unit refuses every top-level name two packages declare', t => {
+    const root = tree({
+        'Compiler/JetCli/package.jet': manifest('jet_cli', { jet_foundation: '../JetFoundation' }),
+        'Compiler/JetCli/Source/Cli.jet': 'rows: fn() {}\npub Shape: struct {}\ncli: fn() {}\n',
+        'Compiler/JetFoundation/package.jet': manifest('jet_foundation'),
+        'Compiler/JetFoundation/Source/Found.jet': 'rows: fn() {}\nShape: struct {}\n',
+    });
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    assert.throws(() => compilerFixtureUnit(root), /2 top-level name\(s\)[^]*rows: Compiler\/JetFoundation\/Source\/Found\.jet, Compiler\/JetCli\/Source\/Cli\.jet[^]*Shape: /);
+});
+
+test('the repository compiler closure is one fixture namespace', () => {
+    assert.doesNotThrow(() => compilerFixtureUnit(repo));
 });
 
 test('unblockUses keeps every offset and leaves pub blocks', () => {

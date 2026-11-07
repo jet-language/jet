@@ -9,47 +9,38 @@ kit_golden_tiers: fn() -> [KitTier] {
 
 kit_golden_exists: fn(path: String) -> Bool { files.exists(path) }
 
-kit_golden_collect: fn(root: String, directory: String, expected_root: String, prefix: String) -> [KitEntry] {
+// Every entry under `directory`, its streams beside its source: a flat
+// `<Name>.jet` is the entry `<Name>`, and a project folder (one holding
+// `run.jet`) is the entry named by the folder. A folder with `package.jet` or
+// `workspace.jet` but no `run.jet` is a library or workspace, not an entry.
+kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
     entries := [KitEntry]{}
     if !kit_golden_exists(files.join(root, directory)) -> return entries
     children: files.list_dir(files.join(root, directory)) ?? panic("discover {directory}: {err}")
     loop child in children {
-        if child.name == "expected" || child.name.starts_with(".") -> next
+        if child.name.starts_with(".") -> next
         shown: files.join(directory, child.name)
         if child.is_dir {
             if kit_golden_exists(files.join(child.path, "package.jet")) || kit_golden_exists(files.join(child.path, "workspace.jet")) || kit_golden_exists(files.join(child.path, "run.jet")) {
-                if kit_golden_exists(files.join(child.path, "run.jet")) {
-                    stem: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes())
-                    &entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
-                }
+                if kit_golden_exists(files.join(child.path, "run.jet")) -> entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: shown, project: shown, suite: "golden", mode: ""})
                 next
             }
-            nested: kit_golden_collect(root, shown, expected_root, prefix)
-            loop entry in nested -> &entries.push(entry)
+            nested: kit_golden_collect(root, shown)
+            loop entry in nested -> entries.push(entry)
         } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
-            // A corpus with an `expected/` folder (Examples/features) keeps
-            // support modules in its nested folders, not flat entries; a
-            // corpus that holds its expectations beside its sources
-            // (tests/run) may keep flat generated cases in group folders.
-            if expected_root != prefix.removesuffix("/") && directory.split("/").len() != prefix.split("/").len() -> next
-            stem: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes() - 4)
-            &entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
+            entries.push(KitEntry{path: shown, expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - 4), project: directory, suite: "golden", mode: ""})
         }
     }
     entries
 }
 
-// Every entry of the golden corpora (checkout-relative directories). A corpus
-// with an `expected/` folder keeps its expectations there, else beside its
-// sources.
+// Every entry of the golden corpora (checkout-relative directories).
 kit_golden_discover: fn(root: String, corpora: [String]) -> [KitEntry] {
     all := [KitEntry]{}
     loop corpus in corpora {
-        separate: files.join(corpus, "expected")
-        expected_root: if kit_golden_exists(files.join(root, separate)) -> separate else -> corpus.copy()
-        loop entry in kit_golden_collect(root, corpus, expected_root, "{corpus}/") -> &all.push(entry)
+        loop entry in kit_golden_collect(root, corpus) -> all.push(entry)
     }
-    &all.sort_by(entry -> entry.path)
+    all.sort_by(entry -> entry.path)
     all
 }
 
@@ -66,11 +57,11 @@ kit_golden_failure_exit: fn(expected: String, report: String) -> Int? {
         }
         return Val(70)
     }
-    prefix: "Examples/features/expected/"
-    start: expected.index(prefix) ?? return None
-    stem: kit_steps_byte_slice(expected, start + prefix.count_bytes(), expected.count_bytes())
-    if report == "" -> return if stem == "io/log_fatal" -> Val(1) else -> None
-    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/or_err_journey", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run"], stem) -> return Val(1)
+    if report == "" -> return if expected.ends_with("tests/run/CoreIO/LogFatal") -> Val(1) else -> None
+    exit_one: ["Examples/ErrorsAndEffects/Errors/PropagationJourney", "Examples/ErrorsAndEffects/Errors/ErrorContext", "Examples/ErrorsAndEffects/Errors/DefaultErrorConversion", "Examples/ErrorsAndEffects/Errors/DefaultErrEdge", "Examples/ErrorsAndEffects/Errors/FatalExit", "Examples/Data/DecodeErrorExit", "Examples/Crypto/CryptoErrorRun", "tests/run/FailureFoundation/PropagationJourneyDirect", "tests/run/FailureFoundation/PropagationJourneyOneHop", "tests/run/FailureFoundation/PropagationJourneyCore", "tests/run/FailureFoundation/OrErrJourney"]
+    loop stem in exit_one {
+        if expected.ends_with(stem) -> return Val(1)
+    }
     None
 }
 
@@ -129,7 +120,7 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
     path: if step.cwd == "" -> entry.path else -> files.join(source, entry.path)
     args := [String]{env.jet, if tier.direct -> "check" else -> "build", path}
     if !tier.direct {
-        loop flag in tier.flags -> &args.push(flag)
+        loop flag in tier.flags -> args.push(flag.copy())
     }
     case_env: kit_steps_environment(plan, env, work, scratch, "")
     overlay: kit_steps_step_environment(step, env, work, scratch, "", case_env)
@@ -186,8 +177,8 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
     code: kit_golden_test_exit(golden) ?? return Val(KitOutcome{verdict: kit_expect_verdict("FAIL", "{files.basename(path)} ends in no test summary, so its exit is unknown"), run: kit_exec_failed("no test summary")})
     project: files.basename(entry.path) == "run.jet" && (kit_golden_exists(files.join(context.work, "package.jet")) || kit_golden_exists(files.join(context.work, "workspace.jet")))
     args := [String]{context.env.jet, "test"}
-    loop flag in tier.test_flags -> &args.push(flag)
-    &args.push(if project -> context.work else -> files.join(source, entry.path))
+    loop flag in tier.test_flags -> args.push(flag.copy())
+    args.push(if project -> context.work else -> files.join(source, entry.path))
     result: kit_exec_invoke_with_env(context.env, args, context.work, context.scratch, "", kit_steps_environment(context.plan, context.env, context.work, context.scratch, ""))
     failure: kit_exec_process_failure(result)
     if failure == {
@@ -198,19 +189,69 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
     Val(KitOutcome{verdict: kit_expect_exact(context.id, path, Val(golden), result.stdout, context.bless, false), run: result})
 }
 
+// Stages `entry`'s project from `project` into `work`. A flat entry shares its
+// directory with the flat entries beside it (kit_golden_collect files every
+// flat `.jet` there as one), and its row reads none of theirs unless its
+// source names one: those siblings' files (`<stem>.*`) stay out, unless the
+// entry, or a sibling it names, names the stem. Every other file and every
+// support directory is staged, so the row writes only what it may read.
+kit_golden_stage: fn(project: String, entry: KitEntry, work: String) {
+    own: files.basename(entry.path)
+    if own == "run.jet" {
+        kit_exec_copy_tree(project, work, true, false)
+        return
+    }
+    files.create_dir_all(work) ?? panic("mkdir {work}: {err}")
+    listed: files.list_dir(project) ?? panic("list {project}: {err}")
+    siblings := [String]{}
+    loop child in listed {
+        if child.is_dir || !child.name.ends_with(".jet") || child.name == own || child.name == "package.jet" || child.name == "workspace.jet" -> next
+        siblings.push(kit_steps_byte_slice(child.name, 0, child.name.count_bytes() - 4))
+    }
+    own_stem: kit_steps_byte_slice(own, 0, own.count_bytes() - 4)
+    named := [String]{own_stem.copy()}
+    at := 0
+    loop at < named.len() {
+        text: files.read(files.join(project, "{named[at]}.jet")) ?? ""
+        at += 1
+        loop stem in siblings {
+            if !named.contains(stem) && text.contains(stem) -> named.push(stem.copy())
+        }
+    }
+    loop child in listed {
+        if !child.is_dir && !child.name.starts_with("{own_stem}.") && kit_golden_unnamed_sibling(child.name, siblings, named) -> next
+        kit_exec_copy_entry(child, work, true, false)
+    }
+}
+
+// Whether the file `name` belongs to a sibling entry (`<stem>.*`) that the
+// staged entry never names.
+kit_golden_unnamed_sibling: fn(name: String, siblings: [String], named: [String]) -> Bool {
+    loop stem in siblings {
+        if !named.contains(stem) && name.starts_with("{stem}.") -> return true
+    }
+    false
+}
+
 kit_golden_run_entry: fn(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: String, bless: KitBless) -> KitOutcome {
     expected: files.join(env.root, entry.expected)
     plan := kit_steps_parse(kit_exec_optional("{expected}.case") ?? "")
     last := kit_exec_failed("case has not run")
     if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
     if plan.fixture != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    // A row that binds a fixed port runs its program in a network namespace
+    // of its own, where the port is always free; a host that can't give it
+    // one skips the row.
+    if plan.host_port != 0 {
+        if kit_netns_required() == .Val(skipped) -> return KitOutcome{verdict: skipped, run: last}
+    }
     source: files.join(scratch, "source")
     work: files.join(source, entry.project)
-    kit_exec_copy_tree(files.join(env.root, entry.project), work, true, false)
+    kit_golden_stage(files.join(env.root, entry.project), entry, work)
     implicit: plan.steps.len() == 0
     if implicit {
-        if plan.compile_only || !tier.direct -> &plan.steps.push(kit_golden_default_step("build"))
-        if !plan.compile_only -> &plan.steps.push(kit_golden_default_step("built"))
+        if plan.compile_only || !tier.direct -> plan.steps.push(kit_golden_default_step("build"))
+        if !plan.compile_only -> plan.steps.push(kit_golden_default_step("built"))
     }
     last_explicit := false
     loop assertion in plan.steps[plan.steps.len() - 1].assertions {
@@ -270,11 +311,12 @@ kit_golden_step_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previ
     if command == "built" && golden.tier.direct {
         argv := [String]{context.env.jet, "run", files.join(golden.source, golden.entry.path)}
         if step.argv.len() > 1 {
-            &argv.push("--")
-            loop arg in step.argv.slice(1, step.argv.len()) -> &argv.push(arg)
+            argv.push("--")
+            loop arg in step.argv.slice(1, step.argv.len()) -> argv.push(arg)
         }
         actual.argv = argv
     }
+    if plan.host_port != 0 && actual.isolate == "" -> actual.isolate = "netns"
     if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
     // `repo-cwd:` runs the program from the staged source root. The stage keeps
     // the repository layout, so a repo-relative path the program reads (its own
@@ -299,7 +341,7 @@ kit_golden_step_check: fn(step: KitStep, index: Int, context: KitStepCtx, state:
         if state.json_stdout == .Val(text) -> streams.stdout = text
         if state.json_stderr == .Val(text) -> streams.stderr = text
         // A release image's own fault report gives its build id and the
-        // frames' addresses (D-RT-DEFECT-REPORT1 A); `jet crash` names them
+        // frames' addresses; `jet crash` names them
         // from the debug info the build saved, so the report compares with
         // the one `.err.out` every tier shares.
         if streams.stderr.contains(" (names and lines: jet crash)\n") {
@@ -352,20 +394,18 @@ kit_golden_run_suite: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
         }
         scratch: files.join(context.scratch, "{index}")
         files.create_dir_all(scratch) ?? {
-            &results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
+            results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
             next
         }
         bless := context.bless
         bless.first_tier = index == 0
         outcome := kit_golden_run_entry(entry, tier, context.env, scratch, bless)
         outcome.tier = if independent -> "-" else -> tier_name
-        if context.env.trace_node == "" {
-            files.remove_all(scratch) ?? {
-                outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
-                ()
-            }
+        files.remove_all(scratch) ?? {
+            outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
+            ()
         }
-        &results.push(kit_cases_known_verdict(outcome, annotation))
+        results.push(kit_cases_known_verdict(outcome, annotation))
     }
     results
 }

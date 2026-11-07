@@ -111,10 +111,10 @@ sql_tokens: fn(sql: String) -> [String] Err! {
             next
         }
         if quote != 0 {
-            sql_text.append_cp(&token, ch)
+            sql_text.append_cp(token, ch)
             if ch == quote {
                 if peek == quote {
-                    sql_text.append_cp(&token, peek)
+                    sql_text.append_cp(token, peek)
                     at += sql_text.utf8_width_at(raw, at)
                 } else {
                     quote = 0
@@ -124,44 +124,44 @@ sql_tokens: fn(sql: String) -> [String] Err! {
         }
         if ch == 45 && peek == 45 {
             at += sql_text.utf8_width_at(raw, at)
-            token = push_token(&tokens, token)
+            token = push_token(tokens, token)
             line_comment = true
             next
         }
         if ch == 47 && peek == 42 {
             at += sql_text.utf8_width_at(raw, at)
-            token = push_token(&tokens, token)
+            token = push_token(tokens, token)
             block_comment = true
             next
         }
         if {
             ch == 39 || ch == 34 -> {
                 quote = ch
-                sql_text.append_cp(&token, ch)
+                sql_text.append_cp(token, ch)
             }
-            sql_assets.asset_contains(whitespace, ch) -> token = push_token(&tokens, token)
+            sql_assets.asset_contains(whitespace, ch) -> token = push_token(tokens, token)
             ch == 44 || ch == 40 || ch == 41 || ch == 59 -> {
-                token = push_token(&tokens, token)
+                token = push_token(tokens, token)
                 single := [U8]{}
-                sql_text.append_cp(&single, ch)
-                &tokens.push(String.from_bytes(single) ?? panic("SQL punctuation builder produced invalid UTF-8"))
+                sql_text.append_cp(single, ch)
+                tokens.push(String.from_bytes(single) ?? panic("SQL punctuation builder produced invalid UTF-8"))
             }
             ch == 61 || ch == 33 || ch == 62 || ch == 60 -> {
-                token = push_token(&tokens, token)
+                token = push_token(tokens, token)
                 op := [U8]{}
-                sql_text.append_cp(&op, ch)
+                sql_text.append_cp(op, ch)
                 if peek == 61 {
-                    sql_text.append_cp(&op, peek)
+                    sql_text.append_cp(op, peek)
                     at += sql_text.utf8_width_at(raw, at)
                 }
-                &tokens.push(String.from_bytes(op) ?? panic("SQL operator builder produced invalid UTF-8"))
+                tokens.push(String.from_bytes(op) ?? panic("SQL operator builder produced invalid UTF-8"))
             }
-            else -> sql_text.append_cp(&token, ch)
+            else -> sql_text.append_cp(token, ch)
         }
     }
     if quote != 0 -> return Err(sql_error("SQL string literal is missing its closing quote"))
     if block_comment -> return Err(sql_error("SQL block comment is missing its closing `*/`"))
-    _: push_token(&tokens, token)
+    _: push_token(tokens, token)
     tokens
 }
 
@@ -177,7 +177,7 @@ unquote: fn(value: String) -> String Never! {
     loop at < end {
         cp: sql_text.scalar_at(raw, at)
         at += sql_text.utf8_width_at(raw, at)
-        sql_text.append_cp(&out, cp)
+        sql_text.append_cp(out, cp)
         if cp == first && at < end && sql_text.scalar_at(raw, at) == first -> at += 1
     }
     String.from_bytes(out) ?? panic("SQL unquote builder produced invalid UTF-8")
@@ -225,14 +225,14 @@ JetSQLQuery: struct {
 parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
     trimmed := sql_text.trim(sql) // #4303
     tokens := sql_tokens(trimmed) ?? return Err(err)
-    if tokens.len() > 0 && tokens[tokens.len() - 1] == ";" -> _: &tokens.pop()
+    if tokens.len() > 0 && tokens[tokens.len() - 1] == ";" -> _: tokens.pop()
     if tokens.len() == 0 -> return Err("SQL query is empty")
     if !keyword(tokens[0], "select") -> return Err("SQL query needs a SELECT statement")
     cursor := 1
     projection := [JetSQLSelectItem]{}
     loop {
         parsed: parse_select_item(tokens, cursor) ?? return Err(err)
-        &projection.push(parsed.item)
+        projection.push(parsed.item)
         cursor = parsed.cursor
         if !token_is(tokens, cursor, ",") -> break
         cursor += 1
@@ -271,10 +271,10 @@ parse_sql_query: fn(sql: String) -> JetSQLQuery Err! {
                 if clause_keyword(token) || token == "," -> return Err("SQL GROUP BY needs a field or ordinal")
                 if parse_usize(token) == .Val(ordinal) {
                     if ordinal == (U64{0}) -> return Err("SQL GROUP BY ordinals start at one")
-                    &query.group_by.push(.Ordinal(ordinal))
+                    query.group_by.push(.Ordinal(ordinal))
                 } else {
                     field: identifier(Val(token), "GROUP BY field") ?? return Err(err)
-                    &query.group_by.push(.Field(field))
+                    query.group_by.push(.Field(field))
                 }
                 cursor += 1
                 if !token_is(tokens, cursor, ",") -> break
@@ -407,7 +407,7 @@ sql_aggregate_value: fn(group: [U64], function: JetSQLAggregate, field: String?,
                 ordering: sql_compare_values(value, current)
                 replace = (function == .Min && ordering == Ordering.Less) || (function == .Max && ordering == Ordering.Greater)
             }
-            if replace -> selected = Val(^value)
+            if replace -> selected = Val(value)
         }
     }
     if function == .Count -> return .Int(count)
@@ -450,13 +450,13 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
             keep = false
             if cell(index, filter.field) == .Val(left) -> keep = sql_compare(left, filter.operator, JetSQLValue.literal(filter.value))
         }
-        if keep -> &selected.push(index)
+        if keep -> selected.push(index)
         index += U64{1}
     }
     grouped := [[U64]]{}
     if has_aggregate(query) || query.group_by.len() != 0 {
         if query.group_by.len() == 0 {
-            &grouped.push(^selected)
+            grouped.push(selected)
         } else {
             positions := [String: Int]{}
             unsorted := [[U64]]{}
@@ -465,7 +465,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
             loop at in 0..<selected.len() {
                 pieces := [String]{}
                 one: selected[at..<at + 1] // #4500: no singleton allocation.
-                loop group in query.group_by -> &pieces.push(sql_group_key(one, query, group, cell) ?? return Err(err))
+                loop group in query.group_by -> pieces.push(sql_group_key(one, query, group, cell) ?? return Err(err))
                 key: pieces.join("|")
                 position := 0
                 if positions.get(key) == .Val(found) {
@@ -473,20 +473,20 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
                 } else {
                     position = unsorted.len()
                     positions[key.copy()] = position
-                    &keys.push(key)
-                    &unsorted.push([U64]{})
+                    keys.push(key)
+                    unsorted.push([U64]{})
                 }
-                &unsorted[position].push(selected[at])
+                unsorted[position].push(selected[at])
             }
-            &keys.sort_by((left: String, right: String) -> left <=> right)
+            keys.sort_by((left: String, right: String) -> left <=> right)
             loop key in keys {
                 at: positions.get(key) ?? panic("SQL grouping key lost its position")
                 // copy: the group's row indices stay in `unsorted` (an element has no hole to leave); a small [U64] list per group.
-                &grouped.push(unsorted[at].copy())
+                grouped.push(unsorted[at].copy())
             }
         }
     } else {
-        loop selected_index in selected -> &grouped.push([U64]{selected_index})
+        loop selected_index in selected -> grouped.push([U64]{selected_index})
     }
     projected := [internal.SQLOrderedRow]{}
     loop at in 0..<grouped.len() {
@@ -497,7 +497,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
             order = sql_output_value(row, clause.field)
             if order == None && row.source_indices.len() != 0 -> order = cell(row.source_indices[0], clause.field)
         }
-        &projected.push(internal.SQLOrderedRow{row: row, order: order})
+        projected.push(internal.SQLOrderedRow{row: row, order: order})
     }
     // Rust performs this pass AFTER every row and ORDER fallback is evaluated.
     loop entry in projected {
@@ -506,7 +506,7 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
         }
     }
     if query.order == .Val(clause) {
-        &projected.sort_by((left: internal.SQLOrderedRow, right: internal.SQLOrderedRow) -> {
+        projected.sort_by((left: internal.SQLOrderedRow, right: internal.SQLOrderedRow) -> {
             order := sql_compare_values(left.order ?? JetSQLValue.Null, right.order ?? JetSQLValue.Null)
             if clause.descending -> order = reverse_order(order)
             if order == Ordering.Equal -> return source_indices_compare(left.row.source_indices, right.row.source_indices)
@@ -514,11 +514,11 @@ execute_sql_rows: fn(fields: [String], row_count: U64, query: JetSQLQuery, cell:
         })
     }
     if query.limit == .Val(limit) {
-        loop limit < (U64.from_int(projected.len()) ?? panic("SQL result length")) -> _: &projected.pop()
+        loop limit < (U64.from_int(projected.len()) ?? panic("SQL result length")) -> _: projected.pop()
     }
     rows := [JetSQLResultRow]{}
     // copy: each result row stays in its `projected` element (an element has no hole to leave); one row per result.
-    loop at in 0..<projected.len() -> &rows.push(projected[at].row.copy())
+    loop at in 0..<projected.len() -> rows.push(projected[at].row.copy())
     rows
 }
 
@@ -631,11 +631,11 @@ sql_compare: fn(left: JetSQLValue, operator: String, right: JetSQLValue) -> Bool
     }
 }
 // Rust sql_error:176–178 is identity; each caller uses the canonical Err rail.
-sql_error: fn(message: ^String) -> String Never! { message }
+sql_error: fn(message: &&String) -> String Never! { message }
 
 // Rust push_token:180–184. One scalar-builder buffer; no scalar list/parser.
 push_token: fn(tokens: &[String], token: [U8]) -> [U8] Never! {
-    if token.len() > 0 -> &tokens.push(String.from_bytes(token) ?? panic("SQL token builder produced invalid UTF-8"))
+    if token.len() > 0 -> tokens.push(String.from_bytes(token) ?? panic("SQL token builder produced invalid UTF-8"))
     [U8]{}
 }
 ascii_alpha: fn(cp: Int) -> Bool Never! { (cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122) }
@@ -738,7 +738,7 @@ projection_shape_error: fn(projection: [JetSQLSelectItem], grouped: Bool) -> Str
     loop item in projection {
         name: item.output_name()
         if names.has(name) -> return Val("SQL SELECT repeats output column `{name}`")
-        &names.add(name)
+        names.add(name)
     }
     None
 }
@@ -820,14 +820,14 @@ query_shape_error: fn(query: JetSQLQuery) -> String? Never! {
         if key == {
             .Field(name) -> {
                 if fields.has(name) -> return Val("SQL GROUP BY repeats a grouping key")
-                &fields.add(name.copy())
+                fields.add(name.copy())
             }
             .Ordinal(ordinal) -> {
                 if ordinals.has(ordinal) -> return Val("SQL GROUP BY repeats a grouping key")
-                &ordinals.add(ordinal)
+                ordinals.add(ordinal)
             }
         }
-        &grouped_fields.add(field)
+        grouped_fields.add(field)
     }
     aggregate: has_aggregate(query)
     loop item in query.projection {
@@ -853,8 +853,8 @@ sql_number: fn(value: Float) -> String Never! {
 sql_escape: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in sql_text.utf8_bytes(value) {
-        if byte == (U8{92}) || byte == (U8{124}) || byte == (U8{61}) -> &out.push(U8{92})
-        &out.push(byte)
+        if byte == (U8{92}) || byte == (U8{124}) || byte == (U8{61}) -> out.push(U8{92})
+        out.push(byte)
     }
     String.from_bytes(out) ?? panic("SQL escaping preserves UTF-8")
 }
@@ -901,7 +901,7 @@ count_cast: fn(length: U64) -> I64 Never! {
 }
 // Rust sql_project_group:891–941. Transfer the consumed grouping positions
 // into the result rather than cloning the otherwise dead Rust group Vec.
-sql_project_group: fn(fields: [String], query: JetSQLQuery, group: ^[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
+sql_project_group: fn(fields: [String], query: JetSQLQuery, group: &&[U64], cell: fn(U64, String) -> JetSQLValue?) -> JetSQLResultRow Never! {
     projected := [(field: String, value: JetSQLValue)]{}
     loop item in query.projection {
         if item == {
@@ -909,18 +909,18 @@ sql_project_group: fn(fields: [String], query: JetSQLQuery, group: ^[U64], cell:
                 loop field in fields {
                     value := JetSQLValue.Null
                     if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                    &projected.push((field: field.copy(), value: ^value))
+                    projected.push((field: field.copy(), value: value))
                 }
             }
             .Field(field, alias) -> {
                 value := JetSQLValue.Null
                 if group.len() != 0 -> value = cell(group[0], field) ?? JetSQLValue.Null
-                &projected.push((field: alias ?? field.copy(), value: ^value))
+                projected.push((field: alias ?? field.copy(), value: value))
             }
-            .Aggregate(function, field, _) -> &projected.push((field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)))
+            .Aggregate(function, field, _) -> projected.push((field: item.output_name(), value: sql_aggregate_value(group, function, field, cell)))
         }
     }
-    JetSQLResultRow{fields: projected, source_indices: ^group}
+    JetSQLResultRow{fields: projected, source_indices: group.move()}
 }
 SQLOrderedRow: struct { row: JetSQLResultRow, order: JetSQLValue? }
 source_indices_compare: fn(left: [U64], right: [U64]) -> Ordering Never! {

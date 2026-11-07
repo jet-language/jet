@@ -1,0 +1,26 @@
+// Auto-derive policy:
+// Package policy sets the default. Signed type markers opt individual traits
+// in or out. A hand-written implementation wins over both.
+#[Printable, !Debug, !Equatable]
+Visible: struct {
+    value: Int
+}
+
+#Debug
+Diagnostic: struct {
+    value: Int
+}
+
+Secret: struct {
+    value: Int
+}
+
+impl Secret.Debug {
+    debug: fn(self) -> String { "[redacted]" }
+}
+
+run: fn() {
+    print(Visible{value: 7})
+    print(Diagnostic{value: 8}.debug())
+    print(Secret{value: 0}.debug())
+}

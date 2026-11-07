@@ -23,16 +23,23 @@ KitEnv: struct {
     env_clear: Bool{false}
     version: String{""}
     version_error: String{""}
-    trace_case: String{""}
-    trace_node: String{""}
-    trace_cache: String{""}
-    // The entry's peak log: each child's sampled resident peak, one per line; "" keeps none.
-    peaks: String{""}
+    // The entry's memory claim so far (kit_exec_run): its children's largest
+    // resident peak plus the files a row held on a memory-backed scratch. None
+    // keeps none.
+    peak: Shared<KitPeak>?{None}
+    // The rows' scratch is memory-backed (kit_exec_memory_backed): their files
+    // count as memory they hold.
+    scratch_memory: Bool{false}
     // The FFI cache children share across runs; "" keeps one per run under `scratch`.
     ffi_cache: String{""}
     // A cap in nanoseconds on each wait for an answer (recv, poll, await, a
     // wait with a deadline, repeat while); 0 is none. A known-failing case sets it.
     answer_limit: Int{0}
+}
+
+// An entry's memory claim in bytes, which its rows' runs raise (KitEnv.peak).
+KitPeak: struct {
+    bytes: Int
 }
 
 KitEnvVar: struct {
@@ -311,6 +318,8 @@ KitStep: struct {
     limit_time: Int{0}
     limit_memory: Int{0}
     limit_resident: Int{0}
+    // "no-nix" (the `isolate:` launcher), "netns" (a network namespace of its
+    // own: a `host-port:` golden row's program, kit_netns_argv) or "".
     isolate: String{""}
     isolate_network: String{"disabled"}
     env_clear: Bool{false}
@@ -341,7 +350,8 @@ KitPlan: struct {
     json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
     replacements: [KitReplacement]{[KitReplacement]{}}
     free_ports: [String]{[String]{}}
-    // A fixed TCP port the case binds; 0 is none.
+    // A fixed TCP port the case binds; 0 is none. A golden row's program
+    // binds it in a network namespace of its own (kit_netns_argv).
     host_port: Int{0}
 }
 
@@ -458,7 +468,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
             expanded: kit_steps_runtime_expand(words[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "requirement token unavailable"))
             path: files.join(context.work, expanded)
             if files.exists(path) {
-                &state.captures.push(KitCapture{name: words[1], value: KitCapturedValue.Text(path)})
+                state.captures.push(KitCapture{name: words[1], value: KitCapturedValue.Text(path)})
                 found = true
                 break
             }
@@ -489,7 +499,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
     port_names: kit_steps_case_port_names(context)
     if port_names.len() > 0 {
         ports: kit_steps_free_ports(context, port_names.len()) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
-        loop index in 0..<port_names.len() -> &state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
+        loop index in 0..<port_names.len() -> state.free_ports.push(KitFreePort{name: port_names[index], port: ports[index]})
     }
     // A case that binds a fixed host port holds its lock until the case ends,
     // waiting at most one step timeout, so concurrent kit and feature-example
@@ -546,7 +556,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                 next
             }
             frame: KitLoopFrame{start: index, end: end, kind: original.argv[1], name: original.argv[original.argv.len() - 1], values: values, captures: state.captures, bindings: state.bindings, started: time.instant()}
-            &loops.push(frame)
+            loops.push(frame.copy())
             state = kit_steps_loop_bind(frame, state)
             next
         }
@@ -558,7 +568,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                 cursor = end + 1
                 next
             }
-            &loops.push(KitLoopFrame{start: index, end: end, kind: "repeat", captures: state.captures, bindings: state.bindings, started: time.instant()})
+            loops.push(KitLoopFrame{start: index, end: end, kind: "repeat", captures: state.captures, bindings: state.bindings, started: time.instant()})
             next
         }
         if original.action == "end for" || original.action == "end repeat" {
@@ -628,7 +638,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
         state.json_stderr = None
         if kit_expect_named(["", "wait", "close", "poll"], step.action) && (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
             rules := plan.json_normalize
-            loop rule in step.json_normalize -> &rules.push(rule)
+            loop rule in step.json_normalize -> rules.push(rule)
             output: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
             errors: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
             if output.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", output.error))
@@ -641,7 +651,7 @@ kit_steps_execute: fn(original_context: KitStepCtx, hooks: KitStepHooks) -> KitO
                 .Val(golden) -> kit_golden_source_name(golden.entry)
                 .None -> ""
             }
-            &state.history.push(KitCapturedStep{label: step.label,
+            state.history.push(KitCapturedStep{label: step.label,
                 stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
                 stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
                 elapsed_ns: state.last.elapsed_ns,
@@ -750,14 +760,28 @@ kit_execution_refused: fn(row: String) -> KitExecution {
 // order and rows stream as entries finish; reports and failure lists keep this order
 // whatever the pool's size.
 kit_execute_corpus_order: fn(corpus: &[KitSelected]) {
-    &corpus.sort_by(item -> "{item.suite}\n{item.entry.path}")
+    corpus.sort_by(item -> "{item.suite}\n{item.entry.path}")
 }
 
-// The disk-backed scratch directory a run uses without --scratch: JET_TEST_SCRATCH_DIR,
-// else <JET_SCRATCH_ROOT>/testkit, else Jet's user cache (<XDG_CACHE_HOME>/jet/testkit,
-// else ~/.cache/jet/testkit). None when not even HOME is set.
+// Where a run stages its rows without --scratch: in memory, so no row writes
+// the disk. That is /dev/shm, else the per-user runtime directory
+// (XDG_RUNTIME_DIR), each under a directory of this user's; a host with
+// neither stages on disk (kit_disk_root). Each row's files count against its
+// memory claim and resident guard (kit_exec_run), so the scratch stays inside
+// the run's memory budget. None when not even HOME is set.
 kit_scratch_root: fn() -> String? {
-    if sys.get("JET_TEST_SCRATCH_DIR") == .Val(dir) -> return Val(dir)
+    uid: sys.getuid()
+    if files.is_dir("/dev/shm") -> return Val("/dev/shm/jet-testkit-{uid}")
+    if sys.get("XDG_RUNTIME_DIR") == .Val(runtime) {
+        if runtime.starts_with("/") && files.is_dir(runtime) -> return Val(files.join(runtime, "jet-testkit"))
+    }
+    kit_disk_root()
+}
+
+// The disk directory for what outlives a run (the history and the FFI cache):
+// <JET_SCRATCH_ROOT>/testkit, else Jet's user cache (<XDG_CACHE_HOME>/jet/testkit,
+// else ~/.cache/jet/testkit). None when not even HOME is set.
+kit_disk_root: fn() -> String? {
     if sys.get("JET_SCRATCH_ROOT") == .Val(root) -> return Val(files.join(root, "testkit"))
     if sys.get("XDG_CACHE_HOME") == .Val(cache) -> return Val(files.join(cache, "jet/testkit"))
     home: sys.get("HOME") ?? return None
@@ -778,9 +802,9 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     discovery_ctx: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless, known: [String: String]{}}
     corpus := [KitSelected]{}
     loop suite in selected_suites {
-        loop entry in kit_suite_discover(suite, discovery_ctx) -> &corpus.push(KitSelected{entry: entry, suite: suite})
+        loop entry in kit_suite_discover(suite, discovery_ctx) -> corpus.push(KitSelected{entry: entry, suite: suite})
     }
-    kit_execute_corpus_order(&corpus)
+    kit_execute_corpus_order(corpus)
     selection: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
     if selection.error != "" -> return kit_execution_refused("REFUSED\tselection\t\t{selection.error}")
     entries: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
@@ -793,21 +817,15 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     if options.jet == "" -> return kit_execution_refused("ERROR\tselection\t\tJET must name the compiler under test")
     jet: files.canonicalize(options.jet) ?? return kit_execution_refused("ERROR\tselection\t\tcompiler: {err}")
     jetpack: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
-    base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set JET_TEST_SCRATCH_DIR or JET_SCRATCH_ROOT, or pass --scratch")
-    canonical: kit_execute_disk_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
+    base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
+    canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
     // What outlives a run: each suite's measurements and the FFI cache.
-    state: kit_execute_disk_dir(sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_scratch_root() ?? canonical, "state"), root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
+    state_base: sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tstate: set JET_TEST_STATE_DIR, JET_SCRATCH_ROOT or HOME"), "state")
+    state: kit_execute_disk_dir(state_base, root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
     run_scratch: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
-    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi")}
-    if sys.get("JET_NATIVE_TRACE_LOG") != None {
-        env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
-        env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""
-        if env.trace_node == "" || env.trace_cache == "" {
-            return kit_execution_refused("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
-        }
-    }
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi"), scratch_memory: kit_exec_memory_backed(canonical)}
     if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch, entries.any(item -> item.suite == "ui" && item.entry.mode.ends_with("project")), options.ui_corpora)
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
@@ -824,17 +842,15 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     results := [KitCaseResult]{}
     ran_suites := [String]{}
     loop run in kit_execute_entries(entries, schedule, options, env, kit_known_load(options.ledger), root, run_scratch) {
-        if run.ran && !kit_expect_named(ran_suites, run.suite) -> &ran_suites.push(run.suite)
-        loop result in run.results -> &results.push(result)
+        if run.ran && !kit_expect_named(ran_suites, run.suite) -> ran_suites.push(run.suite)
+        loop result in run.results -> results.push(result)
     }
     kit_history_save(history_dir, ran_suites, history, results)
     if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
-    if env.trace_node == "" {
-        kit_exec_remove_tree(run_scratch) ?? {
-            &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
-            kit_report_row(results[results.len() - 1])
-            false
-        }
+    kit_exec_remove_tree(run_scratch) ?? {
+        results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
+        kit_report_row(results[results.len() - 1])
+        false
     }
     kit_execute_finish(jet, results, ran_suites, selected_suites, reports, options.results)
 }
@@ -845,7 +861,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
 kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [String], suites: [String], reports: [String: String]?, results_path: String) -> KitExecution {
     failures := [KitFailure]{}
     loop result in results {
-        if kit_case_blocks(result.status) -> &failures.push(KitFailure{suite: result.suite, row: "{result.status}\t{result.case}\t{result.tier}\t{result.detail}"})
+        if kit_case_blocks(result.status) -> failures.push(KitFailure{suite: result.suite, row: "{result.status}\t{result.case}\t{result.tier}\t{result.detail}"})
     }
     if reports == .Val(paths) {
         code := if failures.any(failure -> !kit_expect_named(suites, failure.suite)) -> 2 else -> 0
@@ -856,23 +872,30 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
             ran_suite: suite.copy()
             failed_suite: suite.copy()
             suite_code: kit_report_finish(jet, results.filter(result -> result.suite == in_suite), path, ran_suites.filter(name -> name == ran_suite))
-            if suite_code != 0 && !failures.any(failure -> failure.suite == failed_suite) -> &failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+            if suite_code != 0 && !failures.any(failure -> failure.suite == failed_suite) -> failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
             if suite_code > code -> code = suite_code
         }
         return KitExecution{code: code, failures: failures, results: results}
     }
     code: kit_report_finish(jet, results, results_path, ran_suites)
-    if code != 0 && failures.len() == 0 -> &failures.push(KitFailure{suite: "", row: "ERROR\tresults\t\tthe {suites.join(",")} report could not be written to {results_path}"})
+    if code != 0 && failures.len() == 0 -> failures.push(KitFailure{suite: "", row: "ERROR\tresults\t\tthe {suites.join(",")} report could not be written to {results_path}"})
     KitExecution{code: code, failures: failures, results: results}
 }
 
-// Creates `path` and returns it canonical, refusing RAM-backed /tmp and the checkout.
+// Creates the state directory `path` and returns it canonical, refusing
+// RAM-backed /tmp and the checkout: what outlives a run stays on disk.
 kit_execute_disk_dir: fn(path: String, root: String) -> String Err! {
+    canonical: kit_execute_scratch_dir(path, root) ?? return Err(err)
+    if canonical == "/tmp" || canonical.starts_with("/tmp/") -> return Err("{canonical} must be disk-backed and outside the checkout")
+    Ok(canonical)
+}
+
+// Creates the scratch directory `path` and returns it canonical, refusing the
+// checkout: rows never write it.
+kit_execute_scratch_dir: fn(path: String, root: String) -> String Err! {
     files.create_dir_all(path) ?? return Err("{err}")
     canonical: files.canonicalize(path) ?? return Err("{err}")
-    if canonical == root || canonical.starts_with("{root}/") || canonical == "/tmp" || canonical.starts_with("/tmp/") {
-        return Err("{canonical} must be disk-backed and outside the checkout")
-    }
+    if canonical == root || canonical.starts_with("{root}/") -> return Err("{canonical} must be outside the checkout")
     Ok(canonical)
 }
 
@@ -943,16 +966,16 @@ kit_execute_schedule: fn(entries: [KitSelected], history: [String: KitHistory], 
         last: history.get(kit_history_key(item.suite, item.entry.path)) ?? KitHistory{wall_ms: -1, peak_kib: -1}
         need := if last.peak_kib < 0 -> kit_job_memory() else -> last.peak_kib * 1536
         if need < 67108864 -> need = 67108864
-        &schedule.weights.push(if budget > 0 && need > budget -> budget else -> need)
+        schedule.weights.push(if budget > 0 && need > budget -> budget else -> need)
         guard := if need > kit_resident_guard() -> need else -> kit_resident_guard()
         if available > 0 && guard > available -> guard = available
-        &schedule.guards.push(guard)
-        &schedule.order.push(index)
+        schedule.guards.push(guard)
+        schedule.order.push(index)
         // Unmeasured entries come first, in corpus order; then measured entries by
         // descending wall time, ties in corpus order.
-        &keys.push(if last.wall_ms < 0 -> index - entries.len() else -> (Int{1} << 40) - last.wall_ms * entries.len() + index)
+        keys.push(if last.wall_ms < 0 -> index - entries.len() else -> (Int{1} << 40) - last.wall_ms * entries.len() + index)
     }
-    &schedule.order.sort_by(index -> keys[index])
+    schedule.order.sort_by(index -> keys[index])
     schedule
 }
 
@@ -991,9 +1014,9 @@ kit_history_save: fn(dir: String, suites: [String], history: [String: KitHistory
         prefix: "{suite}\t"
         rows := [String]{}
         loop (key, last) in merged {
-            if key.starts_with(prefix) -> &rows.push("{kit_steps_byte_slice(key, prefix.count_bytes(), key.count_bytes())}\t{last.wall_ms}\t{last.peak_kib}")
+            if key.starts_with(prefix) -> rows.push("{kit_steps_byte_slice(key, prefix.count_bytes(), key.count_bytes())}\t{last.wall_ms}\t{last.peak_kib}")
         }
-        &rows.sort_by(row -> row)
+        rows.sort_by(row -> row)
         path: kit_history_file(dir, suite)
         staged: "{path}.{process.current_pid()}.new"
         files.write(staged, "{rows.join("\n")}\n").drop("a lost history only loses scheduling hints")
@@ -1023,7 +1046,7 @@ kit_execute_admits: fn(schedule: KitSchedule, running: Int, claimed: Int, weight
 // order for the report file; a serial (`--jobs 1`) run prints in schedule order.
 kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String) -> [KitEntryRun] {
     runs := [KitEntryRun]{}
-    loop (index, item) in entries -> &runs.push(KitEntryRun{index: index, suite: item.suite, ran: false, done: false, results: [KitCaseResult]{}})
+    loop (index, item) in entries -> runs.push(KitEntryRun{index: index, suite: item.suite, ran: false, done: false, results: [KitCaseResult]{}})
     { sender: done, receiver: finished }: channel<KitEntryRun>()
     task.group pool(limit: schedule.jobs) {
         started := 0
@@ -1049,7 +1072,7 @@ kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: 
                 run.results = [KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "testkit task stopped before reporting this entry", exit: -1}]
                 run.done = true
             }
-            kit_golden_mark_tier_splits(&run.results)
+            kit_golden_mark_tier_splits(run.results)
             loop result in run.results {
                 if result.diff != "" -> print(result.diff)
                 kit_report_row(result)
@@ -1063,43 +1086,37 @@ kit_execute_entries: fn(entries: [KitSelected], schedule: KitSchedule, options: 
 // Runs one entry in its own task, so a panic in it still reports the entry, as not done.
 kit_execute_report: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String, guard: Int, done: Sender<KitEntryRun>) {
     entry_task: task kit_execute_entry(index, item.copy(), options.copy(), env.copy(), known.copy(), root.copy(), run_scratch.copy(), guard)
-    run := ^entry_task.join() ?? KitEntryRun{index: index, suite: item.suite.copy(), ran: true, done: false, results: [KitCaseResult]{}}
-    done.send(^run)
+    run := entry_task.join() ?? KitEntryRun{index: index, suite: item.suite.copy(), ran: true, done: false, results: [KitCaseResult]{}}
+    done.send(run)
 }
 
 // One entry in its private scratch `<run>/<index>`, removed afterwards unless tracing.
-// Every row carries the entry's wall time and its children's largest resident peak.
+// Every row carries the entry's wall time and its memory claim: its children's largest
+// resident peak plus the files a row held on a memory-backed scratch.
 kit_execute_entry: fn(index: Int, item: KitSelected, options: KitOptions, env: KitEnv, known: [String: String], root: String, run_scratch: String, guard: Int) -> KitEntryRun {
     entry: item.entry
     started: time.instant()
     run := KitEntryRun{index: index, suite: item.suite, ran: false, done: true, results: [KitCaseResult]{}}
     scratch: files.join(run_scratch, "{index}")
     files.create_dir_all(scratch) ?? {
-        &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
+        run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
         return run
     }
     run.ran = true
     context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless, known: known}
-    context.env.trace_case = entry.path
     context.env.resident_limit = guard
-    context.env.peaks = files.join(run_scratch, "{index}.peaks")
+    claim: shared KitPeak{bytes: 0}
+    context.env.peak = Val(claim.copy())
     loop outcome in kit_suite_run(item.suite, entry, context) {
-        &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
+        run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
     }
     kit_exec_stop_strays(scratch)
-    if env.trace_node == "" {
-        kit_exec_remove_tree(scratch) ?? {
-            &run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
-            false
-        }
+    kit_exec_remove_tree(scratch) ?? {
+        run.results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+        false
     }
-    peak := 0
-    peaks: kit_exec_optional(context.env.peaks) ?? ""
-    loop line in peaks.split("\n") {
-        sampled: Int.parse(line) ?? next
-        if sampled > peak -> peak = sampled
-    }
-    files.remove(context.env.peaks).drop("an entry whose children were never sampled has no peak log")
+    held: claim.guard_read()
+    peak: held.value.bytes
     wall_ms: started.elapsed().ns /% 1000000
     loop at in 0..<run.results.len() {
         run.results[at].wall_ms = if wall_ms > 0 -> wall_ms else -> 1

@@ -12,7 +12,7 @@ s2_syntax_paths: fn(root: String) -> [String] {
     kind: s2_syntax_files_api.stat(root) ?? return out
     if kind.is_symlink -> return out
     if kind.is_file {
-        &out.push(root)
+        out.push(root.copy())
         return out
     }
     if !kind.is_dir -> return out
@@ -26,7 +26,7 @@ s2_syntax_paths: fn(root: String) -> [String] {
         }
         if entry.is_dir && (omit || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")) -> next
         children: s2_syntax_paths(entry.path)
-        loop child in children -> &out.push(child)
+        loop child in children -> out.push(child)
     }
     out
 }
@@ -74,6 +74,41 @@ s2_syntax_old_binding: fn(line: String) -> Bool {
     false
 }
 
+// A negative UI fixture keeps a retired spelling as its subject: the lines of a
+// `tests/ui` fixture that its `.stderr` snapshot reports an Error at.
+s2_syntax_ui_subject_lines: fn(path: String) -> [Int] {
+    lines := [Int]{}
+    if !path.starts_with("tests/ui/") || !path.ends_with(".jet") -> return lines
+    stem: policy_slice_bytes(path, 0, path.bytes().len() - 4)
+    snapshot: s2_syntax_files_api.read("{stem}.stderr") ?? return lines
+    marker: "--> {path}:"
+    error := false
+    loop line in snapshot.lines() {
+        if line.starts_with("Error [") {
+            error = true
+            next
+        }
+        if line.starts_with("Warning [") || line.starts_with("Stop [") || line.starts_with("Lint [") {
+            error = false
+            next
+        }
+        at: s2_syntax_parse.find_from(line, marker, 0)
+        if !error || at < 0 -> next
+        rest: policy_slice_bytes(line, at + marker.bytes().len(), line.bytes().len())
+        number: Int.parse(rest.split(":").to_list()[0]) ?? next
+        lines.push(number)
+    }
+    lines
+}
+
+// A `tests/ui` snapshot's source excerpt (`  4 | use core.json`) quotes its
+// fixture, which the scan checks on its own.
+s2_syntax_ui_excerpt: fn(path: String, line: String) -> Bool {
+    if !path.starts_with("tests/ui/") || path.ends_with(".jet") -> return false
+    head: s2_syntax_trim_start(line).split(" |").to_list()[0]
+    head != "" && head.bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
+}
+
 s2_syntax_live_surface_has_no_retired_spellings: fn() {
     roots: [String]{"AGENTS.md", "CLAUDE.md", "Docs/spec", "Docs/spec/reference/syntax-surface.jet", "Core", "Examples", "tests/ui"}
     forbidden: [String]{"@unsafe", "@audit", "@extern", "@bindgen", "#extern", "#bindgen", "#layout", "#grant", "#context", "#test", "#pure", "pure fn", "#todo", "List<", "List[", "Map<", "#[Serialize", "Serialize]", "#[Deserialize", "Deserialize]", "core.json", "use jet.", "use std.", "?continue", "?break", "?return", "comptime val "}
@@ -82,10 +117,12 @@ s2_syntax_live_surface_has_no_retired_spellings: fn() {
         loop path in s2_syntax_paths(root) {
             if path.ends_with(".rs") || s2_syntax_skip(path) -> next
             source: s2_syntax_files_api.read(path) ?? next
+            subjects: s2_syntax_ui_subject_lines(path)
             loop (index, line) in source.lines() {
+                if subjects.contains(index + 1) || s2_syntax_ui_excerpt(path, line) -> next
                 loop needle in forbidden {
                     if needle == "pure fn" && !path.starts_with("Docs") -> next
-                    if s2_syntax_forbidden(line, needle) -> &failures.push("{path}:{index + 1} contains retired {needle}")
+                    if s2_syntax_forbidden(line, needle) -> failures.push("{path}:{index + 1} contains retired {needle}")
                 }
             }
         }
@@ -144,9 +181,9 @@ s2_syntax_old_binding_migration_paths_stay_removed: fn() {
                 allowed: path.ends_with("tests/ui/foreign_declaration_binding.jet") && s2_syntax_old_binding(line)
                 if allowed -> next
                 loop code in codes {
-                    if line.contains(code) -> &failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
+                    if line.contains(code) -> failures.push("{path}:{index + 1} contains retired binding diagnostic {code}")
                 }
-                if s2_syntax_old_binding(line) -> &failures.push("{path}:{index + 1} contains retired binding spelling")
+                if s2_syntax_old_binding(line) -> failures.push("{path}:{index + 1} contains retired binding spelling")
             }
         }
     }
@@ -219,7 +256,7 @@ s2_syntax_syntax_status_matrix_covers_unbuilt_notes: fn() {
         context := [String]{}
         at := start
         loop at < end {
-            &context.push(lines[at])
+            context.push(lines[at])
             at = at + 1
         }
         paragraph: context.join("\n")
@@ -301,11 +338,12 @@ s2_syntax_artifact_extensions_are_one_closed_kind_specific_family: fn() {
     failures := [String]{}
     loop root in roots {
         loop path in s2_syntax_paths(root) {
-            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") -> next
+            // Dated evidence keeps its words as recorded (retirement_ratchet.jet).
+            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") || guards_dated_evidence(path) -> next
             source: s2_syntax_files_api.read(path) ?? next
             loop (index, line) in source.lines() {
                 loop suffix in retired {
-                    if line.contains(suffix) && !line.contains("jet.jproof") -> &failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
+                    if line.contains(suffix) && !line.contains("jet.jproof") -> failures.push("{path}:{index + 1} retains retired artifact suffix {suffix}")
                 }
             }
         }

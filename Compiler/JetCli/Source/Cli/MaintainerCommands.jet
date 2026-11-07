@@ -9,6 +9,7 @@ use {
     cli_time: core.time
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
     jet_foundation.[diagnostic_render_all]
+    jet_pkg_model.[COMPILER_VERSION]
 }
 
 jet_cli_maintainer_error: fn(code: String, what: String, why: String?, fix: String?, color: Bool, json: Bool, status: Int) -> JetDriverVerbOutput Never! {
@@ -80,13 +81,13 @@ jet_cli_reduce_candidate: fn(lines: &[String], start: Int, end: Int) -> [String]
     // Build only the retained lines; do not clone and drain the whole input.
     candidate := [String]{}
     loop (index, line) in lines {
-        if index < start || index >= end -> &candidate.push(line)
+        if index < start || index >= end -> candidate.push(line.copy())
     }
     candidate
 }
 // The reducer owns its line buffer; candidates borrow it until accepted.
-jet_cli_reduce_lines: fn(lines: ^[String], scratch: String, code: String) -> [String] {
-    current := ^lines
+jet_cli_reduce_lines: fn(lines: &&[String], scratch: String, code: String) -> [String] {
+    current := lines.move()
     chunks := 2
     loop current.len() >= 2 {
         size: (current.len() + chunks - 1) /% chunks
@@ -95,10 +96,10 @@ jet_cli_reduce_lines: fn(lines: ^[String], scratch: String, code: String) -> [St
         start := 0
         loop start < current.len() {
             end: if start + size < current.len() -> start + size else -> current.len()
-            candidate: jet_cli_reduce_candidate(&current, start, end)
+            candidate: jet_cli_reduce_candidate(current, start, end)
             if candidate.len() > 0 && jet_cli_reduce_oracle(scratch, candidate.join("\n"), code) {
                 cli_term.print("reduce: dropped lines {start + 1}..{end} -> {candidate.len()} line(s) left")
-                current = ^candidate
+                current = candidate.move()
                 chunks = if chunks > 2 -> chunks - 1 else -> 2
                 progress = true
                 break
@@ -134,7 +135,7 @@ jet_cli_devtools_reduce: fn(args: [String], color: Bool, json: Bool) -> JetDrive
     }
     lines: source.lines()
     cli_term.print("reduce: starting at {lines.len()} line(s)")
-    reduced: jet_cli_reduce_lines(^lines, scratch, wanted)
+    reduced: jet_cli_reduce_lines(lines, scratch, wanted)
     cli_term.print("reduce: finished at {reduced.len()} line(s)")
     text: reduced.join("\n")
     output: jet_cli_reduced_path(file)
@@ -166,7 +167,7 @@ jet_cli_devtools_ice_report: fn(args: [String], color: Bool, json: Bool) -> JetD
     bundle: "{root}/.jet/ice-report/{jet_cli_maintainer_stem(file)}-{stamp}"
     cli_files.create_dir_all(bundle) ?? return jet_cli_maintainer_error("E2105", "couldn't create `{bundle}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)
     names: [String]{"source.jet", "versions.txt"}
-    contents: [String]{source, "jet {JET_CLI_VERSION}\n"}
+    contents: [String]{source, "jet {COMPILER_VERSION}\n"}
     loop index in 0..<names.len() {
         name: names[index]
         cli_files.write("{bundle}/{name}", contents[index]) ?? return jet_cli_maintainer_error("E2105", "couldn't write `{name}`: {jet_cli_io_error_text(err)}", None, None, color, json, JET_DRIVER_EXIT_USER_ERROR)

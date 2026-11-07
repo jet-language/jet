@@ -75,7 +75,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
 
     signature: key.sign("message".bytes())
     keyring := Keyring.empty()
-    &keyring.insert(key)
+    keyring.insert(key)
     verified: if keyring.verify(key.key_id, "message".bytes(), signature) == {
         .Ok(_) -> true
         .Err(_) -> false
@@ -148,7 +148,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     assert(drill_ok, "the drill observes ThresholdUnmet")
     signed: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0]})
     drill := boot.engine.clone_for_drill()
-    unmet: if &drill.update_root(signed, TrustedClock.Fixed(now)) == {
+    unmet: if drill.update_root(signed, TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
         .Err(error) -> {
             if error == {
@@ -172,12 +172,12 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     new_root.public_key_ids = engine.root.public_key_ids
     new_root.delegations = engine.root.delegations
     signed: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0], boot.keys[1]})
-    &engine.update_root(signed, TrustedClock.Fixed(now)) ?? panic("rotate root")
+    engine.update_root(signed, TrustedClock.Fixed(now)) ?? panic("rotate root")
     assert_eq(engine.versions.get((MetadataRole.Root).label()), Val(2))
     older := new_root
     older.version = 1
     signed_old: trust_test_sign_root(older, [TrustKey]{boot.keys[0], boot.keys[1]})
-    rollback: if &engine.update_root(signed_old, TrustedClock.Fixed(now)) == {
+    rollback: if engine.update_root(signed_old, TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
         .Err(error) -> {
             if error == {
@@ -203,9 +203,9 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     target_map["jetsrc/core"] = TargetMeta{length: 4, hashes: target_hashes, custom: [String: String]{}}
     targets: TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
     signed_targets: trust_sign_targets(targets, [TrustKey]{targets_key}) ?? panic("sign targets")
-    &engine.verify_targets(signed_targets, Val("jetsrc/core"), TrustedClock.Fixed(now)) ?? panic("verify delegated targets")
+    engine.verify_targets(signed_targets, Val("jetsrc/core"), TrustedClock.Fixed(now)) ?? panic("verify delegated targets")
     denied_engine := engine.clone_for_drill()
-    denied: if &denied_engine.verify_targets(signed_targets, Val("evil/core"), TrustedClock.Fixed(now)) == {
+    denied: if denied_engine.verify_targets(signed_targets, Val("evil/core"), TrustedClock.Fixed(now)) == {
         .Ok(_) -> false
         .Err(error) -> {
             if error == {
@@ -223,14 +223,14 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     snapshot_meta["targets"] = SnapshotMetaEntry{version: 1, length: targets_canonical.bytes().len(), hashes: snapshot_hashes}
     snapshot: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta: snapshot_meta}
     signed_snapshot: trust_sign_snapshot(snapshot, [TrustKey]{snapshot_key}) ?? panic("sign snapshot")
-    &engine.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
+    engine.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
 
     snapshot_canonical: trust_canonical_snapshot(snapshot)
     timestamp_hashes := [String: String]{}
     timestamp_hashes["sha256"] = crypto.sha256(snapshot_canonical.bytes()).hex()
     timestamp: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len(), hashes: timestamp_hashes}}
     signed_timestamp: trust_sign_timestamp(timestamp, [TrustKey]{timestamp_key}) ?? panic("sign timestamp")
-    &engine.verify_timestamp(signed_timestamp, snapshot_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify timestamp")
+    engine.verify_timestamp(signed_timestamp, snapshot_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify timestamp")
 }
 
 #Test("bad clock expiry and size limits") {
@@ -280,13 +280,13 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     now: TRUST_TEST_NOW
     boot: trust_test_boot(now)
     engine := boot.engine
-    &engine.bind_identity(BoundIdentity.registry("jet-lang.dev")) ?? panic("bind registry")
-    &engine.bind_identity(BoundIdentity.cache_builder("ci-builder-1")) ?? panic("bind cache builder")
-    &engine.bind_identity(BoundIdentity.remote_executor("worker-a")) ?? panic("bind remote executor")
+    engine.bind_identity(BoundIdentity.registry("jet-lang.dev")) ?? panic("bind registry")
+    engine.bind_identity(BoundIdentity.cache_builder("ci-builder-1")) ?? panic("bind cache builder")
+    engine.bind_identity(BoundIdentity.remote_executor("worker-a")) ?? panic("bind remote executor")
     offline: PublisherIdentity.OfflineEd25519{public_key_hex: "11".repeat(32), key_id: "pub1"}
-    &engine.bind_identity(BoundIdentity.publisher("alice", offline)) ?? panic("bind publisher")
+    engine.bind_identity(BoundIdentity.publisher("alice", offline)) ?? panic("bind publisher")
     sigstore: PublisherIdentity.Sigstore{identity: "alice@jet-lang.dev", issuer: "https://accounts.google.com", checkpoint_digest: "aa".repeat(32), bundle_digest: "bb".repeat(32)}
-    mismatch: if &engine.bind_identity(BoundIdentity{kind: IdentityKind.Registry, name: "other", proof: Val(sigstore)}) == {
+    mismatch: if engine.bind_identity(BoundIdentity{kind: IdentityKind.Registry, name: "other", proof: Val(sigstore)}) == {
         .Ok(_) -> false
         .Err(error) -> {
             if error == {
@@ -297,7 +297,7 @@ trust_test_tamper: fn(sig_hex: String) -> String {
     }
     assert(mismatch, "a Sigstore proof cannot sit on a registry identity")
     refreshed := engine.clone_for_drill()
-    &refreshed.bind_identity(BoundIdentity.publisher("alice", sigstore)) ?? panic("rebind the same publisher name")
+    refreshed.bind_identity(BoundIdentity.publisher("alice", sigstore)) ?? panic("rebind the same publisher name")
     kms: PublisherIdentity.KMSHSM{key_uri: "kms:projects/p/locations/l/keyRings/r/cryptoKeys/k", public_key_hex: "cc".repeat(32), key_id: "kms1"}
     kms.validate() ?? panic("a kms: key URI validates")
     evil: PublisherIdentity.KMSHSM{key_uri: "http://evil", public_key_hex: "cc".repeat(32), key_id: "kms1"}

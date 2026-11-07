@@ -11,7 +11,7 @@ read_snapshot: fn(builder: &MetadataBuilder) -> MetadataType Never! {
     loop row_view in builder.deferred {
         if row_view.key != 7 -> next
         row := row_view.copy()
-        mutate(&builder)
+        mutate(builder)
         return row.ty
     }
     panic("missing deferred metadata")
@@ -24,7 +24,7 @@ run: fn() Never! {
         }},
         mutations: 0
     }
-    snapshot := read_snapshot(&builder)
+    snapshot := read_snapshot(builder)
     assert(builder.mutations == 1)
     if snapshot == .Apply(name, args) {
         assert(name == "List")

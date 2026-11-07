@@ -1,0 +1,30 @@
+// Power is a numeric method; ^ only hands over ownership.
+run: fn() {
+    print((3).pow(2))
+    side: 4
+    print(side.pow(3))
+    growth := 2
+    growth = growth.pow(10)
+    print(growth)
+    print(Float{1.5}.pow(Float{2.0}))
+    power_semantics_lesson()
+}
+
+// Explicit method nesting preserves power grouping.
+// Whole-number powers stay exact; a written negative exponent is Fraction.
+FOLDED: comptime { (2).pow((3).pow(2)) }
+LARGE_EXACT: comptime { (2).pow(200) }
+show_exact: fn(value: Int) { print(value) }
+raise: fn(base: Int, exponent: Int) -> Int { return base.pow(exponent) }
+power_semantics_lesson: fn() {
+    print((2).pow((3).pow(2)))
+    print(-(3).pow(2))
+    print((2).pow(10))
+    print((2).pow(-1))
+    print(FOLDED)
+    show_exact(raise(2, 200))
+    show_exact(LARGE_EXACT)
+    print((2).pow(3).pow(2))
+    print((-3).pow(2))
+    print(Float.from_int(2).pow(Float.from_int(10)))
+}

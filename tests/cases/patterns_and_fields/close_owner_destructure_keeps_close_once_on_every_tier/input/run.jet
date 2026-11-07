@@ -1,7 +1,7 @@
 
 Resource: struct { name: String, payload: String }
 impl Resource.Close {
-    close: fn(^self) { print("close {self.name} {self.payload}") }
+    close: fn(&&self) { print("close {self.name} {self.payload}") }
 }
 make: fn() -> Resource { Resource{name: "call", payload: "intact"} }
 ordered: fn(early: Bool) {
@@ -11,4 +11,7 @@ ordered: fn(early: Bool) {
     if early -> return
     print("normal")
 }
-run: fn() { ordered(false); ordered(true) }
+run: fn() {
+    ordered(false)
+    ordered(true)
+}

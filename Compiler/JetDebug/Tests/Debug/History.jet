@@ -35,7 +35,7 @@ debug_history_test_event: fn(sequence: Int) -> DebugEvent Never! {
 debug_history_test_writes: fn(run: RecordedRun) -> [[DebugWrite]] Never! {
     history: DebugHistory.from_recorded_run(run, "source", "shape")
     rows := [[DebugWrite]]{}
-    loop event in history.events -> &rows.push(event.writes.copy())
+    loop event in history.events -> rows.push(event.writes.copy())
     rows
 }
 
@@ -47,11 +47,11 @@ debug_history_test_writes: fn(run: RecordedRun) -> [[DebugWrite]] Never! {
     history.cursor = Val(23)
     history.decision_ledger = Val(ledger)
     loop index in 0..<DEBUG_HISTORY_MAX_EVENTS {
-        accepted: &history.push(debug_history_test_event(index + 1))
+        accepted: history.push(debug_history_test_event(index + 1))
         assert(accepted)
     }
     assert(!history.capped)
-    rejected: &history.push(debug_history_test_event(DEBUG_HISTORY_MAX_EVENTS + 1))
+    rejected: history.push(debug_history_test_event(DEBUG_HISTORY_MAX_EVENTS + 1))
     assert(!rejected)
     assert(history.capped)
     // Refusal, not a rolling overwrite: the oldest and newest events remain.
@@ -63,9 +63,9 @@ debug_history_test_writes: fn(run: RecordedRun) -> [[DebugWrite]] Never! {
     assert_eq(history.decision_ledger, Val(ledger))
     // The flag is sticky: once room exists again push succeeds, but capped
     // stays reported.
-    removed: &history.events.pop()
+    removed: history.events.pop()
     removed.drop("free one retained slot")
-    reaccepted: &history.push(debug_history_test_event(100002))
+    reaccepted: history.push(debug_history_test_event(100002))
     assert(reaccepted)
     assert(history.capped)
     assert_eq(history.events[99999].sequence, 100002)
@@ -77,16 +77,16 @@ debug_history_test_writes: fn(run: RecordedRun) -> [[DebugWrite]] Never! {
 #Test("from_recorded_run_keeps_every_act_and_reports_cap_at_or_past_bound") {
     run := RecordedRun.default()
     loop index in 0..<99999 {
-        &run.acts.push(debug_history_test_act(index + 1, "main", 1, [ValueSnapshot]{}))
+        run.acts.push(debug_history_test_act(index + 1, "main", 1, [ValueSnapshot]{}))
     }
     below: DebugHistory.from_recorded_run(run, "source", "shape")
     assert_eq(below.events.len(), 99999)
     assert(!below.capped)
-    &run.acts.push(debug_history_test_act(100000, "main", 1, [ValueSnapshot]{}))
+    run.acts.push(debug_history_test_act(100000, "main", 1, [ValueSnapshot]{}))
     at: DebugHistory.from_recorded_run(run, "source", "shape")
     assert_eq(at.events.len(), 100000)
     assert(at.capped)
-    &run.acts.push(debug_history_test_act(100001, "main", 2, [ValueSnapshot]{}))
+    run.acts.push(debug_history_test_act(100001, "main", 2, [ValueSnapshot]{}))
     past := DebugHistory.from_recorded_run(run, "source", "shape")
     // No silent truncation: every receipt act survives, and the checkpoint
     // still names the true last act.
@@ -96,7 +96,7 @@ debug_history_test_writes: fn(run: RecordedRun) -> [[DebugWrite]] Never! {
     assert_eq(past.events[100000].line, 2)
     assert_eq((past.checkpoint ?? panic("checkpoint")).sequence, 100001)
     // A history already past the bound refuses further pushes.
-    refused: &past.push(debug_history_test_event(100002))
+    refused: past.push(debug_history_test_event(100002))
     assert(!refused)
     assert_eq(past.events.len(), 100001)
 }
@@ -225,7 +225,7 @@ debug_history_test_writes: fn(run: RecordedRun) -> [[DebugWrite]] Never! {
     ledger: "opaque\n{{\"decision_ledger\":[\"α\",{{\"cursor\":9}}]}}\n"
     history := DebugHistory.default()
     history.decision_ledger = Val(ledger)
-    pushed: &history.push(DebugEvent{
+    pushed: history.push(DebugEvent{
         sequence: 7,
         function: "helper",
         line: 12,

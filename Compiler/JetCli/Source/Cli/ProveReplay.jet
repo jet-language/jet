@@ -16,13 +16,14 @@ use {
     prove_crypto: core.crypto
     replay_base64: core.encoding.base64
     replay_random: core.crypto.random
-    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
-        CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
+        BuildSettingOverride, CanonicalJSON, CanonicalJSONField, CanonicalJSONParser, Diagnostic, Effect, Expr, ImportDecl, Item, OrFallback, PatSlot, Pattern, Stmt,
         canonical_json_bytes, canonical_json_value, import_alias, import_walk_bindings,
     ]
     jet_parser.[parse_source]
     jet_sema.[sema_taint_core_effect, sema_taint_effect_name]
+    jet_pkg_model.[COMPILER_VERSION]
 }
 
 // The v1 bounds (proof-replay-decisions): 256 MiB per artifact, 100,000 frames, 1 MiB
@@ -265,10 +266,10 @@ jet_cli_prove_replay_checks: fn(identity: JetCLIProveIdentity, members: [JetCLIP
 // clock.
 jet_cli_replay_capture_roots: fn(sites: [JetCLIReplaySite], sensitive: Bool) -> [String] Never! {
     roots := [String]{}
-    if sensitive && jet_cli_replay_reaches(sites, Effect.IO) -> &roots.push("IO")
-    if sensitive && jet_cli_replay_reaches_http(sites) -> &roots.push("Net")
-    if sensitive && jet_cli_replay_reaches(sites, Effect.Rand) -> &roots.push("Rand")
-    &roots.push("Time")
+    if sensitive && jet_cli_replay_reaches(sites, Effect.IO) -> roots.push("IO")
+    if sensitive && jet_cli_replay_reaches_http(sites) -> roots.push("Net")
+    if sensitive && jet_cli_replay_reaches(sites, Effect.Rand) -> roots.push("Rand")
+    roots.push("Time")
     roots
 }
 
@@ -322,7 +323,7 @@ jet_cli_replay_consent: fn(identity: JetCLIProveIdentity, members: [JetCLIProveM
     hosts: if roots.contains("Net") -> "the hosts the program's HTTP requests name, decided as it runs" else -> "none"
     cli_term.eprint("jet prove --capture-sensitive stores raw values from this run in a file that is not encrypted:\n  authorities: {roots.join(", ")}\n  hosts: {hosts}\n  byte limits: {JET_CLI_REPLAY_MAX_PAYLOAD} bytes per record, {JET_CLI_REPLAY_MAX_FRAMES} records, {JET_CLI_REPLAY_MAX_ARTIFACT} bytes per artifact\n  may disclose: {disclosed}paths, host names, panic text and run metadata\n  destination: {destination} (mode 0600)\nType `{JET_CLI_REPLAY_CONSENT}` to record it:")
     input := cli_term.stdin()
-    answer: &input.read_line() ?? ""
+    answer: input.read_line() ?? ""
     if answer.removesuffix("\n").removesuffix("\r") == JET_CLI_REPLAY_CONSENT -> return None
     Val(jet_cli_replay_refusal("E3627", "replay capture refused sensitive data", "the consent phrase was not typed, so no raw Rand/IO/Net value is recorded", "run again and type `capture sensitive` exactly, or use safe `--capture` for Time-only roots"))
 }
@@ -356,7 +357,7 @@ jet_cli_replay_target_identity: fn(identity: JetCLIProveIdentity, members: [JetC
         jet_cli_replay_string("mir_identity", identity.mir_json),
         jet_cli_replay_string("mir_schema", JET_CLI_REPLAY_ADAPTER),
         jet_cli_replay_string("optimized_mir_hash", identity.mir_hash),
-        jet_cli_replay_string("profile", "dev"),
+        jet_cli_replay_string("profile", identity.profile),
         jet_cli_replay_string("semantic_mir_hash", identity.mir_hash),
         jet_cli_replay_string("source_digest", identity.source_digest),
         jet_cli_replay_string("target_triple", triple),
@@ -398,7 +399,7 @@ jet_cli_replay_rand_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIP
     operations := [String]{}
     loop site in sites {
         if site.authority == .Val(authority) {
-            if authority == Effect.Rand -> &operations.push(site.operation.copy())
+            if authority == Effect.Rand -> operations.push(site.operation.copy())
         }
     }
     jet_cli_replay_site_digest("jet.replay.v1/rand-site", identity, members, operations.join("\n"))
@@ -410,14 +411,14 @@ jet_cli_replay_rand_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIP
 jet_cli_replay_io_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], sites: [JetCLIReplaySite]) -> String Never! {
     operations := [String]{}
     loop site in sites {
-        if jet_cli_replay_is_stdin_read(site) -> &operations.push(site.operation.copy())
+        if jet_cli_replay_is_stdin_read(site) -> operations.push(site.operation.copy())
     }
     jet_cli_replay_site_digest("jet.replay.v1/io-site", identity, members, operations.join("\n"))
 }
 
 jet_cli_replay_site_digest: fn(domain: String, identity: JetCLIProveIdentity, members: [JetCLIProveMember], operation: String) -> String Never! {
     out := [U8]{}
-    loop field in ([String]{domain, jet_cli_replay_entry(identity.authority_root, members), identity.source_digest, operation}) -> jet_cli_receipt_frame(&out, field.bytes())
+    loop field in ([String]{domain, jet_cli_replay_entry(identity.authority_root, members), identity.source_digest, operation}) -> jet_cli_receipt_frame(out, field.bytes())
     prove_crypto.sha256(out).hex()
 }
 
@@ -427,7 +428,7 @@ jet_cli_replay_site_digest: fn(domain: String, identity: JetCLIProveIdentity, me
 jet_cli_replay_net_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMember], sites: [JetCLIReplaySite]) -> String Never! {
     operations := [String]{}
     loop site in sites {
-        if jet_cli_replay_is_http_client(site) -> &operations.push(site.operation.copy())
+        if jet_cli_replay_is_http_client(site) -> operations.push(site.operation.copy())
     }
     jet_cli_replay_site_digest("jet.replay.v1/net-site", identity, members, operations.join("\n"))
 }
@@ -440,11 +441,11 @@ jet_cli_replay_net_site_id: fn(identity: JetCLIProveIdentity, members: [JetCLIPr
 jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt: String, status: Int) -> [U8] Never! {
     header: jet_cli_replay_header_bytes("0".repeat(24), run, salt, status)
     out := "JREPLAY".bytes()
-    &out.push(U8{0})
-    jet_cli_replay_put_le(&out, 1, 2)
-    jet_cli_replay_put_le(&out, 0, 2)
-    jet_cli_replay_put_le(&out, header.len(), 4)
-    &out.extend(header)
+    out.push(U8{0})
+    jet_cli_replay_put_le(out, 1, 2)
+    jet_cli_replay_put_le(out, 0, 2)
+    jet_cli_replay_put_le(out, header.len(), 4)
+    out.extend(header)
     ns: CanonicalJSON.Object([CanonicalJSONField]{
         jet_cli_replay_integer_field("bits", 64),
         jet_cli_replay_string("t", "int"),
@@ -462,77 +463,77 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
     salt_bytes: replay_base64.decode_url(salt) ?? panic("the capture's privacy salt is base64url")
     loop read in reads {
         if read.kind == JET_CLI_REPLAY_JOURNAL_RAND {
-            &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+            payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
                 CanonicalJSONField{key: "bits", value: jet_cli_replay_bytes_value(read.bytes)},
                 jet_cli_replay_integer_field("call_id", rand_calls),
                 CanonicalJSONField{key: "requested_bits", value: jet_cli_replay_uint(read.bytes.len() * 8)},
                 jet_cli_replay_string("site_id", read.site_id),
             })))
-            &kinds.push(JET_CLI_REPLAY_KIND_RAND)
+            kinds.push(JET_CLI_REPLAY_KIND_RAND)
             rand_calls += 1
             next
         }
         if read.kind == JET_CLI_REPLAY_JOURNAL_NET {
-            jet_cli_replay_net_frames(&payloads, &kinds, read, net_calls, salt_bytes)
+            jet_cli_replay_net_frames(payloads, kinds, read, net_calls, salt_bytes)
             net_calls += 1
             next
         }
         // Each read is its own stream, named by its IORead frame's sequence.
         stream: jet_cli_replay_integer_field("stream_id", payloads.len())
-        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
             jet_cli_replay_integer_field("call_id", io_calls),
             CanonicalJSONField{key: "requested_bytes", value: jet_cli_replay_uint(read.request)},
             jet_cli_replay_string("site_id", read.site_id),
             stream,
         })))
-        &kinds.push(JET_CLI_REPLAY_KIND_IO_READ)
+        kinds.push(JET_CLI_REPLAY_KIND_IO_READ)
         io_calls += 1
         if read.kind == JET_CLI_REPLAY_JOURNAL_STDIN && read.result > 0 {
             chunk := 0
             loop chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES < read.result {
                 start: chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES
                 end: if read.result - start > JET_CLI_REPLAY_IO_CHUNK_BYTES -> start + JET_CLI_REPLAY_IO_CHUNK_BYTES else -> read.result
-                &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+                payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
                     CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(read.bytes.slice(start, end))},
                     jet_cli_replay_integer_field("chunk_index", chunk),
                     stream,
                 })))
-                &kinds.push(JET_CLI_REPLAY_KIND_IO_CHUNK)
+                kinds.push(JET_CLI_REPLAY_KIND_IO_CHUNK)
                 chunk += 1
             }
             next
         }
         outcome: if read.kind == JET_CLI_REPLAY_JOURNAL_STDIN -> jet_cli_replay_io_outcome(None) else -> jet_cli_replay_io_outcome(jet_cli_replay_io_error_name(read.result))
-        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
             jet_cli_replay_integer_field("chunks", 0),
             CanonicalJSONField{key: "outcome", value: outcome},
             stream,
             CanonicalJSONField{key: "total_bytes", value: jet_cli_replay_uint(0)},
         })))
-        &kinds.push(JET_CLI_REPLAY_KIND_IO_END)
+        kinds.push(JET_CLI_REPLAY_KIND_IO_END)
     }
     payload_bytes := 0
     loop (sequence, record) in payloads {
         payload: record.slice(0, record.len() - 1)
         frame := [U8]{U8{1}}
-        jet_cli_replay_put_le(&frame, kinds[sequence], 2)
-        jet_cli_replay_put_le(&frame, sequence, 8)
-        jet_cli_replay_put_le(&frame, payload.len(), 4)
-        &frame.extend(payload)
-        &out.extend(frame)
-        &out.extend(prove_crypto.sha256(frame).as_bytes())
+        jet_cli_replay_put_le(frame, kinds[sequence], 2)
+        jet_cli_replay_put_le(frame, sequence, 8)
+        jet_cli_replay_put_le(frame, payload.len(), 4)
+        frame.extend(payload.copy())
+        out.extend(frame.copy())
+        out.extend(prove_crypto.sha256(frame).as_bytes())
         payload_bytes += payload.len()
     }
     // With the id zeroed, these bytes are what the content id hashes.
     id: prove_crypto.sha256(out).hex().slice(0, 24)
     bytes := out.slice(0, 32)
-    &bytes.extend(id.bytes())
-    &bytes.extend(out.slice(56, out.len()))
+    bytes.extend(id.bytes())
+    bytes.extend(out.slice(56, out.len()))
     footer_hash: prove_crypto.sha256(bytes).as_bytes()
-    &bytes.extend("JEND".bytes())
-    jet_cli_replay_put_le(&bytes, payloads.len(), 8)
-    jet_cli_replay_put_le(&bytes, payload_bytes, 8)
-    &bytes.extend(footer_hash)
+    bytes.extend("JEND".bytes())
+    jet_cli_replay_put_le(bytes, payloads.len(), 8)
+    jet_cli_replay_put_le(bytes, payload_bytes, 8)
+    bytes.extend(footer_hash)
     bytes
 }
 
@@ -542,44 +543,44 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
 jet_cli_replay_net_frames: fn(payloads: &[[U8]], kinds: &[Int], read: JetCLIReplayRead, call: Int, salt: [U8]) Never! {
     hop: jet_cli_replay_net_hop(read.bytes) ?? panic("a Net journal record is checked when it is read")
     request_id: payloads.len()
-    &payloads.push(canonical_json_bytes(CanonicalJSON.Object(jet_cli_replay_net_request_fields(hop, call, request_id, read.site_id, salt))))
-    &kinds.push(JET_CLI_REPLAY_KIND_NET_REQUEST)
+    payloads.push(canonical_json_bytes(CanonicalJSON.Object(jet_cli_replay_net_request_fields(hop, call, request_id, read.site_id, salt))))
+    kinds.push(JET_CLI_REPLAY_KIND_NET_REQUEST)
     id: jet_cli_replay_integer_field("request_id", request_id)
     if hop.stage >= 1 {
         addresses := [CanonicalJSON]{}
-        loop address in hop.addresses -> &addresses.push(CanonicalJSON.String(jet_cli_replay_ip_text(address)))
-        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        loop address in hop.addresses -> addresses.push(CanonicalJSON.String(jet_cli_replay_ip_text(address)))
+        payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
             CanonicalJSONField{key: "addresses", value: CanonicalJSON.Array(addresses)},
             id,
         })))
-        &kinds.push(JET_CLI_REPLAY_KIND_NET_DNS)
+        kinds.push(JET_CLI_REPLAY_KIND_NET_DNS)
     }
     if hop.answered {
         headers := [CanonicalJSON]{}
         loop (at, name) in hop.reply_names {
-            &headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])}))
+            headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("name", name), jet_cli_replay_string("value", hop.reply_values[at])}))
         }
-        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
             CanonicalJSONField{key: "headers", value: CanonicalJSON.Array(headers)},
             id,
             jet_cli_replay_integer_field("status", hop.status),
         })))
-        &kinds.push(JET_CLI_REPLAY_KIND_NET_RESPONSE)
+        kinds.push(JET_CLI_REPLAY_KIND_NET_RESPONSE)
     }
     chunk := 0
     loop chunk * JET_CLI_REPLAY_NET_CHUNK_BYTES < hop.stream.len() {
         start: chunk * JET_CLI_REPLAY_NET_CHUNK_BYTES
         end: if hop.stream.len() - start > JET_CLI_REPLAY_NET_CHUNK_BYTES -> start + JET_CLI_REPLAY_NET_CHUNK_BYTES else -> hop.stream.len()
-        &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+        payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
             CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(hop.stream.slice(start, end))},
             jet_cli_replay_integer_field("chunk_index", chunk),
             id,
         })))
-        &kinds.push(JET_CLI_REPLAY_KIND_NET_CHUNK)
+        kinds.push(JET_CLI_REPLAY_KIND_NET_CHUNK)
         chunk += 1
     }
     outcome: if hop.ending == "eof" -> jet_cli_replay_io_outcome(None) else -> jet_cli_replay_io_outcome(Val(hop.ending))
-    &payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
+    payloads.push(canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
         jet_cli_replay_integer_field("chunks", chunk),
         CanonicalJSONField{key: "outcome", value: outcome},
         jet_cli_replay_string("phase", JET_CLI_REPLAY_NET_PHASES[hop.stage]),
@@ -587,7 +588,7 @@ jet_cli_replay_net_frames: fn(payloads: &[[U8]], kinds: &[Int], read: JetCLIRepl
         CanonicalJSONField{key: "sends", value: jet_cli_replay_uint(hop.sends)},
         CanonicalJSONField{key: "total_bytes", value: jet_cli_replay_uint(hop.stream.len())},
     })))
-    &kinds.push(JET_CLI_REPLAY_KIND_NET_END)
+    kinds.push(JET_CLI_REPLAY_KIND_NET_END)
 }
 
 // A NetRequest's fields, in byte order. The body and each header field are
@@ -598,7 +599,7 @@ jet_cli_replay_net_request_fields: fn(hop: JetCLIReplayNetHop, call: Int, reques
     headers := [CanonicalJSON]{}
     loop (at, name) in hop.names {
         digest: jet_cli_replay_net_digest("jet.replay.v1/net-header", salt, [[U8]]{name.bytes(), hop.values[at].bytes()})
-        &headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("digest_sha256", digest), jet_cli_replay_string("name", name)}))
+        headers.push(CanonicalJSON.Object([CanonicalJSONField]{jet_cli_replay_string("digest_sha256", digest), jet_cli_replay_string("name", name)}))
     }
     [CanonicalJSONField]{
         CanonicalJSONField{key: "body_digest", value: body},
@@ -619,16 +620,16 @@ jet_cli_replay_net_request_fields: fn(hop: JetCLIReplayNetHop, call: Int, reques
 // each part after its u64 big-endian length.
 jet_cli_replay_net_digest: fn(domain: String, salt: [U8], parts: [[U8]]) -> String Never! {
     out := domain.bytes()
-    &out.push(U8{0})
-    &out.extend(salt)
+    out.push(U8{0})
+    out.extend(salt.copy())
     loop part in parts {
         loop step in 0..<8 {
             shift: 7 - step
             rest := part.len()
             loop _ in 0..<shift -> rest = rest /% 256
-            &out.push(U8.from_int(rest %% 256) ?? panic("replay digest byte"))
+            out.push(U8.from_int(rest %% 256) ?? panic("replay digest byte"))
         }
-        &out.extend(part)
+        out.extend(part.copy())
     }
     prove_crypto.sha256(out).hex()
 }
@@ -656,7 +657,7 @@ jet_cli_replay_cursor_u64: fn(cursor: &JetCLIReplayCursor) -> Int Never! {
 }
 
 jet_cli_replay_cursor_bytes: fn(cursor: &JetCLIReplayCursor) -> [U8] Never! {
-    size: jet_cli_replay_cursor_u64(&cursor)
+    size: jet_cli_replay_cursor_u64(cursor)
     if cursor.bad || size > cursor.bytes.len() - cursor.at {
         cursor.bad = true
         return [U8]{}
@@ -667,7 +668,7 @@ jet_cli_replay_cursor_bytes: fn(cursor: &JetCLIReplayCursor) -> [U8] Never! {
 }
 
 jet_cli_replay_cursor_text: fn(cursor: &JetCLIReplayCursor) -> String Never! {
-    bytes: jet_cli_replay_cursor_bytes(&cursor)
+    bytes: jet_cli_replay_cursor_bytes(cursor)
     text: String.from_bytes(bytes) ?? {
         cursor.bad = true
         return ""
@@ -679,19 +680,19 @@ jet_cli_replay_cursor_text: fn(cursor: &JetCLIReplayCursor) -> String Never! {
 // rest of the hop empty.
 jet_cli_replay_net_request_read: fn(cursor: &JetCLIReplayCursor) -> JetCLIReplayNetHop Never! {
     hop := JetCLIReplayNetHop{hop: 0, method: "", scheme: "", host: "", port: 0, target: "", names: [String]{}, values: [String]{}, body: None, stage: 0, addresses: [[U8]]{}, sends: 0, stream: [U8]{}, answered: false, status: 0, reply_names: [String]{}, reply_values: [String]{}, ending: ""}
-    hop.hop = jet_cli_replay_cursor_u64(&cursor)
-    hop.method = jet_cli_replay_cursor_text(&cursor)
-    hop.scheme = jet_cli_replay_cursor_text(&cursor)
-    hop.host = jet_cli_replay_cursor_text(&cursor)
-    hop.port = jet_cli_replay_cursor_u64(&cursor)
-    hop.target = jet_cli_replay_cursor_text(&cursor)
-    fields: jet_cli_replay_cursor_u64(&cursor)
+    hop.hop = jet_cli_replay_cursor_u64(cursor)
+    hop.method = jet_cli_replay_cursor_text(cursor)
+    hop.scheme = jet_cli_replay_cursor_text(cursor)
+    hop.host = jet_cli_replay_cursor_text(cursor)
+    hop.port = jet_cli_replay_cursor_u64(cursor)
+    hop.target = jet_cli_replay_cursor_text(cursor)
+    fields: jet_cli_replay_cursor_u64(cursor)
     loop _ in 0..<fields {
         if cursor.bad -> break
-        &hop.names.push(jet_cli_replay_cursor_text(&cursor))
-        &hop.values.push(jet_cli_replay_cursor_text(&cursor))
+        hop.names.push(jet_cli_replay_cursor_text(cursor))
+        hop.values.push(jet_cli_replay_cursor_text(cursor))
     }
-    if jet_cli_replay_cursor_u64(&cursor) == 1 -> hop.body = Val(jet_cli_replay_cursor_bytes(&cursor))
+    if jet_cli_replay_cursor_u64(cursor) == 1 -> hop.body = Val(jet_cli_replay_cursor_bytes(cursor))
     hop
 }
 
@@ -699,28 +700,28 @@ jet_cli_replay_net_request_read: fn(cursor: &JetCLIReplayCursor) -> JetCLIReplay
 // when it is malformed.
 jet_cli_replay_net_hop: fn(bytes: [U8]) -> JetCLIReplayNetHop? Never! {
     cursor := JetCLIReplayCursor{bytes: bytes.copy(), at: 0, bad: false}
-    hop := jet_cli_replay_net_request_read(&cursor)
-    hop.stage = jet_cli_replay_cursor_u64(&cursor)
-    count: jet_cli_replay_cursor_u64(&cursor)
+    hop := jet_cli_replay_net_request_read(cursor)
+    hop.stage = jet_cli_replay_cursor_u64(cursor)
+    count: jet_cli_replay_cursor_u64(cursor)
     loop _ in 0..<count {
         if cursor.bad -> break
-        address: jet_cli_replay_cursor_bytes(&cursor)
+        address: jet_cli_replay_cursor_bytes(cursor)
         if address.len() != 4 && address.len() != 16 -> cursor.bad = true
-        &hop.addresses.push(address)
+        hop.addresses.push(address)
     }
-    hop.sends = jet_cli_replay_cursor_u64(&cursor)
-    hop.stream = jet_cli_replay_cursor_bytes(&cursor)
-    hop.answered = jet_cli_replay_cursor_u64(&cursor) == 1
+    hop.sends = jet_cli_replay_cursor_u64(cursor)
+    hop.stream = jet_cli_replay_cursor_bytes(cursor)
+    hop.answered = jet_cli_replay_cursor_u64(cursor) == 1
     if hop.answered {
-        hop.status = jet_cli_replay_cursor_u64(&cursor)
-        replies: jet_cli_replay_cursor_u64(&cursor)
+        hop.status = jet_cli_replay_cursor_u64(cursor)
+        replies: jet_cli_replay_cursor_u64(cursor)
         loop _ in 0..<replies {
             if cursor.bad -> break
-            &hop.reply_names.push(jet_cli_replay_cursor_text(&cursor))
-            &hop.reply_values.push(jet_cli_replay_cursor_text(&cursor))
+            hop.reply_names.push(jet_cli_replay_cursor_text(cursor))
+            hop.reply_values.push(jet_cli_replay_cursor_text(cursor))
         }
     }
-    hop.ending = jet_cli_replay_cursor_text(&cursor)
+    hop.ending = jet_cli_replay_cursor_text(cursor)
     if cursor.bad || cursor.at != bytes.len() || hop.stage < 0 || hop.stage >= JET_CLI_REPLAY_NET_PHASES.len() -> return None
     if hop.scheme != "http" && hop.scheme != "https" -> return None
     if (hop.stage < 2 && hop.ending == "eof") || (hop.answered && hop.stage != 3) || (hop.stream.len() > 0 && hop.stage < 2) -> return None
@@ -770,7 +771,7 @@ jet_cli_replay_bytes_value: fn(bytes: [U8]) -> CanonicalJSON Never! {
 // The canonical header, without its trailing LF.
 jet_cli_replay_header_bytes: fn(artifact_id: String, run: JetCLIReplayRun, salt: String, status: Int) -> [U8] Never! {
     roots := [CanonicalJSON]{}
-    loop root in run.roots -> &roots.push(CanonicalJSON.String(root.copy()))
+    loop root in run.roots -> roots.push(CanonicalJSON.String(root.copy()))
     header: canonical_json_bytes(CanonicalJSON.Object([CanonicalJSONField]{
         jet_cli_replay_string("artifact_id", artifact_id),
         CanonicalJSONField{key: "capture", value: CanonicalJSON.Object([CanonicalJSONField]{
@@ -801,7 +802,7 @@ jet_cli_replay_header_bytes: fn(artifact_id: String, run: JetCLIReplayRun, salt:
 jet_cli_replay_put_le: fn(out: &[U8], value: Int, width: Int) Never! {
     rest := value
     loop _ in 0..<width {
-        &out.push(U8.from_int(rest %% 256) ?? panic("replay wire byte"))
+        out.push(U8.from_int(rest %% 256) ?? panic("replay wire byte"))
         rest /%= 256
     }
 }
@@ -823,15 +824,95 @@ jet_cli_replay_capture_write: fn(identity: JetCLIProveIdentity, request: JetCLIP
     if request.path == .Val(path) {
         parts: path.split("/").to_list()
         folders := [String]{}
-        loop index in 0..<(parts.len() - 1) -> &folders.push(parts[index].copy())
+        loop index in 0..<(parts.len() - 1) -> folders.push(parts[index].copy())
         jet_cli_replay_publish(root, folders, parts[parts.len() - 1], bytes)
     }
     indexed: ".jet/replays/{name}"
     index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_unfinalized(err.message))
-    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-prove-v1"}
+    record: JetCLIRecordIdentity{target_inputs_sha256: identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
     row: jet_cli_comparison_index_entry(index, record, "replay", id, indexed, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, false) ?? return Err(jet_cli_replay_unfinalized(err.message))
-    jet_cli_record_index_publish_and_store(&index, root, ^row) ?? return Err(jet_cli_replay_unfinalized(err.message))
+    jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_unfinalized(err.message))
     Ok(indexed)
+}
+
+// `jet test --record=NAME` (Rust `begin_named_capture`): the safe, Time-only
+// capture of one run, published at `.jet/replays/NAME.jetproof-replay` and
+// indexed there as a protected replay. The run's programs read the recorded
+// clock through JET_CLI_REPLAY_TIME_ENV; nothing else is recorded, so no
+// sensitive-data preflight applies. The identity names the selected
+// `profile`, and its semantic hash binds the target's MIR identity to that
+// profile and to the `--set` writers the program compiled under, so a run
+// under other settings is a different recording.
+JetCLIReplayRecord: struct {
+    identity: JetCLIProveIdentity
+    name: String
+    run: JetCLIReplayRun
+}
+
+// Binds a recording of `file`, whose compile authorized `files`, before its
+// program builds: a refusal leaves no artifact.
+jet_cli_replay_record_begin: fn(file: String, files: [String], name: String, profile: String, settings: [BuildSettingOverride]) -> JetCLIReplayRecord JetCLIProveRefusal! {
+    if jet_cli_replay_name_problem(name) == .Val(problem) {
+        return Err(JetCLIProveRefusal{code: "E2104", what: "invalid replay name", why: problem, fix: "write `--record=NAME` with letters, digits, `-`, or `_`", exit_code: JET_DRIVER_EXIT_USAGE})
+    }
+    target: JetCLIProveTarget{kind: "file", root: file, members: [String]{file}}
+    members: jet_cli_prove_members(target) ?? return Err(err)
+    group: JetCLIProveGroup{entry: 0, diagnostics: [Diagnostic]{}, files: files, has_tests: true, sites: [JetCLIProveTestSite]{}, floor: None}
+    base: jet_cli_prove_identity(target, members, [JetCLIProveGroup]{group}) ?? return Err(err)
+    selected: if profile == "" -> "dev" else -> profile
+    fields := [JetCLIProveField]{jet_cli_prove_field("mir", base.mir_hash), jet_cli_prove_field("profile", selected)}
+    loop setting in settings -> fields.push(jet_cli_prove_field("set {setting.name}", setting.value))
+    mir_hash: jet_cli_prove_digest("jet-record-mir-v1", fields)
+    identity := base.copy()
+    identity.profile = selected.copy()
+    identity.mir_hash = mir_hash.copy()
+    identity.mir_json = jet_cli_prove_mir_json(mir_hash, members)
+    path: jet_cli_replay_record_path(name)
+    if cli_time.unix_ns() < 0 {
+        return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the system clock is before the Unix epoch", "fix the system clock and record again"))
+    }
+    if cli_files.lexists(jet_cli_entry_join(identity.authority_root, path)) {
+        return Err(jet_cli_replay_refusal("E3629", "replay artifact could not be finalized", "the recording `{path}` already exists", "record under a new NAME, or remove the old recording"))
+    }
+    sites: jet_cli_replay_sites(members)
+    site_id: jet_cli_replay_site_id(identity, members, sites)
+    run: JetCLIReplayRun{
+        time_ms: jet_cli_replay_clock_ms(),
+        identity: jet_cli_replay_target_identity(identity, members, site_id),
+        site_id: site_id,
+        rand_site_id: jet_cli_replay_rand_site_id(identity, members, sites),
+        io_site_id: jet_cli_replay_io_site_id(identity, members, sites),
+        net_site_id: jet_cli_replay_net_site_id(identity, members, sites),
+        sensitive: false,
+        roots: [String]{"Time"},
+        replayed: None,
+    }
+    Ok(JetCLIReplayRecord{identity: identity, name: name, run: run})
+}
+
+jet_cli_replay_record_path: fn(name: String) -> String Never! {
+    ".jet/replays/{name}.jetproof-replay"
+}
+
+// Writes a recording once its run ended with `status`, then indexes it
+// (Rust `finish_named_capture`, `index_named_capture`); returns its path.
+// An index that can't take the row is E2105, as every record index update's is.
+jet_cli_replay_record_finish: fn(record: JetCLIReplayRecord, status: Int) -> String JetCLIProveRefusal! {
+    root: record.identity.authority_root
+    salt: replay_random.token_urlsafe(32) ?? return Err(jet_cli_replay_unfinalized("the OS gave no randomness for the privacy salt"))
+    bytes: jet_cli_replay_encode(record.run, [JetCLIReplayRead]{}, salt, status)
+    verified: jet_cli_replay_verify(bytes) ?? return Err(jet_cli_replay_capture_fault(err))
+    jet_cli_replay_publish(root, [String]{".jet", "replays"}, "{record.name}.jetproof-replay", bytes) ?? return Err(err)
+    path: jet_cli_replay_record_path(record.name)
+    index := jet_cli_record_index_load(root) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    identity: JetCLIRecordIdentity{target_inputs_sha256: record.identity.input_sha256, tool_version: COMPILER_VERSION, engine: "jet-prove-v1"}
+    row: jet_cli_comparison_index_entry(index, identity, "replay", verified.artifact_id, path, bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    jet_cli_record_index_publish_and_store(index, root, row) ?? return Err(jet_cli_replay_record_index_failed(err.message))
+    Ok(path)
+}
+
+jet_cli_replay_record_index_failed: fn(why: String) -> JetCLIProveRefusal Never! {
+    jet_cli_replay_refusal("E2105", "record index update failed", why, "make the project's `.jet/records` directory writable, then record again")
 }
 
 // --- the harness journal ------------------------------------------------------
@@ -842,10 +923,10 @@ jet_cli_replay_journal_open: fn(run: JetCLIReplayRun, folder: String) -> JetCLIR
     records := [U8]{}
     if run.replayed == .Val(artifact) {
         loop read in artifact.reads {
-            &records.push(U8.from_int(read.kind) ?? panic("journal kind"))
-            jet_cli_replay_put_le(&records, read.request, 8)
-            jet_cli_replay_put_le(&records, read.result, 8)
-            &records.extend(read.bytes)
+            records.push(U8.from_int(read.kind) ?? panic("journal kind"))
+            jet_cli_replay_put_le(records, read.request, 8)
+            jet_cli_replay_put_le(records, read.result, 8)
+            records.extend(read.bytes)
         }
     } else {
         return Ok(JetCLIReplayJournal{capture: jet_cli_rooted_join(folder, "journal.bin"), records: "", trace: ""})
@@ -896,7 +977,7 @@ jet_cli_replay_journal_reads: fn(journal: JetCLIReplayJournal, run: JetCLIReplay
             if hop.stage >= 1 -> frames += 1
             if hop.answered -> frames += 1
             if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random, stdin and HTTP reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that makes fewer reads"))
-            &reads.push(JetCLIReplayRead{kind: kind, site_id: run.net_site_id.copy(), request: 0, result: result, bytes: record})
+            reads.push(JetCLIReplayRead{kind: kind, site_id: run.net_site_id.copy(), request: 0, result: result, bytes: record})
             at = begin + result
             next
         }
@@ -914,7 +995,7 @@ jet_cli_replay_journal_reads: fn(journal: JetCLIReplayJournal, run: JetCLIReplay
         frames += if rand -> 1 else if kind == JET_CLI_REPLAY_JOURNAL_STDIN && result > 0 -> 1 + (result + JET_CLI_REPLAY_IO_CHUNK_BYTES - 1) /% JET_CLI_REPLAY_IO_CHUNK_BYTES else -> 2
         if frames >= JET_CLI_REPLAY_MAX_FRAMES -> return Err(jet_cli_replay_refusal("E3628", "replay capture exceeded its artifact limit", "the run's random, stdin and HTTP reads need more than {JET_CLI_REPLAY_MAX_FRAMES - 1} records", "capture a target that makes fewer reads"))
         site_id: if rand -> run.rand_site_id else -> run.io_site_id
-        &reads.push(JetCLIReplayRead{kind: kind, site_id: site_id.copy(), request: request, result: result, bytes: bytes.slice(start, start + size)})
+        reads.push(JetCLIReplayRead{kind: kind, site_id: site_id.copy(), request: request, result: result, bytes: bytes.slice(start, start + size)})
         at = start + size
     }
     Ok(reads)
@@ -940,7 +1021,7 @@ jet_cli_replay_journal_stdin: fn(path: String) -> [U8] Never! {
         start: at + JET_CLI_REPLAY_JOURNAL_HEAD
         size: if kind < 97 -> result else -> 0
         if size < 0 || size > bytes.len() - start -> return typed
-        if kind == JET_CLI_REPLAY_JOURNAL_STDIN -> &typed.extend(bytes.slice(start, start + size))
+        if kind == JET_CLI_REPLAY_JOURNAL_STDIN -> typed.extend(bytes.slice(start, start + size))
         at = start + size
     }
     typed
@@ -983,7 +1064,7 @@ jet_cli_replay_net_divergence: fn(request: [U8], artifact: JetCLIReplayArtifact,
     if index >= artifact.requests.len() -> return Val(jet_cli_replay_diverged("the replayed run made HTTP request {index + 1}, but the recording holds {artifact.requests.len()}"))
     seen: artifact.requests[index]
     cursor := JetCLIReplayCursor{bytes: request.copy(), at: 0, bad: false}
-    hop: jet_cli_replay_net_request_read(&cursor)
+    hop: jet_cli_replay_net_request_read(cursor)
     if cursor.bad || cursor.at != request.len() -> return Val(jet_cli_replay_diverged("HTTP request {index + 1} of the replayed run reached the trace malformed"))
     parsed: jet_cli_replay_json(seen.payload, "NetRequest payload") ?? return Val(jet_cli_replay_diverged("the recorded HTTP request {index + 1} is not valid JSON"))
     recorded: if parsed == {
@@ -1031,7 +1112,7 @@ jet_cli_replay_entry_stem: fn(entry: String) -> String Never! {
     loop byte in stem.bytes() {
         code: Int.from_u8(byte)
         keep: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95
-        &out.push(if keep -> byte else -> U8{95})
+        out.push(if keep -> byte else -> U8{95})
     }
     if out.len() == 0 -> return "replay"
     String.from_bytes(out) ?? "replay"
@@ -1306,7 +1387,7 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
             if chunks == 0 && kind != JET_CLI_REPLAY_KIND_IO_END -> return Err(jet_cli_replay_corrupt("an IORead frame must be followed by its IOChunk frames or one IOEnd frame"))
             if chunks > 0 {
                 delivered: open ?? return Err(jet_cli_replay_corrupt("an IORead frame has no stream"))
-                &artifact.reads.push(delivered)
+                artifact.reads.push(delivered)
                 open = None
             }
         }
@@ -1321,7 +1402,7 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
         } else if kind == JET_CLI_REPLAY_KIND_RAND {
             if !artifact.roots.contains("Rand") -> return Err(jet_cli_replay_corrupt("a RandBits frame needs the capture root `Rand`"))
             drawn: jet_cli_replay_rand_payload(payload, rand_calls)
-            &artifact.reads.push(drawn)
+            artifact.reads.push(drawn)
             rand_calls += 1
         } else if kind == JET_CLI_REPLAY_KIND_IO_READ {
             if !artifact.roots.contains("IO") -> return Err(jet_cli_replay_corrupt("an IORead frame needs the capture root `IO`"))
@@ -1338,12 +1419,12 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
         } else if kind == JET_CLI_REPLAY_KIND_IO_END {
             read: open ?? return Err(jet_cli_replay_corrupt("an IOEnd frame has no open IORead"))
             ended: jet_cli_replay_io_end_payload(payload, read, stream)
-            &artifact.reads.push(ended)
+            artifact.reads.push(ended)
             open = None
         } else if kind == JET_CLI_REPLAY_KIND_NET_REQUEST {
             if !artifact.roots.contains("Net") -> return Err(jet_cli_replay_corrupt("a NetRequest frame needs the capture root `Net`"))
             site: jet_cli_replay_net_request_payload(payload, net_calls, frames)
-            &artifact.requests.push(JetCLIReplayNetSeen{request_id: frames, payload: payload.copy()})
+            artifact.requests.push(JetCLIReplayNetSeen{request_id: frames, payload: payload.copy()})
             net = Val(JetCLIReplayNetOpen{request_id: frames, site_id: site, resolved: false, answered: false, chunks: 0, stream: [U8]{}})
             net_calls += 1
         } else if kind == JET_CLI_REPLAY_KIND_NET_DNS {
@@ -1362,13 +1443,13 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
             hop := net ?? return Err(jet_cli_replay_corrupt("a NetChunk frame has no open NetRequest"))
             if !hop.resolved -> return Err(jet_cli_replay_corrupt("a NetChunk frame must follow its NetDns frame"))
             bytes_read: jet_cli_replay_net_chunk_payload(payload, hop.request_id, hop.chunks)
-            &hop.stream.extend(bytes_read)
+            hop.stream.extend(bytes_read)
             hop.chunks += 1
             net = Val(hop)
         } else if kind == JET_CLI_REPLAY_KIND_NET_END {
             hop: net ?? return Err(jet_cli_replay_corrupt("a NetEnd frame has no open NetRequest"))
             ended: jet_cli_replay_net_end_payload(payload, hop)
-            &artifact.reads.push(ended)
+            artifact.reads.push(ended)
             net = None
         } else {
             jet_cli_replay_act_payload(payload)
@@ -1380,7 +1461,7 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
     if open != None {
         if chunks == 0 -> return Err(jet_cli_replay_corrupt("an IORead frame must be followed by its IOChunk frames or one IOEnd frame"))
         delivered: open ?? return Err(jet_cli_replay_corrupt("an IORead frame has no stream"))
-        &artifact.reads.push(delivered)
+        artifact.reads.push(delivered)
     }
     if net != None -> return Err(jet_cli_replay_corrupt("a NetRequest frame must be followed by its frames up to one NetEnd frame"))
     if time_frames == 0 -> return Err(jet_cli_replay_limit("replay artifact contains no Time authority"))
@@ -1391,8 +1472,8 @@ jet_cli_replay_verify: fn(bytes: [U8]) -> JetCLIReplayArtifact JetCLIReplayFault
     // is its first key and the id's 24 bytes sit right after `{"artifact_id":"`.
     if jet_cli_replay_text_at(bytes, 16, "{{\"artifact_id\":\"") == false || Int.from_u8(bytes[56]) != 34 -> return Err(jet_cli_replay_corrupt("header artifact_id must be its first field"))
     body := bytes.slice(0, 32)
-    loop _ in 0..<24 -> &body.push(U8{48})
-    &body.extend(bytes.slice(56, jend))
+    loop _ in 0..<24 -> body.push(U8{48})
+    body.extend(bytes.slice(56, jend))
     content: prove_crypto.sha256(body).hex()
     if content.slice(0, 24) != artifact.artifact_id -> return Err(jet_cli_replay_corrupt("replay artifact_id does not match content"))
     Ok(artifact)
@@ -1589,7 +1670,7 @@ jet_cli_replay_io_chunk_payload: fn(payload: [U8], open: JetCLIReplayRead, strea
     bytes: jet_cli_replay_payload_bytes(fields, "bytes", what)
     if bytes.len() == 0 || bytes.len() > JET_CLI_REPLAY_IO_CHUNK_BYTES || open.result != chunk * JET_CLI_REPLAY_IO_CHUNK_BYTES || open.result + bytes.len() > open.request -> return Err(jet_cli_replay_corrupt("IOChunk payload bytes disagree with their IORead"))
     delivered := open.bytes.copy()
-    &delivered.extend(bytes)
+    delivered.extend(bytes)
     Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_STDIN, site_id: open.site_id.copy(), request: open.request, result: delivered.len(), bytes: delivered})
 }
 
@@ -1723,11 +1804,11 @@ jet_cli_replay_net_end_payload: fn(payload: [U8], open: JetCLIReplayNetOpen) -> 
     // fails while the hop is in its handshake phase may end at `eof`.
     if stage < 2 && ending == "eof" -> return Err(jet_cli_replay_corrupt("{what} ends a hop that stopped before connecting without an error"))
     record := [U8]{}
-    jet_cli_replay_put_le(&record, stage, 8)
-    jet_cli_replay_put_le(&record, sends, 8)
-    jet_cli_replay_put_le(&record, open.stream.len(), 8)
-    &record.extend(open.stream)
-    &record.extend(ending.bytes())
+    jet_cli_replay_put_le(record, stage, 8)
+    jet_cli_replay_put_le(record, sends, 8)
+    jet_cli_replay_put_le(record, open.stream.len(), 8)
+    record.extend(open.stream)
+    record.extend(ending.bytes())
     Ok(JetCLIReplayRead{kind: JET_CLI_REPLAY_JOURNAL_NET, site_id: open.site_id.copy(), request: 0, result: record.len(), bytes: record})
 }
 
@@ -1750,7 +1831,7 @@ jet_cli_replay_net_pairs: fn(fields: [CanonicalJSONField], key: String, keys: [S
         loop name in keys {
             _: jet_cli_replay_text(entry, name, "{what} {key}")
         }
-        &entries.push(entry)
+        entries.push(entry)
     }
     Ok(entries)
 }
@@ -1777,7 +1858,7 @@ jet_cli_replay_ip_text: fn(address: [U8]) -> String Never! {
             rest = rest /% 16
             if rest == 0 -> break
         }
-        &groups.push(group)
+        groups.push(group)
     }
     groups.join(":")
 }
@@ -1791,7 +1872,7 @@ jet_cli_replay_ip_bytes: fn(text: String) -> [U8]? Never! {
         loop part in parts {
             if !jet_cli_replay_digits(part) || (part.len() > 1 && part.starts_with("0")) -> return None
             value: Int.parse(part) ?? return None
-            &out.push(U8.from_int(value) ?? return None)
+            out.push(U8.from_int(value) ?? return None)
         }
         return Val(out)
     }
@@ -1804,8 +1885,8 @@ jet_cli_replay_ip_bytes: fn(text: String) -> [U8]? Never! {
             code: Int.from_u8(byte)
             value = value * 16 + (if code <= 57 -> code - 48 else -> code - 87)
         }
-        &out.push(U8.from_int(value /% 256) ?? return None)
-        &out.push(U8.from_int(value %% 256) ?? return None)
+        out.push(U8.from_int(value /% 256) ?? return None)
+        out.push(U8.from_int(value %% 256) ?? return None)
     }
     Val(out)
 }
@@ -1904,7 +1985,7 @@ jet_cli_replay_act_local: fn(item: CanonicalJSON) JetCLIReplayFault! {
 // the bytes its canonical rendering writes.
 jet_cli_replay_json: fn(bytes: [U8], name: String) -> CanonicalJSON JetCLIReplayFault! {
     parser := CanonicalJSONParser{bytes: bytes.copy(), at: 0}
-    value: canonical_json_value(&parser) ?? return Err(jet_cli_replay_corrupt("{name} is not valid JSON"))
+    value: canonical_json_value(parser) ?? return Err(jet_cli_replay_corrupt("{name} is not valid JSON"))
     if parser.at != bytes.len() -> return Err(jet_cli_replay_corrupt("{name} is not valid JSON"))
     rendered: canonical_json_bytes(value)
     if rendered.slice(0, rendered.len() - 1) != bytes -> return Err(jet_cli_replay_corrupt("{name} is not canonical JSON"))
@@ -1980,7 +2061,7 @@ jet_cli_replay_roots: fn(capture: [CanonicalJSONField]) -> [String] JetCLIReplay
         if field.value == .Array(items) {
             loop item in items {
                 if item == .String(root) {
-                    &roots.push(root.copy())
+                    roots.push(root.copy())
                 } else {
                     return Err(jet_cli_replay_corrupt("header capture roots must be strings"))
                 }
@@ -2110,9 +2191,9 @@ jet_cli_replay_sites: fn(members: [JetCLIProveMember]) -> [JetCLIReplaySite] {
         if jet_cli_errors(parsed.diagnostics).len() != 0 -> next
         aliases: jet_cli_replay_aliases(parsed.program.imports)
         locals := [String]{}
-        jet_cli_replay_local_names(parsed.program.items, &locals)
-        jet_cli_replay_items(parsed.program.items, aliases, locals, &sites)
-        jet_cli_replay_block(parsed.program.script_body, aliases, locals, &sites)
+        jet_cli_replay_local_names(parsed.program.items, locals)
+        jet_cli_replay_items(parsed.program.items, aliases, locals, sites)
+        jet_cli_replay_block(parsed.program.script_body, aliases, locals, sites)
     }
     sites
 }
@@ -2147,9 +2228,9 @@ jet_cli_replay_aliases: fn(imports: [ImportDecl]) -> [String:String] Never! {
 jet_cli_replay_local_names: fn(items: [Item], names: &[String]) {
     loop item in items {
         if item == {
-            .Func(func) -> &names.push(func.name.copy())
+            .Func(func) -> names.push(func.name.copy())
             .CodeModule(unit) -> {
-                if unit.body == .Val(body) -> jet_cli_replay_local_names(body, &names)
+                if unit.body == .Val(body) -> jet_cli_replay_local_names(body, names)
             }
             else -> {}
         }
@@ -2159,19 +2240,19 @@ jet_cli_replay_local_names: fn(items: [Item], names: &[String]) {
 jet_cli_replay_items: fn(items: [Item], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
     loop item in items {
         if item == {
-            .Func(func) -> jet_cli_replay_block(func.body, aliases, locals, &sites)
+            .Func(func) -> jet_cli_replay_block(func.body, aliases, locals, sites)
             .Struct(def) -> {
-                loop method in def.methods -> jet_cli_replay_block(method.body, aliases, locals, &sites)
+                loop method in def.methods -> jet_cli_replay_block(method.body, aliases, locals, sites)
             }
             .Enum(def) -> {
-                loop method in def.methods -> jet_cli_replay_block(method.body, aliases, locals, &sites)
+                loop method in def.methods -> jet_cli_replay_block(method.body, aliases, locals, sites)
             }
             .Impl(def) -> {
-                loop method in def.methods -> jet_cli_replay_block(method.body, aliases, locals, &sites)
+                loop method in def.methods -> jet_cli_replay_block(method.body, aliases, locals, sites)
             }
-            .Test(def) -> jet_cli_replay_block(def.body, aliases, locals, &sites)
+            .Test(def) -> jet_cli_replay_block(def.body, aliases, locals, sites)
             .CodeModule(unit) -> {
-                if unit.body == .Val(body) -> jet_cli_replay_items(body, aliases, locals, &sites)
+                if unit.body == .Val(body) -> jet_cli_replay_items(body, aliases, locals, sites)
             }
             else -> {}
         }
@@ -2179,22 +2260,22 @@ jet_cli_replay_items: fn(items: [Item], aliases: [String:String], locals: [Strin
 }
 
 jet_cli_replay_boundary: fn(operation: String, sites: &[JetCLIReplaySite]) {
-    &sites.push(JetCLIReplaySite{operation: operation, authority: None, owner: ""})
+    sites.push(JetCLIReplaySite{operation: operation, authority: None, owner: ""})
 }
 
 jet_cli_replay_block: fn(body: [Stmt], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
-    loop statement in body -> jet_cli_replay_stmt(statement, aliases, locals, &sites)
+    loop statement in body -> jet_cli_replay_stmt(statement, aliases, locals, sites)
 }
 
 jet_cli_replay_stmt: fn(statement: Stmt, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
     if statement == {
-        .Expr(value) -> jet_cli_replay_expr(value, aliases, locals, &sites)
+        .Expr(value) -> jet_cli_replay_expr(value, aliases, locals, sites)
         .Val(binding) -> {
-            jet_cli_replay_expr(binding.init, aliases, locals, &sites)
+            jet_cli_replay_expr(binding.init, aliases, locals, sites)
             if binding.pattern == .Val(bound) {
                 if bound == .Refutable(pattern, fallback, _, _) {
-                    jet_cli_replay_pattern(pattern, aliases, locals, &sites)
-                    jet_cli_replay_fallback(fallback, aliases, locals, &sites)
+                    jet_cli_replay_pattern(pattern, aliases, locals, sites)
+                    jet_cli_replay_fallback(fallback, aliases, locals, sites)
                 }
             }
         }
@@ -2202,101 +2283,101 @@ jet_cli_replay_stmt: fn(statement: Stmt, aliases: [String:String], locals: [Stri
             if target == {
                 .Local(_, _) -> {}
                 .Index(base, index, _, _) -> {
-                    jet_cli_replay_expr(base, aliases, locals, &sites)
-                    jet_cli_replay_expr(index, aliases, locals, &sites)
+                    jet_cli_replay_expr(base, aliases, locals, sites)
+                    jet_cli_replay_expr(index, aliases, locals, sites)
                 }
-                .Field(base, _, _) -> jet_cli_replay_expr(base, aliases, locals, &sites)
+                .Field(base, _, _) -> jet_cli_replay_expr(base, aliases, locals, sites)
             }
-            jet_cli_replay_expr(value, aliases, locals, &sites)
+            jet_cli_replay_expr(value, aliases, locals, sites)
         }
         .Return(value, _) -> {
-            if value == .Val(returned) -> jet_cli_replay_expr(returned, aliases, locals, &sites)
+            if value == .Val(returned) -> jet_cli_replay_expr(returned, aliases, locals, sites)
         }
         .While(cond, body, _, _, _) -> {
-            jet_cli_replay_expr(cond, aliases, locals, &sites)
-            jet_cli_replay_block(body, aliases, locals, &sites)
+            jet_cli_replay_expr(cond, aliases, locals, sites)
+            jet_cli_replay_block(body, aliases, locals, sites)
         }
         .For(_, _, _, kind, body, _, _, _, _) -> {
             if kind == {
                 .Range(start, end, step, _) -> {
-                    jet_cli_replay_expr(start, aliases, locals, &sites)
-                    jet_cli_replay_expr(end, aliases, locals, &sites)
-                    if step == .Val(by) -> jet_cli_replay_expr(by, aliases, locals, &sites)
+                    jet_cli_replay_expr(start, aliases, locals, sites)
+                    jet_cli_replay_expr(end, aliases, locals, sites)
+                    if step == .Val(by) -> jet_cli_replay_expr(by, aliases, locals, sites)
                 }
                 .In(collection, step) -> {
-                    jet_cli_replay_expr(collection, aliases, locals, &sites)
-                    if step == .Val(by) -> jet_cli_replay_expr(by, aliases, locals, &sites)
+                    jet_cli_replay_expr(collection, aliases, locals, sites)
+                    if step == .Val(by) -> jet_cli_replay_expr(by, aliases, locals, sites)
                 }
             }
-            jet_cli_replay_block(body, aliases, locals, &sites)
+            jet_cli_replay_block(body, aliases, locals, sites)
         }
         .Switch(subject, arms, else_body, _) -> {
-            jet_cli_replay_expr(subject, aliases, locals, &sites)
+            jet_cli_replay_expr(subject, aliases, locals, sites)
             loop arm in arms {
-                jet_cli_replay_expr(arm.cond, aliases, locals, &sites)
-                jet_cli_replay_block(arm.body, aliases, locals, &sites)
+                jet_cli_replay_expr(arm.cond, aliases, locals, sites)
+                jet_cli_replay_block(arm.body, aliases, locals, sites)
             }
-            if else_body == .Val(otherwise) -> jet_cli_replay_block(otherwise, aliases, locals, &sites)
+            if else_body == .Val(otherwise) -> jet_cli_replay_block(otherwise, aliases, locals, sites)
         }
         .Break(_) -> {}
-        .BreakValue(value, _) -> jet_cli_replay_expr(value, aliases, locals, &sites)
+        .BreakValue(value, _) -> jet_cli_replay_expr(value, aliases, locals, sites)
         .Continue(_) -> {}
         .BreakLabel(_, _) -> {}
-        .BreakLabelValue(_, _, value, _) -> jet_cli_replay_expr(value, aliases, locals, &sites)
+        .BreakLabelValue(_, _, value, _) -> jet_cli_replay_expr(value, aliases, locals, sites)
         .ContinueLabel(_, _) -> {}
-        .Loop(body, _, _, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
+        .Loop(body, _, _, _) -> jet_cli_replay_block(body, aliases, locals, sites)
         .CountedLoop(init, cond, step, body, _, _, _) -> {
-            jet_cli_replay_expr(init.init, aliases, locals, &sites)
-            jet_cli_replay_expr(cond, aliases, locals, &sites)
-            if step == .Val(next_step) -> jet_cli_replay_stmt(next_step, aliases, locals, &sites)
-            jet_cli_replay_block(body, aliases, locals, &sites)
+            jet_cli_replay_expr(init.init, aliases, locals, sites)
+            jet_cli_replay_expr(cond, aliases, locals, sites)
+            if step == .Val(next_step) -> jet_cli_replay_stmt(next_step, aliases, locals, sites)
+            jet_cli_replay_block(body, aliases, locals, sites)
         }
-        .Unsafe(_, _, _, _) -> jet_cli_replay_boundary("#Unsafe raw boundary", &sites)
-        .Impure(_, _, _, _) -> jet_cli_replay_boundary("comptime impure boundary", &sites)
-        .Reactive(_, _) -> jet_cli_replay_boundary("task/concurrency boundary", &sites)
-        .Shield(body, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .Switched(_, body, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .Region(_, _, body, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .Policy(_, body, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .TaskGroup(_, _, _, _, _) -> jet_cli_replay_boundary("task/concurrency boundary", &sites)
-        .Layout(_, _, body, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .AuthorityScope(_, _, _, body, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
+        .Unsafe(_, _, _, _) -> jet_cli_replay_boundary("#Unsafe raw boundary", sites)
+        .Impure(_, _, _, _) -> jet_cli_replay_boundary("comptime impure boundary", sites)
+        .Reactive(_, _) -> jet_cli_replay_boundary("task/concurrency boundary", sites)
+        .Shield(body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .Switched(_, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .Region(_, _, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .Policy(_, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .TaskGroup(_, _, _, _, _) -> jet_cli_replay_boundary("task/concurrency boundary", sites)
+        .Layout(_, _, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .AuthorityScope(_, _, _, body, _) -> jet_cli_replay_block(body, aliases, locals, sites)
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
-            jet_cli_replay_expr(cond, aliases, locals, &sites)
-            jet_cli_replay_block(then_body, aliases, locals, &sites)
-            if else_body == .Val(otherwise) -> jet_cli_replay_block(otherwise, aliases, locals, &sites)
+            jet_cli_replay_expr(cond, aliases, locals, sites)
+            jet_cli_replay_block(then_body, aliases, locals, sites)
+            if else_body == .Val(otherwise) -> jet_cli_replay_block(otherwise, aliases, locals, sites)
         }
         .ComptimeSwitch(subject, arms, else_body, _) -> {
-            jet_cli_replay_expr(subject, aliases, locals, &sites)
+            jet_cli_replay_expr(subject, aliases, locals, sites)
             loop arm in arms {
-                jet_cli_replay_expr(arm.cond, aliases, locals, &sites)
-                jet_cli_replay_block(arm.body, aliases, locals, &sites)
+                jet_cli_replay_expr(arm.cond, aliases, locals, sites)
+                jet_cli_replay_block(arm.body, aliases, locals, sites)
             }
-            if else_body == .Val(otherwise) -> jet_cli_replay_block(otherwise, aliases, locals, &sites)
+            if else_body == .Val(otherwise) -> jet_cli_replay_block(otherwise, aliases, locals, sites)
         }
-        .ComptimeBlock(body, _, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .ContextBlock(_, _, _) -> jet_cli_replay_boundary("context block boundary", &sites)
-        .Live(_, _) -> jet_cli_replay_boundary("live terminal boundary", &sites)
-        .AssumeDet(_, _, _, _) -> jet_cli_replay_boundary("assume-deterministic boundary", &sites)
-        .Transact(_, _, body, _, _) -> jet_cli_replay_block(body, aliases, locals, &sites)
-        .Yield(value, _) -> jet_cli_replay_expr(value, aliases, locals, &sites)
-        .ScopeMember(_, _, _, _, _, _, _, _) -> jet_cli_replay_boundary("scope member boundary", &sites)
-        .DeferClose(close, _) -> jet_cli_replay_expr(close, aliases, locals, &sites)
+        .ComptimeBlock(body, _, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .ContextBlock(_, _, _) -> jet_cli_replay_boundary("context block boundary", sites)
+        .Live(_, _) -> jet_cli_replay_boundary("live terminal boundary", sites)
+        .AssumeDet(_, _, _, _) -> jet_cli_replay_boundary("assume-deterministic boundary", sites)
+        .Transact(_, _, body, _, _) -> jet_cli_replay_block(body, aliases, locals, sites)
+        .Yield(value, _) -> jet_cli_replay_expr(value, aliases, locals, sites)
+        .ScopeMember(_, _, _, _, _, _, _, _) -> jet_cli_replay_boundary("scope member boundary", sites)
+        .DeferClose(close, _) -> jet_cli_replay_expr(close, aliases, locals, sites)
     }
 }
 
 jet_cli_replay_fallback: fn(fallback: OrFallback, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
     if fallback == {
-        .Value(value) -> jet_cli_replay_expr(value, aliases, locals, &sites)
+        .Value(value) -> jet_cli_replay_expr(value, aliases, locals, sites)
         .Block(body, value, _) -> {
-            jet_cli_replay_block(body, aliases, locals, &sites)
-            if value == .Val(result) -> jet_cli_replay_expr(result, aliases, locals, &sites)
+            jet_cli_replay_block(body, aliases, locals, sites)
+            if value == .Val(result) -> jet_cli_replay_expr(result, aliases, locals, sites)
         }
         .Return(value, _) -> {
-            if value == .Val(returned) -> jet_cli_replay_expr(returned, aliases, locals, &sites)
+            if value == .Val(returned) -> jet_cli_replay_expr(returned, aliases, locals, sites)
         }
         .Panic(_, args) -> {
-            loop arg in args -> jet_cli_replay_expr(arg.expr, aliases, locals, &sites)
+            loop arg in args -> jet_cli_replay_expr(arg.expr, aliases, locals, sites)
         }
         .Break(_) -> {}
         .Continue(_) -> {}
@@ -2306,14 +2387,14 @@ jet_cli_replay_fallback: fn(fallback: OrFallback, aliases: [String:String], loca
 }
 
 jet_cli_replay_exprs: fn(values: [Expr], aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
-    loop value in values -> jet_cli_replay_expr(value, aliases, locals, &sites)
+    loop value in values -> jet_cli_replay_expr(value, aliases, locals, sites)
 }
 
 jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
     if value == {
         .Str(parts, _, _) -> {
             loop part in parts {
-                if part == .Interp(inner, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+                if part == .Interp(inner, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
             }
         }
         .StrMatchLit(_, _, _) -> {}
@@ -2323,75 +2404,75 @@ jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String],
         .Bool(_, _, _) -> {}
         .Unit(_, _) -> {}
         .Char(_, _, _) -> {}
-        .ListLit(elements, _, _) -> jet_cli_replay_exprs(elements, aliases, locals, &sites)
-        .MemberSpread(base, _, _, _) -> jet_cli_replay_expr(base, aliases, locals, &sites)
-        .Spread(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+        .ListLit(elements, _, _) -> jet_cli_replay_exprs(elements, aliases, locals, sites)
+        .MemberSpread(base, _, _, _) -> jet_cli_replay_expr(base, aliases, locals, sites)
+        .Spread(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
         .MapLit(entries, _, _) -> {
             loop entry in entries {
-                jet_cli_replay_expr(entry.key, aliases, locals, &sites)
-                jet_cli_replay_expr(entry.value, aliases, locals, &sites)
+                jet_cli_replay_expr(entry.key, aliases, locals, sites)
+                jet_cli_replay_expr(entry.value, aliases, locals, sites)
             }
         }
         .Index(base, index, _, _, _) -> {
-            jet_cli_replay_expr(base, aliases, locals, &sites)
-            jet_cli_replay_expr(index, aliases, locals, &sites)
+            jet_cli_replay_expr(base, aliases, locals, sites)
+            jet_cli_replay_expr(index, aliases, locals, sites)
         }
         .Slice(base, start, end, range, _, _) -> {
-            jet_cli_replay_expr(base, aliases, locals, &sites)
-            if range == .Val(bounds) -> jet_cli_replay_expr(bounds, aliases, locals, &sites)
+            jet_cli_replay_expr(base, aliases, locals, sites)
+            if range == .Val(bounds) -> jet_cli_replay_expr(bounds, aliases, locals, sites)
             if range == None {
-                jet_cli_replay_expr(start, aliases, locals, &sites)
-                jet_cli_replay_expr(end, aliases, locals, &sites)
+                jet_cli_replay_expr(start, aliases, locals, sites)
+                jet_cli_replay_expr(end, aliases, locals, sites)
             }
         }
         .Range(start, end, _, _, _) -> {
-            jet_cli_replay_expr(start, aliases, locals, &sites)
-            jet_cli_replay_expr(end, aliases, locals, &sites)
+            jet_cli_replay_expr(start, aliases, locals, sites)
+            jet_cli_replay_expr(end, aliases, locals, sites)
         }
         .Ident(_, _, _) -> {}
         .Call(call, _) -> {
-            jet_cli_replay_call(call.name, aliases, locals, &sites)
-            loop arg in call.args -> jet_cli_replay_expr(arg.expr, aliases, locals, &sites)
+            jet_cli_replay_call(call.name, aliases, locals, sites)
+            loop arg in call.args -> jet_cli_replay_expr(arg.expr, aliases, locals, sites)
         }
-        .Unary(_, operand, _, _) -> jet_cli_replay_expr(operand, aliases, locals, &sites)
+        .Unary(_, operand, _, _) -> jet_cli_replay_expr(operand, aliases, locals, sites)
         .Binary(_, left, right, _, _) -> {
-            jet_cli_replay_expr(left, aliases, locals, &sites)
-            jet_cli_replay_expr(right, aliases, locals, &sites)
+            jet_cli_replay_expr(left, aliases, locals, sites)
+            jet_cli_replay_expr(right, aliases, locals, sites)
         }
-        .CompareChain(operands, _, _, _, _) -> jet_cli_replay_exprs(operands, aliases, locals, &sites)
+        .CompareChain(operands, _, _, _, _) -> jet_cli_replay_exprs(operands, aliases, locals, sites)
         .UnitLit(_, _, _, _, _, _, _) -> {}
-        .Deref(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-        .RawOf(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-        .Copy(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-        .Place(inner, _, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-        .Field(base, _, _, _) -> jet_cli_replay_expr(base, aliases, locals, &sites)
-        .OptField(base, _, _, _, _, _) -> jet_cli_replay_expr(base, aliases, locals, &sites)
+        .Deref(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .RawOf(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .Copy(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .Place(inner, _, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .Field(base, _, _, _) -> jet_cli_replay_expr(base, aliases, locals, sites)
+        .OptField(base, _, _, _, _, _) -> jet_cli_replay_expr(base, aliases, locals, sites)
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            jet_cli_replay_method(receiver, method, aliases, &sites)
-            jet_cli_replay_expr(receiver, aliases, locals, &sites)
-            loop arg in args -> jet_cli_replay_expr(arg.expr, aliases, locals, &sites)
+            jet_cli_replay_method(receiver, method, aliases, sites)
+            jet_cli_replay_expr(receiver, aliases, locals, sites)
+            loop arg in args -> jet_cli_replay_expr(arg.expr, aliases, locals, sites)
         }
         .OptMethodCall(receiver, method, _, _, args, _, _) -> {
-            jet_cli_replay_method(receiver, method, aliases, &sites)
-            jet_cli_replay_expr(receiver, aliases, locals, &sites)
-            loop arg in args -> jet_cli_replay_expr(arg.expr, aliases, locals, &sites)
+            jet_cli_replay_method(receiver, method, aliases, sites)
+            jet_cli_replay_expr(receiver, aliases, locals, sites)
+            loop arg in args -> jet_cli_replay_expr(arg.expr, aliases, locals, sites)
         }
         .StructLit(_, _, _, _, fields, _, _, _) -> {
-            loop field in fields -> jet_cli_replay_expr(field.value, aliases, locals, &sites)
+            loop field in fields -> jet_cli_replay_expr(field.value, aliases, locals, sites)
         }
         .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> {
-                    loop field in fields -> jet_cli_replay_expr(field.value, aliases, locals, &sites)
+                    loop field in fields -> jet_cli_replay_expr(field.value, aliases, locals, sites)
                 }
-                .Elements(elements) -> jet_cli_replay_exprs(elements, aliases, locals, &sites)
+                .Elements(elements) -> jet_cli_replay_exprs(elements, aliases, locals, sites)
                 .Entries(entries) -> {
                     loop entry in entries {
-                        jet_cli_replay_expr(entry.key, aliases, locals, &sites)
-                        jet_cli_replay_expr(entry.value, aliases, locals, &sites)
+                        jet_cli_replay_expr(entry.key, aliases, locals, sites)
+                        jet_cli_replay_expr(entry.value, aliases, locals, sites)
                     }
                 }
-                .Value(inner) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+                .Value(inner) -> jet_cli_replay_expr(inner, aliases, locals, sites)
                 .ByteText(_) -> {}
                 .Empty -> {}
             }
@@ -2399,91 +2480,91 @@ jet_cli_replay_expr: fn(value: Expr, aliases: [String:String], locals: [String],
         .EnumLit(_, _, _, args, _, _, _) -> {
             loop arg in args {
                 if arg == {
-                    .Positional(inner) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-                    .Named(_, inner) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+                    .Positional(inner) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+                    .Named(_, inner) -> jet_cli_replay_expr(inner, aliases, locals, sites)
                 }
             }
         }
-        .Tainted(inner, _, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-        .Present(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+        .Tainted(inner, _, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .Present(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
         .Absent(_, _) -> {}
         .Todo(_, _, _) -> {}
         .NoElse(_, _) -> {}
         .PatternTest(subject, pattern, _, _) -> {
-            jet_cli_replay_expr(subject, aliases, locals, &sites)
-            jet_cli_replay_pattern(pattern, aliases, locals, &sites)
+            jet_cli_replay_expr(subject, aliases, locals, sites)
+            jet_cli_replay_pattern(pattern, aliases, locals, sites)
         }
-        .Ok(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-        .Err(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+        .Ok(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+        .Err(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
         .Try(inner, _, _, context, _) -> {
-            jet_cli_replay_expr(inner, aliases, locals, &sites)
-            if context == .Val(note) -> jet_cli_replay_expr(note, aliases, locals, &sites)
+            jet_cli_replay_expr(inner, aliases, locals, sites)
+            if context == .Val(note) -> jet_cli_replay_expr(note, aliases, locals, sites)
         }
         .OrFallback(inner, fallback, _, _, _) -> {
-            jet_cli_replay_expr(inner, aliases, locals, &sites)
-            jet_cli_replay_fallback(fallback, aliases, locals, &sites)
+            jet_cli_replay_expr(inner, aliases, locals, sites)
+            jet_cli_replay_fallback(fallback, aliases, locals, sites)
         }
         .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
-            jet_cli_replay_expr(cond, aliases, locals, &sites)
-            jet_cli_replay_block(then_body, aliases, locals, &sites)
-            jet_cli_replay_expr(then_value, aliases, locals, &sites)
-            jet_cli_replay_block(else_body, aliases, locals, &sites)
-            jet_cli_replay_expr(else_value, aliases, locals, &sites)
+            jet_cli_replay_expr(cond, aliases, locals, sites)
+            jet_cli_replay_block(then_body, aliases, locals, sites)
+            jet_cli_replay_expr(then_value, aliases, locals, sites)
+            jet_cli_replay_block(else_body, aliases, locals, sites)
+            jet_cli_replay_expr(else_value, aliases, locals, sites)
         }
         .TupleLit(fields, _, _, _) -> {
-            loop field in fields -> jet_cli_replay_expr(field.value, aliases, locals, &sites)
+            loop field in fields -> jet_cli_replay_expr(field.value, aliases, locals, sites)
         }
         .Lambda(lambda, _) -> {
             if lambda.body == {
-                .Expr(inner) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-                .Block(body) -> jet_cli_replay_block(body, aliases, locals, &sites)
+                .Expr(inner) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+                .Block(body) -> jet_cli_replay_block(body, aliases, locals, sites)
             }
         }
-        .CallValue(_, _, _, _) -> jet_cli_replay_boundary("opaque callable", &sites)
+        .CallValue(_, _, _, _) -> jet_cli_replay_boundary("opaque callable", sites)
         .PtrFromAddr(_, _, _, addr, _, _) -> {
-            jet_cli_replay_boundary("native pointer boundary", &sites)
-            jet_cli_replay_expr(addr, aliases, locals, &sites)
+            jet_cli_replay_boundary("native pointer boundary", sites)
+            jet_cli_replay_expr(addr, aliases, locals, sites)
         }
         .ComptimeName(_, _, _, _) -> {}
-        .Paren(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+        .Paren(inner, _, _) -> jet_cli_replay_expr(inner, aliases, locals, sites)
     }
 }
 
 jet_cli_replay_pattern: fn(pattern: Pattern, aliases: [String:String], locals: [String], sites: &[JetCLIReplaySite]) {
     if pattern == {
         .Variant(_, bindings, _, _) -> {
-            loop slot in bindings -> jet_cli_replay_slot(slot, aliases, locals, &sites)
+            loop slot in bindings -> jet_cli_replay_slot(slot, aliases, locals, sites)
         }
         .Present(_, _, inner, _) -> {
-            if inner == .Val(nested) -> jet_cli_replay_pattern(nested, aliases, locals, &sites)
+            if inner == .Val(nested) -> jet_cli_replay_pattern(nested, aliases, locals, sites)
         }
         .Absent(_) -> {}
         .Ok(_, _, inner, _) -> {
-            if inner == .Val(nested) -> jet_cli_replay_pattern(nested, aliases, locals, &sites)
+            if inner == .Val(nested) -> jet_cli_replay_pattern(nested, aliases, locals, sites)
         }
         .Err(_, _, inner, _) -> {
-            if inner == .Val(nested) -> jet_cli_replay_pattern(nested, aliases, locals, &sites)
+            if inner == .Val(nested) -> jet_cli_replay_pattern(nested, aliases, locals, sites)
         }
         .Range(_, _, _) -> {}
         .Or(alternatives, _) -> {
-            loop alternative in alternatives -> jet_cli_replay_pattern(alternative, aliases, locals, &sites)
+            loop alternative in alternatives -> jet_cli_replay_pattern(alternative, aliases, locals, sites)
         }
         .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == {
                     .Bind(_, _, _, _) -> {}
-                    .Value(_, _, inner) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
-                    .Nested(_, _, nested) -> jet_cli_replay_pattern(nested, aliases, locals, &sites)
+                    .Value(_, _, inner) -> jet_cli_replay_expr(inner, aliases, locals, sites)
+                    .Nested(_, _, nested) -> jet_cli_replay_pattern(nested, aliases, locals, sites)
                 }
             }
         }
         .List(items, _, _) -> {
-            loop slot in items -> jet_cli_replay_slot(slot, aliases, locals, &sites)
+            loop slot in items -> jet_cli_replay_slot(slot, aliases, locals, sites)
         }
         .Map(entries, _, _) -> {
             loop entry in entries {
-                jet_cli_replay_expr(entry.key, aliases, locals, &sites)
-                jet_cli_replay_slot(entry.slot, aliases, locals, &sites)
+                jet_cli_replay_expr(entry.key, aliases, locals, sites)
+                jet_cli_replay_slot(entry.slot, aliases, locals, sites)
             }
         }
         .StrMatch(_, _) -> {}
@@ -2496,10 +2577,10 @@ jet_cli_replay_slot: fn(slot: PatSlot, aliases: [String:String], locals: [String
         .Wildcard -> {}
         .Bind(_, _) -> {}
         .Range(_, _) -> {}
-        .Nested(nested) -> jet_cli_replay_pattern(nested, aliases, locals, &sites)
-        .Named(_, _, inner) -> jet_cli_replay_slot(inner, aliases, locals, &sites)
+        .Nested(nested) -> jet_cli_replay_pattern(nested, aliases, locals, sites)
+        .Named(_, _, inner) -> jet_cli_replay_slot(inner, aliases, locals, sites)
         .Rest(_) -> {}
-        .Value(inner) -> jet_cli_replay_expr(inner, aliases, locals, &sites)
+        .Value(inner) -> jet_cli_replay_expr(inner, aliases, locals, sites)
     }
 }
 
@@ -2511,11 +2592,11 @@ jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String]
     if dot < 0 {
         if locals.contains(name) -> return
         if JET_CLI_REPLAY_IO_BUILTINS.contains(name) {
-            &sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO), owner: ""})
+            sites.push(JetCLIReplaySite{operation: name, authority: Val(Effect.IO), owner: ""})
             return
         }
         if aliases.get(name) == None {
-            jet_cli_replay_boundary(name, &sites)
+            jet_cli_replay_boundary(name, sites)
             return
         }
         target: aliases.get(name) ?? return
@@ -2523,7 +2604,7 @@ jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String]
         if member_dot < 0 -> return
         home: target.slice(0, member_dot)
         authority: sema_taint_core_effect(home, target.slice(member_dot + 1, target.len())) ?? return
-        &sites.push(JetCLIReplaySite{operation: target, authority: Val(authority), owner: home})
+        sites.push(JetCLIReplaySite{operation: target, authority: Val(authority), owner: home})
         return
     }
     head: name.slice(0, dot)
@@ -2532,10 +2613,10 @@ jet_cli_replay_call: fn(name: String, aliases: [String:String], locals: [String]
     resolved: owner ?? head
     authority: sema_taint_core_effect(resolved, member)
     if authority == .Val(found) {
-        &sites.push(JetCLIReplaySite{operation: name, authority: Val(found), owner: resolved})
+        sites.push(JetCLIReplaySite{operation: name, authority: Val(found), owner: resolved})
         return
     }
-    if owner == None -> jet_cli_replay_boundary(name, &sites)
+    if owner == None -> jet_cli_replay_boundary(name, sites)
 }
 
 // `receiver.method(…)`: a Core member through an import alias, else a
@@ -2544,11 +2625,11 @@ jet_cli_replay_method: fn(receiver: Expr, method: String, aliases: [String:Strin
     path: jet_cli_replay_receiver_path(receiver) ?? ""
     owner: jet_cli_replay_module(path, aliases) ?? ""
     if owner == "" {
-        jet_cli_replay_boundary("method call {method}", &sites)
+        jet_cli_replay_boundary("method call {method}", sites)
         return
     }
     authority: sema_taint_core_effect(owner, method) ?? return
-    &sites.push(JetCLIReplaySite{operation: "{owner}.{method}", authority: Val(authority), owner: owner})
+    sites.push(JetCLIReplaySite{operation: "{owner}.{method}", authority: Val(authority), owner: owner})
 }
 
 // `a.b.c` with `a` an import alias: the aliased module with `.b.c` appended.

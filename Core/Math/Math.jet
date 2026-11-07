@@ -160,8 +160,6 @@ signum: fn(n: Float) -> Float Never! {
 degrees: fn(n: Float) -> Float Never! { n * 57.29577951308232 }
 radians: fn(n: Float) -> Float Never! { n * 0.017453292519943295 }
 lerp: fn(a: Float, b: Float, t: Float) -> Float Never! { a + (b - a) * t }
-float32: fn(n: Float) -> Float Never! { n }
-float64: fn(n: Float) -> Float Never! { n }
 fabs: fn(n: Float) -> Float Never! { core.math.fabs(n) }
 // `math.abs` on F32 and I64 (MathBuiltin `abs`): F32 negates exactly when the
 // sign bit is set, so -0.0 and a negative NaN lose their sign; I64 negation
@@ -269,7 +267,7 @@ round: fn(n: Float) -> Int Never! {
     Int.from_float(whole) ?? panic("bounded rounded Float fits Int")
 }
 to_bits: fn(n: Float) -> Int Never! { core.math.to_bits(n) }
-// `math.to_bits` on F32 (D-FLOATW1): the binary32 bits as a non-negative Int.
+// `math.to_bits` on F32: the binary32 bits as a non-negative Int.
 // Widening to Float is exact, so the binary64 fields repack without rounding:
 // the top 23 fraction bits, the rebiased exponent, and a binary32 subnormal
 // (a binary64 normal below 2^-126) shifted into the fraction.
@@ -337,7 +335,7 @@ checked_pow: fn(base: Int, exponent: Int) -> Int? Never! {
     Val(result)
 }
 
-// Integer power has the same exact arithmetic and negative-exponent stop as `^`.
+// Integer power has the same exact arithmetic and negative-exponent stop as `Int.pow`.
 int_pow: fn(base: Int, exponent: Int) -> Int Never! { base.pow(exponent) }
 
 saturating_add: fn(a: Int, b: Int) -> Int Never! { a + b }
@@ -565,7 +563,7 @@ sumprod: fn(left: [Float], right: [Float]) -> Float Never! {
 }
 
 random: fn() -[Rand]> Float Never! {
-    Float{ambient_random.__word()} / 18446744073709551616.0
+    approx(ambient_random.__word()) / 18446744073709551616.0
 }
 
 fraction: fn(numerator: Int, denominator: Int) -> Fraction? Never! {
@@ -1112,7 +1110,7 @@ impl Decimal.Decode {
         if tree == {
             .Number(lexeme) -> __decimal_decoded(lexeme)
             .Int(value) -> __decimal_decoded("{value}")
-            .Null -> __decimal_rejected("null")
+            .Null -> __decimal_rejected("Null")
             .Bool(_) -> __decimal_rejected("Bool")
             .Float(_) -> __decimal_rejected("Float")
             .Text(text) -> __decimal_decoded(text)
@@ -1437,6 +1435,7 @@ __decimal_parse: fn(text: String) -> Decimal? Never! {
     raw_digits := 0
     fractional := 0
     point := false
+    mantissa_start: index
     loop index < bytes.len() && bytes[index] != (U8{101}) && bytes[index] != (U8{69}) {
         byte: bytes[index]
         if byte == (U8{46}) {
@@ -1446,12 +1445,31 @@ __decimal_parse: fn(text: String) -> Decimal? Never! {
             if byte < (U8{48}) || byte > (U8{57}) -> return None
             raw_digits = raw_digits + 1
             if raw_digits > 1000000 -> return None
-            magnitude = magnitude * 10 + Int{byte} - 48
             if point -> fractional = fractional + 1
         }
         index = index + 1
     }
     if raw_digits == 0 -> return None
+    // The spelling is checked before any arithmetic, so an over-limit
+    // coefficient fails at once; 18 digits per step keeps the big-integer
+    // accumulation to one multiply per chunk.
+    chunk := 0
+    chunk_digits := 0
+    at := mantissa_start
+    loop at < index {
+        byte: bytes[at]
+        if byte != (U8{46}) {
+            chunk = chunk * 10 + Int{byte} - 48
+            chunk_digits = chunk_digits + 1
+            if chunk_digits == 18 {
+                magnitude = magnitude * 1000000000000000000 + chunk
+                chunk = 0
+                chunk_digits = 0
+            }
+        }
+        at = at + 1
+    }
+    if chunk_digits > 0 -> magnitude = magnitude * exact_power(10, chunk_digits) + chunk
     exponent := 0
     if index < bytes.len() {
         index = index + 1
@@ -1553,6 +1571,17 @@ __decimal_round: fn(value: Decimal) -> Decimal Never! {
     assert_eq(__decimal_div(left, right).numerator(), 4)
     assert_eq(__decimal_from_str("-0.00").scale, 2)
     assert(!__decimal_from_str("-0.00").negative)
+}
+
+#Test("Decimal parsing accumulates long coefficients and rejects over-limit ones before arithmetic") {
+    long: __decimal_from_str("1234567890123456789012345678901234567.890")
+    assert_eq(__decimal_to_string(long), "1234567890123456789012345678901234567.890")
+    assert_eq(long.scale, 3)
+    assert_eq(__decimal_from_str("1000000000000000000").magnitude, 1000000000000000000)
+    over_limit: if __decimal_parse("1{"0".repeat(1000000)}") == .Val(_) -> false else -> true
+    assert(over_limit)
+    bad_digit: if __decimal_parse("12a4567890123456789012") == .Val(_) -> false else -> true
+    assert(bad_digit)
 }
 
 #Test("Decimal decodes its own text encoding") {
@@ -1712,7 +1741,7 @@ impl Mat4.Mul(Vec4) {
 }
 
 impl F64x4 {
-    // D-SIMD3: every lane reduction is the scalar left-to-right fold.
+    // Every lane reduction is the scalar left-to-right fold.
     sum: fn(self) -> F64 Never! {
         value := F64{0.0}
         loop i in 0..<4 -> value = value + self.lanes[i]
@@ -1802,7 +1831,7 @@ __f32_swizzle_lane: fn(value: Float) -> F32 Never! {
 
 // The other SIMD lane types follow F64x4: a fixed array of scalar lanes, with
 // every operation the scalar spelling applied lane by lane and every reduction
-// the left-to-right scalar fold (D-SIMD1/D-SIMD2/D-SIMD3). Float `min` and
+// the left-to-right scalar fold. Float `min` and
 // `max` skip NaN lanes like `min_float` and `max_float`; integer `min` and
 // `max` fold from lane 0.
 F32x4: struct {
@@ -1817,7 +1846,7 @@ impl F32x4 {
         if index < 0 || index >= 4 -> core.math.__numeric_stop("lane index {index} out of range for F32x4 (4 lanes)")
         self.lanes[index]
     }
-    // Swizzles (D-SWIZZLE1): two or three lanes read as the Float vector of
+    // Swizzles: two or three lanes read as the Float vector of
     // that width and all four as an F32x4; a write takes the type its read has.
     __swizzle2: fn(self, a: Int, b: Int) -> Vec2 Never! { Vec2.new(Float.from_f32(self.lanes[a]), Float.from_f32(self.lanes[b])) }
     __swizzle3: fn(self, a: Int, b: Int, c: Int) -> Vec3 Never! { Vec3.new(Float.from_f32(self.lanes[a]), Float.from_f32(self.lanes[b]), Float.from_f32(self.lanes[c])) }
@@ -1998,7 +2027,7 @@ impl F64x2 {
         if index < 0 || index >= 2 -> core.math.__numeric_stop("lane index {index} out of range for F64x2 (2 lanes)")
         self.lanes[index]
     }
-    // Swizzles (D-SWIZZLE1): both lanes read and write as an F64x2.
+    // Swizzles: both lanes read and write as an F64x2.
     __swizzle2: fn(self, a: Int, b: Int) -> F64x2 Never! { F64x2.new(self.lanes[a], self.lanes[b]) }
     __swizzle_set1: fn(&self, a: Int, value: F64) Never! { self.lanes[a] = value }
     __swizzle_set2: fn(&self, a: Int, b: Int, value: F64x2) Never! {
@@ -3782,17 +3811,17 @@ impl Transform2 {
 __decimal_to_string: fn(value: Decimal) -> String Never! {
     digits: "{value.magnitude}".bytes()
     bytes := [U8]{}
-    if value.negative -> &bytes.push(U8{45})
+    if value.negative -> bytes.push(U8{45})
     if value.scale >= digits.len() && value.scale != 0 {
-        &bytes.push(U8{48})
-        &bytes.push(U8{46})
-        loop _ in 0..<(value.scale - digits.len()) -> &bytes.push(U8{48})
-        loop byte in digits -> &bytes.push(byte)
+        bytes.push(U8{48})
+        bytes.push(U8{46})
+        loop _ in 0..<(value.scale - digits.len()) -> bytes.push(U8{48})
+        loop byte in digits -> bytes.push(byte)
     } else {
         boundary: digits.len() - value.scale
         loop (index, byte) in digits {
-            if value.scale != 0 && index == boundary -> &bytes.push(U8{46})
-            &bytes.push(byte)
+            if value.scale != 0 && index == boundary -> bytes.push(U8{46})
+            bytes.push(byte)
         }
     }
     String.from_bytes(bytes) ?? panic("Decimal digits are not UTF-8")
@@ -3837,7 +3866,7 @@ impl Fraction.Display {
 impl Complex.Display {
     display: fn(self) -> String { __complex_to_string(self) }
 }
-// Complex has no order (D-TRAIT-OVERLOAD1=A); its arithmetic hooks and its
+// Complex has no order; its arithmetic hooks and its
 // magnitude are source methods like Fraction's and Decimal's.
 impl Complex {
     abs: fn(self) -> Float Never! { __complex_abs(self) }

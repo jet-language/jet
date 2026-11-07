@@ -117,17 +117,17 @@ pkg_cffi_validate_c_binding: fn(lib: String, project_root: String, overlay_overr
         if overlay.lib != lib -> next
         remaining := [String]{}
         loop symbol in expected {
-            if symbol != overlay.generated_symbol -> &remaining.push(symbol)
+            if symbol != overlay.generated_symbol -> remaining.push(symbol)
         }
-        if !remaining.contains(overlay.overlay_symbol) -> &remaining.push(overlay.overlay_symbol)
-        &remaining.sort()
+        if !remaining.contains(overlay.overlay_symbol) -> remaining.push(overlay.overlay_symbol)
+        remaining.sort()
         expected = remaining
     }
     if expected.len() == 0 -> return
     defined: pkg_cffi_nm_symbols(input.path, false) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "could not inventory exported symbols in `{input.path}` ({err.message})")))
     missing := [String]{}
     loop symbol in expected {
-        if !defined.contains(pkg_cffi_normalize_nm_symbol(symbol)) -> &missing.push(symbol)
+        if !defined.contains(pkg_cffi_normalize_nm_symbol(symbol)) -> missing.push(symbol)
     }
     if missing.len() == 0 -> return
     return Err(pkg_cffi_error(pkg_cffi_e3208(cache, lib, "the local archive `{input.path}` is missing bound export symbol(s): {missing.join(", ")}; the binding is stale")))
@@ -153,9 +153,9 @@ pkg_cffi_binding_symbols: fn(source: String) -> [String] Never! {
             .Val(quoted) -> quoted.before
             .None -> parts.after
         }
-        if symbol != "" && !symbols.contains(symbol) -> &symbols.push(symbol)
+        if symbol != "" && !symbols.contains(symbol) -> symbols.push(symbol)
     }
-    &symbols.sort()
+    symbols.sort()
     symbols
 }
 
@@ -172,11 +172,11 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
             name.starts_with("framework=") -> bare = name.removeprefix("framework=")
             else -> {}
         }
-        if bare != generated_name && !pkg_cffi_cpp_runtime_library(bare, target) -> &libraries.push(bare)
+        if bare != generated_name && !pkg_cffi_cpp_runtime_library(bare, target) -> libraries.push(bare)
     }
     inputs := [ArchiveInput]{}
     loop input in pkg_bridge_local_archive_inputs(flags.lib_dirs, libraries) {
-        if files.is_file(input.path) -> &inputs.push(input)
+        if files.is_file(input.path) -> inputs.push(input)
     }
     if inputs.len() == 0 -> return
     defined := [String]{}
@@ -184,14 +184,14 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
         if input.bytes == None -> return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "the local archive `{input.path}` could not be read")))
         exported: pkg_cffi_nm_symbols(input.path, false) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "could not inventory exported symbols in `{input.path}` ({err.message})")))
         loop symbol in exported {
-            if !defined.contains(symbol) -> &defined.push(symbol)
+            if !defined.contains(symbol) -> defined.push(symbol)
         }
     }
     undefined: pkg_cffi_nm_symbols(generated_archive, true) ?? return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "could not inventory bound symbols in `{generated_archive}` ({err.message})")))
     missing := [String]{}
     loop symbol in undefined {
         if pkg_cffi_ignorable_cpp_symbol(symbol) || defined.contains(symbol) -> next
-        &missing.push(symbol)
+        missing.push(symbol)
     }
     if missing.len() == 0 -> return
     return Err(pkg_cffi_error(pkg_cffi_e3208(generated_archive, lib, "local C++ archive inventory is missing bound symbol(s): {missing.join(", ")}; regenerate the binding or restore the archive")))
@@ -208,8 +208,8 @@ pkg_cffi_cpp_runtime_library: fn(name: String, target: String) -> Bool Never! {
 // `nm -g [-u] <path>`: the sorted global (or undefined) symbols.
 pkg_cffi_nm_symbols: fn(path: String, undefined: Bool) -[Exec, Time.Wait]> [String] ForeignBridgeError! {
     argv := [String]{"nm", "-g"}
-    if undefined -> &argv.push("-u")
-    &argv.push(path)
+    if undefined -> argv.push("-u")
+    argv.push(path.copy())
     receipt: process.cmd(argv).run() ?? return Err(pkg_bridge_error(pkg_bridge_spawn_error("nm", err)))
     if !receipt.success {
         detail: receipt.errors.trim()
@@ -229,9 +229,9 @@ pkg_cffi_parse_nm_symbols: fn(output: String, undefined: Bool) -> [String] Never
         symbol: tokens[tokens.len() - 1]
         if symbol == "" || symbol == "?" -> next
         normalized: pkg_cffi_normalize_nm_symbol(symbol)
-        if !symbols.contains(normalized) -> &symbols.push(normalized)
+        if !symbols.contains(normalized) -> symbols.push(normalized)
     }
-    &symbols.sort()
+    symbols.sort()
     symbols
 }
 

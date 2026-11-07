@@ -46,8 +46,8 @@ ImpactReport: struct {
         }
         ImpactReport{
             symbol: symbol.copy(), found, depth_limit, definition_module,
-            references: ^references, call_sites: ^call_sites,
-            upstream_callers: ^upstream_callers, downstream_callees: ^downstream_callees,
+            references: references.move(), call_sites: call_sites.move(),
+            upstream_callers: upstream_callers.move(), downstream_callees: downstream_callees.move(),
         }
     }
 
@@ -119,12 +119,12 @@ impact_resolve_symbol: fn(index: SemIndex, query: String) -> View<SymbolDef>? Ne
 // Rust direct_references/direct_call_sites (182–196), including depth-zero use.
 impact_direct_references: fn(index: SemIndex, symbol: String) -> [ImpactRef] Never! {
     out := [ImpactRef]{}
-    loop reference in index.references_to(symbol) -> &out.push(impact_ref_to_impact(reference[0], 1))
+    loop reference in index.references_to(symbol) -> out.push(impact_ref_to_impact(reference[0], 1))
     out
 }
 impact_direct_call_sites: fn(index: SemIndex, symbol: String) -> [ImpactEdge] Never! {
     out := [ImpactEdge]{}
-    loop edge in index.call_sites(symbol) -> &out.push(impact_edge_to_impact(edge[0], 1))
+    loop edge in index.call_sites(symbol) -> out.push(impact_edge_to_impact(edge[0], 1))
     out
 }
 
@@ -138,9 +138,9 @@ impact_transitive_callers: fn(index: SemIndex, callee: String, depth_limit: Int)
     out := [ImpactEdge]{}
     seen_edges := [ImpactEdgeKey:Bool]{}
     frontier := Queue<ImpactFrontier>.new()
-    &frontier.push_back(ImpactFrontier{name: callee.copy(), depth: 0})
+    frontier.push_back(ImpactFrontier{name: callee.copy(), depth: 0})
     loop {
-        current: (&frontier.pop_front()) ?? break
+        current: (frontier.pop_front()) ?? break
         if current.depth >= depth_limit -> next
         loop window in index.call_sites(current.name) {
             edge: window[0]
@@ -148,8 +148,8 @@ impact_transitive_callers: fn(index: SemIndex, callee: String, depth_limit: Int)
             if seen_edges.has_key(key) -> next
             seen_edges[key] = true
             next_depth: current.depth + 1
-            &out.push(impact_edge_to_impact(edge, next_depth))
-            &frontier.push_back(ImpactFrontier{name: edge.caller.copy(), depth: next_depth})
+            out.push(impact_edge_to_impact(edge, next_depth))
+            frontier.push_back(ImpactFrontier{name: edge.caller.copy(), depth: next_depth})
         }
     }
     out
@@ -158,12 +158,12 @@ impact_transitive_callees: fn(index: SemIndex, caller: String, depth_limit: Int)
     out := [ImpactEdge]{}
     seen_edges := [ImpactEdgeKey:Bool]{}
     frontier := Queue<ImpactFrontier>.new()
-    &frontier.push_back(ImpactFrontier{name: caller.copy(), depth: 0})
+    frontier.push_back(ImpactFrontier{name: caller.copy(), depth: 0})
     // Read one owner-backed view: preserve current index order without copying
     // the complete call graph on every BFS expansion.
     edges: index.call_edges()
     loop {
-        current: (&frontier.pop_front()) ?? break
+        current: (frontier.pop_front()) ?? break
         if current.depth >= depth_limit -> next
         loop edge in edges {
             if edge.caller != current.name -> next
@@ -171,8 +171,8 @@ impact_transitive_callees: fn(index: SemIndex, caller: String, depth_limit: Int)
             if seen_edges.has_key(key) -> next
             seen_edges[key] = true
             next_depth: current.depth + 1
-            &out.push(impact_edge_to_impact(edge, next_depth))
-            &frontier.push_back(ImpactFrontier{name: edge.callee.copy(), depth: next_depth})
+            out.push(impact_edge_to_impact(edge, next_depth))
+            frontier.push_back(ImpactFrontier{name: edge.callee.copy(), depth: next_depth})
         }
     }
     out

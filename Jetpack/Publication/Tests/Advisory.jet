@@ -57,7 +57,7 @@ publication_advisory_test_feed: fn(records: String) -> PublicationAdvisoryFeed N
 publication_advisory_test_signed_feed: fn(seed: [U8]) -> PublicationAdvisoryFeed PublicationDiagnosticError! {
     key: crypto.SigningKey.from_bytes(seed) ?? panic("32 byte seed fixture")
     public: hex.encode(key.public_key().bytes)
-    close(^key)
+    close(key)
     feed := publication_advisory_test_feed("")
     feed.public_key = public
     feed.key_id = publication_advisory_key_id(public) ?? panic("valid key")
@@ -71,7 +71,7 @@ publication_advisory_test_policy: fn(feed: PublicationAdvisoryFeed, now: Int) ->
 }
 publication_advisory_test_lock: fn(name: String, version: String, source: LockSource) -> LockFile Never! {
     lock := LockFile.empty()
-    &lock.packages.push(LockedPackage{name: name, version: version, source: source, fingerprint: "sha256-aabb"})
+    lock.packages.push(LockedPackage{name: name, version: version, source: source, fingerprint: "sha256-aabb"})
     lock
 }
 publication_advisory_test_parse_error: fn(text: String) -> Diagnostic Never! {
@@ -242,8 +242,8 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
 }
 #Test("publication advisory lock maturity all sources and source summaries") {
     lock := publication_advisory_test_lock("root", "1.0.0", .Root)
-    &lock.packages.push(LockedPackage{name: "local", version: "1.0.0", source: .Path("local")})
-    &lock.packages.push(LockedPackage{name: "mylib", version: "1.0.0", source: .Git{url: "https://example.invalid/repo", selector: "main"}})
+    lock.packages.push(LockedPackage{name: "local", version: "1.0.0", source: .Path("local")})
+    lock.packages.push(LockedPackage{name: "mylib", version: "1.0.0", source: .Git{url: "https://example.invalid/repo", selector: "main"}})
     feed := publication_advisory_test_feed("")
     missing: publication_lock_maturity_diagnostics(lock, feed, 86400, 200, [PackagePolicyException]{}) ?? panic("maturity")
     assert_eq(missing.maturity.len(), 1)

@@ -1,12 +1,12 @@
-Error [jet.UseAfterMove]: `p` was consumed by `consume`, so it can't be used here
+Error [jet.MoveWithoutMarker]: `consume` takes `p`, but `p` is used again later
+  --> tests/ui/struct_use_after_move.jet:11:13
+    |
+ 11 |     consume(p)
+    |             ^
   --> tests/ui/struct_use_after_move.jet:12:13
     |
  12 |     print(p.x)
-    |             ^
-  --> tests/ui/struct_use_after_move.jet:11:14
-    |
- 11 |     consume(^p)
-    |              ^ `p` moved to `consume` here
- Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `p` after the move, or give `consume` a copy with `p.copy()` where it moved.
-More: jet-lang.dev/e/E0121
+    |             ^ `p` is used again here
+ Why: `consume` takes ownership of this argument, and a call never copies on its own, so `p` has no value after this call
+ Fix: Write `p.copy()` to pass a copy and keep `p`, or reorder so this call is the last use of `p`
+More: jet-lang.dev/e/E0209

@@ -51,11 +51,11 @@ sema_validate_blocks: fn(items: &[Item], diagnostics: &[Diagnostic]) {
     loop index in 0..<items.len() {
         if items[index] == .Struct(definition) {
             if definition.validate_block.len() == 0 -> next
-            implementation: sema_validate_impl(definition, &diagnostics) ?? next
-            &generated.push(Item.Impl{value: implementation})
+            implementation: sema_validate_impl(definition, diagnostics) ?? next
+            generated.push(Item.Impl{value: implementation})
         }
     }
-    loop item in generated -> &items.push(item)
+    loop item in generated -> items.push(item)
 }
 
 // Rust `synthesize_validate_impl`.
@@ -65,8 +65,8 @@ sema_validate_impl: fn(definition: StructDef, diagnostics: &[Diagnostic]) -> Imp
     rules := [SemaValidateRule]{}
     valid := true
     loop statement in definition.validate_block {
-        if sema_validate_rule(statement, fields, &diagnostics) == .Val(rule) {
-            &rules.push(rule)
+        if sema_validate_rule(statement, fields, diagnostics) == .Val(rule) {
+            rules.push(rule)
         } else {
             valid = false
         }
@@ -81,23 +81,23 @@ sema_validate_impl: fn(definition: StructDef, diagnostics: &[Diagnostic]) -> Imp
 sema_validate_rule: fn(statement: Stmt, fields: [String:Bool], diagnostics: &[Diagnostic]) -> SemaValidateRule? {
     if statement == .Expr(expression) {
         if expression == .Call(call, _) {
-            if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return sema_validate_refuse(sema_validate_e0353(call.name_span), &diagnostics)
-            if call.args[0].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[0].span), &diagnostics)
-            at_label: call.args[1].label ?? return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
-            if at_label.name != "at" -> return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
-            if call.args[2].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[2].span), &diagnostics)
+            if call.name != SEMA_VALIDATE_CHECK || call.args.len() != 3 -> return sema_validate_refuse(sema_validate_e0353(call.name_span), diagnostics)
+            if call.args[0].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[0].span), diagnostics)
+            at_label: call.args[1].label ?? return sema_validate_refuse(sema_validate_e0353(call.args[1].span), diagnostics)
+            if at_label.name != "at" -> return sema_validate_refuse(sema_validate_e0353(call.args[1].span), diagnostics)
+            if call.args[2].label != None -> return sema_validate_refuse(sema_validate_e0353(call.args[2].span), diagnostics)
             if call.args[1].expr == .Ident(name, name_span, _) {
-                if fields.get(name) == None -> return sema_validate_refuse(sema_validate_e0354(name, name_span), &diagnostics)
+                if fields.get(name) == None -> return sema_validate_refuse(sema_validate_e0354(name, name_span), diagnostics)
                 return Val(SemaValidateRule{cond: call.args[0].expr.copy(), field: name.copy(), message: call.args[2].expr.copy()})
             }
-            return sema_validate_refuse(sema_validate_e0353(call.args[1].span), &diagnostics)
+            return sema_validate_refuse(sema_validate_e0353(call.args[1].span), diagnostics)
         }
     }
-    sema_validate_refuse(sema_validate_e0353(sema_user_text_stmt_span(statement)), &diagnostics)
+    sema_validate_refuse(sema_validate_e0353(sema_user_text_stmt_span(statement)), diagnostics)
 }
 
-sema_validate_refuse: fn(diagnostic: ^Diagnostic, diagnostics: &[Diagnostic]) -> SemaValidateRule? Never! {
-    &diagnostics.push(diagnostic)
+sema_validate_refuse: fn(diagnostic: &&Diagnostic, diagnostics: &[Diagnostic]) -> SemaValidateRule? Never! {
+    diagnostics.push(diagnostic)
     None
 }
 
@@ -119,19 +119,19 @@ sema_validate_build: fn(definition: StructDef, rules: [SemaValidateRule], span: 
     loop field in definition.fields -> fields[field.name] = true
     referenced: sema_validate_referenced_fields(rules, fields)
     checks := [Stmt]{}
-    loop name in referenced -> &checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
+    loop name in referenced -> checks.push(sema_serde_items_binding(name, None, sema_serde_items_field_read(SEMA_VALIDATE_VALUE, name, span), false, span))
     loop rule in rules {
         failure: sema_serde_items_field_error_value(sema_serde_items_string(rule.field, span), rule.message.copy(), span)
-        // `&__errors.push(failure)`: the push writes the collected list.
+        // `__errors.push(failure)`: the push writes the collected list.
         errors: Expr.Place{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), access: PlaceAccess.Write, span: span, id: AST_NODE_GENERATED}
         push: Stmt.Expr{expr: sema_serde_items_method_call(errors, "push", [Expr]{failure}, span)}
-        &checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond.copy(), span), [Stmt]{push}, span))
+        checks.push(sema_serde_items_if(sema_serde_items_not(rule.cond.copy(), span), [Stmt]{push}, span))
     }
     body := [Stmt]{sema_serde_items_binding(SEMA_VALIDATE_ERRORS, Val(sema_data_decode_error()), Expr.ListLit{elements: [Expr]{}, span: span, id: AST_NODE_GENERATED}, true, span)}
-    &body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, checks, span))
+    body.push(sema_serde_items_if(Expr.Bool{value: true, span: span, id: AST_NODE_GENERATED}, checks, span))
     has_errors: sema_serde_items_not(sema_serde_items_method_call(sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), "is_empty", [Expr]{}, span), span)
-    &body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span, id: AST_NODE_GENERATED}, span)}, span))
-    &body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}, span))
+    body.push(sema_serde_items_if(has_errors, [Stmt]{sema_serde_items_return(Expr.Err{value: sema_serde_items_ident(SEMA_VALIDATE_ERRORS, span), span: span, id: AST_NODE_GENERATED}, span)}, span))
+    body.push(sema_serde_items_return(Expr.Ok{value: sema_serde_items_copy(sema_serde_items_ident(SEMA_VALIDATE_VALUE, span), span), span: span, id: AST_NODE_GENERATED}, span))
     target: Type.Named{name: definition.name}
     function := ast_func("validate", span, span)
     function.is_pub = definition.is_pub
@@ -151,8 +151,8 @@ sema_validate_referenced_fields: fn(rules: [SemaValidateRule], fields: [String:B
     found := [String]{}
     // Each visit is written at its call, where it takes the visitor's effect row.
     loop rule in rules {
-        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(fields, &found, expression))
-        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(fields, &found, expression))
+        ast_visit_expr(rule.cond, (expression: Expr) -> sema_validate_note_name(fields, found, expression))
+        ast_visit_expr(rule.message, (expression: Expr) -> sema_validate_note_name(fields, found, expression))
     }
     found
 }
@@ -160,11 +160,11 @@ sema_validate_referenced_fields: fn(rules: [SemaValidateRule], fields: [String:B
 sema_validate_note_name: fn(fields: [String:Bool], found: &[String], expression: Expr) Never! -[Mem.Alloc]> {
     if expression == .Ident(name, _, _) {
         if fields.get(name) == None || found.contains(name) -> return
-        &found.push(name.copy())
+        found.push(name.copy())
     }
 }
 
-// D-VALIDATE1=A: on the Core `Validate<T>` builder (`Validate.over(value)`),
+// On the Core `Validate<T>` builder (`Validate.over(value)`),
 // `.check(condition, at: field, "message")` is the block's rule. `at:` must
 // be a bare field of `T`; the Core method receives that field's name, so the
 // rule comes back as three positional arguments. A malformed rule reports its
@@ -178,24 +178,24 @@ sema_validate_over_receiver: fn(receiver: Type, environment: SemaScopeEnvironmen
 }
 
 sema_validate_over_rule: fn(subject: Type, args: [CallArg], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, diagnostics: &[Diagnostic]) -> [CallArg]? {
-    if args.len() != 3 -> return sema_validate_over_refuse(sema_validate_e0353(span), &diagnostics)
-    if args[0].label != None -> return sema_validate_over_refuse(sema_validate_e0353(args[0].span), &diagnostics)
-    at_label: args[1].label ?? return sema_validate_over_refuse(sema_validate_e0353(args[1].span), &diagnostics)
-    if at_label.name != "at" -> return sema_validate_over_refuse(sema_validate_e0353(args[1].span), &diagnostics)
-    if args[2].label != None -> return sema_validate_over_refuse(sema_validate_e0353(args[2].span), &diagnostics)
+    if args.len() != 3 -> return sema_validate_over_refuse(sema_validate_e0353(span), diagnostics)
+    if args[0].label != None -> return sema_validate_over_refuse(sema_validate_e0353(args[0].span), diagnostics)
+    at_label: args[1].label ?? return sema_validate_over_refuse(sema_validate_e0353(args[1].span), diagnostics)
+    if at_label.name != "at" -> return sema_validate_over_refuse(sema_validate_e0353(args[1].span), diagnostics)
+    if args[2].label != None -> return sema_validate_over_refuse(sema_validate_e0353(args[2].span), diagnostics)
     if args[1].expr == .Ident(name, name_span, _) {
-        if !sema_validate_over_has_field(subject, name, environment, program, &scopes) -> return sema_validate_over_refuse(sema_validate_e0354(name, name_span), &diagnostics)
+        if !sema_validate_over_has_field(subject, name, environment, program, scopes) -> return sema_validate_over_refuse(sema_validate_e0354(name, name_span), diagnostics)
         rule := args
         // copy: the field name is a payload of read parameter `args`; the rewritten rule owns its String
         rule[1] = CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: name.copy()}}, span: name_span, id: AST_NODE_GENERATED},
             span: args[1].span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
         return Val(rule)
     }
-    sema_validate_over_refuse(sema_validate_e0353(args[1].span), &diagnostics)
+    sema_validate_over_refuse(sema_validate_e0353(args[1].span), diagnostics)
 }
 
-sema_validate_over_refuse: fn(diagnostic: ^Diagnostic, diagnostics: &[Diagnostic]) -> [CallArg]? Never! {
-    &diagnostics.push(diagnostic)
+sema_validate_over_refuse: fn(diagnostic: &&Diagnostic, diagnostics: &[Diagnostic]) -> [CallArg]? Never! {
+    diagnostics.push(diagnostic)
     None
 }
 
@@ -208,7 +208,7 @@ sema_validate_over_has_field: fn(subject: Type, name: String, environment: SemaS
         else -> ""
     }
     if owner_name == "" -> return false
-    owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
+    owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
     if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
     if owner == .Val(owner_symbol) {
         if sema_scope_declaration_struct(environment, program, owner_symbol.id) == .Val(shape) {

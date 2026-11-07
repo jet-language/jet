@@ -5,7 +5,7 @@ Box: struct {
 }
 
 wrap: fn(xs: [Int]) -> Box {
-    Box{xs: ^xs}
+    Box{xs: xs.move()}
 }
 
 make: fn() -> [Int] {
@@ -14,7 +14,7 @@ make: fn() -> [Int] {
 
 run: fn() {
     grid := [[1], [2]]
-    first := ^grid[0]
-    fresh := ^make()
+    first := grid[0].move()
+    fresh := make()
     print("{wrap([3]).xs.len()} {first.len()} {fresh.len()}")
 }

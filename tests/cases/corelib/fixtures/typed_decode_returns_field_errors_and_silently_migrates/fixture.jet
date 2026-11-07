@@ -12,7 +12,7 @@ migration Config {
     add host: String = "localhost"
 }
 
-run: fn() ![FieldError] {
+run: fn() [FieldError]! {
     old: json.decode<Config>("{{\"port\":2}}")
     print("json {old.port} {old.host}")
     toml_old: toml.decode<Config>("port = 3\n")

@@ -66,9 +66,9 @@ publication_keygen: fn(registry: String, force: Bool) -[FS, Env, Time, Rand]> Pu
     public: hex.encode(key.public_key().bytes)
     #Unsafe("export a fresh Core signing seed only to descriptor-relative owner-only key publication; the Core key owner is wiped on every outcome") {
         if publication_sign_write_key_pair(paths, key.bytes, public, force) == {
-            .Ok(_) -> close(^key)
+            .Ok(_) -> close(key)
             .Err(error) -> {
-                close(^key)
+                close(key)
                 return Err(error)
             }
         }
@@ -96,11 +96,11 @@ publication_sign_bytes: fn(seed: [U8], content_hash: String) -> String Publicati
     key: crypto.SigningKey.from_bytes(seed) ?? return Err(publication_sign_crypto_error("signing key must contain exactly 32 bytes"))
     signature: if crypto.sign(key, content_hash.bytes()) == {
         .Ok(signed) -> {
-            close(^key)
+            close(key)
             signed
         }
         .Err(_) -> {
-            close(^key)
+            close(key)
             return Err(publication_sign_crypto_error("the signing key was rejected"))
         }
     }
@@ -122,11 +122,11 @@ publication_sign: fn(seed_path: String, content_hash: String) -[FS, Env]> String
     #Unsafe("import the protected seed into Core signing without a second raw-secret copy; close the temporary Core Secret on success and failure") {
         signature: if publication_sign_bytes(seed.bytes, content_hash) == {
             .Ok(signed) -> {
-                close(^seed)
+                close(seed)
                 signed
             }
             .Err(error) -> {
-                close(^seed)
+                close(seed)
                 return Err(error)
             }
         }

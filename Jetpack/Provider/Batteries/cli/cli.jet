@@ -75,7 +75,7 @@ cli: module {}
             line_no := 0
             loop line in text.lines() {
                 line_no += 1
-                if regex.is_match(line) -> &hits.push(SearchHit{
+                if regex.is_match(line) -> hits.push(SearchHit{
                     relative: entry.relative,
                     line: line_no,
                     text: line,
@@ -107,7 +107,7 @@ cli: module {}
             .spawn() ?? panic("cli producer")
         matches := [String]{}
         loop line in producer.stdout.lines() {
-            if line.contains(pattern) -> &matches.push(line.trim())
+            if line.contains(pattern) -> matches.push(line.trim())
         }
         produced: producer.wait() ?? panic("cli producer wait")
 

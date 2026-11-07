@@ -47,12 +47,12 @@ publication_registry_origin_matches: fn(url: String, success: Bool, origin: Stri
 // HTTP/SSH already pin through the hardened transport ProcessSpec.
 publication_registry_clone_arguments: fn(url: String, pinned: String, path: String) -> [String] Never! {
     args := [String]{}
-    if pinned != url -> &args.push("-c")
-    if pinned != url -> &args.push("url.{pinned}.insteadOf={url}")
-    &args.push("clone")
-    &args.push("--")
-    &args.push(url.copy())
-    &args.push(path.copy())
+    if pinned != url -> args.push("-c")
+    if pinned != url -> args.push("url.{pinned}.insteadOf={url}")
+    args.push("clone")
+    args.push("--")
+    args.push(url.copy())
+    args.push(path.copy())
     args
 }
 
@@ -66,7 +66,7 @@ PublicationRegistryMarkerLock: struct {
     name: String
 }
 impl PublicationRegistryMarkerLock.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         self.authority.remove(self.name).drop("release the owned registry marker on every result")
     }
 }
@@ -92,11 +92,11 @@ publication_acquire_registry_lock: fn(parent: String, name: String, delay_ms: In
             }
         }
         if writer.fsync() == .Err(error) {
-            close(^writer)
+            close(writer)
             authority.remove(name).drop("remove a marker whose initial fsync failed")
             return Err(error)
         }
-        close(^writer)
+        close(writer)
         return Ok(PublicationRegistryMarkerLock{authority: authority, name: name})
     }
     Err(publication_read_error(.TimedOut, path, busy))
@@ -207,11 +207,11 @@ publication_ensure_index_clone_with_network: fn<N: PublicationRegistryNet>(regis
     lock: publication_acquire_registry_lock(parent_path, publication_registry_cache_lock_name(registry.name), 50, 120000, "registry cache refresh is busy") ?? return Err(publication_registry_cache_error(registry, "{err}"))
     if publication_ensure_index_clone_locked(registry, dir, authority, transport, network) == {
         .Ok(path) -> {
-            close(^lock)
+            close(lock)
             Ok(path)
         }
         .Err(error) -> {
-            close(^lock)
+            close(lock)
             Err(error)
         }
     }

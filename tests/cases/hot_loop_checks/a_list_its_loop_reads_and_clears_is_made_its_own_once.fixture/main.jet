@@ -9,10 +9,10 @@ words: fn(bytes: [U8]) {
             if !token.is_empty() {
                 word: String.from_bytes(token) ?? "<bad>"
                 print("w {token.len()} {word}")
-                &token.clear()
+                token.clear()
             }
         } else {
-            &token.push(byte)
+            token.push(byte)
         }
     }
 }
@@ -23,11 +23,11 @@ kept: fn(bytes: [U8]) {
     copies := [[U8]]{}
     loop byte in bytes {
         if byte == space {
-            &copies.push(token.copy())
-            &token.clear()
+            copies.push(token.copy())
+            token.clear()
         } else {
-            &token.push(byte)
-            &copies.push(token.copy())
+            token.push(byte)
+            copies.push(token.copy())
         }
     }
     loop item in copies {
@@ -38,9 +38,9 @@ kept: fn(bytes: [U8]) {
 
 run: fn() {
     bytes := "one two  thréé longerthanfour".bytes()
-    &bytes.push(U8{32})
-    &bytes.push(U8{255})
-    &bytes.push(U8{32})
+    bytes.push(U8{32})
+    bytes.push(U8{255})
+    bytes.push(U8{32})
     words(bytes.copy())
     kept(bytes)
 }

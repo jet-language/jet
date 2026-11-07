@@ -8,7 +8,7 @@ Critical-area probe: build the program end to end; every part matters; write bat
 
 ## Build this
 
-A `notes` command-line tool as one Jet package: subcommands with typed args and help; reads and writes files under a config dir; an ignore-aware recursive search (respecting .gitignore) with colored, aligned output; a pipeline that spawns a process, reads its stdout as lines, filters, and writes to another process's stdin; environment and exit codes; a typed object pipeline (records flowing between stages, not text); a `#Job` that runs a scheduled task; a single-file script mode run; and a release build installed to a bin dir. Start from Examples/features/cli/**, Examples/features/io/** (cli_args, grep_scan, walk_files, process_builder, stdin_*, terminal, log_*), Examples/features/script_mode/**, Examples/features/tooling/**.
+A `notes` command-line tool as one Jet package: subcommands with typed args and help; reads and writes files under a config dir; an ignore-aware recursive search (respecting .gitignore) with colored, aligned output; a pipeline that spawns a process, reads its stdout as lines, filters, and writes to another process's stdin; environment and exit codes; a typed object pipeline (records flowing between stages, not text); a `#Job` that runs a scheduled task; a single-file script mode run; and a release build installed to a bin dir. Start from Examples/Systems/CLI/**, Examples/Systems/** (cli_args, grep_scan, walk_files, process_builder, stdin_*, terminal, log_*), Examples/Systems/CLI/ScriptMode.jet, Examples/Tooling/**.
 
 ## Answer these
 

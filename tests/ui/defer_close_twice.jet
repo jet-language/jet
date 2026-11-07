@@ -3,11 +3,11 @@ Resource: struct {
 }
 
 impl Resource.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 run: fn() {
     resource := Resource{name: "file"}
-    defer close(^resource)
-    close(^resource)
+    defer close(resource)
+    close(resource)
 }

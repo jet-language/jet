@@ -18,10 +18,10 @@ extern Handle jet_rt_mem_fixed_storage_over(uintptr_t, int64_t);
     extern uintptr_t jet_rt_mem_##K##_storage_try_alloc(Handle, int64_t, int64_t, uintptr_t); \
     extern void jet_rt_mem_##K##_storage_reset(Handle); \
     extern void jet_rt_handle_drop_##T(Handle)
-KIND(arena, JetArena);
-KIND(bump, JetBump);
-KIND(pool, JetPool);
-KIND(fixed, JetFixed);
+KIND(arena, jet_arena);
+KIND(bump, jet_bump);
+KIND(pool, jet_pool);
+KIND(fixed, jet_fixed);
 #undef KIND
 extern void jet_rt_mem_resources(uint64_t *);
 extern void jet_rt_mem_allocator_memory(uint64_t *);

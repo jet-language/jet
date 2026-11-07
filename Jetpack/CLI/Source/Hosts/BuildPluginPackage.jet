@@ -62,7 +62,7 @@ WasmComponentPluginSpec: struct {
             key: split.before.trim()
             value: split.after.trim()
             if fields.contains(key) -> return Err(cli_build_plugin_error("plugin manifest field {key} is declared more than once"))
-            &fields.push(key)
+            fields.push(key.copy())
             if key == {
                 "name" -> name = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
                 "version" -> version = Val(cli_build_plugin_manifest_string(value, key) ?? return Err(err))
@@ -114,7 +114,7 @@ cli_build_plugin_manifest_string: fn(value: String, field: String) -> String Bui
     loop byte in inner {
         if escaped {
             if byte == (U8{34}) || byte == (U8{92}) {
-                &out.push(byte)
+                out.push(byte)
             } else {
                 return Err(cli_build_plugin_error("plugin manifest field {field} contains an unsupported escape"))
             }
@@ -124,7 +124,7 @@ cli_build_plugin_manifest_string: fn(value: String, field: String) -> String Bui
         } else if byte == (U8{34}) {
             return Err(cli_build_plugin_error("plugin manifest field {field} contains an unescaped quote"))
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
     }
     if escaped -> return Err(cli_build_plugin_error("plugin manifest field {field} ends with an escape"))
@@ -146,7 +146,7 @@ cli_build_plugin_manifest_capabilities: fn(value: String) -> [BuildEffect] Build
         if capabilities.contains(capability) -> next
         index := capabilities.len()
         loop index > 0 && capabilities[index - 1].rank() > capability.rank() -> index -= 1
-        &capabilities.insert(index, capability)
+        capabilities.insert(index, capability)
     }
     Ok(capabilities)
 }
@@ -161,7 +161,7 @@ cli_build_plugin_validate_component: fn(bytes: [U8]) BuildPluginPackageError! {
         id: Int.from_u8(bytes[offset])
         offset += 1
         if id > 13 -> return Err(cli_build_plugin_error("plugin component uses unknown section id {id}"))
-        length: cli_build_plugin_read_u32_leb(bytes, &offset) ?? return Err(err)
+        length: cli_build_plugin_read_u32_leb(bytes, offset) ?? return Err(err)
         end: offset + length
         if end > bytes.len() -> return Err(cli_build_plugin_error("plugin component section is truncated"))
         offset = end
@@ -198,7 +198,7 @@ cli_read_packaged_file_bounded: fn(path: String, label: String, limit: Int) -[FS
     loop {
         chunk: reader.read(65536) ?? return Err(cli_build_plugin_error("could not read plugin {label}: {err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(cli_build_plugin_error("plugin {label} exceeds {limit} bytes"))
     }
     Ok(bytes)

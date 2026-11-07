@@ -4,7 +4,7 @@ Error [jet.SingleUseDropped]: `leases` still owes `consume`
  14 |     leases: [Lease]{acquire("list")}
     |     ^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(leases) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(leases) }` to discard it deliberately
 More: jet-lang.dev/e/E0140
 
 Error [jet.SingleUseDropped]: `maybe` still owes `consume`
@@ -13,7 +13,7 @@ Error [jet.SingleUseDropped]: `maybe` still owes `consume`
  15 |     maybe: Lease?{acquire("option")}
     |     ^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(maybe) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(maybe) }` to discard it deliberately
 More: jet-lang.dev/e/E0140
 
 Error [jet.SingleUseDropped]: `outcomes` still owes `consume`
@@ -22,7 +22,7 @@ Error [jet.SingleUseDropped]: `outcomes` still owes `consume`
  16 |     outcomes: [Lease Err!]{try_acquire("result")}
     |     ^^^^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(outcomes) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(outcomes) }` to discard it deliberately
 More: jet-lang.dev/e/E0140
 
 Error [jet.SingleUseDropped]: `table` still owes `consume`
@@ -31,7 +31,7 @@ Error [jet.SingleUseDropped]: `table` still owes `consume`
  17 |     table: [String: Lease]{"map": acquire("map")}
     |     ^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(table) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(table) }` to discard it deliberately
 More: jet-lang.dev/e/E0140
 
 Error [jet.SingleUseDropped]: `pair` still owes `consume`
@@ -40,7 +40,7 @@ Error [jet.SingleUseDropped]: `pair` still owes `consume`
  18 |     pair: (first: acquire("tuple"), count: 1)
     |     ^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(pair) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(pair) }` to discard it deliberately
 More: jet-lang.dev/e/E0140
 
 Error [jet.SingleUseDropped]: `boxed` still owes `consume`
@@ -49,5 +49,5 @@ Error [jet.SingleUseDropped]: `boxed` still owes `consume`
  19 |     boxed: Box<Lease>{item: acquire("generic")}
     |     ^^^^^
  Why: This value's type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
- Fix: Consume it exactly once: move it to a parameter with the move marker `^`, or `return` it — or write `#Unsafe("reason") { consume(boxed) }` to discard it deliberately
+ Fix: Consume it exactly once: pass it to a `&&` parameter, or `return` it — or write `#Unsafe("reason") { consume(boxed) }` to discard it deliberately
 More: jet-lang.dev/e/E0140

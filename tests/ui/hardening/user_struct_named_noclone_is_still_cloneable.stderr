@@ -7,6 +7,6 @@ Error [jet.MoveWithoutMarker]: `eat` takes `v`, but `v` is used again later
     |
  13 |     print(v.n)
     |             ^ `v` is used again here
- Why: `eat` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `v`
+ Why: `eat` takes ownership of this argument, and a call never copies on its own, so `v` has no value after this call
  Fix: Write `v.copy()` to pass a copy and keep `v`, or reorder so this call is the last use of `v`
 More: jet-lang.dev/e/E0209

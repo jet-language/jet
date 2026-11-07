@@ -3,7 +3,9 @@
 //
 // Every user-written `#Unsafe` region in the checkout is one row of the
 // generated baseline in Docs/spec/safety.md. Growth fails; a shrink that only
-// removes exact rows rewrites the baseline; `--update` approves any change.
+// removes exact rows rewrites the baseline; `--update` approves any change;
+// `--check` never writes and fails on any difference, shrink included (the
+// lane gate: Tools/agent/LaneCheck.jet runs it before every check).
 // The CoreLib audit (#4619) then requires every raw operation in `Core/**` to
 // sit inside an audited gate, and every safe abstraction (a plain fn that
 // opens an `#Unsafe` block) to carry a reviewer's proof in the safety.md
@@ -14,7 +16,7 @@
 // text: a column counts Unicode scalars, as the baseline rows always have.
 //
 // Usage (from the repository root):
-//   jet Tools/agent/UnsafeRatchet.jet [--update] [--root PATH] [--baseline PATH]
+//   jet Tools/agent/UnsafeRatchet.jet [--update | --check] [--root PATH] [--baseline PATH]
 use {
     json: core.encoding.json
     files: core.files
@@ -80,6 +82,7 @@ Options: struct {
     root: String
     baseline: String
     update: Bool
+    check: Bool
     help: Bool
 }
 
@@ -182,10 +185,11 @@ CountChange: struct {
 
 usage: fn() -> String {
     [String]{
-        "usage: {COMMAND} [--update] [--root PATH] [--baseline PATH]",
+        "usage: {COMMAND} [--update | --check] [--root PATH] [--baseline PATH]",
         "",
         "Scan user-written Jet unsafe regions and compare them with the committed baseline.",
         "A lower count updates the baseline only for exact-row removals. Use --update to approve changes.",
+        "--check never writes: any difference from the baseline, a shrink included, fails.",
     }.join("\n")
 }
 
@@ -403,22 +407,22 @@ decode_jet_string: fn(source: [U8], start: Int, end: Int) -> String? {
         next_byte: if index + 1 < end -> Int.from_u8(source[index + 1]) else -> -1
         if byte == BACKSLASH {
             if next_byte == 110 {
-                &out.push(U8{10})
+                out.push(U8{10})
             } else if next_byte == 116 {
-                &out.push(U8{9})
+                out.push(U8{9})
             } else if next_byte == QUOTE || next_byte == BACKSLASH {
-                &out.push(source[index + 1])
+                out.push(source[index + 1])
             } else {
                 return None
             }
             index += 2
         } else if (byte == OPEN_BRACE || byte == CLOSE_BRACE) && next_byte == byte {
-            &out.push(source[index])
+            out.push(source[index])
             index += 2
         } else if byte == OPEN_BRACE || byte == CLOSE_BRACE {
             return None
         } else {
-            &out.push(source[index])
+            out.push(source[index])
             index += 1
         }
     }
@@ -638,8 +642,8 @@ scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
                 if marker_group_at(source, index) == {
                     .Val(group) -> {
                         if group.reasoned_unsafe == 1 && leads_to_function(source, group.end) {
-                            at: locate(source, &cursor, index)
-                            &regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: group.reason.copy()})
+                            at: locate(source, cursor, index)
+                            regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: group.reason.copy()})
                         }
                         index = group.end
                         next
@@ -649,8 +653,8 @@ scan_source: fn(source: [U8], file: String, owner: String, regions: &[Region]) {
             }
             if unsafe_marker_at(source, index) == {
                 .Val(marker) -> {
-                    at: locate(source, &cursor, index)
-                    &regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: marker.reason.copy()})
+                    at: locate(source, cursor, index)
+                    regions.push(Region{package: owner.copy(), file: file.copy(), line: at.line, column: at.column, reason: marker.reason.copy()})
                     index = marker.end
                     next
                 }
@@ -672,17 +676,17 @@ jet_files: fn(base: String, relative: String, out: &[String]) RatchetError! -[FS
     directory: if relative == "" -> base else -> files.join(base, relative)
     entries: files.list_dir(directory) ?? return Err(ratchet_fail("cannot list {directory}: {err}"))
     names := [String]{}
-    loop entry in entries -> &names.push(entry.name.copy())
-    &names.sort_by((left: String, right: String) -> left <=> right)
+    loop entry in entries -> names.push(entry.name.copy())
+    names.sort_by((left: String, right: String) -> left <=> right)
     loop name in names {
         path: files.join(directory, name)
         if files.is_symlink(path) -> next
         child: if relative == "" -> name.copy() else -> "{relative}/{name}"
         if files.is_dir(path) {
             if SKIP_DIRECTORIES.contains(name) || is_generated_ffi("{child}/placeholder") -> next
-            jet_files(base, child, &out) ?? return Err(err)
+            jet_files(base, child, out) ?? return Err(err)
         } else if files.is_file(path) && name.ends_with(".jet") && !is_generated_ffi(child) {
-            &out.push(child)
+            out.push(child)
         }
     }
     Ok(())
@@ -735,22 +739,22 @@ compare_regions: fn(left: Region, right: Region) -> Ordering {
 
 scan: fn(root: String) -[FS]> Census RatchetError! {
     paths := [String]{}
-    jet_files(root, "", &paths) ?? return Err(err)
+    jet_files(root, "", paths) ?? return Err(err)
     regions := [Region]{}
     loop file in paths {
         source: read_source(files.join(root, file)) ?? return Err(err)
         owner: package_name(root, file) ?? return Err(err)
-        scan_source(source, file, owner, &regions)
+        scan_source(source, file, owner, regions)
     }
     // #6319: sort_by with a named comparator crashes; the lambda forwards to it.
-    &regions.sort_by((left: Region, right: Region) -> compare_regions(left, right))
+    regions.sort_by((left: Region, right: Region) -> compare_regions(left, right))
     counts := [PackageCount]{}
     loop region in regions {
         last: counts.len() - 1
         if last >= 0 && counts[last].name == region.package {
             counts[last].count += 1
         } else {
-            &counts.push(PackageCount{name: region.package.copy(), count: 1})
+            counts.push(PackageCount{name: region.package.copy(), count: 1})
         }
     }
     Ok(Census{total: regions.len(), counts: counts, regions: regions})
@@ -787,22 +791,22 @@ blank_literals: fn(source: [U8]) -> [U8] {
 // past ASCII stands in as U+0001 so match offsets are byte offsets.
 raw_hits: fn(code: [U8]) -> [RawHit] {
     ascii := [U8]{}
-    loop byte in code -> &ascii.push(if Int.from_u8(byte) < 128 -> byte else -> U8{1})
+    loop byte in code -> ascii.push(if Int.from_u8(byte) < 128 -> byte else -> U8{1})
     text: String.from_bytes_lossy(ascii)
     hits := [RawHit]{}
     if text.contains(".*") {
-        loop found in POINTER_DEREFERENCE.matches(text) -> &hits.push(RawHit{index: found.start, operation: 0})
+        loop found in POINTER_DEREFERENCE.matches(text) -> hits.push(RawHit{index: found.start, operation: 0})
     }
     if text.contains("Ptr") {
-        loop found in POINTER_FROM_ADDRESS.matches(text) -> &hits.push(RawHit{index: found.start, operation: 1})
+        loop found in POINTER_FROM_ADDRESS.matches(text) -> hits.push(RawHit{index: found.start, operation: 1})
     }
     if text.contains("volatile_") {
-        loop found in VOLATILE_ACCESS.matches(text) -> &hits.push(RawHit{index: found.start, operation: 2})
+        loop found in VOLATILE_ACCESS.matches(text) -> hits.push(RawHit{index: found.start, operation: 2})
     }
     if text.contains("sys") {
-        loop found in POSIX_CONTROL.matches(text) -> &hits.push(RawHit{index: found.start, operation: 3})
+        loop found in POSIX_CONTROL.matches(text) -> hits.push(RawHit{index: found.start, operation: 3})
     }
-    &hits.sort_by((left: RawHit, right: RawHit) -> if left.index != right.index -> left.index <=> right.index else -> left.operation <=> right.operation)
+    hits.sort_by((left: RawHit, right: RawHit) -> if left.index != right.index -> left.index <=> right.index else -> left.operation <=> right.operation)
     hits
 }
 
@@ -856,7 +860,7 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
                 has_pending = true
                 pending_name = span_text(code, name_start, identifier_end(code, name_start))
                 pending_unsafe = next_function_unsafe
-                pending_line = locate(source, &cursor, index).line
+                pending_line = locate(source, cursor, index).line
                 pending_parens = parens
                 next_function_unsafe = false
                 index = keyword + 2
@@ -870,7 +874,7 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
                 has_pending = true
                 pending_name = span_text(code, name_start, name_end)
                 pending_unsafe = next_function_unsafe
-                pending_line = locate(source, &cursor, index).line
+                pending_line = locate(source, cursor, index).line
                 pending_parens = parens
                 next_function_unsafe = false
                 index = name_end
@@ -884,23 +888,23 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
         } else if byte == OPEN_BRACE {
             depth += 1
             if pending_gate {
-                &gates.push(depth)
+                gates.push(depth)
                 pending_gate = false
-                if frames.len() > 0 -> &frames[frames.len() - 1].gates.push(locate(source, &cursor, index).line)
+                if frames.len() > 0 -> frames[frames.len() - 1].gates.push(locate(source, cursor, index).line)
             } else if has_pending && parens == pending_parens {
-                &frames.push(Frame{name: pending_name.copy(), is_unsafe: pending_unsafe, line: pending_line, depth: depth, gates: [Int]{}})
+                frames.push(Frame{name: pending_name.copy(), is_unsafe: pending_unsafe, line: pending_line, depth: depth, gates: [Int]{}})
                 if pending_unsafe -> unsafe_frames += 1
                 has_pending = false
             }
         } else if byte == CLOSE_BRACE {
             // A default parameter can close a value literal before the function body.
             if parens == pending_parens -> has_pending = false
-            if gates.len() > 0 && gates[gates.len() - 1] == depth -> _ := &gates.pop()
+            if gates.len() > 0 && gates[gates.len() - 1] == depth -> _ := gates.pop()
             if frames.len() > 0 && frames[frames.len() - 1].depth == depth {
-                frame: &frames.pop() ?? panic("a checked frame vanished")
+                frame: frames.pop() ?? panic("a checked frame vanished")
                 if frame.is_unsafe -> unsafe_frames -= 1
                 if frame.gates.len() > 0 && !frame.is_unsafe {
-                    &result.abstractions.push(Abstraction{file: file.copy(), function: frame.name.copy(), line: frame.line, gates: frame.gates.copy()})
+                    result.abstractions.push(Abstraction{file: file.copy(), function: frame.name.copy(), line: frame.line, gates: frame.gates.copy()})
                 }
             }
             depth -= 1
@@ -908,8 +912,8 @@ scan_corelib_source: fn(source: [U8], file: String, result: &CoreLibScan) {
         loop hit < hits.len() && hits[hit].index < index -> hit += 1
         if gates.len() == 0 && unsafe_frames == 0 {
             loop hit < hits.len() && hits[hit].index == index {
-                at: locate(source, &cursor, index)
-                &result.violations.push(Violation{file: file.copy(), line: at.line, column: at.column, operation: RAW_OPERATIONS[hits[hit].operation].copy()})
+                at: locate(source, cursor, index)
+                result.violations.push(Violation{file: file.copy(), line: at.line, column: at.column, operation: RAW_OPERATIONS[hits[hit].operation].copy()})
                 hit += 1
             }
         }
@@ -922,10 +926,10 @@ scan_corelib: fn(root: String) -[FS]> CoreLibScan RatchetError! {
     directory: files.join(root, CORELIB_DIRECTORY)
     if !files.exists(directory) -> return Ok(result)
     paths := [String]{}
-    jet_files(directory, "", &paths) ?? return Err(err)
+    jet_files(directory, "", paths) ?? return Err(err)
     loop file in paths {
         source: read_source(files.join(directory, file)) ?? return Err(err)
-        scan_corelib_source(source, "{CORELIB_DIRECTORY}/{file}", &result)
+        scan_corelib_source(source, "{CORELIB_DIRECTORY}/{file}", result)
     }
     Ok(result)
 }
@@ -1015,7 +1019,7 @@ read_abstractions: fn(text: String) -> [AbstractionRow] RatchetError! {
             row: json.to_string(item) ?? return Err(ratchet_fail("cannot encode JSON row: {err}"))
             return Err(ratchet_fail("safe-abstraction registry row needs file, function and a proof of at least 20 characters: {row}"))
         }
-        &rows.push(AbstractionRow{file: file ?? "", function: function ?? ""})
+        rows.push(AbstractionRow{file: file ?? "", function: function ?? ""})
     }
     Ok(rows)
 }
@@ -1027,7 +1031,7 @@ check_corelib: fn(root: String, baseline_text: String) -[FS]> String RatchetErro
     loop row in rows -> recorded["{row.file}\t{row.function}"] = true
     problems := [String]{}
     loop violation in current.violations {
-        &problems.push("  - {violation.file}:{violation.line}:{violation.column} {violation.operation} outside an audited #Unsafe gate")
+        problems.push("  - {violation.file}:{violation.line}:{violation.column} {violation.operation} outside an audited #Unsafe gate")
     }
     found := [String: Bool]{}
     loop abstraction in current.abstractions {
@@ -1035,19 +1039,19 @@ check_corelib: fn(root: String, baseline_text: String) -[FS]> String RatchetErro
         found[key.copy()] = true
         if recorded.get(key) == None {
             lines: loop line in abstraction.gates -> "{line}"
-            &problems.push("  - {abstraction.file}:{abstraction.line} fn {abstraction.function} opens #Unsafe at line {lines.join(", ")} but is not an #Unsafe function and has no recorded safe-abstraction proof")
+            problems.push("  - {abstraction.file}:{abstraction.line} fn {abstraction.function} opens #Unsafe at line {lines.join(", ")} but is not an #Unsafe function and has no recorded safe-abstraction proof")
         }
     }
     loop row in rows {
         if found.get("{row.file}\t{row.function}") == None {
-            &problems.push("  - stale safe-abstraction row: {row.file} fn {row.function} no longer opens an #Unsafe block")
+            problems.push("  - stale safe-abstraction row: {row.file} fn {row.function} no longer opens an #Unsafe block")
         }
     }
     if problems.len() == 0 -> return Ok("")
     lines := [String]{"CoreLib unsafe audit failed:"}
-    loop problem in problems -> &lines.push(problem)
-    &lines.push("make the function `#Unsafe(\"<caller contract>\") name: fn …` so every caller audits the call, or record why it is a safe")
-    &lines.push("abstraction in the safety.md unsafe-abstractions registry (file, function, proof).")
+    loop problem in problems -> lines.push(problem)
+    lines.push("make the function `#Unsafe(\"<caller contract>\") name: fn …` so every caller audits the call, or record why it is a safe")
+    lines.push("abstraction in the safety.md unsafe-abstractions registry (file, function, proof).")
     Ok(lines.join("\n"))
 }
 
@@ -1092,7 +1096,7 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
         if package == None || file == None || line == None || column == None || reason == None {
             return Err(ratchet_fail("unsafe baseline has an invalid region row"))
         }
-        &regions.push(Region{package: package ?? "", file: file ?? "", line: line ?? 0, column: column ?? 0, reason: reason ?? ""})
+        regions.push(Region{package: package ?? "", file: file ?? "", line: line ?? 0, column: column ?? 0, reason: reason ?? ""})
     }
     counts := [PackageCount]{}
     loop region in regions {
@@ -1103,9 +1107,9 @@ census_from_json: fn(parsed: Dyn) -> Census RatchetError! {
                 known = true
             }
         }
-        if !known -> &counts.push(PackageCount{name: region.package.copy(), count: 1})
+        if !known -> counts.push(PackageCount{name: region.package.copy(), count: 1})
     }
-    &counts.sort_by((left: PackageCount, right: PackageCount) -> left.name <=> right.name)
+    counts.sort_by((left: PackageCount, right: PackageCount) -> left.name <=> right.name)
     recorded: object_fields(counts_value) ?? return Err(ratchet_fail("unsafe baseline counts do not match its region rows"))
     matches := recorded.len() == counts.len()
     loop index in 0..<counts.len() {
@@ -1121,7 +1125,7 @@ census_json: fn(census: Census) -> Dyn {
     loop entry in census.counts -> counts[entry.name.copy()] = Dyn.Int(entry.count)
     regions := [Dyn]{}
     loop region in census.regions {
-        &regions.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(region.package.copy()), "file": Dyn.Text(region.file.copy()), "line": Dyn.Int(region.line), "column": Dyn.Int(region.column), "reason": Dyn.Text(region.reason.copy())}))
+        regions.push(Dyn.Object([String: Dyn]{"package": Dyn.Text(region.package.copy()), "file": Dyn.Text(region.file.copy()), "line": Dyn.Int(region.line), "column": Dyn.Int(region.column), "reason": Dyn.Text(region.reason.copy())}))
     }
     Dyn.Object([String: Dyn]{"schema": Dyn.Int(1), "total": Dyn.Int(census.total), "counts": Dyn.Object(counts), "regions": Dyn.Array(regions)})
 }
@@ -1133,18 +1137,18 @@ markdown_cell: fn(value: String) -> String {
 render_section: fn(census: Census) -> String RatchetError! {
     data: json.to_string_pretty(census_json(census)) ?? return Err(ratchet_fail("cannot encode the baseline data: {err}"))
     lines := [String]{"{DATA_BEGIN}\n{data}\n{DATA_END}", "", "### Counts", "", "| crate/package | regions |", "| --- | ---: |"}
-    if census.counts.len() == 0 -> &lines.push("| (none) | 0 |")
-    loop entry in census.counts -> &lines.push("| {markdown_cell(entry.name)} | {entry.count} |")
-    &lines.push("| **total** | **{census.total}** |")
-    &lines.push("")
-    &lines.push("### Regions")
-    &lines.push("")
-    &lines.push("| crate/package | file | line | reason |")
-    &lines.push("| --- | --- | ---: | --- |")
-    if census.regions.len() == 0 -> &lines.push("| (none) | (none) | - | (none) |")
+    if census.counts.len() == 0 -> lines.push("| (none) | 0 |")
+    loop entry in census.counts -> lines.push("| {markdown_cell(entry.name)} | {entry.count} |")
+    lines.push("| **total** | **{census.total}** |")
+    lines.push("")
+    lines.push("### Regions")
+    lines.push("")
+    lines.push("| crate/package | file | line | reason |")
+    lines.push("| --- | --- | ---: | --- |")
+    if census.regions.len() == 0 -> lines.push("| (none) | (none) | - | (none) |")
     loop region in census.regions {
         reason: json_text(region.reason) ?? return Err(err)
-        &lines.push("| {markdown_cell(region.package)} | {markdown_cell(region.file)} | {region.line}:{region.column} | {markdown_cell(reason)} |")
+        lines.push("| {markdown_cell(region.package)} | {markdown_cell(region.file)} | {region.line}:{region.column} | {markdown_cell(reason)} |")
     }
     Ok(lines.join("\n"))
 }
@@ -1215,7 +1219,7 @@ unmatched: fn(current: [Region], remaining: &[String: Int], exact: Bool) -> [Reg
         if count > 0 {
             remaining[key.copy()] = count - 1
         } else {
-            &added.push(region.copy())
+            added.push(region.copy())
         }
     }
     added
@@ -1231,14 +1235,14 @@ same_regions: fn(current: Census, baseline: Census) -> Bool {
 
 stale_rows: fn(current: Census, baseline: Census) -> RowChanges {
     remaining := tally(baseline.regions, true)
-    added: unmatched(current.regions, &remaining, true)
+    added: unmatched(current.regions, remaining, true)
     removed := [Region]{}
     loop region in baseline.regions {
         key: exact_key(region)
         count: remaining.get(key) ?? 0
         if count > 0 {
             remaining[key.copy()] = count - 1
-            &removed.push(region.copy())
+            removed.push(region.copy())
         }
     }
     RowChanges{added: added, removed: removed}
@@ -1254,17 +1258,17 @@ count_of: fn(counts: [PackageCount], name: String) -> Int {
 increases: fn(current: Census, baseline: Census) -> [CountChange] {
     names := [String]{}
     loop entry in current.counts {
-        if !names.contains(entry.name) -> &names.push(entry.name.copy())
+        if !names.contains(entry.name) -> names.push(entry.name.copy())
     }
     loop entry in baseline.counts {
-        if !names.contains(entry.name) -> &names.push(entry.name.copy())
+        if !names.contains(entry.name) -> names.push(entry.name.copy())
     }
-    &names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by((left: String, right: String) -> left <=> right)
     changes := [CountChange]{}
     loop name in names {
         before: count_of(baseline.counts, name)
         after: count_of(current.counts, name)
-        if after > before -> &changes.push(CountChange{name: name.copy(), before: before, after: after})
+        if after > before -> changes.push(CountChange{name: name.copy(), before: before, after: after})
     }
     changes
 }
@@ -1276,24 +1280,24 @@ region_line: fn(region: Region) -> String RatchetError! {
 
 format_growth: fn(changes: [CountChange], added: [Region]) -> String RatchetError! {
     lines := [String]{"unsafe-region baseline grew:"}
-    loop change in changes -> &lines.push("  {change.name}: {change.before} -> {change.after}")
-    &lines.push("new regions:")
-    if added.len() == 0 -> &lines.push("  (baseline rows changed without enough named rows to identify the additions)")
-    loop region in added -> &lines.push(region_line(region) ?? return Err(err))
-    &lines.push("update the committed baseline in the same change:")
-    &lines.push("  {COMMAND} --update")
+    loop change in changes -> lines.push("  {change.name}: {change.before} -> {change.after}")
+    lines.push("new regions:")
+    if added.len() == 0 -> lines.push("  (baseline rows changed without enough named rows to identify the additions)")
+    loop region in added -> lines.push(region_line(region) ?? return Err(err))
+    lines.push("update the committed baseline in the same change:")
+    lines.push("  {COMMAND} --update")
     Ok(lines.join("\n"))
 }
 
 format_stale: fn(changes: RowChanges) -> String RatchetError! {
     lines := [String]{"unsafe-region baseline is stale; semantic site rows changed:", "current rows:"}
-    if changes.added.len() == 0 -> &lines.push("  (none)")
-    loop region in changes.added -> &lines.push(region_line(region) ?? return Err(err))
-    &lines.push("baseline rows no longer present:")
-    if changes.removed.len() == 0 -> &lines.push("  (none)")
-    loop region in changes.removed -> &lines.push(region_line(region) ?? return Err(err))
-    &lines.push("refresh the committed baseline in the same change:")
-    &lines.push("  {COMMAND} --update")
+    if changes.added.len() == 0 -> lines.push("  (none)")
+    loop region in changes.added -> lines.push(region_line(region) ?? return Err(err))
+    lines.push("baseline rows no longer present:")
+    if changes.removed.len() == 0 -> lines.push("  (none)")
+    loop region in changes.removed -> lines.push(region_line(region) ?? return Err(err))
+    lines.push("refresh the committed baseline in the same change:")
+    lines.push("  {COMMAND} --update")
     Ok(lines.join("\n"))
 }
 
@@ -1320,13 +1324,17 @@ ratchet: fn(options: Options) -[FS, IO]> Bool RatchetError! {
     grown: increases(current, baseline.census)
     if grown.len() > 0 {
         remaining := tally(baseline.census.regions, false)
-        term.eprint(format_growth(grown, unmatched(current.regions, &remaining, false)) ?? return Err(err))
+        term.eprint(format_growth(grown, unmatched(current.regions, remaining, false)) ?? return Err(err))
         return Ok(false)
     }
     if current.total < baseline.census.total {
         changes: stale_rows(current, baseline.census)
         if changes.added.len() > 0 {
             term.eprint(format_stale(changes) ?? return Err(err))
+            return Ok(false)
+        }
+        if options.check {
+            term.eprint("{format_stale(changes) ?? return Err(err)}\nunsafe ratchet: --check never writes; run {COMMAND} to record the shrink")
             return Ok(false)
         }
         write_text(options.baseline, baseline_document(baseline.text, current) ?? return Err(err)) ?? return Err(err)
@@ -1349,12 +1357,14 @@ resolved: fn(path: String) -[FS, Env]> String RatchetError! {
 
 parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
     root: resolved(".") ?? return Err(err)
-    options := Options{root: root.copy(), baseline: files.join(root, "Docs/spec/safety.md"), update: false, help: false}
+    options := Options{root: root.copy(), baseline: files.join(root, "Docs/spec/safety.md"), update: false, check: false, help: false}
     index := 0
     loop index < args.len() {
         arg: args[index]
         if arg == "--update" {
             options.update = true
+        } else if arg == "--check" {
+            options.check = true
         } else if arg == "--root" || arg == "--baseline" {
             index += 1
             value: if index < args.len() -> args[index].copy() else -> ""
@@ -1373,6 +1383,7 @@ parse_args: fn(args: [String]) -[FS, Env]> Options RatchetError! {
         }
         index += 1
     }
+    if options.update && options.check -> return Err(ratchet_fail("--update and --check exclude each other\n\n{usage()}"))
     Ok(options)
 }
 
@@ -1410,13 +1421,13 @@ run: fn() {
 
 scanned: fn(text: String, file: String) -> [Region] {
     regions := [Region]{}
-    scan_source(text.bytes(), file, "pkg", &regions)
+    scan_source(text.bytes(), file, "pkg", regions)
     regions
 }
 
 audited: fn(text: String) -> CoreLibScan {
     result := CoreLibScan{abstractions: [Abstraction]{}, violations: [Violation]{}}
-    scan_corelib_source(text.bytes(), "Core/Sys/Sys.jet", &result)
+    scan_corelib_source(text.bytes(), "Core/Sys/Sys.jet", result)
     result
 }
 
@@ -1491,7 +1502,7 @@ audited: fn(text: String) -> CoreLibScan {
     grown: increases(large, small)
     assert_eq(grown.len(), 1)
     remaining := tally(small.regions, false)
-    added: unmatched(large.regions, &remaining, false)
+    added: unmatched(large.regions, remaining, false)
     assert_eq(added.len(), 1)
     assert_eq(added[0].file, "b.jet")
     shrink: stale_rows(small, large)
@@ -1510,4 +1521,13 @@ audited: fn(text: String) -> CoreLibScan {
     }
     missing: read_abstractions("no registry") ?? panic("none: {err.message}")
     assert_eq(missing.len(), 0)
+}
+
+#Test("--check compares without writing and excludes --update") {
+    checked: parse_args([String]{"--check"}) ?? panic("--check: {err.message}")
+    assert(checked.check && !checked.update)
+    if parse_args([String]{"--check", "--update"}) == {
+        .Ok(_) -> panic("--check with --update was accepted")
+        .Err(error) -> assert(error.message.starts_with("--update and --check exclude each other"))
+    }
 }

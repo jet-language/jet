@@ -220,8 +220,8 @@ Neither CLI help nor a website page is an alternate diagnostic catalog.
 
 `jet explain <token>` answers a sigil or operator from the syntax dictionary
 ([`SyntaxDictionaryData.jet`](../../Compiler/JetCli/Source/Cli/SyntaxDictionaryData.jet)) in
-plain words: every meaning by position (`^` before a name moves it; between two
-numbers it raises to a power), an example for each, what happens afterwards, and
+plain words: every meaning by position (`&&` on a parameter type takes the
+value; between two values it is logical and), an example for each, what happens afterwards, and
 related codes. The REPL `?` and LSP hover show the same text. The registry
 constant and owning decision appear only with `--verbose`.
 
@@ -296,7 +296,7 @@ Expected files are read-only in ordinary runs.
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
-200ms. `Compiler/JetLSP/Tests/Integration/DevLatencyTests.jet` measures `Examples/features/collections/wordcount.jet`
+200ms. `Compiler/JetLSP/Tests/Integration/DevLatencyTests.jet` measures `Examples/Collections/WordCount.jet`
 with `BUDGET_MS: u128 = 200`, uses five timed rounds after warm-up, and keeps
 watch coalescing below 5ms with idle polling at most 10ms. This is the user
 latency contract, not a claim that every machine has one fixed runtime.

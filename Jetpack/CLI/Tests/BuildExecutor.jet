@@ -49,8 +49,8 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     build := HermeticBuildContext.new()
     spec := ActionSpec.cached([String]{"sh", "-c", script}).with_inputs([String]{"input.txt"}).with_outputs([String]{"out.txt"})
     loop cap in caps -> spec = spec.with_cap(cap)
-    action: &build.action("write", spec) ?? panic("declare action")
-    target: &build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("declare target")
+    action: build.action("write", spec) ?? panic("declare action")
+    target: build.add_executable("out", TargetSpec.new().with_action(action)) ?? panic("declare target")
     build.plan_with_default(target) ?? panic("plan")
 }
 
@@ -69,11 +69,11 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
         .Ok(_) -> panic("a blank build path must be refused")
     }
     build := HermeticBuildContext.new()
-    if &build.action("escape", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
+    if build.action("escape", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"../escape.o"})) == {
         .Err(error) -> assert(error == HermeticBuildError.InvalidPath("../escape.o"))
         .Ok(_) -> panic("an escaping output must be refused")
     }
-    _: &build.action("inside", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"build/inside.o"})) ?? panic("an inside output must be accepted")
+    _: build.action("inside", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"build/inside.o"})) ?? panic("an inside output must be accepted")
 }
 
 #Test("resolve under: normal components join under the base, parent and root components are refused") {
@@ -119,8 +119,8 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
     root: build_test_root("probe-grant")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
-    probe: &build.find_program("has-sh", "sh") ?? panic("probe")
-    target: &build.add_executable("probed", TargetSpec.new().with_probe(probe)) ?? panic("target")
+    probe: build.find_program("has-sh", "sh") ?? panic("probe")
+    target: build.add_executable("probed", TargetSpec.new().with_probe(probe)) ?? panic("target")
     plan: build.plan_with_default(target) ?? panic("plan")
     if build_execute_build_plan(plan, root, store, [BuildEffect]{}) == {
         .Err(error) -> assert(error == BuildExecutionError.MissingGrant{action: "probe has-sh", capability: BuildEffect.Exec})
@@ -227,7 +227,7 @@ build_test_plan: fn(caps: [BuildEffect], script: String) -[Rand]> HermeticBuildP
 // fixtures.
 build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Never! {
     build := HermeticBuildContext.new()
-    handle: &build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
+    handle: build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs(outputs)) ?? panic("declare action")
     plan: build.plan() ?? panic("plan")
     plan.actions[handle.id]
 }
@@ -319,8 +319,8 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 #Test("tool resolution: declared tools resolve, a declared-only toolchain refuses undeclared tools and a foreign target refuses PATH") {
     sh: build_find_program_path("sh") ?? panic("host sh on PATH")
     build := HermeticBuildContext.new()
-    declared: &build.toolchain("declared", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None)).with_tool("sh", sh).declared_only()) ?? panic("declared toolchain")
-    foreign: &build.toolchain("foreign", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None))) ?? panic("foreign toolchain")
+    declared: build.toolchain("declared", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None)).with_tool("sh", sh).declared_only()) ?? panic("declared toolchain")
+    foreign: build.toolchain("foreign", ToolchainSpec.target("riscv64-unknown-elf", BuildProvenance.user_declared("fixture", None))) ?? panic("foreign toolchain")
     plan: build.plan() ?? panic("plan")
     assert_eq(build_resolve_program_path(plan, declared, "sh") ?? panic("declared tool"), sh)
     assert(build_resolve_program_path(plan, declared, "cat") == None)
@@ -378,19 +378,19 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 #Test("context handles: same-context handles are accepted, another context's handles are refused") {
     build := HermeticBuildContext.new()
     other := HermeticBuildContext.new()
-    own: &build.toolchain("own", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("own toolchain")
-    foreign: &other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
-    _: &build.action("own", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
-    if &build.action("foreign", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
+    own: build.toolchain("own", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("own toolchain")
+    foreign: other.toolchain("foreign", ToolchainSpec.host("x86_64-linux", BuildProvenance.inferred_host())) ?? panic("foreign toolchain")
+    _: build.action("own", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_toolchain(own)) ?? panic("a same-context toolchain must be accepted")
+    if build.action("foreign", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_toolchain(foreign)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownToolchain(foreign.id))
         .Ok(_) -> panic("another context's toolchain must be refused")
     }
-    foreign_action: &other.action("x", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"c.o"})) ?? panic("foreign action")
-    if &build.add_executable("bad", TargetSpec.new().with_action(foreign_action)) == {
+    foreign_action: other.action("x", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"c.o"})) ?? panic("foreign action")
+    if build.add_executable("bad", TargetSpec.new().with_action(foreign_action)) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownAction(foreign_action.id))
         .Ok(_) -> panic("another context's action must be refused")
     }
-    foreign_target: &other.add_executable("t", TargetSpec.new()) ?? panic("foreign target")
+    foreign_target: other.add_executable("t", TargetSpec.new()) ?? panic("foreign target")
     if build.plan_with_default(foreign_target) == {
         .Err(error) -> assert(error == HermeticBuildError.UnknownTarget(foreign_target.id))
         .Ok(_) -> panic("another context's target must be refused")
@@ -400,11 +400,11 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 #Test("action environment: allowlisted variables reach the action, others and undeclared allowlist names are refused") {
     spec: ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"}).with_env("PATH", "/toolchain/bin").with_env("SECRET", "x").with_env_allowlist([String]{"PATH"})
     build := HermeticBuildContext.new()
-    handle: &build.action("env", spec) ?? panic("action")
+    handle: build.action("env", spec) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     env: build_action_environment(plan.actions[handle.id])
     assert_eq(env.keys().to_list(), [String]{"PATH"})
-    if &build.action("undeclared", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_env_allowlist([String]{"HOME"})) == {
+    if build.action("undeclared", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"}).with_env_allowlist([String]{"HOME"})) == {
         .Err(error) -> assert(error == HermeticBuildError.UndeclaredEnvName{action: "undeclared", key: "HOME"})
         .Ok(_) -> panic("an allowlist name without a declared value must be refused")
     }
@@ -412,10 +412,10 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 
 #Test("output ownership: distinct outputs plan, a second owner of one output is refused") {
     build := HermeticBuildContext.new()
-    &build.action("first", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("first")
-    &build.action("second", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"})) ?? panic("second")
+    build.action("first", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("first")
+    build.action("second", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"b.o"})) ?? panic("second")
     assert(build.plan() == .Ok(_))
-    &build.action("third", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("third")
+    build.action("third", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("third")
     if build.plan() == {
         .Err(error) -> assert(error == HermeticBuildError.DuplicateBuildOutput{output: "a.o", first_action: "first", second_action: "third"})
         .Ok(_) -> panic("a second owner of one output must be refused")
@@ -426,7 +426,7 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
     root: build_test_root("records")
     store: BuildArtifactStoreHandle.at(files.join(root, ".jet-store")) ?? panic("store")
     build := HermeticBuildContext.new()
-    handle: &build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
+    handle: build.action("cc", ActionSpec.cached([String]{"cc"}).with_outputs([String]{"a.o"})) ?? panic("action")
     plan: build.plan() ?? panic("plan")
     action: plan.actions[handle.id]
     digest: store.put_blob("object".bytes()) ?? panic("blob")
@@ -571,10 +571,10 @@ build_test_output_action: fn(outputs: [String]) -[Rand]> HermeticBuildAction Nev
 #Test("toolchain mounts: an absolute mount is accepted, relative and parent destinations are refused") {
     provenance: BuildProvenance.user_declared("fixture", None)
     build := HermeticBuildContext.new()
-    _: &build.toolchain("absolute", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", "/toolchain", "sha256:x")) ?? panic("an absolute mount must be accepted")
+    _: build.toolchain("absolute", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", "/toolchain", "sha256:x")) ?? panic("an absolute mount must be accepted")
     destinations: [String]{"toolchain", "/toolchain/../etc"}
     loop destination in destinations {
-        if &build.toolchain("bad-{destination.len()}", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", destination, "sha256:x")) == {
+        if build.toolchain("bad-{destination.len()}", ToolchainSpec.target("x86_64-linux", provenance).with_read_only_mount_identity("/nix/store", destination, "sha256:x")) == {
             .Err(error) -> assert(error == HermeticBuildError.InvalidPath("toolchain `bad-{destination.len()}` has an invalid read-only mount"))
             .Ok(_) -> panic("mount destination `{destination}` must be refused")
         }

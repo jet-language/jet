@@ -1,0 +1,11 @@
+// I9: the setting switch and constant read are both folded
+// before the program reaches AOT or the interpreter.
+base_url: fn() -> String { $build.settings.api_base }
+
+run: fn() {
+    comptime if $build.settings.tls == {
+        true -> { print("tls-on") }
+        else -> { print("tls-off") }
+    }
+    print(base_url())
+}

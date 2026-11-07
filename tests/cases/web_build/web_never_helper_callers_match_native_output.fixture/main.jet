@@ -1,0 +1,65 @@
+// Examples/features/errors/never_helper_callers.jet as a web build (#6425):
+// the browser entry prints what O0, O1 and O2 print.
+package: {
+    name: "never_helper_callers"
+    authority: { allow: [Browser, IO] }
+}
+
+#Error
+ParseErr: enum {
+    Empty
+}
+
+#Error
+AppErr: enum {
+    Parse(ParseErr)
+    Missing(String)
+}
+
+impl ParseErr -> AppErr { AppErr.Parse(self) }
+
+double: fn(n: Int) -> Int Never! { n * 2 }
+
+label: fn(text: String) -> String Never! { "<{text}>" }
+
+// The helper's value inside a caller of another failure domain.
+parse: fn(text: String) -> Int ParseErr! {
+    if text == "" -> return Err(ParseErr.Empty)
+    Ok(double(text.len()))
+}
+
+// The `Never!` call needs no conversion; the declared ParseErr -> AppErr route
+// carries only `parse`'s failure.
+load: fn(text: String) -> Int AppErr! {
+    base: double(3)
+    parsed: parse(text)
+    Ok(base + parsed)
+}
+
+// An Option-return caller uses the helper's value directly.
+find: fn(items: [String], wanted: String) -> String? {
+    loop item in items {
+        if item == wanted -> return Val(label(item))
+    }
+    None
+}
+
+// The explicit carrier spelling of a `Never!` body.
+explicit: fn(n: Int) -> Int Never! {
+    return Ok(double(n))
+}
+
+run: fn() {
+    print(double(21))
+    print(load("abcd") ?? 0)
+    print(load("") ?? 0)
+    if load("") == {
+        .Ok(value) -> { print(value) }
+        .Err(_error) -> { print("error") }
+        else -> {}
+    }
+    print(find(["a", "b"], "b") ?? "none")
+    print(find(["a"], "z") ?? "none")
+    print(explicit(5))
+    print(label("x"))
+}

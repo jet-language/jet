@@ -71,7 +71,7 @@ use {
     group_summaries: fn(groups: [Group<String, Float>]) -> [Summary] {
         out := [Summary]{}
         loop group in groups {
-            &out.push(Summary{team: group.key, mean: group.value})
+            out.push(Summary{team: group.key, mean: group.value})
         }
         return out
     }
@@ -84,7 +84,7 @@ use {
             ?? panic("typed inner join")
         out := [Joined]{}
         loop pair in pairs {
-            &out.push(Joined{
+            out.push(Joined{
                 team: pair.left.team,
                 owner: pair.right.owner,
                 mean: pair.left.mean,
@@ -164,13 +164,13 @@ use {
     // data, so the battery does not report a fabricated provider result.
     png_chunk: fn(kind: [U8], payload: [U8]) -> [U8] {
         chunk := Bytes.new()
-        &chunk.write_u32_be(U32{payload.len()})
-        &chunk.write_bytes(kind)
-        &chunk.write_bytes(payload)
+        chunk.write_u32_be(U32{payload.len()})
+        chunk.write_bytes(kind)
+        chunk.write_bytes(payload)
         checksum_input := Bytes.new()
-        &checksum_input.write_bytes(kind)
-        &checksum_input.write_bytes(payload)
-        &chunk.write_u32_be(U32{archive.crc32(checksum_input.to_bytes())})
+        checksum_input.write_bytes(kind)
+        checksum_input.write_bytes(payload)
+        chunk.write_u32_be(U32{archive.crc32(checksum_input.to_bytes())})
         return chunk.to_bytes()
     }
 
@@ -178,7 +178,7 @@ use {
         pixels := [U8]{}
         loop y in 0..<32 {
             // PNG filter byte: no prediction for this deterministic raster.
-            &pixels.push(U8{0})
+            pixels.push(U8{0})
             loop x in 0..<64 {
                 bar := x /% 6
                 ink := false
@@ -186,7 +186,7 @@ use {
                     height: groups[bar].value /% 1000 + 1
                     ink = y >= (32 - height)
                 }
-                &pixels.push(if ink -> U8{0} else -> U8{255})
+                pixels.push(if ink -> U8{0} else -> U8{255})
             }
         }
         return pixels
@@ -195,26 +195,26 @@ use {
     // PNG compression preserves the archive codec's typed failure contract.
     plot_png: fn(groups: [Group<String, Int>]) -> [U8] archive.ArchiveError! {
         ihdr := Bytes.new()
-        &ihdr.write_u32_be(U32{64})
-        &ihdr.write_u32_be(U32{32})
-        &ihdr.write_u8(U8{8})
-        &ihdr.write_u8(U8{0})
-        &ihdr.write_u8(U8{0})
-        &ihdr.write_u8(U8{0})
-        &ihdr.write_u8(U8{0})
+        ihdr.write_u32_be(U32{64})
+        ihdr.write_u32_be(U32{32})
+        ihdr.write_u8(U8{8})
+        ihdr.write_u8(U8{0})
+        ihdr.write_u8(U8{0})
+        ihdr.write_u8(U8{0})
+        ihdr.write_u8(U8{0})
 
         raw: png_rows(groups)
         compressed: archive.deflate(raw) ?? return Err(err)
         zlib := Bytes.new()
-        &zlib.write_bytes([U8]{120, 156})
-        &zlib.write_bytes(compressed)
-        &zlib.write_u32_be(U32{archive.adler32(raw)})
+        zlib.write_bytes([U8]{120, 156})
+        zlib.write_bytes(compressed)
+        zlib.write_u32_be(U32{archive.adler32(raw)})
 
         png := Bytes.new()
-        &png.write_bytes([U8]{137, 80, 78, 71, 13, 10, 26, 10})
-        &png.write_bytes(png_chunk("IHDR".bytes(), ihdr.to_bytes()))
-        &png.write_bytes(png_chunk("IDAT".bytes(), zlib.to_bytes()))
-        &png.write_bytes(png_chunk("IEND".bytes(), [U8]{}))
+        png.write_bytes([U8]{137, 80, 78, 71, 13, 10, 26, 10})
+        png.write_bytes(png_chunk("IHDR".bytes(), ihdr.to_bytes()))
+        png.write_bytes(png_chunk("IDAT".bytes(), zlib.to_bytes()))
+        png.write_bytes(png_chunk("IEND".bytes(), [U8]{}))
         return Ok(png.to_bytes())
     }
 

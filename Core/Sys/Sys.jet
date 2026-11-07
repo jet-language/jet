@@ -92,7 +92,7 @@ env_columns: fn(columns: [[U8]]) -> [(name: [U8], value: [U8])] Never! {
     entries := [(name: [U8], value: [U8])]{}
     index := 0
     loop index < columns.len() {
-        &entries.push((name: columns[index], value: columns[index + 1]))
+        entries.push((name: columns[index], value: columns[index + 1]))
         index += 2
     }
     entries
@@ -112,15 +112,15 @@ __env_compose: fn(snapshot: [(name: [U8], value: [U8])], clear: Bool,
         }
         value: values[index]
         if has_nul(value) -> return Err(env_process_error(name, EnvError.InvalidValue))
-        remove_process_entries(&entries, name.bytes())
-        &entries.push((name: name.bytes(), value: value.bytes()))
+        remove_process_entries(entries, name.bytes())
+        entries.push((name: name.bytes(), value: value.bytes()))
     }
     loop name in removals {
         if validate_env_name(name) == {
             .Err(error) -> return Err(env_process_error(name, error))
             .Ok(_) -> {}
         }
-        remove_process_entries(&entries, name.bytes())
+        remove_process_entries(entries, name.bytes())
     }
     Ok(entries)
 }
@@ -133,7 +133,7 @@ env_process_error: fn(name: String, error: EnvError) -> IOError Never! {
 
 remove_process_entries: fn(entries: &[(name: [U8], value: [U8])], name: [U8]) Never! {
     loop {
-        if !remove_entry(&entries, name) -> return
+        if !remove_entry(entries, name) -> return
     }
 }
 
@@ -165,13 +165,13 @@ read_entry: fn(entries: [(name: [U8], value: [U8])], key: [U8]) -> String? Never
 remove_entry: fn(entries: &[(name: [U8], value: [U8])], key: [U8]) -> Bool Never! {
     index: entry_index(entries, key)
     if index < 0 -> return false
-    _: &entries.remove(index, .Slot)
+    _: entries.remove(index, .Slot)
     true
 }
 
 replace_entry: fn(entries: &[(name: [U8], value: [U8])], key: [U8], value: [U8]) Never! {
-    _: remove_entry(&entries, key)
-    &entries.push((name: key, value: value))
+    _: remove_entry(entries, key)
+    entries.push((name: key, value: value))
 }
 
 entry_names: fn(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
@@ -180,11 +180,11 @@ entry_names: fn(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
     loop entry in entries {
         name: String.from_bytes(entry.name) ?? return Err(EnvError.NonUnicode)
         _: String.from_bytes(entry.value) ?? return Err(EnvError.NonUnicode)
-        &raw.push(entry.name)
-        &names.push(name)
+        raw.push(entry.name)
+        names.push(name)
     }
     ordered := [String]{}
-    loop index in env_key_order(raw) -> &ordered.push(names[index])
+    loop index in env_key_order(raw) -> ordered.push(names[index])
     Ok(ordered)
 }
 
@@ -193,7 +193,7 @@ entry_names: fn(entries: [(name: [U8], value: [U8])]) -> [String] EnvError! {
 env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
     count: keys.len()
     order := [Int]{}
-    loop index in 0..<count -> &order.push(index)
+    loop index in 0..<count -> order.push(index)
     merged := order.copy()
     width := 1
     loop width < count {
@@ -222,21 +222,21 @@ env_key_order: fn(keys: [[U8]]) -> [Int] Never! {
 
 #Test("environment names enumerate in key order, odd counts and runs included") {
     entries := [(name: [U8], value: [U8])]{}
-    loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) -> &entries.push((name: name.bytes(), value: "v".bytes()))
+    loop name in ([String]{"PATH", "B", "HOME", "A", "TERM", "C", "A_1"}) -> entries.push((name: name.bytes(), value: "v".bytes()))
     assert_eq(entry_names(entries), Ok([String]{"A", "A_1", "B", "C", "HOME", "PATH", "TERM"}))
     assert_eq(entry_names([(name: [U8], value: [U8])]{}), Ok([String]{}))
 }
 
 #Test("logical environment replacement and removal retain one last spelling") {
     entries := [(name: [U8], value: [U8])]{}
-    replace_entry(&entries, "JET_ENV_A".bytes(), "old".bytes())
-    replace_entry(&entries, "JET_ENV_B".bytes(), "other".bytes())
-    replace_entry(&entries, "JET_ENV_A".bytes(), "".bytes())
+    replace_entry(entries, "JET_ENV_A".bytes(), "old".bytes())
+    replace_entry(entries, "JET_ENV_B".bytes(), "other".bytes())
+    replace_entry(entries, "JET_ENV_A".bytes(), "".bytes())
     assert_eq(entries.len(), 2)
     assert_eq(String.from_bytes(entries[0].name), Ok("JET_ENV_B"))
     assert_eq(read_entry(entries, "JET_ENV_A".bytes()), Val(""))
-    assert(remove_entry(&entries, "JET_ENV_A".bytes()))
-    assert(!remove_entry(&entries, "JET_ENV_A".bytes()))
+    assert(remove_entry(entries, "JET_ENV_A".bytes()))
+    assert(!remove_entry(entries, "JET_ENV_A".bytes()))
 }
 
 #Test("logical environment presence and Unicode enumeration differ") {
@@ -358,7 +358,7 @@ expand: fn(value: String) -[Env]> String Never! {
         if byte == (U8{36}) && i + 1 < raw.len() {
             after: raw[i + 1]
             if after == (U8{36}) {
-                &out.push(byte)
+                out.push(byte)
                 i = i + 2
                 next
             }
@@ -367,7 +367,7 @@ expand: fn(value: String) -[Env]> String Never! {
                 loop close < raw.len() && raw[close] != (U8{125}) -> close = close + 1
                 if close < raw.len() {
                     replacement: get(slice_ascii(raw, i + 2, close)) ?? ""
-                    loop item in replacement.bytes() -> &out.push(item)
+                    loop item in replacement.bytes() -> out.push(item)
                     i = close + 1
                     next
                 }
@@ -376,7 +376,7 @@ expand: fn(value: String) -[Env]> String Never! {
             loop end < raw.len() && is_env_ident(raw[end]) -> end = end + 1
             if end > i + 1 {
                 replacement: get(slice_ascii(raw, i + 1, end)) ?? ""
-                loop item in replacement.bytes() -> &out.push(item)
+                loop item in replacement.bytes() -> out.push(item)
                 i = end
                 next
             }
@@ -387,13 +387,13 @@ expand: fn(value: String) -[Env]> String Never! {
             if close > i + 1 && close < raw.len() && raw[close] == (U8{37}) {
                 found: get(slice_ascii(raw, i + 1, close))
                 if found != None {
-                    loop item in found.bytes() -> &out.push(item)
+                    loop item in found.bytes() -> out.push(item)
                     i = close + 1
                     next
                 }
             }
         }
-        &out.push(byte)
+        out.push(byte)
         i = i + 1
     }
 }
@@ -441,7 +441,7 @@ getgroups: fn() -[Env]> [Int] Never! {
     row: core.sys.__groups_fill(count)
     if row[0] < 0 -> return [Int]{}
     out := [Int]{}
-    loop index in 0..<row[0] -> &out.push(row[index + 1])
+    loop index in 0..<row[0] -> out.push(row[index + 1])
     out
 }
 
@@ -449,9 +449,9 @@ loadavg: fn() -[Env]> [Float] Never! {
     row: core.sys.__loadavg()
     if !row.available || row.count < 0 -> return [Float]{0.0, 0.0, 0.0}
     out := [Float]{}
-    if row.count > 0 -> &out.push(row.first)
-    if row.count > 1 -> &out.push(row.second)
-    if row.count > 2 -> &out.push(row.third)
+    if row.count > 0 -> out.push(row.first)
+    if row.count > 1 -> out.push(row.second)
+    if row.count > 2 -> out.push(row.third)
     out
 }
 
@@ -466,7 +466,7 @@ times: fn() -[Env]> [Float] Never! {
 }
 
 /// Which processes `usage` measures: this program, or every child it has
-/// waited for (D-CORE-RLIMIT-NAME1).
+/// waited for.
 UsageOf: enum { Program Children }
 
 /// CPU time in user code and in the kernel, and the peak resident memory in
@@ -746,7 +746,7 @@ slice_ascii: fn(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }
@@ -755,7 +755,7 @@ ascii_lower: fn(text: String) -> String {
     out := [U8]{}
     loop byte in text.bytes() {
         n: byte
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(byte)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(byte)
     }
     String.from_bytes(out) ?? text
 }
@@ -906,7 +906,7 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_na
     if host_path.is_absolute(path) -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
     cursor := host_path.components(path)
     loop {
-        part: host_path.next(path, &cursor) ?? break
+        part: host_path.next(path, cursor) ?? break
         if part.kind == .ParentDir -> return Err(config_error("E2416: Dotenv.file must be project-relative"))
     }
     dotenv := String?{None}
@@ -922,7 +922,7 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_na
     loop entry in __env_snapshot() {
         name: String.from_bytes(entry.name) ?? next
         value: String.from_bytes(entry.value) ?? next
-        &process.push((name: name, value: value))
+        process.push((name: name, value: value))
     }
     values: config_entries(prefix, dotenv, allow, process) ?? return Err(err)
     tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
@@ -937,10 +937,10 @@ __decode_tree: fn(prefix: String, file: String, allow: [String], names: [(env_na
                 break
             }
         }
-        &origins.push((name: entry.name, path: segments.join(".")))
-        tree = config_insert(^tree, segments, 0, entry.value)
+        origins.push((name: entry.name, path: segments.join(".")))
+        tree = config_insert(tree, segments, 0, entry.value)
     }
-    Ok((tree: config_tree(^tree), origins: origins))
+    Ok((tree: config_tree(tree), origins: origins))
 }
 
 __decode_errors: fn(errors: [FieldError], origins: [(name: String, path: String)]) -> [FieldError] Never! {
@@ -968,7 +968,7 @@ __decode_errors: fn(errors: [FieldError], origins: [(name: String, path: String)
             .Val(name) -> "E2416: env var {name} -> {error.path}: {reason}"
             .None -> "E2416: config field {error.path}: {reason}"
         }
-        &framed.push(FieldError{path: error.path, reason: message})
+        framed.push(FieldError{path: error.path, reason: message})
     }
     framed
 }
@@ -985,7 +985,7 @@ ConfigTree: enum {
 ascii_upper: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
-        if byte >= (U8{97}) && byte <= (U8{122}) -> &out.push(U8{Int.from_u8(byte) - 32}) else -> &out.push(byte)
+        if byte >= (U8{97}) && byte <= (U8{122}) -> out.push(U8{Int.from_u8(byte) - 32}) else -> out.push(byte)
     }
     String.from_bytes(out) ?? panic("ASCII fold preserves UTF-8")
 }
@@ -1007,7 +1007,7 @@ config_put: fn(values: &[ConfigValue], name: String, value: String) Never! {
             return
         }
     }
-    &values.push(ConfigValue{folded: folded, name: name, value: value})
+    values.push(ConfigValue{folded: folded, name: name, value: value})
 }
 
 config_find: fn(raw: [U8], needle: [U8]) -> Int? Never! {
@@ -1053,19 +1053,19 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(
                 name: core.text.trim(slice_ascii(line.bytes(), 0, equal))
                 if config_allowed(name, allow) {
                     value: config_dotenv_value(slice_ascii(line.bytes(), equal + 1, line.bytes().len()))
-                    config_put(&values, name, value)
+                    config_put(values, name, value)
                 }
             }
             start = end + 1
         }
     }
-    loop entry in process { if config_allowed(entry.name, allow) -> config_put(&values, entry.name, entry.value) }
+    loop entry in process { if config_allowed(entry.name, allow) -> config_put(values, entry.name, entry.value) }
     // Same bytewise uppercase-name order as the native BTreeMap, including
     // punctuation. Lowercase sorting would move '_' before alphabetic keys.
     loop index in 1..<values.len() {
         at := index
         loop at > 0 && values[at].folded < values[at - 1].folded {
-            &values.__swap(at - 1, at)
+            values.__swap(at - 1, at)
             at -= 1
         }
     }
@@ -1084,53 +1084,53 @@ config_entries: fn(prefix: String, dotenv: String?, allow: [String], process: [(
                     .Val(relative) -> start + relative
                     .None -> bytes.len()
                 }
-                if end > start -> &segments.push(ascii_lower(slice_ascii(bytes, start, end)))
+                if end > start -> segments.push(ascii_lower(slice_ascii(bytes, start, end)))
                 start = end + 2
             }
-            if segments.len() > 0 -> &out.push(ConfigEntry{name: entry.name, value: entry.value, segments: segments})
+            if segments.len() > 0 -> out.push(ConfigEntry{name: entry.name, value: entry.value, segments: segments})
         }
     }
     Ok(out)
 }
 
-config_insert: fn(^tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
-    owned := ^tree
-    if ^owned == {
+config_insert: fn(&&tree: ConfigTree, segments: [String], at: Int, value: String) -> ConfigTree Never! {
+    owned := tree.move()
+    if owned.move() == {
         .Object(pairs) -> {
-            out := ^pairs
+            out := pairs.move()
             segment: segments[at]
             loop index in 0..<out.len() {
                 matches: ascii_lower(out[index].key) == ascii_lower(segment)
                 if matches && at + 1 == segments.len() {
-                    pair := &out.remove(index, .Slot) ?? panic("checked config entry")
-                    &out.insert(index, (key: ^pair.key, value: ConfigTree.Text(value)))
-                    return ConfigTree.Object(^out)
+                    pair := out.remove(index, .Slot) ?? panic("checked config entry")
+                    out.insert(index, (key: pair.key.move(), value: ConfigTree.Text(value)))
+                    return ConfigTree.Object(out)
                 }
                 if matches && out[index].value == .Object(_) {
-                    pair := &out.remove(index, .Slot) ?? panic("checked config entry")
-                    child: config_insert(^pair.value, segments, at + 1, value)
-                    &out.insert(index, (key: ^pair.key, value: ^child))
-                    return ConfigTree.Object(^out)
+                    pair := out.remove(index, .Slot) ?? panic("checked config entry")
+                    child: config_insert(pair.value.move(), segments, at + 1, value)
+                    out.insert(index, (key: pair.key.move(), value: child))
+                    return ConfigTree.Object(out)
                 }
             }
             child: if at + 1 == segments.len() -> ConfigTree.Text(value) else -> config_insert(ConfigTree.Object([(key: String, value: ConfigTree)]{}), segments, at + 1, value)
-            &out.push((key: segment, value: ^child))
-            ConfigTree.Object(^out)
+            out.push((key: segment, value: child))
+            ConfigTree.Object(out)
         }
-        .Text(text) -> ConfigTree.Text(^text)
+        .Text(text) -> ConfigTree.Text(text)
     }
 }
 
-config_tree: fn(^tree: ConfigTree) -> Dyn Never! {
-    owned := ^tree
-    if ^owned == {
-        .Text(text) -> Dyn.Text(^text)
+config_tree: fn(&&tree: ConfigTree) -> Dyn Never! {
+    owned := tree.move()
+    if owned.move() == {
+        .Text(text) -> Dyn.Text(text)
         .Object(pairs) -> {
             encoded := [(key: String, value: Dyn)]{}
-            loop pair in ^pairs {
-                &encoded.push((key: pair.key, value: config_tree(^pair.value)))
+            loop pair in pairs.move() {
+                encoded.push((key: pair.key, value: config_tree(pair.value.move())))
             }
-            Dyn.Object(^encoded)
+            Dyn.Object(encoded)
         }
     }
 }
@@ -1156,11 +1156,11 @@ config_tree: fn(^tree: ConfigTree) -> Dyn Never! {
 
 #Test("Dotenv tree replacement preserves sibling order and nested values") {
     tree := ConfigTree.Object([(key: String, value: ConfigTree)]{})
-    tree = config_insert(^tree, [String]{"first"}, 0, "one")
-    tree = config_insert(^tree, [String]{"db", "host"}, 0, "local")
-    tree = config_insert(^tree, [String]{"last"}, 0, "three")
-    tree = config_insert(^tree, [String]{"DB", "host"}, 0, "remote")
-    tree = config_insert(^tree, [String]{"FIRST"}, 0, "updated")
+    tree = config_insert(tree, [String]{"first"}, 0, "one")
+    tree = config_insert(tree, [String]{"db", "host"}, 0, "local")
+    tree = config_insert(tree, [String]{"last"}, 0, "three")
+    tree = config_insert(tree, [String]{"DB", "host"}, 0, "remote")
+    tree = config_insert(tree, [String]{"FIRST"}, 0, "updated")
     if tree == {
         .Object(pairs) -> {
             assert_eq(pairs.len(), 3)

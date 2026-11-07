@@ -85,7 +85,7 @@ wait: fn(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
 
 waitall: fn(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
     out := [Int]{}
-    loop rx in receivers -> &out.push(wait(rx))
+    loop rx in receivers -> out.push(wait(rx))
     out
 }
 
@@ -164,7 +164,7 @@ put: fn(state: TaskState, value: Int) -> TaskState Never! {
     if state.closed -> return state.copy()
     if state.capacity > 0 && state.values.len() >= state.capacity -> return state.copy()
     values := state.values.copy()
-    &values.push(value)
+    values.push(value)
     TaskState{
         values: values,
         capacity: state.capacity,

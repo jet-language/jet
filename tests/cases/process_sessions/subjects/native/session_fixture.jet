@@ -24,7 +24,7 @@ memory: fn() {
     loop {
         block := "x".repeat(256 * 1024).bytes()
         block[0] = U8{1}
-        &blocks.push(block)
+        blocks.push(block)
         time.sleep(1ms)
     }
 }
@@ -34,7 +34,7 @@ descriptors: fn() {
     path: if sys.family() == "windows" -> "NUL" else -> "/dev/null"
     loop {
         if files.open(path) == {
-            .Ok(handle) -> &handles.push(handle)
+            .Ok(handle) -> handles.push(handle)
             .Err(_) -> time.sleep(1ms)
         }
     }

@@ -169,7 +169,7 @@ env_hook_render_vars: fn(kind: ShellKind, vars: [String: String]) -> String Neve
             .Bash | .Zsh -> "export {name}={env_hook_sh_quote(vars[name])}\n"
             .Fish -> "set -gx {name} {env_hook_fish_quote(vars[name])}\n"
         }
-        &out.push(line)
+        out.push(line)
     }
     out.join("")
 }
@@ -181,7 +181,7 @@ env_hook_render_unset: fn(kind: ShellKind, names: [String]) -> String Never! {
             .Bash | .Zsh -> "unset {name}\n"
             .Fish -> "set -e {name}\n"
         }
-        &out.push(line)
+        out.push(line)
     }
     out.join("")
 }

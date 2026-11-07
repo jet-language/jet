@@ -2,7 +2,8 @@
 // jet_pkg_model::PerlBind.
 
 use {
-    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+    jet_foundation.[JET_TYPE_NAMES]
+    jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     jet_pkg_model.[
         ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage, pkg_ascii_lower,
@@ -106,14 +107,14 @@ pkg_perl_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
     worker: pkg_binder_canonicalize(worker_file, "could not resolve the Perl worker")
     abi: "jet_perl_{lib}"
     wrappers := [String]{}
-    loop function in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.perl))
+    loop function in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, function.jet, "invoke", function.perl))
     bridge: pkg_worker_render_supervisor_c(abi, perl, worker, script, wrappers.join(""), "worker_path,script_path")
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Perl process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-perl-bind-v1", source, script, perl, worker_source})
     provenance := "schema=jet-perl-bind-v1\nsha256={digest}\nperl={perl}\nscript={script}\nworker={worker}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Perl, "Perl", lib, script, archive, "perl={perl};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Perl, "Perl", lib, script, archive, "perl={perl};{pkg_binder_cc_ar_identity()}")
     bound := [String]{}
-    loop function in functions -> &bound.push(function.jet)
+    loop function in functions -> bound.push(function.jet)
     result: ForeignBindResult{source: pkg_perl_render_jet(lib, functions), bound: bound, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -145,7 +146,7 @@ pkg_perl_parse_function_names: fn(bytes: [U8]) -> [PerlBoundFunction] ForeignBin
         loop existing in out {
             if existing.jet == jet -> return Err(ForeignBindError.Source("Perl function `{name}` collides with another generated Jet function `{jet}`"))
         }
-        &out.push(PerlBoundFunction{perl: name, jet: jet})
+        out.push(PerlBoundFunction{perl: name, jet: jet})
     }
     if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named Perl functions were found"))
     Ok(out)
@@ -175,14 +176,14 @@ pkg_perl_validate_structure: fn(source: String) ForeignBindError! {
         if code == {
             35 -> comment = true
             39 | 34 | 96 -> quote = code
-            40 | 91 | 123 -> &stack.push(code)
+            40 | 91 | 123 -> stack.push(code)
             41 | 93 | 125 -> {
                 expected: if code == {
                     41 -> 40
                     93 -> 91
                     else -> 123
                 }
-                if stack.len() == 0 || &stack.pop() != expected -> return Err(ForeignBindError.Source("the script has a Perl parse error"))
+                if stack.len() == 0 || stack.pop() != expected -> return Err(ForeignBindError.Source("the script has a Perl parse error"))
             }
             else -> {}
         }
@@ -192,7 +193,7 @@ pkg_perl_validate_structure: fn(source: String) ForeignBindError! {
 
 pkg_perl_render_worker: fn(functions: [PerlBoundFunction]) -> String Never! {
     allowed := [String]{}
-    loop function in functions -> &allowed.push("    '{function.perl.replace("'", "\\'")}' => 1")
+    loop function in functions -> allowed.push("    '{function.perl.replace("'", "\\'")}' => 1")
     pkg_binder_fill_template(PKG_PERL_WORKER, [String: String]{"allowed": allowed.join(",\n")})
 }
 
@@ -201,13 +202,13 @@ pkg_perl_render_jet: fn(lib: String, functions: [PerlBoundFunction]) -> String N
     out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop function in functions {
         name: function.jet
-        &out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nPerlError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    close: fn(^self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\nopen: fn() -[FFI.Perl]> Session PerlError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\ncancel: fn(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
-    &out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nPerlError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(&&session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\nopen: fn() -[FFI.Perl]> Session PerlError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\ncancel: fn(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n")
+    out.push(pkg_render_decode_response("PerlError", DecoderProtocol.StandardEnvelope))
     loop function in functions {
         name: function.jet
-        &out.push("{name}: fn(session: Session, input: Dyn, deadline_ms: Int) -[FFI.Perl]> Dyn PerlError! {{\n    payload: json.to_string(input) ?? return Err(PerlError.Protocol)\n    raw: abi.{name}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        out.push("{name}: fn(session: Session, input: Dyn, deadline_ms: Int) -[FFI.Perl]> Dyn PerlError! {{\n    payload: json.to_string(input) ?? return Err(PerlError.Protocol)\n    raw: abi.{name}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
@@ -224,13 +225,13 @@ pkg_perl_snake: fn(value: String) -> String Never! {
     loop scalar in value.chars() {
         text: "{scalar}"
         code: pkg_bytes_code(text.bytes(), 0)
-        if code >= 65 && code <= 90 && index > 0 -> &out.push("_")
-        &out.push(pkg_ascii_lower(text))
+        if code >= 65 && code <= 90 && index > 0 -> out.push("_")
+        out.push(pkg_ascii_lower(text))
         index += 1
     }
     out.join("")
 }
 
 pkg_perl_reserved: fn(value: String) -> Bool Never! {
-    PKG_PERL_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
+    PKG_PERL_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }

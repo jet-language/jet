@@ -36,7 +36,7 @@ lsp_canonical_source_uri: fn(value: String, project_root: OSPath?, platform: Pat
     path := lsp_source_path.from_text(raw, platform)
     if !lsp_source_path.is_absolute(path) && project_root == .Val(root) {
         joined := root.copy()
-        lsp_source_path.push(&joined, path)
+        lsp_source_path.push(joined, path)
         path = joined
     }
     canonical: lsp_normalize_path_buf(path)
@@ -130,7 +130,7 @@ lsp_module_source: fn(result: JetDriverCompilerCheckResult, path: String) -> Str
 lsp_resolve_use_target: fn(base: OSPath, import: String, repository_root: OSPath) -[FS, Env]> String? Never! {
     path := if import.starts_with("core.") -> repository_root.copy() else -> base.copy()
     relative: if import.starts_with("core.") -> "Docs/spec/reference/core-library.md" else -> "{import.replace(".", "/")}.jet"
-    lsp_source_path.push(&path, lsp_source_path.from_text(relative, path.platform))
+    lsp_source_path.push(path, lsp_source_path.from_text(relative, path.platform))
     // Canonical exists follows metadata; dangling symlinks and every native
     // error yield false. Runtime's real body is gated, never substituted.
     if !lsp_source_io.exists(path) -> return None
@@ -153,7 +153,7 @@ lsp_workspace_root_for_path: fn(workspace_roots: [OSPath], path: OSPath) -[FS, E
     if package == .Val(root) -> return Val(lsp_normalize_os_path(root))
     loop {
         marker := dir.copy()
-        lsp_source_path.push(&marker, lsp_source_path.from_text(".git", path.platform))
+        lsp_source_path.push(marker, lsp_source_path.from_text(".git", path.platform))
         if lsp_source_io.exists(marker) -> return Val(lsp_normalize_os_path(dir))
         extent: lsp_source_path.parent_span(dir) ?? break
         dir = lsp_source_path.owned_span(dir, extent)
@@ -180,12 +180,12 @@ lsp_type_hierarchy_trait_impls: fn(bundle: ProgramBundle, type_name: String) -> 
     loop module_ref in bundle.modules {
         loop item in module_ref.items {
             if item == {
-                .Struct(value) -> { if value.name == type_name { loop implementation in value.trait_impls -> &out.push(implementation.trait_name.copy()) } }
-                .Enum(value) -> { if value.name == type_name { loop implementation in value.trait_impls -> &out.push(implementation.trait_name.copy()) } } else -> {}
+                .Struct(value) -> { if value.name == type_name { loop implementation in value.trait_impls -> out.push(implementation.trait_name.copy()) } }
+                .Enum(value) -> { if value.name == type_name { loop implementation in value.trait_impls -> out.push(implementation.trait_name.copy()) } } else -> {}
             }
         }
     }
-    lsp_sorted_unique_names(^out)
+    lsp_sorted_unique_names(out)
 }
 lsp_type_hierarchy_subtype_names: fn(bundle: ProgramBundle, trait_name: String) -> [String] Never! {
     out := [String]{}
@@ -193,31 +193,31 @@ lsp_type_hierarchy_subtype_names: fn(bundle: ProgramBundle, trait_name: String) 
         loop item in module_ref.items {
             if item == {
                 .Struct(value) -> loop implementation in value.trait_impls {
-                    if implementation.trait_name == trait_name { &out.push(value.name.copy()); break }
+                    if implementation.trait_name == trait_name { out.push(value.name.copy()); break }
                 }
                 .Enum(value) -> loop implementation in value.trait_impls {
-                    if implementation.trait_name == trait_name { &out.push(value.name.copy()); break }
+                    if implementation.trait_name == trait_name { out.push(value.name.copy()); break }
                 }
                 else -> {}
             }
         }
     }
-    lsp_sorted_unique_names(^out)
+    lsp_sorted_unique_names(out)
 }
-lsp_sorted_unique_names: fn(names: ^[String]) -> [String] Never! {
-    &names.sort()
+lsp_sorted_unique_names: fn(names: &&[String]) -> [String] Never! {
+    names.sort()
     write := 0
     loop read in 0..<names.len() {
         if write > 0 && names[write - 1] == names[read] -> next
         if write != read {
-            saved := ^names[write]
-            names[write] = ^names[read]
-            names[read] = ^saved
+            saved := names[write]
+            names[write] = names[read]
+            names[read] = saved.move()
         }
         write += 1
     }
-    loop names.len() > write -> _: &names.pop()
-    ^names
+    loop names.len() > write -> _: names.pop()
+    names.move()
 }
 LSPBlockSpan: struct { start: Int end: Int }
 
@@ -230,11 +230,11 @@ lsp_source_lines: fn(src: String) -> [Span] Never! {
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
             end: if index > start && bytes[index - 1] == (U8{13}) -> index - 1 else -> index
-            &lines.push(Span{start: start, end: end})
+            lines.push(Span{start: start, end: end})
             start = index + 1
         }
     }
-    if start < bytes.len() -> &lines.push(Span{start: start, end: bytes.len()})
+    if start < bytes.len() -> lines.push(Span{start: start, end: bytes.len()})
     lines
 }
 
@@ -289,9 +289,9 @@ lsp_brace_block_spans: fn(src: String) -> [LSPBlockSpan] Never! {
     stack := [Int]{}
     blocks := [LSPBlockSpan]{}
     loop (offset, byte) in src.bytes() {
-        if byte == (U8{123}) -> &stack.push(offset)
+        if byte == (U8{123}) -> stack.push(offset)
         else if byte == (U8{125}) {
-            if &stack.pop() == .Val(start) -> &blocks.push(LSPBlockSpan{start: start, end: offset + 1})
+            if stack.pop() == .Val(start) -> blocks.push(LSPBlockSpan{start: start, end: offset + 1})
         }
     }
     blocks
@@ -323,14 +323,14 @@ lsp_dedup_ranges: fn(ranges: [LSPRange]) -> [LSPRange] Never! {
         loop existing in out {
             if lsp_same_range(existing, range) { found = true; break }
         }
-        if !found -> &out.push(range)
+        if !found -> out.push(range)
     }
     out
 }
 lsp_selection_ranges_for: fn(src: String, tokens: [Token], blocks: [LSPBlockSpan], offset: Int) -> [LSPRange] Never! {
     ranges := [LSPRange]{}
-    if lsp_token_span_at(tokens, offset) == .Val(span) -> &ranges.push(lsp_byte_span_to_range(src, span))
-    if lsp_line_span_at(src, offset) == .Val(span) -> &ranges.push(lsp_byte_span_to_range(src, span))
+    if lsp_token_span_at(tokens, offset) == .Val(span) -> ranges.push(lsp_byte_span_to_range(src, span))
+    if lsp_line_span_at(src, offset) == .Val(span) -> ranges.push(lsp_byte_span_to_range(src, span))
     smallest := LSPBlockSpan?{None}
     loop block in blocks {
         if block.start <= offset && offset <= block.end {
@@ -340,8 +340,8 @@ lsp_selection_ranges_for: fn(src: String, tokens: [Token], blocks: [LSPBlockSpan
             }
         }
     }
-    if smallest == .Val(block) -> &ranges.push(lsp_byte_span_to_range(src, (Span{start: block.start, end: block.end})))
-    &ranges.push(lsp_full_document_range(src))
+    if smallest == .Val(block) -> ranges.push(lsp_byte_span_to_range(src, (Span{start: block.start, end: block.end})))
+    ranges.push(lsp_full_document_range(src))
     lsp_dedup_ranges(ranges)
 }
 lsp_selection_range_json: fn(ranges: [LSPRange]) -> String Never! {
@@ -349,9 +349,9 @@ lsp_selection_range_json: fn(ranges: [LSPRange]) -> String Never! {
     // Emit once instead of repeatedly copying the nested parent JSON.
     pieces := [String]{}
     loop index in 0..<ranges.len() {
-        &pieces.push("{{\"range\":{lsp_range_json(ranges[index])}")
-        if index + 1 < ranges.len() -> &pieces.push(",\"parent\":")
+        pieces.push("{{\"range\":{lsp_range_json(ranges[index])}")
+        if index + 1 < ranges.len() -> pieces.push(",\"parent\":")
     }
-    loop _ in ranges -> &pieces.push("}}")
+    loop _ in ranges -> pieces.push("}}")
     pieces.join("")
 }

@@ -1,0 +1,30 @@
+// Static responses and access records share the server surface.
+package: {
+    name: "http_observability"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc, Net, Time] }
+}
+
+use {
+    files: core.files
+    client: core.http.client
+    server: core.http.server
+    testing: core.testing
+}
+
+run: fn() {
+    request: client.request("GET", "http://127.0.0.1/")
+    print("access:{server.access_log(request, 200)}")
+    root := testing.temp_dir("http-static")
+    path := Path.from(root).join("index.txt").to_string()
+    files.write(path, "hello") ?? return
+    if server.static_file(path, "text/plain") == {
+        .Ok(_) -> print("static:ok")
+        .Err(_) -> print("static:error")
+    }
+    mux: server.mux()
+    if server.serve_once("127.0.0.1:65536", mux) == {
+        .Ok(_) -> print("serve-once:ok")
+        .Err(_) -> print("serve-once:error")
+    }
+    files.remove_all(root) ?? return
+}

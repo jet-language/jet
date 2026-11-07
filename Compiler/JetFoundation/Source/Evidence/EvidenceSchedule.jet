@@ -136,7 +136,7 @@ evidence_schedule_operation: fn(value: Dyn) -> FrameOperation EvidenceCodecError
     fields: evidence_schedule_object(value, "frame operation")
     accesses := [ResourceAccess]{}
     loop access in evidence_schedule_array(evidence_schedule_field(fields, "accesses"), "operation accesses") {
-        &accesses.push(evidence_schedule_access(access))
+        accesses.push(evidence_schedule_access(access))
     }
     provider: if fields.get("completion_provider") == {
         .None -> None
@@ -165,26 +165,26 @@ evidence_decode_frame_schedule: fn(text: String) -> FrameSchedule EvidenceCodecE
     retentions := [FrameRetention]{}
     conservative := [String]{}
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "operations"), "operations") {
-        &operations.push(evidence_schedule_operation(value))
+        operations.push(evidence_schedule_operation(value))
     }
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "dependencies"), "dependencies") {
         row: evidence_schedule_object(value, "frame dependency")
-        &dependencies.push(FrameDependency{before: evidence_schedule_unsigned(evidence_schedule_field(row, "before"), "dependency before"), after: evidence_schedule_unsigned(evidence_schedule_field(row, "after"), "dependency after"), resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "dependency resource"), reason: evidence_schedule_text(evidence_schedule_field(row, "reason"), "dependency reason")})
+        dependencies.push(FrameDependency{before: evidence_schedule_unsigned(evidence_schedule_field(row, "before"), "dependency before"), after: evidence_schedule_unsigned(evidence_schedule_field(row, "after"), "dependency after"), resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "dependency resource"), reason: evidence_schedule_text(evidence_schedule_field(row, "reason"), "dependency reason")})
     }
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "transfers"), "transfers") {
         row: evidence_schedule_object(value, "frame transfer")
-        &transfers.push(FrameTransfer{before: evidence_schedule_unsigned(evidence_schedule_field(row, "before"), "transfer before"), after: evidence_schedule_unsigned(evidence_schedule_field(row, "after"), "transfer after"), resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "transfer resource"), from_device: evidence_schedule_text(evidence_schedule_field(row, "from_device"), "source device"), to_device: evidence_schedule_text(evidence_schedule_field(row, "to_device"), "destination device")})
+        transfers.push(FrameTransfer{before: evidence_schedule_unsigned(evidence_schedule_field(row, "before"), "transfer before"), after: evidence_schedule_unsigned(evidence_schedule_field(row, "after"), "transfer after"), resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "transfer resource"), from_device: evidence_schedule_text(evidence_schedule_field(row, "from_device"), "source device"), to_device: evidence_schedule_text(evidence_schedule_field(row, "to_device"), "destination device")})
     }
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "reuse"), "reuse") {
         row: evidence_schedule_object(value, "frame reuse")
-        &reuse.push(FrameReuse{previous_resource: evidence_schedule_text(evidence_schedule_field(row, "previous_resource"), "previous resource"), next_resource: evidence_schedule_text(evidence_schedule_field(row, "next_resource"), "next resource"), previous_last_use: evidence_schedule_unsigned(evidence_schedule_field(row, "previous_last_use"), "previous last use"), next_first_use: evidence_schedule_unsigned(evidence_schedule_field(row, "next_first_use"), "next first use"), legal: evidence_schedule_bool(evidence_schedule_field(row, "legal"), "reuse legality"), reason: evidence_schedule_text(evidence_schedule_field(row, "reason"), "reuse reason")})
+        reuse.push(FrameReuse{previous_resource: evidence_schedule_text(evidence_schedule_field(row, "previous_resource"), "previous resource"), next_resource: evidence_schedule_text(evidence_schedule_field(row, "next_resource"), "next resource"), previous_last_use: evidence_schedule_unsigned(evidence_schedule_field(row, "previous_last_use"), "previous last use"), next_first_use: evidence_schedule_unsigned(evidence_schedule_field(row, "next_first_use"), "next first use"), legal: evidence_schedule_bool(evidence_schedule_field(row, "legal"), "reuse legality"), reason: evidence_schedule_text(evidence_schedule_field(row, "reason"), "reuse reason")})
     }
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "retentions"), "retentions") {
         row: evidence_schedule_object(value, "frame retention")
-        &retentions.push(FrameRetention{resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "retained resource"), operation: evidence_schedule_unsigned(evidence_schedule_field(row, "operation"), "retention operation"), owner: evidence_schedule_text(evidence_schedule_field(row, "owner"), "retention owner"), completion_token: evidence_schedule_optional(evidence_schedule_field(row, "completion_token"), "retention completion token"), completed: evidence_schedule_bool(evidence_schedule_field(row, "completed"), "retention completion")})
+        retentions.push(FrameRetention{resource: evidence_schedule_text(evidence_schedule_field(row, "resource"), "retained resource"), operation: evidence_schedule_unsigned(evidence_schedule_field(row, "operation"), "retention operation"), owner: evidence_schedule_text(evidence_schedule_field(row, "owner"), "retention owner"), completion_token: evidence_schedule_optional(evidence_schedule_field(row, "completion_token"), "retention completion token"), completed: evidence_schedule_bool(evidence_schedule_field(row, "completed"), "retention completion")})
     }
     loop value in evidence_schedule_array(evidence_schedule_field(fields, "conservative"), "conservative") {
-        &conservative.push(evidence_schedule_text(value, "conservative reason"))
+        conservative.push(evidence_schedule_text(value, "conservative reason"))
     }
     Ok(FrameSchedule{operations: operations, dependencies: dependencies, transfers: transfers, reuse: reuse, retentions: retentions, conservative: conservative})
 }

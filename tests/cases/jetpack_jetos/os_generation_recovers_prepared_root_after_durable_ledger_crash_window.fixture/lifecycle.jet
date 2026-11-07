@@ -18,7 +18,7 @@ decode: fn(value: String) -> String {
     assert(value.bytes().len() % 2 == 0, "invalid lifecycle hex")
     bytes: value.bytes()
     out := [U8]{}
-    loop i in 0..<(bytes.len() /% 2) -> &out.push(U8{digit(bytes[i * 2]) * 16 + digit(bytes[i * 2 + 1])})
+    loop i in 0..<(bytes.len() /% 2) -> out.push(U8{digit(bytes[i * 2]) * 16 + digit(bytes[i * 2 + 1])})
     String.from_bytes(out) ?? panic("lifecycle UTF-8")
 }
 root_index: fn(roots: [RootProof], id: String) -> Int {
@@ -30,7 +30,7 @@ run: fn() {
     assert(args.len() == 1)
     journal: files.join(args[0], "hangar/lifecycle-db/journal")
     names := files.listdir(journal) ?? panic("read lifecycle journal")
-    &names.sort()
+    names.sort()
     roots := [RootProof]{}
     loop name in names {
         raw: files.read(files.join(journal, name)) ?? panic("read journal bytes")
@@ -42,7 +42,7 @@ run: fn() {
                 root: RootProof{kind: fields[1], id: id, producer: decode(fields[3]), witness: decode(fields[5]), targets: [String]{}, phase: "prepared"}
                 index: root_index(roots, id)
                 if index < 0 {
-                    &roots.push(root)
+                    roots.push(root)
                     current = roots.len() - 1
                 } else {
                     roots[index] = root
@@ -50,7 +50,7 @@ run: fn() {
                 }
             } else if fields.len() == 2 && fields[0] == "target" {
                 assert(current >= 0, "target must follow prepare")
-                &roots[current].targets.push(fields[1])
+                roots[current].targets.push(fields[1])
             } else if fields.len() == 5 && fields[0] == "commit" {
                 index: root_index(roots, decode(fields[1]))
                 assert(index >= 0, "commit must follow durable prepare")
@@ -61,14 +61,14 @@ run: fn() {
         }
     }
     ids := [String]{}
-    loop root in roots -> &ids.push(root.id)
-    &ids.sort()
+    loop root in roots -> ids.push(root.id)
+    ids.sort()
     observed := [Dyn]{}
     loop id in ids {
         root: roots[root_index(roots, id)]
         targets := [Dyn]{}
-        loop target in root.targets -> &targets.push(Dyn.Text(target))
-        &observed.push(Dyn.Object([String: Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
+        loop target in root.targets -> targets.push(Dyn.Text(target))
+        observed.push(Dyn.Object([String: Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
     }
     print(json.to_string(Dyn.Array(observed)))
 }

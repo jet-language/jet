@@ -64,9 +64,9 @@ terminal_test_env: fn(name: String, value: String?) {
 #Test("terminal diagnostic collector keeps one card per root cause") {
     collector := DiagnosticCollector.new()
     loop _ in 0..<8 {
-        &collector.record(false, "E1350", "signed-cache-closure", "native Nix cache closure could not be admitted", "the signed closure failed validation", "repair the cache response and retry the realization.")
+        collector.record(false, "E1350", "signed-cache-closure", "native Nix cache closure could not be admitted", "the signed closure failed validation", "repair the cache response and retry the realization.")
     }
-    &collector.record(false, "E1272", "nix-bridge", "Nix realization needs a bridge", "the native Nix bridge is not available", "install the bridge and retry the realization.")
+    collector.record(false, "E1272", "nix-bridge", "Nix realization needs a bridge", "the native Nix bridge is not available", "install the bridge and retry the realization.")
     rendered: collector.render()
     assert_eq(terminal_test_count(rendered, "Error [jet.NixCacheAdmissionFailed]"), 1)
     assert_eq(terminal_test_count(rendered, "Error [jet.MissingNixOutput]"), 1)

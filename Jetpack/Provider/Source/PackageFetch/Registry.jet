@@ -7,7 +7,7 @@ pkg_fetch_registry_edges: fn(manifest: Manifest, metadata: PublicationRegistryPa
     }
     out := [PublicationRegistryDependency]{}
     loop child in pkg_lock_manifest_dependency_names(manifest) {
-        if manifest.dependencies[child] == .Registry(requirement) -> &out.push(PublicationRegistryDependency{name: child, requirements: [String]{requirement}, roles: [String]{"normal"}, prefer: [String]{}, reject: [String]{}, strict: false, enabled_by_default: true})
+        if manifest.dependencies[child] == .Registry(requirement) -> out.push(PublicationRegistryDependency{name: child, requirements: [String]{requirement}, roles: [String]{"normal"}, prefer: [String]{}, reject: [String]{}, strict: false, enabled_by_default: true})
     }
     Ok(out)
 }
@@ -21,9 +21,9 @@ pkg_fetch_registry_plan: fn(resolver: PackageFetchResolver, manifest: Manifest) 
     owners := [String: [String]]{}
     loop name in pkg_lock_manifest_dependency_names(manifest) {
         if manifest.dependencies[name] == .Registry(raw) {
-            &constraints.push(PublicationVersionConstraint{package: name, req: pkg_fetch_requirement(name, raw), from: "{manifest.package.name} (root)"})
-            &direct.push(name)
-            &pending.push(name)
+            constraints.push(PublicationVersionConstraint{package: name, req: pkg_fetch_requirement(name, raw), from: "{manifest.package.name} (root)"})
+            direct.push(name.copy())
+            pending.push(name.copy())
             owners[name] = [String]{manifest.package.name}
         }
     }
@@ -31,11 +31,11 @@ pkg_fetch_registry_plan: fn(resolver: PackageFetchResolver, manifest: Manifest) 
     entries := [String: [PublicationIndexEntry]]{}
     visited := [String]{}
     loop pending.len() > 0 {
-        &pending.sort()
+        pending.sort()
         name: pending[0]
         pending = pending[1..<pending.len()]
         if visited.contains(name) -> next
-        &visited.push(name)
+        visited.push(name.copy())
         registry: pkg_fetch_registry_config(resolver, name)
         available: publication_resolve_and_verify_all(registry, name) ?? return Err(pkg_fetch_registry_evidence_error(name, err.diagnostic))
         previous: pkg_fetch_previous_package(resolver, name)
@@ -61,22 +61,22 @@ pkg_fetch_registry_plan: fn(resolver: PackageFetchResolver, manifest: Manifest) 
             preferred := [String: [PublicationVersionReq]]{}
             strict := [String]{}
             loop edge in edges {
-                loop raw in edge.requirements -> &dependencies.push(PublicationVersionConstraint{package: edge.name, req: pkg_fetch_requirement(edge.name, raw), from: "{name} {entry.version} ({edge.roles.join(",")})"})
+                loop raw in edge.requirements -> dependencies.push(PublicationVersionConstraint{package: edge.name, req: pkg_fetch_requirement(edge.name, raw), from: "{name} {entry.version} ({edge.roles.join(",")})"})
                 preferences := [PublicationVersionReq]{}
-                loop raw in edge.prefer -> &preferences.push(pkg_fetch_requirement(edge.name, raw))
+                loop raw in edge.prefer -> preferences.push(pkg_fetch_requirement(edge.name, raw))
                 preferred[edge.name] = preferences
                 rejects := [PublicationSemVer]{}
-                loop raw in edge.reject -> &rejects.push(publication_parse_semver(raw) ?? return Err(pkg_fetch_registry_error(edge.name, "registry dependency has an invalid reject version")))
+                loop raw in edge.reject -> rejects.push(publication_parse_semver(raw) ?? return Err(pkg_fetch_registry_error(edge.name, "registry dependency has an invalid reject version")))
                 rejected[edge.name] = rejects
-                if edge.strict -> &strict.push(edge.name)
-                if !pending.contains(edge.name) && !visited.contains(edge.name) -> &pending.push(edge.name)
+                if edge.strict -> strict.push(edge.name)
+                if !pending.contains(edge.name) && !visited.contains(edge.name) -> pending.push(edge.name)
                 bucket := owners.get(edge.name) ?? [String]{}
-                &bucket.push("{name}#{entry.version}")
+                bucket.push("{name}#{entry.version}")
                 owners[edge.name] = bucket
             }
-            close(^snapshot)
-            &indexed.push(entry)
-            &choices.push(PublicationSolverCandidate{version: version, dependencies: dependencies, rejected: rejected, preferred: preferred, strict: strict})
+            close(snapshot)
+            indexed.push(entry)
+            choices.push(PublicationSolverCandidate{version: version, dependencies: dependencies, rejected: rejected, preferred: preferred, strict: strict})
         }
         candidates[name] = choices
         entries[name] = indexed
@@ -117,7 +117,7 @@ pkg_fetch_registry_node: fn(verification: &StoreVerification, roots: HangarRoots
         if selected == None {
             versions := [PublicationSemVer]{}
             loop entry in available.entries {
-                if !entry.yanked && publication_parse_semver(entry.version) == .Val(version) && publication_matches(requirement, version) -> &versions.push(version)
+                if !entry.yanked && publication_parse_semver(entry.version) == .Val(version) && publication_matches(requirement, version) -> versions.push(version)
             }
             mode: if resolver.options.resolution == .LowestDirect && chain.len() > 2 -> PublicationResolveMode.Latest else -> resolver.options.resolution
             version: publication_select_compatible(name, [PublicationVersionConstraint]{PublicationVersionConstraint{package: name, req: requirement, from: chain.join(" -> ")}}, versions, mode) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
@@ -153,34 +153,34 @@ pkg_fetch_registry_node: fn(verification: &StoreVerification, roots: HangarRoots
     edges: pkg_fetch_registry_edges(manifest, metadata, name)
     receipt: publication_authorize_package_candidate(resolver.policy, name, entry.version, manifest.package.license, registry.name) ?? return Err(PackageFetchError{diagnostic: publication_package_policy_edge_diagnostic(chain.join(" -> "), "{chain.join(" -> ")} -> {name}#{entry.version}", registry.name, err)})
     if entry.content_hash == "" || entry.fingerprint == "" -> return Err(pkg_fetch_registry_error(name, "published registry metadata has no complete source identity"))
-    pkg_fetch_record_version(&resolver, name, entry.version, chain)
+    pkg_fetch_record_version(resolver, name, entry.version, chain)
     specs := manifest.dependencies
     if metadata == .Val(record) {
         loop child in pkg_lock_manifest_dependency_names(manifest) {
             if manifest.dependencies[child] == .Registry(_) && record.contains_dependency(child) {
-                _: &specs.remove(child)
+                _: specs.remove(child)
             }
         }
     }
     loop edge in edges -> specs[edge.name] = DepSpec.Registry(if edge.requirements.len() > 0 -> edge.requirements[0] else -> "*")
     dependencies := specs.keys().to_list()
-    &dependencies.sort()
+    dependencies.sort()
     fingerprints := [String]{}
     references := [String]{}
     loop child in dependencies {
         child_chain := chain
-        &child_chain.push(child)
-        pkg_fetch_resolve(&verification, roots, context, &resolver, child, specs[child], snapshot.path(), child_chain)
+        child_chain.push(child.copy())
+        pkg_fetch_resolve(verification, roots, context, resolver, child, specs[child], snapshot.path(), child_chain)
         node: resolver.nodes[child]
-        &fingerprints.push(node.package.fingerprint)
+        fingerprints.push(node.package.fingerprint)
         if node.package.source == .Registry(_, _, _, _, _, _, _, _) {
             output: pkg_try_output_hash_of(node.directory) ?? return Err(pkg_fetch_registry_error(child, err.message()))
-            &references.push(output)
+            references.push(output)
         }
     }
     fingerprint: pkg_lock_compute_fingerprint(entry.content_hash, fingerprints, pkg_project_capability_digest(snapshot.path()))
-    installed: pkg_fetch_registry_ingest(&verification, roots, resolver, registry, entry, snapshot.path(), references, if reused -> None else -> resolver.advisory, receipt, exception, reused)
-    close(^snapshot)
+    installed: pkg_fetch_registry_ingest(verification, roots, resolver, registry, entry, snapshot.path(), references, if reused -> None else -> resolver.advisory, receipt, exception, reused)
+    close(snapshot)
     // A hashing failure is a failed content hash; the entry hash is never empty here.
     if (publication_registry_artifact_hash(installed.out) ?? "") != entry.content_hash -> return Err(pkg_fetch_registry_error(name, "stored registry artifact failed its content hash"))
     pkg_source_store_link_into_project(installed.out, files.join(files.join(resolver.root, ".jet/build/deps"), name)) ?? return Err(PackageFetchError{diagnostic: err.diagnostic})
@@ -194,12 +194,12 @@ pkg_fetch_registry_node: fn(verification: &StoreVerification, roots: HangarRoots
 pkg_fetch_registry_ingest: fn(verification: &StoreVerification, roots: HangarRoots, resolver: PackageFetchResolver, registry: PublicationRegistryConfig, entry: PublicationIndexEntry, artifact: String, references: [String], advisory: PublicationAdvisoryPolicy?, receipt: PublicationPackagePolicyReceipt, exception: PackagePolicyException?, reuse: Bool) -[FS, Env, Time]> StoreEntry PackageFetchError! {
     reference: "registry:{registry.name}:{entry.name}#{entry.version}"
     identity: CacheIdentity{source_fingerprint: entry.content_hash, recipe_fingerprint: entry.fingerprint, policy_fingerprint: receipt.fingerprint, platform: pkg_host_platform()}
-    if reuse && store_find_by_reference(&verification, roots, reference) == .Val(existing) && existing.cache_identity == identity -> return Ok(existing)
+    if reuse && store_find_by_reference(verification, roots, reference) == .Val(existing) && existing.cache_identity == identity -> return Ok(existing)
     evidence: "subject={entry.content_hash};sbom=verified;signature-binding=verified;provenance=verified;reproducibility=verified"
     provenance := "registry={registry.name};repository={publication_redact_registry_url(registry.url)};package={entry.name}#{entry.version};source-hash={entry.content_hash};fingerprint={entry.fingerprint};publisher={entry.public_key};index-signature={entry.signature};oci-referrers={evidence};package-policy={publication_policy_receipt_summary(receipt)}"
     if exception == .Val(value) -> provenance = "{provenance};source-policy-exception={value.summary()}"
     if advisory == .Val(policy) -> provenance = "{provenance};advisory-feed=sequence={policy.receipt.sequence},digest={policy.receipt.digest},key={policy.receipt.key_id},maturity={policy.receipt.maturity_seconds}s"
     request: IngestRequest{name: entry.name, version: entry.version, reference: reference, cache_identity: identity, references: references, outputs: [String: String]{"out": artifact}, signature: "", provenance: provenance, platform_artifact_kind: ""}
-    ingested: store_ingest_tree(&verification, roots, request) ?? return Err(pkg_fetch_registry_error(entry.name, err.what()))
+    ingested: store_ingest_tree(verification, roots, request) ?? return Err(pkg_fetch_registry_error(entry.name, err.what()))
     Ok(ingested.entry)
 }

@@ -50,7 +50,7 @@ foundation_core_menu_variants: fn(name: String, kind: CoreLeafKind, effect_roots
             result := [String]{}
             loop variant in variants {
                 canonical: foundation_core_menu_variant(name, variant)
-                if canonical == .Val(value) -> &result.push(value)
+                if canonical == .Val(value) -> result.push(value)
             }
             Val(result)
         }
@@ -78,7 +78,7 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
             kind := CoreLeafKind.Plain
             if core_module_enum_variants(module_name, name) == .Val(enum_variants) -> kind = CoreLeafKind.Enum{variants: enum_variants}
             variants: foundation_core_menu_variants(name, kind, effect_roots, builtin_tags) ?? return None
-            &menus.push(TAppliedRuleArgumentMenu{
+            menus.push(TAppliedRuleArgumentMenu{
                 name: name,
                 variants: variants,
                 first_variant_segment: name == "Effect" || name == "Target",
@@ -86,8 +86,8 @@ foundation_core_argument_menus: fn(effect_roots: [String], builtin_tags: [String
         }
     }
     int_type_variants := [String]{}
-    loop kind in foundation_fixed_integers() -> &int_type_variants.push(kind.name)
-    &menus.push(TAppliedRuleArgumentMenu{
+    loop kind in foundation_fixed_integers() -> int_type_variants.push(kind.name)
+    menus.push(TAppliedRuleArgumentMenu{
         name: "IntType",
         variants: int_type_variants,
         first_variant_segment: false,

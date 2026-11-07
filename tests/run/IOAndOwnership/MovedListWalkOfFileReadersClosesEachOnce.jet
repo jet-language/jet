@@ -1,0 +1,52 @@
+package: {
+    name: "moved_list_walk_of_file_readers_closes_each_once"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] }
+}
+
+// #6415: `loop x in list.move()` over items that hold a FileReader takes each item
+// by move. A kept item keeps its one reader; a skipped item and the items an
+// early return leaves behind close theirs exactly once. A second close of
+// the same reader used to hang in jet_fd_drop_raw.
+
+use {
+    files: core.files
+    core.files.[FileReader]
+}
+
+Held: struct {
+    name: String
+    reader: FileReader
+}
+
+open_all: fn(paths: [String]) -[FS]> [Held] IOError! {
+    opened := [Held]{}
+    loop path in paths -> opened.push(Held{name: path, reader: files.open(path)})
+    kept := [Held]{}
+    loop held in opened.move() {
+        if held.name.ends_with("skip") -> next
+        kept.push(held)
+    }
+    Ok(kept)
+}
+
+first_taken: fn(paths: [String]) -[FS]> Int IOError! {
+    opened := [Held]{}
+    loop path in paths -> opened.push(Held{name: path, reader: files.open(path)})
+    loop held in opened.move() {
+        return Ok(held.reader.read(64).len())
+    }
+    Ok(0)
+}
+
+run: fn() {
+    scratch: files.temp_dir("moved-readers")
+    a: files.join(scratch.path, "a")
+    b: files.join(scratch.path, "b-skip")
+    c: files.join(scratch.path, "c")
+    files.write(a, "alpha\n")
+    files.write(b, "bravo\n")
+    files.write(c, "charlie\n")
+    kept: open_all([String]{a, b, c}) ?? panic("open")
+    loop held in kept -> print("{files.basename(held.name)} {(held.reader.read(64) ?? [U8]{}).len()}")
+    print("first taken {first_taken([String]{c, a}) ?? -1}")
+}

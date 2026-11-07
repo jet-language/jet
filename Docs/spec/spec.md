@@ -19,7 +19,7 @@ the core library under [`Core/`](../../Core/). This document states the
 contract, not where it is implemented.
 
 The [`Examples/`](../../Examples/) tree is the executable form of the examples in
-this document. Prefer a feature example under `Examples/features/` when checking
+this document. Prefer a feature example under `Examples/` when checking
 a claim. If this document disagrees with a checked example or with the parser,
 sema, or Prelude source, the executable truth wins and the prose must be fixed.
 Run `jet check` on a feature file, or `jet run` when the claim has runtime
@@ -188,8 +188,8 @@ assign   = place ( "=" | "+=" | "-=" | "*=" | "/=" | "/%=" | "%=" | "%%="
                  | "<<=" | ">>=" ) expr NL ;
 ```
 
-A parameter's access marker is on its type (`x: &T` or `x: ^T`); receivers
-write `&self` or `^self`. A type is never written between a binding name and its
+A parameter's access marker is on its type (`x: &T` or `x: &&T`); receivers
+write `&self` or `&&self`. A type is never written between a binding name and its
 binding sigil. Types ride values (`Type{…}` or an expected-type-inferred
 `{…}`), or appear on signatures and fields. The old `name: Type: value` and
 `name: Type := value` forms are retired (D-BIND-BARE1=A).
@@ -577,7 +577,8 @@ list when `xs: [Int]` (D-DOTCTOR3 amendment, 2026-09-28, #3739).
 `self` is the receiver and follows the same access law as any parameter. In an
 `&self` method, field assignment, compound assignment, and whole-receiver
 replacement are legal. The same write in a read method is E0205. Calling a
-write-receiver method requires a changeable receiver binding and is E0202.
+write-receiver method needs a changeable receiver: on a `:` binding it is E0111,
+on a read parameter E0205, and the error quotes the method's signature line.
 Invoke an instance method as `circle.area()`, not `area(circle)`. Methods may
 live in the type, in `impl Type { … }`, or as a top-level external inherent
 method `Type.method: fn(self, …) { … }`; the type must be defined in the current
@@ -640,7 +641,7 @@ builds outside-context checks and `finish()` returns `T ![FieldError]`
 `#Memo` immediately before the field to retain the result after its first read;
 writes to stored dependencies invalidate it. A memoized field is read-only and
 is not supplied in a `Type{ … }` literal. Arguments to bare `#Memo` are E0382.
-See [`computed_field.jet`](../../Examples/features/memory/computed_field.jet)
+See [`computed_field.jet`](../../Examples/Memory/ComputedField.jet)
 (D-FIELDPOL1, D-FIELDMEMO1).
 
 A pure function marked `#Memo` retains completed results by its argument tuple.
@@ -762,10 +763,12 @@ wire key set (after any `#Rename`/`#RenameAll` treatment) with historical shapes
 from newest to oldest, rewrites the first match forward in source order, and
 decodes the current shape. The `rename` operation moves a
 key, `remove` drops it, `add` evaluates its default, and `change` decodes,
-converts, and re-encodes the old field. A converter and an `add` default are
-ordinary Jet expressions checked and lowered through the normal pipeline. If no
-shape matches, the original decode error is returned. Types with no migration
-blocks pay no chain cost, and CSV applies the chain per row (D-MIGRATE4=A).
+converts, and re-encodes the old field; an old value that does not decode
+fails the call with that field's errors (D-VALIDATE-DECODE1=B). A converter
+and an `add` default are ordinary Jet expressions checked and lowered through
+the normal pipeline. If no shape matches, the original decode error is
+returned. Types with no migration blocks pay no chain cost, and CSV applies the
+chain per row (D-MIGRATE4=A).
 
 ### Struct layout
 
@@ -883,7 +886,7 @@ Function values use a function type with parameter types and a result:
 function-value effect bound is written `fn(T1, T2) -[]> R`; other effect sets
 replace the empty set. Unmarked parameters have plain read access. A named
 function becomes a value only when every parameter can be called with that read
-access; parameters requiring `&` or `^` keep the function direct-call-only
+access; parameters requiring `&` or `&&` keep the function direct-call-only
 (**E0227**; S47, D-MEM-PARAM1).
 
 The same structural callable-value comparison applies inside collection and
@@ -917,7 +920,7 @@ in that scope does not escape: it borrows each `:=` local it writes, so the
 write lands on the owner (`count := 0; bump: (n: Int) -> { count += n };
 bump(2)` leaves `count` at 2). An escaping lambda—one stored in a binding that
 is passed, stored, or returned, returned itself, stored in a struct field, or
-passed to a `^T` parameter—must own its captures.
+passed to a `&&T` parameter—must own its captures.
 Copy values are copied at closure creation; other clonable values are cloned;
 an owned non-clonable value moves. A borrowed non-clonable parameter cannot
 escape (**E0120**). The old `take(...)` prefix is rejected with **E0057**.
@@ -956,9 +959,9 @@ Static and receiver routes use the same adapter.
 `first()` is the consuming positional terminal. Use `skip(n).first()` for a
 zero-based selection; an out-of-range selection returns `None`. There is no
 `nth` adapter. `min_by` and `max_by` retain the last source item when keys
-compare equal. The examples are `Examples/features/basics/closures.jet`,
-`Examples/features/basics/callbacks.jet`, and
-`Examples/features/collections/iter_adapters.jet`
+compare equal. The examples are `Examples/Basics/Functions/Closures.jet`,
+`Examples/Basics/Functions/Callbacks.jet`, and
+`Examples/Collections/Iterators/IterAdapters.jet`
 (D-S14-PAUSE, D-SHAPE-PIPE1=C, D-BITOREXPR1=A).
 
 The lambda diagnostics are covered by `tests/ui/lambda_*.jet` and
@@ -1137,20 +1140,21 @@ Jet has one explicit ownership contract. A parameter without an access marker is
 always a read parameter; sema decides this from the signature and never raises
 it to write or take access from body usage. The public surface is:
 
-| Source type | Access | Required call-site marker |
+| Source type | Access | Call site |
 | --- | --- | --- |
-| `T` | read; the callee cannot mutate the caller's value | none |
-| `&T` | exclusive write/edit access | `&` |
-| `^T` | take; ownership moves to the callee | `^` |
+| `T` | read; the callee cannot mutate the caller's value | plain |
+| `&T` | exclusive write/edit access | plain; needs a `:=` binding |
+| `&&T` | take; ownership moves to the callee | plain; the name is gone after the call |
 
-For non-scalar values, a read call borrows the existing value without an
-allocation. A body write through an unmarked parameter, or passing it to a write
-or take position, is a hard error at the definition or call site; add `&` or `^`
-to the contract and mirror it where the call transfers access. A cloneable read
-value entering an owning destination is materialized automatically. A bare
-`:` binding of a place remains a read window; non-cloneable values and
-`#Policy(copies: .Explicit)` require an explicit `.copy()` or an owning `^`
-contract (D-MEM1, D-MEM-COPYSEM1).
+Calls carry no marks (D-CALLSITE-MARK2=A): the signature decides. For
+non-scalar values, a read call borrows the existing value without an
+allocation. A body write through an unmarked parameter, or passing it to a
+write or take position, is a hard error at the definition or call site; add
+`&` or `&&` to the contract. A cloneable read value entering an owning
+destination is materialized automatically. A bare `:` binding of a place
+remains a read window; non-cloneable values and `#Policy(copies: .Explicit)`
+require an explicit `.copy()` or an owning `&&` contract (D-MEM1,
+D-MEM-COPYSEM1).
 
 Move facts follow executable control-flow paths. A loop repeats a move only
 when that path reaches its back edge (including `next`); a `return` or `break`
@@ -1158,12 +1162,12 @@ after a move ends that path instead. Assigning a fresh whole value clears the
 old move fact before another iteration. A move completed before the loop, or
 while evaluating its one-time collection header, is not repeated by the loop
 body. An owned pattern table such as
-`if ^owned == { .Object(entries) -> … }` consumes its subject once and binds
+`if owned.move() == { .Object(entries) -> … }` consumes its subject once and binds
 each arm's payload from that already-checked subject, not by moving it again.
 This includes tables used as value tails: testing the next arm does not
 consume the original subject a second time.
 Owning `Dyn` and `DBValue` constructors accept explicit payload transfers,
-for example `Dyn.Text(^text)`; the payload stays moved and is not copied.
+for example `Dyn.Text(text.move())`; the payload stays moved and is not copied.
 
 Public Jet APIs return newly computed answers (D-OUTPUT-RETURNS1=A). Use one
 value, tuple, or named struct for multiple results, including trait requirements
@@ -1178,18 +1182,18 @@ Those performance claims require exercised proof.
 
 ```jet
 bump: fn(n: &Int) { n += 1 }
-archive: fn(name: ^String) -> String { name }
+archive: fn(name: &&String) -> String { name }
 
 run: fn() {
     score := 41
-    bump(&score)
-    saved: archive(^"vault")
+    bump(score)
+    saved: archive("vault")
     print(saved)
 }
 ```
 
 The sigil on a method receiver is written at its definition. Plain `self` is a
-read receiver; `&self` is a write receiver; `^self` consumes the receiver.
+read receiver; `&self` is a write receiver; `&&self` consumes the receiver.
 
 ```jet
 Player: struct {
@@ -1203,38 +1207,40 @@ impl Player {
 
 run: fn() {
     player := Player{hp: 10}
-    &player.heal(2)
+    player.heal(2)
     print(player.show())
 }
 ```
 
 Writing through a read receiver is E0205 and points to `&self`. Calling a
-`&self` method requires a changeable receiver binding and is checked with E0202.
-Using the same name twice while a write access is live is E0204: pass `&x` once,
-or materialize `x.copy()` first. A `&x` argument writes only once the call runs,
-so a later argument may read `x` when that read ends with its own evaluation
-(`grow(&xs, xs.len())`, like `&xs.push(xs.len())`, or a copied scalar in
-`add(&n, n)`); a later argument the call keeps holding, moves, or writes is
-still E0204, and so is `x` passed on to a nested call (`grow(&xs, f(xs))`),
-whose parameter may keep or take it. A written `&` always means the call edits
-(D-CALLSITE-MARK1=A): `&x` passed to a parameter that only reads is E0225,
-whose Safe fix removes the mark. A `ViewMut<T>` parameter keeps the `&` that
-builds its write window.
+`&self` method needs a changeable receiver: a `:` binding is E0111 and a read
+parameter is E0205, each quoting the method's signature line.
+Calls carry no marks (D-CALLSITE-MARK2=A): the signature says what a call does
+to each input, so `bump(score)`, `items.push(3)` and `buf.seal()` are written
+plain. Using the same name twice while a write access is live is E0204: pass
+`x` once, or materialize `x.copy()` first. A write argument writes only once
+the call runs, so a later argument may read `x` when that read ends with its
+own evaluation (`grow(xs, xs.len())`, like `xs.push(xs.len())`, or a copied
+scalar in `add(n, n)`); a later argument the call keeps holding, moves, or
+writes is still E0204, and so is `x` passed on to a nested call
+(`grow(xs, f(xs))`), whose parameter may keep or take it. A part of a list
+passed to a writing parameter is a write window by itself
+(`sort_part(values[0..2])`). A write window bound to a name keeps its mark:
+`edit: &values[2..3]`.
 
 ### Copies, moves, and owned destinations
 
-A named binding passed to a take parameter without `^` moves when the call is
-its last use (D-COPY-DEFAULT1=A, D-CALLSITE-MARK1=A); any later use on any path,
-or a later iteration of a loop the name outlives, makes that argument E0209,
-which teaches `x.copy()` or a reorder. Jet never hides a clone to make that call work.
-A name in two argument slots of one call has no last use in that call, so a
-take slot is E0209 there. Fields, values with cleanup (a `Close` resource, a
-consume duty, or a type holding one by value), type parameters, and captures
-inside a lambda body still need `^`, so the moment a value with cleanup closes
-is always written. One call that reads a name through one argument and takes
-it through another is E0204. `^x` on a captured name inside a lambda body moves
-`x` into the lambda: `x` is gone after the lambda is made, and a second call
-of the lambda binding on any path is E0121.
+A named binding passed to a take parameter moves into the call
+(D-COPY-DEFAULT1=A, D-CALLSITE-MARK2=A); any later use on any path, or a later
+iteration of a loop the name outlives, is E0209, which names the call and
+teaches `x.copy()` or a reorder. Jet never hides a clone to make that call
+work. A name in two argument slots of one call has no last use in that call,
+so a take slot is E0209 there. A field passed to a take parameter is written
+`owner.field.move()`, so a partial move is always visible. One call that reads
+a name through one argument and takes it through another is E0204. A captured
+name passed to a take parameter inside a lambda body moves `x` into the
+lambda: `x` is gone after the lambda is made, and a second call of the lambda
+binding on any path is E0121.
 A literal, `x.copy()`, or call result is a temporary and
 may enter a take parameter without another marker. A temporary with cleanup
 lent to a read parameter (`show(open_log("x"))`) closes exactly once, when its
@@ -1257,29 +1263,28 @@ saved: name.copy()
 print(name)
 print(saved)
 ```
-See [`copy_verb.jet`](../../Examples/features/memory/copy_verb.jet) for the
+See [`copy_verb.jet`](../../Examples/Memory/CopyVerb.jet) for the
 explicit-copy form.
 
-The compiler chooses when a name is unmarked, and a mark gives exact control
-(D-COPY-DEFAULT1=A). `ys: xs` reads a place through a view, `ys := xs.copy()` makes
-an independent copy, and `ys := ^xs` moves `xs` exactly: `^place` is accepted
-in every value position (binding, assignment, field initializer, collection
-element, result), and any later use of `xs` is E0121 naming the move. `^`
-before a literal or call result, or before a collection element or any place
-below one (`^items[i].tags`, whose copy is spelled `items[i].tags.copy()`), is E0225;
-on a read or write parameter it is E0201. An unmarked use that is not the last one
-shares the value instead of moving it: the source stays usable and each holder
-has its own value, so a write through one never shows in the other. A use in
-`return`, or in a loop's `break` value, is the last use for the loops it
-leaves. Values that cannot be copied (resources, one-pass iterators, consume
-duties, tasks) keep E0121 on the later use. A taking receiver call or an
-argument to a take parameter, on a whole local at its last use, needs no `^`;
-a take elsewhere still does, and a writing
-call always needs `&`. Under `#Policy(copies: .Explicit)`, every implicit copy
-that `jet audit copies` reports is a diagnostic with a Safe `.copy()` edit, and an
-unmarked move that a later use reaches stays E0121.
-See [`view_move_copy.jet`](../../Examples/features/memory/view_move_copy.jet)
-and [`share_on_reuse.jet`](../../Examples/features/memory/share_on_reuse.jet).
+The compiler chooses when a name is unmarked, and `.move()` and `.copy()` give
+exact control (D-COPY-DEFAULT1=A, D-COPY-MOVE-SPELL1=A). `ys: xs` reads a place
+through a view, `ys := xs.copy()` makes an independent copy, and
+`ys := xs.move()` moves `xs` exactly: `.move()` is accepted in every value
+position (binding, assignment, field initializer, collection element, result),
+and any later use of `xs` is E0121 naming the move. `.move()` below a collection
+element (`items[i].tags.move()`, whose copy is spelled `items[i].tags.copy()`)
+is E0225; on a read or write parameter it is E0201. An unmarked use that is not
+the last one shares the value instead of moving it: the source stays usable and
+each holder has its own value, so a write through one never shows in the other.
+A use in `return`, or in a loop's `break` value, is the last use for the loops
+it leaves. Values that cannot be copied (resources, one-pass iterators, consume
+duties, tasks) keep E0121 on the later use. A call is always written plain: its
+signature's `&` or `&&` decides whether it writes or takes. Under
+`#Policy(copies: .Explicit)`, every implicit copy that `jet audit copies`
+reports is a diagnostic with a Safe `.copy()` edit, and an unmarked move that a
+later use reaches stays E0121.
+See [`view_move_copy.jet`](../../Examples/Memory/Views/ViewMoveCopy.jet)
+and [`share_on_reuse.jet`](../../Examples/Memory/Shared/ShareOnReuse.jet).
 
 After a partial move from an owned local, assigning a replacement to that
 field initializes that field and its descendants again; it does not restore a
@@ -1299,11 +1304,11 @@ and incompatible read/write paths are E2305, or E2307 for string views
 Constructing a struct prefixes each contained view's output path with its field
 name, including nested structs and views already bound to local names. This
 does not turn a local owner into a caller-owned one: returning such an aggregate
-still rejects views into values made here or consumed by a `^` parameter.
-A positional enum constructor preserves the payload's written access:
-`Choice.First(&values[0..1])` fills a declared `ViewMut<Int>` payload with a
-write window. It cannot grant write access to a read-only parameter or turn an
-unmarked owned slice into a write view.
+still rejects views into values made here or consumed by a `&&` parameter.
+A positional enum constructor preserves the payload's access: with
+`edit: &values[0..1]`, `Choice.First(edit)` fills a declared `ViewMut<Int>`
+payload with that write window. It cannot grant write access to a read-only
+parameter or turn an unmarked owned slice into a write view.
 At a string boundary, fill `View<str>` only from `.trim()`, `.after()`,
 `.before()`, or a tracked string-view binding; a plain owned `String` is not a
 borrowed window.
@@ -1352,8 +1357,9 @@ and ranges lower through a safe structural split; known fields are disjoint;
 dynamic projections conservatively overlap. Jet's sema validates these facts.
 A call or temporary is not a place: bind it first (E0213). The
 retired `values.view(0..1)` spelling is E0214 and points to `values[0..1]`.
-Method calls do not extend a place, so `&values[0..1].sort()` writes the maximal
-range and then calls the method on that window (D-SHAPE-PLACE1=A).
+Method calls do not extend a place, so `values[0..1].sort()` calls `sort` on
+the maximal range, which `sort`'s `&self` makes a write window
+(D-SHAPE-PLACE1=A, D-CALLSITE-MARK2=A).
 
 Sema keeps one provenance and alias graph for every borrowed window, regardless
 of whether the runtime representation is a string slice, `View<T>`, arena
@@ -1439,8 +1445,8 @@ returned window likewise retains its owner's provenance rather than consuming
 the owner's storage. At a named boundary, `View<str>` states the owner-tied contract;
 E2307 rejects a temporary or unstable owner, or an explicit-copy policy that was
 not satisfied. See
-[`string_view.jet`](../../Examples/features/memory/string_view.jet) and
-[`returned_views.jet`](../../Examples/features/memory/returned_views.jet).
+[`string_view.jet`](../../Examples/Memory/Views/StringView.jet) and
+[`returned_views.jet`](../../Examples/Memory/Views/ReturnedViews.jet).
 
 ### Shared state, local cells, and pools
 
@@ -1448,7 +1454,7 @@ not satisfied. See
 infers `T` from the value. A field read takes one read lock and a field write one
 write lock; a read-modify-write such as `config.hits += 1` holds one lock across
 both halves. Each statement is one atomic step. Cloning a `Shared<T>` clones the
-cheap handle, not the payload, so it can cross a task boundary without `^`
+cheap handle, not the payload, so it can cross a task boundary without `&&`
 (D-SHARED-API1, D-CONC-SHARE1=A).
 A type may declare strong `Shared` edges back to itself (a linked list, a tree);
 the cycle check runs at the write. A write into a shared cell, its edit guard's
@@ -1457,11 +1463,11 @@ type, is rejected with E0221 unless the stored value is built in place: a
 literal, a new cell (`shared T{…}`) whose fields are built the same way, a value
 whose type has no strong path back, or a `:` name bound to a new cell in the
 same run of its scope and read nowhere else since. A writing call
-(`&cell.kids.push(kid)`) is checked the same way for each argument. Building a
+(`cell.kids.push(kid)`) is checked the same way for each argument. Building a
 list by prepending or adding new children never closes a cycle; storing an
 existing handle does, so use a `Shared.Weak<T>` back-edge (`.downgrade()`) or an
 id. Weak back-edges do not keep a cycle alive; computed fields are not stored
-edges. A writing call on a place inside a cell (`&cell.items.push(x)`) edits the
+edges. A writing call on a place inside a cell (`cell.items.push(x)`) edits the
 stored value under the cell's write lock, like a field write.
 
 The complete assignment place stays under that lock: `store.items[key] = value`
@@ -1469,7 +1475,7 @@ updates the stored map, and nested field or indexed-record writes update the
 payload rather than a copied read. This also holds inside `#Transact` and through
 an expert edit guard. Direct indexed `+=`/`-=` still follows the ordinary E0164
 rule: use a total update with an explicit missing-key fallback instead. See the
-[compound-place example](../../Examples/features/memory/shared_compound_places.jet).
+[compound-place test](../../tests/cases/shared_transaction/shared_compound_places_match_o0_o1_o2_and_interpreter.fixture/run.jet).
 
 ```jet
 AppConfig: struct {
@@ -1495,7 +1501,7 @@ the ordered shared engine avoids nesting locks and therefore avoids the plain
 access deadlock class. The closure spellings `Shared.read(f)` and `Shared.edit(f)`
 are retired (E1116); read fields directly. `Shared.new(x)` is retired (E1115);
 use `shared x`. A grouped operand uses the same construction, `shared (expr)`;
-for example, a generic optional payload can be `shared (T?{Val(^x)})`.
+for example, a generic optional payload can be `shared (T?{Val(x.move())})`.
 
 Expert code can hold a lock across helper calls with `guard_read()` or
 `guard_edit()`. Each returns an owned `SharedGuard<T>` and releases it on every
@@ -1509,7 +1515,7 @@ default; `&guard: SharedGuard<T>` requires and preserves edit access
 an edit guard, registers before releasing the lock, reacquires the same lock,
 and checks the predicate again. Cancellation unregisters the waiter before final
 release. `notify_one()` wakes one waiter and `notify_all()` wakes all waiters.
-See [`shared_guard_queue.jet`](../../Examples/features/memory/shared_guard_queue.jet)
+See [`shared_guard_queue.jet`](../../Examples/Memory/Shared/SharedGuardQueue.jet)
 for the bounded-queue shape.
 
 Inside `#Transact`, writes to `Shared` values are buffered and commit atomically.
@@ -1573,7 +1579,7 @@ entries. Removing an entry bumps its generation and returns `?T`. Indexing a
 stale ID panics, like an array bounds failure, rather than silently reading old
 storage. `add`, `remove` and `pool[id] = v` change the pool, so they need a
 writable pool: a `:=` binding or a `&` parameter. Through an unmarked
-parameter, `add` and `remove` are **E0202**.
+parameter, `add` and `remove` are **E0205**.
 
 ```jet
 Player: struct {
@@ -1592,12 +1598,12 @@ run: fn() {
 }
 ```
 
-See [`entity_world.jet`](../../Examples/features/memory/entity_world.jet) and
-[`entity_tree.jet`](../../Examples/features/memory/entity_tree.jet) for pool
+See [`entity_world.jet`](../../Examples/Memory/EntityWorld.jet) and
+[`entity_tree.jet`](../../Examples/Memory/EntityTree.jet) for pool
 links and nested writes (D-POOLID-API1).
 
 `Rows<T>` (`core.collections`) is an add-only table and `Row<T>` its 4-byte
-row handle. `&rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`
+row handle. `rows.add(v)` appends `v` and returns its `Row<T>`; `rows[row]`
 reads or writes that row (`rows[row].f = v` too); `rows.f` is a read-only
 `[F]` of field `f` of every row, in row order; `row.index()` is the row's
 position as an `Int`; `freeze(rows)` snapshots the table. There is no remove,
@@ -1606,7 +1612,7 @@ indexes only a table of its own row type: `Row<Node>` indexing a `Rows<Ty>` is
 E0112 at compile time. `add` panics past 4,294,967,295 rows. Row fields are
 meant to be scalars or `Row` handles, which a later column layout keeps one
 array per field (D-COLUMNS1). See
-[`rows.jet`](../../Examples/features/collections/rows.jet).
+[`rows.jet`](../../Examples/Collections/Rows.jet).
 
 ### Transitive memory facts
 
@@ -1633,15 +1639,15 @@ ratified narrow teaching diagnostic.
 
 Access markers are prefix sigils on the type, not on the binding name. The
 unmarked type is the enforced read default; the only explicit access sigils are
-`&` for exclusive write and `^` for take. They appear on parameters, and the
-call site mirrors them when a caller supplies a write window or transfers
-ownership.
+`&` for exclusive write and `&&` for take (D-MOVE-SIGIL1=A). They appear on
+parameters; calls stay plain, because the signature decides
+(D-CALLSITE-MARK2=A).
 
 | Written type | Meaning | Native lowering of a non-scalar parameter |
 | --- | --- | --- |
 | `T` | read; the callee cannot elevate it | shared borrow |
 | `&T` | exclusive edit access | mutable borrow |
-| `^T` | ownership moves to the callee | owned value |
+| `&&T` | ownership moves to the callee | owned value |
 
 ```jet
 Player: struct {
@@ -1652,30 +1658,32 @@ damage: fn(player: &Player, amount: Int) {
     player.hp = player.hp - amount
 }
 
-consume: fn(resource: ^String) { print(resource) }
+consume: fn(resource: &&String) { print(resource) }
 
 run: fn() {
     player := Player{hp: 10}
-    damage(&player, 3)
-    consume(^"resource")
+    damage(player, 3)
+    consume("resource")
 }
 ```
 
 An access marker composes with the optional prefix: `&?User` is write access to
-an optional `User`, and `^?Texture` takes an optional `Texture`. More than one
-access marker on a parameter is E0029:
+an optional `User`, and `&&?Texture` takes an optional `Texture`. A marker both
+before the parameter name and on its type is E0029:
 
 ```text
-error[E0029]: two access markers on one parameter
-  --> file.jet:3:12
-   |
- 3 | bad: fn(p: &^Player) { … }
-   |            ^^ remove one access marker
+Error [jet.DuplicateAccessMarker]: `p` has two access markers
+  --> file.jet:4:10
+    |
+  4 | bad: fn(&p: &&Player) { print(p.hp) }
+    |          ^
+ Why: The write-access marker `&` before the parameter name conflicts with the take marker `&&` on its type; a parameter can declare only one access marker
+ Fix: Keep one access marker on the type or receiver and remove the other
 ```
 
-A value takes one marker too: `^^handle.join()` or `&^items` on an argument or
-expression is E0029 ("this value has two access markers"); write
-`^handle.join()` (D-SHAPE-COPY1=A).
+The three marks outside signatures are a write window bound to a name
+(`edit: &values[2..3]`), a match that writes into its subject
+(`if &shape == { … }`), and `task &&name`. `^` has no meaning in the grammar.
 
 `.copy()` is a method call, not an access marker. Raw-pointer access (`p.*` or
 prefix `*x`) is a separate `#Unsafe`-gated mechanism. It does not change the
@@ -1815,13 +1823,13 @@ set because the checker cannot inspect its body. This keeps inference sound
 without attempting to read foreign code. Deterministic constructors such as a
 seeded `Clock` or `RNG` carry no ambient effect; reading ambient time or
 randomness still does.
-The opaque Rust bridge example `Examples/features/lowlevel/ffi.jet` therefore
+The opaque Rust bridge example `Examples/Interop/FFI/FFI.jet` therefore
 declares the complete maximal grant, including `Secret` and `Time`; its base64
 operation is unchanged, and this grant does not assert that the foreign body
 actually reads either capability.
 
 For example, interpolated `print` in
-`Examples/features/basics/first_hour_expert.jet` records both `IO` and the
+`Examples/Basics/FirstHourExpert.jet` records both `IO` and the
 `Mem.Alloc` needed for its fresh `String`; `core.process.args()` records the
 `Exec.Args` leaf, while starting a process records the `Exec` root. A Core
 call with a precise leaf under its own root records only that leaf, so
@@ -2057,7 +2065,7 @@ unsafe block; it does not invent a safety proof. E3101 reports a low-level
 operation outside `#Unsafe`, E3102 reports a missing `core.mem` discovery
 import, E3103 reports an unsafe function call without an enclosing gate, and
 E3112 requires a nonempty reason. The audited example is
-[`Examples/features/lowlevel/lowlevel.jet`](../../Examples/features/lowlevel/lowlevel.jet).
+[`Examples/LowLevel/LowLevel.jet`](../../Examples/LowLevel/LowLevel.jet).
 
 A function marker `#Unsafe("reason") fn` makes the entire function body an
 audited contract. Its caller must itself be inside an enclosing unsafe region.
@@ -2082,7 +2090,7 @@ file fails closed. `jet inspect gates --kind unsafe FILE` reports each gate,
 operation, discharge state, and effective policy. Assertions erase in sema
 before the shared IR
 boundary. See
-[`Examples/features/lowlevel/unsafe_obligations.jet`](../../Examples/features/lowlevel/unsafe_obligations.jet). (D-UNSAFE-OBLIG1)
+[`Examples/LowLevel/UnsafeObligations.jet`](../../Examples/LowLevel/UnsafeObligations.jet). (D-UNSAFE-OBLIG1)
 
 ### One audited-gate law
 
@@ -2111,7 +2119,7 @@ written reasons. Structure gates record deliberate suppressions such as
 fix. Durable trust grants, dependency grants and `.Force` pins are checked
 before their writer publishes state; invocation choices are checked before
 dispatch. An ordinary deliberate `jet update jet` is not a forced pin.
-See [`Examples/features/effects/lint_gate_reason.jet`](../../Examples/features/effects/lint_gate_reason.jet).
+See [`Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet`](../../Examples/ErrorsAndEffects/Effects/AuditedGateLadder.jet).
 (D-GATE-LAW1=A)
 
 
@@ -2121,7 +2129,7 @@ Jet has no compact cast-and-dereference operator. To reinterpret an address,
 first construct `mem.Ptr<T>.from_addr(addr)`, then use postfix `p.*` in the same
 audited region. The two operations make the cast and dereference obligations
 separate. The Jai comparison is illustrated by
-[`Examples/features/lowlevel/pointer_cast_deref.jet`](../../Examples/features/lowlevel/pointer_cast_deref.jet). (D-POINTERCHAIN1)
+[`Examples/LowLevel/PointerCastDeref.jet`](../../Examples/LowLevel/PointerCastDeref.jet). (D-POINTERCHAIN1)
 
 ### Allocator families
 
@@ -2135,9 +2143,9 @@ are thread-confined, so move plain owned data across a task or channel rather
 than moving the allocator itself.
 
 `arena.reset()` retains backing storage for reuse. Terminal release uses the
-universal resource operation `close(^allocator)`; `.free()` is not the
+universal resource operation `close(allocator)`; `.free()` is not the
 allocator release spelling. Using an allocator after its move is E0121. The
-walkthrough is [`Examples/features/memory/arena.jet`](../../Examples/features/memory/arena.jet). (D-ALLOC1, D-ALLOC-C, D-ALLOC-D)
+walkthrough is [`Examples/Memory/Allocation/Arena.jet`](../../Examples/Memory/Allocation/Arena.jet). (D-ALLOC1, D-ALLOC-C, D-ALLOC-D)
 
 The fallible allocation family is separate from plain abort-on-failure calls:
 `List.try_new`, `List.try_with_capacity`, `try_push`, `try_reserve`,
@@ -2148,25 +2156,25 @@ interpreter carry the same fallible result; they do not choose a
 different allocation policy. A value `try_alloc` accepts belongs to its
 allocator as an `alloc` value does: it closes and drops once, at reset or
 close, and the Result carrying its view owns none of it. See
-[`Examples/features/memory/try_allocation.jet`](../../Examples/features/memory/try_allocation.jet). (D-ALLOCFAIL1=A)
+[`Examples/Memory/Allocation/TryAllocation.jet`](../../Examples/Memory/Allocation/TryAllocation.jet). (D-ALLOCFAIL1=A)
 
 ### Arena regions and scope-bound views
 
 `arena.alloc(value)` places a value in retained arena storage and returns a
 scope-bound view, not an owned copy. `reset()` mutably borrows the arena and
-`close(^arena)` consumes it, so the compiler rejects either operation while a
+`close(arena)` consumes it, so the compiler rejects either operation while a
 view is live. The runtime has one narrowly contained lifetime-extension helper
 inside the memory implementation; that lifetime never appears in user syntax.
 
 A view must stay inside its region and before the arena is reset or closed.
-E0631 rejects a view returned, stored in another owner, passed to a `&` or `^`
+E0631 rejects a view returned, stored in another owner, passed to a `&` or `&&`
 parameter, or captured by an escaping closure. E0632 rejects a read after the
 arena reset. Regions are implicit and scope-inferred from the lexical scope of
 the arena binding. Expert code may use `#Region(r) { ... }` for a named or
 narrower region, or one spanning more than one allocator; the same escape rule
 applies. Views are non-reassignable, non-escaping locals, and analysis that
 cannot prove those properties is rejected. The example and diagnostics are
-[`Examples/features/memory/arena_regions.jet`](../../Examples/features/memory/arena_regions.jet),
+[`Examples/Memory/Allocation/ArenaRegions.jet`](../../Examples/Memory/Allocation/ArenaRegions.jet),
 [`tests/ui/arena_view_escape.stderr`](../../tests/ui/arena_view_escape.stderr),
 and [`tests/ui/arena_view_after_reset.stderr`](../../tests/ui/arena_view_after_reset.stderr). (D-ALLOC2, D-REGION1)
 
@@ -2295,7 +2303,7 @@ The import graph is loaded before semantic checking, so checks cover the whole
 program. The relevant diagnostics are **E0602** (path escapes the project),
 **E0603** (missing import), **E0604** (import cycle), **E0605** (private item),
 and **E0606** (ambiguous module). The executable import example is
-`Examples/features/modules/imports/`; the corresponding UI fixtures are under
+`Examples/Modules/Imports/`; the corresponding UI fixtures are under
 `tests/ui/import_escape/`, `import_missing/`, `import_cycle/`,
 `import_private/`, `import_private_field/`, and `import_ambiguous/`.
 
@@ -2385,7 +2393,7 @@ pair of equal names stays **E0105**.
 Re-exported calls retain the defining function's borrow and move rules.
 Examples covering file modules, inline modules,
 qualified and grouped imports, and re-exports are in
-`Examples/features/modules/` (D-MOD4).
+`Examples/Modules/` (D-MOD4).
 
 ### Generic modules
 
@@ -2424,7 +2432,7 @@ specialization; different arguments or a different template definition produce
 different instances. Semantic checks reject invalid targets, arity, bounds,
 value kinds and types, scope, and cycles with **E0850**–**E0853** and
 **E0855**–**E0857**; a specialization identity collision is **E0859**. The
-value-argument example is `Examples/features/modules/fact_value_arguments.jet`.
+value-argument example is `Examples/Modules/FactValueArguments.jet`.
 
 ## Composable configuration modules
 
@@ -2624,7 +2632,7 @@ Copyable captures are copied at closure creation; owned non-copyable captures
 move. A task-boundary value must be sendable (**E1102**). Mutable or otherwise
 non-sendable captures report **E1101** or **E1102**. A `view` borrow, a struct
 containing `ref` fields, a trait value, or a closure with non-sendable captures
-cannot cross. Give ownership to a child with `^`, make an immutable owned
+cannot cross. Give ownership to a child with `task &&name`, make an immutable owned
 snapshot with `freeze`, or use `Shared` and a lock for deliberate shared
 mutation (D-CONC-CROSS1).
 
@@ -2641,12 +2649,12 @@ values. Mutating methods and write windows report the same E1113 with the
 original freeze location; a control-flow merge preserves the proof only when
 every reaching path carries a frozen value.
 
-`task ^name { ... }` consumes `name` into the child. Using `name` after child
-creation is the ordinary **E0121** use-after-move. This `^` capture spelling is
-specific to tasks; `^` on an ordinary call argument retains its move meaning.
+`task &&name { ... }` consumes `name` into the child. Using `name` after child
+creation is the ordinary **E0121** use-after-move. This capture mark is one of
+the three marks written outside a signature (D-CALLSITE-MARK2=A).
 `Shared` and `Cell` retain their synchronized and local-only semantics.
 
-The example and golden output are `Examples/features/concurrency/freeze_capture.jet`
+The example and golden output are `Examples/Concurrency/FreezeCapture.jet`
 and `freeze_capture.out`; UI fixtures are
 `tests/ui/frozen_write.jet`, `frozen_capture_use_after_move.jet`, and
 `freeze_shared_source.jet`.
@@ -2704,7 +2712,7 @@ Channel payloads must be sendable (**E1102**). `channel<T>(capacity: N)` adds a
 bounded buffer of `N >= 1` values; a literal capacity below 1 is **E0395** and a
 run-time capacity below 1 stops the program, never clamping. Seed a channel with
 `N` tokens when at most `N` workers may be
-active; `Examples/features/concurrency/bounded_workers.jet` demonstrates the
+active; `Examples/Concurrency/Parallel/BoundedWorkers.jet` demonstrates the
 pattern (D-CONC-CHAN1).
 
 ### Bounded buffering law
@@ -2935,7 +2943,7 @@ String-like operations decode UTF-8 lossily and then use String behavior:
 
 Consuming typed reads remain on `core.encoding.Reader`; terminal output remains
 on the `core.term` writer. `Bytes` does not introduce a second reader or
-writer hierarchy. See `Examples/features/io/byte_buffer.jet`
+writer hierarchy. See `Examples/Systems/ByteBuffer.jet`
 (D-ITERTOOLS1=A, #1467).
 
 ### `core.math`
@@ -2950,7 +2958,7 @@ and arithmetic operations.
 `round` returns the nearest integer with an exact half away from zero
 (`-2.5` becomes `-3`, and `2.5` becomes `3`). For `min` and `max`, one NaN
 operand yields the non-NaN operand; two NaN operands yield NaN. Examples are
-`Examples/features/math/math_audit.jet`, `more_math.jet`, and `fraction.jet`
+`Examples/Math/MathAudit.jet`, `more_math.jet`, and `fraction.jet`
 (D-MATHLIB2, D-CORESURFACE1, D-NUMTYPE1).
 
 ### `core.sys` and process boundaries
@@ -2970,7 +2978,7 @@ and a host-OS target gate. The gated set includes `fork`, `setuid`, `setgid`,
 and `stop`.
 
 These helpers do not emulate POSIX semantics on Windows. Examples are
-`Examples/features/io/os_facts.jet` and `os_process_control.jet`.
+`Examples/Systems/Process/OSFacts.jet` and `os_process_control.jet`.
 
 ### Other core contracts
 
@@ -3031,8 +3039,8 @@ validates scalar signatures, named operands, the `; -> return` anchor, clobbers,
 and the selected target before lowering. Native code is linked by the native
 build path. Compile-time code links no foreign functions, so a raw body never
 runs at compile time. See
-[`Examples/features/lowlevel/inline_c.jet`](../../Examples/features/lowlevel/inline_c.jet)
-and [`Examples/features/lowlevel/inline_asm.jet`](../../Examples/features/lowlevel/inline_asm.jet).
+[`Examples/Interop/FFI/InlineC.jet`](../../Examples/Interop/FFI/InlineC.jet)
+and [`Examples/LowLevel/InlineAsm.jet`](../../Examples/LowLevel/InlineAsm.jet).
 (D-FFI-INLINE1, D-FFI-RAWBODY1, D-FFI-ASM1, D-FFI-CPP1)
 
 ### Rust declarations
@@ -3043,17 +3051,19 @@ and `= "rust::path"`; `extern rust "std"` needs no extra dependency. A
 non-`core` crate requires an exact version pin (E0701). By-value boundary types
 include scalars, `String`, `Char`, lists/maps/options/results built from allowed
 types, and structs or enums whose fields obey the same rule.
-Capability parameters use the `&` and `^` conventions; a raw foreign call that
+Capability parameters use the `&` and `&&` conventions; a raw foreign call that
 carries one requires an audited `#Unsafe` boundary (E0702).
 
 A returned resource may declare `#Close(close)`. Its close function must consume
-exactly `^` of the handle and return no value, so `close(^handle)` owns one
-release. When a dependency is needed, Jet builds a hidden cached cargo bridge
-under `~/.cache/jet/ffi/` or the directory selected by `JET_FFI_CACHE_DIR`; it
-does not add a manifest to the user's project. Missing cargo is E0703, a
+exactly `&&` of the handle and return no value, so `close(handle)` owns one
+release. When a dependency is needed, `jet run`, `jet build` and `jet test` build
+a hidden cached cargo bridge under `~/.cache/jet/ffi/` or the directory selected
+by `JET_FFI_CACHE_DIR`; it does not add a manifest to the user's project.
+`jet check` reuses a cached bridge, or type-checks the bridge with `cargo check`
+in a private workspace and publishes nothing. Missing cargo is E0703, a
 fetch/build failure is E0704, and an invalid foreign path or signature is E0705.
 A panic at the foreign boundary becomes the shared runtime report. The worked
-surface is [`Examples/features/lowlevel/ffi.jet`](../../Examples/features/lowlevel/ffi.jet);
+surface is [`Examples/Interop/FFI/FFI.jet`](../../Examples/Interop/FFI/FFI.jet);
 Rust FFI integration assertions live in [`tests/ffi_rust.rs`](../../tests/ffi_rust.rs).
 The descriptor table also records the namespaced `rust.*` and `swift.*`
 bridge roots; this direct block is the Rust declaration surface described here.
@@ -3134,7 +3144,7 @@ records its identity.
 `.jet/bindings/py/.bridges/<identity>/`, with a stable `lib<abi>.a` projection.
 The identity includes the descriptor, source and worker bytes, runtime,
 native toolchain, and typed function list. The source fixture is
-[`Examples/interop/python`](../../Examples/interop/python); the generated
+[`Examples/Interop/Languages/Python`](../../Examples/Interop/Languages/Python); the generated
 surface and effect spelling are asserted in [`tests/cases/ffi_python`](../../tests/cases/ffi_python/). (D-FFI-PY1)
 
 ### JavaScript and TypeScript
@@ -3172,7 +3182,7 @@ ABI. Generated calls carry `FFI.Go`; unsupported signatures and tool failures
 are rejected or laundered through E3208. Compilation has a 60-second deadline
 and bounded diagnostics.
 
-**Evidence.** Use [`Examples/features/lowlevel/polyglot_go`](../../Examples/features/lowlevel/polyglot_go)
+**Evidence.** Use [`Examples/Interop/Polyglot/PolyglotGo`](../../Examples/Interop/Polyglot/PolyglotGo)
 for the archive, handle, and close path. (D-FFI-GO1)
 
 ### Fortran ISO C binding
@@ -3188,7 +3198,7 @@ through the private C ABI. The order is Fortran column-major order. Unsupported
 shapes and gfortran failures use E3208, and calls carry `FFI.Fortran`.
 
 **Evidence.** The checked matrix fixture is
-[`Examples/features/lowlevel/polyglot_fortran`](../../Examples/features/lowlevel/polyglot_fortran). (D-FFI-FORTRAN1)
+[`Examples/Interop/Polyglot/PolyglotFortran`](../../Examples/Interop/Polyglot/PolyglotFortran). (D-FFI-FORTRAN1)
 
 ### COBOL and copybooks
 
@@ -3208,7 +3218,7 @@ layouts and ABI-proof failures use E3208; bridge tools have 60-second and
 64-KiB bounds.
 
 **Evidence.** The payroll fixture is
-[`Examples/interop/cobol`](../../Examples/interop/cobol). (D-FFI-COBOL1)
+[`Examples/Interop/Languages/Cobol`](../../Examples/Interop/Languages/Cobol). (D-FFI-COBOL1)
 
 ### Java and the JVM
 
@@ -3221,7 +3231,7 @@ supported surface.
 JVM lazily in the Jet process, attaches calling threads, and destroys the JVM
 at process teardown. Java objects are opaque `java.<lib>.Handle` values in a
 bounded 1,024-slot global-reference table. Calls borrow a handle;
-`close(^handle)` consumes it and releases the global reference. Constructors
+`close(handle)` consumes it and releases the global reference. Constructors
 and value-returning methods return `JavaError.Exception` on a Java exception;
 Java stack text and foreign frames remain inside the bridge. Calls carry
 `FFI.Java`, and javac/javap/cc/ar are bounded to 60 seconds with 64-KiB
@@ -3229,7 +3239,7 @@ capture.
 
 **Evidence.** Provenance joins the source, reflected bytecode surface, class
 cache, and schema. See
-[`Examples/features/lowlevel/polyglot_java`](../../Examples/features/lowlevel/polyglot_java). (D-FFI-JVM1)
+[`Examples/Interop/Polyglot/PolyglotJava`](../../Examples/Interop/Polyglot/PolyglotJava). (D-FFI-JVM1)
 
 ### .NET
 
@@ -3242,7 +3252,7 @@ typed `cs.<lib>` module.
 `load_assembly_and_get_function_pointer`; managed entry points use
 `[UnmanagedCallersOnly]`. No worker or file protocol participates in calls.
 Instances are opaque move-only handles in a 1,024-slot generation-checked
-`GCHandle` table. `close(^handle)` releases the managed root. Exhaustion,
+`GCHandle` table. `close(handle)` releases the managed root. Exhaustion,
 managed exceptions, and invalid/stale handles become `DotNetError.ResourceLimit`,
 `DotNetError.Exception`, and `DotNetError.InvalidHandle`; foreign exception
 text does not cross. Calls carry `FFI.DotNet`, with 60-second tool deadlines
@@ -3250,7 +3260,7 @@ and 64-KiB diagnostics.
 
 **Evidence.** Provenance binds the source, reflected surface, hostfxr identity,
 and schema. See
-[`Examples/features/lowlevel/polyglot_dotnet`](../../Examples/features/lowlevel/polyglot_dotnet). (D-FFI-DOTNET1)
+[`Examples/Interop/Polyglot/PolyglotDotNet`](../../Examples/Interop/Polyglot/PolyglotDotNet). (D-FFI-DOTNET1)
 
 ### Tcl
 
@@ -3261,7 +3271,7 @@ once; `eval`, `eval_int`, and `eval_float` share that session. `eval_once` uses
 a fresh interpreter for one call.
 
 **Boundary.** `Session` is opaque and thread-affine. A bounded 64-slot table owns
-interpreters; `close(^session)` consumes the Jet handle, and process teardown
+interpreters; `close(session)` consumes the Jet handle, and process teardown
 cleans remaining interpreters before Tcl finalization. String results are
 copied through a 64-KiB boundary and reject embedded NUL and oversized values.
 Typed Tcl parsing supplies integer and float entrypoints. Tcl failures become
@@ -3271,7 +3281,7 @@ cancellation claim for a long-running command.
 
 **Evidence.** Binding tools use a 60-second deadline and 64-KiB capture; source,
 runtime, and schema are hashed in provenance. See
-[`Examples/features/lowlevel/polyglot_tcl`](../../Examples/features/lowlevel/polyglot_tcl). (D-FFI-TCL1)
+[`Examples/Interop/Polyglot/PolyglotTcl`](../../Examples/Interop/Polyglot/PolyglotTcl). (D-FFI-TCL1)
 
 ### Lua
 
@@ -3296,7 +3306,7 @@ with `LuaError.NotRunning`.
 destroying a healthy session. A generation-tagged 32-slot state table owns
 sessions; tools have 60-second and 64-KiB bounds, and provenance joins source,
 runtime, and schema. LuaRocks realization remains provider work. See
-[`Examples/interop/lua`](../../Examples/interop/lua). (D-FFI-LUA1)
+[`Examples/Interop/Languages/Lua`](../../Examples/Interop/Languages/Lua). (D-FFI-LUA1)
 
 ### Ada
 
@@ -3317,7 +3327,7 @@ GNAT elaboration runs once and finalization runs at process exit. Calls carry
 schema. `jet import ada <dir>` preserves the Ada sources and emits an editable
 binder stub with JT0101 for unsupported semantics; it does not translate
 ranges, exceptions, tasking, representation clauses, or ownership. The native
-fixture is [`Examples/features/lowlevel/polyglot_ada`](../../Examples/features/lowlevel/polyglot_ada). (D-FFI-ADA1)
+fixture is [`Examples/Interop/Polyglot/PolyglotAda`](../../Examples/Interop/Polyglot/PolyglotAda). (D-FFI-ADA1)
 
 ### Object Pascal
 
@@ -3330,13 +3340,13 @@ ownership semantics.
 
 **Boundary.** Class pointers never reach Jet. The C bridge owns them in a
 bounded 64-slot table and returns opaque move-only identities;
-`<class>_close(^handle)` consumes one identity. Stale or double close fails
+`<class>_close(handle)` consumes one identity. Stale or double close fails
 before the Pascal destructor runs, and process teardown destroys remaining
 objects before runtime finalization. Calls carry `FFI.Pascal`; compiler and
 archiver tools have 60-second and 64-KiB bounds, and native links pin the
 Pascal runtime search path.
 
-**Evidence.** See [`Examples/features/lowlevel/polyglot_pascal`](../../Examples/features/lowlevel/polyglot_pascal). (D-FFI-PASCAL1)
+**Evidence.** See [`Examples/Interop/Polyglot/PolyglotPascal`](../../Examples/Interop/Polyglot/PolyglotPascal). (D-FFI-PASCAL1)
 
 ### Dart and Flutter
 
@@ -3361,7 +3371,7 @@ and are synchronous and isolate-thread-affine.
 ordinary native-library packaging; Jet does not embed or launch a Flutter
 engine. SDK, C, archiver, and native compilation are bounded to 60 seconds and
 64-KiB capture, with E3208 for tool failures. See
-[`Examples/features/lowlevel/polyglot_dart`](../../Examples/features/lowlevel/polyglot_dart). (D-FFI-DART1)
+[`Examples/Interop/Polyglot/PolyglotDart`](../../Examples/Interop/Polyglot/PolyglotDart). (D-FFI-DART1)
 
 ### PowerShell
 
@@ -3381,10 +3391,10 @@ remain in the worker. Calls carry `FFI.PowerShell`.
 
 **Evidence.** A call has a 1–300000 ms deadline. Expiry or cancellation kills
 and reaps the complete process group and invalidates its generation-tagged
-session; `close(^session)` consumes the handle. At most 32 workers exist per
+session; `close(session)` consumes the handle. At most 32 workers exist per
 process. Binding-time tools have 60-second and 64-KiB bounds and E3208
 laundered diagnostics. See
-[`Examples/interop/powershell`](../../Examples/interop/powershell). (D-FFI-PWSH1)
+[`Examples/Interop/Languages/PowerShell`](../../Examples/Interop/Languages/PowerShell). (D-FFI-PWSH1)
 
 ### Perl
 
@@ -3403,10 +3413,10 @@ inside the worker. Calls carry `FFI.Perl` and do not accept runtime source.
 
 **Evidence.** Calls use a 1–300000 ms deadline. Timeout or cancellation kills
 the process group; generation-tagged handles reject stale identities and
-`close(^session)` consumes a session. At most 32 workers exist. CPAN
+`close(session)` consumes a session. At most 32 workers exist. CPAN
 realization is provider work. Binding tools have 60-second and 64-KiB bounds
 and E3208 diagnostics. See
-[`Examples/interop/perl`](../../Examples/interop/perl). (D-FFI-PERL1)
+[`Examples/Interop/Languages/Perl`](../../Examples/Interop/Languages/Perl). (D-FFI-PERL1)
 
 ### Ruby
 
@@ -3424,10 +3434,10 @@ is not the result channel. Ruby exceptions become
 inside the worker. Calls carry `FFI.Ruby`.
 
 **Evidence.** Timeout and cancellation use a 1–300000 ms deadline and kill the
-process group; `close(^session)` consumes a generation-tagged session, with at
+process group; `close(session)` consumes a generation-tagged session, with at
 most 32 workers. Compiler and archive tools have 60-second and 64-KiB bounds.
 RubyGems installation remains provider work. See
-[`Examples/interop/ruby`](../../Examples/interop/ruby). (D-FFI-RUBY1)
+[`Examples/Interop/Languages/Ruby`](../../Examples/Interop/Languages/Ruby). (D-FFI-RUBY1)
 
 ### PHP
 
@@ -3446,10 +3456,10 @@ protocol, command, and resource-limit failures. Calls carry `FFI.Php` and do
 not expose PHP exception text or source paths.
 
 **Evidence.** Worker frames and responses are capped at 1 MiB. A call deadline
-or cancellation replaces the affected workers; `close(^pool)` consumes the
+or cancellation replaces the affected workers; `close(pool)` consumes the
 pool handle. Binding lint, C compilation, and archiving use bounded diagnostics
 and the descriptor/provenance record. See
-[`Examples/interop/php`](../../Examples/interop/php). (D-FFI-PHP1)
+[`Examples/Interop/Languages/Php`](../../Examples/Interop/Languages/Php). (D-FFI-PHP1)
 
 ### R
 
@@ -3472,7 +3482,7 @@ close.
 **Evidence.** Calls use a 1–300000 ms deadline, process-group cancellation,
 generation-tagged handles, 1-MiB frames, and at most 32 workers. CRAN
 realization remains provider work. See
-[`Examples/interop/r`](../../Examples/interop/r). (D-FFI-R1)
+[`Examples/Interop/Languages/R`](../../Examples/Interop/Languages/R). (D-FFI-R1)
 
 ### Octave
 
@@ -3492,7 +3502,7 @@ cancellation, and errors become `OctaveError` variants without foreign text.
 **Evidence.** Provenance records the script, Octave identity, worker, JSON
 transport, column-major order, rank-two shape, and session bound. Binding tools
 use 60-second and 64-KiB capture. See
-[`Examples/interop/octave`](../../Examples/interop/octave). (D-FFI-OCTAVE1)
+[`Examples/Interop/Languages/Octave`](../../Examples/Interop/Languages/Octave). (D-FFI-OCTAVE1)
 
 ### Windows COM automation
 
@@ -3510,7 +3520,7 @@ move-only opaque `Object` values, and VARIANT/SAFEARRAY values cross as bounded
 `Dyn`. Dynamic name-based `IDispatch` is available only inside explicit
 `#Unsafe`; generated safe calls use fixed DISPIDs. Each live object owns a
 single-threaded apartment and a generation-tagged handle tied to its creating
-thread. `close(^object)` releases it and balances `CoUninitialize`; stale,
+thread. `close(object)` releases it and balances `CoUninitialize`; stale,
 cross-thread, and double-close uses fail before invocation. HRESULT and
 EXCEPINFO become `ComError` variants without vendor text. Calls carry
 `FFI.Com`; frames and Dyn depth are capped at 1 MiB and 64.
@@ -3518,7 +3528,7 @@ EXCEPINFO become `ComError` variants without vendor text. Calls carry
 **Evidence.** Provenance hashes the extracted type-library schema and generated
 surface. A released file-backed binding may omit the original `.tlb`, but when
 the input remains available its bytes must match the recorded hash. See
-[`Examples/features/lowlevel/polyglot_com`](../../Examples/features/lowlevel/polyglot_com). (D-FFI-COM1)
+[`Examples/Interop/Polyglot/PolyglotCom`](../../Examples/Interop/Polyglot/PolyglotCom). (D-FFI-COM1)
 
 ### Data-schema binders
 
@@ -3580,9 +3590,9 @@ The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
 `Offline`. Mutation states are `Idle`, `Pending`, `Success`, `Error`, and
 `Settled`; network modes are `Online`, `Always`, and `OfflineFirst`. `get`,
 `show`, `state`, `state_signal`, `mutation_state`, `mutation_signal`, and
-`facts` read values and bounded lifecycle facts. `invalidate(&q)` marks a
-query stale and advances its generation. `refresh(&q)`, `queue(&q, data)`, and
-`retry(&q, replay)` are fallible operations; `cancel(&q)` returns whether an
+`facts` read values and bounded lifecycle facts. `invalidate(q)` marks a
+query stale and advances its generation. `refresh(q)`, `queue(q, data)`, and
+`retry(q, replay)` are fallible operations; `cancel(q)` returns whether an
 in-flight operation was cancelled. `mutate` checks the key and optional
 expected value, applies the mutation, and returns a `WebMutationState`;
 `mutate_with_invalidations` additionally validates target keys.
@@ -3756,15 +3766,30 @@ parameter type must be generatable: `Int`, a sized integer, an inline range,
 `Float`, `Float32`, `Bool`, `Char`, `String`, or a list, fixed list, or
 optional of a generatable type; any other type reports E0613. `jet test` runs
 the body on 200 generated cases, each behind the same unwind boundary as a
-claim. Every generated value comes from one recorded sequence of bounded
+claim; the generated grade, `jet test --grade=generated`, runs each property
+on `--iterations=<n>` cases instead (1000 when unset) from the base seed
+`--seed=<n>` (the fixed 0 when unset, unless `JET_PROP_SEED` names one), so a
+graded run is reproducible; `iterations` or `seed` without `grade` is refused.
+Every generated value comes from one recorded sequence of bounded
 choices. The first failing case is shrunk: spans of choices are deleted and
 single choices lowered while the case still fails, so integers move toward
 zero and lists toward fewer, simpler elements. The failure report names the
 failing case, the run seed, the minimized inputs (`minimized_inputs: n = 50`,
 each parameter as `name = value` in Debug form), and the minimized case's own
 report; only that case's output is
-captured. A seed is fresh entropy unless `JET_PROP_SEED` (an integer from 0 to
-2^63-1) names one; rerunning with the printed seed reproduces the run.
+captured. Outside the generated grade a seed is fresh entropy unless
+`JET_PROP_SEED` (an integer from 0 to 2^63-1) names one; rerunning with the
+printed seed reproduces the run.
+A `#Pre(condition, "reason")` marker on a property test is its precondition: a
+generated case that fails it is rejected before the body runs, never counts
+toward the case budget, and is never a shrink target; a failure report names
+how many cases the precondition rejected, and a property whose rejections reach ten
+times its budget fails with a fix instead of passing on too few cases. Each
+property's evidence record counts only the cases that ran and attaches its
+law: `precondition`, `partitions` (each parameter as `name: Type`),
+`relation` (the body's assertions), `surfaces` (the functions and methods the
+body calls), `sink` (a runtime stop of the body), `shrink_rule`, `seed` and
+`rejected`.
 (D-TEST1)
 
 For an explicit file, `jet test <file.jet>` builds one generated AOT harness for
@@ -3985,7 +4010,7 @@ of the optimizer rather than the intended work:
   operation that occurs later.
 
 The language example is
-[`Examples/features/tooling/bench.jet`](../../Examples/features/tooling/bench.jet),
+[`Examples/Tooling/Performance/Bench.jet`](../../Examples/Tooling/Performance/Bench.jet),
 and the test command contract is covered by
 [`tests/measurement_tiers.rs`](../../tests/measurement_tiers.rs). The separate
 compiler-speed dashboard at [`Tools/perf/dashboard.sh`](../../Tools/perf/dashboard.sh)
@@ -4010,7 +4035,7 @@ profile, then `build: fn`, then the flag. A flag that replaces a profile or
 was written. `b.pin(.optimize, .Full)` fixes the value for every build; a flag
 with another value is E2113. `jet run` reads profiles and flags, not
 `build: fn`. Example:
-[`Examples/features/tooling/build_options`](../../Examples/features/tooling/build_options/run.jet).
+[`Examples/Tooling/Build/BuildOptions`](../../Examples/Tooling/Build/BuildOptions/run.jet).
 
 The `bounds` row says what a failed list bounds check does: `fatal` (the
 stock everywhere) stops the program, `report` writes the failure to stderr and
@@ -4025,7 +4050,7 @@ reference is never null and a raw pointer's validity is the `#Unsafe` author's
 obligation (I1), and a conversion is total or returns an Optional
 (D-SHAPE-CONVERT1), so there is no check to switch. A profile field, flag or
 `build: fn` call of either name is refused with that law. Example:
-[`Examples/features/tooling/build_bounds`](../../Examples/features/tooling/build_bounds/run.jet).
+[`tests/run/Tooling/BuildBounds`](../../tests/run/Tooling/BuildBounds/run.jet).
 
 The `debug_info` and `small` rows hold a Bool: a profile field writes
 `debug_info: false`, `build: fn` writes `b.debug_info(false)`, and the flag
@@ -4077,7 +4102,7 @@ more than `optimize: basic` does. `jet build --small` is `--small=true`. Jai's
 `min_size` has no row, since the native backend has no separate size pass. The
 command-line help describes the flag as “Favor a smaller binary”; it does not
 promise a particular byte-size ratio (S15). Example:
-[`Examples/features/tooling/build_debug_info`](../../Examples/features/tooling/build_debug_info/run.jet).
+[`tests/run/Tooling/BuildDebugInfo`](../../tests/run/Tooling/BuildDebugInfo/run.jet).
 
 `inline` says which callees the optimizer inlines at `optimize: basic` and
 `full` (`none` inlines none). `auto` (the stock) picks them by size, within the
@@ -4088,7 +4113,7 @@ cannot splice a recursive callee, a callee that writes a parameter, an
 `#FFI(asm)` leaf, or a callee from another file whose arithmetic can stop.
 `off` inlines nothing. `build: fn` writes `b.inline(.AlwaysMarked)`, and the
 flag writes `--inline=always_marked`. Example:
-[`Examples/features/tooling/build_inline`](../../Examples/features/tooling/build_inline/run.jet).
+[`tests/run/Tooling/BuildInline`](../../tests/run/Tooling/BuildInline/run.jet).
 
 ### Fault reports and unreached functions
 
@@ -4108,7 +4133,7 @@ non-generic function of the package's own modules, so the image carries them
 (a generic function is still built only for the instances a call reaches).
 `build: fn` writes `b.backtrace(.Brief)` and `b.dead_code(.Keep)`, and the
 flags write `--backtrace=brief` and `--dead-code=keep`. Example:
-[`Examples/features/tooling/build_backtrace`](../../Examples/features/tooling/build_backtrace/run.jet).
+[`tests/run/Tooling/BuildBacktrace`](../../tests/run/Tooling/BuildBacktrace/run.jet).
 
 `checked_alloc` (stock `false`) holds a Bool. With `true` the program links
 the runtime's checked memory allocator and runs with it from its first
@@ -4157,7 +4182,7 @@ operating system the image runs on. The native backend writes Linux x86-64 ELF
 images, so every other value is refused with E2104. `min_os` (stock `""`) is
 the oldest OS version the image runs on; a Linux ELF image has no versioned
 ABI floor, so any value is refused with E2104. Example:
-[`Examples/features/tooling/build_link_inputs`](../../Examples/features/tooling/build_link_inputs/run.jet).
+[`Examples/Tooling/Build/BuildLinkInputs`](../../Examples/Tooling/Build/BuildLinkInputs/run.jet).
 
 ### Language server
 
@@ -4387,7 +4412,7 @@ overlay containing rule N's output.
   "name": "ReportV2",
   "project": "..",
   "roots": [
-    {"path":"Examples/report.jet","validate":"clean"},
+    {"path":"Examples/Tooling","validate":"clean"},
     {"path":"tests/ui/report_type.jet","validate":"fixture"}
   ],
   "rules": [
@@ -4747,10 +4772,13 @@ exact = "acme/tool@github#v1.2.0"
 ```
 
 `jetpack update [<source>]` is the operation that moves a source-channel
-record. `jetpack outdated` compares lock facts with channel metadata without
-writing. `jet build`, `jet run`, the environment view, and `jet dev` read the
-exact lock entry; an unlocked channel is E1271, including in CI and `--offline`
-mode (D-JPK-CHANNEL1).
+record. Neither it nor an automatic refresh rewrites the source declaration:
+the lock is the one home of the exact version (D-CHANNEL-AUTO2=A).
+`jetpack outdated` compares lock facts with channel metadata without writing;
+each row names the locked exact version, and a row whose metadata lookup fails
+says `unknown`, never `current`. `jet build`, `jet run`, the environment view,
+and `jet dev` read the exact lock entry; an unlocked channel is E1271,
+including in CI and `--offline` mode (D-JPK-CHANNEL1).
 
 ### Package identity
 
@@ -5028,7 +5056,7 @@ inspection: `on` writes them, `off` writes none. It is the profile field
 `write_generated: on`, the flag `--write-generated=on` (which replaces the
 retired `--emit-generated`) and the `build: fn` call `b.write_generated(.On)`.
 Example:
-[`Examples/features/tooling/build_write_generated`](../../Examples/features/tooling/build_write_generated/run.jet).
+[`Examples/Metaprogramming/BuildTime/BuildWriteGenerated`](../../Examples/Metaprogramming/BuildTime/BuildWriteGenerated/run.jet).
 
 `b.contribute(name, value)` gives a value to a setting the package declares in
 `package.jet` (`settings: { cache_slots: Int = 1 }`). The manifest lists every
@@ -5038,7 +5066,7 @@ Before a package that declares settings compiles (`jet build`, `jet run`,
 contribution as a `[[build.contribution]]` row. Every compile of the package
 reads those rows: `$build.settings.cache_slots` folds to the contributed value
 over the declared default and the selected profile's value. Example:
-[`Examples/features/packages/build_contribution`](../../Examples/features/packages/build_contribution/run.jet).
+[`Examples/Metaprogramming/BuildTime/BuildContribution`](../../Examples/Metaprogramming/BuildTime/BuildContribution/run.jet).
 
 Generation is additive with one owner per managed path. Generated modules are
 ordered in dependency rounds using ordinary quoted-file imports; a later round

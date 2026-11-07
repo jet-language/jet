@@ -11,7 +11,7 @@ lsp_module_file_path: fn(current_path: OSPath, workspace_root: OSPath?, module_p
         .Val(root) -> root.copy()
         .None -> lsp_completion_path.owned_span(current_path, parent)
     }
-    lsp_completion_path.push(&base, module_path)
+    lsp_completion_path.push(base, module_path)
     Val(base)
 }
 lsp_use_statement_for_module: fn(current_path: OSPath, workspace_root: OSPath?, module_path: OSPath) -> String? Never! {
@@ -30,7 +30,7 @@ lsp_use_statement_for_module: fn(current_path: OSPath, workspace_root: OSPath?, 
     loop rel.ends_with(".jet") -> rel = rel.removesuffix(".jet")
     separator: if module_ref.platform == .Windows -> "\\" else -> "/"
     parts := [String]{}
-    loop part in rel.split(separator) { if !part.is_empty() -> &parts.push(part.copy()) }
+    loop part in rel.split(separator) { if !part.is_empty() -> parts.push(part.copy()) }
     name: parts.join(".")
     if name.is_empty() -> return None
     Val("use {name}\n")

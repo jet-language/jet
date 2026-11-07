@@ -1,0 +1,36 @@
+// core.encoding.toml — full TOML 1.0: `[table]` headers, arrays, typed scalars.
+// Decode a nested document into typed structs, then round-trip it back to text.
+use toml: core.encoding.toml
+
+Owner: struct {
+    name: String
+    port: Int
+}
+
+Config: struct {
+    title: String
+    owner: Owner
+    ports: [Int]
+}
+
+run: fn() [FieldError]! {
+    raw: "title = \"jet\"\nports = [80, 443]\n\n[owner]\nname = \"ada\"\nport = 8080\n"
+    cfg: toml.decode<Config>(raw)
+    print(cfg.title)
+    print(cfg.owner.name)
+    print(cfg.owner.port)
+    print(cfg.ports.len())
+    print(toml.to_string(cfg))
+    comments()
+}
+
+// `#` comments, whole-line and inline, are skipped by the parser. A malformed
+// line is rejected with a parse error rather than a crash.
+comments: fn() {
+    commented: toml.parse("# count setting\ncount = 2 # inline\n") ?? panic("toml")
+    print("toml commented: {commented}")
+    if toml.parse("count = \n") == {
+        .Ok(tree) -> print("toml missing value: accepted {tree}")
+        .Err(e) -> print("toml missing value: rejected")
+    }
+}

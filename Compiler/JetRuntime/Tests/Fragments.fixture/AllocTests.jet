@@ -158,12 +158,20 @@ alloc_test_full_slabs: fn() {
     }
     alloc_cache_flush()
     head: alloc_head(arena, I64{4096})
-    #Unsafe("after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked onto the free-slab stack") {
+    #Unsafe("after all payloads are freed, the class keeps its emptied slabs linked up to ALLOC_RETAINED_EMPTY_SLABS and counts each; any further empty slab went onto the free-slab stack") {
         retained: os_load_i64(wrapping(head + I64{64}))
-        alloc_test_require(retained != I64{0} && os_load_i64(head) == retained)
-        alloc_test_require(os_load_i64(retained) == I64{0})
-        alloc_test_require(os_load_i64(wrapping(retained + I64{8})) == I64{0})
-        alloc_test_require(os_load_i64(wrapping(retained + I64{24})) == I64{0})
+        alloc_test_require(retained > I64{0} && retained <= ALLOC_RETAINED_EMPTY_SLABS)
+        empty := I64{0}
+        previous := I64{0}
+        slab := os_load_i64(head)
+        loop slab != (I64{0}) {
+            alloc_test_require(os_load_i64(wrapping(slab + I64{8})) == previous)
+            alloc_test_require(os_load_i64(wrapping(slab + I64{40})) == arena)
+            if (os_load_i64(wrapping(slab + I64{24})) == I64{0}) { empty = wrapping(empty + I64{1}) }
+            previous = slab
+            slab = os_load_i64(slab)
+        }
+        alloc_test_require(empty == retained)
     }
 }
 
@@ -289,17 +297,17 @@ alloc_test_zero_inherit: fn() {
     marked: jet_rt_alloc(I64{40}, I64{8})
     plain: jet_rt_alloc(I64{40}, I64{8})
     jet_rt_block_mark_zero(marked)
-    copy: jet_rt_alloc(I64{40}, I64{8})
-    jet_rt_block_inherit_zero(plain, copy)
+    inherited: jet_rt_alloc(I64{40}, I64{8})
+    jet_rt_block_inherit_zero(plain, inherited)
     #Unsafe("the test owns these fresh align-8 blocks and their count words") {
-        alloc_test_require(os_load_i64(wrapping(copy - I64{24})) == I64{1})
+        alloc_test_require(os_load_i64(wrapping(inherited - I64{24})) == I64{1})
     }
-    jet_rt_block_inherit_zero(marked, copy)
+    jet_rt_block_inherit_zero(marked, inherited)
     #Unsafe("the test owns these fresh align-8 blocks and their count words") {
-        alloc_test_require(os_load_i64(wrapping(copy - I64{24})) == RC_ZERO_MARK.bit_or(I64{1}))
+        alloc_test_require(os_load_i64(wrapping(inherited - I64{24})) == RC_ZERO_MARK.bit_or(I64{1}))
     }
-    alloc_test_require(jet_rt_block_unique(copy) && jet_rt_block_release(copy))
-    jet_rt_free(copy, I64{40}, I64{8})
+    alloc_test_require(jet_rt_block_unique(inherited) && jet_rt_block_release(inherited))
+    jet_rt_free(inherited, I64{40}, I64{8})
     jet_rt_free(plain, I64{40}, I64{8})
     jet_rt_free(marked, I64{40}, I64{8})
 }

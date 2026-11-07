@@ -10,32 +10,32 @@ lsp_loop_test_change: fn(uri: String, version: String, changes: String) -> Dyn N
 }
 lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, source: String) Never! {
     params: lsp_loop_test_params("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":{version},\"text\":{foundation_json_quote(source)}}}}}")
-    assert_eq(lsp_update_document(&state, Val(params), true, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(lsp_update_document(state, Val(params), true, lsp_loop_path.PathPlatform.Unix), Val(uri))
 }
 
 #Test("incremental sync range edit updates document and coalesces dirtiness") {
     state := LSPDiagnosticState.new()
     uri: "file:///tmp/lsp_incremental_test.jet"
-    lsp_loop_test_open(&state, uri, 1, "run: fn() {{\n    x: 1\n}}\n")
+    lsp_loop_test_open(state, uri, 1, "run: fn() {{\n    x: 1\n}}\n")
     change: lsp_loop_test_change(uri, "2", "{{\"range\":{{\"start\":{{\"line\":1,\"character\":4}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":4,\"text\":\"let x = 1\"}}")
-    assert_eq(lsp_update_document(&state, Val(change), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(lsp_update_document(state, Val(change), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
     assert_eq(state.docs[uri].text, "run: fn() {{\n    let x = 1\n}}\n")
     assert_eq(state.docs[uri].version, 2)
-    lsp_publish_after_change(&state, Val(lsp_loop_test_change(uri, "3", "{{\"text\":\"new\"}}")), lsp_loop_path.PathPlatform.Unix)
+    lsp_publish_after_change(state, Val(lsp_loop_test_change(uri, "3", "{{\"text\":\"new\"}}")), lsp_loop_path.PathPlatform.Unix)
     assert_eq(state.docs[uri].text, "new")
-    assert_eq(lsp_dirty_documents(&state), [String]{uri})
-    assert_eq(lsp_dirty_documents(&state), [String]{})
+    assert_eq(lsp_dirty_documents(state), [String]{uri})
+    assert_eq(lsp_dirty_documents(state), [String]{})
 }
 
 #Test("incremental sync rejects stale and every original malformed edit without consuming version") {
     state := LSPDiagnosticState.new()
     uri: "file:///tmp/lsp_validated_sync.jet"
-    lsp_loop_test_open(&state, uri, 10, "// 😀\nkept: fn() {{}}\n")
+    lsp_loop_test_open(state, uri, 10, "// 😀\nkept: fn() {{}}\n")
     accepted: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":7}}}},\"rangeLength\":4,\"text\":\"fresh\"}}"
-    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "11", accepted)), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
-    _: lsp_dirty_documents(&state)
+    assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "11", accepted)), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    _: lsp_dirty_documents(state)
     stale: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"stale\"}}"
-    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "11", stale)), false, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "11", stale)), false, lsp_loop_path.PathPlatform.Unix), None)
     rejected: [String]{
         "{{\"range\":{{\"start\":{{\"line\":0,\"character\":4}},\"end\":{{\"line\":0,\"character\":5}}}},\"rangeLength\":1,\"text\":\"X\"}}",
         "{{\"range\":{{\"start\":{{\"line\":1,\"character\":8}},\"end\":{{\"line\":1,\"character\":3}}}},\"rangeLength\":5,\"text\":\"backward\"}}",
@@ -47,16 +47,16 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
         "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":4,\"text\":\"bad_length\"}}",
     }
     loop changes in rejected {
-        assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "12", changes)), false, lsp_loop_path.PathPlatform.Unix), None)
+        assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "12", changes)), false, lsp_loop_path.PathPlatform.Unix), None)
         assert_eq(state.docs[uri].text, "// 😀\nfresh: fn() {{}}\n")
         assert_eq(state.docs[uri].version, 11)
         assert_eq(state.dirty.len(), 0)
     }
     loop version in ([String]{"12.5", "2147483648"}) {
-        assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, version, "{{\"text\":\"wide\"}}")), false, lsp_loop_path.PathPlatform.Unix), None)
+        assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, version, "{{\"text\":\"wide\"}}")), false, lsp_loop_path.PathPlatform.Unix), None)
     }
     final: "{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":8}}}},\"rangeLength\":5,\"text\":\"final\"}}"
-    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "12", final)), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "12", final)), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
     assert_eq(state.docs[uri].text, "// 😀\nfinal: fn() {{}}\n")
     assert_eq(state.docs[uri].version, 12)
 }
@@ -64,15 +64,15 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
 #Test("change transaction is sequential and rolls back the whole list on a bad later edit") {
     state := LSPDiagnosticState.new()
     uri: "file:///tmp/atomic.jet"
-    lsp_loop_test_open(&state, uri, -1, "a😀b")
+    lsp_loop_test_open(state, uri, -1, "a😀b")
     edits: "{{\"text\":\"abc\"}},{{\"range\":{{\"start\":{{\"line\":0,\"character\":1}},\"end\":{{\"line\":0,\"character\":2}}}},\"rangeLength\":2,\"text\":\"x\"}}"
-    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "0", edits)), false, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "0", edits)), false, lsp_loop_path.PathPlatform.Unix), None)
     assert_eq(state.docs[uri].text, "a😀b")
     assert_eq(state.docs[uri].version, -1)
     assert_eq(state.dirty.len(), 0)
     full_length: "{{\"rangeLength\":4,\"text\":\"bad\"}}"
-    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "0", full_length)), false, lsp_loop_path.PathPlatform.Unix), None)
-    assert_eq(lsp_update_document(&state, Val(lsp_loop_test_change(uri, "0", "")), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "0", full_length)), false, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(lsp_update_document(state, Val(lsp_loop_test_change(uri, "0", "")), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
     assert_eq(state.docs[uri].version, 0)
     assert_eq(state.docs[uri].text, "a😀b")
 }
@@ -80,13 +80,13 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
 #Test("didOpen replaces the document independent of prior version but malformed opens do not") {
     state := LSPDiagnosticState.new()
     uri: "file:///tmp/open%20document.jet"
-    lsp_loop_test_open(&state, uri, 10, "old")
-    lsp_loop_test_open(&state, uri, -2147483648, "replacement")
+    lsp_loop_test_open(state, uri, 10, "old")
+    lsp_loop_test_open(state, uri, -2147483648, "replacement")
     assert_eq(state.docs[uri].text, "replacement")
     assert_eq(state.docs[uri].version, -2147483648)
     assert(lsp_loop_path.equals(state.docs[uri].path, lsp_loop_path.from_text("/tmp/open document.jet", lsp_loop_path.PathPlatform.Unix)))
     missing_text: lsp_loop_test_params("{{\"textDocument\":{{\"uri\":{foundation_json_quote(uri)},\"version\":12}}}}")
-    assert_eq(lsp_update_document(&state, Val(missing_text), true, lsp_loop_path.PathPlatform.Unix), None)
+    assert_eq(lsp_update_document(state, Val(missing_text), true, lsp_loop_path.PathPlatform.Unix), None)
     assert_eq(state.docs[uri].text, "replacement")
     assert_eq(state.docs[uri].version, -2147483648)
 }
@@ -95,8 +95,8 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
     queries := JetDriverCompilerQueries.new()
     cwd: lsp_loop_path.from_text("/lsp", lsp_loop_path.PathPlatform.Unix)
     doc: LSPDocument.new(lsp_loop_path.from_text("/lsp/lex.jet", cwd.platform), "run: fn() {{}}", 1)
-    first: lsp_lex_document(&queries, cwd, doc)
-    second: lsp_lex_document(&queries, cwd, doc)
+    first: lsp_lex_document(queries, cwd, doc)
+    second: lsp_lex_document(queries, cwd, doc)
     a: first.guard_read()
     b: second.guard_read()
     assert_eq(a.value.len(), b.value.len())
@@ -105,7 +105,7 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
     inline: LSPDocument.new(lsp_loop_path.from_text("/lsp/inline.jet", cwd.platform), "package: {{ name: \"inline\" }}\nrun: fn() {{}}", 1)
     masked: pkg_mask_inline_package_source(inline.text) ?? panic("canonical package mask")
     expected: lex(masked.source.bytes()).tokens
-    actual: lsp_lex_document(&queries, cwd, inline)
+    actual: lsp_lex_document(queries, cwd, inline)
     tokens: actual.guard_read()
     assert_eq(tokens.value.len(), expected.len())
     loop (index, token) in expected {
@@ -119,7 +119,7 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
     source: "run: fn() {{}}\n"
     server := LSPServer.new(lsp_diag_test_snapshot("witness.jet", source, [JetDriverAuthorizedSourceFile]{}), lsp_diag_test_path("/fixture/build-source"))
     uri: "file:///lsp/witness.jet"
-    lsp_loop_test_open(&server.diagnostic_state, uri, 1, source)
+    lsp_loop_test_open(server.diagnostic_state, uri, 1, source)
     first: server.check_with_bundle(server.diagnostic_state.docs[uri])
     assert_eq(first.checked_versions.get(uri), Val(1))
     recomputes: server.queries.stats().recomputes
@@ -132,7 +132,7 @@ lsp_loop_test_open: fn(state: &LSPDiagnosticState, uri: String, version: Int, so
     assert_eq(before.value.result.loaded_module_rows, after.value.result.loaded_module_rows)
     assert_eq(before.value.source, source)
     params: lsp_loop_test_change(uri, "2", "")
-    assert_eq(lsp_update_document(&server.diagnostic_state, Val(params), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
+    assert_eq(lsp_update_document(server.diagnostic_state, Val(params), false, lsp_loop_path.PathPlatform.Unix), Val(uri))
     // Same text/query result can be retained, but each request owns its own
     // checked version witness. Old requests must never observe this new version.
     latest: server.check_with_bundle(server.diagnostic_state.docs[uri])

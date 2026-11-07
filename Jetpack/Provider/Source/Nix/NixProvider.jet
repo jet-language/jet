@@ -73,7 +73,7 @@ NixProvider: struct {
             if native == {
                 .Val(recipe) -> {
                     size: provider_native_catalog_download_size(recipe)
-                    &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: size, disk_bytes: None})
+                    plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: size, disk_bytes: None})
                     next
                 }
                 .None -> {}
@@ -84,16 +84,16 @@ NixProvider: struct {
                 .Ok(record) -> record
                 .Err(error) -> {
                     if !provider_nix_index_not_indexed(error) -> return Err(ProviderError.NixIndex(error))
-                    &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+                    plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
                     next
                 }
             }
-            loop name in provider_sorted_keys(verified.record.outputs) -> &nix_paths.push(verified.record.outputs[name])
+            loop name in provider_sorted_keys(verified.record.outputs) -> nix_paths.push(verified.record.outputs[name])
         }
         if nix_paths.len() > 0 {
             roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("download planning has no Hangar roots for closure admission"))
-            nix: store_plan_nix_downloads(&verification, roots, nix_paths, ctx.offline, ctx.progress) ?? return Err(provider_nix_cache_error(&verification, roots, err))
-            &plan.add_nix(nix)
+            nix: store_plan_nix_downloads(verification, roots, nix_paths, ctx.offline, ctx.progress) ?? return Err(provider_nix_cache_error(verification, roots, err))
+            plan.add_nix(nix)
         }
         Ok(plan)
     }
@@ -146,7 +146,7 @@ NixProvider: struct {
                 realized := provider_parse_realization(spec, stdout)
                 realized.producer.facts[PROVIDER_NIX_NATIVE_FORMAT] = "json"
                 realized.producer.facts[PROVIDER_NIX_NATIVE_DOCUMENT] = stdout
-                return provider_finalize_nix_realization(&verification, spec, table, ctx, realized)
+                return provider_finalize_nix_realization(verification, spec, table, ctx, realized)
             }
             .None -> {}
         }
@@ -157,7 +157,7 @@ NixProvider: struct {
             .Ok(record) -> record
             .Err(error) -> {
                 if provider_nix_index_not_indexed(error) && nix_fallback_allowed_from_environment(ctx.offline) {
-                    return provider_realize_from_local_nix(&verification, spec, table, ctx, key)
+                    return provider_realize_from_local_nix(verification, spec, table, ctx, key)
                 }
                 return Err(ProviderError.NixIndex(error))
             }
@@ -165,10 +165,10 @@ NixProvider: struct {
         store_require_catalog_permission(Val(verified.trust.label()), ctx.allow_local_nix_catalog) ?? return Err(ProviderError.BadOutput(err.message()))
         roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("index-backed Nix realization has no Hangar roots for closure admission"))
         requests := [NixOutputRequest]{}
-        loop name in provider_sorted_keys(verified.record.outputs) -> &requests.push(NixOutputRequest{name, store_path: verified.record.outputs[name]})
-        admitted: store_admit_nix_closure_with_progress(&verification, roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(&verification, roots, err))
+        loop name in provider_sorted_keys(verified.record.outputs) -> requests.push(NixOutputRequest{name, store_path: verified.record.outputs[name]})
+        admitted: store_admit_nix_closure_with_progress(verification, roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(verification, roots, err))
         realized: provider_realization_from_index(spec, key, verified, admitted)
-        provider_finalize_nix_realization(&verification, spec, table, ctx, realized)
+        provider_finalize_nix_realization(verification, spec, table, ctx, realized)
     }
 }
 

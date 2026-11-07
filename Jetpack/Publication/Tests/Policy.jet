@@ -238,10 +238,10 @@ publication_policy_test_resign: fn(feed: &PublicationAdvisoryFeed, seed: [U8]) P
     jet_dir: files.join(root, ".jet")
     files.create_dir_all(jet_dir) ?? panic("create fixture")
     seed := [U8]{}
-    loop index in 0..<32 -> &seed.push(U8{17})
+    loop index in 0..<32 -> seed.push(U8{17})
     feed := publication_advisory_test_signed_feed(seed) ?? panic("sign feed")
     feed.expires_at = PUBLICATION_U64_MAX
-    publication_policy_test_resign(&feed, seed) ?? panic("resign feed")
+    publication_policy_test_resign(feed, seed) ?? panic("resign feed")
     lock: publication_advisory_test_lock("widget", "1.0.0", LockSource.Root)
     files.write(files.join(jet_dir, "lock"), pkg_lock_write(lock)) ?? panic("lock fixture")
     assert_eq(publication_advisory_gate_status(root), PublicationGateState.Blocked)
@@ -262,13 +262,13 @@ publication_policy_test_resign: fn(feed: &PublicationAdvisoryFeed, seed: [U8]) P
     records: publication_advisory_test_feed("release|widget#1.0.0|100|third-party\nadvisory|ADV|widget|^1.0|1.0.1|security fix|high\n")
     feed.releases = records.releases
     feed.advisories = records.advisories
-    publication_policy_test_resign(&feed, seed) ?? panic("sign advisory")
+    publication_policy_test_resign(feed, seed) ?? panic("sign advisory")
     files.write(files.join(jet_dir, "advisories.db"), publication_advisory_feed_text(feed)) ?? panic("advisory fixture")
     assert_eq(publication_advisory_gate_status(root), PublicationGateState.Blocked)
     feed.advisories = [PublicationAdvisory]{}
     feed.issued_at = publication_advisory_now()
     feed.releases[0].first_seen = feed.issued_at
-    publication_policy_test_resign(&feed, seed) ?? panic("sign immature")
+    publication_policy_test_resign(feed, seed) ?? panic("sign immature")
     parsed_immature: publication_parse_advisory_feed(publication_advisory_feed_text(feed)) ?? panic("well-formed immature feed")
     assert_eq(parsed_immature.releases[0].first_seen, feed.issued_at)
     files.write(files.join(jet_dir, "advisories.db"), publication_advisory_feed_text(feed)) ?? panic("immaturity fixture")
@@ -276,13 +276,13 @@ publication_policy_test_resign: fn(feed: &PublicationAdvisoryFeed, seed: [U8]) P
     feed.releases[0].first_seen = 100
     feed.issued_at = 100
     feed.expires_at = 200
-    publication_policy_test_resign(&feed, seed) ?? panic("sign stale")
+    publication_policy_test_resign(feed, seed) ?? panic("sign stale")
     parsed_stale: publication_parse_advisory_feed(publication_advisory_feed_text(feed)) ?? panic("well-formed stale feed")
     assert_eq(parsed_stale.expires_at, 200)
     files.write(files.join(jet_dir, "advisories.db"), publication_advisory_feed_text(feed)) ?? panic("stale fixture")
     assert_eq(publication_advisory_gate_status(root), PublicationGateState.Blocked)
     feed.expires_at = PUBLICATION_U64_MAX
-    publication_policy_test_resign(&feed, seed) ?? panic("sign restore")
+    publication_policy_test_resign(feed, seed) ?? panic("sign restore")
     files.write(files.join(jet_dir, "advisories.db"), publication_advisory_feed_text(feed)) ?? panic("restored fixture")
     files.write(trust_path, "public_key=wrong-key\n") ?? panic("wrong trust fixture")
     assert_eq(publication_advisory_gate_status(root), PublicationGateState.Blocked)

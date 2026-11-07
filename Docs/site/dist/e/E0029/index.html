@@ -36,23 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Keep exactly one access marker on the parameter.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0029</code>: <code>tests/ui/two_access_markers_on_a_value.stderr</code>.</p>
-<pre class="diag">Error [jet.DuplicateAccessMarker]: This value has two access markers
-  --&gt; tests/ui/two_access_markers_on_a_value.jet:5:11
+<p>First UI snapshot mentioning <code>E0029</code>: <code>tests/ui/two_capability_markers.stderr</code>.</p>
+<pre class="diag">Error [jet.DuplicateAccessMarker]: `x` has two access markers
+  --&gt; tests/ui/two_capability_markers.jet:3:11
     |
-  5 |     print(^^handle.join() ?? 0)
-    |           ^^
- Why: A value takes one access marker: `&amp;` to write the place or `^` to move it
- Fix: Keep one marker and remove the other
-More: jet-lang.dev/e/E0029
-
-Error [jet.DuplicateAccessMarker]: This value has two access markers
-  --&gt; tests/ui/two_access_markers_on_a_value.jet:7:12
-    |
-  7 |     moved: ^^items
-    |            ^^
- Why: A value takes one access marker: `&amp;` to write the place or `^` to move it
- Fix: Keep one marker and remove the other
+  3 | bump: fn(&amp;x: &amp;Int) {
+    |           ^
+ Why: The write-access marker `&amp;` before the parameter name conflicts with the write-access marker `&amp;` on its type; a parameter can declare only one access marker
+ Fix: Keep one access marker on the type or receiver and remove the other
 More: jet-lang.dev/e/E0029
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

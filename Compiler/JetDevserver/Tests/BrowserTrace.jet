@@ -1,60 +1,77 @@
 use {
-    jet_devserver.BrowserTrace.[ROW_LIMIT, RecordError, Relay, read, read_with_process_state, relay_path]
-    fs: std.fs
-    std.sync.[Mutex]
-    core.sys.target.[selected_os, selected_family]
-    jet_foundation.JSON.[parse, json_str]
-    jet_foundation.Report.[STATUS_SCHEMA]
+    browser_trace_test_files: core.files
+    browser_trace_test_sys: core.sys
+    browser_trace_test_hex: core.encoding.hex
 }
 
-TEST_LOCK: Mutex.new(_)
-manifest: fn() -> String {
+browser_trace_test_supported: fn() -> Bool {
+    platform: browser_trace_test_sys.name()
+    platform == "linux" || platform == "android"
+}
+
+browser_trace_test_manifest: fn() -> String {
     map: "source\t6170702e6a6574\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nsymbol\t6170702e6a6574\t6c6f61645f7265706f7274\tfn"
-    return "{{\n  \"traceMap\": \"{hex(map.as_bytes())}\"\n}}\n"
+    "{{\n  \"traceMap\": \"{browser_trace_test_hex.encode(map.bytes())}\"\n}}\n"
 }
-#Test("relay_maps_payload_free_rows_and_rejects_extra_fields") {
-    _guard: TEST_LOCK.lock().unwrap()
-    relay: Relay.new(manifest()).unwrap()
-    header: fs.read_to_string(relay_path(std.process.id())).unwrap()
-    header := header.trim_end() // #4303
-    parsed: parse(header).unwrap()
-    assert_eq(parsed.get_opt("schema").and_then(json_str), .Val(STATUS_SCHEMA))
-    if selected_family() == "unix" {
-        mode: fs.metadata(relay_path(std.process.id())).unwrap().permissions().mode().bit_and(0o777)
-        assert_eq(mode, 0o600, "relay mode must be atomic owner-only")
+
+// The relay lines carrying `action`.
+browser_trace_test_lines: fn(action: String) -> [String] {
+    text: browser_trace_test_files.read(browser_trace_relay_path(browser_trace_test_sys.pid())) ?? panic("cannot read relay: {err}")
+    marker: "\"action\":\"{action}\""
+    out := [String]{}
+    loop line in text.split("\n") {
+        if line.contains(marker) -> out.push(line)
     }
-    relay.record("class=event&symbol=load_report&start_ns=10&duration_ns=5&clock_ns=15".as_bytes()).unwrap()
-    assert_eq(relay.record("class=event&symbol=run&start_ns=1&duration_ns=1&clock_ns=2&url=secret".as_bytes()), .Err(RecordError.Malformed))
-    capture: read(std.process.id()).unwrap()
-    assert_eq(capture.sources[0].path, "app.jet")
-    assert_eq(capture.rows.len(), 1)
-    assert_eq(capture.rows[0].symbol, "load_report")
-    assert(!capture.truncated)
+    out
 }
-#Test("dead_devserver_relay_is_rejected_and_removed") {
-    if selected_os() != "linux" && selected_os() != "android" -> return
-    _guard: TEST_LOCK.lock().unwrap()
-    relay: Relay.new(manifest()).unwrap()
-    path: relay_path(std.process.id())
-    error: read_with_process_state(std.process.id(), ProcessState.Dead).unwrap_err()
-    assert(error.contains("stale process session"), "{error}")
-    assert(!path.exists(), "dead devserver relay was not removed")
-    drop(^relay)
+
+// One test owns the per-process relay path for its whole sequence, so no two
+// relays of this process overlap.
+#Test("relay is owner-only, maps payload-free rows, rejects extra fields and caps rows") {
+    if !browser_trace_test_supported() -> return
+    relay := BrowserTraceRelay.new(browser_trace_test_manifest()) ?? panic("relay failed: {err.message}")
+    path: browser_trace_relay_path(browser_trace_test_sys.pid())
+    stat: browser_trace_test_files.stat(path) ?? panic("cannot stat relay: {err}")
+    assert_eq(stat.mode.bit_and(0o777), 0o600, "relay mode must be atomic owner-only")
+    header: browser_trace_test_lines("browser.relay")
+    assert_eq(header.len(), 1)
+    assert(header[0].starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"browser.relay\",\"ok\":true,\"reports\":[]"), header[0])
+    assert(header[0].contains("\"pid\":{browser_trace_test_sys.pid()}"), header[0])
+    relay.record("class=event&symbol=load_report&start_ns=10&duration_ns=5&clock_ns=15".bytes()) ?? panic("record failed")
+    assert(relay.record("class=event&symbol=run&start_ns=1&duration_ns=1&clock_ns=2&url=secret".bytes()) == .Err(BrowserTraceRecordError.Malformed))
+    assert(relay.record("class=event&symbol=bad-name&start_ns=1&duration_ns=1&clock_ns=2".bytes()) == .Err(BrowserTraceRecordError.Malformed))
+    assert(relay.record("class=event&symbol=run&start_ns=3&duration_ns=1&clock_ns=2".bytes()) == .Err(BrowserTraceRecordError.Malformed))
+    rows: browser_trace_test_lines("browser.relay.row")
+    assert_eq(rows.len(), 1)
+    assert(rows[0].contains("\"duration_ns\":5,\"class\":\"event\",\"symbol\":\"load_report\""), rows[0])
+    loop _ in 0..<BROWSER_TRACE_ROW_LIMIT {
+        relay.record("class=dom&symbol=run&start_ns=1&duration_ns=1&clock_ns=2".bytes()) ?? panic("record failed")
+    }
+    assert_eq(browser_trace_test_lines("browser.relay.row").len(), BROWSER_TRACE_ROW_LIMIT)
+    assert_eq(browser_trace_test_lines("browser.relay.truncated").len(), 1)
+    relay.close()
+    assert(!browser_trace_test_files.exists(path), "a closed relay must be removed")
 }
-#Test("unknown_process_identity_fails_closed_without_consuming_relay") {
-    _guard: TEST_LOCK.lock().unwrap()
-    relay: Relay.new(manifest()).unwrap()
-    path: relay_path(std.process.id())
-    error: read_with_process_state(std.process.id(), ProcessState.Unknown).unwrap_err()
-    assert(error.contains("cannot be verified"), "{error}")
-    assert(path.exists(), "unknown identity must not mutate relay ownership")
-    drop(^relay)
+
+#Test("relay refuses a manifest without a compiler trace map") {
+    if !browser_trace_test_supported() -> return
+    assert(BrowserTraceRelay.new("{{}}\n") == .Err(_))
 }
-#Test("relay_caps_rows_and_records_truncation") {
-    _guard: TEST_LOCK.lock().unwrap()
-    relay: Relay.new(manifest()).unwrap()
-    loop _ in 0..ROW_LIMIT + 1 -> relay.record("class=dom&symbol=run&start_ns=1&duration_ns=1&clock_ns=2".as_bytes()).unwrap()
-    capture: read(std.process.id()).unwrap()
-    assert_eq(capture.rows.len(), ROW_LIMIT)
-    assert(capture.truncated)
+
+#Test("collection request is consumed once and refuses a stale process session") {
+    if !browser_trace_test_supported() -> return
+    pid: browser_trace_test_sys.pid()
+    path: browser_trace_request_path(pid)
+    started: browser_trace_process_start(pid) ?? panic("process start marker is unavailable")
+    assert(browser_trace_take_request() == .Ok(false))
+    writer := browser_trace_test_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? panic("cannot create request: {err}")
+    writer.write_all("{BROWSER_TRACE_REQUEST_SCHEMA}\t{pid}\t{started}\n".bytes()) ?? panic("cannot write request: {err}")
+    writer.flush() ?? panic("cannot flush request: {err}")
+    assert(browser_trace_take_request() == .Ok(true))
+    assert(!browser_trace_test_files.exists(path), "a taken request must be consumed")
+    stale := browser_trace_test_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? panic("cannot create request: {err}")
+    stale.write_all("{BROWSER_TRACE_REQUEST_SCHEMA}\t{pid}\tnot-{started}\n".bytes()) ?? panic("cannot write request: {err}")
+    stale.flush() ?? panic("cannot flush request: {err}")
+    assert(browser_trace_take_request() == .Err(_))
+    assert(!browser_trace_test_files.exists(path), "a stale request must be removed")
 }

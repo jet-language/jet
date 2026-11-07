@@ -75,7 +75,7 @@ TransitionPlan: struct {
             new: if self.reverse -> change.before else -> change.after
             if old == new -> next
             action: if old == None -> ChangeAction.Create else -> if new == None -> ChangeAction.Remove else -> ChangeAction.Update
-            &changes.push(ChangeSummary{path: change.relative, action: action})
+            changes.push(ChangeSummary{path: change.relative, action: action})
         }
         TransitionSummary{operation: self.operation, changes: changes, before_fingerprint: self.before_fingerprint, after_fingerprint: self.after_fingerprint, journal: self.journal_path}
     }
@@ -111,7 +111,7 @@ TransitionPlan: struct {
         snapshots := [TransitionSnapshot]{}
         loop change in self.changes {
             path: env_transition_safe_path(self.root, change.relative)
-            &snapshots.push(TransitionSnapshot{path: path, state: env_transition_read_state(path)})
+            snapshots.push(TransitionSnapshot{path: path, state: env_transition_read_state(path)})
         }
         // Publish the exact recovery record before touching any authored or
         // generated file: `jet fold` can then restore every path that reached
@@ -155,14 +155,14 @@ TransitionPlan: struct {
                     if current == snapshot.state -> next
                     if current == written {
                         if env_transition_apply_state(self.root, snapshot.path, snapshot.state) == {
-                            .Err(rollback) -> &failures.push("{change.relative}: {rollback.message()}")
+                            .Err(rollback) -> failures.push("{change.relative}: {rollback.message()}")
                             else -> {}
                         }
                         next
                     }
-                    &failures.push("{change.relative} changed during rollback; its newer bytes were preserved")
+                    failures.push("{change.relative} changed during rollback; its newer bytes were preserved")
                 }
-                .Err(read_error) -> &failures.push("{change.relative} could not be inspected during rollback: {read_error.message()}")
+                .Err(read_error) -> failures.push("{change.relative} could not be inspected during rollback: {read_error.message()}")
             }
         }
         if failures.len() == 0 -> return error.copy()
@@ -231,7 +231,7 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             config_text: env_transition_render_config(config_name, "environments", field.value)
             config: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
             env_transition_validate_composed_root(root_after, package, config)
-            &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
+            changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
         }
         .Package(name) -> {
             env_transition_validate_name(name, "Package")
@@ -250,10 +250,10 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             root_after_facts: PackageFacts.parse_uncomposed(root_after, package_path) ?? return Err(env_transition_package_error(package_path, err))
             root_after_facts.validate_members() ?? return Err(env_transition_error(err.message()))
             composed_after := root_after_facts
-            &composed_after.compose([ConfigFacts]{member_config}) ?? return Err(env_transition_error(err.message()))
+            composed_after.compose([ConfigFacts]{member_config}) ?? return Err(env_transition_error(err.message()))
             semantic_before = env_transition_semantic_fingerprint(package)
             semantic_after = env_transition_semantic_fingerprint(composed_after)
-            &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(member.bytes())})
+            changes.push(TransitionFileChange{relative: destination, before: None, after: Val(member.bytes())})
         }
         .Hosts(name) -> {
             env_transition_validate_name(name, "host")
@@ -268,13 +268,13 @@ env_transition_split_plan: fn(root: String, target: SplitTarget) -[FS, Env]> Tra
             env_transition_validate_composed_root(root_after, package, config)
             semantic_before = "sha256:{pkg_sha256_hex(pkg_debug_output(output).bytes())}"
             semantic_after = semantic_before
-            &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
+            changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
         }
     }
     if root_after.bytes() == package_bytes {
         return Err(env_transition_error("the requested split would not change package.jet"))
     }
-    &changes.push(TransitionFileChange{relative: TRANSITION_PACKAGE_FILE, before: Val(package_bytes), after: Val(root_after.bytes())})
+    changes.push(TransitionFileChange{relative: TRANSITION_PACKAGE_FILE, before: Val(package_bytes), after: Val(root_after.bytes())})
     env_transition_forward_plan(canonical, target.operation(), changes, semantic_before, semantic_after)
 }
 
@@ -296,7 +296,7 @@ env_transition_fold_plan: fn(root: String, path: String) -[FS, Env]> TransitionP
         loop change in journal.changes {
             if change.relative == relative -> records_relative = true
         }
-        if records_relative -> &matches.push(TransitionJournalMatch{path: journal_path, journal: journal})
+        if records_relative -> matches.push(TransitionJournalMatch{path: journal_path, journal: journal})
     }
     if matches.len() != 1 {
         return Err(env_transition_error("expected one transition journal for {relative}, found {matches.len()}"))
@@ -325,6 +325,6 @@ env_transition_forward_plan: fn(root: String, operation: String, changes: [Trans
 env_transition_validate_composed_root: fn(root_text: String, original: PackageFacts, config: ConfigFacts) EnvironmentError! {
     PackageFacts.parse_uncomposed(root_text, TRANSITION_PACKAGE_FILE) ?? return Err(env_transition_error(err.message()))
     candidate := original
-    &candidate.compose([ConfigFacts]{config}) ?? return Err(env_transition_error(err.message()))
+    candidate.compose([ConfigFacts]{config}) ?? return Err(env_transition_error(err.message()))
     candidate.validate_defaults() ?? return Err(env_transition_error(err.message()))
 }

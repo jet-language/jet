@@ -12,7 +12,7 @@ use jet_foundation.[Span, Type, name_rows_set, name_rows_value, type_carrier_ide
 // key-sized entry; None when its keys have no order the builder knows.
 ir_set_shape: fn(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never! {
     elem: ir_set_element(ir_untag(m.types[set_row].ty)) ?? return None
-    key_row: ir_value_type(&m, p, elem) ?? return None
+    key_row: ir_value_type(m, p, elem) ?? return None
     kind: ir_map_key_kind(m, key_row)
     if kind == "" -> return None
     member: IRMember{name: "key", offset: 0, ty: key_row}
@@ -23,39 +23,39 @@ ir_set_shape: fn(m: &IRModule, p: IRProgram, set_row: Int) -> IRMapShape? Never!
 ir_set_helper: fn(m: &IRModule, p: IRProgram, set_row: Int, name: String) -> Int Never! {
     key: "{name}<{type_carrier_identity(m.types[set_row].ty)}>"
     if name_rows_value(m.function_rows, key) == .Val(known) -> return known
-    shape: ir_set_shape(&m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
+    shape: ir_set_shape(m, p, set_row) ?? panic("Set helper {name} of a type without a Set shape")
     id: m.functions.len()
     symbol: if name == "set.find" -> "find" else if name == "set.insert" -> "insert" else if name == "set.take" -> "take" else if name == "set.remove" -> "remove" else -> "equal"
-    &m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
-    name_rows_set(&m.function_rows, key, id)
+    m.functions.push(ir_hashed_function(name, key, "jet_ir_set_{symbol}_", "", 0))
+    name_rows_set(m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
-    set: ir_new_slot(&a, set_row, IRSlotKind.Param, ir_intern_name(&m, "set"))
+    set: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "set"))
     if name == "set.equal" {
-        other: ir_new_slot(&a, set_row, IRSlotKind.Param, ir_intern_name(&m, "other"))
-        ir_set_equal_body(&m, p, &a, shape, set, other)
+        other: ir_new_slot(a, set_row, IRSlotKind.Param, ir_intern_name(m, "other"))
+        ir_set_equal_body(m, p, a, shape, set, other)
     } else {
-        probe_key: ir_new_slot(&a, shape.key.ty, IRSlotKind.Param, ir_intern_name(&m, "key"))
+        probe_key: ir_new_slot(a, shape.key.ty, IRSlotKind.Param, ir_intern_name(m, "key"))
         if name == "set.find" {
-            ir_map_find_body(&m, p, &a, shape, set, probe_key)
+            ir_map_find_body(m, p, a, shape, set, probe_key)
         } else if name == "set.insert" {
-            ir_set_insert_body(&m, p, &a, shape, set_row, set, probe_key)
+            ir_set_insert_body(m, p, a, shape, set_row, set, probe_key)
         } else {
-            option_row: if name == "set.take" -> ir_value_type(&m, p, Type.Option{inner: shape.entry_ty}) ?? -1 else -> -1
-            ir_set_take_body(&m, p, &a, shape, set_row, set, probe_key, option_row)
+            option_row: if name == "set.take" -> ir_value_type(m, p, Type.Option{inner: shape.entry_ty}) ?? -1 else -> -1
+            ir_set_take_body(m, p, a, shape, set_row, set, probe_key, option_row)
         }
     }
-    ir_resolve_deferred(&m, p, &a)
-    m.functions[id] = ^a.f
+    ir_resolve_deferred(m, p, a)
+    m.functions[id] = a.f.move()
     id
 }
 
 // A call of Set helper `name` with result row `result` (-1: none).
 ir_set_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, name: String, args: [Int], result: Int) -> Int Never! {
-    callee: ir_set_helper(&m, p, set_row, name)
-    dst: if result >= 0 -> ir_fresh_temp(&m, &b, result) else -> -1
-    operands: ir_args(&b.f, args)
-    ir_emit(&b.f, IROp.Call, dst, callee, operands, args.len(), b.line)
-    ir_stop_check(&m, &b)
+    callee: ir_set_helper(m, p, set_row, name)
+    dst: if result >= 0 -> ir_fresh_temp(m, b, result) else -> -1
+    operands: ir_args(b.f, args)
+    ir_emit(b.f, IROp.Call, dst, callee, operands, args.len(), b.line)
+    ir_stop_check(m, b)
     dst
 }
 
@@ -63,35 +63,35 @@ ir_set_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, name: S
 // present keeps its entry, drops the offered one and returns false (map.set
 // with a Unit value).
 ir_set_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int) Never! {
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
-    word_row: ir_word_row(&m)
-    index: ir_set_call(&m, p, &a, set_row, "set.find", [Int]{set, key}, word_row)
-    none: ir_word_const(&m, &a, 0)
-    present: ir_bool_op(&m, &a, IROp.Ge, index, none)
-    ir_open_if(&a.f, present, a.line)
-    if m.types[shape.key.ty].drop != "" -> ir_emit(&a.f, IROp.Drop, -1, key, -1, -1, a.line)
-    kept: ir_int_constant(&m, &a, bool_row, 0)
-    ir_emit(&a.f, IROp.Return, -1, kept, -1, -1, a.line)
-    ir_end(&a.f, a.line)
-    minus_one: ir_word_const(&m, &a, -1)
-    point: ir_word_op(&m, &a, IROp.Sub, minus_one, index)
-    length: ir_list_reserve(&m, &a, set, shape.entry)
-    room: ir_load_word(&m, &a, set, 16)
-    target: ir_element_address(&m, &a, room, point, shape.stride)
-    one: ir_word_const(&m, &a, 1)
-    after: ir_word_op(&m, &a, IROp.Add, point, one)
-    shifted: ir_element_address(&m, &a, room, after, shape.stride)
-    moved: ir_word_op(&m, &a, IROp.Sub, length, point)
-    width: ir_word_const(&m, &a, shape.stride)
-    bytes: ir_word_op(&m, &a, IROp.Mul, moved, width)
-    _: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
+    word_row: ir_word_row(m)
+    index: ir_set_call(m, p, a, set_row, "set.find", [Int]{set, key}, word_row)
+    none: ir_word_const(m, a, 0)
+    present: ir_bool_op(m, a, IROp.Ge, index, none)
+    ir_open_if(a.f, present, a.line)
+    if m.types[shape.key.ty].drop != "" -> ir_emit(a.f, IROp.Drop, -1, key, -1, -1, a.line)
+    kept: ir_int_constant(m, a, bool_row, 0)
+    ir_emit(a.f, IROp.Return, -1, kept, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    minus_one: ir_word_const(m, a, -1)
+    point: ir_word_op(m, a, IROp.Sub, minus_one, index)
+    length: ir_list_reserve(m, a, set, shape.entry)
+    room: ir_load_word(m, a, set, 16)
+    target: ir_element_address(m, a, room, point, shape.stride)
+    one: ir_word_const(m, a, 1)
+    after: ir_word_op(m, a, IROp.Add, point, one)
+    shifted: ir_element_address(m, a, room, after, shape.stride)
+    moved: ir_word_op(m, a, IROp.Sub, length, point)
+    width: ir_word_const(m, a, shape.stride)
+    bytes: ir_word_op(m, a, IROp.Mul, moved, width)
+    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{shifted, target, bytes}, -1)
     a.fresh[key] = true
-    ir_store_at(&m, p, &a, target, 0, key)
-    grown: ir_word_op(&m, &a, IROp.Add, length, one)
-    ir_emit(&a.f, IROp.Store, -1, set, 0, grown, a.line)
-    added: ir_int_constant(&m, &a, bool_row, 1)
-    ir_emit(&a.f, IROp.Return, -1, added, -1, -1, a.line)
+    ir_store_at(m, p, a, target, 0, key)
+    grown: ir_word_op(m, a, IROp.Add, length, one)
+    ir_emit(a.f, IROp.Store, -1, set, 0, grown, a.line)
+    added: ir_int_constant(m, a, bool_row, 1)
+    ir_emit(a.f, IROp.Return, -1, added, -1, -1, a.line)
 }
 
 // The stored key under a borrowed probe: set.take moves it into an Option box
@@ -101,135 +101,135 @@ ir_set_insert_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSh
 ir_set_take_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, set_row: Int, set: Int, key: Int, option_row: Int) Never! {
     discard: option_row < 0
     a.f.result = option_row
-    word_row: ir_word_row(&m)
-    index: ir_set_call(&m, p, &a, set_row, "set.find", [Int]{set, key}, word_row)
-    none: ir_word_const(&m, &a, 0)
-    absent: ir_bool_op(&m, &a, IROp.Lt, index, none)
-    ir_open_if(&a.f, absent, a.line)
+    word_row: ir_word_row(m)
+    index: ir_set_call(m, p, a, set_row, "set.find", [Int]{set, key}, word_row)
+    none: ir_word_const(m, a, 0)
+    absent: ir_bool_op(m, a, IROp.Lt, index, none)
+    ir_open_if(a.f, absent, a.line)
     if discard {
-        ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+        ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
     } else {
-        null: ir_temp(&m, &a, option_row)
-        ir_option_none(&m, &a, null)
-        ir_emit(&a.f, IROp.Return, -1, null, -1, -1, a.line)
+        null: ir_temp(m, a, option_row)
+        ir_option_none(m, a, null)
+        ir_emit(a.f, IROp.Return, -1, null, -1, -1, a.line)
     }
-    ir_end(&a.f, a.line)
-    data: ir_load_word(&m, &a, set, 16)
-    entry: ir_element_address(&m, &a, data, index, shape.stride)
+    ir_end(a.f, a.line)
+    data: ir_load_word(m, a, set, 16)
+    entry: ir_element_address(m, a, data, index, shape.stride)
     boxed := -1
     if discard {
         if m.types[shape.key.ty].drop != "" {
-            removed_key: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
-            ir_emit(&a.f, IROp.Drop, -1, removed_key, -1, -1, a.line)
+            removed_key: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
+            ir_emit(a.f, IROp.Drop, -1, removed_key, -1, -1, a.line)
         }
     } else if ir_option_inline(m, option_row) {
-        taken: ir_load_at(&m, &a, entry, shape.key.offset, shape.key.ty)
-        boxed = ir_temp(&m, &a, option_row)
-        ir_emit(&a.f, IROp.Move, boxed, taken, -1, -1, a.line)
+        taken: ir_load_at(m, a, entry, shape.key.offset, shape.key.ty)
+        boxed = ir_temp(m, a, option_row)
+        ir_emit(a.f, IROp.Move, boxed, taken, -1, -1, a.line)
     } else {
         key_size: m.types[shape.key.ty].size
-        boxed = ir_box_alloc(&m, &a, key_size, option_row)
-        ir_emit(&a.f, IROp.CopyBytes, -1, boxed, entry, ir_align8(key_size), a.line)
+        boxed = ir_box_alloc(m, a, key_size, option_row)
+        ir_emit(a.f, IROp.CopyBytes, -1, boxed, entry, ir_align8(key_size), a.line)
     }
-    length: ir_load_word(&m, &a, set, 0)
-    one: ir_word_const(&m, &a, 1)
-    last: ir_word_op(&m, &a, IROp.Sub, length, one)
-    after: ir_word_op(&m, &a, IROp.Add, index, one)
-    from: ir_element_address(&m, &a, data, after, shape.stride)
-    moved: ir_word_op(&m, &a, IROp.Sub, last, index)
-    width: ir_word_const(&m, &a, shape.stride)
-    bytes: ir_word_op(&m, &a, IROp.Mul, moved, width)
-    _: ir_runtime(&m, &a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
-    ir_emit(&a.f, IROp.Store, -1, set, 0, last, a.line)
-    ir_emit(&a.f, IROp.Return, -1, boxed, -1, -1, a.line)
+    length: ir_load_word(m, a, set, 0)
+    one: ir_word_const(m, a, 1)
+    last: ir_word_op(m, a, IROp.Sub, length, one)
+    after: ir_word_op(m, a, IROp.Add, index, one)
+    from: ir_element_address(m, a, data, after, shape.stride)
+    moved: ir_word_op(m, a, IROp.Sub, last, index)
+    width: ir_word_const(m, a, shape.stride)
+    bytes: ir_word_op(m, a, IROp.Mul, moved, width)
+    _: ir_runtime(m, a, "jet_rt_mem_move", [Int]{entry, from, bytes}, -1)
+    ir_emit(a.f, IROp.Store, -1, set, 0, last, a.line)
+    ir_emit(a.f, IROp.Return, -1, boxed, -1, -1, a.line)
 }
 
 // Equal lengths and the same key at every position of the ascending entries.
 ir_set_equal_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapShape, left: Int, right: Int) Never! {
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
     a.f.result = bool_row
-    left_len: ir_load_word(&m, &a, left, 0)
-    right_len: ir_load_word(&m, &a, right, 0)
-    differ: ir_bool_op(&m, &a, IROp.Ne, left_len, right_len)
-    ir_open_if(&a.f, differ, a.line)
-    unequal: ir_int_constant(&m, &a, bool_row, 0)
-    ir_emit(&a.f, IROp.Return, -1, unequal, -1, -1, a.line)
-    ir_end(&a.f, a.line)
-    right_data: ir_load_word(&m, &a, right, 16)
-    walk: ir_walk_open(&m, &a, left, shape.entry)
-    other: ir_element_address(&m, &a, right_data, walk.index, shape.stride)
-    probe: ir_load_at(&m, &a, other, 0, shape.key.ty)
-    order: ir_map_order(&m, p, &a, shape.kind, walk.item, probe)
-    ir_open_if(&a.f, order.same, a.line)
-    ir_else(&a.f, a.line)
-    mismatch: ir_int_constant(&m, &a, bool_row, 0)
-    ir_emit(&a.f, IROp.Return, -1, mismatch, -1, -1, a.line)
-    ir_end(&a.f, a.line)
-    ir_walk_close(&m, &a, walk)
-    same: ir_int_constant(&m, &a, bool_row, 1)
-    ir_emit(&a.f, IROp.Return, -1, same, -1, -1, a.line)
+    left_len: ir_load_word(m, a, left, 0)
+    right_len: ir_load_word(m, a, right, 0)
+    differ: ir_bool_op(m, a, IROp.Ne, left_len, right_len)
+    ir_open_if(a.f, differ, a.line)
+    unequal: ir_int_constant(m, a, bool_row, 0)
+    ir_emit(a.f, IROp.Return, -1, unequal, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    right_data: ir_load_word(m, a, right, 16)
+    walk: ir_walk_open(m, a, left, shape.entry)
+    other: ir_element_address(m, a, right_data, walk.index, shape.stride)
+    probe: ir_load_at(m, a, other, 0, shape.key.ty)
+    order: ir_map_order(m, p, a, shape.kind, walk.item, probe)
+    ir_open_if(a.f, order.same, a.line)
+    ir_else(a.f, a.line)
+    mismatch: ir_int_constant(m, a, bool_row, 0)
+    ir_emit(a.f, IROp.Return, -1, mismatch, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_walk_close(m, a, walk)
+    same: ir_int_constant(m, a, bool_row, 1)
+    ir_emit(a.f, IROp.Return, -1, same, -1, -1, a.line)
 }
 
 // A List of copies of the Set's keys in entry order.
 ir_set_list: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRMapShape, set: Int, list_row: Int) -> Int Never! {
-    out: ir_list_empty(&m, &b, list_row)
-    walk: ir_walk_open(&m, &b, set, shape.entry)
-    ir_list_push(&m, p, &b, out, shape.key.ty, walk.item)
-    ir_walk_close(&m, &b, walk)
+    out: ir_list_empty(m, b, list_row)
+    walk: ir_walk_open(m, b, set, shape.entry)
+    ir_list_push(m, p, b, out, shape.key.ty, walk.item)
+    ir_walk_close(m, b, walk)
     out
 }
 
 // Inserts into `target` a copy of each key of `from` that `probe` holds
 // (`held`) or lacks, in `from`'s order.
 ir_set_keep_keys: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, set_row: Int, shape: IRMapShape, from: Int, probe: Int, target: Int, held: Bool, span: Span) Never! {
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
-    word_row: ir_word_row(&m)
-    walk: ir_walk_open(&m, &b, from, shape.key.ty)
-    found: ir_set_call(&m, p, &b, set_row, "set.find", [Int]{probe, walk.item}, word_row)
-    none: ir_word_const(&m, &b, 0)
-    keep: ir_bool_op(&m, &b, if held -> IROp.Ge else -> IROp.Lt, found, none)
-    ir_open_if(&b.f, keep, b.line)
-    key: ir_copy_value(&m, p, &b, walk.item, span)
-    _: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{target, key}, bool_row)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    word_row: ir_word_row(m)
+    walk: ir_walk_open(m, b, from, shape.key.ty)
+    found: ir_set_call(m, p, b, set_row, "set.find", [Int]{probe, walk.item}, word_row)
+    none: ir_word_const(m, b, 0)
+    keep: ir_bool_op(m, b, if held -> IROp.Ge else -> IROp.Lt, found, none)
+    ir_open_if(b.f, keep, b.line)
+    key: ir_copy_value(m, p, b, walk.item, span)
+    _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{target, key}, bool_row)
     b.fresh[key] = false
-    ir_end(&b.f, b.line)
-    ir_walk_close(&m, &b, walk)
+    ir_end(b.f, b.line)
+    ir_walk_close(m, b, walk)
 }
 
 // `rank.first()` / `rank.last()`: a copy of the least (greatest) key in an
 // Option box, None when the Rank is empty.
 ir_set_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMapShape, set: Int, last: Bool, span: Span) -> Int Never! {
-    result_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    result: ir_fresh_temp(&m, &b, result_row)
-    ir_option_none(&m, &b, result)
-    length: ir_load_word(&m, &b, set, 0)
-    zero: ir_word_const(&m, &b, 0)
-    present: ir_bool_op(&m, &b, IROp.Gt, length, zero)
-    ir_open_if(&b.f, present, b.line)
-    data: ir_load_word(&m, &b, set, 16)
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    result: ir_fresh_temp(m, b, result_row)
+    ir_option_none(m, b, result)
+    length: ir_load_word(m, b, set, 0)
+    zero: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Gt, length, zero)
+    ir_open_if(b.f, present, b.line)
+    data: ir_load_word(m, b, set, 16)
     index := zero
     if last {
-        one: ir_word_const(&m, &b, 1)
-        word_row: ir_word_row(&m)
-        index = ir_temp(&m, &b, word_row)
-        ir_emit(&b.f, IROp.Sub, index, length, one, IR_OVERFLOW_WRAP, b.line)
+        one: ir_word_const(m, b, 1)
+        word_row: ir_word_row(m)
+        index = ir_temp(m, b, word_row)
+        ir_emit(b.f, IROp.Sub, index, length, one, IR_OVERFLOW_WRAP, b.line)
     }
-    entry: ir_element_address(&m, &b, data, index, shape.stride)
-    key: ir_load_at(&m, &b, entry, shape.key.offset, shape.key.ty)
+    entry: ir_element_address(m, b, data, index, shape.stride)
+    key: ir_load_at(m, b, entry, shape.key.offset, shape.key.ty)
     size: m.types[shape.key.ty].size
-    made: ir_option_make(&m, p, &b, result_row, key, size)
-    ir_option_set(&m, &b, result, made)
-    ir_end(&b.f, b.line)
+    made: ir_option_make(m, p, b, result_row, key, size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
     result
 }
 
 // `Set.new()` / `Rank.new()` (the Prelude std::collections::HashSet::new /
 // BTreeSet::new route): an empty header.
 ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
-    if inputs.len() != 0 -> return ir_fail_slot(&b, span, "Set.new with {inputs.len()} arguments")
-    set_row: ir_value_type(&m, p, result) ?? return ir_type_fail(&b, span, result)
-    if ir_set_shape(&m, p, set_row) == None -> return ir_fail_slot(&b, span, "Set construction of {ir_type_name(result)}")
-    ir_list_empty(&m, &b, set_row)
+    if inputs.len() != 0 -> return ir_fail_slot(b, span, "Set.new with {inputs.len()} arguments")
+    set_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
+    if ir_set_shape(m, p, set_row) == None -> return ir_fail_slot(b, span, "Set construction of {ir_type_name(result)}")
+    ir_list_empty(m, b, set_row)
 }
 
 // `Set.from(source)` / `source.to_set()`: each element inserted in order,
@@ -237,36 +237,36 @@ ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result:
 // buffer of its own, which is then retired (ir_list_retire); any other's
 // are copied. An Iter is drained into a List first, as Iter.to_list is.
 ir_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, source: Int, span: Span) -> Int Never! {
-    set_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    shape: ir_set_shape(&m, p, set_row) ?? return ir_fail_slot(&b, span, "Set construction of {ir_type_name(ty)}")
+    set_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    shape: ir_set_shape(m, p, set_row) ?? return ir_fail_slot(b, span, "Set construction of {ir_type_name(ty)}")
     elem: shape.entry_ty
     source_ty: ir_lazy_slot_type(m, b, source)
     list := source
     moved := b.fresh[source]
     if ir_iter_element(source_ty) != None {
-        list_row: ir_value_type(&m, p, Type.List{element: elem}) ?? return ir_fail_slot(&b, span, "type [{ir_type_name(elem)}]")
-        list = ir_list_empty(&m, &b, list_row)
-        _: ir_lazy_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{source, list}, -1, source)
+        list_row: ir_value_type(m, p, Type.List{element: elem}) ?? return ir_fail_slot(b, span, "type [{ir_type_name(elem)}]")
+        list = ir_list_empty(m, b, list_row)
+        _: ir_lazy_runtime(m, b, "jet_rt_native_iter_to_list", [Int]{source, list}, -1, source)
         moved = true
-    } else if ir_list_element(&m, p, b, source) != Val(shape.key.ty) {
-        return ir_fail_slot(&b, span, "Set construction source {ir_type_name(source_ty)} is not its element List")
+    } else if ir_list_element(m, p, b, source) != Val(shape.key.ty) {
+        return ir_fail_slot(b, span, "Set construction source {ir_type_name(source_ty)} is not its element List")
     }
-    if moved -> ir_make_unique(&m, p, &b, list)
-    set: ir_list_empty(&m, &b, set_row)
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
-    walk: ir_walk_open(&m, &b, list, shape.key.ty)
-    key: if moved -> walk.item else -> ir_copy_value(&m, p, &b, walk.item, span)
-    _: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{set, key}, bool_row)
+    if moved -> ir_make_unique(m, p, b, list)
+    set: ir_list_empty(m, b, set_row)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    walk: ir_walk_open(m, b, list, shape.key.ty)
+    key: if moved -> walk.item else -> ir_copy_value(m, p, b, walk.item, span)
+    _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{set, key}, bool_row)
     b.fresh[key] = false
-    ir_walk_close(&m, &b, walk)
+    ir_walk_close(m, b, walk)
     if moved {
         // The taken List gave every element to the Set.
-        capacity: ir_load_word(&m, &b, list, 8)
-        zero: ir_word_const(&m, &b, 0)
-        owns: ir_bool_op(&m, &b, IROp.Gt, capacity, zero)
-        ir_open_if(&b.f, owns, b.line)
-        ir_list_retire(&m, &b, list, shape.key.ty, capacity)
-        ir_end(&b.f, b.line)
+        capacity: ir_load_word(m, b, list, 8)
+        zero: ir_word_const(m, b, 0)
+        owns: ir_bool_op(m, b, IROp.Gt, capacity, zero)
+        ir_open_if(b.f, owns, b.line)
+        ir_list_retire(m, b, list, shape.key.ty, capacity)
+        ir_end(b.f, b.line)
     }
     b.fresh[list] = false
     set
@@ -304,144 +304,144 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
     symbol: ir_set_symbol(route)
     if symbol == "jet_set_from" || symbol == "jet_iter_to_set" {
         if operands.len() != 1 -> return None
-        return Val(ir_set_from(&m, p, &b, ty, subject, span))
+        return Val(ir_set_from(m, p, b, ty, subject, span))
     }
     set_row: b.f.slot_type[subject]
-    shape: ir_set_shape(&m, p, set_row) ?? return None
+    shape: ir_set_shape(m, p, set_row) ?? return None
     if symbol == "jet_set_len" || symbol == "jet_set_capacity" {
-        int_row: ir_type_row(&m, Type.Int) ?? 0
-        return Val(ir_load_at(&m, &b, subject, if symbol == "jet_set_capacity" -> 8 else -> 0, int_row))
+        int_row: ir_type_row(m, Type.Int) ?? 0
+        return Val(ir_load_at(m, b, subject, if symbol == "jet_set_capacity" -> 8 else -> 0, int_row))
     }
     if symbol == "jet_set_is_empty" {
-        length: ir_load_word(&m, &b, subject, 0)
-        zero: ir_word_const(&m, &b, 0)
-        return Val(ir_bool_op(&m, &b, IROp.Eq, length, zero))
+        length: ir_load_word(m, b, subject, 0)
+        zero: ir_word_const(m, b, 0)
+        return Val(ir_bool_op(m, b, IROp.Eq, length, zero))
     }
     // A Set's first key is its least, as its iteration order is ascending.
     if symbol == "jet_set_first" || symbol == "jet_set_last" || symbol == "jet_set_max" {
         if operands.len() != 1 -> return None
-        return Val(ir_set_end(&m, p, &b, ty, shape, subject, symbol != "jet_set_first", span))
+        return Val(ir_set_end(m, p, b, ty, shape, subject, symbol != "jet_set_first", span))
     }
     // `shuffle()`: a fresh List of copies of the keys in the Iter shuffle's order.
     if symbol == "jet_set_shuffle" {
         if operands.len() != 1 -> return None
-        list_row: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
+        list_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
         iter_ty: Type.Apply{name: "Iter", args: [Type]{shape.entry_ty.copy()}}
-        iter_row: ir_value_type(&m, p, iter_ty) ?? return Val(ir_type_fail(&b, span, iter_ty))
-        items: ir_set_list(&m, p, &b, shape, subject, list_row)
-        meta: ir_lazy_meta(&m, p, &b, shape.entry_ty, span)
+        iter_row: ir_value_type(m, p, iter_ty) ?? return Val(ir_type_fail(b, span, iter_ty))
+        items: ir_set_list(m, p, b, shape, subject, list_row)
+        meta: ir_lazy_meta(m, p, b, shape.entry_ty, span)
         if meta < 0 -> return Val(-1)
-        source: ir_lazy_iter_from_list(&m, p, &b, items, shape.entry_ty, meta, iter_row, span)
+        source: ir_lazy_iter_from_list(m, p, b, items, shape.entry_ty, meta, iter_row, span)
         if source < 0 -> return Val(-1)
-        shuffled: ir_runtime(&m, &b, "jet_rt_native_iter_shuffle", [Int]{source}, iter_row)
-        ir_lazy_consumed(&m, &b, source)
-        out: ir_list_empty(&m, &b, list_row)
-        _: ir_runtime(&m, &b, "jet_rt_native_iter_to_list", [Int]{shuffled, out}, -1)
-        ir_lazy_consumed(&m, &b, shuffled)
+        shuffled: ir_runtime(m, b, "jet_rt_native_iter_shuffle", [Int]{source}, iter_row)
+        ir_lazy_consumed(m, b, source)
+        out: ir_list_empty(m, b, list_row)
+        _: ir_runtime(m, b, "jet_rt_native_iter_to_list", [Int]{shuffled, out}, -1)
+        ir_lazy_consumed(m, b, shuffled)
         b.fresh[out] = true
         return Val(out)
     }
     if symbol == "jet_set_to_list" || symbol == "jet_set_sort" || symbol == "jet_set_values" {
         if operands.len() != 1 -> return None
-        result_row: ir_value_type(&m, p, ty) ?? return Val(ir_type_fail(&b, span, ty))
-        if symbol != "jet_set_values" -> return Val(ir_set_list(&m, p, &b, shape, subject, result_row))
-        list_row: ir_value_type(&m, p, Type.List{element: shape.entry_ty}) ?? return Val(ir_fail_slot(&b, span, "type [{ir_type_name(shape.entry_ty)}]"))
-        items: ir_set_list(&m, p, &b, shape, subject, list_row)
-        meta: ir_lazy_meta(&m, p, &b, shape.entry_ty, span)
+        result_row: ir_value_type(m, p, ty) ?? return Val(ir_type_fail(b, span, ty))
+        if symbol != "jet_set_values" -> return Val(ir_set_list(m, p, b, shape, subject, result_row))
+        list_row: ir_value_type(m, p, Type.List{element: shape.entry_ty}) ?? return Val(ir_fail_slot(b, span, "type [{ir_type_name(shape.entry_ty)}]"))
+        items: ir_set_list(m, p, b, shape, subject, list_row)
+        meta: ir_lazy_meta(m, p, b, shape.entry_ty, span)
         if meta < 0 -> return Val(-1)
-        return Val(ir_lazy_iter_from_list(&m, p, &b, items, shape.entry_ty, meta, result_row, span))
+        return Val(ir_lazy_iter_from_list(m, p, b, items, shape.entry_ty, meta, result_row, span))
     }
     if symbol == "jet_set_equal" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set equal without an operand"))
-        bool_row: ir_type_row(&m, Type.Bool) ?? 0
-        return Val(ir_set_call(&m, p, &b, set_row, "set.equal", [Int]{subject, operands[1]}, bool_row))
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set equal without an operand"))
+        bool_row: ir_type_row(m, Type.Bool) ?? 0
+        return Val(ir_set_call(m, p, b, set_row, "set.equal", [Int]{subject, operands[1]}, bool_row))
     }
     // `union(other)` is a copy of the receiver with a copy of each key of
     // `other` inserted; `intersection(other)` (`difference(other)`) a new Set
     // of copies of the receiver's keys `other` holds (lacks), in the
     // receiver's order; `symmetric_difference(other)` the difference both ways.
     if symbol == "jet_set_union" || symbol == "jet_set_intersection" || symbol == "jet_set_difference" || symbol == "jet_set_symmetric_difference" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set {route} without an operand"))
-        other: ir_adapt(&m, p, &b, operands[1], set_row, span)
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set {route} without an operand"))
+        other: ir_adapt(m, p, b, operands[1], set_row, span)
         if ir_failed(b) -> return Val(-1)
         target := -1
         if symbol == "jet_set_union" {
-            target = ir_copy_value(&m, p, &b, subject, span)
+            target = ir_copy_value(m, p, b, subject, span)
             // The copy shares the receiver's buffer until it is its own.
-            ir_make_unique(&m, p, &b, target)
-            bool_row: ir_type_row(&m, Type.Bool) ?? 0
-            walk: ir_walk_open(&m, &b, other, shape.key.ty)
-            key: ir_copy_value(&m, p, &b, walk.item, span)
-            _: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{target, key}, bool_row)
+            ir_make_unique(m, p, b, target)
+            bool_row: ir_type_row(m, Type.Bool) ?? 0
+            walk: ir_walk_open(m, b, other, shape.key.ty)
+            key: ir_copy_value(m, p, b, walk.item, span)
+            _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{target, key}, bool_row)
             b.fresh[key] = false
-            ir_walk_close(&m, &b, walk)
+            ir_walk_close(m, b, walk)
         } else {
-            target = ir_list_empty(&m, &b, set_row)
-            ir_set_keep_keys(&m, p, &b, set_row, shape, subject, other, target, symbol == "jet_set_intersection", span)
-            if symbol == "jet_set_symmetric_difference" -> ir_set_keep_keys(&m, p, &b, set_row, shape, other, subject, target, false, span)
+            target = ir_list_empty(m, b, set_row)
+            ir_set_keep_keys(m, p, b, set_row, shape, subject, other, target, symbol == "jet_set_intersection", span)
+            if symbol == "jet_set_symmetric_difference" -> ir_set_keep_keys(m, p, b, set_row, shape, other, subject, target, false, span)
         }
-        ir_release(&m, &b, other)
+        ir_release(m, b, other)
         b.fresh[target] = true
         return Val(target)
     }
     // `is_subset(other)`: `other` holds every receiver key; `is_superset(other)`
     // the converse; `is_disjoint(other)`: it holds none of them.
     if symbol == "jet_set_is_subset" || symbol == "jet_set_is_superset" || symbol == "jet_set_is_disjoint" {
-        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set {route} without an operand"))
-        other: ir_adapt(&m, p, &b, operands[1], set_row, span)
+        if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set {route} without an operand"))
+        other: ir_adapt(m, p, b, operands[1], set_row, span)
         if ir_failed(b) -> return Val(-1)
         superset: symbol == "jet_set_is_superset"
-        bool_row: ir_type_row(&m, Type.Bool) ?? 0
-        word_row: ir_word_row(&m)
-        result: ir_temp(&m, &b, bool_row)
-        yes: ir_int_constant(&m, &b, bool_row, 1)
-        ir_emit(&b.f, IROp.Copy, result, yes, -1, -1, b.line)
-        walk: ir_walk_open(&m, &b, if superset -> other else -> subject, shape.key.ty)
-        found: ir_set_call(&m, p, &b, set_row, "set.find", [Int]{if superset -> subject else -> other, walk.item}, word_row)
-        none: ir_word_const(&m, &b, 0)
-        broken: ir_bool_op(&m, &b, if symbol == "jet_set_is_disjoint" -> IROp.Ge else -> IROp.Lt, found, none)
-        ir_open_if(&b.f, broken, b.line)
-        no: ir_int_constant(&m, &b, bool_row, 0)
-        ir_emit(&b.f, IROp.Copy, result, no, -1, -1, b.line)
-        ir_end(&b.f, b.line)
-        ir_walk_close(&m, &b, walk)
-        ir_release(&m, &b, other)
+        bool_row: ir_type_row(m, Type.Bool) ?? 0
+        word_row: ir_word_row(m)
+        result: ir_temp(m, b, bool_row)
+        yes: ir_int_constant(m, b, bool_row, 1)
+        ir_emit(b.f, IROp.Copy, result, yes, -1, -1, b.line)
+        walk: ir_walk_open(m, b, if superset -> other else -> subject, shape.key.ty)
+        found: ir_set_call(m, p, b, set_row, "set.find", [Int]{if superset -> subject else -> other, walk.item}, word_row)
+        none: ir_word_const(m, b, 0)
+        broken: ir_bool_op(m, b, if symbol == "jet_set_is_disjoint" -> IROp.Ge else -> IROp.Lt, found, none)
+        ir_open_if(b.f, broken, b.line)
+        no: ir_int_constant(m, b, bool_row, 0)
+        ir_emit(b.f, IROp.Copy, result, no, -1, -1, b.line)
+        ir_end(b.f, b.line)
+        ir_walk_close(m, b, walk)
+        ir_release(m, b, other)
         return Val(result)
     }
     keyed: symbol == "jet_set_remove" || symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel"
     if !keyed && symbol != "jet_set_has" && symbol != "jet_set_insert" -> return None
-    if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(&b, span, "Set builtin {route} without a key"))
-    key: ir_adapt(&m, p, &b, operands[1], shape.key.ty, span)
+    if operands.len() != 2 || operands[1] < 0 -> return Val(ir_fail_slot(b, span, "Set builtin {route} without a key"))
+    key: ir_adapt(m, p, b, operands[1], shape.key.ty, span)
     if ir_failed(b) -> return Val(-1)
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
     if symbol == "jet_set_remove" {
-        _: ir_set_call(&m, p, &b, set_row, "set.remove", [Int]{subject, key}, -1)
-        ir_release(&m, &b, key)
+        _: ir_set_call(m, p, b, set_row, "set.remove", [Int]{subject, key}, -1)
+        ir_release(m, b, key)
         return Val(-1)
     }
     if symbol == "jet_set_pop_kernel" || symbol == "jet_set_replace_kernel" {
         // replace takes the stored key out, then moves the offered one in.
-        option_row: ir_value_type(&m, p, Type.Option{inner: shape.entry_ty}) ?? return Val(ir_fail_slot(&b, span, "Set builtin {route} result"))
-        taken: ir_set_call(&m, p, &b, set_row, "set.take", [Int]{subject, key}, option_row)
+        option_row: ir_value_type(m, p, Type.Option{inner: shape.entry_ty}) ?? return Val(ir_fail_slot(b, span, "Set builtin {route} result"))
+        taken: ir_set_call(m, p, b, set_row, "set.take", [Int]{subject, key}, option_row)
         if symbol == "jet_set_replace_kernel" {
-            offered: ir_own(&m, p, &b, key)
-            _: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{subject, offered}, bool_row)
+            offered: ir_own(m, p, b, key)
+            _: ir_set_call(m, p, b, set_row, "set.insert", [Int]{subject, offered}, bool_row)
             b.fresh[offered] = false
         } else {
-            ir_release(&m, &b, key)
+            ir_release(m, b, key)
         }
         return Val(taken)
     }
     if symbol == "jet_set_insert" {
-        offered: ir_own(&m, p, &b, key)
-        added: ir_set_call(&m, p, &b, set_row, "set.insert", [Int]{subject, offered}, bool_row)
+        offered: ir_own(m, p, b, key)
+        added: ir_set_call(m, p, b, set_row, "set.insert", [Int]{subject, offered}, bool_row)
         b.fresh[offered] = false
         return Val(added)
     }
-    word_row: ir_word_row(&m)
-    found: ir_set_call(&m, p, &b, set_row, "set.find", [Int]{subject, key}, word_row)
-    none: ir_word_const(&m, &b, 0)
-    present: ir_bool_op(&m, &b, IROp.Ge, found, none)
-    ir_release(&m, &b, key)
+    word_row: ir_word_row(m)
+    found: ir_set_call(m, p, b, set_row, "set.find", [Int]{subject, key}, word_row)
+    none: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ge, found, none)
+    ir_release(m, b, key)
     Val(present)
 }

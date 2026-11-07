@@ -54,10 +54,10 @@ jet_driver_rust_foreign_mangle: fn(name: String) -> String Never! { ast_comptime
 // IdentityBuilder::field: u64 little-endian lengths, followed by exact UTF-8.
 jet_driver_rust_foreign_field: fn(bytes: &[U8], name: String, value: [U8]) Never! {
     name_bytes: name.bytes()
-    loop shift in 0..<8 -> &bytes.push(U8{(name_bytes.len() >> (shift * 8)).bit_and(255)})
-    loop byte in name_bytes -> &bytes.push(byte)
-    loop shift in 0..<8 -> &bytes.push(U8{(value.len() >> (shift * 8)).bit_and(255)})
-    loop byte in value -> &bytes.push(byte)
+    loop shift in 0..<8 -> bytes.push(U8{(name_bytes.len() >> (shift * 8)).bit_and(255)})
+    loop byte in name_bytes -> bytes.push(byte)
+    loop shift in 0..<8 -> bytes.push(U8{(value.len() >> (shift * 8)).bit_and(255)})
+    loop byte in value -> bytes.push(byte)
 }
 jet_driver_rust_foreign_digest: fn(bytes: [U8]) -> String Never! {
     sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
@@ -126,12 +126,12 @@ jet_driver_rust_foreign_dependencies: fn(entries: [JetDriverRustForeignEntry]) -
         if parts.len() < 2 || parts[0] == "" -> next
         version: entry.crate_spec.removeprefix("{parts[0]}@")
         if version == "" -> next
-        if versions.get(parts[0]) == None -> &names.push(parts[0])
+        if versions.get(parts[0]) == None -> names.push(parts[0])
         versions[parts[0]] = version
     }
-    &names.sort()
+    names.sort()
     rows := [JetDriverRustForeignDependency]{}
-    loop name in names -> &rows.push(JetDriverRustForeignDependency{name: name, version: versions[name]})
+    loop name in names -> rows.push(JetDriverRustForeignDependency{name: name, version: versions[name]})
     Ok(rows)
 }
 jet_driver_rust_foreign_manifest: fn(crate_name: String, deps: [JetDriverRustForeignDependency]) -> String Never! {
@@ -143,46 +143,46 @@ jet_driver_rust_foreign_manifest: fn(crate_name: String, deps: [JetDriverRustFor
 jet_driver_rust_foreign_plan: fn(facts: JetDriverRustForeignFacts, rust_toolchain: String, target: String, link_closure: String) -> JetDriverRustForeignPlan JetDriverRustForeignError! {
     dependencies: jet_driver_rust_foreign_dependencies(facts.entries) ?? return Err(err)
     identity := [U8]{}
-    jet_driver_rust_foreign_field(&identity, "schema", "jet-ffi-bridge-identity-v1".bytes())
-    jet_driver_rust_foreign_field(&identity, "descriptor_schema", "jet-inline-ffi-v10-asm-early-clobber".bytes())
-    jet_driver_rust_foreign_field(&identity, "c-record-source", facts.record_source.bytes())
-    jet_driver_rust_foreign_field(&identity, "selected_target", target.bytes())
-    jet_driver_rust_foreign_field(&identity, "rust_toolchain", rust_toolchain.bytes())
+    jet_driver_rust_foreign_field(identity, "schema", "jet-ffi-bridge-identity-v1".bytes())
+    jet_driver_rust_foreign_field(identity, "descriptor_schema", "jet-inline-ffi-v10-asm-early-clobber".bytes())
+    jet_driver_rust_foreign_field(identity, "c-record-source", facts.record_source.bytes())
+    jet_driver_rust_foreign_field(identity, "selected_target", target.bytes())
+    jet_driver_rust_foreign_field(identity, "rust_toolchain", rust_toolchain.bytes())
     loop dependency in dependencies {
-        jet_driver_rust_foreign_field(&identity, "dependency", dependency.name.bytes())
-        jet_driver_rust_foreign_field(&identity, "dependency_version", dependency.version.bytes())
+        jet_driver_rust_foreign_field(identity, "dependency", dependency.name.bytes())
+        jet_driver_rust_foreign_field(identity, "dependency_version", dependency.version.bytes())
     }
     // Declaration order is observable in the hosted bridge; do not sort here.
     loop entry in facts.entries {
         declaration: entry.declaration
-        jet_driver_rust_foreign_field(&identity, "foreign_descriptor", JET_DRIVER_RUST_FOREIGN_DESCRIPTOR.bytes())
-        jet_driver_rust_foreign_field(&identity, "jet_name", declaration.name.bytes())
-        jet_driver_rust_foreign_field(&identity, "rust_path", declaration.rust_path.bytes())
-        jet_driver_rust_foreign_field(&identity, "wrapper_name", "jet_ffi_{declaration.name}".bytes())
-        jet_driver_rust_foreign_field(&identity, "crate_spec", entry.crate_spec.bytes())
-        jet_driver_rust_foreign_field(&identity, "c_abi", [U8]{0})
-        jet_driver_rust_foreign_field(&identity, "generated", [U8]{if declaration.generated -> 1 else -> 0})
-        jet_driver_rust_foreign_field(&identity, "c_module", [U8]{0})
+        jet_driver_rust_foreign_field(identity, "foreign_descriptor", JET_DRIVER_RUST_FOREIGN_DESCRIPTOR.bytes())
+        jet_driver_rust_foreign_field(identity, "jet_name", declaration.name.bytes())
+        jet_driver_rust_foreign_field(identity, "rust_path", declaration.rust_path.bytes())
+        jet_driver_rust_foreign_field(identity, "wrapper_name", "jet_ffi_{declaration.name}".bytes())
+        jet_driver_rust_foreign_field(identity, "crate_spec", entry.crate_spec.bytes())
+        jet_driver_rust_foreign_field(identity, "c_abi", [U8]{0})
+        jet_driver_rust_foreign_field(identity, "generated", [U8]{if declaration.generated -> 1 else -> 0})
+        jet_driver_rust_foreign_field(identity, "c_module", [U8]{0})
         loop parameter in declaration.params {
-            jet_driver_rust_foreign_field(&identity, "parameter_convention", jet_driver_rust_foreign_convention(parameter.convention).bytes())
-            jet_driver_rust_foreign_field(&identity, "parameter_type", jet_driver_rust_foreign_type_key(parameter.ty).bytes())
+            jet_driver_rust_foreign_field(identity, "parameter_convention", jet_driver_rust_foreign_convention(parameter.convention).bytes())
+            jet_driver_rust_foreign_field(identity, "parameter_type", jet_driver_rust_foreign_type_key(parameter.ty).bytes())
         }
-        loop parameter in declaration.params -> jet_driver_rust_foreign_field(&identity, "parameter_name", parameter.name.bytes())
-        if declaration.return_type == .Val(ty) -> jet_driver_rust_foreign_field(&identity, "return_type", jet_driver_rust_foreign_type_key(ty).bytes())
-        if declaration.close == .Val(close) -> jet_driver_rust_foreign_field(&identity, "close_function", close.bytes())
+        loop parameter in declaration.params -> jet_driver_rust_foreign_field(identity, "parameter_name", parameter.name.bytes())
+        if declaration.return_type == .Val(ty) -> jet_driver_rust_foreign_field(identity, "return_type", jet_driver_rust_foreign_type_key(ty).bytes())
+        if declaration.close == .Val(close) -> jet_driver_rust_foreign_field(identity, "close_function", close.bytes())
     }
-    jet_driver_rust_foreign_field(&identity, "link_closure", link_closure.bytes())
-    jet_driver_rust_foreign_field(&identity, "native_helper_artifact_mode", JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE.bytes())
+    jet_driver_rust_foreign_field(identity, "link_closure", link_closure.bytes())
+    jet_driver_rust_foreign_field(identity, "native_helper_artifact_mode", JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE.bytes())
     key: jet_driver_rust_foreign_digest(identity)
     shared := [U8]{}
-    jet_driver_rust_foreign_field(&shared, "schema", "jet-ffi-bridge-identity-v1".bytes())
-    jet_driver_rust_foreign_field(&shared, "descriptor_schema", "jet-ffi-shared-deps-v1".bytes())
-    jet_driver_rust_foreign_field(&shared, "selected_target", target.bytes())
-    jet_driver_rust_foreign_field(&shared, "rust_toolchain", rust_toolchain.bytes())
-    jet_driver_rust_foreign_field(&shared, "native_helper_artifact_mode", JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE.bytes())
+    jet_driver_rust_foreign_field(shared, "schema", "jet-ffi-bridge-identity-v1".bytes())
+    jet_driver_rust_foreign_field(shared, "descriptor_schema", "jet-ffi-shared-deps-v1".bytes())
+    jet_driver_rust_foreign_field(shared, "selected_target", target.bytes())
+    jet_driver_rust_foreign_field(shared, "rust_toolchain", rust_toolchain.bytes())
+    jet_driver_rust_foreign_field(shared, "native_helper_artifact_mode", JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE.bytes())
     // Native CC/AR identities and explicit static dependencies affect build
     // scripts as well as the final archive; never reuse their stale outputs.
-    jet_driver_rust_foreign_field(&shared, "native_helper_link_closure", link_closure.bytes())
+    jet_driver_rust_foreign_field(shared, "native_helper_link_closure", link_closure.bytes())
     crate_name: "jet_ffi_{key}"
     Ok(JetDriverRustForeignPlan{key: key, crate_name: crate_name, shared_key: jet_driver_rust_foreign_digest(shared), target: target, dependencies: dependencies, entries: facts.entries, record_source: facts.record_source, record_names: facts.record_names, manifest: jet_driver_rust_foreign_manifest(crate_name, dependencies), source: jet_driver_rust_foreign_source(facts)})
 }
@@ -191,7 +191,7 @@ JetDriverRustForeignRecord: struct { rust_name: String, fields: [Field], alignme
 JetDriverRustForeignRecordIndex: struct { records: [JetDriverRustForeignRecord], names: [String:String], aliases: [String:Type] }
 jet_driver_rust_foreign_function: fn(declaration: ExternFn) -> JetDriverRustForeignFunction Never! {
     params := [JetDriverRustForeignParam]{}
-    loop param in declaration.params -> &params.push(JetDriverRustForeignParam{convention: param.convention, name: param.name, ty: param.ty})
+    loop param in declaration.params -> params.push(JetDriverRustForeignParam{convention: param.convention, name: param.name, ty: param.ty})
     close: if declaration.close == .Val(value) -> Val(value.name) else -> None
     JetDriverRustForeignFunction{name: declaration.name, params: params, return_type: declaration.return_type, rust_path: declaration.rust_path, generated: declaration.generated, close: close}
 }
@@ -199,7 +199,7 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
     loop item in items {
         if item == {
             .ExternRust(block) -> {
-                loop declaration in block.functions -> &entries.push(JetDriverRustForeignEntry{module_identity: module_identity, crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
+                loop declaration in block.functions -> entries.push(JetDriverRustForeignEntry{module_identity: module_identity, crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
             }
             .Struct(definition) -> {
                 is_c: if definition.layout == {
@@ -215,7 +215,7 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
                     .Val(.CAligned(value, _)) -> Val(value)
                     else -> None
                 }
-                &records.records.push(JetDriverRustForeignRecord{rust_name: rust_name, fields: definition.fields, alignment: alignment})
+                records.records.push(JetDriverRustForeignRecord{rust_name: rust_name, fields: definition.fields, alignment: alignment})
             }
             .Distinct(definition) -> {
                 key: if owner == "" -> definition.name else -> "{owner}::{definition.name}"
@@ -230,7 +230,7 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
             .CodeModule(module_block) -> {
                 if module_block.body == .Val(body) {
                     nested: if owner == "" -> module_block.name else -> "{owner}::{module_block.name}"
-                    jet_driver_rust_foreign_collect_items(body, nested, module_identity, &entries, &records)
+                    jet_driver_rust_foreign_collect_items(body, nested, module_identity, entries, records)
                 }
             }
             else -> {}
@@ -275,7 +275,7 @@ jet_driver_rust_foreign_record_type: fn(ty: Type, records: JetDriverRustForeignR
             if stack.contains(name) -> return None
             base: records.aliases.get(name) ?? return None
             next := stack
-            &next.push(name)
+            next.push(name.copy())
             return jet_driver_rust_foreign_record_type(base, records, next)
         }
         .Apply(name, args) -> {
@@ -302,17 +302,17 @@ jet_driver_rust_foreign_facts: fn(graph: SemaRegistrationGraph) -> JetDriverRust
     if !jet_driver_rust_foreign_present(graph) -> return jet_driver_rust_foreign_empty()
     entries := [JetDriverRustForeignEntry]{}
     records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
-    loop module_row in graph.modules -> jet_driver_rust_foreign_collect_items(module_row.declarations, module_row.module_name, module_row.module_identity, &entries, &records)
+    loop module_row in graph.modules -> jet_driver_rust_foreign_collect_items(module_row.declarations, module_row.module_name, module_row.module_identity, entries, records)
     if entries.len() == 0 -> return jet_driver_rust_foreign_empty()
     source := [String]{}
     loop record in records.records {
         repr: if record.alignment == .Val(alignment) -> "#[repr(C, align({alignment}))]" else -> "#[repr(C)]"
-        &source.push("{repr}\nstruct {record.rust_name} {{\n")
+        source.push("{repr}\nstruct {record.rust_name} {{\n")
         loop field in record.fields {
             ty: jet_driver_rust_foreign_record_type(field.ty, records, [String]{}) ?? panic("checked C record field `{field.name}` has no native Rust representation")
-            &source.push("    {jet_driver_rust_foreign_mangle(field.name)}: {ty},\n")
+            source.push("    {jet_driver_rust_foreign_mangle(field.name)}: {ty},\n")
         }
-        &source.push("}}\n\n")
+        source.push("}}\n\n")
     }
     // Alias record names use the same checked representation, not opaque handles.
     loop (name, _) in records.aliases {

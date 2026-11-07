@@ -34,7 +34,7 @@ env_file_all_call_args: fn(text: String, name: String) -> [String] Never! {
     rest := text
     loop {
         parts: rest.split_once(name) ?? break
-        if env_file_call_args_after(parts.after) == .Val(args) -> &out.push(args)
+        if env_file_call_args_after(parts.after) == .Val(args) -> out.push(args)
         rest = parts.after
     }
     out
@@ -51,7 +51,7 @@ env_file_call_args_after: fn(after: String) -> String? Never! {
     rest: after.trim_start()
     if !rest.starts_with("(") -> return None
     scalars := [String]{}
-    loop scalar in rest.chars() -> &scalars.push("{scalar}")
+    loop scalar in rest.chars() -> scalars.push("{scalar}")
     depth := 1
     out := [String]{}
     in_quote := false
@@ -59,7 +59,7 @@ env_file_call_args_after: fn(after: String) -> String? Never! {
     loop index in 1..<scalars.len() {
         current: scalars[index]
         if in_quote {
-            &out.push(current)
+            out.push(current.copy())
             if escaped {
                 escaped = false
             } else if current == "\\" {
@@ -72,18 +72,18 @@ env_file_call_args_after: fn(after: String) -> String? Never! {
         if current == {
             "\"" -> {
                 in_quote = true
-                &out.push(current)
+                out.push(current.copy())
             }
             "(" -> {
                 depth += 1
-                &out.push(current)
+                out.push(current.copy())
             }
             ")" -> {
                 depth -= 1
                 if depth == 0 -> return Val(out.join(""))
-                &out.push(current)
+                out.push(current.copy())
             }
-            else -> &out.push(current)
+            else -> out.push(current.copy())
         }
     }
     None
@@ -93,7 +93,7 @@ env_file_call_args_after: fn(after: String) -> String? Never! {
 // escapes and doubled braces decoded.
 env_file_quoted_strings: fn(fragment: String) -> [String] Never! {
     scalars := [String]{}
-    loop scalar in fragment.chars() -> &scalars.push("{scalar}")
+    loop scalar in fragment.chars() -> scalars.push("{scalar}")
     out := [String]{}
     index := 0
     loop index < scalars.len() {
@@ -109,28 +109,28 @@ env_file_quoted_strings: fn(fragment: String) -> [String] Never! {
             if current == "\"" -> break
             if current == "\\" {
                 if index >= scalars.len() {
-                    &value.push("\\")
+                    value.push("\\")
                     break
                 }
                 escaped: scalars[index]
                 index += 1
                 if escaped == {
-                    "n" -> &value.push("\n")
-                    "t" -> &value.push("\t")
-                    "\"" -> &value.push("\"")
-                    "\\" -> &value.push("\\")
+                    "n" -> value.push("\n")
+                    "t" -> value.push("\t")
+                    "\"" -> value.push("\"")
+                    "\\" -> value.push("\\")
                     else -> {
-                        &value.push("\\")
-                        &value.push(escaped)
+                        value.push("\\")
+                        value.push(escaped.copy())
                     }
                 }
                 next
             }
             doubled: (current == "{{" || current == "}}") && index < scalars.len() && scalars[index] == current
             if doubled -> index += 1
-            &value.push(current)
+            value.push(current.copy())
         }
-        &out.push(value.join(""))
+        out.push(value.join(""))
     }
     out
 }

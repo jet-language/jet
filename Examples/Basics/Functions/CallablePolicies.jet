@@ -1,0 +1,52 @@
+// Declaration defaults and apply(...)
+// replacements keep the same checked callable signature.
+policy audit(topic: String, prefix: String{"audit"}) {
+    wrap(call) {
+        return "{prefix}:{topic}:{call()? (topic)}"
+    }
+}
+
+#Policy(audit("users.load")) audited_load: fn() -> String { "ok" }
+
+#Policy(trace("users.load")) load_user: fn(id: Int, label: String{"user"}) -> String { "{label}:{id}" }
+
+run: fn() {
+    audited: apply(audit("users.load"), audited_load)
+    layered: apply(audit("outer"), audit("inner"), audited_load)
+    unwrapped: apply(audited_load)
+    selected: apply(retry(3), load_user)
+    bare: apply(load_user)
+    print(audited())
+    print(audited_load())
+    print(layered())
+    print(unwrapped())
+    print(load_user(6))
+    print(selected(7))
+    print(bare(8))
+    user_policies_lesson()
+}
+
+// A package owns a typed callable-policy setting; this one passes the call
+// straight through.
+policy pass_through(topic: String) {
+    wrap(call) {
+        return call()
+    }
+}
+
+// A `wrap(call)` body is user code: `call()` inside an interpolation
+// propagates like any call and yields the success value (#5514).
+policy labeled(topic: String) {
+    wrap(call) { return "{topic}:{call()}" }
+}
+
+#Policy(pass_through("users.count")) load_count: fn() -> Int { 7 }
+
+load_name: fn() -> String { "ok" }
+
+user_policies_lesson: fn() {
+    selected: apply(pass_through("users.count"), load_count)
+    print(selected())
+    tagged: apply(labeled("users.load"), load_name)
+    print(tagged())
+}

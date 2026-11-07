@@ -27,12 +27,12 @@ store_prepare_profile_generation_root: fn(verification: &StoreVerification, root
     incarnation: Incarnation.new(1)
     root_witness: RootWitness.new(witness)
     identity: RootIdentity.new(RootKind.ProfileGeneration, id, ProducerID.new("jetpack-profile-generation"), incarnation, root_witness)
-    _: store_lifecycle_prepare(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
+    _: store_lifecycle_prepare(verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
     Ok(PreparedProfileGenerationRoot{id: id, incarnation: incarnation, witness: root_witness})
 }
 
 store_commit_profile_generation_root: fn(verification: &StoreVerification, roots: HangarRoots, prepared: PreparedProfileGenerationRoot, at: Int) StoreError! {
-    _: store_lifecycle_commit(&verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
+    _: store_lifecycle_commit(verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
 }
 
 // Check that a package-generation record still owns the exact committed GC
@@ -42,7 +42,7 @@ store_commit_profile_generation_root: fn(verification: &StoreVerification, roots
 store_validate_profile_generation_root: fn(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String]) StoreError! {
     if targets.len() == 0 -> return
     id: store_profile_generation_root_id(owner, profile, generation)
-    snapshot: store_lifecycle_snapshot(&verification, roots)
+    snapshot: store_lifecycle_snapshot(verification, roots)
     root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.NotFound("profile generation lifecycle root is missing"))
     if root.phase != RootPhase.Committed -> return Err(StoreError.Other("profile generation lifecycle root is not committed"))
     expected: store_sorted_unique(targets)
@@ -74,12 +74,12 @@ store_reconcile_external_consumer_root: fn(verification: &StoreVerification, roo
     root_witness: RootWitness.new(witness)
     incarnation: Incarnation.new(1)
     identity: RootIdentity.new(RootKind.ExternalConsumer, id, ProducerID.new(consumer), incarnation, root_witness)
-    snapshot: store_lifecycle_prepare_if_absent(&verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
+    snapshot: store_lifecycle_prepare_if_absent(verification, roots, identity, targets, LifecycleTimestamp.from_unix_seconds(at))
     root: snapshot.roots.get(id.as_str()) ?? return Err(StoreError.Other("external consumer root disappeared after prepare"))
     if root.phase == RootPhase.Committed -> return Ok(None)
     Ok(Val(PreparedExternalConsumerRoot{id: id, incarnation: incarnation, witness: root_witness}))
 }
 
 store_commit_external_consumer_root: fn(verification: &StoreVerification, roots: HangarRoots, prepared: PreparedExternalConsumerRoot, at: Int) StoreError! {
-    _: store_lifecycle_commit(&verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
+    _: store_lifecycle_commit(verification, roots, prepared.id, prepared.incarnation, prepared.witness, LifecycleTimestamp.from_unix_seconds(at))
 }

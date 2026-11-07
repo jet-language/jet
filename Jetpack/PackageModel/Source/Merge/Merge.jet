@@ -36,7 +36,7 @@ Pkg: struct {
     parse_list: fn(body: String) -> [Pkg] Never! {
         out := [Pkg]{}
         loop item in pkg_merge_split_top_level(body) {
-            loop pkg in Pkg.parse_item(item.trim()) -> &out.push(pkg)
+            loop pkg in Pkg.parse_item(item.trim()) -> out.push(pkg)
         }
         out
     }
@@ -58,7 +58,7 @@ Pkg: struct {
                     members := [Pkg]{}
                     loop name in rest.removeprefix("[").removesuffix("]").split(",") {
                         member: name.trim()
-                        if member != "" -> &members.push(Pkg.new(parts.before, member))
+                        if member != "" -> members.push(Pkg.new(parts.before, member))
                     }
                     return members
                 }
@@ -94,14 +94,14 @@ pkg_merge_split_top_level: fn(body: String) -> [String] Never! {
             41 | 93 | 125 -> depth -= 1
             44 -> {
                 if depth == 0 {
-                    &out.push(pkg_bytes_text(raw, start, index))
+                    out.push(pkg_bytes_text(raw, start, index))
                     start = index + 1
                 }
             }
             else -> {}
         }
     }
-    if start < raw.len() -> &out.push(pkg_bytes_text(raw, start, raw.len()))
+    if start < raw.len() -> out.push(pkg_bytes_text(raw, start, raw.len()))
     out
 }
 
@@ -125,7 +125,7 @@ pkg_merge_sources: fn(contribs: [[String: String]]) -> [String: String] MergeErr
 
 pkg_merge_sorted_names: fn(map: [String: String]) -> [String] Never! {
     names := map.keys().to_list()
-    &names.sort()
+    names.sort()
     names
 }
 
@@ -135,7 +135,7 @@ pkg_merge_packages: fn(lists: [[Pkg]]) -> [Pkg] Never! {
     out := [Pkg]{}
     loop list in lists {
         loop pkg in list {
-            if !out.contains(pkg) -> &out.push(pkg)
+            if !out.contains(pkg) -> out.push(pkg.copy())
         }
     }
     out
@@ -161,12 +161,12 @@ MergedEntry: struct {
 // text facts surface as settings.
 pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     lists := [[Pkg]]{}
-    loop contribution in contribs -> &lists.push(contribution.packages)
+    loop contribution in contribs -> lists.push(contribution.packages)
     by_key := [String: [FactContribution]]{}
     loop contribution in contribs {
         loop key in pkg_merge_sorted_setting_keys(contribution.settings) {
             writers := by_key.get(key) ?? [FactContribution]{}
-            loop writer in contribution.settings[key] -> &writers.push(writer)
+            loop writer in contribution.settings[key] -> writers.push(writer.copy())
             by_key[key] = writers
         }
     }
@@ -192,6 +192,6 @@ pkg_merge_entry: fn(contribs: [EntryContribution]) -> MergedEntry MergeError! {
 
 pkg_merge_sorted_setting_keys: fn(settings: [String: [FactContribution]]) -> [String] Never! {
     names := settings.keys().to_list()
-    &names.sort()
+    names.sort()
     names
 }

@@ -1,12 +1,12 @@
-Error [jet.UseAfterMove]: `name` was consumed by the move `^name`, so it can't be used here
+Error [jet.UseAfterMove]: `name` was consumed by `name.move()`, so it can't be used here
   --> tests/ui/E0121_lambda_move_outer_use.jet:5:11
     |
   5 |     print(name)
     |           ^^^^
   --> tests/ui/E0121_lambda_move_outer_use.jet:3:16
     |
-  3 |     f: () -> { ^name }
-    |                ^^^^^ `name` moved to the move `^name` here
+  3 |     f: () -> { name.move() }
+    |                ^^^^^^^^^ `name` moved to `name.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `name` after the move, or give the move `^name` a copy with `name.copy()` where it moved.
+ Fix: Stop using `name` after the move, or give `name.move()` a copy with `name.copy()` where it moved.
 More: jet-lang.dev/e/E0121

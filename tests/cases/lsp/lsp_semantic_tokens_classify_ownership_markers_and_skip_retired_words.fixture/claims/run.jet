@@ -26,7 +26,7 @@ s5_token_slice: fn(text: String, start: Int, end: Int) -> String {
     bytes: text.bytes()
     if start < 0 || end < start || end > bytes.len() -> return ""
     selected := [U8]{}
-    loop index in start..<end -> &selected.push(bytes[index])
+    loop index in start..<end -> selected.push(bytes[index])
     String.from_bytes(selected) ?? ""
 }
 
@@ -53,7 +53,7 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
     last: s5_token_find(response, "]", first)
     values := [Int]{}
     loop field in s5_token_slice(response, first, last).split(",").to_list() {
-        if s5_token_u32(field.trim()) == .Val(value) -> &values.push(value)
+        if s5_token_u32(field.trim()) == .Val(value) -> values.push(value)
     }
     lines: source.lines()
     tokens := [S5SemanticToken]{}
@@ -66,7 +66,7 @@ s5_token_decode: fn(source: String, response: String) -> [S5SemanticToken] {
         column = if delta == 0 -> column + values[offset + 1] else -> values[offset + 1]
         length: values[offset + 2]
         text: if line_index < lines.len() -> s5_token_slice(lines[line_index], column, column + length) else -> ""
-        &tokens.push(S5SemanticToken{text, token_type: values[offset + 3], modifiers: values[offset + 4]})
+        tokens.push(S5SemanticToken{text, token_type: values[offset + 3], modifiers: values[offset + 4]})
         offset = offset + 5
     }
     tokens
@@ -102,7 +102,7 @@ s5_token_original_assertions: fn() {
         return
     }
     s5_token_assert(tokens, "copy", 12, 16)
-    s5_token_assert(tokens, "^", 12, 4)
+    s5_token_assert(tokens, "&&", 12, 4)
     s5_token_assert(tokens, "&", 12, 8)
     s5_token_assert(tokens, "Test", 13, 32)
     s5_token_assert(tokens, "Unsafe", 13, 32)

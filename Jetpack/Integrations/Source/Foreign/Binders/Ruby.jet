@@ -1,7 +1,8 @@
 // Persistent supervised Ruby binder ported from
 // jet_pkg_model::RubyBind.
 use {
-    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+    jet_foundation.[JET_TYPE_NAMES]
+    jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     jet_pkg_model.[
         ForeignBindError, ForeignBindResult, ForeignLanguage, WorkerLanguage,
@@ -98,12 +99,12 @@ pkg_ruby_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
     worker: pkg_binder_canonicalize(worker_file, "could not resolve the Ruby worker")
     abi: "jet_ruby_{lib}"
     wrappers := [String]{}
-    loop name in functions -> &wrappers.push(pkg_worker_invoke_wrapper(abi, name, "invoke", name))
+    loop name in functions -> wrappers.push(pkg_worker_invoke_wrapper(abi, name, "invoke", name))
     bridge: pkg_worker_render_supervisor_c(abi, ruby, worker, script, wrappers.join(""), "worker_path,script_path")
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Ruby process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-ruby-bind-v1", source, script, ruby, worker_source})
     provenance := "schema=jet-ruby-bind-v1\nsha256={digest}\nruby={ruby}\nscript={script}\nworker={worker}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Ruby, "Ruby", lib, script, archive, "ruby={ruby};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Ruby, "Ruby", lib, script, archive, "ruby={ruby};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_ruby_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -119,7 +120,7 @@ pkg_ruby_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
         if !pkg_binder_is_ident(name) -> return Err(ForeignBindError.Source("Ruby function `{name}` cannot be projected as a Jet identifier"))
         if pkg_ruby_reserved(name) -> return Err(ForeignBindError.Source("Ruby function `{name}` uses a reserved generated binding name"))
         if out.contains(name) -> return Err(ForeignBindError.Source("Ruby function `{name}` is declared more than once"))
-        &out.push(name)
+        out.push(name)
     }
     if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named Ruby functions were found"))
     Ok(out)
@@ -127,7 +128,7 @@ pkg_ruby_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
 
 pkg_ruby_render_worker: fn(functions: [String]) -> String Never! {
     allowed := [String]{}
-    loop name in functions -> &allowed.push("'{name}'")
+    loop name in functions -> allowed.push("'{name}'")
     pkg_binder_fill_template(PKG_RUBY_WORKER, [String: String]{"allowed": allowed.join(", ")})
 }
 
@@ -135,12 +136,12 @@ pkg_ruby_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_ruby_{lib}"
     out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop name in functions {
-        &out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nRubyError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    close: fn(^self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(^session: Session) {{ abi.close(session.value) }}\n\nopen: fn() -> Session RubyError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\ncancel: fn(session: Session) {{ abi.cancel(session.value) }}\n\n")
-    &out.push(pkg_render_decode_response("RubyError", DecoderProtocol.StandardEnvelope))
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nRubyError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    close: fn(&&self) {{ abi.close(self.value) }}\n}}\n\nclose: fn(&&session: Session) {{ abi.close(session.value) }}\n\nopen: fn() -> Session RubyError! {{\n    handle: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\ncancel: fn(session: Session) {{ abi.cancel(session.value) }}\n\n")
+    out.push(pkg_render_decode_response("RubyError", DecoderProtocol.StandardEnvelope))
     loop name in functions {
-        &out.push("{name}: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {{\n    payload: json.to_string(input) ?? return Err(RubyError.Protocol)\n    raw: abi.{name}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        out.push("{name}: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {{\n    payload: json.to_string(input) ?? return Err(RubyError.Protocol)\n    raw: abi.{name}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
@@ -151,5 +152,5 @@ pkg_ruby_render_probe: fn() -> String Never! {
 }
 
 pkg_ruby_reserved: fn(value: String) -> Bool Never! {
-    PKG_RUBY_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
+    PKG_RUBY_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }

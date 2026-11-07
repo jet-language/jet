@@ -25,12 +25,12 @@ contains_bytes: fn(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
 }
 request_head: fn(stream: &TCPStream) -> [U8] {
     // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
-    net.set_read_timeout(&stream, 5000) ?? panic("request timeout")
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
     request := [U8]{}
     loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
         block: stream.read(512) ?? panic("request read")
         assert(block.len() > 0)
-        loop byte in block { &request.push(byte) }
+        loop byte in block { request.push(byte) }
         assert(request.len() <= 65536)
     }
     return request
@@ -43,7 +43,7 @@ use process: core.process
 subject: fn(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
-        &argv.push(path)
+        argv.push(path.copy())
         return process.cmd(argv).run() ?? panic("run subject")
     }
     // Source/CmdCompile.rs482-488 public built: path; compile happens INSIDE runner task.
@@ -83,11 +83,11 @@ run: fn() {
         port: address.split(":").to_list()[1].copy()
         source: files.read("{work}/server/main.template") ?? panic("source")
         files.write("{work}/server/main.jet", source.replace("__PORT__", port)) ?? panic("stage")
-        runner: task { return subject(mode, "{work}/server/main.jet") }
+        runner: task { subject(mode, "{work}/server/main.jet") }
         started: time.instant()
         client := retry_connect(address, started)
         client.write_all("POST / HTTP/1.1{PEER_CRLF}Host: local{PEER_CRLF}Transfer-Encoding: chunked{PEER_CRLF}Trailer: X-Test{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}1{PEER_CRLF}x{PEER_CRLF}0{PEER_CRLF}".bytes()) ?? panic("chunked prefix")
-        net.set_read_timeout(&client, 35000) ?? panic("response timeout")
+        net.set_read_timeout(client, 35000) ?? panic("response timeout")
         stop: "{work}/stop-{mode}"
         writer: task {
             trailer: "X-Test: value{PEER_CRLF}".bytes()
@@ -111,7 +111,7 @@ run: fn() {
             if client.read(8192) == {
                 .Ok(block) -> {
                     if block.len() == 0 -> break
-                    loop byte in block { &response.push(byte) }
+                    loop byte in block { response.push(byte) }
                 }
                 .Err(_) -> {
                     read_ok = false

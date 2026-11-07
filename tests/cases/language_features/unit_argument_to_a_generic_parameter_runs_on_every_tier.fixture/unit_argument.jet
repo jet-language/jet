@@ -8,13 +8,13 @@ step: fn(n: Int) StepError! {
     Ok(())
 }
 
-finish: fn<T>(value: ^T) -> T StepError! {
-    Ok(^value)
+finish: fn<T>(value: &&T) -> T StepError! {
+    Ok(value)
 }
 
 run: fn() {
     done: step(1) ?? panic("step")
-    finish(^done) ?? panic("finish")
+    finish(done) ?? panic("finish")
     print("unit through a generic: ok")
     if step(-1) == {
         .Ok(_) -> print("unexpected")

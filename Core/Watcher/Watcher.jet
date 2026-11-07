@@ -198,8 +198,8 @@ impl WatchHandle {
         at := 0
         loop at + 2 < texts.len() {
             ev: WatchEvent{domain: watch_domain_of(target), kind: watch_kind_named(texts[at]), path: texts[at + 1], detail: texts[at + 2], pid: pid, port: port}
-            &out.push(ev.copy())
-            _ := bus.emit(^ev)
+            out.push(ev.copy())
+            _ := bus.emit(ev)
             at = at + 3
         }
         out
@@ -234,7 +234,7 @@ impl WatchSet {
     poll: fn(self) -[IO]> [WatchEvent] Never! {
         out := [WatchEvent]{}
         loop index in 0..<core.watcher.__set_len(self) {
-            loop ev in core.watcher.__set_get(self, index).poll() -> &out.push(ev)
+            loop ev in core.watcher.__set_get(self, index).poll() -> out.push(ev)
         }
         out
     }
@@ -353,7 +353,7 @@ suffix: fn(text: String, start: Int) -> String Never! {
     i := start
     loop {
         if i >= raw.len() -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }

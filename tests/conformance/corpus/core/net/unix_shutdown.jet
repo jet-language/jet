@@ -6,8 +6,8 @@ run: fn() {
     client: net.unix_connect("/tmp/jet-conformance-unix-shutdown.sock") ?? panic("connect")
     server: net.unix_accept(listener) ?? panic("accept")
     print((() -> {
-        net.unix_shutdown(&client, .Write) ?? panic("shutdown")
+        net.unix_shutdown(client, .Write) ?? panic("shutdown")
         true
     })())
-    net.unix_close(&server) ?? panic("server close")
+    net.unix_close(server) ?? panic("server close")
 }

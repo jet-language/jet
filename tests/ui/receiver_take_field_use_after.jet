@@ -3,11 +3,11 @@
 Buffer: struct { text: String }
 Holder: struct { buf: Buffer, tag: String }
 impl Buffer {
-    seal: fn(^self) { print(self.text) }
+    seal: fn(&&self) { print(self.text) }
 }
 run: fn() {
     holder: Holder{buf: Buffer{text: "hello"}, tag: "kept"}
-    ^holder.buf.seal()
+    holder.buf.seal()
     print(holder.tag)
     print(holder.buf.text)
 }

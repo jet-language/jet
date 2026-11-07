@@ -157,7 +157,7 @@ EncodingError: struct {
         display: fn(self) -> String { self.display_text() }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.display_text() }
+        debug: fn(&&self) -> String { self.display_text() }
     }
 }
 impl EncodingError {
@@ -196,7 +196,7 @@ HexError: struct {
         display: fn(self) -> String { self.reason }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.reason }
+        debug: fn(&&self) -> String { self.reason }
     }
 }
 impl HexError {
@@ -222,8 +222,8 @@ bytes_to_hex: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
         n: Int.from_u8(b)
-        &out.push(hex_nibble(n /% 16))
-        &out.push(hex_nibble(n %% 16))
+        out.push(hex_nibble(n /% 16))
+        out.push(hex_nibble(n %% 16))
     }
     String.from_bytes(out) ?? ""
 }
@@ -239,17 +239,17 @@ hex_to_bytes: fn(text: String) -> [U8] HexError! {
     loop i < raw.len() {
         hi: hex_value(raw[i]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
         lo: hex_value(raw[i + 1]) ?? return Err(HexError{reason: "invalid hex digit; expected 0-9, a-f, or A-F"})
-        &out.push(U8{hi * 16 + lo})
+        out.push(U8{hi * 16 + lo})
         i = i + 2
     }
     Ok(out)
 }
 
-// Typed `tree.decode<T>()` of a container T with no Decode implementation of
-// its own, and `FieldError.under`. JetIR calls these by name (BuildDyn.jet
-// ir_dyn_decode, ir_decode_under); scalars cross the runtime's canonical
-// jet_rt_codec_decode_* adapters instead. The generic parameter is not spelled
-// `T` (see json.__decode_typed).
+// Typed `tree.decode<T>()` of a container or F32 T with no Decode
+// implementation of its own, and `FieldError.under`. JetIR calls these by name
+// (BuildDyn.jet ir_dyn_decode, ir_decode_under); scalars cross the runtime's
+// canonical jet_rt_codec_decode_* adapters instead. The generic parameter is
+// not spelled `T` (see json.__decode_typed).
 
 // `FieldError.under(segment, inner)`: every error of `inner` framed under
 // `segment`; a success passes through.
@@ -267,8 +267,8 @@ __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
             failures := [FieldError]{}
             loop (index, item) in items {
                 if item.decode<Item>() == {
-                    .Ok(value) -> &values.push(value)
-                    .Err(errors) -> loop error in errors -> &failures.push(decode_under("[{index}]", error))
+                    .Ok(value) -> values.push(value)
+                    .Err(errors) -> loop error in errors -> failures.push(decode_under("[{index}]", error))
                 }
             }
             if failures.len() > 0 -> return Err(failures)
@@ -276,6 +276,13 @@ __decode_list: fn<Item: Decode>(tree: Dyn) -> [Item] [FieldError]! {
         }
         else -> Err(decode_expected("a list", tree))
     }
+}
+
+// A fixed List `[Item#length]`: the List decode of exactly `length` items.
+__decode_fixed_list: fn<Item: Decode>(tree: Dyn, length: Int) -> [Item] [FieldError]! {
+    values: tree.decode<[Item]>() ?? return Err(err)
+    if values.len() != length -> return Err([FieldError]{FieldError{path: "", reason: "expected a fixed list of length {length}, found {values.len()}"}})
+    Ok(values)
 }
 
 // A byte List ([U8]) also takes Dyn.Bytes as is and Text as strict padded
@@ -289,6 +296,13 @@ __decode_bytes: fn(tree: Dyn) -> [U8] [FieldError]! {
         }
         else -> __decode_list<U8>(tree)
     }
+}
+
+// An F32: a Float decode inside the F32 range.
+__decode_f32: fn(tree: Dyn) -> F32 [FieldError]! {
+    value: tree.decode<Float>() ?? return Err(err)
+    single: F32.from_float(value) ?? return Err([FieldError]{FieldError{path: "", reason: "expected F32, found out-of-range Float"}})
+    Ok(single)
 }
 
 // An Option: Null is None; any other value is Some of its decode, whose errors
@@ -314,7 +328,7 @@ __decode_map: fn<Item: Decode>(tree: Dyn) -> [String: Item] [FieldError]! {
             loop entry in entries {
                 if entry.value.decode<Item>() == {
                     .Ok(value) -> values[entry.key] = value
-                    .Err(errors) -> loop error in errors -> &failures.push(decode_under(entry.key, error))
+                    .Err(errors) -> loop error in errors -> failures.push(decode_under(entry.key, error))
                 }
             }
             if failures.len() > 0 -> return Err(failures)
@@ -340,7 +354,7 @@ decode_under: fn(segment: String, error: FieldError) -> FieldError Never! {
 // vocabulary.
 decode_expected: fn(expected: String, tree: Dyn) -> [FieldError] Never! {
     kind: if tree == {
-        .Null -> "null"
+        .Null -> "Null"
         .Bool(_) -> "Bool"
         .Int(_) -> "Int"
         .Float(_) -> "Float"

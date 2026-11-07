@@ -23,14 +23,14 @@ jet_cli_emit_leaf: fn(kind: String, text: String) -> JetCLIEmitNode Never! {
 // The text form: one line per node, two spaces per depth, a final newline.
 jet_cli_emit_tree_text: fn(nodes: [JetCLIEmitNode]) -> String Never! {
     lines := [String]{}
-    loop node in nodes -> jet_cli_emit_tree_lines(node, "", &lines)
+    loop node in nodes -> jet_cli_emit_tree_lines(node, "", lines)
     if lines.len() == 0 -> return ""
     "{lines.join("\n")}\n"
 }
 
 jet_cli_emit_tree_lines: fn(node: JetCLIEmitNode, indent: String, lines: &[String]) Never! {
-    &lines.push("{indent}{node.text}")
-    loop child in node.children -> jet_cli_emit_tree_lines(child, "{indent}  ", &lines)
+    lines.push("{indent}{node.text}")
+    loop child in node.children -> jet_cli_emit_tree_lines(child, "{indent}  ", lines)
 }
 
 // The `--json` form: `{"schema":"jet.status/v1","action":"emit","ok":true,

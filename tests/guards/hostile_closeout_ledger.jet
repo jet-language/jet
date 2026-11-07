@@ -46,9 +46,9 @@ s2_closeout_receipts: fn(directory: String) -> [String] {
     loop entry in entries {
         metadata: closeout_files.stat(entry.path) ?? next
         if metadata.is_dir {
-            loop path in s2_closeout_receipts(entry.path) -> &result.push(path)
+            loop path in s2_closeout_receipts(entry.path) -> result.push(path)
         } else if entry.name == "jet.json" {
-            &result.push(entry.path)
+            result.push(entry.path)
         }
     }
     result
@@ -57,7 +57,7 @@ s2_closeout_receipts: fn(directory: String) -> [String] {
 s2_closeout_observed: fn() -> [String:Int] {
     counts := [String:Int]{}
     paths := s2_closeout_receipts("Docs/audits/raw/2393-r1")
-    &paths.sort()
+    paths.sort()
     loop path in paths {
         text: closeout_files.read(path) ?? panic("cannot read {path}")
         in_codes := false
@@ -84,7 +84,7 @@ s2_closeout_rows: fn(ledger: String, finding: String) -> [String] {
     rows := [String]{}
     loop line in ledger.lines() {
         columns: line.split("|").to_list()
-        if columns.len() > 1 && columns[1].trim().starts_with(finding) -> &rows.push(line.copy())
+        if columns.len() > 1 && columns[1].trim().starts_with(finding) -> rows.push(line.copy())
     }
     rows
 }
@@ -105,7 +105,7 @@ s2_closeout_validate: fn(ledger: String, observed: [String:Int]) -> String {
         if rows.len() != 1 -> return "observed finding {spec.finding} must have one canonical ledger row, found {rows.len()}"
         row: rows[0]
         required := [String]{spec.owner, spec.raw_witness, spec.fixture}
-        loop value in spec.row_requirements -> &required.push(value)
+        loop value in spec.row_requirements -> required.push(value)
         loop value in required {
             if !row.contains(value) -> return "ledger row {spec.finding} for observed {observed_name} lacks {value}"
         }
@@ -127,7 +127,7 @@ s2_closeout_test_missing_row: fn() {
     loop spec in s2_closeout_specs() {
         kept := [String]{}
         loop line in ledger.lines() {
-            if !line.contains("| {spec.finding} ") -> &kept.push(line.copy())
+            if !line.contains("| {spec.finding} ") -> kept.push(line.copy())
         }
         error: s2_closeout_validate(kept.join("\n"), observed)
         assert(error != "", "an observed finding without its owner row must fail closed")
@@ -147,7 +147,7 @@ s2_closeout_test_mismatched_row: fn() {
         loop required in requirements {
             mismatched: row.replace(required, "__mismatched__")
             lines := [String]{}
-            loop line in ledger.lines() -> &lines.push(if line == row -> mismatched else -> line.copy())
+            loop line in ledger.lines() -> lines.push(if line == row -> mismatched else -> line.copy())
             error: s2_closeout_validate(lines.join("\n"), observed)
             assert(error != "", "a mismatched owner or witness must fail closed")
             assert(error.contains(spec.finding) && error.contains(required), "mismatch error lost {spec.finding} identity: {error}")

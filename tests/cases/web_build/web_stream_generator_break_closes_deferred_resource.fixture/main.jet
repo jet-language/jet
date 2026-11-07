@@ -8,7 +8,7 @@ CleanupMarker: struct {
 }
 
 impl CleanupMarker.Close {
-    close: fn(^self) { print("cleanup: {self.name}") }
+    close: fn(&&self) { print("cleanup: {self.name}") }
 }
 
 count: fn(n: Int) -> Stream<Int> {
@@ -34,7 +34,7 @@ nested: fn() -> Stream<Int> {
 
 cleanup_after_break: fn() -> Stream<Int> {
     marker := CleanupMarker{name: "stream"}
-    defer close(^marker)
+    defer close(marker)
     print("cleanup: before")
     yield 7
     print("cleanup: after")

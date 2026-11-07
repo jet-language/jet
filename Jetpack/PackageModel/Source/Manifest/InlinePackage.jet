@@ -21,7 +21,7 @@ PKG_MANIFEST_SCALAR_FIELDS: comptime { [String]{MANIFEST_FIELD_NAME, MANIFEST_FI
 // manifest block blanked, or None when no top-level `build: fn` remains.
 pkg_build_entry_source: fn(text: String) -> String? Never! {
     masked := text.bytes()
-    pkg_mask_manifest_blocks(text.bytes(), &masked)
+    pkg_mask_manifest_blocks(text.bytes(), masked)
     source: String.from_bytes(masked) ?? return None
     if !pkg_has_top_level_build_function(source.bytes()) -> return None
     Val(source)
@@ -59,13 +59,13 @@ pkg_mask_manifest_blocks: fn(bytes: [U8], masked: &[U8]) Never! {
         if brace_depth == 0 && bracket_depth == 0 && paren_depth == 0 {
             if pkg_manifest_block_start(bytes, i) == .Val(block) {
                 if pkg_balanced_block_end(bytes, block.end) == .Val(end) {
-                    pkg_blank_range(&masked, block.start, end)
+                    pkg_blank_range(masked, block.start, end)
                     i = end
                     next
                 }
             }
             if pkg_manifest_scalar_start(bytes, i) == .Val(scalar) {
-                pkg_blank_range(&masked, scalar.start, scalar.end)
+                pkg_blank_range(masked, scalar.start, scalar.end)
                 i = scalar.end
                 next
             }
@@ -332,7 +332,7 @@ InlinePackageBlock: struct {
     // The source with the carrier blanked, every offset and line ending kept.
     mask_source: fn(self, source: String) -> String Never! {
         masked := source.bytes()
-        pkg_blank_range(&masked, self.span.start, self.span.end)
+        pkg_blank_range(masked, self.span.start, self.span.end)
         String.from_bytes(masked) ?? source
     }
 }

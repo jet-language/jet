@@ -1,4 +1,4 @@
-// D-CONC-SPAWN1 / D-CONC-FAIL1: web adapter for the canonical task Prelude.
+// Web adapter for the canonical task Prelude.
 // Web has no native thread handle. The task still starts at spawn, owns one
 // result, and consumes that result exactly once at join or detach.
 class JetWebTask {

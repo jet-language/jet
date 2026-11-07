@@ -7,7 +7,7 @@
 // Hangar descriptor's identity, or None when there is none yet.
 provider_cc_toolchain_cache_expectation: fn(verification: &StoreVerification, spec: RefSpec, ctx: ProviderCtx) -[FS, Env, Time]> CacheExpectation? Never! {
     target: provider_cc_toolchain_requested_target(spec) ?? return None
-    descriptor: provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) ?? return None
+    descriptor: provider_cc_toolchain_resolve_for_target(verification, ctx.store_dir, target, ctx.fixtures != None) ?? return None
     Val(CacheExpectation{identity: descriptor.cache_identity(ctx), owned_output: Val(descriptor.root), allow_unsigned_local: true})
 }
 
@@ -19,9 +19,9 @@ provider_cc_toolchain_plan_downloads: fn(verification: &StoreVerification, specs
         target: provider_cc_toolchain_requested_target(spec) ?? {
             return Err(ProviderError.Unsupported(err.message()))
         }
-        if provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) == {
+        if provider_cc_toolchain_resolve_for_target(verification, ctx.store_dir, target, ctx.fixtures != None) == {
             .Ok(_) -> {
-                &plan.add_item(PlanItem{package: spec.raw, state: PlanState.Cached, download_bytes: Val(0), disk_bytes: None})
+                plan.add_item(PlanItem{package: spec.raw, state: PlanState.Cached, download_bytes: Val(0), disk_bytes: None})
                 next
             }
             .Err(error) -> {
@@ -33,7 +33,7 @@ provider_cc_toolchain_plan_downloads: fn(verification: &StoreVerification, specs
                 if provider_cc_fixture_manifest(fixtures, target) == {
                     .Ok(manifest) -> {
                         if manifest != None {
-                            &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+                            plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
                             next
                         }
                     }
@@ -45,7 +45,7 @@ provider_cc_toolchain_plan_downloads: fn(verification: &StoreVerification, specs
         provider_cc_pack_covered_target(target) ?? {
             return Err(ProviderError.Unsupported(err.message()))
         }
-        &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
     }
     Ok(plan)
 }
@@ -56,7 +56,7 @@ provider_cc_toolchain_realize: fn(verification: &StoreVerification, spec: RefSpe
     target: provider_cc_toolchain_requested_target(spec) ?? {
         return Err(ProviderError.Unsupported(err.message()))
     }
-    if provider_cc_toolchain_resolve_for_target(&verification, ctx.store_dir, target, ctx.fixtures != None) == {
+    if provider_cc_toolchain_resolve_for_target(verification, ctx.store_dir, target, ctx.fixtures != None) == {
         .Ok(descriptor) -> return Ok(provider_cc_realized_from_descriptor(spec, ctx, descriptor, SourceState.Cached))
         .Err(error) -> {
             if !error.is_missing_descriptor(target) -> return Err(ProviderError.BadOutput(error.message()))
@@ -76,7 +76,7 @@ provider_cc_toolchain_realize: fn(verification: &StoreVerification, spec: RefSpe
         }
         .None -> {}
     }
-    provider_cc_realize_pack(&verification, spec, ctx, target)
+    provider_cc_realize_pack(verification, spec, ctx, target)
 }
 
 provider_cc_realized_from_descriptor: fn(spec: RefSpec, ctx: ProviderCtx, descriptor: CcToolchainDescriptor, source_state: SourceState) -[FS, Env]> Realized Never! {
@@ -240,8 +240,8 @@ provider_cc_copy_tree_node: fn(source: String, destination: String, spent: CcCop
             return Err(CcToolchainError.Invalid("read C toolchain bundle directory: {err}"))
         }
         names := [String]{}
-        loop child in children -> &names.push(child.name)
-        &names.sort()
+        loop child in children -> names.push(child.name)
+        names.sort()
         loop name in names {
             budget = provider_cc_copy_tree_node(files.join(source, name), files.join(destination, name), budget)
         }

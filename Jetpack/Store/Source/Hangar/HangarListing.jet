@@ -85,7 +85,7 @@ store_inspect_leases: fn(roots: HangarRoots) -> LeaseInventory StoreError! {
 // cleanup. A malformed object or committed closure cannot be omitted from a
 // successful report.
 store_audit_read_only: fn(verification: &StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
-    graph: store_closure_graph_read_only(&verification, roots)
+    graph: store_closure_graph_read_only(verification, roots)
     entries: store_list_read_only_checked(roots)
     known := [String: Bool]{}
     loop entry in entries -> known[entry.id] = true
@@ -126,7 +126,7 @@ store_audit_read_only: fn(verification: &StoreVerification, roots: HangarRoots) 
         }
         canonical_hangar: files.canonicalize(hangar) ?? hangar
         hangar_root: if store_path_starts_with(entry.out, hangar) || store_path_starts_with(entry.out, canonical_hangar) -> Val(canonical_hangar) else -> None
-        actual: store_read_only_output_hash(&verification, entry.out, hangar_root, entry.platform_artifact_kind != "") ?? return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be hashed: {err.message()}"))
+        actual: store_read_only_output_hash(verification, entry.out, hangar_root, entry.platform_artifact_kind != "") ?? return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be hashed: {err.message()}"))
         if actual != entry.envelope.output_hash {
             return Err(StoreError.InvalidData("Hangar object `{entry.id}` failed its content digest: expected {entry.envelope.output_hash}, got {actual}"))
         }
@@ -141,7 +141,7 @@ store_audit_read_only: fn(verification: &StoreVerification, roots: HangarRoots) 
 // The package record ids of `graph` in Rust `BTreeMap` order.
 store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
     ids := graph.records.keys().to_list()
-    &ids.sort()
+    ids.sort()
     ids
 }
 
@@ -150,26 +150,26 @@ store_sorted_record_ids: fn(graph: ClosureGraph) -> [String] Never! {
 // every consumer observes one receipt-bearing projection.
 store_list_checked: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     hangar_lock: env_runtime_lock(roots.root, "hangar")
-    store_list_checked_unlocked(&verification, roots)
+    store_list_checked_unlocked(verification, roots)
 }
 
 // `store_list_checked` for a caller that already holds the Hangar lock.
 store_list_checked_unlocked: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
-    _: store_migrate_closure_graph_unlocked(&verification, roots)
+    _: store_migrate_closure_graph_unlocked(verification, roots)
     entries: store_list_unlocked(roots)
     healthy := [StoreEntry]{}
     loop entry in entries {
         if entry.envelope.output_hash == "" {
             return Err(StoreError.InvalidData("Hangar object `{entry.id}` has no output digest"))
         }
-        actual: if store_try_entry_output_hash(&verification, roots, entry) == {
+        actual: if store_try_entry_output_hash(verification, roots, entry) == {
             .Ok(actual) -> actual
             .Err(error) -> {
                 if error.message().contains("does not exist") {
                     // Deleted output: drop the dangling record so the
                     // provider realizes the package again instead of failing
                     // every call.
-                    _: store_tombstone_closure_record_unlocked(&verification, roots, entry.id)
+                    _: store_tombstone_closure_record_unlocked(verification, roots, entry.id)
                     next
                 }
                 return Err(StoreError.InvalidData("Hangar object `{entry.id}` could not be verified: {error.message()}"))
@@ -179,10 +179,10 @@ store_list_checked_unlocked: fn(verification: &StoreVerification, roots: HangarR
             // Self-healing default: a drifted object is quarantined and
             // dropped from the listing so its provider realizes it again;
             // failing the whole operation would strand every other entry.
-            store_quarantine_malformed_objects(&verification, roots, [MalformedObject]{MalformedObject{id: entry.id, path: entry.out, reason: "digest-mismatch"}})
+            store_quarantine_malformed_objects(verification, roots, [MalformedObject]{MalformedObject{id: entry.id, path: entry.out, reason: "digest-mismatch"}})
             next
         }
-        &healthy.push(entry)
+        healthy.push(entry)
     }
     Ok(healthy)
 }
@@ -200,7 +200,7 @@ store_list_for_full_audit: fn(roots: HangarRoots) -> [StoreEntry] StoreError! {
 // historical infallible listing API; integrity-sensitive callers use
 // `store_list_checked`.
 store_list: fn(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
-    store_list_checked(&verification, roots) ?? [StoreEntry]{}
+    store_list_checked(verification, roots) ?? [StoreEntry]{}
 }
 
 // Recover every Hangar crash surface under one advisory-lock ownership
@@ -211,7 +211,7 @@ store_recover_hangar: fn(verification: &StoreVerification, roots: HangarRoots) -
     staging: AdmissionTransaction.recover_unlocked(roots)
     reproducibility: store_recover_certification_staging_unlocked(roots)
     archive: store_recover_archive_staging_unlocked(roots)
-    repairs: store_recover_repair_quarantine_unlocked(&verification, roots)
+    repairs: store_recover_repair_quarantine_unlocked(verification, roots)
     build_debug: recipe_recover_build_scratch(roots.hangar_dir())
     // The authenticated protocol owns both receipt validation and the
     // lease-container sweep. The container lifetime lock is the process-tree
@@ -219,8 +219,8 @@ store_recover_hangar: fn(verification: &StoreVerification, roots: HangarRoots) -
     // the managed-root inode with this recovery lock.
     protocol: ExecutableLeaseProtocol.open(roots.root)
     leases: protocol.recover_stale_leases()
-    closure: store_recover_closure_journal_unlocked(&verification, roots)
-    migrated: store_migrate_closure_graph_unlocked(&verification, roots).migrated
+    closure: store_recover_closure_journal_unlocked(verification, roots)
+    migrated: store_migrate_closure_graph_unlocked(verification, roots).migrated
     Ok(staging + reproducibility + archive + repairs + build_debug + leases + closure + migrated)
 }
 
@@ -254,7 +254,7 @@ store_lease_nodes_unlocked: fn(roots: HangarRoots) -> [Bool] StoreError! {
         if !node.is_dir && !node.is_symlink && !node.is_file {
             return Err(StoreError.InvalidData("Hangar lease `{entry.path}` is not a supported filesystem node"))
         }
-        &nodes.push(store_lease_node_is_stale(entry.path, node))
+        nodes.push(store_lease_node_is_stale(entry.path, node))
     }
     Ok(nodes)
 }
@@ -305,10 +305,10 @@ store_entry_id: fn(name: String, version: String, reference: String, out: String
 // checkout or machine.
 store_content_addressed_entry_id: fn(name: String, version: String, reference: String, output_hash: String) -> String Never! {
     canonical := "jet.content-entry.v1".bytes()
-    &canonical.push(U8{0})
-    store_push_bytes(&canonical, reference.bytes())
-    &canonical.push(U8{0})
-    store_push_bytes(&canonical, output_hash.bytes())
+    canonical.push(U8{0})
+    store_push_bytes(canonical, reference.bytes())
+    canonical.push(U8{0})
+    store_push_bytes(canonical, output_hash.bytes())
     store_short_entry_id(name, version, store_sha256_hex(canonical))
 }
 

@@ -2,6 +2,7 @@
 // First-RC witness against the admitted standalone Jet object and C platform.
 // --test executes a named Jet test hook in a fresh native runtime library.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -65,9 +66,12 @@ if (test) {
   writeFileSync(source, `#include <stdint.h>\n#include <string.h>\n#include <unistd.h>\ntypedef struct Text Text;\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t, char **, char **);\nextern int32_t jet_rt_main(void (*body)(void));\nextern Text *jet_rt_string_from_static(const void *, int64_t);\nextern void jet_rt_string_drop(Text *);\nextern int64_t ${fixtures[test]}(${signature});\nstatic int64_t fixture_result;\n${pathDeclaration}static void exercise(void) {\n${call}\n}\nint main(int argc, char **argv) {\n${pathSetup}jet_rt_host_arguments(argc, argv, environ);\nint32_t status = jet_rt_main(exercise);\n${pathCleanup}return status != 0 ? status : (int)fixture_result;\n}\n`);
   const cObject = join(out, 'fixture-driver.o'), executable = join(out, 'fixture-driver'), fixtureObject = `${prefix}.o`;
   const crt = ['crt1.o', 'crti.o', 'crtn.o'].map(name => resolve(musl, name));
-  const inputs = [...archiveInputs, ...crt.map(path => ({ path, handle: fileObject(path) })), { path: fixtureObject, handle: fileObject(fixtureObject) }, { path: file, handle: fileObject(file) }];
+  // The fixture library imports jet_rt_fault_report, which Jet's linker writes
+  // into each image; this platform link takes it from the shared report source.
+  const faultReport = faultReportObject(out);
+  const inputs = [...archiveInputs, ...crt.map(path => ({ path, handle: fileObject(path) })), { path: fixtureObject, handle: fileObject(fixtureObject) }, { path: faultReport, handle: fileObject(faultReport) }, { path: file, handle: fileObject(file) }];
   command('compile-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', '-c', source, '-o', cObject]);
-  command('link-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-nostdlib', '-static', '-no-pie', crt[0], crt[1], cObject, '-Wl,--start-group', fixtureObject, ...archiveInputs.map(row => row.path), '-Wl,--end-group', crt[2], '-o', executable]);
+  command('link-fixture-driver', join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-nostdlib', '-static', '-no-pie', crt[0], crt[1], cObject, '-Wl,--start-group', fixtureObject, faultReport, ...archiveInputs.map(row => row.path), '-Wl,--end-group', crt[2], '-o', executable]);
   for (const row of inputs) if (fileObject(row.path) !== row.handle) throw Error(`fixture input changed: ${row.path}`);
   const result = command('run-fixture', executable, test === 'CompilerFileLeaves' ? [join(out, 'file-leaves.data')] : []);
   if (result.signal || result.stdout !== '' || result.stderr !== '') throw Error(`native ${test} fixture output differs`);

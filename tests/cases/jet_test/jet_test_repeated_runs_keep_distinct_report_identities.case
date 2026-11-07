@@ -5,7 +5,7 @@
 # typed evidence agree on the expected failure and the unexpected pass.
 fixture: fixtures/package
 env: NO_COLOR=1
-step: jet test --json --serial --filter=known {root}/Examples/features/tooling/expected_fail.jet
+step: jet test --json --serial --filter=known {root}/Examples/Tooling/Testing/ExpectedFail.jet
 exit: 0
 json: stdout doc $.ok = true
 json: stdout doc $.test.expectedFailures = 1
@@ -13,13 +13,13 @@ json: stdout doc $.test.unexpectedPasses = 0
 stderr: !~ "E2105" # no report collision (#3057)
 stderr: !~ "history:" # the report was published
 capture: filtered_first stdout doc $.evidence.identity.report
-step: jet test --json --serial --filter=known {root}/Examples/features/tooling/expected_fail.jet
+step: jet test --json --serial --filter=known {root}/Examples/Tooling/Testing/ExpectedFail.jet
 exit: 0
 stderr: !~ "E2105" # a repeat never collides (#3057)
 stderr: !~ "history:" # the repeat's report was published
 capture: filtered_repeat stdout doc $.evidence.identity.report
 cap:filtered_repeat: != "{cap:filtered_first}" # a repeat is its own report
-step: jet test --json --serial {root}/Examples/features/tooling/expected_fail.jet
+step: jet test --json --serial {root}/Examples/Tooling/Testing/ExpectedFail.jet
 exit: 1
 json: stdout doc $.ok = false
 json: stdout doc $.test.passed = 1
@@ -34,7 +34,7 @@ stderr: !~ "history:" # the unfiltered report was published
 capture: full_first stdout doc $.evidence.identity.report
 cap:full_first: != "{cap:filtered_first}" # the unfiltered run is its own report
 cap:full_first: != "{cap:filtered_repeat}" # the unfiltered run is its own report
-step: jet test --show-default --capture=all --serial {root}/Examples/features/tooling/expected_fail.jet
+step: jet test --show-default --capture=all --serial {root}/Examples/Tooling/Testing/ExpectedFail.jet
 exit: 1
 stdout: ~ "1 passed, 0 failed, 0 skipped, 1 expected-fail, 1 unexpected-pass" # the text tally agrees with the JSON
 stderr: !~ "E2105" # no report collision (#3057)

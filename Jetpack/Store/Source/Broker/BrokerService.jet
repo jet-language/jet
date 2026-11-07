@@ -32,7 +32,7 @@ store_broker_connect_absent: fn(failure: NetError) -> Bool Never! {
 }
 
 store_broker_send: fn(stream: &UnixStream, bytes: [U8]) StoreError! {
-    net.unix_write_all_bytes(&stream, bytes) ?? return Err(store_broker_net_error(err))
+    net.unix_write_all_bytes(stream, bytes) ?? return Err(store_broker_net_error(err))
 }
 
 // Rust `reuse_shared_entry`: import a published shared entry into the
@@ -45,13 +45,13 @@ store_reuse_shared_entry: fn(verification: &StoreVerification, roots: HangarRoot
     if sys.family() == "windows" -> return Err(store_broker_invalid("shared-store sockets are unsupported on this host"))
     found_stream: store_broker_connect(config.socket)
     stream := found_stream ?? return Ok(None)
-    store_broker_send(&stream, store_broker_encode_read_request(reference))
-    reader := BrokerWireReader.socket(^stream)
-    found_bytes: store_broker_read_archive_response(&reader)
+    store_broker_send(stream, store_broker_encode_read_request(reference))
+    reader := BrokerWireReader.socket(stream)
+    found_bytes: store_broker_read_archive_response(reader)
     bytes: found_bytes ?? return Ok(None)
-    store_import_broker_archive(&verification, roots, bytes)
-    candidate: store_find_by_reference(&verification, roots, reference) ?? return Err(store_broker_invalid("shared-store broker returned no matching entry"))
-    proof: store_verify_cache_entry(&verification, roots, candidate, reference, expectation)
+    store_import_broker_archive(verification, roots, bytes)
+    candidate: store_find_by_reference(verification, roots, reference) ?? return Err(store_broker_invalid("shared-store broker returned no matching entry"))
+    proof: store_verify_cache_entry(verification, roots, candidate, reference, expectation)
     if !proof.trusted() -> return Err(store_broker_invalid("shared-store entry failed cache identity verification"))
     Ok(Val(candidate))
 }
@@ -65,15 +65,15 @@ store_promote_shared_entry: fn(verification: &StoreVerification, roots: HangarRo
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(store_broker_invalid("shared-store producer record is invalid: {err.message()}"))
     if store_is_private_untrusted_build(producer) -> return Ok(false)
     if sys.family() == "windows" -> return Err(store_broker_invalid("shared-store sockets are unsupported on this host"))
-    archive: store_export_unsigned_archive(&verification, roots, entry.id, true)
+    archive: store_export_unsigned_archive(verification, roots, entry.id, true)
     binding: store_broker_provenance_binding_for_entry(entry)
     found_credential: store_broker_writer_credential(config)
     credential: found_credential ?? return Ok(false)
     found_stream: store_broker_connect(config.socket)
     stream := found_stream ?? return Ok(false)
-    store_broker_send(&stream, store_broker_encode_write_request(binding, credential, archive))
-    reader := BrokerWireReader.socket(^stream)
-    store_broker_read_response(&reader)
+    store_broker_send(stream, store_broker_encode_write_request(binding, credential, archive))
+    reader := BrokerWireReader.socket(stream)
+    store_broker_read_response(reader)
 }
 
 // Rust `serve_shared_store_fd`: serve one socket-activated request and exit.
@@ -85,7 +85,7 @@ store_serve_shared_store: fn(verification: &StoreVerification, roots: HangarRoot
     stream := net.unix_accept(listener) ?? return Err(store_broker_net_error(err))
     found_config: store_broker_read_config(store_broker_admin_layout())
     config: found_config ?? return Err(store_broker_invalid("shared-store broker is not installed"))
-    store_broker_serve_connection(&verification, ^stream, config)
+    store_broker_serve_connection(verification, stream, config)
 }
 
 // The one Unix listener the service manager handed over (Rust takes exactly
@@ -103,29 +103,29 @@ store_broker_peer_user: fn(stream: UnixStream) -> Int StoreError! {
 
 // Rust `serve_shared_store_connection`: authorize the kernel-reported peer,
 // then promote one write or answer one read.
-store_broker_serve_connection: fn(verification: &StoreVerification, ^stream: UnixStream, config: SharedStoreConfig) StoreError! {
+store_broker_serve_connection: fn(verification: &StoreVerification, &&stream: UnixStream, config: SharedStoreConfig) StoreError! {
     user: store_broker_peer_user(stream)
-    store_broker_serve_peer(&verification, ^stream, config, user)
+    store_broker_serve_peer(verification, stream, config, user)
 }
 
 // Serve one connection whose peer is `user`; replies go back over its stream.
-store_broker_serve_peer: fn(verification: &StoreVerification, ^stream: UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
+store_broker_serve_peer: fn(verification: &StoreVerification, &&stream: UnixStream, config: SharedStoreConfig, user: Int) StoreError! {
     shared: HangarRoots.at(config.shared_root)
     key: store_broker_trust_key(config)
-    reader := BrokerWireReader.socket(^stream)
-    if store_broker_read_request_header(&reader) == {
+    reader := BrokerWireReader.socket(stream)
+    if store_broker_read_request_header(reader) == {
         .Write(header) -> {
             store_broker_authorize_peer(config, user, true, Val(header.binding), Val(header.credential))
-            archive: &reader.read_exact(header.length)
-            store_broker_promote_staged_archive(&verification, shared, config, key, archive, header.binding)
-            &reader.reply(store_broker_encode_response("ok"))
+            archive: reader.read_exact(header.length)
+            store_broker_promote_staged_archive(verification, shared, config, key, archive, header.binding)
+            reader.reply(store_broker_encode_response("ok"))
         }
         .Read(reference) -> {
             store_broker_authorize_peer(config, user, false, None, None)
-            entry: store_find_by_reference(&verification, shared, reference) ?? return &reader.reply(store_broker_encode_response("missing"))
-            store_verify_hangar_object(&verification, shared, entry) ?? return Err(StoreError.Other(err.what()))
-            exported: store_export_archive(&verification, shared, entry.id, true, Val(key))
-            &reader.reply(store_broker_encode_archive_response(exported.bytes))
+            entry: store_find_by_reference(verification, shared, reference) ?? return reader.reply(store_broker_encode_response("missing"))
+            store_verify_hangar_object(verification, shared, entry) ?? return Err(StoreError.Other(err.what()))
+            exported: store_export_archive(verification, shared, entry.id, true, Val(key))
+            reader.reply(store_broker_encode_archive_response(exported.bytes))
         }
     }
 }
@@ -140,10 +140,10 @@ store_broker_promote_staged_archive: fn(verification: &StoreVerification, shared
     store_broker_sweep_stale_incoming(incoming)
     nonce: time.unix_ns()
     stage: files.join(incoming, "{sys.pid()}-{if nonce < 0 -> 0 else -> nonce}")
-    files.create_dir(stage)
+    files.create_dir_all(stage)
     store_broker_atomic_write(files.join(stage, STORE_BROKER_STAGE_MARKER), "{store_broker_now_secs()}".bytes())
     staged: HangarRoots.at(stage)
-    failure: store_broker_admission_failure(&verification, shared, staged, key, archive, binding)
+    failure: store_broker_admission_failure(verification, shared, staged, key, archive, binding)
     cleanup: store_broker_cleanup_failure(stage)
     if failure == {
         .Val(error) -> {
@@ -162,7 +162,7 @@ store_broker_promote_staged_archive: fn(verification: &StoreVerification, shared
 }
 
 store_broker_admission_failure: fn(verification: &StoreVerification, shared: HangarRoots, staged: HangarRoots, key: String, archive: [U8], binding: ProvenanceBinding) -> StoreError? Never! {
-    if store_broker_admit_and_promote(&verification, shared, staged, key, archive, binding) == {
+    if store_broker_admit_and_promote(verification, shared, staged, key, archive, binding) == {
         .Err(error) -> Val(error)
         else -> None
     }
@@ -179,10 +179,10 @@ store_broker_admit_and_promote: fn(verification: &StoreVerification, shared: Han
     // The archive is bounded and digest-checked, then signed by the broker
     // before the shared root is reachable by the promotion step.
     attested: store_attest_archive(staged, archive, key)
-    store_import_archive(&verification, staged, attested, Val(key), false)
-    entries: store_list_checked(&verification, staged)
+    store_import_archive(verification, staged, attested, Val(key), false)
+    entries: store_list_checked(verification, staged)
     if entries.len() == 0 -> return Err(store_broker_invalid("shared-store archive contains no verified entry"))
-    loop entry in entries -> store_verify_hangar_object(&verification, staged, entry) ?? return Err(StoreError.Other(err.what()))
+    loop entry in entries -> store_verify_hangar_object(verification, staged, entry) ?? return Err(StoreError.Other(err.what()))
     bound: store_broker_entry_for_reference(entries, binding.reference) ?? return Err(store_broker_invalid("shared-store archive has no provenance-bound root"))
     if store_broker_provenance_binding_for_entry(bound) != binding {
         return Err(store_broker_invalid("shared-store provenance binding does not match archive"))
@@ -190,7 +190,7 @@ store_broker_admit_and_promote: fn(verification: &StoreVerification, shared: Han
     // The import holds the shared root's hangar lock, and every scope of one
     // root shares that root's single kernel lock, so promotions are already
     // serialized; an outer claim on the same root would wait on itself.
-    store_import_archive(&verification, shared, attested, Val(key), false)
+    store_import_archive(verification, shared, attested, Val(key), false)
 }
 
 store_broker_entry_for_reference: fn(entries: [StoreEntry], reference: String) -> StoreEntry? Never! {

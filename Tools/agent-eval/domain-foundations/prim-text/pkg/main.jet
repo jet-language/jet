@@ -33,14 +33,14 @@ merge_sequence: fn(sequence: [String], key: String) -> [String] {
         if index + 1 < sequence.len() {
             next: sequence.get(index + 1) ?? ""
             if pair_key(current, next) == key {
-                &result.push(merged)
+                result.push(merged)
                 index += 2
             } else {
-                &result.push(current)
+                result.push(current)
                 index += 1
             }
         } else {
-            &result.push(current)
+            result.push(current)
             index += 1
         }
     }
@@ -51,7 +51,7 @@ train_bpe: fn(corpus: String) -> BPEModel {
     words: text.words(corpus)
     sequences := [[String]]{}
     loop word in words {
-        &sequences.push(text.graphemes(word))
+        sequences.push(text.graphemes(word))
     }
     merges := [String]{}
     loop _round in 0..<12 {
@@ -77,10 +77,10 @@ train_bpe: fn(corpus: String) -> BPEModel {
         if best_count == 0 {
             break
         }
-        &merges.push(best)
+        merges.push(best)
         next_sequences := [[String]]{}
         loop sequence in sequences {
-            &next_sequences.push(merge_sequence(sequence, best))
+            next_sequences.push(merge_sequence(sequence, best))
         }
         sequences = next_sequences
     }
@@ -99,7 +99,7 @@ encode_text: fn(source: String, model: BPEModel) -> [String] {
             sequence = merge_sequence(sequence, merge)
         }
         loop token in sequence {
-            &encoded.push(token)
+            encoded.push(token)
         }
     }
     return encoded

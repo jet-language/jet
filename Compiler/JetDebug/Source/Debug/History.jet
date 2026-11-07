@@ -56,12 +56,12 @@ DebugHistory: struct {
 
     // Rust push: a full history rejects the event and sets the sticky capped
     // flag; nothing older is overwritten and no later push clears the flag.
-    push: fn(&self, event: ^DebugEvent) -> Bool Never! {
+    push: fn(&self, event: &&DebugEvent) -> Bool Never! {
         if self.events.len() >= DEBUG_HISTORY_MAX_EVENTS {
             self.capped = true
             return false
         }
-        &self.events.push(^event)
+        self.events.push(event)
         true
     }
 
@@ -70,7 +70,7 @@ DebugHistory: struct {
     // so none are synthesized). All acts are kept, even past the cap; capped
     // reports acts >= cap. The checkpoint carries the last act's sequence (0
     // when empty) and the cursor starts unset.
-    from_recorded_run: fn(run: RecordedRun, source_identity: ^String, shape: ^String) -> DebugHistory Never! {
+    from_recorded_run: fn(run: RecordedRun, source_identity: &&String, shape: &&String) -> DebugHistory Never! {
         grouped := debug_writes_by_sequence(run)
         // Acts sharing a sequence each receive that sequence's whole group, as
         // the reference clones per act; the last such act takes it by move.
@@ -81,26 +81,26 @@ DebugHistory: struct {
             writes := [DebugWrite]{}
             if {
                 (last_act.get(act.sequence) ?? -1) == index -> {
-                    if &grouped.remove(act.sequence) == .Val(group) -> writes = ^group
+                    if grouped.remove(act.sequence) == .Val(group) -> writes = group.move()
                 }
                 else -> {
                     if grouped.get(act.sequence) == .Val(group) -> writes = group.copy()
                 }
             }
-            &events.push(DebugEvent{
+            events.push(DebugEvent{
                 sequence: act.sequence,
                 function: act.function.copy(),
                 line: act.line,
                 depth: 0,
                 stack: [FrameSnapshot]{FrameSnapshot{function: act.function.copy(), line: act.line}},
                 locals: act.locals.copy(),
-                writes: ^writes,
+                writes: writes.move(),
             })
         }
         last_sequence: if run.acts.len() > 0 -> run.acts[run.acts.len() - 1].sequence else -> 0
         DebugHistory{
-            events: ^events,
-            checkpoint: Val(DebugCheckpoint{source_identity: ^source_identity, shape: ^shape, sequence: last_sequence}),
+            events: events.move(),
+            checkpoint: Val(DebugCheckpoint{source_identity: source_identity.move(), shape: shape.move(), sequence: last_sequence}),
             cursor: None,
             capped: run.acts.len() >= DEBUG_HISTORY_MAX_EVENTS,
             decision_ledger: run.decision_ledger.copy(),
@@ -113,9 +113,9 @@ DebugHistory: struct {
     to_recorded_run: fn(self) -> RecordedRun Never! {
         acts := [RecordedAct]{}
         loop event in self.events {
-            &acts.push(RecordedAct{sequence: event.sequence, function: event.function.copy(), line: event.line, locals: event.locals.copy()})
+            acts.push(RecordedAct{sequence: event.sequence, function: event.function.copy(), line: event.line, locals: event.locals.copy()})
         }
-        RecordedRun{acts: ^acts, decision_ledger: self.decision_ledger.copy()}
+        RecordedRun{acts: acts.move(), decision_ledger: self.decision_ledger.copy()}
     }
 }
 
@@ -164,9 +164,9 @@ debug_snapshot_map: fn(values: [ValueSnapshot]) -> [String:Int] Never! {
 // caller's accumulator (Rust extends its result into the same vector).
 debug_diff_snapshots: fn(writes: &[DebugIndexedWrite], sequence: Int, line: Int, before: [ValueSnapshot], before_slots: [String:Int], after: [ValueSnapshot], after_slots: [String:Int]) Never! {
     places := [String]{}
-    loop place in before_slots.keys() -> &places.push(place)
-    loop place in after_slots.keys() -> &places.push(place)
-    &places.sort()
+    loop place in before_slots.keys() -> places.push(place)
+    loop place in after_slots.keys() -> places.push(place)
+    places.sort()
     loop (index, place) in places {
         if index > 0 && places[index - 1] == place -> next
         old_slot: before_slots.get(place)
@@ -187,7 +187,7 @@ debug_diff_snapshots: fn(writes: &[DebugIndexedWrite], sequence: Int, line: Int,
             .Val(new) -> after[new].value.copy()
             else -> "<unbound>"
         }
-        &writes.push(DebugIndexedWrite{sequence: sequence, line: line, place: place.copy(), old_value: old_value, new_value: new_value})
+        writes.push(DebugIndexedWrite{sequence: sequence, line: line, place: place.copy(), old_value: old_value, new_value: new_value})
     }
 }
 
@@ -204,10 +204,10 @@ debug_derive_recorded_writes: fn(run: RecordedRun) -> [DebugIndexedWrite] Never!
     loop (index, act) in run.acts {
         after := debug_snapshot_map(act.locals)
         if {
-            index > 0 && run.acts[index - 1].function == act.function -> debug_diff_snapshots(&writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
-            else -> debug_diff_snapshots(&writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
+            index > 0 && run.acts[index - 1].function == act.function -> debug_diff_snapshots(writes, act.sequence, act.line, run.acts[index - 1].locals, previous, act.locals, after)
+            else -> debug_diff_snapshots(writes, act.sequence, act.line, unbound_values, unbound_slots, act.locals, after)
         }
-        previous = ^after
+        previous = after.move()
     }
     writes
 }
@@ -221,24 +221,24 @@ debug_writes_by_sequence: fn(run: RecordedRun) -> [Int:[DebugWrite]] Never! {
     sequences := [Int]{}
     groups := [[DebugWrite]]{}
     derived := debug_derive_recorded_writes(run)
-    &derived.reverse()
+    derived.reverse()
     loop derived.len() > 0 {
-        write: &derived.pop() ?? break
+        write: derived.pop() ?? break
         converted: DebugWrite{line: write.line, place: write.place, old_value: write.old_value, new_value: write.new_value}
         if slots.get(write.sequence) == {
-            .Val(slot) -> &groups[slot].push(^converted)
+            .Val(slot) -> groups[slot].push(converted)
             else -> {
                 slots[write.sequence] = groups.len()
-                &sequences.push(write.sequence)
-                &groups.push([DebugWrite]{^converted})
+                sequences.push(write.sequence)
+                groups.push([DebugWrite]{converted.move()})
             }
         }
     }
     grouped := [Int:[DebugWrite]]{}
     loop groups.len() > 0 {
-        group := &groups.pop() ?? break
-        sequence: &sequences.pop() ?? break
-        grouped[sequence] = ^group
+        group := groups.pop() ?? break
+        sequence: sequences.pop() ?? break
+        grouped[sequence] = group.move()
     }
     grouped
 }

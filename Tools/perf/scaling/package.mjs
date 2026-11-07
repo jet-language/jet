@@ -7,7 +7,7 @@ export const MODULUS = 1000003;
 const M = MODULUS;
 
 export function manifest(name) {
-  return `name: "${name.replace(/\W/g, '_')}"\nversion: "0.1.0"\nedition: "2028"\noutputs: { app: .Executable{ entry: run } }\n`;
+  return `name: "${name.replace(/\W/g, '_')}"\nversion: "0.1.0"\nedition: "2026"\noutputs: { app: .Executable{ entry: run } }\n`;
 }
 
 // mulberry32: the stream depends only on the seed.

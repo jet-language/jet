@@ -71,26 +71,26 @@ PackageProfilePlan: struct {
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
-    finalize: fn(^self) -> PackageProfilePlan Never! {
+    finalize: fn(&&self) -> PackageProfilePlan Never! {
         updated := self
         lines := [String]{"jet-package-profile-plan-v1\n"}
-        &lines.push(envmodel_fingerprint_line("name", updated.name))
-        loop value in updated.selected_profiles -> &lines.push(envmodel_fingerprint_line("selected", value))
-        loop value in updated.applied -> &lines.push(envmodel_fingerprint_line("applied", value))
-        loop value in updated.sources -> &lines.push(envmodel_fingerprint_line("source", value))
+        lines.push(envmodel_fingerprint_line("name", updated.name))
+        loop value in updated.selected_profiles -> lines.push(envmodel_fingerprint_line("selected", value))
+        loop value in updated.applied -> lines.push(envmodel_fingerprint_line("applied", value))
+        loop value in updated.sources -> lines.push(envmodel_fingerprint_line("source", value))
         loop package in updated.packages {
-            &lines.push(envmodel_fingerprint_line("package.raw", package.raw))
-            &lines.push(envmodel_fingerprint_line("package.target", package.target))
-            &lines.push(envmodel_fingerprint_line("package.source", package.source))
-            &lines.push(envmodel_fingerprint_line("package.upstream", package.upstream ?? "<none>"))
-            &lines.push(envmodel_fingerprint_line("package.provider", package.provider))
-            &lines.push(envmodel_fingerprint_line("package.channel", package.channel ?? "<none>"))
-            loop owner in package.declared_by -> &lines.push(envmodel_fingerprint_line("package.declared_by", owner))
-            &lines.push(envmodel_fingerprint_line("package.provider_facts", package.provider_facts.digest()))
+            lines.push(envmodel_fingerprint_line("package.raw", package.raw))
+            lines.push(envmodel_fingerprint_line("package.target", package.target))
+            lines.push(envmodel_fingerprint_line("package.source", package.source))
+            lines.push(envmodel_fingerprint_line("package.upstream", package.upstream ?? "<none>"))
+            lines.push(envmodel_fingerprint_line("package.provider", package.provider))
+            lines.push(envmodel_fingerprint_line("package.channel", package.channel ?? "<none>"))
+            loop owner in package.declared_by -> lines.push(envmodel_fingerprint_line("package.declared_by", owner))
+            lines.push(envmodel_fingerprint_line("package.provider_facts", package.provider_facts.digest()))
         }
         loop path in envmodel_sorted_keys(updated.collisions) {
-            &lines.push(envmodel_fingerprint_line("collision.path", path))
-            &lines.push(envmodel_fingerprint_line("collision.provider", updated.collisions[path]))
+            lines.push(envmodel_fingerprint_line("collision.path", path))
+            lines.push(envmodel_fingerprint_line("collision.provider", updated.collisions[path]))
         }
         updated.fingerprint = "sha256-{pkg_sha256_hex(lines.join("").bytes())}"
         facts := [String: ProviderFacts]{}
@@ -142,7 +142,7 @@ PackageProfileSet: struct {
             }
             merged := existing
             loop source in profile.sources {
-                if !merged.sources.contains(source) -> &merged.sources.push(source)
+                if !merged.sources.contains(source) -> merged.sources.push(source.copy())
             }
             self.profiles[profile.name] = merged
             return
@@ -164,7 +164,7 @@ PackageProfileSet: struct {
             if selected_seen.get(name) == None {
                 selected_seen[name] = true
                 if selected.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                &selected.push(name)
+                selected.push(name.copy())
             }
         }
         resolved := ResolvedPackageProfile{name: selected.join("+"), selected_profiles: selected}
@@ -177,8 +177,8 @@ PackageProfileSet: struct {
         package_indices := [String: Int]{}
         loop name in selected {
             if (state.get(name) ?? 0) == ENVMODEL_PROFILE_FINISHED -> next
-            &frame_names.push(name)
-            &frame_next.push(0)
+            frame_names.push(name)
+            frame_next.push(0)
             loop frame_names.len() > 0 {
                 top: frame_names.len() - 1
                 current: frame_names[top].copy()
@@ -186,22 +186,22 @@ PackageProfileSet: struct {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
                     if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                     state[current] = ENVMODEL_PROFILE_ENTERED
-                    &stack.push(current)
+                    stack.push(current.copy())
                 }
                 profile: self.profiles[current]
                 parent_index: frame_next[top].copy()
                 frame_next[top] = parent_index + 1
                 if parent_index >= profile.extends.len() {
-                    _ := &frame_names.pop()
-                    _ := &frame_next.pop()
-                    _ := &stack.pop()
+                    _ := frame_names.pop()
+                    _ := frame_next.pop()
+                    _ := stack.pop()
                     state[current] = ENVMODEL_PROFILE_FINISHED
-                    &resolved.applied.push(current)
+                    resolved.applied.push(current.copy())
                     loop source in profile.sources {
                         if source_seen.get(source) == None {
                             source_seen[source] = true
                             if resolved.sources.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
-                            &resolved.sources.push(source)
+                            resolved.sources.push(source.copy())
                         }
                     }
                     loop raw in profile.packages {
@@ -211,7 +211,7 @@ PackageProfileSet: struct {
                                 if resolved.packages.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
                                 index: resolved.packages.len()
                                 package_indices[raw] = index
-                                &resolved.packages.push(PackageProfilePackage{raw: raw})
+                                resolved.packages.push(PackageProfilePackage{raw: raw})
                                 index
                             }
                         }
@@ -219,7 +219,7 @@ PackageProfileSet: struct {
                         owner_key: "{raw.bytes().len()}:{raw}{current}"
                         if declared_by_seen.get(owner_key) == None {
                             declared_by_seen[owner_key] = true
-                            &resolved.packages[package_index].declared_by.push(current)
+                            resolved.packages[package_index].declared_by.push(current.copy())
                         }
                     }
                     loop path in envmodel_sorted_keys(profile.collisions) {
@@ -244,15 +244,15 @@ PackageProfileSet: struct {
                         started := false
                         loop item in stack {
                             if item == parent -> started = true
-                            if started -> &cycle.push(item)
+                            if started -> cycle.push(item)
                         }
-                        &cycle.push(parent)
+                        cycle.push(parent.copy())
                         return Err(PackageProfileError.Cycle(cycle))
                     }
                     ENVMODEL_PROFILE_FINISHED -> {}
                     else -> {
-                        &frame_names.push(parent)
-                        &frame_next.push(0)
+                        frame_names.push(parent.copy())
+                        frame_next.push(0)
                     }
                 }
             }

@@ -1,0 +1,21 @@
+// The prelude declares an enum `Severity`; this file's `Severity` shadows it,
+// so `s.encode()` and `s.label()` name this type's methods alone.
+Severity: distinct Int(0..10)
+
+impl Severity.Encode {
+    encode: fn(self) -> Dyn {
+        self.raw().encode()
+    }
+}
+
+impl Severity {
+    label: fn(self) -> String {
+        "level {self.raw()}"
+    }
+}
+
+run: fn() {
+    s: Severity.from_int(7)
+    print(s.encode())
+    print(s.label())
+}

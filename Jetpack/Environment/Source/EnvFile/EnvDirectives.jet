@@ -76,12 +76,12 @@ EnvFile: struct {
                 .Ok(provider_ref) -> provider_ref.upstream()
                 .Err(_) -> source.upstream
             }
-            &decls.push(NamedSourceDecl{name: source.name, upstream: upstream, via: via})
+            decls.push(NamedSourceDecl{name: source.name, upstream: upstream, via: via})
         }
         table := SourceTable.from_decls(decls)
         loop source in self.named {
             if ProviderRef.classify(source.upstream) == .Ok(provider_ref) {
-                &table.set_channel_metadata(source.name, provider_ref.policy, provider_ref.raw)
+                table.set_channel_metadata(source.name, provider_ref.policy, provider_ref.raw)
             }
         }
         table
@@ -98,7 +98,7 @@ EnvFile: struct {
     // The canonical refs this env declares.
     refs: fn(self) -> [String] Never! {
         out := [String]{}
-        loop package in self.packages -> &out.push(self.entry_ref(package))
+        loop package in self.packages -> out.push(self.entry_ref(package))
         out
     }
 
@@ -111,15 +111,15 @@ EnvFile: struct {
                 .Val(via) -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)}, {env_file_quote_jet_string(via)})"
                 .None -> "        pkg.source({env_file_quote_jet_string(source.name)}, {env_file_quote_jet_string(source.upstream)})"
             }
-            &lines.push(line)
+            lines.push(line)
         }
         if self.default_source == .Val(default) {
-            &lines.push("        pkg.source({env_file_quote_jet_string(env_file_published_source(default))})")
+            lines.push("        pkg.source({env_file_quote_jet_string(env_file_published_source(default))})")
         }
         quoted := [String]{}
-        loop package in self.packages -> &quoted.push(env_file_quote_jet_string(package))
-        &lines.push("        pkg.packages([{quoted.join(", ")}])")
-        &lines.push("        pkg.prompt({prompt})")
+        loop package in self.packages -> quoted.push(env_file_quote_jet_string(package))
+        lines.push("        pkg.packages([{quoted.join(", ")}])")
+        lines.push("        pkg.prompt({prompt})")
         "// {ENV_FILE} — a Jetpack project environment\nuse pkg: jetpack\n\nshell: fn() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
     }
 
@@ -144,11 +144,11 @@ EnvFile: struct {
             if args.len() == {
                 0 -> {}
                 1 -> file.default_source = Val(env_file_published_source(args[0]))
-                2 -> &file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: None})
-                else -> &file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: Val(args[2])})
+                2 -> file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: None})
+                else -> file.named.push(EnvNamedSource{name: args[0], upstream: args[1], via: Val(args[2])})
             }
         }
-        loop package in env_file_list_arg(text, PACK_DIRECTIVE_PACKAGES) -> &file.packages.push(package.trim())
+        loop package in env_file_list_arg(text, PACK_DIRECTIVE_PACKAGES) -> file.packages.push(package.trim())
         file.prompt = env_file_string_arg(text, PACK_DIRECTIVE_PROMPT)
         file
     }
@@ -163,8 +163,8 @@ EnvFile: struct {
         }
         entry: file.entry_for(spec)
         if !file.packages.contains(entry) {
-            &file.packages.push(entry)
-            &file.packages.sort()
+            file.packages.push(entry)
+            file.packages.sort()
         }
         files.write(EnvFile.path_in(dir), file.render())
         Ok(file)
@@ -178,7 +178,7 @@ EnvFile: struct {
         before: file.packages.len()
         keep := [String]{}
         loop entry in file.packages {
-            if file.entry_ref(entry) != target -> &keep.push(entry)
+            if file.entry_ref(entry) != target -> keep.push(entry)
         }
         file.packages = keep
         removed: file.packages.len() != before
@@ -212,15 +212,15 @@ env_file_quote_jet_string: fn(value: String) -> String Never! {
     loop scalar in value.chars() {
         text: "{scalar}"
         if text == {
-            "\\" -> &out.push("\\\\")
-            "\"" -> &out.push("\\\"")
-            "\n" -> &out.push("\\n")
-            "\t" -> &out.push("\\t")
-            "{{" -> &out.push("{{{{")
-            "}}" -> &out.push("}}}}")
-            else -> &out.push(text)
+            "\\" -> out.push("\\\\")
+            "\"" -> out.push("\\\"")
+            "\n" -> out.push("\\n")
+            "\t" -> out.push("\\t")
+            "{{" -> out.push("{{{{")
+            "}}" -> out.push("}}}}")
+            else -> out.push(text)
         }
     }
-    &out.push("\"")
+    out.push("\"")
     out.join("")
 }

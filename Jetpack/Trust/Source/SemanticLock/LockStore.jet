@@ -39,13 +39,13 @@ trust_semantic_lock_atomic_commit: fn(project: String, lock: SemanticLockFile) T
     if {
         stripped.trim() == "" -> {
             fresh := pkg_lock_parse("version = 1\n") ?? return Err(trust_lock_error(err))
-            pkg_lock_ensure_build_stamp(project, &fresh)
+            pkg_lock_ensure_build_stamp(project, fresh)
             machine = pkg_lock_write(fresh)
         }
         else -> {
             parsed := pkg_lock_parse(stripped) ?? return Err(trust_lock_error(err))
             if parsed.build_stamp == None {
-                pkg_lock_ensure_build_stamp(project, &parsed)
+                pkg_lock_ensure_build_stamp(project, parsed)
                 machine = pkg_lock_write(parsed)
             }
         }

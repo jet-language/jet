@@ -43,14 +43,14 @@ CTypeCatalog: struct {
         declarations: pkg_opaque_split_declarations(source)
         catalog := CTypeCatalog{aliases: [String: String]{}, records: [String: CStructDef]{}, names: [String: String]{}}
         used_names := [String]{}
-        loop handle in handles.handles -> &used_names.push(handle.jet_name)
+        loop handle in handles.handles -> used_names.push(handle.jet_name)
         raw_records := [(jet_name: String, record: CRawRecord)]{}
 
         loop declaration in declarations {
             if pkg_cbind_parse_complete_record(declaration) == {
                 .Val(record) -> {
                     seed: record.alias ?? (record.struct_tag ?? "CRecord")
-                    jet_name: pkg_bind_unique_name(&used_names, foundation_generated_type_name(pkg_cbind_trim_end_matches(seed, "_t"), "CRecord"))
+                    jet_name: pkg_bind_unique_name(used_names, foundation_generated_type_name(pkg_cbind_trim_end_matches(seed, "_t"), "CRecord"))
                     if record.struct_tag == {
                         .Val(struct_tag) -> catalog.names[struct_tag] = jet_name
                         .None -> {}
@@ -62,7 +62,7 @@ CTypeCatalog: struct {
                         }
                         .None -> {}
                     }
-                    &raw_records.push((jet_name: jet_name, record: record))
+                    raw_records.push((jet_name: jet_name, record: record))
                     next
                 }
                 .None -> {}
@@ -105,7 +105,7 @@ CTypeCatalog: struct {
         seen := [String]{}
         loop {
             if seen.contains(current) -> return None
-            &seen.push(current)
+            seen.push(current.copy())
             name: self.names.get(current)
             if name != None -> return name
             following: self.aliases.get(current) ?? return None
@@ -119,7 +119,7 @@ CTypeCatalog: struct {
         seen := [String]{}
         loop {
             if seen.contains(current) -> return None
-            &seen.push(current)
+            seen.push(current.copy())
             scalar: pkg_cbind_layout_scalar(current)
             if scalar != None -> return scalar
             following: self.aliases.get(current) ?? return None
@@ -136,13 +136,13 @@ CTypeCatalog: struct {
         if pieces.len() == 0 -> return None
         ret: pieces[0]
         raw_params := [String]{}
-        loop index in 1..<pieces.len() -> &raw_params.push(pieces[index].trim())
+        loop index in 1..<pieces.len() -> raw_params.push(pieces[index].trim())
         managed: raw_params.len() > 0 && pkg_cbind_is_void_pointer_type(raw_params[0])
         params := [String]{}
         loop index in 0..<raw_params.len() {
             if managed && index == 0 -> next
             scalar: pkg_cbind_callback_scalar_type(raw_params[index]) ?? return None
-            &params.push(if managed -> "FfiCallbackEvent<{scalar}>" else -> scalar)
+            params.push(if managed -> "FfiCallbackEvent<{scalar}>" else -> scalar)
         }
         joined: params.join(", ")
         if ret == "void" -> return Val("fn({joined})")
@@ -194,14 +194,14 @@ CTypeCatalog: struct {
         seen := [String]{}
         out := [String]{}
         keys := self.records.keys().to_list()
-        &keys.sort()
+        keys.sort()
         loop key in keys {
             record: self.records[key]
             if seen.contains(record.jet_name) -> next
-            &seen.push(record.jet_name)
-            &out.push("#Layout(c)\n{record.jet_name}: struct {{\n")
-            loop field in record.fields -> &out.push("    {field.name}: {field.ty},\n")
-            &out.push("}}\n\n")
+            seen.push(record.jet_name)
+            out.push("#Layout(c)\n{record.jet_name}: struct {{\n")
+            loop field in record.fields -> out.push("    {field.name}: {field.ty},\n")
+            out.push("}}\n\n")
         }
         out.join("")
     }
@@ -262,7 +262,7 @@ pkg_cbind_parse_callback_alias: fn(decl: String) -> (alias: String, target: Stri
     if ret == "" -> return None
     params: pkg_cbind_split_params(pkg_bytes_text(bytes, params_open + 1, params_close)) ?? return None
     types := [String]{}
-    loop param in params -> &types.push(pkg_cbind_split_param_type_and_name(param, 0).ty)
+    loop param in params -> types.push(pkg_cbind_split_param_type_and_name(param, 0).ty)
     Val((alias: alias, target: "{CBIND_CALLBACK_MARKER}{ret}|{types.join("|")}"))
 }
 
@@ -304,7 +304,7 @@ pkg_cbind_parse_record_fields: fn(body: String, catalog: CTypeCatalog) -> [(name
         split: pkg_cbind_split_param_type_and_name(declaration, index)
         if !pkg_cbind_is_ident(split.name) -> return None
         ty: catalog.map_layout_type(split.ty) ?? return None
-        &fields.push((name: foundation_generated_snake_name(split.name, "field"), ty: ty))
+        fields.push((name: foundation_generated_snake_name(split.name, "field"), ty: ty))
     }
     Val(fields)
 }
@@ -425,7 +425,7 @@ pkg_cbind_split_params: fn(src: String) -> [String]? Never! {
                 if depth == 0 {
                     current: pkg_bytes_text(bytes, start, index)
                     if current.trim() == "" -> return None
-                    &out.push(current)
+                    out.push(current)
                     start = index + 1
                 }
             }
@@ -434,7 +434,7 @@ pkg_cbind_split_params: fn(src: String) -> [String]? Never! {
     }
     last: pkg_bytes_text(bytes, start, bytes.len())
     if depth != 0 || last.trim() == "" -> return None
-    &out.push(last)
+    out.push(last)
     Val(out)
 }
 
@@ -463,7 +463,7 @@ pkg_cbind_normalize_type: fn(c_type: String) -> String Never! {
     loop token in pkg_cbind_words(c_type) {
         if token == {
             "const" | "volatile" | "register" | "restrict" | "extern" -> {}
-            else -> &kept.push(token)
+            else -> kept.push(token)
         }
     }
     kept.join(" ")
@@ -589,7 +589,7 @@ pkg_cbind_words: fn(text: String) -> [String] Never! {
         width: pkg_bytes_space_width(bytes, index)
         if width > 0 {
             if start >= 0 {
-                &words.push(pkg_bytes_text(bytes, start, index))
+                words.push(pkg_bytes_text(bytes, start, index))
                 start = -1
             }
             index += width
@@ -598,7 +598,7 @@ pkg_cbind_words: fn(text: String) -> [String] Never! {
         if start < 0 -> start = index
         index += 1
     }
-    if start >= 0 -> &words.push(pkg_bytes_text(bytes, start, bytes.len()))
+    if start >= 0 -> words.push(pkg_bytes_text(bytes, start, bytes.len()))
     words
 }
 
@@ -655,14 +655,14 @@ pkg_cbind_rfind_byte: fn(bytes: [U8], code: Int) -> Int Never! {
 pkg_bind_unique_name: fn(used: &[String], preferred: String) -> String Never! {
     base: if preferred == "" -> "value" else -> preferred
     if !used.contains(base) {
-        &used.push(base)
+        used.push(base.copy())
         return base
     }
     suffix := 2
     loop {
         candidate: "{base}_{suffix}"
         if !used.contains(candidate) {
-            &used.push(candidate)
+            used.push(candidate.copy())
             return candidate
         }
         suffix += 1

@@ -95,8 +95,8 @@ store_seal_census_report: fn(verification: &StoreVerification) -> String? Never!
     total := 0
     loop count in counts.values() -> total += count
     rows := [(path: String, count: Int)]{}
-    loop path in store_sorted_keys_int(counts) -> &rows.push((path: path, count: counts[path]))
-    &rows.sort_by((left: (path: String, count: Int), right: (path: String, count: Int)) -> right.count <=> left.count)
+    loop path in store_sorted_keys_int(counts) -> rows.push((path: path, count: counts[path]))
+    rows.sort_by((left: (path: String, count: Int), right: (path: String, count: Int)) -> right.count <=> left.count)
     out := "seal census: {total} checks across {counts.len()} objects\n"
     shown := 0
     loop row in rows {
@@ -109,7 +109,7 @@ store_seal_census_report: fn(verification: &StoreVerification) -> String? Never!
 
 store_sorted_keys_int: fn(map: [String: Int]) -> [String] Never! {
     keys := map.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }
 
@@ -145,14 +145,14 @@ store_seal_memo_forget: fn(verification: &StoreVerification, path: String) Never
     state: verification.state
     permit := state.guard_edit()
     if !permit.value.seal_memo_armed -> return
-    &permit.value.seal_memo.remove(path).drop("an absent seal memo is already forgotten")
+    permit.value.seal_memo.remove(path).drop("an absent seal memo is already forgotten")
 }
 
 // The sealed digest when `path` is the direct canonical object named by its
 // digest and every recorded filesystem tuple still matches.
 store_check_seal: fn(verification: &StoreVerification, path: String, hangar: String) -> String? StoreError! {
-    store_seal_census_note(&verification, path)
-    if store_seal_memo_get(&verification, path) == {
+    store_seal_census_note(verification, path)
+    if store_seal_memo_get(verification, path) == {
         .Val(digest) -> return Ok(Val(digest))
         .None -> {}
     }
@@ -164,10 +164,10 @@ store_check_seal: fn(verification: &StoreVerification, path: String, hangar: Str
     if record.root_kind != root_kind -> return Ok(None)
     table: pkg_seal_tuple_table(path) ?? return Ok(None)
     if table.node_count == record.tuple_count && table.digest == record.tuple_digest {
-        store_seal_memo_put(&verification, path, record.digest)
+        store_seal_memo_put(verification, path, record.digest)
         return Ok(Val(record.digest))
     }
-    store_seal_memo_forget(&verification, path)
+    store_seal_memo_forget(verification, path)
     Ok(None)
 }
 
@@ -192,7 +192,7 @@ store_write_seal: fn(verification: &StoreVerification, path: String, hangar: Str
     store_sync_store_directory(seals)
     // The caller just full-hashed this object under the Hangar lock; the
     // fresh seal is the strongest verdict a command can hold.
-    store_seal_memo_put(&verification, path, digest)
+    store_seal_memo_put(verification, path, digest)
 }
 
 store_seal_publish: fn(temporary: String, target: String, bytes: [U8]) StoreError! {
@@ -204,11 +204,11 @@ store_seal_publish: fn(temporary: String, target: String, bytes: [U8]) StoreErro
 
 // Remove a seal when its canonical object is rolled back or quarantined.
 store_remove_seal: fn(verification: &StoreVerification, path: String, hangar: String) StoreError! {
-    store_seal_memo_forget(&verification, path)
+    store_seal_memo_forget(verification, path)
     digest: store_object_digest_for_path(path, hangar) ?? return
     // A removed seal means the object is quarantined or replaced; drop the
     // owner's closure-member proof with it.
-    store_invalidate_proven_member(&verification, hangar, digest)
+    store_invalidate_proven_member(verification, hangar, digest)
     seal: files.join(files.join(hangar, STORE_SEALS_DIR), digest)
     if files.stat(seal) == {
         .Ok(metadata) -> {
@@ -337,5 +337,5 @@ store_disarm_command_memo: fn(verification: &StoreVerification) Never! {
     state: verification.state
     permit := state.guard_edit()
     permit.value.seal_memo_armed = false
-    &permit.value.seal_memo.clear()
+    permit.value.seal_memo.clear()
 }

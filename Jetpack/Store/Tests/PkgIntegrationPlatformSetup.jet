@@ -7,9 +7,9 @@ store_platform_fixture_meta: fn(verification: &StoreVerification, roots: HangarR
     files.create_dir_all(source) ?? panic("metadata source")
     files.write(files.join(source, "payload"), "fixture payload: {id}") ?? panic("metadata payload")
     request: IngestRequest{name: id, version: "1.0", reference: "fixture:{id}", cache_identity: CacheIdentity{source_fingerprint: "sha256-fixture-source-{id}", recipe_fingerprint: "sha256-fixture-recipe-{id}", policy_fingerprint: "policy=fixture", platform: pkg_host_platform()}, references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "fixture", platform_artifact_kind: ""}
-    entry: (store_ingest_tree(&verification, roots, request) ?? panic("real ingest")).entry
+    entry: (store_ingest_tree(verification, roots, request) ?? panic("real ingest")).entry
     files.remove_all(source) ?? panic("remove source")
-    if timestamp == .Val(value) -> store_test_backdate_last_used_at(&verification, roots, entry.id, value) ?? panic("backdate")
+    if timestamp == .Val(value) -> store_test_backdate_last_used_at(verification, roots, entry.id, value) ?? panic("backdate")
     files.join(roots.hangar_dir(), entry.id)
 }
 store_platform_setup: fn() {
@@ -18,7 +18,7 @@ store_platform_setup: fn() {
     roots: HangarRoots{root: files.join(work, "package-root"), dev_mode: false}
     verification := StoreVerification.new()
     if mode == "stale" {
-        object: store_platform_fixture_meta(&verification, roots, "platform-stale", Val(1))
+        object: store_platform_fixture_meta(verification, roots, "platform-stale", Val(1))
         files.write(files.join(work, "fixture-object"), object) ?? panic("publish stale object path")
         return
     }
@@ -46,7 +46,7 @@ store_platform_setup: fn() {
     files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{platform_json.to_string(Dyn.Text(output))}}}}}]") ?? panic("provider fixture")
     files.write(files.join(fixtures, "jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{platform_json.to_string(Dyn.Text(artifact_name))}}}") ?? panic("release fixture")
     if mode == "native" -> return
-    object: store_platform_fixture_meta(&verification, roots, "platform-hostile-good", None)
+    object: store_platform_fixture_meta(verification, roots, "platform-hostile-good", None)
     files.write(files.join(work, "fixture-object"), object) ?? panic("publish setup path")
 }
 #Test("S3 platform authentic fixture setup") {

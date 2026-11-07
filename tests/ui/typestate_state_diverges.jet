@@ -10,20 +10,20 @@ Order: struct {
 impl Order {
     #Transition(_, Draft) start: fn(id: Int) -> Order { Order{id: id} }
 
-    #Transition(Draft, Confirmed) confirm: fn(self: ^Order) -> Order { self }
+    #Transition(Draft, Confirmed) confirm: fn(self: &&Order) -> Order { self }
 
-    #Transition(Draft, Cancelled) cancel: fn(self: ^Order) -> Order { self }
+    #Transition(Draft, Cancelled) cancel: fn(self: &&Order) -> Order { self }
 
-    #Transition(Confirmed, Draft) reopen: fn(self: ^Order) -> Order { self }
+    #Transition(Confirmed, Draft) reopen: fn(self: &&Order) -> Order { self }
 
-    #Transition(Cancelled, Draft) restore: fn(self: ^Order) -> Order { self }
+    #Transition(Cancelled, Draft) restore: fn(self: &&Order) -> Order { self }
 }
 
 job: fn(cents: Int) {
     order := Order.start(1)
     if {
-        cents > 0 -> order = ^order.confirm()
-        else -> order = ^order.cancel()
+        cents > 0 -> order = order.confirm()
+        else -> order = order.cancel()
     }
     print(order.id)
 }

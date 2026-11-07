@@ -42,13 +42,13 @@ lsp_line_table_bytes: fn(bytes: [U8]) -> LineTable Never! {
     loop index < bytes.len() {
         byte: Int.from_u8(bytes[index])
         if byte == 13 || byte == 10 {
-            &lines.push(Span{start: start, end: index})
+            lines.push(Span{start: start, end: index})
             if byte == 13 && index + 1 < bytes.len() && bytes[index + 1] == (U8{10}) -> index += 1
             start = index + 1
         }
         index += 1
     }
-    &lines.push(Span{start: start, end: bytes.len()})
+    lines.push(Span{start: start, end: bytes.len()})
     LineTable{lines: lines}
 }
 
@@ -124,9 +124,9 @@ lsp_apply_edit: fn(src: String, range: LSPRange, expected_utf16_len: Int?, new_t
         if lsp_utf16_length(bytes, start, end) != expected -> return None
     }
     out := [U8]{}
-    loop index in 0..<start -> &out.push(bytes[index])
-    loop byte in new_text.bytes() -> &out.push(byte)
-    loop index in end..<bytes.len() -> &out.push(bytes[index])
+    loop index in 0..<start -> out.push(bytes[index])
+    loop byte in new_text.bytes() -> out.push(byte)
+    loop index in end..<bytes.len() -> out.push(bytes[index])
     Val(String.from_bytes(out) ?? panic("validated LSP edit must preserve UTF-8"))
 }
 

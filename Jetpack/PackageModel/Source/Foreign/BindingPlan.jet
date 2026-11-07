@@ -225,11 +225,11 @@ BindingInputs: struct {
 
     digest: fn(self) -> String Never! {
         identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
-        &identity.field("target", self.target.bytes())
-        &identity.field("generator", self.generator.bytes())
-        &identity.field("artifact", self.artifact.bytes())
-        &identity.field("dependencies", self.dependencies.join("\n").bytes())
-        &identity.field("compiler-flags", self.compiler_flags.join("\n").bytes())
+        identity.field("target", self.target.bytes())
+        identity.field("generator", self.generator.bytes())
+        identity.field("artifact", self.artifact.bytes())
+        identity.field("dependencies", self.dependencies.join("\n").bytes())
+        identity.field("compiler-flags", self.compiler_flags.join("\n").bytes())
         identity.finish()
     }
 }
@@ -274,15 +274,15 @@ BindingPlan: struct {
 
         required := [String]{"abi", "layout", "width", "alignment", "target"}
         if operation.pointer_count != None {
-            &required.push("ownership")
-            &required.push("lifetime")
+            required.push("ownership")
+            required.push("lifetime")
         }
         if operation.requires_protocol_evidence() {
-            &required.push("errors")
-            &required.push("cleanup")
+            required.push("errors")
+            required.push("cleanup")
         }
-        if operation.nullable_return -> &required.push("nullability")
-        if operation.fallible_close -> &required.push("cleanup")
+        if operation.nullable_return -> required.push("nullability")
+        if operation.fallible_close -> required.push("cleanup")
         checked_obligations: pkg_plan_sorted_strings(required)
 
         loop obligation in checked_obligations {
@@ -381,7 +381,7 @@ BindingPlan: struct {
             "// ownership={self.semantics.ownership} failure={self.semantics.failure_mapping} copies={self.semantics.copies} placement={self.semantics.placement} effects={self.semantics.effects} cleanup={self.semantics.cleanup}\n"
         }
         if self.operation.callback_transport != "none" {
-            &lines.push("// jet-ffi-callback-transport={self.operation.callback_transport}\n// jet-ffi-callback-identity={self.operation.name}\n// jet-ffi-callback-plan={self.digest}\n")
+            lines.push("// jet-ffi-callback-transport={self.operation.callback_transport}\n// jet-ffi-callback-identity={self.operation.name}\n// jet-ffi-callback-plan={self.digest}\n")
         }
         name: self.operation.name
         if self.shape == {
@@ -389,13 +389,13 @@ BindingPlan: struct {
                 if self.operation.pointer_count == {
                     .Val(pointer_count) -> {
                         pointer: pointer_count.pointer_parameter
-                        &lines.push("#Import c.{self.library}: module {{\n    __jet_ffi_native_{name}: fn({pointer}: &[U8], {pointer_count.count_parameter}: U64) {self.operation.result_type} = \"{name}\"\n}}\n\n")
-                        &lines.push("{name}: fn({pointer}: &[U8]) -> {self.operation.result_type} {{\n    return __jet_ffi_native_{name}({pointer}, {pointer}.len())\n}}\n")
+                        lines.push("#Import c.{self.library}: module {{\n    __jet_ffi_native_{name}: fn({pointer}: &[U8], {pointer_count.count_parameter}: U64) {self.operation.result_type} = \"{name}\"\n}}\n\n")
+                        lines.push("{name}: fn({pointer}: &[U8]) -> {self.operation.result_type} {{\n    return __jet_ffi_native_{name}({pointer}, {pointer}.len())\n}}\n")
                     }
-                    .None -> &lines.push("// automatic facade preserves native signature: {self.operation.native_signature}\n")
+                    .None -> lines.push("// automatic facade preserves native signature: {self.operation.native_signature}\n")
                 }
             }
-            .Native -> &lines.push("// native facade preserves arity: {self.operation.native_signature}\n")
+            .Native -> lines.push("// native facade preserves arity: {self.operation.native_signature}\n")
         }
         lines.join("")
     }
@@ -484,41 +484,41 @@ pkg_plan_sorted_strings: fn(values: [String]) -> [String] Never! {
     kept := [String]{}
     loop value in values {
         if value.trim() == "" -> next
-        &kept.push(value)
+        kept.push(value.copy())
     }
-    &kept.sort()
+    kept.sort()
     out := [String]{}
     loop value in kept {
         if out.len() > 0 && out[out.len() - 1] == value -> next
-        &out.push(value)
+        out.push(value)
     }
     out
 }
 
 pkg_plan_digest: fn(operation: BindingOperation, library: String, shape: BindingShape, boundary_digest: String, input_digest: String, checked_obligations: [String], semantics: PlanSemantics) -> String Never! {
     identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
-    &identity.field("library", library.bytes())
-    &identity.field("operation", operation.name.bytes())
-    &identity.field("native-signature", operation.native_signature.bytes())
-    &identity.field("result", operation.result_type.bytes())
-    &identity.field("shape", shape.as_str().bytes())
-    &identity.field("boundary", boundary_digest.bytes())
-    &identity.field("inputs", input_digest.bytes())
-    &identity.field("obligations", checked_obligations.join("\n").bytes())
-    &identity.field("ownership", semantics.ownership.bytes())
-    &identity.field("failure", semantics.failure_mapping.bytes())
-    &identity.field("copies", semantics.copies.bytes())
-    &identity.field("placement", semantics.placement.bytes())
-    &identity.field("effects", semantics.effects.bytes())
-    &identity.field("cleanup", semantics.cleanup.bytes())
+    identity.field("library", library.bytes())
+    identity.field("operation", operation.name.bytes())
+    identity.field("native-signature", operation.native_signature.bytes())
+    identity.field("result", operation.result_type.bytes())
+    identity.field("shape", shape.as_str().bytes())
+    identity.field("boundary", boundary_digest.bytes())
+    identity.field("inputs", input_digest.bytes())
+    identity.field("obligations", checked_obligations.join("\n").bytes())
+    identity.field("ownership", semantics.ownership.bytes())
+    identity.field("failure", semantics.failure_mapping.bytes())
+    identity.field("copies", semantics.copies.bytes())
+    identity.field("placement", semantics.placement.bytes())
+    identity.field("effects", semantics.effects.bytes())
+    identity.field("cleanup", semantics.cleanup.bytes())
     if operation.pointer_count == {
         .Val(pointer_count) -> {
-            &identity.field("pointer", pointer_count.pointer_parameter.bytes())
-            &identity.field("count", pointer_count.count_parameter.bytes())
-            &identity.field("unit", pointer_count.unit.as_str().bytes())
-            &identity.field("meaning", pointer_count.meaning.as_str().bytes())
-            &identity.field("width", "{pointer_count.native_width_bits}".bytes())
-            &identity.field("retention", pointer_count.retention.as_str().bytes())
+            identity.field("pointer", pointer_count.pointer_parameter.bytes())
+            identity.field("count", pointer_count.count_parameter.bytes())
+            identity.field("unit", pointer_count.unit.as_str().bytes())
+            identity.field("meaning", pointer_count.meaning.as_str().bytes())
+            identity.field("width", "{pointer_count.native_width_bits}".bytes())
+            identity.field("retention", pointer_count.retention.as_str().bytes())
         }
         .None -> {}
     }

@@ -53,7 +53,7 @@ lexer_test_literal: fn(lexed: Lexed, token: Token) -> TokenLiteral Never! {
 lexer_test_strings: fn(lexed: Lexed) -> [[StringPart]] Never! {
     strings := [[StringPart]]{}
     loop token in lexed.tokens {
-        if token.kind == TOKEN_STRING -> &strings.push(lexer_test_literal(lexed, token).string_parts)
+        if token.kind == TOKEN_STRING -> strings.push(lexer_test_literal(lexed, token).string_parts)
     }
     strings
 }
@@ -328,14 +328,14 @@ byte_fixed: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block 
     assert(lexed.diagnostics.is_empty())
     kinds := [Int]{}
     loop token in lexed.tokens {
-        if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> &kinds.push(token.kind)
+        if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> kinds.push(token.kind)
     }
     assert_eq(kinds, [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON})
 }
 
 #Test("payload_golden_whitespace_exponents_and_shifted_spans") {
     raw := [U8]{9, 11, 12, 13, 10, 32, 32}
-    loop byte in `1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 "prefix {1.25e-2} suffix"`.bytes() -> &raw.push(byte)
+    loop byte in `1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 "prefix {1.25e-2} suffix"`.bytes() -> raw.push(byte)
     result: lex_payload(raw, false)
     assert(result.diagnostics.is_empty())
     assert_eq(result.tokens.len(), 6)

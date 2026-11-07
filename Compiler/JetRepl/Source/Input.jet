@@ -33,11 +33,11 @@ repl_reanchor_span: fn(span: Span, offset: Int) -> Span Never! {
 }
 
 // Every span a report renders (primary, labels, edit), shifted to the input.
-repl_reanchor: fn(diagnostic: ^Diagnostic, offset: Int) -> Diagnostic Never! {
+repl_reanchor: fn(diagnostic: &&Diagnostic, offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     if updated.span == .Val(span) -> updated.span = Val(repl_reanchor_span(span, offset))
     labels := [DiagnosticLabel]{}
-    loop label in updated.labels -> &labels.push(DiagnosticLabel{span: repl_reanchor_span(label.span, offset), message: label.message})
+    loop label in updated.labels -> labels.push(DiagnosticLabel{span: repl_reanchor_span(label.span, offset), message: label.message})
     updated.labels = labels
     if updated.edit == .Val(edit) -> updated.edit = Val(TextEdit{span: repl_reanchor_span(edit.span, offset), new_text: edit.new_text})
     updated
@@ -45,7 +45,7 @@ repl_reanchor: fn(diagnostic: ^Diagnostic, offset: Int) -> Diagnostic Never! {
 
 repl_reanchor_all: fn(diagnostics: [Diagnostic], offset: Int) -> [Diagnostic] Never! {
     shifted := [Diagnostic]{}
-    loop diagnostic in diagnostics -> &shifted.push(repl_reanchor(diagnostic.copy(), offset))
+    loop diagnostic in diagnostics -> shifted.push(repl_reanchor(diagnostic.copy(), offset))
     shifted
 }
 

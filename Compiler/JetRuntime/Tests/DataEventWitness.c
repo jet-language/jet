@@ -15,6 +15,7 @@ typedef struct { int64_t tag; uintptr_t payload; } Event;
 typedef struct { int64_t length, capacity; void *data; } Sequence;
 _Static_assert(sizeof(Event) == 16 && offsetof(Event, payload) == 8, "DataEvent native ABI");
 _Static_assert(sizeof(Sequence) == 24 && offsetof(Sequence, data) == 16, "native List");
+extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -178,9 +179,11 @@ static void bytes_cases(void) {
     a = jet_rt_record_new_data_event_bytes(sequence(0)); b = jet_rt_record_new_data_event_bytes(sequence(1));
     assert(!jet_rt_handle_eq_data_event(a,b)); drop_pair(a,b);
 }
-int main(int argc, char **argv) {
+int main(int argc, char **argv, char **envp) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
+    // A stop's report reads the startup capture (HostStartup.jet).
+    jet_rt_host_arguments(argc, argv, envp);
     if (argc > 1 && strcmp(argv[1],"panic-reference") == 0) {
         const char file[] = "<core.prelude>", message[] = "record variant index out of range";
         jet_panic(jet_rt_string_from_static(file,sizeof(file)-1),0,jet_rt_string_from_static(message,sizeof(message)-1));

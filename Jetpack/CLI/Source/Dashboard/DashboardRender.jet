@@ -23,7 +23,7 @@ DashboardAlternateScreen: struct {
 }
 
 impl DashboardAlternateScreen.Close {
-    close: fn(^self) -[IO]> {
+    close: fn(&&self) -[IO]> {
         if self.active -> cli_dashboard_write_stdout(cli_dashboard_screen_leave_sequence())
     }
 }
@@ -40,8 +40,8 @@ cli_dashboard_screen_leave_sequence: fn() -> String Never! {
 
 cli_dashboard_write_stdout: fn(text: String) Never! -[IO]> {
     out := term.stdout()
-    &out.write(text).drop("a closed stdout cannot take the dashboard")
-    &out.flush().drop("a closed stdout cannot take the dashboard")
+    out.write(text).drop("a closed stdout cannot take the dashboard")
+    out.flush().drop("a closed stdout cannot take the dashboard")
 }
 
 // Clear the screen and draw one frame from the top-left corner.
@@ -74,13 +74,13 @@ cli_dashboard_render_frame_width: fn(frame: DashboardFrame, width: Int, theme: T
 
 cli_dashboard_render_loading_width: fn(width: Int, store_message: String, theme: Theme) -> String Never! {
     out := [String]{}
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack dashboard"))
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Project  ")}{theme.gray("reading project…")}")
-    &out.push("\n")
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Store"))
-    cli_dashboard_push_line(&out, width, 2, store_message)
-    &out.push("\n")
-    cli_dashboard_push_line(&out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Jetpack dashboard"))
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Project  ")}{theme.gray("reading project…")}")
+    out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Store"))
+    cli_dashboard_push_line(out, width, 2, store_message)
+    out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
     out.join("")
 }
 
@@ -88,14 +88,14 @@ cli_dashboard_render_loading_width: fn(width: Int, store_message: String, theme:
 cli_dashboard_render_status_summary: fn(snapshot: DashboardSnapshot, theme: Theme) -[IO, Env]> String Never! {
     width: cli_dashboard_terminal_width()
     out := [String]{}
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack status"))
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Project: ")}{theme.bold(cli_dashboard_sanitize(snapshot.project.root))}")
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Environment: ")}{cli_dashboard_environment_value(theme, snapshot.project)}")
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Store: ")}{theme.cyan("{snapshot.store.packages} package(s)")}, {theme.gray(cli_dashboard_format_size(snapshot.store.bytes))}, health {cli_dashboard_health_value(theme, snapshot.store.health)}")
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Updates: ")}{theme.cyan("{snapshot.project.update_channels} moving channel(s)")}{theme.gray("; run `jetpack outdated` to check latest")}")
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Doctor: ")}{cli_dashboard_health_value(theme, snapshot.doctor.health())} ({theme.cyan("{snapshot.doctor.checks.len()}")} checks)")
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Jetpack status"))
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Project: ")}{theme.bold(cli_dashboard_sanitize(snapshot.project.root))}")
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Environment: ")}{cli_dashboard_environment_value(theme, snapshot.project)}")
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Store: ")}{theme.cyan("{snapshot.store.packages} package(s)")}, {theme.gray(cli_dashboard_format_size(snapshot.store.bytes))}, health {cli_dashboard_health_value(theme, snapshot.store.health)}")
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Updates: ")}{theme.cyan("{snapshot.project.update_channels} moving channel(s)")}{theme.gray("; run `jetpack outdated` to check latest")}")
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Doctor: ")}{cli_dashboard_health_value(theme, snapshot.doctor.health())} ({theme.cyan("{snapshot.doctor.checks.len()}")} checks)")
     recent: if snapshot.activity.len() == 0 -> "none recorded" else -> cli_dashboard_activity_text(snapshot.activity[0])
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Recent activity: ")}{theme.gray(recent)}")
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Recent activity: ")}{theme.gray(recent)}")
     out.join("")
 }
 
@@ -106,46 +106,46 @@ cli_dashboard_render_width: fn(snapshot: DashboardSnapshot, width: Int, theme: T
 cli_dashboard_render_width_with_note: fn(snapshot: DashboardSnapshot, width: Int, theme: Theme, note: String?) -> String Never! {
     project: snapshot.project
     out := [String]{}
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack dashboard"))
-    cli_dashboard_push_line(&out, width, 0, "{theme.gray("Project  ")}{theme.bold(cli_dashboard_sanitize(project.root))}")
-    if note == .Val(text) -> cli_dashboard_push_line(&out, width, 0, theme.yellow(text))
-    &out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Jetpack dashboard"))
+    cli_dashboard_push_line(out, width, 0, "{theme.gray("Project  ")}{theme.bold(cli_dashboard_sanitize(project.root))}")
+    if note == .Val(text) -> cli_dashboard_push_line(out, width, 0, theme.yellow(text))
+    out.push("\n")
 
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Project environment"))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "state", cli_dashboard_environment_value(theme, project)))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "env file", theme.gray(cli_dashboard_sanitize(project.env_file))))
-    if project.declared_packages == .Val(count) -> cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "declared", theme.cyan("{count} package(s)")))
-    if project.locked_packages == .Val(count) -> cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "locked", theme.cyan("{count} package(s)")))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "lock", cli_dashboard_lock_value(theme, project.lock, project.locked_packages)))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "active", cli_dashboard_active_value(theme, project)))
-    &out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Project environment"))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "state", cli_dashboard_environment_value(theme, project)))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "env file", theme.gray(cli_dashboard_sanitize(project.env_file))))
+    if project.declared_packages == .Val(count) -> cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "declared", theme.cyan("{count} package(s)")))
+    if project.locked_packages == .Val(count) -> cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "locked", theme.cyan("{count} package(s)")))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "lock", cli_dashboard_lock_value(theme, project.lock, project.locked_packages)))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "active", cli_dashboard_active_value(theme, project)))
+    out.push("\n")
 
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Store"))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "health", cli_dashboard_health_value(theme, snapshot.store.health)))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "size", "{theme.gray(cli_dashboard_format_size(snapshot.store.bytes))} in {theme.gray(cli_dashboard_sanitize(snapshot.store.path))}"))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "packages", theme.cyan("{snapshot.store.packages}")))
-    &out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Store"))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "health", cli_dashboard_health_value(theme, snapshot.store.health)))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "size", "{theme.gray(cli_dashboard_format_size(snapshot.store.bytes))} in {theme.gray(cli_dashboard_sanitize(snapshot.store.path))}"))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "packages", theme.cyan("{snapshot.store.packages}")))
+    out.push("\n")
 
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Available updates"))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "channels", "{theme.cyan("{project.update_channels}")} moving channel(s) recorded"))
-    cli_dashboard_push_line(&out, width, 2, cli_dashboard_field(theme, "check", theme.gray("run `jetpack outdated` for latest availability")))
-    &out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Available updates"))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "channels", "{theme.cyan("{project.update_channels}")} moving channel(s) recorded"))
+    cli_dashboard_push_line(out, width, 2, cli_dashboard_field(theme, "check", theme.gray("run `jetpack outdated` for latest availability")))
+    out.push("\n")
 
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Doctor findings"))
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Doctor findings"))
     loop check in snapshot.doctor.checks {
-        cli_dashboard_push_line(&out, width, 2, "[{cli_dashboard_health_mark(theme, check.health)}] {theme.bold(terminal_pad_end(check.name, 12))} {cli_dashboard_sanitize(check.detail)}")
-        if check.fix != "" -> cli_dashboard_push_line(&out, width, 4, theme.gray("fix: {cli_dashboard_sanitize(check.fix)}"))
+        cli_dashboard_push_line(out, width, 2, "[{cli_dashboard_health_mark(theme, check.health)}] {theme.bold(terminal_pad_end(check.name, 12))} {cli_dashboard_sanitize(check.detail)}")
+        if check.fix != "" -> cli_dashboard_push_line(out, width, 4, theme.gray("fix: {cli_dashboard_sanitize(check.fix)}"))
     }
-    &out.push("\n")
+    out.push("\n")
 
-    cli_dashboard_push_line(&out, width, 0, theme.cyan("Recent activity"))
+    cli_dashboard_push_line(out, width, 0, theme.cyan("Recent activity"))
     if snapshot.activity.len() == 0 {
-        cli_dashboard_push_line(&out, width, 2, theme.gray("none recorded"))
+        cli_dashboard_push_line(out, width, 2, theme.gray("none recorded"))
     } else {
-        loop activity in snapshot.activity -> cli_dashboard_push_line(&out, width, 2, theme.gray(cli_dashboard_activity_text(activity)))
+        loop activity in snapshot.activity -> cli_dashboard_push_line(out, width, 2, theme.gray(cli_dashboard_activity_text(activity)))
     }
-    &out.push("\n")
-    cli_dashboard_push_line(&out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
+    out.push("\n")
+    cli_dashboard_push_line(out, width, 0, theme.gray(DASHBOARD_KEYS_HINT))
     out.join("")
 }
 
@@ -250,7 +250,7 @@ cli_dashboard_sanitize: fn(value: String) -> String Never! {
     out := [String]{}
     loop scalar in value.chars() {
         text: "{scalar}"
-        &out.push(if cli_dashboard_is_control(text.bytes()) -> "?" else -> text)
+        out.push(if cli_dashboard_is_control(text.bytes()) -> "?" else -> text)
     }
     out.join("")
 }
@@ -271,7 +271,7 @@ cli_dashboard_fit: fn(value: String, width: Int) -> String Never! {
     if scalars.len() <= width -> return clean
     if width <= 0 -> return ""
     kept := [String]{}
-    loop index in 0..<(width - 1) -> &kept.push("{scalars[index]}")
+    loop index in 0..<(width - 1) -> kept.push("{scalars[index]}")
     "{kept.join("")}…"
 }
 
@@ -279,5 +279,5 @@ cli_dashboard_fit: fn(value: String, width: Int) -> String Never! {
 cli_dashboard_push_line: fn(out: &[String], width: Int, indent: Int, value: String) Never! {
     available: if width > indent -> width - indent else -> 0
     text: if value.contains(terminal_esc()) -> terminal_fit_line(value, available) else -> cli_dashboard_fit(value, available)
-    &out.push("{" ".repeat(indent)}{text}\n")
+    out.push("{" ".repeat(indent)}{text}\n")
 }

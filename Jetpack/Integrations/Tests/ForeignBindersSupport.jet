@@ -49,7 +49,7 @@ pkg_binders_test_read_exact: fn(child: &ProcessChild, count: Int) -[Exec, Time.W
     loop out.len() < count {
         chunk: child.stdout.read(count - out.len()) ?? panic("read worker output")
         if chunk.len() == 0 -> panic("worker closed its output early")
-        loop byte in chunk -> &out.push(byte)
+        loop byte in chunk -> out.push(byte)
     }
     out
 }
@@ -57,6 +57,6 @@ pkg_binders_test_read_exact: fn(child: &ProcessChild, count: Int) -[Exec, Time.W
 // A little-endian u32 length prefix.
 pkg_binders_test_u32_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
-    loop index in 0..<4 -> &out.push(U8{((value >> (index * 8))).bit_and(255)})
+    loop index in 0..<4 -> out.push(U8{((value >> (index * 8))).bit_and(255)})
     out
 }

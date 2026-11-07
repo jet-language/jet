@@ -60,28 +60,28 @@ ParsedType: struct {
 
 parser_parse_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
     if depth > 256 {
-        span: parser_current(&state).span
-        parser_add_error(&state, span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
+        span: parser_current(state).span
+        parser_add_fatal_code(state, "E1403", span, "this type is nested too deeply", "type parsing is bounded against adversarial nesting", "reduce the nesting depth")
         return ParsedType{ty: Type.Named{name: "__jet_error"}, span: span}
     }
 
-    start: parser_current(&state)
+    start: parser_current(state)
     // A whole type position may hold only a contract,
     // `E!` or `(A | B)!`, the unit-success carrier.
-    if parser_suffix_contract_ahead(&state) >= 0 {
-        error_type: parser_parse_suffix_contract(&state, depth + 1)
+    if parser_suffix_contract_ahead(state) >= 0 {
+        error_type: parser_parse_suffix_contract(state, depth + 1)
         return ParsedType{ty: Type.Result{ok: Type.Named{name: "Unit"}, err: error_type.ty}, span: parser_cover(start.span, error_type.span)}
     }
-    ty: parser_parse_type_atom(&state, depth + 1)
+    ty: parser_parse_type_atom(state, depth + 1)
     // The error contract follows the success type:
     // `Int ParseError!`, `Entry? (DBError | TimeoutError)!`.
-    if parser_suffix_contract_ahead(&state) >= 0 {
-        error_type: parser_parse_suffix_contract(&state, depth + 1)
+    if parser_suffix_contract_ahead(state) >= 0 {
+        error_type: parser_parse_suffix_contract(state, depth + 1)
         result: Type.Result{ok: ty.ty, err: error_type.ty}
         return ParsedType{ty: result, span: parser_cover(start.span, error_type.span)}
     }
 
-    parser_parse_type_union_tail(&state, ty, depth + 1)
+    parser_parse_type_union_tail(state, ty, depth + 1)
 }
 
 parser_next_code_index: fn(state: JetParserState, start: Int) -> Int Never! {
@@ -147,7 +147,7 @@ parser_scan_contract_member: fn(state: JetParserState, start: Int) -> Int Never!
 // `E!` or `(A | B)!`, and 1 for the rejected unparenthesized `A | B!`.
 parser_suffix_contract_ahead: fn(state: &JetParserState) -> Int Never! {
     if state.pending_type_gt -> return -1
-    parser_skip_trivia(&state)
+    parser_skip_trivia(state)
     index := state.position
     members := 0
     loop {
@@ -170,18 +170,18 @@ parser_suffix_contract_ahead: fn(state: &JetParserState) -> Int Never! {
 // The error half of a contract and its `!`. A union needs
 // its parentheses: `A | B!` is taught as `(A | B)!`.
 parser_parse_suffix_contract: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    bare_union: parser_suffix_contract_ahead(&state) == 1
+    bare_union: parser_suffix_contract_ahead(state) == 1
     first_index: state.position
-    error_type: parser_parse_type_union(&state, depth + 1)
+    error_type: parser_parse_type_union(state, depth + 1)
     end_index: state.position
-    bang: parser_expect(&state, TOKEN_BANG, "`!` after the error contract")
+    bang: parser_expect(state, TOKEN_BANG, "`!` after the error contract")
     span: parser_cover(error_type.span, bang.span)
     if bare_union {
         text: parser_tokens_text(state, first_index, end_index)
         marked: parser_tokens_text(state, parser_contract_last_member(state, first_index), end_index)
-        parser_add_type_mark_error(&state, "E-ERR-UNION", span, "`{text}!` marks only `{marked}` as the error contract.", "The `!` mark follows one type, so a union of error types is grouped for the mark to cover every member.", "Write `({text})!`.", "({text})!")
+        parser_add_type_mark_error(state, "E-ERR-UNION", span, "`{text}!` marks only `{marked}` as the error contract.", "The `!` mark follows one type, so a union of error types is grouped for the mark to cover every member.", "Write `({text})!`.", "({text})!")
     }
-    ParsedType{ty: error_type.ty, span: ^span}
+    ParsedType{ty: error_type.ty, span: span.move()}
 }
 
 // The token where the last member of a bare `A | B` union starts: the one
@@ -208,8 +208,8 @@ parser_type_starts: fn(kind: Int) -> Bool Never! {
 
 // `#TagName Type`: a value-tag prefix on a type. The tag is a PascalCase name.
 parser_type_tag_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_current_kind(&state) != TOKEN_HASH || parser_kind_at(&state, 1) != TOKEN_IDENT -> return false
-    parser_pascal_name(parser_value_at(&state, 1))
+    if parser_current_kind(state) != TOKEN_HASH || parser_kind_at(state, 1) != TOKEN_IDENT -> return false
+    parser_pascal_name(parser_value_at(state, 1))
 }
 
 parser_tokens_text: fn(state: JetParserState, first: Int, end: Int) -> String Never! {
@@ -240,22 +240,22 @@ parser_marked_type_text: fn(state: JetParserState, ty: Type, first: Int, end: In
 
 parser_add_type_mark_error: fn(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String, replacement: String) {
     diagnostic: diagnostic_from_registry(code, Val(span), what, why, fix)
-    &state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: replacement}))
+    state.diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: replacement}))
 }
 
 parser_parse_type_union: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    ty: parser_parse_type_atom(&state, depth + 1)
-    parser_parse_type_union_tail(&state, ty, depth + 1)
+    ty: parser_parse_type_atom(state, depth + 1)
+    parser_parse_type_union_tail(state, ty, depth + 1)
 }
 
 parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, depth: Int) -> ParsedType {
     result := first
     members := [Type]{}
-    loop parser_current_kind(&state) == TOKEN_PIPE {
-        parser_bump(&state)
-        next: parser_parse_type_atom(&state, depth + 1)
-        if members.len() == 0 -> &members.push(result.ty)
-        &members.push(next.ty)
+    loop parser_current_kind(state) == TOKEN_PIPE {
+        parser_bump(state)
+        next: parser_parse_type_atom(state, depth + 1)
+        if members.len() == 0 -> members.push(result.ty)
+        members.push(next.ty)
         result.span.end = next.span.end
     }
     if members.len() > 0 -> result.ty = Type.Union{members: members}
@@ -265,21 +265,21 @@ parser_parse_type_union_tail: fn(state: &JetParserState, first: ParsedType, dept
 // `?` follows the type it marks and binds tightly, so
 // `[Int?]`, `[Int]?`, `Box<Int?>`, and `Box<Int>?` all differ. `T??` is E0309.
 parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    parsed: parser_parse_type_base(&state, depth + 1)
-    base: parser_parse_inline_range(&state, parsed) ?? parsed
-    kind: parser_current_kind(&state)
+    parsed: parser_parse_type_base(state, depth + 1)
+    base: parser_parse_inline_range(state, parsed) ?? parsed
+    kind: parser_current_kind(state)
     if kind != TOKEN_QUESTION && kind != TOKEN_QUESTION_QUESTION -> return base
-    mark: parser_bump(&state)
+    mark: parser_bump(state)
     already_optional: if base.ty == {
         .Option(_) -> true
         else -> false
     }
     span: parser_cover(base.span, mark.span)
     if kind == TOKEN_QUESTION_QUESTION || already_optional {
-        parser_add_error_code(&state, "E0309", mark.span, "`??` isn't allowed on a type", "an optional value is written `T?` once; there is no optional optional", "use a single `?`, like `Int?`")
+        parser_add_error_code(state, "E0309", mark.span, "`??` isn't allowed on a type", "an optional value is written `T?` once; there is no optional optional", "use a single `?`, like `Int?`")
     }
     if already_optional -> return ParsedType{ty: base.ty, span: span}
-    ParsedType{ty: Type.Option{inner: base.ty}, span: ^span}
+    ParsedType{ty: Type.Option{inner: base.ty}, span: span.move()}
 }
 
 // An inline range `Int(lo..hi)` may follow a type in every type position;
@@ -287,73 +287,73 @@ parser_parse_type_atom: fn(state: &JetParserState, depth: Int) -> ParsedType {
 // pending, and the `(` after it belongs to the enclosing call. None when no
 // range follows `base`.
 parser_parse_inline_range: fn(state: &JetParserState, base: ParsedType) -> ParsedType? {
-    if state.pending_type_gt || parser_current_kind(&state) != TOKEN_LPAREN -> return None
-    if parser_kind_at(&state, 1) != TOKEN_INT && parser_kind_at(&state, 1) != TOKEN_MINUS -> return None
-    open: parser_bump(&state)
-    lower: parser_distinct_range_bound(&state, "as the range's lower bound")
-    parser_expect(&state, TOKEN_DOT_DOT, "between the range's bounds")
-    upper: parser_distinct_range_bound(&state, "as the range's upper bound")
-    close: parser_expect(&state, TOKEN_RPAREN, "to close the range constraint")
+    if state.pending_type_gt || parser_current_kind(state) != TOKEN_LPAREN -> return None
+    if parser_kind_at(state, 1) != TOKEN_INT && parser_kind_at(state, 1) != TOKEN_MINUS -> return None
+    open: parser_bump(state)
+    lower: parser_distinct_range_bound(state, "as the range's lower bound")
+    parser_expect(state, TOKEN_DOT_DOT, "between the range's bounds")
+    upper: parser_distinct_range_bound(state, "as the range's upper bound")
+    close: parser_expect(state, TOKEN_RPAREN, "to close the range constraint")
     span: parser_cover(base.span, close.span)
     if lower.value > upper.value {
-        parser_add_error_code(&state, "E0137", parser_cover(lower.span, upper.span), "this range is empty — {lower.value} is after {upper.value}", "a range's low bound must not be greater than its high bound", "write `{upper.value}..{lower.value}` (swap the bounds), or fix the values")
+        parser_add_error_code(state, "E0137", parser_cover(lower.span, upper.span), "this range is empty — {lower.value} is after {upper.value}", "a range's low bound must not be greater than its high bound", "write `{upper.value}..{lower.value}` (swap the bounds), or fix the values")
     }
     if base.ty != Type.Int {
-        parser_add_error_code(&state, "E0137", parser_cover(open.span, close.span), "inline value ranges apply to `Int`, not `{type_name(base.ty)}`", "an inline range carries an interval on the default integer carrier", "write `Int(lo..hi)` here, or declare a named distinct type for another carrier")
+        parser_add_error_code(state, "E0137", parser_cover(open.span, close.span), "inline value ranges apply to `Int`, not `{type_name(base.ty)}`", "an inline range carries an interval on the default integer carrier", "write `Int(lo..hi)` here, or declare a named distinct type for another carrier")
         return Val(ParsedType{ty: base.ty, span: span})
     }
     Val(ParsedType{ty: Type.InlineRange{base: base.ty, lo: lower.value, hi: upper.value}, span: span})
 }
 
 parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    start: parser_current(&state)
+    start: parser_current(state)
     kind: start.kind
 
-    if parser_type_tag_ahead(&state) {
-        parser_bump(&state)
-        marker_token: parser_bump(&state)
-        inner: parser_parse_type(&state, depth + 1)
+    if parser_type_tag_ahead(state) {
+        parser_bump(state)
+        marker_token: parser_bump(state)
+        inner: parser_parse_type(state, depth + 1)
         return ParsedType{ty: Type.Tagged{marker: TagMarker.User{name: parser_value(state, marker_token)}, inner: inner.ty}, span: parser_cover(start.span, inner.span)}
     }
     if kind == {
         TOKEN_STAR -> {
-            parser_bump(&state)
-            elem: parser_parse_type_atom(&state, depth + 1)
+            parser_bump(state)
+            elem: parser_parse_type_atom(state, depth + 1)
             ParsedType{ty: Type.Apply{name: "Ptr", args: [Type]{elem.ty}}, span: parser_cover(start.span, elem.span)}
         }
-        TOKEN_KW_FN -> parser_parse_function_type(&state, depth + 1)
-        TOKEN_LBRACKET -> parser_parse_collection_type(&state, depth + 1)
-        TOKEN_LPAREN -> parser_parse_tuple_type(&state, depth + 1)
+        TOKEN_KW_FN -> parser_parse_function_type(state, depth + 1)
+        TOKEN_LBRACKET -> parser_parse_collection_type(state, depth + 1)
+        TOKEN_LPAREN -> parser_parse_tuple_type(state, depth + 1)
         else -> {
             if kind != TOKEN_IDENT && kind != TOKEN_SELF {
                 found: parser_text(state, start)
-                parser_add_error(&state, start.span, "expected a type, found `{found}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
-                if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
+                parser_add_error(state, start.span, "expected a type, found `{found}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
+                if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(state)
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
             // (E1107): the per-container prefix spelling `columnar [T]` is
             // reserved; nothing ships, so it is a fatal teaching error at the
             // prefix word.
-            if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
-                parser_add_fatal_code(&state, "E1107", start.span, "the `columnar [T]` per-container layout form is reserved", "a per-use columnar override isn't built yet — only the whole-struct form ships", "put `#Layout(columnar)` on the `struct` declaration instead")
+            if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(state, 1) == TOKEN_LBRACKET {
+                parser_add_fatal_code(state, "E1107", start.span, "the `columnar [T]` per-container layout form is reserved", "a per-use columnar override isn't built yet — only the whole-struct form ships", "put `#Layout(columnar)` on the `struct` declaration instead")
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
-            parser_bump(&state)
+            parser_bump(state)
             name := parser_value(state, start)
             end := start.span
-            loop parser_current_kind(&state) == TOKEN_DOT {
-                parser_bump(&state)
-                member: parser_expect_name(&state, "after `.` in a type path")
+            loop parser_current_kind(state) == TOKEN_DOT {
+                parser_bump(state)
+                member: parser_expect_name(state, "after `.` in a type path")
                 name = "{name}.{parser_value(state, member)}"
                 end = member.span
             }
-            if parser_current_kind(&state) == TOKEN_LT {
-                return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
+            if parser_current_kind(state) == TOKEN_LT {
+                return parser_parse_applied_type(state, name, parser_cover(start.span, end), depth + 1)
             }
             // E0119: a `$fact` path segment reads a compile-time fact value,
             // which never names a type outside a derive template.
             if state.derive_template_depth == 0 && (name.starts_with("$") || name.contains(".$")) {
-                parser_add_error_code(&state, "E0119", start.span, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
+                parser_add_error_code(state, "E0119", start.span, "`{name}` is a fact value, not a type", "facts classify values at compile time; they do not mint or select types", "read the fact in a compile-time value position instead")
             }
             ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
         }
@@ -361,57 +361,57 @@ parser_parse_type_base: fn(state: &JetParserState, depth: Int) -> ParsedType {
 }
 
 parser_parse_collection_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    open: parser_bump(&state)
-    first: parser_parse_type(&state, depth + 1)
-    if parser_current_kind(&state) == TOKEN_COLON {
-        parser_bump(&state)
-        value: parser_parse_type(&state, depth + 1)
-        close: parser_expect(&state, TOKEN_RBRACKET, "`]` after the map value type")
+    open: parser_bump(state)
+    first: parser_parse_type(state, depth + 1)
+    if parser_current_kind(state) == TOKEN_COLON {
+        parser_bump(state)
+        value: parser_parse_type(state, depth + 1)
+        close: parser_expect(state, TOKEN_RBRACKET, "`]` after the map value type")
         return ParsedType{ty: Type.Map{key: first.ty, key_span: Val(first.span), value: value.ty}, span: parser_cover(open.span, close.span)}
     }
-    if parser_current_kind(&state) == TOKEN_HASH {
-        parser_bump(&state)
-        measure: parser_parse_measure(&state, "length", depth + 1)
-        close: parser_expect(&state, TOKEN_RBRACKET, "`]` after the fixed-list length")
-        return ParsedType{ty: Type.FixedList{elem: first.ty, len: ^measure}, span: parser_cover(open.span, close.span)}
+    if parser_current_kind(state) == TOKEN_HASH {
+        parser_bump(state)
+        measure: parser_parse_measure(state, "length", depth + 1)
+        close: parser_expect(state, TOKEN_RBRACKET, "`]` after the fixed-list length")
+        return ParsedType{ty: Type.FixedList{elem: first.ty, len: measure.move()}, span: parser_cover(open.span, close.span)}
     }
-    close: parser_expect(&state, TOKEN_RBRACKET, "`]` after the list element type")
+    close: parser_expect(state, TOKEN_RBRACKET, "`]` after the list element type")
     ParsedType{ty: Type.List{element: first.ty}, span: parser_cover(open.span, close.span)}
 }
 
 parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    open: parser_bump(&state)
-    if parser_current_kind(&state) == TOKEN_RPAREN {
-        close: parser_bump(&state)
+    open: parser_bump(state)
+    if parser_current_kind(state) == TOKEN_RPAREN {
+        close: parser_bump(state)
         return ParsedType{ty: Type.Named{name: "Unit"}, span: parser_cover(open.span, close.span)}
     }
     fields := [TypeTupleField]{}
     loop {
         // A member name is an identifier or the `tag` keyword, which also
         // spells an ordinary name (parser_expect_name).
-        kind: parser_current_kind(&state)
+        kind: parser_current_kind(state)
         if {
-            (kind == TOKEN_IDENT || kind == TOKEN_KW_TAG) && parser_kind_at(&state, 1) == TOKEN_COLON -> {
-                name: parser_expect_name(&state, "for a tuple member name")
-                parser_bump(&state)
-                ty: parser_parse_type(&state, depth + 1)
-                &fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
+            (kind == TOKEN_IDENT || kind == TOKEN_KW_TAG) && parser_kind_at(state, 1) == TOKEN_COLON -> {
+                name: parser_expect_name(state, "for a tuple member name")
+                parser_bump(state)
+                ty: parser_parse_type(state, depth + 1)
+                fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
             }
             else -> {
-                ty: parser_parse_type(&state, depth + 1)
-                &fields.push(TypeTupleField{name: "", ty: ty.ty})
+                ty: parser_parse_type(state, depth + 1)
+                fields.push(TypeTupleField{name: "", ty: ty.ty})
             }
         }
-        if parser_current_kind(&state) == TOKEN_RPAREN -> break
-        if parser_current_kind(&state) != TOKEN_COMMA {
-            token: parser_current(&state)
-            parser_add_error(&state, token.span, "expected `,` between tuple type members", "tuple types list their members in source order", "add a comma or close the tuple type")
+        if parser_current_kind(state) == TOKEN_RPAREN -> break
+        if parser_current_kind(state) != TOKEN_COMMA {
+            token: parser_current(state)
+            parser_add_error(state, token.span, "expected `,` between tuple type members", "tuple types list their members in source order", "add a comma or close the tuple type")
             break
         }
-        parser_bump(&state)
-        if parser_current_kind(&state) == TOKEN_RPAREN -> break
+        parser_bump(state)
+        if parser_current_kind(state) == TOKEN_RPAREN -> break
     }
-    close: parser_expect(&state, TOKEN_RPAREN, "`)` after the tuple type")
+    close: parser_expect(state, TOKEN_RPAREN, "`)` after the tuple type")
     if fields.len() == 1 && fields[0].name == "" -> return ParsedType{ty: fields[0].ty, span: parser_cover(open.span, close.span)}
     // S73: a named tuple type stores its members sorted by name, so its
     // identity ignores source order (Rust `canonicalize_tuple_fields`).
@@ -422,33 +422,38 @@ parser_parse_tuple_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
 // reuses the parameter grammar's zone separators public
 // labels and zones are part of callable identity, local names are not.
 parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType {
-    start: parser_bump(&state)
-    parser_expect(&state, TOKEN_LPAREN, "`(` after `fn` in a function type")
+    start: parser_bump(state)
+    parser_parse_function_type_from(state, depth, start.span)
+}
+
+// A function type from its `(` on; `start` is where the type began.
+parser_parse_function_type_from: fn(state: &JetParserState, depth: Int, start: Span) -> ParsedType {
+    parser_expect(state, TOKEN_LPAREN, "`(` after `fn` in a function type")
     params := [Type]{}
     names := [String]{}
     zones := [ParamZone]{}
     zone := ParamZone.Either
     saw_slash := false
     saw_star := false
-    if parser_current_kind(&state) != TOKEN_RPAREN {
-        loop !parser_aborting(&state) {
-            token: parser_current(&state)
+    if parser_current_kind(state) != TOKEN_RPAREN {
+        loop !parser_aborting(state) {
+            token: parser_current(state)
             if {
                 token.kind == TOKEN_SLASH -> {
-                    parser_bump(&state)
+                    parser_bump(state)
                     if saw_slash || saw_star || params.len() == 0 {
-                        parser_report_fn_type_zone(&state, token.span)
+                        parser_report_fn_type_zone(state, token.span)
                     } else {
                         saw_slash = true
                         positional := [ParamZone]{}
-                        loop _ in zones -> &positional.push(ParamZone.PositionalOnly)
+                        loop _ in zones -> positional.push(ParamZone.PositionalOnly)
                         zones = positional
                     }
                 }
                 token.kind == TOKEN_STAR -> {
-                    parser_bump(&state)
+                    parser_bump(state)
                     if saw_star {
-                        parser_report_fn_type_zone(&state, token.span)
+                        parser_report_fn_type_zone(state, token.span)
                     } else {
                         saw_star = true
                         zone = ParamZone.LabelOnly
@@ -456,22 +461,22 @@ parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType
                 }
                 else -> {
                     name := ""
-                    if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
-                        parser_bump(&state)
-                        parser_bump(&state)
+                    if token.kind == TOKEN_IDENT && parser_kind_at(state, 1) == TOKEN_COLON {
+                        parser_bump(state)
+                        parser_bump(state)
                         name = parser_value(state, token)
                     }
-                    &params.push(parser_parse_type(&state, depth + 1).ty)
-                    &names.push(name)
-                    &zones.push(zone)
+                    params.push(parser_parse_type(state, depth + 1).ty)
+                    names.push(name)
+                    zones.push(zone.copy())
                 }
             }
-            if parser_current_kind(&state) == TOKEN_RPAREN -> break
-            parser_expect(&state, TOKEN_COMMA, "`,` between parameter types in `fn(...)`")
-            if parser_current_kind(&state) == TOKEN_RPAREN -> break
+            if parser_current_kind(state) == TOKEN_RPAREN -> break
+            parser_expect(state, TOKEN_COMMA, "`,` between parameter types in `fn(...)`")
+            if parser_current_kind(state) == TOKEN_RPAREN -> break
         }
     }
-    close: parser_expect(&state, TOKEN_RPAREN, "`)` after parameter types in `fn(...)`")
+    close: parser_expect(state, TOKEN_RPAREN, "`)` after parameter types in `fn(...)`")
     has_label_only := false
     unlabeled_label_only := false
     loop index in 0..<zones.len() {
@@ -480,42 +485,42 @@ parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType
             if names[index] == "" -> unlabeled_label_only = true
         }
     }
-    after_params: parser_current(&state).span
-    if saw_star && !has_label_only -> parser_report_fn_type_zone(&state, after_params)
+    after_params: parser_current(state).span
+    if saw_star && !has_label_only -> parser_report_fn_type_zone(state, after_params)
     if unlabeled_label_only {
-        parser_add_error_code(&state, "E0763", after_params, "a parameter after `*` in this function type has no label", "a label-only parameter is reached by writing its label, so it has to have one", "name it, as in `fn(*, force: Bool) Int`")
+        parser_add_error_code(state, "E0763", after_params, "a parameter after `*` in this function type has no label", "a label-only parameter is reached by writing its label, so it has to have one", "name it, as in `fn(*, force: Bool) Int`")
     }
     param_contract := [CallContractRow]?{None}
     if saw_slash || saw_star {
         rows := [CallContractRow]{}
         loop index in 0..<zones.len() {
             label: if zones[index] == ParamZone.LabelOnly -> names[index] else -> ""
-            &rows.push(CallContractRow{label: label, zone: zones[index]})
+            rows.push(CallContractRow{label: label, zone: zones[index]})
         }
         param_contract = Val(rows)
     }
-    first: parser_current_kind(&state)
-    second: parser_kind_at(&state, 1)
+    first: parser_current_kind(state)
+    second: parser_kind_at(state, 1)
     canonical: first == TOKEN_MINUS && second == TOKEN_LBRACKET
     effect_bound := [EffectRowEntry]?{None}
-    if canonical -> effect_bound = Val(parser_parse_effect_arrow_row(&state))
+    if canonical -> effect_bound = Val(parser_parse_effect_arrow_row(state))
     arrow_return := false
     result := ParsedType?{None}
     if {
         canonical -> {
-            result = parser_parse_unit_fallible_return(&state)
-            if !parser_has_type(result) && parser_type_starts_here(&state) {
+            result = parser_parse_unit_fallible_return(state)
+            if !parser_has_type(result) && parser_type_starts_here(state) {
                 arrow_return = true
-                result = Val(parser_parse_type(&state, depth + 1))
+                result = Val(parser_parse_type(state, depth + 1))
             }
         }
-        parser_at_unified_arrow(&state) -> {
-            parser_bump(&state)
+        parser_at_unified_arrow(state) -> {
+            parser_bump(state)
             arrow_return = true
-            result = parser_parse_unit_fallible_return(&state)
-            if !parser_has_type(result) && parser_type_starts_here(&state) -> result = Val(parser_parse_type(&state, depth + 1))
+            result = parser_parse_unit_fallible_return(state)
+            if !parser_has_type(result) && parser_type_starts_here(state) -> result = Val(parser_parse_type(state, depth + 1))
         }
-        else -> result = parser_parse_unit_fallible_return(&state)
+        else -> result = parser_parse_unit_fallible_return(state)
     }
     returned := Type?{None}
     end := close.span
@@ -523,21 +528,21 @@ parser_parse_function_type: fn(state: &JetParserState, depth: Int) -> ParsedType
         returned = Val(parsed.ty)
         end = parsed.span
         if arrow_return && parser_is_unit_fallible(parsed.ty) {
-            parser_add_error_code(&state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
+            parser_add_error_code(state, "E0003", parsed.span, "a unit-fallible signature has no `->`", "a function that can fail but returns no value has no result payload for an arrow to introduce", "write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`")
         }
     }
     owners := [String]{}
     loop index in 0..<names.len() {
-        &owners.push(if names[index] == "" -> "_{index}" else -> names[index])
+        owners.push(if names[index] == "" -> "_{index}" else -> names[index])
     }
-    return_view: parser_parse_opt_declared_view_from(&state, owners)
-    if effect_bound == None && parser_func_effect_starts_here(&state) {
-        late_first: parser_current_kind(&state)
-        if late_first == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_LBRACKET -> effect_bound = Val(parser_parse_effect_arrow_row(&state))
+    return_view: parser_parse_opt_declared_view_from(state, owners)
+    if effect_bound == None && parser_func_effect_starts_here(state) {
+        late_first: parser_current_kind(state)
+        if late_first == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_LBRACKET -> effect_bound = Val(parser_parse_effect_arrow_row(state))
     }
-    end = parser_lookahead(&state, -1).span
+    end = parser_lookahead(state, -1).span
     ty: Type.Fn{params: params, ret: returned, effect_bound: effect_bound, param_contract: param_contract, call_metadata: None, return_view_provenance: return_view}
-    ParsedType{ty: ty, span: parser_cover(start.span, end)}
+    ParsedType{ty: ty, span: parser_cover(start, end)}
 }
 
 parser_has_type: fn(value: ParsedType?) -> Bool Never! {
@@ -547,93 +552,93 @@ parser_has_type: fn(value: ParsedType?) -> Bool Never! {
 
 // The effect row of a function type, `-[E]>`.
 parser_parse_effect_arrow_row: fn(state: &JetParserState) -> [EffectRowEntry] {
-    parser_expect(&state, TOKEN_MINUS, "`-` to start an effect arrow")
-    parser_expect(&state, TOKEN_LBRACKET, "`[` to start an effect row")
-    effects: parser_parse_effect_row_entries(&state, TOKEN_RBRACKET)
-    parser_expect(&state, TOKEN_RBRACKET, "`]` to close the effect row")
-    parser_expect(&state, TOKEN_GT, "`>` after the effect row")
+    parser_expect(state, TOKEN_MINUS, "`-` to start an effect arrow")
+    parser_expect(state, TOKEN_LBRACKET, "`[` to start an effect row")
+    effects: parser_parse_effect_row_entries(state, TOKEN_RBRACKET)
+    parser_expect(state, TOKEN_RBRACKET, "`]` to close the effect row")
+    parser_expect(state, TOKEN_GT, "`>` after the effect row")
     effects
 }
 
 parser_report_fn_type_zone: fn(state: &JetParserState, span: Span) {
-    parser_add_error_code(&state, "E0763", span, "this function type's parameter zones are out of order", "the zones read left to right: positional-only, then either, then label-only", "write at most one `/` before at most one `*`, each with parameters on its side")
+    parser_add_error_code(state, "E0763", span, "this function type's parameter zones are out of order", "the zones read left to right: positional-only, then either, then label-only", "write at most one `/` before at most one `*`, each with parameters on its side")
 }
 
 parser_parse_applied_type: fn(state: &JetParserState, name: String, prefix: Span, depth: Int) -> ParsedType {
-    parser_bump(&state)
+    parser_bump(state)
     args := [Type]{}
-    if !parser_type_close_here(&state) {
+    if !parser_type_close_here(state) {
         loop {
             if {
-                (name == "Vec" || name == "Matrix") && parser_current_kind(&state) == TOKEN_IDENT -> {
-                    measure_token: parser_bump(&state)
-                    &args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: parser_value(state, measure_token)}})
+                (name == "Vec" || name == "Matrix") && parser_current_kind(state) == TOKEN_IDENT -> {
+                    measure_token: parser_bump(state)
+                    args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: parser_value(state, measure_token)}})
                 }
                 else -> {
-                    &args.push(parser_parse_type(&state, depth + 1).ty)
+                    args.push(parser_parse_type(state, depth + 1).ty)
                 }
             }
-            if parser_type_close_here(&state) -> break
-            if parser_current_kind(&state) != TOKEN_COMMA {
-                token: parser_current(&state)
-                parser_add_error(&state, token.span, "expected `,` between type arguments", "generic type arguments are comma-separated", "add a comma or close the type arguments")
+            if parser_type_close_here(state) -> break
+            if parser_current_kind(state) != TOKEN_COMMA {
+                token: parser_current(state)
+                parser_add_error(state, token.span, "expected `,` between type arguments", "generic type arguments are comma-separated", "add a comma or close the type arguments")
                 break
             }
-            parser_bump(&state)
-            if parser_type_close_here(&state) -> break
+            parser_bump(state)
+            if parser_type_close_here(state) -> break
         }
     }
-    if !parser_type_close_here(&state) {
-        token: parser_current(&state)
-        parser_add_error(&state, token.span, "expected `>` after type arguments", "generic type arguments must be closed", "add `>`")
+    if !parser_type_close_here(state) {
+        token: parser_current(state)
+        parser_add_error(state, token.span, "expected `>` after type arguments", "generic type arguments must be closed", "add `>`")
         return ParsedType{ty: Type.Apply{name: name, args: args}, span: parser_cover(prefix, token.span)}
     }
-    close: parser_type_gt_span(&state)
+    close: parser_type_gt_span(state)
     ty: parser_apply_named_type(name, args)
     ParsedType{ty: ty, span: parser_cover(prefix, close)}
 }
 
 parser_parse_measure: fn(state: &JetParserState, kind: String, depth: Int) -> Measure {
-    token: parser_current(&state)
+    token: parser_current(state)
     // Rust `parse_declared_measure`: a fixed-list length is a whole,
     // non-negative number; either report is the item's `Err`.
-    if kind == "length" && token.kind == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_INT {
-        parser_bump(&state)
-        number: parser_bump(&state)
-        parser_add_fatal_code(&state, "E0963", parser_cover(token.span, number.span), "a fixed-size list length is outside the supported range", "the list length must fit the target's array-size representation", "use a non-negative comptime integer within the supported range")
+    if kind == "length" && token.kind == TOKEN_MINUS && parser_kind_at(state, 1) == TOKEN_INT {
+        parser_bump(state)
+        number: parser_bump(state)
+        parser_add_fatal_code(state, "E0963", parser_cover(token.span, number.span), "a fixed-size list length is outside the supported range", "the list length must fit the target's array-size representation", "use a non-negative comptime integer within the supported range")
         return Measure.Literal{kind: kind, value: 0}
     }
     if kind == "length" && token.kind == TOKEN_FLOAT {
-        parser_bump(&state)
-        parser_add_fatal_code(&state, "E0963", token.span, "a fixed-size list length must be an integer, got Float (an approximate binary number)", "a fixed-size list needs one known number of elements", "use an integer literal or a compile-time expression that produces Int")
+        parser_bump(state)
+        parser_add_fatal_code(state, "E0963", token.span, "a fixed-size list length must be an integer, got Float (an approximate binary number)", "a fixed-size list needs one known number of elements", "use an integer literal or a compile-time expression that produces Int")
         return Measure.Literal{kind: kind, value: 0}
     }
     if token.kind == {
         TOKEN_INT -> {
-            parser_bump(&state)
+            parser_bump(state)
             Measure.Literal{kind: kind, value: parser_integer(state, token) ?? 0}
         }
         TOKEN_IDENT -> {
-            parser_bump(&state)
+            parser_bump(state)
             Measure.Symbol{kind: kind, name: parser_value(state, token)}
         }
         TOKEN_LPAREN -> {
-            parser_bump(&state)
-            left: parser_parse_measure(&state, kind, depth + 1)
-            op: parser_current_kind(&state)
+            parser_bump(state)
+            left: parser_parse_measure(state, kind, depth + 1)
+            op: parser_current_kind(state)
             if op == TOKEN_PLUS || op == TOKEN_STAR {
-                parser_bump(&state)
-                right: parser_parse_measure(&state, kind, depth + 1)
-                close: parser_expect(&state, TOKEN_RPAREN, "`)` after the measure expression")
+                parser_bump(state)
+                right: parser_parse_measure(state, kind, depth + 1)
+                close: parser_expect(state, TOKEN_RPAREN, "`)` after the measure expression")
                 rule: if op == TOKEN_STAR -> MeasureRule.Mul else -> MeasureRule.Add
                 return Measure.Combined{kind: kind, rule: rule, left: left, right: right}
             }
-            parser_expect(&state, TOKEN_RPAREN, "`)` after the measure")
+            parser_expect(state, TOKEN_RPAREN, "`)` after the measure")
             left
         }
         else -> {
-            parser_add_error(&state, token.span, "expected a declared type measure", "type measures accept integer literals, names, and declared arithmetic", "write an integer or a module value parameter")
-            if token.kind != TOKEN_EOF -> parser_bump(&state)
+            parser_add_error(state, token.span, "expected a declared type measure", "type measures accept integer literals, names, and declared arithmetic", "write an integer or a module value parameter")
+            if token.kind != TOKEN_EOF -> parser_bump(state)
             Measure.Literal{kind: kind, value: 0}
         }
     }

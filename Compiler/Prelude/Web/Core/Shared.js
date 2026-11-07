@@ -1,4 +1,4 @@
-// D-CONC-SHARE1=A / D-CONC-STM1=A: the browser adapter for Shared<T>.
+// The browser adapter for Shared<T>.
 // JavaScript runs one event-loop turn at a time, so there is no OS lock to
 // acquire. Stable ids still give the transaction commit the same participant
 // order as the native SharedProtocol, and the body is never retried.

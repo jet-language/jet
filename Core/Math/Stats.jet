@@ -69,7 +69,7 @@ invalid_sample: fn(xs: [Float]) -> Bool Never! {
 
 copy_floats: fn(xs: [Float]) -> [Float] Never! {
     out := [Float]{}
-    loop x in xs -> &out.push(x)
+    loop x in xs -> out.push(x)
     out
 }
 stable_mean: fn(xs: [Float]) -> Float? {
@@ -135,7 +135,7 @@ sorted: fn(xs: [Float]) -> [Float] Never! {
     if n < 2 -> return out
     start := (n - 2) /% 2
     loop {
-        sift_down(&out, start, n - 1)
+        sift_down(out, start, n - 1)
         if start == 0 -> break
         start = start - 1
     }
@@ -145,7 +145,7 @@ sorted: fn(xs: [Float]) -> [Float] Never! {
         out[0] = out[end]
         out[end] = tmp
         end = end - 1
-        sift_down(&out, 0, end)
+        sift_down(out, 0, end)
     }
     out
 }
@@ -405,7 +405,7 @@ multimode: fn(xs: [Float]) -> [Float] Never! {
             loop z in out {
                 if z == x -> seen = true
             }
-            if seen == false -> &out.push(x)
+            if seen == false -> out.push(x)
         }
     }
     out
@@ -487,7 +487,7 @@ kde: fn(xs: [Float], bandwidth: Float) -> [Float] Never! {
             z: (point - value) / bandwidth
             total = total + exp_value((Float{-0.5}) * z * z)
         }
-        &out.push(total * normalizer)
+        out.push(total * normalizer)
     }
     out
 }
@@ -501,7 +501,7 @@ kde_random: fn(xs: [Float], bandwidth: Float, n: Int) -[Rand]> [Float] Never! {
         index: random.int(0, xs.len() - 1)
         value := xs[index] + random.normal((Float{0.0}), bandwidth)
         if nonfinite(value) -> return [Float]{}
-        &out.push(value)
+        out.push(value)
     }
     out
 }
@@ -523,7 +523,7 @@ zscore: fn(xs: [Float]) -> [Float] Never! {
     }
     spread: sqrt_value(acc / (Float{xs.len()}))
     if spread <= (Float{0.0}) -> return out
-    loop x in xs -> &out.push((x / scale - m) / spread)
+    loop x in xs -> out.push((x / scale - m) / spread)
     out
 }
 
@@ -567,7 +567,7 @@ cumsum: fn(xs: [Float]) -> [Float] Never! {
         acc = t
         value: acc + correction
         if nonfinite(value) -> return [Float]{}
-        &out.push(value)
+        out.push(value)
     }
     out
 }
@@ -625,7 +625,7 @@ quantiles: fn(xs: [Float], n: Int) -> [Float] Never! {
     i := 1
     loop i < n {
         q: quantile_sorted(s, (Float{i}) / (Float{n})) ?? return [Float]{}
-        &out.push(q)
+        out.push(q)
         i = i + 1
     }
     out
@@ -650,7 +650,7 @@ mad: fn(xs: [Float]) -> Float? Never! {
     if scale <= (Float{0.0}) -> return Val(Float{0.0})
     center := m / scale
     dev := [Float]{}
-    loop x in xs -> &dev.push(abs_value(x / scale - center))
+    loop x in xs -> dev.push(abs_value(x / scale - center))
     d: median(dev) ?? return None
     value := d * scale
     if nonfinite(value) -> return None
@@ -705,7 +705,7 @@ moving_average: fn(xs: [Float], window: Int) -> [Float] Never! {
         if width > window -> width = window
         value := acc / (Float{width})
         if nonfinite(value) -> return [Float]{}
-        &out.push(value)
+        out.push(value)
         i = i + 1
     }
     out
@@ -718,12 +718,12 @@ ewma: fn(xs: [Float], alpha: Float) -> [Float] Never! {
     if a < (Float{0.0}) -> a = (Float{0.0})
     if a > (Float{1.0}) -> a = (Float{1.0})
     acc := xs[0].copy()
-    &out.push(acc)
+    out.push(acc)
     i := 1
     loop i < xs.len() {
         acc = a * xs[i] + ((Float{1.0}) - a) * acc
         if nonfinite(acc) -> return [Float]{}
-        &out.push(acc)
+        out.push(acc)
         i = i + 1
     }
     out
@@ -736,7 +736,7 @@ cumprod: fn(xs: [Float]) -> [Float] Never! {
     loop x in xs {
         acc = acc * x
         if nonfinite(acc) -> return [Float]{}
-        &out.push(acc)
+        out.push(acc)
     }
     out
 }
@@ -748,7 +748,7 @@ diff: fn(xs: [Float]) -> [Float] Never! {
     loop i < xs.len() {
         value := xs[i] - xs[i - 1]
         if nonfinite(value) -> return [Float]{}
-        &out.push(value)
+        out.push(value)
         i = i + 1
     }
     out
@@ -765,7 +765,7 @@ rank: fn(xs: [Float]) -> [Float] Never! {
             if xs[j] < xs[i] -> before = before + 1
             if xs[j] == xs[i] -> ties = ties + 1
         }
-        &out.push((Float{before}) + (Float{ties - 1}) / (Float{2.0}))
+        out.push((Float{before}) + (Float{ties - 1}) / (Float{2.0}))
     }
     out
 }
@@ -790,7 +790,7 @@ residuals: fn(xs: [Float], ys: [Float]) -> [Float] Never! {
     loop i in 0..<xs.len() {
         value := ys[i] - (fit.slope * xs[i] + fit.intercept)
         if nonfinite(value) -> return [Float]{}
-        &out.push(value)
+        out.push(value)
     }
     out
 }
@@ -800,7 +800,7 @@ histogram: fn(xs: [Float], bins: Int) -> [Int] Never! {
     if bins <= 0 || xs.len() == 0 || invalid_sample(xs) -> return out
     lo: min(xs) ?? return out
     hi: max(xs) ?? return out
-    loop _ in 0..<bins -> &out.push(0)
+    loop _ in 0..<bins -> out.push(0)
     if lo == hi {
         out[0] = xs.len()
         return out
@@ -852,7 +852,7 @@ clip: fn(xs: [Float], lo: Float, hi: Float) -> [Float] Never! {
         v := x.copy()
         if v < lower -> v = lower
         if v > upper -> v = upper
-        &out.push(v)
+        out.push(v)
     }
     out
 }

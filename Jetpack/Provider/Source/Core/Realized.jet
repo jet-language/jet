@@ -252,12 +252,12 @@ DownloadPlan: struct {
         }
         self.download_bytes = provider_plan_sum(self.download_bytes, item.download_bytes)
         self.disk_bytes = provider_plan_sum(self.disk_bytes, item.disk_bytes)
-        &self.items.push(item)
+        self.items.push(item.copy())
     }
 
     extend: fn(&self, other: DownloadPlan) Never! {
         if other.estimated_seconds != None -> self.estimated_seconds = other.estimated_seconds
-        loop item in other.items -> &self.add_item(item)
+        loop item in other.items -> self.add_item(item)
     }
 
     add_nix: fn(&self, nix: NixDownloadPlan) Never! {
@@ -268,7 +268,7 @@ DownloadPlan: struct {
                 .Cached -> PlanState.Cached
                 .Repaired -> PlanState.Repaired
             }
-            &self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
+            self.add_item(PlanItem{package: item.package, state, download_bytes: Val(item.download_bytes), disk_bytes: Val(item.disk_bytes)})
         }
     }
 }

@@ -9,31 +9,31 @@ use {
     files: core.files
 }
 
-keep_error: fn(v: ^encoding.EncodingError) -> encoding.EncodingError { return v }
-keep_cause: fn(v: ^encoding.EncodingCause) -> encoding.EncodingCause { return v }
-keep_event: fn(v: ^encoding.DataEvent) -> encoding.DataEvent { return v }
-keep_format: fn(v: ^encoding.EncodingFormat) -> encoding.EncodingFormat { return v }
-keep_kind: fn(v: ^encoding.EncodingErrorKind) -> encoding.EncodingErrorKind { return v }
-keep_json_reader: fn(v: ^json.JSONReader) -> json.JSONReader { return v }
-keep_json_writer: fn(v: ^json.JSONWriter) -> json.JSONWriter { return v }
-keep_jsonl_reader: fn(v: ^jsonl.JSONLReader) -> jsonl.JSONLReader { return v }
-keep_jsonl_writer: fn(v: ^jsonl.JSONLWriter) -> jsonl.JSONLWriter { return v }
-keep_csv_reader: fn(v: ^csv.CSVReader) -> csv.CSVReader { return v }
-keep_csv_writer: fn(v: ^csv.CSVWriter) -> csv.CSVWriter { return v }
-keep_xml_reader: fn(v: ^xml.XMLReader) -> xml.XMLReader { return v }
-keep_xml_writer: fn(v: ^xml.XMLWriter) -> xml.XMLWriter { return v }
-keep_cbor_reader: fn(v: ^cbor.CBORReader) -> cbor.CBORReader { return v }
-keep_cbor_writer: fn(v: ^cbor.CBORWriter) -> cbor.CBORWriter { return v }
+keep_error: fn(v: &&encoding.EncodingError) -> encoding.EncodingError { return v }
+keep_cause: fn(v: &&encoding.EncodingCause) -> encoding.EncodingCause { return v }
+keep_event: fn(v: &&encoding.DataEvent) -> encoding.DataEvent { return v }
+keep_format: fn(v: &&encoding.EncodingFormat) -> encoding.EncodingFormat { return v }
+keep_kind: fn(v: &&encoding.EncodingErrorKind) -> encoding.EncodingErrorKind { return v }
+keep_json_reader: fn(v: &&json.JSONReader) -> json.JSONReader { return v }
+keep_json_writer: fn(v: &&json.JSONWriter) -> json.JSONWriter { return v }
+keep_jsonl_reader: fn(v: &&jsonl.JSONLReader) -> jsonl.JSONLReader { return v }
+keep_jsonl_writer: fn(v: &&jsonl.JSONLWriter) -> jsonl.JSONLWriter { return v }
+keep_csv_reader: fn(v: &&csv.CSVReader) -> csv.CSVReader { return v }
+keep_csv_writer: fn(v: &&csv.CSVWriter) -> csv.CSVWriter { return v }
+keep_xml_reader: fn(v: &&xml.XMLReader) -> xml.XMLReader { return v }
+keep_xml_writer: fn(v: &&xml.XMLWriter) -> xml.XMLWriter { return v }
+keep_cbor_reader: fn(v: &&cbor.CBORReader) -> cbor.CBORReader { return v }
+keep_cbor_writer: fn(v: &&cbor.CBORWriter) -> cbor.CBORWriter { return v }
 
 run: fn() {
     limits := encoding.EncodingLimits.safe()
     print("{limits.buffer_bytes}:{limits.max_depth}:{limits.max_item_bytes}:{limits.max_expansion_depth}:{limits.max_expansion_bytes}")
     if limits.max_total_bytes == None { print(true) } else { print(false) }
-    print(keep_format(^encoding.EncodingFormat.JSON) == encoding.EncodingFormat.JSON)
-    print(keep_kind(^encoding.EncodingErrorKind.Limit) == encoding.EncodingErrorKind.Limit)
+    print(keep_format(encoding.EncodingFormat.JSON.move()) == encoding.EncodingFormat.JSON)
+    print(keep_kind(encoding.EncodingErrorKind.Limit.move()) == encoding.EncodingErrorKind.Limit)
 
     cause := encoding.EncodingCause{ kind: "io", os_code: None, message: "nope" }
-    kept_cause := keep_cause(^cause)
+    kept_cause := keep_cause(cause)
     print(kept_cause.kind)
     print(kept_cause.message)
 
@@ -47,7 +47,7 @@ run: fn() {
         reason: "buffer_bytes 1 is outside 4096..16777216",
         cause: None,
     }
-    kept_err := keep_error(^err)
+    kept_err := keep_error(err)
     print(kept_err.format == encoding.EncodingFormat.JSON)
     print(kept_err.kind == encoding.EncodingErrorKind.Limit)
     print(kept_err.byte_offset)
@@ -55,19 +55,19 @@ run: fn() {
     print("{kept_err}")
 
     event := encoding.DataEvent.Null
-    kept_event := keep_event(^event)
+    kept_event := keep_event(event)
     print(true)
 
     output: files.create("{work}/foundation.json") ?? panic("create")
-    writer: json.writer(^output, limits, false) ?? panic("writer")
-    kept_writer := keep_json_writer(^writer)
-    &kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
-    &kept_writer.finish() ?? panic("finish")
+    writer: json.writer(output, limits, false) ?? panic("writer")
+    kept_writer := keep_json_writer(writer)
+    kept_writer.write(encoding.DataEvent.Null) ?? panic("write")
+    kept_writer.finish() ?? panic("finish")
 
     bad := encoding.EncodingLimits.safe()
     bad.buffer_bytes = 1
     bad_output: files.create("{work}/bad-limits.json") ?? panic("bad create")
-    if json.writer(^bad_output, bad, false) == {
+    if json.writer(bad_output, bad, false) == {
         .Ok(_) -> { print("limits-missed") }
         .Err(reject) -> {
             print("{reject}")

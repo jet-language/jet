@@ -1,8 +1,17 @@
-Error [jet.OwnerMovedWhileViewed]: List elements create overlapping views of `values[…]`
-  --> tests/ui/view_list_overlap.jet:1:74
+Error [jet.OwnerMovedWhileViewed]: `values[…]` already has a live view that conflicts with `second`
+  --> tests/ui/view_list_overlap.jet:3:5
     |
-  1 | duplicate: fn(values: &[Int]) -> [ViewMut<Int>] { return [&values[0..1], &values[0..1]] }
-    |                                                                          ^^^^^^^^^^^^^
+  3 |     second: &values[0..1]
+    |     ^^^^^^
+ Why: Many read views may overlap, but an exclusive mutable view cannot overlap any other live view
+ Fix: Finish using the earlier view before creating this one, or make an owned copy
+More: jet-lang.dev/e/E0212
+
+Error [jet.OwnerMovedWhileViewed]: List elements create overlapping views of `values[…]`
+  --> tests/ui/view_list_overlap.jet:4:20
+    |
+  4 |     return [first, second]
+    |                    ^^^^^^
  Why: List elements coexist, so an exclusive mutable view cannot overlap another element's view
  Fix: Use disjoint ranges, keep only one mutable view, or store owned values
 More: jet-lang.dev/e/E0212

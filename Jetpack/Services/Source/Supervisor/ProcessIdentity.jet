@@ -297,7 +297,7 @@ services_run_bounded_probe: fn(spec: ProcessSpec, timeout_ms: Int) -[Env, Exec, 
     deadline: services_now_ms() + bounded
     loop {
         exited: child.exited() ?? {
-            services_abandon_child(&child)
+            services_abandon_child(child)
             return false
         }
         if exited {
@@ -305,7 +305,7 @@ services_run_bounded_probe: fn(spec: ProcessSpec, timeout_ms: Int) -[Env, Exec, 
             return receipt.success
         }
         if services_now_ms() >= deadline {
-            services_abandon_child(&child)
+            services_abandon_child(child)
             return false
         }
         time.sleep(time.duration_ms(10))
@@ -348,7 +348,7 @@ services_unit_safe_name: fn(name: String) -> String Never! {
         text: "{scalar}"
         bytes: text.bytes()
         keep: bytes.len() == 1 && (trust_text_is_alphanumeric(Int.from_u8(bytes[0])) || Int.from_u8(bytes[0]) == 95 || Int.from_u8(bytes[0]) == 45)
-        &out.push(if keep -> text else -> "-")
+        out.push(if keep -> text else -> "-")
     }
     out.join("")
 }

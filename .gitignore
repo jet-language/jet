@@ -54,17 +54,21 @@ jet-lsp-timing.json
 **/.jet/symbols/
 
 # Polyglot binder output (`jet inspect bind`). The generated `*.jet` binding
-# source is deterministic and stays tracked; native archives, class files,
-# worker scripts, and resolved host paths are machine-specific.
+# source is deterministic and stays tracked, and so are a C binding's `.hash`
+# and `.metadata` sidecars; native archives, class files, worker scripts, and
+# resolved host paths (a `.provenance` record) are machine-specific.
 **/.jet/bindings/*/*
 !**/.jet/bindings/*/*.jet
+!**/.jet/bindings/c/*.hash
+!**/.jet/bindings/c/*.metadata
 
 # `b.generate` output (D-BUILDGEN1=A) is materialized on every build and never
-# committed. The two example locks below only hold that output's digest.
-# (`Examples/features/comptime/.jet/lock` stays tracked: it is a fixture.)
+# committed, and an example's `.jet/lock` only holds that output's digest. Two
+# example locks are tracked fixtures.
 **/.jet/generated/
-Examples/features/tooling/.jet/lock
-Examples/features/tooling/programmable_build/.jet/lock
+Examples/**/.jet/lock
+!Examples/Metaprogramming/Comptime/.jet/lock
+!Examples/Tooling/DevLoop/StaticSiteGenerator/.jet/lock
 # Exception: E3510's input is a hand-written module at the generated path.
 !tests/ui/build_generated_collision/.jet/generated/
 

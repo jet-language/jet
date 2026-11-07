@@ -107,10 +107,10 @@ trust_text_split: fn(text: String, code: Int) -> [String] Never! {
     loop {
         at: trust_text_find_byte(raw, code, start)
         if at < 0 -> break
-        &pieces.push(pkg_bytes_text(raw, start, at))
+        pieces.push(pkg_bytes_text(raw, start, at))
         start = at + 1
     }
-    &pieces.push(pkg_bytes_text(raw, start, raw.len()))
+    pieces.push(pkg_bytes_text(raw, start, raw.len()))
     pieces
 }
 
@@ -145,7 +145,7 @@ trust_text_lines: fn(text: String) -> [String] Never! {
         end: if newline < 0 -> raw.len() else -> newline
         content_end := end
         if newline >= 0 && content_end > start && Int.from_u8(raw[content_end - 1]) == TRUST_CARRIAGE_RETURN -> content_end -= 1
-        &lines.push(pkg_bytes_text(raw, start, content_end))
+        lines.push(pkg_bytes_text(raw, start, content_end))
         start = end + 1
     }
     lines
@@ -161,7 +161,7 @@ trust_text_words: fn(text: String) -> [String] Never! {
         if index >= raw.len() -> break
         start: index.copy()
         loop index < raw.len() && pkg_bytes_space_width(raw, index) == 0 -> index += 1
-        &words.push(pkg_bytes_text(raw, start, index))
+        words.push(pkg_bytes_text(raw, start, index))
     }
     words
 }
@@ -175,11 +175,11 @@ trust_text_replace_all: fn(text: String, needle: String, replacement: String) ->
     index := 0
     loop index < raw.len() {
         if pkg_bytes_starts_with(raw, index, pattern) {
-            loop byte in replacement.bytes() -> &out.push(byte)
+            loop byte in replacement.bytes() -> out.push(byte)
             index += pattern.len()
             next
         }
-        &out.push(raw[index])
+        out.push(raw[index])
         index += 1
     }
     String.from_bytes(out) ?? text.copy()
@@ -225,8 +225,8 @@ trust_text_compare_lists: fn(left: [String], right: [String]) -> Int Never! {
 trust_sha256_nul_joined: fn(parts: [String]) -> String Never! {
     bytes := [U8]{}
     loop index in 0..<parts.len() {
-        if index > 0 -> &bytes.push(U8{0})
-        loop byte in parts[index].bytes() -> &bytes.push(byte)
+        if index > 0 -> bytes.push(U8{0})
+        loop byte in parts[index].bytes() -> bytes.push(byte)
     }
     pkg_sha256_hex(bytes)
 }

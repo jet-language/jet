@@ -4,8 +4,7 @@ start: fn(group: Group, remaining: Int) Never! {
     if remaining == 0 -> return
     worker: task report()
     start(group, remaining - 1)
-    joined: ^worker.join() ?? panic("join failed")
-    joined ?? panic("infallible worker")
+    worker.join() ?? panic("join failed")
 }
 run: fn() {
     task.group group {

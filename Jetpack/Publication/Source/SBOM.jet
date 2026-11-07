@@ -23,7 +23,7 @@ publication_emit_spdx: fn(lock: LockFile, root_name: String, root_version: Strin
     loop index in 0..<lock.packages.len() {
         package: lock.packages[index]
         checksum: publication_spdx_checksum(package.content_hash ?? package.fingerprint) ?? "NOASSERTION"
-        &out.push("##### {package.name}\n\nPackageName: {package.name}\nSPDXID: SPDXRef-pkg-{index}\nPackageVersion: {package.version}\nFilesAnalyzed: false\nPackageChecksum: {checksum}\nPackageDownloadLocation: NOASSERTION\n\nRelationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-{index}\n\n")
+        out.push("##### {package.name}\n\nPackageName: {package.name}\nSPDXID: SPDXRef-pkg-{index}\nPackageVersion: {package.version}\nFilesAnalyzed: false\nPackageChecksum: {checksum}\nPackageDownloadLocation: NOASSERTION\n\nRelationship: SPDXRef-root DEPENDS_ON SPDXRef-pkg-{index}\n\n")
     }
     out.join("")
 }
@@ -35,7 +35,7 @@ publication_emit_cyclonedx: fn(lock: LockFile, root_name: String, root_version: 
         package: lock.packages[index]
         value: package.content_hash ?? package.fingerprint
         hash: if value.starts_with("sha256-") -> value.removeprefix("sha256-") else -> value
-        &components.push("    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-{index}\",\n      \"name\": {foundation_json_quote(package.name)},\n      \"version\": {foundation_json_quote(package.version)},\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": {foundation_json_quote(hash)} }}]\n    }}")
+        components.push("    {{\n      \"type\": \"library\",\n      \"bom-ref\": \"pkg-{index}\",\n      \"name\": {foundation_json_quote(package.name)},\n      \"version\": {foundation_json_quote(package.version)},\n      \"hashes\": [{{ \"alg\": \"SHA-256\", \"content\": {foundation_json_quote(hash)} }}]\n    }}")
     }
     "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [{{ \"name\": \"jet\" }}],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": {foundation_json_quote(root_name)},\n      \"version\": {foundation_json_quote(root_version)}\n    }}\n  }},\n  \"components\": [\n{components.join(",\n")}\n  ]\n}}\n"
 }

@@ -1,5 +1,5 @@
 // `run_prove` (its front) and `resolve_target`: the closed `jet prove TARGET`
-// grammar (D-PROVE-REPLAY1=A, D-RECORD-SPELL1=D, D-PROVE-LENS1=A) and the one
+// grammar and the one
 // target it selects. Every refusal here comes before any build, producer,
 // artifact or program effect.
 use {
@@ -9,7 +9,7 @@ use {
     jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
 }
 
-// The `--lens` values, in report order (D-PROVE-LENS1=A).
+// The `--lens` values, in report order.
 JET_CLI_PROOF_LENSES: [String]{"all", "refinements", "effects", "taint", "contracts", "tests", "budgets", "replay", "solver"}
 
 // Authority files a directory target never counts as proof members.
@@ -103,7 +103,7 @@ jet_cli_prove_lens_names: fn(lenses: [String]) -> [String] Never! {
     if lenses.contains("all") -> return if lenses.contains("solver") -> [String]{"all", "solver"} else -> [String]{"all"}
     names := [String]{}
     loop lens in JET_CLI_PROOF_LENSES {
-        if lenses.contains(lens) -> &names.push(lens.copy())
+        if lenses.contains(lens) -> names.push(lens.copy())
     }
     names
 }
@@ -189,11 +189,11 @@ jet_cli_prove_parse: fn(words: [String]) -> JetCLIProveRequest JetCLIProveRefusa
                     exit_code: JET_DRIVER_EXIT_USAGE,
                 })
             }
-            &lenses.push(value)
+            lenses.push(value)
             next
         }
         if word.starts_with("-") -> return Err(jet_cli_prove_refusal("E2102", "unknown `jet prove` flag `{word}`", "run `jet prove --help` to see the flags it accepts", JET_DRIVER_EXIT_USAGE))
-        &positionals.push(word)
+        positionals.push(word)
     }
     if positionals.len() != 1 -> return Err(jet_cli_prove_refusal("E2104", "`jet prove` needs exactly one file, package, or workspace target", "run `jet prove path/to/program.jet`", JET_DRIVER_EXIT_USAGE))
     Ok(JetCLIProveRequest{target: positionals[0].copy(), lenses: lenses, capture: capture, replay: replay, save: save, unsave: unsave})
@@ -242,10 +242,10 @@ jet_cli_prove_resolve: fn(raw: String) -[FS, Env]> JetCLIProveTarget JetCLIProve
         }
     }
     found := [String]{}
-    if jet_cli_prove_collect(raw, &found) == .Err(problem) -> return Err(jet_cli_prove_target_refusal(problem.message))
+    if jet_cli_prove_collect(raw, found) == .Err(problem) -> return Err(jet_cli_prove_target_refusal(problem.message))
     if found.len() == 0 -> return Err(jet_cli_prove_target_refusal("proof target `{raw}` contains no .jet files"))
     members := loop path in found -> jet_cli_prove_normalized(path, cwd)
-    &members.sort()
+    members.sort()
     Ok(JetCLIProveTarget{kind: kind, root: root, members: members})
 }
 
@@ -284,10 +284,10 @@ jet_cli_prove_collect: fn(directory: String, found: &[String]) JetCLIReadError! 
         }
         if entry.name.starts_with(".") || JET_CLI_SKIPPED_NAMES.contains(entry.name) -> next
         if info.is_dir {
-            jet_cli_prove_collect(path, &found)
+            jet_cli_prove_collect(path, found)
             next
         }
-        if info.is_file && entry.name.ends_with(".jet") && !JET_CLI_PROVE_AUTHORITY_FILES.contains(entry.name) -> &found.push(path)
+        if info.is_file && entry.name.ends_with(".jet") && !JET_CLI_PROVE_AUTHORITY_FILES.contains(entry.name) -> found.push(path)
     }
 }
 
@@ -300,9 +300,9 @@ jet_cli_prove_normalized: fn(path: String, cwd: String) -> String Never! {
     stripped: text.starts_with(prefix)
     if stripped -> text = text.removeprefix(prefix)
     parts := [String]{}
-    if !stripped && (text == "." || text.starts_with("./")) -> &parts.push(".")
+    if !stripped && (text == "." || text.starts_with("./")) -> parts.push(".")
     loop part in text.split("/").to_list() {
-        if part != "" && part != "." -> &parts.push(part)
+        if part != "" && part != "." -> parts.push(part)
     }
     joined: parts.join("/")
     if text.starts_with("/") -> return "/{joined}"

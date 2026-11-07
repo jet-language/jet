@@ -186,18 +186,18 @@ pretty_fragment: fn(value: String, indent: Int) -> String Never! {
         } else if ch == (U8{34}) {
             quoted = true
         } else if structure_close(ch) == .Val(expected) {
-            &stack.push(expected)
+            stack.push(expected)
         } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
-            _: &stack.pop()
+            _: stack.pop()
         } else if ch == (U8{44}) && stack.len() == 0 {
             item: byte_slice(body, start, i).trim().copy()
-            if item != "" -> &items.push(pretty_fragment(item, indent + 2))
+            if item != "" -> items.push(pretty_fragment(item, indent + 2))
             start = i + 1
         }
         i = i + 1
     }
     item: byte_slice(body, start, body_raw.len()).trim().copy()
-    if item != "" -> &items.push(pretty_fragment(item, indent + 2))
+    if item != "" -> items.push(pretty_fragment(item, indent + 2))
     loop (index, expanded) in items {
         separator: if index + 1 < items.len() -> "," else -> ""
         out = "{out}\n{spaces(indent + 2)}{expanded}{separator}"
@@ -251,9 +251,9 @@ matching_close: fn(value: String, open: U8, close: U8) -> Int? Never! {
         } else if ch == (U8{34}) {
             quoted = true
         } else if structure_close(ch) == .Val(expected) {
-            &stack.push(expected)
+            stack.push(expected)
         } else if stack.len() > 0 && stack[stack.len() - 1] == ch {
-            _: &stack.pop()
+            _: stack.pop()
             if stack.len() == 0 -> return Val(i)
         }
         i = i + 1
@@ -307,10 +307,10 @@ duration: fn(n: Int) -> String Never! {
     rest %%= 60000
     seconds: rest /% 1000
     parts := [String]{}
-    if days > 0 -> &parts.push("{days}d")
-    if hours > 0 -> &parts.push("{hours}h")
-    if minutes > 0 -> &parts.push("{minutes}m")
-    if seconds > 0 || parts.len() == 0 -> &parts.push("{seconds}s")
+    if days > 0 -> parts.push("{days}d")
+    if hours > 0 -> parts.push("{hours}h")
+    if minutes > 0 -> parts.push("{minutes}m")
+    if seconds > 0 || parts.len() == 0 -> parts.push("{seconds}s")
     "{sign}{parts.take(3).join(" ")}"
 }
 
@@ -332,10 +332,10 @@ radix: fn(n: Int, base: Int) -> String Never! {
     x := n
     loop x > 0 {
         d: x % base
-        if d < 10 -> &digits.push(U8{48 + d}) else -> &digits.push(U8{87 + d})
+        if d < 10 -> digits.push(U8{48 + d}) else -> digits.push(U8{87 + d})
         x /%= base
     }
-    &digits.reverse()
+    digits.reverse()
     String.from_bytes(digits) ?? "0"
 }
 
@@ -397,8 +397,8 @@ grouped_digits: fn(text: String) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
     loop i in 0..<raw.len() {
-        if i > 0 && (raw.len() - i) % 3 == 0 -> &out.push(U8{44})
-        &out.push(raw[i])
+        if i > 0 && (raw.len() - i) % 3 == 0 -> out.push(U8{44})
+        out.push(raw[i])
     }
     String.from_bytes(out) ?? text.copy()
 }
@@ -454,7 +454,7 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> [U8] {
     i := start
     loop {
         if i >= end || i < 0 || i >= raw.len() -> return out
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }

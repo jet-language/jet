@@ -1,9 +1,9 @@
-// Each value below closes exactly once: `^held` moves the variable out as the tail value.
+// Each value below closes exactly once: `held.move()` moves the variable out as the tail value.
 use files: core.files
 
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 // Closes through the FileReader it holds, and the Res beside it.
@@ -28,7 +28,7 @@ ok_checked: fn(name: String) -> Checked Err! {
 
 moved_option_res: fn(name: String) -> Res? {
     held: some_res(name)
-    ^held
+    held.move()
 }
 
 check_option_res: fn() {
@@ -40,7 +40,7 @@ check_option_res: fn() {
 
 moved_result_res: fn(name: String) -> Res Err! {
     held: ok_res(name)
-    ^held
+    held.move()
 }
 
 check_result_res: fn() {
@@ -52,7 +52,7 @@ check_result_res: fn() {
 
 moved_option_reader: fn(name: String) -> Checked? {
     held: some_checked(name)
-    ^held
+    held.move()
 }
 
 check_option_reader: fn() {
@@ -64,7 +64,7 @@ check_option_reader: fn() {
 
 moved_result_reader: fn(name: String) -> Checked Err! {
     held: ok_checked(name)
-    ^held
+    held.move()
 }
 
 check_result_reader: fn() {

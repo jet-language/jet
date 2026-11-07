@@ -29,34 +29,34 @@ checked: fn(relative: String) -> Checked {
 
 gathered: fn() -> [Checked] {
     out := [Checked]{}
-    &out.push(checked("b"))
-    &out.push(checked("c"))
-    &out.push(checked("a"))
+    out.push(checked("b"))
+    out.push(checked("c"))
+    out.push(checked("a"))
     out
 }
 
-passed_through: fn(input: ^[Checked]) -> [Checked] {
+passed_through: fn(input: &&[Checked]) -> [Checked] {
     input
 }
 
-rebound: fn(input: ^[Checked]) -> [Checked] {
-    out := ^input
+rebound: fn(input: &&[Checked]) -> [Checked] {
+    out := input.move()
     out
 }
 
-sorted: fn(input: ^[Checked]) -> [Checked] {
+sorted: fn(input: &&[Checked]) -> [Checked] {
     out := input
-    &out.sort_by((a, b) -> a.relative <=> b.relative)
+    out.sort_by((a, b) -> a.relative <=> b.relative)
     out
 }
 
-shelved: fn(input: ^[Checked]) -> Shelf {
+shelved: fn(input: &&[Checked]) -> Shelf {
     shelf := Shelf{name: "shelf", items: input}
     again := shelf
     again
 }
 
-paired: fn(input: ^Shelf) -> (shelf: Shelf, count: Int) {
+paired: fn(input: &&Shelf) -> (shelf: Shelf, count: Int) {
     count: input.items.len()
     pair := (shelf: input, count: count)
     pair
@@ -65,7 +65,7 @@ paired: fn(input: ^Shelf) -> (shelf: Shelf, count: Int) {
 nested: fn() -> [[Checked]] {
     inner := [Checked]{checked("x"), checked("y")}
     outer := [[Checked]]{}
-    &outer.push(inner)
+    outer.push(inner)
     outer
 }
 
@@ -79,28 +79,28 @@ run: fn() {
     before: open_fds()
     list := gathered()
     print("gathered {names(list)} open {open_fds() - before}")
-    through := passed_through(^list)
+    through := passed_through(list)
     print("passed {names(through)} open {open_fds() - before}")
-    again := rebound(^through)
+    again := rebound(through)
     print("rebound {names(again)} open {open_fds() - before}")
-    ordered := sorted(^again)
+    ordered := sorted(again)
     print("sorted {names(ordered)} open {open_fds() - before}")
-    shelf := shelved(^ordered)
+    shelf := shelved(ordered)
     print("shelved {names(shelf.items)} open {open_fds() - before}")
-    pair := paired(^shelf)
+    pair := paired(shelf)
     print("paired {pair.count} open {open_fds() - before}")
-    drop_pair(^pair)
+    drop_pair(pair)
     print("pair leaked {open_fds() - before}")
     lists := nested()
     print("nested {lists.len()} open {open_fds() - before}")
-    drop_lists(^lists)
+    drop_lists(lists)
     print("nested leaked {open_fds() - before}")
 }
 
-drop_pair: fn(pair: ^(shelf: Shelf, count: Int)) {
+drop_pair: fn(pair: &&(shelf: Shelf, count: Int)) {
     print("dropping {pair.shelf.name}")
 }
 
-drop_lists: fn(lists: ^[[Checked]]) {
+drop_lists: fn(lists: &&[[Checked]]) {
     print("dropping {lists.len()}")
 }

@@ -18,12 +18,12 @@ Reverse: struct<Value, Alpha> {
 }
 
 impl Box {
-    new: fn(value: ^T) -> Box<T> {
+    new: fn(value: &&T) -> Box<T> {
         return Box<T>{ value: value }
     }
 }
 
-keep_result: fn(value: ^(Int CellResultError!)) {
+keep_result: fn(value: &&(Int CellResultError!)) {
     cell: Cell.new(value)
     print(cell.read(result -> result ?? 0))
 }
@@ -35,7 +35,7 @@ ok_result: fn() -> Int CellResultError! {
 run: fn() {
     counts := [String:Int]{}
     counts["jet"] = 3
-    map_cell: Cell.new(^counts)
+    map_cell: Cell.new(counts)
     print(map_cell.read(values -> values.get("jet") ?? 0))
 
     keep_result(ok_result())

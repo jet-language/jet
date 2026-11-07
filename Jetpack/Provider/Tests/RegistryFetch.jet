@@ -3,11 +3,11 @@
 
 provider_registry_test_header: fn(kind: Int, stored: Int) -> [U8] Never! {
     header := [U8]{}
-    loop _ in 0..<512 -> &header.push(U8{0})
+    loop _ in 0..<512 -> header.push(U8{0})
     digits := [U8]{}
     value := stored
     loop _ in 0..<11 {
-        &digits.push(U8{48 + value %% 8})
+        digits.push(U8{48 + value %% 8})
         value = value /% 8
     }
     loop index in 0..<11 -> header[124 + index] = digits[10 - index]
@@ -37,12 +37,12 @@ provider_registry_test_project: fn(manifest: String) -[FS]> String Never! {
 #Test("registry pax logical size cannot bypass stored payload limit") {
     pax: "21 GNU.sparse.size=1\n".bytes()
     archive := provider_registry_test_header(120, pax.len())
-    loop byte in pax -> &archive.push(byte)
-    loop _ in 0..<(512 - pax.len()) -> &archive.push(U8{0})
-    loop byte in provider_registry_test_header(76, PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) -> &archive.push(byte)
-    loop _ in 0..<1024 -> &archive.push(U8{0})
+    loop byte in pax -> archive.push(byte)
+    loop _ in 0..<(512 - pax.len()) -> archive.push(U8{0})
+    loop byte in provider_registry_test_header(76, PROVIDER_MAX_ARCHIVE_ENTRY_BYTES + 1) -> archive.push(byte)
+    loop _ in 0..<1024 -> archive.push(U8{0})
     preflight := RegistryTarPreflight.new()
-    if &preflight.feed(archive) == {
+    if preflight.feed(archive) == {
         .Ok(_) -> panic("an oversized stored payload must be refused")
         .Err(error) -> {
             message: error.message()
@@ -140,11 +140,11 @@ provider_registry_test_octal: fn(header: &[U8], at: Int, width: Int, value: Int)
 // the block size.
 provider_registry_test_member: fn(name: String, kind: Int, body: [U8]) -> [U8] Never! {
     header := [U8]{}
-    loop _ in 0..<512 -> &header.push(U8{0})
+    loop _ in 0..<512 -> header.push(U8{0})
     raw: name.bytes()
     loop index in 0..<raw.len() -> header[index] = raw[index]
-    provider_registry_test_octal(&header, 100, 8, 420)
-    provider_registry_test_octal(&header, 124, 12, body.len())
+    provider_registry_test_octal(header, 100, 8, 420)
+    provider_registry_test_octal(header, 124, 12, body.len())
     header[156] = U8{kind}
     magic: "ustar".bytes()
     loop index in 0..<magic.len() -> header[257 + index] = magic[index]
@@ -153,20 +153,20 @@ provider_registry_test_member: fn(name: String, kind: Int, body: [U8]) -> [U8] N
     loop index in 148..<156 -> header[index] = U8{32}
     sum := 0
     loop byte in header -> sum += Int.from_u8(byte)
-    provider_registry_test_octal(&header, 148, 7, sum)
+    provider_registry_test_octal(header, 148, 7, sum)
     header[154] = U8{0}
     member := header
-    loop byte in body -> &member.push(byte)
-    loop _ in 0..<((512 - body.len() %% 512) %% 512) -> &member.push(U8{0})
+    loop byte in body -> member.push(byte)
+    loop _ in 0..<((512 - body.len() %% 512) %% 512) -> member.push(U8{0})
     member
 }
 
 provider_registry_test_tar: fn(members: [[U8]]) -> [U8] Never! {
     archive := [U8]{}
     loop member in members {
-        loop byte in member -> &archive.push(byte)
+        loop byte in member -> archive.push(byte)
     }
-    loop _ in 0..<1024 -> &archive.push(U8{0})
+    loop _ in 0..<1024 -> archive.push(U8{0})
     archive
 }
 
@@ -213,7 +213,7 @@ provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]
         provider_registry_test_member("pkg/ok", 48, body),
     }), unsafe_path)
     long_name := "../escape".bytes()
-    &long_name.push(U8{0})
+    long_name.push(U8{0})
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{
         provider_registry_test_member("././@LongLink", 76, long_name),
         provider_registry_test_member("pkg/ok", 48, body),
@@ -229,7 +229,7 @@ provider_registry_test_refuses: fn(archive: [U8], expected: String) Never! -[FS]
     // A header that claims more payload than the stream holds.
     short: provider_registry_test_member("pkg/ok", 48, body)
     truncated := provider_registry_test_member("pkg/big", 48, [U8]{})
-    provider_registry_test_octal(&truncated, 124, 12, 4096)
+    provider_registry_test_octal(truncated, 124, 12, 4096)
     provider_registry_test_refuses(provider_registry_test_tar([[U8]]{short, truncated}), "truncated tar payload")
 }
 

@@ -66,16 +66,16 @@ compiler_threads_partition: fn(weights: [Int], workers: Int) -> [Int] Never! {
     part := 1
     loop (index, weight) in weights {
         loop part < workers && reached * workers >= total * part {
-            &bounds.push(index)
+            bounds.push(index)
             part += 1
         }
         reached += if weight < 1 -> 1 else -> weight
     }
     loop part < workers {
-        &bounds.push(weights.len())
+        bounds.push(weights.len())
         part += 1
     }
-    &bounds.push(weights.len())
+    bounds.push(weights.len())
     bounds
 }
 
@@ -86,10 +86,10 @@ compiler_threads_partition: fn(weights: [Int], workers: Int) -> [Int] Never! {
 compiler_threads_heaviest_first: fn(weights: [Int]) -> [Int] Never! {
     count: weights.len()
     order := [Int]{}
-    loop index in 0..<count -> &order.push(index)
+    loop index in 0..<count -> order.push(index)
     if count < 2 -> return order
     scratch := [Int]{}
-    loop _ in 0..<count -> &scratch.push(0)
+    loop _ in 0..<count -> scratch.push(0)
     width := 1
     loop width < count {
         start := 0

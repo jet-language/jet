@@ -33,15 +33,15 @@ SemaFrameCallScan: struct {
 sema_frame_lambda_schedule: fn(lambda: Lambda, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> SemaFrameScheduleFacts {
     scan := SemaFrameCallScan{operations: [FrameOperation]{}, dma_starts: [SemaFrameDMABinding]{}, refusal: None, refusal_index: -1}
     if lambda.body == {
-        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_frame_note_call(&scan, expression, environment, program, scopes))
+        .Expr(value) -> ast_visit_expr(value, (expression: Expr) -> sema_frame_note_call(scan, expression, environment, program, scopes))
         .Block(body) -> {
-            sema_frame_collect_dma_starts(&scan, body, environment, program, scopes)
-            ast_visit_body(body, (expression: Expr) -> sema_frame_note_call(&scan, expression, environment, program, scopes), true)
+            sema_frame_collect_dma_starts(scan, body, environment, program, scopes)
+            ast_visit_body(body, (expression: Expr) -> sema_frame_note_call(scan, expression, environment, program, scopes), true)
         }
     }
     if scan.refusal != None -> return SemaFrameScheduleFacts{schedule: None, explanation: None, derivation_record: None, derivation: None, error: scan.refusal}
-    operations := ^scan.operations
-    &operations.sort_by((left: FrameOperation, right: FrameOperation) -> left.source_index <=> right.source_index)
+    operations := scan.operations.move()
+    operations.sort_by((left: FrameOperation, right: FrameOperation) -> left.source_index <=> right.source_index)
     source: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, lambda.span)
     sema_frame_schedule_produce(operations, environment, program, source, lambda.span.start)
 }
@@ -54,34 +54,34 @@ sema_frame_note_refusal: fn(scan: &SemaFrameCallScan, detail: String, source_ind
 
 sema_frame_note_fact: fn(scan: &SemaFrameCallScan, fact: SemaFrameOperationFact, source_index: Int) Never! {
     if fact.error == .Val(detail) {
-        sema_frame_note_refusal(&scan, detail, source_index)
+        sema_frame_note_refusal(scan, detail, source_index)
         return
     }
-    if fact.operation == .Val(operation) -> &scan.operations.push(operation)
+    if fact.operation == .Val(operation) -> scan.operations.push(operation.copy())
 }
 
 sema_frame_note_call: fn(scan: &SemaFrameCallScan, expression: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     if expression == {
         .Call(call, _) -> {
             index: call.name_span.start
-            sema_frame_note_fact(&scan, sema_frame_direct_call_operation(call.name, call.args, index, environment, program, scopes), index)
+            sema_frame_note_fact(scan, sema_frame_direct_call_operation(call.name, call.args, index, environment, program, scopes), index)
         }
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             index: method_span.start
             if sema_frame_module_call_operation(receiver, method, args, index, environment, program, scopes) == .Val(fact) {
-                sema_frame_note_fact(&scan, fact, index)
+                sema_frame_note_fact(scan, fact, index)
                 return
             }
             if sema_frame_hardware_register_operation(receiver, method, index, environment, program, scopes) == .Val(operation) {
-                &scan.operations.push(operation)
+                scan.operations.push(operation)
                 return
             }
             if method == "start" {
                 started: sema_frame_hardware_dma_start(receiver, args, index, environment, program, scopes)
-                if started.operation == .Val(operation) -> &scan.operations.push(operation)
+                if started.operation == .Val(operation) -> scan.operations.push(operation)
                 return
             }
-            if method == "wait" && sema_frame_hardware_dma_wait(receiver, index, scan.dma_starts) == .Val(operation) -> &scan.operations.push(operation)
+            if method == "wait" && sema_frame_hardware_dma_wait(receiver, index, scan.dma_starts) == .Val(operation) -> scan.operations.push(operation)
         }
         else -> {}
     }
@@ -129,20 +129,20 @@ sema_frame_registered_call_operation: fn(name: String, args: [CallArg], target: 
 sema_frame_collect_dma_starts: fn(scan: &SemaFrameCallScan, body: [Stmt], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) Never! {
     loop statement in body {
         if statement == {
-            .Val(binding) -> sema_frame_record_dma_start(&scan, binding.name, binding.init, environment, program, scopes)
-            .While(_, inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Reactive(inner, _) | .Shield(inner, _) | .Switched(_, inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .ComptimeBlock(inner, _, _) | .ContextBlock(_, inner, _) | .Live(inner, _) | .AssumeDet(_, _, inner, _) | .Transact(_, _, inner, _, _) | .ScopeMember(_, _, _, _, inner, _, _, _) -> sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+            .Val(binding) -> sema_frame_record_dma_start(scan, binding.name, binding.init, environment, program, scopes)
+            .While(_, inner, _, _, _) | .For(_, _, _, _, inner, _, _, _, _) | .Loop(inner, _, _, _) | .Unsafe(_, _, inner, _) | .Impure(_, _, inner, _) | .Reactive(inner, _) | .Shield(inner, _) | .Switched(_, inner, _) | .Region(_, _, inner, _) | .Policy(_, inner, _) | .TaskGroup(_, _, _, inner, _) | .Layout(_, _, inner, _) | .AuthorityScope(_, _, _, inner, _) | .ComptimeBlock(inner, _, _) | .ContextBlock(_, inner, _) | .Live(inner, _) | .AssumeDet(_, _, inner, _) | .Transact(_, _, inner, _, _) | .ScopeMember(_, _, _, _, inner, _, _, _) -> sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
             .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
-                loop arm in arms -> sema_frame_collect_dma_starts(&scan, arm.body, environment, program, scopes)
-                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+                loop arm in arms -> sema_frame_collect_dma_starts(scan, arm.body, environment, program, scopes)
+                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
             }
             .CountedLoop(init, _, step, inner, _, _, _) -> {
-                sema_frame_record_dma_start(&scan, init.name, init.init, environment, program, scopes)
-                if step == .Val(value) -> sema_frame_collect_dma_starts(&scan, [Stmt]{value}, environment, program, scopes)
-                sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+                sema_frame_record_dma_start(scan, init.name, init.init, environment, program, scopes)
+                if step == .Val(value) -> sema_frame_collect_dma_starts(scan, [Stmt]{value}, environment, program, scopes)
+                sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
             }
             .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-                sema_frame_collect_dma_starts(&scan, then_body, environment, program, scopes)
-                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(&scan, inner, environment, program, scopes)
+                sema_frame_collect_dma_starts(scan, then_body, environment, program, scopes)
+                if else_body == .Val(inner) -> sema_frame_collect_dma_starts(scan, inner, environment, program, scopes)
             }
             else -> {}
         }
@@ -154,7 +154,7 @@ sema_frame_record_dma_start: fn(scan: &SemaFrameCallScan, name: String, init: Ex
         .MethodCall(receiver, method, method_span, _, _, args, _) -> {
             if method != "start" -> return
             started: sema_frame_hardware_dma_start(receiver, args, method_span.start, environment, program, scopes)
-            if started.dma_start == .Val(start) -> &scan.dma_starts.push(sema_frame_hardware_dma_bind_start(start, name))
+            if started.dma_start == .Val(start) -> scan.dma_starts.push(sema_frame_hardware_dma_bind_start(start, name))
         }
         else -> {}
     }

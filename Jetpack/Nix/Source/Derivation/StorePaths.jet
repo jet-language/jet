@@ -34,7 +34,7 @@ nix_nix32_encode: fn(bytes: [U8]) -> String Never! {
         shift: bit % 8
         value := Int.from_u8(bytes[index]) >> shift
         if index < bytes.len() - 1 -> value = (value).bit_or(Int.from_u8(bytes[index + 1]) << (8 - shift))
-        &out.push(alphabet[(value).bit_and(31)])
+        out.push(alphabet[(value).bit_and(31)])
         group -= 1
     }
     String.from_bytes(out) ?? panic("Nix32 alphabet is ASCII")
@@ -44,7 +44,7 @@ nix_nix32_encode: fn(bytes: [U8]) -> String Never! {
 // carries no bits past the last byte adds no padding byte, as in Nix).
 nix_nix32_decode: fn(text: String) -> [U8] NixError! {
     scalars := [String]{}
-    loop scalar in text.chars() -> &scalars.push("{scalar}")
+    loop scalar in text.chars() -> scalars.push("{scalar}")
     folded := [Int]{}
     count: scalars.len()
     loop group in 0..<count {
@@ -54,16 +54,16 @@ nix_nix32_decode: fn(text: String) -> [U8] NixError! {
         bit: group * 5
         index: bit /% 8
         shift: bit % 8
-        loop folded.len() <= index -> &folded.push(0)
+        loop folded.len() <= index -> folded.push(0)
         folded[index] = (folded[index]).bit_or((((digit << shift)).bit_and(255)))
         carry: digit >> (8 - shift)
         if carry != 0 {
-            loop folded.len() <= index + 1 -> &folded.push(0)
+            loop folded.len() <= index + 1 -> folded.push(0)
             folded[index + 1] = (folded[index + 1]).bit_or(carry)
         }
     }
     out := [U8]{}
-    loop value in folded -> &out.push(U8{value})
+    loop value in folded -> out.push(U8{value})
     Ok(out)
 }
 
@@ -87,13 +87,13 @@ nix_is_nix32_byte: fn(byte: U8) -> Bool Never! {
 // XOR-fold `hash` down to `size` bytes (Nix `compressHash`).
 nix_compress_hash: fn(hash: [U8], size: Int) -> [U8] Never! {
     folded := [Int]{}
-    loop _ in 0..<size -> &folded.push(0)
+    loop _ in 0..<size -> folded.push(0)
     loop index in 0..<hash.len() {
         slot: index % size
         folded[slot] = (folded[slot]).bit_xor(Int.from_u8(hash[index]))
     }
     out := [U8]{}
-    loop value in folded -> &out.push(U8{value})
+    loop value in folded -> out.push(U8{value})
     out
 }
 
@@ -129,7 +129,7 @@ nix_make_fixed_output_path: fn(store_dir: String, name: String, method_algo: Str
 // the sorted references.
 nix_make_text_path: fn(store_dir: String, name: String, contents: [U8], references: [String]) -> String Never! {
     sorted := references.copy()
-    &sorted.sort()
+    sorted.sort()
     type_text := "text"
     loop reference in sorted -> type_text = "{type_text}:{reference}"
     nix_make_store_path(store_dir, type_text, "sha256:{nix_hex(nix_sha256_digest(contents))}", name)
@@ -161,7 +161,7 @@ nix_scan_store_path_digests: fn(store_dir: String, bytes: [U8]) -> [String] Neve
                 end += 1
                 loop end < bytes.len() && nix_is_store_name_byte(Int.from_u8(bytes[end])) -> end += 1
                 // The store directory is text and the digest and name are ASCII.
-                &found.push(pkg_bytes_text(bytes, index, end))
+                found.push(pkg_bytes_text(bytes, index, end))
             }
         }
         index += 1
@@ -201,8 +201,8 @@ nix_debug_control: fn(scalar: String, code: Int) -> String Never! {
     if code >= 32 && code != 127 -> return scalar.copy()
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
-    if code >= 16 -> &out.push(digits[code /% 16])
-    &out.push(digits[code % 16])
+    if code >= 16 -> out.push(digits[code /% 16])
+    out.push(digits[code % 16])
     hex: String.from_bytes(out) ?? panic("hex digits are ASCII")
     open: "{{"
     close: "}}"

@@ -16,7 +16,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     assert(parsed.diagnostics.len() == 0)
     entries := [JetDriverRustForeignEntry]{}
     records := JetDriverRustForeignRecordIndex{records: [], names: [String:String]{}, aliases: [String:Type]{}}
-    jet_driver_rust_foreign_collect_items(parsed.program.items, "", "test-module", &entries, &records)
+    jet_driver_rust_foreign_collect_items(parsed.program.items, "", "test-module", entries, records)
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: records.names}
 }
 #Test("native Rust helpers preserve declared dependency set and slot ABI") {
@@ -55,7 +55,7 @@ rust_foreign_test_facts: fn(source: String) -> JetDriverRustForeignFacts {
     assert(base.key != other_plan.key && base.shared_key == other_plan.shared_key)
 }
 #Test("safe ownership signatures do not invent unsupported native trampolines") {
-    facts: rust_foreign_test_facts("extern rust \"std\" {{ take: fn(^s: String) -> String = \"std::convert::identity\"; modify: fn(&s: String) = \"std::string::String::clear\" }}")
+    facts: rust_foreign_test_facts("extern rust \"std\" {{ take: fn(&&s: String) -> String = \"std::convert::identity\"; modify: fn(&s: String) = \"std::string::String::clear\" }}")
     source: jet_driver_rust_foreign_source(facts)
     assert(source.contains("pub fn jet_ffi_take(p0: String)"))
     assert(source.contains("pub fn jet_ffi_modify(p0: &mut String)"))

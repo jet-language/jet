@@ -1,10 +1,10 @@
 use files: core.files
 
 // A handle a pattern binds out of a call's Result or Option, then closes
-// with `close(^name)` inside the arm, has exactly one owner: the arm's close
+// with `close(name)` inside the arm, has exactly one owner: the arm's close
 // ends it and the matched carrier no longer does. The artifact store's lock
 // (`if files.create(path, if_exists: .Refuse) == { .Ok(writer) -> { ...;
-// close(^writer) } }`) is this shape; a second close of the same handle
+// close(writer) } }`) is this shape; a second close of the same handle
 // hung `jet self doctor`. Every round leaves no descriptor open, and the
 // file written in the arm holds exactly what the arm wrote.
 
@@ -23,7 +23,7 @@ write_in_arm: fn(path: String, round: Int) -> Bool {
     if files.create(path, if_exists: .Refuse) == {
         .Ok(writer) -> {
             writer.write_all("round {round}".bytes())
-            close(^writer)
+            close(writer)
             wrote = true
         }
         .Err(_) -> {}
@@ -37,7 +37,7 @@ write_and_return: fn(path: String) -> Int {
         if files.create(path, if_exists: .Refuse) == {
             .Ok(writer) -> {
                 writer.write_all("returned".bytes())
-                close(^writer)
+                close(writer)
                 return 1
             }
             .Err(_) -> return 0
@@ -52,7 +52,7 @@ read_in_arm: fn(path: String) -> Int {
     if maybe_reader(path) == {
         .Val(reader) -> {
             count = reader.read(64).len()
-            consume(^reader)
+            consume(reader)
         }
         None -> {}
     }

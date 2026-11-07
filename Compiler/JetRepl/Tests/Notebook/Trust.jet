@@ -37,13 +37,13 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
     store := NotebookTrustStore.default()
     bundle: notebook_trust_test_bundle()
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
-    _: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    _: notebook_trust_grant_active(store, notebook_trust_test_request(bundle))
     assert(notebook_trust_test_active(notebook_decide_render(store, "src", "env", "rend", bundle)))
 }
 #Test("imported_output_quarantined") {
     store: NotebookTrustStore.default()
     bundle := NotebookMIMEBundle{text_plain: "x", mime: [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "<b>x</b>"}}, quarantined: false, widget_id: None, requested_origins: [String]{}, requested_messages: [String]{}}
-    notebook_quarantine_outputs(&bundle)
+    notebook_quarantine_outputs(bundle)
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "s", "e", "r", bundle)))
 }
 
@@ -87,7 +87,7 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
     bundle := notebook_trust_test_bundle()
     request := notebook_trust_test_request(bundle)
     assert(request.needs_capabilities())
-    grant: notebook_trust_grant_active(&store, request)
+    grant: notebook_trust_grant_active(store, request)
     assert_eq(grant.widget_id, request.widget_id)
     assert_eq(grant.origins, request.origins)
     assert_eq(grant.messages, request.messages)
@@ -107,7 +107,7 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
 #Test("notebook_grants_revoke_on_identity_change_and_source_edit") {
     store := NotebookTrustStore.default()
     bundle := notebook_trust_test_bundle()
-    grant: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    grant: notebook_trust_grant_active(store, notebook_trust_test_request(bundle))
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src2", "env", "rend", bundle)))
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env2", "rend", bundle)))
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend2", bundle)))
@@ -116,7 +116,7 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
     bundle = notebook_trust_test_bundle()
     bundle.widget_id = Val("other.widget")
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
-    notebook_trust_revoke_matching(&store, "unrelated argument still clears notebook store")
+    notebook_trust_revoke_matching(store, "unrelated argument still clears notebook store")
     assert(!notebook_trust_is_granted(store, grant.key))
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", notebook_trust_test_bundle())))
 }
@@ -150,12 +150,12 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
 #Test("notebook_render_quarantine_precedes_grants_and_preserves_exact_reasons") {
     store := NotebookTrustStore.default()
     bundle := notebook_trust_test_bundle()
-    _: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    _: notebook_trust_grant_active(store, notebook_trust_test_request(bundle))
     bundle.text_plain = ""
-    notebook_quarantine_outputs(&bundle)
+    notebook_quarantine_outputs(bundle)
     assert_eq(notebook_decide_render(store, "src", "env", "rend", bundle), NotebookRenderDecision.FallbackPlain{text_plain: "(no text/plain)", reason: "imported output is quarantined until re-run under local trust"})
     bundle.quarantined = false
-    notebook_trust_revoke_matching(&store, "src")
+    notebook_trust_revoke_matching(store, "src")
     assert_eq(notebook_decide_render(store, "src", "env", "rend", bundle), NotebookRenderDecision.FallbackPlain{text_plain: "(no text/plain)", reason: "active output blocked: widget `sales.chart` needs an explicit jet trust notebook grant"})
 }
 
@@ -172,7 +172,7 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
         {media_type: "application/json", payload: "json"},
     }
     allowed: bundle.mime.copy()
-    &bundle.mime.push(NotebookMIMEEntry{media_type: "TEXT/PLAIN", payload: "drop"})
+    bundle.mime.push(NotebookMIMEEntry{media_type: "TEXT/PLAIN", payload: "drop"})
     bundle.requested_origins = [String]{}
     bundle.requested_messages = [String]{}
     if notebook_decide_render(store, "src", "env", "rend", bundle) == {
@@ -180,15 +180,15 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
         else -> { panic("zero-capability bundle is passive-equivalent") }
     }
     bundle.requested_origins = [String]{"https://data.example"}
-    _: notebook_trust_grant_active(&store, notebook_trust_test_request(bundle))
+    _: notebook_trust_grant_active(store, notebook_trust_test_request(bundle))
     if notebook_decide_render(store, "src", "env", "rend", bundle) == {
         .AllowActive(_, mime) -> assert_eq(mime, bundle.mime)
         else -> { panic("active grant preserves every MIME row") }
     }
-    notebook_trust_revoke_matching(&store, "src")
+    notebook_trust_revoke_matching(store, "src")
     request := notebook_trust_test_request(bundle)
     request.policy_version = "notebook-trust-1"
-    _: notebook_trust_grant_active(&store, request)
+    _: notebook_trust_grant_active(store, request)
     assert(notebook_trust_test_fallback(notebook_decide_render(store, "src", "env", "rend", bundle)))
     // A widget ID alone makes a non-active MIME type an active request.
     bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "other", payload: "x"}}
@@ -218,15 +218,15 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
     store.save(native) ?? panic("save trust store")
     expected: "grant:user:package:keep\n\ngrant:user:other:final\ngrant:user:notebook:k|first||\ngrant:user:notebook:k|last|origin|Message\n"
     assert_eq(notebook_trust_test_files.read(path) ?? panic("read trust store"), expected)
-    &store.insert(NotebookTrustGrant{key: "z", widget_id: "middle", origins: [String]{}, messages: [String]{}})
-    &store.insert(NotebookTrustGrant{key: "k", widget_id: "replacement", origins: [String]{"O"}, messages: [String]{"M"}})
+    store.insert(NotebookTrustGrant{key: "z", widget_id: "middle", origins: [String]{}, messages: [String]{}})
+    store.insert(NotebookTrustGrant{key: "k", widget_id: "replacement", origins: [String]{"O"}, messages: [String]{"M"}})
     store.save(native) ?? panic("save replaced trust store")
     replaced: "grant:user:package:keep\n\ngrant:user:other:final\ngrant:user:notebook:z|middle||\ngrant:user:notebook:k|replacement|O|M\n"
     assert_eq(notebook_trust_test_files.read(path) ?? panic("read replaced trust store"), replaced)
     reloaded := NotebookTrustStore.load(native)
     assert(notebook_trust_is_granted(reloaded, "k"))
     assert(notebook_trust_is_granted(reloaded, "z"))
-    notebook_trust_revoke_matching(&reloaded, "anything")
+    notebook_trust_revoke_matching(reloaded, "anything")
     reloaded.save(native) ?? panic("save revocation")
     assert_eq(notebook_trust_test_files.read(path) ?? panic("read revoked trust store"), "grant:user:package:keep\n\ngrant:user:other:final\n")
     notebook_trust_test_files.remove_all(root) ?? panic("remove fixture")
@@ -238,7 +238,7 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
     missing: NotebookTrustStore.load(native)
     assert(!notebook_trust_is_granted(missing, "k"))
     store := NotebookTrustStore.default()
-    &store.insert(NotebookTrustGrant{key: "k", widget_id: "w", origins: [String]{}, messages: [String]{}})
+    store.insert(NotebookTrustGrant{key: "k", widget_id: "w", origins: [String]{}, messages: [String]{}})
     store.save(native) ?? panic("create parents and trust file")
     assert(notebook_trust_is_granted(NotebookTrustStore.load(native), "k"))
     notebook_trust_test_files.write_bytes(path, [U8]{255}) ?? panic("invalid UTF-8 fixture")
@@ -261,9 +261,9 @@ notebook_trust_test_active: fn(decision: NotebookRenderDecision) -> Bool Never! 
 // Canonical OSPath lexical push replaces the obsolete String-path gate.
 #Test("notebook_trust_native_path_preserves_dotdot_and_unix_backslash") {
     first := notebook_trust_paths.from_text("/home/user/../user", notebook_trust_paths.PathPlatform.Unix)
-    notebook_trust_paths.push(&first, notebook_trust_paths.from_text(".jet", notebook_trust_paths.PathPlatform.Unix))
+    notebook_trust_paths.push(first, notebook_trust_paths.from_text(".jet", notebook_trust_paths.PathPlatform.Unix))
     assert_eq(notebook_trust_paths.display(first), "/home/user/../user/.jet")
     second := notebook_trust_paths.from_text("/home/user\\literal", notebook_trust_paths.PathPlatform.Unix)
-    notebook_trust_paths.push(&second, notebook_trust_paths.from_text(".jet", notebook_trust_paths.PathPlatform.Unix))
+    notebook_trust_paths.push(second, notebook_trust_paths.from_text(".jet", notebook_trust_paths.PathPlatform.Unix))
     assert_eq(notebook_trust_paths.display(second), "/home/user\\literal/.jet")
 }

@@ -54,17 +54,17 @@ RunPlan: struct {
 // this one root so planning, trust, dotenv composition, managed state, and
 // explicit refs share the same project identity.
 cli_project_env_root: fn(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
-    cli_project_root(&cache, start)
+    cli_project_root(cache, start)
 }
 
 // Build a plan from the project `env.jet` (the no-explicit-ref path).
 cli_load_project_plan: fn(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
-    cli_load_project_plan_with_selections(&cache, theme, None, None)
+    cli_load_project_plan_with_selections(cache, theme, None, None)
 }
 
 cli_load_project_plan_with_selections: fn(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cwd: cli_current_dir()
-    dir: cli_project_env_root(&cache, cwd)
+    dir: cli_project_env_root(cache, cwd)
     src: files.read(EnvFile.path_in(dir)) ?? {
         theme.error("nothing to do", "no ref was given and there is no {ENV_FILE} here.", "try `jet run fastfetch@jetpack`, or `jet add <ref>` first.")
         return Err(CLIError.Reported(EXIT_USAGE))
@@ -81,7 +81,7 @@ cli_load_project_plan_with_selections: fn(cache: &WorkspaceDeclarationCache, the
     }
     env_file: EnvFile.parse(src)
     table := env_file.source_table()
-    cli_ensure_builtin_sources(&table)
+    cli_ensure_builtin_sources(table)
     refs: cli_classify_all(theme, env_file.refs(), table)
     plan := RunPlan.empty(dir, table)
     plan.refs = refs
@@ -91,7 +91,7 @@ cli_load_project_plan_with_selections: fn(cache: &WorkspaceDeclarationCache, the
 
 // Add `package` to `refs` once, keeping first-seen order.
 cli_push_package_ref: fn(refs: &[String], package: String) Never! {
-    if !refs.contains(package) -> &refs.push(package)
+    if !refs.contains(package) -> refs.push(package.copy())
 }
 
 // Evaluate the typed `module { … }` env surface (U3/U6/U8) into a plan.
@@ -103,7 +103,7 @@ cli_typed_plan: fn(theme: Theme, src: String, dir: String, requested_preset: Str
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     table := plan.table
-    cli_ensure_builtin_sources(&table)
+    cli_ensure_builtin_sources(table)
     // A formatter package, the selected preset's packages, the language
     // expansion's packages, integration packages, and the catalog package of
     // an enabled service with no explicit `run:` all realize like the
@@ -111,18 +111,18 @@ cli_typed_plan: fn(theme: Theme, src: String, dir: String, requested_preset: Str
     // expanded the typed selections; re-expanding here could make planning,
     // trust, and activation disagree if the catalog changes.
     package_refs := plan.package_refs
-    if plan.lifecycle.formatter == .Val(formatter) -> cli_push_package_ref(&package_refs, formatter.package)
+    if plan.lifecycle.formatter == .Val(formatter) -> cli_push_package_ref(package_refs, formatter.package)
     if plan.selected_preset == .Val(preset) {
-        loop package in preset.packages -> cli_push_package_ref(&package_refs, package)
+        loop package in preset.packages -> cli_push_package_ref(package_refs, package)
     }
     expansion: plan.language_expansion
-    loop package in expansion.packages -> cli_push_package_ref(&package_refs, package)
+    loop package in expansion.packages -> cli_push_package_ref(package_refs, package)
     loop integration in plan.integrations {
-        loop package in integration.packages -> cli_push_package_ref(&package_refs, package)
+        loop package in integration.packages -> cli_push_package_ref(package_refs, package)
     }
     loop service in plan.dev_services {
         if service.enable && service.run == None {
-            if services_catalog_pkg_ref(service.name) == .Val(package) -> cli_push_package_ref(&package_refs, package)
+            if services_catalog_pkg_ref(service.name) == .Val(package) -> cli_push_package_ref(package_refs, package)
         }
     }
     refs: cli_classify_all(theme, package_refs, table)
@@ -167,7 +167,7 @@ cli_classify_all: fn(theme: Theme, raws: [String], table: SourceTable) -[IO, Tim
             cli_ref_error(theme, err)
             return Err(CLIError.Reported(EXIT_USAGE))
         }
-        &refs.push(spec)
+        refs.push(spec)
     }
     Ok(refs)
 }

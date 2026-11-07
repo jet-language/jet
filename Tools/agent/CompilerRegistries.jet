@@ -33,7 +33,7 @@ USAGE: "usage: jet Tools/agent/CompilerRegistries.jet manifest SHA [--out DIR] |
 TOOL: "/Tools/agent/CompilerRegistries.jet"
 FLAGS: [String]{"--jet", "--manifest", "--receipt", "--out", "--runtime", "--shard"}
 SOURCE_LIST: "Compiler/JetRuntime/sources.list"
-RETIRED: "Tools/testkit/retired-with-rust.tsv"
+RETIRED: "Compiler/JetTestKit/retired-with-rust.tsv"
 // The testkit cases entry: `jet test Compiler --profile registries`, every
 // case including the opt-in ones, its verdicts in JET_CI_EVIDENCE_DIR.
 KIT_PACKAGE: "Compiler"
@@ -43,8 +43,11 @@ BE: "Compiler/JetBackend/Tests/"
 TEST_SCHEMA: "jet.test.v1"
 REGISTRY_TIMEOUT_MS: 3500000
 TRANSPORT_TIMEOUT_MS: 600000
-REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2028\"\n"
-TRANSPORT_PACKAGE: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\nedition: \"2028\"\nauthority: {{ allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }}\n"
+REGISTRY_PACKAGE: "name: \"compiler_registry\"\nversion: \"0.0.1\"\nedition: \"2026\"\n"
+TRANSPORT_PACKAGE: "name: \"compiler_registry_transport\"\nversion: \"0.0.1\"\nedition: \"2026\"\nauthority: {{ allow: [Env, Exec, Exec.Args, FS, IO, Mem.Alloc, Time.Wait, FFI] }}\n"
+// The C host of a plain transport: it registers the process arguments a stop
+// reports, attaches the main thread and runs the fragment's exported entry.
+PLAIN_DRIVER: "#include <stdint.h>\nextern char **environ;\nextern void jet_rt_host_arguments(int64_t,char **,char **);\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern void jet_rt_plain_fixture(void);\nint main(int argc,char **argv) {{ jet_rt_host_arguments(argc,argv,environ); jet_rt_thread_attach(); jet_rt_plain_fixture(); jet_rt_thread_detach(); return 0; }}\n"
 // The ICU root primary order of the ASCII names a repository holds: the order
 // the inventory walk lists directory entries in.
 ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
@@ -59,7 +62,7 @@ Problem: struct {
         display: fn(self) -> String { self.message.copy() }
     }
     impl Debug {
-        debug: fn(^self) -> String Never! { self.message.copy() }
+        debug: fn(&&self) -> String Never! { self.message.copy() }
     }
 }
 
@@ -279,7 +282,7 @@ use_pinned_source: fn(repo: String, head: String, args: [String]) -[Env, Exec, F
     source: exported.output.trim().copy()
     pinned(source, head) ?? return fail(err.message)
     argv := [String]{jet_cli(), "{source}{TOOL}"}
-    loop arg in args -> &argv.push(arg.copy())
+    loop arg in args -> argv.push(arg.copy())
     child: process.cmd(argv).cwd(source).stdout(.Inherit).stderr(.Inherit).run() ?? return fail("the pinned copy cannot start: {err}")
     process.exit(if child.signal != None -> 1 else -> child.code)
 }
@@ -297,7 +300,7 @@ primary_rank: fn(scalar: String) -> Int Never! {
 
 primary_ranks: fn(name: String) -> [Int] Never! {
     ranks := [Int]{}
-    loop scalar in name.chars() -> &ranks.push(primary_rank("{scalar}"))
+    loop scalar in name.chars() -> ranks.push(primary_rank("{scalar}"))
     ranks
 }
 
@@ -312,16 +315,16 @@ collate: fn(left: String, right: String) -> Ordering Never! {
 // in collation order; package.jet is a manifest, never a member.
 files_under: fn(repo: String, directory: String, extension: String) -[Env, Exec, FS, IO]> [String] Never! {
     listed := files.list_dir("{repo}/{directory}") ?? return fail("`{directory}` cannot be listed: {err}")
-    &listed.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
+    listed.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
     out := [String]{}
     loop entry in listed {
         path: "{directory}/{entry.name}"
         meta: files.stat("{repo}/{path}") ?? return fail("`{path}` cannot be read: {err}")
         if meta.is_symlink -> return fail("registry inventory must not follow symlinks: {repo}/{path}")
         if meta.is_dir {
-            loop nested in files_under(repo, path, extension) -> &out.push(nested)
+            loop nested in files_under(repo, path, extension) -> out.push(nested)
         } else if entry.name.ends_with(extension) && entry.name != "package.jet" {
-            &out.push(path)
+            out.push(path)
         }
     }
     out
@@ -329,7 +332,7 @@ files_under: fn(repo: String, directory: String, extension: String) -[Env, Exec,
 
 blank_bytes: fn(out: &[U8], raw: [U8], start: Int, end: Int) Never! {
     stop: if end < raw.len() -> end else -> raw.len()
-    loop at in start..<stop -> &out.push(if raw[at] == (U8{10}) -> U8{10} else -> U8{32})
+    loop at in start..<stop -> out.push(if raw[at] == (U8{10}) -> U8{10} else -> U8{32})
 }
 
 starts_at: fn(raw: [U8], at: Int, word: String) -> Bool Never! {
@@ -362,7 +365,7 @@ code_mask: fn(raw: [U8]) -> [U8] Never! {
         b: raw[i]
         if starts_at(raw, i, "//") {
             loop i < n && raw[i] != (U8{10}) -> i += 1
-            blank_bytes(&out, raw, start, i)
+            blank_bytes(out, raw, start, i)
         } else if starts_at(raw, i, "/*") {
             i += 2
             depth := 1
@@ -377,11 +380,11 @@ code_mask: fn(raw: [U8]) -> [U8] Never! {
                     i += 1
                 }
             }
-            blank_bytes(&out, raw, start, i)
+            blank_bytes(out, raw, start, i)
         } else if starts_at(raw, i, "\"\"\"") {
             end: index_of(raw, "\"\"\"", i + 3)
             i = if end < 0 -> n else -> end + 3
-            blank_bytes(&out, raw, start, i)
+            blank_bytes(out, raw, start, i)
         } else if b == (U8{34}) || b == (U8{96}) || b == (U8{39}) {
             i += 1
             loop i < n {
@@ -393,9 +396,9 @@ code_mask: fn(raw: [U8]) -> [U8] Never! {
                 i += 1
                 if closing -> break
             }
-            blank_bytes(&out, raw, start, i)
+            blank_bytes(out, raw, start, i)
         } else {
-            &out.push(b)
+            out.push(b)
             i += 1
         }
     }
@@ -440,7 +443,7 @@ tests_in: fn(text: String) -> [String] Problem! {
         if !closed -> return Err(problem("registry Test must have an exact literal name"))
         literal: String.from_bytes(raw.slice(quote, end + 1)) ?? return Err(problem("registry Test must have an exact literal name"))
         parsed: json.parse(literal) ?? return Err(problem("registry Test name {literal} is not a JSON string literal: {err}"))
-        if parsed == .Text(name) -> &names.push(name.copy()) else -> return Err(problem("registry Test must have an exact literal name"))
+        if parsed == .Text(name) -> names.push(name.copy()) else -> return Err(problem("registry Test must have an exact literal name"))
     }
     names
 }
@@ -467,7 +470,7 @@ inventory: fn(repo: String) -[Env, Exec, FS, IO]> [Census] Never! {
     found := [Census]{}
     shapes: patterns()
     packages := files.list_dir("{repo}/Compiler") ?? return fail("Compiler cannot be listed: {err}")
-    &packages.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
+    packages.sort_by((left: DirEntry, right: DirEntry) -> collate(left.name, right.name))
     loop item in packages {
         if !item.is_dir || !files.is_dir("{repo}/Compiler/{item.name}/Tests") -> next
         loop source in files_under(repo, "Compiler/{item.name}/Tests", ".jet") {
@@ -478,7 +481,7 @@ inventory: fn(repo: String) -[Env, Exec, FS, IO]> [Census] Never! {
             abi_registry: source.ends_with("Tests.jet") && shapes.abi.is_match(masked)
             nested_input: shapes.nested.is_match(source)
             role: if !nested_input && (names.len() > 0 || entry || abi_registry) -> "registry" else -> "support-or-fixture"
-            &found.push(Census{package: item.name.copy(), source: source, sha256: crypto.sha256(text.bytes()).hex(), names: names, entry: entry, role: role})
+            found.push(Census{package: item.name.copy(), source: source, sha256: crypto.sha256(text.bytes()).hex(), names: names, entry: entry, role: role})
         }
     }
     found
@@ -506,7 +509,7 @@ retirements: fn(repo: String) -[Env, Exec, FS, IO]> [Retirement] Never! {
         if cells.len() != 2 || cells[0] == "" || cells[1] == "" -> return fail("retired rows need an exact source ID and reason")
         path: cells[0].copy()
         sha: if files.exists("{repo}/{path}") -> Val(sha256_file(repo, path)) else -> None
-        &rows.push(Retirement{path: path, reason: cells[1].copy(), sha256: sha})
+        rows.push(Retirement{path: path, reason: cells[1].copy(), sha256: sha})
     }
     rows
 }
@@ -524,8 +527,8 @@ registry_rows: fn(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registr
     loop row in census {
         if row.role != "registry" || retired.contains(row.source) -> next
         id: row.source.removeprefix("Compiler/").removesuffix(".jet")
-        &rows.push(Registry{row: row.copy(), id: id.copy(), mode: if row.names.len() > 0 -> "test" else -> "run"})
-        if row.names.len() > 0 && row.entry -> &rows.push(Registry{row: row.copy(), id: "{id}.run", mode: "run"})
+        rows.push(Registry{row: row.copy(), id: id.copy(), mode: if row.names.len() > 0 -> "test" else -> "run"})
+        if row.names.len() > 0 && row.entry -> rows.push(Registry{row: row.copy(), id: "{id}.run", mode: "run"})
     }
     rows
 }
@@ -535,7 +538,7 @@ registry_rows: fn(repo: String, census: [Census]) -[Env, Exec, FS, IO]> [Registr
 // the jet under test.
 testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
     sources := [String]{"{KIT_PACKAGE}/package.jet"}
-    &sources.push(RETIRED)
+    sources.push(RETIRED)
     table: retirements(repo)
     retired := [Dyn]{}
     pending := [Dyn]{}
@@ -543,10 +546,10 @@ testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
     loop row in table {
         if !row.path.starts_with("tests/cases/") -> next
         if row.reason.starts_with("Retired with Rust:") {
-            &retired.push(retirement_dyn(row, ""))
-            &retired_ids.push(row.path.copy())
+            retired.push(retirement_dyn(row, ""))
+            retired_ids.push(row.path.copy())
         }
-        if row.reason.starts_with("PRODUCT INTEROP RED:") -> &pending.push(retirement_dyn(row, "RED"))
+        if row.reason.starts_with("PRODUCT INTEROP RED:") -> pending.push(retirement_dyn(row, "RED"))
     }
     cases: files_under(repo, "tests/cases", ".case").filter(path -> !retired_ids.contains(path))
     requirement: regex.compile("^(?:requires: tool:|when tool |step(?: [^:]+)?: )") ?? return fail("requirement pattern: {err}")
@@ -555,13 +558,13 @@ testkit_inventory: fn(repo: String) -[Env, Exec, FS, IO]> Kit Never! {
     case_rows := [Dyn]{}
     loop path in cases {
         bytes: files.read_bytes("{repo}/{path}") ?? return fail("`{path}` cannot be read: {err}")
-        &case_rows.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "sha256": Dyn.Text(crypto.sha256(bytes).hex())}))
+        case_rows.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "sha256": Dyn.Text(crypto.sha256(bytes).hex())}))
         text: String.from_bytes(bytes) ?? return fail("`{path}` is not UTF-8")
         number := 0
         loop line in text.split("\n") {
             number += 1
             if requirement.is_match(line) && rust.is_match(line) {
-                &requirements.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "line": Dyn.Int(number), "source": Dyn.Text(line.copy())}))
+                requirements.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path.copy()), "line": Dyn.Int(number), "source": Dyn.Text(line.copy())}))
             }
         }
     }
@@ -621,7 +624,7 @@ unblock_uses: fn(text: String) -> String Never! {
 
 blank_match: fn(found: Match) -> String Never! {
     out := [U8]{}
-    blank_bytes(&out, found.text.bytes(), 0, found.text.bytes().len())
+    blank_bytes(out, found.text.bytes(), 0, found.text.bytes().len())
     String.from_bytes(out) ?? ""
 }
 
@@ -637,12 +640,12 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
         if core_import.full_match(line) {
             key: line.trim_end()
             if seen.contains(key) {
-                &lines.push(" ".repeat(line.len()))
+                lines.push(" ".repeat(line.len()))
                 next
             }
-            &seen.push(key.copy())
+            seen.push(key.copy())
         }
-        &lines.push(line.copy())
+        lines.push(line.copy())
     }
     lines.join("\n")
 }
@@ -668,7 +671,7 @@ specification: fn(id: String) -> Spec? Never! {
             "Scan" -> Val((call: Val("scan_tests"), expected: ""))
             "Text" -> Val((call: Val("text_tests"), expected: ""))
             "Unicode" -> Val((call: Val("unicode_tests"), expected: ""))
-            "Secret" -> Val((call: None, expected: "secret tests: ok\n"))
+            "Secret" -> Val((call: Val("secret_tests"), expected: "secret tests: ok\n"))
             else -> None
         }
         if plain == .Val(table) {
@@ -758,10 +761,10 @@ prepare_transport: fn(repo: String, row: Census, out: String, adapter: String) -
     id: home.removeprefix("Compiler/").removesuffix(".jet")
     found: specification(id) ?? return None
     sources := [String]{row.source.copy()}
-    if found.witness != "" -> &sources.push(found.witness.copy())
-    if found.expected_file != "" -> &sources.push(found.expected_file.copy())
+    if found.witness != "" -> sources.push(found.witness.copy())
+    if found.expected_file != "" -> sources.push(found.expected_file.copy())
     witness: "{home.removesuffix(".jet")}.c"
-    if found.kind == "c" && files.exists("{repo}/{witness}") -> &sources.push(witness)
+    if found.kind == "c" && files.exists("{repo}/{witness}") -> sources.push(witness)
     entry := [String: Dyn]{
         "id": Dyn.Text(id.copy()),
         "package": Dyn.Text(row.package.copy()),
@@ -844,7 +847,7 @@ trap_literal: fn(repo: String, name: String) -[FS]> String Problem! {
         count: Int.parse(found.group(2) ?? "") ?? return Err(problem("trap literal {name} has an invalid width"))
         loop i in 0..<count {
             v: (word >> (i * 8)).bit_and(255)
-            &bytes.push(U8{v})
+            bytes.push(U8{v})
         }
     }
     literal: String.from_bytes(bytes) ?? return Err(problem("trap literal {name} is not UTF-8"))
@@ -891,7 +894,7 @@ signal_dyn: fn(value: Int?) -> Dyn Never! {
 // `expected` (or a signal or timeout) fails the transport.
 execute: fn(lane: &Lane, command: String, args: [String], cwd: String, extra: [Setting], expected: Int, timeout_ms: Int) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
     argv := [String]{command.copy()}
-    loop arg in args -> &argv.push(arg.copy())
+    loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).cwd(cwd).timeout(time.duration_ms(timeout_ms)).output_limit(134217728)
     keys: process.env_keys() ?? [String]{}
     loop name in keys {
@@ -909,14 +912,14 @@ execute: fn(lane: &Lane, command: String, args: [String], cwd: String, extra: [S
     receipt: spec.run() ?? {
         files.write("{prefix}.stdout", "") ?? return Err(problem("`{prefix}.stdout` cannot be written: {err}"))
         files.write("{prefix}.stderr", "") ?? return Err(problem("`{prefix}.stderr` cannot be written: {err}"))
-        &lane.evidence.push(evidence_row(command, args, cwd, Dyn.Null, Dyn.Null, Dyn.Text("{err}"), prefix))
+        lane.evidence.push(evidence_row(command, args, cwd, Dyn.Null, Dyn.Null, Dyn.Text("{err}"), prefix))
         return Err(problem("{command}: {err}; see {prefix}"))
     }
     files.write("{prefix}.stdout", receipt.output) ?? return Err(problem("`{prefix}.stdout` cannot be written: {err}"))
     files.write("{prefix}.stderr", receipt.errors) ?? return Err(problem("`{prefix}.stderr` cannot be written: {err}"))
     code: if receipt.signal != None || receipt.timed_out -> Dyn.Null else -> Dyn.Int(receipt.code)
     failure: if receipt.timed_out -> Dyn.Text("timed out after {timeout_ms} ms") else -> Dyn.Null
-    &lane.evidence.push(evidence_row(command, args, cwd, code, signal_dyn(receipt.signal), failure, prefix))
+    lane.evidence.push(evidence_row(command, args, cwd, code, signal_dyn(receipt.signal), failure, prefix))
     if receipt.timed_out -> return Err(problem("{command}: timed out after {timeout_ms} ms; see {prefix}"))
     if receipt.signal == .Val(number) -> return Err(problem("{command}: signal {number}; see {prefix}"))
     if receipt.code != expected -> return Err(problem("{command}: {receipt.code}; see {prefix}"))
@@ -938,10 +941,10 @@ evidence_row: fn(command: String, args: [String], cwd: String, code: Dyn, signal
 
 node: fn(lane: &Lane, runner: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
     argv := [String]{"{lane.repo}/{runner}"}
-    loop arg in args -> &argv.push(arg.copy())
+    loop arg in args -> argv.push(arg.copy())
     binary: lane.node.copy()
     cwd: lane.out.copy()
-    execute(&lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    execute(lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
 }
 
 exact: fn(ran: Ran, stdout: String, stderr: String) Problem! {
@@ -954,7 +957,7 @@ exact: fn(ran: Ran, stdout: String, stderr: String) Problem! {
 front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Setting]) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     files.create_dir_all(files.dirname(prefix)) ?? return Err(problem("`{prefix}` cannot be prepared: {err}"))
     binary: lane.jet.copy()
-    ran: execute(&lane, binary, args, cwd, extra, 0, front_timeout_ms()) ?? return Err(err)
+    ran: execute(lane, binary, args, cwd, extra, 0, front_timeout_ms()) ?? return Err(err)
     files.write("{prefix}.front.log", "{ran.stdout}{ran.stderr}") ?? return Err(problem("`{prefix}.front.log` cannot be written: {err}"))
     record: Dyn.Object([String: Dyn]{"command": Dyn.Text(lane.jet.copy()), "args": texts(args), "cwd": Dyn.Text(cwd.copy()), "status": Dyn.Int(ran.code), "signal": Dyn.Null, "error": Dyn.Null, "stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy())})
     text: json.to_string_pretty(record) ?? return Err(problem("the front record cannot be encoded: {err}"))
@@ -969,7 +972,7 @@ compile: fn(lane: &Lane, file: String, root: String, prefix: String) -[Env, Exec
     loop path in ([String]{built, "{prefix}.exe", "{prefix}.issues", "{prefix}.pack-issues"}) {
         if files.exists(path) -> files.remove(path) ?? return Err(problem("`{path}` cannot be removed: {err}"))
     }
-    front(&lane, [String]{"build", file}, prefix, root, [Setting]{}) ?? return Err(err)
+    front(lane, [String]{"build", file}, prefix, root, [Setting]{}) ?? return Err(err)
     if !files.exists(built) -> return Err(problem("native build did not emit a fresh executable"))
     files.copy(built, "{prefix}.exe") ?? return Err(problem("`{prefix}.exe` cannot be written: {err}"))
     files.set_mode("{prefix}.exe", 0o755) ?? return Err(problem("`{prefix}.exe` cannot be made executable: {err}"))
@@ -984,8 +987,8 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
         if files.exists("{prefix}{suffix}") -> files.remove("{prefix}{suffix}") ?? return Err(problem("`{prefix}{suffix}` cannot be removed: {err}"))
     }
     hooks := [Setting]{Setting{name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", value: prefix.copy()}, Setting{name: "JET_FRONT_LIBRARY_LIFECYCLE", value: lifecycle.copy()}}
-    if exports != "" -> &hooks.push(Setting{name: "JET_FRONT_LIBRARY_EXPORTS", value: exports.copy()})
-    front(&lane, [String]{"check", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
+    if exports != "" -> hooks.push(Setting{name: "JET_FRONT_LIBRARY_EXPORTS", value: exports.copy()})
+    front(lane, [String]{"check", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
     if files.exists("{prefix}.issues") -> return Err(problem(files.read("{prefix}.issues") ?? ""))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads"}) {
         if !files.exists("{prefix}{suffix}") -> return Err(problem("native library hook omitted {suffix}"))
@@ -995,9 +998,9 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
 
 program: fn(lane: &Lane, file: String, expected: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     root: files.dirname(file)
-    binary: compile(&lane, file, root, "{root}/registry-native") ?? return Err(err)
+    binary: compile(lane, file, root, "{root}/registry-native") ?? return Err(err)
     cwd: lane.out.copy()
-    ran: execute(&lane, binary, [String]{}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    ran: execute(lane, binary, [String]{}, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     exact(ran, expected, "") ?? return Err(err)
 }
 
@@ -1009,9 +1012,9 @@ link: fn(lane: &Lane, source: String, object: String, binary: String) Problem! -
     report: "{cwd}/fault-report.S"
     report_object: "{cwd}/fault-report.o"
     files.write(report, "    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include \"{repo}/Compiler/JetRuntime/Assets/FaultReport/report.S\"\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n") ?? return Err(problem("`{report}` cannot be written: {err}"))
-    execute(&lane, "as", [String]{"--64", "-o", report_object, report}, cwd.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    execute(lane, "as", [String]{"--64", "-o", report_object, report}, cwd.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
-    execute(&lane, env_or("CC", "cc"), args, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+    execute(lane, env_or("CC", "cc"), args, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     Ok(())
 }
 
@@ -1081,7 +1084,7 @@ run_transport: fn(entry: Dyn, repo: String, jet: String, log_dir: String, runtim
     files.create_dir_all(log_dir) ?? return Err(problem("`{log_dir}` cannot be created: {err}"))
     staged: stage_toolchain(jet, runtime, "{log_dir}/toolchain") ?? return Err(err)
     lane := Lane{id: id.copy(), out: out.copy(), repo: repo.copy(), log_dir: log_dir.copy(), jet: staged, runtime_dir: runtime.dir.copy(), pack: runtime.pack.copy(), object: runtime.object.copy(), node: process.which("node") ?? "node", evidence: [Dyn]{}}
-    if drive(&lane, found) == {
+    if drive(lane, found) == {
         .Ok(_) -> {}
         .Err(failure) -> return (ran: Ran{code: 1, signal: None, timed_out: false, stdout: "", stderr: "{failure.message}\n"}, evidence: lane.evidence.copy())
     }
@@ -1097,7 +1100,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
     staged: lane.jet.copy()
     if found.kind == "codec-fixture" || found.kind == "process-fixture" {
         args: fixture_args(repo, found, out, lane.jet, lane.runtime_dir)
-        execute(&lane, node_bin, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        execute(lane, node_bin, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         result: read_json("{args[1]}/fixture-result.json") ?? return Err(err)
         ok: int_field(result, "status") == Val(0) && text_field(result, "test") == found.name
         if found.kind == "codec-fixture" && !(ok && field(result, "stdout") == .Text("") && field(result, "stderr") == .Text("")) -> return Err(problem("named native codec/file fixture receipt differs"))
@@ -1106,7 +1109,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
     }
     if found.kind == "native-suite" {
         loop mode in found.modes {
-            execute(&lane, node_bin, [String]{"{repo}/{found.runner}", out, mode}, out, [Setting]{Setting{name: "JET_FRONT_JETC0", value: staged.copy()}}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            execute(lane, node_bin, [String]{"{repo}/{found.runner}", out, mode}, out, [Setting]{Setting{name: "JET_FRONT_JETC0", value: staged.copy()}}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         }
         result: read_json("{out}/run.receipt.json") ?? return Err(err)
         if int_field(result, "status") != Val(0) || truthy(field(result, "signal")) || truthy(field(result, "error")) || field(result, "stdout") != .Text("") || field(result, "stderr") != .Text("") {
@@ -1115,42 +1118,64 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         return Ok(())
     }
     if found.kind == "suite" {
-        node(&lane, found.runner, [String]{out, found.modes[0]}) ?? return Err(err)
+        node(lane, found.runner, [String]{out, found.modes[0]}) ?? return Err(err)
         selected: suite_library(found, out)
-        library(&lane, selected.file, selected.prefix, selected.lifecycle, selected.exports) ?? return Err(err)
-        loop mode in found.modes[2..<found.modes.len()] -> node(&lane, found.runner, [String]{out, mode}) ?? return Err(err)
+        library(lane, selected.file, selected.prefix, selected.lifecycle, selected.exports) ?? return Err(err)
+        loop mode in found.modes[2..<found.modes.len()] -> node(lane, found.runner, [String]{out, mode}) ?? return Err(err)
         // The final run modes execute the actual C driver and check literal
         // output, stops and ledgers; never admit assembly-only or reference.
-        if found.crypto -> crypto_verdict(&lane) ?? return Err(err)
+        if found.crypto -> crypto_verdict(lane) ?? return Err(err)
         return Ok(())
     }
     if found.kind == "plain" {
+        // One runtime per image: the fragment and the runtime sources lower
+        // as a library that a C host links, as the suite transports do. A
+        // program would link this runtime copy beside the pack's, whose
+        // startup thread state the fragment's own init then overwrites.
         raw: "{out}/raw"
         native: "{out}/native"
-        files.create_dir_all(native) ?? return Err(problem("`{native}` cannot be created: {err}"))
-        node(&lane, found.runner, [String]{raw, "--assemble-only", "--test", found.name}) ?? return Err(err)
+        files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
+        node(lane, found.runner, [String]{raw, "--assemble-only", "--test", found.name}) ?? return Err(err)
         unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
-        entry: if found.call == .Val(call) -> "\nrun: fn() {{ {call}() }}\n" else -> ""
-        files.write("{native}/unit.jet", "{unit}{entry}") ?? return Err(problem("`{native}/unit.jet` cannot be written: {err}"))
-        return program(&lane, "{native}/unit.jet", found.expected)
+        call: found.call ?? return Err(problem("plain transport {found.name} names no entry"))
+        fixture: "{native}/Source/Fixture.jet"
+        files.write(fixture, "{unit}\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
+        package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
+        files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
+        // The fragments witness the allocator a program built without
+        // `--checked-alloc` runs, so the checked heap's init hook stays out.
+        rows: files.read("{repo}/Compiler/JetRuntime/lifecycle.list") ?? return Err(problem("`Compiler/JetRuntime/lifecycle.list` cannot be read: {err}"))
+        kept := [String]{}
+        loop row in rows.split("\n") {
+            if !row.starts_with("jet_rt_alloc_check_init ") -> kept.push(row.copy())
+        }
+        lifecycle: "{native}/lifecycle.list"
+        files.write(lifecycle, kept.join("\n")) ?? return Err(problem("`{lifecycle}` cannot be written: {err}"))
+        library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
+        driver: "{native}/driver.c"
+        files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        binary: "{native}/driver"
+        link(lane, driver, "{native}/fixture.o", binary) ?? return Err(err)
+        ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        return exact(ran, found.expected, "")
     }
-    if found.kind == "c" -> return c_verdict(&lane, found)
+    if found.kind == "c" -> return c_verdict(lane, found)
     if found.kind == "indices" {
-        node(&lane, found.runner, [String]{out, "--indices"}) ?? return Err(err)
-        return program(&lane, "{out}/unit.jet", "link section indexes: pass\n")
+        node(lane, found.runner, [String]{out, "--indices"}) ?? return Err(err)
+        return program(lane, "{out}/unit.jet", "link section indexes: pass\n")
     }
     if found.kind == "roots" || found.kind == "link" {
-        node(&lane, "{BE}run-runtime-pack-roots.mjs", [String]{out, "--prepare-only"}) ?? return Err(err)
+        node(lane, "{BE}run-runtime-pack-roots.mjs", [String]{out, "--prepare-only"}) ?? return Err(err)
         if found.kind == "roots" {
-            program(&lane, "{out}/unit.jet", "runtime pack object roots: pass\n") ?? return Err(err)
+            program(lane, "{out}/unit.jet", "runtime pack object roots: pass\n") ?? return Err(err)
         } else {
-            node(&lane, found.runner, [String]{out}) ?? return Err(err)
-            binary: compile(&lane, "{out}/unit.jet", out, "{out}/link-native") ?? return Err(err)
-            linked: execute(&lane, binary, [String]{"{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            node(lane, found.runner, [String]{out}) ?? return Err(err)
+            binary: compile(lane, "{out}/unit.jet", out, "{out}/link-native") ?? return Err(err)
+            linked: execute(lane, binary, [String]{"{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
             receipt: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
             if !receipt.full_match(linked.stdout) || linked.stderr != "" -> return Err(problem("linker artifact receipt differs"))
         }
-        consumer: execute(&lane, "{out}/consumer", [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        consumer: execute(lane, "{out}/consumer", [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(consumer, "", "")
     }
     Err(problem("unimplemented transport {found.kind}"))
@@ -1162,10 +1187,10 @@ crypto_verdict: fn(lane: &Lane) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> 
     if name == "AgeV1" {
         frozen: read_json("{lane.repo}/{RT}AgeV1Fixtures.json") ?? return Err(err)
         loop group in ([String]{"cases", "seals"}) {
-            loop test in array_field(frozen, group) -> &receipts.push("{lane.out}/run-{text_field(test, "name")}.receipt.json")
+            loop test in array_field(frozen, group) -> receipts.push("{lane.out}/run-{text_field(test, "name")}.receipt.json")
         }
     } else {
-        &receipts.push("{lane.out}/run-{name}.receipt.json")
+        receipts.push("{lane.out}/run-{name}.receipt.json")
     }
     loop path in receipts {
         receipt: read_json(path) ?? return Err(err)
@@ -1200,8 +1225,8 @@ witness_stdout: fn(repo: String, name: String) -[FS]> String Problem! {
 c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     out: lane.out.copy()
     repo: lane.repo.copy()
-    node(&lane, found.runner, [String]{out, "--until", "assemble", "--test", found.name}) ?? return Err(err)
-    library(&lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list", "") ?? return Err(err)
+    node(lane, found.runner, [String]{out, "--until", "assemble", "--test", found.name}) ?? return Err(err)
+    library(lane, "{out}/library/Source/Runtime.jet", "{out}/jet_runtime_jet", "{repo}/Compiler/JetRuntime/lifecycle.list", "") ?? return Err(err)
     source: if found.name == {
         "VaultHooks" | "VaultProvider" -> "{repo}/{RT}{found.name}Witness.c"
         "Thread" -> "{repo}/{RT}thread-fixture.c"
@@ -1214,12 +1239,12 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
         files.write(source, text) ?? return Err(problem("`{source}` cannot be written: {err}"))
     }
     binary: "{out}/driver"
-    link(&lane, source, "{out}/jet_runtime_jet.o", binary) ?? return Err(err)
+    link(lane, source, "{out}/jet_runtime_jet.o", binary) ?? return Err(err)
     if found.name == "HostFault" {
-        plain: execute(&lane, binary, [String]{}, out, [Setting]{}, 101, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        plain: execute(lane, binary, [String]{}, out, [Setting]{}, 101, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         exact(plain, "", "A\n") ?? return Err(err)
         unreachable: trap_literal(repo, "trap_msg_unreachable") ?? return Err(err)
-        trapped: execute(&lane, binary, [String]{"unreachable"}, out, [Setting]{}, 101, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        trapped: execute(lane, binary, [String]{"unreachable"}, out, [Setting]{}, 101, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(trapped, "", "{unreachable}A\n")
     }
     if found.name == "TrapReport" {
@@ -1228,8 +1253,8 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
         footer: trap_literal(repo, "trap_footer_e3001") ?? return Err(err)
         simple: "{header}registry boom{prelude}{footer}"
         loop kind in 0..<5 {
-            direct: execute(&lane, binary, [String]{"{kind}", "direct"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-            captured: execute(&lane, binary, [String]{"{kind}", "captured"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            direct: execute(lane, binary, [String]{"{kind}", "direct"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+            captured: execute(lane, binary, [String]{"{kind}", "captured"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
             stop: if kind == 1 -> "Stop [E3010]:" else -> "Stop [E3001]:"
             if direct.stdout != "" || !direct.stderr.starts_with(stop) -> return Err(problem("trap report process-edge verdict differs"))
             exact(captured, "", direct.stderr) ?? return Err(err)
@@ -1247,7 +1272,7 @@ c_verdict: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time
         else -> ""
     }
     loop args in driver_runs(found, out) {
-        ran: execute(&lane, binary, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        ran: execute(lane, binary, args, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         exact(ran, expected, "") ?? return Err(err)
     }
     Ok(())
@@ -1291,7 +1316,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         standalone: row.package == "JetRuntime" && mode == "test"
         if !standalone {
             if prepare_transport(repo, row, out, adapter) == .Val(transport) {
-                &entries.push(transport)
+                entries.push(transport)
                 next
             }
         }
@@ -1326,7 +1351,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
                 entry["status"] = Dyn.Text("BLOCKED")
                 entry["reason"] = Dyn.Text(reason.copy())
             }
-            &entries.push(Dyn.Object(entry.copy()))
+            entries.push(Dyn.Object(entry.copy()))
             next
         }
         entry := [String: Dyn]{
@@ -1345,7 +1370,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         if reason != "" {
             entry["status"] = Dyn.Text("BLOCKED")
             entry["reason"] = Dyn.Text(reason.copy())
-            &entries.push(Dyn.Object(entry.copy()))
+            entries.push(Dyn.Object(entry.copy()))
             next
         }
         text: files.read("{repo}/{row.source}") ?? return fail("`{row.source}` cannot be read: {err}")
@@ -1357,7 +1382,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         files.create_dir_all(cwd) ?? return fail("`{cwd}` cannot be created: {err}")
         files.write("{cwd}/registry.jet", body) ?? return fail("`{cwd}/registry.jet` cannot be written: {err}")
         files.write("{cwd}/package.jet", REGISTRY_PACKAGE) ?? return fail("`{cwd}/package.jet` cannot be written: {err}")
-        &entries.push(Dyn.Object(entry.copy()))
+        entries.push(Dyn.Object(entry.copy()))
     }
     kit: testkit_inventory(repo)
     kit_entry: "{repo}/{KIT_PACKAGE}/package.jet"
@@ -1379,7 +1404,7 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
         testkit["status"] = Dyn.Text("BLOCKED")
         testkit["reason"] = Dyn.Text(if kit.pending > 0 -> "{kit.pending} mandatory user Rust product cases remain RED; see testkit.pendingProductInterop (not retired or excluded)" else -> "full testkit cases have {kit.rust_tools} active Rust tool requirements/guards; removing Rust would skip required case branches. See testkit.rustToolRequirements for exact paths/lines")
     }
-    &entries.push(Dyn.Object(testkit.copy()))
+    entries.push(Dyn.Object(testkit.copy()))
     after: current_head(repo) ?? return fail(err.message)
     if options.head != after -> return fail("pinned source changed during assembly")
     proof: proof_path(repo)
@@ -1412,10 +1437,10 @@ partition: fn(entries: [Dyn], shard: String) -> [Dyn] Problem! {
     count: Int.parse(parts.tail) ?? -1
     if index < 1 || count < 1 || index > 9007199254740991 || count > 9007199254740991 || index > count -> return Err(problem("invalid registry shard I/N"))
     sorted := entries.copy()
-    &sorted.sort_by((left: Dyn, right: Dyn) -> text_field(left, "id") <=> text_field(right, "id"))
+    sorted.sort_by((left: Dyn, right: Dyn) -> text_field(left, "id") <=> text_field(right, "id"))
     picked := [Dyn]{}
     loop offset in 0..<sorted.len() {
-        if offset % count == index - 1 -> &picked.push(sorted[offset].copy())
+        if offset % count == index - 1 -> picked.push(sorted[offset].copy())
     }
     picked
 }
@@ -1442,7 +1467,7 @@ canonical: fn(value: Dyn) -> String Never! { json.canonical(value) ?? "" }
 
 sorted_texts: fn(items: [String]) -> [String] Never! {
     out := items.copy()
-    &out.sort()
+    out.sort()
     out
 }
 
@@ -1490,11 +1515,11 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
     // Re-census: a forged or truncated entries array cannot turn omissions into PASS.
     current: inventory(repo)
     required := registry_rows(repo, current).map(row -> row.id.copy())
-    &required.push("testkit/cases")
+    required.push("testkit/cases")
     ids: entries.map(entry -> text_field(entry, "id"))
     distinct := [String]{}
     loop id in ids {
-        if !distinct.contains(id) -> &distinct.push(id.copy())
+        if !distinct.contains(id) -> distinct.push(id.copy())
     }
     if distinct.len() != ids.len() || sorted_texts(ids) != sorted_texts(required) -> return fail("manifest does not account for every current registry")
     if canonical(census_dyn(current)) != canonical(field(manifest, "inventory")) -> return fail("registry source inventory changed since manifest")
@@ -1534,7 +1559,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
             result["reason"] = Dyn.Text("runtime prerequisite: {loaded.error}")
             tally.blocked += 1
         } else {
-            if run_entry(&result, entry, manifest, repo, jet, log_dir, loaded.runtime, adapter) == {
+            if run_entry(result, entry, manifest, repo, jet, log_dir, loaded.runtime, adapter) == {
                 .Ok(_) -> {
                     result["status"] = Dyn.Text("PASS")
                     tally.passed += 1
@@ -1546,7 +1571,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
                 }
             }
         }
-        &tally.entries.push(Dyn.Object(result.copy()))
+        tally.entries.push(Dyn.Object(result.copy()))
         write_json(receipt_path, receipt_dyn("FAIL", header, tally, options.shard, entries.len()))
     }
     if current_head(repo) == {
@@ -1609,12 +1634,10 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
             if (sha256_path("{repo}/{name}") ?? "") != text_field(source, "sha256") -> return Err(problem("testkit input changed: {name}"))
         }
         evidence: "{stem}.evidence"
-        scratch: "{stem}.scratch"
         files.create_dir_all(evidence) ?? return Err(problem("`{evidence}` cannot be created: {err}"))
-        files.create_dir_all(scratch) ?? return Err(problem("`{scratch}` cannot be created: {err}"))
         command = [String]{jet, "test", KIT_PACKAGE, "--profile", KIT_PROFILE}
         cwd = repo.copy()
-        settings: [Setting]{Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()}, Setting{name: "JET_TEST_SCRATCH_DIR", value: scratch.copy()}}
+        settings: [Setting]{Setting{name: "JET_CI_EVIDENCE_DIR", value: evidence.copy()}}
         child: registry_spec(command, repo, repo, settings, timeout_ms).run() ?? return Err(problem("the testkit cases cannot start: {err}"))
         stdout = child.output.copy()
         stderr = child.errors.copy()
@@ -1646,10 +1669,10 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
     } else {
         command = [String]{jet, mode}
         if mode == "test" {
-            &command.push("--capture=all")
-            &command.push("--color=never")
+            command.push("--capture=all")
+            command.push("--color=never")
         }
-        &command.push(path)
+        command.push(path)
         sources: array_field(entry, "sources").map(source -> if source == .Text(text) -> text.copy() else -> "")
         environment: field(entry, "environment")
         if canonical(environment) != canonical(registry_environment(repo, cwd, sources)) -> return Err(problem("registry environment changed since manifest"))
@@ -1659,7 +1682,7 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
         extra := [Setting]{}
         if environment == .Object(pairs) {
             loop pair in pairs {
-                if pair.value == .Text(value) -> &extra.push(Setting{name: pair.key.copy(), value: value.copy()})
+                if pair.value == .Text(value) -> extra.push(Setting{name: pair.key.copy(), value: value.copy()})
             }
         }
         child: registry_spec(command, cwd, repo, extra, timeout_ms).run() ?? return Err(problem("the registry cannot start: {err}"))
@@ -1683,7 +1706,7 @@ run_entry: fn(result: &[String: Dyn], entry: Dyn, manifest: Dyn, repo: String, j
         reports := [Dyn]{}
         loop line in stdout.split("\n") {
             parsed: json.parse(line) ?? next
-            if text_field(parsed, "schema") == text_field(entry, "stdout") -> &reports.push(parsed)
+            if text_field(parsed, "schema") == text_field(entry, "stdout") -> reports.push(parsed)
         }
         if reports.len() != 1 -> return Err(problem("exact canonical jet.test.v1 success report required"))
         report: reports[0].copy()
@@ -1753,13 +1776,13 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
     manifest: ids.map(id -> Dyn.Object([String: Dyn]{"id": Dyn.Text(id.copy())}))
     assert_eq(shard_ids(manifest, ""), ids)
     reversed := manifest.copy()
-    &reversed.reverse()
+    reversed.reverse()
     loop count in ([Int]{1, 2, 3, 10}) {
         all := [String]{}
         loop index in 1..<(count + 1) {
             picked: shard_ids(manifest, "{index}/{count}")
             assert_eq(shard_ids(reversed, "{index}/{count}"), picked)
-            loop id in picked -> &all.push(id.copy())
+            loop id in picked -> all.push(id.copy())
         }
         assert_eq(all.len(), ids.len())
         assert_eq(sorted_texts(all), sorted_texts(ids))

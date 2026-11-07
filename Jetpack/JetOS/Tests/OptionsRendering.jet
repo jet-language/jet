@@ -108,8 +108,8 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
         assert_eq(resolved.priority, case.priority)
         assert_eq(resolved.value, "b")
         assert_eq(resolved.contenders[0].tier, jetos_clean_symbol(case.tier))
-        &system.options.push(jetos_test_option("k.priority", "-17"))
-        &system.options.push(jetos_test_option("k.priority", "100000"))
+        system.options.push(jetos_test_option("k.priority", "-17"))
+        system.options.push(jetos_test_option("k.priority", "100000"))
         explicit: jetos_resolved_option(system, "k") ?? panic("option exists")
         assert_eq(explicit.priority, -17)
         assert_eq(explicit.contenders[0].priority, -17)
@@ -230,8 +230,8 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
         jetos_test_option("init.path", "\"/bin/init\""), jetos_test_option("boot.initrd.modules", "[]")
     })
     assert_eq(jetos_boot_profile(overrides).to_json(), "{{\"loader\":\"Grub\",\"kernel\":\"packages.linux\",\"init\":\"/bin/init\",\"initrd_modules\":[\"virtio_blk\",\"ext4\"]}}")
-    &overrides.options.push(jetos_test_option("boot.kernel", ".Custom"))
-    &overrides.options.push(jetos_test_option("boot.initrd.modules", "[\"nvme\", .ext4]"))
+    overrides.options.push(jetos_test_option("boot.kernel", ".Custom"))
+    overrides.options.push(jetos_test_option("boot.initrd.modules", "[\"nvme\", .ext4]"))
     assert_eq(jetos_boot_profile(overrides).to_json(), "{{\"loader\":\"Grub\",\"kernel\":\"Custom\",\"init\":\"/bin/init\",\"initrd_modules\":[\"nvme\",\"ext4\"]}}")
     blanks: jetos_test_system([OptionPlan]{jetos_test_option("boot.loader", "\"\""), jetos_test_option("boot.kernel", "\"\""), jetos_test_option("init.path", "\"\"")})
     assert_eq(jetos_boot_profile(blanks).loader, "")
@@ -297,10 +297,13 @@ jetos_test_image: fn(name: String, kind: ImageKind, from: String, format: String
     verification := StoreVerification.new()
     root: files.tmpdir("jetos-proof-package-") ?? panic("create root")
     entry: StoreEntry{id: "fixture", name: "fixture", version: "1", reference: "fixture@jetpack", out: files.join(root, "missing-output"), bin: "", rlib: "", envelope: Envelope.empty(), cache_identity: CacheIdentity.empty(), references: [String]{}, named_outputs: [String: String]{}, platform_artifact_kind: "", producer_record: "", receipt: "", realized_at: 0, last_used_at: 0}
-    lease: store_snapshot_lease(&verification, HangarRoots.at(root), entry) ?? panic("create real non-consumable lease")
+    lease: store_snapshot_lease(verification, HangarRoots.at(root), entry) ?? panic("create real non-consumable lease")
     package: JetOSRealizedPackage{entry: entry, lease: lease, original_out: "/original", original_reference_text: "original@jetpack", consumption_override: Val("/override")}
     packages := [JetOSRealizedPackage]{package}
     assert_eq(jetos_render_proof(jetos_test_system([OptionPlan]{}), packages, jetos_test_plan([ImagePlan]{})), "jetos proof for devhost\ntarget: linux.x64\nrisk: low\nplan: pass\npackages:\n  fixture@jetpack -> {entry.out}\noptions:\nservices:\nimages:\n")
-    ^packages[0].lease.release()
+    // The list owns the package: take it out before releasing its lease, so the
+    // lease's locks close once (E0211 refuses a take from the element in place).
+    held: packages.pop() ?? panic("one rendered package")
+    held.lease.release()
     files.remove_all(root) ?? panic("remove root")
 }

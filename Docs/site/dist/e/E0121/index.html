@@ -37,17 +37,17 @@
 <p class="diag-copy fix" data-registry-field="fix">Stop using `{name}` after the move, or give {consumer} a copy with `{name}.copy()` where it moved.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0121</code>: <code>tests/ui/E0121_lambda_move_outer_use.stderr</code>.</p>
-<pre class="diag">Error [jet.UseAfterMove]: `name` was consumed by the move `^name`, so it can&#39;t be used here
+<pre class="diag">Error [jet.UseAfterMove]: `name` was consumed by `name.move()`, so it can&#39;t be used here
   --&gt; tests/ui/E0121_lambda_move_outer_use.jet:5:11
     |
   5 |     print(name)
     |           ^^^^
   --&gt; tests/ui/E0121_lambda_move_outer_use.jet:3:16
     |
-  3 |     f: () -&gt; { ^name }
-    |                ^^^^^ `name` moved to the move `^name` here
+  3 |     f: () -&gt; { name.move() }
+    |                ^^^^^^^^^ `name` moved to `name.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `name` after the move, or give the move `^name` a copy with `name.copy()` where it moved.
+ Fix: Stop using `name` after the move, or give `name.move()` a copy with `name.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

@@ -79,13 +79,13 @@ publication_validate_takeover: fn(repo: String, entries: [PublicationIndexEntry]
     if !publication_is_takeover(entries, candidate) -> return
     publication_require_takeover_review(repo, candidate.name, candidate.version)
     all := entries.copy()
-    &all.push(candidate.copy())
+    all.push(candidate.copy())
     _: publication_verify_index_entry(all, candidate, true, "registry")
 }
 
 // The IOError kinds Publication reports. Core keeps the IOContext and
 // IOOperation annotations Core-only, so the builders below make every
-// context. Rust's InvalidData reports InvalidInput: D-IO-INVALIDDATA1=A is
+// context. Rust's InvalidData reports InvalidInput: InvalidData is
 // ratified, but Core's IOError has no InvalidData yet (CORE-GAPS 11).
 PublicationIOKind: enum {
     InvalidInput
@@ -139,7 +139,7 @@ publication_read_entries: fn(repo: String, name: String) -[FS]> [PublicationInde
         line_number += 1
         if raw.trim() == "" -> next
         entry: publication_index_parse_line(raw) ?? return Err(publication_index_error(.InvalidInput, path, "malformed registry index record at line {line_number}"))
-        &out.push(entry)
+        out.push(entry)
     }
     Ok(out)
 }
@@ -174,9 +174,9 @@ publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
             next
         }
         if info.is_symlink || !info.is_file -> return Err(publication_index_error(.InvalidInput, path, "registry index for `{name}` is not a regular file"))
-        &names.push(name)
+        names.push(name.copy())
     }
-    &names.sort()
+    names.sort()
     Ok(names)
 }
 publication_find_entry: fn(repo: String, name: String, version: String) -[FS]> PublicationIndexEntry? IOError! {
@@ -188,7 +188,7 @@ publication_find_entry: fn(repo: String, name: String, version: String) -[FS]> P
 publication_non_yanked_entries: fn(repo: String, name: String) -[FS]> [PublicationIndexEntry] IOError! {
     out := [PublicationIndexEntry]{}
     loop entry in publication_read_entries(repo, name) {
-        if !entry.yanked -> &out.push(entry)
+        if !entry.yanked -> out.push(entry)
     }
     Ok(out)
 }
@@ -217,7 +217,7 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
             next
         }
         if writer.fsync() == .Err(error) {
-            close(^writer)
+            close(writer)
             files.remove(path).drop("the unsynced lock is released; the fsync error is primary")
             return Err(error)
         }
@@ -225,12 +225,12 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
         // propagate an Err before the lock file is released.
         if action() == {
             .Ok(value) -> {
-                close(^writer)
+                close(writer)
                 files.remove(path).drop("release the owned index lock; the action result is primary")
                 return Ok(value)
             }
             .Err(error) -> {
-                close(^writer)
+                close(writer)
                 files.remove(path).drop("release the owned index lock; the action error is primary")
                 return Err(error)
             }
@@ -282,7 +282,7 @@ publication_write_index_entry_locked: fn(repo: String, entry: PublicationIndexEn
             }
             return Err(publication_index_error(.AlreadyExists, path, "registry version {entry.name} {entry.version} is immutable"))
         }
-        &entries.push(existing)
+        entries.push(existing)
     }
     if publication_validate_takeover(repo, entries, entry) == .Err(error) -> return Err(publication_index_error(.PermissionDenied, path, "{error.diagnostic.code}: {error.diagnostic.what}"))
     separator: if text != "" && !text.ends_with("\n") -> "\n" else -> ""
@@ -312,14 +312,14 @@ publication_mark_yanked_locked: fn(repo: String, name: String, version: String) 
         if entry.name == name && entry.version == version && !entry.yanked {
             entry.yanked = true
             found = true
-            &output.push(publication_index_to_jsonl(entry))
+            output.push(publication_index_to_jsonl(entry))
         } else {
-            &output.push(line)
+            output.push(line)
         }
     }
     if found {
         // A final empty item gives join the Rust trailing newline without another copy.
-        &output.push("")
+        output.push("")
         publication_index_atomic_replace(repo, path, output.join("\n").bytes())
     }
     Ok(found)

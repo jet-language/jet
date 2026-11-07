@@ -35,7 +35,7 @@ kit_steps_await_valid: fn(text: String) -> Bool {
     loop cursor < tokens.len() {
         key: tokens[cursor].text
         if kit_expect_named(options, key) -> return false
-        &options.push(key)
+        options.push(key.copy())
         if key == "optional" -> return kind == "file" && cursor + 1 == tokens.len()
         if cursor + 1 >= tokens.len() -> return false
         if key == "capture" {
@@ -154,7 +154,7 @@ kit_steps_await: fn(step: KitStep, context: KitStepCtx, previous: KitStepState) 
             success = verdict.status == "PASS"
         }
         if success {
-            if capture != "" -> &state.captures.push(KitCapture{name: capture, value: KitCapturedValue.Text(selected)})
+            if capture != "" -> state.captures.push(KitCapture{name: capture, value: KitCapturedValue.Text(selected)})
             state.last = kit_steps_action_run()
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }

@@ -14,15 +14,15 @@ use {
 write_catalog: fn(path: Path) -> Bool (EncodingError | IOError)! {
     out: files.create(path) ?? return Err(err)
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
-    writer := json.writer(^out, canonical: true) ?? return Err(err)
-    &writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
-    &writer.write(encoding.DataEvent.Key("b")) ?? return Err(err)
-    &writer.write(encoding.DataEvent.Int(2)) ?? return Err(err)
-    &writer.write(encoding.DataEvent.Key("a")) ?? return Err(err)
-    &writer.write(encoding.DataEvent.Int(1)) ?? return Err(err)
-    &writer.write(encoding.DataEvent.ObjectEnd) ?? return Err(err)
-    &writer.flush() ?? return Err(err)
-    &writer.finish() ?? return Err(err)
+    writer := json.writer(out, canonical: true) ?? return Err(err)
+    writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
+    writer.write(encoding.DataEvent.Key("b")) ?? return Err(err)
+    writer.write(encoding.DataEvent.Int(2)) ?? return Err(err)
+    writer.write(encoding.DataEvent.Key("a")) ?? return Err(err)
+    writer.write(encoding.DataEvent.Int(1)) ?? return Err(err)
+    writer.write(encoding.DataEvent.ObjectEnd) ?? return Err(err)
+    writer.flush() ?? return Err(err)
+    writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
@@ -31,7 +31,7 @@ run: fn() (EncodingError | IOError)! {
     path: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
     write_catalog(path) ?? return
     input: files.open(path) ?? return
-    reader: json.reader(^input) ?? return
+    reader: json.reader(input) ?? return
     read_count := 0
     loop event in reader {
         if event == {

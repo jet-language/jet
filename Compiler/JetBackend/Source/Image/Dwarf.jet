@@ -22,7 +22,7 @@
 //   the end of the prologue carries `prologue_end`.
 // - `.debug_jetline`: not DWARF. The location table the runtime's fault
 //   report reads (JetRuntime Assets/FaultReport/report.S) instead of
-//   parsing the DWARF (D-SIZE-PAYUSE1 A): per Jet function its address
+//   parsing the DWARF: per Jet function its address
 //   range, name, file, declaration line and the `.debug_line` rows, delta
 //   coded (dwarf_jet_line).
 // - `.debug_loclists`: offset pairs from the compile unit's base (the start
@@ -68,7 +68,7 @@ X64DwarfSections: struct {
 // Encoding.
 
 dwarf_u8: fn(bytes: &[U8], value: Int) Never! {
-    &bytes.push(U8{value.bit_and(255)})
+    bytes.push(U8{value.bit_and(255)})
 }
 
 dwarf_uleb: fn(bytes: &[U8], value: Int) Never! {
@@ -77,10 +77,10 @@ dwarf_uleb: fn(bytes: &[U8], value: Int) Never! {
         low: rest.bit_and(0x7f)
         rest = rest >> 7
         if rest == 0 {
-            &bytes.push(U8{low})
+            bytes.push(U8{low})
             return
         }
-        &bytes.push(U8{low.bit_or(0x80)})
+        bytes.push(U8{low.bit_or(0x80)})
     }
 }
 
@@ -90,16 +90,16 @@ dwarf_sleb: fn(bytes: &[U8], value: Int) Never! {
         low: rest.bit_and(0x7f)
         rest = rest >> 7
         if (rest == 0 && (low.bit_and(0x40)) == 0) || (rest == -1 && (low.bit_and(0x40)) != 0) {
-            &bytes.push(U8{low})
+            bytes.push(U8{low})
             return
         }
-        &bytes.push(U8{low.bit_or(0x80)})
+        bytes.push(U8{low.bit_or(0x80)})
     }
 }
 
 dwarf_string: fn(bytes: &[U8], text: String) Never! {
-    &bytes.extend(text.bytes())
-    &bytes.push(U8{0})
+    bytes.extend(text.bytes())
+    bytes.push(U8{0})
 }
 
 dwarf_patch_u32: fn(bytes: &[U8], at: Int, value: Int) Never! {
@@ -112,7 +112,7 @@ dwarf_patch_u32: fn(bytes: &[U8], at: Int, value: Int) Never! {
 // The 4-byte length field at `at`: the bytes after it, to the end.
 dwarf_patch_length: fn(bytes: &[U8], at: Int) Never! {
     length: bytes.len() - at - 4
-    dwarf_patch_u32(&bytes, at, length)
+    dwarf_patch_u32(bytes, at, length)
 }
 
 // ---------------------------------------------------------------------------
@@ -122,90 +122,90 @@ dwarf_cfa_advance: fn(cfi: &[U8], from: Int, to: Int) Never! {
     delta: to - from
     if delta <= 0 -> return
     if {
-        delta < 64 -> dwarf_u8(&cfi, (0x40).bit_or(delta))
+        delta < 64 -> dwarf_u8(cfi, (0x40).bit_or(delta))
         delta < 256 -> {
-            dwarf_u8(&cfi, 0x02)
-            dwarf_u8(&cfi, delta)
+            dwarf_u8(cfi, 0x02)
+            dwarf_u8(cfi, delta)
         }
         delta < 65536 -> {
-            dwarf_u8(&cfi, 0x03)
-            elf64_u16(&cfi, delta)
+            dwarf_u8(cfi, 0x03)
+            elf64_u16(cfi, delta)
         }
         else -> {
-            dwarf_u8(&cfi, 0x04)
-            elf64_u32(&cfi, delta)
+            dwarf_u8(cfi, 0x04)
+            elf64_u32(cfi, delta)
         }
     }
 }
 
 dwarf_cfa_def_cfa: fn(cfi: &[U8], reg: Int, offset: Int) Never! {
-    dwarf_u8(&cfi, 0x0c)
-    dwarf_uleb(&cfi, reg)
-    dwarf_uleb(&cfi, offset)
+    dwarf_u8(cfi, 0x0c)
+    dwarf_uleb(cfi, reg)
+    dwarf_uleb(cfi, offset)
 }
 
 dwarf_cfa_def_cfa_register: fn(cfi: &[U8], reg: Int) Never! {
-    dwarf_u8(&cfi, 0x0d)
-    dwarf_uleb(&cfi, reg)
+    dwarf_u8(cfi, 0x0d)
+    dwarf_uleb(cfi, reg)
 }
 
 dwarf_cfa_def_cfa_offset: fn(cfi: &[U8], offset: Int) Never! {
-    dwarf_u8(&cfi, 0x0e)
-    dwarf_uleb(&cfi, offset)
+    dwarf_u8(cfi, 0x0e)
+    dwarf_uleb(cfi, offset)
 }
 
 // `reg` is saved at CFA - 8 * `factored`.
 dwarf_cfa_offset: fn(cfi: &[U8], reg: Int, factored: Int) Never! {
     if {
-        reg < 64 -> dwarf_u8(&cfi, (0x80).bit_or(reg))
+        reg < 64 -> dwarf_u8(cfi, (0x80).bit_or(reg))
         else -> {
-            dwarf_u8(&cfi, 0x05)
-            dwarf_uleb(&cfi, reg)
+            dwarf_u8(cfi, 0x05)
+            dwarf_uleb(cfi, reg)
         }
     }
-    dwarf_uleb(&cfi, factored)
+    dwarf_uleb(cfi, factored)
 }
 
-dwarf_cfa_remember_state: fn(cfi: &[U8]) Never! { dwarf_u8(&cfi, 0x0a) }
+dwarf_cfa_remember_state: fn(cfi: &[U8]) Never! { dwarf_u8(cfi, 0x0a) }
 
-dwarf_cfa_restore_state: fn(cfi: &[U8]) Never! { dwarf_u8(&cfi, 0x0b) }
+dwarf_cfa_restore_state: fn(cfi: &[U8]) Never! { dwarf_u8(cfi, 0x0b) }
 
 // Pad a CIE or FDE with DW_CFA_nop so the record (length field included)
 // is a whole number of words.
 dwarf_eh_finish: fn(eh: &[U8], start: Int) Never! {
-    loop _ in 0..<((8 - (eh.len() - start) % 8) % 8) -> &eh.push(U8{0})
-    dwarf_patch_length(&eh, start)
+    loop _ in 0..<((8 - (eh.len() - start) % 8) % 8) -> eh.push(U8{0})
+    dwarf_patch_length(eh, start)
 }
 
 dwarf_eh_frame: fn(sections: &X64DwarfSections, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
     eh := [U8]{}
     // CIE: version 1, augmentation "zR" (FDE addresses pcrel sdata4), code
     // alignment 1, data alignment -8, return address column 16 (rip).
-    elf64_u32(&eh, 0)
-    elf64_u32(&eh, 0)
-    dwarf_u8(&eh, 1)
-    dwarf_string(&eh, "zR")
-    dwarf_uleb(&eh, 1)
-    dwarf_sleb(&eh, -8)
-    dwarf_u8(&eh, 16)
-    dwarf_uleb(&eh, 1)
-    dwarf_u8(&eh, 0x1b)
-    dwarf_cfa_def_cfa(&eh, 7, 8)
-    dwarf_cfa_offset(&eh, 16, 1)
-    dwarf_eh_finish(&eh, 0)
+    elf64_u32(eh, 0)
+    elf64_u32(eh, 0)
+    dwarf_u8(eh, 1)
+    dwarf_string(eh, "zR")
+    dwarf_uleb(eh, 1)
+    dwarf_sleb(eh, -8)
+    dwarf_u8(eh, 16)
+    dwarf_uleb(eh, 1)
+    dwarf_u8(eh, 0x1b)
+    dwarf_cfa_def_cfa(eh, 7, 8)
+    dwarf_cfa_offset(eh, 16, 1)
+    dwarf_eh_finish(eh, 0)
     relas := [X64ObjectRela]{}
     loop (index, function) in functions {
         start: eh.len()
-        elf64_u32(&eh, 0)
+        elf64_u32(eh, 0)
         // CIE pointer: the distance back from this field to the CIE.
         cie_pointer: eh.len()
-        elf64_u32(&eh, cie_pointer)
-        &relas.push(X64ObjectRela{at: eh.len(), symbol: dwarf_function_symbol(symbols, index), kind: ELF64_R_X86_64_PC32, addend: offsets[index]})
-        elf64_u32(&eh, 0)
-        elf64_u32(&eh, function.code.len())
-        dwarf_uleb(&eh, 0)
-        loop byte in debug[index].cfi -> &eh.push(byte)
-        dwarf_eh_finish(&eh, start)
+        elf64_u32(eh, cie_pointer)
+        relas.push(X64ObjectRela{at: eh.len(), symbol: dwarf_function_symbol(symbols, index), kind: ELF64_R_X86_64_PC32, addend: offsets[index]})
+        elf64_u32(eh, 0)
+        elf64_u32(eh, function.code.len())
+        dwarf_uleb(eh, 0)
+        loop byte in debug[index].cfi -> eh.push(byte)
+        dwarf_eh_finish(eh, start)
     }
     sections.eh_frame = eh
     sections.eh_relas = relas
@@ -275,12 +275,12 @@ DW_FORM_FLAG_PRESENT: 0x19
 // One abbreviation: code, DIE tag, whether it has children, then
 // (attribute, form) pairs.
 dwarf_abbrev: fn(bytes: &[U8], code: Int, die: Int, children: Bool, attributes: [Int]) Never! {
-    dwarf_uleb(&bytes, code)
-    dwarf_uleb(&bytes, die)
-    dwarf_u8(&bytes, if children -> 1 else -> 0)
-    loop attribute in attributes -> dwarf_uleb(&bytes, attribute)
-    dwarf_uleb(&bytes, 0)
-    dwarf_uleb(&bytes, 0)
+    dwarf_uleb(bytes, code)
+    dwarf_uleb(bytes, die)
+    dwarf_u8(bytes, if children -> 1 else -> 0)
+    loop attribute in attributes -> dwarf_uleb(bytes, attribute)
+    dwarf_uleb(bytes, 0)
+    dwarf_uleb(bytes, 0)
 }
 
 // With `sections` (one section per function) the unit has no address range.
@@ -288,35 +288,35 @@ dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
     a := [U8]{}
     named_variable: [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_DECL_FILE, DW_FORM_UDATA, DW_AT_DECL_LINE, DW_FORM_UDATA, DW_AT_TYPE, DW_FORM_REF4}
     located := named_variable
-    &located.push(DW_AT_LOCATION)
-    &located.push(DW_FORM_SEC_OFFSET)
+    located.push(DW_AT_LOCATION)
+    located.push(DW_FORM_SEC_OFFSET)
     unit := [Int]{DW_AT_PRODUCER, DW_FORM_STRING, DW_AT_LANGUAGE, DW_FORM_DATA2, DW_AT_NAME, DW_FORM_STRING, DW_AT_COMP_DIR, DW_FORM_STRING}
-    if !sections -> &unit.extend([Int]{DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8})
-    &unit.extend([Int]{DW_AT_STMT_LIST, DW_FORM_SEC_OFFSET})
-    dwarf_abbrev(&a, DWARF_ABBREV_UNIT, 0x11, true, unit)
-    dwarf_abbrev(&a, DWARF_ABBREV_BASE, 0x24, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_ENCODING, DW_FORM_DATA1, DW_AT_BYTE_SIZE, DW_FORM_DATA1})
-    dwarf_abbrev(&a, DWARF_ABBREV_POINTER, 0x0f, false, [Int]{DW_AT_BYTE_SIZE, DW_FORM_DATA1, DW_AT_TYPE, DW_FORM_REF4})
-    dwarf_abbrev(&a, DWARF_ABBREV_VOID_POINTER, 0x0f, false, [Int]{DW_AT_BYTE_SIZE, DW_FORM_DATA1})
-    dwarf_abbrev(&a, DWARF_ABBREV_STRUCT, 0x13, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA})
-    dwarf_abbrev(&a, DWARF_ABBREV_MEMBER, 0x0d, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_TYPE, DW_FORM_REF4, DW_AT_DATA_MEMBER_LOCATION, DW_FORM_UDATA})
-    dwarf_abbrev(&a, DWARF_ABBREV_UNION, 0x17, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA})
-    dwarf_abbrev(&a, DWARF_ABBREV_ENUM, 0x04, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_DATA1})
-    dwarf_abbrev(&a, DWARF_ABBREV_ENUMERATOR, 0x28, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_CONST_VALUE, DW_FORM_SDATA})
-    dwarf_abbrev(&a, DWARF_ABBREV_TYPEDEF, 0x16, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_TYPE, DW_FORM_REF4})
-    dwarf_abbrev(&a, DWARF_ABBREV_OPAQUE, 0x13, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA, DW_AT_DECLARATION, DW_FORM_FLAG_PRESENT})
-    dwarf_abbrev(&a, DWARF_ABBREV_SUBPROGRAM, 0x2e, true, [Int]{
+    if !sections -> unit.extend([Int]{DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8})
+    unit.extend([Int]{DW_AT_STMT_LIST, DW_FORM_SEC_OFFSET})
+    dwarf_abbrev(a, DWARF_ABBREV_UNIT, 0x11, true, unit)
+    dwarf_abbrev(a, DWARF_ABBREV_BASE, 0x24, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_ENCODING, DW_FORM_DATA1, DW_AT_BYTE_SIZE, DW_FORM_DATA1})
+    dwarf_abbrev(a, DWARF_ABBREV_POINTER, 0x0f, false, [Int]{DW_AT_BYTE_SIZE, DW_FORM_DATA1, DW_AT_TYPE, DW_FORM_REF4})
+    dwarf_abbrev(a, DWARF_ABBREV_VOID_POINTER, 0x0f, false, [Int]{DW_AT_BYTE_SIZE, DW_FORM_DATA1})
+    dwarf_abbrev(a, DWARF_ABBREV_STRUCT, 0x13, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA})
+    dwarf_abbrev(a, DWARF_ABBREV_MEMBER, 0x0d, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_TYPE, DW_FORM_REF4, DW_AT_DATA_MEMBER_LOCATION, DW_FORM_UDATA})
+    dwarf_abbrev(a, DWARF_ABBREV_UNION, 0x17, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA})
+    dwarf_abbrev(a, DWARF_ABBREV_ENUM, 0x04, true, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_DATA1})
+    dwarf_abbrev(a, DWARF_ABBREV_ENUMERATOR, 0x28, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_CONST_VALUE, DW_FORM_SDATA})
+    dwarf_abbrev(a, DWARF_ABBREV_TYPEDEF, 0x16, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_TYPE, DW_FORM_REF4})
+    dwarf_abbrev(a, DWARF_ABBREV_OPAQUE, 0x13, false, [Int]{DW_AT_NAME, DW_FORM_STRING, DW_AT_BYTE_SIZE, DW_FORM_UDATA, DW_AT_DECLARATION, DW_FORM_FLAG_PRESENT})
+    dwarf_abbrev(a, DWARF_ABBREV_SUBPROGRAM, 0x2e, true, [Int]{
         DW_AT_NAME, DW_FORM_STRING, DW_AT_DECL_FILE, DW_FORM_UDATA, DW_AT_DECL_LINE, DW_FORM_UDATA,
         DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_FRAME_BASE, DW_FORM_EXPRLOC, DW_AT_EXTERNAL, DW_FORM_FLAG_PRESENT,
     })
-    dwarf_abbrev(&a, DWARF_ABBREV_GENERATED, 0x2e, false, [Int]{
+    dwarf_abbrev(a, DWARF_ABBREV_GENERATED, 0x2e, false, [Int]{
         DW_AT_NAME, DW_FORM_STRING, DW_AT_LOW_PC, DW_FORM_ADDR, DW_AT_HIGH_PC, DW_FORM_DATA8, DW_AT_FRAME_BASE, DW_FORM_EXPRLOC, DW_AT_ARTIFICIAL, DW_FORM_FLAG_PRESENT,
     })
-    dwarf_abbrev(&a, DWARF_ABBREV_PARAMETER, 0x05, false, located)
-    dwarf_abbrev(&a, DWARF_ABBREV_VARIABLE, 0x34, false, located)
-    dwarf_abbrev(&a, DWARF_ABBREV_PARAMETER_UNLOCATED, 0x05, false, named_variable)
-    dwarf_abbrev(&a, DWARF_ABBREV_VARIABLE_UNLOCATED, 0x34, false, named_variable)
-    dwarf_abbrev(&a, DWARF_ABBREV_ANONYMOUS_UNION, 0x17, true, [Int]{DW_AT_BYTE_SIZE, DW_FORM_UDATA})
-    dwarf_uleb(&a, 0)
+    dwarf_abbrev(a, DWARF_ABBREV_PARAMETER, 0x05, false, located)
+    dwarf_abbrev(a, DWARF_ABBREV_VARIABLE, 0x34, false, located)
+    dwarf_abbrev(a, DWARF_ABBREV_PARAMETER_UNLOCATED, 0x05, false, named_variable)
+    dwarf_abbrev(a, DWARF_ABBREV_VARIABLE_UNLOCATED, 0x34, false, named_variable)
+    dwarf_abbrev(a, DWARF_ABBREV_ANONYMOUS_UNION, 0x17, true, [Int]{DW_AT_BYTE_SIZE, DW_FORM_UDATA})
+    dwarf_uleb(a, 0)
     a
 }
 
@@ -335,20 +335,20 @@ dwarf_encoding: fn(encoding: X64DebugEncoding) -> Int Never! {
 
 // A ref4 to type `row`, patched once every type has its offset.
 dwarf_type_ref: fn(info: &[U8], refs: &[Int], rows: &[Int], row: Int) Never! {
-    &refs.push(info.len())
-    &rows.push(row)
-    elf64_u32(&info, 0)
+    refs.push(info.len())
+    rows.push(row)
+    elf64_u32(info, 0)
 }
 
 dwarf_members: fn(info: &[U8], refs: &[Int], rows: &[Int], members: [X64DebugMember]) Never! {
     loop member in members {
         if member.ty < 0 -> next
-        dwarf_uleb(&info, DWARF_ABBREV_MEMBER)
-        dwarf_string(&info, member.name)
-        dwarf_type_ref(&info, &refs, &rows, member.ty)
-        dwarf_uleb(&info, member.offset)
+        dwarf_uleb(info, DWARF_ABBREV_MEMBER)
+        dwarf_string(info, member.name)
+        dwarf_type_ref(info, refs, rows, member.ty)
+        dwarf_uleb(info, member.offset)
     }
-    dwarf_uleb(&info, 0)
+    dwarf_uleb(info, 0)
 }
 
 // Every type DIE, in row order; returns each row's DIE offset.
@@ -357,77 +357,77 @@ dwarf_types: fn(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
     refs := [Int]{}
     rows := [Int]{}
     loop ty in types {
-        &offsets.push(info.len())
+        offsets.push(info.len())
         if ty.kind == {
             .Base(encoding) -> {
-                dwarf_uleb(&info, DWARF_ABBREV_BASE)
-                dwarf_string(&info, ty.name)
-                dwarf_u8(&info, dwarf_encoding(encoding))
-                dwarf_u8(&info, ty.size)
+                dwarf_uleb(info, DWARF_ABBREV_BASE)
+                dwarf_string(info, ty.name)
+                dwarf_u8(info, dwarf_encoding(encoding))
+                dwarf_u8(info, ty.size)
             }
             .Pointer(target) -> {
                 if {
                     target >= 0 -> {
-                        dwarf_uleb(&info, DWARF_ABBREV_POINTER)
-                        dwarf_u8(&info, 8)
-                        dwarf_type_ref(&info, &refs, &rows, target)
+                        dwarf_uleb(info, DWARF_ABBREV_POINTER)
+                        dwarf_u8(info, 8)
+                        dwarf_type_ref(info, refs, rows, target)
                     }
                     else -> {
-                        dwarf_uleb(&info, DWARF_ABBREV_VOID_POINTER)
-                        dwarf_u8(&info, 8)
+                        dwarf_uleb(info, DWARF_ABBREV_VOID_POINTER)
+                        dwarf_u8(info, 8)
                     }
                 }
             }
             .Struct(members) -> {
-                dwarf_uleb(&info, DWARF_ABBREV_STRUCT)
-                dwarf_string(&info, ty.name)
-                dwarf_uleb(&info, ty.size)
-                dwarf_members(&info, &refs, &rows, members)
+                dwarf_uleb(info, DWARF_ABBREV_STRUCT)
+                dwarf_string(info, ty.name)
+                dwarf_uleb(info, ty.size)
+                dwarf_members(info, refs, rows, members)
             }
             .Union(members) -> {
                 if {
-                    ty.name == "" -> dwarf_uleb(&info, DWARF_ABBREV_ANONYMOUS_UNION)
+                    ty.name == "" -> dwarf_uleb(info, DWARF_ABBREV_ANONYMOUS_UNION)
                     else -> {
-                        dwarf_uleb(&info, DWARF_ABBREV_UNION)
-                        dwarf_string(&info, ty.name)
+                        dwarf_uleb(info, DWARF_ABBREV_UNION)
+                        dwarf_string(info, ty.name)
                     }
                 }
-                dwarf_uleb(&info, ty.size)
-                dwarf_members(&info, &refs, &rows, members)
+                dwarf_uleb(info, ty.size)
+                dwarf_members(info, refs, rows, members)
             }
             .Enum(enumerators) -> {
-                dwarf_uleb(&info, DWARF_ABBREV_ENUM)
-                dwarf_string(&info, ty.name)
-                dwarf_u8(&info, ty.size)
+                dwarf_uleb(info, DWARF_ABBREV_ENUM)
+                dwarf_string(info, ty.name)
+                dwarf_u8(info, ty.size)
                 loop enumerator in enumerators {
-                    dwarf_uleb(&info, DWARF_ABBREV_ENUMERATOR)
-                    dwarf_string(&info, enumerator.name)
-                    dwarf_sleb(&info, enumerator.value)
+                    dwarf_uleb(info, DWARF_ABBREV_ENUMERATOR)
+                    dwarf_string(info, enumerator.name)
+                    dwarf_sleb(info, enumerator.value)
                 }
-                dwarf_uleb(&info, 0)
+                dwarf_uleb(info, 0)
             }
             .Typedef(target) -> {
                 if {
                     target >= 0 -> {
-                        dwarf_uleb(&info, DWARF_ABBREV_TYPEDEF)
-                        dwarf_string(&info, ty.name)
-                        dwarf_type_ref(&info, &refs, &rows, target)
+                        dwarf_uleb(info, DWARF_ABBREV_TYPEDEF)
+                        dwarf_string(info, ty.name)
+                        dwarf_type_ref(info, refs, rows, target)
                     }
                     else -> {
-                        dwarf_uleb(&info, DWARF_ABBREV_OPAQUE)
-                        dwarf_string(&info, ty.name)
-                        dwarf_uleb(&info, ty.size)
+                        dwarf_uleb(info, DWARF_ABBREV_OPAQUE)
+                        dwarf_string(info, ty.name)
+                        dwarf_uleb(info, ty.size)
                     }
                 }
             }
             .Opaque -> {
-                dwarf_uleb(&info, DWARF_ABBREV_OPAQUE)
-                dwarf_string(&info, ty.name)
-                dwarf_uleb(&info, ty.size)
+                dwarf_uleb(info, DWARF_ABBREV_OPAQUE)
+                dwarf_string(info, ty.name)
+                dwarf_uleb(info, ty.size)
             }
         }
     }
-    loop (index, at) in refs -> dwarf_patch_u32(&info, at, offsets[rows[index]])
+    loop (index, at) in refs -> dwarf_patch_u32(info, at, offsets[rows[index]])
     offsets
 }
 
@@ -447,30 +447,30 @@ dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
             number: x64_dwarf_register(reg)
             if {
                 indirect && number < 32 -> {
-                    dwarf_u8(&expr, 0x70 + number)
-                    dwarf_sleb(&expr, 0)
+                    dwarf_u8(expr, 0x70 + number)
+                    dwarf_sleb(expr, 0)
                 }
                 indirect -> {
-                    dwarf_u8(&expr, 0x92)
-                    dwarf_uleb(&expr, number)
-                    dwarf_sleb(&expr, 0)
+                    dwarf_u8(expr, 0x92)
+                    dwarf_uleb(expr, number)
+                    dwarf_sleb(expr, 0)
                 }
-                number < 32 -> dwarf_u8(&expr, 0x50 + number)
+                number < 32 -> dwarf_u8(expr, 0x50 + number)
                 else -> {
-                    dwarf_u8(&expr, 0x90)
-                    dwarf_uleb(&expr, number)
+                    dwarf_u8(expr, 0x90)
+                    dwarf_uleb(expr, number)
                 }
             }
         }
         .Frame(offset) -> {
-            dwarf_u8(&expr, 0x91)
-            dwarf_sleb(&expr, offset)
-            if indirect -> dwarf_u8(&expr, 0x06)
+            dwarf_u8(expr, 0x91)
+            dwarf_sleb(expr, offset)
+            if indirect -> dwarf_u8(expr, 0x06)
         }
         .FrameAddress(offset) -> {
-            dwarf_u8(&expr, 0x91)
-            dwarf_sleb(&expr, offset)
-            if !indirect -> dwarf_u8(&expr, 0x9f)
+            dwarf_u8(expr, 0x91)
+            dwarf_sleb(expr, offset)
+            if !indirect -> dwarf_u8(expr, 0x9f)
         }
     }
     expr
@@ -480,9 +480,9 @@ dwarf_location: fn(location: X64DebugLocation, indirect: Bool) -> [U8] Never! {
 // one pass over the function's ranges instead of one per variable.
 dwarf_variable_buckets: fn(ranges: [X64VariableRange], count: Int) -> [[X64VariableRange]] Never! {
     buckets := [[X64VariableRange]]{}
-    loop _ in 0..<count -> &buckets.push([X64VariableRange]{})
+    loop _ in 0..<count -> buckets.push([X64VariableRange]{})
     loop range in ranges {
-        if range.variable >= 0 && range.variable < count -> &buckets[range.variable].push(range)
+        if range.variable >= 0 && range.variable < count -> buckets[range.variable].push(range.copy())
     }
     buckets
 }
@@ -494,12 +494,12 @@ dwarf_variable_buckets: fn(ranges: [X64VariableRange], count: Int) -> [[X64Varia
 dwarf_variable_ranges: fn(ranges: [X64VariableRange]) -> [X64VariableRange] Never! {
     order: dwarf_range_order(ranges)
     sorted := [X64VariableRange]{}
-    loop index in order -> &sorted.push(ranges[index])
+    loop index in order -> sorted.push(ranges[index])
     trimmed := [X64VariableRange]{}
     loop (index, range) in sorted {
         end := range.end
         if index + 1 < sorted.len() && sorted[index + 1].start < end -> end = sorted[index + 1].start
-        if end > range.start -> &trimmed.push(X64VariableRange{variable: range.variable, start: range.start, end: end, location: range.location})
+        if end > range.start -> trimmed.push(X64VariableRange{variable: range.variable, start: range.start, end: end, location: range.location})
     }
     trimmed
 }
@@ -510,10 +510,10 @@ dwarf_variable_ranges: fn(ranges: [X64VariableRange]) -> [X64VariableRange] Neve
 dwarf_range_order: fn(ranges: [X64VariableRange]) -> [Int] Never! {
     count: ranges.len()
     order := [Int]{}
-    loop index in 0..<count -> &order.push(index)
+    loop index in 0..<count -> order.push(index)
     if count < 2 -> return order
     scratch := [Int]{}
-    loop _ in 0..<count -> &scratch.push(0)
+    loop _ in 0..<count -> scratch.push(0)
     width := 1
     loop width < count {
         start := 0
@@ -557,13 +557,13 @@ dwarf_range_order: fn(ranges: [X64VariableRange]) -> [Int] Never! {
 // Compile unit, line program and location lists.
 
 dwarf_address: fn(bytes: &[U8], relas: &[X64ObjectRela], symbol: Int, addend: Int) Never! {
-    &relas.push(X64ObjectRela{at: bytes.len(), symbol: symbol, kind: ELF64_R_X86_64_64, addend: addend})
-    elf64_u64(&bytes, 0)
+    relas.push(X64ObjectRela{at: bytes.len(), symbol: symbol, kind: ELF64_R_X86_64_64, addend: addend})
+    elf64_u64(bytes, 0)
 }
 
 dwarf_section_offset: fn(bytes: &[U8], relas: &[X64ObjectRela], symbol: Int, addend: Int) Never! {
-    &relas.push(X64ObjectRela{at: bytes.len(), symbol: symbol, kind: ELF64_R_X86_64_32, addend: addend})
-    elf64_u32(&bytes, 0)
+    relas.push(X64ObjectRela{at: bytes.len(), symbol: symbol, kind: ELF64_R_X86_64_32, addend: addend})
+    elf64_u32(bytes, 0)
 }
 
 // The source facts of compiled function `function` (`main` has none).
@@ -589,48 +589,48 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
     relas := [X64ObjectRela]{}
     lists := [U8]{}
     list_relas := [X64ObjectRela]{}
-    elf64_u32(&lists, 0)
-    elf64_u16(&lists, 5)
-    dwarf_u8(&lists, 8)
-    dwarf_u8(&lists, 0)
-    elf64_u32(&lists, 0)
+    elf64_u32(lists, 0)
+    elf64_u16(lists, 5)
+    dwarf_u8(lists, 8)
+    dwarf_u8(lists, 0)
+    elf64_u32(lists, 0)
 
-    elf64_u32(&info, 0)
-    elf64_u16(&info, 5)
+    elf64_u32(info, 0)
+    elf64_u16(info, 5)
     // DW_UT_compile, 8-byte addresses, the abbreviation table.
-    dwarf_u8(&info, 1)
-    dwarf_u8(&info, 8)
-    dwarf_section_offset(&info, &relas, symbols.abbrev, 0)
+    dwarf_u8(info, 1)
+    dwarf_u8(info, 8)
+    dwarf_section_offset(info, relas, symbols.abbrev, 0)
     paths: program.debug.files
-    dwarf_uleb(&info, DWARF_ABBREV_UNIT)
-    dwarf_string(&info, "Jet native backend (O0)")
+    dwarf_uleb(info, DWARF_ABBREV_UNIT)
+    dwarf_string(info, "Jet native backend (O0)")
     // DW_LANG_C11: the closest registered language whose expression syntax
     // (`p.x`, `*p`, `p->x`) reads Jet values.
-    elf64_u16(&info, 0x1d)
-    dwarf_string(&info, if paths.len() > 0 -> paths[0] else -> "<generated>")
-    dwarf_string(&info, if program.debug.directory == "" -> "." else -> program.debug.directory)
+    elf64_u16(info, 0x1d)
+    dwarf_string(info, if paths.len() > 0 -> paths[0] else -> "<generated>")
+    dwarf_string(info, if program.debug.directory == "" -> "." else -> program.debug.directory)
     if symbols.functions.len() == 0 {
-        dwarf_address(&info, &relas, symbols.text, 0)
-        elf64_u64(&info, text_size)
+        dwarf_address(info, relas, symbols.text, 0)
+        elf64_u64(info, text_size)
     }
-    dwarf_section_offset(&info, &relas, symbols.line, 0)
-    type_offsets: dwarf_types(&info, program.debug.types)
+    dwarf_section_offset(info, relas, symbols.line, 0)
+    type_offsets: dwarf_types(info, program.debug.types)
 
     weights := [Int]{}
     total := 0
     loop (index, function) in functions {
         weight: 1 + dwarf_function_debug(program, function).variables.len() + debug[index].ranges.len()
-        &weights.push(weight)
+        weights.push(weight)
         total += weight
     }
     workers: compiler_threads_admit(threads, functions.len(), total, DWARF_INFO_MIN_WEIGHT_PER_THREAD, 0, 0)
     if workers <= 1 {
-        loop (index, function) in functions -> dwarf_info_function(&info, &relas, &lists, &list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
+        loop (index, function) in functions -> dwarf_info_function(info, relas, lists, list_relas, program, function, debug[index], offsets[index], dwarf_function_symbol(symbols, index), type_offsets, symbols)
     } else {
         bounds: compiler_threads_partition(weights, workers)
         inputs: shared DwarfInfoShared{program: program, functions: functions, debug: debug, offsets: offsets, type_offsets: type_offsets, symbols: symbols}
         parts := [Shared<DwarfInfoPart>]{}
-        loop part in 0..<(bounds.len() - 1) -> &parts.push(shared DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}})
+        loop part in 0..<(bounds.len() - 1) -> parts.push(shared DwarfInfoPart{start: bounds[part], end: bounds[part + 1], outputs: [DwarfInfoRows]{}})
         _ := dwarf_info_parts(inputs, parts, 0) ?? panic("the DWARF info threads failed")
         loop part in parts {
             rows: dwarf_info_part_take(part)
@@ -638,18 +638,18 @@ dwarf_info: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions:
             lists_base: lists.len()
             loop rela in rows.relas {
                 addend: if rela.symbol == symbols.loclists -> rela.addend + lists_base else -> rela.addend
-                &relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
+                relas.push(X64ObjectRela{at: rela.at + info_base, symbol: rela.symbol, kind: rela.kind, addend: addend})
             }
-            loop rela in rows.list_relas -> &list_relas.push(X64ObjectRela{at: rela.at + lists_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
+            loop rela in rows.list_relas -> list_relas.push(X64ObjectRela{at: rela.at + lists_base, symbol: rela.symbol, kind: rela.kind, addend: rela.addend})
             // Bytes append as one block copy; popping them out one by one
             // (compiler_take_rows) grew the target per byte.
-            &info.extend(rows.info)
-            &lists.extend(rows.lists)
+            info.extend(rows.info)
+            lists.extend(rows.lists)
         }
     }
-    dwarf_uleb(&info, 0)
-    dwarf_patch_length(&info, 0)
-    dwarf_patch_length(&lists, 0)
+    dwarf_uleb(info, 0)
+    dwarf_patch_length(info, 0)
+    dwarf_patch_length(lists, 0)
     sections.info = info
     sections.info_relas = relas
     sections.loclists = lists
@@ -715,16 +715,16 @@ dwarf_info_part: fn(inputs: Shared<DwarfInfoShared>, part: Shared<DwarfInfoPart>
     list_relas := [X64ObjectRela]{}
     loop index in permit.value.start..<permit.value.end {
         function: reads.value.functions[index]
-        dwarf_info_function(&info, &relas, &lists, &list_relas, reads.value.program, function, reads.value.debug[index], reads.value.offsets[index], dwarf_function_symbol(reads.value.symbols, index), reads.value.type_offsets, reads.value.symbols)
+        dwarf_info_function(info, relas, lists, list_relas, reads.value.program, function, reads.value.debug[index], reads.value.offsets[index], dwarf_function_symbol(reads.value.symbols, index), reads.value.type_offsets, reads.value.symbols)
     }
-    &permit.value.outputs.push(DwarfInfoRows{info: ^info, relas: ^relas, lists: ^lists, list_relas: ^list_relas})
+    permit.value.outputs.push(DwarfInfoRows{info: info.move(), relas: relas.move(), lists: lists.move(), list_relas: list_relas.move()})
     1
 }
 
 // A part's rows, after its thread joined.
 dwarf_info_part_take: fn(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
     permit: part.guard_edit()
-    &permit.value.outputs.pop() ?? panic("a DWARF info thread left no rows")
+    permit.value.outputs.pop() ?? panic("a DWARF info thread left no rows")
 }
 
 // One function's subprogram DIE in `info` (its address relocation against
@@ -736,23 +736,23 @@ dwarf_info_part_take: fn(part: Shared<DwarfInfoPart>) -> DwarfInfoRows {
 dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], list_relas: &[X64ObjectRela], program: X64ObjectModule, function: X64CompiledFunction, debug: X64FunctionDebug, offset: Int, symbol: Int, type_offsets: [Int], symbols: X64DwarfSymbols) Never! {
     facts: dwarf_function_debug(program, function)
     if facts.file < 0 {
-        dwarf_uleb(&info, DWARF_ABBREV_GENERATED)
-        dwarf_string(&info, function.name)
-        dwarf_address(&info, &relas, symbol, offset)
-        elf64_u64(&info, function.code.len())
+        dwarf_uleb(info, DWARF_ABBREV_GENERATED)
+        dwarf_string(info, function.name)
+        dwarf_address(info, relas, symbol, offset)
+        elf64_u64(info, function.code.len())
         // Frame base: DW_OP_reg6 (rbp).
-        dwarf_uleb(&info, 1)
-        dwarf_u8(&info, 0x56)
+        dwarf_uleb(info, 1)
+        dwarf_u8(info, 0x56)
         return
     }
-    dwarf_uleb(&info, DWARF_ABBREV_SUBPROGRAM)
-    dwarf_string(&info, facts.name)
-    dwarf_uleb(&info, facts.file + 1)
-    dwarf_uleb(&info, facts.line)
-    dwarf_address(&info, &relas, symbol, offset)
-    elf64_u64(&info, function.code.len())
-    dwarf_uleb(&info, 1)
-    dwarf_u8(&info, 0x56)
+    dwarf_uleb(info, DWARF_ABBREV_SUBPROGRAM)
+    dwarf_string(info, facts.name)
+    dwarf_uleb(info, facts.file + 1)
+    dwarf_uleb(info, facts.line)
+    dwarf_address(info, relas, symbol, offset)
+    elf64_u64(info, function.code.len())
+    dwarf_uleb(info, 1)
+    dwarf_u8(info, 0x56)
     buckets: dwarf_variable_buckets(debug.ranges, facts.variables.len())
     loop (variable, row) in facts.variables {
         ranges: dwarf_variable_ranges(buckets[variable])
@@ -761,110 +761,110 @@ dwarf_info_function: fn(info: &[U8], relas: &[X64ObjectRela], lists: &[U8], list
         if row.parameter {
             abbrev = if located -> DWARF_ABBREV_PARAMETER else -> DWARF_ABBREV_PARAMETER_UNLOCATED
         }
-        dwarf_uleb(&info, abbrev)
-        dwarf_string(&info, row.name)
-        dwarf_uleb(&info, facts.file + 1)
-        dwarf_uleb(&info, row.line)
-        elf64_u32(&info, type_offsets[row.ty])
+        dwarf_uleb(info, abbrev)
+        dwarf_string(info, row.name)
+        dwarf_uleb(info, facts.file + 1)
+        dwarf_uleb(info, row.line)
+        elf64_u32(info, type_offsets[row.ty])
         if located {
-            dwarf_section_offset(&info, &relas, symbols.loclists, lists.len())
+            dwarf_section_offset(info, relas, symbols.loclists, lists.len())
             loop range in ranges {
                 if symbols.functions.len() == 0 {
                     // DW_LLE_offset_pair from the unit's base, the start of .text.
-                    dwarf_u8(&lists, 0x04)
-                    dwarf_uleb(&lists, offset + range.start)
-                    dwarf_uleb(&lists, offset + range.end)
+                    dwarf_u8(lists, 0x04)
+                    dwarf_uleb(lists, offset + range.start)
+                    dwarf_uleb(lists, offset + range.end)
                 } else {
                     // DW_LLE_start_length: the function's own section.
-                    dwarf_u8(&lists, 0x08)
-                    dwarf_address(&lists, &list_relas, symbol, offset + range.start)
-                    dwarf_uleb(&lists, range.end - range.start)
+                    dwarf_u8(lists, 0x08)
+                    dwarf_address(lists, list_relas, symbol, offset + range.start)
+                    dwarf_uleb(lists, range.end - range.start)
                 }
                 expr: dwarf_location(range.location, row.indirect)
-                dwarf_uleb(&lists, expr.len())
-                &lists.extend(expr)
+                dwarf_uleb(lists, expr.len())
+                lists.extend(expr)
             }
-            dwarf_u8(&lists, 0)
+            dwarf_u8(lists, 0)
         }
     }
-    dwarf_uleb(&info, 0)
+    dwarf_uleb(info, 0)
 }
 
 dwarf_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], offsets: [Int], symbols: X64DwarfSymbols) Never! {
     line := [U8]{}
     relas := [X64ObjectRela]{}
-    elf64_u32(&line, 0)
-    elf64_u16(&line, 5)
-    dwarf_u8(&line, 8)
-    dwarf_u8(&line, 0)
+    elf64_u32(line, 0)
+    elf64_u16(line, 5)
+    dwarf_u8(line, 8)
+    dwarf_u8(line, 0)
     header_length_at: line.len()
-    elf64_u32(&line, 0)
+    elf64_u32(line, 0)
     // Minimum instruction length 1, one operation per instruction, rows are
     // statements, line_base -5, line_range 14, opcode_base 13.
-    loop byte in ([Int]{1, 1, 1, 0xfb, 14, 13}) -> dwarf_u8(&line, byte)
-    loop byte in ([Int]{0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1}) -> dwarf_u8(&line, byte)
+    loop byte in ([Int]{1, 1, 1, 0xfb, 14, 13}) -> dwarf_u8(line, byte)
+    loop byte in ([Int]{0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1}) -> dwarf_u8(line, byte)
     // Directories: (path, string); the compilation directory only.
-    dwarf_u8(&line, 1)
-    dwarf_uleb(&line, 1)
-    dwarf_uleb(&line, DW_FORM_STRING)
-    dwarf_uleb(&line, 1)
-    dwarf_string(&line, if program.debug.directory == "" -> "." else -> program.debug.directory)
+    dwarf_u8(line, 1)
+    dwarf_uleb(line, 1)
+    dwarf_uleb(line, DW_FORM_STRING)
+    dwarf_uleb(line, 1)
+    dwarf_string(line, if program.debug.directory == "" -> "." else -> program.debug.directory)
     // Files: (path, string), (directory index, udata). File 0 is the
     // primary source file; file i + 1 is X64ModuleDebug.files[i].
     paths: program.debug.files
-    dwarf_u8(&line, 2)
-    dwarf_uleb(&line, 1)
-    dwarf_uleb(&line, DW_FORM_STRING)
-    dwarf_uleb(&line, 2)
-    dwarf_uleb(&line, DW_FORM_UDATA)
-    dwarf_uleb(&line, paths.len() + 1)
-    dwarf_string(&line, if paths.len() > 0 -> paths[0] else -> "<generated>")
-    dwarf_uleb(&line, 0)
+    dwarf_u8(line, 2)
+    dwarf_uleb(line, 1)
+    dwarf_uleb(line, DW_FORM_STRING)
+    dwarf_uleb(line, 2)
+    dwarf_uleb(line, DW_FORM_UDATA)
+    dwarf_uleb(line, paths.len() + 1)
+    dwarf_string(line, if paths.len() > 0 -> paths[0] else -> "<generated>")
+    dwarf_uleb(line, 0)
     loop path in paths {
-        dwarf_string(&line, path)
-        dwarf_uleb(&line, 0)
+        dwarf_string(line, path)
+        dwarf_uleb(line, 0)
     }
-    dwarf_patch_length(&line, header_length_at)
+    dwarf_patch_length(line, header_length_at)
 
     loop (index, function) in functions {
         facts: dwarf_function_debug(program, function)
         rows: debug[index].lines
         if facts.file < 0 || rows.len() == 0 -> next
         // DW_LNE_set_address.
-        dwarf_u8(&line, 0)
-        dwarf_uleb(&line, 9)
-        dwarf_u8(&line, 2)
-        dwarf_address(&line, &relas, dwarf_function_symbol(symbols, index), offsets[index])
+        dwarf_u8(line, 0)
+        dwarf_uleb(line, 9)
+        dwarf_u8(line, 2)
+        dwarf_address(line, relas, dwarf_function_symbol(symbols, index), offsets[index])
         if facts.file != 0 {
-            dwarf_u8(&line, 0x04)
-            dwarf_uleb(&line, facts.file + 1)
+            dwarf_u8(line, 0x04)
+            dwarf_uleb(line, facts.file + 1)
         }
         current_line := 1
         current_at := 0
         loop row in rows {
             if row.line != current_line {
-                dwarf_u8(&line, 0x03)
-                dwarf_sleb(&line, row.line - current_line)
+                dwarf_u8(line, 0x03)
+                dwarf_sleb(line, row.line - current_line)
                 current_line = row.line
             }
             if row.at != current_at {
-                dwarf_u8(&line, 0x02)
-                dwarf_uleb(&line, row.at - current_at)
+                dwarf_u8(line, 0x02)
+                dwarf_uleb(line, row.at - current_at)
                 current_at = row.at
             }
-            if row.at == debug[index].body -> dwarf_u8(&line, 0x0a)
-            dwarf_u8(&line, 0x01)
+            if row.at == debug[index].body -> dwarf_u8(line, 0x0a)
+            dwarf_u8(line, 0x01)
         }
         if function.code.len() > current_at {
-            dwarf_u8(&line, 0x02)
-            dwarf_uleb(&line, function.code.len() - current_at)
+            dwarf_u8(line, 0x02)
+            dwarf_uleb(line, function.code.len() - current_at)
         }
         // DW_LNE_end_sequence.
-        dwarf_u8(&line, 0)
-        dwarf_uleb(&line, 1)
-        dwarf_u8(&line, 1)
+        dwarf_u8(line, 0)
+        dwarf_uleb(line, 1)
+        dwarf_u8(line, 1)
     }
-    dwarf_patch_length(&line, 0)
+    dwarf_patch_length(line, 0)
     sections.line = line
     sections.line_relas = relas
 }
@@ -890,51 +890,51 @@ dwarf_jet_line: fn(sections: &X64DwarfSections, program: X64ObjectModule, functi
     relas := [X64ObjectRela]{}
     strings := [U8]{}
     rows := [U8]{}
-    dwarf_string(&strings, if program.debug.directory == "" -> "." else -> program.debug.directory)
+    dwarf_string(strings, if program.debug.directory == "" -> "." else -> program.debug.directory)
     paths := [Int]{}
-    loop _ in program.debug.files -> &paths.push(-1)
+    loop _ in program.debug.files -> paths.push(-1)
     kept := [Int]{}
     loop (index, function) in functions {
         facts: dwarf_function_debug(program, function)
-        if facts.file >= 0 && facts.line > 0 -> &kept.push(index)
+        if facts.file >= 0 && facts.line > 0 -> kept.push(index)
     }
-    elf64_u32(&table, 0)
-    elf64_u32(&table, kept.len())
+    elf64_u32(table, 0)
+    elf64_u32(table, kept.len())
     strings_at: table.len()
-    elf64_u32(&table, 0)
+    elf64_u32(table, 0)
     rows_at: table.len()
-    elf64_u32(&table, 0)
+    elf64_u32(table, 0)
     loop index in kept {
         function: functions[index]
         facts: dwarf_function_debug(program, function)
-        dwarf_address(&table, &relas, dwarf_function_symbol(symbols, index), offsets[index])
-        elf64_u32(&table, function.code.len())
-        elf64_u32(&table, strings.len())
-        dwarf_string(&strings, facts.name)
+        dwarf_address(table, relas, dwarf_function_symbol(symbols, index), offsets[index])
+        elf64_u32(table, function.code.len())
+        elf64_u32(table, strings.len())
+        dwarf_string(strings, facts.name)
         if paths[facts.file] < 0 {
             paths[facts.file] = strings.len()
-            dwarf_string(&strings, program.debug.files[facts.file])
+            dwarf_string(strings, program.debug.files[facts.file])
         }
-        elf64_u32(&table, paths[facts.file])
-        elf64_u32(&table, facts.line)
-        elf64_u32(&table, rows.len())
-        elf64_u32(&table, debug[index].lines.len())
+        elf64_u32(table, paths[facts.file])
+        elf64_u32(table, facts.line)
+        elf64_u32(table, rows.len())
+        elf64_u32(table, debug[index].lines.len())
         current_line := 1
         current_at := 0
         loop row in debug[index].lines {
-            dwarf_uleb(&rows, row.at - current_at)
-            dwarf_sleb(&rows, row.line - current_line)
+            dwarf_uleb(rows, row.at - current_at)
+            dwarf_sleb(rows, row.line - current_line)
             current_at = row.at
             current_line = row.line
         }
     }
     strings_start: table.len()
-    dwarf_patch_u32(&table, strings_at, strings_start)
-    &table.extend(strings)
+    dwarf_patch_u32(table, strings_at, strings_start)
+    table.extend(strings)
     rows_start: table.len()
-    dwarf_patch_u32(&table, rows_at, rows_start)
-    &table.extend(rows)
-    dwarf_patch_length(&table, 0)
+    dwarf_patch_u32(table, rows_at, rows_start)
+    table.extend(rows)
+    dwarf_patch_length(table, 0)
     sections.jet_line = table
     sections.jet_line_relas = relas
 }
@@ -951,11 +951,11 @@ x64_dwarf_sections: fn(program: X64ObjectModule, functions: [X64CompiledFunction
         line: [U8]{}, line_relas: [X64ObjectRela]{}, jet_line: [U8]{}, jet_line_relas: [X64ObjectRela]{},
         loclists: [U8]{}, loclists_relas: [X64ObjectRela]{},
     }
-    dwarf_eh_frame(&sections, functions, debug, offsets, symbols)
+    dwarf_eh_frame(sections, functions, debug, offsets, symbols)
     if !debug_info -> return sections
     sections.abbrev = dwarf_abbrevs(symbols.functions.len() > 0)
-    dwarf_info(&sections, program, functions, debug, offsets, text_size, symbols, threads)
-    dwarf_line(&sections, program, functions, debug, offsets, symbols)
-    dwarf_jet_line(&sections, program, functions, debug, offsets, symbols)
+    dwarf_info(sections, program, functions, debug, offsets, text_size, symbols, threads)
+    dwarf_line(sections, program, functions, debug, offsets, symbols)
+    dwarf_jet_line(sections, program, functions, debug, offsets, symbols)
     sections
 }

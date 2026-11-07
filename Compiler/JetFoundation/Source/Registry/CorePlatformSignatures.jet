@@ -5,8 +5,8 @@
 // one branch per member, so the compiler and its emitted code stay linear in
 // the table size. One row per line: `module member[|member…] params return
 // [type_parameter|…]`, fields separated by one space. `params` is `-` (none)
-// or a comma list of positional parameter types, each optionally prefixed `^`
-// (moved) or `&` (written); `return` is `-` (none) or a type; the optional
+// or a comma list of positional parameter types, each optionally prefixed `&&`
+// (taken) or `&` (written); `return` is `-` (none) or a type; the optional
 // fifth field names the signature's unconstrained type parameters. Types:
 // `String` `Int` `Float` `Bool` `Char`; `u8` / `i32` / `U16` / `I64` (IntN); `[T]` list;
 // `[K:V]` map; `T?` option; `Result<T,E>`; `Union<A,B,…>`; `Name<T,…>`
@@ -39,15 +39,14 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
                 bytes: text.bytes()
                 access := AccessConvention.Read
                 start := 0
-                if core_sig_row_code(bytes, 0) == 94 {
+                if core_sig_row_code(bytes, 0) == 38 && core_sig_row_code(bytes, 1) == 38 {
                     access = AccessConvention.Move
-                    start = 1
-                }
-                if core_sig_row_code(bytes, 0) == 38 {
+                    start = 2
+                } else if core_sig_row_code(bytes, 0) == 38 {
                     access = AccessConvention.Write
                     start = 1
                 }
-                &parameters.push(core_sig_positional(core_sig_row_type(text, start), access))
+                parameters.push(core_sig_positional(core_sig_row_type(text, start), access))
             }
         }
         return_type: if fields[3] == "-" -> Type?{None} else -> Val(core_sig_row_type(fields[3], 0))
@@ -55,7 +54,7 @@ core_sig_row_lookup: fn(rows: String, module_name: String, member: String) -> Co
         signature.native_return_labels = core_sig_row_tuple_labels(fields[3])
         if fields.len() == 5 {
             type_parameters := [CoreCallTypeParameter]{}
-            loop name in fields[4].split("|") -> &type_parameters.push(core_sig_type_parameter(name, CoreCallTypeConstraint.Any))
+            loop name in fields[4].split("|") -> type_parameters.push(core_sig_type_parameter(name, CoreCallTypeConstraint.Any))
             signature.type_parameters = type_parameters
         }
         return Val(signature)
@@ -79,7 +78,7 @@ core_sig_row_tuple_labels: fn(field: String) -> [String] Never! {
     inner: String.from_bytes(bytes.slice(1, bytes.len() - 1)) ?? return labels
     if inner == "" -> return labels
     loop part in core_sig_row_parameters(inner) {
-        &labels.push(part.split(":").to_list()[0])
+        labels.push(part.split(":").to_list()[0])
     }
     labels
 }
@@ -116,11 +115,11 @@ core_sig_row_parameters: fn(field: String) -> [String] Never! {
         if code == 91 || code == 60 || code == 40 -> depth += 1
         if code == 93 || code == 62 || code == 41 -> depth -= 1
         if code == 44 && depth == 0 {
-            &out.push(String.from_bytes(bytes.slice(start, index)) ?? "")
+            out.push(String.from_bytes(bytes.slice(start, index)) ?? "")
             start = index + 1
         }
     }
-    &out.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
+    out.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
     out
 }
 
@@ -145,7 +144,7 @@ core_sig_row_types_at: fn(bytes: [U8], start: Int, close: Int) -> CoreSigRowType
     if done -> next += 1
     loop !done {
         parsed: core_sig_row_type_at(bytes, next)
-        &types.push(parsed.ty)
+        types.push(parsed.ty)
         done = core_sig_row_code(bytes, parsed.next) != 44
         next = parsed.next + 1
     }
@@ -171,7 +170,7 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
             name_end := next
             loop core_sig_row_code(bytes, name_end) != 58 -> name_end += 1
             field: core_sig_row_type_at(bytes, name_end + 1)
-            &fields.push(TypeTupleField{name: String.from_bytes(bytes.slice(next, name_end)) ?? "", ty: field.ty})
+            fields.push(TypeTupleField{name: String.from_bytes(bytes.slice(next, name_end)) ?? "", ty: field.ty})
             done = core_sig_row_code(bytes, field.next) != 44
             next = field.next + 1
         }
@@ -194,7 +193,7 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
                 done = true
             } else {
                 param: core_sig_row_type_at(bytes, next)
-                &params.push(param.ty)
+                params.push(param.ty)
                 code: core_sig_row_code(bytes, param.next)
                 done = code == 41
                 next = if code == 44 -> param.next + 1 else -> param.next
@@ -236,7 +235,7 @@ core_sig_row_atom_at: fn(bytes: [U8], start: Int) -> CoreSigRowType Never! {
 core_platform_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows: """
 core.auth __state_load - [u8]
-core.auth __state_replace [u8],^[u8] Bool
+core.auth __state_replace [u8],&&[u8] Bool
 core.files __read_bytes_os String Result<[u8],IOError>
 core.files __write_bytes_os|__append_bytes_os String,[u8] Result<Unit,IOError>
 core.files __create_dirs_os String Result<Unit,IOError>
@@ -329,18 +328,18 @@ core.files __chown_raw String,Int,Int Result<(),IOError>
 core.files __set_mode_raw String,Int Result<(),IOError>
 core.files __symlink_directory_raw String Result<Bool,IOError>
 core.files __symlink_raw String,String,Bool Result<(),IOError>
-core.files __mkdtemp_raw ^String Result<String,IOError>
-core.files __temp_dir_raw ^String Result<TempDir,IOError>
-core.files __temp_file_raw ^String Result<TempFile,IOError>
+core.files __mkdtemp_raw &&String Result<String,IOError>
+core.files __temp_dir_raw &&String Result<TempDir,IOError>
+core.files __temp_file_raw &&String Result<TempFile,IOError>
 core.files __lock_open String __LockCall
 core.files __lock_try Int __LockCall
 core.files __lock_wait Int,Int,Bool,Int __LockWait
 core.files __lock_close Int Int
 core.files __lock_fd_identity Int __LockIdentity
 core.files __lock_path_identity String __LockIdentity
-core.files __lock_owner ^String,Int FileLock
+core.files __lock_owner &&String,Int FileLock
 core.files __canonicalize_raw String Result<String,IOError>
-core.files __walk_parallel_raw String,^String? Result<[WalkEntry],IOError>
+core.files __walk_parallel_raw String,&&String? Result<[WalkEntry],IOError>
 core.log __record_emit String,String,[LogField] -
 core.log __flush - -
 core.log __process_exit Int -
@@ -350,7 +349,7 @@ core.log __metric_publish String,Int -
 core.web.browser __ws_set_timeout WsConn,Int Result<(),WsError>
 core.web __contract_stop String Never
 core.web __live_load - [u8]
-core.web __live_replace [u8],^[u8] Bool
+core.web __live_replace [u8],&&[u8] Bool
 core.web __live_publish String,String -
 core.files __walk_context String,String,Bool Int
 core.files __walk_close|__walk_matcher_new Int Unit
@@ -365,7 +364,7 @@ core.files __walk_read_dir Int,Int (kind:Int,code:Int?,cause:String?)
 core.files __walk_metadata Int,Int (directory:Bool,symlink:Bool,kind:Int,code:Int?,cause:String?)
 core.files __walk_next Int,Int (end:Bool,child:Int,directory:Bool,file:Bool,path:String,relative:String,ignore_file:Bool,kind:Int,code:Int?,cause:String?)
 
-core.devtools __publish_payload ^String,^String,^String,^String,^T - T
+core.devtools __publish_payload &&String,&&String,&&String,&&String,&&T - T
 core.mod __supported - Bool
 core.mod __os - String
 core.mod __read_context String,ModGrant Result<Int,String>
@@ -413,10 +412,10 @@ core.crypto.expert secret_bytes Secret [u8]
 core.crypto.expert signing_key_bytes SigningKey [u8]
 core.crypto.expert x25519_secret_bytes X25519SecretKey [u8]
 core.crypto.expert shared_secret_bytes SharedSecret [u8]
-core.crypto.vault prepare_import_signing String,^[u8] Result<MutationPlan<SigningKey>,VaultError>
-core.crypto.vault prepare_import_x25519 String,^[u8] Result<MutationPlan<X25519SecretKey>,VaultError>
-core.crypto.vault commit_import_signing ^VaultWrite<SigningKey>,^MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
-core.crypto.vault commit_import_x25519 ^VaultWrite<X25519SecretKey>,^MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
+core.crypto.vault prepare_import_signing String,&&[u8] Result<MutationPlan<SigningKey>,VaultError>
+core.crypto.vault prepare_import_x25519 String,&&[u8] Result<MutationPlan<X25519SecretKey>,VaultError>
+core.crypto.vault commit_import_signing &&VaultWrite<SigningKey>,&&MutationPlan<SigningKey> Result<KeyRef<SigningKey>,VaultError>
+core.crypto.vault commit_import_x25519 &&VaultWrite<X25519SecretKey>,&&MutationPlan<X25519SecretKey> Result<KeyRef<X25519SecretKey>,VaultError>
 core.net gethostname - String
 core.net tcp_listen|__tcp_listen String Result<TCPListener,NetError>
 core.net ip_addr String Result<IPAddr,NetError>
@@ -456,7 +455,7 @@ core.net ttl|__ttl TCPStream Result<Int,NetError>
 core.net set_ttl|__set_ttl &TCPStream,Int Result<Unit,NetError>
 core.net socket_type TCPStream String
 core.net sendfile &TCPStream,String Result<Int,NetError>
-core.net tcp_reply ^TCPStream,String,String Result<Unit,NetError>
+core.net tcp_reply &&TCPStream,String,String Result<Unit,NetError>
 core.net udp_bind|__udp_bind String Result<UDPSocket,NetError>
 core.net udp_bind_addr|__udp_bind_addr SocketAddr Result<UDPSocket,NetError>
 core.net udp_local_addr|__udp_local_addr UDPSocket Result<SocketAddr,NetError>
@@ -497,10 +496,10 @@ core.net __dns_srv_lookup String,Int Result<[DNSSRV],String>
 core.net __dns_srv_at_lookup String,String,Int Result<[DNSSRV],String>
 core.net dns_srv_target DNSSRV String
 core.net dns_srv_port|dns_srv_priority|dns_srv_weight DNSSRV Int
-core.net tls_connect ^TCPStream,String Result<TLSStream,NetError>
+core.net tls_connect &&TCPStream,String Result<TLSStream,NetError>
 core.net tls_read &TLSStream Result<String,IOError>
 core.net tls_write &TLSStream,String Result<Unit,IOError>
-core.net tls_close ^TLSStream Result<Unit,IOError>
+core.net tls_close &&TLSStream Result<Unit,IOError>
 core.net.tls unwrap TLSStream Result<TCPStream,IOError>
 core.net.tls client String,Int Result<TLSStream,IOError>
 core.net.tls read &TLSStream,Int Result<[u8],IOError>
@@ -508,7 +507,7 @@ core.net.tls read_text &TLSStream,Int Result<String,IOError>
 core.net.tls write &TLSStream,[u8] Result<Int,IOError>
 core.net.tls write_all &TLSStream,[u8] Result<Unit,IOError>
 core.net.tls write_text &TLSStream,String Result<Unit,IOError>
-core.net.tls close ^TLSStream Result<Unit,IOError>
+core.net.tls close &&TLSStream Result<Unit,IOError>
 core.net.tls peer_port TLSStream Result<Int,IOError>
 core.http reason_phrase Int String
 core.http basic_auth String,String String
@@ -638,7 +637,7 @@ core.encoding.hex crc_hqx [u8],Int Int
 core.encoding.base64 encode|b2a_base64 [u8] String
 core.encoding.base64 decode|a2b_base64 String Result<[u8],String>
 core.encoding.base64 encode_url|b64encode|standard_b64encode|urlsafe_b64encode|b32encode|b32hexencode|a85encode|b85encode|z85encode|encodebytes|b16encode|encode_url_padded [u8] String
-core.encoding.base64 b16decode|b64decode|standard_b64decode|b32decode|b32hexdecode|a85decode|b85decode|z85decode|decodebytes|decode_padded|decode_url|urlsafe_b64decode String Result<[u8],String>
+core.encoding.base64 b16decode|b64decode|standard_b64decode|b32decode|b32hexdecode|a85decode|b85decode|z85decode|decodebytes|decode_url|urlsafe_b64decode String Result<[u8],String>
 core.encoding.base64 pad|unpad String String
 core.encoding.base64 is_base64 String Bool
 core.encoding.base32 encode [u8] String
@@ -661,7 +660,7 @@ core.math isqrt|factorial Int Int?
 core.math fraction Int,Int Fraction?
 core.ui phone|tablet|desktop - UIPreviewViewport
 core.ui preview|playground String,fn(;UINode),UIPreviewViewport? UIPreview
-core.ui previews|playgrounds [UIPreview] Result<UIPreviewRegistry,UIPreviewError>
+core.ui previews [UIPreview] Result<UIPreviewRegistry,UIPreviewError>
 core.ui null_backend|__null_backend - NullBackend
 core.ui.host __capability Int Bool
 core.ui.host __clipboard_get - String?
@@ -691,28 +690,28 @@ core.ui text_input String,UIIMEMode UINode
 core.font system FontStyle FontFace
 core.font shape String,FontFace GlyphRun
 core.font __shape_text String,FontFace Result<GlyphRun,String>
-core.tui list ^[String] UINode
+core.tui list &&[String] UINode
 core.tui key_event String TUIEvent
 core.tui resize_event Float,Float TUIEvent
 core.tui capabilities - TUICapabilities
 core.tui key_event_modifiers|timer_event String,Int TUIEvent
-core.tui io_event String,^[u8] TUIEvent
+core.tui io_event String,&&[u8] TUIEvent
 core.tui focus_event Bool TUIEvent
 core.tui interrupt_event|close_event - TUIEvent
 core.tui color_ansi16|color_ansi256 Int TUIColor
 core.tui color_rgb Int,Int,Int TUIColor
 core.tui style - TUIStyle
-core.tui style_foreground|style_background ^TUIStyle,TUIColor TUIStyle
-core.tui style_bold|style_dim|style_underline ^TUIStyle,Bool TUIStyle
+core.tui style_foreground|style_background &&TUIStyle,TUIColor TUIStyle
+core.tui style_bold|style_dim|style_underline &&TUIStyle,Bool TUIStyle
 core.tui style_text String,TUIStyle,TUICapabilities String
 core.tui ascii String String
 core.tui display_width String Int
 core.tui length|min|max|percent|fill Float TUIConstraint
 core.tui horizontal|vertical - TUIDirection
-core.tui layout Rect,TUIDirection,^[TUIConstraint] [Rect]
-core.tui table ^[String],^[[String]] UINode
+core.tui layout Rect,TUIDirection,&&[TUIConstraint] [Rect]
+core.tui table &&[String],&&[[String]] UINode
 core.tui list_state - TUIListState
-core.tui list_state_select|list_state_offset ^TUIListState,Int TUIListState
+core.tui list_state_select|list_state_offset &&TUIListState,Int TUIListState
 core.tui list_state_selected TUIListState Int
 core.ui.host capabilities - UICapabilityFacts
 core.ui.host file_filter String,[String],[String] Result<UIFileFilter,UIHostError>

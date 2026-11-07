@@ -13,7 +13,7 @@ impl NixDerivationStore {
         text: files.read(drv_path) ?? return Err(NixError.DrvIO("{drv_path}: {err}"))
         drv: NixDerivation.parse(text)
         self.derivations[drv_path] = drv
-        &self.load_inputs_from_filesystem(drv)
+        self.load_inputs_from_filesystem(drv)
     }
 
     load_inputs_from_filesystem: fn(&self, drv: NixDerivation) NixError! -[FS]> {
@@ -22,7 +22,7 @@ impl NixDerivationStore {
             output: drv.outputs[name]
             if output.is_floating() || output.is_impure() -> return
         }
-        loop input in drv.input_drvs -> &self.load_from_filesystem(input.path)
+        loop input in drv.input_drvs -> self.load_from_filesystem(input.path)
     }
 }
 
@@ -41,9 +41,9 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
     entries: files.list_dir(store_dir) ?? return Err(NixError.DrvIO("{err}"))
     paths := [String]{}
     loop entry in entries {
-        if files.suffix(entry.name) == ".drv" -> &paths.push(entry.path)
+        if files.suffix(entry.name) == ".drv" -> paths.push(entry.path)
     }
-    &paths.sort()
+    paths.sort()
     store := nix_derivation_store([String: NixDerivation]{})
     loop index in 0..<paths.len() {
         if index >= limit -> break
@@ -63,7 +63,7 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
                 if nix_is_unsupported(error) {
                     report.skipped += 1
                 } else {
-                    &report.divergences.push(error)
+                    report.divergences.push(error)
                 }
                 next
             }
@@ -71,24 +71,24 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
         derivation: drv ?? next
         if nix_verify_aterm_roundtrip(aterm, derivation) == {
             .Err(error) -> {
-                &report.divergences.push(error)
+                report.divergences.push(error)
                 next
             }
             else -> {}
         }
         if nix_verify_drv_path(store_dir, path, aterm.bytes(), derivation) == {
             .Err(error) -> {
-                &report.divergences.push(error)
+                report.divergences.push(error)
                 next
             }
             else -> {}
         }
-        if nix_verify_corpus_outputs(&store, store_dir, path, derivation) == {
+        if nix_verify_corpus_outputs(store, store_dir, path, derivation) == {
             .Err(error) -> {
                 if nix_is_unsupported(error) {
                     report.skipped += 1
                 } else {
-                    &report.divergences.push(error)
+                    report.divergences.push(error)
                 }
                 next
             }
@@ -100,8 +100,8 @@ nix_differential_corpus: fn(store_dir: String, limit: Int) -[FS]> NixCorpusRepor
 }
 
 nix_verify_corpus_outputs: fn(store: &NixDerivationStore, store_dir: String, path: String, drv: NixDerivation) NixError! -[FS]> {
-    &store.load_inputs_from_filesystem(drv)
-    &store.verify_output_paths(store_dir, path, drv)
+    store.load_inputs_from_filesystem(drv)
+    store.verify_output_paths(store_dir, path, drv)
 }
 
 // The checked count, or the first divergence of the sample.

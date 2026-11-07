@@ -10,8 +10,8 @@
 //   2. `JET_INLINE_DEPS_FIXTURES=<dir>`, an offline test/dev override with
 //      the same `<name>/<version>/` shape, checked only when set.
 // A package neither knows is fetched only by `jet run` (its first run) and
-// `jet fetch --lock`, through the configured package registry
-// (D-JPK-SCRIPTDEP1); anywhere else it is E1253. A local package stays
+// `jet fetch --lock`, through the configured package registry;
+// anywhere else it is E1253. A local package stays
 // authoritative: an unmatched selector is E1253, never a fetch.
 use {
     jet_foundation.[Diagnostic, ImportDecl, Program, Span, diagnostic_from_registry]
@@ -42,7 +42,7 @@ pkg_inline_deps_collect_from_imports: fn(imports: [ImportDecl]) -> [InlineDep] N
     loop decl in imports {
         version: decl.inline_version ?? next
         if decl.kind == {
-            .Module(name, _) -> &out.push(InlineDep{name: name, selector: version.text, span: version.span})
+            .Module(name, _) -> out.push(InlineDep{name: name, selector: version.text, span: version.span})
             else -> {}
         }
     }
@@ -82,13 +82,13 @@ ScriptCacheIdentity: struct {
     new: fn(source_hash: String, dependencies: [ScriptDependencyIdentity], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
         sorted := dependencies
         sorted = loop fresh_item in sorted -> fresh_item
-        &sorted.sort_by(identity -> identity.content_hash)
+        sorted.sort_by(identity -> identity.content_hash)
         sorted = loop fresh_item in sorted -> fresh_item
-        &sorted.sort_by(identity -> identity.resolved_version)
+        sorted.sort_by(identity -> identity.resolved_version)
         sorted = loop fresh_item in sorted -> fresh_item
-        &sorted.sort_by(identity -> identity.selector)
+        sorted.sort_by(identity -> identity.selector)
         sorted = loop fresh_item in sorted -> fresh_item
-        &sorted.sort_by(identity -> identity.name)
+        sorted.sort_by(identity -> identity.name)
         ScriptCacheIdentity{source_hash: source_hash, dependencies: sorted, toolchain: toolchain, target: target}
     }
 
@@ -96,17 +96,17 @@ ScriptCacheIdentity: struct {
     // when a name, hash, or toolchain contains delimiters.
     digest: fn(self) -> String Never! {
         bytes := [U8]{}
-        pkg_inline_deps_framed(&bytes, "jet-script-cache.v1")
-        pkg_inline_deps_framed(&bytes, self.source_hash)
-        pkg_inline_deps_framed_count(&bytes, self.dependencies.len())
+        pkg_inline_deps_framed(bytes, "jet-script-cache.v1")
+        pkg_inline_deps_framed(bytes, self.source_hash)
+        pkg_inline_deps_framed_count(bytes, self.dependencies.len())
         loop dependency in self.dependencies {
-            pkg_inline_deps_framed(&bytes, dependency.name)
-            pkg_inline_deps_framed(&bytes, dependency.selector)
-            pkg_inline_deps_framed(&bytes, dependency.resolved_version)
-            pkg_inline_deps_framed(&bytes, dependency.content_hash)
+            pkg_inline_deps_framed(bytes, dependency.name)
+            pkg_inline_deps_framed(bytes, dependency.selector)
+            pkg_inline_deps_framed(bytes, dependency.resolved_version)
+            pkg_inline_deps_framed(bytes, dependency.content_hash)
         }
-        pkg_inline_deps_framed(&bytes, self.toolchain)
-        pkg_inline_deps_framed(&bytes, self.target)
+        pkg_inline_deps_framed(bytes, self.toolchain)
+        pkg_inline_deps_framed(bytes, self.target)
         "sha256-{pkg_sha256_hex(bytes)}"
     }
 }
@@ -116,7 +116,7 @@ ScriptCacheIdentity: struct {
 // and reject a stale prepared result before execution.
 pkg_inline_deps_cache_identity: fn(source_hash: String, dependencies: [InlineDepResolved], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
     identities := [ScriptDependencyIdentity]{}
-    loop dependency in dependencies -> &identities.push(dependency.dependency_identity())
+    loop dependency in dependencies -> identities.push(dependency.dependency_identity())
     ScriptCacheIdentity.new(source_hash, identities, toolchain, target)
 }
 
@@ -170,7 +170,7 @@ pkg_inline_deps_resolve: fn(dep: InlineDep, script_dir: String) -[FS, Env]> Inli
     if pkg_inline_deps_numeric_version(dep.selector) == None -> return Err(InlineDepUnresolved.InvalidSelector)
     roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
     if sys.get(PKG_INLINE_DEPS_FIXTURES_ENV) == {
-        .Val(fixtures) -> &roots.push(fixtures)
+        .Val(fixtures) -> roots.push(fixtures)
         .None -> {}
     }
     loop root in roots {
@@ -222,7 +222,7 @@ pkg_inline_deps_list_versions: fn(root: String, name: String) -[FS]> [(version: 
             .Ok(found) -> found
             .Err(error) -> { return Err(InlineDepUnresolved.InvalidTree(TreeHashError.IO{path: entry.path, detail: "{error}"})) }
         }
-        if stat.is_dir || stat.is_symlink -> &out.push((dir: entry.path, version: entry.name))
+        if stat.is_dir || stat.is_symlink -> out.push((dir: entry.path, version: entry.name))
     }
     Ok(Val(out))
 }
@@ -235,13 +235,13 @@ pkg_inline_deps_best_match: fn(selector: String, candidates: [(version: String, 
     loop candidate in candidates {
         version_parts: pkg_inline_deps_numeric_version(candidate.version) ?? next
         accepted: if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
-        if accepted -> &matches.push(candidate)
+        if accepted -> matches.push(candidate.copy())
     }
     if matches.len() == 0 -> return None
     // Stable passes order by (major, minor, patch); ties keep input order.
-    &matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 2))
-    &matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 1))
-    &matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 0))
+    matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 2))
+    matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 1))
+    matches.sort_by(candidate -> pkg_inline_deps_version_part(candidate.version, 0))
     Val(matches[matches.len() - 1])
 }
 
@@ -284,7 +284,7 @@ pkg_inline_deps_numeric_version: fn(value: String) -> [U64]? Never! {
             if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) -> return None
             number = number * U64{10} + digit
         }
-        &out.push(number)
+        out.push(number)
     }
     Val(out)
 }
@@ -302,12 +302,12 @@ pkg_inline_deps_valid_package_name: fn(name: String) -> Bool Never! {
 // A big-endian 64-bit length prefix, then the UTF-8 bytes.
 pkg_inline_deps_framed: fn(bytes: &[U8], value: String) Never! {
     raw: value.bytes()
-    pkg_inline_deps_framed_count(&bytes, raw.len())
-    loop byte in raw -> &bytes.push(byte)
+    pkg_inline_deps_framed_count(bytes, raw.len())
+    loop byte in raw -> bytes.push(byte)
 }
 
 pkg_inline_deps_framed_count: fn(bytes: &[U8], count: Int) Never! {
-    loop shift in FOUNDATION_U64_SHIFTS -> &bytes.push(U8{((count >> shift)).bit_and(255)})
+    loop shift in FOUNDATION_U64_SHIFTS -> bytes.push(U8{((count >> shift)).bit_and(255)})
 }
 
 // E1253 an inline `use pkg#version;` ref that cannot

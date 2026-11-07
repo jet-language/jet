@@ -2,7 +2,7 @@
 //
 // Tracks the canonical syntax registry in Compiler/JetFoundation/Data/Syntax/
 // (keyword/sigil/marker constants, each with a decision ID — invariant I7) plus the real code in
-// Examples/features/*.jet. This grammar exists for editor syntax highlighting
+// Examples/*.jet. This grammar exists for editor syntax highlighting
 // (Zed), not full compilation: it is permissive where the real parser is
 // strict, but every keyword/sigil/marker it names is a *current* one. Retired
 // spellings (`val`/`var`, `mut`/`take`/`view`, `when`/`switch`/`while`/
@@ -21,7 +21,8 @@ const JET_HIGHLIGHT_LITERAL = ["Cancelled", "DeadlineBlown", "None", "Panicked",
 const JET_HIGHLIGHT_TYPE_BUILTIN = ["()", "BTreeMap", "Bits", "Bool", "Budget", "BudgetApplies", "Bytes", "CSV", "Cache", "Char", "Complex", "Computed", "Condition", "DBValue", "Decimal", "Derived", "Duration", "Dyn", "Effect", "EncodingError", "Err", "Event", "EventPolicy", "EventScope", "EventTrace", "F32", "F64", "Float", "HashMap", "Hook", "I16", "I32", "I64", "I8", "IOError", "Instant", "Int", "Iter", "JSON", "Key", "Measurement", "MemoStats", "PriorityQueue", "Ptr", "Queue", "Rank", "Receiver", "Sender", "Set", "Shared", "Shared.Weak", "SharedGuard", "SharedRevisionError", "SharedSnapshot", "Signal", "Stream", "String", "Subscription", "TOML", "Task", "TaskFailure", "U16", "U32", "U64", "U8", "UTF8Error", "ViewIter", "WatchEvent", "WatchHandle", "WatchSet", "YAML"];
 const JET_HIGHLIGHT_BUILTIN = ["assert", "assert_eq", "channel", "check", "freeze", "input", "join", "print"];
 const JET_HIGHLIGHT_MARKER_RULE = ["ABI", "Allow", "Arithmetic", "Bindgen", "CLI", "Close", "Codable", "CodableAsBase", "Commutative", "Comparable", "Context", "Debug", "DebugOnly", "Decode", "DenyUnknownFields", "Deprecated", "DevPanel", "Discriminant", "Doc", "Encode", "Env", "Equatable", "Error", "Every", "FFI", "FX", "Flag", "Flatten", "HTML", "Impure", "Inline", "Interrupt", "Job", "Kernel", "Layout", "Live", "Local", "Memo", "Meta", "MustUse", "NoPrelude", "Nondeterministic", "Numeric", "Off", "Patchable", "Persist", "Policy", "Post", "Pre", "Printable", "PublishedSchema", "Reactive", "Receipt", "Redact", "Region", "Rename", "RenameAll", "Replayable", "Root", "SQL", "Scalar", "Scrub", "Shared", "Shield", "Short", "SingleUse", "Skip", "State", "Static", "Target", "Test", "Todo", "Track", "Transact", "Transition", "Undo", "UnitFamily", "Unsafe", "Untagged", "WasmExport", "wire"];
-const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", ":", ":=", ":>", "<:", "^"];
+const JET_HIGHLIGHT_TAKE_MARK = ["&&"];
+const JET_HIGHLIGHT_SIGIL = ["#", "$", "&", "...", ":", ":=", ":>", "<:"];
 const JET_HIGHLIGHT_OPERATOR = ["!", "!=", "%", "%%", "%%=", "%=", "&&", "*", "*=", "+", "+=", "-", "-=", "->", "..", "..<", ".[", "/", "/%", "/%=", "/=", "<", "<<", "<<=", "<=", "<=>", "==", ">", ">=", ">>", ">>=", "?", "?.", "??", "|", "||"];
 const JET_MARKER_INBODY_SEPARATOR = ":";
 // END GENERATED JET SYNTAX HIGHLIGHTS

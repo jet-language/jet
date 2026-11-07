@@ -2,7 +2,7 @@
 // Jet source-body comparison against the frozen formatter bytes committed as
 // FmtParityExpected.out (sha256 6ac11c2f…). The Rust capture's rows that owner
 // ruling #4588 replaced (half away from zero, a zero prints no sign, pretty
-// commas) and its i64 duration wrap (exact Int, D-INTBIG1) follow the rulings
+// commas) and its i64 duration wrap (exact Int) follow the rulings
 // (#6608). Preparation runs no reference.
 // This is not native selector lowering or runtime-pack admission proof.
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -15,7 +15,7 @@ const root = resolve(here, '../../..');
 const frozenExpected = join(here, 'FmtParityExpected.out');
 const [mode, output, checker] = process.argv.slice(2);
 if (mode === 'reference') {
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   process.exit(0);
 }
 if (!['prepare', 'compare'].includes(mode) || !output || (mode === 'compare' ? !checker || process.argv.length !== 5 : process.argv.length !== 4))
@@ -70,7 +70,7 @@ if (mode === 'prepare') {
   writeFileSync(join(out, 'source.jet'), jet);
   writeFileSync(join(out, 'fmt_source.jet'), readFileSync(join(root, 'Core/Text/Fmt.jet')));
   writeFileSync(join(out, 'package.jet'), 'name: "fmt_source_parity"\nversion: "0.0.1"\nedition: "2026"\n');
-  console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("parked: Rust reference retired (owner #38/#59)");
   writeFileSync(join(out, 'expected.out'), readFileSync(frozenExpected));
   console.log(`fmt parity prepared: kernels=${kernels.length} cases=${cases.length}; expected bytes are the frozen FmtParityExpected.out; source/native comparison NOT RUN`);
 } else {

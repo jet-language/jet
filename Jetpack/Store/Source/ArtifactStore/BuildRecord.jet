@@ -38,20 +38,20 @@ BuildRecord: struct {
     to_json: fn(self) -> String Never! {
         parts := [String]{"{{\"schema\":{foundation_json_quote(self.schema)},\"program\":{foundation_json_quote(self.program)},\"nodes\":["}
         loop index in 0..<self.nodes.len() {
-            if index != 0 -> &parts.push(",")
+            if index != 0 -> parts.push(",")
             node: self.nodes[index]
             // A negative or non-finite duration is written as the integer `0`
             // (the Rust wire), not as the Float `0.0`.
             finite: node.duration_ms - node.duration_ms == 0.0
             duration: if finite && node.duration_ms >= 0.0 -> "{node.duration_ms}" else -> "0"
-            &parts.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"duration_ms\":{duration},\"why_ran\":{foundation_json_quote(node.why_ran)},\"inputs\":[")
+            parts.push("{{\"kind\":{foundation_json_quote(node.kind)},\"key\":{foundation_json_quote(node.key)},\"subject\":{foundation_json_quote(node.subject)},\"duration_ms\":{duration},\"why_ran\":{foundation_json_quote(node.why_ran)},\"inputs\":[")
             loop input_index in 0..<node.inputs.len() {
-                if input_index != 0 -> &parts.push(",")
-                &parts.push(foundation_json_quote(node.inputs[input_index]))
+                if input_index != 0 -> parts.push(",")
+                parts.push(foundation_json_quote(node.inputs[input_index]))
             }
-            &parts.push("]}}")
+            parts.push("]}}")
         }
-        &parts.push("]}}")
+        parts.push("]}}")
         parts.join("")
     }
 
@@ -78,9 +78,9 @@ BuildRecord: struct {
             input_values: store_build_record_array(inputs_value) ?? return Err(BuildRecordError{reason: "build record node inputs are invalid: expected a Dyn array"})
             inputs := [String]{}
             loop input in input_values {
-                &inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a Dyn string"}))
+                inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a Dyn string"}))
             }
-            &nodes.push(BuildNodeRecord{
+            nodes.push(BuildNodeRecord{
                 kind: store_build_record_string_field(node, "kind"),
                 key: store_build_record_string_field(node, "key"),
                 subject: store_build_record_string_field(node, "subject"),
@@ -180,7 +180,7 @@ store_build_last_run_directory: fn(root: String, create: Bool) -[FS, Env]> files
         if part == "." || part == ".." || part.contains("\\") || part.bytes().contains(U8{0}) {
             return Err(ArtifactStoreError.Config("workspace root must have only plain path components"))
         }
-        &parts.push(part)
+        parts.push(part)
     }
     held := files.open_directory("/")
     loop part in parts -> held = held.open_directory(part)
@@ -207,12 +207,12 @@ store_build_write_last_run: fn(root: String, program: String, key: String) Artif
     name: ArtifactDigest.hash(program.bytes()).to_hex()
     temp: ".{name}.{process.current_pid()}"
     writer := held.create(temp, if_exists: .Refuse, mode: Val(0o600))
-    if store_build_last_run_fill(&writer, bytes) == .Err(error) {
-        close(^writer)
+    if store_build_last_run_fill(writer, bytes) == .Err(error) {
+        close(writer)
         held.remove(temp).drop("preserve the original last-run publication error")
         return Err(ArtifactStoreError.IO(error))
     }
-    close(^writer)
+    close(writer)
     if held.rename(temp, name, if_exists: .Replace) == .Err(error) {
         held.remove(temp).drop("preserve the original last-run rename error")
         return Err(ArtifactStoreError.IO(error))
@@ -235,7 +235,7 @@ store_build_last_run: fn(root: String, program: String) -[FS, Env, Time.Wait]> S
     loop {
         chunk: reader.read(65536) ?? return None
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > STORE_LAST_RUN_MAX_BYTES -> return None
     }
     after: reader.stat() ?? return None

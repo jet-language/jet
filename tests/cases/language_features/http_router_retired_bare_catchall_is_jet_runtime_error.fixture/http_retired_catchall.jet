@@ -7,8 +7,8 @@ handle: fn(req: HTTPRequest) -> HTTPResponse HTTPError! {
     return Ok(server.response(200, "ok"))
 }
 run: fn() {
-    router: http.router()
+    routes: server.mux()
     dynamic: env.get("JET_HTTP_TEST_MARKER") ?? "*"
     pattern: "/assets/{dynamic}"
-    router.get(pattern, handle)
+    routes.get(pattern, handle)
 }

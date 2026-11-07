@@ -91,6 +91,19 @@ process_execution_collect_start: fn(child: I64, err: I64) -> Bool {
     sync_mutex_unlock(child)
     true
 }
+// Closes the captured streams the collector still reads: a run past its
+// timeout stops waiting for an EOF a lingering descendant would never send.
+process_execution_drain_stop: fn(native: I64) {
+    sync_mutex_lock(native)
+    stream := I64{1}
+    loop stream <= (I64{2}) {
+        offset: spawn_stream_offset(native, stream)
+        spawn_close(fd_word(native, offset))
+        fd_put(native, offset, I64{-1})
+        stream += I64{1}
+    }
+    sync_mutex_unlock(native)
+}
 process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64) -> Bool {
     offset: spawn_stream_offset(native, stream)
     number: fd_word(native, offset)
@@ -185,10 +198,21 @@ process_execution_capture: fn(child: I64, native: I64, stream: I64, scratch: I64
                 exited = true
             }
         }
+        // The timeout bounds the whole run, output included: a descendant that
+        // left the child's process group can hold a captured pipe (or the
+        // terminal) open long after the child exits, and its EOF never comes.
+        // Past the limit the collector stops the child and then stops reading.
         timeout: fd_word(spec, PROCESS_SPEC_TIMEOUT)
-        if (!exited && timeout != I64{0} && fd_word(timeout, I64{0}) >= I64{0} && (process_execution_now() - fd_word(child, I64{72})) /% I64{1000000} >= fd_word(timeout, I64{0})) {
+        expired: timeout != I64{0} && fd_word(timeout, I64{0}) >= I64{0} && (process_execution_now() - fd_word(child, I64{72})) /% I64{1000000} >= fd_word(timeout, I64{0})
+        if (expired && !exited) {
             fd_put(child, I64{104}, I64{1})
             process_execution_stop(child)
+        }
+        if (expired && exited && !(output_done && errors_done)) {
+            fd_put(child, I64{104}, I64{1})
+            process_execution_drain_stop(native)
+            output_done = true
+            errors_done = true
         }
         detached: fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
         contained: !detached || sync_load(wrapping(child + I64{120})).bit_and(I64{4}) != I64{0}

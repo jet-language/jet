@@ -64,8 +64,8 @@ PlanSandbox: struct {
             return Err(StagedPlanActionError.Failed("declared input `{path}` digest mismatch: expected `{declared_digest}`, got `sha256-{digest}`"))
         }
         if !self.observed_inputs.contains(path) {
-            &self.observed_inputs.push(path)
-            &self.observed_inputs.sort()
+            self.observed_inputs.push(path.copy())
+            self.observed_inputs.sort()
         }
         Ok(bytes)
     }

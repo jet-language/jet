@@ -219,7 +219,7 @@ recipe_path_names: fn(absolute: String) -> [String] Never! {
     parts: files.split_slash(absolute)
     start: if absolute.starts_with("/") -> 0 else -> 1
     loop index in start..<parts.len() {
-        if parts[index] != "" -> &names.push(parts[index])
+        if parts[index] != "" -> names.push(parts[index])
     }
     names
 }
@@ -234,11 +234,11 @@ recipe_normalize: fn(path: String) -> String Never! {
         if segment == "" || segment == "." -> next
         if segment == ".." {
             if out.len() > 0 {
-                _: &out.pop()
+                _: out.pop()
             }
             next
         }
-        &out.push(segment)
+        out.push(segment)
     }
     body: out.join("/")
     if absolute -> return "/{body}"
@@ -367,8 +367,8 @@ recipe_copy_tree: fn(src: String, dst: String) RecipeError! -[FS, Env]> {
 recipe_sorted_names: fn(path: String) -[FS]> [String] RecipeError! {
     names := [String]{}
     entries: files.list_dir(path)
-    loop entry in entries -> &names.push(entry.name)
-    &names.sort()
+    loop entry in entries -> names.push(entry.name)
+    names.sort()
     Ok(names)
 }
 
@@ -417,7 +417,7 @@ recipe_read_file_nofollow: fn(path: String, limit: Int) -[FS]> [U8] RecipeError!
         if remaining <= 0 -> break
         chunk: file.read(if remaining < RECIPE_COPY_CHUNK -> remaining else -> RECIPE_COPY_CHUNK)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &content.push(byte)
+        loop byte in chunk -> content.push(byte)
     }
     if content.len() > limit -> return Err(RecipeError.InvalidData("recipe input exceeds its size limit `{path}`"))
     after: files.stat(path)
@@ -461,7 +461,7 @@ recipe_validate_source_components: fn(source_root: String, relative: String) Rec
     loop segment in segments {
         if segment == "" -> next
         if segment == "." || segment == ".." -> return Err(RecipeError.InvalidInput("recipe source contains a non-normal path component"))
-        &components.push(segment)
+        components.push(segment)
     }
     current := source_root
     loop index in 0..<components.len() {

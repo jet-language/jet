@@ -11,7 +11,7 @@ Base32Error: struct {
         display: fn(self) -> String { self.reason }
     }
     impl Debug {
-        debug: fn(^self) -> String { self.reason }
+        debug: fn(&&self) -> String { self.reason }
     }
 }
 
@@ -54,7 +54,7 @@ decode: fn(text: String) -> [U8] Base32Error! {
         bits += 5
         if bits >= 8 {
             bits -= 8
-            &out.push(U8{(buffer >> bits).bit_and(255)})
+            out.push(U8{(buffer >> bits).bit_and(255)})
         }
         buffer = buffer.bit_and(((1 << bits) - 1))
     }
@@ -90,9 +90,9 @@ b32hexdecode: fn(text: String) -> [U8] Base32Error! {
     canonical := [U8]{}
     loop b in text.bytes() {
         n: Int.from_u8(b)
-        if n >= 48 && n <= 57 -> &canonical.push(standard[n - 48])
-        else if n >= 65 && n <= 86 -> &canonical.push(standard[n - 65 + 10])
-        else if n == 61 -> &canonical.push(b)
+        if n >= 48 && n <= 57 -> canonical.push(standard[n - 48])
+        else if n >= 65 && n <= 86 -> canonical.push(standard[n - 65 + 10])
+        else if n == 61 -> canonical.push(b)
         else -> return Err(Base32Error{reason: "invalid Base32hex character"})
     }
     decode(String.from_bytes(canonical) ?? "")
@@ -108,12 +108,12 @@ encode_alphabet: fn(data: [U8], alphabet: String) -> String Never! {
         bits += 8
         loop bits >= 5 {
             bits -= 5
-            &out.push(chars[(buffer >> bits).bit_and(31)])
+            out.push(chars[(buffer >> bits).bit_and(31)])
         }
         buffer = buffer.bit_and(((1 << bits) - 1))
     }
-    if bits > 0 -> &out.push(chars[(buffer << (5 - bits)).bit_and(31)])
-    loop out.len() %% 8 != 0 -> &out.push(U8{61})
+    if bits > 0 -> out.push(chars[(buffer << (5 - bits)).bit_and(31)])
+    loop out.len() %% 8 != 0 -> out.push(U8{61})
     String.from_bytes(out) ?? ""
 }
 

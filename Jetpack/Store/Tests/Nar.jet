@@ -28,7 +28,7 @@ store_test_nar_root: fn(label: String) -> String Never! {
 
 #Test("store narinfo signature covers canonical fields") {
     secret := [U8]{}
-    loop _ in 0..<32 -> &secret.push(U8{7})
+    loop _ in 0..<32 -> secret.push(U8{7})
     key: TrustKey.from_secret(secret) ?? panic("trust key")
     info: NarInfo{store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool", url: "nar/tool.nar", compression: "none", file_size: 4, nar_size: 4, nar_hash: store_nar_digest("test".bytes()), references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}
     signed: info.signed(key) ?? panic("sign")
@@ -83,7 +83,7 @@ store_test_nar_root: fn(label: String) -> String Never! {
 #Test("store publish local rejects hash matching malformed nar") {
     root: store_test_nar_root("publish")
     secret := [U8]{}
-    loop _ in 0..<32 -> &secret.push(U8{9})
+    loop _ in 0..<32 -> secret.push(U8{9})
     key: TrustKey.from_secret(secret) ?? panic("trust key")
     nar: "not a NAR".bytes()
     info: NarInfo{store_path: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool", url: "nar/tool.nar", compression: "none", file_size: nar.len(), nar_size: nar.len(), nar_hash: store_nar_digest(nar), references: [String]{}, deriver: None, ca: None, signatures: [NarSignature]{}}

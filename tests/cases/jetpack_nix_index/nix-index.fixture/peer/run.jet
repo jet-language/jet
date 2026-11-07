@@ -27,7 +27,7 @@ NixIndexError: enum { Invalid(String) }
 
 peer_seed: fn() -> [U8] {
     seed := [U8]{}
-    loop _ in 0..<32 -> &seed.push(U8{7})
+    loop _ in 0..<32 -> seed.push(U8{7})
     seed
 }
 
@@ -47,40 +47,40 @@ peer_write: fn(path: String, text: String) {
 }
 
 peer_nar_token: fn(out: &[U8], token: [U8]) {
-    nix_push_le(&out, token.len(), 8)
-    loop byte in token -> &out.push(byte)
+    nix_push_le(out, token.len(), 8)
+    loop byte in token -> out.push(byte)
     padding: (8 - token.len() % 8) % 8
-    loop _ in 0..<padding -> &out.push(U8{0})
+    loop _ in 0..<padding -> out.push(U8{0})
 }
 
 peer_nar_node: fn(out: &[U8], path: String) {
-    peer_nar_token(&out, "(".bytes())
-    peer_nar_token(&out, "type".bytes())
+    peer_nar_token(out, "(".bytes())
+    peer_nar_token(out, "type".bytes())
     info: files.stat(path) ?? panic("fixture NAR stat")
     if info.is_dir {
-        peer_nar_token(&out, "directory".bytes())
+        peer_nar_token(out, "directory".bytes())
         entries := files.list_dir(path) ?? panic("fixture NAR directory")
-        &entries.sort_by(entry -> entry.name)
+        entries.sort_by(entry -> entry.name)
         loop entry in entries {
-            peer_nar_token(&out, "entry".bytes())
-            peer_nar_token(&out, "(".bytes())
-            peer_nar_token(&out, "name".bytes())
-            peer_nar_token(&out, entry.name.bytes())
-            peer_nar_token(&out, "node".bytes())
-            peer_nar_node(&out, entry.path)
-            peer_nar_token(&out, ")".bytes())
+            peer_nar_token(out, "entry".bytes())
+            peer_nar_token(out, "(".bytes())
+            peer_nar_token(out, "name".bytes())
+            peer_nar_token(out, entry.name.bytes())
+            peer_nar_token(out, "node".bytes())
+            peer_nar_node(out, entry.path)
+            peer_nar_token(out, ")".bytes())
         }
     } else {
         assert(info.is_file)
-        peer_nar_token(&out, "regular".bytes())
+        peer_nar_token(out, "regular".bytes())
         if info.mode.bit_and(73) != 0 {
-            peer_nar_token(&out, "executable".bytes())
-            peer_nar_token(&out, "".bytes())
+            peer_nar_token(out, "executable".bytes())
+            peer_nar_token(out, "".bytes())
         }
-        peer_nar_token(&out, "contents".bytes())
-        peer_nar_token(&out, files.read_bytes(path) ?? panic("fixture NAR read"))
+        peer_nar_token(out, "contents".bytes())
+        peer_nar_token(out, files.read_bytes(path) ?? panic("fixture NAR read"))
     }
-    peer_nar_token(&out, ")".bytes())
+    peer_nar_token(out, ")".bytes())
 }
 
 peer_nar: fn(source: String, kind: String) -> [U8] {
@@ -93,8 +93,8 @@ peer_nar: fn(source: String, kind: String) -> [U8] {
     } else if kind == "lib" -> peer_write(files.join(source, "lib/marker"), "library")
     else -> peer_write(files.join(source, "share/marker"), "runtime")
     out := [U8]{}
-    peer_nar_token(&out, "nix-archive-1".bytes())
-    peer_nar_node(&out, source)
+    peer_nar_token(out, "nix-archive-1".bytes())
+    peer_nar_node(out, source)
     files.remove_all(source) ?? panic("remove encoded NAR source")
     out
 }
@@ -109,7 +109,7 @@ peer_nix_base32: fn(bytes: [U8]) -> String {
             target: bit + offset
             if target < 256 && Int.from_u8(bytes[target /% 8]).bit_and(1 << (target % 8)) != 0 -> digit = digit.bit_or(1 << offset)
         }
-        &out.push(alphabet[digit])
+        out.push(alphabet[digit])
     }
     String.from_bytes(out) ?? panic("base32 ASCII")
 }
@@ -118,7 +118,7 @@ peer_narinfo: fn(store_path: String, nar_name: String, nar: [U8], references: [S
     digest: crypto.sha256(nar)
     hash: "sha256:{digest.hex()}"
     names := [String]{}
-    loop reference in references -> &names.push(files.basename(reference))
+    loop reference in references -> names.push(files.basename(reference))
     fingerprint: "1;{store_path};sha256:{peer_nix_base32(digest.bytes)};{nar.len()};{references.join(",")}"
     signature: peer_signature(fingerprint.bytes())
     "StorePath: {store_path}\nURL: nar/{nar_name}\nCompression: none\nFileHash: {hash}\nFileSize: {nar.len()}\nNarHash: {hash}\nNarSize: {nar.len()}\nReferences: {names.join(" ")}\nSig: jet-test-cache-v1:{signature}\n".bytes()
@@ -169,14 +169,14 @@ peer_object_count: fn(counts: [String: Int], path: String, kind: String) -> Int 
 
 peer_control: fn(port: String, path: String) {
     stream := net.tcp_connect("127.0.0.1:{port}") ?? panic("connect fixture control")
-    net.tcp_write_text(&stream, "GET /{path} HTTP/1.1{PEER_CRLF}Host: 127.0.0.1{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write fixture control")
+    net.tcp_write_text(stream, "GET /{path} HTTP/1.1{PEER_CRLF}Host: 127.0.0.1{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write fixture control")
     bytes := [U8]{}
     loop {
-        chunk: net.tcp_read_bytes(&stream, 16384) ?? panic("read fixture control")
+        chunk: net.tcp_read_bytes(stream, 16384) ?? panic("read fixture control")
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
-    net.tcp_close(&stream) ?? panic("close fixture control")
+    net.tcp_close(stream) ?? panic("close fixture control")
     response: String.from_bytes(bytes) ?? panic("control response UTF-8")
     assert(response.starts_with("HTTP/1.1 200 OK{PEER_CRLF}"))
     start: response.index("{PEER_CRLF}{PEER_CRLF}") ?? panic("control response header")
@@ -227,10 +227,10 @@ run: fn() {
         request := [U8]{}
         first_line := false
         loop !first_line {
-            chunk: net.tcp_read_bytes(&stream, 16384) ?? panic("read Nix fixture request")
+            chunk: net.tcp_read_bytes(stream, 16384) ?? panic("read Nix fixture request")
             assert(chunk.len() > 0)
             loop byte in chunk {
-                &request.push(byte)
+                request.push(byte)
                 if byte == (U8{10}) -> first_line = true
             }
         }
@@ -248,15 +248,15 @@ run: fn() {
         body: if path == "/counts" -> Val("{{\"root\":{peer_object_count(counts, PEER_ROOT, "root")},\"lib\":{peer_object_count(counts, PEER_LIB, "lib")},\"runtime\":{peer_object_count(counts, PEER_RUNTIME, "runtime")},\"info\":{counts.get("/nix-cache-info") ?? 0}}}".bytes()) else if control -> Val("".bytes()) else if !online -> None else if publishing -> peer_static_file(publication, path) else -> routes.get(path)
         if body == {
             .Val(bytes) -> {
-                net.tcp_write_text(&stream, "HTTP/1.1 200 OK{PEER_CRLF}Content-Length: {bytes.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture header")
-                net.tcp_write_all_bytes(&stream, bytes) ?? panic("write Nix fixture bytes")
+                net.tcp_write_text(stream, "HTTP/1.1 200 OK{PEER_CRLF}Content-Length: {bytes.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture header")
+                net.tcp_write_all_bytes(stream, bytes) ?? panic("write Nix fixture bytes")
             }
             .None -> {
                 miss: if publishing -> "404 Not Found" else -> "503 Service Unavailable"
-                net.tcp_write_text(&stream, "HTTP/1.1 {miss}{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture miss")
+                net.tcp_write_text(stream, "HTTP/1.1 {miss}{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture miss")
             }
         }
-        net.tcp_close(&stream) ?? panic("close Nix fixture request")
+        net.tcp_close(stream) ?? panic("close Nix fixture request")
         if stop -> break
     }
 }

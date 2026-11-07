@@ -9,7 +9,7 @@ classify: fn(raw: String) -> Query {
     }
     return Query.Tag(raw.copy())
 }
-describe: fn(n: Note, q: ^Query) -> String {
+describe: fn(n: Note, q: &&Query) -> String {
     if q == {
         .Tag(t) -> { return "tag:{t}" }
         .Kind(k) -> { return "kind:{note.kind_str(n)}" }
@@ -18,7 +18,7 @@ describe: fn(n: Note, q: ^Query) -> String {
 run: fn() {
     n: note.make_note("x", NoteType.User)
     q: classify("user")
-    print(describe(n, ^q))
+    print(describe(n, q))
     q2: classify("design")
-    print(describe(n, ^q2))
+    print(describe(n, q2))
 }

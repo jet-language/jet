@@ -7,7 +7,7 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 
 const args = process.argv.slice(2);
-console.log("parked: Rust reference retired (owner #38/#59); Tower #4923");
+console.log("parked: Rust reference retired (owner #38/#59)");
 if (args.length < 2 || args.length > 3) throw new Error("usage: run-http-body-perf.mjs OUT SAME_TREE_HTTP_BODY_HOSTED [FROZEN_PERF_JSON]");
 const [out, hosted, frozenPerf] = args.map((path) => resolve(path));
 if (!existsSync(hosted)) throw new Error(`missing same-tree input ${hosted}`);
@@ -37,7 +37,7 @@ function median(implementation) {
 const jet = median("jet"), rust = frozen?.rustMedianNanos ?? null;
 writeFileSync(join(out, "perf.json"), JSON.stringify({
   bytes: 1 << 30, chunkBytes: 65536, carrier: "owned stride8 byte List", hosted, frozenPerf: frozenPerf ?? null,
-  samples, jetMedianNanos: jet, rustMedianNanos: rust, rustReference: "parked: Rust reference retired (owner #38/#59); Tower #4923",
+  samples, jetMedianNanos: jet, rustMedianNanos: rust, rustReference: "parked: Rust reference retired (owner #38/#59)",
   jetOverRust: jet !== null && rust !== null ? jet / rust : null,
 }, null, 2) + "\n");
 for (const failure of failures) console.error(`${failure}: runtime/output failure`);

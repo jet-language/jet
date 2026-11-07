@@ -16,7 +16,7 @@ nix_test_hex_decode: fn(text: String) -> [U8] {
     out := [U8]{}
     index := 0
     loop index + 1 < bytes.len() {
-        &out.push(U8{nix_test_hex_value(Int.from_u8(bytes[index])) * 16 + nix_test_hex_value(Int.from_u8(bytes[index + 1]))})
+        out.push(U8{nix_test_hex_value(Int.from_u8(bytes[index])) * 16 + nix_test_hex_value(Int.from_u8(bytes[index + 1]))})
         index += 2
     }
     out
@@ -67,7 +67,7 @@ nix_test_is_parse_error: fn(error: NixError) -> Bool {
     assert(drv.is_fixed())
     nix_verify_aterm_roundtrip(aterm, drv) ?? panic("minimal fixed ATerm must roundtrip")
     store := nix_derivation_store([String: NixDerivation]{})
-    &store.verify_output_paths(NIX_DEFAULT_STORE_DIR, "{real}.drv", drv) ?? panic("fixed-output paths must verify")
+    store.verify_output_paths(NIX_DEFAULT_STORE_DIR, "{real}.drv", drv) ?? panic("fixed-output paths must verify")
 }
 
 #Test("nix malformed aterm strings return parse errors") {

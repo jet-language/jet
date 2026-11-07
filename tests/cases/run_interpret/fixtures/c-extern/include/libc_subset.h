@@ -1,6 +1,6 @@
-/* A tiny subset of the C standard library, declared so Jet's native C-header
- * binder (D-CBIND3, Source/CBind.rs) can translate it. These are real libc
- * symbols — the Rust backend already links libc, so no extra `-l` is needed
+/* A tiny subset of the C standard library, declared so Jet's C-header binder
+ * (D-CBIND3, `jet inspect bind`) can translate it. These are real libc
+ * symbols: the native link already carries libc, so no extra `-l` is needed
  * beyond the `c: c@system` dep in package.jet's `deps:` block.
  *
  * Only prototypes inside the bindable subset (scalars, `char*` -> String,

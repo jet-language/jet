@@ -52,8 +52,7 @@ run: fn() {
         print(row.large.to_string())
     }
 
-    overflow: json.decode<SmallI64>("{{\"value\":9223372036854775808}}")
-    if overflow == {
+    if json.decode<SmallI64>("{{\"value\":9223372036854775808}}") == {
         .Err(_) -> { print("i64-overflow") }
         else -> { print("accepted") }
     }
@@ -70,49 +69,41 @@ run: fn() {
         .Err(_) -> print("quoted-int")
         else -> print("accepted")
     }
-    nonfinite: json.decode<Float>("1e400")
-    if nonfinite == {
+    if json.decode<Float>("1e400") == {
         .Err(_) -> { print("nonfinite") }
         else -> { print("accepted") }
     }
-    invalid_nan: json.decode<Decimal>("NaN")
-    if invalid_nan == {
+    if json.decode<Decimal>("NaN") == {
         .Err(_) -> { print("nan-rejected") }
         else -> { print("accepted") }
     }
-    invalid_infinity: json.decode<Decimal>("Infinity")
-    if invalid_infinity == {
+    if json.decode<Decimal>("Infinity") == {
         .Err(_) -> { print("infinity-rejected") }
         else -> { print("accepted") }
     }
-    fractional_integer: json.decode<Int>("1.5")
-    if fractional_integer == {
+    if json.decode<Int>("1.5") == {
         .Err(_) -> { print("fractional-rejected") }
         else -> { print("accepted") }
     }
-    exponent_limited: json.decode<Decimal>("1e1000001")
-    if exponent_limited == {
+    if json.decode<Decimal>("1e1000001") == {
         .Err(_) -> { print("exponent-limit") }
         else -> { print("accepted") }
     }
-    mismatch_raw: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
-    mismatch: json.decode<ExactNumbers>(mismatch_raw)
-    if mismatch == {
+    // Decimal decodes from its own text encoding, so the mismatch is a Bool.
+    mismatch_raw: "{{\"amount\":true,\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
+    if json.decode<ExactNumbers>(mismatch_raw) == {
         .Err(_) -> { print("mismatch") }
         else -> { print("accepted") }
     }
-    stream_mismatch: data.json<ExactNumbers>("[{mismatch_raw}]")
-    if stream_mismatch == {
+    if data.json<ExactNumbers>("[{mismatch_raw}]") == {
         .Err(_) -> { print("stream-mismatch") }
         else -> { print("accepted") }
     }
-    string_mismatch: json.decode<String>("123")
-    if string_mismatch == {
+    if json.decode<String>("123") == {
         .Err(_) -> { print("string-mismatch") }
         else -> { print("accepted") }
     }
-    limited: json.decode<Decimal>(@limited_text)
-    if limited == {
+    if json.decode<Decimal>(LIMITED_TEXT) == {
         .Err(_) -> { print("limit") }
         else -> { print("accepted") }
     }

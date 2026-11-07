@@ -27,10 +27,10 @@ sema_totality_rows: fn(modules: [SemaGraphModuleResult]) -> [SemaTotalityRow] Ne
         if graph_module.complete -> next
         owner: if graph_module.source_file != "" -> graph_module.source_file.copy() else -> graph_module.module_identity.copy()
         if graph_module.incomplete_reasons.len() == 0 {
-            &rows.push(SemaTotalityRow{owner: owner, function: "-", reason: "incomplete with no recorded cause"})
+            rows.push(SemaTotalityRow{owner: owner, function: "-", reason: "incomplete with no recorded cause"})
             next
         }
-        loop reason in graph_module.incomplete_reasons -> &rows.push(sema_totality_reason_row(owner, reason))
+        loop reason in graph_module.incomplete_reasons -> rows.push(sema_totality_reason_row(owner, reason))
     }
     rows
 }

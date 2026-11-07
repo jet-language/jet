@@ -9,7 +9,7 @@ kit_steps_json_projection_valid: fn(part: String) -> Bool {
     loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
         name: raw.trim().copy()
         if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) -> return false
-        &names.push(name)
+        names.push(name)
     }
     names.len() > 0
 }
@@ -101,7 +101,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
                     name: raw.trim().copy()
                     child: value.get(name) ?? return None
-                    _: &projected.add(name, child)
+                    _: projected.add(name, child)
                 }
                 return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)
             }
@@ -114,7 +114,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 filter: kit_steps_json_filter(part) ?? return None
                 selected := [Dyn]{}
                 loop item in items {
-                    if kit_steps_json_filter_matches(item, filter) -> &selected.push(item)
+                    if kit_steps_json_filter_matches(item, filter) -> selected.push(item.copy())
                 }
                 if selected.len() == 0 -> return Val([Dyn]{})
                 return kit_steps_json_select(Dyn.Array(selected), parts, depth + 1)
@@ -124,7 +124,7 @@ kit_steps_json_select: fn(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
                 selected := [Dyn]{}
                 loop item in items {
                     values: kit_steps_json_select(item, parts, depth + 1) ?? return None
-                    loop child in values -> &selected.push(child)
+                    loop child in values -> selected.push(child)
                 }
                 return Val(selected)
             }
@@ -149,7 +149,7 @@ kit_steps_json_values: fn(text: String, mode: String, path: String) -> [Dyn]? {
             if line == "" -> next
             record: json.parse(line) ?? return None
             if kit_steps_json_type(record) != "object" -> return None
-            &records.push(record)
+            records.push(record)
         }
         tree = Dyn.Array(records)
     } else -> return None

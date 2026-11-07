@@ -11,11 +11,11 @@ RawHostStartupOutputFacts: struct {
     unicode: Bool
 }
 
-jet_cli_make_host_startup_output_facts: fn(stdout_tty: Bool, stderr_tty: Bool, term: ^[U8]?, no_color: Bool, force_color: Bool, columns: U64?, unicode: Bool) -> RawHostStartupOutputFacts Never! {
+jet_cli_make_host_startup_output_facts: fn(stdout_tty: Bool, stderr_tty: Bool, term: &&[U8]?, no_color: Bool, force_color: Bool, columns: U64?, unicode: Bool) -> RawHostStartupOutputFacts Never! {
     RawHostStartupOutputFacts{
         stdout_tty: stdout_tty,
         stderr_tty: stderr_tty,
-        term: ^term,
+        term: term.move(),
         no_color: no_color,
         force_color: force_color,
         columns: columns,

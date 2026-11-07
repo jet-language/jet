@@ -174,8 +174,8 @@ capability_ascii_lower: fn(text: String) -> String Never! {
     raw: text.bytes()
     out := [U8]{}
     loop byte in raw {
-        if byte >= (U8{65}) && byte <= (U8{90}) -> &out.push(U8{Int.from_u8(byte) + 32})
-        else -> &out.push(byte)
+        if byte >= (U8{65}) && byte <= (U8{90}) -> out.push(U8{Int.from_u8(byte) + 32})
+        else -> out.push(byte)
     }
     String.from_bytes(out) ?? panic("ASCII case conversion preserves UTF-8")
 }
@@ -206,7 +206,7 @@ ascii: fn(value: String) -> String Never! {
         width: utf8_width(raw[i])
         n: scalar_at(raw, i, width)
         i += width
-        &out.push(U8{ascii_scalar(n)})
+        out.push(U8{ascii_scalar(n)})
     }
     String.from_bytes(out) ?? ""
 }
@@ -250,11 +250,11 @@ style_text: fn(value: String, s: TUIStyle, caps: TUICapabilities) -> String Neve
     if !caps.color -> return text
     if caps.profile == .ASCII -> return text
     codes := [String]{}
-    if s.bold -> &codes.push("1")
-    if s.dim -> &codes.push("2")
-    if s.underline -> &codes.push("4")
-    if s.foreground == .Val(color) -> &codes.push(color_code(color, caps.profile, false))
-    if s.background == .Val(color) -> &codes.push(color_code(color, caps.profile, true))
+    if s.bold -> codes.push("1")
+    if s.dim -> codes.push("2")
+    if s.underline -> codes.push("4")
+    if s.foreground == .Val(color) -> codes.push(color_code(color, caps.profile, false))
+    if s.background == .Val(color) -> codes.push(color_code(color, caps.profile, true))
     if codes.len() == 0 -> return text
     escape: String.from_bytes([U8]{27}) ?? ""
     "{escape}[{codes.join(";")}m{text}{escape}[0m"
@@ -306,7 +306,7 @@ layout: fn(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) ->
                 fill_weight += value
             }
         }
-        &sizes.push(desired)
+        sizes.push(desired)
         desired_total += desired
     }
     scale := Float{1.0}
@@ -327,7 +327,7 @@ layout: fn(area: Rect, direction: TUIDirection, constraints: [TUIConstraint]) ->
     loop size in sizes {
         frame := Rect{x: area.x, y: area.y + cursor, width: area.width, height: size}
         if direction == .Horizontal -> frame = Rect{x: area.x + cursor, y: area.y, width: size, height: area.height}
-        &result.push(frame)
+        result.push(frame)
         cursor += size
     }
     result
@@ -343,9 +343,9 @@ list: fn(items: [String]) -> UINode Never! {
     loop index in 0..<count {
         prefix := "  "
         if index == 0 -> prefix = "> "
-        &children.push(ui.text(truncate_text("{prefix}{items[index]}", caps.width)))
+        children.push(ui.text(truncate_text("{prefix}{items[index]}", caps.width)))
     }
-    if children.len() == 0 -> &children.push(ui.text(""))
+    if children.len() == 0 -> children.push(ui.text(""))
     ui.box(children)
 }
 
@@ -357,8 +357,8 @@ table: fn(headers: [String], rows: [[String]]) -> ui.UINode Never! {
     if columns == 0 -> return ui.text("")
     caps: capabilities()
     children := [UINode]{}
-    if headers.len() > 0 -> &children.push(ui.text(table_line(headers, columns, caps.width)))
-    loop row in rows -> &children.push(ui.text(table_line(row, columns, caps.width)))
+    if headers.len() > 0 -> children.push(ui.text(table_line(headers, columns, caps.width)))
+    loop row in rows -> children.push(ui.text(table_line(row, columns, caps.width)))
     ui.box(children)
 }
 
@@ -443,7 +443,7 @@ truncate_text: fn(value: String, limit: Int) -> String Never! {
         else {
             width: scalar_display_width(scalar)
             if used + width > limit -> break
-            loop offset in 0..<size -> &out.push(raw[start + offset])
+            loop offset in 0..<size -> out.push(raw[start + offset])
             used += width
         }
     }

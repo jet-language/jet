@@ -22,7 +22,7 @@ s3_guard_retired_marker_forms: fn() {
     pending := [String]{""}
     offenders := [String]{}
     loop {
-        relative_dir: &pending.pop() ?? break
+        relative_dir: pending.pop() ?? break
         directory := "."
         if relative_dir != "" -> directory = "./{relative_dir}"
         entries: s3_marker_files.list_dir(directory) ?? next
@@ -38,7 +38,7 @@ s3_guard_retired_marker_forms: fn() {
                     if entry.name == name -> skip = true
                 }
                 if skip || entry.name.starts_with("target-") || entry.name.starts_with("build-") || entry.name.starts_with("result-") -> next
-                &pending.push(relative)
+                pending.push(relative)
                 next
             }
             if !metadata.is_file -> next
@@ -57,7 +57,7 @@ s3_guard_retired_marker_forms: fn() {
                 // `marker Name…` declares; `marker: value` is an ordinary binding.
                 declaration: jet_source && words.len() > 1 && words[0] == marker_word.trim() && words[1] != words[1].to_lower() && (trimmed.contains("(") || trimmed.contains(" = #["))
                 if declaration || (line.contains(marker_word) && (line.contains(on_clause) || line.contains(second_list))) || line.contains(checked_text_node) {
-                    &offenders.push("{relative}:{line_number}: {line}")
+                    offenders.push("{relative}:{line_number}: {line}")
                 }
             }
         }

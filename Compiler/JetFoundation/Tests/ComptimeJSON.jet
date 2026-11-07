@@ -33,7 +33,7 @@ require_unsupported: fn(value: CtValue, reason: String) Never! {
     assert_eq(ast_comptime_value_json(CtValue.Char{value: '\n'}) ?? panic("Char JSON"), "\"\\n\"")
     assert_eq(ast_comptime_value_json(CtValue.Char{value: '"'}) ?? panic("Char JSON"), "\"\\\"\"")
     bytes := [U8]{}
-    loop byte in 0..<32 -> &bytes.push(U8{byte})
+    loop byte in 0..<32 -> bytes.push(U8{byte})
     controls: String.from_bytes(bytes) ?? panic("C0 text")
     encoded: ast_comptime_value_json(CtValue.Str{value: controls}) ?? panic("C0 JSON")
     assert_eq(encoded, foundation_json_quote(controls))

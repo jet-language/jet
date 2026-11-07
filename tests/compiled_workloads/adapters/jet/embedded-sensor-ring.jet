@@ -74,37 +74,37 @@ run: fn(args: WorkloadArgs) {
         if field_count == 2 && first == "ENQ" {
             if Int.parse(second) == {
                 .Ok(value) -> {
-                    if &ring.enqueue(value) {
+                    if ring.enqueue(value) {
                         accepted_enqueues += 1
                         digest = fold_digest(digest, step, 1, value, ring.head, ring.tail, ring.count)
-                        print_state(step, "enqueue", "accepted", value, true, &ring)
+                        print_state(step, "enqueue", "accepted", value, true, ring)
                     } else {
                         rejects += 1
                         digest = fold_digest(digest, step, 3, value, ring.head, ring.tail, ring.count)
-                        print_state(step, "enqueue", "reject-overflow", value, true, &ring)
+                        print_state(step, "enqueue", "reject-overflow", value, true, ring)
                     }
                 }
                 .Err(_) -> {
                     rejects += 1
                     digest = fold_digest(digest, step, 5, 0, ring.head, ring.tail, ring.count)
-                    print_state(step, "malformed", "reject-malformed", 0, false, &ring)
+                    print_state(step, "malformed", "reject-malformed", 0, false, ring)
                 }
             }
         } else if field_count == 1 && first == "DEQ" {
             if ring.count == 0 {
                 rejects += 1
                 digest = fold_digest(digest, step, 4, 0, ring.head, ring.tail, ring.count)
-                print_state(step, "dequeue", "reject-underflow", 0, false, &ring)
+                print_state(step, "dequeue", "reject-underflow", 0, false, ring)
             } else {
-                value: &ring.dequeue()
+                value: ring.dequeue()
                 accepted_dequeues += 1
                 digest = fold_digest(digest, step, 2, value, ring.head, ring.tail, ring.count)
-                print_state(step, "dequeue", "accepted", value, true, &ring)
+                print_state(step, "dequeue", "accepted", value, true, ring)
             }
         } else {
             rejects += 1
             digest = fold_digest(digest, step, 5, 0, ring.head, ring.tail, ring.count)
-            print_state(step, "malformed", "reject-malformed", 0, false, &ring)
+            print_state(step, "malformed", "reject-malformed", 0, false, ring)
         }
     }
 

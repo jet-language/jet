@@ -35,15 +35,15 @@ read_file: fn(root: String, path: String) -[FS]> SourceFile Err! {
 jet_files: fn(root: String, relative: String, out: &[String]) Err! -[FS]> {
     entries: files.list_dir(files.join(root, relative)) ?? return Err("cannot list {relative}: {err}")
     names := [String]{}
-    loop entry in entries -> &names.push(entry.name.copy())
-    &names.sort_by((left: String, right: String) -> left <=> right)
+    loop entry in entries -> names.push(entry.name.copy())
+    names.sort_by((left: String, right: String) -> left <=> right)
     loop name in names {
         child: "{relative}/{name}"
         path: files.join(root, child)
         if files.is_symlink(path) -> next
         if {
-            files.is_dir(path) -> jet_files(root, child, &out) ?? return Err(err)
-            name.ends_with(".jet") -> &out.push(child)
+            files.is_dir(path) -> jet_files(root, child, out) ?? return Err(err)
+            name.ends_with(".jet") -> out.push(child)
         }
     }
     Ok(())
@@ -58,31 +58,31 @@ load_inputs: fn(root: String) -[FS]> Inputs Err! {
     core_sources := [SourceFile]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         if has_path(core_sources, row.path) -> next
-        &core_sources.push(read_file(root, row.path) ?? return Err(err))
+        core_sources.push(read_file(root, row.path) ?? return Err(err))
     }
     route_files := [SourceFile]{}
-    loop path in route_paths() -> &route_files.push(read_file(root, path) ?? return Err(err))
+    loop path in route_paths() -> route_files.push(read_file(root, path) ?? return Err(err))
     registry_paths := [String]{}
-    jet_files(root, REGISTRY_DIR, &registry_paths) ?? return Err(err)
+    jet_files(root, REGISTRY_DIR, registry_paths) ?? return Err(err)
     registry_files := [SourceFile]{}
-    loop path in registry_paths -> &registry_files.push(read_file(root, path) ?? return Err(err))
+    loop path in registry_paths -> registry_files.push(read_file(root, path) ?? return Err(err))
     specials: read_file(root, SPECIAL_ROUTES_PATH) ?? return Err(err)
     special_rows: parse_special_routes(specials.text) ?? return Err(err)
     special_files := [SourceFile]{}
     loop row in special_rows {
         if has_path(special_files, row.path) -> next
         if !files.is_file(files.join(root, row.path)) -> next
-        &special_files.push(read_file(root, row.path) ?? return Err(err))
+        special_files.push(read_file(root, row.path) ?? return Err(err))
     }
     exclusions: read_file(root, EXCLUSIONS_PATH) ?? return Err(err)
     witness_paths := [String]{}
-    jet_files(root, CORPUS_ROOT, &witness_paths) ?? return Err(err)
+    jet_files(root, CORPUS_ROOT, witness_paths) ?? return Err(err)
     witnesses := [SourceFile]{}
-    loop path in witness_paths -> &witnesses.push(read_file(root, path) ?? return Err(err))
+    loop path in witness_paths -> witnesses.push(read_file(root, path) ?? return Err(err))
     generator_paths := [String]{}
-    jet_files(root, GENERATOR_ROOT, &generator_paths) ?? return Err(err)
+    jet_files(root, GENERATOR_ROOT, generator_paths) ?? return Err(err)
     generator_files := [SourceFile]{}
-    loop path in generator_paths -> &generator_files.push(read_file(root, path) ?? return Err(err))
+    loop path in generator_paths -> generator_files.push(read_file(root, path) ?? return Err(err))
     Ok(Inputs{core_sources: core_sources, route_files: route_files, registry_files: registry_files, specials_text: specials.text.copy(), special_files: special_files, exclusions_text: exclusions.text.copy(), witnesses: witnesses, generator_files: generator_files})
 }
 
@@ -95,9 +95,9 @@ snapshot_files: fn(inputs: Inputs) -> [SourceFile] Never! {
         loop file in group {
             if seen.get(file.path) != None -> next
             seen[file.path.copy()] = true
-            &out.push(file.copy())
+            out.push(file.copy())
         }
     }
-    &out.sort_by((left: SourceFile, right: SourceFile) -> left.path <=> right.path)
+    out.sort_by((left: SourceFile, right: SourceFile) -> left.path <=> right.path)
     out
 }

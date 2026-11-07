@@ -12,17 +12,17 @@ notebook_codec_test_cell: fn(id: String, source: String, dependencies: [String])
 }
 notebook_codec_test_document: fn() -> JetNotebook Never! {
     nb := JetNotebook.new("env-doc")
-    &nb.cells.push(notebook_codec_test_cell("one", "answer: 42", [String]{}))
+    nb.cells.push(notebook_codec_test_cell("one", "answer: 42", [String]{}))
     nb
 }
 notebook_codec_test_replace: fn(json: CanonicalJSON, key: String, value: CanonicalJSON?) -> CanonicalJSON Never! {
     fields := [CanonicalJSONField]{}
     if json == .Object(original) {
         loop field in original {
-            if field.key != key -> &fields.push(field.copy())
+            if field.key != key -> fields.push(field.copy())
         }
     } else { panic("object fixture") }
-    if value == .Val(replacement) -> &fields.push(CanonicalJSONField{key: key, value: replacement})
+    if value == .Val(replacement) -> fields.push(CanonicalJSONField{key: key, value: replacement})
     canonical_json_object(fields) ?? panic("unique fixture fields")
 }
 notebook_codec_test_error: fn(json: CanonicalJSON) -> String Never! {
@@ -47,12 +47,12 @@ notebook_codec_test_bundle_error: fn(json: CanonicalJSON) -> String Never! {
 // N3 owns its merge and conversion assertions.
 #Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss_codec") {
     nb := notebook_codec_test_document()
-    &nb.store_output("one", notebook_plain_bundle("answer : Int: 42"), 1, None) ?? panic("store output")
+    nb.store_output("one", notebook_plain_bundle("answer : Int: 42"), 1, None) ?? panic("store output")
     assert(nb.visible_output("one") == .Val(_))
     nb.cells[0].source = "answer: 7"
     assert(nb.visible_output("one") == None)
     nb.cells[0].source = "answer: 42"
-    &nb.store_output("one", notebook_plain_bundle("42"), 2, None) ?? panic("restore live output")
+    nb.store_output("one", notebook_plain_bundle("42"), 2, None) ?? panic("restore live output")
     root: notebook_codec_test_testing.temp_dir("jetnb-codec")
     path: notebook_codec_test_files.join(root, "nested/demo.jetnb")
     notebook_save_jetnb(nb, path) ?? panic("save jetnb")
@@ -92,9 +92,9 @@ notebook_codec_test_bundle_error: fn(json: CanonicalJSON) -> String Never! {
     bundle.widget_id = Val("widget")
     bundle.requested_origins = [String]{"https://data.example", "https://data.example"}
     bundle.requested_messages = [String]{"click"}
-    &nb.store_output("one", bundle, 4294967295, Val(18446744073709551615)) ?? panic("store rich output")
-    &nb.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# title", output: None, depends_on: [String]{"one", "one"}})
-    &nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer: 42", theirs_source: "answer: 7"})
+    nb.store_output("one", bundle, 4294967295, Val(18446744073709551615)) ?? panic("store rich output")
+    nb.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# title", output: None, depends_on: [String]{"one", "one"}})
+    nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer: 42", theirs_source: "answer: 7"})
     bytes: canonical_json_bytes(notebook_to_json(nb) ?? panic("encode complete"))
     loaded: JetNotebook.from_canonical_bytes(bytes) ?? panic("decode complete")
     assert_eq(loaded.cells[1].kind, NotebookCellKind.Markdown)
@@ -119,7 +119,7 @@ notebook_codec_test_bundle_error: fn(json: CanonicalJSON) -> String Never! {
     assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "cells", None)), "jetnb is missing `cells`")
     assert_eq(notebook_codec_test_error(notebook_codec_test_replace(json, "cells", Val(.Null))), "jetnb `cells` must be an array")
     invalid := notebook_codec_test_document()
-    &invalid.cells.push(notebook_codec_test_cell("one", "", [String]{}))
+    invalid.cells.push(notebook_codec_test_cell("one", "", [String]{}))
     assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("duplicate fixture")), "jetnb has duplicate or empty cell id `one`")
     invalid.cells[1].id = ""
     assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("empty fixture")), "jetnb has duplicate or empty cell id ``")
@@ -131,10 +131,10 @@ notebook_codec_test_bundle_error: fn(json: CanonicalJSON) -> String Never! {
     assert(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("cycle fixture")).contains("dependency cycle"))
     invalid.cells[0].depends_on = [String]{}
     invalid.cells[1].depends_on = [String]{}
-    &invalid.merge_conflicts.push(NotebookMergeConflict{cell_id: "missing", ours_source: "", theirs_source: ""})
+    invalid.merge_conflicts.push(NotebookMergeConflict{cell_id: "missing", ours_source: "", theirs_source: ""})
     assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("conflict fixture")), "merge conflict names unknown cell `missing`")
     invalid.merge_conflicts[0].cell_id = "one"
-    &invalid.merge_conflicts.push(invalid.merge_conflicts[0].copy())
+    invalid.merge_conflicts.push(invalid.merge_conflicts[0].copy())
     assert_eq(notebook_codec_test_error(notebook_to_json(invalid) ?? panic("repeat conflict fixture")), "jetnb repeats merge conflict for `one`")
     omitted: notebook_codec_test_replace(notebook_codec_test_replace(notebook_codec_test_replace(json, "cache_policy", None), "output_cache", None), "merge_conflicts", None)
     assert_eq((notebook_from_json(omitted) ?? panic("optional fields omitted")).cells.len(), 1)

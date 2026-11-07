@@ -50,20 +50,20 @@ kit_steps_surround_punctuation: fn(text: String, commas: Bool) -> String {
     loop byte in text.bytes() {
         code: Int.from_u8(byte)
         if quote != 0 {
-            &output.push(byte)
+            output.push(byte)
             if escaped -> escaped = false
             else if code == 92 -> escaped = true
             else if code == quote -> quote = 0
         } else if code == 34 || code == 39 {
             quote = code
-            &output.push(byte)
-        } else if commas && code == 44 -> &output.push(U8{32})
+            output.push(byte)
+        } else if commas && code == 44 -> output.push(U8{32})
         else if !commas && (code == 40 || code == 41) {
-            &output.push(U8{32})
-            &output.push(byte)
-            &output.push(U8{32})
+            output.push(U8{32})
+            output.push(byte)
+            output.push(U8{32})
         } else {
-            &output.push(byte)
+            output.push(byte)
         }
     }
     String.from_bytes(output) ?? panic("punctuation scan changed UTF-8")
@@ -135,7 +135,7 @@ kit_steps_hex_decode: fn(text: String) -> [U8] Err! {
     loop index < bytes.len() {
         high: kit_steps_hex_nibble(bytes[index]) ?? return Err("invalid hexadecimal argument: {text}")
         low: kit_steps_hex_nibble(bytes[index + 1]) ?? return Err("invalid hexadecimal argument: {text}")
-        &result.push(U8{high * 16 + low})
+        result.push(U8{high * 16 + low})
         index += 2
     }
     Ok(result)

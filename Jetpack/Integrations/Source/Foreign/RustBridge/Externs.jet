@@ -132,7 +132,7 @@ FFILink: struct {
     // Cargo's dependency search paths, target artifacts first, no duplicates.
     dependency_dirs: fn(self) -> [String] Never! {
         dirs := [String]{self.target_deps_dir}
-        if self.host_deps_dir != self.target_deps_dir -> &dirs.push(self.host_deps_dir)
+        if self.host_deps_dir != self.target_deps_dir -> dirs.push(self.host_deps_dir)
         dirs
     }
 }
@@ -178,7 +178,7 @@ CRecordDefinitions: struct {
 
     is_record_type: fn(self, ty: Type) -> Bool Never! {
         stack := [String]{}
-        self.is_record_type_with_stack(ty, &stack)
+        self.is_record_type_with_stack(ty, stack)
     }
 
     is_record_type_with_stack: fn(self, ty: Type, stack: &[String]) -> Bool Never! {
@@ -186,15 +186,15 @@ CRecordDefinitions: struct {
         if self.names.has_key(name) -> return true
         base: self.aliases.get(name) ?? return false
         if stack.contains(name) -> return false
-        &stack.push(name)
-        result: self.is_record_type_with_stack(base, &stack)
-        _ := &stack.pop()
+        stack.push(name)
+        result: self.is_record_type_with_stack(base, stack)
+        _ := stack.pop()
         result
     }
 
     rust_type: fn(self, ty: Type) -> String? Never! {
         stack := [String]{}
-        self.rust_type_with_stack(ty, &stack)
+        self.rust_type_with_stack(ty, stack)
     }
 
     rust_type_with_stack: fn(self, ty: Type, stack: &[String]) -> String? Never! {
@@ -206,8 +206,8 @@ CRecordDefinitions: struct {
             .Char -> Val("u32")
             .IntN(signed, bits) -> Val(pkg_ffi_int_rust_name(signed, bits))
             .Float32 -> Val("f32")
-            .FixedList(elem, len) -> self.fixed_list_rust_type(elem, len, &stack)
-            .Named(name) -> self.named_rust_type(name, &stack)
+            .FixedList(elem, len) -> self.fixed_list_rust_type(elem, len, stack)
+            .Named(name) -> self.named_rust_type(name, stack)
             .Fn(_, _, _, _, _, _) -> Val("*mut core::ffi::c_void")
             else -> None
         }
@@ -215,7 +215,7 @@ CRecordDefinitions: struct {
 
     fixed_list_rust_type: fn(self, elem: Type, len: Measure, stack: &[String]) -> String? Never! {
         length: pkg_ffi_fixed_length(len) ?? return None
-        element: self.rust_type_with_stack(elem, &stack) ?? return None
+        element: self.rust_type_with_stack(elem, stack) ?? return None
         Val("[{element}; {length}]")
     }
 
@@ -226,9 +226,9 @@ CRecordDefinitions: struct {
         if self.handle_names.contains(name) -> return Val("*mut core::ffi::c_void")
         base: self.aliases.get(name) ?? return None
         if stack.contains(name) -> return None
-        &stack.push(name)
-        resolved: self.rust_type_with_stack(base, &stack)
-        _ := &stack.pop()
+        stack.push(name.copy())
+        resolved: self.rust_type_with_stack(base, stack)
+        _ := stack.pop()
         resolved
     }
 }
@@ -284,12 +284,12 @@ pkg_ffi_mangle_path: fn(name: String) -> String Never! {
     loop byte in name.bytes() {
         code: Int.from_u8(byte)
         if (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) {
-            &encoded.push(byte)
+            encoded.push(byte)
             next
         }
-        &encoded.push(U8{95})
+        encoded.push(U8{95})
         escape: pkg_ffi_path_escape(code)
-        loop escaped in escape.bytes() -> &encoded.push(escaped)
+        loop escaped in escape.bytes() -> encoded.push(escaped)
     }
     "{GENERATED_NAME_PREFIX}{String.from_bytes(encoded) ?? ""}"
 }
@@ -310,13 +310,13 @@ pkg_ffi_path_escape: fn(code: Int) -> String Never! {
 
 pkg_ffi_param_names: fn(params: [Param]) -> [String] Never! {
     names := [String]{}
-    loop param in params -> &names.push(param.name)
+    loop param in params -> names.push(param.name)
     names
 }
 
 pkg_ffi_param_shapes: fn(params: [Param]) -> [(convention: AccessConvention, ty: Type)] Never! {
     shapes := [(convention: AccessConvention, ty: Type)]{}
-    loop param in params -> &shapes.push((convention: param.convention, ty: param.ty))
+    loop param in params -> shapes.push((convention: param.convention, ty: param.ty))
     shapes
 }
 
@@ -335,10 +335,10 @@ pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [Exte
             if item == {
                 .ExternRust(block) -> {
                     functions: block.functions
-                    loop function in functions -> &out.push(pkg_ffi_extern_entry(function, block))
+                    loop function in functions -> out.push(pkg_ffi_extern_entry(function, block))
                 }
-                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, target, &out)
-                .CModule(c_module) -> pkg_ffi_collect_c_module(c_module, &out)
+                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, target, out)
+                .CModule(c_module) -> pkg_ffi_collect_c_module(c_module, out)
                 else -> {}
             }
         }
@@ -353,9 +353,9 @@ pkg_ffi_collect_externs: fn(program: RustBridgeProgram, target: String) -> [Exte
 pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out: &[ExternEntry]) Never! {
     if parser_guest_import_symbol(function) == .Val(symbol) {
         names := [String]{}
-        loop index in 0..<function.params.len() -> &names.push("arg{index}")
+        loop index in 0..<function.params.len() -> names.push("arg{index}")
         wrapper_owner: if owner == "" -> "root" else -> owner
-        &out.push(ExternEntry{
+        out.push(ExternEntry{
             jet_name: function.name,
             rust_path: symbol,
             wrapper_name: pkg_ffi_mangle_path("jet_ffi_guest.{wrapper_owner}.{function.name}"),
@@ -373,7 +373,7 @@ pkg_ffi_collect_function: fn(function: Func, owner: String, target: String, out:
         return
     }
     inline: function.inline_foreign ?? return
-    &out.push(ExternEntry{
+    out.push(ExternEntry{
         jet_name: function.name,
         rust_path: "",
         wrapper_name: "jet_ffi_{function.name}",
@@ -404,7 +404,7 @@ pkg_ffi_inline_asm_contract: fn(function: Func, target: String) -> InlineAsmCont
 pkg_ffi_collect_c_module: fn(c_module: CModule, out: &[ExternEntry]) Never! {
     functions: c_module.functions
     loop function in functions {
-        &out.push(ExternEntry{
+        out.push(ExternEntry{
             jet_name: function.name,
             rust_path: function.rust_path,
             wrapper_name: "jet_ffi_{function.name}",
@@ -466,12 +466,12 @@ pkg_ffi_owner_key: fn(owner: String, name: String) -> String Never! {
 pkg_ffi_collect_record_items: fn(items: [Item], owner: String, records: &[CRecordDecl], names: &[String: String], aliases: &[String: Type]) Never! {
     loop item in items {
         if item == {
-            .Struct(definition) -> pkg_ffi_collect_record(definition, owner, &records, &names)
-            .Distinct(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.base, &aliases)
-            .TypeAlias(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.target, &aliases)
+            .Struct(definition) -> pkg_ffi_collect_record(definition, owner, records, names)
+            .Distinct(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.base, aliases)
+            .TypeAlias(definition) -> pkg_ffi_record_alias(owner, definition.name, definition.target, aliases)
             .CodeModule(code_module) -> {
                 body: code_module.body ?? next
-                pkg_ffi_collect_record_items(body, pkg_ffi_owner_key(owner, code_module.name), &records, &names, &aliases)
+                pkg_ffi_collect_record_items(body, pkg_ffi_owner_key(owner, code_module.name), records, names, aliases)
             }
             else -> {}
         }
@@ -487,8 +487,8 @@ pkg_ffi_collect_record: fn(definition: StructDef, owner: String, records: &[CRec
     if !names.has_key(definition.name) -> names[definition.name] = rust_name
     fields := [(name: String, ty: Type)]{}
     declared: definition.fields
-    loop field in declared -> &fields.push((name: field.name, ty: field.ty))
-    &records.push(CRecordDecl{rust_name: rust_name, fields: fields, alignment: pkg_ffi_struct_layout_alignment(layout)})
+    loop field in declared -> fields.push((name: field.name, ty: field.ty))
+    records.push(CRecordDecl{rust_name: rust_name, fields: fields, alignment: pkg_ffi_struct_layout_alignment(layout)})
 }
 
 // A qualified alias key plus a bare-name entry that the first owner claims.
@@ -503,11 +503,11 @@ pkg_ffi_collect_c_record_definitions: fn(program: RustBridgeProgram) -> CRecordD
     records := [CRecordDecl]{}
     names := [String: String]{}
     aliases := [String: Type]{}
-    loop program_module in program.modules -> pkg_ffi_collect_record_items(program_module.items, program_module.alias, &records, &names, &aliases)
+    loop program_module in program.modules -> pkg_ffi_collect_record_items(program_module.items, program_module.alias, records, names, aliases)
     handle_names := [String]{}
     facts: program.cffi.handle_facts
     loop fact in facts {
-        if !handle_names.contains(fact.jet_name) -> &handle_names.push(fact.jet_name)
+        if !handle_names.contains(fact.jet_name) -> handle_names.push(fact.jet_name)
     }
     definitions := CRecordDefinitions{source: "", names: names, aliases: aliases, records: records, handle_names: handle_names}
     source := ""
@@ -577,7 +577,7 @@ pkg_ffi_inline_asm_entry_diagnostic: fn(asm: ExternEntry, inline: InlineEntry, t
         normalized: pkg_ffi_normalize_register(clobber)
         if !inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
         if seen_clobbers.contains(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
-        &seen_clobbers.push(normalized)
+        seen_clobbers.push(normalized.copy())
         if output_register == .Val(result_register) {
             if result_register == normalized -> return Val(pkg_ffi_asm_error("{asm.line_hint} uses `{clobber}` as both result and an early-written clobber", "an early-written clobber cannot overwrite the fixed result destination", "choose a distinct result register or clobber register"))
         }
@@ -621,9 +621,9 @@ pkg_ffi_foreign_descriptor_stamps: fn(entries: [ExternEntry]) -> [String] Never!
     loop entry in entries {
         language: pkg_ffi_foreign_language_for_entry(entry) ?? next
         stamp: pkg_ffi_foreign_descriptor_stamp(language)
-        if !stamps.contains(stamp) -> &stamps.push(stamp)
+        if !stamps.contains(stamp) -> stamps.push(stamp)
     }
-    &stamps.sort()
+    stamps.sort()
     stamps
 }
 
@@ -634,7 +634,7 @@ pkg_ffi_entry_languages: fn(entries: [ExternEntry]) -> [ForeignLanguage] Never! 
         loop entry in entries {
             if pkg_ffi_foreign_language_for_entry(entry) == .Val(entry_language) {
                 if entry_language == language {
-                    &languages.push(language)
+                    languages.push(language)
                     break
                 }
             }
@@ -666,7 +666,7 @@ pkg_ffi_tag_marker_text: fn(marker: TagMarker) -> String Never! {
 
 pkg_ffi_join_type_keys: fn(types: [Type], separator: String) -> String Never! {
     keys := [String]{}
-    loop ty in types -> &keys.push(pkg_ffi_type_key(ty))
+    loop ty in types -> keys.push(pkg_ffi_type_key(ty))
     keys.join(separator)
 }
 
@@ -677,7 +677,7 @@ pkg_ffi_optional_type_key: fn(ty: Type?) -> String Never! {
 
 pkg_ffi_tuple_type_key: fn(fields: [TypeTupleField]) -> String Never! {
     rows := [String]{}
-    loop field in fields -> &rows.push("{field.name}:{pkg_ffi_type_key(field.ty)}")
+    loop field in fields -> rows.push("{field.name}:{pkg_ffi_type_key(field.ty)}")
     "({rows.join(",")})"
 }
 
@@ -747,6 +747,6 @@ pkg_ffi_parse_crate_spec: fn(spec: String) -> (name: String, version: String)? N
 // A map's keys in sorted order (the Rust `BTreeMap` iteration order).
 pkg_ffi_sorted_keys: fn(map: [String: String]) -> [String] Never! {
     keys := map.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }

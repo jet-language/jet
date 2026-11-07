@@ -86,13 +86,13 @@ run_in: fn(dir: String, argv: [String], index: String) -[Exec, Time.Wait]> Ran N
 
 git: fn(dir: String, args: [String]) -[Exec, Time.Wait]> Ran Never! {
     argv := [String]{"git"}
-    &argv.extend(args)
+    argv.extend(args.copy())
     run_in(dir, argv, "")
 }
 
 git_index: fn(dir: String, index: String, args: [String]) -[Exec, Time.Wait]> Ran Never! {
     argv := [String]{"git"}
-    &argv.extend(args)
+    argv.extend(args.copy())
     run_in(dir, argv, index)
 }
 
@@ -183,11 +183,11 @@ touched_paths: fn(dir: String, patch: String) -[Exec, Time.Wait]> [String] Never
         counts: field.partition("\t")
         name: counts.tail.partition("\t").tail
         if name != "" {
-            if !paths.contains(name) -> &paths.push(name.copy())
+            if !paths.contains(name) -> paths.push(name.copy())
             next
         }
         loop _ in 0..<2 {
-            if index < fields.len() && !paths.contains(fields[index]) -> &paths.push(fields[index].copy())
+            if index < fields.len() && !paths.contains(fields[index]) -> paths.push(fields[index].copy())
             index += 1
         }
     }
@@ -199,13 +199,13 @@ nul_fields: fn(text: String) -> [String] Never! {
     current := [U8]{}
     loop byte in text.bytes() {
         if Int.from_u8(byte) == 0 {
-            &fields.push(String.from_bytes_lossy(current))
+            fields.push(String.from_bytes_lossy(current))
             current = [U8]{}
             next
         }
-        &current.push(byte)
+        current.push(byte)
     }
-    if current.len() > 0 -> &fields.push(String.from_bytes_lossy(current))
+    if current.len() > 0 -> fields.push(String.from_bytes_lossy(current))
     fields
 }
 
@@ -243,7 +243,7 @@ land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
             index += 1
             next
         }
-        &positional.push(arg.copy())
+        positional.push(arg.copy())
     }
     if positional.len() == 0 || positional.len() % 2 != 0 -> usage()
     pairs := [Pair]{}
@@ -257,7 +257,7 @@ land_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
                 return 2
             }
         }
-        &pairs.push(Pair{patch: patch, message: message})
+        pairs.push(Pair{patch: patch, message: message})
     }
     source: checkout_top()
     if source == "" {
@@ -298,14 +298,14 @@ land: fn(dir: String, pairs: [Pair]) -[Exec, Env, FS, IO, Time.Wait]> Int Never!
     touched := [String]{}
     loop pair in pairs {
         name: files.basename(pair.patch)
-        &touched.extend(touched_paths(dir, pair.patch))
+        touched.extend(touched_paths(dir, pair.patch))
         apply: git(dir, [String]{"apply", pair.patch})
         if apply.code != 0 {
             term.eprint("land: {name} does not apply on {pre.slice(0..<10)}: {first_line(apply)}")
             revert(dir, applied)
             return 4
         }
-        &applied.push(pair.patch.copy())
+        applied.push(pair.patch.copy())
         print("applied {name}")
     }
     if !check(dir, touched) {
@@ -346,7 +346,7 @@ check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool 
     targets := [String]{}
     loop path in touched {
         if compiler_input(path) -> compiler = true
-        if path.ends_with(".jet") && files.exists(files.join(dir, path)) -> &targets.push(path.copy())
+        if path.ends_with(".jet") && files.exists(files.join(dir, path)) -> targets.push(path.copy())
     }
     if compiler -> targets = [String]{""}
     if targets.len() == 0 {
@@ -356,7 +356,7 @@ check: fn(dir: String, touched: [String]) -[Exec, Env, FS, IO, Time.Wait]> Bool 
     clean := true
     loop target in targets {
         argv := [String]{jet, "Tools/agent/LaneCheck.jet"}
-        if target != "" -> &argv.push(target.copy())
+        if target != "" -> argv.push(target.copy())
         label: if target == "" -> "the compiler" else -> target.copy()
         receipt: process.cmd(argv).cwd(dir).env("JET", jet).env("JET_TOOLCHAIN_ROOT", dir).output_limit(268435456).run() ?? {
             term.eprint("check: cannot run {jet}: {err}")
@@ -404,7 +404,7 @@ commit_stack: fn(dir: String, pre: String, pairs: [Pair]) -[Exec, Env, FS, Time.
         }
         tip = made.output.trim()
         subject: git(dir, [String]{"log", "-1", "--format=%h %s", tip}).output.trim()
-        &landed.push(subject)
+        landed.push(subject)
     }
     files.remove(index) ?? ()
     if failure != "" -> return Err(LandError{message: failure})
@@ -422,7 +422,7 @@ queue_main: fn(args: [String]) -[Exec, Env, FS, IO, Time]> Int Never! {
     if args.len() < 2 -> usage()
     lane: args[0]
     bases := [String]{}
-    loop base in args[1..<args.len()] -> &bases.push(absolute(base))
+    loop base in args[1..<args.len()] -> bases.push(absolute(base))
     loop base in bases {
         loop ext in JOB_FILES {
             if !files.exists("{base}{ext}") {
@@ -512,7 +512,7 @@ tagged_seconds: fn(message: String, marker: String) -> Float? Never! {
         loop byte in rest.bytes() {
             code: Int.from_u8(byte)
             if !((code >= 48 && code <= 57) || code == 46) -> break
-            &digits.push(byte)
+            digits.push(byte)
         }
         if digits.len() == 0 -> next
         number: String.from_bytes_lossy(digits)

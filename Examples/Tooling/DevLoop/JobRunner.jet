@@ -1,0 +1,31 @@
+// Project jobs are Jet `#Job fn`s with typed visibility.
+// Discover inside a project with `jet jobs`.
+// Invoke in the project: `jet greet` / `jet seed_data`; for this file,
+// `jet run <this-file> -- greet` / `jet run <this-file> -- seed_data`.
+// Cross-job dependency = a plain call (`seed_data` calls `greet` below).
+// A release binary runs only `.Ship` jobs, so the golden runs `greet` on every
+// tier (Examples/Tooling/DevLoop/JobRunner.case); the `.Dev` path
+// is covered by tests/cases/comptime_cli_parity/job_runner_help_and_named_jobs_match_default_run_aot_and_goldens.case.
+#[Job(.Ship), Doc("Say hello from a shipped project job")]
+greet: fn() { print("hello from job") }
+
+#[Job(.Dev), Doc("Seed local data"), Every(5min)]
+seed_data: fn() {
+    greet()
+    print("seeded")
+}
+
+#Job(.Internal) inspect_job: fn() { print("internal job") }
+
+// A bare `#Job` defaults to `.Dev`; `.Internal` stays callable from code but
+// not from argv.
+#Job default_job: fn() { print("default-dev") }
+
+// An environment may name these typed jobs in `on_enter`/`checks`; Git hooks
+// use the same environment graph through `git_hooks_path` and native Git.
+env.dev: module {
+    // One typed package backs `jet fmt --lang nix`.
+    formatter: pkgs.nixfmt
+}
+
+run: fn() { print("use jet run <this-file> -- greet") }

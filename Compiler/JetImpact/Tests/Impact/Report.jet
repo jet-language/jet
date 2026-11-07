@@ -27,8 +27,8 @@ impact_test_edge: fn(caller: String, callee: String, start: Int) -> CallEdge Nev
     CallEdge{caller: caller.copy(), callee: callee.copy(), module_path: "mód",
         call_span: SourceSpan{start, end: start + 4}}
 }
-impact_test_index: fn(defs: ^[SymbolDef], refs: ^[SymbolRef], calls: ^[CallEdge]) -> SemIndex Never! {
-    SemIndex.new(^defs, ^refs, ^calls, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
+impact_test_index: fn(defs: &&[SymbolDef], refs: &&[SymbolRef], calls: &&[CallEdge]) -> SemIndex Never! {
+    SemIndex.new(defs, refs, calls, [EffectFact]{}, [MemberFact]{}, [StructuralNode]{}, [DefinitionFact]{})
 }
 
 #Test("impact_depth_zero_retains_direct_sites_and_utf8_byte_spans") {
@@ -186,7 +186,7 @@ partial matches from name references/calls:
 }
 
 // Original checked fixtures. S4/C4 must supply the index opened from
-// Examples/features/effects/effects.jet. Do not replace it with graph inputs or
+// Examples/ErrorsAndEffects/Effects/Effects.jet. Do not replace it with graph inputs or
 // mark these helpers as exercised #Test blocks before the real open exists.
 impact_test_checked_effects: fn(index: SemIndex) Never! {
     // impact_finds_report_callers

@@ -17,14 +17,14 @@ run: fn() {
     target: sys.get("S1_PATH") ?? "/__jet_canvas/debug"
     body: if method == "POST" -> files.read("request.json") ?? panic("request") else -> ""
     stream := net.tcp_connect(address) ?? panic("connect")
-    net.set_read_timeout(&stream, 5000) ?? panic("timeout")
+    net.set_read_timeout(stream, 5000) ?? panic("timeout")
     request: "{method} {target} HTTP/1.1{CRLF}Host: {address}{CRLF}Origin: http://{address}{CRLF}Authorization: Bearer {secret}{CRLF}Content-Type: application/json{CRLF}Content-Length: {body.bytes().len()}{CRLF}Connection: close{CRLF}{CRLF}{body}"
     stream.write_all(request.bytes()) ?? panic("write")
     bytes := [U8]{}
     loop {
         block: stream.read(4096) ?? panic("read")
         if block.is_empty() -> break
-        loop byte in block -> &bytes.push(byte)
+        loop byte in block -> bytes.push(byte)
     }
     response: String.from_bytes(bytes) ?? panic("response")
     print(response)

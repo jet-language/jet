@@ -2,10 +2,10 @@ use {
     comptime_diff_hex: core.encoding.hex
     json: core.encoding.json
 }
-COMPTIME_VALUE: comptime { json.events(json.parse("{{\"a\":[1,2]}}") ?? panic("bad")).replace("\n", "|") }
+COMPTIME_VALUE: comptime { "{json.events(json.parse("{{\"a\":[1,2]}}") ?? panic("bad"))}" }
 
 run: fn() {
-    r: json.events(json.parse("{{\"a\":[1,2]}}") ?? panic("bad")).replace("\n", "|")
+    r: "{json.events(json.parse("{{\"a\":[1,2]}}") ?? panic("bad"))}"
     comptime_diff_frame("{COMPTIME_VALUE}", "{r}")
 
 }

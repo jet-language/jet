@@ -13,7 +13,7 @@ cli_rust_foreign_test_plan: fn(name: String) -> JetDriverRustForeignPlan {
     entries := [JetDriverRustForeignEntry]{}
     loop item in parsed.program.items {
         if item == .ExternRust(block) {
-            loop declaration in block.functions -> &entries.push(JetDriverRustForeignEntry{module_identity: "test-module", crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
+            loop declaration in block.functions -> entries.push(JetDriverRustForeignEntry{module_identity: "test-module", crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
         }
     }
     assert(entries.len() == 1)

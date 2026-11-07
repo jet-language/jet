@@ -39,15 +39,15 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     if request.changed {
         files = jet_cli_fmt_changed_files() ?? return jet_cli_report_output("", "E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color, JET_DRIVER_EXIT_USAGE)
     } else if request.paths.len() == 0 {
-        jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, &files)
+        jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, files)
     } else {
         loop raw in request.paths {
-            if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, &files) else -> &files.push(raw)
+            if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, files) else -> files.push(raw.copy())
         }
-        &files.sort()
+        files.sort()
         unique := [String]{}
         loop file in files {
-            if unique.len() == 0 || unique[unique.len() - 1] != file -> &unique.push(file)
+            if unique.len() == 0 || unique[unique.len() - 1] != file -> unique.push(file)
         }
         files = unique
     }
@@ -55,10 +55,10 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     results := [JetCLIFmtFile]{}
     loop path in files {
         source: cli_files.read(path) ?? {
-            &results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
+            results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
             next
         }
-        &results.push(jet_cli_fmt_one(path, source, request))
+        results.push(jet_cli_fmt_one(path, source, request))
     }
     failed := false
     loop result in results {
@@ -83,12 +83,12 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
     if request.check {
         dirty := [JetCLIFmtFile]{}
         loop result in results {
-            if result.changed -> &dirty.push(result)
+            if result.changed -> dirty.push(result)
         }
         if dirty.len() == 0 -> return jet_cli_external_fmt_ok(json)
         relative: loop result in dirty -> jet_cli_fmt_relative(result.path, display_root)
         order := [Int]{}
-        loop index in 0..<dirty.len() -> &order.push(index)
+        loop index in 0..<dirty.len() -> order.push(index)
         loop position in 1..<order.len() {
             // copy: `order[position]` stays in its list (owner: `order`; no move out of an element,
             // E0225) and the binding `current` owns its own.
@@ -106,8 +106,8 @@ jet_cli_format_run: fn(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOu
             if json {
                 if request.diff {
                     diff: jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)
-                    &entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(relative[index])), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
-                } else { &entries.push(jet_cli_status_text(dirty[index].path)) }
+                    entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(relative[index])), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                } else { entries.push(jet_cli_status_text(dirty[index].path)) }
             } else {
                 // Rust uses the original path in JSON without --diff.
                 stdout = "{stdout}{relative[index]}\n"

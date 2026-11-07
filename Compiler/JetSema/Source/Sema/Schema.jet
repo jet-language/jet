@@ -17,8 +17,8 @@ SchemaSnapshot: struct {
 
     write: fn(self) -> String Never! {
         fragments := [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}
-        if self.squashed_before == .Val(before) -> &fragments.push("squashed_before = {before}\n")
-        loop field in self.fields -> &fragments.push("field {field.name}: {field.ty}\n")
+        if self.squashed_before == .Val(before) -> fragments.push("squashed_before = {before}\n")
+        loop field in self.fields -> fragments.push("field {field.name}: {field.ty}\n")
         fragments.join("")
     }
 
@@ -53,7 +53,7 @@ SchemaSnapshot: struct {
                     rest: line.removeprefix("field ")
                     colon: rest.find(":")
                     if colon < 0 -> return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
-                    &fields.push(SnapshotField{name: rest.slice(0, colon).trim(), ty: rest.slice(colon + 1, rest.len()).trim()})
+                    fields.push(SnapshotField{name: rest.slice(0, colon).trim(), ty: rest.slice(colon + 1, rest.len()).trim()})
                 }
                 else -> return Err(SchemaSnapshotError{message: "unknown line in schema snapshot: {line}"})
             }

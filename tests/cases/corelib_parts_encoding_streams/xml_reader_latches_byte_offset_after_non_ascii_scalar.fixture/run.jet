@@ -6,9 +6,9 @@ use {
 }
 run: fn() {
     input: files.open("input.xml") ?? panic("open")
-    reader := xml.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    reader := xml.reader(input, encoding.EncodingLimits.safe()) ?? panic("reader")
     loop {
-        if &reader.next() == {
+        if reader.next() == {
             .Ok(value) -> {
                 if value == None -> panic("mismatched XML accepted")
             }
@@ -17,7 +17,7 @@ run: fn() {
                 print(error.line ?? 0)
                 print(error.column ?? 0)
                 print(error.path)
-                if &reader.next() == {
+                if reader.next() == {
                     .Err(again) -> print(again == error)
                     else -> panic("terminal XML error not latched")
                 }

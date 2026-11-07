@@ -45,16 +45,16 @@ mrc_arguments_required: fn(rule: TAppliedRule) -> Bool {
     rule.signature.params.is_empty() && rule.signature.variadic != None
 }
 
-// (D-MARK-FORM1=A): parentheses exactly when the signature needs them.
+// Parentheses exactly when the signature needs them.
 mrc_spelling: fn(rule: TAppliedRule, menus: [TAppliedRuleArgumentMenu]) -> String {
     if rule.name == "Test" -> return "#Test(\"coverage\")"
     if !mrc_arguments_required(rule) -> return "#{rule.name}"
     if rule.name == "UnitFamily" -> return "#UnitFamily(Length, dimension)"
     args := [String]{}
     loop param in rule.signature.params {
-        if param.default_source == None -> &args.push(mrc_placeholder(param.kind, param.source_type, menus))
+        if param.default_source == None -> args.push(mrc_placeholder(param.kind, param.source_type, menus))
     }
-    if args.is_empty() && rule.signature.variadic == .Val(kind) -> &args.push(mrc_placeholder(kind, rule.signature.variadic_source_type ?? "", menus))
+    if args.is_empty() && rule.signature.variadic == .Val(kind) -> args.push(mrc_placeholder(kind, rule.signature.variadic_source_type ?? "", menus))
     first: if rule.name == {
         "Scrub" -> "X"
         "Undo" -> "inverse"
@@ -113,7 +113,7 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
     parsed: if generated -> parse_generated_source(source.bytes()) else -> parse_source(source.bytes())
     rejected := [String]{}
     loop diagnostic in parsed.diagnostics {
-        if diagnostic.code == "E0927" || diagnostic.code == "E0355" -> &rejected.push("{diagnostic.code}: {diagnostic.what}")
+        if diagnostic.code == "E0927" || diagnostic.code == "E0355" -> rejected.push("{diagnostic.code}: {diagnostic.what}")
     }
     rejected
 }
@@ -129,10 +129,10 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
         marker: mrc_spelling(rule, catalog.argument_menus)
         renderable := [String]{}
         loop site in rule.sites {
-            if mrc_site_is_source_renderable(site) -> &renderable.push(site)
+            if mrc_site_is_source_renderable(site) -> renderable.push(site)
         }
         if renderable.is_empty() {
-            &ghosts.push("#{rule.name} declares only interior sites {rule.sites.join(", ")}, so no source can reach it")
+            ghosts.push("#{rule.name} declares only interior sites {rule.sites.join(", ")}, so no source can reach it")
             next
         }
         rejections := [String]{}
@@ -144,9 +144,9 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
                 reached = true
                 break
             }
-            &rejections.push("  at {site}: {rejected.join("; ")}")
+            rejections.push("  at {site}: {rejected.join("; ")}")
         }
-        if !reached -> &ghosts.push("`{marker}` is rejected at every site it declares:\n{rejections.join("\n")}")
+        if !reached -> ghosts.push("`{marker}` is rejected at every site it declares:\n{rejections.join("\n")}")
     }
     assert_eq(ghosts.join("\n"), "")
 }
@@ -160,7 +160,7 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
 #Test("every_active_row_walks_parse_validate_format_highlight_reflect") {
     catalog: mrc_catalog()
     registry := SemaScopeMembersMarkerRegistry{applied_rules: catalog.rows, argument_menus: catalog.argument_menus, marker_rules: [SemaScopeMembersMarkerRule]{}, known_marker_names: [String]{}, function_allowed_markers: [String]{}, block_allowed_markers: [String]{}, derive_provider_names: [String]{}}
-    assert(sema_scope_members_registry_add_applied_catalog(&registry, catalog), "the applied catalog must register once")
+    assert(sema_scope_members_registry_add_applied_catalog(registry, catalog), "the applied catalog must register once")
     failures := [String]{}
     loop rule in catalog.rows {
         marker: mrc_spelling(rule, catalog.argument_menus)
@@ -174,23 +174,23 @@ mrc_rejected_the_marker: fn(source: String) -> [String] {
             }
         }
         source: found ?? {
-            &failures.push("`{marker}` has no parseable declared site")
+            failures.push("`{marker}` has no parseable declared site")
             next
         }
         if !source.contains("#Bindgen") {
             once: jet_format_source(source, false)
             if !once.ok {
-                &failures.push("`{marker}` format: {mrc_render(once.diagnostics).join("; ")}")
+                failures.push("`{marker}` format: {mrc_render(once.diagnostics).join("; ")}")
             } else {
                 twice: jet_format_source(once.text, false)
-                if !twice.ok || twice.text != once.text -> &failures.push("`{marker}` formatted source does not round-trip")
+                if !twice.ok || twice.text != once.text -> failures.push("`{marker}` formatted source does not round-trip")
             }
         }
         reflected: sema_comptime_reflection_marker_rule(registry, rule.name)
         if reflected == .Val(row) {
-            if row.name != rule.name -> &failures.push("`{marker}` reflects as `{row.name}`")
+            if row.name != rule.name -> failures.push("`{marker}` reflects as `{row.name}`")
         } else {
-            &failures.push("`{marker}` is missing from reflection")
+            failures.push("`{marker}` is missing from reflection")
         }
     }
     assert_eq(failures.join("\n"), "")

@@ -29,7 +29,7 @@ trap_put: fn(address: I64, value: I64) {
 }
 
 trap_syscall: fn(number: I64, a1: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
-    #Unsafe("audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process") {
+    #Unsafe("audited runtime syscall: write borrows live text, mmap creates scratch, munmap releases it, exit_group ends the process; getcwd, mkdir, open and close name caller-owned scratch or a descriptor") {
         return os_syscall_i64(number, a1, a2, a3, a4, a5, a6)
     }
 }
@@ -275,6 +275,7 @@ trap_simple: fn(code: I64, file: I64, file_len: I64, line: I64, message: I64, me
     // this process report (jet_scheduler_panic_message).
     comptime_serve_stop(I64{1}, message, message_len, I64{0}, I64{0})
     if rt_task_panic_publish(message, message_len, code) -> return
+    production_receipt_write(code, file, file_len, trap_line(line), I64{0}, I64{0})
     trap_header(code)
     trap_write(message, message_len)
     trap_msg_message_end()
@@ -560,6 +561,7 @@ trap_rich: fn(file: I64, line: I64, function: I64, source: I64, column: I64, car
     // Task bodies receive the original message, never the rendered report
     // (architecture.md TaskFailure.Panicked.
     if rt_task_panic_publish(trap_word(message), trap_word(wrapping(message + I64{8})), I64{0}) -> return
+    production_receipt_write(I64{0}, trap_word(file), trap_word(wrapping(file + I64{8})), trap_line(line), trap_word(function), trap_word(wrapping(function + I64{8})))
     trap_header(I64{0})
     trap_write_handle(message)
     trap_msg_message_end()
@@ -629,6 +631,7 @@ trap_require_stop: fn(kind: I64, descriptor: I64, message: I64, left: I64, right
     published: rt_task_panic_publish(trap_word(raw), trap_word(wrapping(raw + I64{8})), I64{0})
     if (kind == I64{1}) -> jet_rt_string_drop(raw)
     if published -> return
+    production_receipt_write(I64{0}, trap_word(descriptor), trap_word(wrapping(descriptor + I64{8})), trap_line(trap_word(wrapping(descriptor + I64{16}))), trap_word(wrapping(descriptor + I64{24})), trap_word(wrapping(descriptor + I64{32})))
     trap_header(I64{0})
     if (kind < I64{2}) -> test_stop_assertion_mark()
     if {

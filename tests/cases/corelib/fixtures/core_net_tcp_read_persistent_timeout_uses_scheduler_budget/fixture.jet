@@ -15,7 +15,7 @@ run: fn() {
         stream.close() ?? panic("close")
     }
     stream := net.tcp_accept(listener) ?? panic("accept")
-    net.set_read_timeout(&stream, 20) ?? panic("timeout")
+    net.set_read_timeout(stream, 20) ?? panic("timeout")
     if stream.read(1) == {
         .Ok(_) -> print("unexpected read")
         .Err(error) -> print(net.error_message(error))

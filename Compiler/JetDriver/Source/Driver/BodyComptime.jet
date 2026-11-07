@@ -36,14 +36,14 @@ JetDriverComptimeBodyResult: struct {
 }
 
 // `result` with the registration graph moved back into it.
-jet_driver_comptime_body_returning: fn(result: ^JetDriverComptimeBodyResult, registration: ^SemaRegistrationGraph) -> JetDriverComptimeBodyResult Never! {
-    owned := ^result
-    owned.registration = Val(^registration)
+jet_driver_comptime_body_returning: fn(result: &&JetDriverComptimeBodyResult, registration: &&SemaRegistrationGraph) -> JetDriverComptimeBodyResult Never! {
+    owned := result.move()
+    owned.registration = Val(registration.move())
     owned
 }
 
 jet_driver_comptime_body_result: fn(
-    graph: ^SemaGraphResult,
+    graph: &&SemaGraphResult,
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
@@ -51,7 +51,7 @@ jet_driver_comptime_body_result: fn(
     soft_stop: Bool,
 ) -> JetDriverComptimeBodyResult Never! {
     JetDriverComptimeBodyResult{
-        graph: ^graph,
+        graph: graph.move(),
         values: values,
         functions: functions,
         trace: trace,
@@ -62,20 +62,20 @@ jet_driver_comptime_body_result: fn(
 }
 
 jet_driver_comptime_body_failure: fn(
-    graph: ^SemaGraphResult,
+    graph: &&SemaGraphResult,
     values: [SemaComptimeItemValue],
     functions: [SemaComptimeFunctionResult],
     trace: JetDriverCompileTrace,
     problem: String?,
 ) -> JetDriverComptimeBodyResult Never! {
-    result := jet_driver_comptime_body_result(^graph, values, functions, trace, false, false)
+    result := jet_driver_comptime_body_result(graph, values, functions, trace, false, false)
     result.internal_problem = problem
     result
 }
 
 jet_driver_comptime_trace_append: fn(target: &JetDriverCompileTrace, addition: JetDriverCompileTrace) Never! {
-    loop text in addition.stdout -> &target.stdout.push(text)
-    loop text in addition.stderr -> &target.stderr.push(text)
+    loop text in addition.stdout -> target.stdout.push(text.copy())
+    loop text in addition.stderr -> target.stderr.push(text.copy())
     if addition.exit_code != None -> target.exit_code = addition.exit_code
     target.soft_stop = target.soft_stop || addition.soft_stop
 }
@@ -109,13 +109,13 @@ jet_driver_comptime_diagnostics_add: fn(diagnostics: &[Diagnostic], incoming: [D
         key: jet_driver_comptime_diagnostic_key(diagnostic)
         if seen.get(key) != None -> next
         seen[key] = true
-        &diagnostics.push(diagnostic)
+        diagnostics.push(diagnostic.copy())
     }
 }
 // A run returns its one graph on every exit, with later edits in its trail.
-jet_driver_comptime_take_registration: fn(finished: ^SemaRegistrationGraph?, partial: ^SemaRegistrationGraph?) -> SemaRegistrationGraph Never! {
-    if finished == .Val(graph) -> return ^graph
-    ^partial ?? panic("a comptime run lost its registration graph")
+jet_driver_comptime_take_registration: fn(finished: &&SemaRegistrationGraph?, partial: &&SemaRegistrationGraph?) -> SemaRegistrationGraph Never! {
+    if finished == .Val(graph) -> return graph.move()
+    partial.move() ?? panic("a comptime run lost its registration graph")
 }
 
 // `known` holds the `module\nkey` of every source already added.
@@ -128,7 +128,7 @@ jet_driver_comptime_body_source_add: fn(
     key: "{item.module_identity}\n{item.key}"
     if known.get(key) != None -> return
     known[key] = true
-    &sources.push(item)
+    sources.push(item)
 }
 
 jet_driver_comptime_body_sources: fn(graph: SemaGraphResult) -> [SemaComptimeBodySource] Never! {
@@ -139,7 +139,7 @@ jet_driver_comptime_body_sources: fn(graph: SemaGraphResult) -> [SemaComptimeBod
             key: "{source.module_identity}\n{source.key}"
             if seen.get(key) != None -> next
             seen[key] = true
-            &sources.push(source)
+            sources.push(source.copy())
         }
     }
     sources
@@ -157,7 +157,7 @@ jet_driver_pending_comptime_body_sources: fn(
     }
     pending := [SemaComptimeBodySource]{}
     loop source in jet_driver_comptime_body_sources(graph) {
-        if present.get("{source.module_identity}\n{source.key}") == None -> &pending.push(source)
+        if present.get("{source.module_identity}\n{source.key}") == None -> pending.push(source)
     }
     pending
 }
@@ -177,17 +177,17 @@ jet_driver_comptime_reads_names: fn(graph: SemaGraphResult, values: [SemaComptim
 
 jet_driver_comptime_body_stage: fn(
     stage: SemaComptimeDeclarationStage,
-    graph: ^SemaGraphResult,
-    sources: ^[SemaComptimeItemSource],
+    graph: &&SemaGraphResult,
+    sources: &&[SemaComptimeItemSource],
 ) -> SemaComptimeDeclarationStage Never! {
     // The successful evaluation retired the old graph; its resolved modules
     // now belong to the recheck stage, never to a second copied graph.
     SemaComptimeDeclarationStage{
-        modules: ^graph.modules,
+        modules: graph.modules.move(),
         imports: stage.imports,
         package_policies: stage.package_policies,
-        names: ^graph.names,
-        sources: ^sources,
+        names: graph.names.move(),
+        sources: sources.move(),
         diagnostics: stage.diagnostics,
         complete: stage.complete,
     }
@@ -197,19 +197,19 @@ jet_driver_comptime_body_stage: fn(
 // `registration` of the result (every exit returns it). The run's values,
 // closures and trace move in too; the result hands them back.
 jet_driver_orchestrate_comptime_bodies: fn(
-    graph: ^SemaRegistrationGraph,
+    graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
-    initial_graph: ^SemaGraphResult,
-    initial_values: ^[SemaComptimeItemValue],
-    initial_functions: ^[SemaComptimeFunctionResult],
-    initial_trace: ^JetDriverCompileTrace,
+    initial_graph: &&SemaGraphResult,
+    initial_values: &&[SemaComptimeItemValue],
+    initial_functions: &&[SemaComptimeFunctionResult],
+    initial_trace: &&JetDriverCompileTrace,
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeBodyResult {
     jet_driver_comptime_body_pass(
-        ^graph, stage, ^initial_graph, ^initial_values, ^initial_functions,
-        ^initial_trace, load, request, &diagnostics, 0,
+        graph, stage, initial_graph, initial_values, initial_functions,
+        initial_trace, load, request, diagnostics, 0,
     )
 }
 
@@ -217,104 +217,104 @@ jet_driver_orchestrate_comptime_bodies: fn(
 // them into rechecking. Like pure folding, passes thread ownership through
 // calls instead of copying a graph across a loop backedge.
 jet_driver_comptime_body_pass: fn(
-    graph: ^SemaRegistrationGraph,
+    graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
-    initial_graph: ^SemaGraphResult,
-    initial_values: ^[SemaComptimeItemValue],
-    initial_functions: ^[SemaComptimeFunctionResult],
-    initial_trace: ^JetDriverCompileTrace,
+    initial_graph: &&SemaGraphResult,
+    initial_values: &&[SemaComptimeItemValue],
+    initial_functions: &&[SemaComptimeFunctionResult],
+    initial_trace: &&JetDriverCompileTrace,
     load: JetDriverLoadResult,
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
     completed_passes: Int,
 ) -> JetDriverComptimeBodyResult {
-    registration := ^graph
-    current_graph := ^initial_graph
-    values := ^initial_values
-    functions := ^initial_functions
-    trace := ^initial_trace
+    registration := graph.move()
+    current_graph := initial_graph.move()
+    values := initial_values.move()
+    functions := initial_functions.move()
+    trace := initial_trace.move()
     if current_graph.modules.len() != registration.modules.len() {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            ^current_graph, values, functions, trace,
+            current_graph, values, functions, trace,
             Val("semantic body rechecking did not return every registered module"),
-        ), ^registration)
+        ), registration)
     }
-    jet_driver_comptime_diagnostics_add(&diagnostics, current_graph.diagnostics)
+    jet_driver_comptime_diagnostics_add(diagnostics, current_graph.diagnostics)
     pending := jet_driver_pending_comptime_body_sources(current_graph, values)
     if current_graph.complete && pending.len() == 0 && !jet_driver_has_errors(current_graph.diagnostics) {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^current_graph, values, functions, trace, true, false), ^registration)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, true, false), registration)
     }
     if pending.len() == 0 {
         if !jet_driver_has_errors(current_graph.diagnostics) && !jet_driver_has_errors(diagnostics) {
             problem := jet_driver_totality_problem("semantic body rechecking did not return a complete resolved package graph", "sema.body", current_graph.modules)
-            return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(^current_graph, values, functions, trace, Val(problem)), ^registration)
+            return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(current_graph, values, functions, trace, Val(problem)), registration)
         }
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^current_graph, values, functions, trace, false, false), ^registration)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false), registration)
     }
     // JET_KEEP_GOING: pending bodies still run past reported errors, so the
     // functions whose bodies need their values still lower.
     if jet_driver_has_errors(current_graph.diagnostics) && !registration.keep_going {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^current_graph, values, functions, trace, false, false), ^registration)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, values, functions, trace, false, false), registration)
     }
     pass: completed_passes + 1
     if pass > 256 {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            ^current_graph, values, functions, trace,
+            current_graph, values, functions, trace,
             Val("body comptime rechecking exceeded its bounded progress limit"),
-        ), ^registration)
+        ), registration)
     }
     body_sources := [SemaComptimeItemSource]{}
     known := [String:Bool]{}
-    loop source in pending -> jet_driver_comptime_body_source_add(&body_sources, &known, source)
+    loop source in pending -> jet_driver_comptime_body_source_add(body_sources, known, source)
     run := jet_driver_run_comptime(
-        ^registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
-        request, &diagnostics,
+        registration, [SemaGraphModuleResult]{}, None, body_sources, values, functions,
+        request, diagnostics,
     )
-    finished_registration := ^run.graph
+    finished_registration := run.graph.move()
     run.graph = None
-    partial_registration := ^run.partial_graph
+    partial_registration := run.partial_graph.move()
     run.partial_graph = None
-    registration = jet_driver_comptime_take_registration(^finished_registration, ^partial_registration)
-    jet_driver_comptime_trace_append(&trace, run.trace)
+    registration = jet_driver_comptime_take_registration(finished_registration, partial_registration)
+    jet_driver_comptime_trace_append(trace, run.trace)
     if run.soft_stop {
-        sema_graph_trail_undo(&registration, &run.trail)
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^current_graph, run.values, run.functions, trace, false, true), ^registration)
+        sema_graph_trail_undo(registration, run.trail)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(current_graph, run.values, run.functions, trace, false, true), registration)
     }
     if !run.complete {
-        sema_graph_trail_undo(&registration, &run.trail)
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(^current_graph, run.values, run.functions, trace, run.internal_problem), ^registration)
+        sema_graph_trail_undo(registration, run.trail)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(current_graph, run.values, run.functions, trace, run.internal_problem), registration)
     }
     if run.values.len() <= values.len() {
-        sema_graph_trail_undo(&registration, &run.trail)
+        sema_graph_trail_undo(registration, run.trail)
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            ^current_graph, values, functions, trace,
+            current_graph, values, functions, trace,
             Val("body comptime rechecking made no staged-value progress"),
-        ), ^registration)
+        ), registration)
     }
-    values = ^run.values
-    functions = ^run.functions
+    values = run.values.move()
+    functions = run.functions.move()
     // The run's graph already carries every value: the recheck finalizes it
     // in place instead of copying the registration graph.
     rechecked := jet_driver_recheck_comptime_bodies(
-        ^registration, &run.trail, stage, ^current_graph, ^body_sources,
+        registration, run.trail, stage, current_graph, body_sources,
         values, functions, request,
     )
-    restored := ^rechecked.registration_graph
+    restored := rechecked.registration_graph.move()
     rechecked.registration_graph = None
-    registration = ^restored ?? panic("body finalization lost its registration graph")
-    sema_graph_trail_undo(&registration, &run.trail)
+    registration = restored.move() ?? panic("body finalization lost its registration graph")
+    sema_graph_trail_undo(registration, run.trail)
     jet_driver_comptime_body_pass(
-        ^registration, stage, ^rechecked, ^values, ^functions, ^trace,
-        load, request, &diagnostics, pass,
+        registration, stage, rechecked, values, functions, trace,
+        load, request, diagnostics, pass,
     )
 }
 
 // As jet_driver_orchestrate_comptime_bodies: the registration graph moves in
 // and comes back in `registration` of the result.
 jet_driver_validate_checked_text: fn(
-    graph: ^SemaRegistrationGraph,
+    graph: &&SemaRegistrationGraph,
     stage: SemaComptimeDeclarationStage,
-    initial_graph: ^SemaGraphResult,
+    initial_graph: &&SemaGraphResult,
     initial_values: [SemaComptimeItemValue],
     initial_functions: [SemaComptimeFunctionResult],
     initial_trace: JetDriverCompileTrace,
@@ -322,73 +322,73 @@ jet_driver_validate_checked_text: fn(
     request: JetDriverCompileRequest,
     diagnostics: &[Diagnostic],
 ) -> JetDriverComptimeBodyResult {
-    registration := ^graph
+    registration := graph.move()
     sources := [SemaComptimeItemSource]{}
     known := [String:Bool]{}
     loop module_index in 0..<initial_graph.modules.len() {
         loop call in initial_graph.modules[module_index].comptime_requests {
-            if call.checked_text == .Val(evaluation) -> jet_driver_comptime_checked_text_source_add(&sources, &known, evaluation)
+            if call.checked_text == .Val(evaluation) -> jet_driver_comptime_checked_text_source_add(sources, known, evaluation)
         }
     }
     if sources.len() == 0 {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^initial_graph, initial_values, initial_functions, initial_trace, true, false), ^registration)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(initial_graph, initial_values, initial_functions, initial_trace, true, false), registration)
     }
     run := jet_driver_run_comptime(
-        ^registration,
+        registration,
         [SemaGraphModuleResult]{},
         None,
         sources,
         initial_values,
         initial_functions,
         request,
-        &diagnostics,
+        diagnostics,
     )
-    finished_registration := ^run.graph
+    finished_registration := run.graph.move()
     run.graph = None
-    partial_registration := ^run.partial_graph
+    partial_registration := run.partial_graph.move()
     run.partial_graph = None
-    registration = jet_driver_comptime_take_registration(^finished_registration, ^partial_registration)
-    sema_graph_trail_undo(&registration, &run.trail)
+    registration = jet_driver_comptime_take_registration(finished_registration, partial_registration)
+    sema_graph_trail_undo(registration, run.trail)
     trace := initial_trace
-    jet_driver_comptime_trace_append(&trace, run.trace)
+    jet_driver_comptime_trace_append(trace, run.trace)
     if run.soft_stop {
-        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^initial_graph, run.values, run.functions, trace, false, true), ^registration)
+        return jet_driver_comptime_body_returning(jet_driver_comptime_body_result(initial_graph, run.values, run.functions, trace, false, true), registration)
     }
     if !run.complete {
-        result := jet_driver_comptime_body_result(^initial_graph, run.values, run.functions, trace, false, false)
+        result := jet_driver_comptime_body_result(initial_graph, run.values, run.functions, trace, false, false)
         result.internal_problem = run.internal_problem
         if result.internal_problem == None && !jet_driver_has_errors(diagnostics) {
             result.internal_problem = Val("checked text evaluation did not return a complete validation or diagnostic")
         }
-        return jet_driver_comptime_body_returning(^result, ^registration)
+        return jet_driver_comptime_body_returning(result, registration)
     }
-    merged_graph := ^initial_graph
-    if !jet_driver_merge_checked_text_functions(&merged_graph, run.functions) {
+    merged_graph := initial_graph.move()
+    if !jet_driver_merge_checked_text_functions(merged_graph, run.functions) {
         return jet_driver_comptime_body_returning(jet_driver_comptime_body_failure(
-            ^merged_graph,
+            merged_graph,
             run.values,
             run.functions,
             trace,
             Val("checked text method closure lost its checked function or registered owner"),
-        ), ^registration)
+        ), registration)
     }
-    registration = jet_driver_merged_names(&merged_graph, ^registration, request.compiler_threads)
-    jet_driver_comptime_body_returning(jet_driver_comptime_body_result(^merged_graph, run.values, run.functions, trace, true, false), ^registration)
+    registration = jet_driver_merged_names(merged_graph, registration, request.compiler_threads)
+    jet_driver_comptime_body_returning(jet_driver_comptime_body_result(merged_graph, run.values, run.functions, trace, true, false), registration)
 }
 
 // Finalizes the rechecked bodies against the moved-in registration graph,
 // recording its edits on `trail`; the graph comes back in the result's
 // `registration_graph` with the edits still applied (the caller undoes them).
 jet_driver_recheck_comptime_bodies: fn(
-    graph: ^SemaRegistrationGraph,
+    graph: &&SemaRegistrationGraph,
     trail: &SemaGraphTrail,
     stage: SemaComptimeDeclarationStage,
-    semantic_graph: ^SemaGraphResult,
-    body_sources: ^[SemaComptimeItemSource],
+    semantic_graph: &&SemaGraphResult,
+    body_sources: &&[SemaComptimeItemSource],
     values: [SemaComptimeItemValue],
     comptime_functions: [SemaComptimeFunctionResult],
     request: JetDriverCompileRequest,
 ) -> SemaGraphResult {
-    body_stage := jet_driver_comptime_body_stage(stage, ^semantic_graph, ^body_sources)
-    sema_finalize_graph(^graph, &trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
+    body_stage := jet_driver_comptime_body_stage(stage, semantic_graph, body_sources)
+    sema_finalize_graph(graph, trail, body_stage, values, comptime_functions, request.eval_config.host_hooks, request.compiler_threads, None, true, request.trace_sink)
 }

@@ -22,24 +22,24 @@ console_types_test_safe: fn(method: String, body: [U8]) -> String Never! {
     validate_safe_request(method, body) ?? return err.message()
     "accepted"
 }
-console_types_test_add_service: fn(project: ConsoleProject, handle: ^ConsoleServiceHandle) -> String Never! {
-    &project.add_service(^handle) ?? return err.message()
+console_types_test_add_service: fn(project: ConsoleProject, handle: &&ConsoleServiceHandle) -> String Never! {
+    project.add_service(handle) ?? return err.message()
     "accepted"
 }
-console_types_test_add_database: fn(project: ConsoleProject, handle: ^ConsoleDatabaseHandle) -> String Never! {
-    &project.add_database(^handle) ?? return err.message()
+console_types_test_add_database: fn(project: ConsoleProject, handle: &&ConsoleDatabaseHandle) -> String Never! {
+    project.add_database(handle) ?? return err.message()
     "accepted"
 }
 console_types_test_with_database: fn(project: ConsoleProject, name: String, identity: String) -> ConsoleProject ConsoleError! {
     owned := project.copy()
-    ^owned.with_database(ConsoleDatabaseHandle{name: name.copy(), identity: identity.copy()})
+    owned.with_database(ConsoleDatabaseHandle{name: name.copy(), identity: identity.copy()})
 }
 console_types_test_capability: fn(capability: ConsoleCapability) -> String Never! { "{capability.as_str()} -> {capability.required_right()}" }
 console_types_test_mode: fn(mode: ConsoleMode) -> String Never! { mode.as_str() }
 console_types_test_message: fn(error: ConsoleError) -> String Never! { error.message() }
 console_types_test_bytes: fn(count: Int) -> [U8] Never! {
     out := [U8]{}
-    loop _ in 0..<count -> &out.push(U8{120})
+    loop _ in 0..<count -> out.push(U8{120})
     out
 }
 
@@ -160,13 +160,13 @@ console_types_test_bytes: fn(count: Int) -> [U8] Never! {
     assert_eq(defaults.max_audit, 256)
     assert(defaults.script == None)
     configured := ConsoleOptions.new(console_types_test_project())
-    configured = ^configured.with_mode(ConsoleMode.SandboxData)
-    configured = ^configured.with_rights([String]{"db.write", "IO", "io", "net"})
-    configured = ^configured.with_denied([String]{"net", " fs.Read ", "Unknown", "net"})
-    configured = ^configured.with_ttl_ms(U64.MAX)
-    configured = ^configured.with_release_build(true)
-    configured = ^configured.with_script("1 + 1")
-    configured = ^configured.with_limits(0, 1, 1000)
+    configured = configured.with_mode(ConsoleMode.SandboxData)
+    configured = configured.with_rights([String]{"db.write", "IO", "io", "net"})
+    configured = configured.with_denied([String]{"net", " fs.Read ", "Unknown", "net"})
+    configured = configured.with_ttl_ms(U64.MAX)
+    configured = configured.with_release_build(true)
+    configured = configured.with_script("1 + 1")
+    configured = configured.with_limits(0, 1, 1000)
     assert(configured.mode == ConsoleMode.SandboxData)
     // Rights keep their leaf spelling under a canonical root; duplicates merge.
     assert_eq(configured.authority.holds.join(","), "DB.write,IO,Net")
@@ -181,12 +181,12 @@ console_types_test_bytes: fn(count: Int) -> [U8] Never! {
     assert_eq(configured.max_outputs, 1)
     assert_eq(configured.max_audit, 1000)
     authority: CanonicalAuthority.from_rights([String]{"DB.Read"})
-    replaced := ^configured.with_authority(^authority)
-    replaced = ^replaced.with_denied([String]{})
+    replaced := configured.with_authority(authority)
+    replaced = replaced.with_denied([String]{})
     assert_eq(replaced.authority.holds.join(","), "DB.Read")
     assert_eq(replaced.denied.len(), 0)
-    replaced = ^replaced.with_limits(0, 0, 0)
-    replaced = ^replaced.with_ttl_ms(U64{0})
+    replaced = replaced.with_limits(0, 0, 0)
+    replaced = replaced.with_ttl_ms(U64{0})
     assert_eq(replaced.max_history, 1)
     assert_eq(replaced.max_outputs, 1)
     assert_eq(replaced.max_audit, 1)
@@ -195,25 +195,25 @@ console_types_test_bytes: fn(count: Int) -> [U8] Never! {
 
 #Test("console_project_handles_sort_dedup_and_bindings_json") {
     project := console_types_test_project()
-    assert_eq(console_types_test_add_service(&project, ConsoleServiceHandle{name: "web", identity: "svc-web", state: "ready"}), "accepted")
-    assert_eq(console_types_test_add_service(&project, ConsoleServiceHandle{name: "api", identity: "svc\"q", state: "ready"}), "accepted")
-    assert_eq(console_types_test_add_service(&project, ConsoleServiceHandle{name: "web", identity: "other", state: "down"}), "invalid console input: service `web` is declared more than once")
+    assert_eq(console_types_test_add_service(project, ConsoleServiceHandle{name: "web", identity: "svc-web", state: "ready"}), "accepted")
+    assert_eq(console_types_test_add_service(project, ConsoleServiceHandle{name: "api", identity: "svc\"q", state: "ready"}), "accepted")
+    assert_eq(console_types_test_add_service(project, ConsoleServiceHandle{name: "web", identity: "other", state: "down"}), "invalid console input: service `web` is declared more than once")
     assert_eq(project.services.len(), 2)
     assert_eq(project.services[0].name, "api")
     assert_eq(project.services[1].identity, "svc-web")
     assert(project.has_service("api"))
     assert(!project.has_service("API"))
-    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "main", identity: "db-main"}), "accepted")
-    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "audit", identity: "db-audit"}), "accepted")
-    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "main", identity: "db-other"}), "invalid console input: database `main` is declared more than once")
+    assert_eq(console_types_test_add_database(project, ConsoleDatabaseHandle{name: "main", identity: "db-main"}), "accepted")
+    assert_eq(console_types_test_add_database(project, ConsoleDatabaseHandle{name: "audit", identity: "db-audit"}), "accepted")
+    assert_eq(console_types_test_add_database(project, ConsoleDatabaseHandle{name: "main", identity: "db-other"}), "invalid console input: database `main` is declared more than once")
     // A service and a database may share a name; the namespaces are separate.
-    assert_eq(console_types_test_add_database(&project, ConsoleDatabaseHandle{name: "web", identity: "db-web"}), "accepted")
+    assert_eq(console_types_test_add_database(project, ConsoleDatabaseHandle{name: "web", identity: "db-web"}), "accepted")
     expected: "{{\"project\":\"project-x\",\"services\":[{{\"name\":\"api\",\"identity\":\"svc\\\"q\",\"state\":\"ready\"}},{{\"name\":\"web\",\"identity\":\"svc-web\",\"state\":\"ready\"}}],\"databases\":[{{\"name\":\"audit\",\"identity\":\"db-audit\"}},{{\"name\":\"main\",\"identity\":\"db-main\"}},{{\"name\":\"web\",\"identity\":\"db-web\"}}]}}"
     assert_eq(project.bindings_json(), expected)
     empty: console_types_test_project()
     assert_eq(empty.bindings_json(), "{{\"project\":\"project-x\",\"services\":[],\"databases\":[]}}")
     chained: console_types_test_project().with_service(ConsoleServiceHandle{name: "b", identity: "1", state: "s"}) ?? panic("first service")
-    chained_twice: ^chained.with_service(ConsoleServiceHandle{name: "a", identity: "2", state: "s"}) ?? panic("second service")
+    chained_twice: chained.with_service(ConsoleServiceHandle{name: "a", identity: "2", state: "s"}) ?? panic("second service")
     assert_eq(chained_twice.services[0].name, "a")
     with_db: console_types_test_with_database(chained_twice, "d", "1") ?? panic("first database")
     refused: if console_types_test_with_database(with_db, "d", "2") == {
@@ -256,17 +256,17 @@ console_types_test_request: fn(request_id: String, method: String) -> String Nev
 }
 console_types_test_origin: fn(request: ConsoleRequest, origin: String) -> String Never! {
     owned := request.copy()
-    updated: ^owned.with_origin(origin.copy()) ?? return err.message()
+    updated: owned.with_origin(origin.copy()) ?? return err.message()
     if updated.is_loopback() -> "loopback" else -> "remote"
 }
 console_types_test_request_header: fn(request: ConsoleRequest, name: String, value: String) -> String Never! {
     owned := request.copy()
-    updated: ^owned.with_header(name, value.copy()) ?? return err.message()
+    updated: owned.with_header(name, value.copy()) ?? return err.message()
     updated.headers[name.to_ascii_lower()] ?? "missing"
 }
-console_types_test_request_body: fn(request: ConsoleRequest, body: ^[U8]) -> String Never! {
+console_types_test_request_body: fn(request: ConsoleRequest, body: &&[U8]) -> String Never! {
     owned := request.copy()
-    ^owned.with_body(^body) ?? return err.message()
+    owned.with_body(body) ?? return err.message()
     "accepted"
 }
 console_types_test_status: fn(code: U16) -> String Never! {
@@ -275,12 +275,12 @@ console_types_test_status: fn(code: U16) -> String Never! {
 }
 console_types_test_response_header: fn(response: ConsoleResponse, name: String, value: String) -> String Never! {
     owned := response.copy()
-    updated: ^owned.with_header(name, value.copy()) ?? return err.message()
+    updated: owned.with_header(name, value.copy()) ?? return err.message()
     updated.headers[name.to_ascii_lower()] ?? "missing"
 }
-console_types_test_response_body: fn(response: ConsoleResponse, body: ^[U8]) -> String Never! {
+console_types_test_response_body: fn(response: ConsoleResponse, body: &&[U8]) -> String Never! {
     owned := response.copy()
-    updated: ^owned.with_body(^body) ?? return err.message()
+    updated: owned.with_body(body) ?? return err.message()
     "{updated.body.len()}"
 }
 
@@ -353,7 +353,7 @@ console_types_test_response_body: fn(response: ConsoleResponse, body: ^[U8]) -> 
     // A per-session nonce changes only the session; validation re-derives the
     // project identity from its root with the default nonce.
     renewal_owner := project.copy()
-    renewed: ^renewal_owner.with_identity("rev-2", "nonce-9") ?? panic("renewed identity")
+    renewed: renewal_owner.with_identity("rev-2", "nonce-9") ?? panic("renewed identity")
     assert_eq(renewed.identity.project_id, project.identity.project_id)
     assert_eq(renewed.identity.source_revision, "rev-2")
     assert(renewed.identity.session_id != project.identity.session_id)
@@ -362,15 +362,15 @@ console_types_test_response_body: fn(response: ConsoleResponse, body: ^[U8]) -> 
     moved.root = other.copy()
     assert_eq(console_types_test_validate(moved), "invalid console input: project identity does not match its declared root")
     duplicated := renewed.copy()
-    &duplicated.services.push(ConsoleServiceHandle{name: "api", identity: "a", state: "ready"})
-    &duplicated.services.push(ConsoleServiceHandle{name: "api", identity: "b", state: "ready"})
+    duplicated.services.push(ConsoleServiceHandle{name: "api", identity: "a", state: "ready"})
+    duplicated.services.push(ConsoleServiceHandle{name: "api", identity: "b", state: "ready"})
     assert_eq(console_types_test_validate(duplicated), "invalid console input: project declares duplicate service handles")
     // Every handle token is checked before any duplicate.
-    &duplicated.databases.push(ConsoleDatabaseHandle{name: "main", identity: ""})
+    duplicated.databases.push(ConsoleDatabaseHandle{name: "main", identity: ""})
     assert_eq(console_types_test_validate(duplicated), "invalid console input: database identity must be a bounded non-empty token")
     databases := renewed.copy()
-    &databases.databases.push(ConsoleDatabaseHandle{name: "main", identity: "a"})
-    &databases.databases.push(ConsoleDatabaseHandle{name: "main", identity: "b"})
+    databases.databases.push(ConsoleDatabaseHandle{name: "main", identity: "a"})
+    databases.databases.push(ConsoleDatabaseHandle{name: "main", identity: "b"})
     assert_eq(console_types_test_validate(databases), "invalid console input: project declares duplicate database handles")
     console_types_test_files.remove_all(root) ?? panic("remove root")
     console_types_test_files.remove_all(other) ?? panic("remove other")
@@ -416,7 +416,7 @@ console_types_test_response_body: fn(response: ConsoleResponse, body: ^[U8]) -> 
     assert_eq(console_types_test_request_header(request, "X Trace", "a"), "invalid console input: header name must be a bounded non-empty token")
     full := request.copy()
     loop index in 0..<64 {
-        full = ^full.with_header("h{index}", "v") ?? panic("header within limit")
+        full = full.with_header("h{index}", "v") ?? panic("header within limit")
     }
     assert_eq(full.headers.len(), 64)
     assert_eq(console_types_test_request_header(full, "h64", "v"), "console request headers exceeds its bounded limit")
@@ -441,7 +441,7 @@ console_types_test_response_body: fn(response: ConsoleResponse, body: ^[U8]) -> 
     assert_eq(console_types_test_response_header(response, "Bad Name", "a"), "invalid console input: response header name must be a bounded non-empty token")
     full := response.copy()
     loop index in 0..<64 {
-        full = ^full.with_header("h{index}", "v") ?? panic("header within limit")
+        full = full.with_header("h{index}", "v") ?? panic("header within limit")
     }
     assert_eq(console_types_test_response_header(full, "h64", "v"), "console response headers exceeds its bounded limit")
     assert_eq(console_types_test_response_header(full, "H0", "replacement"), "replacement")

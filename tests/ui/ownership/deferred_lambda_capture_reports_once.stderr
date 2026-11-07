@@ -4,14 +4,14 @@ Error [jet.ReadOnlyValueNotOwned]: `value` was not moved here, so it cannot be r
   2 | see: fn(value: String) -[]> String { return value }
     |                                             ^^^^^
  Why: This function has read access only and does not own the value
- Fix: Return a copy: `return value.copy()` — or take ownership with the move marker `^`: `value: ^String`. To return borrowed data, declare `-> View<T> from value` and return a view derived from `value`
+ Fix: Return a copy: `return value.copy()` — or take ownership: `value: &&String`. To return borrowed data, declare `-> View<T> from value` and return a view derived from `value`
 More: jet-lang.dev/e/E0120
 
 Error [jet.UseWhileWriteActive]: `value` is being changed in this call, so it can't be used again here
-  --> tests/ui/ownership/deferred_lambda_capture_reports_once.jet:9:28
+  --> tests/ui/ownership/deferred_lambda_capture_reports_once.jet:9:27
     |
-  9 |     both(&value, () -> see(value))
-    |                            ^^^^^
- Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
- Fix: Pass the write-access marker `&` (`&value`) only once, or copy first with `value.copy()`
+  9 |     both(value, () -> see(value))
+    |                           ^^^^^
+ Why: While something is being changed through a write parameter, nobody else may be looking at it
+ Fix: Pass `value` only once, or copy first with `value.copy()`
 More: jet-lang.dev/e/E0204

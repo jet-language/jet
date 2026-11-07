@@ -1,0 +1,39 @@
+
+Box: struct<T> {
+    value: T
+}
+
+impl Box {
+    new: fn(value: &&T) -> Box<T> {
+        return Box<T>{ value: value }
+    }
+}
+
+Pair: struct<A, B> {
+    first: A
+    second: B
+}
+
+impl Pair {
+    new: fn(first: &&A, second: &&B) -> Pair<A, B> {
+        return Pair<A, B>{ first: first, second: second }
+    }
+}
+
+returned: fn() -> Box<Int> {
+    return Box.new(4)
+}
+
+expected_box: fn() -> Box<[Int]> {
+    return Box.new([])
+}
+
+run: fn() {
+    direct: Box.new(1)
+    expected: expected_box()
+    nested: Box.new(Box.new(2))
+    pair: Pair.new("three", 3)
+    explicit: Box<Int>.new(5)
+    print("{direct.value}{nested.value.value}")
+    print("{pair.first}{pair.second}{returned().value}{explicit.value}")
+}

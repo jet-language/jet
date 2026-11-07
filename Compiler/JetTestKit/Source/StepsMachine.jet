@@ -131,7 +131,7 @@ kit_steps_machine_output: fn(text: String, expected: [String]) -> String? {
     loop (index, line) in kit_steps_rust_lines(text) {
         if line.trim() == "" -> next
         record: kit_steps_machine_line(line) ?? return Val("machine record {index + 1}: {err}")
-        &records.push(record)
+        records.push(record)
     }
     if records.len() == 0 -> return Val("machine output contains no records")
     if records != expected -> return Val("machine output record kinds differ")

@@ -74,7 +74,7 @@ pkg_format_package_value: fn(input: String, indent: Int) -> String Never! {
     entries: pkg_top_level_entries(inner)
     if entries.len() == 0 -> return "{prefix}{{}}{suffix}"
     lines := [String]{}
-    loop entry in entries -> &lines.push("{" ".repeat(indent + 4)}{pkg_format_package_entry(entry, indent + 4)}")
+    loop entry in entries -> lines.push("{" ".repeat(indent + 4)}{pkg_format_package_entry(entry, indent + 4)}")
     separator: if pkg_package_top_level_comma(inner) != None -> ",\n" else -> "\n"
     body := lines.join(separator)
     if pkg_package_has_trailing_top_level_comma(inner) -> body = "{body},"

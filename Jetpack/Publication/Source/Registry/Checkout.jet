@@ -134,15 +134,15 @@ publication_push_index_inner: fn(registry: PublicationRegistryConfig, repo: Stri
             if !files.is_file(files.join(referrers, PUBLICATION_OCI_REFERRER_INDEX)) {
                 return Err(publication_registry_cache_error(registry, "publication has no complete OCI referrer set; restore or rebuild the package evidence"))
             }
-            &stage.push(referrers)
+            stage.push(referrers)
         }
     }
     allowed := [String]{}
     add := [String]{"add", "--"}
     loop path in stage {
         relative: publication_checkout_relative(repo, path) ?? return Err(publication_registry_cache_error(registry, "publication path escapes its checkout"))
-        &allowed.push(relative)
-        &add.push(relative)
+        allowed.push(relative.copy())
+        add.push(relative)
     }
     added: publication_checkout_git(registry, transport, repo, add)
     if !added.success -> return Err(publication_registry_cache_error(registry, "git add failed"))
@@ -227,10 +227,10 @@ publication_rebuild_publication_in: fn(registry: PublicationRegistryConfig, repo
         source: publication_artifact_path(stale_repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}"))
         if !files.is_dir(source) -> return Err(publication_registry_cache_error(registry, "concurrent publication lost its staged source artifact"))
         publication_publish_artifact(repo, source, expected.name, expected.version, expected.content_hash) ?? return Err(publication_registry_cache_error(registry, "{err}"))
-        &paths.push(publication_artifact_path(repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}")))
+        paths.push(publication_artifact_path(repo, expected.name, expected.version) ?? return Err(publication_registry_cache_error(registry, "{err}")))
     }
     metadata: publication_refresh_registry_metadata(repo, registry.name) ?? return Err(publication_registry_cache_error(registry, err.diagnostic.what))
-    loop path in metadata.paths -> &paths.push(path)
+    loop path in metadata.paths -> paths.push(path)
     publication_push_index_inner(registry, repo, message, paths, Val(expected), false)
 }
 
@@ -267,7 +267,7 @@ publication_remote_contains_entry: fn(registry: PublicationRegistryConfig, trans
     true
 }
 
-// D-VERSION1=A: a version already in the index, yanked or live, cannot be
+// A version already in the index, yanked or live, cannot be
 // republished. Reads the local verified clone.
 publication_find_published: fn(repo: String, name: String, version: String) -[FS]> PublicationIndexEntry? PublicationDiagnosticError! {
     if publication_find_entry(repo, name, version) == {

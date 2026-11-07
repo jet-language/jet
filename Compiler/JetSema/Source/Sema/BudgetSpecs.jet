@@ -115,12 +115,12 @@ BudgetFieldEntry: struct { value: Expr, span: Span }
 // program into the canonical typed budget form.
 sema_budget_specs: fn(program: Program) -> [BudgetSpec] BudgetSpecError! {
     diagnostics := [Diagnostic]{}
-    specs: sema_budget_elaborate_items(program.items, &diagnostics)
+    specs: sema_budget_elaborate_items(program.items, diagnostics)
     located: loop spec in specs -> LocatedBudgetSpec{spec: spec, module_index: 0}
     findings := [BudgetLocatedDiagnostic]{}
-    sema_budget_validate_resolution(located, sema_budget_attachment_catalog(program.items), &findings)
-    sema_budget_validate_collisions(located, &findings)
-    loop finding in findings -> &diagnostics.push(finding.diagnostic)
+    sema_budget_validate_resolution(located, sema_budget_attachment_catalog(program.items), findings)
+    sema_budget_validate_collisions(located, findings)
+    loop finding in findings -> diagnostics.push(finding.diagnostic)
     if diagnostics.len() > 0 -> return Err(BudgetSpecError{diagnostics: diagnostics})
     Ok(specs)
 }
@@ -136,7 +136,7 @@ sema_budget_specs_graph: fn(graph: SemaRegistrationGraph) -> [BudgetSpec] Budget
 // its module's source location.
 sema_budget_located_specs_graph: fn(graph: SemaRegistrationGraph) -> [LocatedBudgetSpec] BudgetSpecError! {
     specs := [LocatedBudgetSpec]{}
-    findings: sema_budget_graph_findings(graph, &specs)
+    findings: sema_budget_graph_findings(graph, specs)
     if findings.len() > 0 {
         diagnostics: loop finding in findings -> sema_diagnostic_with_source_location(finding.diagnostic, graph.modules[finding.module_index].source_segments)
         return Err(BudgetSpecError{diagnostics: diagnostics})
@@ -148,7 +148,7 @@ sema_budget_located_specs_graph: fn(graph: SemaRegistrationGraph) -> [LocatedBud
 // the position of the module its span belongs to.
 sema_budget_validate_graph: fn(graph: SemaRegistrationGraph) -> [BudgetLocatedDiagnostic] Never! {
     specs := [LocatedBudgetSpec]{}
-    sema_budget_graph_findings(graph, &specs)
+    sema_budget_graph_findings(graph, specs)
 }
 
 // One budget diagnostic and the `graph.modules` position of its source.
@@ -164,29 +164,29 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBud
     loop (module_index, row) in graph.modules {
         if sema_module_is_core_source(row.module_identity) -> next
         module_diagnostics := [Diagnostic]{}
-        module_specs: sema_budget_elaborate_items(row.program.items, &module_diagnostics)
-        loop diagnostic in module_diagnostics -> &findings.push(BudgetLocatedDiagnostic{module_index: module_index, diagnostic: diagnostic})
+        module_specs: sema_budget_elaborate_items(row.program.items, module_diagnostics)
+        loop diagnostic in module_diagnostics -> findings.push(BudgetLocatedDiagnostic{module_index: module_index, diagnostic: diagnostic})
         package: row.package_identity
         if !packages.contains(package) {
-            &packages.push(package)
+            packages.push(package.copy())
             group_specs[package] = [LocatedBudgetSpec]{}
             group_catalogs[package] = sema_budget_empty_catalog()
         }
         grouped := group_specs.get(package) ?? [LocatedBudgetSpec]{}
         loop spec in module_specs {
-            &grouped.push(LocatedBudgetSpec{spec: spec.copy(), module_index: module_index})
-            &specs.push(LocatedBudgetSpec{spec: spec, module_index: module_index})
+            grouped.push(LocatedBudgetSpec{spec: spec.copy(), module_index: module_index})
+            specs.push(LocatedBudgetSpec{spec: spec, module_index: module_index})
         }
         group_specs[package] = grouped
         catalog := group_catalogs.get(package) ?? sema_budget_empty_catalog()
-        sema_budget_catalog_extend(&catalog, sema_budget_attachment_catalog(row.program.items))
+        sema_budget_catalog_extend(catalog, sema_budget_attachment_catalog(row.program.items))
         group_catalogs[package] = catalog
     }
-    &packages.sort()
+    packages.sort()
     loop package in packages {
         grouped: group_specs.get(package) ?? [LocatedBudgetSpec]{}
-        sema_budget_validate_resolution(grouped, group_catalogs.get(package) ?? sema_budget_empty_catalog(), &findings)
-        sema_budget_validate_collisions(grouped, &findings)
+        sema_budget_validate_resolution(grouped, group_catalogs.get(package) ?? sema_budget_empty_catalog(), findings)
+        sema_budget_validate_collisions(grouped, findings)
     }
     findings
 }
@@ -194,7 +194,7 @@ sema_budget_graph_findings: fn(graph: SemaRegistrationGraph, specs: &[LocatedBud
 sema_budget_elaborate_items: fn(items: [Item], diagnostics: &[Diagnostic]) -> [BudgetSpec] Never! {
     specs := [BudgetSpec]{}
     loop item in items {
-        if item == .Module(declaration) -> sema_budget_validate_module(declaration, &specs, &diagnostics)
+        if item == .Module(declaration) -> sema_budget_validate_module(declaration, specs, diagnostics)
     }
     specs
 }
@@ -204,15 +204,15 @@ sema_budget_empty_catalog: fn() -> BudgetAttachmentCatalog Never! {
 }
 
 sema_budget_set_insert: fn(set: &[String], value: String) Never! {
-    if !set.contains(value) -> &set.push(value)
+    if !set.contains(value) -> set.push(value.copy())
 }
 
 sema_budget_catalog_extend: fn(catalog: &BudgetAttachmentCatalog, other: BudgetAttachmentCatalog) Never! {
-    loop value in other.envs -> sema_budget_set_insert(&catalog.envs, value)
-    loop value in other.services -> sema_budget_set_insert(&catalog.services, value)
-    loop value in other.targets -> sema_budget_set_insert(&catalog.targets, value)
-    loop value in other.scenes -> sema_budget_set_insert(&catalog.scenes, value)
-    loop value in other.tests -> sema_budget_set_insert(&catalog.tests, value)
+    loop value in other.envs -> sema_budget_set_insert(catalog.envs, value)
+    loop value in other.services -> sema_budget_set_insert(catalog.services, value)
+    loop value in other.targets -> sema_budget_set_insert(catalog.targets, value)
+    loop value in other.scenes -> sema_budget_set_insert(catalog.scenes, value)
+    loop value in other.tests -> sema_budget_set_insert(catalog.tests, value)
 }
 
 sema_budget_attachment_catalog: fn(items: [Item]) -> BudgetAttachmentCatalog Never! {
@@ -224,24 +224,24 @@ sema_budget_attachment_catalog: fn(items: [Item]) -> BudgetAttachmentCatalog Nev
                 loop statement in definition.body {
                     if statement == .ScopeMember(name, _, _, _, _, _, _, _) && name == BUDGET_SCOPE_TEST_MEASURE -> measured = true
                 }
-                if measured && definition.name == .Val(name) -> sema_budget_set_insert(&catalog.tests, name)
+                if measured && definition.name == .Val(name) -> sema_budget_set_insert(catalog.tests, name)
             }
-            .Func(function) -> sema_budget_scene_attachments(function.body, &catalog.scenes)
+            .Func(function) -> sema_budget_scene_attachments(function.body, catalog.scenes)
             .Module(declaration) -> {
                 loop contribution in declaration.contributions {
                     if contribution.namespace == {
-                        .Env -> sema_budget_set_insert(&catalog.envs, contribution.path)
-                        .System | .Image -> sema_budget_set_insert(&catalog.targets, contribution.path)
+                        .Env -> sema_budget_set_insert(catalog.envs, contribution.path)
+                        .System | .Image -> sema_budget_set_insert(catalog.targets, contribution.path)
                         else -> {}
                     }
                     if contribution.value == {
                         .Env(env) -> {
-                            loop service in env.services -> sema_budget_set_insert(&catalog.services, service.name)
+                            loop service in env.services -> sema_budget_set_insert(catalog.services, service.name)
                         }
                         .System(system) -> {
                             loop field in system.fields {
                                 if field.value == .Services(services) {
-                                    loop service in services -> sema_budget_set_insert(&catalog.services, service.name)
+                                    loop service in services -> sema_budget_set_insert(catalog.services, service.name)
                                 }
                             }
                         }
@@ -258,28 +258,28 @@ sema_budget_attachment_catalog: fn(items: [Item]) -> BudgetAttachmentCatalog Nev
 sema_budget_scene_attachments: fn(stmts: [Stmt], scenes: &[String]) Never! {
     loop stmt in stmts {
         if stmt == {
-            .Val(binding) -> sema_budget_scene_expr(binding.init, &scenes)
-            .Expr(expr) -> sema_budget_scene_expr(expr, &scenes)
-            .DeferClose(close, _) -> sema_budget_scene_expr(close, &scenes)
+            .Val(binding) -> sema_budget_scene_expr(binding.init, scenes)
+            .Expr(expr) -> sema_budget_scene_expr(expr, scenes)
+            .DeferClose(close, _) -> sema_budget_scene_expr(close, scenes)
             .Return(value, _) -> {
-                if value == .Val(expr) -> sema_budget_scene_expr(expr, &scenes)
+                if value == .Val(expr) -> sema_budget_scene_expr(expr, scenes)
             }
-            .Assign(_, _, _, value) -> sema_budget_scene_expr(value, &scenes)
+            .Assign(_, _, _, value) -> sema_budget_scene_expr(value, scenes)
             .While(cond, body, _, _, _) -> {
-                sema_budget_scene_expr(cond, &scenes)
-                sema_budget_scene_attachments(body, &scenes)
+                sema_budget_scene_expr(cond, scenes)
+                sema_budget_scene_attachments(body, scenes)
             }
-            .Loop(body, _, _, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Unsafe(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Impure(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Reactive(body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Shield(body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Switched(_, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Region(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Policy(_, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .TaskGroup(_, _, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .Layout(_, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
-            .AuthorityScope(_, _, _, body, _) -> sema_budget_scene_attachments(body, &scenes)
+            .Loop(body, _, _, _) -> sema_budget_scene_attachments(body, scenes)
+            .Unsafe(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Impure(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Reactive(body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Shield(body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Switched(_, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Region(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Policy(_, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .TaskGroup(_, _, _, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .Layout(_, _, body, _) -> sema_budget_scene_attachments(body, scenes)
+            .AuthorityScope(_, _, _, body, _) -> sema_budget_scene_attachments(body, scenes)
             else -> {}
         }
     }
@@ -293,17 +293,17 @@ sema_budget_scene_expr: fn(expr: Expr, scenes: &[String]) Never! {
                 else -> false
             }
             if method == "new" && scene_receiver && args.len() == 1 {
-                if sema_budget_string_value(args[0].expr) == .Val(name) -> sema_budget_set_insert(&scenes, name)
+                if sema_budget_string_value(args[0].expr) == .Val(name) -> sema_budget_set_insert(scenes, name)
             }
-            sema_budget_scene_expr(receiver, &scenes)
-            loop arg in args -> sema_budget_scene_expr(arg.expr, &scenes)
+            sema_budget_scene_expr(receiver, scenes)
+            loop arg in args -> sema_budget_scene_expr(arg.expr, scenes)
         }
         .Call(call, _) -> {
-            loop arg in call.args -> sema_budget_scene_expr(arg.expr, &scenes)
+            loop arg in call.args -> sema_budget_scene_expr(arg.expr, scenes)
         }
-        .Field(base, _, _, _) -> sema_budget_scene_expr(base, &scenes)
-        .Unary(_, operand, _, _) -> sema_budget_scene_expr(operand, &scenes)
-        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_budget_scene_expr(operand, &scenes)
+        .Field(base, _, _, _) -> sema_budget_scene_expr(base, scenes)
+        .Unary(_, operand, _, _) -> sema_budget_scene_expr(operand, scenes)
+        .Binary(_, left, right, _, _) -> loop operand in expr_binary_operands(left, right) -> sema_budget_scene_expr(operand, scenes)
         else -> {}
     }
 }
@@ -321,7 +321,7 @@ sema_budget_validate_resolution: fn(specs: [LocatedBudgetSpec], catalog: BudgetA
                 else -> true
             }
             if !found {
-                &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_unresolved(spec, "scope", "no canonical {scope.kind} attachment named `{scope.name}` exists in the containing package", "declare that attachment or use its canonical package-qualified identity")})
+                findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_unresolved(spec, "scope", "no canonical {scope.kind} attachment named `{scope.name}` exists in the containing package", "declare that attachment or use its canonical package-qualified identity")})
                 next
             }
         }
@@ -334,7 +334,7 @@ sema_budget_validate_resolution: fn(specs: [LocatedBudgetSpec], catalog: BudgetA
                 "SceneProbe" -> catalog.scenes.contains(provider.name)
                 else -> true
             }
-            if !found -> &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_unresolved(spec, "provider", "no canonical {provider.kind} provider named `{provider.name}` exists in the containing package", "name a provider attached to a resolved scope")})
+            if !found -> findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_unresolved(spec, "provider", "no canonical {provider.kind} provider named `{provider.name}` exists in the containing package", "name a provider attached to a resolved scope")})
         }
     }
 }
@@ -365,11 +365,11 @@ sema_budget_validate_collisions: fn(specs: [LocatedBudgetSpec], findings: &[Budg
         loop left_index in 0..<index {
             left: specs[left_index].spec.copy()
             if left.role == right.role && left.name == right.name {
-                &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their containing package, perf role, and name form the same budget identity")})
+                findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their containing package, perf role, and name form the same budget identity")})
                 break
             }
             if left.scope == right.scope && left.metric == right.metric && left.provider == right.provider && sema_budget_applicability_overlaps(left.applicability, right.applicability) {
-                &findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their scope, metric, provider, and intersecting applicability form the same effective key")})
+                findings.push(BudgetLocatedDiagnostic{module_index: located.module_index, diagnostic: sema_budget_overlap(left, right, "their scope, metric, provider, and intersecting applicability form the same effective key")})
                 break
             }
         }
@@ -405,14 +405,14 @@ sema_budget_validate_module: fn(declaration: ModuleDecl, specs: &[BudgetSpec], d
             else -> { next }
         }
         if !sema_budget_snake_case(contribution.path) {
-            &diagnostics.push(sema_budget_invalid("role `{contribution.path}`", "performance role names are nonempty lowercase snake_case", "rename the role using lowercase words joined by `_`", contribution.path_span))
+            diagnostics.push(sema_budget_invalid("role `{contribution.path}`", "performance role names are nonempty lowercase snake_case", "rename the role using lowercase words joined by `_`", contribution.path_span))
             next
         }
-        workloads: sema_budget_compile_workload_catalog(contribution.path, perf.compile_workloads, &diagnostics)
+        workloads: sema_budget_compile_workload_catalog(contribution.path, perf.compile_workloads, diagnostics)
         loop entry in perf.budgets {
             if sema_budget_elaborate(contribution.path, entry, workloads) == {
-                .Ok(spec) -> &specs.push(spec)
-                .Err(error) -> &diagnostics.push(error.diagnostics[0])
+                .Ok(spec) -> specs.push(spec)
+                .Err(error) -> diagnostics.push(error.diagnostics[0])
             }
         }
     }
@@ -644,22 +644,22 @@ sema_budget_compile_workload_catalog: fn(role: String, declarations: [CompileWor
     loop declaration in declarations {
         target_value: sema_budget_string_value(declaration.target)
         if target_value == None || !sema_budget_snake_or_kebab(target_value ?? "") {
-            &diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` has an invalid target", "write a constant lowercase target name such as `target: \"cli\"`", expr_span(declaration.target)))
+            diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` has an invalid target", "write a constant lowercase target name such as `target: \"cli\"`", expr_span(declaration.target)))
             next
         }
         target: target_value ?? ""
         patch_value: sema_budget_string_value(declaration.patch)
         if patch_value == None || !sema_budget_safe_relative_path(patch_value ?? "") {
-            &diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` has an invalid patch path", "write a project-relative patch path without `..`, a root, or a backslash", expr_span(declaration.patch)))
+            diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` has an invalid patch path", "write a project-relative patch path without `..`, a root, or a backslash", expr_span(declaration.patch)))
             next
         }
         if !sema_budget_snake_case(declaration.name) {
-            &diagnostics.push(sema_budget_invalid(role, "compile workload name `{declaration.name}` is not lowercase snake_case", "name workloads with lowercase words joined by underscores", declaration.name_span))
+            diagnostics.push(sema_budget_invalid(role, "compile workload name `{declaration.name}` is not lowercase snake_case", "name workloads with lowercase words joined by underscores", declaration.name_span))
             next
         }
         duplicate: catalog.get(declaration.name) != None
         catalog[declaration.name] = CompileWorkloadFact{mode: "Edit", name: Val(declaration.name), target: target, patch: patch_value}
-        if duplicate -> &diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` is declared more than once", "keep one declaration for each workload name", declaration.name_span))
+        if duplicate -> diagnostics.push(sema_budget_invalid(role, "compile workload `{declaration.name}` is declared more than once", "keep one declaration for each workload name", declaration.name_span))
     }
     catalog
 }
@@ -742,9 +742,9 @@ sema_budget_parse_axis: fn(name: String, axis: String, expr: Expr) -> BudgetAxis
             selectors := [String]{}
             loop selector in values {
                 key: if axis == "targets" -> sema_budget_target_selector(name, selector) else -> sema_budget_profile_selector(name, selector)
-                sema_budget_set_insert(&selectors, key)
+                sema_budget_set_insert(selectors, key)
             }
-            &selectors.sort()
+            selectors.sort()
             return Ok(BudgetAxis.Only{selectors: selectors})
         }
     }
@@ -797,7 +797,7 @@ sema_budget_ascii_lower: fn(value: String) -> String Never! {
     bytes := [U8]{}
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
-        &bytes.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
+        bytes.push(if code >= 65 && code <= 90 -> U8{code + 32} else -> byte)
     }
     String.from_bytes_lossy(bytes)
 }
@@ -836,8 +836,8 @@ sema_budget_enum_key: fn(expr: Expr) -> String? Never! {
         loop arg in args {
             value: sema_budget_arg_value(arg)
             if value == {
-                .Str(_, _, _) -> &rendered.push(sema_budget_string_value(value) ?? return None)
-                .EnumLit(_, _, _, _, _, _, _) -> &rendered.push(sema_budget_enum_key(value) ?? return None)
+                .Str(_, _, _) -> rendered.push(sema_budget_string_value(value) ?? return None)
+                .EnumLit(_, _, _, _, _, _, _) -> rendered.push(sema_budget_enum_key(value) ?? return None)
                 else -> { return None }
             }
         }

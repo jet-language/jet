@@ -164,11 +164,15 @@ stdout: machine-output = [status]
 json: stdout doc $ : object # original parse(&text) requires one JSON object
 json: stdout doc $.action = "inspect.structure"
 stderr.trim: empty # original assert_machine_door: other stream is all whitespace
-step live: jet inspect live 0 --json
+# `jet inspect live <pid>` folded into `--live PID` on every inspect plane; a
+# pid with no observable runtime is the E2105 refusal envelope.
+step live: jet inspect structure --live 1 --json
 exit: 1
 stdout: nonempty # original assert_machine_stream: stream is not all whitespace
-stdout: machine-output = [report]
+stdout: machine-output = [status]
 json: stdout doc $ : object # original parse(&text) requires one JSON object
+json: stdout doc $.action = "cli"
+json: stdout doc $.reports[0].code = "E2105"
 stderr.trim: empty # original assert_machine_door: other stream is all whitespace
 step impact: jet inspect impact run.jet square --json
 exit: 0
@@ -252,12 +256,15 @@ stdout: machine-output = [status]
 json: stdout doc $ : object # original parse(&text) requires one JSON object
 json: stdout doc $.action = "remote.list"
 stderr.trim: empty # original assert_machine_door: other stream is all whitespace
+# Hangar is Jetpack's (`jetpack hangar`), not a jet command: the door is the
+# E2101 unknown-command refusal envelope.
 step hangar-generations: jet hangar generations --json
-exit: 0
+exit: 2
 stdout: nonempty # original assert_machine_stream: stream is not all whitespace
 stdout: machine-output = [status]
 json: stdout doc $ : object # original parse(&text) requires one JSON object
-json: stdout doc $.action = "generations"
+json: stdout doc $.action = "cli"
+json: stdout doc $.reports[0].code = "E2101"
 stderr.trim: empty # original assert_machine_door: other stream is all whitespace
 copy: {root}/.jet/perf/1787269028-687eeec2.jettrace fixture.jettrace
 step perf-view: jet perf view {work}/fixture.jettrace --json

@@ -7,7 +7,7 @@
 // Decode implementation, a container's Core decode helper or the runtime's
 // scalar Decode adapter, whose String Decode reads a native Text in place.
 
-use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, StmtKind]
+use jet_foundation.[Span, TBuiltinOp, BodyCallArg, Measure, NodeKind, BodyHandleOp, TPanicLoc, Type, checked_generated_local, checked_user_local, measure_literal_value, StmtKind]
 
 // The lowering of `receiver.operation(args)` when the receiver is the
 // canonical Dyn and the operation is one of the tree methods here; None
@@ -15,21 +15,21 @@ use jet_foundation.[Span, TBuiltinOp, BodyCallArg, NodeKind, BodyHandleOp, TPani
 ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {
     dyn_row: ir_dyn_def(p, ir_ty(p, b, receiver)) ?? return None
     if operation == {
-        .DynGetKey -> return Val(ir_dyn_key_lookup(&m, p, &b, ty, dyn_row, receiver, args, false, span))
-        .DynHas -> return Val(ir_dyn_key_lookup(&m, p, &b, ty, dyn_row, receiver, args, true, span))
-        .DynSetPath(keys, site, location) -> return Val(ir_dyn_set_path(&m, p, &b, dyn_row, receiver, keys, site, location, args, span))
-        .DynRemove -> return Val(ir_dyn_remove(&m, p, &b, ty, dyn_row, receiver, args, span))
-        .DynDecode(target) -> return Val(ir_dyn_decode(&m, p, &b, ty, receiver, target, args, span))
-        .DynIndexKey(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_key", true, site, location, args, span))
-        .DynIndexAt(site, location) -> return Val(ir_dyn_index(&m, p, &b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
-        .DynBinary(op, site, location) -> return Val(ir_dyn_operator(&m, p, &b, ty, receiver, "jet_dyn_binary", op, site, location, args, span))
-        .DynCompare(op, site, location) -> return Val(ir_dyn_operator(&m, p, &b, ty, receiver, "jet_dyn_compare", op, site, location, args, span))
-        .DynField | .JSONField -> return Val(ir_dyn_field(&m, p, &b, ty, dyn_row, receiver, args, span))
+        .DynGetKey -> return Val(ir_dyn_key_lookup(m, p, b, ty, dyn_row, receiver, args, false, span))
+        .DynHas -> return Val(ir_dyn_key_lookup(m, p, b, ty, dyn_row, receiver, args, true, span))
+        .DynSetPath(keys, site, location) -> return Val(ir_dyn_set_path(m, p, b, dyn_row, receiver, keys, site, location, args, span))
+        .DynRemove -> return Val(ir_dyn_remove(m, p, b, ty, dyn_row, receiver, args, span))
+        .DynDecode(target) -> return Val(ir_dyn_decode(m, p, b, ty, receiver, target, args, span))
+        .DynIndexKey(site, location) -> return Val(ir_dyn_index(m, p, b, ty, receiver, "jet_dyn_index_key", true, site, location, args, span))
+        .DynIndexAt(site, location) -> return Val(ir_dyn_index(m, p, b, ty, receiver, "jet_dyn_index_at", false, site, location, args, span))
+        .DynBinary(op, site, location) -> return Val(ir_dyn_operator(m, p, b, ty, receiver, "jet_dyn_binary", op, site, location, args, span))
+        .DynCompare(op, site, location) -> return Val(ir_dyn_operator(m, p, b, ty, receiver, "jet_dyn_compare", op, site, location, args, span))
+        .DynField | .JSONField -> return Val(ir_dyn_field(m, p, b, ty, dyn_row, receiver, args, span))
         .DynText | .JSONText -> {
-            if args.len() != 0 -> return Val(ir_fail_slot(&b, span, "handle method jet_dyn_text with {args.len()} arguments"))
-            tree: ir_expr(&m, p, &b, receiver)
+            if args.len() != 0 -> return Val(ir_fail_slot(b, span, "handle method jet_dyn_text with {args.len()} arguments"))
+            tree: ir_expr(m, p, b, receiver)
             if ir_failed(b) || tree < 0 -> return Val(-1)
-            return Val(ir_dyn_text_read(&m, p, &b, ty, dyn_row, tree, "jet_dyn_text", span))
+            return Val(ir_dyn_text_read(m, p, b, ty, dyn_row, tree, "jet_dyn_text", span))
         }
         else -> {}
     }
@@ -43,51 +43,51 @@ ir_dyn_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver:
         .DynKeys -> (symbol: "jet_dyn_keys", arity: 0, mask: [Bool]{true})
         else -> { return None }
     }
-    if args.len() != route.arity -> return Val(ir_fail_slot(&b, span, "handle method {route.symbol} with {args.len()} arguments"))
+    if args.len() != route.arity -> return Val(ir_fail_slot(b, span, "handle method {route.symbol} with {args.len()} arguments"))
     operands := [Int]{}
-    tree: ir_expr(&m, p, &b, receiver)
+    tree: ir_expr(m, p, b, receiver)
     if ir_failed(b) -> return Val(-1)
-    &operands.push(tree)
+    operands.push(tree)
     loop arg in args {
-        slot: ir_expr(&m, p, &b, arg)
+        slot: ir_expr(m, p, b, arg)
         if ir_failed(b) -> return Val(-1)
-        &operands.push(slot)
+        operands.push(slot)
     }
-    Val(ir_route(&m, p, &b, route.symbol, operands, route.mask, ty, span))
+    Val(ir_route(m, p, b, route.symbol, operands, route.mask, ty, span))
 }
 
 // `tree[key]` / `tree[index]`: the jet_dyn_index_key / jet_dyn_index_at
 // route (ir_dyn_checked).
 ir_dyn_index: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, keyed: Bool, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn index with {args.len()} arguments")
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    tree: ir_expr(&m, p, &b, receiver)
+    if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn index with {args.len()} arguments")
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    tree: ir_expr(m, p, b, receiver)
     if ir_failed(b) || tree < 0 -> return -1
-    index: ir_expr(&m, p, &b, args[0])
+    index: ir_expr(m, p, b, args[0])
     if ir_failed(b) || index < 0 -> return -1
-    site: ir_dyn_text(&m, &b, site_text)
-    ir_dyn_checked(&m, p, &b, ty, row, symbol, [Int]{tree, index, site}, [Bool]{true, keyed, true}, location, span)
+    site: ir_dyn_text(m, b, site_text)
+    ir_dyn_checked(m, p, b, ty, row, symbol, [Int]{tree, index, site}, [Bool]{true, keyed, true}, location, span)
 }
 
 // `left op right` on Dyn operands (`+ - * /` or `< <= > >=`): the
 // jet_dyn_binary / jet_dyn_compare route over the borrowed trees
 // (ir_dyn_checked).
 ir_dyn_operator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, symbol: String, op: String, site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn operator with {args.len()} arguments")
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    left: ir_expr(&m, p, &b, receiver)
+    if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn operator with {args.len()} arguments")
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    left: ir_expr(m, p, b, receiver)
     if ir_failed(b) || left < 0 -> return -1
-    right: ir_expr(&m, p, &b, args[0])
+    right: ir_expr(m, p, b, args[0])
     if ir_failed(b) || right < 0 -> return -1
-    spelling: ir_dyn_text(&m, &b, op)
-    site: ir_dyn_text(&m, &b, site_text)
-    ir_dyn_checked(&m, p, &b, ty, row, symbol, [Int]{left, right, spelling, site}, [Bool]{true, true, true, true}, location, span)
+    spelling: ir_dyn_text(m, b, op)
+    site: ir_dyn_text(m, b, site_text)
+    ir_dyn_checked(m, p, b, ty, row, symbol, [Int]{left, right, spelling, site}, [Bool]{true, true, true, true}, location, span)
 }
 
 ir_dyn_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
-    string_row: ir_string_row(&m)
-    slot: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.ConstText, slot, ir_intern_text(&m, text), -1, -1, b.line)
+    string_row: ir_string_row(m)
+    slot: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, slot, ir_intern_text(m, text), -1, -1, b.line)
     slot
 }
 
@@ -95,24 +95,24 @@ ir_dyn_text: fn(m: &IRModule, b: &IRBuilder, text: String) -> Int Never! {
 // stops at the expression's line, its source quoted with the caret at the line
 // start.
 ir_dyn_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: Int, symbol: String, operands: [Int], mask: [Bool], location: TPanicLoc, span: Span) -> Int Never! {
-    string_row: ir_string_row(&m)
+    string_row: ir_string_row(m)
     result_ty: Type.Result{ok: ty, err: Type.String}
-    outcome: ir_route(&m, p, &b, symbol, operands, mask, result_ty, span)
+    outcome: ir_route(m, p, b, symbol, operands, mask, result_ty, span)
     if ir_failed(b) || outcome < 0 -> return -1
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
-    failed: ir_temp(&m, &b, bool_row)
-    ok: ir_result_is_ok(&m, &b, outcome)
-    ir_emit(&b.f, IROp.Not, failed, ok, -1, -1, b.line)
-    ir_open_if(&b.f, failed, b.line)
-    message: ir_load_at(&m, &b, outcome, 8, string_row)
-    null: ir_word_const(&m, &b, 0)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    failed: ir_temp(m, b, bool_row)
+    ok: ir_result_is_ok(m, b, outcome)
+    ir_emit(b.f, IROp.Not, failed, ok, -1, -1, b.line)
+    ir_open_if(b.f, failed, b.line)
+    message: ir_load_at(m, b, outcome, 8, string_row)
+    null: ir_word_const(m, b, 0)
     at := location.copy()
     at.column = 0
     at.caret = 0
-    ir_stop(&m, p, &b, 2, message, null, null, ir_report_location(p, at))
-    ir_end(&b.f, b.line)
+    ir_stop(m, p, b, 2, message, null, null, ir_report_location(p, at))
+    ir_end(b.f, b.line)
     if ir_failed(b) -> return -1
-    ir_box_take(&m, p, &b, outcome, 8, row)
+    ir_box_take(m, p, b, outcome, 8, row)
 }
 
 // The checked layout of the native Dyn.Object: its variant index, the
@@ -122,26 +122,26 @@ IRDynObject: struct { object: Int, payload: IRMember, entry_row: Int, entry: [IR
 
 ir_dyn_object_layout: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, span: Span) -> IRDynObject? Never! {
     object: ir_variant_index(p, dyn_row, "Object") ?? {
-        _: ir_fail_slot(&b, span, "canonical Dyn has no Object variant")
+        _: ir_fail_slot(b, span, "canonical Dyn has no Object variant")
         return None
     }
-    members: ir_variant_members(&m, p, dyn_row, [Type]{}, object) ?? [IRMember]{}
+    members: ir_variant_members(m, p, dyn_row, [Type]{}, object) ?? [IRMember]{}
     if members.len() != 1 {
-        _: ir_fail_slot(&b, span, "Dyn.Object has no payload layout")
+        _: ir_fail_slot(b, span, "Dyn.Object has no payload layout")
         return None
     }
     payload: members[0]
     entry_ty: if ir_untag(m.types[payload.ty].ty) == .List(element) -> element else -> {
-        _: ir_fail_slot(&b, span, "Dyn.Object payload is not its checked ordered List")
+        _: ir_fail_slot(b, span, "Dyn.Object payload is not its checked ordered List")
         return None
     }
-    entry_row: ir_value_type(&m, p, entry_ty) ?? {
-        _: ir_type_fail(&b, span, entry_ty)
+    entry_row: ir_value_type(m, p, entry_ty) ?? {
+        _: ir_type_fail(b, span, entry_ty)
         return None
     }
-    entry: ir_inline_members(&m, p, entry_row) ?? [IRMember]{}
+    entry: ir_inline_members(m, p, entry_row) ?? [IRMember]{}
     if entry.len() != 2 || entry[0].name != "key" || entry[1].name != "value" {
-        _: ir_fail_slot(&b, span, "Dyn.Object entries are not checked key/value records")
+        _: ir_fail_slot(b, span, "Dyn.Object entries are not checked key/value records")
         return None
     }
     Val(IRDynObject{object: object, payload: payload, entry_row: entry_row, entry: entry})
@@ -152,32 +152,32 @@ ir_dyn_object_layout: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int
 // data_tree_object_find); 0 when `tree` holds another variant or no entry
 // has that key.
 ir_dyn_object_find: fn(m: &IRModule, b: &IRBuilder, layout: IRDynObject, tree: Int, key: Int) -> Int Never! {
-    pointer_row: ir_pointer_row(&m)
-    zero: ir_word_const(&m, &b, 0)
-    hit: ir_temp(&m, &b, pointer_row)
-    ir_emit(&b.f, IROp.Const, hit, 0, -1, -1, b.line)
-    selector: ir_load_word(&m, &b, tree, 0)
-    expected: ir_word_const(&m, &b, layout.object)
-    is_object: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
-    ir_open_if(&b.f, is_object, b.line)
+    pointer_row: ir_pointer_row(m)
+    zero: ir_word_const(m, b, 0)
+    hit: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.Const, hit, 0, -1, -1, b.line)
+    selector: ir_load_word(m, b, tree, 0)
+    expected: ir_word_const(m, b, layout.object)
+    is_object: ir_bool_op(m, b, IROp.Eq, selector, expected)
+    ir_open_if(b.f, is_object, b.line)
     payload: layout.payload
-    holder: if payload.boxed -> ir_load_word(&m, &b, tree, payload.offset) else -> tree
-    entries: ir_load_at(&m, &b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
-    length: ir_load_word(&m, &b, entries, 0)
-    data: ir_load_word(&m, &b, entries, 16)
+    holder: if payload.boxed -> ir_load_word(m, b, tree, payload.offset) else -> tree
+    entries: ir_load_at(m, b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
+    length: ir_load_word(m, b, entries, 0)
+    data: ir_load_word(m, b, entries, 16)
     stride: ir_list_stride(m, layout.entry_row)
-    index: ir_count_open(&m, &b, length)
-    missing: ir_bool_op(&m, &b, IROp.Eq, hit, zero)
-    ir_open_if(&b.f, missing, b.line)
-    entry: ir_element_address(&m, &b, data, index, stride)
-    name: ir_load_at(&m, &b, entry, layout.entry[0].offset, layout.entry[0].ty)
-    same: ir_bool_op(&m, &b, IROp.Eq, name, key)
-    ir_open_if(&b.f, same, b.line)
-    ir_emit(&b.f, IROp.Copy, hit, entry, -1, -1, b.line)
-    ir_end(&b.f, b.line)
-    ir_end(&b.f, b.line)
-    ir_count_close(&m, &b, index)
-    ir_end(&b.f, b.line)
+    index: ir_count_open(m, b, length)
+    missing: ir_bool_op(m, b, IROp.Eq, hit, zero)
+    ir_open_if(b.f, missing, b.line)
+    entry: ir_element_address(m, b, data, index, stride)
+    name: ir_load_at(m, b, entry, layout.entry[0].offset, layout.entry[0].ty)
+    same: ir_bool_op(m, b, IROp.Eq, name, key)
+    ir_open_if(b.f, same, b.line)
+    ir_emit(b.f, IROp.Copy, hit, entry, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_count_close(m, b, index)
+    ir_end(b.f, b.line)
     hit
 }
 
@@ -187,41 +187,41 @@ ir_dyn_object_find: fn(m: &IRModule, b: &IRBuilder, layout: IRDynObject, tree: I
 // of the entry's value), else None, as has gives whether it exists; any
 // other variant has no keys.
 ir_dyn_key_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], has: Bool, span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn key lookup with {args.len()} arguments")
-    layout: ir_dyn_object_layout(&m, p, &b, dyn_row, span) ?? return -1
-    result_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    if has && m.types[result_row].kind != .Bool -> return ir_fail_slot(&b, span, "Dyn.has as {ir_type_name(ty)}")
+    if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn key lookup with {args.len()} arguments")
+    layout: ir_dyn_object_layout(m, p, b, dyn_row, span) ?? return -1
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if has && m.types[result_row].kind != .Bool -> return ir_fail_slot(b, span, "Dyn.has as {ir_type_name(ty)}")
     if !has {
-        _: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Dyn.get as {ir_type_name(ty)}") }
+        _: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Dyn.get as {ir_type_name(ty)}") }
     }
-    tree: ir_expr(&m, p, &b, receiver)
-    key: ir_expr(&m, p, &b, args[0])
+    tree: ir_expr(m, p, b, receiver)
+    key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || tree < 0 || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
         key_ty: ir_ty(p, b, args[0])
-        return ir_fail_slot(&b, span, "Dyn key lookup by {ir_type_name(key_ty)}")
+        return ir_fail_slot(b, span, "Dyn key lookup by {ir_type_name(key_ty)}")
     }
-    hit: ir_dyn_object_find(&m, &b, layout, tree, key)
-    zero: ir_word_const(&m, &b, 0)
+    hit: ir_dyn_object_find(m, b, layout, tree, key)
+    zero: ir_word_const(m, b, 0)
     if has {
-        found: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
-        ir_release(&m, &b, tree)
-        ir_release(&m, &b, key)
+        found: ir_bool_op(m, b, IROp.Ne, hit, zero)
+        ir_release(m, b, tree)
+        ir_release(m, b, key)
         return found
     }
     value_row: layout.entry[1].ty
-    result: ir_temp(&m, &b, result_row)
-    ir_option_none(&m, &b, result)
-    present: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
-    ir_open_if(&b.f, present, b.line)
-    value: ir_load_at(&m, &b, hit, layout.entry[1].offset, value_row)
-    owned: ir_copy_value(&m, p, &b, value, span)
+    result: ir_temp(m, b, result_row)
+    ir_option_none(m, b, result)
+    present: ir_bool_op(m, b, IROp.Ne, hit, zero)
+    ir_open_if(b.f, present, b.line)
+    value: ir_load_at(m, b, hit, layout.entry[1].offset, value_row)
+    owned: ir_copy_value(m, p, b, value, span)
     size: m.types[value_row].size
-    made: ir_option_make(&m, p, &b, result_row, owned, size)
-    ir_option_set(&m, &b, result, made)
-    ir_end(&b.f, b.line)
-    ir_release(&m, &b, tree)
-    ir_release(&m, &b, key)
+    made: ir_option_make(m, p, b, result_row, owned, size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
+    ir_release(m, b, tree)
+    ir_release(m, b, key)
     b.fresh[result] = true
     result
 }
@@ -232,34 +232,34 @@ ir_dyn_key_lookup: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_r
 // the whole Object and convert the entry's value back. A missing key or
 // another variant takes the route, whose failure names the field.
 ir_dyn_field: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn field lookup with {args.len()} arguments")
-    layout: ir_dyn_object_layout(&m, p, &b, dyn_row, span) ?? return -1
-    result_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    tree: ir_expr(&m, p, &b, receiver)
-    key: ir_expr(&m, p, &b, args[0])
+    if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn field lookup with {args.len()} arguments")
+    layout: ir_dyn_object_layout(m, p, b, dyn_row, span) ?? return -1
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    tree: ir_expr(m, p, b, receiver)
+    key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || tree < 0 || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
         key_ty: ir_ty(p, b, args[0])
-        return ir_fail_slot(&b, span, "Dyn field lookup by {ir_type_name(key_ty)}")
+        return ir_fail_slot(b, span, "Dyn field lookup by {ir_type_name(key_ty)}")
     }
-    hit: ir_dyn_object_find(&m, &b, layout, tree, key)
-    zero: ir_word_const(&m, &b, 0)
-    result: ir_temp(&m, &b, result_row)
-    present: ir_bool_op(&m, &b, IROp.Ne, hit, zero)
-    ir_open_if(&b.f, present, b.line)
-    value: ir_load_at(&m, &b, hit, layout.entry[1].offset, layout.entry[1].ty)
-    owned: ir_copy_value(&m, p, &b, value, span)
-    found: ir_result_box(&m, p, &b, ty, true, owned)
-    ir_emit(&b.f, IROp.Move, result, found, -1, -1, b.line)
+    hit: ir_dyn_object_find(m, b, layout, tree, key)
+    zero: ir_word_const(m, b, 0)
+    result: ir_temp(m, b, result_row)
+    present: ir_bool_op(m, b, IROp.Ne, hit, zero)
+    ir_open_if(b.f, present, b.line)
+    value: ir_load_at(m, b, hit, layout.entry[1].offset, layout.entry[1].ty)
+    owned: ir_copy_value(m, p, b, value, span)
+    found: ir_result_box(m, p, b, ty, true, owned)
+    ir_emit(b.f, IROp.Move, result, found, -1, -1, b.line)
     b.fresh[found] = false
-    ir_else(&b.f, b.line)
-    routed: ir_dyn_route_lent(&m, p, &b, "jet_dyn_field", [Int]{tree, key}, ty, span)
+    ir_else(b.f, b.line)
+    routed: ir_dyn_route_lent(m, p, b, "jet_dyn_field", [Int]{tree, key}, ty, span)
     if ir_failed(b) || routed < 0 -> return -1
-    ir_emit(&b.f, IROp.Move, result, routed, -1, -1, b.line)
+    ir_emit(b.f, IROp.Move, result, routed, -1, -1, b.line)
     b.fresh[routed] = false
-    ir_end(&b.f, b.line)
-    ir_release(&m, &b, tree)
-    ir_release(&m, &b, key)
+    ir_end(b.f, b.line)
+    ir_release(m, b, tree)
+    ir_release(m, b, key)
     b.fresh[result] = true
     result
 }
@@ -271,11 +271,11 @@ ir_dyn_route_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
     fresh := [Bool]{}
     mask := [Bool]{}
     loop slot in operands {
-        &fresh.push(b.fresh[slot])
-        &mask.push(true)
+        fresh.push(b.fresh[slot])
+        mask.push(true)
         b.fresh[slot] = false
     }
-    routed: ir_route(&m, p, &b, symbol, operands, mask, ty, span)
+    routed: ir_route(m, p, b, symbol, operands, mask, ty, span)
     loop (index, slot) in operands -> b.fresh[slot] = fresh[index]
     routed
 }
@@ -285,29 +285,29 @@ ir_dyn_route_lent: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, symbol: String,
 // Text gives Ok(a new owner of its String), read in place; another variant
 // takes the route, whose failure names the variant it found.
 ir_dyn_text_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, tree: Int, symbol: String, span: Span) -> Int Never! {
-    text: ir_variant_index(p, dyn_row, "Text") ?? return ir_fail_slot(&b, span, "canonical Dyn has no Text variant")
-    members: ir_variant_members(&m, p, dyn_row, [Type]{}, text) ?? [IRMember]{}
-    if members.len() != 1 || m.types[members[0].ty].kind != .String -> return ir_fail_slot(&b, span, "Dyn.Text has no String payload layout")
+    text: ir_variant_index(p, dyn_row, "Text") ?? return ir_fail_slot(b, span, "canonical Dyn has no Text variant")
+    members: ir_variant_members(m, p, dyn_row, [Type]{}, text) ?? [IRMember]{}
+    if members.len() != 1 || m.types[members[0].ty].kind != .String -> return ir_fail_slot(b, span, "Dyn.Text has no String payload layout")
     payload: members[0]
-    result_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    result: ir_temp(&m, &b, result_row)
-    selector: ir_load_word(&m, &b, tree, 0)
-    expected: ir_word_const(&m, &b, text)
-    is_text: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
-    ir_open_if(&b.f, is_text, b.line)
-    holder: if payload.boxed -> ir_load_word(&m, &b, tree, payload.offset) else -> tree
-    value: ir_load_at(&m, &b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
-    owned: ir_copy_value(&m, p, &b, value, span)
-    found: ir_result_box(&m, p, &b, ty, true, owned)
-    ir_emit(&b.f, IROp.Move, result, found, -1, -1, b.line)
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    result: ir_temp(m, b, result_row)
+    selector: ir_load_word(m, b, tree, 0)
+    expected: ir_word_const(m, b, text)
+    is_text: ir_bool_op(m, b, IROp.Eq, selector, expected)
+    ir_open_if(b.f, is_text, b.line)
+    holder: if payload.boxed -> ir_load_word(m, b, tree, payload.offset) else -> tree
+    value: ir_load_at(m, b, holder, if payload.boxed -> 0 else -> payload.offset, payload.ty)
+    owned: ir_copy_value(m, p, b, value, span)
+    found: ir_result_box(m, p, b, ty, true, owned)
+    ir_emit(b.f, IROp.Move, result, found, -1, -1, b.line)
     b.fresh[found] = false
-    ir_else(&b.f, b.line)
-    routed: ir_dyn_route_lent(&m, p, &b, symbol, [Int]{tree}, ty, span)
+    ir_else(b.f, b.line)
+    routed: ir_dyn_route_lent(m, p, b, symbol, [Int]{tree}, ty, span)
     if ir_failed(b) || routed < 0 -> return -1
-    ir_emit(&b.f, IROp.Move, result, routed, -1, -1, b.line)
+    ir_emit(b.f, IROp.Move, result, routed, -1, -1, b.line)
     b.fresh[routed] = false
-    ir_end(&b.f, b.line)
-    ir_release(&m, &b, tree)
+    ir_end(b.f, b.line)
+    ir_release(m, b, tree)
     b.fresh[result] = true
     result
 }
@@ -318,16 +318,16 @@ IRDynPlace: struct { cell: Int, current: Int, tree: Int, backs: [IRWriteBack] }
 
 ir_dyn_place_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, span: Span) -> IRDynPlace? Never! {
     receiver_ty: ir_ty(p, b, receiver)
-    value_row: ir_value_type(&m, p, receiver_ty) ?? {
-        _: ir_type_fail(&b, span, receiver_ty)
+    value_row: ir_value_type(m, p, receiver_ty) ?? {
+        _: ir_type_fail(b, span, receiver_ty)
         return None
     }
     backs := [IRWriteBack]{}
-    cell: ir_place_address(&m, p, &b, receiver, &backs, span)
+    cell: ir_place_address(m, p, b, receiver, backs, span)
     if ir_failed(b) || cell < 0 -> return None
-    current: ir_temp(&m, &b, value_row)
-    ir_emit(&b.f, IROp.Load, current, cell, 0, -1, b.line)
-    tree: ir_dyn_to_runtime(&m, p, &b, dyn_row, current, span)
+    current: ir_temp(m, b, value_row)
+    ir_emit(b.f, IROp.Load, current, cell, 0, -1, b.line)
+    tree: ir_dyn_to_runtime(m, p, b, dyn_row, current, span)
     if tree < 0 -> return None
     Val(IRDynPlace{cell: cell, current: current, tree: tree, backs: backs})
 }
@@ -336,12 +336,12 @@ ir_dyn_place_open: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, r
 // replaced drops, and a variable's write cell is read back.
 ir_dyn_place_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, place: IRDynPlace, span: Span) Never! {
     value_row: b.f.slot_type[place.current]
-    updated: ir_dyn_from_runtime(&m, p, &b, dyn_row, place.tree, value_row, span)
+    updated: ir_dyn_from_runtime(m, p, b, dyn_row, place.tree, value_row, span)
     if updated < 0 -> return
-    ir_emit(&b.f, IROp.Drop, -1, place.current, -1, -1, b.line)
-    ir_emit(&b.f, IROp.Store, -1, place.cell, 0, updated, b.line)
+    ir_emit(b.f, IROp.Drop, -1, place.current, -1, -1, b.line)
+    ir_emit(b.f, IROp.Store, -1, place.cell, 0, updated, b.line)
     b.fresh[updated] = false
-    loop back in place.backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    loop back in place.backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
 }
 
 // `tree.a[0].b = value` (JetRuntime jet_dyn_set_path): the steps cross as one
@@ -349,150 +349,191 @@ ir_dyn_place_close: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, 
 // tree the route adopts; a refused step stops with the route's "{site}: ..."
 // text at the checked location.
 ir_dyn_set_path: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, dyn_row: Int, receiver: Int, keys: [Bool], site_text: String, location: TPanicLoc, args: [Int], span: Span) -> Int Never! {
-    if args.len() != keys.len() + 1 -> return ir_fail_slot(&b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
+    if args.len() != keys.len() + 1 -> return ir_fail_slot(b, span, "Dyn path write with {args.len()} operands for {keys.len()} steps")
     value_expr: args[keys.len()]
     value_ty: ir_ty(p, b, value_expr)
-    if ir_dyn_def(p, value_ty) == None -> return ir_fail_slot(&b, span, "Dyn path value of type {ir_type_name(value_ty)} is not the canonical Dyn")
-    pointer_row: ir_pointer_row(&m)
-    word_row: ir_word_row(&m)
-    string_row: ir_string_row(&m)
-    count: ir_word_const(&m, &b, keys.len())
-    sequence: ir_runtime(&m, &b, "jet_rt_record_seq_list_rec_dyn_new", [Int]{count}, pointer_row)
+    if ir_dyn_def(p, value_ty) == None -> return ir_fail_slot(b, span, "Dyn path value of type {ir_type_name(value_ty)} is not the canonical Dyn")
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    string_row: ir_string_row(m)
+    count: ir_word_const(m, b, keys.len())
+    sequence: ir_runtime(m, b, "jet_rt_record_seq_list_rec_dyn_new", [Int]{count}, pointer_row)
     loop (index, key) in keys {
-        step: ir_expr(&m, p, &b, args[index])
+        step: ir_expr(m, p, b, args[index])
         if ir_failed(b) || step < 0 -> return -1
         expected: if key -> IRTypeKind.String else -> IRTypeKind.Int
         if ir_kind_of(m, b, step) != expected {
             step_ty: ir_ty(p, b, args[index])
-            return ir_fail_slot(&b, span, "Dyn path step {index} of type {ir_type_name(step_ty)} is neither a String key nor an Int index")
+            return ir_fail_slot(b, span, "Dyn path step {index} of type {ir_type_name(step_ty)} is neither a String key nor an Int index")
         }
-        item: ir_runtime(&m, &b, if key -> "jet_rt_record_new_dyn_text" else -> "jet_rt_record_new_dyn_int", [Int]{step}, pointer_row)
-        _: ir_runtime(&m, &b, "jet_rt_record_seq_list_rec_dyn_push", [Int]{sequence, item}, -1)
-        ir_release(&m, &b, step)
+        item: ir_runtime(m, b, if key -> "jet_rt_record_new_dyn_text" else -> "jet_rt_record_new_dyn_int", [Int]{step}, pointer_row)
+        _: ir_runtime(m, b, "jet_rt_record_seq_list_rec_dyn_push", [Int]{sequence, item}, -1)
+        ir_release(m, b, step)
     }
-    steps: ir_runtime(&m, &b, "jet_rt_record_new_dyn_array", [Int]{sequence}, pointer_row)
-    value: ir_expr(&m, p, &b, value_expr)
+    steps: ir_runtime(m, b, "jet_rt_record_new_dyn_array", [Int]{sequence}, pointer_row)
+    value: ir_expr(m, p, b, value_expr)
     if ir_failed(b) || value < 0 -> return -1
-    adopted: ir_dyn_to_runtime(&m, p, &b, dyn_row, value, span)
+    adopted: ir_dyn_to_runtime(m, p, b, dyn_row, value, span)
     if adopted < 0 -> return -1
-    ir_release(&m, &b, value)
-    place: ir_dyn_place_open(&m, p, &b, dyn_row, receiver, span) ?? return -1
-    site: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.ConstText, site, ir_intern_text(&m, site_text), -1, -1, b.line)
-    out: ir_out_slot(&m, &b, 1)
-    selector: ir_runtime(&m, &b, "jet_dyn_set_path", [Int]{place.tree, steps, adopted, site, out}, word_row)
-    _: ir_runtime(&m, &b, "jet_rt_handle_drop_dyn", [Int]{steps}, -1)
-    zero: ir_word_const(&m, &b, 0)
-    refused: ir_bool_op(&m, &b, IROp.Eq, selector, zero)
-    ir_open_if(&b.f, refused, b.line)
-    message: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.Load, message, out, 0, -1, b.line)
+    ir_release(m, b, value)
+    place: ir_dyn_place_open(m, p, b, dyn_row, receiver, span) ?? return -1
+    site: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, site, ir_intern_text(m, site_text), -1, -1, b.line)
+    out: ir_out_slot(m, b, 1)
+    selector: ir_runtime(m, b, "jet_dyn_set_path", [Int]{place.tree, steps, adopted, site, out}, word_row)
+    _: ir_runtime(m, b, "jet_rt_handle_drop_dyn", [Int]{steps}, -1)
+    zero: ir_word_const(m, b, 0)
+    refused: ir_bool_op(m, b, IROp.Eq, selector, zero)
+    ir_open_if(b.f, refused, b.line)
+    message: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.Load, message, out, 0, -1, b.line)
     // A cancelled task refuses without a stop text: it propagates.
-    worded: ir_bool_op(&m, &b, IROp.Ne, message, zero)
-    ir_open_if(&b.f, worded, b.line)
-    ir_stop(&m, p, &b, 2, message, zero, zero, ir_report_location(p, location))
-    ir_end(&b.f, b.line)
-    ir_end(&b.f, b.line)
-    ir_dyn_place_close(&m, p, &b, dyn_row, place, span)
+    worded: ir_bool_op(m, b, IROp.Ne, message, zero)
+    ir_open_if(b.f, worded, b.line)
+    ir_stop(m, p, b, 2, message, zero, zero, ir_report_location(p, location))
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_dyn_place_close(m, p, b, dyn_row, place, span)
     return -1
 }
 
 // `tree.remove(key)` (JetRuntime jet_dyn_remove): the receiver's first
 // Object entry named `key` leaves it; Some(its value), else None.
 ir_dyn_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, dyn_row: Int, receiver: Int, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(&b, span, "Dyn.remove with {args.len()} arguments")
-    _: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(&b, span, "Dyn.remove as {ir_type_name(ty)}") }
-    key: ir_expr(&m, p, &b, args[0])
+    if args.len() != 1 -> return ir_fail_slot(b, span, "Dyn.remove with {args.len()} arguments")
+    _: if ir_untag(ty) == .Option(inner) -> inner else -> { return ir_fail_slot(b, span, "Dyn.remove as {ir_type_name(ty)}") }
+    key: ir_expr(m, p, b, args[0])
     if ir_failed(b) || key < 0 -> return -1
     if ir_kind_of(m, b, key) != .String {
         key_ty: ir_ty(p, b, args[0])
-        return ir_fail_slot(&b, span, "Dyn.remove by {ir_type_name(key_ty)}")
+        return ir_fail_slot(b, span, "Dyn.remove by {ir_type_name(key_ty)}")
     }
-    place: ir_dyn_place_open(&m, p, &b, dyn_row, receiver, span) ?? return -1
-    removed: ir_route_option(&m, p, &b, "jet_dyn_remove", [Int]{place.tree, key}, IRRouteCarrier.Handle{name: "Dyn"}, ty, span)
+    place: ir_dyn_place_open(m, p, b, dyn_row, receiver, span) ?? return -1
+    removed: ir_route_option(m, p, b, "jet_dyn_remove", [Int]{place.tree, key}, IRRouteCarrier.Handle{name: "Dyn"}, ty, span)
     if ir_failed(b) -> return -1
-    ir_release(&m, &b, key)
-    ir_dyn_place_close(&m, p, &b, dyn_row, place, span)
+    ir_release(m, b, key)
+    ir_dyn_place_close(m, p, b, dyn_row, place, span)
     removed
 }
 
 // `tree.decode<T>()`: T's own Decode implementation, called with the tree; a
-// container or Dyn target's Core/Encoding/Encoding.jet decode helper
-// (ir_codec_decode_helper); else the runtime's canonical scalar adapter
-// jet_rt_codec_decode_<scalar>, which borrows the tree.
+// container, F32 or Dyn target's Core/Encoding/Encoding.jet decode helper
+// (ir_codec_decode_helper, ir_dyn_fixed_decode); else the runtime's canonical
+// scalar adapter jet_rt_codec_decode_<scalar>, which borrows the tree.
 ir_dyn_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, target: Type, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 0 -> return ir_fail_slot(&b, span, "Dyn.decode with {args.len()} arguments")
-    concrete: ir_fact(p, &b, target, span)
+    if args.len() != 0 -> return ir_fail_slot(b, span, "Dyn.decode with {args.len()} arguments")
+    concrete: ir_fact(p, b, target, span)
     if ir_failed(b) -> return -1
     tree_arg: ir_codec_arg(receiver)
-    if ir_codec_impl(p, concrete, "Decode", "decode") == .Val(found) -> return ir_call(&m, p, &b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
+    if ir_codec_impl(p, concrete, "Decode", "decode") == .Val(found) -> return ir_call(m, p, b, found.key, found.args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     if ir_codec_decode_helper(p, concrete) == .Val(helper) {
-        helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
-        return ir_call(&m, p, &b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
+        helper_key: ir_codec_decode_key(p, helper.name) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)}: Core/Encoding/Encoding.jet {helper.name} is outside the checked program")
+        return ir_call(m, p, b, helper_key, helper.type_args, -1, [IRWriteBack]{}, [BodyCallArg]{tree_arg}, span)
     }
-    if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_decode(&m, p, &b, ty, receiver, concrete, members, span)
-    scalar: ir_codec_scalar(concrete) ?? return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
-    tree: ir_expr(&m, p, &b, receiver)
+    if ir_untag(concrete) == .FixedList(element, measure) -> return ir_dyn_fixed_decode(m, p, b, ty, receiver, concrete, element, measure, span)
+    if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_decode(m, p, b, ty, receiver, concrete, members, span)
+    scalar: ir_codec_scalar(concrete) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(concrete)} without its Decode implementation")
+    tree: ir_expr(m, p, b, receiver)
     if ir_failed(b) || tree < 0 -> return -1
     if scalar == "string" {
-        if ir_dyn_def(p, ir_ty(p, b, receiver)) == .Val(dyn_row) -> return ir_dyn_text_read(&m, p, &b, ty, dyn_row, tree, "jet_rt_codec_decode_string", span)
+        if ir_dyn_def(p, ir_ty(p, b, receiver)) == .Val(dyn_row) -> return ir_dyn_text_read(m, p, b, ty, dyn_row, tree, "jet_rt_codec_decode_string", span)
     }
-    ir_route(&m, p, &b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
+    ir_route(m, p, b, "jet_rt_codec_decode_{scalar}", [Int]{tree}, [Bool]{true}, ty, span)
+}
+
+// `tree.decode<[T#N]>()`: Core/Encoding/Encoding.jet __decode_fixed_list
+// decodes the List of exactly N items. A `[T#N]` carried as a List is that
+// List; an inline one takes a copy of its N elements.
+ir_dyn_fixed_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, fixed: Type, element: Type, measure: Measure, span: Span) -> Int Never! {
+    count: measure_literal_value(measure) ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)} without a literal length")
+    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)} as {ir_type_name(ty)}") }
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    fixed_row: ir_value_type(m, p, fixed) ?? return ir_type_fail(b, span, fixed)
+    key: ir_codec_decode_key(p, "__decode_fixed_list") ?? return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(fixed)}: Core/Encoding/Encoding.jet __decode_fixed_list is outside the checked program")
+    length: ir_node(b, Type.Int, NodeKind.IntLit{value: count, width: None}, span)
+    listed: ir_call(m, p, b, key, [Type]{element.copy()}, -1, [IRWriteBack]{}, [BodyCallArg]{ir_codec_arg(receiver), ir_codec_arg(length)}, span)
+    if ir_failed(b) || listed < 0 -> return -1
+    if ir_fixed_count(m, fixed_row) == None -> return ir_adapt(m, p, b, listed, result_row, span)
+    list_ty: Type.List{element: element.copy()}
+    list_row: ir_value_type(m, p, list_ty) ?? return ir_type_fail(b, span, list_ty)
+    err_row: ir_value_type(m, p, err_ty) ?? return ir_type_fail(b, span, err_ty)
+    out: ir_temp(m, b, result_row)
+    listed_fresh: b.fresh[listed]
+    decoded: ir_result_is_ok(m, b, listed)
+    ir_open_if(b.f, decoded, b.line)
+    list: ir_box_take(m, p, b, listed, 8, list_row)
+    storage: ir_fresh_temp(m, b, fixed_row)
+    ir_emit(b.f, IROp.StackAddress, storage, m.types[fixed_row].size, 8, -1, b.line)
+    ir_fixed_store_back(m, p, b, storage, list)
+    made: ir_result_box(m, p, b, ty, true, storage)
+    if ir_failed(b) -> return -1
+    ir_emit(b.f, IROp.Copy, out, made, -1, -1, b.line)
+    b.fresh[made] = false
+    ir_else(b.f, b.line)
+    b.fresh[listed] = listed_fresh
+    errors: ir_box_take(m, p, b, listed, 8, err_row)
+    failed: ir_result_box(m, p, b, ty, false, errors)
+    if ir_failed(b) -> return -1
+    ir_emit(b.f, IROp.Copy, out, failed, -1, -1, b.line)
+    b.fresh[failed] = false
+    ir_end(b.f, b.line)
+    b.fresh[out] = true
+    out
 }
 
 // `tree.decode<A | B>()`: the first member, in written order, whose own
 // decode succeeds, boxed as that member's variant; the last member's errors
 // when none does.
 ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
-    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(union_ty)} as {ir_type_name(ty)}") }
-    result_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    if members.len() == 0 -> return ir_fail_slot(&b, span, "Dyn.decode into {ir_type_name(union_ty)} without members")
-    ir_scope_open(&b)
-    tree: ir_expr(&m, p, &b, receiver)
+    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> { return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(union_ty)} as {ir_type_name(ty)}") }
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if members.len() == 0 -> return ir_fail_slot(b, span, "Dyn.decode into {ir_type_name(union_ty)} without members")
+    ir_scope_open(b)
+    tree: ir_expr(m, p, b, receiver)
     if ir_failed(b) || tree < 0 {
-        ir_scope_close(&m, &b)
+        ir_scope_close(m, b)
         return -1
     }
     tree_ty: ir_ty(p, b, receiver)
     tree_local: checked_generated_local("decode_union_{tree}", span, tree_ty)
     tree_owned: b.fresh[tree] && ir_has_drop(m, b, tree)
-    &b.bindings.push(IRBinding{name: tree_local.name.copy(), slot: tree, owned: tree_owned})
+    b.bindings.push(IRBinding{name: tree_local.name.copy(), slot: tree, owned: tree_owned})
     b.fresh[tree] = false
-    out: ir_temp(&m, &b, result_row)
+    out: ir_temp(m, b, result_row)
     loop (index, member) in members {
-        tree_node: ir_node(&b, tree_ty, NodeKind.Local{local: tree_local}, span)
+        tree_node: ir_node(b, tree_ty, NodeKind.Local{local: tree_local}, span)
         attempt_ty: Type.Result{ok: member.copy(), err: err_ty.copy()}
-        attempt: ir_dyn_decode(&m, p, &b, attempt_ty, tree_node, member, [Int]{}, span)
+        attempt: ir_dyn_decode(m, p, b, attempt_ty, tree_node, member, [Int]{}, span)
         if ir_failed(b) || attempt < 0 {
-            ir_scope_close(&m, &b)
+            ir_scope_close(m, b)
             return -1
         }
-        member_row: ir_value_type(&m, p, member) ?? return ir_type_fail(&b, span, member)
+        member_row: ir_value_type(m, p, member) ?? return ir_type_fail(b, span, member)
         attempt_fresh: b.fresh[attempt]
-        decoded: ir_result_is_ok(&m, &b, attempt)
-        ir_open_if(&b.f, decoded, b.line)
-        payload: ir_adapt(&m, p, &b, attempt, member_row, span)
-        boxed: ir_union_box(&m, p, &b, payload, member, union_ty, span)
-        made: ir_result_box(&m, p, &b, ty, true, boxed)
+        decoded: ir_result_is_ok(m, b, attempt)
+        ir_open_if(b.f, decoded, b.line)
+        payload: ir_adapt(m, p, b, attempt, member_row, span)
+        boxed: ir_union_box(m, p, b, payload, member, union_ty, span)
+        made: ir_result_box(m, p, b, ty, true, boxed)
         if ir_failed(b) {
-            ir_scope_close(&m, &b)
+            ir_scope_close(m, b)
             return -1
         }
-        ir_emit(&b.f, IROp.Copy, out, made, -1, -1, b.line)
+        ir_emit(b.f, IROp.Copy, out, made, -1, -1, b.line)
         b.fresh[made] = false
-        ir_else(&b.f, b.line)
+        ir_else(b.f, b.line)
         b.fresh[attempt] = attempt_fresh
         if index + 1 == members.len() {
-            failed: ir_result_rebox(&m, p, &b, attempt, result_row, span)
-            ir_emit(&b.f, IROp.Copy, out, failed, -1, -1, b.line)
+            failed: ir_result_rebox(m, p, b, attempt, result_row, span)
+            ir_emit(b.f, IROp.Copy, out, failed, -1, -1, b.line)
             b.fresh[failed] = false
         } else {
-            ir_release(&m, &b, attempt)
+            ir_release(m, b, attempt)
         }
         b.fresh[attempt] = false
     }
-    loop _ in 0..<members.len() -> ir_end(&b.f, b.line)
-    ir_scope_close(&m, &b)
+    loop _ in 0..<members.len() -> ir_end(b.f, b.line)
+    ir_scope_close(m, b)
     b.fresh[out] = true
     out
 }
@@ -503,11 +544,11 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
 ir_decode_under: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, segment: Int, inner: Int, span: Span) -> Int Never! {
     success: if ir_untag(ty) == {
         .Result(ok, _) -> ok.copy()
-        else -> { return ir_fail_slot(&b, span, "FieldError.under as {ir_type_name(ty)}") }
+        else -> { return ir_fail_slot(b, span, "FieldError.under as {ir_type_name(ty)}") }
     }
-    key: ir_codec_decode_key(p, "__decode_under") ?? return ir_fail_slot(&b, span, "FieldError.under: Core/Encoding/Encoding.jet __decode_under is outside the checked program")
+    key: ir_codec_decode_key(p, "__decode_under") ?? return ir_fail_slot(b, span, "FieldError.under: Core/Encoding/Encoding.jet __decode_under is outside the checked program")
     args: [BodyCallArg]{ir_codec_arg(segment), ir_codec_arg(inner)}
-    ir_call(&m, p, &b, key, [Type]{success}, -1, [IRWriteBack]{}, args, span)
+    ir_call(m, p, b, key, [Type]{success}, -1, [IRWriteBack]{}, args, span)
 }
 
 // A plain positional call argument for a by-name Core codec helper.
@@ -517,7 +558,7 @@ ir_codec_arg: fn(value: Int) -> BodyCallArg Never! {
 
 // The Core decode helper for a target with no Decode implementation of its
 // own, and its type arguments: a List (a byte List also takes Bytes and
-// base64 Text), an Option, a String-keyed Map and Dyn itself.
+// base64 Text), an Option, a String-keyed Map, an F32 and Dyn itself.
 ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_args: [Type])? Never! {
     if ir_dyn_def(p, target) != None -> return Val((name: "__decode_dyn", type_args: [Type]{}))
     if ir_untag(target) == {
@@ -530,6 +571,7 @@ ir_codec_decode_helper: fn(p: IRProgram, target: Type) -> (name: String, type_ar
             if ir_untag(key) != Type.String -> return None
             Val((name: "__decode_map", type_args: [Type]{value.copy()}))
         }
+        .Float32 -> Val((name: "__decode_f32", type_args: [Type]{}))
         else -> None
     }
 }
@@ -561,167 +603,176 @@ ir_codec_scalar: fn(target: Type) -> String? Never! {
 }
 
 // `value.encode()` into a Dyn: a Dyn is itself, a type with its own Encode
-// implementation calls it, an Int, fixed-width integer, Float, Bool, Char or
-// String value is boxed as its Dyn variant (a Char is the Text of its one
-// character), and a String-keyed Map or a List encodes as an Object or Array
-// of its encoded values. The builtin and typed codec routes have no lowering
-// here.
+// implementation calls it, an Int, fixed-width integer, Float, F32, Bool, Char
+// or String value is boxed as its Dyn variant (a Char is the Text of its one
+// character), and a String-keyed Map or a List or fixed List encodes as an
+// Object or Array of its encoded values. The builtin and typed codec routes
+// have no lowering here.
 ir_serde_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
     concrete: ir_ty(p, b, receiver)
-    if ir_dyn_def(p, concrete) != None -> return ir_expr(&m, p, &b, receiver)
+    if ir_dyn_def(p, concrete) != None -> return ir_expr(m, p, b, receiver)
     if ir_codec_impl(p, concrete, "Encode", "encode") == .Val(found) {
-        self_slot: ir_expr(&m, p, &b, receiver)
+        self_slot: ir_expr(m, p, b, receiver)
         if ir_failed(b) || self_slot < 0 -> return -1
-        return ir_call(&m, p, &b, found.key, found.args, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
+        return ir_call(m, p, b, found.key, found.args, self_slot, [IRWriteBack]{}, [BodyCallArg]{}, span)
     }
     if ir_dyn_def(p, ty) != None {
         receiver_node: ir_body_node(p, b, receiver)
-        typed: ir_node(&b, concrete, receiver_node.kind.copy(), receiver_node.span)
+        typed: ir_node(b, concrete, receiver_node.kind.copy(), receiver_node.span)
         if ir_untag(concrete) == .Map(map_key, _, _) {
-            if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(&m, p, &b, ty, typed, span)
+            if ir_untag(map_key) == Type.String -> return ir_dyn_object_encode(m, p, b, ty, typed, span)
         }
-        if ir_untag(concrete) == .List(element) {
+        if ir_sequence_element(concrete) == .Val(element) {
             // A byte List encodes as Dyn.Bytes, the inverse of __decode_bytes
-            // (encoding-decisions.md: Codable `[U8]` is never an integer array).
+            // (encoding-decisions.md: Codable `[U8]` is never an integer array);
+            // an inline `[U8#N]` crosses as a List copy of it.
             if ir_untag(element) == (Type.IntN{signed: false, bits: 8}) {
-                bytes: ir_expr(&m, p, &b, receiver)
+                value: ir_expr(m, p, b, receiver)
+                if ir_failed(b) || value < 0 -> return -1
+                bytes: ir_list_operand(m, p, b, value, span)
                 if ir_failed(b) || bytes < 0 -> return -1
-                return ir_dyn_box(&m, p, &b, ty, "Bytes", bytes, span)
+                return ir_dyn_box(m, p, b, ty, "Bytes", bytes, span)
             }
-            return ir_dyn_array_encode(&m, p, &b, ty, typed, element, span)
+            return ir_dyn_array_encode(m, p, b, ty, typed, element, span)
         }
-        if ir_untag(concrete) == .Option(inner) -> return ir_dyn_option_encode(&m, p, &b, ty, typed, inner, span)
-        if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_encode(&m, p, &b, ty, typed, concrete, members, span)
+        if ir_untag(concrete) == .Option(inner) -> return ir_dyn_option_encode(m, p, b, ty, typed, inner, span)
+        if ir_untag(concrete) == .Union(members) -> return ir_dyn_union_encode(m, p, b, ty, typed, concrete, members, span)
     }
     variant: if ir_untag(concrete) == {
         .Int | .IntN(_, _) -> "Int"
-        .Float -> "Float"
+        .Float | .Float32 -> "Float"
         .Bool -> "Bool"
         .String | .Char -> "Text"
         else -> ""
     }
-    if variant == "" || ir_dyn_def(p, ty) == None -> return ir_fail_slot(&b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
-    slot: ir_expr(&m, p, &b, receiver)
+    if variant == "" || ir_dyn_def(p, ty) == None -> return ir_fail_slot(b, span, "handle method SerdeEncode of {ir_type_name(concrete)}")
+    slot: ir_expr(m, p, b, receiver)
     if ir_failed(b) || slot < 0 -> return -1
     payload := slot
     if ir_untag(concrete) == .IntN(_, _) {
-        int_row: ir_value_type(&m, p, Type.Int) ?? return ir_type_fail(&b, span, Type.Int)
-        payload = ir_numeric_cast(&m, p, &b, slot, int_row, span)
+        int_row: ir_value_type(m, p, Type.Int) ?? return ir_type_fail(b, span, Type.Int)
+        payload = ir_numeric_cast(m, p, b, slot, int_row, span)
+        if ir_failed(b) -> return -1
+    }
+    // An F32 widens to the Float that holds it exactly.
+    if ir_untag(concrete) == Type.Float32 {
+        float_row: ir_value_type(m, p, Type.Float) ?? return ir_type_fail(b, span, Type.Float)
+        payload = ir_numeric_cast(m, p, b, slot, float_row, span)
         if ir_failed(b) -> return -1
     }
     if ir_untag(concrete) == Type.Char {
-        string_row: ir_string_row(&m)
-        payload = ir_runtime(&m, &b, "jet_rt_char_to_string", [Int]{slot}, string_row)
+        string_row: ir_string_row(m)
+        payload = ir_runtime(m, b, "jet_rt_char_to_string", [Int]{slot}, string_row)
         if ir_failed(b) -> return -1
     }
-    ir_dyn_box(&m, p, &b, ty, variant, payload, span)
+    ir_dyn_box(m, p, b, ty, variant, payload, span)
 }
 
 // A List's `encode()`: the Array of each item's encode(), in order, built by
 // a loop over the list the way ir_dyn_object_encode builds an Object.
 ir_dyn_array_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, element: Type, span: Span) -> Int Never! {
     output_ty: Type.List{element: ty}
-    output_row: ir_value_type(&m, p, output_ty) ?? return ir_type_fail(&b, span, output_ty)
-    ir_scope_open(&b)
-    source: ir_expr(&m, p, &b, value)
+    output_row: ir_value_type(m, p, output_ty) ?? return ir_type_fail(b, span, output_ty)
+    ir_scope_open(b)
+    source: ir_expr(m, p, b, value)
     if ir_failed(b) || source < 0 {
-        ir_scope_close(&m, &b)
+        ir_scope_close(m, b)
         return -1
     }
     value_ty: ir_ty(p, b, value)
     source_local: checked_generated_local("encode_source_{source}", span, value_ty)
     source_owned: b.fresh[source] && ir_has_drop(m, b, source)
-    &b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
+    b.bindings.push(IRBinding{name: source_local.name.copy(), slot: source, owned: source_owned})
     b.fresh[source] = false
     // The item List leaves the scope as the payload: its binding never owns it.
-    output: ir_list_empty(&m, &b, output_row)
+    output: ir_list_empty(m, b, output_row)
     b.fresh[output] = false
     output_local: checked_generated_local("encode_output_{output}", span, output_ty)
-    &b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
+    b.bindings.push(IRBinding{name: output_local.name.copy(), slot: output})
     item_local: checked_user_local("encode_item_{output}", span, element)
-    item_expr: ir_node(&b, element, NodeKind.Local{local: item_local}, span)
-    encoded: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
-    output_expr: ir_node(&b, output_ty, NodeKind.Local{local: output_local}, span)
-    push: ir_node(&b, Type.Named{name: "Unit"}, NodeKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [Int]{encoded}}, span)
-    source_expr: ir_node(&b, value_ty, NodeKind.Local{local: source_local}, span)
-    push_stmt: ir_stmt_node(&b, StmtKind.ExprStmt{value: push, span: span})
-    walk: ir_stmt_node(&b, StmtKind.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [Int]{push_stmt}, span: span})
-    ir_stmt(&m, p, &b, walk)
-    ir_scope_close(&m, &b)
+    item_expr: ir_node(b, element, NodeKind.Local{local: item_local}, span)
+    encoded: ir_node(b, ty, NodeKind.HandleMethod{receiver: item_expr, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
+    output_expr: ir_node(b, output_ty, NodeKind.Local{local: output_local}, span)
+    push: ir_node(b, Type.Named{name: "Unit"}, NodeKind.BuiltinMethod{receiver: output_expr, operation: TBuiltinOp.Push, args: [Int]{encoded}}, span)
+    source_expr: ir_node(b, value_ty, NodeKind.Local{local: source_local}, span)
+    push_stmt: ir_stmt_node(b, StmtKind.ExprStmt{value: push, span: span})
+    walk: ir_stmt_node(b, StmtKind.ForIn{label: None, variable: item_local, variable_two: None, source: source_expr, collection: source_expr, step: None, method_kind: None, columnar: false, by_value: false, source_stable: false, body: [Int]{push_stmt}, span: span})
+    ir_stmt(m, p, b, walk)
+    ir_scope_close(m, b)
     if ir_failed(b) -> return -1
     b.fresh[output] = true
-    ir_dyn_box(&m, p, &b, ty, "Array", output, span)
+    ir_dyn_box(m, p, b, ty, "Array", output, span)
 }
 
 // An Option's `encode()`: its value's encode() when present, Null when not.
 ir_dyn_option_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, inner: Type, span: Span) -> Int Never! {
-    dyn_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    inner_row: ir_value_type(&m, p, inner) ?? return ir_type_fail(&b, span, inner)
-    ir_scope_open(&b)
-    source: ir_dyn_encode_source(&m, p, &b, value, "encode_option", span)
+    dyn_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    inner_row: ir_value_type(m, p, inner) ?? return ir_type_fail(b, span, inner)
+    ir_scope_open(b)
+    source: ir_dyn_encode_source(m, p, b, value, "encode_option", span)
     if source < 0 {
-        ir_scope_close(&m, &b)
+        ir_scope_close(m, b)
         return -1
     }
-    out: ir_temp(&m, &b, dyn_row)
-    present: ir_option_is_some(&m, &b, source)
-    ir_open_if(&b.f, present, b.line)
-    payload: ir_option_payload(&m, &b, source, inner_row)
-    encoded: ir_dyn_encode_slot(&m, p, &b, ty, payload, inner, "encode_some_{source}", span)
+    out: ir_temp(m, b, dyn_row)
+    present: ir_option_is_some(m, b, source)
+    ir_open_if(b.f, present, b.line)
+    payload: ir_option_payload(m, b, source, inner_row)
+    encoded: ir_dyn_encode_slot(m, p, b, ty, payload, inner, "encode_some_{source}", span)
     if ir_failed(b) || encoded < 0 {
-        ir_scope_close(&m, &b)
+        ir_scope_close(m, b)
         return -1
     }
-    ir_emit(&b.f, IROp.Copy, out, encoded, -1, -1, b.line)
+    ir_emit(b.f, IROp.Copy, out, encoded, -1, -1, b.line)
     b.fresh[encoded] = false
-    ir_else(&b.f, b.line)
-    null: ir_enum_value(&m, p, &b, ty, "Dyn", "Null", BodyEnumPayload.Unit, span)
+    ir_else(b.f, b.line)
+    null: ir_enum_value(m, p, b, ty, "Dyn", "Null", BodyEnumPayload.Unit, span)
     if ir_failed(b) || null < 0 {
-        ir_scope_close(&m, &b)
+        ir_scope_close(m, b)
         return -1
     }
-    ir_emit(&b.f, IROp.Copy, out, null, -1, -1, b.line)
+    ir_emit(b.f, IROp.Copy, out, null, -1, -1, b.line)
     b.fresh[null] = false
-    ir_end(&b.f, b.line)
-    ir_scope_close(&m, &b)
+    ir_end(b.f, b.line)
+    ir_scope_close(m, b)
     b.fresh[out] = true
     out
 }
 
 // A union's `encode()`: the encode() of the member its variant holds.
 ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, union_ty: Type, members: [Type], span: Span) -> Int Never! {
-    row: ir_type_def(p, ir_union_key(ir_untag(union_ty))) ?? return ir_fail_slot(&b, span, "union {ir_type_name(union_ty)} without a definition")
-    dyn_row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    if members.len() == 0 -> return ir_fail_slot(&b, span, "encode of {ir_type_name(union_ty)} without members")
-    ir_scope_open(&b)
-    source: ir_dyn_encode_source(&m, p, &b, value, "encode_union", span)
+    row: ir_type_def(p, ir_union_key(ir_untag(union_ty))) ?? return ir_fail_slot(b, span, "union {ir_type_name(union_ty)} without a definition")
+    dyn_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    if members.len() == 0 -> return ir_fail_slot(b, span, "encode of {ir_type_name(union_ty)} without members")
+    ir_scope_open(b)
+    source: ir_dyn_encode_source(m, p, b, value, "encode_union", span)
     if source < 0 {
-        ir_scope_close(&m, &b)
+        ir_scope_close(m, b)
         return -1
     }
-    out: ir_temp(&m, &b, dyn_row)
-    selector: ir_load_word(&m, &b, source, 0)
+    out: ir_temp(m, b, dyn_row)
+    selector: ir_load_word(m, b, source, 0)
     loop (index, member) in members {
         last: index + 1 == members.len()
         if !last {
-            expected: ir_word_const(&m, &b, index)
-            held: ir_bool_op(&m, &b, IROp.Eq, selector, expected)
-            ir_open_if(&b.f, held, b.line)
+            expected: ir_word_const(m, b, index)
+            held: ir_bool_op(m, b, IROp.Eq, selector, expected)
+            ir_open_if(b.f, held, b.line)
         }
-        fields: ir_variant_members(&m, p, row, [Type]{}, index) ?? return ir_fail_slot(&b, span, "layout of {ir_type_name(union_ty)}")
-        if fields.len() != 1 -> return ir_fail_slot(&b, span, "encode of union member {ir_type_name(member)} without a payload")
-        payload: ir_load_at(&m, &b, source, fields[0].offset, fields[0].ty)
-        encoded: ir_dyn_encode_slot(&m, p, &b, ty, payload, member, "encode_member_{source}_{index}", span)
+        fields: ir_variant_members(m, p, row, [Type]{}, index) ?? return ir_fail_slot(b, span, "layout of {ir_type_name(union_ty)}")
+        if fields.len() != 1 -> return ir_fail_slot(b, span, "encode of union member {ir_type_name(member)} without a payload")
+        payload: ir_load_at(m, b, source, fields[0].offset, fields[0].ty)
+        encoded: ir_dyn_encode_slot(m, p, b, ty, payload, member, "encode_member_{source}_{index}", span)
         if ir_failed(b) || encoded < 0 {
-            ir_scope_close(&m, &b)
+            ir_scope_close(m, b)
             return -1
         }
-        ir_emit(&b.f, IROp.Copy, out, encoded, -1, -1, b.line)
+        ir_emit(b.f, IROp.Copy, out, encoded, -1, -1, b.line)
         b.fresh[encoded] = false
-        if !last -> ir_else(&b.f, b.line)
+        if !last -> ir_else(b.f, b.line)
     }
-    loop _ in 1..<members.len() -> ir_end(&b.f, b.line)
-    ir_scope_close(&m, &b)
+    loop _ in 1..<members.len() -> ir_end(b.f, b.line)
+    ir_scope_close(m, b)
     b.fresh[out] = true
     out
 }
@@ -730,12 +781,12 @@ ir_dyn_union_encode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, val
 // generated local, which owns it when it is a fresh value with a drop; -1
 // when it fails.
 ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, stem: String, span: Span) -> Int Never! {
-    source: ir_expr(&m, p, &b, value)
+    source: ir_expr(m, p, b, value)
     if ir_failed(b) || source < 0 -> return -1
     value_ty: ir_ty(p, b, value)
     local: checked_generated_local("{stem}_{source}", span, value_ty)
     owned: b.fresh[source] && ir_has_drop(m, b, source)
-    &b.bindings.push(IRBinding{name: local.name.copy(), slot: source, owned: owned})
+    b.bindings.push(IRBinding{name: local.name.copy(), slot: source, owned: owned})
     b.fresh[source] = false
     source
 }
@@ -744,10 +795,10 @@ ir_dyn_encode_source: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, 
 // generated local `name` bound to it.
 ir_dyn_encode_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, slot: Int, slot_ty: Type, name: String, span: Span) -> Int Never! {
     local: checked_generated_local(name, span, slot_ty)
-    &b.bindings.push(IRBinding{name: local.name.copy(), slot: slot})
-    item: ir_node(&b, slot_ty, NodeKind.Local{local: local}, span)
-    encoded: ir_node(&b, ty, NodeKind.HandleMethod{receiver: item, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
-    ir_expr(&m, p, &b, encoded)
+    b.bindings.push(IRBinding{name: local.name.copy(), slot: slot})
+    item: ir_node(b, slot_ty, NodeKind.Local{local: local}, span)
+    encoded: ir_node(b, ty, NodeKind.HandleMethod{receiver: item, operation: BodyHandleOp.SerdeEncode, args: [Int]{}}, span)
+    ir_expr(m, p, b, encoded)
 }
 
 // `concrete`'s own `codec` implementation method (`Decode|decode`,
@@ -802,7 +853,7 @@ ir_codec_method_args: fn(p: IRProgram, function: FnBody, concrete: Type) -> [Typ
             if candidate.name == parameter.name -> found = index
         }
         if found < 0 -> return None
-        &args.push(actual[found].copy())
+        args.push(actual[found].copy())
     }
     Val(args)
 }

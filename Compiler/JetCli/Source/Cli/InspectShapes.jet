@@ -285,7 +285,7 @@ jet_cli_shape_fact: fn(source: String, structure: StructDef) -> JetCLIShapeBuild
             short = jet_cli_shape_marker_string(marker, None)
         }
         skip: field.computed != None || jet_cli_shape_marker(field.serde_markers, "Skip") != None
-        &fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
+        fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }
     seen := [String]{}
     loop field in fields {
@@ -308,7 +308,7 @@ jet_cli_shape_fact: fn(source: String, structure: StructDef) -> JetCLIShapeBuild
         if seen.contains(field.name) {
             return JetCLIShapeBuild.Invalid{error: "duplicate shape field {field.name}"}
         }
-        &seen.push(field.name)
+        seen.push(field.name)
     }
     loop projection in JET_CLI_SHAPE_PROJECTIONS {
         names := [String]{}
@@ -318,7 +318,7 @@ jet_cli_shape_fact: fn(source: String, structure: StructDef) -> JetCLIShapeBuild
             if names.contains(name) {
                 return JetCLIShapeBuild.Invalid{error: "duplicate {projection} projection name {name}"}
             }
-            &names.push(name)
+            names.push(name)
         }
     }
     layout := "default"
@@ -344,7 +344,7 @@ jet_cli_shape_names_value: fn(names: JetCLIShapeNames) -> JetCLIStatusValue Neve
     labels: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "db", "layout"}
     ignored := [String]{}
     loop index in 0..<slots.len() {
-        if slots[index] == .None -> &ignored.push(labels[index])
+        if slots[index] == .None -> ignored.push(labels[index])
     }
     jet_cli_status_object(
     [JetCLIStatusField]{
@@ -370,7 +370,7 @@ jet_cli_shape_projection_value: fn(fact: JetCLIShapeFact, projection: String) ->
     loop field in fact.fields {
         if field.skip -> next
         short: if projection == "args" -> field.short else -> String?{None}
-        &rows.push(
+        rows.push(
         jet_cli_status_object(
         [JetCLIStatusField]{
             jet_cli_status_field("source_name", jet_cli_status_text(field.name)),
@@ -484,7 +484,7 @@ jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Boo
         loop item in checked.items {
             if item == .Struct(structure) {
                 if jet_cli_shape_fact(source, structure) == {
-                    .Fact(fact) -> { &facts.push(fact) }
+                    .Fact(fact) -> { facts.push(fact) }
                     .Invalid(error) -> {
                         what: "could not project shape `{structure.name}` from `{source}`: {error}"
                         why: "the checked declaration could not form one canonical shape fact"
@@ -499,7 +499,7 @@ jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Boo
             }
         }
     }
-    &facts.sort_by((left: JetCLIShapeFact, right: JetCLIShapeFact) -> (left.source <=> right.source).then(left.type_name <=> right.type_name))
+    facts.sort_by((left: JetCLIShapeFact, right: JetCLIShapeFact) -> (left.source <=> right.source).then(left.type_name <=> right.type_name))
     if json {
         values: loop fact in facts -> jet_cli_shape_fact_value(fact)
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.shapes", true, [JetCLIStatusField]{jet_cli_status_field("shapes", jet_cli_status_array(values))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}

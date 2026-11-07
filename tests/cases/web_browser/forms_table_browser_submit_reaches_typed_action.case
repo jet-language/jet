@@ -26,7 +26,7 @@ stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
 stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
 when probe {env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium} --version stdout+stderr: ~any "Chromium" "Chrome"
 when probe {env:JET_WEB_NODE|env:NODE|node} --version stdout: ^= "v0" | ^= "v1" | ^= "v2" | ^= "v3" | ^= "v4" | ^= "v5" | ^= "v6" | ^= "v7" | ^= "v8" | ^= "v9"
-spawn app: jet run {root}/Examples/features/web/forms_table.jet
+spawn app: jet run {root}/Examples/Apps/Web/FormsTable.jet
 env: JET_APP_PORT={free-port:forms}
 stdout: null
 poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:forms} / - write until stdout: ^= "HTTP/1.1 200" timeout 30s every 50ms

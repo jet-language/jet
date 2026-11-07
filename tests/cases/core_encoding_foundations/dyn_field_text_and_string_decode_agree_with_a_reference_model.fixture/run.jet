@@ -47,7 +47,7 @@ build: fn(encoded: Dyn) -> Dyn {
                         .Text(k) -> k
                         else -> panic("encoded key")
                     }
-                    &pairs.push((key: key, value: build(pair[1])))
+                    pairs.push((key: key, value: build(pair[1])))
                 }
             }
             return Dyn.Object(pairs)
@@ -77,9 +77,9 @@ run: fn() {
                             .Ok(t) -> "d={t}"
                             .Err(e) -> "de={reasons(e)}"
                         }
-                        &out.push("ok {shown(value)} {text} {decoded}")
+                        out.push("ok {shown(value)} {text} {decoded}")
                     }
-                    .Err(e) -> &out.push("err {reasons(e)}")
+                    .Err(e) -> out.push("err {reasons(e)}")
                 }
             }
         }

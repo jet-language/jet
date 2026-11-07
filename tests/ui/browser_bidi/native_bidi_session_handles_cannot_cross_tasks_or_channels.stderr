@@ -1,8 +1,8 @@
 Error [jet.ValueNotSendable]: `session` can't cross into a task because `browser.Browser` isn't sendable
-  --> tests/ui/browser_bidi/native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:11:28
+  --> tests/ui/browser_bidi/native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:11:26
     |
- 11 |     handle :: task session.close()
-    |                            ^^^^^
+ 11 |     handle: task session.close()
+    |                          ^^^^^
  Why: `Browser` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
  Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
 More: jet-lang.dev/e/E1102
@@ -19,7 +19,7 @@ More: jet-lang.dev/e/E1102
 Error [jet.UndischargedTask]: `handle` still owes `join`
   --> tests/ui/browser_bidi/native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:11:5
     |
- 11 |     handle :: task session.close()
+ 11 |     handle: task session.close()
     |     ^^^^^^
  Why: The program may end before this task finishes
  Fix: Join it with `.join()`, use its result, or write `.detach()` to let it go free

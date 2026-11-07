@@ -6,8 +6,8 @@ run: fn() {
     client: net.unix_connect("/tmp/jet-conformance-unix-write-all-bytes.sock") ?? panic("connect")
     server: net.unix_accept(listener) ?? panic("accept")
     print((() -> {
-        net.unix_write_all_bytes(&client, "all".bytes()) ?? panic("write")
+        net.unix_write_all_bytes(client, "all".bytes()) ?? panic("write")
         true
     })())
-    print(net.unix_read(&server) ?? panic("read"))
+    print(net.unix_read(server) ?? panic("read"))
 }

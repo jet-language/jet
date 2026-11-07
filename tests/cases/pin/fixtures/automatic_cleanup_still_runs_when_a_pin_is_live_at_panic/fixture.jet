@@ -6,7 +6,7 @@ Guard: struct {
 }
 
 impl Guard.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         print("closed {self.name}")
     }
 }
@@ -19,7 +19,7 @@ Node: struct {
 run: fn() {
     guard := Guard{name: "pin"}
     node := Node{payload: 1, hops: 0}
-    pinned: mem.pin(&node)
+    pinned: mem.pin(node)
     pinned.hops += 1
     print("body {(pinned.hops)}")
     panic("stop")

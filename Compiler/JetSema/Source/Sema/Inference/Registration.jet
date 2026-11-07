@@ -18,9 +18,9 @@ sema_infer_context_for_registration: fn(caller_module_identity: String, caller_p
 sema_infer_registered_function: fn(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], args: [Type], explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     context := sema_infer_context_for_registration(caller_module_identity, caller_package_identity, function.generic_params, lexical_generic_params, expected)
     if function.signature == {
-        .Fn(parameters, ret, _, _, _, _) -> sema_infer_callable(graph, &context, parameters, ret, args, explicit_type_args, span, &diagnostics)
+        .Fn(parameters, ret, _, _, _, _) -> sema_infer_callable(graph, context, parameters, ret, args, explicit_type_args, span, diagnostics)
         else -> {
-            &diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a function", "Registration can specialize only a callable signature", "register a function-typed declaration before calling it"))
+            diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a function", "Registration can specialize only a callable signature", "register a function-typed declaration before calling it"))
             None
         }
     }
@@ -31,7 +31,7 @@ sema_infer_registered_function: fn(function: SemaRegistrationFunction, graph: Se
 // the whole row (methods and their bodies) to swap one field.
 sema_infer_registered_nominal: fn(nominal: SemaRegistrationNominal, nominal_ty: Type, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], actual: Type, explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
     context := sema_infer_context_for_registration(caller_module_identity, caller_package_identity, nominal.generic_params, lexical_generic_params, expected)
-    sema_infer_nominal(graph, &context, nominal_ty, actual, explicit_type_args, span, &diagnostics)
+    sema_infer_nominal(graph, context, nominal_ty, actual, explicit_type_args, span, diagnostics)
 }
 
 sema_infer_registered_method: fn(function: SemaRegistrationFunction, graph: SemaRegistrationGraph?, caller_module_identity: String, caller_package_identity: String, lexical_generic_params: [TGenericParam], receiver: Type?, args: [Type], explicit_type_args: [Type], expected: Type?, span: Span, diagnostics: &[Diagnostic]) -> SemaInferenceResult? {
@@ -39,12 +39,12 @@ sema_infer_registered_method: fn(function: SemaRegistrationFunction, graph: Sema
     if function.signature == {
         .Fn(parameters, ret, _, _, _, _) -> {
             actuals := [Type]{}
-            if receiver == .Val(receiver_ty) -> &actuals.push(receiver_ty)
-            loop arg in args -> &actuals.push(arg)
-            sema_infer_callable(graph, &context, parameters, ret, actuals, explicit_type_args, span, &diagnostics)
+            if receiver == .Val(receiver_ty) -> actuals.push(receiver_ty.copy())
+            loop arg in args -> actuals.push(arg.copy())
+            sema_infer_callable(graph, context, parameters, ret, actuals, explicit_type_args, span, diagnostics)
         }
         else -> {
-            &diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a method", "Registration can specialize only a callable method signature", "register the complete method signature before dispatch"))
+            diagnostics.push(sema_error("E0803", span, "`{function.symbol.name}` is not a method", "Registration can specialize only a callable method signature", "register the complete method signature before dispatch"))
             None
         }
     }

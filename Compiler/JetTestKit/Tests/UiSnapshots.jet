@@ -179,6 +179,43 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     files.remove_all(root) ?? panic("remove UI fixed-ledger scratch: {err}")
 }
 
+#Test("a UI fixture's `@requires` lines gate it and its fixed companion as SKIP-HOST, even under a ledger row") {
+    root: kit_ui_test_scratch("requires")
+    missing: "tool:jet-ui-test-absent-tool"
+    met: "env:JET_UI_TEST_UNSET_VARIABLE="
+    assert_eq(kit_ui_requirements("// @requires {met}\nrun: fn() {{}}\n//\t@requires\t{missing}\n// @requires_not\n"), [met, missing])
+    assert_eq(kit_ui_invocation("// @requires {missing}\n", "a.jet", false).refused, "")
+    kit_exec_write(files.join(root, "tests/ui/needs_tool.jet"), "run: fn() {{}}\n// @requires {missing}\n")
+    kit_exec_write(files.join(root, "tests/ui/needs_tool.stderr"), "Error [jet.UnknownName]: never compared\n")
+    // The CLI double passes only `clean` entries; `needs_tool` would fail if it ran.
+    kit_exec_write(files.join(root, "tests/ui/clean_companion.jet"), "run: fn() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_companion.fixed.jet"), "// @requires {met}\n// @requires {missing}\nrun: fn() {{}}\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_companion.stderr"), "(no errors)\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_met.jet"), "run: fn() {{}}\n// @requires {met}\n")
+    kit_exec_write(files.join(root, "tests/ui/clean_met.stderr"), "(no errors)\n")
+    kit_exec_write(kit_test_ledger(root), "tests/ui/needs_tool\towner\tledger rows never claim a skipped fixture\n")
+    kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
+    entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
+    assert_eq(entries.map(entry -> entry.path.copy()), ["tests/ui/clean_companion.jet", "tests/ui/clean_met.jet", "tests/ui/needs_tool.jet"])
+    loop (index, entry) in entries {
+        outcomes: kit_ui_run(entry, kit_ui_test_context(root, "case-{index}"))
+        statuses: outcomes.map(outcome -> outcome.verdict.status.copy())
+        if {
+            entry.path == "tests/ui/clean_companion.jet" -> {
+                assert_eq(statuses, ["PASS", "SKIP-HOST"])
+                assert_eq(outcomes[1].tier, "fixed-check")
+                assert_eq(outcomes[1].verdict.detail, missing)
+            }
+            entry.path == "tests/ui/clean_met.jet" -> assert_eq(statuses, ["PASS"])
+            else -> {
+                assert_eq(statuses, ["SKIP-HOST"])
+                assert_eq(outcomes[0].verdict.detail, missing)
+            }
+        }
+    }
+    files.remove_all(root) ?? panic("remove UI requires scratch: {err}")
+}
+
 #Test("UI staging gives a loose entry its imported modules route trees and data but no other entry") {
     root: kit_ui_test_scratch("imports")
     main: "use helper: \"./modules/helper\"\nrun: fn() {{ print(helper.value()) }}\n"
@@ -257,13 +294,13 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
 #Test("UI coverage independently derives source codes report openers and allowances") {
     row: KitUIRegistryRow{code: "E0109", name: "jet.OperatorTypeMismatch", active: true}
     kept := [String]{}
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "", &kept).status, "FAIL")
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", &kept).status, "PASS")
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n", &kept).status, "FAIL")
-    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "", &kept).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "", kept).status, "FAIL")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], [], "E0109\tleft-only\tTower #2093\n", kept).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "E0109\tleft-only\tTower #2093\n", kept).status, "FAIL")
+    assert_eq(kit_ui_set_coverage([row], ["E0109"], ["E0109"], "", kept).status, "PASS")
     over := ""
     loop i in 0..<153 -> over = "{over}E0109\tleft-only\tTower #2093\n"
-    assert(kit_ui_set_coverage([row], ["E0109"], [], over, &kept).detail.contains("ceiling 152"))
+    assert(kit_ui_set_coverage([row], ["E0109"], [], over, kept).detail.contains("ceiling 152"))
     assert_eq(kit_ui_extract_reports("Error [jet.OperatorTypeMismatch]: root\n Warning [jet.SameEnumGuardTable]: indented\n Fix: E0001\nStop [E3003]: runtime\nLint [L0302]: lint\nError [jet.Unknown]: unregistered\n", [row]), ["E0109", "E3003", "L0302"])
     assert_eq(kit_ui_extract_source("\"E0109\" [L0302] \"FS\" \"E-WEB-ABI-TYPE\" \"JT0001\""), ["E0109", "L0302", "E-WEB-ABI-TYPE", "JT0001"])
     parsed: kit_ui_registry("// header\nA: struct {{\n    impl Diagnostic {{\n        code: \"E0109\"\n        edit: .CryptoMisuse\n        no_fix: None\n        what: fn(self) -> String {{ \"w\" }}\n    }}\n}}\n\nB: struct {{\n    path: String\n\n    impl Diagnostic {{\n        code: \"E0001\"\n        stage: [.Jet, .Parse]\n    }}\n}}\n\nC: struct {{\n    impl Diagnostic {{\n        code: \"E0004\"\n        status: .Retired\n    }}\n}}\n")
@@ -280,11 +317,11 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     other: KitUIRegistryRow{code: "E0001", name: "jet.StrayCharacter", active: true}
     allowlist: "# code\tside\tcard\nE0109\tleft-only\tTower #2093\nE0001\tleft-only\tTower #1\n"
     kept := [String]{}
-    verdict: kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], allowlist, &kept)
+    verdict: kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], allowlist, kept)
     assert_eq(verdict.status, "FAIL")
     assert(verdict.detail.contains("stale coverage allowance: E0001"))
     assert_eq(kept.join("\n"), "# code\tside\tcard\nE0109\tleft-only\tTower #2093\n")
     again := [String]{}
-    assert_eq(kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], kept.join("\n"), &again).status, "PASS")
+    assert_eq(kit_ui_set_coverage([row, other], ["E0109", "E0001"], ["E0001"], kept.join("\n"), again).status, "PASS")
     assert_eq(again.join("\n"), kept.join("\n"))
 }

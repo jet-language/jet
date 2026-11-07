@@ -60,34 +60,34 @@ lsp_signature_change_response: fn(server: LSPServer, params: Dyn, id: Dyn) -> St
         groups := [lsp_signature_path.OSPath:[Int]]{}
         loop (index, edit) in preview.edits {
             path: lsp_signature_module_path(result, edit.path, doc.path.platform) ?? {
-                &preview.unknown.push("unavailable_edit_source:{edit.path}")
+                preview.unknown.push("unavailable_edit_source:{edit.path}")
                 next
             }
             if groups.get(path) == None -> groups[path] = [Int]{}
-            &groups[path].push(index)
+            groups[path].push(index)
         }
         // Sort native keys once to preserve BTreeMap traversal without encoding
         // OSPath as a display string or replacing exact keys by a linear table.
         paths := [lsp_signature_path.OSPath]{}
-        loop (path, _) in groups -> &paths.push(path)
-        &paths.sort_by((a, b) -> a.encoded <=> b.encoded)
+        loop (path, _) in groups -> paths.push(path)
+        paths.sort_by((a, b) -> a.encoded <=> b.encoded)
         loop path in paths {
             canonical: lsp_canonical_source_uri(lsp_signature_path.display(path), result.project_root, path.platform) ?? {
-                &preview.unknown.push("unversioned_source:{lsp_signature_path.display(path)}")
+                preview.unknown.push("unversioned_source:{lsp_signature_path.display(path)}")
                 next
             }
-            if !checked.checked_versions.has_key(canonical) -> &preview.unknown.push("unopened_or_unversioned_source:{lsp_signature_path.display(path)}")
+            if !checked.checked_versions.has_key(canonical) -> preview.unknown.push("unopened_or_unversioned_source:{lsp_signature_path.display(path)}")
         }
         loop path in paths {
             if !staged_sources.has_key(path) {
-                &preview.unknown.push("unavailable_edit_source:{lsp_signature_path.display(path)}")
+                preview.unknown.push("unavailable_edit_source:{lsp_signature_path.display(path)}")
                 next
             }
             indices: groups[path]
-            if !lsp_apply_signature_edit_indices(&staged_sources[path], preview.edits, indices) -> &preview.unknown.push("invalid_checked_edit_span:{lsp_signature_path.display(path)}")
+            if !lsp_apply_signature_edit_indices(staged_sources[path], preview.edits, indices) -> preview.unknown.push("invalid_checked_edit_span:{lsp_signature_path.display(path)}")
         }
-        &preview.unknown.sort()
-        &preview.unknown.dedup()
+        preview.unknown.sort()
+        preview.unknown.dedup()
         staged_status := "not_run"
         staged_diagnostics := 0
         if preview.can_apply() {
@@ -100,8 +100,8 @@ lsp_signature_change_response: fn(server: LSPServer, params: Dyn, id: Dyn) -> St
             }
             root_text: staged_sources.get(root_path) ?? doc.text
             staged_queries := JetDriverCompilerQueries.new()
-            loop (path, source) in staged_sources -> &staged_queries.set_document(server.snapshot.cwd, path, source)
-            staged_owner: &staged_queries.check_text_lsp(server.snapshot, root_path, root_text)
+            loop (path, source) in staged_sources -> staged_queries.set_document(server.snapshot.cwd, path, source)
+            staged_owner: staged_queries.check_text_lsp(server.snapshot, root_path, root_text)
             staged_permit: staged_owner.guard_read()
             staged: staged_permit.value.result
             staged_diagnostics = staged.diagnostics.len()
@@ -117,7 +117,7 @@ lsp_signature_change_response: fn(server: LSPServer, params: Dyn, id: Dyn) -> St
                 .Val(text) -> foundation_json_quote(text)
                 .None -> "null"
             }
-            &callers.push("{{\"identity\":{foundation_json_quote(caller.identity)},\"source\":{foundation_json_quote(caller.path)},\"range\":{range},\"value\":{value},\"status\":\"{caller.status}\"}}")
+            callers.push("{{\"identity\":{foundation_json_quote(caller.identity)},\"source\":{foundation_json_quote(caller.path)},\"range\":{range},\"value\":{value},\"status\":\"{caller.status}\"}}")
         }
         edits := [String]{}
         loop edit in preview.edits {
@@ -129,14 +129,14 @@ lsp_signature_change_response: fn(server: LSPServer, params: Dyn, id: Dyn) -> St
                 .Val(number) -> "{number}"
                 .None -> "null"
             }
-            &edits.push("{{\"uri\":{foundation_json_quote(uri)},\"version\":{version},\"range\":{lsp_range_json(range)},\"newText\":{foundation_json_quote(edit.new_text)}}}")
+            edits.push("{{\"uri\":{foundation_json_quote(uri)},\"version\":{version},\"range\":{lsp_range_json(range)},\"newText\":{foundation_json_quote(edit.new_text)}}}")
         }
         versions := [String]{}
-        loop (uri, version) in checked.checked_versions -> &versions.push("{foundation_json_quote(uri)}:{version}")
-        &versions.sort()
+        loop (uri, version) in checked.checked_versions -> versions.push("{foundation_json_quote(uri)}:{version}")
+        versions.sort()
         unknown := [String]{}
-        loop reason in preview.unknown -> &unknown.push(foundation_json_quote(reason))
-        &unknown.sort()
+        loop reason in preview.unknown -> unknown.push(foundation_json_quote(reason))
+        unknown.sort()
         can_apply: preview.can_apply() && staged_status == "passed"
         status: if can_apply -> "ready" else -> "incomplete"
         declaration_range := "null"
@@ -178,7 +178,7 @@ lsp_signature_module_path: fn(result: JetDriverCompilerCheckResult, path: String
 // These reachable pure projections retain exactly its sorting/validation laws.
 lsp_signature_edit_order: fn(edits: [SignatureChangeEdit], indices: [Int]) -> [Int] Never! {
     order := indices.copy()
-    &order.sort_by((left: Int, right: Int) -> {
+    order.sort_by((left: Int, right: Int) -> {
         a: edits[left].span
         b: edits[right].span
         if a.start != b.start -> b.start <=> a.start else -> b.end <=> a.end

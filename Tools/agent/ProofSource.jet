@@ -70,7 +70,7 @@ is_full_sha: fn(text: String) -> Bool Never! {
 
 git: fn(repository: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String? Never! {
     argv := [String]{"git", "-C", repository}
-    loop arg in args -> &argv.push(arg.copy())
+    loop arg in args -> argv.push(arg.copy())
     ran: process.cmd(argv).output_limit(67108864).run() ?? return None
     if ran.code != 0 || ran.signal != None -> return None
     Val(ran.output)
@@ -117,7 +117,7 @@ publish: fn(repository: String, commit: String, temporary: String, destination: 
             term.eprint("proof-source: unsupported proof source entry {path}: {fields.join(" ")}")
             return false
         }
-        &tracked.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path), "mode": Dyn.Text(fields[0].copy()), "blob": Dyn.Text(fields[2].copy())}))
+        tracked.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(path), "mode": Dyn.Text(fields[0].copy()), "blob": Dyn.Text(fields[2].copy())}))
     }
     archive: "{temporary}/source.tar"
     failed: tool([String]{"git", "-C", repository, "archive", "--format=tar", "--output={archive}", commit}) ?? tool([String]{"tar", "-xf", archive, "-C", "{temporary}/source"}) ?? ""
@@ -172,8 +172,8 @@ executable: fn(mode: Int) -> Bool Never! {
 // Git's blob id: sha1 of `blob <length>\0<bytes>`.
 blob_hash: fn(bytes: [U8]) -> String Never! {
     framed := "blob {bytes.len()}".bytes()
-    &framed.push(U8{0})
-    &framed.extend(bytes)
+    framed.push(U8{0})
+    framed.extend(bytes.copy())
     crypto.sha1(framed)
 }
 

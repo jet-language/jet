@@ -22,7 +22,7 @@ CapturePolicy: struct {
         scope := attempt.base_consent_scope()
         scope.mode = self.mode
         scope.byte_limit = self.budget().max_bytes
-        &scope.canonicalize()
+        scope.canonicalize()
         scope
     }
     eligibility: fn(self, attempt: CaptureAttempt) -> CaptureEligibility Never! {
@@ -64,8 +64,8 @@ CaptureStartFact: struct {
         CaptureStartFact{identity: attempt.identity.copy(), mode: policy.mode, package: policy.package, no_capture: policy.no_capture, explicit_capture: policy.explicit_capture, budget: policy.budget(), eligibility: policy.eligibility(attempt)}
     }
     capture_kind: fn(self) -> CaptureKind? Never! { self.eligibility.kind() }
-    fault: fn(self, fault_code: ^String, location: ^CaptureLocation?) -> CaptureFaultFact Never! {
-        CaptureFaultFact.new(self, ^fault_code, ^location)
+    fault: fn(self, fault_code: &&String, location: &&CaptureLocation?) -> CaptureFaultFact Never! {
+        CaptureFaultFact.new(self, fault_code, location)
     }
 }
 CaptureFaultFact: struct {
@@ -74,8 +74,8 @@ CaptureFaultFact: struct {
     fault_code: String
     location: CaptureLocation?
     eligibility: CaptureEligibility
-    new: fn(start: CaptureStartFact, fault_code: ^String, location: ^CaptureLocation?) -> CaptureFaultFact Never! {
-        CaptureFaultFact{identity: start.identity.copy(), mode: start.mode, fault_code: ^fault_code, location: ^location, eligibility: start.eligibility.copy()}
+    new: fn(start: CaptureStartFact, fault_code: &&String, location: &&CaptureLocation?) -> CaptureFaultFact Never! {
+        CaptureFaultFact{identity: start.identity.copy(), mode: start.mode, fault_code: fault_code.move(), location: location.move(), eligibility: start.eligibility.copy()}
     }
     captured: fn(self) -> Bool Never! { self.eligibility.is_allowed() }
     capture_kind: fn(self) -> CaptureKind? Never! { self.eligibility.kind() }

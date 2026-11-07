@@ -106,11 +106,11 @@ native_pack_test_fixture: fn(store: ArtifactStore, payload: String) -[FS, Env, E
     consume: Dyn.Object([String: Dyn]{"id": Dyn.Text("consume"), "expected_rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": Dyn.Array([Dyn]{produced}), "outputs": Dyn.Array([Dyn]{})})
     artifacts := [Dyn]{}
     loop role in ([String]{"pack_object", "jet_object", "remaining_native_archive", "remaining_raw_leaf_archive", "runtime_sources", "runtime_exports", "runtime_imports"}) {
-        &artifacts.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text("pack")})}))
+        artifacts.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text("pack")})}))
     }
     evidence_roles := [Dyn]{}
     loop role in ([String]{"generation", "raw_frontend", "final_source_tree"}) {
-        &evidence_roles.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text(role)})}))
+        evidence_roles.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text(role)})}))
     }
     contract_tree: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-rail-contract/v1"), "job": native_pack_handle_tree(job), "proofq_name": Dyn.Text("unit-codec-fixture"), "steps": Dyn.Array([Dyn]{build, consume}), "artifacts": Dyn.Array(artifacts), "evidence": Dyn.Array(evidence_roles), "generators": Dyn.Array([Dyn]{known}), "abi": Dyn.Array([Dyn]{known}), "routes": Dyn.Array([Dyn]{known}), "providers": Dyn.Array([Dyn]{known})})
     rail_contract: store.publish_blob(native_pack_encode(contract_tree) ?? panic("contract codec")) ?? panic("contract")
@@ -165,7 +165,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
     loop step in fixture.evidence.steps {
         assert(loaded.objects.contains(step.invocation))
         assert(loaded.objects.contains(step.receipt))
-        log: native_pack_check_step_receipt(native_pack_blob(store, step.receipt, &census) ?? panic("actual receipt"), step) ?? panic("actual stdout handle")
+        log: native_pack_check_step_receipt(native_pack_blob(store, step.receipt, census) ?? panic("actual receipt"), step) ?? panic("actual stdout handle")
         assert(loaded.objects.contains(log))
         loop input in step.inputs -> assert(loaded.objects.contains(input.object))
         loop output in step.outputs -> assert(loaded.objects.contains(output.object))
@@ -173,31 +173,31 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
     loop roles in ([ [NativeRuntimeRoleObject] ]{fixture.subject.generators, fixture.subject.abi, fixture.subject.routes, fixture.subject.providers}) {
         loop role in roles -> assert(loaded.objects.contains(role.object))
     }
-    lifecycle: native_pack_fields(native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle, &census) ?? panic("actual lifecycle")) ?? panic("lifecycle JSON"), [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("actual lifecycle fields")
+    lifecycle: native_pack_fields(native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle, census) ?? panic("actual lifecycle")) ?? panic("lifecycle JSON"), [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("actual lifecycle fields")
     assert(loaded.objects.contains(native_pack_handle_field(lifecycle, "sections") ?? panic("sections")))
     assert(loaded.objects.contains(native_pack_handle_field(lifecycle, "relocations") ?? panic("relocations")))
-    terminal: native_pack_fields(native_pack_input_tree(native_pack_blob(store, fixture.evidence.proof_terminal, &census) ?? panic("actual terminal")) ?? panic("terminal JSON"), [String]{"schema", "job", "rail_contract", "done", "proofq_metadata", "proofq_name", "runtime_source_revision", "runtime_source_tree"}) ?? panic("actual terminal fields")
+    terminal: native_pack_fields(native_pack_input_tree(native_pack_blob(store, fixture.evidence.proof_terminal, census) ?? panic("actual terminal")) ?? panic("terminal JSON"), [String]{"schema", "job", "rail_contract", "done", "proofq_metadata", "proofq_name", "runtime_source_revision", "runtime_source_tree"}) ?? panic("actual terminal fields")
     assert(loaded.objects.contains(native_pack_handle_field(terminal, "proofq_metadata") ?? panic("metadata")))
     // Complete independent fixture-derived event order, preserving duplicate
     // role handles and the repeated lifecycle read. Membership is insufficient.
     expected := [ObjectHandle]{fixture.compiler, published.object, loaded.identity, prepared, loaded.approval, authorization, fixture.evidence.rail_contract, fixture.evidence.proof_done, fixture.evidence.proof_terminal, native_pack_handle_field(terminal, "proofq_metadata") ?? panic("metadata"), fixture.evidence.final_source_tree, fixture.evidence.admission, fixture.evidence.job, fixture.evidence.generation, fixture.evidence.raw_frontend}
     loop step in fixture.evidence.steps {
-        &expected.push(step.invocation)
-        &expected.push(step.receipt)
-        &expected.push(native_pack_check_step_receipt(native_pack_blob(store, step.receipt, &census) ?? panic("receipt"), step) ?? panic("stdout"))
-        loop input in step.inputs -> &expected.push(input.object)
-        loop output in step.outputs -> &expected.push(output.object)
+        expected.push(step.invocation)
+        expected.push(step.receipt)
+        expected.push(native_pack_check_step_receipt(native_pack_blob(store, step.receipt, census) ?? panic("receipt"), step) ?? panic("stdout"))
+        loop input in step.inputs -> expected.push(input.object)
+        loop output in step.outputs -> expected.push(output.object)
     }
-    loop object in ([ObjectHandle]{fixture.subject.jet_object, fixture.subject.remaining_native_archive, fixture.subject.remaining_raw_leaf_archive, fixture.subject.runtime_sources, fixture.subject.runtime_exports, fixture.subject.runtime_imports, fixture.subject.lifecycle}) -> &expected.push(object)
+    loop object in ([ObjectHandle]{fixture.subject.jet_object, fixture.subject.remaining_native_archive, fixture.subject.remaining_raw_leaf_archive, fixture.subject.runtime_sources, fixture.subject.runtime_exports, fixture.subject.runtime_imports, fixture.subject.lifecycle}) -> expected.push(object)
     loop roles in ([[NativeRuntimeRoleObject]]{fixture.subject.generators, fixture.subject.abi, fixture.subject.routes, fixture.subject.providers}) {
-        loop role in roles -> &expected.push(role.object)
+        loop role in roles -> expected.push(role.object)
     }
-    &expected.push(fixture.subject.lifecycle)
-    &expected.push(native_pack_handle_field(lifecycle, "sections") ?? panic("sections"))
-    &expected.push(native_pack_handle_field(lifecycle, "relocations") ?? panic("relocations"))
-    &expected.push(fixture.subject.pack_object)
+    expected.push(fixture.subject.lifecycle)
+    expected.push(native_pack_handle_field(lifecycle, "sections") ?? panic("sections"))
+    expected.push(native_pack_handle_field(lifecycle, "relocations") ?? panic("relocations"))
+    expected.push(fixture.subject.pack_object)
     assert_eq(loaded.objects, expected)
-    assert_eq(native_pack_blob(store, fixture.evidence.raw_frontend, &census) ?? panic("raw status"), "{{\"raw_exit\":101}}".bytes())
+    assert_eq(native_pack_blob(store, fixture.evidence.raw_frontend, census) ?? panic("raw status"), "{{\"raw_exit\":101}}".bytes())
     changed := fixture.subject
     changed.pack_object = store.publish_blob("unadmitted unrelated pack".bytes()) ?? panic("unrelated pack")
     if native_runtime_pack_prepare(store, changed, fixture.evidence) == {
@@ -280,7 +280,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
     root: store_artifact_test_root("native-pack-reference")
     store: store_artifact_test_store(root, 1024 * 1024)
     fixture: native_pack_test_fixture(store, "small codec fixture bytes")
-    contract: NativeRuntimeRailContract.from_bytes(native_pack_blob(store, fixture.evidence.rail_contract, &census) ?? panic("contract")) ?? panic("decode")
+    contract: NativeRuntimeRailContract.from_bytes(native_pack_blob(store, fixture.evidence.rail_contract, census) ?? panic("contract")) ?? panic("decode")
     produced := [String: [String]]{}
     loop pair in ([String]{"future", "build"}) {
         input: Dyn.Object([String: Dyn]{"role": Dyn.Text("x"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text(pair), "output": Dyn.Text("missing")})})
@@ -289,7 +289,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
             .Ok(_) -> panic("unresolved producer accepted")
             .Err(_) -> {}
         }
-        &produced.add("build", contract.steps[0].outputs).drop("first insertion or deliberately unchanged")
+        produced.add("build", contract.steps[0].outputs).drop("first insertion or deliberately unchanged")
     }
     store_artifact_test_cleanup(root)
 }
@@ -299,7 +299,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
     root: store_artifact_test_root("native-pack-lifecycle")
     store: store_artifact_test_store(root, 1024 * 1024)
     fixture: native_pack_test_fixture(store, "small codec fixture bytes")
-    tree: native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle, &census) ?? panic("lifecycle bytes")) ?? panic("lifecycle tree")
+    tree: native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle, census) ?? panic("lifecycle bytes")) ?? panic("lifecycle tree")
     loop spelling in ([String]{".init_array.0", ".init_array.00001", ".init_array.00000.extra", ".init_array.000000", ".init_array. 00000", ".init_array.000é0", ".init_array.0000٠"}) {
         fields := native_pack_fields(tree, [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("lifecycle fields")
         entries := native_pack_array_field(fields, "entries") ?? panic("entries")
@@ -346,7 +346,7 @@ native_pack_test_authorize: fn(store: ArtifactStore, subject: ObjectHandle, evid
     loaded: native_runtime_pack_load(store, fixture.compiler) ?? panic("initial actual census")
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     loop object in loaded.objects {
-        bytes: native_pack_blob(store, object, &census) ?? panic("original verified object")
+        bytes: native_pack_blob(store, object, census) ?? panic("original verified object")
         path: store.object_path(object)
         files.write_bytes(path, "corrupt-census-fixture".bytes()) ?? panic("corrupt")
         if native_runtime_pack_load(store, fixture.compiler) == {

@@ -80,7 +80,7 @@ const COMMAND_FLAGS = {
     claim: by(),
     release: by('handoff'),
     delete: by(),
-    criteria: by('add', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'edit', 'text', 'remove', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
     log: by('text'),
   }},
   decision: { verbs: {
@@ -135,7 +135,7 @@ const COMMAND_FLAGS = {
     list: ['epoch', 'archived'],
     add: payload('id', 'epoch', 'title', 'goal', 'criteria'),
     update: payload('title', 'goal', 'criteria', 'status', 'epoch', 'archive', 'unarchive'),
-    criteria: by('add', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'edit', 'text', 'remove', 'meet', 'verify', 'reopen', 'reason', 'evidence', 'list'),
     closeout: by('commit'),
     verify: by('evidence', 'expectRev'),
     delete: by(),
@@ -191,7 +191,7 @@ function checkFlags(cmd, verb, flags) {
 }
 
 const FLAG_VALUE = {
-  add: '"text"', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
+  add: '"text"', edit: 'n', remove: 'n', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   sections: 'FILE',
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
@@ -554,6 +554,16 @@ function cmdCard(store, { pos, flags }) {
         const { result } = store.mutate((s) => db.reopenCriterion(s, ref, flags.reopen, { reason: flags.reason, by }));
         return out(flags, 'criterion #' + result.n + ' reopened on card #' + result.cardNum, result);
       }
+      if (flags.edit !== undefined) {
+        if (typeof flags.text !== 'string') throw new TowerError('E_USAGE', 'card criteria --edit n needs --text "new text" and --reason "…"');
+        const { result } = store.mutate((s) => db.editCriterion(s, ref, flags.edit, { text: flags.text, reason: flags.reason, by }));
+        return out(flags, `criterion #${result.n} edited on card #${result.cardNum}${result.reopened ? ' (reopened: its evidence proved the old wording)' : ''}`, result);
+      }
+      if (flags.remove !== undefined) {
+        const { result } = store.mutate((s) => db.removeCriterion(s, ref, flags.remove, { reason: flags.reason, by }));
+        return out(flags, `criterion #${result.n} removed from card #${result.cardNum}`, result);
+      }
+      if (flags.text !== undefined) throw new TowerError('E_USAGE', 'card criteria --text goes with --edit n');
       if (flags.add !== undefined) {
         const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
@@ -966,6 +976,16 @@ function cmdMilestone(store, { pos, flags }) {
         const { result } = store.mutate((s) => db.reopenMilestoneCriterion(s, id, flags.reopen, { reason: flags.reason, by: flags.by }));
         return out(flags, `criterion #${result.n} reopened on milestone ${id}`, result);
       }
+      if (flags.edit !== undefined) {
+        if (typeof flags.text !== 'string') throw new TowerError('E_USAGE', 'milestone criteria --edit n needs --text "new text" and --reason "…"');
+        const { result } = store.mutate((s) => db.editMilestoneCriterion(s, id, flags.edit, { text: flags.text, reason: flags.reason, by: flags.by }));
+        return out(flags, `criterion #${result.n} edited on milestone ${id}${result.reopened ? ' (reopened: its evidence proved the old wording)' : ''}`, result);
+      }
+      if (flags.remove !== undefined) {
+        const { result } = store.mutate((s) => db.removeMilestoneCriterion(s, id, flags.remove, { reason: flags.reason, by: flags.by }));
+        return out(flags, `criterion #${result.n} removed from milestone ${id}`, result);
+      }
+      if (flags.text !== undefined) throw new TowerError('E_USAGE', 'milestone criteria --text goes with --edit n');
       if (flags.add !== undefined) {
         const { result } = store.mutate((s) => db.addMilestoneCriterion(s, id, flags.add, flags.by));
         return out(flags, `added criterion #${result.n} to milestone ${id}`, result);

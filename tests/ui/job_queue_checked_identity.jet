@@ -8,10 +8,10 @@ use jobs: core.jobs
 ordinary: fn(payload: String) { print(payload) }
 
 reject: fn(queue: &jobs.JobQueue) -[DB, Time]> {
-    _: &queue.enqueue(ordinary, "not a declared job") ?? return
+    _: queue.enqueue(ordinary, "not a declared job") ?? return
 }
 
 run: fn() {
     queue := jobs.queue() ?? return
-    reject(&queue)
+    reject(queue)
 }

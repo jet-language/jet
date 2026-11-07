@@ -75,7 +75,7 @@ NetError: enum {
         display: fn(self) -> String { net_error_text(self) }
     }
     impl Debug {
-        debug: fn(^self) -> String { net_error_text(self) }
+        debug: fn(&&self) -> String { net_error_text(self) }
     }
 }
 
@@ -135,7 +135,7 @@ ip_addr: fn(text: String) -> IPAddr NetError! {
     if !valid_text(text) -> return Err(net_err("ip_addr", text, "IP address is empty or contains control bytes"))
     bytes: parse_ip_bytes(text) ?? return Err(net_err("parse IP address", text, "invalid IP address `{text}`: invalid IP address syntax"))
     #Unsafe("checked IPv4/IPv6 octets transferred into the native address carrier") {
-        return core.net.__ip_from_bytes(^bytes)
+        return core.net.__ip_from_bytes(bytes)
     }
 }
 
@@ -204,8 +204,8 @@ socket_addr_parse: fn(text: String) -> SocketAddr NetError! {
     }
     port: parse_port(port_text) ?? return Err(invalid_socket(text))
     #Unsafe("validated IP octets, port and IPv6 numeric scope transferred into the socket carrier") {
-        ip: core.net.__ip_from_bytes(^bytes)
-        return core.net.__socket_from_parts(^ip, U16{port}, U32{0}, U32{scope})
+        ip: core.net.__ip_from_bytes(bytes)
+        return core.net.__socket_from_parts(ip, U16{port}, U32{0}, U32{scope})
     }
 }
 
@@ -277,49 +277,49 @@ create_server: fn(host: String, port: Int) -[Net]> TCPListener NetError! {
     tcp_listen(format_host_port(host, port))
 }
 send: fn(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int NetError! {
-    &stream.write(text)
+    stream.write(text)
 }
 
 tcp_read: fn(&stream: TCPStream) -[Net, Time.Wait]> String NetError! {
-    &stream.read_text(8192)
+    stream.read_text(8192)
 }
 
 tcp_write: fn(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
-    return &stream.write_text(text)
+    return stream.write_text(text)
 }
 tcp_read_bytes: fn(&stream: TCPStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n < 0 -> return Err(net_err("tcp_read_bytes", "", "read limit must be non-negative"))
-    &stream.read(n)
+    stream.read(n)
 }
 
 tcp_read_text: fn(&stream: TCPStream, n: Int) -[Net, Time.Wait]> String NetError! {
     if n < 0 -> return Err(net_err("tcp_read_text", "", "read limit must be non-negative"))
-    &stream.read_text(n)
+    stream.read_text(n)
 }
 
 tcp_write_bytes: fn(&stream: TCPStream, bytes: [U8]) -[Net, Time.Wait]> Int NetError! {
-    &stream.write(bytes)
+    stream.write(bytes)
 }
 
 tcp_write_all_bytes: fn(&stream: TCPStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
-    return &stream.write_all(bytes)
+    return stream.write_all(bytes)
 }
 
 tcp_write_text: fn(&stream: TCPStream, text: String) NetError! -[Net, Time.Wait]> {
-    return &stream.write_text(text)
+    return stream.write_text(text)
 }
 
 tcp_shutdown: fn(&stream: TCPStream, how: NetShutdown) NetError! -[Net]> {
-    return &stream.shutdown(how)
+    return stream.shutdown(how)
 }
 
 tcp_close: fn(&stream: TCPStream) NetError! -[Net]> {
-    return &stream.close()
+    return stream.close()
 }
 tcp_ready: fn(&stream: TCPStream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady NetError! {
     if !valid_timeout(deadline_ms) -> return Err(net_err("tcp_ready", "", "deadline must be non-negative"))
     deadline: Duration.milliseconds(deadline_ms) ?? return Err(net_err("tcp_ready", "", "deadline is too large"))
-    &stream.ready(interest, deadline: deadline)
+    stream.ready(interest, deadline: deadline)
 }
 
 ready_readable: fn(ready: NetReady) -> Bool Never! { ready.readable }
@@ -346,26 +346,26 @@ listener_local_socket_addr: fn(listener: TCPListener) -[Net]> SocketAddr NetErro
 }
 
 // One plain-text HTTP/1.1 reply, then the write half closes.
-tcp_reply: fn(stream: ^TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
+tcp_reply: fn(stream: &&TCPStream, status: String, body: String) NetError! -[Net, Time.Wait]> {
     if !valid_status(status) -> return Err(net_err("tcp_reply", "", "status must be a three-digit HTTP status without control bytes"))
-    conn := ^stream
-    &conn.write_all("HTTP/1.1 {status}\r\nContent-Length: {body.bytes().len()}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{body}".bytes()) ?? return Err(err)
-    return &conn.shutdown(NetShutdown.Write)
+    conn := stream.move()
+    conn.write_all("HTTP/1.1 {status}\r\nContent-Length: {body.bytes().len()}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{body}".bytes()) ?? return Err(err)
+    return conn.shutdown(NetShutdown.Write)
 }
 
 set_timeout: fn(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_timeout", "", "timeout must be non-negative"))
-    core.net.__set_timeout(&stream, timeout_ms)
+    core.net.__set_timeout(stream, timeout_ms)
 }
 
 set_read_timeout: fn(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_read_timeout", "", "timeout must be non-negative"))
-    core.net.__set_read_timeout(&stream, timeout_ms)
+    core.net.__set_read_timeout(stream, timeout_ms)
 }
 
 set_write_timeout: fn(&stream: TCPStream, timeout_ms: Int) NetError! -[Net]> {
     if !valid_timeout(timeout_ms) -> return Err(net_err("set_write_timeout", "", "timeout must be non-negative"))
-    core.net.__set_write_timeout(&stream, timeout_ms)
+    core.net.__set_write_timeout(stream, timeout_ms)
 }
 
 nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! {
@@ -373,7 +373,7 @@ nodelay: fn(stream: TCPStream) -[Net]> Bool NetError! {
 }
 
 set_nodelay: fn(&stream: TCPStream, on: Bool) NetError! -[Net]> {
-    core.net.__set_nodelay(&stream, on)
+    core.net.__set_nodelay(stream, on)
 }
 
 ttl: fn(stream: TCPStream) -[Net]> Int NetError! {
@@ -381,12 +381,12 @@ ttl: fn(stream: TCPStream) -[Net]> Int NetError! {
 }
 set_ttl: fn(&stream: TCPStream, hops: Int) NetError! -[Net]> {
     if hops < 0 || hops > 4294967295 -> return Err(net_err("set_ttl", "", "ttl must fit u32"))
-    core.net.__set_ttl(&stream, hops)
+    core.net.__set_ttl(stream, hops)
 }
 
 sendfile: fn(&stream: TCPStream, path: String) -[Net, Time.Wait]> Int NetError! {
     if !valid_text(path) -> return Err(net_err("sendfile", path, "path is empty or contains control bytes"))
-    core.net.sendfile(&stream, path)
+    core.net.sendfile(stream, path)
 }
 
 udp_bind: fn(addr: String) -[Net]> UDPSocket NetError! {
@@ -453,28 +453,28 @@ __unix_connect_deadline_entry: fn(path: String, deadline: Duration) -[Net, Time.
 }
 
 unix_read: fn(&stream: UnixStream) -[Net, Time.Wait]> String NetError! {
-    core.net.__unix_read(&stream)
+    core.net.__unix_read(stream)
 }
 
 unix_write: fn(&stream: UnixStream, text: String) NetError! -[Net, Time.Wait]> {
-    core.net.unix_write(&stream, text)
+    core.net.unix_write(stream, text)
 }
 
 unix_read_bytes: fn(&stream: UnixStream, n: Int) -[Net, Time.Wait]> [U8] NetError! {
     if n <= 0 -> return Err(net_err("unix_read_bytes", "", "read limit must be positive"))
-    core.net.unix_read_bytes(&stream, n)
+    core.net.unix_read_bytes(stream, n)
 }
 
 unix_write_all_bytes: fn(&stream: UnixStream, bytes: [U8]) NetError! -[Net, Time.Wait]> {
-    core.net.__unix_write_all_bytes(&stream, bytes)
+    core.net.__unix_write_all_bytes(stream, bytes)
 }
 
 unix_shutdown: fn(&stream: UnixStream, how: NetShutdown) NetError! -[Net]> {
-    core.net.__unix_shutdown(&stream, how)
+    core.net.__unix_shutdown(stream, how)
 }
 
 unix_close: fn(&stream: UnixStream) NetError! -[Net]> {
-    core.net.__unix_close(&stream)
+    core.net.__unix_close(stream)
 }
 
 dns_a: fn(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] NetError! {
@@ -612,7 +612,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
 srv_records: fn(raw: [DNSSRV]) -> [SRVRecord] Never! {
     records := [SRVRecord]{}
     loop row in raw {
-        &records.push(SRVRecord{target: core.net.dns_srv_target(row), port: core.net.dns_srv_port(row), priority: core.net.dns_srv_priority(row), weight: core.net.dns_srv_weight(row)})
+        records.push(SRVRecord{target: core.net.dns_srv_target(row), port: core.net.dns_srv_port(row), priority: core.net.dns_srv_priority(row), weight: core.net.dns_srv_weight(row)})
     }
     records
 }
@@ -877,7 +877,7 @@ ascii_lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: Int.from_u8(b)
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
@@ -890,7 +890,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
     limit := if end < raw.len() -> end else -> raw.len()
     if start < 0 || start >= limit -> return out
-    loop i in start..<limit -> &out.push(raw[i])
+    loop i in start..<limit -> out.push(raw[i])
     out
 }
 
@@ -991,7 +991,7 @@ parse_ipv4_bytes: fn(text: String) -> [U8]? Never! {
             value = value * 10 + digit
         }
         if value > 255 -> return None
-        &bytes.push(U8{value})
+        bytes.push(U8{value})
         start = i + 1
     }
     if bytes.len() != 4 -> return None
@@ -1024,8 +1024,8 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
         if contains_byte(piece, 46) {
             if position != raw.len() -> return None
             dotted: parse_ipv4_bytes(piece) ?? return None
-            &words.push(Int.from_u8(dotted[0]) * 256 + Int.from_u8(dotted[1]))
-            &words.push(Int.from_u8(dotted[2]) * 256 + Int.from_u8(dotted[3]))
+            words.push(Int.from_u8(dotted[0]) * 256 + Int.from_u8(dotted[1]))
+            words.push(Int.from_u8(dotted[2]) * 256 + Int.from_u8(dotted[3]))
         } else {
             if position - start > 4 -> return None
             value := 0
@@ -1034,7 +1034,7 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
                 if digit < 0 -> return None
                 value = value * 16 + digit
             }
-            &words.push(value)
+            words.push(value)
         }
         if words.len() > 8 -> return None
         if position == raw.len() -> break
@@ -1054,13 +1054,13 @@ parse_ip_bytes: fn(text: String) -> [U8]? Never! {
     loop i in 0..<(words.len() + 1) {
         if i == compression {
             loop _ in 0..<(8 - words.len()) {
-                &bytes.push(U8{0})
-                &bytes.push(U8{0})
+                bytes.push(U8{0})
+                bytes.push(U8{0})
             }
         }
         if i < words.len() {
-            &bytes.push(U8{words[i] /% 256})
-            &bytes.push(U8{words[i] %% 256})
+            bytes.push(U8{words[i] /% 256})
+            bytes.push(U8{words[i] %% 256})
         }
     }
     Val(bytes)
@@ -1082,7 +1082,7 @@ net_hex_word: fn(word: Int) -> String Never! {
         digit: (value /% divisor) %% 16
         if digit > 0 || started || divisor == 1 {
             started = true
-            &bytes.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
+            bytes.push(U8{if digit < 10 -> 48 + digit else -> 87 + digit})
         }
     }
     String.from_bytes(bytes) ?? ""
@@ -1091,7 +1091,7 @@ net_hex_word: fn(word: Int) -> String Never! {
 format_ip_bytes: fn(bytes: [U8]) -> String Never! {
     if bytes.len() == 4 -> return "{Int.from_u8(bytes[0])}.{Int.from_u8(bytes[1])}.{Int.from_u8(bytes[2])}.{Int.from_u8(bytes[3])}"
     words := [Int]{}
-    loop i in 0..<8 -> &words.push(Int.from_u8(bytes[i * 2]) * 256 + Int.from_u8(bytes[i * 2 + 1]))
+    loop i in 0..<8 -> words.push(Int.from_u8(bytes[i * 2]) * 256 + Int.from_u8(bytes[i * 2 + 1]))
     // std::net's canonical IPv4-mapped spelling is dotted, not hexadecimal.
     if words[0] == 0 && words[1] == 0 && words[2] == 0 && words[3] == 0 && words[4] == 0 && words[5] == 65535 {
         return "::ffff:{Int.from_u8(bytes[12])}.{Int.from_u8(bytes[13])}.{Int.from_u8(bytes[14])}.{Int.from_u8(bytes[15])}"
@@ -1179,7 +1179,7 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
     loop i < bytes.len() {
         lead: Int.from_u8(bytes[i])
         if lead < 128 {
-            &out.push(bytes[i])
+            out.push(bytes[i])
             i = i + 1
             next
         }
@@ -1206,11 +1206,11 @@ decode_utf8_lossy: fn(bytes: [U8]) -> String Never! {
             consumed = consumed + 1
         }
         if valid {
-            loop j in i..<(i + width) -> &out.push(bytes[j])
+            loop j in i..<(i + width) -> out.push(bytes[j])
         } else {
-            &out.push(U8{239})
-            &out.push(U8{191})
-            &out.push(U8{189})
+            out.push(U8{239})
+            out.push(U8{191})
+            out.push(U8{189})
         }
         i = i + consumed
     }

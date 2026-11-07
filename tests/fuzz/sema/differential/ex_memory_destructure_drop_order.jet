@@ -8,7 +8,7 @@ Bundle: struct<T> {
     omitted_second: T
 }
 
-pass: fn<T>(value: ^T) -> T { ^value }
+pass: fn<T>(value: &&T) -> T { value.move() }
 
 ordered: fn(early: Bool) {
     _before: pass(
@@ -43,7 +43,7 @@ Closing: struct {
 }
 
 impl Closing.Close {
-    close: fn(^self) { print("close {self.name} {self.payload}") }
+    close: fn(&&self) { print("close {self.name} {self.payload}") }
 }
 
 closing_result: fn() -> Closing { Closing{name: "call", payload: "intact"} }

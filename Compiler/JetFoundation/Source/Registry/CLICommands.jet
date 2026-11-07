@@ -82,7 +82,6 @@ JET_CLI_HANDLERS: comptime { [JetCLIHandlerSpec]{
     {key: "Lsp", dispatch_word: "lsp", keeps_group: false},
     {key: "Exec", dispatch_word: "exec", keeps_group: false},
     {key: "Env", dispatch_word: "env", keeps_group: true},
-    {key: "SharedStore", dispatch_word: "shared-store", keeps_group: true},
     {key: "Cache", dispatch_word: "cache", keeps_group: true},
     {key: "Perf", dispatch_word: "perf", keeps_group: true},
     {key: "Reserved", dispatch_word: "reserved", keeps_group: false},
@@ -459,19 +458,6 @@ JET_CLI_COMMANDS: comptime { [JetCLICommandSpec]{
         },
     },
     {
-        name: "shared-store",
-        summary: "Manage the optional shared package broker",
-        frequency_rank: 61,
-        exhaustive: true,
-        usage: None,
-        actions: [JetCLIActionSpec]{
-            {name: "install", usage: "install", summary: "Install the optional shared package broker", handler: "SharedStore", also_canonical_top_level: false},
-            {name: "enroll", usage: "enroll <uid> [--read-only]", summary: "Grant a user shared-store broker access", handler: "SharedStore", also_canonical_top_level: false},
-            {name: "status", usage: "status", summary: "Show shared-store broker configuration", handler: "SharedStore", also_canonical_top_level: false},
-            {name: "broker", usage: "broker [--fd <n>]", summary: "Serve one shared-store broker request", handler: "SharedStore", also_canonical_top_level: false},
-        },
-    },
-    {
         name: "cache",
         summary: "Manage the machine-wide artifact store",
         frequency_rank: 52,
@@ -691,13 +677,13 @@ JET_CLI_FLAGS: comptime { jet_cli_flag_rows() }
 jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
     rows := [JetCLIFlagSpec]{}
     loop spec in JET_CLI_FIXED_FLAGS {
-        &rows.push(spec.copy())
+        rows.push(spec.copy())
         if spec.long == "--profile" {
             loop option in JET_BUILD_OPTIONS {
                 flag: build_option_flag(option.name)
                 help := "With build/run/dev/test/inspect: {option.help}"
                 if jet_cli_test_setting_of_flag(flag) == .Val(row) -> help = "{help}; with test: {jet_cli_test_setting_text(row)}"
-                &rows.push(JetCLIFlagSpec{long: flag, help: help})
+                rows.push(JetCLIFlagSpec{long: flag, help: help})
             }
         }
         if spec.long != "--explain-partition" -> next
@@ -708,7 +694,7 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
             if JET_CLI_FIXED_FLAGS.any(fixed -> fixed.long == fixed_flag) -> next
             option_flag: flag.copy() // copy: the build-option lambda's own name.
             if JET_BUILD_OPTIONS.any(option -> build_option_flag(option.name) == option_flag) -> next
-            &rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
+            rows.push(JetCLIFlagSpec{long: flag, help: jet_cli_test_setting_help(setting)})
         }
     }
     rows
@@ -787,9 +773,7 @@ JET_CLI_FIXED_FLAGS: comptime { [JetCLIFlagSpec]{
     {long: "--example", help: "With find: Search by input/output example"},
     // Script locking folds into `fetch`, not a separate verb.
     {long: "--lock", help: "With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy"},
-    {long: "--read-only", help: "With shared-store enroll: Grant read-only broker access"},
     {long: "--host", help: "With cache limit: Host-wide store cap"},
-    {long: "--fd", help: "With shared-store broker: Inherited broker socket descriptor"},
     // Select one workspace member.
     {long: "-p", help: "With run/dev/debug/check/build/jobs: Pick a workspace member by name"},
     {long: "--annotated", help: "With new: Include commented example deps"},

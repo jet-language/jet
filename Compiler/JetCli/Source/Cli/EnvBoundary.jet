@@ -7,8 +7,7 @@
 // `jet dev`, `jet test` and `jet run --no-prepare` refuse such a program
 // outside its verified environment (E1355). `jet` reads only source,
 // package facts and `env.jet` here; it never resolves a package or creates
-// project state, because acquisition and activation belong to `jetpack`
-// (D-VERDICT-2188-1).
+// project state, because acquisition and activation belong to `jetpack`.
 use {
     cli_files: core.files
     cli_sys: core.sys
@@ -65,7 +64,7 @@ jet_cli_env_boundary_refusal: fn(typed: String, jet_argv: [String], color: Bool)
         ManifestEntry{key: "environment", value: declared},
         ManifestEntry{key: "command", value: command},
     }, None)
-    Val(JetCLIPlan.Refused{report: diagnostic_with_detail(^report, " Import: `use {import}` is the package import that requires this environment."), color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
+    Val(JetCLIPlan.Refused{report: diagnostic_with_detail(report, " Import: `use {import}` is the package import that requires this environment."), color: color, exit_code: JET_DRIVER_EXIT_USER_ERROR, notice: ""})
 }
 
 // Whether `flag` is a jet word, before the first standalone `--`.
@@ -119,9 +118,9 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
     dependencies := [String]{}
     allow_inline := true
     cache := WorkspaceDeclarationCache.new()
-    if jet_cli_find_package_root_checked(&cache, cli_files.realpath(search) ?? search) == .Ok(found) {
+    if jet_cli_find_package_root_checked(cache, cli_files.realpath(search) ?? search) == .Ok(found) {
         if found == .Val(root) {
-            if pkg_package_facts_for_root(&cache, root) == .Ok(loaded) {
+            if pkg_package_facts_for_root(cache, root) == .Ok(loaded) {
                 if loaded == .Val(facts) {
                     project_root = root
                     allow_inline = false
@@ -129,7 +128,7 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
                         source: facts.deps.get(name) ?? next
                         // A path dependency is source in this checkout.
                         if source == .Provider(provider, _) && provider == RefSource.Path -> next
-                        &dependencies.push(name)
+                        dependencies.push(name)
                     }
                 }
             }
@@ -137,25 +136,25 @@ jet_cli_project_package_import: fn(start: String, environment_root: String) -[FS
     }
     canonical_root: cli_files.realpath(project_root) ?? project_root
     sources := [JetDriverAuthorizedSourceFile]{}
-    _ := jet_cli_discover_sources(canonical_root, &sources)
+    _ := jet_cli_discover_sources(canonical_root, sources)
     pending := [String]{}
     if directory {
-        loop file in sources -> &pending.push(file.path)
+        loop file in sources -> pending.push(file.path)
     } else {
-        &pending.push(start)
+        pending.push(start.copy())
     }
     visited := [String]{}
     loop pending.len() > 0 {
-        file: &pending.pop() ?? break
+        file: pending.pop() ?? break
         identity: cli_files.realpath(file) ?? file
         if visited.contains(identity) -> next
-        &visited.push(identity)
+        visited.push(identity.copy())
         program: jet_cli_parsed_program(cli_files.read(file) ?? next) ?? next
         loop import in program.imports {
             if jet_cli_package_import_name(import, dependencies, allow_inline) == .Val(name) -> return Val(name)
         }
         loop import in program.imports {
-            if jet_cli_local_import_target(identity, import, canonical_root, sources) == .Val(target) -> &pending.push(target)
+            if jet_cli_local_import_target(identity, import, canonical_root, sources) == .Val(target) -> pending.push(target)
         }
     }
     None

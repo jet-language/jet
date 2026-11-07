@@ -7,9 +7,9 @@ use {
 
 write_partial: fn(path: String) {
     output: files.create(path) ?? panic("create")
-    writer := jsonl.writer(^output) ?? panic("writer")
-    &writer.write(Dyn.Text("kept")) ?? panic("write")
-    &writer.flush() ?? panic("flush")
+    writer := jsonl.writer(output) ?? panic("writer")
+    writer.write(Dyn.Text("kept")) ?? panic("write")
+    writer.flush() ?? panic("flush")
 }
 
 run: fn() {

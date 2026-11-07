@@ -4,12 +4,13 @@
 // original predicate: modified().ok() (None unreachable on supported hosts).
 use {
     core.files
+    core.process
     core.sys
     core.encoding.hex
     core.encoding.json
 }
 visit: fn(root: String, path: String) {
-    info: files.stat(path.copy())
+    info: files.stat(path.copy()) ?? panic("stat {path}: {err}")
     kind := 4
     if info.is_symlink -> kind = 3
     else if info.is_dir -> kind = 1
@@ -20,7 +21,7 @@ visit: fn(root: String, path: String) {
         if info.readonly -> mode = 1
     }
     bytes := ""
-    if info.is_file -> bytes = hex.encode(files.read_bytes(path.copy()))
+    if info.is_file -> bytes = hex.encode(files.read_bytes(path.copy()) ?? panic("read {path}: {err}"))
     // Hex is injective over bytes; JSON quoting is injective over relative paths.
     relative := ""
     if path != root -> relative = files.relative(path.copy(), root.copy())
@@ -28,12 +29,13 @@ visit: fn(root: String, path: String) {
     modified: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
     print("{shown}\t{kind}\t{info.size}\t{mode}\tsome:{modified}\t{bytes}")
     if !info.is_dir -> return
-    entries: files.list_dir(path)
+    entries: files.list_dir(path.copy()) ?? panic("list {path}: {err}")
     children := [String]{}
-    loop entry in entries -> &children.push(entry.path)
-    &children.sort()
+    loop entry in entries -> children.push(entry.path)
+    children.sort()
     loop child in children -> visit(root.copy(), child)
 }
-run: fn(root: String) {
+run: fn() {
+    root: process.args()[0]
     visit(root.copy(), root)
 }

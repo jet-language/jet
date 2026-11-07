@@ -30,7 +30,7 @@ pkg_test_plan_externs: fn(source: String, markers: [String], view_only: Bool) ->
             if !line.contains(marker) -> matches = false
         }
         if view_only && !name.ends_with("_view") -> matches = false
-        if matches -> &names.push(name)
+        if matches -> names.push(name.copy())
     }
     names
 }
@@ -54,7 +54,7 @@ pkg_test_plan_wrapper_body: fn(source: String, name: String, generic: Bool) -> S
 pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
     lexed: lex_generated(source.bytes())
     if lexed.diagnostics.len() != 0 -> return false
-    parsed: parse_lexed(^lexed)
+    parsed: parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics {
         if diagnostic.severity == 1 -> return false
     }
@@ -79,7 +79,7 @@ pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
     languages := [ForeignLanguage]{}
     loop renderer in registry {
         assert(!languages.contains(renderer.language))
-        &languages.push(renderer.language)
+        languages.push(renderer.language)
     }
 
     loop renderer in registry {

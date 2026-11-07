@@ -13,14 +13,14 @@ run: fn() {
     files.write(path, raw) ?? panic("fixture")
     input: files.open(path) ?? panic("open")
     reader: csv.reader(
-        ^input, delimiter: "\t", header: true, skip_blank: true
+        input, delimiter: "\t", header: true, skip_blank: true
     ) ?? panic("reader")
     first: reader.next()
     if first == {
         .Val(row) -> {
             print(row.line)
             print(row.fields[0])
-            print(&row.fields[1].replace(crlf, "|"))
+            print(row.fields[1].replace(crlf, "|"))
         }
         .None -> panic("next")
     }

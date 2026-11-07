@@ -8,6 +8,6 @@ run: fn() -[Secret, IO]> {
     current: vault.current<crypto.SigningKey>("__core_conformance_commit_retire") ?? return
     plan: vault.prepare_retire<crypto.SigningKey>(current, "fixed commit retire reason") ?? return
     write: vault.authorize_write(plan, "fixed commit retire authorization") ?? return
-    result: vault.commit_retire<crypto.SigningKey>(^write, ^plan) ? ok -> true ! error -> false
+    result: vault.commit_retire<crypto.SigningKey>(write, plan) ? ok -> true ! error -> false
     print(result)
 }

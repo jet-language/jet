@@ -1,0 +1,19 @@
+// `http.serve(mux, deadline:)` binds a loopback server
+// whose route deadline is a per-request #Context; `shutdown` drains it and
+// returns the shutdown report.
+package: {
+    name: "http_serve_entry"
+    authority: { allow: [IO, Net, Time.Wait] }
+}
+
+use {
+    http: core.http
+    server: core.http.server
+}
+
+run: fn() {
+    mux: server.mux()
+    running: http.serve(mux, deadline: 5s)
+    _report: running.shutdown() ?? return
+    print("serve:shutdown")
+}

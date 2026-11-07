@@ -1,8 +1,8 @@
 Error [jet.UseWhileWriteActive]: `x` is being changed in this call, so it can't be used again here
-  --> tests/ui/ownership/same_call_mut_and_read_is_error.jet:8:14
+  --> tests/ui/ownership/same_call_mut_and_read_is_error.jet:8:13
     |
-  8 |     both(&x, x)
-    |              ^
- Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
- Fix: Pass the write-access marker `&` (`&x`) only once, or copy first with `x.copy()`
+  8 |     both(x, x)
+    |             ^
+ Why: While something is being changed through a write parameter, nobody else may be looking at it
+ Fix: Pass `x` only once, or copy first with `x.copy()`
 More: jet-lang.dev/e/E0204

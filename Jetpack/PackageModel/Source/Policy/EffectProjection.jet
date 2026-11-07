@@ -64,7 +64,7 @@ ScriptEntry: struct {
 // Project the application policy without changing the sema effect fact. A
 // manifest-less program, and a manifest that writes no `authority`
 // (#3718), receive the beginner floor; a written allow row adds to that
-// floor and a written deny row removes from it (D-AUTH-AMBIENT3=A).
+// floor and a written deny row removes from it.
 pkg_project_application_effects: fn(required_effects: [String], manifest: PackageFacts?) -> EffectProjection Never! {
     facts: manifest ?? return pkg_effect_floor_projection(required_effects, ApplicationAuthority.ambient_basics())
     if facts.authority.allow == None && facts.authority.deny == None {
@@ -105,12 +105,12 @@ pkg_application_policy_diagnostic: fn(projection: EffectProjection, denied: [Str
     what: if denied_required.len() == 0 -> "application authority is undecided for `{pkg_effect_show_set(missing)}`" else -> "application authority denies `{pkg_effect_show_set(denied_required)}`"
     repair: script ?? {
         base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), authority.policy_fix(""))
-        return diagnostic_with_rights(diagnostic_with_detail(^base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
+        return diagnostic_with_rights(diagnostic_with_detail(base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
     }
     scripted: denied.len() == 0 && missing.len() > 0 && authority.is_application_default()
     fix: if scripted -> "run `jet {repair.command} --allow={missing.join(",")} {repair.path}` (or `-A`/`--allow-all` for every effect) to allow it for this run, or {authority.policy_fix(repair.path)}" else -> authority.policy_fix(repair.path)
     base: diagnostic_from_registry("E1803", None, what, authority.policy_why(), fix)
-    diagnostic: diagnostic_with_rights(diagnostic_with_detail(^base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
+    diagnostic: diagnostic_with_rights(diagnostic_with_detail(base, authority.policy_facts()), "authority", [String]{}, [String]{projection.authority}, None)
     if !scripted -> return diagnostic
     // E1803's registry row owns a suggested, needs-review source edit.
     at: pkg_inline_package_insertion_offset(repair.source)
@@ -123,12 +123,12 @@ pkg_entry_effects: fn(summaries: [String: PackageEffectSummary], entry: String) 
     seen := [String: Bool]{}
     pending := [String]{entry}
     loop pending.len() > 0 {
-        key: &pending.pop() ?? break
+        key: pending.pop() ?? break
         if seen.has_key(key) -> next
         seen[key] = true
         summary: summaries.get(key) ?? next
-        loop effect_name in summary.direct -> &effects.push(effect_name)
-        loop edge in summary.edges -> &pending.push(edge)
+        loop effect_name in summary.direct -> effects.push(effect_name)
+        loop edge in summary.edges -> pending.push(edge)
     }
     authority_holds(effects)
 }
@@ -146,7 +146,7 @@ pkg_render_effect_line: fn(effects: [String]) -> String Never! {
 
 pkg_effect_texts: fn(effects: [String]) -> Dyn Never! {
     items := [Dyn]{}
-    loop effect_name in effects -> &items.push(Dyn.Text(effect_name))
+    loop effect_name in effects -> items.push(Dyn.Text(effect_name))
     Dyn.Array(items)
 }
 
@@ -182,7 +182,7 @@ pkg_render_effect_projection_object: fn(projection: EffectProjection) -> String 
 
 pkg_render_quoted_list: fn(values: [String]) -> String Never! {
     quoted := [String]{}
-    loop value in values -> &quoted.push(pkg_json_quote(value))
+    loop value in values -> quoted.push(pkg_json_quote(value))
     quoted.join(",")
 }
 

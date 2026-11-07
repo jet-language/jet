@@ -1,11 +1,13 @@
 // Native unit outcomes and reporting use the one E4 text carrier. The Rust
 // tier keeps TEST_PRELUDE; the native pack replaces only these exports.
-// Outcome layout: [flags, owned name, owned stdout, owned stderr, cases] (40
-// bytes). Flags: ok=1, expected_failure=2, skipped=4, runtime_stop=8 (the test
-// ended at an uncaught runtime stop, not a failed assertion: TestHarness.jet
-// jet_rt_test_unit). `cases` is the number of generated cases a property test
-// (TestProperty.jet) ran, -1 for any other test; it is the wire header's
-// fifth field, '-' when it is -1.
+// Outcome layout: [flags, owned name, owned stdout, owned stderr, cases,
+// rejected, seed] (TEST_OUTCOME_BYTES). Flags: ok=1, expected_failure=2,
+// skipped=4, runtime_stop=8 (the test ended at an uncaught runtime stop, not
+// a failed assertion: TestHarness.jet jet_rt_test_unit). `cases` is the
+// number of generated cases a property test (TestProperty.jet) ran,
+// `rejected` the generated cases its `#Pre` rejected and `seed` its run seed;
+// all three are -1 for any other test. They are the wire header's fifth
+// field: `cases/rejected/seed`, or '-' for any other test.
 // Capture is in TestCapture; unit invocation still needs L8a's stop boundary.
 
 test_text_new: fn(length: I64) -> I64 { rt_text_with_length(length, length) }
@@ -26,20 +28,25 @@ test_text_drop: fn(text: I64) { jet_rt_string_drop(text) }
 // name is borrowed. stdout and error are owned; null error denotes success.
 // The remaining task adapter collects capture/skip and transfers these handles.
 #Export(c) jet_rt_test_unit_outcome: fn(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64) -> I64 {
-    test_outcome_new(name, expected, skipped, stdout, error, I64{-1})
+    test_outcome_new(name, expected, skipped, stdout, error, I64{-1}, I64{-1}, I64{-1})
 }
 
-// jet_rt_test_unit_outcome's outcome, carrying a property test's `cases`.
-test_outcome_new: fn(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64, cases: I64) -> I64 {
+TEST_OUTCOME_BYTES: I64{56}
+
+// jet_rt_test_unit_outcome's outcome, carrying a property test's `cases`,
+// `rejected` and `seed`.
+test_outcome_new: fn(name: I64, expected: Bool, skipped: Bool, stdout: I64, error: I64, cases: I64, rejected: I64, seed: I64) -> I64 {
     failed: error != I64{0}
     ok: skipped || failed == expected
     flags: (if ok -> I64{1} else -> I64{0}).bit_or((if expected -> I64{2} else -> I64{0})).bit_or((if skipped -> I64{4} else -> I64{0}))
-    outcome: jet_rt_alloc(I64{40}, I64{8})
+    outcome: jet_rt_alloc(TEST_OUTCOME_BYTES, I64{8})
     trap_store(outcome, flags)
     trap_store(wrapping(outcome + I64{8}), test_text_clone(name))
     trap_store(wrapping(outcome + I64{16}), stdout)
     trap_store(wrapping(outcome + I64{24}), if failed -> error else -> test_text_new(I64{0}))
     trap_store(wrapping(outcome + I64{32}), cases)
+    trap_store(wrapping(outcome + I64{40}), rejected)
+    trap_store(wrapping(outcome + I64{48}), seed)
     outcome
 }
 
@@ -66,8 +73,8 @@ test_decimal_bytes: fn(destination: I64, value: I64) -> I64 {
     stdout_len: trap_word(wrapping(stdout + I64{8}))
     stderr_len: trap_word(wrapping(stderr + I64{8}))
     cases: trap_word(wrapping(outcome + I64{32}))
-    // At most 4*19 decimal digits + flags + separators + '\n'.
-    wire: test_text_new(I64{96} + name_len + stdout_len + stderr_len)
+    // At most 6*19 decimal digits + flags + separators + '\n'.
+    wire: test_text_new(I64{136} + name_len + stdout_len + stderr_len)
     data: trap_word(wire)
     used := test_decimal_bytes(data, trap_word(outcome))
     trap_put(wrapping(data + used), I64{32})
@@ -86,6 +93,12 @@ test_decimal_bytes: fn(destination: I64, value: I64) -> I64 {
         used += I64{1}
     } else {
         used += test_decimal_bytes(wrapping(data + used), cases)
+        trap_put(wrapping(data + used), I64{47})
+        used += I64{1}
+        used += test_decimal_bytes(wrapping(data + used), trap_word(wrapping(outcome + I64{40})))
+        trap_put(wrapping(data + used), I64{47})
+        used += I64{1}
+        used += test_decimal_bytes(wrapping(data + used), trap_word(wrapping(outcome + I64{48})))
     }
     trap_put(wrapping(data + used), I64{10})
     used += I64{1}
@@ -104,7 +117,7 @@ test_decimal_bytes: fn(destination: I64, value: I64) -> I64 {
     test_text_drop(trap_word(wrapping(outcome + I64{8})))
     test_text_drop(trap_word(wrapping(outcome + I64{16})))
     test_text_drop(trap_word(wrapping(outcome + I64{24})))
-    jet_rt_free(outcome, I64{40}, I64{8})
+    jet_rt_free(outcome, TEST_OUTCOME_BYTES, I64{8})
 }
 
 test_write_word: fn(fd: I64, word: I64, length: I64) {
@@ -277,25 +290,35 @@ test_parse_record: fn(data: I64, end: I64, start: I64, record: I64) {
     trap_store(cursor, at)
 }
 
-// The header's fifth field at `at`: '-', or the decimal count of generated
-// cases a property test ran, then the header's '\n'. The offset after it, or
-// -1 when the field is malformed.
+// The header's fifth field at `at`: '-', or a property test's
+// `cases/rejected/seed` (three decimal numbers), then the header's '\n'. The
+// offset after it, or -1 when the field is malformed.
 test_parse_cases: fn(data: I64, end: I64, at: I64) -> I64 {
     if (at < end && trap_byte(wrapping(data + at)) == I64{45}) {
         if (end - at >= I64{2} && trap_byte(wrapping(wrapping(data + at) + I64{1})) == I64{10}) -> return at + I64{2}
         return I64{-1}
     }
     cursor := at
-    value := I64{0}
-    loop cursor < end {
-        byte: trap_byte(wrapping(data + cursor))
-        if (byte == I64{10}) { break }
-        digit: byte - I64{48}
-        if (digit < I64{0} || digit > I64{9} || value > (I64{9223372036854775807} - digit) /% I64{10}) -> return I64{-1}
-        value = value * I64{10} + digit
-        cursor += I64{1}
+    numbers := I64{0}
+    loop numbers < (I64{3}) {
+        if (numbers > I64{0}) {
+            if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{47}) -> return I64{-1}
+            cursor += I64{1}
+        }
+        first: cursor
+        value := I64{0}
+        loop cursor < end {
+            byte: trap_byte(wrapping(data + cursor))
+            if (byte == I64{10} || byte == I64{47}) { break }
+            digit: byte - I64{48}
+            if (digit < I64{0} || digit > I64{9} || value > (I64{9223372036854775807} - digit) /% I64{10}) -> return I64{-1}
+            value = value * I64{10} + digit
+            cursor += I64{1}
+        }
+        if (cursor == first) -> return I64{-1}
+        numbers += I64{1}
     }
-    if (cursor == at || cursor >= end) -> return I64{-1}
+    if (cursor >= end || trap_byte(wrapping(data + cursor)) != I64{10}) -> return I64{-1}
     cursor + I64{1}
 }
 

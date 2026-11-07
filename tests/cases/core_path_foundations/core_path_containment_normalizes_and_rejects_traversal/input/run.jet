@@ -3,20 +3,20 @@ use api: core.files.path
 
 run: fn() {
     // Dot segments and both separator spellings are lexical only.
-    print(api.is_relative_to("/srv/root/./a/../file", "/srv/root"))
-    print(api.is_relative_to("srv\\root\\file", "srv/root"))
-    print(api.is_relative_to("srv/root/link/../file", "srv/root"))
+    print(api.is_relative_to(api.of("/srv/root/./a/../file"), api.of("/srv/root")))
+    print(api.is_relative_to(api.of("srv\\root\\file"), api.of("srv/root")))
+    print(api.is_relative_to(api.of("srv/root/link/../file"), api.of("srv/root")))
 
     // Component boundaries, not string prefixes, define containment.
-    print(api.is_relative_to("/srv/rooted/file", "/srv/root"))
-    print(api.is_relative_to("/srv/root/../outside", "/srv/root"))
+    print(api.is_relative_to(api.of("/srv/rooted/file"), api.of("/srv/root")))
+    print(api.is_relative_to(api.of("/srv/root/../outside"), api.of("/srv/root")))
 
     // A relative current-directory base accepts children but not an escape.
-    print(api.is_relative_to("child/file", "."))
-    print(api.is_relative_to("../outside", "."))
-    print(api.is_relative_to("..foo/file", "."))
+    print(api.is_relative_to(api.of("child/file"), api.of(".")))
+    print(api.is_relative_to(api.of("../outside"), api.of(".")))
+    print(api.is_relative_to(api.of("..foo/file"), api.of(".")))
 
     // Anchors remain distinct, including the platform-neutral drive spelling.
-    print(api.is_relative_to("C:\\root\\child", "C:/root"))
-    print(api.is_relative_to("/srv/root", "srv/root"))
+    print(api.is_relative_to(api.of("C:\\root\\child"), api.of("C:/root")))
+    print(api.is_relative_to(api.of("/srv/root"), api.of("srv/root")))
 }

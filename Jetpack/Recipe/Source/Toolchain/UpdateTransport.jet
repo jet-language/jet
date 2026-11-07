@@ -246,7 +246,7 @@ recipe_update_fetch_http: fn(http: ToolchainHTTPEndpoint, url: String, limit: In
         bytes := [U8]{}
         loop part in response.body().chunks(TOOLCHAIN_READ_CHUNK) {
             chunk: part ?? return Err(RecipeError.Other("{url}: could not read response: {err}"))
-            loop byte in chunk -> &bytes.push(byte)
+            loop byte in chunk -> bytes.push(byte)
             if bytes.len() > limit -> return Err(RecipeError.Other("{url}: response exceeds its size bound"))
         }
         if declared == {
@@ -289,7 +289,7 @@ recipe_update_read_local_file: fn(path: String, limit: Int, label: String) -[FS,
     loop {
         chunk: file.read(TOOLCHAIN_READ_CHUNK) ?? return Err(RecipeError.Update("read {label}: {err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(RecipeError.Update("{label} exceeds its bound"))
     }
     Ok(bytes)

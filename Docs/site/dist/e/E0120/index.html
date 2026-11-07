@@ -34,7 +34,7 @@
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">Read access does not transfer ownership; cloneable values copy automatically at ordinary owning destinations, but this value needs an explicit ownership decision</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Write `name.copy()` for an owning copy, add `^` to the parameter when it should take ownership, or return borrowed data as `-&gt; View&lt;T&gt; from name` with a view derived from `name`</p>
+<p class="diag-copy fix" data-registry-field="fix">Write `name.copy()` for an owning copy, declare the parameter `name: &amp;&amp;T` when it should take ownership, or return borrowed data as `-&gt; View&lt;T&gt; from name` with a view derived from `name`</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0120</code>: <code>tests/ui/borrowed_mutable_view_enum_pattern.stderr</code>.</p>
 <pre class="diag">Error [jet.ReadOnlyValueNotOwned]: `choice` was not moved here, so its contents cannot be taken apart
@@ -42,8 +42,8 @@
     |
   7 |     if choice == {
     |        ^^^^^^
- Why: `choice` grants read-only access to `Choice`, so its non-copyable parts cannot be taken apart with the move marker `^`
- Fix: Change the parameter to `choice: ^Choice` with the move marker `^`, or inspect it without binding its contents
+ Why: `choice` grants read-only access to `Choice`, so its non-copyable parts cannot be taken out of it
+ Fix: Change the parameter to `choice: &amp;&amp;Choice` to take ownership, or inspect it without binding its contents
 More: jet-lang.dev/e/E0120
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

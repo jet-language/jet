@@ -201,6 +201,19 @@ and the beginner and expert paths. Do not ballot implementation choices an
 approved contract already covers. A question is not approval, and a ratified
 outcome stays in force until the owner changes it.
 
+This is a standing owner order, repeated hundreds of times: no agent asks the
+owner questions. No questions in chat, none as card logs, notes or "owner
+question" entries, and none that hold work. Within approved scope, the agent
+decides, records the decision as fact on the card, and keeps working. An
+owner-only choice goes on a ballot and the work moves to independent criteria
+meanwhile. Workers send their questions to the orchestrator, and it answers them
+the same way.
+
+The orchestrator stays on the open goals in rank order, G1 and G2 first, until
+every criterion is met. Implementers write the code, land it on LaneCheck and
+report the commit; the orchestrator tests it in batches and sends every failure
+back to its implementer to fix.
+
 Tower is the only work ledger. Every incomplete stream has exactly one card
 recording its phase, plan, dependencies, criteria, and handoff state. Workers
 never write to Tower, close cards, or keep a competing task list. The
@@ -292,10 +305,14 @@ workers. Every code worker returns the exact `CHECK OK` receipt from
 `Tools/agent/LaneCheck.jet`; prose-only or static-data-only work returns
 `DOCS ONLY`. Workers address the card's criteria directly: write the code to
 the spec, run only the touched files' source checks, commit, report, and move
-on. Workers never run suites, A/B comparisons, chains, or releases; the
-orchestrator verifies reported commits in batches and returns every failure
-to its owner at once. The orchestration skill defines briefs, liveness,
-integration, proof cadence, recovery, and closure.
+on. When a spec or criterion exists, the code comes first: no worker stops to
+prove rows, waits for review, or holds a commit for the orchestrator before
+landing it and taking the next criterion. Workers never run suites, A/B
+comparisons, chains, or releases; the orchestrator tests landed commits in
+batches, never gates a landing on a proof, and returns every failure to its
+owner at once. The owner fixes those failures and moves on again. The
+orchestration skill defines briefs, liveness, integration, proof cadence,
+recovery, and closure.
 
 This repository carries no harness-specific configuration. Agent tools use
 their own global settings; Jet contributes only this contract and the skills
@@ -319,7 +336,12 @@ in one pass:
   before every compiler commit) and `Tools/agent/chain/chain.sh TREE LEVEL
   --dry-run`, which names every stage the launch would build. Every row is
   clean or carries a written disposition naming the commit in this launch that
-  fixes it. Launching to "see what fails next" is forbidden.
+  fixes it. Launching to "see what fails next" is forbidden. The launchers
+  enforce it: a clean census writes the snapshot's receipt
+  (`Tools/agent/land/preflight-receipt.mjs`, keyed on the compiler source
+  identity and the seed), and `chain.sh` full, `release-compiler.mjs` and
+  `publish-release.mjs build` refuse to start without the receipt for their
+  tree and seed; `--check-gate` gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
@@ -346,6 +368,15 @@ in one pass:
   one owner, and land them as one batch before the next expensive build or
   check. A rebuild that exists only to reveal the next error is a process
   failure.
+- **A tightened rule sweeps everything first.** A change that makes sema,
+  a guard or a gate stricter is checked, before it lands, against every Jet
+  source the rule can reach: Core, Compiler, Jetpack, Tools, Examples and every
+  tests/ tree, case fixture and template. Every hit is fixed in the same batch.
+  Checking only what the compiler build or one suite touches is a serial
+  discovery.
+- **A failed gate is read whole.** When a release, chain or suite fails, read
+  every lost row of every suite, sweep for the same root across the whole
+  repository, and fix the full list as one batch before the next run.
 - **Gate every commit cheaply first.** Parse and check each touched file,
   regenerate and commit generated outputs with their sources, and run the
   generator checks against the exact source a build will use, so no expensive

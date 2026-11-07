@@ -3,8 +3,8 @@ Error [jet.MoveWithoutMarker]: Implicit move of `h.res`
     |
  26 |     out = Val(h.res)
     |               ^^^^^
- Why: `h.res` holds a resource, which has one cleanup owner; this owning position takes it out of `h`, and a value with cleanup moves only where `^` writes the move
- Fix: Write the move marker `^` (`^h.res`), or use the value where it is
+ Why: `h.res` holds a resource, which has one cleanup owner; this owning position takes it out of `h`, and a value with cleanup moves only where `.move()` writes the move
+ Fix: Write the move `h.res.move()`, or use the value where it is
 More: jet-lang.dev/e/E0209
 
 Error [jet.MoveWithoutMarker]: Implicit move of `found`
@@ -12,8 +12,8 @@ Error [jet.MoveWithoutMarker]: Implicit move of `found`
     |
  34 |         .Val(found) -> out = Val(found)
     |                                  ^^^^^
- Why: `found` holds a resource, which has one cleanup owner; this owning position takes it out of its matched subject, and a value with cleanup moves only where `^` writes the move
- Fix: Write the move marker `^` (`^found`), or use the value where it is
+ Why: `found` holds a resource, which has one cleanup owner; this owning position takes it out of its matched subject, and a value with cleanup moves only where `.move()` writes the move
+ Fix: Write the move `found.move()`, or use the value where it is
 More: jet-lang.dev/e/E0209
 
 Error [jet.MoveWithoutMarker]: Implicit move of `found.res`
@@ -21,8 +21,8 @@ Error [jet.MoveWithoutMarker]: Implicit move of `found.res`
     |
  46 |         .Val(found) -> Val(found.res)
     |                            ^^^^^^^^^
- Why: `found.res` holds a resource, which has one cleanup owner; this owning position takes it out of its matched subject, and a value with cleanup moves only where `^` writes the move
- Fix: Write the move marker `^` (`^found.res`), or use the value where it is
+ Why: `found.res` holds a resource, which has one cleanup owner; this owning position takes it out of its matched subject, and a value with cleanup moves only where `.move()` writes the move
+ Fix: Write the move `found.res.move()`, or use the value where it is
 More: jet-lang.dev/e/E0209
 
 Error [jet.MoveWithoutMarker]: Implicit move of `held`
@@ -30,37 +30,37 @@ Error [jet.MoveWithoutMarker]: Implicit move of `held`
     |
  54 |         .Val(held) -> held
     |                       ^^^^
- Why: `held` holds a resource, which has one cleanup owner; this owning position takes it out of its matched subject, and a value with cleanup moves only where `^` writes the move
- Fix: Write the move marker `^` (`^held`), or use the value where it is
+ Why: `held` holds a resource, which has one cleanup owner; this owning position takes it out of its matched subject, and a value with cleanup moves only where `.move()` writes the move
+ Fix: Write the move `held.move()`, or use the value where it is
 More: jet-lang.dev/e/E0209
 
-Error [jet.UseAfterMove]: `h.res` was consumed by the move `^h.res`, so it can't be used here
+Error [jet.UseAfterMove]: `h.res` was consumed by `h.res.move()`, so it can't be used here
   --> tests/ui/resource_move_needs_mark.jet:63:17
     |
  63 |     print(h.res.name)
     |                 ^^^^
   --> tests/ui/resource_move_needs_mark.jet:62:14
     |
- 62 |     out: Val(^h.res)
-    |              ^^^^^^ `h.res` moved to the move `^h.res` here
+ 62 |     out: Val(h.res.move())
+    |              ^^^^^^^^^^ `h.res` moved to `h.res.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `h.res` after the move, or give the move `^h.res` a copy with `h.res.copy()` where it moved.
+ Fix: Stop using `h.res` after the move, or give `h.res.move()` a copy with `h.res.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 
-Error [jet.UseAfterMove]: `found.res` was consumed by the move `^found.res`, so it can't be used here
+Error [jet.UseAfterMove]: `found.res` was consumed by `found.res.move()`, so it can't be used here
   --> tests/ui/resource_move_needs_mark.jet:72:29
     |
  72 |             print(found.res.name)
     |                             ^^^^
   --> tests/ui/resource_move_needs_mark.jet:71:22
     |
- 71 |             out: Val(^found.res)
-    |                      ^^^^^^^^^^ `found.res` moved to the move `^found.res` here
+ 71 |             out: Val(found.res.move())
+    |                      ^^^^^^^^^^^^^^ `found.res` moved to `found.res.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `found.res` after the move, or give the move `^found.res` a copy with `found.res.copy()` where it moved.
+ Fix: Stop using `found.res` after the move, or give `found.res.move()` a copy with `found.res.copy()` where it moved.
 More: jet-lang.dev/e/E0121
 
-Error [jet.UseAfterMove]: `carrier` was consumed by the move `^found`, so it can't be used here
+Error [jet.UseAfterMove]: `carrier` was consumed by `found.move()`, so it can't be used here
   --> tests/ui/resource_move_needs_mark.jet:86:19
     |
  86 |     print(present(carrier))
@@ -68,7 +68,7 @@ Error [jet.UseAfterMove]: `carrier` was consumed by the move `^found`, so it can
   --> tests/ui/resource_move_needs_mark.jet:82:8
     |
  82 |     if carrier == {
-    |        ^^^^^^^ `carrier` moved to the move `^found` here
+    |        ^^^^^^^ `carrier` moved to `found.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `carrier` after the move, or give the move `^found` a copy with `carrier.copy()` where it moved.
+ Fix: Stop using `carrier` after the move, or give `found.move()` a copy with `carrier.copy()` where it moved.
 More: jet-lang.dev/e/E0121

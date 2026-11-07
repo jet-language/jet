@@ -1,4 +1,4 @@
-// D-HOST-MIR1: checked Pool/Cell host kernels. Route rows select these
+// Checked Pool/Cell host kernels. Route rows select these
 // symbols before JavaScript runs; this file does not inspect source names or
 // perform receiver/member dispatch.
 function jet_pool_state(pool) {

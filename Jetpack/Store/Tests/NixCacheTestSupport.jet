@@ -22,7 +22,7 @@ store_nix_test_remove_dir: fn(path: String) Never! {
 // A 32-byte Ed25519 seed of repeated `byte` (Rust `SigningKey::from_bytes(&[n; 32])`).
 store_nix_test_seed: fn(byte: Int) -> [U8] Never! {
     seed := [U8]{}
-    loop _ in 0..<32 -> &seed.push(U8{byte})
+    loop _ in 0..<32 -> seed.push(U8{byte})
     seed
 }
 
@@ -52,7 +52,7 @@ store_nix_test_signed_narinfo_with_payload: fn(store_path: String, nar_name: Str
     file_hash: "sha256:{store_sha256_hex(payload)}"
     nar_hash: "sha256:{store_sha256_hex(nar)}"
     names := [String]{}
-    loop reference in references -> &names.push(files.basename(reference))
+    loop reference in references -> names.push(files.basename(reference))
     info: NixNarInfo{
         store_path: store_path,
         url: "nar/{nar_name}",
@@ -99,9 +99,9 @@ NixTestCacheServer: struct {
         store_nix_test_write_site(self.site, routes)
     }
 
-    stop: fn(^self) Never! {
+    stop: fn(&&self) Never! {
         _: self.server.shutdown(time.duration_ms(100)) ?? panic("stop test cache")
-        ^self.serving.join() ?? panic("test cache task")
+        self.serving.join() ?? panic("test cache task")
     }
 }
 

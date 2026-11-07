@@ -78,6 +78,12 @@ evidence and no contradictory blocker remains. Do not add a per-card review,
 duplicate proof, broad suite, or technical `verify` step. Use `verify` only for
 an explicit owner acceptance or closeout follow-up.
 
+Change a checklist with `tower card criteria '#N' --add "…"`, `--edit n --text
+"…" --reason "…"` or `--remove n --reason "…"` (`tower milestone criteria`
+takes the same flags). Rewording a met or verified row reopens it, because its
+evidence proved the old wording. Removed numbers are never reused, and the event
+log keeps the old text and the reason.
+
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly
 requires it; never start a server or open a browser for the owner.

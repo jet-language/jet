@@ -35,7 +35,7 @@ policy_split_whitespace: fn(text: String) -> [String] {
     loop index < bytes.len() {
         width: policy_space_width(bytes, index)
         if width > 0 {
-            if start >= 0 -> &words.push(policy_slice_bytes(text, start, index))
+            if start >= 0 -> words.push(policy_slice_bytes(text, start, index))
             start = -1
             index += width
         } else {
@@ -43,7 +43,7 @@ policy_split_whitespace: fn(text: String) -> [String] {
             index += 1
         }
     }
-    if start >= 0 -> &words.push(policy_slice_bytes(text, start, bytes.len()))
+    if start >= 0 -> words.push(policy_slice_bytes(text, start, bytes.len()))
     words
 }
 
@@ -53,7 +53,7 @@ audit_table_cells: fn(raw: String) -> [String] {
     if line.starts_with("|") -> line = policy_slice_bytes(line, 1, line.bytes().len())
     if line.ends_with("|") -> line = policy_slice_bytes(line, 0, line.bytes().len() - 1)
     result := [String]{}
-    loop cell in audit_parse.split(line, "|") -> &result.push(cell.trim())
+    loop cell in audit_parse.split(line, "|") -> result.push(cell.trim())
     result
 }
 audit_card_refs: fn(cell: String) -> [String] {
@@ -65,7 +65,7 @@ audit_card_refs: fn(cell: String) -> [String] {
         loop i in 1..<raw.len() {
             if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> digits = false
         }
-        if digits -> &result.push(token)
+        if digits -> result.push(token)
     }
     result
 }
@@ -107,9 +107,9 @@ run: fn() {
         assert(cells.len() == expected.len(), "accessibility findings row must have id, surface, screen_reader, state, and card: {line}")
         loop j in 0..<expected.len() -> assert(!cells[j].is_empty(), "accessibility finding {expected[j]} must not be empty: {line}")
         assert(!finding_ids.contains(cells[0]), "accessibility finding IDs must be unique: {cells[0]}")
-        &finding_ids.push(cells[0])
+        finding_ids.push(cells[0])
         assert(cells[3] == "pass" || cells[3] == "gap" || cells[3] == "not-proven", "accessibility finding {cells[0]} has an unknown state: {cells[3]}")
-        &rows.push(cells)
+        rows.push(cells)
     }
     assert(!rows.is_empty(), "accessibility audit must list at least one finding")
     loop row in rows {
@@ -122,7 +122,7 @@ run: fn() {
         unique_cards := [String]{}
         loop card in cards {
             assert(!unique_cards.contains(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
-            &unique_cards.push(card)
+            unique_cards.push(card.copy())
             // TOWER_DATA pins the lookup to this tree's board; left to itself,
             // Tower follows a linked worktree to the main checkout's live board.
             output: audit_process.cmd([String]{"node", "Tools/tower/tower.mjs", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")

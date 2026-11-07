@@ -76,59 +76,59 @@ jet_cli_flash_tool_from_facts: fn(facts: TargetProgrammerFacts) -> JetCLIFlashTo
     arguments := [JetCLIFlashArgument]{}
     if facts.adapter == {
         .Emulator -> {
-            &arguments.push(JetCLIFlashArgument.Literal("-machine"))
+            arguments.push(JetCLIFlashArgument.Literal("-machine"))
             // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter: no
             // move out of it, E0201); the pushed argument owns its own.
-            if facts.machine == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
-            &arguments.push(JetCLIFlashArgument.Literal("-cpu"))
+            if facts.machine == .Val(value) -> arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            arguments.push(JetCLIFlashArgument.Literal("-cpu"))
             // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter: no
             // move out of it, E0201); the pushed argument owns its own.
-            if facts.cpu == .Val(value) -> &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
-            &arguments.push(JetCLIFlashArgument.Literal("-nographic"))
-            &arguments.push(JetCLIFlashArgument.Literal("-kernel"))
-            &arguments.push(JetCLIFlashArgument.ImageName)
+            if facts.cpu == .Val(value) -> arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+            arguments.push(JetCLIFlashArgument.Literal("-nographic"))
+            arguments.push(JetCLIFlashArgument.Literal("-kernel"))
+            arguments.push(JetCLIFlashArgument.ImageName)
         }
         .ProbeRs -> {
-            &arguments.push(JetCLIFlashArgument.Literal("download"))
+            arguments.push(JetCLIFlashArgument.Literal("download"))
             if facts.chip == .Val(value) {
-                &arguments.push(JetCLIFlashArgument.Literal("--chip"))
+                arguments.push(JetCLIFlashArgument.Literal("--chip"))
                 // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter:
                 // no move out of it, E0201); the pushed argument owns its own.
-                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+                arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             }
             if facts.interface == .Val(value) {
-                &arguments.push(JetCLIFlashArgument.Literal("--probe"))
+                arguments.push(JetCLIFlashArgument.Literal("--probe"))
                 // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter:
                 // no move out of it, E0201); the pushed argument owns its own.
-                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+                arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             }
             if facts.speed_khz == .Val(value) {
-                &arguments.push(JetCLIFlashArgument.Literal("--speed"))
-                &arguments.push(JetCLIFlashArgument.Dynamic("{value}"))
+                arguments.push(JetCLIFlashArgument.Literal("--speed"))
+                arguments.push(JetCLIFlashArgument.Dynamic("{value}"))
             }
-            if facts.reset -> &arguments.push(JetCLIFlashArgument.Literal("--connect-under-reset"))
-            &arguments.push(JetCLIFlashArgument.ImageName)
+            if facts.reset -> arguments.push(JetCLIFlashArgument.Literal("--connect-under-reset"))
+            arguments.push(JetCLIFlashArgument.ImageName)
         }
         .OpenOcd -> {
             if facts.interface == .Val(value) {
-                &arguments.push(JetCLIFlashArgument.Literal("-f"))
+                arguments.push(JetCLIFlashArgument.Literal("-f"))
                 // copy: `value` is a payload view of `facts` (owner: the caller, a read parameter:
                 // no move out of it, E0201); the pushed argument owns its own.
-                &arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
+                arguments.push(JetCLIFlashArgument.Dynamic(value.copy()))
             }
             loop config in facts.config {
-                &arguments.push(JetCLIFlashArgument.Literal("-f"))
+                arguments.push(JetCLIFlashArgument.Literal("-f"))
                 // copy: `config` stays in the iterated collection (`config` is a view of its
                 // element; no move out of an element, E0225) and the new
                 // `JetCLIFlashArgument.Dynamic` value owns its own.
-                &arguments.push(JetCLIFlashArgument.Dynamic(config.copy()))
+                arguments.push(JetCLIFlashArgument.Dynamic(config.copy()))
             }
             if facts.speed_khz == .Val(value) {
-                &arguments.push(JetCLIFlashArgument.Literal("-c"))
-                &arguments.push(JetCLIFlashArgument.Dynamic("adapter speed {value}"))
+                arguments.push(JetCLIFlashArgument.Literal("-c"))
+                arguments.push(JetCLIFlashArgument.Dynamic("adapter speed {value}"))
             }
-            &arguments.push(JetCLIFlashArgument.Literal("-c"))
-            &arguments.push(JetCLIFlashArgument.OpenOcdProgram(facts.reset))
+            arguments.push(JetCLIFlashArgument.Literal("-c"))
+            arguments.push(JetCLIFlashArgument.OpenOcdProgram(facts.reset))
         }
     }
     // copy: `facts.executable` stays with the caller (`facts` is a read parameter: no move out of
@@ -155,7 +155,7 @@ jet_cli_flash_tool_argv: fn(tool: JetCLIFlashToolDeclaration, image_name: String
             .ImageName -> image_name.copy()
             .OpenOcdProgram(reset) -> if reset -> "program {image_name} verify reset exit" else -> "program {image_name} verify exit"
         }
-        &result.push(value)
+        result.push(value)
     }
     Ok(result)
 }
@@ -164,7 +164,7 @@ JetCLIFlashProfile: struct { target: String, target_triple: String, target_ident
 // Rust FlashProfile::from_machine.
 jet_cli_flash_profile_from_machine: fn(machine: TargetMachine) -> JetCLIFlashProfile JetCLIFlashError! {
     tools := [JetCLIFlashToolDeclaration]{}
-    loop facts in machine.programmers -> &tools.push(jet_cli_flash_tool_from_facts(facts))
+    loop facts in machine.programmers -> tools.push(jet_cli_flash_tool_from_facts(facts))
     if tools.is_empty() -> return Err(jet_cli_flash_error("target `{machine.name}` has no owner-approved programmer facts; declare an adapter plus chip for probe-rs, interface/config for OpenOCD, or machine/cpu for an emulator"))
     // copy: `machine.name` stays with the caller (`machine` is a read parameter: no move out of it,
     // E0201) and the field `target` owns its own. `machine.triple` stays with the caller (`machine`
@@ -184,7 +184,7 @@ jet_cli_flash_profile_select: fn(profile: JetCLIFlashProfile, requested: JetCLIF
         }
     }
     names := [String]{}
-    loop tool in profile.tools -> &names.push(jet_cli_flash_adapter_name(tool.adapter))
+    loop tool in profile.tools -> names.push(jet_cli_flash_adapter_name(tool.adapter))
     available: names.join(", ")
     if requested == .Val(adapter) -> return Err(jet_cli_flash_error("target `{profile.target}` does not declare the `{jet_cli_flash_adapter_name(adapter)}` adapter (declared: {available})"))
     Err(jet_cli_flash_error("target `{profile.target}` declares no usable programmer ({available})"))
@@ -199,7 +199,7 @@ JetCLIFlashPlan: struct {
 // Rust FlashPlan::from_target_and_image.
 jet_cli_flash_plan_from_target_and_image: fn<H: JetCLIFlashHost>(host: &H, target: String, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?, package_version: String) -> JetCLIFlashPlan JetCLIFlashError! {
     machine: jet_driver_target_machine_by_name(target, package_version) ?? return Err(jet_cli_flash_error("unknown target machine `{target}`"))
-    jet_cli_flash_plan_from_machine<H>(&host, machine, image, audit, adapter)
+    jet_cli_flash_plan_from_machine<H>(host, machine, image, audit, adapter)
 }
 // Rust FlashPlan::from_machine, same validation order.
 jet_cli_flash_plan_from_machine: fn<H: JetCLIFlashHost>(host: &H, machine: TargetMachine, image: Path, audit: Path?, adapter: JetCLIFlashAdapter?) -> JetCLIFlashPlan JetCLIFlashError! {
@@ -211,18 +211,18 @@ jet_cli_flash_plan_from_machine: fn<H: JetCLIFlashHost>(host: &H, machine: Targe
         if region.kind == MemoryKind.Flash && region.size.bytes > capacity -> capacity = region.size.bytes
     }
     if capacity < 0 -> return Err(jet_cli_flash_error("target `{machine.name}` declares no flash memory region"))
-    canonical_image: jet_cli_flash_regular_file<H>(&host, image, "flash image")
+    canonical_image: jet_cli_flash_regular_file<H>(host, image, "flash image")
     // #4376: Core's exact-text Path projection in error messages avoids external owner-field lowering.
-    metadata: &host.metadata(canonical_image) ?? return Err(jet_cli_flash_context_error("cannot inspect flash image `{flash_paths.show(canonical_image)}`: {err.message}", err))
+    metadata: host.metadata(canonical_image) ?? return Err(jet_cli_flash_context_error("cannot inspect flash image `{flash_paths.show(canonical_image)}`: {err.message}", err))
     if metadata.bytes > capacity -> return Err(jet_cli_flash_error("flash image `{flash_paths.show(canonical_image)}` is {metadata.bytes} bytes but target `{machine.name}` declares only {capacity} flash bytes"))
-    image_digest: &host.sha256_file(canonical_image) ?? return Err(jet_cli_flash_context_error("cannot hash flash image `{flash_paths.show(canonical_image)}`: {err.message}", err))
+    image_digest: host.sha256_file(canonical_image) ?? return Err(jet_cli_flash_context_error("cannot hash flash image `{flash_paths.show(canonical_image)}`: {err.message}", err))
     // #4376: consume fallible optional payload with a result match, never an implicit optional owner.
-    image_name: if &host.utf8_filename(canonical_image) == {
+    image_name: if host.utf8_filename(canonical_image) == {
         .Ok(name) -> jet_cli_flash_required_filename(name, canonical_image)
-        .Err(cause) -> { return Err(^cause) }
+        .Err(cause) -> { return Err(cause) }
     }
-    canonical_audit: jet_cli_flash_resolve_audit<H>(&host, canonical_image, machine.name, audit)
-    text: jet_cli_flash_read_audit<H>(&host, canonical_audit)
+    canonical_audit: jet_cli_flash_resolve_audit<H>(host, canonical_image, machine.name, audit)
+    text: jet_cli_flash_read_audit<H>(host, canonical_audit)
     audit_digest: sha256_hex(text)
     fields: jet_cli_flash_parse_top_level_string_fields(text) ?? return Err(jet_cli_flash_error("target audit `{flash_paths.show(canonical_audit)}` is malformed: {err.message}"))
     jet_cli_flash_verify_audit(fields, machine, image_digest)
@@ -230,14 +230,14 @@ jet_cli_flash_plan_from_machine: fn<H: JetCLIFlashHost>(host: &H, machine: Targe
     selected: jet_cli_flash_profile_select(profile, adapter)
     declaration: profile.tools[selected]
     declared_argv: jet_cli_flash_tool_argv(declaration, image_name)
-    executable: jet_cli_flash_resolve_tool<H>(&host, declaration.executable)
-    tool_digest: &host.sha256_file(executable) ?? return Err(jet_cli_flash_context_error("cannot hash declared flash tool `{flash_paths.show(executable)}`: {err.message}", err))
+    executable: jet_cli_flash_resolve_tool<H>(host, declaration.executable)
+    tool_digest: host.sha256_file(executable) ?? return Err(jet_cli_flash_context_error("cannot hash declared flash tool `{flash_paths.show(executable)}`: {err.message}", err))
     // copy: `declaration.executable` stays with `declaration`, which is read again at line 200, and
     // the new value owns its own.
     argv := [String]{declaration.executable.copy()}
     // copy: `word` stays in the iterated collection (`word` is a view of its element; no move out
     // of an element, E0225) and the pushed row owns its own.
-    loop word in declared_argv -> &argv.push(word.copy())
+    loop word in declared_argv -> argv.push(word.copy())
     // copy: the machine facts stay with the caller (`machine`, a read parameter: no move out of it,
     // E0201) and the tool declaration stays in `profile.tools` (no move out of an element, E0225);
     // the plan owns its own fields.
@@ -264,7 +264,7 @@ jet_cli_flash_strings_json: fn(values: [String]) -> CanonicalJSON Never! {
     rows := [CanonicalJSON]{}
     // copy: `value` stays in the iterated collection (`value` is a view of its element; no move out
     // of an element, E0225) and the new `CanonicalJSON.String` value owns its own.
-    loop value in values -> &rows.push(CanonicalJSON.String(value.copy()))
+    loop value in values -> rows.push(CanonicalJSON.String(value.copy()))
     CanonicalJSON.Array(rows)
 }
 // Rust FlashPlan::identity object; keys in canonical order. #4376: use Core's exact-text Path
@@ -331,13 +331,13 @@ JetCLIFlashReceipt: struct {
     failure: JetCLIFlashFailure?, result_identity: String
 }
 // Rust FlashReceipt::from_execution.
-jet_cli_flash_receipt_from_execution: fn(plan: JetCLIFlashPlan, execution: ^JetCLIFlashExecution) -> JetCLIFlashReceipt Never! {
+jet_cli_flash_receipt_from_execution: fn(plan: JetCLIFlashPlan, execution: &&JetCLIFlashExecution) -> JetCLIFlashReceipt Never! {
     stdout := jet_cli_flash_bound_capture(execution.stdout)
     stderr := jet_cli_flash_bound_capture(execution.stderr)
     success: execution.failure == None
     // copy: `plan` stays with the caller (`plan` is a read parameter: no move out of it, E0201) and
     // the field `plan` owns its own.
-    receipt := JetCLIFlashReceipt{schema: JET_CLI_FLASH_RECEIPT_SCHEMA, plan: plan.copy(), plan_identity: jet_cli_flash_plan_identity(plan), mechanism: ^execution.mechanism, policy: ^execution.policy, status: execution.status, success: success, stdout: ^stdout.bytes, stderr: ^stderr.bytes, stdout_truncated: stdout.truncated, stderr_truncated: stderr.truncated, failure: ^execution.failure, result_identity: ""}
+    receipt := JetCLIFlashReceipt{schema: JET_CLI_FLASH_RECEIPT_SCHEMA, plan: plan.copy(), plan_identity: jet_cli_flash_plan_identity(plan), mechanism: execution.mechanism.move(), policy: execution.policy.move(), status: execution.status, success: success, stdout: stdout.bytes.move(), stderr: stderr.bytes.move(), stdout_truncated: stdout.truncated, stderr_truncated: stderr.truncated, failure: execution.failure.move(), result_identity: ""}
     receipt.result_identity = "flash-result-v1:{canonical_json_sha256(jet_cli_flash_receipt_result_json(receipt))}"
     receipt
 }
@@ -357,7 +357,7 @@ jet_cli_flash_utf8_lossy: fn(bytes: [U8]) -> String Never! {
     loop at < bytes.len() {
         first: Int.from_u8(bytes[at])
         if first < 128 {
-            &out.push(bytes[at])
+            out.push(bytes[at])
             at += 1
             next
         }
@@ -384,12 +384,12 @@ jet_cli_flash_utf8_lossy: fn(bytes: [U8]) -> String Never! {
             consumed += 1
         }
         if valid {
-            loop index in at..<at + width -> &out.push(bytes[index])
+            loop index in at..<at + width -> out.push(bytes[index])
             at += width
         } else {
-            &out.push(U8{239})
-            &out.push(U8{191})
-            &out.push(U8{189})
+            out.push(U8{239})
+            out.push(U8{191})
+            out.push(U8{189})
             at += consumed
         }
     }
@@ -442,7 +442,7 @@ jet_cli_flash_receipt_to_json: fn(receipt: JetCLIFlashReceipt) -> CanonicalJSON 
         loop field in plan_fields {
             // copy: `field` stays in the iterated collection (`field` is a view of its element; no
             // move out of an element, E0225) and the pushed row owns its own.
-            if field.key != "plan_schema" -> &fields.push(field.copy())
+            if field.key != "plan_schema" -> fields.push(field.copy())
         }
     }
     additions: [CanonicalJSONField]{
@@ -471,7 +471,7 @@ jet_cli_flash_receipt_to_json: fn(receipt: JetCLIFlashReceipt) -> CanonicalJSON 
     }
     // copy: `field` stays in the iterated collection (`field` is a view of its element; no move out
     // of an element, E0225) and the pushed row owns its own.
-    loop field in additions -> &fields.push(field.copy())
+    loop field in additions -> fields.push(field.copy())
     canonical_json_object(fields) ?? panic("flash receipt JSON keys are unique")
 }
 // Rust FlashReceipt::section.

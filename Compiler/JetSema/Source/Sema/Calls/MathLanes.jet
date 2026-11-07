@@ -1,4 +1,4 @@
-// The built-in math value types no Core declaration names (and the D-LINALG1
+// The built-in math value types no Core declaration names (and the linear-algebra
 // arms): the `[T#N]` `to_array` bridge, the vector and matrix products, and the
 // `splat` / `from_array` statics. A math type Core declares (every SIMD lane
 // type, `Vec3`) keeps its own source methods; a lane `v[i]` reads its `lanes`
@@ -82,7 +82,7 @@ sema_call_math_reduce_error: fn(span: Span, what: String, why: String, fix: Stri
     sema_error("E2510", span, what, why, fix)
 }
 
-// D-REDUCE-VALUE1: `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
+// `v.reduce(.Op)` on a SIMD lane takes one Core `ReduceOp`
 // value. A written value that names no `ReduceOp` variant is E2510 before the
 // Core `reduce` method checks the call; true when it was.
 sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [CallArg], diagnostics: &[Diagnostic]) -> Bool Never! {
@@ -90,7 +90,7 @@ sema_call_math_lane_reduce_rejected: fn(receiver: Type, method: String, args: [C
     if args[0].expr == {
         .EnumLit(enum_type, variant, _, payload, _, value_span, _) -> {
             if (enum_type == "" || enum_type == SEMA_MATH_REDUCE_OP_TYPE) && payload.len() == 0 && SEMA_MATH_REDUCE_OP_VALUES.contains(variant) -> return false
-            &diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
+            diagnostics.push(sema_call_math_reduce_error(value_span, "this value is not a `ReduceOp`", "`reduce` accepts `.Add`, `.Mul`, `.Min`, `.Max`, or `.Avg`", "use a Core `ReduceOp` value"))
             return true
         }
         else -> {}
@@ -108,22 +108,22 @@ sema_call_try_math_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
     values := [TExpr]{}
     complete := true
     loop argument in args {
-        checked: sema_check_expression(argument.expr, wanted, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        checked: sema_check_expression(argument.expr, wanted, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
             complete = false
             next
         }
         if wanted == .Val(required) && !type_identity_equal(checked.ty, required) {
-            &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`.{method}()` on `{name}` expects a `{type_name(required)}`, got `{type_name(checked.ty)}`", "`{name}.{method}(…)` operates on a `{type_name(required)}`", "pass a `{type_name(required)}` value"))
+            diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`.{method}()` on `{name}` expects a `{type_name(required)}`, got `{type_name(checked.ty)}`", "`{name}.{method}(…)` operates on a `{type_name(required)}`", "pass a `{type_name(required)}` value"))
             complete = false
             next
         }
-        &values.push(checked)
+        values.push(checked)
     }
     if !complete -> return failed
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return failed
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return failed
     value: sema_tree_node(result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.MathMethod{type_name: name, method: method}, args: values}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.{method}", span, sema_call_geometry_call_facts(result), &diagnostics) -> return failed
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{name}.{method}", span, sema_call_geometry_call_facts(result), diagnostics) -> return failed
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
 // Rust `math_static_return` / `math_static_arg_ty`: `T.splat(scalar)` and
@@ -136,12 +136,12 @@ sema_call_try_math_static: fn(owner: String, method: String, args: [CallArg], sp
     if (method != "splat" && method != "from_array") || args.len() != 1 -> return unhandled
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     wanted: if method == "splat" -> sema_call_math_scalar_type(name) else -> sema_call_math_array_bridge(name)
-    checked: sema_check_expression(args[0].expr, Val(wanted), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+    checked: sema_check_expression(args[0].expr, Val(wanted), environment, program, scopes, state, tail_store, context, diagnostics) ?? return failed
     if !type_identity_equal(checked.ty, wanted) {
-        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{name}.{method}()` expects a `{type_name(wanted)}`, got `{type_name(checked.ty)}`", "`{name}.{method}` builds a `{name}` from a `{type_name(wanted)}`", "pass a `{type_name(wanted)}` value"))
+        diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`{name}.{method}()` expects a `{type_name(wanted)}`, got `{type_name(checked.ty)}`", "`{name}.{method}` builds a `{name}` from a `{type_name(wanted)}`", "pass a `{type_name(wanted)}` value"))
         return failed
     }
     value: sema_tree_node(self_type, TExprKind.MathBuiltin{type_name: name, function: method, args: [TExpr]{checked}}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{name}.{method}", span, sema_call_geometry_call_facts(self_type), &diagnostics) -> return failed
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{name}.{method}", span, sema_call_geometry_call_facts(self_type), diagnostics) -> return failed
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }

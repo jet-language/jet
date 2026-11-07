@@ -36,8 +36,8 @@ jet_cli_debug_session: fn(entry: String, source: String, scratch: String, color:
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     if !built.success -> return jet_cli_done(built.output, built.errors, if built.code == 0 -> JET_DRIVER_EXIT_USER_ERROR else -> built.code)
     session := NativeSession.start(native_debug_image(entry, out_dir), cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
-    plan: jet_cli_debug_console(&session, cli_files.basename(entry), source.split("\n").to_list(), color)
-    &session.close()
+    plan: jet_cli_debug_console(session, cli_files.basename(entry), source.split("\n").to_list(), color)
+    session.close()
     plan
 }
 
@@ -51,7 +51,7 @@ jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPla
 jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], color: Bool) -[FS, Env, Exec, IO, Time.Wait]> JetCLIPlan Never! {
     echo: !cli_term.stdin().is_tty()
     opened := NativeDebugStep?{None}
-    if &session.open(file, lines) == {
+    if session.open(file, lines) == {
         .Ok(step) -> opened = step
         .Err(failure) -> return jet_cli_debug_unavailable(failure, color)
     }
@@ -67,7 +67,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
         jet_cli_debug_write("(jet) ")
         // The end of stdin runs the program to its end.
         command := "continue"
-        if &input.read_line() == {
+        if input.read_line() == {
             .Ok(read) -> command = read ?? "continue"
             else -> {}
         }
@@ -77,7 +77,7 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
             row: diagnostic_registry_row("E2204") ?? panic("E2204 is not registered")
             return jet_cli_fail("E2204", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
         }
-        step: &session.command(command, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
+        step: session.command(command, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
         jet_cli_debug_write(step.text)
         stop = step.stop
     }
@@ -87,6 +87,6 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
 jet_cli_debug_write: fn(text: String) Never! -[IO, Time.Wait]> {
     if text.len() == 0 -> return
     out := cli_term.stdout()
-    &out.write(text).drop("jet debug stdout")
-    &out.flush().drop("jet debug stdout")
+    out.write(text).drop("jet debug stdout")
+    out.flush().drop("jet debug stdout")
 }

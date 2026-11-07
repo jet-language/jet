@@ -4,7 +4,7 @@
 Secret: struct { id: Int, token: String }
 
 impl Secret.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         print("close {self.id}")
         if self.id == 8 {
             nested: Secret{id: 9, token: "owned"}
@@ -20,9 +20,9 @@ PlainPair: struct { first: String, second: String }
 DrainPair: struct { first: Secret, second: Secret }
 
 impl DrainPair.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         print("drain")
-        taken: ^self.first
+        taken: self.first.move()
         print("drained {taken.id}")
     }
 }
@@ -46,7 +46,7 @@ optional: fn(take_inner: Bool, id: Int) {
     held := Val(Secret{id: id, token: "owned"})
     if {
         take_inner -> {
-            taken: ^held ?? return
+            taken: held.move() ?? return
             print("take {taken.id}")
         }
         else -> print("keep")
@@ -55,32 +55,32 @@ optional: fn(take_inner: Bool, id: Int) {
 
 replaced: fn() {
     held := Wrapper<Secret>{value: Secret{id: 6, token: "owned"}}
-    taken: ^held.value
+    taken: held.value.move()
     held.value = Secret{id: 7, token: "owned"}
     print("replace {taken.id} {held.value.id}")
 }
 
 remainder: fn() {
     held: Pair<Secret>{first: Secret{id: 10, token: "owned"}, second: Secret{id: 11, token: "owned"}}
-    taken: ^held.first
+    taken: held.first.move()
     print("remainder {taken.id} {held.second.id}")
 }
 
 concrete_remainder: fn() {
     held: ConcretePair{first: Secret{id: 12, token: "owned"}, second: Secret{id: 13, token: "owned"}}
-    taken: ^held.first
+    taken: held.first.move()
     print("concrete {taken.id} {held.second.id}")
 }
 
 plain_remainder: fn() {
     held: PlainPair{first: "first", second: "second"}
-    taken: ^held.first
+    taken: held.first.move()
     print("plain {taken} {held.second}")
 }
 
 early_remainder: fn(leave: Bool, first_id: Int) {
     held: Pair<Secret>{first: Secret{id: first_id, token: "owned"}, second: Secret{id: first_id + 1, token: "owned"}}
-    taken: ^held.first
+    taken: held.first.move()
     print("early {taken.id} {held.second.id}")
     if leave -> return
     print("fallthrough")
@@ -94,7 +94,7 @@ close_remainder: fn() {
 // Moving an outer field must not disturb an inner resource's atomic cleanup.
 inner_resource_remainder: fn() {
     held: PlainPair{first: "outer", second: "kept"}
-    taken: ^held.first
+    taken: held.first.move()
     if true {
         inner: Secret{id: 20, token: "owned"}
         print("shadow {inner.id}")

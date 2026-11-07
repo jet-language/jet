@@ -2,7 +2,8 @@
 // jet_pkg_model::RBind. Each function binds three ways: a Dyn call, a
 // typed table call, and a sanitized SVG plot call.
 use {
-    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST]
+    jet_foundation.[JET_TYPE_NAMES]
+    jetpack_foundation.[JET_KEYWORD_LIST]
     files: core.files
     sys: core.sys
     jet_pkg_model.[
@@ -41,15 +42,15 @@ pkg_r_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, E
     abi: "jet_r_{lib}"
     wrappers := [String]{}
     loop name in functions {
-        &wrappers.push(pkg_worker_invoke_wrapper(abi, name, "invoke", name))
-        &wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_table", "invoke", "__jet_table__{name}"))
-        &wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_plot", "invoke", "__jet_plot__{name}"))
+        wrappers.push(pkg_worker_invoke_wrapper(abi, name, "invoke", name))
+        wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_table", "invoke", "__jet_table__{name}"))
+        wrappers.push(pkg_worker_invoke_wrapper(abi, "{name}_plot", "invoke", "__jet_plot__{name}"))
     }
     bridge: pkg_worker_render_supervisor_c_with_temp(abi, rscript, worker, script, wrappers.join(""), "\"--vanilla\",worker_path,script_path", Val(PKG_R_PLOT_TEMP_PREFIX))
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write R process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-r-bind-v1", source, script, rscript, worker_source})
     provenance := "schema=jet-r-bind-v1\nsha256={digest}\nrscript={rscript}\nscript={script}\nworker={worker}\nworkers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.R, "R", lib, script, archive, "Rscript={rscript};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.R, "R", lib, script, archive, "Rscript={rscript};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_r_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -75,7 +76,7 @@ pkg_r_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
         loop existing in out {
             if "{existing}_plot" == name -> return Err(ForeignBindError.Source("R function `{name}` collides with a generated plot binding"))
         }
-        &out.push(name)
+        out.push(name)
     }
     if out.len() == 0 -> return Err(ForeignBindError.Source("no top-level named R functions were found"))
     Ok(out)
@@ -83,7 +84,7 @@ pkg_r_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
 
 pkg_r_render_worker: fn(functions: [String]) -> String Never! {
     allowed := [String]{}
-    loop name in functions -> &allowed.push("  {name} = TRUE")
+    loop name in functions -> allowed.push("  {name} = TRUE")
     pkg_binder_fill_template(PKG_R_WORKER, [String: String]{"allowed": allowed.join(",\n"), "svg_runtime": PKG_R_SVG_RUNTIME})
 }
 
@@ -91,17 +92,17 @@ pkg_r_render_jet: fn(lib: String, functions: [String]) -> String Never! {
     abi: "jet_r_{lib}"
     out := [String]{"#Import c.{abi}: module {{\n    open: fn() -> Int = \"{abi}_open\"\n    take_error: fn() -> Int = \"{abi}_take_error\"\n    cancel: fn(handle: Int) = \"{abi}_cancel\"\n    close: fn(handle: Int) = \"{abi}_close\"\n"}
     loop name in functions {
-        &out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
-        &out.push("    {name}_table: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n")
-        &out.push("    {name}_plot: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n")
+        out.push("    {name}: fn(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
+        out.push("    {name}_table: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_table\"\n")
+        out.push("    {name}_plot: fn(handle: Int, input: String, deadline_ms: Int) String = \"{abi}_invoke_{name}_plot\"\n")
     }
-    &out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nRError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
-    &out.push(pkg_render_decode_response("RError", DecoderProtocol.StandardEnvelope))
-    &out.push(PKG_R_JET_SESSION)
+    out.push("}}\nuse abi: c.{abi}\nuse json: core.encoding.json\n\nSession: struct {{ value: Int }}\n#Error\nRError: enum {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    out.push(pkg_render_decode_response("RError", DecoderProtocol.StandardEnvelope))
+    out.push(PKG_R_JET_SESSION)
     loop name in functions {
-        &out.push("{name}: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {{\n    payload: json.to_string(input) ?? return Err(RError.Protocol)\n    raw: abi.{name}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
-        &out.push("{name}_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {{\n    payload: json.to_string(rows) ?? return Err(RError.Protocol)\n    raw: abi.{name}_table(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    value: decode_response(raw, code)\n    output_json: json.to_string(value) ?? return Err(RError.Protocol)\n    return Ok(json.decode<[T]>(output_json) ?? return Err(RError.Protocol))\n}}\n\n")
-        &out.push("{name}_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {{\n    payload: json.to_string(input) ?? return Err(RError.Protocol)\n    raw: abi.{name}_plot(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    value: decode_response(raw, code)\n    return Ok(value.text() ?? return Err(RError.Protocol))\n}}\n\n")
+        out.push("{name}: fn(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RError! {{\n    payload: json.to_string(input) ?? return Err(RError.Protocol)\n    raw: abi.{name}(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        out.push("{name}_table: fn<T: [Encode, Decode]>(session: Session, rows: [T], deadline_ms: Int) -> [T] RError! {{\n    payload: json.to_string(rows) ?? return Err(RError.Protocol)\n    raw: abi.{name}_table(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    value: decode_response(raw, code)\n    output_json: json.to_string(value) ?? return Err(RError.Protocol)\n    return Ok(json.decode<[T]>(output_json) ?? return Err(RError.Protocol))\n}}\n\n")
+        out.push("{name}_plot: fn(session: Session, input: Dyn, deadline_ms: Int) -> String RError! {{\n    payload: json.to_string(input) ?? return Err(RError.Protocol)\n    raw: abi.{name}_plot(session.value, payload, deadline_ms)\n    code: abi.take_error()\n    value: decode_response(raw, code)\n    return Ok(value.text() ?? return Err(RError.Protocol))\n}}\n\n")
     }
     out.join("")
 }
@@ -112,14 +113,14 @@ pkg_r_render_probe: fn() -> String Never! {
 }
 
 pkg_r_reserved: fn(value: String) -> Bool Never! {
-    PKG_R_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_LIST.contains(value)
+    PKG_R_RESERVED.contains(value) || JET_KEYWORD_LIST.contains(value) || JET_TYPE_NAMES.contains(value)
 }
 
 PKG_R_JET_SESSION: comptime { ```impl Session.Close {
-    close: fn(^self) { abi.close(self.value) }
+    close: fn(&&self) { abi.close(self.value) }
 }
 
-close: fn(^session: Session) { abi.close(session.value) }
+close: fn(session: &&Session) { abi.close(session.value) }
 
 open: fn() -> Session RError! {
     handle: abi.open()

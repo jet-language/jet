@@ -16,14 +16,14 @@ jet_driver_c_dependencies: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [J
     declarations := [JetDriverCDependency]{}
     diagnostics := [Diagnostic]{}
     loop index in 0..<snapshot.roots.len() {
-        package: jet_driver_parse_package_root(snapshot, index, &diagnostics)
+        package: jet_driver_parse_package_root(snapshot, index, diagnostics)
         loop dependency in package.dependencies {
             if !dependency.source.starts_with("c@") -> next
             target := dependency.source.removeprefix("c@").trim()
             lexed: lex_config(target.bytes())
             tokens: lexed.tokens
             if tokens.len() > 0 && (tokens[0].kind == TOKEN_STRING || tokens[0].kind == TOKEN_RAW_STRING) -> target = token_decoded(lexed.tables, tokens[0])
-            &declarations.push(JetDriverCDependency{library: dependency.name, root: snapshot.roots[index].canonical_path, target: target})
+            declarations.push(JetDriverCDependency{library: dependency.name, root: snapshot.roots[index].canonical_path, target: target})
         }
     }
     declarations
@@ -82,7 +82,7 @@ jet_driver_foreign_link_cache_identity: fn(facts: JetDriverForeignLinkFacts) -> 
 }
 
 jet_driver_foreign_push_unique: fn(rows: &[String], value: String) Never! {
-    if !rows.contains(value) -> &rows.push(value)
+    if !rows.contains(value) -> rows.push(value.copy())
 }
 
 // The language head before any `:`; every head other than C, C++ and
@@ -148,32 +148,32 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
     modules_of := [Int]{}
     loop (module_index, semantic_module) in modules {
         loop provider in semantic_module.foreign_providers {
-            jet_driver_foreign_push_unique(&facts.libraries, provider.library)
-            loop library in provider.direct_links -> jet_driver_foreign_push_unique(&direct, library)
-            loop library in provider.transitive_links -> jet_driver_foreign_push_unique(&transitive, library)
+            jet_driver_foreign_push_unique(facts.libraries, provider.library)
+            loop library in provider.direct_links -> jet_driver_foreign_push_unique(direct, library)
+            loop library in provider.transitive_links -> jet_driver_foreign_push_unique(transitive, library)
         }
         loop (row_index, row) in semantic_module.foreign_functions {
             head: jet_driver_foreign_language_head(row.language)
             if head == "c" || head == "rust" -> facts.c_or_rust_rows = true
-            &ids.push(stable_id("foreign", row.key))
-            &keys.push(row.key)
-            &rows.push(row_index)
-            &modules_of.push(module_index)
+            ids.push(stable_id("foreign", row.key))
+            keys.push(row.key)
+            rows.push(row_index)
+            modules_of.push(module_index)
         }
     }
-    &facts.libraries.sort()
-    &direct.sort()
-    &transitive.sort()
+    facts.libraries.sort()
+    direct.sort()
+    transitive.sort()
     loop library in transitive {
-        if !direct.contains(library) -> &facts.transitive_links.push(library)
+        if !direct.contains(library) -> facts.transitive_links.push(library)
     }
     facts.direct_links = direct
     order := [Int]{}
-    loop position in 0..<ids.len() -> &order.push(position)
-    &order.sort_by((left: Int, right: Int) -> if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right])
+    loop position in 0..<ids.len() -> order.push(position)
+    order.sort_by((left: Int, right: Int) -> if ids[left] != ids[right] -> ids[left] <=> ids[right] else -> keys[left] <=> keys[right])
     loop (index, position) in order {
         row: modules[modules_of[position]].foreign_functions[rows[position]]
-        &facts.declarations.push(JetDriverForeignDeclaration{
+        facts.declarations.push(JetDriverForeignDeclaration{
             name: row.name,
             language: jet_driver_foreign_language_head(row.language),
             symbol: row.symbol,
@@ -184,7 +184,7 @@ jet_driver_foreign_link_facts: fn(modules: [SemaGraphModuleResult], source_files
         head: jet_driver_foreign_language_head(row.language)
         if head != "c" && head != "cpp" -> next
         params: loop param in row.params -> JetDriverInlineCParam{ty: param.ty, write: param.convention == AccessConvention.Write}
-        &facts.inline_c.push(JetDriverInlineC{
+        facts.inline_c.push(JetDriverInlineC{
             index: index,
             name: row.name,
             symbol: row.symbol,

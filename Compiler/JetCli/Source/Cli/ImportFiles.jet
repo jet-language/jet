@@ -15,7 +15,7 @@ jet_cli_import_gap: fn(what: String, why: String, fix: String, source: String, t
     JetCLIImportTodo{what: what, why: why, fix: fix, source: "{source}:{line}", target: target, status: "omitted-reported"}
 }
 jet_cli_import_files_append: fn(output: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &output.push(byte)
+    loop byte in text.bytes() -> output.push(byte)
 }
 
 // Rust `translate_file` (422-518): Python annotated functions only.
@@ -34,7 +34,7 @@ jet_cli_import_translate_file: fn(raw: String, source: String, target: String) -
             next
         }
         if jet_cli_import_indentation(line) != 0 || !trimmed.starts_with("def ") {
-            &todos.push(jet_cli_import_gap("unsupported Python top-level construct '{jet_cli_import_shorten(trimmed)}'", "first Python importer translates annotated functions only", "port construct into ordinary Jet; no source was silently emitted", source, target, at + 1))
+            todos.push(jet_cli_import_gap("unsupported Python top-level construct '{jet_cli_import_shorten(trimmed)}'", "first Python importer translates annotated functions only", "port construct into ordinary Jet; no source was silently emitted", source, target, at + 1))
             at += 1
             next
         }
@@ -43,11 +43,11 @@ jet_cli_import_translate_file: fn(raw: String, source: String, target: String) -
         body := [JetCLIImportBodyLine]{}
         loop at < lines.len() {
             if !lines[at].trim().is_empty() && jet_cli_import_indentation(lines[at]) == 0 -> break
-            if !lines[at].trim().is_empty() -> &body.push(JetCLIImportBodyLine{line: at + 1, text: lines[at].copy()})
+            if !lines[at].trim().is_empty() -> body.push(JetCLIImportBodyLine{line: at + 1, text: lines[at].copy()})
             at += 1
         }
         if jet_cli_import_parse_header(trimmed) == {
-            .Err(error) -> &todos.push(jet_cli_import_gap("Python function signature at line {header_line} is not type-safe", error.message, "add supported parameter and return annotations, then rerun import", source, target, header_line))
+            .Err(error) -> todos.push(jet_cli_import_gap("Python function signature at line {header_line} is not type-safe", error.message, "add supported parameter and return annotations, then rerun import", source, target, header_line))
             .Ok(function_header) -> {
                 function := function_header
                 function.body = body
@@ -58,61 +58,61 @@ jet_cli_import_translate_file: fn(raw: String, source: String, target: String) -
                             tests += 1
                             marker = "#Test "
                         }
-                        &rendered.push(jet_cli_import_render_function(marker, function, converted))
+                        rendered.push(jet_cli_import_render_function(marker, function, converted))
                         functions += 1
                     }
-                    .Err(error) -> &todos.push(jet_cli_import_gap("Python body '{function.name}' was not translated", error.message, "port body into ordinary Jet; source remains in omissions report", source, target, error.line))
+                    .Err(error) -> todos.push(jet_cli_import_gap("Python body '{function.name}' was not translated", error.message, "port body into ordinary Jet; source remains in omissions report", source, target, error.line))
                 }
             }
         }
     }
     output := [U8]{}
-    jet_cli_import_files_append(&output, jet_cli_import_header("py"))
+    jet_cli_import_files_append(output, jet_cli_import_header("py"))
     loop index in 0..<rendered.len() {
-        if index > 0 -> &output.push(U8{10})
-        jet_cli_import_files_append(&output, rendered[index])
+        if index > 0 -> output.push(U8{10})
+        jet_cli_import_files_append(output, rendered[index])
     }
-    if functions == 0 -> jet_cli_import_files_append(&output, "// No construct was safe to translate. See import-report.json.\n")
+    if functions == 0 -> jet_cli_import_files_append(output, "// No construct was safe to translate. See import-report.json.\n")
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("Python translation UTF-8"), todos: todos, functions: functions, tests: tests}
 }
 
 // Rust `translate_pascal_file` (520-555).
 jet_cli_import_translate_pascal_file: fn(raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     output := [U8]{}
-    jet_cli_import_files_append(&output, jet_cli_import_binder_header("pascal"))
-    jet_cli_import_files_append(&output, "// Source: {source}\n")
+    jet_cli_import_files_append(output, jet_cli_import_binder_header("pascal"))
+    jet_cli_import_files_append(output, "// Source: {source}\n")
     todo: if jet_cli_import_pascal_library_name(raw) == .Val(library) -> {
-        jet_cli_import_files_append(&output, "use {library}: pascal.{library}\n\n// Binder stub: use {library}: pascal.{library}\n// TODO JT0101: Pascal library `{library}` remains an FFI source.\n")
+        jet_cli_import_files_append(output, "use {library}: pascal.{library}\n\n// Binder stub: use {library}: pascal.{library}\n// TODO JT0101: Pascal library `{library}` remains an FFI source.\n")
         jet_cli_import_gap("Pascal library `{library}` was not translated", "Object Pascal bodies, classes, and runtime ownership have no proven source-to-Jet mapping; the original source remains authoritative", "run `jet inspect bind pascal {source} --pkg {library}` for call-in-place bindings, then port unsupported bodies explicitly", source, target, 1)
     } else -> {
-        jet_cli_import_files_append(&output, "// TODO JT0101: Pascal source has no recognizable library declaration.\n")
+        jet_cli_import_files_append(output, "// TODO JT0101: Pascal source has no recognizable library declaration.\n")
         jet_cli_import_gap("Pascal source has no recognizable library declaration", "the importer cannot establish a library boundary or ABI contract", "add a Pascal `library` declaration or use a hand-written Jet FFI overlay; no source was silently emitted", source, target, 1)
     }
-    jet_cli_import_files_append(&output, "// The Pascal source remains the canonical source of truth.\n")
+    jet_cli_import_files_append(output, "// The Pascal source remains the canonical source of truth.\n")
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("Pascal preparation UTF-8"), todos: [todo], functions: 0, tests: 0}
 }
 
 // Rust `translate_ada_file` (557-590).
 jet_cli_import_translate_ada_file: fn(raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     output := [U8]{}
-    jet_cli_import_files_append(&output, jet_cli_import_binder_header("ada"))
-    jet_cli_import_files_append(&output, "// Source: {source}\n")
+    jet_cli_import_files_append(output, jet_cli_import_binder_header("ada"))
+    jet_cli_import_files_append(output, "// Source: {source}\n")
     todo: if jet_cli_import_ada_package_name(raw) == .Val(package) -> {
-        jet_cli_import_files_append(&output, "use {package}: ada.{package}\n\n// Binder stub: use {package}: ada.{package}\n// TODO JT0101: Ada package `{package}` remains an FFI source.\n")
+        jet_cli_import_files_append(output, "use {package}: ada.{package}\n\n// Binder stub: use {package}: ada.{package}\n// TODO JT0101: Ada package `{package}` remains an FFI source.\n")
         jet_cli_import_gap("Ada package `{package}` was not translated", "Ada bodies, range checks, exceptions, tasking, and representation clauses have no proven source-to-Jet mapping; the original package spec and body remain authoritative", "run `jet inspect bind ada {source} --pkg {package}` for call-in-place bindings, then port unsupported bodies explicitly", source, target, 1)
     } else -> {
-        jet_cli_import_files_append(&output, "// TODO JT0101: Ada source has no recognizable package declaration.\n")
+        jet_cli_import_files_append(output, "// TODO JT0101: Ada source has no recognizable package declaration.\n")
         jet_cli_import_gap("Ada source has no recognizable package declaration", "the importer cannot establish a library boundary or ABI contract", "add a top-level Ada `package` declaration or use a hand-written Jet FFI overlay; no source was silently emitted", source, target, 1)
     }
-    jet_cli_import_files_append(&output, "// The Ada source remains the canonical source of truth.\n")
+    jet_cli_import_files_append(output, "// The Ada source remains the canonical source of truth.\n")
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("Ada preparation UTF-8"), todos: [todo], functions: 0, tests: 0}
 }
 
 // Rust `translate_enterprise_file` (595-830): Java/C#/TS/JS/Go scalar orchestration.
 jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, source: String, target: String) -> JetCLIImportTranslation Never! {
     output := [U8]{}
-    jet_cli_import_files_append(&output, jet_cli_import_header(language))
-    jet_cli_import_files_append(&output, "// Source: {source}\n// Provenance: law=D-MIGRATE-SRC1; generated spans remain tied to the source file.\n")
+    jet_cli_import_files_append(output, jet_cli_import_header(language))
+    jet_cli_import_files_append(output, "// Source: {source}\n// Provenance: generated spans remain tied to the source file.\n")
     lines: raw.lines()
     rendered := [JetCLIImportRenderedFunction?]{}
     todos := [JetCLIImportTodo]{}
@@ -134,7 +134,7 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
             next
         }
         if jet_cli_import_foreign_import_line(language, trimmed) {
-            if !jet_cli_import_foreign_supported_import(language, trimmed) -> &todos.push(jet_cli_import_gap("unsupported {language} dependency declaration", "the importer does not execute or infer foreign dependency behavior", "bind the dependency with `jet inspect bind {language}` or port it explicitly before rerunning import", source, target, at + 1))
+            if !jet_cli_import_foreign_supported_import(language, trimmed) -> todos.push(jet_cli_import_gap("unsupported {language} dependency declaration", "the importer does not execute or infer foreign dependency behavior", "bind the dependency with `jet inspect bind {language}` or port it explicitly before rerunning import", source, target, at + 1))
             at += 1
             next
         }
@@ -152,7 +152,7 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                     is_expression_body: header.expression_body != None
                     body := [JetCLIImportBodyLine]{}
                     end_line := at
-                    if header.expression_body == .Val(expression) -> &body.push(JetCLIImportBodyLine{line: at + 1, text: expression.copy()})
+                    if header.expression_body == .Val(expression) -> body.push(JetCLIImportBodyLine{line: at + 1, text: expression.copy()})
                     else {
                         if jet_cli_import_collect_foreign_body(lines, open_line) == {
                             .Ok(collected) -> {
@@ -160,7 +160,7 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                                 end_line = collected.end
                             }
                             .Err(error) -> {
-                                &todos.push(jet_cli_import_gap("malformed {language} function at line {at + 1}", error.message, "repair the source function and rerun import; the original source was preserved", source, target, at + 1))
+                                todos.push(jet_cli_import_gap("malformed {language} function at line {at + 1}", error.message, "repair the source function and rerun import; the original source was preserved", source, target, at + 1))
                                 at += 1
                                 next
                             }
@@ -169,8 +169,8 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                     header.function.body = body
                     if language == "js" {
                         docs: jet_cli_import_javascript_doc_types(lines, at)
-                        if jet_cli_import_infer_javascript_types(&header.function, docs) == .Err(error) {
-                            &todos.push(jet_cli_import_gap("JavaScript function `{header.function.name}` was not translated", error.message, "add a supported scalar JSDoc type or port the function explicitly", source, target, at + 1))
+                        if jet_cli_import_infer_javascript_types(header.function, docs) == .Err(error) {
+                            todos.push(jet_cli_import_gap("JavaScript function `{header.function.name}` was not translated", error.message, "add a supported scalar JSDoc type or port the function explicitly", source, target, at + 1))
                             at = end_line + 1
                             next
                         }
@@ -178,14 +178,14 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                     function_name: header.function.name
                     canonical_name: jet_cli_import_canonical_identifier(function_name)
                     if names.has_key(canonical_name) {
-                        if &rendered_by_name.remove(canonical_name) == .Val(index) {
+                        if rendered_by_name.remove(canonical_name) == .Val(index) {
                             if rendered[index] == .Val(prior) {
                                 functions -= 1
                                 if prior.carried_test -> tests -= 1
                             }
                             rendered[index] = None
                         }
-                        &todos.push(jet_cli_import_gap("ambiguous overloaded {language} function `{function_name}`", "multiple source functions would share one Jet name and call shape", "rename or manually port the overloads behind one explicit Jet API", source, target, at + 1))
+                        todos.push(jet_cli_import_gap("ambiguous overloaded {language} function `{function_name}`", "multiple source functions would share one Jet name and call shape", "rename or manually port the overloads behind one explicit Jet API", source, target, at + 1))
                         at = end_line + 1
                         next
                     }
@@ -202,10 +202,10 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                             }
                             rendered_by_name[canonical_name.copy()] = rendered.len()
                             text: "// Source span: {source}:{at + 1}-{end_line + 1}\n{jet_cli_import_render_function(marker, header.function, converted)}"
-                            &rendered.push(Val(JetCLIImportRenderedFunction{carried_test: carried_test, text: text}))
+                            rendered.push(Val(JetCLIImportRenderedFunction{carried_test: carried_test, text: text}))
                             functions += 1
                         }
-                        .Err(error) -> &todos.push(jet_cli_import_gap("{language} body `{header.function.name}` was not translated", error.message, "port the body into ordinary Jet; the original source remains authoritative", source, target, error.line))
+                        .Err(error) -> todos.push(jet_cli_import_gap("{language} body `{header.function.name}` was not translated", error.message, "port the body into ordinary Jet; the original source remains authoritative", source, target, error.line))
                     }
                     at = end_line + 1
                     next
@@ -215,7 +215,7 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
                     if jet_cli_import_has_unquoted_char(signature, "{{") {
                         if jet_cli_import_collect_foreign_body(lines, open_line) == .Ok(collected) -> end_line = collected.end
                     }
-                    &todos.push(jet_cli_import_gap("unsupported {language} function declaration", error.message, "use the supported scalar function subset or port the declaration explicitly", source, target, at + 1))
+                    todos.push(jet_cli_import_gap("unsupported {language} function declaration", error.message, "use the supported scalar function subset or port the declaration explicitly", source, target, at + 1))
                     at = end_line + 1
                     next
                 }
@@ -225,26 +225,26 @@ jet_cli_import_translate_enterprise_file: fn(language: String, raw: String, sour
             at += 1
             next
         }
-        &todos.push(jet_cli_import_gap("unsupported {language} top-level construct `{jet_cli_import_shorten(trimmed)}`", "the importer only emits proven scalar functions and does not model foreign runtime state", "port the construct into ordinary Jet or keep it behind the language binder", source, target, at + 1))
+        todos.push(jet_cli_import_gap("unsupported {language} top-level construct `{jet_cli_import_shorten(trimmed)}`", "the importer only emits proven scalar functions and does not model foreign runtime state", "port the construct into ordinary Jet or keep it behind the language binder", source, target, at + 1))
         at += 1
     }
     if functions == 0 {
         if jet_cli_import_enterprise_unit_name(language, raw, source) == .Val(unit) {
             root: jet_cli_import_foreign_binder_root(language)
-            jet_cli_import_files_append(&output, "use {unit}: {root}.{unit}\n\n// Binder fallback: use {unit}: {root}.{unit}\n")
+            jet_cli_import_files_append(output, "use {unit}: {root}.{unit}\n\n// Binder fallback: use {unit}: {root}.{unit}\n")
         }
-        jet_cli_import_files_append(&output, "// No construct was safe to translate. See import-report.json.\n")
+        jet_cli_import_files_append(output, "// No construct was safe to translate. See import-report.json.\n")
     }
     first := true
     loop row in rendered {
         if row == .Val(item) {
             if first {
-                &output.push(U8{10})
+                output.push(U8{10})
                 first = false
             }
-            jet_cli_import_files_append(&output, item.text)
+            jet_cli_import_files_append(output, item.text)
         }
     }
-    jet_cli_import_files_append(&output, "\n// The {language} source remains the canonical source of truth until every TODO is resolved.\n")
+    jet_cli_import_files_append(output, "\n// The {language} source remains the canonical source of truth until every TODO is resolved.\n")
     JetCLIImportTranslation{source: String.from_bytes(output) ?? panic("enterprise translation UTF-8"), todos: todos, functions: functions, tests: tests}
 }

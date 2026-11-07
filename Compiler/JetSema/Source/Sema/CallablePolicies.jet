@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 sema_policy_builtin: fn(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -20,9 +20,9 @@ sema_policy_wrapper_function: fn(func: Func) -> Bool Never! {
 sema_policy_calls: fn(function: Func) -> [Call] Never! {
     calls := [Call]{}
     loop marker in function.markers {
-        if marker.name != "Policy" -> next
+        if marker.name != MARKER_POLICY -> next
         loop argument in marker.args {
-            if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> &calls.push(call)
+            if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> calls.push(call.copy())
         }
     }
     calls
@@ -34,7 +34,7 @@ sema_policy_note_use: fn(names: &[NamedSpan], name: String, span: Span) Never! {
     loop known in names {
         if known.name == name -> return
     }
-    &names.push(NamedSpan{name: name, span: span})
+    names.push(NamedSpan{name: name, span: span})
 }
 
 SemaPolicyUses: struct {
@@ -45,7 +45,7 @@ SemaPolicyUses: struct {
             if call.args[call.args.len() - 1].expr == .Ident(target, _, _) {
                 names := self.uses.get(target) ?? [NamedSpan]{}
                 loop index in 0..<(call.args.len() - 1) {
-                    if call.args[index].expr == .Call(policy, _) && !sema_policy_builtin(policy.name) -> sema_policy_note_use(&names, policy.name, policy.name_span)
+                    if call.args[index].expr == .Call(policy, _) && !sema_policy_builtin(policy.name) -> sema_policy_note_use(names, policy.name, policy.name_span)
                 }
                 self.uses[target] = names
             }
@@ -56,8 +56,8 @@ SemaPolicyUses: struct {
 // Registration runs this after inline-module lifting, before signature and
 // body passes, so generated wrappers receive exactly the ordinary checks.
 sema_policy_materialize: fn(program: &Program, declarations: [UserPolicyDecl], module_identity: String, source_file: String, origin: SemaSourceOrigin, segments: [SemaSourceSegment], diagnostics: &[Diagnostic]) {
-    generated: sema_policy_wrappers(program.items, declarations, module_identity, source_file, origin, segments, &diagnostics)
-    loop item in generated -> &program.items.push(item)
+    generated: sema_policy_wrappers(program.items, declarations, module_identity, source_file, origin, segments, diagnostics)
+    loop item in generated -> program.items.push(item)
 }
 
 // The policy wrappers `items` call for; each item is read in place.
@@ -67,12 +67,12 @@ sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_i
         if item == .Func(function) {
             loop call in sema_policy_calls(function) {
                 names := uses.get(function.name) ?? [NamedSpan]{}
-                sema_policy_note_use(&names, call.name, call.name_span)
+                sema_policy_note_use(names, call.name, call.name_span)
                 uses[function.name] = names
             }
-            visitor := SemaPolicyUses{uses: ^uses}
-            loop statement in function.body -> ast_visit_statement(statement, (expression: Expr) -> &visitor.visit(expression), true)
-            uses = ^visitor.uses
+            visitor := SemaPolicyUses{uses: uses.move()}
+            loop statement in function.body -> ast_visit_statement(statement, (expression: Expr) -> visitor.visit(expression), true)
+            uses = visitor.uses.move()
         }
     }
     generated := [Item]{}
@@ -90,16 +90,16 @@ sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_i
                     }
                 }
                 policy: declaration ?? {
-                    &diagnostics.push(sema_error("E0355", used.span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `policy {name}(...) {{ wrap(call) {{ … }} }}`"))
+                    diagnostics.push(sema_error("E0355", used.span, "unknown callable policy setting `{name}`", "a callable policy name must be a compiler-owned setting or a public policy declared in this package", "declare `policy {name}(...) {{ wrap(call) {{ … }} }}`"))
                     next
                 }
                 wrapper := ast_func(sema_policy_wrapper_name(name, target.name), policy.name_span, policy.span)
                 wrapper.params = policy.params
-                &wrapper.params.push(Param{convention: AccessConvention.Read, root: false, name: "call", name_span: policy.name_span, public_label: None, zone: ParamZone.Either, ty: signature, ty_span: policy.name_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None})
+                wrapper.params.push(Param{convention: AccessConvention.Read, root: false, name: "call", name_span: policy.name_span, public_label: None, zone: ParamZone.Either, ty: signature, ty_span: policy.name_span, default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None, declared_footprint: None})
                 loop parameter in target.params {
                     explicit := parameter
                     explicit.default = None
-                    &wrapper.params.push(explicit)
+                    wrapper.params.push(explicit)
                 }
                 wrapper.return_type = target.return_type
                 wrapper.return_type_span = target.return_type_span
@@ -107,11 +107,11 @@ sema_policy_wrappers: fn(items: [Item], declarations: [UserPolicyDecl], module_i
                 wrapper.declared_return_view_provenance = target.declared_return_view_provenance
                 wrapper.body = policy.body
                 wrapper.compiler_generated = true
-                &generated.push(Item.Func{value: wrapper})
+                generated.push(Item.Func{value: wrapper})
             }
         }
     }
-    ^generated
+    generated.move()
 }
 
 sema_policy_declarations_checked: fn(input: [UserPolicyDecl], diagnostics: &[Diagnostic]) -> [UserPolicyDecl] {
@@ -119,15 +119,15 @@ sema_policy_declarations_checked: fn(input: [UserPolicyDecl], diagnostics: &[Dia
     names := [String:Bool]{}
     loop declaration in input {
         if sema_policy_builtin(declaration.name) {
-            &diagnostics.push(sema_error("E0105", declaration.name_span, "policy setting `{declaration.name}` redeclares a compiler-owned setting", "built-in callable policies and package settings share one nominal vocabulary", "choose a different policy setting name"))
+            diagnostics.push(sema_error("E0105", declaration.name_span, "policy setting `{declaration.name}` redeclares a compiler-owned setting", "built-in callable policies and package settings share one nominal vocabulary", "choose a different policy setting name"))
             next
         }
         if names.get(declaration.name) != None {
-            &diagnostics.push(sema_error("E0105", declaration.name_span, "policy `{declaration.name}` is declared more than once in this package", "one package-owned policy name must resolve to one checked wrapper", "rename or remove one of the policy declarations"))
+            diagnostics.push(sema_error("E0105", declaration.name_span, "policy `{declaration.name}` is declared more than once in this package", "one package-owned policy name must resolve to one checked wrapper", "rename or remove one of the policy declarations"))
             next
         }
         names[declaration.name] = true
-        &declarations.push(declaration)
+        declarations.push(declaration.copy())
     }
     declarations
 }
@@ -136,35 +136,35 @@ sema_policy_package_declarations: fn(inputs: [SemaRegistrationModuleInput], pack
     declarations := [UserPolicyDecl]{}
     loop input in inputs {
         if input.package_identity == package {
-            loop declaration in input.program.user_policy_declarations -> &declarations.push(declaration)
+            loop declaration in input.program.user_policy_declarations -> declarations.push(declaration.copy())
         }
     }
-    sema_policy_declarations_checked(declarations, &diagnostics)
+    sema_policy_declarations_checked(declarations, diagnostics)
 }
 
 // Settings use the same default/label/variadic binder as every ordinary call.
 sema_policy_wrap: fn(callee: TExpr, target: SemaCallDirectTarget, policy: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     wrapper_name: sema_policy_wrapper_name(policy.name, target.symbol.name)
-    wrapper: sema_call_resolve_direct(wrapper_name, [Type]{}, environment, program, &scopes, policy.name_span, &diagnostics) ?? return None
+    wrapper: sema_call_resolve_direct(wrapper_name, [Type]{}, environment, program, scopes, policy.name_span, diagnostics) ?? return None
     all_params: sema_call_params_from_type(wrapper.signature) ?? return None
     target_params: sema_call_params_from_type(target.signature) ?? return None
     count: all_params.len() - target_params.len() - 1
     params := [SemaCallParam]{}
-    loop index in 0..<count -> &params.push(all_params[index])
+    loop index in 0..<count -> params.push(all_params[index])
     arguments := policy.args
-    binding := sema_call_bind_args(policy.name, params, &arguments, policy.name_span, &diagnostics) ?? return None
+    binding := sema_call_bind_args(policy.name, params, arguments, policy.name_span, diagnostics) ?? return None
     if binding.default_refs.len() > 0 {
-        defaults: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return None else -> sema_call_local_default_values(wrapper, binding, environment, program, &scopes) ?? return None
-        binding = sema_call_materialize_defaults(params, binding, &arguments, defaults, policy.name_span, &diagnostics) ?? return None
+        defaults: if program.registration_graph == .Val(graph) -> sema_call_registration_defaults(graph, binding) ?? return None else -> sema_call_local_default_values(wrapper, binding, environment, program, scopes) ?? return None
+        binding = sema_call_materialize_defaults(params, binding, arguments, defaults, policy.name_span, diagnostics) ?? return None
     }
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, policy.name, params, None, true, binding, &arguments, environment, program, &scopes, &tail_store, &context, policy.name_span, &diagnostics) ?? return None
+    (lowered, pins) := sema_call_check_bound_arguments_owned(state, policy.name, params, None, true, binding, arguments, environment, program, scopes, tail_store, context, policy.name_span, diagnostics) ?? return None
     captured := callee
     captured_ty: all_params[count].ty ?? return None
-    tree_expr_retype(&captured, captured_ty)
+    tree_expr_retype(captured, captured_ty)
     conventions := (loop parameter in params -> parameter.convention)
-    wrapper_decl: sema_call_callee_decl(program, wrapper.symbol.id, policy.name_span, &diagnostics) ?? return None
+    wrapper_decl: sema_call_callee_decl(program, wrapper.symbol.id, policy.name_span, diagnostics) ?? return None
     value: sema_tree_node(callee.ty, TExprKind.FnValue{kind: TFnValueKind.Policy{fn_type: callee.ty, policy_args: lowered, policy_conventions: conventions, wrapper: Val(wrapper_decl), captures: [TCapture]{}, callee: captured}}, policy.name_span)
-    Val(sema_call_with_binder_pins(^pins, value, policy.name_span))
+    Val(sema_call_with_binder_pins(pins, value, policy.name_span))
 }
 
 // The policy calls of a registered callable, read from its row in place.
@@ -191,12 +191,12 @@ sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, environme
     // included, on every direct call.
     policies: if program.registration_graph == .Val(graph) -> sema_policy_registered_calls(graph, target.symbol.id) ?? return None else -> sema_policy_local_calls(environment, program, target.symbol.id) ?? return None
     if policies.len() == 0 -> return None
-    function: sema_call_callee_decl(program, target.symbol.id, span, &diagnostics) ?? return None
+    function: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
     callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, span)
     index := policies.len()
     loop index > 0 {
         index -= 1
-        callee = sema_policy_wrap(callee, target, policies[index], environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        callee = sema_policy_wrap(callee, target, policies[index], environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     }
     Val(callee)
 }
@@ -204,26 +204,26 @@ sema_policy_direct_value: fn(target: SemaCallDirectTarget, span: Span, environme
 sema_policy_try_apply: fn(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.name != "apply" || !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.args.len() == 0 {
-        &diagnostics.push(sema_error("E0104", call.name_span, "`apply` needs a callable value", "a callable policy is applied to one function value; an empty chain is written `apply(fn)`", "write `apply(load_user)` or `apply(retry(3), load_user)`"))
+        diagnostics.push(sema_error("E0104", call.name_span, "`apply` needs a callable value", "a callable policy is applied to one function value; an empty chain is written `apply(fn)`", "write `apply(load_user)` or `apply(retry(3), load_user)`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     last: call.args[call.args.len() - 1]
     target_name: if last.expr == .Ident(name, _, _) -> name else -> ""
-    target: sema_call_resolve_direct(target_name, [Type]{}, environment, program, &scopes, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    function: sema_call_callee_decl(program, target.symbol.id, last.span, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    target: sema_call_resolve_direct(target_name, [Type]{}, environment, program, scopes, last.span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    function: sema_call_callee_decl(program, target.symbol.id, last.span, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     callee := sema_tree_node(target.signature, TExprKind.FnValue{kind: TFnValueKind.NamedFn{function: Val(function), lambda: None}}, last.span)
     index := call.args.len() - 1
     loop index > 0 {
         index -= 1
         if call.args[index].expr == .Call(policy, _) {
             if sema_policy_builtin(policy.name) -> next
-            callee = sema_policy_wrap(callee, target, policy, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+            callee = sema_policy_wrap(callee, target, policy, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         } else {
-            &diagnostics.push(sema_error("E0355", call.args[index].span, "`apply` received an invalid callable policy", "policy values are checked before application and cannot change a callable's signature", "write `apply(policy(…), function)`"))
+            diagnostics.push(sema_error("E0355", call.args[index].span, "`apply` received an invalid callable policy", "policy values are checked before application and cannot change a callable's signature", "write `apply(policy(…), function)`"))
             return SemaDirectSpecialCheck{handled: true, value: None}
         }
     }
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(callee, expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(callee, expected, environment, program, diagnostics)}
 }
 
 // A marked block or switched statement (parser_parse_marked_statement) is
@@ -240,20 +240,20 @@ sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplic
     unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "Allow" -> &unsupported.push(application)
+        if application.marker.name != MARKER_ALLOW -> unsupported.push(application.copy())
     }
     loop application in program.rule_facts {
         // A file `#Target`, `#NoPrelude` or `#HTML(page)` is lowered by the
         // parser into the Program's target fields, its no_prelude flag or its
         // html_path (the web output's companion page), which are checked on
         // their own.
-        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude" || application.marker.name == "HTML") -> next
+        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == MARKER_TARGET || application.marker.name == MARKER_NO_PRELUDE || application.marker.name == MARKER_HTML) -> next
         // An error conversion's markers stay its impl's markers after the
         // conversion became its routine (sema_error_conversion_items), and are
         // checked as every impl's markers are.
         if application.site == .Val(site) && site == RuleSite.Impl -> next
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "Allow" -> &unsupported.push(application)
+        if application.marker.name != MARKER_ALLOW -> unsupported.push(application.copy())
     }
     unsupported
 }

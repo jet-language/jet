@@ -4,5 +4,5 @@ Error [jet.SingleUseLent]: `db` can't be shared — it must be used exactly once
  14 |     peek(db)
     |          ^^
  Why: This value's type is `#SingleUse`, so it can only be moved (handed over for good); `peek` would borrow or copy it, and a `#SingleUse` value has no second use to give
- Fix: Move it with the move marker `^` (`^db`) to give it away, or rework the call so it takes ownership through that marker
+ Fix: Give it away with `db.move()`, or rework `peek` so it takes ownership with a `&&` parameter
 More: jet-lang.dev/e/E0142

@@ -57,25 +57,25 @@ NixClosureReceipt: struct {
 }
 
 store_admit_nix_closure: fn(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
-    store_admit_nix_closure_with_progress(&verification, roots, outputs, offline, None, None)
+    store_admit_nix_closure_with_progress(verification, roots, outputs, offline, None, None)
 }
 
 // Use the same signature/NAR admission transaction for discovery and repair.
 store_admit_nix_closure_with_progress: fn(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
-    store_nix_run_admission(&verification, roots, outputs, offline, expected_closure_receipt, progress, false)
+    store_nix_run_admission(verification, roots, outputs, offline, expected_closure_receipt, progress, false)
 }
 
 // Admission for a caller that already holds the Hangar lock (doctor repair).
 // All scopes of a root share one kernel lock, so admission must not take it
 // again: the listing and the publication run under the caller's hold.
 store_admit_nix_closure_hangar_locked: fn(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
-    store_nix_run_admission(&verification, roots, outputs, offline, None, None, true)
+    store_nix_run_admission(verification, roots, outputs, offline, None, None, true)
 }
 
 store_nix_run_admission: fn(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?, hangar_locked: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
-    transaction := NixAdmission.new(&verification, roots, expected_closure_receipt, hangar_locked)
-    admitted: &transaction.admit(outputs, offline, progress) ?? {
-        &transaction.rollback()
+    transaction := NixAdmission.new(verification, roots, expected_closure_receipt, hangar_locked)
+    admitted: transaction.admit(outputs, offline, progress) ?? {
+        transaction.rollback()
         return Err(err)
     }
     Ok(admitted)
@@ -96,7 +96,7 @@ NixAdmission: struct {
         stage_parent: files.join(hangar, "stage")
         store_nix_ensure_dir(stage_parent, .Admission)
         stage: files.join(stage_parent, "{STORE_NIX_STAGE_PREFIX}{store_nix_unique_suffix()}")
-        files.create_dir(stage) ?? return Err(store_nix_io_error(.Admission, err))
+        files.create_dir_all(stage) ?? return Err(store_nix_io_error(.Admission, err))
         store_nix_sweep_dead_admission_stages(stage_parent)
         Ok(NixAdmission{verification: verification.copy(), roots, expected_closure_receipt, hangar_locked, stage, committed: false})
     }
@@ -109,33 +109,33 @@ NixAdmission: struct {
         if !offline -> store_dir = endpoint.cache_info().store_dir
         listed := [StoreEntry]{}
         if self.hangar_locked {
-            listed = store_list_checked_unlocked(&self.verification, self.roots) ?? return Err(store_nix_store_error(err))
+            listed = store_list_checked_unlocked(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
         } else {
-            listed = store_list_checked(&self.verification, self.roots) ?? return Err(store_nix_store_error(err))
+            listed = store_list_checked(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
         }
         existing_entries: store_nix_entries_by_store_path(listed)
         queue := Rank<String>.new()
-        loop request in requests.values() -> &queue.add(request.store_path)
+        loop request in requests.values() -> queue.add(request.store_path)
         scheduled := queue.copy()
-        planned: store_nix_planned_narinfos(&self.verification, self.roots, endpoint)
-        store_nix_expand_planned_closure(&queue, &scheduled, planned, store_dir)
+        planned: store_nix_planned_narinfos(self.verification, self.roots, endpoint)
+        store_nix_expand_planned_closure(queue, scheduled, planned, store_dir)
         fetched := [String: FetchedObject]{}
         store_nix_progress_phase(progress, "Downloading")
         store_nix_progress_objects(progress, 0, scheduled.len())
 
         loop queue.len() > 0 {
-            wave: store_nix_take_wave(&queue, STORE_NIX_MAX_PARALLEL_FETCHES)
+            wave: store_nix_take_wave(queue, STORE_NIX_MAX_PARALLEL_FETCHES)
             pending := [String]{}
             loop store_path in wave {
                 if fetched.has_key(store_path) -> next
-                found: store_nix_existing_object(&self.verification, self.roots, existing_entries, store_path, store_dir) ?? {
-                    &pending.push(store_path)
+                found: store_nix_existing_object(self.verification, self.roots, existing_entries, store_path, store_dir) ?? {
+                    pending.push(store_path)
                     next
                 }
                 loop reference in found.references {
                     if !scheduled.has(reference) {
-                        &scheduled.add(reference)
-                        &queue.add(reference)
+                        scheduled.add(reference.copy())
+                        queue.add(reference)
                     }
                 }
                 fetched[store_path] = found
@@ -156,13 +156,13 @@ NixAdmission: struct {
                 }
             }
             names := objects.keys().to_list()
-            &names.sort()
+            names.sort()
             loop store_path in names {
                 object: objects[store_path]
                 loop reference in object.references {
                     if !scheduled.has(reference) {
-                        &scheduled.add(reference)
-                        &queue.add(reference)
+                        scheduled.add(reference.copy())
+                        queue.add(reference.copy())
                     }
                 }
                 fetched[store_path] = object
@@ -180,7 +180,7 @@ NixAdmission: struct {
             }
             downloaded_bytes += object.download_bytes
         }
-        closure_receipt: &self.publish(&fetched, requests, store_dir, progress)
+        closure_receipt: self.publish(fetched, requests, store_dir, progress)
         objects := [String: AdmittedNixObject]{}
         loop store_path in fetched.keys() {
             object: fetched[store_path]
@@ -265,10 +265,10 @@ NixAdmission: struct {
             return Err(NixCacheError.new(.NarCorruption, "Nix NAR bytes do not match signed NarHash"))
         }
         store_seal_node(tree) ?? return Err(store_nix_store_error(err))
-        hangar_digest: store_verified_output_hash(&verification, tree, Val(self.roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.NarCorruption, "Nix staged object {store_path} could not be hashed: {err.message()}"))
+        hangar_digest: store_verified_output_hash(verification, tree, Val(self.roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.NarCorruption, "Nix staged object {store_path} could not be hashed: {err.message()}"))
         references := [String]{}
-        loop name in info.info.references -> &references.push("{store_dir}/{name}")
-        &references.sort()
+        loop name in info.info.references -> references.push("{store_dir}/{name}")
+        references.sort()
         proof: store_nix_proof_digest(endpoint.endpoint, info.info, info.fingerprint, info.key_id, info.signature, references)
         Ok(FetchedObject{
             store_path: store_path,
@@ -290,11 +290,11 @@ NixAdmission: struct {
     // A hangar-locked admission publishes under its caller's hold.
     publish: fn(&self, fetched: &[String: FetchedObject], requests: [String: NixOutputRequest], store_dir: String, progress: ProgressHandle?) -[IO, FS, Env, Time, Time.Wait]> String NixCacheError! {
         if self.hangar_locked {
-            receipt: &self.publish_locked(&fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
+            receipt: self.publish_locked(fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
             return Ok(receipt)
         }
         hangar_lock: env_runtime_lock(self.roots.root, "hangar")
-        receipt: &self.publish_locked(&fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
+        receipt: self.publish_locked(fetched, requests, store_dir, progress) ?? return Err(NixCacheError.new(.Admission, err.detail))
         Ok(receipt)
     }
 
@@ -305,16 +305,16 @@ NixAdmission: struct {
         hangar_digests := [String: String]{}
         loop store_path in fetched.keys() -> hangar_digests[store_path] = fetched[store_path].hangar_digest
         names := fetched.keys().to_list()
-        &names.sort()
+        names.sort()
         total_objects: names.len()
         admitted_objects := 0
         loop store_path in names {
             refs := [String]{}
             loop reference in fetched[store_path].references {
                 target: hangar_digests.get(reference) ?? return Err(NixCacheError.new(.MissingReference, "Nix closure edge has no fetched target"))
-                &refs.push(target)
+                refs.push(target)
             }
-            &refs.sort()
+            refs.sort()
             fetched[store_path].direct_reference_digests = refs
             admitted_objects += 1
             store_nix_progress_objects(progress, admitted_objects, total_objects)
@@ -326,11 +326,11 @@ NixAdmission: struct {
         }
 
         _: AdmissionTransaction.recover_unlocked(self.roots) ?? return Err(store_nix_store_error(err))
-        transaction := AdmissionTransaction.new(&self.verification, self.roots) ?? return Err(store_nix_store_error(err))
+        transaction := AdmissionTransaction.new(self.verification, self.roots) ?? return Err(store_nix_store_error(err))
         loop store_path in names {
             object: fetched[store_path]
             source: object.stage ?? files.join(objects_dir, object.hangar_digest)
-            fetched[store_path].hangar_path = &transaction.stage_object(AdmissionObject{
+            fetched[store_path].hangar_path = transaction.stage_object(AdmissionObject{
                 source: source,
                 digest: object.hangar_digest,
                 bytes: object.unpacked_bytes,
@@ -363,12 +363,12 @@ NixAdmission: struct {
             }
             producer_bytes: store_canonical_producer("nix", object.store_path, object.proof, identity, facts) ?? return Err(store_nix_store_error(err))
             producer := ProducerRecord.decode(producer_bytes) ?? return Err(store_nix_store_error(err))
-            &producer.bind_cache_provenance(reference, object.hangar_digest, identity, object.direct_reference_digests)
+            producer.bind_cache_provenance(reference, object.hangar_digest, identity, object.direct_reference_digests)
             // File-root and symlink-root NARs have no executable `bin` projection.
             candidate: files.join(object.hangar_path, "bin")
             root_is_dir: files.stat(object.hangar_path) ? info -> info.is_dir && !info.is_symlink ! failed -> false
             bin: if root_is_dir && files.is_dir(candidate) -> candidate else -> ""
-            &entries.push(StoreEntry{
+            entries.push(StoreEntry{
                 id: store_content_addressed_entry_id(name, "", reference, object.hangar_digest),
                 name: name,
                 version: "",
@@ -392,7 +392,7 @@ NixAdmission: struct {
                 last_used_at: now,
             })
         }
-        _: &transaction.commit(&entries, [AdmissionReceipt]{AdmissionReceipt{digest: closure_receipt.digest, bytes: closure_receipt.bytes}}, Val(self.stage), RegistrationMode.AdmittedNix, None) ?? return Err(store_nix_store_error(err))
+        _: transaction.commit(entries, [AdmissionReceipt]{AdmissionReceipt{digest: closure_receipt.digest, bytes: closure_receipt.bytes}}, Val(self.stage), RegistrationMode.AdmittedNix, None) ?? return Err(store_nix_store_error(err))
         Ok(closure_receipt.digest)
     }
 
@@ -410,8 +410,8 @@ NixAdmission: struct {
 // reader refuses trailing decoded ones.
 store_nix_read_nar: fn(path: String, compression: NixCompression, tree: String, nar_size: Int, store_path: String) -[IO, FS, Net, Env, Time.Wait]> NarStats NixCacheError! {
     file: files.open(path) ?? return Err(store_nix_io_error(.Admission, err))
-    source: if compression == .Plain -> NarByteSource.file(^file) else -> NarByteSource.zstd(zstd.reader(^file))
-    stats: store_read_nar_stream_with_mode(^source, tree, nar_size, true) ?? return Err(store_nix_nar_stream_error(store_path, err.message()))
+    source: if compression == .Plain -> NarByteSource.file(file) else -> NarByteSource.zstd(zstd.reader(file))
+    stats: store_read_nar_stream_with_mode(source, tree, nar_size, true) ?? return Err(store_nix_nar_stream_error(store_path, err.message()))
     Ok(stats)
 }
 
@@ -452,13 +452,13 @@ store_nix_existing_object: fn(verification: &StoreVerification, roots: HangarRoo
     info: files.stat(output) ?? return Ok(None)
     if !info.is_symlink && !info.is_dir && !info.is_file -> return Ok(None)
     if !store_path_starts_with(output, roots.hangar_dir()) -> return Ok(None)
-    digest: store_verified_output_hash_persistent(&verification, output, Val(roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.Admission, "existing Nix object {store_path} failed re-hash: {err.message()}"))
+    digest: store_verified_output_hash_persistent(verification, output, Val(roots.hangar_dir()), false) ?? return Err(NixCacheError.new(.Admission, "existing Nix object {store_path} failed re-hash: {err.message()}"))
     if digest != entry.envelope.output_hash -> return Ok(None)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(NixCacheError.new(.Admission, err.message()))
     references := [String]{}
     recorded: producer.facts.get("nix.references") ?? ""
     loop reference in recorded.split(",") {
-        if reference != "" -> &references.push(reference)
+        if reference != "" -> references.push(reference)
     }
     nar_hash: producer.facts.get("nix.nar-hash") ?? return Ok(None)
     if nar_hash == "" -> return Ok(None)
@@ -493,32 +493,32 @@ store_nix_existing_object: fn(verification: &StoreVerification, roots: HangarRoo
 store_nix_closure_receipt_digest: fn(objects: [String: FetchedObject], outputs: [String: NixOutputRequest]) -> NixClosureReceipt Never! {
     bytes := "nix-cache-closure-v1\n".bytes()
     output_names := outputs.keys().to_list()
-    &output_names.sort()
-    store_nix_push_u64(&bytes, output_names.len())
+    output_names.sort()
+    store_nix_push_u64(bytes, output_names.len())
     loop name in output_names {
         request: outputs[name]
-        store_nix_push_field(&bytes, name)
-        store_nix_push_field(&bytes, request.store_path)
-        store_nix_push_field(&bytes, objects[request.store_path].hangar_digest)
+        store_nix_push_field(bytes, name)
+        store_nix_push_field(bytes, request.store_path)
+        store_nix_push_field(bytes, objects[request.store_path].hangar_digest)
     }
     store_paths := objects.keys().to_list()
-    &store_paths.sort()
-    store_nix_push_u64(&bytes, store_paths.len())
+    store_paths.sort()
+    store_nix_push_u64(bytes, store_paths.len())
     edge_count := 0
     loop store_path in store_paths {
         object: objects[store_path]
-        store_nix_push_field(&bytes, store_path)
-        store_nix_push_field(&bytes, object.hangar_digest)
-        store_nix_push_field(&bytes, object.proof)
+        store_nix_push_field(bytes, store_path)
+        store_nix_push_field(bytes, object.hangar_digest)
+        store_nix_push_field(bytes, object.proof)
         edge_count += object.references.len()
     }
-    store_nix_push_u64(&bytes, edge_count)
+    store_nix_push_u64(bytes, edge_count)
     loop store_path in store_paths {
         object: objects[store_path]
         loop index in 0..<object.references.len() {
-            store_nix_push_field(&bytes, store_path)
-            store_nix_push_field(&bytes, object.references[index])
-            store_nix_push_field(&bytes, object.direct_reference_digests[index])
+            store_nix_push_field(bytes, store_path)
+            store_nix_push_field(bytes, object.references[index])
+            store_nix_push_field(bytes, object.direct_reference_digests[index])
         }
     }
     digest: "sha256-{crypto.sha256(bytes).hex()}"
@@ -528,47 +528,47 @@ store_nix_closure_receipt_digest: fn(objects: [String: FetchedObject], outputs: 
 // `nix-narinfo-proof-v1`: the signed upstream facts one object was admitted on.
 store_nix_proof_digest: fn(endpoint: String, info: NixNarInfo, fingerprint: [U8], key_id: String, signature: [U8], references: [String]) -> String Never! {
     bytes := "nix-narinfo-proof-v1\n".bytes()
-    store_nix_push_bytes(&bytes, endpoint.bytes())
-    store_nix_push_bytes(&bytes, info.store_path.bytes())
-    store_nix_push_bytes(&bytes, fingerprint)
-    store_nix_push_bytes(&bytes, key_id.bytes())
-    store_nix_push_bytes(&bytes, signature)
-    store_nix_push_bytes(&bytes, info.url.bytes())
-    store_nix_push_bytes(&bytes, info.compression.as_str().bytes())
+    store_nix_push_bytes(bytes, endpoint.bytes())
+    store_nix_push_bytes(bytes, info.store_path.bytes())
+    store_nix_push_bytes(bytes, fingerprint)
+    store_nix_push_bytes(bytes, key_id.bytes())
+    store_nix_push_bytes(bytes, signature)
+    store_nix_push_bytes(bytes, info.url.bytes())
+    store_nix_push_bytes(bytes, info.compression.as_str().bytes())
     if info.file_hash == {
         .Val(value) -> {
-            &bytes.push(U8{1})
-            store_nix_push_field(&bytes, value)
+            bytes.push(U8{1})
+            store_nix_push_field(bytes, value)
         }
-        else -> &bytes.push(U8{0})
+        else -> bytes.push(U8{0})
     }
     if info.file_size == {
         .Val(value) -> {
-            &bytes.push(U8{1})
-            store_nix_push_u64(&bytes, value)
+            bytes.push(U8{1})
+            store_nix_push_u64(bytes, value)
         }
-        else -> &bytes.push(U8{0})
+        else -> bytes.push(U8{0})
     }
-    store_nix_push_field(&bytes, info.nar_hash)
-    store_nix_push_u64(&bytes, info.nar_size)
-    loop reference in references -> store_nix_push_field(&bytes, reference)
+    store_nix_push_field(bytes, info.nar_hash)
+    store_nix_push_u64(bytes, info.nar_size)
+    loop reference in references -> store_nix_push_field(bytes, reference)
     "sha256-{crypto.sha256(bytes).hex()}"
 }
 
 store_nix_push_field: fn(output: &[U8], value: String) Never! {
-    store_nix_push_bytes(&output, value.bytes())
+    store_nix_push_bytes(output, value.bytes())
 }
 
 store_nix_push_bytes: fn(output: &[U8], value: [U8]) Never! {
-    store_nix_push_u64(&output, value.len())
-    loop byte in value -> &output.push(byte)
+    store_nix_push_u64(output, value.len())
+    loop byte in value -> output.push(byte)
 }
 
 // Big-endian u64, as Rust `u64::to_be_bytes`.
 store_nix_push_u64: fn(output: &[U8], value: Int) Never! {
     loop index in 0..<8 {
         shift: (7 - index) * 8
-        &output.push(U8{((value >> shift)).bit_and(255)})
+        output.push(U8{((value >> shift)).bit_and(255)})
     }
 }
 

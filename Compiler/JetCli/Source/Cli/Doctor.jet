@@ -16,7 +16,7 @@ use {
     ]
     jet_foundation.[diagnostic_theme_paint]
     jet_pkg_model.[
-        pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
+        COMPILER_VERSION, pkg_legacy_user_hangar_dir, pkg_resolve_roots, pkg_source_store_dir, publication_redact_registry_url,
         publication_resolve_publish_registry,
     ]
     jetpack_artifact_store.[ArtifactStore]
@@ -58,19 +58,19 @@ jet_cli_doctor_problem: fn(section: String, label: String, detail: String, fix: 
 // Every check in report order.
 jet_cli_doctor_run: fn(online: Bool, cross_target: String?) -[FS, Env, Exec, Time, Time.Wait, Rand]> [JetCLIDoctorCheck] Never! {
     out := [JetCLIDoctorCheck]{}
-    &out.push(jet_cli_doctor_check_native_linker())
-    &out.push(jet_cli_doctor_artifact_store())
-    &out.push(jet_cli_doctor_cache_dir("ffi cache", jet_cli_doctor_ffi_cache_dir()))
-    &out.push(jet_cli_doctor_cache_dir("package store", pkg_source_store_dir()))
-    &out.push(jet_cli_doctor_check_path())
-    &out.push(jet_cli_doctor_ok("lsp", "language server", "built in (`{JET_CLI_BINARY} lsp`)"))
+    out.push(jet_cli_doctor_check_native_linker())
+    out.push(jet_cli_doctor_artifact_store())
+    out.push(jet_cli_doctor_cache_dir("ffi cache", jet_cli_doctor_ffi_cache_dir()))
+    out.push(jet_cli_doctor_cache_dir("package store", pkg_source_store_dir()))
+    out.push(jet_cli_doctor_check_path())
+    out.push(jet_cli_doctor_ok("lsp", "language server", "built in (`{JET_CLI_BINARY} lsp`)"))
     if online {
-        &out.push(jet_cli_doctor_check_registry())
+        out.push(jet_cli_doctor_check_registry())
     } else {
-        &out.push(jet_cli_doctor_note("registry", "registry", "skipped (offline; pass --online to check)"))
+        out.push(jet_cli_doctor_note("registry", "registry", "skipped (offline; pass --online to check)"))
     }
-    loop check in jet_cli_doctor_check_ffi() -> &out.push(check)
-    if cross_target == .Val(name) -> &out.push(jet_cli_doctor_check_cross_target(name))
+    loop check in jet_cli_doctor_check_ffi() -> out.push(check)
+    if cross_target == .Val(name) -> out.push(jet_cli_doctor_check_cross_target(name))
     out
 }
 
@@ -172,20 +172,20 @@ jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] 
     out := [JetCLIDoctorCheck]{}
     // pkg-config discovers C libraries that are not in the hangar.
     if jet_cli_doctor_command_ok([String]{"pkg-config", "--version"}) {
-        &out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", "found"))
+        out.push(jet_cli_doctor_ok("c-ffi", "pkg-config", "found"))
     } else {
-        &out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
+        out.push(jet_cli_doctor_problem("c-ffi", "pkg-config", "not found", "install pkg-config (e.g. `pacman -S pkgconf` / `apt install pkg-config`); only needed if you link C libraries", false))
     }
     // The user-owned C-library store, inspected without following a final link.
     hangar: pkg_resolve_roots().hangar_dir()
     if doctor_files.stat(hangar) == {
         .Ok(metadata) -> {
             if metadata.is_symlink {
-                &out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is a symlink", "move the symlink aside without following it, then retry `jetpack hangar path`", false))
+                out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is a symlink", "move the symlink aside without following it, then retry `jetpack hangar path`", false))
             } else if metadata.is_dir {
-                &out.push(jet_cli_doctor_ok("c-ffi", "hangar", hangar))
+                out.push(jet_cli_doctor_ok("c-ffi", "hangar", hangar))
             } else {
-                &out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is not a directory", "move the path aside without deleting it, then retry `jetpack hangar path`", false))
+                out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} is not a directory", "move the path aside without deleting it, then retry `jetpack hangar path`", false))
             }
         }
         .Err(error) -> {
@@ -198,17 +198,17 @@ jet_cli_doctor_check_ffi: fn() -[FS, Env, Exec, Time.Wait]> [JetCLIDoctorCheck] 
                     }
                 }
                 detail: if source == .Val(legacy) -> "{hangar} not present; legacy Hangar at {legacy} awaits atomic migration" else -> "{hangar} not present (created when you realize a C library)"
-                &out.push(jet_cli_doctor_note("c-ffi", "hangar", detail))
+                out.push(jet_cli_doctor_note("c-ffi", "hangar", detail))
             } else {
-                &out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} cannot be inspected ({jet_cli_doctor_io_kind(error)})", "restore access to the resolved user Hangar path", false))
+                out.push(jet_cli_doctor_problem("c-ffi", "hangar", "{hangar} cannot be inspected ({jet_cli_doctor_io_kind(error)})", "restore access to the resolved user Hangar path", false))
             }
         }
     }
     // cargo builds the bridge crate of an `extern rust` import.
     if jet_cli_doctor_command_ok([String]{"cargo", "--version"}) {
-        &out.push(jet_cli_doctor_ok("rust-ffi", "cargo", "found (builds `extern rust` bridge crates)"))
+        out.push(jet_cli_doctor_ok("rust-ffi", "cargo", "found (builds `extern rust` bridge crates)"))
     } else {
-        &out.push(jet_cli_doctor_note("rust-ffi", "cargo", "not found (only needed for `extern rust` imports)"))
+        out.push(jet_cli_doctor_note("rust-ffi", "cargo", "not found (only needed for `extern rust` imports)"))
     }
     out
 }
@@ -221,7 +221,7 @@ jet_cli_doctor_apply_fixes: fn(checks: [JetCLIDoctorCheck]) -[FS]> [String] Neve
         if check.health != .Problem || !check.auto_fixable || check.section != "cache" -> next
         // The detail is "<path> exists but is not a directory".
         path: if check.detail.split_once(" exists") == .Val(pair) -> pair.before else -> check.detail
-        if jet_cli_doctor_remove(path) -> &fixed.push(check.label)
+        if jet_cli_doctor_remove(path) -> fixed.push(check.label)
     }
     fixed
 }
@@ -247,7 +247,7 @@ jet_cli_doctor_ffi_cache_dir: fn() -[Env]> String Never! {
 
 // A `--target` machine: the plan admitted only declared target machines.
 jet_cli_doctor_check_cross_target: fn(name: String) -> JetCLIDoctorCheck Never! {
-    machine: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
+    machine: jet_driver_target_machine_by_name(name, COMPILER_VERSION) ?? {
         return jet_cli_doctor_problem("cross", name, "not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", false)
     }
     jet_cli_doctor_ok("cross", machine.name, "declared target machine ({machine.triple})")
@@ -298,7 +298,7 @@ jet_cli_doctor_plan: fn(raw: [String], jet_argv: [String], color: Bool) -> JetCL
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<machine>` or `--target <machine>`", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            machine: jet_driver_target_machine_by_name(name, JET_CLI_VERSION) ?? {
+            machine: jet_driver_target_machine_by_name(name, COMPILER_VERSION) ?? {
                 return jet_cli_fail("E3302", "target `{name}` is not available", "the name is not a declared target machine", "use one of {JET_DRIVER_TARGET_MACHINE_NAMES.join(", ")}", color, JET_DRIVER_EXIT_USAGE)
             }
             cross_target = Val(machine.name)

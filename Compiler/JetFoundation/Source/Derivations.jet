@@ -56,7 +56,7 @@ derivation_record: fn(subject: String, claim: String, producer: String, method: 
     record
 }
 
-derivation_record_with_payload: fn(record: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
+derivation_record_with_payload: fn(record: &&DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
     updated := record
     updated.payload = Val(payload)
     updated.id = derivation_record_id(updated)
@@ -114,8 +114,8 @@ derivation_store_intern: fn(store: &DerivationStore, record: DerivationRecord) -
     loop existing in store.records {
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
     }
-    &store.records.push(record)
-    derivation_store_sort(&store)
+    store.records.push(record.copy())
+    derivation_store_sort(store)
     Val(derivation_record_reference(record))
 }
 
@@ -144,7 +144,7 @@ derivation_strings_sorted_unique: fn(values: [String]) -> [String] Never! {
     }
     result := [String]{}
     loop value in sorted {
-        if result.len() == 0 || result[result.len() - 1] != value -> &result.push(value)
+        if result.len() == 0 || result[result.len() - 1] != value -> result.push(value)
     }
     result
 }
@@ -174,7 +174,7 @@ derivation_disposition_name: fn(disposition: DerivationDisposition) -> String Ne
 
 derivation_json_strings: fn(values: [String]) -> String Never! {
     rows := [String]{}
-    loop value in values -> &rows.push(derivation_record_quote(value))
+    loop value in values -> rows.push(derivation_record_quote(value))
     rows.join(",")
 }
 
@@ -189,17 +189,17 @@ derivation_record_id: fn(record: DerivationRecord) -> String Never! {
     separator: String.from_bytes([U8]{0}) ?? ""
     premises := record.premises.join(separator)
     state := DerivationHashState{first: U64{0xcbf29ce484222325}, second: U64{0x9e3779b185ebca87}}
-    derivation_hash_frame(&state, record.subject)
-    derivation_hash_frame(&state, record.claim)
-    derivation_hash_frame(&state, record.producer)
-    derivation_hash_frame(&state, derivation_method_raw(record.method))
-    derivation_hash_frame(&state, record.rule)
-    derivation_hash_frame(&state, premises)
-    derivation_hash_frame(&state, record.identity.source)
-    derivation_hash_frame(&state, record.identity.build)
-    derivation_hash_frame(&state, record.identity.run)
-    derivation_hash_frame(&state, record.identity.target)
-    derivation_hash_frame(&state, payload)
+    derivation_hash_frame(state, record.subject)
+    derivation_hash_frame(state, record.claim)
+    derivation_hash_frame(state, record.producer)
+    derivation_hash_frame(state, derivation_method_raw(record.method))
+    derivation_hash_frame(state, record.rule)
+    derivation_hash_frame(state, premises)
+    derivation_hash_frame(state, record.identity.source)
+    derivation_hash_frame(state, record.identity.build)
+    derivation_hash_frame(state, record.identity.run)
+    derivation_hash_frame(state, record.identity.target)
+    derivation_hash_frame(state, payload)
     derivation_hash_hex(state)
 }
 
@@ -218,8 +218,8 @@ derivation_method_raw: fn(method: DerivationMethod) -> String Never! {
 derivation_hash_frame: fn(state: &DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
-    loop index in 0..<8 -> derivation_hash_byte(&state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
-    loop byte in bytes -> derivation_hash_byte(&state, byte)
+    loop index in 0..<8 -> derivation_hash_byte(state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
+    loop byte in bytes -> derivation_hash_byte(state, byte)
 }
 
 derivation_hash_byte: fn(state: &DerivationHashState, byte: U8) Never! {
@@ -233,8 +233,8 @@ derivation_hash_hex: fn(state: DerivationHashState) -> String Never! {
     first: Int.from_u64(state.first)
     second: Int.from_u64(state.second)
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((first >> shift)).bit_and(15)])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((second >> shift)).bit_and(15)])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> output.push(digits[((first >> shift)).bit_and(15)])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> output.push(digits[((second >> shift)).bit_and(15)])
     String.from_bytes(output) ?? ""
 }
 
@@ -311,12 +311,12 @@ frame_schedule_json: fn(schedule: FrameSchedule) -> String Never! {
     reuse := [String]{}
     retentions := [String]{}
     conservative := [String]{}
-    loop operation in schedule.operations -> &operations.push(frame_operation_json(operation))
-    loop dependency in schedule.dependencies -> &dependencies.push(frame_dependency_json(dependency))
-    loop transfer in schedule.transfers -> &transfers.push(frame_transfer_json(transfer))
-    loop row in schedule.reuse -> &reuse.push(frame_reuse_json(row))
-    loop row in schedule.retentions -> &retentions.push(frame_retention_json(row))
-    loop reason in schedule.conservative -> &conservative.push(derivation_json_quote(reason))
+    loop operation in schedule.operations -> operations.push(frame_operation_json(operation))
+    loop dependency in schedule.dependencies -> dependencies.push(frame_dependency_json(dependency))
+    loop transfer in schedule.transfers -> transfers.push(frame_transfer_json(transfer))
+    loop row in schedule.reuse -> reuse.push(frame_reuse_json(row))
+    loop row in schedule.retentions -> retentions.push(frame_retention_json(row))
+    loop reason in schedule.conservative -> conservative.push(derivation_json_quote(reason))
     operations_json: operations.join(",")
     dependencies_json: dependencies.join(",")
     transfers_json: transfers.join(",")
@@ -328,7 +328,7 @@ frame_schedule_json: fn(schedule: FrameSchedule) -> String Never! {
 
 frame_operation_json: fn(operation: FrameOperation) -> String Never! {
     accesses := [String]{}
-    loop access in operation.accesses -> &accesses.push(resource_access_json(access))
+    loop access in operation.accesses -> accesses.push(resource_access_json(access))
     provider := if operation.completion_provider == None -> "" else -> ",\"completion_provider\":{derivation_json_quote(operation.completion_provider ?? "")}"
     accesses_json: accesses.join(",")
     "{{\"name\":{derivation_json_quote(operation.name)},\"source_index\":{derivation_json_quote(operation.source_index.to_string())},\"accesses\":[{accesses_json}],\"completion\":{frame_completion_json(operation.completion)},\"external_effect\":{derivation_json_bool(operation.external_effect)}{provider}}}"

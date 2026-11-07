@@ -164,7 +164,7 @@ UIShortcutDispatch: enum {
 capabilities: fn() -> UICapabilityFacts Never! {
     all: [UICapability]{.FileDialog, .Clipboard, .IME, .DragDrop, .Shortcuts, .Accessibility, .FontShaping}
     facts := [UICapabilityFact]{}
-    loop (code, capability) in all -> &facts.push(UICapabilityFact{capability: capability, available: core.ui.host.__capability(code)})
+    loop (code, capability) in all -> facts.push(UICapabilityFact{capability: capability, available: core.ui.host.__capability(code)})
     UICapabilityFacts{facts: facts}
 }
 
@@ -209,7 +209,7 @@ provider_record_fields: fn(record: String) -> [String]? Never! {
             digits += 1
         }
         if digits == 0 || length > raw.len() - at -> return None
-        &fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
+        fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
         at += length
     }
     Val(fields)
@@ -234,7 +234,7 @@ file_dialog: fn(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileD
     if !core.ui.host.__capability(0) -> return Err(UIHostError.CapabilityUnavailable{capability: "FileDialog"})
     wire := [String]{request.title.copy(), request.grant.root.copy(), if request.allow_multiple -> "1" else -> "0"}
     loop filter in request.filters {
-        loop extension in filter.extensions -> &wire.push(extension.copy())
+        loop extension in filter.extensions -> wire.push(extension.copy())
     }
     token: core.ui.host.__dialog_request(if opening -> 0 else -> 1, provider_record(wire))
     if token < 0 -> return Err(UIHostError.HostFailure{service: "FileDialog", message: "the provider refused the dialog request"})
@@ -246,7 +246,7 @@ file_dialog: fn(request: UIFileDialogRequest, kind: UIFileDialogKind) -> UIFileD
     if items.len() < 2 -> return Err(UIHostError.InvalidRequest("a completed file dialog must select at least one file"))
     if !request.allow_multiple && items.len() > 2 -> return Err(UIHostError.InvalidRequest("a single-selection dialog returned multiple files"))
     files := [UIGrantedPath]{}
-    loop index in 1..<items.len() -> &files.push(granted_path(request.grant, items[index], access))
+    loop index in 1..<items.len() -> files.push(granted_path(request.grant, items[index], access))
     Ok(UIFileDialogSelection{files: files})
 }
 
@@ -286,25 +286,25 @@ fs_grant: fn(path: String, rights: UIFSRights) -> UIFSGrant UIHostError! {
     rooted := false
     normal_depth := 0
     loop {
-        part: host_path.next(input, &cursor) ?? break
+        part: host_path.next(input, cursor) ?? break
         if part.kind == .Prefix {
-            host_path.push(&normalized, host_path.owned_span(input, part.span))
+            host_path.push(normalized, host_path.owned_span(input, part.span))
             rooted = true
         } else if part.kind == .RootDir {
             root: host_path.OSPath{encoded: [U8]{host_path.main_separator(platform)}, platform: platform}
-            host_path.push(&normalized, root)
+            host_path.push(normalized, root)
             rooted = true
         } else if part.kind == .ParentDir {
             if normal_depth == 0 -> return Err(UIHostError.ResourceDenied("path `{path}` escapes its lexical root"))
             parent: host_path.parent_span(normalized) ?? panic("normalized grant parent")
-            host_path.truncate(&normalized.encoded, parent.end)
+            host_path.truncate(normalized.encoded, parent.end)
             normal_depth -= 1
         } else if part.kind == .Normal {
-            host_path.push(&normalized, host_path.owned_span(input, part.span))
+            host_path.push(normalized, host_path.owned_span(input, part.span))
             normal_depth += 1
         }
     }
-    if normalized.encoded.len() == 0 && rooted -> &normalized.encoded.push(host_path.main_separator(platform))
+    if normalized.encoded.len() == 0 && rooted -> normalized.encoded.push(host_path.main_separator(platform))
     root: if normalized.encoded.len() == 0 -> "." else -> String.from_bytes(normalized.encoded) ?? panic("UTF-8 grant path")
     Ok(UIFSGrant{root: root, rights: rights})
 }
@@ -320,7 +320,7 @@ shortcut: fn(key: String, modifiers: UIShortcutModifiers) -[IO]> UIShortcut UIHo
 }
 
 impl UIShortcut {
-    /// D-FOUND-PLATFORM1=A: `UIShortcut.cmd("s")` binds a key to the logical
+    /// `UIShortcut.cmd("s")` binds a key to the logical
     /// platform-command modifier (Control on Unix/Windows, Meta on macOS).
     cmd: fn(key: String) -> UIShortcut Never! {
         normalized: core.text.lower(core.text.trim(key))

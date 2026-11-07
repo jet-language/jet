@@ -32,7 +32,7 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
     if !file.is_empty() -> report.file = Val(file)
     if diagnostic.edit == .Val(edit) {
         safety: diagnostic.safety ?? panic("diagnostic `{diagnostic.code}` has an edit without a safety grade")
-        &report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
+        report.push_fix_edit(ReportEdit.new(file, ReportSpan.new(edit.span.start, edit.span.end), edit.new_text, cli_report_fix_safety(safety))) ?? panic("a registry edit is valid for its report")
     }
     if diagnostic.no_fix_reason == .Val(reason) {
         kind: if reason.kind == {
@@ -40,12 +40,12 @@ cli_diagnostic_to_report: fn(diagnostic: Diagnostic, file: ReportPath) -> Report
             .Design -> NoFixReasonKind.Design
             .Ambiguous -> NoFixReasonKind.Ambiguous
         }
-        &report.set_no_fix_reason(NoFixReason.new(kind, reason.next)) ?? panic("a registry no-fix reason is valid for its report")
+        report.set_no_fix_reason(NoFixReason.new(kind, reason.next)) ?? panic("a registry no-fix reason is valid for its report")
     }
     loop cause in diagnostic.cause {
         projected := ReportCause.new(cause.code)
         if cause.span == .Val(span) -> projected.span = Val(ReportSpan.new(span.start, span.end))
-        &report.cause.push(projected)
+        report.cause.push(projected)
     }
     report
 }

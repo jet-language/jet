@@ -10,7 +10,7 @@ run: fn() {
     print(first)
 
     // Reset is reusable, but the first view is no longer live past this edge.
-    &arena.reset()
+    arena.reset()
     second: arena.alloc(11)
     print(second)
 
@@ -28,7 +28,7 @@ run: fn() {
     ! error -> {
         print("failure {error.requested_bytes} {error.allocator}")
     }
-    close(^fixed)
+    close(fixed)
 
     // Scope guards run in reverse declaration order, before the function exits.
     _outer: scope.guard(() -> print("outer cleanup"))
@@ -36,5 +36,5 @@ run: fn() {
     print("live")
 
     // close is terminal ownership transfer; no view remains live here.
-    close(^arena)
+    close(arena)
 }

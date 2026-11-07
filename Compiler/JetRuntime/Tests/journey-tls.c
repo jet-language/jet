@@ -69,7 +69,7 @@ static void entry(unsigned kind,int wire,const char *expected) {
     int pipes[2]; assert(!pipe(pipes));
     pid_t pid=fork(); assert(pid>=0);
     if (!pid) {
-        assert(!dup2(pipes[1],STDERR_FILENO)); close(pipes[0]); close(pipes[1]);
+        assert(dup2(pipes[1],STDERR_FILENO)==STDERR_FILENO); close(pipes[0]); close(pipes[1]);
         jet_journey_reset();
         if (wire) jet_report_use_wire();
         Text *message=text("failed\n\n");
@@ -117,9 +117,12 @@ static void live_environment(void) {
 }
 int main(int argc,char **argv) {
     jet_rt_host_arguments(argc,(W)(uintptr_t)argv,(W)(uintptr_t)environ);
-    // Warm persistent registry/table capacity outside the measured interval.
+    // Warm persistent registry/table capacity outside the measured interval,
+    // including the logical environment the report's terminal policy reads:
+    // its first use copies the process environment and keeps it.
     plant("warm.jet","warm",1); jet_rt_native_journey_drop(jet_journey_take_hops());
     join_worker((void *)1);
+    Text *unset=text("JET_JOURNEY_WARM"); jet_rt_logical_env_unset(unset); jet_rt_string_drop(unset);
     W cap=jet_rt_program_allocator_fact(4),mode=jet_rt_program_allocator_fact(5);
     jet_rt_program_allocator_configure(1,0);
     W baseline=jet_rt_program_allocator_fact(2);

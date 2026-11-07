@@ -2,7 +2,7 @@
 // borrows the place instead of copying it (TLocal.place_borrow) when no
 // copy could be observed. The binding and the variable the place reads
 // (its root) are both immutable: sema rejects every write through either
-// (E0202). The root holds its value for the whole function: it is a read
+// (E0111 or E0205). The root holds its value for the whole function: it is a read
 // parameter (or `self`), or an immutable Let that is not itself a window
 // (`r: &place`). Nowhere in the
 // function is either variable moved, dropped, closed, taken apart, rolled
@@ -37,7 +37,7 @@ use jet_foundation.[
 SemaPlaceBorrowCensus: struct {
     keys: [String:Bool]
     names: [String:Bool]
-    // A payload take (`^p`) moves out of a subject this walk does not name:
+    // A payload take (`p.move()`) moves out of a subject this walk does not name:
     // nothing in the body borrows.
     any: Bool
 }
@@ -56,15 +56,15 @@ SemaPlaceBorrowRoots: struct {
 // the rows of the body's flat nodes (sema_node).
 sema_place_borrow_function: fn(body: &[TStmt], params: [TParameter], receiver: String, arena: BodyTree) Never! {
     census := SemaPlaceBorrowCensus{keys: [String:Bool]{}, names: [String:Bool]{}, any: false}
-    sema_place_borrow_census_list(body, arena, &census)
+    sema_place_borrow_census_list(body, arena, census)
     table := SemaPlaceBorrowRoots{roots: [String:Bool]{}, seen: [String:Bool]{}, blocked: [String:Bool]{}}
     loop param in params {
         if param.local.mutable -> next
         if param.convention != AccessConvention.Read -> next
-        if param.local.symbol_id == .Val(id) -> _ := &table.roots.add(id.key, true)
+        if param.local.symbol_id == .Val(id) -> _ := table.roots.add(id.key, true)
     }
-    if receiver != "" -> _ := &table.roots.add(receiver, true)
-    sema_place_borrow_statements(&body, census, arena, &table)
+    if receiver != "" -> _ := table.roots.add(receiver.copy(), true)
+    sema_place_borrow_statements(body, census, arena, table)
 }
 
 sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, arena: BodyTree, table: &SemaPlaceBorrowRoots) Never! {
@@ -73,8 +73,8 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
         if body[index] == .Let(local, let_ty, init, gc_promotion, gc_transferred, _) {
             key: if local.symbol_id == .Val(id) -> id.key else -> ""
             if key != "" {
-                if table.seen.get(key) != None -> _ := &table.blocked.add(key, true)
-                _ := &table.seen.add(key, true)
+                if table.seen.get(key) != None -> _ := table.blocked.add(key.copy(), true)
+                _ := table.seen.add(key.copy(), true)
             }
             if key != "" && gc_promotion == None && !gc_transferred && sema_place_borrow_plain_local(local, let_ty) {
                 if sema_place_borrow_place(init, false, arena) && !sema_place_borrow_consumed(census, key, local.name) {
@@ -84,7 +84,7 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
                 // An owning immutable variable is a root for later places;
                 // a window (`r: &place`) aliases storage another variable
                 // may still change.
-                if !sema_place_borrow_is_window(init, arena) -> _ := &table.roots.add(key, true)
+                if !sema_place_borrow_is_window(init, arena) -> _ := table.roots.add(key, true)
             }
         }
         if borrow {
@@ -92,7 +92,7 @@ sema_place_borrow_statements: fn(body: &[TStmt], census: SemaPlaceBorrowCensus, 
                 local.place_borrow = true
             }
         }
-        sema_place_borrow_nested(&body[index], census, arena, &table)
+        sema_place_borrow_nested(body[index], census, arena, table)
     }
 }
 
@@ -179,168 +179,168 @@ sema_place_borrow_consumed: fn(census: SemaPlaceBorrowCensus, key: String, name:
 
 sema_place_borrow_note_local: fn(census: &SemaPlaceBorrowCensus, local: TLocal) Never! {
     if local.symbol_id == .Val(id) {
-        _ := &census.keys.add(id.key, true)
+        _ := census.keys.add(id.key, true)
         return
     }
-    _ := &census.names.add(local.name, true)
+    _ := census.names.add(local.name, true)
 }
 
 // The variable at the root of a consumed place.
 sema_place_borrow_note_root: fn(census: &SemaPlaceBorrowCensus, root: SemaPlaceBorrowRoot) Never! {
     if root.key != "" {
-        _ := &census.keys.add(root.key, true)
+        _ := census.keys.add(root.key, true)
         return
     }
-    if root.name != "" -> _ := &census.names.add(root.name, true)
+    if root.name != "" -> _ := census.names.add(root.name, true)
 }
 
 sema_place_borrow_census_list: fn(body: [TStmt], arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
-    loop statement in body -> sema_place_borrow_census_stmt(statement, arena, &census)
+    loop statement in body -> sema_place_borrow_census_stmt(statement, arena, census)
 }
 
 sema_place_borrow_census_optional_list: fn(body: [TStmt]?, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
-    if body == .Val(statements) -> sema_place_borrow_census_list(statements, arena, &census)
+    if body == .Val(statements) -> sema_place_borrow_census_list(statements, arena, census)
 }
 
 // A statement's own consuming facts, then its expressions; a statement with
 // nested bodies walks its head expressions here and each body as statements.
 sema_place_borrow_census_stmt: fn(statement: TStmt, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if statement == {
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_root(&census, sema_place_borrow_root(init, arena))
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_root(census, sema_place_borrow_root(init, arena))
         .RefutableBind(pattern, init, fallback, _) -> {
-            sema_place_borrow_note_root(&census, sema_place_borrow_root(init, arena))
-            sema_place_borrow_census_expr(init, arena, &census)
-            sema_place_borrow_census_pattern(pattern, arena, &census)
-            return sema_place_borrow_census_list(fallback, arena, &census)
+            sema_place_borrow_note_root(census, sema_place_borrow_root(init, arena))
+            sema_place_borrow_census_expr(init, arena, census)
+            sema_place_borrow_census_pattern(pattern, arena, census)
+            return sema_place_borrow_census_list(fallback, arena, census)
         }
         .Assign(place, _, _, _, _) -> {
             if place == {
-                .Local(local) -> sema_place_borrow_note_local(&census, local)
-                .Expr(value) -> sema_place_borrow_note_root(&census, sema_place_borrow_root(value, arena))
+                .Local(local) -> sema_place_borrow_note_local(census, local)
+                .Expr(value) -> sema_place_borrow_note_root(census, sema_place_borrow_root(value, arena))
             }
         }
         .Transact(_, snapshots, _, body, _) -> {
-            loop snapshot in snapshots -> sema_place_borrow_note_local(&census, snapshot.local)
-            sema_place_borrow_census_list(body, arena, &census)
+            loop snapshot in snapshots -> sema_place_borrow_note_local(census, snapshot.local)
+            sema_place_borrow_census_list(body, arena, census)
         }
         .GCEdit(root, _, _, _, _, nested, _) -> {
-            _ := &census.names.add(root, true)
-            sema_place_borrow_census_stmt(nested, arena, &census)
+            _ := census.names.add(root.copy(), true)
+            sema_place_borrow_census_stmt(nested, arena, census)
         }
-        .Reactive(executable, _) -> return sema_place_borrow_census_lambda(executable, arena, &census)
+        .Reactive(executable, _) -> return sema_place_borrow_census_lambda(executable, arena, census)
         .If(condition, then_body, else_body, _, _) -> {
-            sema_place_borrow_census_cond(condition, arena, &census)
-            sema_place_borrow_census_list(then_body, arena, &census)
-            return sema_place_borrow_census_optional_list(else_body, arena, &census)
+            sema_place_borrow_census_cond(condition, arena, census)
+            sema_place_borrow_census_list(then_body, arena, census)
+            return sema_place_borrow_census_optional_list(else_body, arena, census)
         }
-        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> return sema_place_borrow_census_list(body, arena, &census)
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> return sema_place_borrow_census_list(body, arena, census)
         .While(_, condition, body, _) -> {
-            sema_place_borrow_census_expr(condition, arena, &census)
-            return sema_place_borrow_census_list(body, arena, &census)
+            sema_place_borrow_census_expr(condition, arena, census)
+            return sema_place_borrow_census_list(body, arena, census)
         }
         .ForIn(_, _, _, source, collection, step, _, _, by_value, _, body, _) -> {
-            if by_value -> sema_place_borrow_note_root(&census, sema_place_borrow_root(collection, arena))
-            sema_place_borrow_census_expr(source, arena, &census)
-            sema_place_borrow_census_expr(collection, arena, &census)
-            if step == .Val(step_value) -> sema_place_borrow_census_expr(step_value, arena, &census)
-            return sema_place_borrow_census_list(body, arena, &census)
+            if by_value -> sema_place_borrow_note_root(census, sema_place_borrow_root(collection, arena))
+            sema_place_borrow_census_expr(source, arena, census)
+            sema_place_borrow_census_expr(collection, arena, census)
+            if step == .Val(step_value) -> sema_place_borrow_census_expr(step_value, arena, census)
+            return sema_place_borrow_census_list(body, arena, census)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            sema_place_borrow_census_expr(start, arena, &census)
-            sema_place_borrow_census_expr(end, arena, &census)
-            if step == .Val(step_value) -> sema_place_borrow_census_expr(step_value, arena, &census)
-            return sema_place_borrow_census_list(body, arena, &census)
+            sema_place_borrow_census_expr(start, arena, census)
+            sema_place_borrow_census_expr(end, arena, census)
+            if step == .Val(step_value) -> sema_place_borrow_census_expr(step_value, arena, census)
+            return sema_place_borrow_census_list(body, arena, census)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            sema_place_borrow_census_stmt(init, arena, &census)
-            sema_place_borrow_census_expr(condition, arena, &census)
-            if step == .Val(step_statement) -> sema_place_borrow_census_stmt(step_statement, arena, &census)
-            return sema_place_borrow_census_list(body, arena, &census)
+            sema_place_borrow_census_stmt(init, arena, census)
+            sema_place_borrow_census_expr(condition, arena, census)
+            if step == .Val(step_statement) -> sema_place_borrow_census_stmt(step_statement, arena, census)
+            return sema_place_borrow_census_list(body, arena, census)
         }
         .Match(subject, arms, _, _) -> {
-            sema_place_borrow_census_expr(subject, arena, &census)
+            sema_place_borrow_census_expr(subject, arena, census)
             loop arm in arms {
-                sema_place_borrow_census_pattern(arm.pattern, arena, &census)
-                sema_place_borrow_census_list(arm.body, arena, &census)
+                sema_place_borrow_census_pattern(arm.pattern, arena, census)
+                sema_place_borrow_census_list(arm.body, arena, census)
             }
             return
         }
         .EnumMatch(subject, arms, else_body, _, _) -> {
-            sema_place_borrow_census_expr(subject, arena, &census)
+            sema_place_borrow_census_expr(subject, arena, census)
             loop arm in arms {
-                sema_place_borrow_census_pattern(arm.pattern, arena, &census)
-                sema_place_borrow_census_list(arm.body, arena, &census)
+                sema_place_borrow_census_pattern(arm.pattern, arena, census)
+                sema_place_borrow_census_list(arm.body, arena, census)
             }
-            return sema_place_borrow_census_optional_list(else_body, arena, &census)
+            return sema_place_borrow_census_optional_list(else_body, arena, census)
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            sema_place_borrow_census_expr(subject, arena, &census)
-            loop arm in arms -> sema_place_borrow_census_list(arm.body, arena, &census)
-            return sema_place_borrow_census_list(else_body, arena, &census)
+            sema_place_borrow_census_expr(subject, arena, census)
+            loop arm in arms -> sema_place_borrow_census_list(arm.body, arena, census)
+            return sema_place_borrow_census_list(else_body, arena, census)
         }
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            sema_place_borrow_census_expr(subject, arena, &census)
+            sema_place_borrow_census_expr(subject, arena, census)
             loop arm in arms {
-                sema_place_borrow_census_expr(arm.condition, arena, &census)
-                sema_place_borrow_census_list(arm.body, arena, &census)
+                sema_place_borrow_census_expr(arm.condition, arena, census)
+                sema_place_borrow_census_list(arm.body, arena, census)
             }
-            return sema_place_borrow_census_optional_list(else_body, arena, &census)
+            return sema_place_borrow_census_optional_list(else_body, arena, census)
         }
         // The rarer bodies: their statements, then every expression in them
         // (the expression walk sees each nested expression once more).
-        .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_list(body, arena, &census)
+        .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_list(body, arena, census)
         else -> {}
     }
-    tree_each_stmt_child(statement, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+    tree_each_stmt_child(statement, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, census))
 }
 
 sema_place_borrow_census_cond: fn(condition: TIfCond, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if condition == {
-        .Plain(value) -> sema_place_borrow_census_expr(value, arena, &census)
+        .Plain(value) -> sema_place_borrow_census_expr(value, arena, census)
         .And(left, right) -> {
-            sema_place_borrow_census_cond(left, arena, &census)
-            sema_place_borrow_census_cond(right, arena, &census)
+            sema_place_borrow_census_cond(left, arena, census)
+            sema_place_borrow_census_cond(right, arena, census)
         }
         .IfLet(pattern, subject) -> {
-            sema_place_borrow_census_pattern(pattern, arena, &census)
-            sema_place_borrow_census_expr(subject, arena, &census)
+            sema_place_borrow_census_pattern(pattern, arena, census)
+            sema_place_borrow_census_expr(subject, arena, census)
         }
     }
 }
 
 sema_place_borrow_census_pattern: fn(pattern: TPattern, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
-    tree_each_pattern_child(pattern, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+    tree_each_pattern_child(pattern, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, census))
 }
 
 sema_place_borrow_census_expr: fn(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if value.kind == {
-        .Flat(index) -> return sema_place_borrow_census_row(arena, index, &census)
+        .Flat(index) -> return sema_place_borrow_census_row(arena, index, census)
         .Move(moved) -> {
-            sema_place_borrow_note_root(&census, sema_place_borrow_root(moved, arena))
-            // `^p` of a match payload takes it out of its subject's storage.
+            sema_place_borrow_note_root(census, sema_place_borrow_root(moved, arena))
+            // `p.move()` of a match payload takes it out of its subject's storage.
             if moved.kind == .Local(local) {
                 if local.payload_take -> census.any = true
             }
         }
-        .Drop(dropped) | .Close(dropped) -> sema_place_borrow_note_root(&census, sema_place_borrow_root(dropped, arena))
+        .Drop(dropped) | .Close(dropped) -> sema_place_borrow_note_root(census, sema_place_borrow_root(dropped, arena))
         .Borrow(place, access) -> {
-            if access != AccessConvention.Read -> sema_place_borrow_note_root(&census, sema_place_borrow_root(place, arena))
+            if access != AccessConvention.Read -> sema_place_borrow_note_root(census, sema_place_borrow_root(place, arena))
         }
-        .Lambda(lambda) -> return sema_place_borrow_census_lambda(lambda, arena, &census)
+        .Lambda(lambda) -> return sema_place_borrow_census_lambda(lambda, arena, census)
         // Any other closure carrier: a name it reads is captured.
-        .SharedGuardWait(_, _, _) | .CoreClosureCall(_) | .FnValue(_) -> return sema_place_borrow_census_names(value, arena, &census)
-        .InlineBlock(body) -> return sema_place_borrow_census_list(body, arena, &census)
+        .SharedGuardWait(_, _, _) | .CoreClosureCall(_) | .FnValue(_) -> return sema_place_borrow_census_names(value, arena, census)
+        .InlineBlock(body) -> return sema_place_borrow_census_list(body, arena, census)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            sema_place_borrow_census_cond(condition, arena, &census)
-            sema_place_borrow_census_list(then_body, arena, &census)
-            sema_place_borrow_census_expr(then_value, arena, &census)
-            sema_place_borrow_census_list(else_body, arena, &census)
-            return sema_place_borrow_census_expr(else_value, arena, &census)
+            sema_place_borrow_census_cond(condition, arena, census)
+            sema_place_borrow_census_list(then_body, arena, census)
+            sema_place_borrow_census_expr(then_value, arena, census)
+            sema_place_borrow_census_list(else_body, arena, census)
+            return sema_place_borrow_census_expr(else_value, arena, census)
         }
-        .Binary(_, _, _, lhs, rhs) -> return sema_place_borrow_census_binary(lhs, rhs, arena, &census)
+        .Binary(_, _, _, lhs, rhs) -> return sema_place_borrow_census_binary(lhs, rhs, arena, census)
         else -> {}
     }
-    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, &census))
+    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_expr(child, arena, census))
 }
 
 // A Binary node's operands, in tree_each_expr_child's order. A left-leaning
@@ -351,16 +351,16 @@ sema_place_borrow_census_binary: fn(lhs: TExpr, rhs: TExpr, arena: BodyTree, cen
     operand := lhs
     loop {
         if operand.kind == .Binary(_, _, _, inner_lhs, inner_rhs) {
-            &rights.push(inner_rhs)
+            rights.push(inner_rhs)
             operand = inner_lhs
         } else {
             break
         }
     }
-    sema_place_borrow_census_expr(operand, arena, &census)
+    sema_place_borrow_census_expr(operand, arena, census)
     index := rights.len() - 1
     loop index >= 0 {
-        sema_place_borrow_census_expr(rights[index], arena, &census)
+        sema_place_borrow_census_expr(rights[index], arena, census)
         index -= 1
     }
 }
@@ -368,25 +368,25 @@ sema_place_borrow_census_binary: fn(lhs: TExpr, rhs: TExpr, arena: BodyTree, cen
 // A closure captures what it names.
 sema_place_borrow_census_lambda: fn(lambda: TLambda, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     loop capture in lambda.captures {
-        _ := &census.names.add(capture.source, true)
-        _ := &census.names.add(capture.local.name, true)
+        _ := census.names.add(capture.source, true)
+        _ := census.names.add(capture.local.name, true)
     }
-    tree_each_lambda_child(lambda, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
+    tree_each_lambda_child(lambda, (child: TExpr) -> sema_place_borrow_census_names(child, arena, census))
 }
 
 sema_place_borrow_census_names: fn(value: TExpr, arena: BodyTree, census: &SemaPlaceBorrowCensus) Never! {
     if value.kind == {
-        .Flat(index) -> return sema_place_borrow_census_row_names(arena, index, &census)
+        .Flat(index) -> return sema_place_borrow_census_row_names(arena, index, census)
         .Local(local) -> {
-            _ := &census.names.add(local.name, true)
+            _ := census.names.add(local.name, true)
             return
         }
         .Lambda(lambda) -> {
-            loop capture in lambda.captures -> _ := &census.names.add(capture.source, true)
+            loop capture in lambda.captures -> _ := census.names.add(capture.source, true)
         }
         else -> {}
     }
-    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_names(child, arena, &census))
+    tree_each_expr_child(value, (child: TExpr) -> sema_place_borrow_census_names(child, arena, census))
 }
 
 // The census rows of a flat node: sema_place_borrow_census_list,
@@ -394,209 +394,209 @@ sema_place_borrow_census_names: fn(value: TExpr, arena: BodyTree, census: &SemaP
 // sema_place_borrow_census_pattern, sema_place_borrow_census_expr and
 // sema_place_borrow_census_names over rows of `tree`.
 sema_place_borrow_census_row_list: fn(tree: BodyTree, body: [Int], census: &SemaPlaceBorrowCensus) Never! {
-    loop item in body -> sema_place_borrow_census_row_stmt(tree, item, &census)
+    loop item in body -> sema_place_borrow_census_row_stmt(tree, item, census)
 }
 
 sema_place_borrow_census_row_optional_list: fn(tree: BodyTree, body: [Int]?, census: &SemaPlaceBorrowCensus) Never! {
-    if body == .Val(statements) -> sema_place_borrow_census_row_list(tree, statements, &census)
+    if body == .Val(statements) -> sema_place_borrow_census_row_list(tree, statements, census)
 }
 
 sema_place_borrow_census_row_stmt: fn(tree: BodyTree, item: Int, census: &SemaPlaceBorrowCensus) Never! {
     if tree.stmts[item - tree.stmt_base] == {
-        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, init))
+        .TupleDestructure(_, init, _, _, _) | .StructDestructure(_, init, _, _, _) | .ListDestructure(_, init, _, _, _, _) -> sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, init))
         .RefutableBind(pattern, init, fallback, _) -> {
-            sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, init))
-            sema_place_borrow_census_row(tree, init, &census)
-            sema_place_borrow_census_row_pattern(tree, pattern, &census)
-            return sema_place_borrow_census_row_list(tree, fallback, &census)
+            sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, init))
+            sema_place_borrow_census_row(tree, init, census)
+            sema_place_borrow_census_row_pattern(tree, pattern, census)
+            return sema_place_borrow_census_row_list(tree, fallback, census)
         }
         .Assign(place, _, _, _, _) -> {
             if place == {
-                .Local(local) -> sema_place_borrow_note_local(&census, local)
-                .Expr(value) -> sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, value))
+                .Local(local) -> sema_place_borrow_note_local(census, local)
+                .Expr(value) -> sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, value))
             }
         }
         .Transact(_, snapshots, _, body, _) -> {
-            loop snapshot in snapshots -> sema_place_borrow_note_local(&census, snapshot.local)
-            sema_place_borrow_census_row_list(tree, body, &census)
+            loop snapshot in snapshots -> sema_place_borrow_note_local(census, snapshot.local)
+            sema_place_borrow_census_row_list(tree, body, census)
         }
         .GCEdit(root, _, _, _, _, nested, _) -> {
-            _ := &census.names.add(root, true)
-            sema_place_borrow_census_row_stmt(tree, nested, &census)
+            _ := census.names.add(root, true)
+            sema_place_borrow_census_row_stmt(tree, nested, census)
         }
-        .Reactive(executable, _) -> return sema_place_borrow_census_row_lambda(tree, executable, &census)
+        .Reactive(executable, _) -> return sema_place_borrow_census_row_lambda(tree, executable, census)
         .If(condition, then_body, else_body, _, _) -> {
-            sema_place_borrow_census_row_cond(tree, condition, &census)
-            sema_place_borrow_census_row_list(tree, then_body, &census)
-            return sema_place_borrow_census_row_optional_list(tree, else_body, &census)
+            sema_place_borrow_census_row_cond(tree, condition, census)
+            sema_place_borrow_census_row_list(tree, then_body, census)
+            return sema_place_borrow_census_row_optional_list(tree, else_body, census)
         }
-        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> return sema_place_borrow_census_row_list(tree, body, &census)
+        .Loop(_, body, _) | .Inline(body, _) | .DebugOnly(body, _) | .Unsafe(_, body) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) -> return sema_place_borrow_census_row_list(tree, body, census)
         .While(_, condition, body, _) -> {
-            sema_place_borrow_census_row(tree, condition, &census)
-            return sema_place_borrow_census_row_list(tree, body, &census)
+            sema_place_borrow_census_row(tree, condition, census)
+            return sema_place_borrow_census_row_list(tree, body, census)
         }
         .ForIn(_, _, _, source, collection, step, _, _, by_value, _, body, _) -> {
-            if by_value -> sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, collection))
-            sema_place_borrow_census_row(tree, source, &census)
-            sema_place_borrow_census_row(tree, collection, &census)
-            if step == .Val(step_value) -> sema_place_borrow_census_row(tree, step_value, &census)
-            return sema_place_borrow_census_row_list(tree, body, &census)
+            if by_value -> sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, collection))
+            sema_place_borrow_census_row(tree, source, census)
+            sema_place_borrow_census_row(tree, collection, census)
+            if step == .Val(step_value) -> sema_place_borrow_census_row(tree, step_value, census)
+            return sema_place_borrow_census_row_list(tree, body, census)
         }
         .ForRange(_, _, start, end, step, _, body, _, _) -> {
-            sema_place_borrow_census_row(tree, start, &census)
-            sema_place_borrow_census_row(tree, end, &census)
-            if step == .Val(step_value) -> sema_place_borrow_census_row(tree, step_value, &census)
-            return sema_place_borrow_census_row_list(tree, body, &census)
+            sema_place_borrow_census_row(tree, start, census)
+            sema_place_borrow_census_row(tree, end, census)
+            if step == .Val(step_value) -> sema_place_borrow_census_row(tree, step_value, census)
+            return sema_place_borrow_census_row_list(tree, body, census)
         }
         .CountedLoop(_, init, condition, step, _, body, _) -> {
-            sema_place_borrow_census_row_stmt(tree, init, &census)
-            sema_place_borrow_census_row(tree, condition, &census)
-            if step == .Val(step_statement) -> sema_place_borrow_census_row_stmt(tree, step_statement, &census)
-            return sema_place_borrow_census_row_list(tree, body, &census)
+            sema_place_borrow_census_row_stmt(tree, init, census)
+            sema_place_borrow_census_row(tree, condition, census)
+            if step == .Val(step_statement) -> sema_place_borrow_census_row_stmt(tree, step_statement, census)
+            return sema_place_borrow_census_row_list(tree, body, census)
         }
         .Match(subject, arms, _, _) -> {
-            sema_place_borrow_census_row(tree, subject, &census)
+            sema_place_borrow_census_row(tree, subject, census)
             loop arm in arms {
-                sema_place_borrow_census_row_pattern(tree, arm.pattern, &census)
-                sema_place_borrow_census_row_list(tree, arm.body, &census)
+                sema_place_borrow_census_row_pattern(tree, arm.pattern, census)
+                sema_place_borrow_census_row_list(tree, arm.body, census)
             }
             return
         }
         .EnumMatch(subject, arms, else_body, _, _) -> {
-            sema_place_borrow_census_row(tree, subject, &census)
+            sema_place_borrow_census_row(tree, subject, census)
             loop arm in arms {
-                sema_place_borrow_census_row_pattern(tree, arm.pattern, &census)
-                sema_place_borrow_census_row_list(tree, arm.body, &census)
+                sema_place_borrow_census_row_pattern(tree, arm.pattern, census)
+                sema_place_borrow_census_row_list(tree, arm.body, census)
             }
-            return sema_place_borrow_census_row_optional_list(tree, else_body, &census)
+            return sema_place_borrow_census_row_optional_list(tree, else_body, census)
         }
         .RangeSwitch(subject, arms, else_body, _) -> {
-            sema_place_borrow_census_row(tree, subject, &census)
-            loop arm in arms -> sema_place_borrow_census_row_list(tree, arm.body, &census)
-            return sema_place_borrow_census_row_list(tree, else_body, &census)
+            sema_place_borrow_census_row(tree, subject, census)
+            loop arm in arms -> sema_place_borrow_census_row_list(tree, arm.body, census)
+            return sema_place_borrow_census_row_list(tree, else_body, census)
         }
         .MixedSwitch(subject, _, arms, else_body, _) -> {
-            sema_place_borrow_census_row(tree, subject, &census)
+            sema_place_borrow_census_row(tree, subject, census)
             loop arm in arms {
-                sema_place_borrow_census_row(tree, arm.condition, &census)
-                sema_place_borrow_census_row_list(tree, arm.body, &census)
+                sema_place_borrow_census_row(tree, arm.condition, census)
+                sema_place_borrow_census_row_list(tree, arm.body, census)
             }
-            return sema_place_borrow_census_row_optional_list(tree, else_body, &census)
+            return sema_place_borrow_census_row_optional_list(tree, else_body, census)
         }
-        .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_row_list(tree, body, &census)
+        .ContractScope(_, body, _, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) | .TaskGroup(_, _, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) -> sema_place_borrow_census_row_list(tree, body, census)
         else -> {}
     }
-    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> sema_place_borrow_census_row(tree, child, &census))
+    body_each_stmt_child(tree, tree.stmts[item - tree.stmt_base], (child: Int) -> sema_place_borrow_census_row(tree, child, census))
 }
 
 sema_place_borrow_census_row_cond: fn(tree: BodyTree, condition: BodyIfCond, census: &SemaPlaceBorrowCensus) Never! {
     if condition == {
-        .Plain(value) -> sema_place_borrow_census_row(tree, value, &census)
+        .Plain(value) -> sema_place_borrow_census_row(tree, value, census)
         .And(left, right) -> {
-            sema_place_borrow_census_row_cond(tree, left, &census)
-            sema_place_borrow_census_row_cond(tree, right, &census)
+            sema_place_borrow_census_row_cond(tree, left, census)
+            sema_place_borrow_census_row_cond(tree, right, census)
         }
         .IfLet(pattern, subject) -> {
-            sema_place_borrow_census_row_pattern(tree, pattern, &census)
-            sema_place_borrow_census_row(tree, subject, &census)
+            sema_place_borrow_census_row_pattern(tree, pattern, census)
+            sema_place_borrow_census_row(tree, subject, census)
         }
     }
 }
 
 sema_place_borrow_census_row_pattern: fn(tree: BodyTree, pattern: BodyPattern, census: &SemaPlaceBorrowCensus) Never! {
-    body_each_pattern_child(tree, pattern, (child: Int) -> sema_place_borrow_census_row(tree, child, &census))
+    body_each_pattern_child(tree, pattern, (child: Int) -> sema_place_borrow_census_row(tree, child, census))
 }
 
 sema_place_borrow_census_row: fn(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
     if tree.nodes[index - tree.node_base].kind == {
         .Move(moved) -> {
-            sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, moved))
-            // `^p` of a match payload takes it out of its subject's storage.
+            sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, moved))
+            // `p.move()` of a match payload takes it out of its subject's storage.
             if tree.nodes[moved - tree.node_base].kind == .Local(local) {
                 if local.payload_take -> census.any = true
             }
         }
-        .Drop(dropped) | .Close(dropped) -> sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, dropped))
+        .Drop(dropped) | .Close(dropped) -> sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, dropped))
         .Borrow(place, access) -> {
-            if access != AccessConvention.Read -> sema_place_borrow_note_root(&census, sema_place_borrow_row_root(tree, place))
+            if access != AccessConvention.Read -> sema_place_borrow_note_root(census, sema_place_borrow_row_root(tree, place))
         }
-        .Lambda(lambda) -> return sema_place_borrow_census_row_lambda(tree, lambda, &census)
+        .Lambda(lambda) -> return sema_place_borrow_census_row_lambda(tree, lambda, census)
         // Any other closure carrier: a name it reads is captured.
-        .SharedGuardWait(_, _, _) | .CoreClosureCall(_) | .FnValue(_) -> return sema_place_borrow_census_row_names(tree, index, &census)
-        .InlineBlock(body) -> return sema_place_borrow_census_row_list(tree, body, &census)
+        .SharedGuardWait(_, _, _) | .CoreClosureCall(_) | .FnValue(_) -> return sema_place_borrow_census_row_names(tree, index, census)
+        .InlineBlock(body) -> return sema_place_borrow_census_row_list(tree, body, census)
         .IfExpr(condition, then_body, then_value, else_body, else_value) -> {
-            sema_place_borrow_census_row_cond(tree, condition, &census)
-            sema_place_borrow_census_row_list(tree, then_body, &census)
-            sema_place_borrow_census_row(tree, then_value, &census)
-            sema_place_borrow_census_row_list(tree, else_body, &census)
-            return sema_place_borrow_census_row(tree, else_value, &census)
+            sema_place_borrow_census_row_cond(tree, condition, census)
+            sema_place_borrow_census_row_list(tree, then_body, census)
+            sema_place_borrow_census_row(tree, then_value, census)
+            sema_place_borrow_census_row_list(tree, else_body, census)
+            return sema_place_borrow_census_row(tree, else_value, census)
         }
         else -> {}
     }
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_place_borrow_census_row(tree, child, &census))
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_place_borrow_census_row(tree, child, census))
 }
 
 // A closure captures what it names.
 sema_place_borrow_census_row_lambda: fn(tree: BodyTree, lambda: BodyLambda, census: &SemaPlaceBorrowCensus) Never! {
     loop capture in lambda.captures {
-        _ := &census.names.add(capture.source, true)
-        _ := &census.names.add(capture.local.name, true)
+        _ := census.names.add(capture.source, true)
+        _ := census.names.add(capture.local.name, true)
     }
-    body_each_lambda_child(tree, lambda, (child: Int) -> sema_place_borrow_census_row_names(tree, child, &census))
+    body_each_lambda_child(tree, lambda, (child: Int) -> sema_place_borrow_census_row_names(tree, child, census))
 }
 
 sema_place_borrow_census_row_names: fn(tree: BodyTree, index: Int, census: &SemaPlaceBorrowCensus) Never! {
     if tree.nodes[index - tree.node_base].kind == {
         .Local(local) -> {
-            _ := &census.names.add(local.name, true)
+            _ := census.names.add(local.name, true)
             return
         }
         .Lambda(lambda) -> {
-            loop capture in lambda.captures -> _ := &census.names.add(capture.source, true)
+            loop capture in lambda.captures -> _ := census.names.add(capture.source, true)
         }
         else -> {}
     }
-    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_place_borrow_census_row_names(tree, child, &census))
+    body_each_node_kind_child(tree, tree.nodes[index - tree.node_base].kind, (child: Int) -> sema_place_borrow_census_row_names(tree, child, census))
 }
 
 // The statement bodies of `statement` that hold Lets of their own block.
 sema_place_borrow_nested: fn(statement: &TStmt, census: SemaPlaceBorrowCensus, arena: BodyTree, table: &SemaPlaceBorrowRoots) Never! {
     if &statement == {
         // One arm per statement kind: an alternative pattern binds read-only.
-        .ContractScope(_, body, _, _, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .ForRange(_, _, _, _, _, _, body, _, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .Range(_, _, _, _, _, _, _, _, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .CountedLoop(_, _, _, _, _, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .Loop(_, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .While(_, _, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .Inline(body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .DebugOnly(body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .Unsafe(_, body) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .UnsafeBlock(_, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .SentryPolicy(_, body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
-        .Impure(body, _) -> sema_place_borrow_statements(&body, census, arena, &table)
+        .ContractScope(_, body, _, _, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .ForRange(_, _, _, _, _, _, body, _, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .Range(_, _, _, _, _, _, _, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .CountedLoop(_, _, _, _, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .Loop(_, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .While(_, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .ForIn(_, _, _, _, _, _, _, _, _, _, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .Inline(body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .DebugOnly(body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .Unsafe(_, body) -> sema_place_borrow_statements(body, census, arena, table)
+        .UnsafeBlock(_, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .SentryPolicy(_, body, _) -> sema_place_borrow_statements(body, census, arena, table)
+        .Impure(body, _) -> sema_place_borrow_statements(body, census, arena, table)
         .If(_, then_body, else_body, _, _) -> {
-            sema_place_borrow_statements(&then_body, census, arena, &table)
+            sema_place_borrow_statements(then_body, census, arena, table)
             if &else_body == .Val(statements) {
-                sema_place_borrow_statements(&statements, census, arena, &table)
+                sema_place_borrow_statements(statements, census, arena, table)
             }
         }
-        .Match(_, arms, _, _) -> loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(&arms[arm_index].body, census, arena, &table)
+        .Match(_, arms, _, _) -> loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(arms[arm_index].body, census, arena, table)
         .EnumMatch(_, arms, else_body, _, _) -> {
-            loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(&arms[arm_index].body, census, arena, &table)
+            loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(arms[arm_index].body, census, arena, table)
             if &else_body == .Val(statements) {
-                sema_place_borrow_statements(&statements, census, arena, &table)
+                sema_place_borrow_statements(statements, census, arena, table)
             }
         }
         .RangeSwitch(_, arms, else_body, _) -> {
-            loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(&arms[arm_index].body, census, arena, &table)
-            sema_place_borrow_statements(&else_body, census, arena, &table)
+            loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(arms[arm_index].body, census, arena, table)
+            sema_place_borrow_statements(else_body, census, arena, table)
         }
         .MixedSwitch(_, _, arms, else_body, _) -> {
-            loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(&arms[arm_index].body, census, arena, &table)
+            loop arm_index in 0..<arms.len() -> sema_place_borrow_statements(arms[arm_index].body, census, arena, table)
             if &else_body == .Val(statements) {
-                sema_place_borrow_statements(&statements, census, arena, &table)
+                sema_place_borrow_statements(statements, census, arena, table)
             }
         }
         else -> {}

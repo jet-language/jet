@@ -22,8 +22,7 @@ summarize: fn() -> String {
     utf16_doc: xml.parse_bytes(utf16) ?? panic("UTF-16 parse")
     utf16_out: xml.to_bytes(utf16_doc, xml.XMLRenderOptions{ encoding: .UTF16LE, lexical: .PreserveValid }) ?? panic("UTF-16 render")
 
-    conflict_result: xml.parse_bytes(conflict)
-    if conflict_result == {
+    if xml.parse_bytes(conflict) == {
         .Ok(_) -> return "encoding-conflict-missed"
         .Err(error) -> {
             reason_ok: error.reason == "XML declaration conflicts with detected input encoding"

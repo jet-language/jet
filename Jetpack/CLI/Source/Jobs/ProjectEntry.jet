@@ -108,6 +108,6 @@ cli_job_registry_unchecked: fn(file: String, detail: String) -> JobRegistryCheck
 cli_list_project_jobs: fn(file: String) -[FS, Env, Exec, Time.Wait]> [String] Never! {
     registry: cli_checked_project_job_registry(file) ?? return [String]{}
     names := [String]{}
-    loop job in registry.jobs() -> &names.push(job.name)
+    loop job in registry.jobs() -> names.push(job.name)
     cli_sorted_unique(names)
 }

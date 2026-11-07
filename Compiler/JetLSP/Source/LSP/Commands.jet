@@ -65,7 +65,7 @@ lsp_execute_command_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> St
                     loop (path, text) in lsp_workspace_sources(server, Val(doc.path)) {
                         extent: lsp_command_path.strip_prefix_span(path, native_root) ?? lsp_command_path.PathSpan{start: 0, end: path.encoded.len()}
                         relative: lsp_command_path.display_span(path, extent).replace("\\", "/")
-                        &sources.push((relative, sha256_hex_bytes(text.bytes())))
+                        sources.push((relative, sha256_hex_bytes(text.bytes())))
                     }
                     projection: budget_view_read_compatible(native_root, sources)
                     return Val(lsp_response(id, projection.to_json()))

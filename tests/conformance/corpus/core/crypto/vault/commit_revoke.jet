@@ -8,5 +8,5 @@ run: fn() -[Secret, IO]> {
     current: vault.current<crypto.SigningKey>("__core_conformance_commit_revoke") ?? return
     plan: vault.prepare_revoke<crypto.SigningKey>(current, "fixed commit revoke reason") ?? return
     write: vault.authorize_write(plan, "fixed commit revoke authorization") ?? return
-    print(vault.commit_revoke<crypto.SigningKey>(^write, ^plan) ? ok -> true ! error -> false)
+    print(vault.commit_revoke<crypto.SigningKey>(write, plan) ? ok -> true ! error -> false)
 }

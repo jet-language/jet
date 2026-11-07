@@ -21,7 +21,7 @@ evidence_marker_record: fn(diagnostic_source: EvidenceSource?) -> EvidenceRecord
 
 evidence_marker_encode: fn(record: EvidenceRecord) -> [U8] {
     out := [U8]{}
-    if evidence_encode_record(record, &out) == {
+    if evidence_encode_record(record, out) == {
         .Ok(_) -> {}
         .Err(error) -> panic("evidence source marker encode: {error.message}")
     }
@@ -32,9 +32,9 @@ evidence_marker_with: fn(bytes: [U8], at: Int, marker: U8) -> [U8] {
     out := [U8]{}
     loop index in 0..<bytes.len() {
         if index == at {
-            &out.push(marker)
+            out.push(marker)
         } else {
-            &out.push(bytes[index])
+            out.push(bytes[index])
         }
     }
     out
@@ -43,7 +43,7 @@ evidence_marker_with: fn(bytes: [U8], at: Int, marker: U8) -> [U8] {
 // Empty string when the bytes decode; otherwise the codec's refusal message.
 evidence_marker_decode_error: fn(bytes: [U8]) -> String {
     cursor := evidence_cursor(bytes, 0, U64.MAX)
-    if evidence_decode_record(&cursor) == {
+    if evidence_decode_record(cursor) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
@@ -64,13 +64,13 @@ evidence_marker_decode_error: fn(bytes: [U8]) -> String {
     evidence_marker_require(at >= 0, "marker byte located")
 
     zero_cursor := evidence_cursor(none_bytes, 0, U64.MAX)
-    if evidence_decode_record(&zero_cursor) == {
+    if evidence_decode_record(zero_cursor) == {
         .Ok(decoded) -> evidence_marker_require(decoded.record.diagnostics[0].source == None, "marker 0 decodes without source")
         .Err(error) -> panic("evidence source marker contract: marker 0 refused: {error.message}")
     }
 
     one_cursor := evidence_cursor(some_bytes, 0, U64.MAX)
-    if evidence_decode_record(&one_cursor) == {
+    if evidence_decode_record(one_cursor) == {
         .Ok(decoded) -> evidence_marker_require(decoded.record.diagnostics[0].source == (Val(EvidenceSource{path: "source.jet", line: U32{3}, column: U32{4}})), "marker 1 decodes source")
         .Err(error) -> panic("evidence source marker contract: marker 1 refused: {error.message}")
     }

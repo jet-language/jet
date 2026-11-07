@@ -125,18 +125,18 @@ plug_flatten: fn(c: WasmComponent) -> PlugFlat WasmError! {
         globals: [PlugGlobal]{}, datas: [PlugData]{}, elems: [PlugElem]{}, starts: [Int]{}, exports: [PlugExport]{},
         imports: [PlugImport]{}, lowered: [Int:Int]{},
     }
-    loop index in 0..<flat.c.core_instances.len() -> plug_instantiate(&flat, index)
+    loop index in 0..<flat.c.core_instances.len() -> plug_instantiate(flat, index)
     loop row in 0..<flat.imports.len() {
         memory_item: flat.imports[row].memory_item
-        if memory_item >= 0 -> flat.imports[row].memory = plug_core_item(&flat, WASM_EXTERN_MEMORY, memory_item, None)
+        if memory_item >= 0 -> flat.imports[row].memory = plug_core_item(flat, WASM_EXTERN_MEMORY, memory_item, None)
         realloc_item: flat.imports[row].realloc_item
-        if realloc_item >= 0 -> flat.imports[row].realloc = plug_core_item(&flat, WASM_EXTERN_FUNC, realloc_item, None)
+        if realloc_item >= 0 -> flat.imports[row].realloc = plug_core_item(flat, WASM_EXTERN_FUNC, realloc_item, None)
     }
     loop index in 0..<flat.c.exports.len() {
         if flat.c.exports[index].sort != WASM_SORT_FUNC -> next
         name: flat.c.exports[index].name.copy()
         target: flat.c.exports[index].index
-        plug_lift(&flat, name, target)
+        plug_lift(flat, name, target)
     }
     Ok(flat)
 }
@@ -159,12 +159,12 @@ plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
             }
             if arg < 0 -> return Err(plug_fail("module instantiation is missing the `{entry.module_name}` argument"))
             expected: if entry.kind == WASM_EXTERN_FUNC -> Val(wm.types[entry.type_index]) else -> None
-            target: plug_instance_export(&flat, arg, entry.name, entry.kind, expected)
+            target: plug_instance_export(flat, arg, entry.name, entry.kind, expected)
             if entry.kind == {
-                WASM_EXTERN_FUNC -> &inst.funcs.push(target)
-                WASM_EXTERN_TABLE -> &inst.tables.push(target)
-                WASM_EXTERN_MEMORY -> &inst.memories.push(target)
-                else -> &inst.globals.push(target)
+                WASM_EXTERN_FUNC -> inst.funcs.push(target)
+                WASM_EXTERN_TABLE -> inst.tables.push(target)
+                WASM_EXTERN_MEMORY -> inst.memories.push(target)
+                else -> inst.globals.push(target)
             }
         }
         imported: inst.funcs.len()
@@ -178,39 +178,39 @@ plug_instantiate: fn(flat: &PlugFlat, index: Int) WasmError! {
                     if name == "" && entry.kind == WASM_EXTERN_FUNC && entry.index == function -> name = entry.name
                 }
             }
-            &inst.funcs.push(flat.funcs.len())
-            &flat.funcs.push(PlugFunc{source: ci.source, instance: index, index: function, ty: ty, name: name, module_name: wm.name, import: -1})
+            inst.funcs.push(flat.funcs.len())
+            flat.funcs.push(PlugFunc{source: ci.source, instance: index, index: function, ty: ty, name: name, module_name: wm.name, import: -1})
         }
         loop table in wm.tables {
-            &inst.tables.push(flat.tables.len())
-            &flat.tables.push(table)
+            inst.tables.push(flat.tables.len())
+            flat.tables.push(table.copy())
         }
         loop memory in wm.memories {
-            &inst.memories.push(flat.memories.len())
-            &flat.memories.push(memory)
+            inst.memories.push(flat.memories.len())
+            flat.memories.push(memory.copy())
         }
         loop global in wm.globals {
             init: plug_const_value(flat, inst, global.init)
-            &inst.globals.push(flat.globals.len())
-            &flat.globals.push(PlugGlobal{value: global.ty.value, init: init})
+            inst.globals.push(flat.globals.len())
+            flat.globals.push(PlugGlobal{value: global.ty.value, init: init})
         }
         loop data in wm.datas {
             active: data.mode == WASM_SEGMENT_ACTIVE
             offset: if active -> plug_const_value(flat, inst, data.offset) else -> 0
             memory: if active -> inst.memories[data.memory] else -> 0
-            &flat.datas.push(PlugData{active: active, memory: memory, offset: offset, bytes: data.bytes})
+            flat.datas.push(PlugData{active: active, memory: memory, offset: offset, bytes: data.bytes})
         }
         loop elem in wm.elems {
             active: elem.mode == WASM_SEGMENT_ACTIVE
             items := [Int]{}
-            loop item in elem.items -> &items.push(if item < 0 -> 0 else -> inst.funcs[item] + 1)
+            loop item in elem.items -> items.push(if item < 0 -> 0 else -> inst.funcs[item] + 1)
             offset: if active -> plug_const_value(flat, inst, elem.offset) else -> 0
             table: if active -> inst.tables[elem.table] else -> 0
-            &flat.elems.push(PlugElem{mode: elem.mode, table: table, offset: offset, items: items})
+            flat.elems.push(PlugElem{mode: elem.mode, table: table, offset: offset, items: items})
         }
-        if wm.start == .Val(start) -> &flat.starts.push(inst.funcs[start])
+        if wm.start == .Val(start) -> flat.starts.push(inst.funcs[start])
     }
-    &flat.instances.push(inst)
+    flat.instances.push(inst)
 }
 
 // A constant expression's value: a number's bit pattern, a global's
@@ -239,7 +239,7 @@ plug_instance_export: fn(flat: &PlugFlat, instance: Int, name: String, kind: Int
             }
         }
         if found < 0 -> return Err(plug_fail("core instance {instance} has no export `{name}`"))
-        return plug_core_item(&flat, kind, found, expected)
+        return plug_core_item(flat, kind, found, expected)
     }
     loop entry in flat.c.modules[source].exports {
         if entry.name == name && entry.kind == kind {
@@ -259,10 +259,10 @@ plug_instance_export: fn(flat: &PlugFlat, instance: Int, name: String, kind: Int
 plug_core_item: fn(flat: &PlugFlat, kind: Int, index: Int, expected: WasmFuncType?) -> Int WasmError! {
     item: plug_item(flat.c, kind, index) ?? return Err(plug_fail("unknown core item {index}"))
     if item.origin == WASM_ORIGIN_ALIAS {
-        return plug_instance_export(&flat, item.instance, item.name, kind, expected)
+        return plug_instance_export(flat, item.instance, item.name, kind, expected)
     }
     if kind == WASM_EXTERN_FUNC && item.origin == WASM_ORIGIN_LOWER {
-        return plug_lower(&flat, index, item, expected)
+        return plug_lower(flat, index, item, expected)
     }
     Err(plug_fail("resource functions are not supported by the plugin engine"))
 }
@@ -286,15 +286,15 @@ plug_lower: fn(flat: &PlugFlat, index: Int, item: WasmCoreItem, expected: WasmFu
     target: item.target
     func: flat.c.func_type(target) ?? return Err(plug_fail("lowered function {target} has no function type"))
     params := [Int]{}
-    loop param in func.types -> &params.push(plug_value_code(flat.c, param))
+    loop param in func.types -> params.push(plug_value_code(flat.c, param))
     result: if func.ok == WASM_CT_NONE -> PLUG_VALUE_NONE else -> plug_value_code(flat.c, func.ok)
     row: flat.imports.len()
-    &flat.imports.push(PlugImport{
+    flat.imports.push(PlugImport{
         name: plug_import_name(flat.c, target), params: params, result: result,
         memory_item: item.options.memory, realloc_item: item.options.realloc, memory: -1, realloc: -1,
     })
     fid: flat.funcs.len()
-    &flat.funcs.push(PlugFunc{source: -1, instance: -1, index: -1, ty: ty, name: "", module_name: "", import: row})
+    flat.funcs.push(PlugFunc{source: -1, instance: -1, index: -1, ty: ty, name: "", module_name: "", import: row})
     flat.lowered[index] = fid
     Ok(fid)
 }
@@ -339,17 +339,17 @@ plug_lift: fn(flat: &PlugFlat, name: String, index: Int) WasmError! {
     item: flat.c.funcs[index]
     if item.origin == WASM_ORIGIN_LIFT {
         if flat.c.func_type(index) == .Val(func) {
-            fid: plug_core_item(&flat, WASM_EXTERN_FUNC, item.target, None)
+            fid: plug_core_item(flat, WASM_EXTERN_FUNC, item.target, None)
             export.fid = fid
-            loop param in func.types -> &export.params.push(plug_value_code(flat.c, param))
+            loop param in func.types -> export.params.push(plug_value_code(flat.c, param))
             if func.ok != WASM_CT_NONE -> export.result = plug_value_code(flat.c, func.ok)
-            if item.options.memory >= 0 -> export.memory = plug_core_item(&flat, WASM_EXTERN_MEMORY, item.options.memory, None)
-            if item.options.realloc >= 0 -> export.realloc = plug_core_item(&flat, WASM_EXTERN_FUNC, item.options.realloc, None)
-            if item.options.post_return >= 0 -> export.post = plug_core_item(&flat, WASM_EXTERN_FUNC, item.options.post_return, None)
+            if item.options.memory >= 0 -> export.memory = plug_core_item(flat, WASM_EXTERN_MEMORY, item.options.memory, None)
+            if item.options.realloc >= 0 -> export.realloc = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.realloc, None)
+            if item.options.post_return >= 0 -> export.post = plug_core_item(flat, WASM_EXTERN_FUNC, item.options.post_return, None)
             export.unsupported = !plug_lift_fits(export.params, export.result, flat.funcs[fid].ty)
         }
     }
-    &flat.exports.push(export)
+    flat.exports.push(export)
 }
 
 // Whether core type `ty` is the canonical flattening of the signature.
@@ -357,7 +357,7 @@ plug_lift_fits: fn(params: [Int], result: Int, ty: WasmFuncType) -> Bool Never! 
     flat := [Int]{}
     loop code in params {
         if code == PLUG_VALUE_UNSUPPORTED -> return false
-        loop core in plug_flat_types(code) -> &flat.push(core)
+        loop core in plug_flat_types(code) -> flat.push(core)
     }
     if result == PLUG_VALUE_UNSUPPORTED || flat != ty.params -> return false
     if result == PLUG_VALUE_NONE -> return ty.results.len() == 0

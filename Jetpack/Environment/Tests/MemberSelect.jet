@@ -30,7 +30,7 @@ env_select_test_member: fn(root: String, name: String, path: String, deps: [Stri
     deps_block := ""
     if deps.len() > 0 {
         lines := [String]{}
-        loop dep in deps -> &lines.push("    {dep}: {dep}#1.0.0,\n")
+        loop dep in deps -> lines.push("    {dep}: {dep}#1.0.0,\n")
         deps_block = "deps: {{\n{lines.join("")}}}\n"
     }
     files.write(files.join(dir, PACKAGE_FILE), "name: \"{name}\"\nversion: \"1.0.0\"\n{deps_block}") ?? panic("member manifest")
@@ -48,7 +48,7 @@ env_select_test_plan: fn(members: [WorkspacePlanMember]) -> WorkspacePlan {
 
 env_select_test_git: fn(root: String, args: [String]) -[Exec, Time.Wait]> String {
     argv := [String]{"git"}
-    loop arg in args -> &argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     receipt: process.cmd(argv).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("run git")
     assert(receipt.success)
     receipt.output
@@ -64,7 +64,7 @@ env_select_test_commit_base: fn(root: String) -[Exec, Time.Wait]> {
 
 env_select_test_names: fn(members: [WorkspacePlanMember]) -> [String] {
     names := [String]{}
-    loop member in members -> &names.push(member.name)
+    loop member in members -> names.push(member.name)
     names
 }
 

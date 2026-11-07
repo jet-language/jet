@@ -12,7 +12,7 @@ const [object, output] = process.argv.slice(2);
 if (!object || !output || !object.endsWith('.o')) throw Error('usage: check-object.mjs <prefix>.o evidence-prefix');
 const list = file => readFileSync(join(root, 'Compiler/JetRuntime', file), 'utf8').split('\n').map(row => row.trim()).filter(row => row && !row.startsWith('#')).map(row => row.split(/\s+/)[0]);
 function inspect(bin, args, suffix) {
-    const result = spawnSync(bin, args, { encoding: 'utf8' });
+    const result = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 1 << 28 });
     writeFileSync(output + suffix, `${result.stdout ?? ''}${result.stderr ?? ''}`);
     if (result.error || result.status !== 0) throw Error(`${bin}: ${result.error ?? result.stderr}`);
     return result.stdout;

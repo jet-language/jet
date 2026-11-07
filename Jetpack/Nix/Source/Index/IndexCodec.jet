@@ -15,7 +15,7 @@ NIX_XXH64_P5: 2870177450012600261
 
 // Append `value` as `size` little-endian bytes.
 nix_push_le: fn(out: &[U8], value: Int, size: Int) Never! {
-    loop index in 0..<size -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
+    loop index in 0..<size -> out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 // The `size`-byte little-endian integer at `offset`, or None past the end.
@@ -33,35 +33,35 @@ nix_has_zstd_magic: fn(bytes: [U8]) -> Bool Never! {
 // A deterministic frame of raw blocks with the content size and checksum.
 nix_index_zstd_encode: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
-    nix_push_le(&out, NIX_INDEX_ZSTD_MAGIC, 4)
+    nix_push_le(out, NIX_INDEX_ZSTD_MAGIC, 4)
     length: bytes.len()
     if {
         length <= 255 -> {
-            &out.push(U8{36})
-            &out.push(U8{length})
+            out.push(U8{36})
+            out.push(U8{length})
         }
         length <= 65791 -> {
-            &out.push(U8{100})
-            nix_push_le(&out, length - 256, 2)
+            out.push(U8{100})
+            nix_push_le(out, length - 256, 2)
         }
         else -> {
-            &out.push(U8{164})
-            nix_push_le(&out, length, 4)
+            out.push(U8{164})
+            nix_push_le(out, length, 4)
         }
     }
     if length == 0 {
-        nix_push_le(&out, 1, 3)
+        nix_push_le(out, 1, 3)
     } else {
         start := 0
         loop start < length {
             end: if start + NIX_INDEX_ZSTD_BLOCK_BYTES < length -> start + NIX_INDEX_ZSTD_BLOCK_BYTES else -> length
             last: if end == length -> 1 else -> 0
-            nix_push_le(&out, (((end - start) << 3)).bit_or(last), 3)
-            loop index in start..<end -> &out.push(bytes[index])
+            nix_push_le(out, (((end - start) << 3)).bit_or(last), 3)
+            loop index in start..<end -> out.push(bytes[index])
             start = end
         }
     }
-    nix_push_le(&out, (nix_xxh64(bytes)).bit_and(NIX_U32_MASK), 4)
+    nix_push_le(out, (nix_xxh64(bytes)).bit_and(NIX_U32_MASK), 4)
     out
 }
 
@@ -99,13 +99,13 @@ nix_index_zstd_decode_bounded: fn(bytes: [U8], limit: Int) -> [U8] NixIndexError
             if output.len() + size > limit -> return Err(NixIndexError.Invalid("nix index decoded bytes exceed bound"))
             if kind == 0 {
                 if input + size > bytes.len() -> return Err(NixIndexError.Invalid("truncated nix index Zstandard block"))
-                loop index in input..<(input + size) -> &output.push(bytes[index])
+                loop index in input..<(input + size) -> output.push(bytes[index])
                 input += size
             } else {
                 if input >= bytes.len() -> return Err(NixIndexError.Invalid("truncated nix index RLE block"))
                 value: bytes[input]
                 input += 1
-                loop _ in 0..<size -> &output.push(value)
+                loop _ in 0..<size -> output.push(value)
             }
             if last -> break
         }

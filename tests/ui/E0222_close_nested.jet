@@ -1,10 +1,10 @@
 ClosePair: struct { first: String, second: String }
 impl ClosePair.Close {
-    close: fn(^self) { print(self.second) }
+    close: fn(&&self) { print(self.second) }
 }
 Holder: struct { value: ClosePair, spare: String }
 run: fn() {
     held: Holder{value: ClosePair{first: "first", second: "second"}, spare: "kept"}
-    taken: ^held.value.first
+    taken: held.value.first.move()
     print(taken)
 }

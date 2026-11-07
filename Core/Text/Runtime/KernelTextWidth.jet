@@ -24,7 +24,7 @@ decode_scalars: fn(text: String) -> [Int] Never! {
         first := Int.from_u8(raw[i])
         width: width_string.utf8_width_at(raw, i)
         if width == 1 {
-            &out.push(if first < 128 -> first else -> 65533)
+            out.push(if first < 128 -> first else -> 65533)
             i = i + 1
             next
         }
@@ -44,11 +44,11 @@ decode_scalars: fn(text: String) -> [Int] Never! {
             k = k + 1
         }
         if !valid {
-            &out.push(65533)
+            out.push(65533)
             i = i + 1
             next
         }
-        &out.push(cp)
+        out.push(cp)
         i = i + width
     }
     out
@@ -56,7 +56,7 @@ decode_scalars: fn(text: String) -> [Int] Never! {
 
 encode_cps: fn(cps: [Int]) -> String Never! {
     out := [U8]{}
-    loop cp in cps -> width_string.append_cp(&out, cp)
+    loop cp in cps -> width_string.append_cp(out, cp)
     String.from_bytes(out) ?? ""
 }
 
@@ -84,10 +84,10 @@ graphemes: fn(text: String) -> [String] Never! {
             else -> grapheme_break_classes(pc, cc)
         }
         if break_here {
-            &out.push(encode_cps(cluster))
+            out.push(encode_cps(cluster))
             cluster = [Int]{}
         }
-        &cluster.push(cur)
+        cluster.push(cur)
         ri_run = if cc == 6 -> ri_run + 1 else -> 0
         if cc != 4 && cc != 5 -> saw_pic = is_extended_pictographic(cur)
         if incb == 2 {
@@ -100,7 +100,7 @@ graphemes: fn(text: String) -> [String] Never! {
             incb_linker = false
         }
     }
-    &out.push(encode_cps(cluster))
+    out.push(encode_cps(cluster))
     out
 }
 
@@ -183,9 +183,9 @@ fill_columns: fn(fill: String, columns: Int) -> String Never! {
     if unit_width <= 0 || unit_width > n -> return spaces(n)
     out := [U8]{}
     loop _ in 0..<(n /% unit_width) {
-        loop b in width_string.utf8_bytes(unit) -> &out.push(b)
+        loop b in width_string.utf8_bytes(unit) -> out.push(b)
     }
-    loop _ in 0..<(n %% unit_width) -> &out.push(U8{32})
+    loop _ in 0..<(n %% unit_width) -> out.push(U8{32})
     String.from_bytes(out) ?? panic("fill columns are whole graphemes and ASCII spaces")
 }
 
@@ -203,6 +203,6 @@ pad: fn(text: String, width: Int, fill: String, left: Bool, right: Bool) -> Stri
 
 spaces: fn(n: Int) -> String Never! {
     out := [U8]{}
-    loop _ in 0..<n -> &out.push(U8{32})
+    loop _ in 0..<n -> out.push(U8{32})
     String.from_bytes(out) ?? panic("spaces are ASCII")
 }

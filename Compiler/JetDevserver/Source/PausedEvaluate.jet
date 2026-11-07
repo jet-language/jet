@@ -260,17 +260,17 @@ impl AuthoritySet {
     // The grants in canonical `capability@scope` order, each once.
     new: fn(grants: [AuthorityGrant]) -> AuthoritySet Never! {
         keys := [String]{}
-        loop grant in grants -> &keys.push("{grant.capability}@{grant.scope_id}")
+        loop grant in grants -> keys.push("{grant.capability}@{grant.scope_id}")
         order := [Int]{}
-        loop index in 0..<grants.len() -> &order.push(index)
+        loop index in 0..<grants.len() -> order.push(index)
         order_keys: keys.copy()
-        &order.sort_by((a: Int, b: Int) -> order_keys[a] <=> order_keys[b])
+        order.sort_by((a: Int, b: Int) -> order_keys[a] <=> order_keys[b])
         kept := [AuthorityGrant]{}
         last := ""
         loop index in order {
             if kept.len() > 0 && keys[index] == last -> next
             last = keys[index]
-            &kept.push(grants[index])
+            kept.push(grants[index])
         }
         AuthoritySet{grants: kept}
     }
@@ -294,17 +294,17 @@ impl AuthoritySet {
 // The requirements in canonical `capability@scope` order, each once.
 authority_requirements_canonical: fn(requirements: [AuthorityRequirement]) -> [AuthorityRequirement] Never! {
     order := [Int]{}
-    loop index in 0..<requirements.len() -> &order.push(index)
+    loop index in 0..<requirements.len() -> order.push(index)
     order_keys := [String]{}
-    loop requirement in requirements -> &order_keys.push(requirement.key())
-    &order.sort_by((a: Int, b: Int) -> order_keys[a] <=> order_keys[b])
+    loop requirement in requirements -> order_keys.push(requirement.key())
+    order.sort_by((a: Int, b: Int) -> order_keys[a] <=> order_keys[b])
     kept := [AuthorityRequirement]{}
     last := ""
     loop index in order {
         key: requirements[index].key()
         if kept.len() > 0 && key == last -> next
         last = key
-        &kept.push(requirements[index])
+        kept.push(requirements[index])
     }
     kept
 }
@@ -416,13 +416,13 @@ impl ValueProjection {
     validate: fn(self) PausedEvaluateError! {
         ids := [String:Bool]{}
         nodes := 0
-        validate_projection(self, None, 1, &ids, &nodes)
+        validate_projection(self, None, 1, ids, nodes)
     }
 
     validate_for_session: fn(self, identity: SessionIdentity) PausedEvaluateError! {
         ids := [String:Bool]{}
         nodes := 0
-        validate_projection(self, Val(identity), 1, &ids, &nodes)
+        validate_projection(self, Val(identity), 1, ids, nodes)
     }
 
     metadata_bytes: fn(self) -> Int Never! {
@@ -431,7 +431,7 @@ impl ValueProjection {
 
     measure: fn(self) -> EvaluationUsage Never! {
         usage := evaluation_usage_zero()
-        measure_projection(self, 1, &usage)
+        measure_projection(self, 1, usage)
         usage
     }
 
@@ -443,7 +443,7 @@ impl ValueProjection {
         }
         children := [String]{}
         loop child in self.children {
-            if child.json() == .Val(text) -> &children.push(text)
+            if child.json() == .Val(text) -> children.push(text)
         }
         Val("{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"type\":\"{foundation_json_escape(self.type_name)}\",\"source\":{self.source.json()},\"publication\":\"{self.publication.as_str()}\"{value},\"children\":{array_json(children)},\"truncated\":{self.truncated}}}")
     }
@@ -471,7 +471,7 @@ validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, dept
         value.value != None || value.children.len() > 0 -> return Err(paused_error("redacted or absent values cannot carry a payload"))
         else -> {}
     }
-    loop child in value.children -> validate_projection(child, identity, depth + 1, &ids, &nodes)
+    loop child in value.children -> validate_projection(child, identity, depth + 1, ids, nodes)
     Ok()
 }
 
@@ -484,7 +484,7 @@ measure_projection: fn(value: ValueProjection, depth: Int, usage: &EvaluationUsa
         else -> 0
     }
     usage.bytes += value.metadata_bytes() + payload
-    loop child in value.children -> measure_projection(child, depth + 1, &usage)
+    loop child in value.children -> measure_projection(child, depth + 1, usage)
 }
 
 LexicalScope: struct {
@@ -512,7 +512,7 @@ impl LexicalScope {
         }
         ids := [String:Bool]{}
         nodes := 0
-        loop binding in self.bindings -> validate_projection(binding, identity, 1, &ids, &nodes)
+        loop binding in self.bindings -> validate_projection(binding, identity, 1, ids, nodes)
         Ok()
     }
 }
@@ -546,7 +546,7 @@ impl ScopeProjection {
     json: fn(self) -> String Never! {
         bindings := [String]{}
         loop binding in self.bindings {
-            if binding.json() == .Val(text) -> &bindings.push(text)
+            if binding.json() == .Val(text) -> bindings.push(text)
         }
         parent_id: if self.parent_id == {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
@@ -566,18 +566,18 @@ project_scope: fn(scope: LexicalScope, identity: SessionIdentity, budget: Evalua
         if selected_value == .Val(id) {
             if id != binding.id -> next
         }
-        &visible.push(binding)
+        visible.push(binding)
     }
     order := [Int]{}
-    loop index in 0..<visible.len() -> &order.push(index)
+    loop index in 0..<visible.len() -> order.push(index)
     ordered: visible.copy()
-    &order.sort_by((a: Int, b: Int) -> if ordered[a].name != ordered[b].name -> ordered[a].name <=> ordered[b].name else -> ordered[a].id <=> ordered[b].id)
+    order.sort_by((a: Int, b: Int) -> if ordered[a].name != ordered[b].name -> ordered[a].name <=> ordered[b].name else -> ordered[a].id <=> ordered[b].id)
     projected := [ValueProjection]{}
     loop index in order {
         binding: visible[index]
         if binding.publication == .Published -> stats.published += 1 else -> stats.redacted += 1
-        value: project_root(binding, identity, budget, &stats)
-        &projected.push(value)
+        value: project_root(binding, identity, budget, stats)
+        projected.push(value)
     }
     Ok(ScopeProjectionResult{
         scope: ScopeProjection{id: scope.id, name: scope.name, parent_id: scope.parent_id, source: scope.source, bindings: projected},
@@ -687,7 +687,7 @@ impl EvaluateRequest {
 
     json: fn(self) -> String Never! {
         effects := [String]{}
-        loop effect_ref in self.effects -> &effects.push("\"{foundation_json_escape(effect_ref)}\"")
+        loop effect_ref in self.effects -> effects.push("\"{foundation_json_escape(effect_ref)}\"")
         "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.evaluate\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"expression\":\"{foundation_json_escape(self.expression)}\",\"mode\":\"{self.mode.as_str()}\",\"effects\":{array_json(effects)},\"authority\":{requirements_json(self.authority)},\"budget\":{self.budget.json()},\"cancelled\":{self.cancellation.requested}}}"
     }
 }
@@ -836,7 +836,7 @@ AuditReceipt: struct {
 audit_receipt: fn(operation: String, request_id: String, identity: SessionIdentity, scope_id: String, authority: [AuthorityRequirement], outcome: AuditOutcome, reason: RejectReason?, usage: EvaluationUsage, truncated: Bool{false}, published_values: Int, redacted_values: Int, observation_id: String?) -> AuditReceipt Never! {
     canonical_authority: authority_requirements_canonical(authority)
     keys := [String]{}
-    loop requirement in canonical_authority -> &keys.push(requirement.key())
+    loop requirement in canonical_authority -> keys.push(requirement.key())
     reason_text: if reason == {
         .Val(why) -> why.as_str()
         else -> ""
@@ -987,7 +987,7 @@ evaluate: fn(session: PausedSession, request: EvaluateRequest, result: Evaluator
         if supplied.validate_for_session(session.identity) == .Err(_) -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
         if supplied.publication != .Absent {
             if supplied.publication == .Published -> stats.published = 1 else -> stats.redacted = 1
-            value = Val(project_root(supplied, session.identity, request.budget, &stats))
+            value = Val(project_root(supplied, session.identity, request.budget, stats))
         }
     }
     audit: audit_receipt("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .Accepted, None, usage, stats.truncated, stats.published, stats.redacted, observation_id)
@@ -1062,7 +1062,7 @@ impl PausedEvaluateHost {
 
     cancel_session: fn(&self, reason: String) PausedEvaluateHostError! {
         session := self.session ?? return Err(PausedEvaluateHostError.SessionUnavailable)
-        if &session.cancel(reason) == .Err(failure) -> return Err(PausedEvaluateHostError.InvalidRequest{detail: failure.message})
+        if session.cancel(reason) == .Err(failure) -> return Err(PausedEvaluateHostError.InvalidRequest{detail: failure.message})
         self.session = Val(session)
         Ok()
     }
@@ -1090,7 +1090,7 @@ impl PausedEvaluateHost {
     }
 
     handle_evaluate: fn(&self, raw: String) -> String PausedEvaluateHostError! {
-        response: &self.evaluate_request(raw)
+        response: self.evaluate_request(raw)
         Ok(response.json())
     }
 
@@ -1106,16 +1106,16 @@ impl PausedEvaluateHost {
 
 inspect_authority: fn(request: InspectRequest) -> [AuthorityRequirement] Never! {
     authority := request.authority.copy()
-    &authority.push(AuthorityRequirement{capability: INSPECT_AUTHORITY, scope_id: request.scope_id})
+    authority.push(AuthorityRequirement{capability: INSPECT_AUTHORITY, scope_id: request.scope_id})
     authority
 }
 
 evaluate_authority: fn(request: EvaluateRequest) -> [AuthorityRequirement] Never! {
     authority := request.authority.copy()
-    &authority.push(AuthorityRequirement{capability: EVALUATE_AUTHORITY, scope_id: request.scope_id})
+    authority.push(AuthorityRequirement{capability: EVALUATE_AUTHORITY, scope_id: request.scope_id})
     if request.mode == .Mutate {
-        &authority.push(AuthorityRequirement{capability: MUTATE_AUTHORITY, scope_id: request.scope_id})
-        loop effect_ref in request.effects -> &authority.push(AuthorityRequirement{capability: effect_ref, scope_id: request.scope_id})
+        authority.push(AuthorityRequirement{capability: MUTATE_AUTHORITY, scope_id: request.scope_id})
+        loop effect_ref in request.effects -> authority.push(AuthorityRequirement{capability: effect_ref, scope_id: request.scope_id})
     }
     authority_requirements_canonical(authority)
 }
@@ -1153,7 +1153,7 @@ reject: fn(operation: String, request_id: String, identity: SessionIdentity, sco
 
 // The root is always retained; descendants stop at the node and byte budgets.
 project_root: fn(value: ValueProjection, identity: SessionIdentity, budget: EvaluationBudget, stats: &ProjectionStats) -> ValueProjection Never! {
-    project_node(value, identity, budget, 1, true, &stats) ?? value_projection_absent(value.id, value.name, value.type_name, value.source)
+    project_node(value, identity, budget, 1, true, stats) ?? value_projection_absent(value.id, value.name, value.type_name, value.source)
 }
 
 project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: EvaluationBudget, depth: Int, root: Bool{false}, stats: &ProjectionStats) -> ValueProjection? Never! {
@@ -1199,8 +1199,8 @@ project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: Eval
                 projected.truncated = true
             }
             else -> loop child in value.children {
-                if project_node(child, identity, budget, depth + 1, false, &stats) == {
-                    .Val(projected_child) -> &projected.children.push(projected_child)
+                if project_node(child, identity, budget, depth + 1, false, stats) == {
+                    .Val(projected_child) -> projected.children.push(projected_child)
                     else -> {
                         stats.truncated = true
                         projected.truncated = true
@@ -1256,7 +1256,7 @@ array_json: fn(values: [String]) -> String Never! { "[{values.join(",")}]" }
 
 requirements_json: fn(requirements: [AuthorityRequirement]) -> String Never! {
     rows := [String]{}
-    loop requirement in requirements -> &rows.push(requirement.json())
+    loop requirement in requirements -> rows.push(requirement.json())
     array_json(rows)
 }
 
@@ -1340,7 +1340,7 @@ parse_authority: fn(fields: [String:Dyn]) -> [AuthorityRequirement] PausedEvalua
             authority := [AuthorityRequirement]{}
             loop entry in values {
                 requirement: dyn_object(entry) ?? return Err(paused_error("paused authority requirement must be an object"))
-                &authority.push(AuthorityRequirement.new(required_string(requirement, "capability"), required_string(requirement, "scope_id")))
+                authority.push(AuthorityRequirement.new(required_string(requirement, "capability"), required_string(requirement, "scope_id")))
             }
             Ok(authority)
         }
@@ -1394,7 +1394,7 @@ parse_evaluate_request: fn(raw: String) -> EvaluateRequest PausedEvaluateError! 
                     if entry == {
                         .Text(text) -> {
                             valid_id(text, "evaluation effect")
-                            &effects.push(text)
+                            effects.push(text)
                         }
                         else -> { return Err(paused_error("paused evaluation effects must be strings")) }
                     }

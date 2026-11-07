@@ -11,8 +11,8 @@ run: fn() {
     folded: re.flags(true, false, false)
 
     word: Regex{"struct"}
-    check("prefix skip finds every occurrence", word.find_all("S: struct {{ T: struct }} structure").len() == 3)
-    starts: word.matches("S: struct {{ T: struct }} structure").map(m -> m.start)
+    check("prefix skip finds every occurrence", word.find_all("struct S {{ struct T }} structure").len() == 3)
+    starts: word.matches("struct S {{ struct T }} structure").map(m -> m.start)
     check("prefix skip keeps the starts", starts == [Int]{0, 11, 22})
 
     photo: Regex{"^IMG_(\d+)\.jpeg$"}

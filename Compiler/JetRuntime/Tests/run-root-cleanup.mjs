@@ -1,34 +1,25 @@
 #!/usr/bin/env node
 // Real Root ABI/lifetime witness only; IR lexical Close has its own fixture.
 // An optional single mode is a rehearsal, never a full-suite receipt.
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
+import { trapLiteral as literal } from './report-literals.mjs';
 const [output, binary, selected, ...extra] = process.argv.slice(2);
 const success = ['normal', 'exit0', 'exact-report', 'nested', 'fifo', 'bare-cancel', 'task-origin', 'central-drop', 'deadline', 'budget3', 'budget4', 'raw-publish', 'panic-message'];
 const host = ['host-context-operation', 'host-error-context', 'host-limit-tag', 'host-limit-range'];
 success.push(...host);
 success.push('range-zero-step', 'range-exhausted');
-const defects = ['root-cancel-publisher', 'root-interrupt-producer', 'corrupt-root-poll', 'corrupt-root-take'];
+// A root rejects a published cancellation and polls an interrupt into the
+// cooperative fallback (Scheduler.jet scheduler_control_publish).
+success.push('root-cancel-publisher', 'root-interrupt-producer');
+const defects = ['corrupt-root-take'];
 const aborts = ['double-panic-shield', 'nested-inherited-stop'];
 const cold = ['cold-gs0-unreachable', 'cold-gs0-layout', 'cold-probe-error', 'cold-set-error'];
 const modes = [...success, ...defects, ...aborts, ...cold];
 if (!output || !binary || extra.length || (selected && !modes.includes(selected))) throw Error('usage: run-root-cleanup.mjs OUT ROOT_CLEANUP_WITNESS [MODE]');
 const out = resolve(output);
 mkdirSync(out, { recursive: true });
-const literals = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../Source/TrapMessages.jet'), 'utf8');
-function literal(name) {
-  const body = literals.match(new RegExp(`^${name}: fn\\(\\) \\{\\n([\\s\\S]*?)^\\}`, 'm'))?.[1];
-  if (!body) throw Error(`missing frozen report literal ${name}`);
-  const rows = [...body.matchAll(/trap_write_word\(I64\{(-?\d+)\}, I64\{(\d+)\}\)/g)];
-  if (!rows.length || body.replace(/\s*trap_write_word\(I64\{-?\d+\}, I64\{\d+\}\)\s*/g, '').trim()) throw Error(`unsupported frozen report literal ${name}`);
-  return Buffer.concat(rows.map(([, value, length]) => {
-    const word = Buffer.alloc(8);
-    word.writeBigInt64LE(BigInt(value));
-    return word.subarray(0, Number(length));
-  }));
-}
 const panic = Buffer.concat([literal('trap_msg_header_panic'), Buffer.from('root-reason'), literal('trap_msg_prelude_end'), literal('trap_footer_e3001')]);
 const hostReport = Buffer.concat([literal('trap_msg_header_panic'), Buffer.from('record variant index out of range'), literal('trap_msg_prelude_end'), literal('trap_footer_e3001')]);
 const defect = Buffer.concat([literal('trap_msg_unreachable'), literal('trap_msg_newline')]);

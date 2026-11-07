@@ -67,7 +67,7 @@ report_optional_int: fn(value: Int?) -> Dyn Never! {
 
 report_texts: fn(values: [String]) -> Dyn Never! {
     items := [Dyn]{}
-    loop value in values -> &items.push(Dyn.Text(value))
+    loop value in values -> items.push(Dyn.Text(value))
     Dyn.Array(items)
 }
 
@@ -137,7 +137,7 @@ StatusFields: struct {
 
     try_with: fn(self, name: String, value: Dyn) -> StatusFields ReportError! {
         fields := self
-        &fields.insert(name, value)
+        fields.insert(name, value)
         Ok(fields)
     }
 
@@ -146,11 +146,11 @@ StatusFields: struct {
         loop entry in self.entries {
             if entry.name == name -> return Err(ReportError.new("duplicate status field `{name}`"))
         }
-        &self.entries.push(StatusField{name: name, value: value})
+        self.entries.push(StatusField{name: name, value: value})
     }
 
     extend: fn(&self, fields: StatusFields) ReportError! {
-        loop entry in fields.entries -> &self.insert(entry.name, entry.value)
+        loop entry in fields.entries -> self.insert(entry.name, entry.value)
     }
 
     is_empty: fn(self) -> Bool Never! {
@@ -161,7 +161,7 @@ StatusFields: struct {
     // object is re-inserted field by field in document order.
     from_dyn_object: fn(value: [String: Dyn]) -> StatusFields ReportError! {
         fields := StatusFields.new()
-        loop entry in value -> &fields.insert(entry.key, entry.value)
+        loop entry in value -> fields.insert(entry.key, entry.value)
         Ok(fields)
     }
 }
@@ -194,13 +194,13 @@ StatusEnvelope: struct {
 
     with_report: fn(self, report: ReportEnvelope) -> StatusEnvelope Never! {
         envelope := self
-        &envelope.reports.push(report)
+        envelope.reports.push(report.copy())
         envelope
     }
 
     with_reports: fn(self, reports: [ReportEnvelope]) -> StatusEnvelope Never! {
         envelope := self
-        loop report in reports -> &envelope.reports.push(report)
+        loop report in reports -> envelope.reports.push(report.copy())
         envelope
     }
 
@@ -216,7 +216,7 @@ StatusEnvelope: struct {
 
     try_with_fields: fn(self, fields: StatusFields) -> StatusEnvelope ReportError! {
         envelope := self
-        &envelope.fields.extend(fields)
+        envelope.fields.extend(fields)
         Ok(envelope)
     }
 
@@ -239,7 +239,7 @@ StatusEnvelope: struct {
         object["action"] = Dyn.Text(self.action.copy())
         object["ok"] = Dyn.Bool(self.ok)
         reports := [Dyn]{}
-        loop report in self.reports -> &reports.push(report.to_tree())
+        loop report in self.reports -> reports.push(report.to_tree())
         object["reports"] = Dyn.Array(reports)
         loop entry in self.fields.entries -> object[entry.name] = entry.value
         Dyn.Object(object)
@@ -347,11 +347,11 @@ report_lexically_normalize: fn(path: String) -> String Never! {
             "" | "." -> {}
             ".." -> {
                 if parts.len() > 0 {
-                    _ := &parts.pop()
+                    _ := parts.pop()
                 }
             }
             else -> {
-                &parts.push(part)
+                parts.push(part)
             }
         }
     }
@@ -512,12 +512,12 @@ ReportEnvelope: struct {
 
     push_fix_edit: fn(&self, edit: ReportEdit) ReportError! {
         if self.no_fix_reason != None -> return Err(ReportError.new("a report cannot carry fix_edits and no_fix_reason"))
-        &self.fix_edits.push(edit)
+        self.fix_edits.push(edit.copy())
     }
 
     with_fix_edits: fn(self, edits: [ReportEdit]) -> ReportEnvelope ReportError! {
         report := self
-        loop edit in edits -> &report.push_fix_edit(edit)
+        loop edit in edits -> report.push_fix_edit(edit)
         Ok(report)
     }
 
@@ -529,7 +529,7 @@ ReportEnvelope: struct {
 
     with_no_fix_reason: fn(self, reason: NoFixReason) -> ReportEnvelope ReportError! {
         report := self
-        &report.set_no_fix_reason(reason)
+        report.set_no_fix_reason(reason)
         Ok(report)
     }
 
@@ -571,7 +571,7 @@ ReportEnvelope: struct {
         object["span"] = report_optional_span(self.span)
         if self.fix_edits.len() > 0 {
             edits := [Dyn]{}
-            loop edit in self.fix_edits -> &edits.push(edit.to_tree())
+            loop edit in self.fix_edits -> edits.push(edit.to_tree())
             object["fix_edits"] = Dyn.Array(edits)
         } else {
             if self.no_fix_reason == {
@@ -585,11 +585,11 @@ ReportEnvelope: struct {
             }
         }
         causes := [Dyn]{}
-        loop cause in self.cause -> &causes.push(cause.to_tree())
+        loop cause in self.cause -> causes.push(cause.to_tree())
         object["cause"] = Dyn.Array(causes)
         object["clears"] = Dyn.Int(self.clears)
         if self.extension == {
-            .Val(extension) -> report_extension_fields(&object, extension)
+            .Val(extension) -> report_extension_fields(object, extension)
             .None -> {}
         }
         Dyn.Object(object)

@@ -98,7 +98,7 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
     accepted: evaluate(paused, mutation, mutated) ?? panic("observed mutation")
     assert(accepted.changed)
     denied := mutation.copy()
-    &denied.authority.push(AuthorityRequirement.new("fs.read", "scope-1") ?? panic("requirement"))
+    denied.authority.push(AuthorityRequirement.new("fs.read", "scope-1") ?? panic("requirement"))
     if evaluate(paused, denied, evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 0, 0, 1))) == {
         .Err(failure) -> assert(failure.reason == RejectReason.InsufficientAuthority)
         else -> panic("denied mutation was accepted")

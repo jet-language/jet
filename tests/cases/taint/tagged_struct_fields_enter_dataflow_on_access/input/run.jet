@@ -6,5 +6,6 @@ Row: struct {
 }
 run: fn() {
     row := Row{ secret: "Ada" }
-    process.run(["echo", row.secret]) ?? return Err("test")
+    receipt: process.cmd(["echo", row.secret]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
 }

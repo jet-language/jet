@@ -47,7 +47,7 @@ jet_eval_build_session_input: fn(data: TComptimeValue) -> BuildSessionValue? Nev
         }
         .List(values) -> {
             output := [BuildSessionValue]{}
-            loop value in values -> &output.push(jet_eval_build_session_input(value) ?? return None)
+            loop value in values -> output.push(jet_eval_build_session_input(value) ?? return None)
             return Val(BuildSessionValue.List{values: output})
         }
         .Present(value) -> return jet_eval_build_session_input(value)
@@ -184,7 +184,7 @@ jet_eval_build_failed_diagnostic: fn(value: TComptimeValue, fallback: Span) -> D
         loop field in rows {
             name: jet_eval_build_field_text(field, "name") ?? return None
             data: jet_eval_build_field_text(field, "value") ?? return None
-            &fields.push(DiagnosticErrorField{name: name, value: data})
+            fields.push(DiagnosticErrorField{name: name, value: data})
         }
         span := fallback
         if jet_eval_build_field_present(details, "source_span") == .Val(source) {
@@ -250,7 +250,7 @@ jet_eval_build_graph_file: fn(value: BuildGraphFile) -> TComptimeValue Never! {
 
 jet_eval_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
     targets := [TComptimeValue]{}
-    loop row in graph.targets -> &targets.push(TComptimeValue.Struct{type_name: "BuildGraphTarget", fields: [TComptimeField]{
+    loop row in graph.targets -> targets.push(TComptimeValue.Struct{type_name: "BuildGraphTarget", fields: [TComptimeField]{
         {name: "id", value: jet_eval_build_graph_int(row.id)},
         {name: "name", value: jet_eval_build_graph_text(row.name)},
         {name: "kind", value: jet_eval_build_graph_text(row.kind)},
@@ -260,18 +260,18 @@ jet_eval_build_graph_value: fn(graph: BuildGraph) -> TComptimeValue Never! {
         {name: "plugin", value: jet_eval_build_graph_optional_int(row.plugin)},
     }})
     keys := [TComptimeValue]{}
-    loop row in graph.action_keys -> &keys.push(TComptimeValue.Struct{type_name: "BuildGraphActionKey", fields: [TComptimeField]{
+    loop row in graph.action_keys -> keys.push(TComptimeValue.Struct{type_name: "BuildGraphActionKey", fields: [TComptimeField]{
         {name: "action", value: jet_eval_build_graph_text(row.action)},
         {name: "key", value: jet_eval_build_graph_text(row.key)},
     }})
     nodes := [TComptimeValue]{}
     loop row in graph.nodes {
         digests := [TComptimeValue]{}
-        loop digest in row.input_digests -> &digests.push(TComptimeValue.Struct{type_name: "BuildGraphInputDigest", fields: [TComptimeField]{
+        loop digest in row.input_digests -> digests.push(TComptimeValue.Struct{type_name: "BuildGraphInputDigest", fields: [TComptimeField]{
             {name: "name", value: jet_eval_build_graph_text(digest.name)},
             {name: "digest", value: jet_eval_build_graph_text(digest.digest)},
         }})
-        &nodes.push(TComptimeValue.Struct{type_name: "BuildGraphNode", fields: [TComptimeField]{
+        nodes.push(TComptimeValue.Struct{type_name: "BuildGraphNode", fields: [TComptimeField]{
             {name: "kind", value: jet_eval_build_graph_text(row.kind)},
             {name: "key", value: jet_eval_build_graph_text(row.key)},
             {name: "subject", value: jet_eval_build_graph_text(row.subject)},

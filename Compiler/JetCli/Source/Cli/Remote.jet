@@ -39,7 +39,7 @@ jet_cli_remote_absolute: fn(path: String) -[FS, Env]> String JetCLIReadError! {
 jet_cli_remote_parts: fn(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
-        if part != "" && part != "." -> &parts.push(part)
+        if part != "" && part != "." -> parts.push(part)
     }
     parts
 }
@@ -54,7 +54,7 @@ jet_cli_remote_config: fn() -[FS, Env]> String JetCLIReadError! {
 
 jet_cli_remote_credential: fn(path: String) JetCLIReadError! -[FS, Time.Wait]> {
     parts := jet_cli_remote_parts(path)
-    name: &parts.pop() ?? return Err(jet_cli_read_error("credential provider path has no file name"))
+    name: parts.pop() ?? return Err(jet_cli_read_error("credential provider path has no file name"))
     held: JetCLIRootedDirectory.open("/", parts, false) ?? return Err(jet_cli_read_error("cannot inspect credential provider directory: {err.message}"))
     bytes: if held.read(name, 4096) == {
         .Ok(value) -> value
@@ -185,10 +185,10 @@ jet_cli_remote_binding_fields: fn(binding: JetCLIRemoteBinding, list: Bool) -> [
     fields: [JetCLIStatusField]{jet_cli_status_field(if list -> "name" else -> "builder", jet_cli_status_text(binding.builder)), jet_cli_status_field("root", jet_cli_status_text(binding.root)), jet_cli_status_field("trust_domain", jet_cli_status_text(binding.trust_domain)), jet_cli_status_field("worker_id", jet_cli_status_text(binding.worker_id)), jet_cli_status_field("platform", jet_cli_status_text(binding.platform)), jet_cli_status_field("abi", jet_cli_status_text(binding.abi))}
     if !list -> return fields
     result := fields
-    &result.push(jet_cli_status_field("cache_read", jet_cli_status_bool(binding.cache_read)))
-    &result.push(jet_cli_status_field("cache_write", jet_cli_status_bool(binding.cache_write)))
-    &result.push(jet_cli_status_field("execute", jet_cli_status_bool(binding.execute)))
-    &result.push(jet_cli_status_field("fallback_local", jet_cli_status_bool(binding.fallback_local)))
+    result.push(jet_cli_status_field("cache_read", jet_cli_status_bool(binding.cache_read)))
+    result.push(jet_cli_status_field("cache_write", jet_cli_status_bool(binding.cache_write)))
+    result.push(jet_cli_status_field("execute", jet_cli_status_bool(binding.execute)))
+    result.push(jet_cli_status_field("fallback_local", jet_cli_status_bool(binding.fallback_local)))
     result
 }
 
@@ -202,21 +202,21 @@ jet_cli_remote_list: fn(json: Bool) -[FS, Env, Time.Wait]> JetDriverVerbOutput J
         loop entry in entries {
             if !entry.is_file || !entry.name.ends_with(".conf") -> next
             name: entry.name.removesuffix(".conf")
-            if jet_cli_remote_name(name) == .Ok(_) -> &names.push(name)
+            if jet_cli_remote_name(name) == .Ok(_) -> names.push(name)
         }
     }
-    &names.sort()
+    names.sort()
     text := ""
     stderr := ""
     rows := [JetCLIStatusValue]{}
     loop name in names {
         if jet_cli_remote_load(directory, name) == {
             .Ok(binding) -> {
-                &rows.push(jet_cli_status_object(jet_cli_remote_binding_fields(binding, true)))
+                rows.push(jet_cli_status_object(jet_cli_remote_binding_fields(binding, true)))
                 caps := [String]{}
-                if binding.cache_read -> &caps.push("cache-read")
-                if binding.cache_write -> &caps.push("cache-write")
-                if binding.execute -> &caps.push("execute")
+                if binding.cache_read -> caps.push("cache-read")
+                if binding.cache_write -> caps.push("cache-write")
+                if binding.execute -> caps.push("execute")
                 text = "{text}{binding.builder}\t{binding.root}\t{binding.trust_domain}\t{caps.join(",")}\n"
             }
             .Err(error) -> { if !json -> stderr = "{stderr}{name}: {error.message}\n" }

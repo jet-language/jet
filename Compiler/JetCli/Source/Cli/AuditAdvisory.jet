@@ -86,7 +86,7 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
     // a package that fails to load is its own diagnostic.
     cache := WorkspaceDeclarationCache.new()
     exceptions := [PackagePolicyException]{}
-    if pkg_package_facts_for_root(&cache, root) == {
+    if pkg_package_facts_for_root(cache, root) == {
         .Val(facts) -> exceptions = facts.policy.exceptions
         .None -> {}
         .Err(error) -> return jet_cli_advisory_audit_fail_one(error.diagnostic, color, json)
@@ -114,7 +114,7 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
     diagnostics := report.maturity
     critical := 0
     loop found in report.matches {
-        &diagnostics.push(found.diagnostic)
+        diagnostics.push(found.diagnostic)
         if found.severity == .Critical -> critical += 1
     }
     failed: critical > 0 || report.maturity.len() > 0

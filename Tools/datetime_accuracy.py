@@ -28,14 +28,11 @@ from zoneinfo import ZoneInfo, reset_tzpath
 ROOT = Path(__file__).resolve().parents[1]
 VECTOR_PATH = ROOT / "tests/fixtures/datetime_accuracy.tsv"
 SOURCE_PATHS = {
-    "epoch_parse": ROOT / "Examples/features/time/datetime_accuracy_epoch_parse.jet",
-    "civil_arithmetic": ROOT / "Examples/features/time/datetime_accuracy_civil_arithmetic.jet",
-    "zones": ROOT / "Examples/features/time/datetime_accuracy_zones.jet",
+    "epoch_parse": ROOT / "tests/run/CoreTimeFoundations/DateTimeAccuracyEpochParse.jet",
+    "civil_arithmetic": ROOT / "tests/run/CoreTimeFoundations/DateTimeAccuracyCivilArithmetic.jet",
+    "zones": ROOT / "tests/run/CoreTimeFoundations/DateTimeAccuracyZones.jet",
 }
-GOLDEN_PATHS = {
-    batch: ROOT / "Examples/features/expected/time" / f"datetime_accuracy_{batch}.out"
-    for batch in SOURCE_PATHS
-}
+GOLDEN_PATHS = {batch: path.with_suffix(".out") for batch, path in SOURCE_PATHS.items()}
 
 SEED = 20260828
 UTC = timezone.utc

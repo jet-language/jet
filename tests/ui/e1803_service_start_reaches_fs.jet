@@ -9,7 +9,7 @@ worker: fn() {}
 
 run: fn() {
     tree := service.tree("orders")
-    _endpoint: &tree.worker("intake", worker, capacity: 1) ?? panic("worker")
-    &tree.start() ?? panic("start")
+    _endpoint: tree.worker("intake", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
     print("started")
 }

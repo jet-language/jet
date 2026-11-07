@@ -78,7 +78,7 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
             10 | 44 -> {
                 if depth == 0 {
                     text: pkg_bytes_text(raw, start, index)
-                    if text.trim() != "" -> &entries.push(TransitionSourceEntry{raw: text, field: env_transition_source_field(text)})
+                    if text.trim() != "" -> entries.push(TransitionSourceEntry{raw: text, field: env_transition_source_field(text)})
                     start = index + 1
                 }
             }
@@ -86,7 +86,7 @@ env_transition_source_entries: fn(source: String) -> [TransitionSourceEntry] Nev
         }
     }
     tail: pkg_bytes_text(raw, start, raw.len())
-    if tail.trim() != "" -> &entries.push(TransitionSourceEntry{raw: tail, field: env_transition_source_field(tail)})
+    if tail.trim() != "" -> entries.push(TransitionSourceEntry{raw: tail, field: env_transition_source_field(tail)})
     entries
 }
 
@@ -142,7 +142,7 @@ TransitionFieldEntry: struct {
 env_transition_required_field: fn(entries: [TransitionSourceEntry], field: String, path: String) -> TransitionFieldEntry EnvironmentError! {
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == Val((field)) -> &matches.push(entry)
+        if entry.field == Val((field)) -> matches.push(entry.copy())
     }
     if matches.len() != 1 {
         return Err(env_transition_error("{field} must be declared exactly once in {path}"))
@@ -157,7 +157,7 @@ env_transition_required_inline_config: fn(entries: [TransitionSourceEntry], name
     key: "::{name}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == Val((key)) -> &matches.push(entry)
+        if entry.field == Val((key)) -> matches.push(entry.copy())
     }
     if matches.len() != 1 {
         return Err(env_transition_error("closed Config {name} was not found in {path}"))
@@ -248,7 +248,7 @@ env_transition_record_names: fn(value: String, scope: String) -> [String] Enviro
     body: env_transition_record_body(value) ?? return Err(env_transition_error("{scope} is not a record"))
     names := [String]{}
     loop entry in env_transition_source_entries(body) {
-        if entry.field == .Val(name) -> &names.push(name)
+        if entry.field == .Val(name) -> names.push(name)
     }
     Ok(names)
 }
@@ -259,7 +259,7 @@ env_transition_remove_entry: fn(source: String, target: TransitionSourceEntry) -
     loop entry in env_transition_source_entries(source) {
         raw: entry.raw.trim()
         if raw == target_raw || raw == "" -> next
-        &kept.push(raw)
+        kept.push(raw)
     }
     output: kept.join("\n")
     if source.ends_with("\n") -> return "{output}\n"
@@ -271,7 +271,7 @@ env_transition_set_or_add_field: fn(source: String, field: String, value: String
     replacement: "{field}: {value.trim()}"
     matches := [TransitionSourceEntry]{}
     loop entry in entries {
-        if entry.field == Val((field)) -> &matches.push(entry)
+        if entry.field == Val((field)) -> matches.push(entry)
     }
     if matches.len() > 1 {
         return Err(env_transition_error("{field} is ambiguous; migration stopped before writing"))
@@ -282,7 +282,7 @@ env_transition_set_or_add_field: fn(source: String, field: String, value: String
         loop entry in entries {
             raw: if entry.raw.trim() == target -> replacement else -> entry.raw.trim()
             if raw == "" -> next
-            &kept.push(raw)
+            kept.push(raw)
         }
         output: kept.join("\n")
         if source.ends_with("\n") -> return Ok("{output}\n")
@@ -370,7 +370,7 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
         code: Int.from_u8(byte)
         index += 1
         if quoted {
-            &output.push(byte)
+            output.push(byte)
             if escaped {
                 escaped = false
             } else if code == 92 {
@@ -380,19 +380,19 @@ env_transition_strip_comments: fn(value: String) -> String Never! {
             }
         } else if code == 34 {
             quoted = true
-            &output.push(byte)
+            output.push(byte)
         } else if code == 47 && pkg_bytes_code(raw, index) == 47 {
             index += 1
             loop index < raw.len() {
                 comment: raw[index]
                 index += 1
                 if Int.from_u8(comment) == 10 {
-                    &output.push(comment)
+                    output.push(comment)
                     break
                 }
             }
         } else {
-            &output.push(byte)
+            output.push(byte)
         }
     }
     pkg_bytes_text(output, 0, output.len())

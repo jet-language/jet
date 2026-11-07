@@ -19,10 +19,10 @@ use {
         if key == "force_pin" {
             plan.overlay_policy = pkg_parse_workspace_policy("workspace: module {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("original force overlay")
         } else {
-            &plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
+            plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
         }
         cache := WorkspaceDeclarationCache.new()
-        denied: if env_workspace_lock_write(&cache, root, plan) == {
+        denied: if env_workspace_lock_write(cache, root, plan) == {
             .Err(error) -> if error == {
                 .Gate(gate) -> {
                     found := false
@@ -35,8 +35,8 @@ use {
             }
             .Ok(_) -> false
         }
-        &refused.push(denied)
-        &absent.push(!files.exists(files.join(root, UNIFIED_LOCK_FILE)))
+        refused.push(denied)
+        absent.push(!files.exists(files.join(root, UNIFIED_LOCK_FILE)))
     }
     loop index in 0..<keys.len() {
         assert(refused[index], "{keys[index]} must refuse")

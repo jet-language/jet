@@ -197,7 +197,7 @@ Browser: struct {
         pattern: obj([(key: "type", value: Dyn.Text("string")), (key: "pattern", value: Dyn.Text(url_pattern.copy()))])
         result: browser_command(self, "network.addIntercept", obj([
             (key: "phases", value: Dyn.Array([Dyn]{Dyn.Text(phase.copy())})),
-            (key: "urlPatterns", value: Dyn.Array([Dyn]{^pattern}))
+            (key: "urlPatterns", value: Dyn.Array([Dyn]{pattern.move()}))
         ]))
         id: browser_string(result, "intercept")
         Ok(BrowserIntercept{__browser: self, __scope: new_scope(id)})
@@ -229,7 +229,7 @@ Browser: struct {
     allow_downloads: fn(self, folder: String) BrowserError! -[Net, Time]> {
         if folder.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         behavior: obj([(key: "type", value: Dyn.Text("allowed")), (key: "destinationFolder", value: Dyn.Text(folder.copy()))])
-        browser_command(self, "browser.setDownloadBehavior", obj([(key: "downloadBehavior", value: ^behavior)]))
+        browser_command(self, "browser.setDownloadBehavior", obj([(key: "downloadBehavior", value: behavior)]))
         Ok()
     }
 
@@ -316,12 +316,12 @@ BrowserPage: struct {
         contexts: browser_get(result, "contexts") ?? return Err(BrowserError{kind: "protocol"})
         ids := [String]{}
         if contexts == .Array(nodes) {
-            loop node in nodes -> collect_frame_ids(node, &ids)
+            loop node in nodes -> collect_frame_ids(node, ids)
         } else {
             return Err(BrowserError{kind: "protocol"})
         }
         out := [BrowserFrame]{}
-        loop id in ids -> &out.push(page_frame(self, id))
+        loop id in ids -> out.push(page_frame(self, id))
         Ok(out)
     }
 
@@ -329,7 +329,7 @@ BrowserPage: struct {
     screenshot: fn(self) -[Net, Time]> [U8] BrowserError! {
         page_live(self)
         format: obj([(key: "type", value: Dyn.Text("image/png"))])
-        result: browser_command(self.__browser, "browsingContext.captureScreenshot", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope))), (key: "format", value: ^format)]))
+        result: browser_command(self.__browser, "browsingContext.captureScreenshot", obj([(key: "context", value: Dyn.Text(scope_id(self.__scope))), (key: "format", value: format)]))
         decode_data(result)
     }
 
@@ -344,7 +344,7 @@ BrowserPage: struct {
         page_live(self)
         if name.len() == 0 || domain.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         cookie: obj([(key: "name", value: Dyn.Text(name.copy())), (key: "value", value: string_value(value)), (key: "domain", value: Dyn.Text(domain.copy()))])
-        browser_command(self.__browser, "storage.setCookie", obj([(key: "cookie", value: ^cookie), (key: "partition", value: page_partition(self))]))
+        browser_command(self.__browser, "storage.setCookie", obj([(key: "cookie", value: cookie), (key: "partition", value: page_partition(self))]))
         Ok()
     }
 
@@ -352,7 +352,7 @@ BrowserPage: struct {
         page_live(self)
         if name.len() == 0 -> return Err(BrowserError{kind: "protocol"})
         filter: obj([(key: "name", value: Dyn.Text(name.copy()))])
-        result: browser_command(self.__browser, "storage.getCookies", obj([(key: "filter", value: ^filter), (key: "partition", value: page_partition(self))]))
+        result: browser_command(self.__browser, "storage.getCookies", obj([(key: "filter", value: filter), (key: "partition", value: page_partition(self))]))
         cookies: browser_get(result, "cookies") ?? return Err(BrowserError{kind: "protocol"})
         if cookies == .Array(items) {
             if items.len() == 0 -> return Ok(None)
@@ -474,8 +474,8 @@ BrowserLocator: struct {
         browser_command(self.__browser, "script.callFunction", obj([
             (key: "functionDeclaration", value: Dyn.Text(C_FILL_FUNCTION)),
             (key: "awaitPromise", value: Dyn.Bool(false)),
-            (key: "target", value: ^target),
-            (key: "arguments", value: Dyn.Array([Dyn]{^node, string_value(value)}))
+            (key: "target", value: target),
+            (key: "arguments", value: Dyn.Array([Dyn]{node.move(), string_value(value)}))
         ]))
         Ok()
     }
@@ -485,8 +485,8 @@ BrowserLocator: struct {
         locator_pointer(self, shared_id, true)
         down: obj([(key: "type", value: Dyn.Text("keyDown")), (key: "value", value: Dyn.Text(key.copy()))])
         up: obj([(key: "type", value: Dyn.Text("keyUp")), (key: "value", value: Dyn.Text(key.copy()))])
-        source: obj([(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array([Dyn]{^down, ^up}))])
-        browser_command(self.__browser, "input.performActions", obj([(key: "context", value: Dyn.Text(scope_id(self.__page))), (key: "actions", value: Dyn.Array([Dyn]{^source}))]))
+        source: obj([(key: "type", value: Dyn.Text("key")), (key: "id", value: Dyn.Text("keyboard")), (key: "actions", value: Dyn.Array([Dyn]{down.move(), up.move()}))])
+        browser_command(self.__browser, "input.performActions", obj([(key: "context", value: Dyn.Text(scope_id(self.__page))), (key: "actions", value: Dyn.Array([Dyn]{source.move()}))]))
         Ok()
     }
 
@@ -496,7 +496,7 @@ BrowserLocator: struct {
         element: obj([(key: "sharedId", value: Dyn.Text(shared_id))])
         browser_command(self.__browser, "input.setFiles", obj([
             (key: "context", value: Dyn.Text(scope_id(self.__page))),
-            (key: "element", value: ^element),
+            (key: "element", value: element),
             (key: "files", value: Dyn.Array([Dyn]{Dyn.Text(path.copy())}))
         ]))
         Ok()
@@ -526,12 +526,12 @@ BrowserProtocol: struct {
         if !(params == .Object(_)) -> return Err(BrowserError{kind: "protocol"})
         if self.__kind == "bidi" {
             if method.starts_with("goog:cdp.") -> return Err(BrowserError{kind: "unsupported protocol"})
-            result: browser_command(self.__browser, method, ^params)
+            result: browser_command(self.__browser, method, params)
             return Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
         }
         if self.__kind != "cdp" || !browser_cdp(self.__browser) -> return Err(BrowserError{kind: "unsupported protocol"})
         if !cdp_method_ok(method) -> return Err(BrowserError{kind: "protocol"})
-        result: browser_command(self.__browser, "goog:cdp.sendCommand", obj([(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: ^params)]))
+        result: browser_command(self.__browser, "goog:cdp.sendCommand", obj([(key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)]))
         Ok(json.dumps(result) ?? return Err(BrowserError{kind: "protocol"}))
     }
 }
@@ -745,7 +745,7 @@ connect: fn(endpoint: String) -[Net, Time]> Browser BrowserError! {
 
 connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Net, Time]> Browser BrowserError! {
     conn: core.net.ws.__connect(endpoint) ? value -> value ! error -> return Err(browser_ws_error(error))
-    browser: Browser{__wire: shared __BrowserWire{conn: ^conn}, __state: shared __BrowserState{
+    browser: Browser{__wire: shared __BrowserWire{conn: conn.move()}, __state: shared __BrowserState{
         next_id: 1, closed: false, session_started: false, timeout_ms: t.milliseconds,
         profile: p.name, cdp: false, trace: [String]{"connect"}, trace_bytes: 7, events: [BrowserEvent]{}
     }}
@@ -753,7 +753,7 @@ connect_profile: fn(endpoint: String, p: BrowserProfile, t: BrowserTimeout) -[Ne
     if !browser_true_field(status, "ready") || !browser_text_field(status, "message") ->
         return Err(BrowserError{kind: "protocol"})
     always: obj([(key: "alwaysMatch", value: empty_object())])
-    session: browser_command(browser, "session.new", obj([(key: "capabilities", value: ^always)]))
+    session: browser_command(browser, "session.new", obj([(key: "capabilities", value: always)]))
     // The session counts as started before reply validation, so a failed
     // sessionId/capability check still ends the started session on close.
     browser_mark_started(browser)
@@ -854,10 +854,10 @@ browser_trace_push: fn(browser: Browser, entry: String) Never! {
     }
     if drop > 0 {
         kept := [String]{}
-        loop index in drop..<guard.value.trace.len() -> &kept.push(guard.value.trace[index])
+        loop index in drop..<guard.value.trace.len() -> kept.push(guard.value.trace[index])
         guard.value.trace = kept
     }
-    &guard.value.trace.push(entry)
+    guard.value.trace.push(entry.copy())
     guard.value.trace_bytes = total + size
 }
 
@@ -866,7 +866,7 @@ browser_pop_event: fn(browser: Browser) -> BrowserEvent? Never! {
     if guard.value.events.len() == 0 -> return None
     first: guard.value.events[0]
     rest := [BrowserEvent]{}
-    loop index in 1..<guard.value.events.len() -> &rest.push(guard.value.events[index])
+    loop index in 1..<guard.value.events.len() -> rest.push(guard.value.events[index])
     guard.value.events = rest
     Val(first)
 }
@@ -875,10 +875,10 @@ browser_queue_event: fn(browser: Browser, event: BrowserEvent) Never! {
     guard := browser.__state.guard_edit()
     if guard.value.events.len() == C_EVENT_LIMIT {
         rest := [BrowserEvent]{}
-        loop index in 1..<guard.value.events.len() -> &rest.push(guard.value.events[index])
+        loop index in 1..<guard.value.events.len() -> rest.push(guard.value.events[index])
         guard.value.events = rest
     }
-    &guard.value.events.push(event)
+    guard.value.events.push(event.copy())
 }
 
 browser_check_command: fn(browser: Browser, method: String) BrowserError! {
@@ -898,18 +898,18 @@ browser_next_id: fn(browser: Browser) -> Int Never! {
 
 // ---- Command transport ------------------------------------------------------
 
-browser_command: fn(browser: Browser, method: String, params: ^Dyn) -[Net, Time]> Dyn BrowserError! {
-    browser_command_with_timeout(browser, method, ^params, browser_timeout_ms(browser))
+browser_command: fn(browser: Browser, method: String, params: &&Dyn) -[Net, Time]> Dyn BrowserError! {
+    browser_command_with_timeout(browser, method, params, browser_timeout_ms(browser))
 }
 
 // One command: send `{id, method, params}`, queue interleaved events, and
 // accept only the matching success reply before the deadline.
-browser_command_with_timeout: fn(browser: Browser, method: String, params: ^Dyn, timeout_ms: Int) -[Net, Time]> Dyn BrowserError! {
+browser_command_with_timeout: fn(browser: Browser, method: String, params: &&Dyn, timeout_ms: Int) -[Net, Time]> Dyn BrowserError! {
     browser_check_command(browser, method)
     started: time.instant()
     browser_ws_timeout(browser, remaining_ms(started, timeout_ms))
     id: browser_next_id(browser)
-    request: obj([(key: "id", value: Dyn.Int(id)), (key: "method", value: Dyn.Text(method.copy())), (key: "params", value: ^params)])
+    request: obj([(key: "id", value: Dyn.Int(id)), (key: "method", value: Dyn.Text(method.copy())), (key: "params", value: params)])
     wire: json.dumps(request) ?? return Err(BrowserError{kind: "protocol"})
     method_hash: fact_hash(method)
     browser_trace_push(browser, "send:{id}:{method_hash}")
@@ -1018,9 +1018,9 @@ phase_ok: fn(phase: String) -> Bool Never! {
 
 // ---- Dyn helpers ------------------------------------------------------------
 
-obj: fn(entries: ^[(key: String, value: Dyn)]) -> Dyn Never! { tree.object_from_entries(^entries) }
+obj: fn(entries: &&[(key: String, value: Dyn)]) -> Dyn Never! { tree.object_from_entries(entries) }
 
-empty_object: fn() -> Dyn Never! { tree.object_from_entries(^[(key: String, value: Dyn)]{}) }
+empty_object: fn() -> Dyn Never! { tree.object_from_entries([(key: String, value: Dyn)]{}) }
 
 string_value: fn(value: String) -> Dyn Never! {
     obj([(key: "type", value: Dyn.Text("string")), (key: "value", value: Dyn.Text(value.copy()))])
@@ -1068,7 +1068,7 @@ fact_hash: fn(value: String) -> String Never! {
     out := [U8]{}
     loop index in 0..<16 {
         nibble: Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))
-        &out.push(digits[nibble])
+        out.push(digits[nibble])
     }
     String.from_bytes(out) ?? ""
 }
@@ -1170,10 +1170,10 @@ page_frame: fn(page: BrowserPage, id: String) -> BrowserFrame Never! {
 
 collect_frame_ids: fn(node: Dyn, out: &[String]) BrowserError! {
     id: browser_string(node, "context")
-    &out.push(id)
+    out.push(id)
     children: browser_get(node, "children") ?? return Ok()
     if children == .Array(nodes) {
-        loop child in nodes -> collect_frame_ids(child, &out)
+        loop child in nodes -> collect_frame_ids(child, out)
         return Ok()
     }
     Err(BrowserError{kind: "protocol"})
@@ -1202,14 +1202,14 @@ storage_name: fn(kind: String) -> String? Never! {
     None
 }
 
-page_storage_call: fn(page: BrowserPage, function: String, arguments: ^[Dyn]) -[Net, Time]> Dyn BrowserError! {
+page_storage_call: fn(page: BrowserPage, function: String, arguments: &&[Dyn]) -[Net, Time]> Dyn BrowserError! {
     page_live(page)
     target: obj([(key: "context", value: Dyn.Text(scope_id(page.__scope)))])
     browser_command(page.__browser, "script.callFunction", obj([
         (key: "functionDeclaration", value: Dyn.Text(function.copy())),
         (key: "awaitPromise", value: Dyn.Bool(false)),
-        (key: "target", value: ^target),
-        (key: "arguments", value: Dyn.Array(^arguments))
+        (key: "target", value: target),
+        (key: "arguments", value: Dyn.Array(arguments))
     ]))
 }
 
@@ -1230,7 +1230,7 @@ page_evaluate_text: fn(page: BrowserPage, expression: String) -[Net, Time]> Stri
         (key: "expression", value: Dyn.Text(expression.copy())),
         (key: "awaitPromise", value: Dyn.Bool(false)),
         (key: "resultOwnership", value: Dyn.Text("none")),
-        (key: "target", value: ^target)
+        (key: "target", value: target)
     ]))
     found: remote_string(result) ?? return Err(BrowserError{kind: "protocol"})
     Ok(found)
@@ -1249,7 +1249,7 @@ trim_byte_end: fn(value: String, byte: U8) -> String Never! {
     end := raw.len()
     loop end > 0 && raw[end - 1] == byte -> end -= 1
     out := [U8]{}
-    loop index in 0..<end -> &out.push(raw[index])
+    loop index in 0..<end -> out.push(raw[index])
     String.from_bytes(out) ?? ""
 }
 
@@ -1258,15 +1258,15 @@ trim_byte_start: fn(value: String, byte: U8) -> String Never! {
     start := 0
     loop start < raw.len() && raw[start] == byte -> start += 1
     out := [U8]{}
-    loop index in start..<raw.len() -> &out.push(raw[index])
+    loop index in start..<raw.len() -> out.push(raw[index])
     String.from_bytes(out) ?? ""
 }
 
 css_attr_equals: fn(attr: String, value: String) -> String Never! {
     out := [U8]{}
     loop b in value.bytes() {
-        if b == (U8{92}) || b == (U8{34}) -> &out.push(U8{92})
-        &out.push(b)
+        if b == (U8{92}) || b == (U8{34}) -> out.push(U8{92})
+        out.push(b)
     }
     escaped: String.from_bytes(out) ?? ""
     "[{attr}=\"{escaped}\"]"
@@ -1279,10 +1279,10 @@ page_locator: fn(page: BrowserPage, kind: String, role: String, name: String, va
 locator_wire: fn(locator: BrowserLocator) -> Dyn BrowserError! {
     if locator.__kind == "accessibility" {
         value := [(key: String, value: Dyn)]{}
-        if locator.__role.len() > 0 -> &value.push((key: "role", value: Dyn.Text(locator.__role.copy())))
-        if locator.__name.len() > 0 -> &value.push((key: "name", value: Dyn.Text(locator.__name.copy())))
+        if locator.__role.len() > 0 -> value.push((key: "role", value: Dyn.Text(locator.__role.copy())))
+        if locator.__name.len() > 0 -> value.push((key: "name", value: Dyn.Text(locator.__name.copy())))
         if value.len() == 0 -> return Err(BrowserError{kind: "protocol"})
-        return Ok(obj([(key: "type", value: Dyn.Text("accessibility")), (key: "value", value: obj(^value))]))
+        return Ok(obj([(key: "type", value: Dyn.Text("accessibility")), (key: "value", value: obj(value))]))
     }
     if locator.__kind == "css" || locator.__kind == "innerText" -> return Ok(obj([(key: "type", value: Dyn.Text(locator.__kind.copy())), (key: "value", value: Dyn.Text(locator.__value.copy()))]))
     Err(BrowserError{kind: "protocol"})
@@ -1293,7 +1293,7 @@ locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String
     wire: locator_wire(locator)
     result: browser_command_with_timeout(locator.__browser, "browsingContext.locateNodes", obj([
         (key: "context", value: Dyn.Text(scope_id(locator.__page))),
-        (key: "locator", value: ^wire),
+        (key: "locator", value: wire),
         (key: "maxNodeCount", value: Dyn.Int(1))
     ]), timeout_ms)
     nodes: browser_get(result, "nodes") ?? return Err(BrowserError{kind: "protocol"})
@@ -1307,15 +1307,15 @@ locator_query: fn(locator: BrowserLocator, timeout_ms: Int) -[Net, Time]> String
 
 locator_pointer: fn(locator: BrowserLocator, shared_id: String, down_up: Bool) BrowserError! -[Net, Time]> {
     element: obj([(key: "sharedId", value: Dyn.Text(shared_id.copy()))])
-    origin: obj([(key: "type", value: Dyn.Text("element")), (key: "element", value: ^element)])
-    actions := [Dyn]{obj([(key: "type", value: Dyn.Text("pointerMove")), (key: "x", value: Dyn.Int(0)), (key: "y", value: Dyn.Int(0)), (key: "origin", value: ^origin)])}
+    origin: obj([(key: "type", value: Dyn.Text("element")), (key: "element", value: element)])
+    actions := [Dyn]{obj([(key: "type", value: Dyn.Text("pointerMove")), (key: "x", value: Dyn.Int(0)), (key: "y", value: Dyn.Int(0)), (key: "origin", value: origin)])}
     if down_up {
-        &actions.push(obj([(key: "type", value: Dyn.Text("pointerDown")), (key: "button", value: Dyn.Int(0))]))
-        &actions.push(obj([(key: "type", value: Dyn.Text("pointerUp")), (key: "button", value: Dyn.Int(0))]))
+        actions.push(obj([(key: "type", value: Dyn.Text("pointerDown")), (key: "button", value: Dyn.Int(0))]))
+        actions.push(obj([(key: "type", value: Dyn.Text("pointerUp")), (key: "button", value: Dyn.Int(0))]))
     }
     parameters: obj([(key: "pointerType", value: Dyn.Text("mouse"))])
-    source: obj([(key: "type", value: Dyn.Text("pointer")), (key: "id", value: Dyn.Text("mouse")), (key: "parameters", value: ^parameters), (key: "actions", value: Dyn.Array(^actions))])
-    browser_command(locator.__browser, "input.performActions", obj([(key: "context", value: Dyn.Text(scope_id(locator.__page))), (key: "actions", value: Dyn.Array([Dyn]{^source}))]))
+    source: obj([(key: "type", value: Dyn.Text("pointer")), (key: "id", value: Dyn.Text("mouse")), (key: "parameters", value: parameters), (key: "actions", value: Dyn.Array(actions))])
+    browser_command(locator.__browser, "input.performActions", obj([(key: "context", value: Dyn.Text(scope_id(locator.__page))), (key: "actions", value: Dyn.Array([Dyn]{source.move()}))]))
     Ok()
 }
 
@@ -1335,7 +1335,7 @@ selected: fn(config: BrowserTestConfig, name: String) -> Bool Never! {
             if pattern.len() > 0 && glob_match(pattern, value) -> return true
             pattern = [U8]{}
         } else {
-            &pattern.push(b)
+            pattern.push(b)
         }
     }
     pattern.len() > 0 && glob_match(pattern, value)
@@ -1425,8 +1425,8 @@ report_new: fn(config: BrowserTestConfig) -> BrowserTestReport Never! {
 report_add_case: fn(report: BrowserTestReport, case: BrowserTestCase) -> BrowserTestReport Never! {
     // Append, then order the cases by name.
     out := report
-    &out.cases.push(case)
-    &out.cases.sort_by((left: BrowserTestCase, right: BrowserTestCase) -> left.name <=> right.name)
+    out.cases.push(case.copy())
+    out.cases.sort_by((left: BrowserTestCase, right: BrowserTestCase) -> left.name <=> right.name)
     out
 }
 
@@ -1464,22 +1464,22 @@ report_source_value: fn(source: BrowserTestSource) -> Dyn Never! {
 report_attempt_value: fn(attempt: BrowserTestAttempt) -> Dyn Never! {
     actions := [Dyn]{}
     loop action in attempt.actions {
-        &actions.push(obj([(key: "sequence", value: Dyn.Int(action.sequence)), (key: "kind", value: Dyn.Text(action.kind)), (key: "fact", value: Dyn.Text(action.fact)), (key: "source", value: report_source_value(attempt.source))]))
+        actions.push(obj([(key: "sequence", value: Dyn.Int(action.sequence)), (key: "kind", value: Dyn.Text(action.kind)), (key: "fact", value: Dyn.Text(action.fact)), (key: "source", value: report_source_value(attempt.source))]))
     }
     snapshots := [Dyn]{}
     loop snapshot in attempt.snapshots {
-        &snapshots.push(obj([(key: "kind", value: Dyn.Text(snapshot.kind)), (key: "hash", value: Dyn.Text(snapshot.hash)), (key: "bytes", value: Dyn.Int(snapshot.bytes)), (key: "path", value: Dyn.Text(snapshot.path)), (key: "source", value: report_source_value(snapshot.source))]))
+        snapshots.push(obj([(key: "kind", value: Dyn.Text(snapshot.kind)), (key: "hash", value: Dyn.Text(snapshot.hash)), (key: "bytes", value: Dyn.Int(snapshot.bytes)), (key: "path", value: Dyn.Text(snapshot.path)), (key: "source", value: report_source_value(snapshot.source))]))
     }
     events := [Dyn]{}
     loop event in attempt.events {
-        &events.push(obj([(key: "kind", value: Dyn.Text(event.kind)), (key: "requestIdHash", value: Dyn.Text(event.request_id_hash)), (key: "requestMethod", value: Dyn.Text(event.request_method)), (key: "urlHash", value: Dyn.Text(event.url_hash)), (key: "statusCode", value: Dyn.Int(event.status_code)), (key: "isBlocked", value: Dyn.Bool(event.is_blocked))]))
+        events.push(obj([(key: "kind", value: Dyn.Text(event.kind)), (key: "requestIdHash", value: Dyn.Text(event.request_id_hash)), (key: "requestMethod", value: Dyn.Text(event.request_method)), (key: "urlHash", value: Dyn.Text(event.url_hash)), (key: "statusCode", value: Dyn.Int(event.status_code)), (key: "isBlocked", value: Dyn.Bool(event.is_blocked))]))
     }
     artifacts := [Dyn]{}
     loop artifact in attempt.artifacts {
-        &artifacts.push(obj([(key: "name", value: Dyn.Text(artifact.name)), (key: "path", value: Dyn.Text(artifact.path)), (key: "mime", value: Dyn.Text(artifact.mime)), (key: "bytes", value: Dyn.Int(artifact.bytes)), (key: "hash", value: Dyn.Text(artifact.hash)), (key: "source", value: report_source_value(artifact.source))]))
+        artifacts.push(obj([(key: "name", value: Dyn.Text(artifact.name)), (key: "path", value: Dyn.Text(artifact.path)), (key: "mime", value: Dyn.Text(artifact.mime)), (key: "bytes", value: Dyn.Int(artifact.bytes)), (key: "hash", value: Dyn.Text(artifact.hash)), (key: "source", value: report_source_value(artifact.source))]))
     }
     trace := [Dyn]{}
-    loop entry in attempt.trace -> &trace.push(Dyn.Text(entry))
+    loop entry in attempt.trace -> trace.push(Dyn.Text(entry))
     error: if attempt.error.len() == 0 -> Dyn.Null else -> Dyn.Text(attempt.error.copy())
     obj([
         (key: "test", value: Dyn.Text(attempt.test.copy())),
@@ -1489,12 +1489,12 @@ report_attempt_value: fn(attempt: BrowserTestAttempt) -> Dyn Never! {
         (key: "expectedFailure", value: Dyn.Bool(attempt.expected_failure)),
         (key: "durationMs", value: Dyn.Int(attempt.duration_ms)),
         (key: "source", value: report_source_value(attempt.source)),
-        (key: "actions", value: Dyn.Array(^actions)),
-        (key: "snapshots", value: Dyn.Array(^snapshots)),
-        (key: "events", value: Dyn.Array(^events)),
-        (key: "artifacts", value: Dyn.Array(^artifacts)),
-        (key: "trace", value: Dyn.Array(^trace)),
-        (key: "error", value: ^error)
+        (key: "actions", value: Dyn.Array(actions)),
+        (key: "snapshots", value: Dyn.Array(snapshots)),
+        (key: "events", value: Dyn.Array(events)),
+        (key: "artifacts", value: Dyn.Array(artifacts)),
+        (key: "trace", value: Dyn.Array(trace)),
+        (key: "error", value: error)
     ])
 }
 
@@ -1503,8 +1503,8 @@ report_json: fn(report: BrowserTestReport) -> String Never! {
     cases := [Dyn]{}
     loop case in report.cases {
         attempts := [Dyn]{}
-        loop attempt in case.attempts -> &attempts.push(report_attempt_value(attempt))
-        &cases.push(obj([(key: "name", value: Dyn.Text(case.name)), (key: "selected", value: Dyn.Bool(case.selected)), (key: "attempts", value: Dyn.Array(^attempts))]))
+        loop attempt in case.attempts -> attempts.push(report_attempt_value(attempt))
+        cases.push(obj([(key: "name", value: Dyn.Text(case.name)), (key: "selected", value: Dyn.Bool(case.selected)), (key: "attempts", value: Dyn.Array(attempts))]))
     }
     document: obj([
         (key: "schema", value: Dyn.Text("jet.browser.test/v1")),
@@ -1514,7 +1514,7 @@ report_json: fn(report: BrowserTestReport) -> String Never! {
         (key: "watch", value: Dyn.Bool(report.watch)),
         (key: "summary", value: Dyn.Text(report_summary(report))),
         (key: "exitCode", value: Dyn.Int(report_exit_code(report))),
-        (key: "cases", value: Dyn.Array(^cases))
+        (key: "cases", value: Dyn.Array(cases))
     ])
     // The document holds no Float, so rendering cannot fail.
     json.to_string_pretty(document) ?? ""
@@ -1524,23 +1524,23 @@ report_text: fn(report: BrowserTestReport) -> String Never! {
     lines := [String]{"Browser tests: {report_summary(report)}\n"}
     loop case in report.cases {
         if !case.selected {
-            &lines.push("SKIP {case.name}\n")
+            lines.push("SKIP {case.name}\n")
             next
         }
         loop attempt in case.attempts {
             status: if attempt.passed -> "PASS" else -> "FAIL"
-            &lines.push("{status} {attempt.test} [{attempt.engine}] attempt={attempt.attempt} duration={attempt.duration_ms}ms\n")
-            if attempt.error.len() > 0 -> &lines.push("  error: {attempt.error}\n")
-            loop action in attempt.actions -> &lines.push("  action {action.sequence}: {action.kind} {action.fact}\n")
+            lines.push("{status} {attempt.test} [{attempt.engine}] attempt={attempt.attempt} duration={attempt.duration_ms}ms\n")
+            if attempt.error.len() > 0 -> lines.push("  error: {attempt.error}\n")
+            loop action in attempt.actions -> lines.push("  action {action.sequence}: {action.kind} {action.fact}\n")
             loop snapshot in attempt.snapshots {
                 origin: if snapshot.source.path.len() == 0 -> "" else -> " source={snapshot.source.path}:{snapshot.source.line}"
-                &lines.push("  snapshot {snapshot.kind}: {snapshot.path} bytes={snapshot.bytes} hash={snapshot.hash}{origin}\n")
+                lines.push("  snapshot {snapshot.kind}: {snapshot.path} bytes={snapshot.bytes} hash={snapshot.hash}{origin}\n")
             }
             loop event in attempt.events {
-                &lines.push("  {event.kind} request={event.request_id_hash} method={event.request_method} url={event.url_hash} status={event.status_code} blocked={event.is_blocked}\n")
+                lines.push("  {event.kind} request={event.request_id_hash} method={event.request_method} url={event.url_hash} status={event.status_code} blocked={event.is_blocked}\n")
             }
-            loop artifact in attempt.artifacts -> &lines.push("  attachment {artifact.name}: {artifact.path}\n")
-            if attempt.trace.len() > 0 -> &lines.push("  trace: {attempt.trace.join(",")}\n")
+            loop artifact in attempt.artifacts -> lines.push("  attachment {artifact.name}: {artifact.path}\n")
+            if attempt.trace.len() > 0 -> lines.push("  trace: {attempt.trace.join(",")}\n")
         }
     }
     lines.join("")
@@ -1551,26 +1551,26 @@ report_text: fn(report: BrowserTestReport) -> String Never! {
 report_html: fn(report: BrowserTestReport) -> String Never! {
     raw: report_json(report).bytes()
     out := [U8]{}
-    push_str(&out, C_REPORT_HTML_HEAD)
+    push_str(out, C_REPORT_HTML_HEAD)
     index := 0
     loop index < raw.len() {
         b: raw[index]
         line_separator: b == (U8{226}) && index + 2 < raw.len() && raw[index + 1] == (U8{128}) && (raw[index + 2] == (U8{168}) || raw[index + 2] == (U8{169}))
         if b == (U8{38}) {
-            push_str(&out, "\\u0026")
+            push_str(out, "\\u0026")
         } else if b == (U8{60}) {
-            push_str(&out, "\\u003c")
+            push_str(out, "\\u003c")
         } else if b == (U8{62}) {
-            push_str(&out, "\\u003e")
+            push_str(out, "\\u003e")
         } else if line_separator {
-            push_str(&out, if raw[index + 2] == (U8{168}) -> "\\u2028" else -> "\\u2029")
+            push_str(out, if raw[index + 2] == (U8{168}) -> "\\u2028" else -> "\\u2029")
             index += 2
         } else {
-            &out.push(b)
+            out.push(b)
         }
         index += 1
     }
-    push_str(&out, C_REPORT_HTML_TAIL)
+    push_str(out, C_REPORT_HTML_TAIL)
     String.from_bytes(out) ?? ""
 }
 
@@ -1650,7 +1650,7 @@ bounded_text: fn(value: String, limit: Int) -> String Never! {
     // Keep whole UTF-8 sequences: back up over continuation bytes.
     loop end > 0 && raw[end] >= 128 && raw[end] < 192 -> end -= 1
     out := [U8]{}
-    loop index in 0..<end -> &out.push(raw[index])
+    loop index in 0..<end -> out.push(raw[index])
     String.from_bytes(out) ?? ""
 }
 
@@ -1667,7 +1667,7 @@ server_logs: fn(server: BrowserTestServer) -> String Never! { server.logs() }
 
 
 push_str: fn(out: &[U8], s: String) Never! {
-    loop b in s.bytes() -> &out.push(b)
+    loop b in s.bytes() -> out.push(b)
 }
 source_name: fn(text: String) -> String Never! {
     raw: text.bytes()
@@ -1676,10 +1676,10 @@ source_name: fn(text: String) -> String Never! {
         n: raw[i]
         ok := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
         if ok {
-            if i == 0 && n >= 48 && n <= 57 -> &out.push(U8{95})
-            &out.push(n)
+            if i == 0 && n >= 48 && n <= 57 -> out.push(U8{95})
+            out.push(n)
         } else {
-            &out.push(U8{95})
+            out.push(U8{95})
         }
     }
     if out.len() == 0 -> return "generated_browser_test"
@@ -1691,13 +1691,13 @@ esc_source: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in raw {
         if b == (U8{92}) || b == (U8{34}) {
-            &out.push(U8{92})
-            &out.push(b)
+            out.push(U8{92})
+            out.push(b)
         } else {
             if b == (U8{10}) {
-                push_str(&out, "\\n")
+                push_str(out, "\\n")
             } else {
-                if b == (U8{13}) -> push_str(&out, "\\r") else -> &out.push(b)
+                if b == (U8{13}) -> push_str(out, "\\r") else -> out.push(b)
             }
         }
     }
@@ -1861,20 +1861,20 @@ test_engines: fn(raw: String) -> [String] BrowserError! {
     loop i in 0..(bytes.len() + 1) {
         separator: i == bytes.len() || bytes[i] == (U8{44}) || ascii_space(bytes[i])
         if !separator {
-            &token.push(bytes[i])
+            token.push(bytes[i])
             next
         }
         value: parse.lower(text.trim(String.from_bytes(token) ?? ""))
         token = [U8]{}
         if value == "" -> next
         if value != "chromium" && value != "firefox" && value != "webkit" -> return Err(BrowserError{kind: "unknown engine"})
-        &requested.push(value)
+        requested.push(value)
     }
     engines := [String]{}
     loop engine in ([String]{"chromium", "firefox", "webkit"}) {
         loop value in requested {
             if value == engine {
-                &engines.push(engine)
+                engines.push(engine)
                 break
             }
         }
@@ -1889,19 +1889,19 @@ split_command: fn(raw: String) -> [String] Never! {
     quote := U8{0}
     loop b in raw.bytes() {
         if quote != (U8{0}) {
-            if b == quote -> quote = U8{0} else -> &value.push(b)
+            if b == quote -> quote = U8{0} else -> value.push(b)
         } else if b == (U8{39}) || b == (U8{34}) {
             quote = b
         } else if ascii_space(b) {
             if value.len() > 0 {
-                &command.push(String.from_bytes(value) ?? "")
+                command.push(String.from_bytes(value) ?? "")
                 value = [U8]{}
             }
         } else {
-            &value.push(b)
+            value.push(b)
         }
     }
-    if value.len() > 0 -> &command.push(String.from_bytes(value) ?? "")
+    if value.len() > 0 -> command.push(String.from_bytes(value) ?? "")
     command
 }
 
@@ -1976,7 +1976,7 @@ strip_quotes: fn(raw: String) -> String Never! {
     loop start < end && bytes[start] == (U8{34}) -> start += 1
     loop end > start && bytes[end - 1] == (U8{34}) -> end -= 1
     out := [U8]{}
-    loop i in start..<end -> &out.push(bytes[i])
+    loop i in start..<end -> out.push(bytes[i])
     String.from_bytes(out) ?? ""
 }
 
@@ -2004,7 +2004,7 @@ strip_quotes: fn(raw: String) -> String Never! {
 }
 
 #Test("browser handshake checks preserve native first-match and protocol rules") {
-    ready: tree.object_from_entries(^[(key: String, value: Dyn)]{
+    ready: tree.object_from_entries([(key: String, value: Dyn)]{
         (key: "ready", value: Dyn.Bool(true)),
         (key: "message", value: Dyn.Text("ready"))
     })
@@ -2012,24 +2012,24 @@ strip_quotes: fn(raw: String) -> String Never! {
     assert(browser_text_field(ready, "message"))
     assert(!browser_true_field(Dyn.Null, "ready"))
     assert(!browser_text_field(Dyn.Null, "message"))
-    duplicate_ready: tree.object_from_entries(^[(key: String, value: Dyn)]{
+    duplicate_ready: tree.object_from_entries([(key: String, value: Dyn)]{
         (key: "ready", value: Dyn.Bool(false)),
         (key: "ready", value: Dyn.Bool(true))
     })
     assert(!browser_true_field(duplicate_ready, "ready"))
-    caps: tree.object_from_entries(^[(key: String, value: Dyn)]{
+    caps: tree.object_from_entries([(key: String, value: Dyn)]{
         (key: "goog:cdp", value: Dyn.Bool(false)),
         (key: "goog:cdp", value: Dyn.Bool(true))
     })
-    session: tree.object_from_entries(^[(key: String, value: Dyn)]{
+    session: tree.object_from_entries([(key: String, value: Dyn)]{
         (key: "sessionId", value: Dyn.Text("")),
-        (key: "capabilities", value: ^caps)
+        (key: "capabilities", value: caps)
     })
     assert_eq(browser_session_cdp(session), Ok(false))
-    typed_text: tree.typed_string(^"typed")
-    typed_session: tree.object_from_entries(^[(key: String, value: Dyn)]{
-        (key: "sessionId", value: ^typed_text),
-        (key: "capabilities", value: tree.object_from_entries(^[(key: String, value: Dyn)]{}))
+    typed_text: tree.typed_string("typed")
+    typed_session: tree.object_from_entries([(key: String, value: Dyn)]{
+        (key: "sessionId", value: typed_text),
+        (key: "capabilities", value: tree.object_from_entries([(key: String, value: Dyn)]{}))
     })
     assert_eq(browser_session_cdp(typed_session), Ok(false))
     if browser_session_cdp(Dyn.Null) == {

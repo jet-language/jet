@@ -8,11 +8,11 @@ s1_criterion_measured_bytes: fn(path: String, seen: &[files.FileID]) -> Int {
     loop id in seen {
         if id.device == metadata.id.device && id.inode == metadata.id.inode -> return 0
     }
-    &seen.push(metadata.id)
+    seen.push(metadata.id)
     total := metadata.size_on_disk
     if metadata.is_dir {
         loop entry in files.list_dir(path) ?? panic("entries {path}") {
-            total += s1_criterion_measured_bytes(entry.path, &seen)
+            total += s1_criterion_measured_bytes(entry.path, seen)
         }
     }
     total
@@ -27,10 +27,10 @@ run: fn() {
     }
     links: (files.stat(payload) ?? panic("payload metadata")).links
     single_seen := [files.FileID]{}
-    single_bytes: s1_criterion_measured_bytes("shared-cas", &single_seen) + s1_criterion_measured_bytes("agent-0/hangar", &single_seen)
+    single_bytes: s1_criterion_measured_bytes("shared-cas", single_seen) + s1_criterion_measured_bytes("agent-0/hangar", single_seen)
     multi_seen := [files.FileID]{}
-    multi_bytes := s1_criterion_measured_bytes("shared-cas", &multi_seen)
-    loop index in 0..<30 -> multi_bytes += s1_criterion_measured_bytes("agent-{index}/hangar", &multi_seen)
+    multi_bytes := s1_criterion_measured_bytes("shared-cas", multi_seen)
+    loop index in 0..<30 -> multi_bytes += s1_criterion_measured_bytes("agent-{index}/hangar", multi_seen)
     // Rust u64::saturating_mul(4), not a narrowed Int/i64 bound.
     max_u64: 18446744073709551615
     bound: if single_bytes > max_u64 /% 4 -> max_u64 else -> single_bytes * 4

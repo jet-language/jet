@@ -6,7 +6,7 @@ use {
 
 worker: fn() -[]> {}
 
-state_name: fn(delivery: ^Delivery) -> String {
+state_name: fn(delivery: &&Delivery) -> String {
     state: delivery.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -26,11 +26,11 @@ run: fn() {
     retention: Duration.seconds(86400) ?? panic("retention")
     runtime := service.runtime(store, retention: retention)
     tree := service.tree("durable-audit")
-    &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     state: service.state_store(state_path) ?? panic("state")
-    &tree.set_state_event_log(^state, "audit-events", 1, "reversible") ?? panic("state adapter")
-    endpoint: &tree.worker("worker", worker, capacity: 2) ?? panic("worker")
-    &tree.start() ?? panic("start")
+    tree.set_state_event_log(state, "audit-events", 1, "reversible") ?? panic("state adapter")
+    endpoint: tree.worker("worker", worker, capacity: 2) ?? panic("worker")
+    tree.start() ?? panic("start")
 
     accepted: runtime.send(endpoint, "accepted", key: "accepted") ?? panic("accepted")
     receipt: (accepted.copy()).receipt() ?? panic("receipt")
@@ -41,14 +41,14 @@ run: fn() {
 
     cancelled_handle: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("cancelled")
     cancelled: cancelled_handle.cancel() ?? panic("cancel")
-    print("cancel:{state_name(^cancelled)}")
+    print("cancel:{state_name(cancelled)}")
 
     dead_handle: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead")
     dead: runtime.dead_letter(dead_handle) ?? panic("dead letter")
-    print("dead:{state_name(^dead)}")
+    print("dead:{state_name(dead)}")
 
     short_runtime := service.runtime(store, retention: Duration.milliseconds(1) ?? panic("short retention"))
     expiring: short_runtime.send(endpoint, "expiring", key: "expiring") ?? panic("expiring")
     time.sleep(Duration.milliseconds(5) ?? panic("sleep"))
-    print("expired:{state_name(^expiring)}")
+    print("expired:{state_name(expiring)}")
 }

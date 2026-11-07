@@ -68,8 +68,8 @@ sema_call_try_live: fn(module_name: String, member: String, alias: String, alias
     imported_module: sema_call_core_import_module(environment, program, alias) ?? return sema_live_unhandled()
     if imported_module != module_name -> return sema_live_unhandled()
     imported: sema_call_core_import_target(environment, program, alias) ?? return sema_live_unhandled()
-    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return sema_live_unhandled()
-    sema_call_live(member, alias, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context) -> return sema_live_unhandled()
+    sema_call_live(member, alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // `alias.member(source, args...)`, where `alias` names `app` or `core.web`
@@ -81,7 +81,7 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
     value := Expr?{None}
     loop argument in args {
         if argument.spread {
-            &diagnostics.push(sema_error("E0104", argument.span, "`{callee}` can't spread its arguments", "the arguments after the source are checked as one call to it", "pass each argument of the source call"))
+            diagnostics.push(sema_error("E0104", argument.span, "`{callee}` can't spread its arguments", "the arguments after the source are checked as one call to it", "pass each argument of the source call"))
             return sema_live_rejected()
         }
         if argument.label == .Val(label) {
@@ -93,28 +93,28 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
                 value = Val(argument.expr.copy()) // copy: the caller's argument list keeps its expression
                 next
             }
-            &diagnostics.push(sema_error("E0104", label.span, "`{callee}` has no parameter `{label.name}`", sema_live_shape(member), "remove the `{label.name}:` argument"))
+            diagnostics.push(sema_error("E0104", label.span, "`{callee}` has no parameter `{label.name}`", sema_live_shape(member), "remove the `{label.name}:` argument"))
             return sema_live_rejected()
         }
-        &positional.push(argument.copy()) // copy: the caller's argument list keeps its arguments
+        positional.push(argument.copy()) // copy: the caller's argument list keeps its arguments
     }
     if positional.len() == 0 {
-        &diagnostics.push(sema_error("E0104", span, "`{callee}` needs a source function", sema_live_shape(member), "pass the source function first, then its arguments"))
+        diagnostics.push(sema_error("E0104", span, "`{callee}` needs a source function", sema_live_shape(member), "pass the source function first, then its arguments"))
         return sema_live_rejected()
     }
-    source: sema_live_source(positional[0].expr, member, environment, program, scopes, &diagnostics) ?? return sema_live_rejected()
+    source: sema_live_source(positional[0].expr, member, environment, program, scopes, diagnostics) ?? return sema_live_rejected()
     supplied: positional.len() - 1
     if member == "push" && value == None {
-        &diagnostics.push(sema_error("E0104", span, "`{callee}` needs the pushed value", sema_live_shape(member), "add `value: ...` after the source's arguments"))
+        diagnostics.push(sema_error("E0104", span, "`{callee}` needs the pushed value", sema_live_shape(member), "add `value: ...` after the source's arguments"))
         return sema_live_rejected()
     }
     whole_source: member == "invalidate" && supplied == 0
     if !whole_source && supplied != source.params.len() {
-        &diagnostics.push(sema_call_arity_diagnostic(source.name, source.params.len(), supplied, false, expr_span(positional[0].expr)))
+        diagnostics.push(sema_call_arity_diagnostic(source.name, source.params.len(), supplied, false, expr_span(positional[0].expr)))
         return sema_live_rejected()
     }
     graph: program.registration_graph ?? return sema_live_rejected()
-    sema_scope_enter(&scopes, &state, "live:{span.start}")
+    sema_scope_enter(scopes, state, "live:{span.start}")
     body := [TStmt]{}
     keys := [Expr]{}
     reads := [CallArg]{}
@@ -124,32 +124,32 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
         local_name: "__jet_live_{span.start}_{index}"
         binding := ast_binding(local_name, argument.span, false, argument.expr.copy(), None) // copy: `positional` keeps its argument
         binding.ty = Val(source.params[index].copy()) // copy: the source signature keeps its parameter types
-        statement: sema_stmt_check_binding(binding, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+        statement: sema_stmt_check_binding(binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_single_use_leave_scope(scopes, state, diagnostics)
             return sema_live_rejected()
         }
-        &body.push(statement)
+        body.push(statement)
         read: Expr.Ident{name: local_name, span: argument.span, id: AST_NODE_GENERATED}
         // An argument with no encoding (a database scope, a handle) does not
         // tell bindings apart.
         if sema_type_bound_satisfied(graph, source.params[index], "Encode", environment.module_identity) == (Val(true)) {
-            &keys.push(sema_live_module_call(alias, "__live_arg", [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument.span)}, argument.span))
+            keys.push(sema_live_module_call(alias, "__live_arg", [Type]{}, [CallArg]{sema_live_arg(read.copy(), argument.span)}, argument.span))
         } else {
-            &keys.push(sema_live_string("_", argument.span))
+            keys.push(sema_live_string("_", argument.span))
         }
-        &reads.push(sema_live_arg(read, argument.span))
-        &takes.push(NamedSpan{name: local_name.copy(), span: argument.span}) // copy: the read above names the same local
+        reads.push(sema_live_arg(read, argument.span))
+        takes.push(NamedSpan{name: local_name.copy(), span: argument.span}) // copy: the read above names the same local
     }
     wire: sema_live_string(source.wire, span)
     key_name: "__jet_live_{span.start}_key"
     key_binding := ast_binding(key_name, span, false, Expr.ListLit{elements: keys, span: span, id: AST_NODE_GENERATED}, None)
     key_binding.ty = Val(Type.List{element: Type.String})
     if !whole_source {
-        key_statement: sema_stmt_check_binding(key_binding, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+        key_statement: sema_stmt_check_binding(key_binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_single_use_leave_scope(scopes, state, diagnostics)
             return sema_live_rejected()
         }
-        &body.push(key_statement)
+        body.push(key_statement)
     }
     key: Expr.Ident{name: key_name, span: span, id: AST_NODE_GENERATED}
     // The pushed value is checked against the source's value type here, so a
@@ -159,11 +159,11 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
         value_name: "__jet_live_{span.start}_value"
         value_binding := ast_binding(value_name, expr_span(given), false, given.copy(), None) // copy: `value` keeps the caller's expression
         value_binding.ty = Val(source.ok.copy()) // copy: the source signature keeps its value type
-        value_statement: sema_stmt_check_binding(value_binding, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-            sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+        value_statement: sema_stmt_check_binding(value_binding, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_single_use_leave_scope(scopes, state, diagnostics)
             return sema_live_rejected()
         }
-        &body.push(value_statement)
+        body.push(value_statement)
         pushed = Val(Expr.Ident{name: value_name, span: expr_span(given), id: AST_NODE_GENERATED})
     }
     invocation: Expr.Call{call: Call{name: source.name, name_span: span, type_args: [Type]{}, args: reads}, id: AST_NODE_GENERATED}
@@ -174,15 +174,15 @@ sema_call_live: fn(member: String, alias: String, args: [CallArg], span: Span, e
         "push" -> sema_live_module_call(alias, "__live_push", [Type]{source.ok.copy()}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span), sema_live_arg(pushed ?? panic("push value was checked above"), span)}, span)
         else -> if whole_source -> sema_live_module_call(alias, "__live_invalidate_all", [Type]{}, [CallArg]{sema_live_arg(wire, span)}, span) else -> sema_live_module_call(alias, "__live_invalidate", [Type]{}, [CallArg]{sema_live_arg(wire, span), sema_live_arg(key, span)}, span)
     }
-    checked: sema_check_expression(lowered, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
-        sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+    checked: sema_check_expression(lowered, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_single_use_leave_scope(scopes, state, diagnostics)
         return sema_live_rejected()
     }
     result_type: checked.ty.copy() // copy: the block's value keeps its own type
-    &body.push(TStmt.ExprStmt{value: checked, span: span})
-    sema_single_use_leave_scope(&scopes, &state, &diagnostics)
+    body.push(TStmt.ExprStmt{value: checked, span: span})
+    sema_single_use_leave_scope(scopes, state, diagnostics)
     lowered_value: sema_tree_node(result_type, TExprKind.InlineBlock{body: body}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(lowered_value, expected, environment, program, diagnostics)}
 }
 
 sema_live_shape: fn(member: String) -> String Never! {
@@ -201,16 +201,16 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
     name: if expression == {
         .Ident(written, _, _) -> written
         else -> {
-            &diagnostics.push(sema_error("E0112", source_span, "a live source must be a function name", "a live binding re-runs its source by name, and the source's module path names it on the wire", "declare the source as a top-level `fn` and pass its name"))
+            diagnostics.push(sema_error("E0112", source_span, "a live source must be a function name", "a live binding re-runs its source by name, and the source's module path names it on the wire", "declare the source as a top-level `fn` and pass its name"))
             return None
         }
     }
     index: sema_scope_resolve_index(scopes, name) ?? {
-        &diagnostics.push(sema_unknown_name_in(name, source_span, scopes))
+        diagnostics.push(sema_unknown_name_in(name, source_span, scopes))
         return None
     }
     if scopes.bindings[index].symbol.kind != SymbolKind.Function {
-        &diagnostics.push(sema_error("E0112", source_span, "`{name}` is a value, not a named function", "a live binding re-runs its source by name, and the source's module path names it on the wire; a closure has no such name", "declare the source as a top-level `fn` and pass its name"))
+        diagnostics.push(sema_error("E0112", source_span, "`{name}` is a value, not a named function", "a live binding re-runs its source by name, and the source's module path names it on the wire; a closure has no such name", "declare the source as a top-level `fn` and pass its name"))
         return None
     }
     ty: sema_scope_binding_type(environment, scopes, index) ?? return None
@@ -218,23 +218,23 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
         if metadata == .Val(call) {
             loop convention in call.conventions {
                 if convention != AccessConvention.Read {
-                    &diagnostics.push(sema_error("E0112", source_span, "`{name}` takes or writes an argument", "a live binding keeps its arguments and re-runs its source with them", "make every parameter of `{name}` a read parameter"))
+                    diagnostics.push(sema_error("E0112", source_span, "`{name}` takes or writes an argument", "a live binding keeps its arguments and re-runs its source with them", "make every parameter of `{name}` a read parameter"))
                     return None
                 }
             }
         }
         result: ret ?? Type.Named{name: "Unit"}
         if result == .Result(ok, err) {
-            if member == "live" && !sema_live_reads_only(name, effect_bound, source_span, &diagnostics) -> return None
+            if member == "live" && !sema_live_reads_only(name, effect_bound, source_span, diagnostics) -> return None
             graph: program.registration_graph ?? return None
-            if !sema_live_codable(graph, name, "result", ok, environment, source_span, &diagnostics) -> return None
-            if !sema_live_codable(graph, name, "error", err, environment, source_span, &diagnostics) -> return None
+            if !sema_live_codable(graph, name, "result", ok, environment, source_span, diagnostics) -> return None
+            if !sema_live_codable(graph, name, "error", err, environment, source_span, diagnostics) -> return None
             return Val(SemaLiveSource{name: name.copy(), wire: "{scopes.bindings[index].symbol.module_name}.{scopes.bindings[index].symbol.name}", params: params.copy(), ok: ok.copy(), err: err.copy()})
         }
-        &diagnostics.push(sema_error("E0112", source_span, "`{name}` can't fail, so its binding has no error to carry", "a live binding's state is loaded or failed with the source's own error", "declare `{name}` with the error it reports: `-> {sema_type_show(result)} E!`"))
+        diagnostics.push(sema_error("E0112", source_span, "`{name}` can't fail, so its binding has no error to carry", "a live binding's state is loaded or failed with the source's own error", "declare `{name}` with the error it reports: `-> {sema_type_show(result)} E!`"))
         return None
     }
-    &diagnostics.push(sema_error("E0112", source_span, "`{name}` is not a function", "a live binding re-runs a named function", "pass a top-level `fn`"))
+    diagnostics.push(sema_error("E0112", source_span, "`{name}` is not a function", "a live binding re-runs a named function", "pass a top-level `fn`"))
     None
 }
 
@@ -242,12 +242,12 @@ sema_live_source: fn(expression: Expr, member: String, environment: SemaScopeEnv
 // `DB.Read` at most.
 sema_live_reads_only: fn(name: String, effect_bound: [EffectRowEntry]?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     rows: effect_bound ?? {
-        &diagnostics.push(sema_error("E0740", span, "`{name}` declares no effects, so a live query can't prove it only reads", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "declare it `{name}: fn(...) -[DB.Read]> ...`, or use `subscribe` for another source"))
+        diagnostics.push(sema_error("E0740", span, "`{name}` declares no effects, so a live query can't prove it only reads", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "declare it `{name}: fn(...) -[DB.Read]> ...`, or use `subscribe` for another source"))
         return false
     }
     loop row in rows {
         if row.name != "DB.Read" {
-            &diagnostics.push(sema_error("E0740", span, "`{name}` uses the effect `{row.name}`, which a live query doesn't allow", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "keep the query to `-[DB.Read]>`, or use `subscribe` for another source"))
+            diagnostics.push(sema_error("E0740", span, "`{name}` uses the effect `{row.name}`, which a live query doesn't allow", "`live` re-runs its query whenever the data it read changes, so the query may only read the database", "keep the query to `-[DB.Read]>`, or use `subscribe` for another source"))
             return false
         }
     }
@@ -259,6 +259,6 @@ sema_live_codable: fn(graph: SemaRegistrationGraph, name: String, role: String, 
         if sema_type_bound_satisfied(graph, ty, codec, environment.module_identity) != (Val(true)) -> break codec.copy()
     } ?? ""
     if missing == "" -> return true
-    &diagnostics.push(sema_error("E0112", span, "`{name}`'s {role} type {sema_type_show(ty)} isn't `{missing}`", "a live binding stores and sends its source's result and error as encoded data", "derive `Encode` and `Decode` for {sema_type_show(ty)}"))
+    diagnostics.push(sema_error("E0112", span, "`{name}`'s {role} type {sema_type_show(ty)} isn't `{missing}`", "a live binding stores and sends its source's result and error as encoded data", "derive `Encode` and `Decode` for {sema_type_show(ty)}"))
     false
 }

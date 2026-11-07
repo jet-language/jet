@@ -14,11 +14,11 @@ nixeval_slice: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
 
 // Push one byte value in 0..=255 (always in range by construction).
 nixeval_push_byte: fn(out: &[U8], value: Int) Never! {
-    &out.push(U8.from_int(value) ?? U8{0})
+    out.push(U8.from_int(value) ?? U8{0})
 }
 
 nixeval_push_text: fn(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 // Width of the UTF-8 scalar whose lead byte is at `index`.
@@ -52,21 +52,21 @@ nixeval_scalar: fn(bytes: [U8], index: Int) -> Int Never! {
 // Append the UTF-8 encoding of one Unicode scalar value.
 nixeval_push_scalar: fn(out: &[U8], scalar: Int) Never! {
     if {
-        scalar < 128 -> nixeval_push_byte(&out, scalar)
+        scalar < 128 -> nixeval_push_byte(out, scalar)
         scalar < 2048 -> {
-            nixeval_push_byte(&out, 192 + scalar /% 64)
-            nixeval_push_byte(&out, 128 + scalar % 64)
+            nixeval_push_byte(out, 192 + scalar /% 64)
+            nixeval_push_byte(out, 128 + scalar % 64)
         }
         scalar < 65536 -> {
-            nixeval_push_byte(&out, 224 + scalar /% 4096)
-            nixeval_push_byte(&out, 128 + (scalar /% 64) % 64)
-            nixeval_push_byte(&out, 128 + scalar % 64)
+            nixeval_push_byte(out, 224 + scalar /% 4096)
+            nixeval_push_byte(out, 128 + (scalar /% 64) % 64)
+            nixeval_push_byte(out, 128 + scalar % 64)
         }
         else -> {
-            nixeval_push_byte(&out, 240 + scalar /% 262144)
-            nixeval_push_byte(&out, 128 + (scalar /% 4096) % 64)
-            nixeval_push_byte(&out, 128 + (scalar /% 64) % 64)
-            nixeval_push_byte(&out, 128 + scalar % 64)
+            nixeval_push_byte(out, 240 + scalar /% 262144)
+            nixeval_push_byte(out, 128 + (scalar /% 4096) % 64)
+            nixeval_push_byte(out, 128 + (scalar /% 64) % 64)
+            nixeval_push_byte(out, 128 + scalar % 64)
         }
     }
 }
@@ -198,8 +198,8 @@ nixeval_lowercase_ascii: fn(text: String) -> String Never! {
     loop byte in text.bytes() {
         value: Int.from_u8(byte)
         if {
-            value >= 65 && value <= 90 -> nixeval_push_byte(&out, value + 32)
-            else -> &out.push(byte)
+            value >= 65 && value <= 90 -> nixeval_push_byte(out, value + 32)
+            else -> out.push(byte)
         }
     }
     String.from_bytes(out) ?? text.copy()
@@ -215,10 +215,10 @@ nixeval_contains_text: fn(list: [String], text: String) -> Bool Never! {
 // Sort and remove adjacent duplicates (Rust `sort(); dedup()`).
 nixeval_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values.copy()
-    &sorted.sort()
+    sorted.sort()
     out := [String]{}
     loop value in sorted {
-        if out.len() == 0 || out[out.len() - 1] != value -> &out.push(value)
+        if out.len() == 0 || out[out.len() - 1] != value -> out.push(value)
     }
     out
 }
@@ -228,7 +228,7 @@ nixeval_sorted_unique: fn(values: [String]) -> [String] Never! {
 // so key iteration goes through `nixeval_sorted(map.keys().to_list())`.
 nixeval_sorted: fn(names: [String]) -> [String] Never! {
     sorted := names.copy()
-    &sorted.sort()
+    sorted.sort()
     sorted
 }
 

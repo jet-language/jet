@@ -1,4 +1,4 @@
-// The compiler workspace's code suites (D-TEST-SUITE2=A), run by the test
+// The compiler workspace's code suites, run by the test
 // profiles of package.jet: `jet test Compiler --profile jetpack`, `selfhost`
 // or `perf`. Each runs in its own child, where JET names the jet under test
 // and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
@@ -70,7 +70,7 @@ suite_setup: fn(rows: TestRows) -> SuiteSetup? {
 // child `jet test` runs its own tests and writes its own evidence.
 jet_command: fn(setup: SuiteSetup, jet: String, args: [String]) -> ProcessSpec {
     argv := [String]{jet}
-    loop arg in args -> &argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).cwd(setup.checkout).env("JET_TOOLCHAIN_ROOT", setup.checkout)
     names: sys.vars() ?? [String]{}
     loop name in names {
@@ -107,15 +107,15 @@ jetpack_rows: fn(rows: TestRows) {
     packages := [String]{}
     loop entry in listed {
         if !entry.is_dir -> next
-        if files.is_file(files.join(entry.path, "package.jet")) -> &packages.push(entry.name.copy())
+        if files.is_file(files.join(entry.path, "package.jet")) -> packages.push(entry.name.copy())
         if files.is_file(files.join(entry.path, "Tests/package.jet")) {
-            &packages.push("{entry.name}/Tests")
+            packages.push("{entry.name}/Tests")
         }
     }
-    &packages.sort()
+    packages.sort()
     specs := [ProcessSpec]{}
     loop package in packages {
-        &specs.push(jet_command(setup, setup.jet, [String]{"test", "Jetpack/{package}"}).env("JET_BIN", setup.jet))
+        specs.push(jet_command(setup, setup.jet, [String]{"test", "Jetpack/{package}"}).env("JET_BIN", setup.jet))
     }
     results: process.run_all(specs, JETPACK_JOBS) ?? {
         rows.fail("Jetpack", "couldn't start the package runs: {err}")
@@ -295,7 +295,7 @@ perf_rows: fn(rows: TestRows) {
     loop line in checked.output.split("\n") {
         cells := [String]{}
         loop cell in line.split("  ") {
-            if cell.trim() != "" -> &cells.push(cell.trim())
+            if cell.trim() != "" -> cells.push(cell.trim())
         }
         if cells.len() < 3 -> next
         if cells[0] == "row" {

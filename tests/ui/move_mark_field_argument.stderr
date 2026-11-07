@@ -1,12 +1,12 @@
-Error [jet.UseAfterMove]: `run.graph` was consumed by the move `^run.graph`, so it can't be used here
+Error [jet.UseAfterMove]: `run.graph` was consumed by `run.graph.move()`, so it can't be used here
   --> tests/ui/move_mark_field_argument.jet:6:15
     |
   6 |     print(run.graph.len())
     |               ^^^^^
-  --> tests/ui/move_mark_field_argument.jet:5:18
+  --> tests/ui/move_mark_field_argument.jet:5:13
     |
-  5 |     consume(^run.graph)
-    |                  ^^^^^ `run.graph` moved to the move `^run.graph` here
+  5 |     consume(run.graph.move())
+    |             ^^^^^^^^^ `run.graph` moved to `run.graph.move()` here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `run.graph` after the move, or give the move `^run.graph` a copy with `run.graph.copy()` where it moved.
+ Fix: Stop using `run.graph` after the move, or give `run.graph.move()` a copy with `run.graph.copy()` where it moved.
 More: jet-lang.dev/e/E0121

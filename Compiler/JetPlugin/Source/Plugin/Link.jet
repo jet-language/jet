@@ -33,11 +33,11 @@ jet_plugin_link: fn(m: &IRModule, root: String) Never! -[FS]> {
         }
         name: plug_stem(artifact)
         if detail == "" {
-            if plug_link_component(&m, id, artifact, name, bytes) == .Err(err) -> detail = err.render()
+            if plug_link_component(m, id, artifact, name, bytes) == .Err(err) -> detail = err.render()
         }
         if detail != "" {
-            desc: ir_intern_bytes(&m, plug_failure_descriptor(name, bytes, detail))
-            plug_guest_entry(&m, id, desc, -1, [Int]{}, -1, [Int]{})
+            desc: ir_intern_bytes(m, plug_failure_descriptor(name, bytes, detail))
+            plug_guest_entry(m, id, desc, -1, [Int]{}, -1, [Int]{})
         }
     }
 }
@@ -62,14 +62,14 @@ plug_sig: fn(keys: &[String:Int], types: &[WasmFuncType], ty: WasmFuncType) -> I
     if keys.get(key) == .Val(known) -> return known
     class: types.len()
     keys[key] = class
-    &types.push(ty)
+    types.push(ty.copy())
     class
 }
 
 plug_thunk_add: fn(thunks: &[Int:Int], fids: &[Int], fid: Int) Never! {
     if fid < 0 || thunks.get(fid) != None -> return
     thunks[fid] = fids.len()
-    &fids.push(fid)
+    fids.push(fid)
 }
 
 plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, bytes: [U8]) WasmError! {
@@ -78,8 +78,8 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
     sig_types := [WasmFuncType]{}
     sigs := [Int]{}
     loop func in flat.funcs {
-        class: plug_sig(&sig_keys, &sig_types, func.ty)
-        &sigs.push(class)
+        class: plug_sig(sig_keys, sig_types, func.ty)
+        sigs.push(class)
     }
     scopes := [PlugScope]{}
     loop inst in flat.instances {
@@ -87,16 +87,16 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
         type_sigs := [Int]{}
         if inst.source >= 0 {
             loop ty in flat.c.modules[inst.source].types {
-                class: plug_sig(&sig_keys, &sig_types, ty)
-                &type_sigs.push(class)
-                &types.push(ty)
+                class: plug_sig(sig_keys, sig_types, ty)
+                type_sigs.push(class)
+                types.push(ty)
             }
         }
         callee_types := [WasmFuncType]{}
-        loop fid in inst.funcs -> &callee_types.push(flat.funcs[fid].ty)
+        loop fid in inst.funcs -> callee_types.push(flat.funcs[fid].ty)
         global_types := [Int]{}
-        loop global in inst.globals -> &global_types.push(flat.globals[global].value)
-        &scopes.push(PlugScope{
+        loop global in inst.globals -> global_types.push(flat.globals[global].value)
+        scopes.push(PlugScope{
             types: types, type_sigs: type_sigs, funcs: inst.funcs, callee_types: callee_types, tables: inst.tables,
             memory: if inst.memories.len() > 0 -> inst.memories[0] else -> -1, globals: inst.globals,
             global_types: global_types, data_base: inst.data_base, elem_base: inst.elem_base,
@@ -106,108 +106,108 @@ plug_link_component: fn(m: &IRModule, id: Int, artifact: String, name: String, b
     // initializer or a `ref.func` names. Each signature class dispatches
     // over its own.
     targets := [[Int]]{}
-    loop _ in sig_types -> &targets.push([Int]{})
+    loop _ in sig_types -> targets.push([Int]{})
     addressable := [Int:Bool]{}
     referenced := [Int]{}
     loop elem in flat.elems {
         loop item in elem.items {
-            if item > 0 -> &referenced.push(item - 1)
+            if item > 0 -> referenced.push(item - 1)
         }
     }
     loop global in flat.globals {
-        if global.value == WASM_FUNCREF && global.init > 0 -> &referenced.push(global.init - 1)
+        if global.value == WASM_FUNCREF && global.init > 0 -> referenced.push(global.init - 1)
     }
     loop func in flat.funcs {
         if func.source < 0 -> next
         wm: flat.c.modules[func.source]
         code: wm.codes[func.index - wm.imported(WASM_EXTERN_FUNC)]
         loop (k, op) in code.op {
-            if op == WASM_OP_REF_FUNC -> &referenced.push(scopes[func.instance].funcs[code.a[k]])
+            if op == WASM_OP_REF_FUNC -> referenced.push(scopes[func.instance].funcs[code.a[k]])
         }
     }
     loop fid in referenced {
         if addressable.get(fid) != None -> next
         addressable[fid] = true
-        &targets[sigs[fid]].push(fid)
+        targets[sigs[fid]].push(fid)
     }
     thunks := [Int:Int]{}
     thunk_fids := [Int]{}
     loop export in flat.exports {
-        plug_thunk_add(&thunks, &thunk_fids, export.fid)
-        plug_thunk_add(&thunks, &thunk_fids, export.realloc)
-        plug_thunk_add(&thunks, &thunk_fids, export.post)
+        plug_thunk_add(thunks, thunk_fids, export.fid)
+        plug_thunk_add(thunks, thunk_fids, export.realloc)
+        plug_thunk_add(thunks, thunk_fids, export.post)
     }
-    loop entry in flat.imports -> plug_thunk_add(&thunks, &thunk_fids, entry.realloc)
+    loop entry in flat.imports -> plug_thunk_add(thunks, thunk_fids, entry.realloc)
     base: m.functions.len()
     names := [String:Int]{}
-    loop runtime in PLUG_RUNTIME_NAMES -> names[runtime] = ir_intern_name(&m, runtime)
+    loop runtime in PLUG_RUNTIME_NAMES -> names[runtime] = ir_intern_name(m, runtime)
     kit: PlugKit{
-        artifact: artifact, rows: plug_rows(&m), names: names, base: base, thunk_base: base + flat.funcs.len(),
+        artifact: artifact, rows: plug_rows(m), names: names, base: base, thunk_base: base + flat.funcs.len(),
         dispatch_base: base + flat.funcs.len() + thunk_fids.len(),
     }
     loop (fid, func) in flat.funcs {
         if func.source < 0 {
-            &m.functions.push(plug_import_stub(kit, fid, func.import, func.ty))
+            m.functions.push(plug_import_stub(kit, fid, func.import, func.ty))
             next
         }
         wm: flat.c.modules[func.source]
         code: wm.codes[func.index - wm.imported(WASM_EXTERN_FUNC)]
         translated: plug_translate(kit, scopes[func.instance], fid, func.ty, code) ?? {
             loop m.functions.len() > base {
-                _: &m.functions.pop()
+                _: m.functions.pop()
             }
             return Err(err)
         }
-        &m.functions.push(translated)
+        m.functions.push(translated)
     }
-    loop fid in thunk_fids -> &m.functions.push(plug_thunk(kit, fid, flat.funcs[fid].ty))
-    loop (class, ty) in sig_types -> &m.functions.push(plug_dispatcher(kit, class, ty, targets[class]))
-    loop made in base..<m.functions.len() -> name_rows_set(&m.function_rows, m.functions[made].key, made)
-    desc: ir_intern_bytes(&m, plug_descriptor(flat, name, bytes, thunks, sigs))
-    plug_guest_entry(&m, id, desc, kit.thunk_base, thunk_fids, base, flat.starts)
+    loop fid in thunk_fids -> m.functions.push(plug_thunk(kit, fid, flat.funcs[fid].ty))
+    loop (class, ty) in sig_types -> m.functions.push(plug_dispatcher(kit, class, ty, targets[class]))
+    loop made in base..<m.functions.len() -> name_rows_set(m.function_rows, m.functions[made].key, made)
+    desc: ir_intern_bytes(m, plug_descriptor(flat, name, bytes, thunks, sigs))
+    plug_guest_entry(m, id, desc, kit.thunk_base, thunk_fids, base, flat.starts)
 }
 
 // Gives guest entry `id` its body: op -1 answers descriptor data row `desc`,
 // op -2 runs the start functions (`base` + each of `starts`), op k calls
 // entry thunk `thunk_base` + k (one per function of `thunk_fids`).
 plug_guest_entry: fn(m: &IRModule, id: Int, desc: Int, thunk_base: Int, thunk_fids: [Int], base: Int, starts: [Int]) Never! {
-    word: ir_word_row(&m)
+    word: ir_word_row(m)
     f := ir_function_new(m.functions[id].name, m.functions[id].key, m.functions[id].symbol, "", 0)
     f.symbol_hash = m.functions[id].symbol_hash
     f.result = word
-    rows: plug_rows(&m)
+    rows: plug_rows(m)
     kit: PlugKit{artifact: "", rows: rows, names: [String:Int]{}, base: base, thunk_base: thunk_base, dispatch_base: -1}
-    cx := plug_cx(kit, ^f, -1)
-    op: ir_slot(&cx.f, word, IRSlotKind.Param, ir_intern_name(&m, "op"), 0)
-    cx.inst = ir_slot(&cx.f, word, IRSlotKind.Param, ir_intern_name(&m, "instance"), 0)
-    area: ir_slot(&cx.f, word, IRSlotKind.Param, ir_intern_name(&m, "area"), 0)
-    cx.dummy = &cx.word(0)
-    blob: &cx.temp(word)
-    &cx.emit(IROp.DataAddress, blob, desc, -1, -1)
-    describe: &cx.word(-1)
-    asked: &cx.cmp(IROp.Eq, op, describe)
-    _: ir_open_if(&cx.f, asked, 0)
-    &cx.emit(IROp.Return, -1, blob, -1, -1)
-    ir_end(&cx.f, 0)
+    cx := plug_cx(kit, f, -1)
+    op: ir_slot(cx.f, word, IRSlotKind.Param, ir_intern_name(m, "op"), 0)
+    cx.inst = ir_slot(cx.f, word, IRSlotKind.Param, ir_intern_name(m, "instance"), 0)
+    area: ir_slot(cx.f, word, IRSlotKind.Param, ir_intern_name(m, "area"), 0)
+    cx.dummy = cx.word(0)
+    blob: cx.temp(word)
+    cx.emit(IROp.DataAddress, blob, desc, -1, -1)
+    describe: cx.word(-1)
+    asked: cx.cmp(IROp.Eq, op, describe)
+    _: ir_open_if(cx.f, asked, 0)
+    cx.emit(IROp.Return, -1, blob, -1, -1)
+    ir_end(cx.f, 0)
     if starts.len() > 0 {
-        start: &cx.word(-2)
-        starting: &cx.cmp(IROp.Eq, op, start)
-        _: ir_open_if(&cx.f, starting, 0)
+        start: cx.word(-2)
+        starting: cx.cmp(IROp.Eq, op, start)
+        _: ir_open_if(cx.f, starting, 0)
         loop fid in starts {
-            _: &cx.call(base + fid, [Int]{cx.inst}, -1)
-            &cx.check(false)
+            _: cx.call(base + fid, [Int]{cx.inst}, -1)
+            cx.check(false)
         }
-        &cx.ret_dummy()
-        ir_end(&cx.f, 0)
+        cx.ret_dummy()
+        ir_end(cx.f, 0)
     }
     loop k in 0..<thunk_fids.len() {
-        known: &cx.word(k)
-        hit: &cx.cmp(IROp.Eq, op, known)
-        _: ir_open_if(&cx.f, hit, 0)
-        result: &cx.call(thunk_base + k, [Int]{cx.inst, area}, word)
-        &cx.emit(IROp.Return, -1, result, -1, -1)
-        ir_end(&cx.f, 0)
+        known: cx.word(k)
+        hit: cx.cmp(IROp.Eq, op, known)
+        _: ir_open_if(cx.f, hit, 0)
+        result: cx.call(thunk_base + k, [Int]{cx.inst, area}, word)
+        cx.emit(IROp.Return, -1, result, -1, -1)
+        ir_end(cx.f, 0)
     }
-    &cx.ret_dummy()
-    m.functions[id] = ^cx.f
+    cx.ret_dummy()
+    m.functions[id] = cx.f.move()
 }

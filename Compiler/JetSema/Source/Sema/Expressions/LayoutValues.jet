@@ -94,7 +94,7 @@ sema_expression_layout_literal: fn(value: TExpr) -> TExpr Never! {
 }
 
 sema_expression_layout_binary_axis_diagnostic: fn(left: Type, right: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error(
+    diagnostics.push(sema_error(
         "E2932",
         span,
         "layout constraint mixes a horizontal and vertical value (`{type_name(left)}` and `{type_name(right)}`)",
@@ -108,14 +108,14 @@ sema_expr_check_layout_binary: fn(op: BinOp, left: TExpr, right: TExpr, span: Sp
     if contract == None -> return SemaExpressionLayoutBinaryCheck{handled: false, value: None}
     result: contract
     if result.axis_mismatch {
-        sema_expression_layout_binary_axis_diagnostic(left.ty, right.ty, span, &diagnostics)
+        sema_expression_layout_binary_axis_diagnostic(left.ty, right.ty, span, diagnostics)
         return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     }
     result_type: result.result_type ?? return SemaExpressionLayoutBinaryCheck{handled: true, value: None}
     lowered_left: sema_expression_layout_literal(left)
     lowered_right: sema_expression_layout_literal(right)
     value: if op == BinOp.Add || op == BinOp.Sub -> sema_tree_node(result_type, TExprKind.Binary{op: sema_expr_tree_binary_op(op), overflow: false, line: line, lhs: lowered_left, rhs: lowered_right}, span) else -> sema_tree_node(result_type, TExprKind.LayoutCompare{op: sema_expr_tree_binary_op(op), lhs: lowered_left, rhs: lowered_right}, span)
-    checked: sema_expr_expected(value, expected, environment, program, &diagnostics)
+    checked: sema_expr_expected(value, expected, environment, program, diagnostics)
     SemaExpressionLayoutBinaryCheck{handled: true, value: checked}
 }
 
@@ -160,15 +160,15 @@ sema_expression_layout_call_facts: fn(result_type: Type) -> SemaCallFacts Never!
 }
 
 sema_expression_layout_discard_arguments: fn(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 sema_expression_layout_argument_mismatch: fn(owner: String, method: String, expected: Type, actual: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a `{type_name(expected)}`, got `{type_name(actual)}`", "`{owner}.{method}(…)` operates on a `{type_name(expected)}`", "pass a `{type_name(expected)}` value"))
+    diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a `{type_name(expected)}`, got `{type_name(actual)}`", "`{owner}.{method}(…)` operates on a `{type_name(expected)}`", "pass a `{type_name(expected)}` value"))
 }
 
 sema_expression_layout_axis_argument_mismatch: fn(owner: String, method: String, actual: Type, span: Span, diagnostics: &[Diagnostic]) {
-    &diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{type_name(actual)}`", "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout {{ … }}` block", "pass a layout variable, not a plain value"))
+    diagnostics.push(sema_error("E0112", span, "`.{method}()` on `{owner}` expects a layout value (`HVar`/`VVar`/`LengthVar`), got `{type_name(actual)}`", "layout variables come from `handle.h(box, anchor)` / `handle.v(box, anchor)`, or a `box.anchor` read inside a `layout {{ … }}` block", "pass a layout variable, not a plain value"))
 }
 
 sema_expression_layout_method_params: fn(types: [Type]) -> [SemaCallParam] Never! {
@@ -182,9 +182,9 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     if owner == "" -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count: sema_expression_layout_method_arity(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if updated_args.len() != expected_count {
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, updated_args.len(), false, span))
-        sema_expression_layout_discard_arguments(updated_args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, updated_args.len(), false, span))
+        sema_expression_layout_discard_arguments(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     result_type: sema_expression_layout_method_return(owner, method, expected_count) ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -193,34 +193,34 @@ sema_call_try_layout_method: fn(receiver: Expr, receiver_value: TExpr, method: S
     valid := true
     loop (index, argument) in updated_args {
         wanted := sema_expression_layout_method_arg_type(method, index)
-        checked: if wanted == .Val(required) -> sema_check_expression(argument.expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked: if wanted == .Val(required) -> sema_check_expression(argument.expr, Val(required), environment, program, scopes, state, tail_store, context, diagnostics) else -> sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         if checked == None {
             valid = false
-            &required_types.push(wanted ?? Type.Named{name: "Unit"})
+            required_types.push(wanted ?? Type.Named{name: "Unit"})
             next
         }
         value: checked
         axis_type := if value.ty == {.Named(name) -> sema_expression_layout_is_axis_type(name) else -> false}
         if sema_expression_layout_method_axis_arg(method, index) && !axis_type {
-            sema_expression_layout_axis_argument_mismatch(owner, method, value.ty, argument.span, &diagnostics)
+            sema_expression_layout_axis_argument_mismatch(owner, method, value.ty, argument.span, diagnostics)
             valid = false
         }
         if wanted == .Val(required) && !type_identity_equal(value.ty, required) {
-            sema_expression_layout_argument_mismatch(owner, method, required, value.ty, argument.span, &diagnostics)
+            sema_expression_layout_argument_mismatch(owner, method, required, value.ty, argument.span, diagnostics)
             valid = false
         }
-        &values.push(value)
-        &required_types.push(wanted ?? value.ty)
+        values.push(value.copy())
+        required_types.push(wanted ?? value.ty)
     }
-    ownership := sema_ownership_check_method_call(&state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), &updated_args, scopes, span, &diagnostics)
+    ownership := sema_ownership_check_method_call(state, "{owner}.{method}", receiver, AccessConvention.Read, sema_expression_layout_method_params(required_types), updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete -> valid = false
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
     value: sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.LayoutMethod{method: method}, args: values}, span)
-    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "{owner}.{method}", span, sema_expression_layout_call_facts(result_type), diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    return SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
 
-// `name: Layout{ … }` (Rust Stmt::Layout, D-LAYOUT-CTOR1): `name` is a
+// `name: Layout{ … }` (Rust Stmt::Layout): `name` is a
 // fresh layout handle in the enclosing scope, and every element of the body
 // (the parser rewrote its `box.anchor` reads to `name.h` / `name.v` calls)
 // is a Constraint, which registers with the handle as it is built (E2933
@@ -230,37 +230,37 @@ sema_stmt_check_layout: fn(name: String, name_span: Span, body: [Stmt], span: Sp
     owner: sema_scope_local_owner_key(scopes)
     id: symbol_id(SymbolKind.Local, environment.module_identity, owner, name)
     symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_name: environment.module_identity, owner: Val(owner), span: name_span, ty: Val(layout_ty), visibility: 0}
-    if !sema_scope_declare_local(&scopes, symbol, false, AccessConvention.Read, None, false) {
-        &diagnostics.push(sema_already_defined(name, name_span))
+    if !sema_scope_declare_local(scopes, symbol, false, AccessConvention.Read, None, false) {
+        diagnostics.push(sema_already_defined(name, name_span))
         return false
     }
-    sema_ownership_declare_binding(&state, symbol, false)
+    sema_ownership_declare_binding(state, symbol, false)
     complete := true
     checked := [TStmt]{}
     seen := [String]{}
     loop statement in body {
         if statement == .Expr(expr) {
-            value: sema_check_expression(expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            value: sema_check_expression(expr, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
                 complete = false
                 next
             }
             if value.ty != (Type.Named{name: "Constraint"}) {
-                &diagnostics.push(sema_error("E2933", expr_span(expr), "This element inside `{name}: Layout.{{ … }}` doesn't produce a constraint (found `{type_name(value.ty)}`)", "Every element inside a `Layout.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated", "Write a comparison, e.g. `label.width >= 80.0`"))
+                diagnostics.push(sema_error("E2933", expr_span(expr), "This element inside `{name}: Layout.{{ … }}` doesn't produce a constraint (found `{type_name(value.ty)}`)", "Every element inside a `Layout.{{ … }}` body must be a `>=`/`<=`/`==` comparison of layout values (a `Constraint`), comma-separated", "Write a comparison, e.g. `label.width >= 80.0`"))
                 complete = false
                 next
             }
             if sema_layout_element_key(expr) == .Val(key) {
                 if seen.contains(key) {
-                    &diagnostics.push(sema_lint("E2934", expr_span(expr), "This constraint repeats one already written in this `Layout{{ … }}` body", "An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover", "Remove the duplicate line, or change it if a different constraint was meant"))
+                    diagnostics.push(sema_lint("E2934", expr_span(expr), "This constraint repeats one already written in this `Layout{{ … }}` body", "An exact duplicate constraint doesn't tighten the layout — it's almost always a copy-paste leftover", "Remove the duplicate line, or change it if a different constraint was meant"))
                 } else {
-                    &seen.push(key)
+                    seen.push(key)
                 }
             }
-            &checked.push(TStmt.ExprStmt{value: value, span: expr_span(expr)})
+            checked.push(TStmt.ExprStmt{value: value, span: expr_span(expr)})
         }
     }
     if !complete -> return false
-    &output.push(TStmt.Layout{handle: checked_symbol_local(name, name_span, id, layout_ty), label: name, body: checked, span: span})
+    output.push(TStmt.Layout{handle: checked_symbol_local(name, name_span, id, layout_ty), label: name, body: checked, span: span})
     true
 }
 
@@ -375,17 +375,17 @@ sema_call_try_measurement_method: fn(receiver: Expr, receiver_value: TExpr, meth
     if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}
     _ := sema_expression_measurement_inner(receiver_value.ty, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != 0 {
-        if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-        &diagnostics.push(sema_call_arity_diagnostic("Measurement.{method}", 0, args.len(), false, span))
-        sema_expression_layout_discard_arguments(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        diagnostics.push(sema_call_arity_diagnostic("Measurement.{method}", 0, args.len(), false, span))
+        sema_expression_layout_discard_arguments(args, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     result_type := Type.Float
     value: sema_expression_measurement_source_call("__measurement_{method}", [TExpr]{receiver_value}, result_type, span, environment, program) ?? {
-        &context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
+        context.incomplete_reasons.push("checked Measurement accessor has no source declaration")
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    if !sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+    if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "Measurement.{method}", span, sema_expression_layout_call_facts(result_type), diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }

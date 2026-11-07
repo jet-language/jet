@@ -39,7 +39,7 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
                 }
                 task_indexes[observed_task.id] = capture.tasks.len()
                 first_seen[observed_task.id] = observed.at_ns
-                &capture.tasks.push(fact)
+                capture.tasks.push(fact)
             }
             last_seen[observed_task.id] = observed.at_ns
         }
@@ -53,18 +53,18 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         stable_parent: if observed_parent == (U64{0}) -> U64{0} else -> U64{task_indexes[observed_parent] + 1}
         capture.tasks[index].id = stable_id
         capture.tasks[index].parent = stable_parent
-        if observations.len() > 1 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
+        if observations.len() > 1 -> capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
     }
-    if capture.spans.len() == 0 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
+    if capture.spans.len() == 0 -> capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
     // Instantaneous blocked facts, not invented syscall duration intervals.
     loop observed_task in latest.live.tasks {
-        if task_indexes.has_key(observed_task.id) && observed_task.state == "blocked" && trace_io_kind_for_wait(observed_task.wait) == .Val(kind) -> &capture.io.push(TraceIO{start_ns: latest.at_ns, end_ns: latest.at_ns, kind: kind, task_id: U64{task_indexes[observed_task.id] + 1}, wait: observed_task.wait, symbol: symbol})
+        if task_indexes.has_key(observed_task.id) && observed_task.state == "blocked" && trace_io_kind_for_wait(observed_task.wait) == .Val(kind) -> capture.io.push(TraceIO{start_ns: latest.at_ns, end_ns: latest.at_ns, kind: kind, task_id: U64{task_indexes[observed_task.id] + 1}, wait: observed_task.wait, symbol: symbol})
     }
     loop channel in latest.live.channels {
         if channel.send_waiters == (U64{0}) && channel.recv_waiters == (U64{0}) -> next
-        &capture.locks.push(TraceLock{kind: "channel", id: channel.id, depth: channel.depth, capacity: channel.capacity, send_waiters: channel.send_waiters, recv_waiters: channel.recv_waiters, closed: channel.closed, symbol: symbol})
+        capture.locks.push(TraceLock{kind: "channel", id: channel.id, depth: channel.depth, capacity: channel.capacity, send_waiters: channel.send_waiters, recv_waiters: channel.recv_waiters, closed: channel.closed, symbol: symbol})
     }
-    if latest.live.arena_allocations > (U64{0}) || latest.live.arena_bytes > (U64{0}) -> &capture.allocations.push(TraceAllocation{count: latest.live.arena_allocations, bytes: latest.live.arena_bytes, symbol: symbol})
+    if latest.live.arena_allocations > (U64{0}) || latest.live.arena_bytes > (U64{0}) -> capture.allocations.push(TraceAllocation{count: latest.live.arena_allocations, bytes: latest.live.arena_bytes, symbol: symbol})
     root := U64?{None}
     loop observed_task in capture.tasks {
         if observed_task.parent == (U64{0}) {
@@ -73,14 +73,14 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         }
     }
     window: latest.live.runtime
-    jet_cli_perf_window(&capture.profile, window)
-    &capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
+    jet_cli_perf_window(capture.profile, window)
+    capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
     if window.cpu_ns == .Val(cpu) {
-        &capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
-        if root != None -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
-        else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "root task causality was not observable", status: "unavailable", symbol: symbol, target: target, task_id: None})
+        capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
+        if root != None -> capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
+        else -> capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "root task causality was not observable", status: "unavailable", symbol: symbol, target: target, task_id: None})
     } else {
-        &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
+        capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
     }
 }
 jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
@@ -91,8 +91,8 @@ jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCL
     loop observed in observations { if observed.live.runtime.cpu_ns != None -> cpu_samples += U64{1} }
     profile: jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
     capture := jet_cli_perf_capture_new(profile, [SourceIdentity]{source.identity})
-    jet_cli_perf_window(&capture.profile, observations[observations.len() - 1].live.runtime)
-    if source.run_span != None -> jet_cli_perf_capture_observations(&capture, observations, JetSymbolRef{path: path, name: "run"}, target)
+    jet_cli_perf_window(capture.profile, observations[observations.len() - 1].live.runtime)
+    if source.run_span != None -> jet_cli_perf_capture_observations(capture, observations, JetSymbolRef{path: path, name: "run"}, target)
     Ok(capture)
 }
 jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
@@ -108,7 +108,7 @@ jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetC
             }
         }
         checked: symbol ?? return Err(jet_cli_read_error("browser runtime facts require a compiler-provided symbol"))
-        jet_cli_perf_capture_observations(&capture, observations, checked, target)
+        jet_cli_perf_capture_observations(capture, observations, checked, target)
     }
     Ok(capture)
 }

@@ -1,16 +1,16 @@
 // A fresh value with cleanup ended in place closes exactly once, right
-// there: `close(^make(..))` and `consume(make(..))` close it before the next
+// there: `close(make.move()(..))` and `consume(make(..))` close it before the next
 // statement, and so does throwing a Res, a Res IOError! or a Res? away with
 // `.drop("why")`. A Close type with no buffers closes the same way.
 
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Plain: struct { id: Int }
 impl Plain.Close {
-    close: fn(^self) { print("close plain {self.id}") }
+    close: fn(&&self) { print("close plain {self.id}") }
 }
 
 make: fn(name: String) -> Res { Res{name: name} }
@@ -18,9 +18,9 @@ attempt: fn(name: String) -> Res IOError! { Ok(Res{name: name}) }
 maybe: fn(name: String) -> Res? { Val(Res{name: name}) }
 
 run: fn() {
-    close(^make("closed"))
+    close(make("closed"))
     print("after close")
-    close(^Plain{id: 7})
+    close(Plain{id: 7})
     print("after plain")
     consume(make("consumed"))
     print("after consume")

@@ -19,7 +19,8 @@ jet_cli_read_error: fn(message: String) -> JetCLIReadError Never! {
     JetCLIReadError{message: message}
 }
 
-report_status_value_parse: fn(text: String) -> Dyn JetCLIReadError! {
+// A JSON text as a status tree (Jetpack Foundation `report_status_value_parse`).
+jet_cli_status_tree_parse: fn(text: String) -> Dyn JetCLIReadError! {
     if cli_json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(jet_cli_read_error(error.reason))
@@ -60,7 +61,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
         .Bytes(_) | .DateTime(_) -> jet_cli_status_text(tree.to_text() ?? panic("Bytes and DateTime always have a text form"))
         .Array(values) -> {
             items := [JetCLIStatusValue]{}
-            loop value in values -> &items.push(jet_cli_status_from_tree(value))
+            loop value in values -> items.push(jet_cli_status_from_tree(value))
             jet_cli_status_array(items)
         }
         .Object(values) -> {
@@ -74,7 +75,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
                     return Err(jet_cli_read_error("duplicate status field `{entry.key}`"))
                 }
                 names[entry.key] = true
-                &fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
+                fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
             }
             jet_cli_status_object(fields)
         }
@@ -84,7 +85,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
 
 // StatusValue::parse always goes through the canonical Core JSON reader.
 jet_cli_status_value_parse: fn(text: String) -> JetCLIStatusValue JetCLIReadError! {
-    jet_cli_status_from_tree(report_status_value_parse(text))
+    jet_cli_status_from_tree(jet_cli_status_tree_parse(text))
 }
 
 jet_cli_status_get: fn(value: JetCLIStatusValue, name: String) -> JetCLIStatusValue? Never! {

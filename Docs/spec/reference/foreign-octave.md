@@ -63,7 +63,7 @@ run: fn() -[FFI.Octave, GPU, IO]> {
     output: scale.scale(session, input, 5000) ?? panic("Octave call failed")
     print(compute.shape(output))
     print(compute.to_list(output))
-    scale.close(^session)
+    scale.close(session)
 }
 ```
 

@@ -108,7 +108,7 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
 
 // Ported from pkg.rs:2068-2076; the bytes of tests/ui/manifest_unknown_field/package.jet are inlined.
 #Test("pkg integration manifest_parse_e1215_unknown_field") {
-    raw: "// D-CONF-PLANE1/D-CONF-NAME1: the retired `payload:` wrapper is a normal\n// unknown-field error now — there is no second parser that still accepts it.\npayload: {{\n    name: \"myapp\",\n    version: \"0.1.0\",\n}}\n"
+    raw: "// The retired `payload:` wrapper is a normal\n// unknown-field error now — there is no second parser that still accepts it.\npayload: {{\n    name: \"myapp\",\n    version: \"0.1.0\",\n}}\n"
     error: pkg_integration_manifest_error(raw)
     assert_eq(error.diagnostic.code, "E1215")
     assert(error.diagnostic.what.contains("payload"))

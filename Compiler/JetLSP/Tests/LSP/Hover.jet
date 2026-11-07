@@ -23,11 +23,11 @@ lsp_hover_test_symbol: fn() -> SemanticSymbol Never! {
 
 #Test("checked hover removes only failure-prefix lines without a trailing duplicate") {
     hover := "base"
-    lsp_append_checked_signature(&hover, "failure: Never\ndetail\nfailure: Err\nnot failure: keep\n")
+    lsp_append_checked_signature(hover, "failure: Never\ndetail\nfailure: Err\nnot failure: keep\n")
     assert_eq(hover, "base\n\ndetail\nnot failure: keep")
-    lsp_append_checked_signature(&hover, "failure: Never\n")
+    lsp_append_checked_signature(hover, "failure: Never\n")
     assert_eq(hover, "base\n\ndetail\nnot failure: keep")
-    lsp_append_checked_signature(&hover, "")
+    lsp_append_checked_signature(hover, "")
     assert_eq(hover, "base\n\ndetail\nnot failure: keep")
 }
 

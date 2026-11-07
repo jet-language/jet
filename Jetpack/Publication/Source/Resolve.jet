@@ -98,7 +98,7 @@ publication_solve_registry: fn(roots: [PublicationVersionConstraint], candidates
     state := PublicationSolverState{constraints: [String: [PublicationVersionConstraint]]{}, assignments: [String: PublicationSemVer]{}, rejected: [String: [PublicationSemVer]]{}, preferred: [String: [PublicationVersionReq]]{}, strict: [String]{}}
     loop root in roots {
         if !state.constraints.has_key(root.package) -> state.constraints[root.package] = [PublicationVersionConstraint]{}
-        &state.constraints[root.package].push(root.copy())
+        state.constraints[root.package].push(root.copy())
     }
     publication_solve_registry_state(state, candidates, locked, update_scope, mode, direct)
 }
@@ -131,13 +131,13 @@ publication_candidate_order: fn(left: PublicationSolverCandidate, right: Publica
 // solve_registry_state (:179-349): each recursive branch owns its cloned state.
 publication_solve_registry_state: fn(state: PublicationSolverState, candidates: [String: [PublicationSolverCandidate]], locked: [String: String], update_scope: [String], mode: PublicationResolveMode, direct: [String]) -> [String: PublicationSemVer] PublicationDiagnosticError! {
     assigned := state.assignments.keys().to_list()
-    &assigned.sort()
+    assigned.sort()
     loop package in assigned {
         requirements: state.constraints.get(package) ?? [PublicationVersionConstraint]{}
         if !publication_satisfies_all(state.assignments[package], requirements) -> return Err(PublicationDiagnosticError{diagnostic: publication_proof_diagnostic(package, requirements, "the selected version is incompatible with a later dependency")})
     }
     packages := state.constraints.keys().to_list()
-    &packages.sort()
+    packages.sort()
     unresolved := String?{None}
     loop name in packages {
         if !state.assignments.has_key(name) {
@@ -161,7 +161,7 @@ publication_solve_registry_state: fn(state: PublicationSolverState, candidates: 
     loop index in 0..<live.len() {
         if !publication_satisfies_all(live[index].version, requirements) || rejected.contains(live[index].version) -> next
         if exact_lock && lock != None && lock != Val(publication_semver_display(live[index].version)) -> next
-        &viable.push(index)
+        viable.push(index)
     }
     low_first: mode == PublicationResolveMode.Lowest || (mode == PublicationResolveMode.LowestDirect && direct.contains(package))
     preserve_lock: mode == PublicationResolveMode.Conservative && !update_scope.contains(package)
@@ -183,26 +183,26 @@ publication_solve_registry_state: fn(state: PublicationSolverState, candidates: 
         branch.assignments[package] = candidate.version.copy()
         loop dependency in candidate.dependencies {
             if !branch.constraints.has_key(dependency.package) -> branch.constraints[dependency.package] = [PublicationVersionConstraint]{}
-            &branch.constraints[dependency.package].push(dependency.copy())
+            branch.constraints[dependency.package].push(dependency.copy())
         }
         loop name in candidate.rejected.keys() {
             if !branch.rejected.has_key(name) -> branch.rejected[name] = [PublicationSemVer]{}
             loop version in candidate.rejected[name] {
-                if !branch.rejected[name].contains(version) -> &branch.rejected[name].push(version.copy())
+                if !branch.rejected[name].contains(version) -> branch.rejected[name].push(version.copy())
             }
         }
         loop name in candidate.preferred.keys() {
             if !branch.preferred.has_key(name) -> branch.preferred[name] = [PublicationVersionReq]{}
-            loop rule in candidate.preferred[name] -> &branch.preferred[name].push(rule.copy())
+            loop rule in candidate.preferred[name] -> branch.preferred[name].push(rule.copy())
         }
         loop name in candidate.strict {
-            if !branch.strict.contains(name) -> &branch.strict.push(name.copy())
+            if !branch.strict.contains(name) -> branch.strict.push(name.copy())
         }
         if publication_solve_registry_state(branch, candidates, locked, update_scope, mode, direct) == {
             .Ok(assignments) -> { return Ok(assignments) }
             .Err(error) -> {
                 detail: error.diagnostic.detail ?? error.diagnostic.why
-                &branches.push("  tried `{package}` {publication_semver_display(candidate.version)}:\n{publication_indent_proof(detail)}")
+                branches.push("  tried `{package}` {publication_semver_display(candidate.version)}:\n{publication_indent_proof(detail)}")
             }
         }
     }
@@ -261,7 +261,7 @@ publication_proof_diagnostic: fn(package: String, requirements: [PublicationVers
 publication_indent_proof: fn(detail: String) -> String Never! {
     // Canonical diagnostic_text_lines has str::lines semantics (including CRLF).
     lines := [String]{}
-    loop line in diagnostic_text_lines(detail) -> &lines.push("    {line}")
+    loop line in diagnostic_text_lines(detail) -> lines.push("    {line}")
     lines.join("\n")
 }
 
@@ -278,7 +278,7 @@ publication_constraints_have_release: fn(requirements: [PublicationVersionConstr
     if index == requirements.len() -> return true
     loop set in requirements[index].req.sets {
         branch_bounds := bounds.copy()
-        if !publication_constrain_release_bounds(set, &branch_bounds) -> next
+        if !publication_constrain_release_bounds(set, branch_bounds) -> next
         if publication_precedence(branch_bounds.lower, branch_bounds.upper) == Ordering.Greater -> next
         if publication_constraints_have_release(requirements, index + 1, branch_bounds) -> return true
     }
@@ -292,8 +292,8 @@ publication_all_constraints_diagnostic: fn(package: String, requirements: [Publi
     remaining_ranges := [String]{}
     remaining_from := [String]{}
     loop index in 1..<requirements.len() {
-        &remaining_ranges.push(publication_version_req_display(requirements[index].req))
-        &remaining_from.push(requirements[index].from.copy())
+        remaining_ranges.push(publication_version_req_display(requirements[index].req))
+        remaining_from.push(requirements[index].from.copy())
     }
     req_b: remaining_ranges.join("` and `")
     from_b: remaining_from.join("` and `")
@@ -314,10 +314,10 @@ publication_check_conflicts: fn(constraints: [PublicationVersionConstraint], ava
     grouped := [String: [PublicationVersionConstraint]]{}
     loop constraint in constraints {
         if !grouped.has_key(constraint.package) -> grouped[constraint.package] = [PublicationVersionConstraint]{}
-        &grouped[constraint.package].push(constraint.copy())
+        grouped[constraint.package].push(constraint.copy())
     }
     packages := grouped.keys().to_list()
-    &packages.sort()
+    packages.sort()
     diagnostics := [Diagnostic]{}
     loop package in packages {
         requirements: grouped[package]
@@ -344,27 +344,27 @@ publication_check_conflicts: fn(constraints: [PublicationVersionConstraint], ava
                         }
                     }
                     if !pair_ok {
-                        &diagnostics.push(publication_proof_diagnostic(package, [PublicationVersionConstraint]{a.copy(), b.copy()}, "available versions cannot satisfy both requirements"))
+                        diagnostics.push(publication_proof_diagnostic(package, [PublicationVersionConstraint]{a.copy(), b.copy()}, "available versions cannot satisfy both requirements"))
                         reported = true
                         break
                     }
                 }
                 if reported -> break
             }
-            if !reported -> &diagnostics.push(publication_all_constraints_diagnostic(package, requirements, "no published candidate satisfies every requirement"))
+            if !reported -> diagnostics.push(publication_all_constraints_diagnostic(package, requirements, "no published candidate satisfies every requirement"))
         }
         if versions.len() == 0 {
             before: diagnostics.len()
             loop i in 0..<requirements.len() {
                 loop j in (i + 1)..<requirements.len() {
-                    if !publication_intersects(requirements[i].req, requirements[j].req) -> &diagnostics.push(publication_proof_diagnostic(package, requirements, "two requirements have no overlapping version"))
+                    if !publication_intersects(requirements[i].req, requirements[j].req) -> diagnostics.push(publication_proof_diagnostic(package, requirements, "two requirements have no overlapping version"))
                 }
             }
             if diagnostics.len() == before {
                 bounds: PublicationReleaseBounds{lower: publication_ver(0, 0, 0), upper: publication_ver(PUBLICATION_U64_MAX, PUBLICATION_U64_MAX, PUBLICATION_U64_MAX)}
                 // No disjoint pair exists here, so the pair reason would be false:
                 // reuse the existing Rust whole-set reason (Resolve.rs:292).
-                if !publication_constraints_have_release(requirements, 0, bounds) -> &diagnostics.push(publication_all_constraints_diagnostic(package, requirements, "no published candidate satisfies every requirement"))
+                if !publication_constraints_have_release(requirements, 0, bounds) -> diagnostics.push(publication_all_constraints_diagnostic(package, requirements, "no published candidate satisfies every requirement"))
             }
         }
     }

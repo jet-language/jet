@@ -1,6 +1,6 @@
 // Read-only unsafe inspection, adapted from origin/port/compiler.
 // The current integration passes module rows rather than a Rust ProgramBundle.
-use jet_foundation.[Diagnostic, Span, Expr, Call, Func, Item, Program, Stmt, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_gate_forbidding, policy_scope_name, policy_value_display]
+use jet_foundation.[Diagnostic, MARKER_UNSAFE, Span, Expr, Call, Func, Item, Program, Stmt, GateSet, PolicyDeclaration, EffectivePolicy, PolicyKey, PolicyScope, PolicyValue, policy_resolve_with_gates, policy_default_gate_value, policy_gate_allows, policy_gate_forbidding, policy_scope_name, policy_value_display]
 
 SemaGateModule: struct {
     source: String
@@ -50,19 +50,19 @@ sema_unsafe_inspect: fn(modules: [SemaGateModule], gates: GateSet) -> UnsafeInsp
     result := UnsafeInspection{gates: [], diagnostics: []}
     loop row in modules {
         declarations := row.declarations
-        loop declaration in row.program.policy_declarations -> &declarations.push(declaration)
+        loop declaration in row.program.policy_declarations -> declarations.push(declaration.copy())
         loop item in row.program.items {
-            sema_unsafe_visit_item(item, row.source, declarations, row.program, gates, &result)
+            sema_unsafe_visit_item(item, row.source, declarations, row.program, gates, result)
         }
     }
-    sema_unsafe_package_surface(modules, &result)
+    sema_unsafe_package_surface(modules, result)
     result.gates = loop fresh_item in result.gates -> fresh_item
-    &result.gates.sort_by((a: UnsafeGateInspection, b: UnsafeGateInspection) -> (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end))
+    result.gates.sort_by((a: UnsafeGateInspection, b: UnsafeGateInspection) -> (a.source <=> b.source).then(a.span.start <=> b.span.start).then(a.span.end <=> b.span.end))
     result
 }
 
 sema_unsafe_diagnostic: fn(result: &UnsafeInspection, source: String, code: String, span: Span?, what: String, why: String, fix: String) Never! {
-    &result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional(code, span, what, why, fix)})
+    result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error_optional(code, span, what, why, fix)})
 }
 
 sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspection) Never! {
@@ -76,24 +76,24 @@ sema_unsafe_package_surface: fn(modules: [SemaGateModule], result: &UnsafeInspec
             if !permitted {
                 loop gate in result.gates {
                     if gate.source != row.source -> next
-                    sema_unsafe_diagnostic(&result, row.source, "E2960", Val(gate.span), "Package policy `policy.unsafe` rejects `#Unsafe` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.unsafe` in `package.jet`.")
+                    sema_unsafe_diagnostic(result, row.source, "E2960", Val(gate.span), "Package policy `policy.unsafe` rejects `#Unsafe` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.unsafe` in `package.jet`.")
                 }
             }
         }
         if row.expert != (Val(false)) -> next
         if row.program.no_prelude {
-            sema_unsafe_expert_diagnostic(&result, row.source, "#NoPrelude", path, None)
+            sema_unsafe_expert_diagnostic(result, row.source, "#NoPrelude", path, None)
         }
         loop item in row.program.items {
             if sema_unsafe_expert_item(item) == .Val(found) {
-                sema_unsafe_expert_diagnostic(&result, row.source, found.name, path, Val(found.span))
+                sema_unsafe_expert_diagnostic(result, row.source, found.name, path, Val(found.span))
             }
         }
     }
 }
 
 sema_unsafe_expert_diagnostic: fn(result: &UnsafeInspection, source: String, subject: String, path: String, span: Span?) Never! {
-    sema_unsafe_diagnostic(&result, source, "E2960", span, "Package policy `policy.expert` rejects `{subject}` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.expert` in `package.jet`.")
+    sema_unsafe_diagnostic(result, source, "E2960", span, "Package policy `policy.expert` rejects `{subject}` at `{path}`", "The package policy gives `{path}` an explicit ceiling, so this source use is outside the team's declared boundary.", "Change the source or update `policy.expert` in `package.jet`.")
 }
 
 sema_unsafe_expert_function: fn(function: Func) -> (name: String, span: Span)? Never! {
@@ -170,38 +170,38 @@ sema_unsafe_expert_body: fn(body: [Stmt]) -> (name: String, span: Span)? Never! 
 sema_unsafe_visit_item: fn(item: Item, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: &UnsafeInspection) Never! {
     if item == {
         .Func(function) -> {
-            sema_unsafe_visit_function(function, source, declarations, program, gates, &result)
+            sema_unsafe_visit_function(function, source, declarations, program, gates, result)
         }
         .Struct(definition) -> {
             loop function in definition.methods {
-                sema_unsafe_visit_function(function, source, declarations, program, gates, &result)
+                sema_unsafe_visit_function(function, source, declarations, program, gates, result)
             }
             loop implementation in definition.trait_impls {
                 loop function in implementation.methods {
-                    sema_unsafe_visit_function(function, source, declarations, program, gates, &result)
+                    sema_unsafe_visit_function(function, source, declarations, program, gates, result)
                 }
             }
         }
         .Enum(definition) -> {
             loop function in definition.methods {
-                sema_unsafe_visit_function(function, source, declarations, program, gates, &result)
+                sema_unsafe_visit_function(function, source, declarations, program, gates, result)
             }
             loop implementation in definition.trait_impls {
                 loop function in implementation.methods {
-                    sema_unsafe_visit_function(function, source, declarations, program, gates, &result)
+                    sema_unsafe_visit_function(function, source, declarations, program, gates, result)
                 }
             }
         }
         .Impl(implementation) -> {
             loop function in implementation.methods {
-                sema_unsafe_visit_function(function, source, declarations, program, gates, &result)
+                sema_unsafe_visit_function(function, source, declarations, program, gates, result)
             }
         }
-        .Test(test) -> { sema_unsafe_plain_body(test.body, source, declarations, gates, &result) }
+        .Test(test) -> { sema_unsafe_plain_body(test.body, source, declarations, gates, result) }
         .CodeModule(row) -> {
             if row.body == .Val(items) {
                 loop child in items {
-                    sema_unsafe_visit_item(child, source, declarations, program, gates, &result)
+                    sema_unsafe_visit_item(child, source, declarations, program, gates, result)
                 }
             }
         }
@@ -211,30 +211,30 @@ sema_unsafe_visit_item: fn(item: Item, source: String, declarations: [PolicyDecl
 
 sema_unsafe_visit_function: fn(function: Func, source: String, declarations: [PolicyDeclaration], program: Program, gates: GateSet, result: &UnsafeInspection) Never! {
     if !function.is_unsafe {
-        sema_unsafe_plain_body(function.body, source, declarations, gates, &result)
+        sema_unsafe_plain_body(function.body, source, declarations, gates, result)
         return
     }
     source_has_reason := false
     loop application in program.rule_facts {
-        if application.target == (Val(function.span)) && application.marker.name == "Unsafe" && application.marker.args.len() > 0 {
+        if application.target == (Val(function.span)) && application.marker.name == MARKER_UNSAFE && application.marker.args.len() > 0 {
             source_has_reason = true
         }
     }
-    sema_unsafe_visit_gate(function.span, function.unsafe_span ?? function.span, true, function.unsafe_reason, source_has_reason, function.body, source, declarations, gates, &result)
+    sema_unsafe_visit_gate(function.span, function.unsafe_span ?? function.span, true, function.unsafe_reason, source_has_reason, function.body, source, declarations, gates, result)
 }
 
 sema_unsafe_plain_body: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
-    sema_unsafe_nested_gates(body, source, declarations, gates, &result)
-    sema_unsafe_reject_outside(body, source, &result)
+    sema_unsafe_nested_gates(body, source, declarations, gates, result)
+    sema_unsafe_reject_outside(body, source, result)
 }
 
 sema_unsafe_nested_gates: fn(body: [Stmt], source: String, declarations: [PolicyDeclaration], gates: GateSet, result: &UnsafeInspection) Never! {
     loop statement in body {
         if statement == .Unsafe(audit, audit_expr, nested, span) {
-            sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, &result)
+            sema_unsafe_visit_gate(span, span, false, audit, audit_expr != None, nested, source, declarations, gates, result)
         } else {
             loop nested in sema_unsafe_nested_bodies(statement) {
-                sema_unsafe_nested_gates(nested, source, declarations, gates, &result)
+                sema_unsafe_nested_gates(nested, source, declarations, gates, result)
             }
         }
     }
@@ -246,32 +246,32 @@ sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: 
     loop declaration in declarations {
         if declaration.key != PolicyKey.Unsafe -> next
         if declaration.scope == PolicyScope.Organization || declaration.scope == PolicyScope.Package || declaration.scope == PolicyScope.Module {
-            &outer.push(declaration)
+            outer.push(declaration.copy())
         }
-        if declaration.target == (Val(target)) -> &site.push(declaration)
+        if declaration.target == (Val(target)) -> site.push(declaration.copy())
     }
     outer_policy: if policy_resolve_with_gates(PolicyKey.Unsafe, outer, gates) == {
         .Ok(policy) -> policy
         .Err(_) -> EffectivePolicy?{None}
     }
     chain := outer
-    loop declaration in site -> &chain.push(declaration)
+    loop declaration in site -> chain.push(declaration)
     effective := if policy_resolve_with_gates(PolicyKey.Unsafe, chain, gates) == {
         .Ok(policy) -> policy
         .Err(_) -> {
             // An allowed `--gate unsafe=allow` cannot widen an owning `.Forbid`.
             forbidding: policy_gate_forbidding(PolicyKey.Unsafe, chain)
             if policy_gate_allows(gates, PolicyKey.Unsafe) && forbidding == .Val(policy) {
-                &result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_gate_denied(PolicyKey.Unsafe, "{source}:{span.start}..{span.end}", Val(span), policy.source)})
+                result.diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_gate_denied(PolicyKey.Unsafe, "{source}:{span.start}..{span.end}", Val(span), policy.source)})
             } else {
-                sema_unsafe_diagnostic(&result, source, "E0355", Val(span), "audited gate denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove `--gate unsafe=allow` or change the owning policy")
+                sema_unsafe_diagnostic(result, source, "E0355", Val(span), "audited gate denied by effective policy", "an organization or package policy can refuse an audited escape, including its invocation gate", "remove `--gate unsafe=allow` or change the owning policy")
             }
             None
         }
     }
     value := effective.map((policy) -> policy.value) ?? policy_default_gate_value(PolicyKey.Unsafe)
     if value == PolicyValue.PerSite {
-        sema_unsafe_diagnostic(&result, source, "E3106", Val(span), "this unsafe gate must choose an obligation mode", "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`", "add `obligations: .Track` (or `.Skip` when organization policy permits it)")
+        sema_unsafe_diagnostic(result, source, "E3106", Val(span), "this unsafe gate must choose an obligation mode", "the effective `.PerSite` policy requires every gate to select `.Track` or `.Skip`", "add `obligations: .Track` (or `.Skip` when organization policy permits it)")
         value = PolicyValue.Track
     }
     skip := false
@@ -279,28 +279,28 @@ sema_unsafe_visit_gate: fn(target: Span, span: Span, is_function: Bool, reason: 
         if declaration.value == PolicyValue.Skip -> skip = true
     }
     if skip && outer_policy.map((policy) -> policy.value) != Val(PolicyValue.PerSite) {
-        sema_unsafe_diagnostic(&result, source, "E3106", Val(span), "this unsafe gate cannot skip obligations", "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization", "set package policy to `.PerSite`, or remove `.Skip`")
+        sema_unsafe_diagnostic(result, source, "E3106", Val(span), "this unsafe gate cannot skip obligations", "`.Skip` is site control for an effective `.PerSite` package policy; it is not ambient authorization", "set package policy to `.PerSite`, or remove `.Skip`")
         value = PolicyValue.Track
     }
     if value == PolicyValue.Forbid {
-        sema_unsafe_diagnostic(&result, source, "E3105", Val(span), "organization or package policy forbids unsafe code", "a lexical `#Unsafe` gate cannot widen the effective safety floor", "remove the low-level operation or change the outer policy through its owner")
+        sema_unsafe_diagnostic(result, source, "E3105", Val(span), "organization or package policy forbids unsafe code", "a lexical `#Unsafe` gate cannot widen the effective safety floor", "remove the low-level operation or change the outer policy through its owner")
     } else if reason == .None && !source_has_reason && value != PolicyValue.Relaxed {
         if is_function {
-            sema_unsafe_diagnostic(&result, source, "E3112", Val(span), "an `#Unsafe` function needs a reason", "every unsafe function records why callers can rely on its unchecked contract", "write `#Unsafe(\"why this is safe\") name: fn …`")
+            sema_unsafe_diagnostic(result, source, "E3112", Val(span), "an `#Unsafe` function needs a reason", "every unsafe function records why callers can rely on its unchecked contract", "write `#Unsafe(\"why this is safe\") name: fn …`")
         } else {
-            sema_unsafe_diagnostic(&result, source, "E3112", Val(span), "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
+            sema_unsafe_diagnostic(result, source, "E3112", Val(span), "an `#Unsafe` block needs a reason", "every unsafe gate records why its unchecked operations preserve memory safety", "write `#Unsafe(\"why this is safe\") {{ … }}`")
         }
     }
     provenance := [String]{}
     if effective == .Val(policy) {
         loop declaration in policy.provenance {
-            &provenance.push("{policy_scope_name(declaration.scope)}:{declaration.source}:{declaration.span.start}..{declaration.span.end}={policy_value_display(declaration.value)}")
+            provenance.push("{policy_scope_name(declaration.scope)}:{declaration.source}:{declaration.span.start}..{declaration.span.end}={policy_value_display(declaration.value)}")
         }
     }
     gate := UnsafeGateInspection{source: source, span: span, reason: reason, mode: sema_unsafe_mode(value), provenance: provenance, operations: []}
-    sema_unsafe_scan_sequence(body, value == PolicyValue.Obligations || value == PolicyValue.Track, &gate, source, &result.diagnostics)
-    &result.gates.push(gate)
-    sema_unsafe_nested_gates(body, source, declarations, gates, &result)
+    sema_unsafe_scan_sequence(body, value == PolicyValue.Obligations || value == PolicyValue.Track, gate, source, result.diagnostics)
+    result.gates.push(gate)
+    sema_unsafe_nested_gates(body, source, declarations, gates, result)
 }
 
 sema_unsafe_mode: fn(value: PolicyValue) -> String Never! {
@@ -320,7 +320,7 @@ sema_unsafe_assertion: fn(statement: Stmt) -> (names: [String], span: Span)? Nev
     if call.name != "__jet_unsafe_assert" -> return None
     names := [String]{}
     loop argument in call.args {
-        if argument.expr == .Ident(name, _, _) -> &names.push(name)
+        if argument.expr == .Ident(name, _, _) -> names.push(name)
     }
     Val((names: names, span: call.name_span))
 }
@@ -339,95 +339,95 @@ sema_unsafe_scan_sequence: fn(body: [Stmt], track: Bool, gate: &UnsafeGateInspec
     loop statement in body {
         if sema_unsafe_assertion(statement) == .Val(assertion) {
             if pending.len() == 0 {
-                &diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "this unsafe assertion has no preceding operation", "typed obligations attach only to the immediately preceding low-level operation statement", "move the assertion directly after the operation it proves")})
+                diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "this unsafe assertion has no preceding operation", "typed obligations attach only to the immediately preceding low-level operation statement", "move the assertion directly after the operation it proves")})
                 next
             }
             asserted := [String]{}
             loop name in assertion.names {
                 if name == "valid_ptr" || name == "aligned" || name == "no_alias" {
-                    if !asserted.contains(name) -> &asserted.push(name)
+                    if !asserted.contains(name) -> asserted.push(name)
                 } else {
-                    &diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "`{name}` is not an unsafe obligation", "unsafe proofs use the closed typed set `valid_ptr`, `aligned`, and `no_alias`", "fix the obligation name")})
+                    diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3108", assertion.span, "`{name}` is not an unsafe obligation", "unsafe proofs use the closed typed set `valid_ptr`, `aligned`, and `no_alias`", "fix the obligation name")})
                 }
             }
-            &asserted.sort()
-            sema_unsafe_discharge(pending, asserted, track, &gate, source, &diagnostics)
+            asserted.sort()
+            sema_unsafe_discharge(pending, asserted, track, gate, source, diagnostics)
             pending = []
             next
         }
-        sema_unsafe_discharge(pending, [String]{}, track, &gate, source, &diagnostics)
+        sema_unsafe_discharge(pending, [String]{}, track, gate, source, diagnostics)
         pending = []
         if statement == .Unsafe(_, _, _, _) -> next
-        sema_unsafe_shallow_operations(statement, &pending)
+        sema_unsafe_shallow_operations(statement, pending)
         loop nested in sema_unsafe_nested_bodies(statement) {
-            sema_unsafe_scan_sequence(nested, track, &gate, source, &diagnostics)
+            sema_unsafe_scan_sequence(nested, track, gate, source, diagnostics)
         }
     }
-    sema_unsafe_discharge(pending, [String]{}, track, &gate, source, &diagnostics)
+    sema_unsafe_discharge(pending, [String]{}, track, gate, source, diagnostics)
 }
 
 sema_unsafe_discharge: fn(operations: [SemaUnsafeOperation], asserted: [String], track: Bool, gate: &UnsafeGateInspection, source: String, diagnostics: &[UnsafeDiagnostic]) Never! {
     loop operation in operations {
         missing := [String]{}
         loop name in operation.required {
-            if !asserted.contains(name) -> &missing.push(name)
+            if !asserted.contains(name) -> missing.push(name.copy())
         }
         discharged: !track || missing.len() == 0
         if !discharged {
-            &diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3107", operation.span, "`{operation.kind}` is missing unsafe obligations: {missing.join(", ")}", "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation", "add `assert {operation.required.join(", ")}` immediately after this operation")})
+            diagnostics.push(UnsafeDiagnostic{source: source, diagnostic: sema_error("E3107", operation.span, "`{operation.kind}` is missing unsafe obligations: {missing.join(", ")}", "the effective `.Obligations` policy requires a typed proof immediately after each low-level operation", "add `assert {operation.required.join(", ")}` immediately after this operation")})
         }
-        &gate.operations.push(UnsafeOperationInspection{kind: operation.kind, span: operation.span, required: operation.required, asserted: asserted, discharged: discharged})
+        gate.operations.push(UnsafeOperationInspection{kind: operation.kind, span: operation.span, required: operation.required, asserted: asserted, discharged: discharged})
     }
 }
 
 sema_unsafe_shallow_operations: fn(statement: Stmt, out: &[SemaUnsafeOperation]) Never! {
     if statement == {
         .Expr(expression) | .DeferClose(expression, _) | .Return(.Val(expression), _) -> {
-            sema_unsafe_expr_operations(expression, &out)
+            sema_unsafe_expr_operations(expression, out)
         }
-        .Val(binding) -> { sema_unsafe_expr_operations(binding.init, &out) }
+        .Val(binding) -> { sema_unsafe_expr_operations(binding.init, out) }
         .Assign(target, _, _, value) -> {
             if target == {
                 .Index(base, index, _, _) -> {
-                    sema_unsafe_expr_operations(base, &out)
-                    sema_unsafe_expr_operations(index, &out)
+                    sema_unsafe_expr_operations(base, out)
+                    sema_unsafe_expr_operations(index, out)
                 }
-                .Field(base, _, _) -> sema_unsafe_expr_operations(base, &out)
+                .Field(base, _, _) -> sema_unsafe_expr_operations(base, out)
                 else -> {}
             }
-            sema_unsafe_expr_operations(value, &out)
+            sema_unsafe_expr_operations(value, out)
         }
         .While(cond, _, _, _, _) | .ComptimeIf(cond, _, _, _, _, _) -> {
-            sema_unsafe_expr_operations(cond, &out)
+            sema_unsafe_expr_operations(cond, out)
         }
         .CountedLoop(init, cond, step, _, _, _, _) -> {
-            sema_unsafe_expr_operations(init.init, &out)
-            sema_unsafe_expr_operations(cond, &out)
-            if step == .Val(value) -> sema_unsafe_shallow_operations(value, &out)
+            sema_unsafe_expr_operations(init.init, out)
+            sema_unsafe_expr_operations(cond, out)
+            if step == .Val(value) -> sema_unsafe_shallow_operations(value, out)
         }
         .For(_, _, _, kind, _, _, _, _, _) -> {
             if kind == {
                 .Range(start, end, step, _) -> {
-                    sema_unsafe_expr_operations(start, &out)
-                    sema_unsafe_expr_operations(end, &out)
-                    if step == .Val(value) -> sema_unsafe_expr_operations(value, &out)
+                    sema_unsafe_expr_operations(start, out)
+                    sema_unsafe_expr_operations(end, out)
+                    if step == .Val(value) -> sema_unsafe_expr_operations(value, out)
                 }
                 .In(collection, step) -> {
-                    sema_unsafe_expr_operations(collection, &out)
-                    if step == .Val(value) -> sema_unsafe_expr_operations(value, &out)
+                    sema_unsafe_expr_operations(collection, out)
+                    if step == .Val(value) -> sema_unsafe_expr_operations(value, out)
                 }
             }
         }
         .Switch(subject, _, _, _) | .ComptimeSwitch(subject, _, _, _) -> {
-            sema_unsafe_expr_operations(subject, &out)
+            sema_unsafe_expr_operations(subject, out)
         }
         .ContextBlock(fields, _, _) -> {
-            loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
+            loop field in fields -> sema_unsafe_expr_operations(field.value, out)
         }
         .ScopeMember(_, _, args, _, _, _, _, _) -> {
-            loop argument in args -> sema_unsafe_expr_operations(argument, &out)
+            loop argument in args -> sema_unsafe_expr_operations(argument, out)
         }
-        .Yield(value, _) -> sema_unsafe_expr_operations(value, &out)
+        .Yield(value, _) -> sema_unsafe_expr_operations(value, out)
         else -> {}
     }
 }
@@ -435,76 +435,76 @@ sema_unsafe_shallow_operations: fn(statement: Stmt, out: &[SemaUnsafeOperation])
 sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) Never! {
     if expression == {
         .PtrFromAddr(_, _, _, addr, span, _) -> {
-            &out.push(SemaUnsafeOperation{kind: "pointer_from_address", span: span, required: ["valid_ptr", "aligned"]})
-            sema_unsafe_expr_operations(addr, &out)
+            out.push(SemaUnsafeOperation{kind: "pointer_from_address", span: span, required: ["valid_ptr", "aligned"]})
+            sema_unsafe_expr_operations(addr, out)
         }
         .Deref(inner, span, _) -> {
-            &out.push(SemaUnsafeOperation{kind: "dereference", span: span, required: ["valid_ptr", "aligned"]})
-            sema_unsafe_expr_operations(inner, &out)
+            out.push(SemaUnsafeOperation{kind: "dereference", span: span, required: ["valid_ptr", "aligned"]})
+            sema_unsafe_expr_operations(inner, out)
         }
         .RawOf(inner, span, _) -> {
-            &out.push(SemaUnsafeOperation{kind: "raw_pointer", span: span, required: ["no_alias"]})
-            sema_unsafe_expr_operations(inner, &out)
+            out.push(SemaUnsafeOperation{kind: "raw_pointer", span: span, required: ["no_alias"]})
+            sema_unsafe_expr_operations(inner, out)
         }
         .MethodCall(receiver, method, span, _, _, args, _) -> {
             if method == {
                 "volatile_read" -> {
-                    &out.push(SemaUnsafeOperation{kind: "volatile_read", span: span, required: ["valid_ptr", "aligned"]})
+                    out.push(SemaUnsafeOperation{kind: "volatile_read", span: span, required: ["valid_ptr", "aligned"]})
                 }
                 "volatile_write" -> {
-                    &out.push(SemaUnsafeOperation{kind: "volatile_write", span: span, required: ["valid_ptr", "aligned", "no_alias"]})
+                    out.push(SemaUnsafeOperation{kind: "volatile_write", span: span, required: ["valid_ptr", "aligned", "no_alias"]})
                 }
                 "cast_ptr" -> {
-                    &out.push(SemaUnsafeOperation{kind: "pointer_cast", span: span, required: ["valid_ptr", "aligned"]})
+                    out.push(SemaUnsafeOperation{kind: "pointer_cast", span: span, required: ["valid_ptr", "aligned"]})
                 }
                 else -> {}
             }
-            sema_unsafe_expr_operations(receiver, &out)
-            loop argument in args -> sema_unsafe_expr_operations(argument.expr, &out)
+            sema_unsafe_expr_operations(receiver, out)
+            loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
         }
         .Call(call, _) -> {
-            loop argument in call.args -> sema_unsafe_expr_operations(argument.expr, &out)
+            loop argument in call.args -> sema_unsafe_expr_operations(argument.expr, out)
         }
         .Str(parts, _, _) -> {
             loop part in parts {
-                if part == .Interp(value, _) -> sema_unsafe_expr_operations(value, &out)
+                if part == .Interp(value, _) -> sema_unsafe_expr_operations(value, out)
             }
         }
         .Binary(_, left, right, _, _) | .Index(left, right, _, _, _) | .Range(left, right, _, _, _) -> {
-            sema_unsafe_expr_operations(left, &out)
-            sema_unsafe_expr_operations(right, &out)
+            sema_unsafe_expr_operations(left, out)
+            sema_unsafe_expr_operations(right, out)
         }
         .CompareChain(operands, _, _, _, _) | .ListLit(operands, _, _) -> {
-            loop operand in operands -> sema_unsafe_expr_operations(operand, &out)
+            loop operand in operands -> sema_unsafe_expr_operations(operand, out)
         }
         .Slice(base, start, end, range, _, _) -> {
-            sema_unsafe_expr_operations(base, &out)
-            if range == .Val(value) -> sema_unsafe_expr_operations(value, &out) else {
-                sema_unsafe_expr_operations(start, &out)
-                sema_unsafe_expr_operations(end, &out)
+            sema_unsafe_expr_operations(base, out)
+            if range == .Val(value) -> sema_unsafe_expr_operations(value, out) else {
+                sema_unsafe_expr_operations(start, out)
+                sema_unsafe_expr_operations(end, out)
             }
         }
         .Unary(_, inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .OptField(inner, _, _, _, _, _) | .Paren(inner, _, _) | .Spread(inner, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) -> {
-            sema_unsafe_expr_operations(inner, &out)
+            sema_unsafe_expr_operations(inner, out)
         }
         .StructLit(_, _, _, _, fields, _, _, _) -> {
-            loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
+            loop field in fields -> sema_unsafe_expr_operations(field.value, out)
         }
         .TypedLit(_, body, _, _) -> {
             if body == {
                 .Fields(fields) -> {
-                    loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
+                    loop field in fields -> sema_unsafe_expr_operations(field.value, out)
                 }
                 .Elements(values) -> {
-                    loop value in values -> sema_unsafe_expr_operations(value, &out)
+                    loop value in values -> sema_unsafe_expr_operations(value, out)
                 }
                 .Entries(entries) -> {
                     loop entry in entries {
-                        sema_unsafe_expr_operations(entry.key, &out)
-                        sema_unsafe_expr_operations(entry.value, &out)
+                        sema_unsafe_expr_operations(entry.key, out)
+                        sema_unsafe_expr_operations(entry.value, out)
                     }
                 }
-                .Value(value) -> sema_unsafe_expr_operations(value, &out)
+                .Value(value) -> sema_unsafe_expr_operations(value, out)
                 .ByteText(_) | .Empty -> {}
             }
         }
@@ -512,49 +512,49 @@ sema_unsafe_expr_operations: fn(expression: Expr, out: &[SemaUnsafeOperation]) N
             loop argument in args {
                 if argument == {
                     .Positional(value) | .Named(_, value) -> {
-                        sema_unsafe_expr_operations(value, &out)
+                        sema_unsafe_expr_operations(value, out)
                     }
                 }
             }
         }
         .MapLit(entries, _, _) -> {
             loop entry in entries {
-                sema_unsafe_expr_operations(entry.key, &out)
-                sema_unsafe_expr_operations(entry.value, &out)
+                sema_unsafe_expr_operations(entry.key, out)
+                sema_unsafe_expr_operations(entry.value, out)
             }
         }
         .TupleLit(fields, _, _, _) -> {
-            loop field in fields -> sema_unsafe_expr_operations(field.value, &out)
+            loop field in fields -> sema_unsafe_expr_operations(field.value, out)
         }
         .CallValue(callee, args, _, _) -> {
-            sema_unsafe_expr_operations(callee, &out)
-            loop argument in args -> sema_unsafe_expr_operations(argument.expr, &out)
+            sema_unsafe_expr_operations(callee, out)
+            loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
         }
         .Try(inner, _, _, note, _) -> {
-            sema_unsafe_expr_operations(inner, &out)
-            if note == .Val(value) -> sema_unsafe_expr_operations(value, &out)
+            sema_unsafe_expr_operations(inner, out)
+            if note == .Val(value) -> sema_unsafe_expr_operations(value, out)
         }
-        .PatternTest(subject, _, _, _) -> { sema_unsafe_expr_operations(subject, &out) }
+        .PatternTest(subject, _, _, _) -> { sema_unsafe_expr_operations(subject, out) }
         .OrFallback(value, fallback, _, _, _) -> {
-            sema_unsafe_expr_operations(value, &out)
+            sema_unsafe_expr_operations(value, out)
             if fallback == {
                 .Value(fallback_value) | .Return(.Val(fallback_value), _) -> {
-                    sema_unsafe_expr_operations(fallback_value, &out)
+                    sema_unsafe_expr_operations(fallback_value, out)
                 }
                 .Block(body, block_value, _) -> {
-                    loop statement in body -> sema_unsafe_shallow_operations(statement, &out)
-                    if block_value == .Val(nested_value) -> sema_unsafe_expr_operations(nested_value, &out)
+                    loop statement in body -> sema_unsafe_shallow_operations(statement, out)
+                    if block_value == .Val(nested_value) -> sema_unsafe_expr_operations(nested_value, out)
                 }
                 .Panic(_, args) -> {
-                    loop argument in args -> sema_unsafe_expr_operations(argument.expr, &out)
+                    loop argument in args -> sema_unsafe_expr_operations(argument.expr, out)
                 }
                 else -> {}
             }
         }
         .If(cond, _, then_value, _, else_value, _, _) -> {
-            sema_unsafe_expr_operations(cond, &out)
-            sema_unsafe_expr_operations(then_value, &out)
-            sema_unsafe_expr_operations(else_value, &out)
+            sema_unsafe_expr_operations(cond, out)
+            sema_unsafe_expr_operations(then_value, out)
+            sema_unsafe_expr_operations(else_value, out)
         }
         else -> {}
     }
@@ -566,13 +566,13 @@ sema_unsafe_nested_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
         .While(_, body, _, _, _) | .For(_, _, _, _, body, _, _, _, _) | .Loop(body, _, _, _) | .CountedLoop(_, _, _, body, _, _, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .ContextBlock(_, body, _) | .Live(body, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .ScopeMember(_, _, _, _, body, _, _, _) -> [body]
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
             out := [[Stmt]]{}
-            loop arm in arms -> &out.push(arm.body)
-            if else_body == .Val(body) -> &out.push(body)
+            loop arm in arms -> out.push(arm.body)
+            if else_body == .Val(body) -> out.push(body.copy())
             out
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
             out := [[Stmt]]{then_body}
-            if else_body == .Val(body) -> &out.push(body)
+            if else_body == .Val(body) -> out.push(body.copy())
             out
         }
         else -> []
@@ -582,11 +582,11 @@ sema_unsafe_nested_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
 sema_unsafe_reject_outside: fn(body: [Stmt], source: String, result: &UnsafeInspection) Never! {
     loop statement in body {
         if sema_unsafe_assertion(statement) == .Val(assertion) {
-            sema_unsafe_diagnostic(&result, source, "E3108", Val(assertion.span), "unsafe obligations can only be asserted inside `#Unsafe`", "the assertion discharges one tracked low-level operation and has no ambient meaning", "move it immediately after an operation inside the audited gate")
+            sema_unsafe_diagnostic(result, source, "E3108", Val(assertion.span), "unsafe obligations can only be asserted inside `#Unsafe`", "the assertion discharges one tracked low-level operation and has no ambient meaning", "move it immediately after an operation inside the audited gate")
         }
         if statement == .Unsafe(_, _, _, _) -> next
         loop nested in sema_unsafe_nested_bodies(statement) {
-            sema_unsafe_reject_outside(nested, source, &result)
+            sema_unsafe_reject_outside(nested, source, result)
         }
     }
 }

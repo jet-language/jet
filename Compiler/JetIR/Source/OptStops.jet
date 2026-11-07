@@ -20,8 +20,8 @@ ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never!
     poll_of := [Int]{}
     after := [Int]{}
     loop _ in 0..<count {
-        &poll_of.push(-1)
-        &after.push(-1)
+        poll_of.push(-1)
+        after.push(-1)
     }
     moved := false
     loop site in 0..<count {
@@ -38,25 +38,25 @@ ir_opt_stops_after_calls: fn(f: &IRFunction, m: IRModule, keys: [String]) Never!
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     at := 0
     loop at < count {
-        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
-        if after[at] >= 0 -> ir_opt_stops_drops(&code, f, after[at] + 1, poll_of[after[at]])
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], f.code_line[at])
+        if after[at] >= 0 -> ir_opt_stops_drops(code, f, after[at] + 1, poll_of[after[at]])
         poll: poll_of[at]
         if poll < 0 {
             at += 1
             next
         }
         // The poll, its If, then the drops at the start of the edge.
-        loop k in poll..<(poll + 2) -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
-        ir_opt_stops_drops(&code, f, at + 1, poll)
+        loop k in poll..<(poll + 2) -> ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+        ir_opt_stops_drops(code, f, at + 1, poll)
         at = poll + 2
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
 }
 
 // Whether `slot` is an Int or word slot.
@@ -75,7 +75,7 @@ ir_opt_stops_poll: fn(f: IRFunction, keys: [String], at: Int) -> Bool Never! {
 }
 
 ir_opt_stops_drops: fn(code: &IROptCode, f: IRFunction, start: Int, end: Int) Never! {
-    loop k in start..<end -> ir_opt_code_put(&code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
+    loop k in start..<end -> ir_opt_code_put(code, f.op[k], f.dst[k], f.a[k], f.b[k], f.c[k], f.code_line[k])
 }
 
 // Stop facts (O1, O2, over the module once every body is optimized). A
@@ -89,15 +89,15 @@ ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction]) Never! {
     keys := [String]{}
     bodies := [Bool]{}
     loop f in functions {
-        &keys.push(f.key.copy())
-        &bodies.push(f.asm == None && f.key != IR_STOP_POLL_KEY && f.key != IR_STOP_TRAP_KEY)
+        keys.push(f.key.copy())
+        bodies.push(f.asm == None && f.key != IR_STOP_POLL_KEY && f.key != IR_STOP_TRAP_KEY)
     }
     // Per body the bodies that call it, and whether it reports a stop.
     callers := [[Int]]{}
     reports := [Bool]{}
     loop _ in 0..<count {
-        &callers.push([Int]{})
-        &reports.push(false)
+        callers.push([Int]{})
+        reports.push(false)
     }
     work := [Int]{}
     loop id in 0..<count {
@@ -105,23 +105,23 @@ ir_opt_stop_facts: fn(m: IRModule, functions: &[IRFunction]) Never! {
         loop at in 0..<functions[id].op.len() {
             if functions[id].op[at] != .Call -> next
             callee: functions[id].a[at]
-            if callee >= 0 && callee < count && bodies[callee] -> &callers[callee].push(id)
+            if callee >= 0 && callee < count && bodies[callee] -> callers[callee].push(id)
         }
         if ir_opt_stops_starts(m, functions[id], keys, bodies) {
             reports[id] = true
-            &work.push(id)
+            work.push(id)
         }
     }
     loop work.len() > 0 {
-        callee := &work.pop() ?? { break }
+        callee := work.pop() ?? { break }
         loop caller in callers[callee] {
             if reports[caller] -> next
             reports[caller] = true
-            &work.push(caller)
+            work.push(caller)
         }
     }
     loop id in 0..<count {
-        if bodies[id] -> ir_opt_stops_unreported(&functions[id], keys, bodies, reports)
+        if bodies[id] -> ir_opt_stops_unreported(functions[id], keys, bodies, reports)
     }
 }
 
@@ -197,7 +197,7 @@ ir_opt_stops_unreported: fn(f: &IRFunction, keys: [String], bodies: [Bool], repo
         loop k in at..<(f.c[at + 1] + 1) -> f.op[k] = IROp.Nop
         removed = true
     }
-    if removed -> ir_opt_compact(&f)
+    if removed -> ir_opt_compact(f)
 }
 
 // Polls folded into a later one (O1, O2, after inlining and again after the
@@ -219,7 +219,7 @@ ir_opt_fold_polls: fn(f: &IRFunction, keys: [String]) Never! {
         loop k in at..<(end + 1) -> f.op[k] = IROp.Nop
         folded = true
     }
-    if folded -> ir_opt_compact(&f)
+    if folded -> ir_opt_compact(f)
 }
 
 // Whether the poll at `at` checks a call: walking back to the first call

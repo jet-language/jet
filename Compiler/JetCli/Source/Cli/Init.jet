@@ -1,4 +1,4 @@
-// `jet init [<script.jet>]` (`run_init`, U11/D-JPK-SCRIPTDEP1=A): write a fresh
+// `jet init [<script.jet>]` (`run_init`, U11): write a fresh
 // `package.jet` pinned to the running toolchain's channel (the Trust pin writer
 // never clobbers a manifest), then fold the script's inline `use pkg#version`
 // refs into its `deps` block with the comment-preserving editor `jet add` uses.
@@ -13,7 +13,7 @@ use {
     jet_foundation.[DIAGNOSTIC_ERROR, diagnostic_render]
     jet_lexer.[lex]
     jet_parser.[parse_source]
-    jet_pkg_model.[DepSpec, pkg_add_dependency, pkg_inline_deps_collect, pkg_mask_inline_package_source]
+    jet_pkg_model.[COMPILER_VERSION, DepSpec, pkg_add_dependency, pkg_inline_deps_collect, pkg_mask_inline_package_source]
     jetpack_trust.[trust_pin_write_init]
 }
 
@@ -22,7 +22,7 @@ jet_cli_init: fn(args: [String], color: Bool, quiet: Bool, json: Bool) -[FS, Env
     script: args.get(1)
     base: cli_files.basename(cwd)
     name: if base == "" || base == "/" -> "app" else -> base
-    message: trust_pin_write_init(cwd, name, JET_CLI_VERSION) ?? {
+    message: trust_pin_write_init(cwd, name, COMPILER_VERSION) ?? {
         diagnostic: if err == .Pin(report) -> report else -> panic("the init pin writer returned a non-pin error")
         return jet_cli_done("", diagnostic_render(diagnostic, "", "", color), JET_DRIVER_EXIT_USER_ERROR)
     }

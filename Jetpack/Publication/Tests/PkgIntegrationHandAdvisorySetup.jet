@@ -55,11 +55,11 @@ s6_hand_advisory_setup: fn(root: String) {
     stale.signature = publication_sign_advisory_feed(stale, generated.seed_path) ?? panic("sign stale feed")
     s6_hand_advisory_save(root, "stale", stale)
     immature := feed.copy()
-    &immature.releases.push(PublicationAdvisoryRelease{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), first_seen: 100, source_class: PublicationSourceClass.ThirdParty})
+    immature.releases.push(PublicationAdvisoryRelease{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), first_seen: 100, source_class: PublicationSourceClass.ThirdParty})
     immature.signature = publication_sign_advisory_feed(immature, generated.seed_path) ?? panic("sign immature feed")
     s6_hand_advisory_save(root, "immature", immature)
     excepted := immature.copy()
-    &excepted.exceptions.push(PublicationAdvisoryException{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), reason: "urgent security fix", reviewer: "security-team", expires_at: 1000})
+    excepted.exceptions.push(PublicationAdvisoryException{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), reason: "urgent security fix", reviewer: "security-team", expires_at: 1000})
     excepted.signature = publication_sign_advisory_feed(excepted, generated.seed_path) ?? panic("sign exception feed")
     s6_hand_advisory_save(root, "excepted", excepted)
     tampered := feed.copy()
@@ -68,8 +68,8 @@ s6_hand_advisory_setup: fn(root: String) {
     s6_hand_advisory_save(root, "tampered", tampered)
     lock := LockFile.empty()
     lock.version = 1
-    &lock.packages.push(LockedPackage{name: "mylib", version: "1.0.0", fingerprint: "sha256-locked", source: LockSource.Path("/tmp/placeholder")})
-    &lock.root_dependencies.push("mylib")
+    lock.packages.push(LockedPackage{name: "mylib", version: "1.0.0", fingerprint: "sha256-locked", source: LockSource.Path("/tmp/placeholder")})
+    lock.root_dependencies.push("mylib")
     s6_hand_advisory_files.write("{root}/lock.txt", pkg_lock_write(lock)) ?? panic("write lock fixture")
 }
 

@@ -349,8 +349,7 @@ export function collectDigest({ root = ROOT, subject, devRef = 'dev', baseRef = 
   providers.unrecorded_owner_chat = provider('unknown', 'Read latest owner directions separately; this tool cannot discover unrecorded chat.');
   const rows = state ? subjectRows({ subject, state, history, head: gitData?.identity.head,
     dirty: gitData?.identity.dirty ?? true, receipts, witnesses }) : { decisions: [], cards: [], open_ballots: [], historical_context: [] };
-  const refs = new Set(rows.decisions.map(d => d.ref));
-  const idioms = syntax.filter(row => match(row).length || refs.has(row.decision)).map(row => ({ ...row,
+  const idioms = syntax.filter(row => match(row).length).map(row => ({ ...row,
     authoritative_ref: `${SYNTAX}::LEXICAL_LEDGER`, observed: 'registry-declaration-present',
     runtime_proof: 'unknown' }));
   const consistency = [];
@@ -413,7 +412,7 @@ export function renderText(digest, limit = 7) {
     return `${b.name} (${b.branch ?? 'branch'}): ${preview}${remainder}${gap} — unreviewed candidate changes`;
   });
   section('Research/proposals', digest.research, r => `${r.path ?? r.category}: ${r.state}${r.matches?.[0] ? `; line ${r.matches[0].line}: ${r.matches[0].excerpt}` : ''}`);
-  section('Registry spellings', digest.idioms, r => `${JSON.stringify(r.spelling)} — ${r.meaning} (${r.decision || 'unlinked'}); runtime proof unknown`);
+  section('Registry spellings', digest.idioms, r => `${JSON.stringify(r.spelling)} — ${r.meaning}; runtime proof unknown`);
   lines.push('\nLimits: candidate retrieval only; done ≠ built; read latest owner direction and focused source before proposing.');
   lines.push(...digest.consistency_warnings.map(w => `WARNING: ${w}`));
   return `${lines.join('\n')}\n`;

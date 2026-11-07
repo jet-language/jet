@@ -295,18 +295,18 @@ sema_shared_access_desugar_field_read: fn(handle: Expr, field: String, span: Spa
 // Probe stored place types without checking (and therefore copying) the place.
 sema_shared_access_place_type: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Type? {
     if value == {
-        .Paren(inner, _, _) -> { return sema_shared_access_place_type(inner, environment, program, &scopes) }
+        .Paren(inner, _, _) -> { return sema_shared_access_place_type(inner, environment, program, scopes) }
         .Ident(name, _, _) -> {
             index: sema_scope_resolve_index(scopes, name) ?? return None
             return sema_scope_binding_type(environment, scopes, index)
         }
         .Field(base, member, _, _) -> {
-            owner_ty := sema_shared_access_place_type(base, environment, program, &scopes) ?? return None
+            owner_ty := sema_shared_access_place_type(base, environment, program, scopes) ?? return None
             if owner_ty == .Shared(inner) -> owner_ty = inner
-            return sema_shared_access_field_type(owner_ty, member, environment, program, &scopes)
+            return sema_shared_access_field_type(owner_ty, member, environment, program, scopes)
         }
         .Index(base, _, _, _, _) -> {
-            owner_ty: sema_shared_access_place_type(base, environment, program, &scopes) ?? return None
+            owner_ty: sema_shared_access_place_type(base, environment, program, scopes) ?? return None
             if owner_ty == {
                 .List(element) | .FixedList(element, _) -> return Val(element)
                 .Map(_, _, element) -> return Val(element)
@@ -329,7 +329,7 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
         .Apply(_, args) -> args
         else -> [Type]{}
     }
-    owner := sema_expression_type_symbol(&scopes, environment, program, owner_name)
+    owner := sema_expression_type_symbol(scopes, environment, program, owner_name)
     if owner == None -> owner = sema_expression_carrier_type_symbol(environment, program, owner_name)
     owner_symbol: owner ?? return None
     definition: sema_scope_declaration_struct(environment, program, owner_symbol.id) ?? return None
@@ -342,18 +342,18 @@ sema_shared_access_field_type: fn(owner_ty: Type, member: String, environment: S
 
 // Split at the cell, retaining every field/index below it in the edit callback.
 sema_shared_access_project_place: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr)? {
-    ty := sema_shared_access_place_type(value, environment, program, &scopes)
+    ty := sema_shared_access_place_type(value, environment, program, scopes)
     if ty == .Val(known) && sema_shared_access_is_shared_type(known) -> return Val((handle: value, place: sema_shared_access_payload(expr_span(value))))
     if value == {
         .Field(base, member, span, node) -> {
-            projected: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
+            projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
             return Val((handle: projected.handle, place: Expr.Field{base: projected.place, member: member, span: span, id: node}))
         }
         .Index(base, index, span, kind, node) -> {
-            projected: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
+            projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
             return Val((handle: projected.handle, place: Expr.Index{base: projected.place, index: index, span: span, kind: kind, id: node}))
         }
-        .Paren(inner, _, _) -> { return sema_shared_access_project_place(inner, environment, program, &scopes) }
+        .Paren(inner, _, _) -> { return sema_shared_access_project_place(inner, environment, program, scopes) }
         else -> { return None }
     }
 }
@@ -371,11 +371,11 @@ sema_shared_access_is_payload: fn(place: Expr) -> Bool Never! {
 sema_shared_access_write_place: fn(target: LValue, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, target: LValue, span: Span)? {
     if target == {
         .Field(base, field, span) -> {
-            projected: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
+            projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
             return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Field{base: projected.place, field: field, span: span}))
         }
         .Index(base, index, span, kind) -> {
-            projected: sema_shared_access_project_place(base, environment, program, &scopes) ?? return None
+            projected: sema_shared_access_project_place(base, environment, program, scopes) ?? return None
             return Val((handle: projected.handle, span: Span{start: sema_shared_access_place_start(base), end: span.end}, target: LValue.Index{base: projected.place, index: index, span: span, kind: kind}))
         }
         else -> { return None }
@@ -396,33 +396,33 @@ sema_shared_access_desugar_place_write: fn(handle: Expr, target: LValue, op: Bin
     sema_shared_access_call(handle, "edit", LambdaBody.Block{body: [Stmt]{assignment}}, span)
 }
 
-// `&handle.place.method(args)` -> the locked-edit callback, so a writing call
+// `handle.place.method(args)` -> the locked-edit callback, so a writing call
 // edits the stored value rather than a read copy of it.
 sema_shared_access_desugar_place_call: fn(handle: Expr, place: Expr, place_span: Span, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], span: Span) -> Expr Never! {
     call: Expr.MethodCall{receiver: Expr.Place{value: place, access: PlaceAccess.Write, span: place_span, id: AST_NODE_GENERATED}, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: args, id: AST_NODE_GENERATED}
     sema_shared_access_call(handle, "edit", LambdaBody.Expr{value: call}, span)
 }
 
-// The shared cell a writing call `&place.method(…)` edits: the cell handle,
+// The shared cell a writing call `place.method(…)` edits: the cell handle,
 // the place below it, and the call's span from the place's first byte. None
 // when the receiver is not a written place inside a cell.
 sema_shared_access_call_place: fn(receiver: Expr, method_span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> (handle: Expr, place: Expr, place_span: Span, span: Span)? {
     if receiver == .Place(value, access, place_span, _) {
         if access != PlaceAccess.Write -> return None
-        projected: sema_shared_access_project_place(value, environment, program, &scopes) ?? return None
+        projected: sema_shared_access_project_place(value, environment, program, scopes) ?? return None
         if sema_shared_access_is_payload(projected.place) -> return None
         return Val((handle: projected.handle, place: projected.place, place_span: place_span, span: Span{start: sema_shared_access_place_start(value), end: method_span.end}))
     }
     None
 }
 
-// A statement `&cell.place.method(args)` whose arguments read shared state
+// A statement `cell.place.method(args)` whose arguments read shared state
 // binds those arguments first, inside one implicit transaction with the edit,
 // as a shared place assignment's right side does.
 sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> Stmt? {
     if expr == .MethodCall(receiver, method, method_span, owner_type_args, type_args, args, node) {
         if !sema_stmt_binding_is_write_place(receiver) || !sema_shared_access_expr_call_args_touches_shared(args, scopes) -> return None
-        found: sema_shared_access_call_place(receiver, method_span, environment, program, &scopes) ?? return None
+        found: sema_shared_access_call_place(receiver, method_span, environment, program, scopes) ?? return None
         body := [Stmt]{}
         hoisted := [CallArg]{}
         loop index in 0..<args.len() {
@@ -431,25 +431,25 @@ sema_shared_access_place_call_transaction: fn(expr: Expr, environment: SemaScope
             if sema_shared_access_expr_touches_shared(argument.expr, scopes) {
                 name: "{SEMA_SHARED_HOISTED_RHS}_{index}"
                 span: expr_span(argument.expr)
-                &body.push(Stmt.Val{binding: ast_binding(name, span, false, argument.expr, None)})
+                body.push(Stmt.Val{binding: ast_binding(name, span, false, argument.expr, None)})
                 argument.expr = Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
             }
-            &hoisted.push(argument)
+            hoisted.push(argument)
         }
-        &body.push(Stmt.Expr{expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: hoisted, id: node}})
+        body.push(Stmt.Expr{expr: Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: owner_type_args, type_args: type_args, args: hoisted, id: node}})
         return Val(Stmt.Transact{name: None, name_span: None, body: body, implicit: true, span: Span{start: found.span.start, end: expr_span(expr).end}})
     }
     None
 }
 
-// L0207 (lint_shared_busy_wait, D-CONC-SHARE2): an unbounded conditional loop
+// L0207 (lint_shared_busy_wait): an unbounded conditional loop
 // that polls a field of a `Shared` handle, with no wait point, sleep, channel
 // receive, or write to the polled field in its body, spins a core. Runs on the
 // parsed condition and body before they are checked.
 sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     handles := [String]{}
     members := [String]{}
-    ast_visit_expr(condition, (expression: Expr) -> sema_shared_access_note_field_read(&handles, &members, expression))
+    ast_visit_expr(condition, (expression: Expr) -> sema_shared_access_note_field_read(handles, members, expression))
     poll := -1
     loop index in 0..<handles.len() {
         if sema_shared_access_name_is_shared(handles[index], scopes) {
@@ -459,9 +459,9 @@ sema_shared_access_lint_busy_wait: fn(condition: Expr, body: [Stmt], scopes: Sem
     }
     if poll < 0 -> return
     blocking := false
-    ast_visit_body(body, (expression: Expr) -> sema_shared_access_note_blocking_call(&blocking, expression), true)
+    ast_visit_body(body, (expression: Expr) -> sema_shared_access_note_blocking_call(blocking, expression), true)
     if blocking || sema_shared_access_statements_write_field(body, handles[poll], members[poll]) -> return
-    &diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
+    diagnostics.push(sema_lint("L0207", sema_shared_access_condition_span(condition), "this unbounded loop polls `Shared` state without waiting", "an empty or non-blocking body reads a lock-backed value repeatedly and can consume a core while another task makes progress", "wait on a `Condition` through an edit guard, or receive from a channel; an empty plain-field predicate can use that wait directly"))
 }
 
 // The Rust checker reported the condition from its leftmost operand's own
@@ -481,9 +481,9 @@ sema_shared_access_name_is_shared: fn(name: String, scopes: SemaScopeTable) -> B
 sema_shared_access_note_field_read: fn(handles: &[String], members: &[String], expression: Expr) Never! {
     if expression == .Field(base, member, _, _) {
         if sema_shared_access_without_parens_name(base) == .Val(name) {
-            &handles.push(name)
+            handles.push(name)
             // copy: `member` is a payload of the visited expression, which the walk keeps
-            &members.push(member.copy())
+            members.push(member.copy())
         }
     }
 }

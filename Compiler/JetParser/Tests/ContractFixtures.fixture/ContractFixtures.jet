@@ -9,7 +9,7 @@ pc_binding_names: fn(parsed: ParseResult) -> [String] {
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
-                if statement == .Val(binding) -> &names.push(binding.name)
+                if statement == .Val(binding) -> names.push(binding.name)
             }
         }
     }
@@ -21,7 +21,7 @@ pc_binding_values: fn(parsed: ParseResult) -> [Int] {
     loop item in parsed.program.items {
         if item == .Func(func) {
             loop statement in func.body {
-                if statement == .Val(binding) && binding.init == .Int(value, _, _, _, _) -> &values.push(value)
+                if statement == .Val(binding) && binding.init == .Int(value, _, _, _, _) -> values.push(value)
             }
         }
     }
@@ -68,13 +68,13 @@ pc_module_markers: fn() {
 }
 
 // Rust `trait_method_sig`: an effect arrow with no result ends a trait slot
-// (no body); a free function in that shape still has no body (E0081).
+// (no body); an impl method in that shape still has no body (E0081).
 pc_trait_effect_slots: fn() {
     slots: parse_source("Sink: trait {{\n    begin: fn(self, name: String) Never! -[FS]>\n    end: fn(self) Never! -[FS]>\n    functions: fn(self) -[]> Bool Never!\n}}\n".bytes())
     pc_require(slots.diagnostics.len() == 0, "effect-arrow trait slots have no body")
     pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
-    free: parse_source("begin: fn(name: String) Never! -[FS]>\nrun: fn() {{}}\n".bytes())
-    pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
+    free: parse_source("Sink: struct {{}}\nimpl Sink {{\n    begin: fn(self, name: String) Never! -[FS]>\n}}\nrun: fn() {{}}\n".bytes())
+    pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "an effect-arrow impl method without a body is E0081")
     // The unit error contract precedes effects.
     once: jet_format_source("save: fn(path: String) IOError! {{}}\nsync: fn() Err! {{}}\nbounded: fn() IOError! -[FS]> {{}}\npure: fn() Never! -[]> {{}}\nSink: trait {{ save: fn(self) IOError! -[FS]> }}\n", false)
     pc_require(once.ok, "unit-fallible signatures format")
@@ -115,7 +115,7 @@ pc_marker_metadata: fn() {
     loop item in parsed.program.items {
         if item == .MarkerDecl(declaration) {
             pc_require(PC_MARKER_NAMES.contains(declaration.name), "unregistered marker {declaration.name}")
-            &seen.push(declaration.name)
+            seen.push(declaration.name)
         }
     }
     pc_require(seen == PC_MARKER_NAMES, "every marker struct declares one rule, in source order")
@@ -126,7 +126,7 @@ pc_marker_metadata: fn() {
     loop item in facts.program.items {
         if item == .MarkerDecl(declaration) {
             loop parameter in declaration.params {
-                &names.push(parameter.name)
+                names.push(parameter.name)
                 if parameter.name.starts_with("$") {
                     pc_require(parameter.ty == None && parameter.value != None, "marker facts carry values, not types")
                 } else {
@@ -210,35 +210,35 @@ pc_current_kind_equivalence: fn() {
         bytes := source.bytes()
         lexed := lex(bytes)
         pc_require(lexed.diagnostics.len() == 0, "current-kind fixture lexes real tokens")
-        prepared := parser_prepare_tokens(^lexed.tokens, &lexed.tables)
+        prepared := parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
         pc_require(prepared.diagnostics.len() == 0, "current-kind fixture uses canonical prepared tokens")
         end: bytes.len()
-        state := JetParserState{tokens: ^prepared.tokens, position: 0, diagnostics: ^lexed.diagnostics, source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, result_handler_depth: 0, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{^bytes}, allow_environment_reads: false, tables: [TokenTables]{^lexed.tables}}
+        state := JetParserState{tokens: prepared.tokens.move(), position: 0, diagnostics: lexed.diagnostics.move(), source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, result_handler_depth: 0, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{bytes.move()}, allow_environment_reads: false, tables: [TokenTables]{lexed.tables.move()}}
         pc_require(state.tokens.len() > 0 && state.tokens[state.tokens.len() - 1].kind == TOKEN_EOF, "fixture retains the actual lexical EOF token")
         split: source.starts_with(">>")
         if split {
             pc_require(state.tokens[0].kind == TOKEN_SHR, "real lexer produces the combined type-close token")
-            _ := parser_take_type_close(&state)
+            _ := parser_take_type_close(state)
             pc_require(state.pending_type_gt, "real type-close consumer leaves the pending second GT")
         }
         before: state.position
         oracle := state.copy()
-        expected: parser_current(&oracle).kind
-        actual: parser_current_kind(&state)
+        expected: parser_current(oracle).kind
+        actual: parser_current_kind(state)
         pc_require(actual == expected && "{state:Debug}" == "{oracle:Debug}", "kind-only query preserves full parser state and the token-accessor verdict")
         if split -> pc_require(actual == TOKEN_GT && state.position == before, "pending GT precedes trivia and does not advance the cursor")
         if !split -> pc_require(state.position > before, "mixed and trivia-only comments advance to the same real token or EOF")
         stable: state.position
-        pc_require(parser_current_kind(&state) == actual && state.position == stable, "repeated current-kind query is idempotent")
+        pc_require(parser_current_kind(state) == actual && state.position == stable, "repeated current-kind query is idempotent")
         if split {
             cursors: [Int]{-1, state.tokens.len(), state.tokens.len() + 1}
             loop cursor in cursors {
                 state.position = cursor
                 oracle = state.copy()
-                expected_pending: parser_current(&oracle).kind
-                pc_require(parser_current_kind(&state) == expected_pending && expected_pending == TOKEN_GT, "pending split token precedes negative and out-of-range bounds")
+                expected_pending: parser_current(oracle).kind
+                pc_require(parser_current_kind(state) == expected_pending && expected_pending == TOKEN_GT, "pending split token precedes negative and out-of-range bounds")
                 pc_require(state.position == cursor && "{state:Debug}" == "{oracle:Debug}", "pending GT preserves even an out-of-range cursor and all state")
-                pc_require(parser_current_kind(&state) == TOKEN_GT && state.position == cursor, "pending GT remains idempotent")
+                pc_require(parser_current_kind(state) == TOKEN_GT && state.position == cursor, "pending GT remains idempotent")
             }
         }
         state.pending_type_gt = false
@@ -246,13 +246,13 @@ pc_current_kind_equivalence: fn() {
         loop cursor in cursors {
             state.position = cursor
             oracle = state.copy()
-            expected_at: parser_current(&oracle).kind
-            actual_at: parser_current_kind(&state)
+            expected_at: parser_current(oracle).kind
+            actual_at: parser_current_kind(state)
             pc_require(actual_at == expected_at && "{state:Debug}" == "{oracle:Debug}", "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")
             if cursor < 0 || cursor >= state.tokens.len() -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "negative, end, and beyond-end cursors return EOF without advancing")
             if cursor == state.tokens.len() - 1 -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "the real EOF token is read without advancing")
             after: state.position
-            pc_require(parser_current_kind(&state) == actual_at && state.position == after, "all non-pending cursor cases remain idempotent")
+            pc_require(parser_current_kind(state) == actual_at && state.position == after, "all non-pending cursor cases remain idempotent")
         }
     }
 }

@@ -57,7 +57,7 @@ NoFollowRoot: struct {
     right: String
     priv resolver: AuthorityResolver
 
-    new: fn(right: String, resolver: ^AuthorityResolver) -> NoFollowRoot SandboxAuthorityError! {
+    new: fn(right: String, resolver: &&AuthorityResolver) -> NoFollowRoot SandboxAuthorityError! {
         canonical: authority_parse_right(right) ?? return Err(SandboxAuthorityError.InvalidRight(right))
         Ok(NoFollowRoot{right: canonical, resolver: resolver})
     }
@@ -82,11 +82,11 @@ SandboxAuthority: struct {
 
     // Lend a host scope to a guest. Every requested right must be a
     // tighten-only child of the host and must satisfy a declared need.
-    lend: fn(package: PackageAuthority, host: CanonicalAuthority, requested: [String], roots: ^[NoFollowRoot]) -> SandboxAuthority SandboxAuthorityError! {
+    lend: fn(package: PackageAuthority, host: CanonicalAuthority, requested: [String], roots: &&[NoFollowRoot]) -> SandboxAuthority SandboxAuthorityError! {
         needs := [String]{}
         loop right in package.needs {
             parsed: authority_parse_right(right) ?? return Err(SandboxAuthorityError.InvalidRight(right))
-            &needs.push(parsed)
+            needs.push(parsed)
         }
         needs = authority_holds(needs)
         authority: host.tighten(requested) ?? return Err(SandboxAuthorityError.Widened(err))

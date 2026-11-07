@@ -18,9 +18,9 @@ run_transcript: fn(source: &String, steps: &[TranscriptStep]) {
     loop step in steps {
         if step == {
             .Send{msg, expect_contains} -> {
-                send_msg(&stdin, msg)
+                send_msg(stdin, msg)
                 if expect_contains == .Val(expects) {
-                    resp: read_msg(&stdout)
+                    resp: read_msg(stdout)
                     loop expect in expects {
                         assert(resp.contains(expect), "transcript step: expected {expect} in response, got:\n{resp}")
                     }
@@ -28,15 +28,15 @@ run_transcript: fn(source: &String, steps: &[TranscriptStep]) {
             }
             .Open{uri, expect_notification} -> {
                 open: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
-                send_msg(&stdin, open)
+                send_msg(stdin, open)
                 if expect_notification {
-                    notif: read_msg(&stdout)
+                    notif: read_msg(stdout)
                     assert(notif.contains("publishDiagnostics"), "expected publishDiagnostics after open, got: {notif}")
                 }
             }
         }
     }
-    drop(^stdin)
+    drop(stdin)
     _: child.wait()
     _: fs.remove_file(tmp_path)
 }
@@ -51,7 +51,7 @@ costly_source: fn(marker: String, callers: USize) -> String {
     loop index in 0..callers {
         source.push_str("caller_{index}: fn() -> Int {{ return target({index}) }}\n")
     }
-    ^source
+    source.move()
 }
 
 percentile: fn(samples: [Duration], pct: USize) -> Duration {

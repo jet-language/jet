@@ -31,9 +31,9 @@ NAME_TABLE_INITIAL_SLOTS: 1024
 // A table whose id 0 is the empty spelling (`name_empty`).
 name_table: fn() -> NameTable Never! {
     slots := [Int]{}
-    loop _ in 0..<NAME_TABLE_INITIAL_SLOTS -> &slots.push(0)
+    loop _ in 0..<NAME_TABLE_INITIAL_SLOTS -> slots.push(0)
     table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, hashes: [Int]{}, slots: slots, mask: NAME_TABLE_INITIAL_SLOTS - 1}
-    name_intern_bytes(&table, [U8]{}, 0, 0)
+    name_intern_bytes(table, [U8]{}, 0, 0)
     table
 }
 
@@ -86,12 +86,12 @@ name_intern_bytes: fn(table: &NameTable, bytes: [U8], start: Int, end: Int) -> N
         slot = (slot + 1).bit_and(table.mask)
     }
     id: table.texts.len()
-    &table.bytes.extend(bytes[start..<end])
-    &table.ends.push(table.bytes.len())
-    &table.hashes.push(hash)
-    &table.texts.push(String.from_bytes(bytes.slice(start, end)) ?? "")
+    table.bytes.extend(bytes[start..<end])
+    table.ends.push(table.bytes.len())
+    table.hashes.push(hash)
+    table.texts.push(String.from_bytes(bytes.slice(start, end)) ?? "")
     table.slots[slot] = id + 1
-    if (id + 1) * 2 > table.mask -> name_table_grow(&table)
+    if (id + 1) * 2 > table.mask -> name_table_grow(table)
     Name{id: U32{id}}
 }
 
@@ -116,20 +116,20 @@ name_find_bytes: fn(table: NameTable, bytes: [U8], start: Int, end: Int) -> Name
 
 name_intern: fn(table: &NameTable, text: String) -> Name Never! {
     bytes: text.bytes()
-    name_intern_bytes(&table, bytes, 0, bytes.len())
+    name_intern_bytes(table, bytes, 0, bytes.len())
 }
 
 name_table_grow: fn(table: &NameTable) Never! {
     capacity: (table.mask + 1) * 2
     mask: capacity - 1
     slots := [Int]{}
-    loop _ in 0..<capacity -> &slots.push(0)
+    loop _ in 0..<capacity -> slots.push(0)
     loop id in 0..<table.texts.len() {
         slot := table.hashes[id].bit_and(mask)
         loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
         slots[slot] = id + 1
     }
-    table.slots = ^slots
+    table.slots = slots.move()
     table.mask = mask
 }
 
@@ -157,7 +157,7 @@ NAME_ROWS_INITIAL_SLOTS: 16
 
 name_rows: fn() -> NameRows Never! {
     slots := [Int]{}
-    loop _ in 0..<NAME_ROWS_INITIAL_SLOTS -> &slots.push(0)
+    loop _ in 0..<NAME_ROWS_INITIAL_SLOTS -> slots.push(0)
     NameRows{texts: [String]{}, hashes: [Int]{}, rows: [Int]{}, slots: slots, mask: NAME_ROWS_INITIAL_SLOTS - 1}
 }
 
@@ -176,7 +176,7 @@ name_rows_key: fn(map: NameRows, text: String, hash: Int) -> Int? Never! {
 // Binds `text` to `row`, replacing any earlier value. A negative `row` reads
 // as unbound to name_rows_get and as itself to name_rows_value.
 name_rows_set: fn(map: &NameRows, text: String, row: Int) Never! {
-    name_rows_set_hashed(&map, text, name_rows_hash(text), row)
+    name_rows_set_hashed(map, text, name_rows_hash(text), row)
 }
 
 // name_rows_set for a `text` whose name_rows_hash is `hash`.
@@ -185,7 +185,7 @@ name_rows_set_hashed: fn(map: &NameRows, text: String, hash: Int, row: Int) Neve
         map.rows[key] = row
         return
     }
-    name_rows_append(&map, text, hash, row)
+    name_rows_append(map, text, hash, row)
 }
 
 // Binds `text` to `row` (>= 0) unless it is bound: a key's first row stands.
@@ -196,18 +196,18 @@ name_rows_set_first: fn(map: &NameRows, text: String, row: Int) Never! {
         if map.rows[key] < 0 -> map.rows[key] = row
         return
     }
-    name_rows_append(&map, text, hash, row)
+    name_rows_append(map, text, hash, row)
 }
 
 // Adds `text`, which the map never held, bound to `row`.
 name_rows_append: fn(map: &NameRows, text: String, hash: Int, row: Int) Never! {
     key: map.texts.len()
     // copy: the map keeps its own key; `text` stays with the caller.
-    &map.texts.push(text.copy())
-    &map.hashes.push(hash)
-    &map.rows.push(row)
+    map.texts.push(text.copy())
+    map.hashes.push(hash)
+    map.rows.push(row)
     if (key + 1) * 2 > map.mask {
-        name_rows_grow(&map)
+        name_rows_grow(map)
         return
     }
     slot := hash.bit_and(map.mask)
@@ -220,13 +220,13 @@ name_rows_grow: fn(map: &NameRows) Never! {
     capacity: (map.mask + 1) * 2
     mask: capacity - 1
     slots := [Int]{}
-    loop _ in 0..<capacity -> &slots.push(0)
+    loop _ in 0..<capacity -> slots.push(0)
     loop key in 0..<map.texts.len() {
         slot := map.hashes[key].bit_and(mask)
         loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
         slots[slot] = key + 1
     }
-    map.slots = ^slots
+    map.slots = slots.move()
     map.mask = mask
 }
 
@@ -253,9 +253,9 @@ name_rows_value: fn(map: NameRows, text: String) -> Int? Never! {
 name_rows_sorted: fn(map: NameRows) -> [(key: String, local: Int)] Never! {
     run := [(key: String, local: Int)]{}
     loop (key, text) in map.texts {
-        if map.rows[key] >= 0 -> &run.push((key: text.copy(), local: map.rows[key]))
+        if map.rows[key] >= 0 -> run.push((key: text.copy(), local: map.rows[key]))
     }
-    &run.sort()
+    run.sort()
     run
 }
 

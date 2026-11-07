@@ -19,10 +19,10 @@ jettrace_validate_tasks: fn(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTa
         symbol: fields[jettrace_get(fields, "symbol")].value
         jettrace_validate_symbol(symbol, "{label}.symbol")
         if tasks.has_key(id) -> return Err(jettrace_error("{label}.id duplicates task {id}"))
-        tasks[id] = JetTraceTaskFact{parent: parent, state: ^state, wait: ^wait, symbol: symbol.copy()}
-        &ids.push(id)
+        tasks[id] = JetTraceTaskFact{parent: parent, state: state.move(), wait: wait.move(), symbol: symbol.copy()}
+        ids.push(id)
     }
-    &ids.sort()
+    ids.sort()
     // Sorted root order preserves Rust's first diagnostic. Three-color walks
     // memoize finished chains: no repeated traversal of every prior ancestor.
     finished := [U64:Bool]{}
@@ -38,12 +38,12 @@ jettrace_validate_tasks: fn(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTa
             if next_parent == (U64{0}) -> break
             if visiting.has_key(current) -> return Err(jettrace_error("content.tasks task {id} has cyclic parent causality"))
             visiting[current] = true
-            &chain.push(current)
+            chain.push(current)
             current = next_parent
         }
         loop vertex in chain -> finished[vertex] = true
     }
-    Ok(^tasks)
+    Ok(tasks)
 }
 jettrace_validate_locks: fn(value: CanonicalJSON) JetTraceError! {
     items: jettrace_array(value, "content.locks")

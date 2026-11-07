@@ -215,7 +215,7 @@ jet_ring_core_usage_layer: fn(usage: String) -> RuntimeLayer Never! {
     helper := ""
     if parts.len() > 1 {
         helper_parts := [String]{}
-        loop index in 1..<parts.len() -> &helper_parts.push(parts[index])
+        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
         helper = helper_parts.join("::")
     }
     jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
@@ -227,27 +227,27 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     helper := ""
     if parts.len() > 1 {
         helper_parts := [String]{}
-        loop index in 1..<parts.len() -> &helper_parts.push(parts[index])
+        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
         helper = helper_parts.join("::")
     }
     dependencies := [String]{}
     loop row in jet_ring_dependency_rows() {
         if row.module_name == module_name {
-            loop dependency in row.dependencies -> jet_ring_insert_string(&dependencies, dependency)
+            loop dependency in row.dependencies -> jet_ring_insert_string(dependencies, dependency)
             break
         }
     }
-    if helper.len() > 0 && module_name != "core" -> jet_ring_insert_string(&dependencies, module_name)
-    if usage == "core::json" -> jet_ring_insert_string(&dependencies, "core.encoding.json")
-    if usage == "core::bytes" -> jet_ring_insert_string(&dependencies, "core.encoding")
-    if usage == "core.crypto::file_seal" || usage == "core.crypto::file_open" -> jet_ring_insert_string(&dependencies, "core.files")
+    if helper.len() > 0 && module_name != "core" -> jet_ring_insert_string(dependencies, module_name)
+    if usage == "core::json" -> jet_ring_insert_string(dependencies, "core.encoding.json")
+    if usage == "core::bytes" -> jet_ring_insert_string(dependencies, "core.encoding")
+    if usage == "core.crypto::file_seal" || usage == "core.crypto::file_open" -> jet_ring_insert_string(dependencies, "core.files")
     if !jet_ring_is_namespace_only(module_name) {
         module_parts := module_name.split(".").to_list()
         if module_parts.len() > 1 {
             parent_parts := [String]{}
-            loop index in 0..<module_parts.len() - 1 -> &parent_parts.push(module_parts[index])
+            loop index in 0..<module_parts.len() - 1 -> parent_parts.push(module_parts[index])
             parent := parent_parts.join(".")
-            if parent.starts_with("core") -> jet_ring_insert_string(&dependencies, parent)
+            if parent.starts_with("core") -> jet_ring_insert_string(dependencies, parent)
         }
     }
     dependencies
@@ -260,7 +260,7 @@ jet_ring_insert_string: fn(rows: &[String], value: String) Never! {
         if value < rows[index] -> break
         index += 1
     }
-    &rows.push(value)
+    rows.push(value.copy())
     cursor := rows.len() - 1
     loop cursor > index {
         rows[cursor] = rows[cursor - 1]
@@ -272,7 +272,7 @@ jet_ring_insert_string: fn(rows: &[String], value: String) Never! {
 // Stable scalar-position ordering, using the same key comparison as publication.
 jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
     order := [Int]{}
-    loop index in 0..<rows.len() -> &order.push(index)
+    loop index in 0..<rows.len() -> order.push(index)
     width := 1
     loop width < order.len() {
         merged := [Int]{}
@@ -284,10 +284,10 @@ jet_ring_closure_order: fn(rows: [JetRingLayerFact]) -> [Int] Never! {
             right := middle
             loop left < middle || right < end {
                 if right >= end || (left < middle && !(rows[order[right]].key < rows[order[left]].key)) {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left += 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right += 1
                 }
             }
@@ -305,7 +305,7 @@ jet_ring_classify_prelude_closure: fn(roots: [String]) -> [JetRingLayerFact] Nev
     classified := [String:Bool]{}
     loop root in roots {
         if !jet_ring_is_closure_marker(root) && !(pending_keys.get(root) ?? false) {
-            &pending.push(root)
+            pending.push(root.copy())
             pending_keys[root] = true
         }
     }
@@ -316,10 +316,10 @@ jet_ring_classify_prelude_closure: fn(roots: [String]) -> [JetRingLayerFact] Nev
         cursor += 1
         pending_keys[current] = false
         classified[current] = true
-        &closure.push(JetRingLayerFact{key: current, layer: jet_ring_core_usage_layer(current)})
+        closure.push(JetRingLayerFact{key: current, layer: jet_ring_core_usage_layer(current)})
         loop dependency in jet_ring_dependency_keys(current) {
             if !(pending_keys.get(dependency) ?? false) && !(classified.get(dependency) ?? false) {
-                &pending.push(dependency)
+                pending.push(dependency.copy())
                 pending_keys[dependency] = true
             }
         }

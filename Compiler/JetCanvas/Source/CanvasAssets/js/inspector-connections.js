@@ -1104,7 +1104,7 @@
     const fields = [
       { key: "signature", id: "function-signature", label: "Signature", kind: "expression", type: "Signature", value: fnMeta.signature || "", source: fnMeta.signature || "", editable: true, apply_op: signatureOp, multiline: true },
       { key: "name", id: "function-rename-to", label: "Name", kind: "expression", type: "Identifier", value: fnMeta.name || node.title, source: fnMeta.name || node.title, editable: true, apply_op: renameOp },
-      // D-VIS-MODULE1: visibility follows the enclosing `priv module`, so it is
+      // Visibility follows the enclosing `priv module`, so it is
       // a read-only fact here, not a per-function edit.
       { key: "visibility", id: "function-visibility", label: "Visibility", kind: "scalar", type: "Visibility", value: fnMeta.visibility || "public", source: fnMeta.visibility || "public", editable: false },
       { key: "pure", id: "function-pure", label: "Pure", kind: "scalar", type: "Bool", value: fnMeta.pure ? "true" : "false", source: fnMeta.pure ? "true" : "false", editable: true, apply_op: signatureOp }

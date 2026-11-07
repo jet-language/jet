@@ -1,0 +1,20 @@
+// Dictionary order: `text.collate` is the Unicode default order (UCA with
+// the CLDR root table), which is also English order. String `<` and `sort()`
+// stay byte order, the order `LC_COLLATE=C` gives.
+use text: core.text
+
+run: fn() {
+    names := [String]{"zebra", "Banana", "éclair", "apple", "Zulu", "_x"}
+    bytes := names
+    bytes.sort()
+    print(bytes)
+    names.sort_by((left: String, right: String) -> text.collate(left, right))
+    print(names)
+    print(text.collate("apple", "Banana") == Ordering.Less)
+    // "é" is e followed by U+0301 COMBINING ACUTE ACCENT: the same text as "é".
+    print(text.collate("é", "é") == Ordering.Equal)
+    print(text.collate("role", "Role") == Ordering.Less)
+    keyed := [String]{"résumé", "resume", "Resume", "résume", "resumé"}
+    keyed.sort_by((word: String) -> text.collation_key(word))
+    print(keyed)
+}

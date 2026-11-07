@@ -113,11 +113,11 @@ line_spans: fn(text: String) -> [ByteSpan] Never! {
     start := 0
     loop index in 0..<bytes.len() {
         if bytes[index] == (U8{10}) {
-            &spans.push(ByteSpan{start: start, end: index})
+            spans.push(ByteSpan{start: start, end: index})
             start = index + 1
         }
     }
-    &spans.push(ByteSpan{start: start, end: bytes.len()})
+    spans.push(ByteSpan{start: start, end: bytes.len()})
     spans
 }
 
@@ -205,7 +205,7 @@ table_rows: fn(body: String, source: String, row_openers: [String]) -> [CommandR
         }
         found: name ?? return Err(census_fail("census: command row lacks name or frequency_rank:\n{byte_slice(body, start, end)}"))
         if rank_start < 0 -> return Err(census_fail("census: command row lacks name or frequency_rank:\n{byte_slice(body, start, end)}"))
-        &rows.push(CommandRow{start: start, end: end, name: found, rank: rank, rank_start: rank_start, rank_end: rank_end})
+        rows.push(CommandRow{start: start, end: end, name: found, rank: rank, rank_start: rank_start, rank_end: rank_end})
         index = closing + 1
     }
     Ok(rows)
@@ -267,7 +267,7 @@ invoked_commands: fn(bytes: [U8], commands: [String:Int]) -> [String] Never! {
         word: String.from_bytes_lossy(bytes[word_start..<word_end])
         if commands.get(word) != None && seen.get(word) == None {
             seen[word] = true
-            &invoked.push(word)
+            invoked.push(word)
         }
         index = word_end
     }
@@ -283,13 +283,13 @@ has_zero_byte: fn(bytes: [U8]) -> Bool Never! {
 
 scanned_files: fn() -[Exec, IO, Time.Wait]> [String] CensusError! {
     argv := [String]{"git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"}
-    loop root in SCAN_ROOTS -> &argv.push(root)
+    loop root in SCAN_ROOTS -> argv.push(root)
     receipt: process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? return Err(census_fail("spawnSync git ENOENT"))
     // execFileSync: the child's stderr reaches ours, and a failure reports the
     // command line followed by that stderr.
     if receipt.errors != "" {
         sink := term.stderr()
-        &sink.write(receipt.errors).drop("stderr write")
+        sink.write(receipt.errors).drop("stderr write")
     }
     if receipt.code != 0 -> return Err(census_fail("Command failed: {argv.join(" ")}\n{receipt.errors}"))
     paths := [String]{}
@@ -308,17 +308,17 @@ scanned_files: fn() -[Exec, IO, Time.Wait]> [String] CensusError! {
         }
         if excluded -> next
         seen[path] = true
-        &paths.push(path)
+        paths.push(path)
     }
-    &paths.sort()
+    paths.sort()
     Ok(paths)
 }
 
 // Most-used first, ties A-Z.
 rank_commands: fn(counts: [String:Int], names: [String]) -> [RankedCommand] Never! {
     ranked := [RankedCommand]{}
-    loop name in names -> &ranked.push(RankedCommand{name: name, count: counts.get(name) ?? 0})
-    &ranked.sort_by((left: RankedCommand, right: RankedCommand) -> (right.count <=> left.count).then(left.name <=> right.name))
+    loop name in names -> ranked.push(RankedCommand{name: name, count: counts.get(name) ?? 0})
+    ranked.sort_by((left: RankedCommand, right: RankedCommand) -> (right.count <=> left.count).then(left.name <=> right.name))
     ranked
 }
 
@@ -367,7 +367,7 @@ census_main: fn(args: [String]) -[Env, FS, IO, Exec, Time.Wait]> Int CensusError
     loop row in read.rows {
         if counts.get(row.name) == None {
             counts[row.name] = 0
-            &names.push(row.name)
+            names.push(row.name)
         }
     }
     paths: scanned_files() ?? return Err(err)
@@ -391,7 +391,7 @@ census_main: fn(args: [String]) -[Env, FS, IO, Exec, Time.Wait]> Int CensusError
         stale := [String]{}
         loop row in read.rows {
             expected: rank_text(rank_of, row.name)
-            if "{row.rank}" != expected -> &stale.push("census: {row.name} has frequency_rank {row.rank} in {read.table.path}, census says {expected}")
+            if "{row.rank}" != expected -> stale.push("census: {row.name} has frequency_rank {row.rank} in {read.table.path}, census says {expected}")
         }
         if stale.len() == 0 -> return Ok(0)
         loop line in stale -> term.eprint(line)

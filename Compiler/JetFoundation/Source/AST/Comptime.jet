@@ -216,7 +216,7 @@ ast_comptime_key_type: fn(key: CtKey) -> Type Never! {
         .Char(_) -> Type.Char
         .Tuple(fields) -> {
             types := [TypeTupleField]{}
-            loop field in fields -> &types.push(TypeTupleField{name: field.name, ty: ast_comptime_key_type(field.value)})
+            loop field in fields -> types.push(TypeTupleField{name: field.name, ty: ast_comptime_key_type(field.value)})
             Type.Tuple{fields: types}
         }
         .Struct(name, _) | .Enum(name, _) -> Type.Named{name: name}
@@ -264,7 +264,7 @@ ComptimeNameSite: struct {
 // `comptime` blocks; `WalkOpts::PLAIN`).
 comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
-    ast_comptime_walk_expr(expr, true, &sites)
+    ast_comptime_walk_expr(expr, true, sites)
     sites
 }
 
@@ -273,7 +273,7 @@ comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
 // consumer filters the names against its own declarations.
 comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
-    ast_comptime_walk_expr(expr, false, &sites)
+    ast_comptime_walk_expr(expr, false, sites)
     sites
 }
 
@@ -282,112 +282,112 @@ comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
 ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if expr == {
         .Ident(name, span, _) -> {
-            if !calls -> &sites.push(ComptimeNameSite{name: name, span: span})
+            if !calls -> sites.push(ComptimeNameSite{name: name, span: span})
         }
         .Call(call, _) -> {
-            if calls -> &sites.push(ComptimeNameSite{name: call.name, span: call.name_span})
-            loop arg in call.args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+            if calls -> sites.push(ComptimeNameSite{name: call.name, span: call.name_span})
+            loop arg in call.args -> ast_comptime_walk_expr(arg.expr, calls, sites)
         }
         .Str(parts, _, _) -> {
             loop part in parts {
-                if part == .Interp(inner, _) -> ast_comptime_walk_expr(inner, calls, &sites)
+                if part == .Interp(inner, _) -> ast_comptime_walk_expr(inner, calls, sites)
             }
         }
-        .ListLit(items, _, _) -> loop item in items -> ast_comptime_walk_expr(item, calls, &sites)
-        .CompareChain(operands, _, _, _, _) -> loop item in operands -> ast_comptime_walk_expr(item, calls, &sites)
-        .MemberSpread(base, _, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
-        .Spread(inner, _, _) | .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) -> ast_comptime_walk_expr(inner, calls, &sites)
+        .ListLit(items, _, _) -> loop item in items -> ast_comptime_walk_expr(item, calls, sites)
+        .CompareChain(operands, _, _, _, _) -> loop item in operands -> ast_comptime_walk_expr(item, calls, sites)
+        .MemberSpread(base, _, _, _) -> ast_comptime_walk_expr(base, calls, sites)
+        .Spread(inner, _, _) | .Unary(_, inner, _, _) | .Deref(inner, _, _) | .RawOf(inner, _, _) | .Copy(inner, _, _) | .Place(inner, _, _, _) | .Field(inner, _, _, _) | .Tainted(inner, _, _, _) | .Present(inner, _, _) | .Ok(inner, _, _) | .Err(inner, _, _) | .Paren(inner, _, _) -> ast_comptime_walk_expr(inner, calls, sites)
         .Try(inner, _, _, note, _) -> {
-            ast_comptime_walk_expr(inner, calls, &sites)
-            if note == .Val(context) -> ast_comptime_walk_expr(context, calls, &sites)
+            ast_comptime_walk_expr(inner, calls, sites)
+            if note == .Val(context) -> ast_comptime_walk_expr(context, calls, sites)
         }
-        .OptField(base, _, _, _, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+        .OptField(base, _, _, _, _, _) -> ast_comptime_walk_expr(base, calls, sites)
         .Range(start, end, _, _, _) -> {
-            ast_comptime_walk_expr(start, calls, &sites)
-            ast_comptime_walk_expr(end, calls, &sites)
+            ast_comptime_walk_expr(start, calls, sites)
+            ast_comptime_walk_expr(end, calls, sites)
         }
         .MapLit(entries, _, _) -> {
             loop entry in entries {
-                ast_comptime_walk_expr(entry.key, calls, &sites)
-                ast_comptime_walk_expr(entry.value, calls, &sites)
+                ast_comptime_walk_expr(entry.key, calls, sites)
+                ast_comptime_walk_expr(entry.value, calls, sites)
             }
         }
         .Index(base, index, _, _, _) -> {
-            ast_comptime_walk_expr(base, calls, &sites)
-            ast_comptime_walk_expr(index, calls, &sites)
+            ast_comptime_walk_expr(base, calls, sites)
+            ast_comptime_walk_expr(index, calls, sites)
         }
         .Slice(base, start, end, range, _, _) -> {
-            ast_comptime_walk_expr(base, calls, &sites)
+            ast_comptime_walk_expr(base, calls, sites)
             if range == .Val(whole) {
-                ast_comptime_walk_expr(whole, calls, &sites)
+                ast_comptime_walk_expr(whole, calls, sites)
             } else {
-                ast_comptime_walk_expr(start, calls, &sites)
-                ast_comptime_walk_expr(end, calls, &sites)
+                ast_comptime_walk_expr(start, calls, sites)
+                ast_comptime_walk_expr(end, calls, sites)
             }
         }
         .Binary(_, left, right, _, _) -> {
-            ast_comptime_walk_expr(left, calls, &sites)
-            ast_comptime_walk_expr(right, calls, &sites)
+            ast_comptime_walk_expr(left, calls, sites)
+            ast_comptime_walk_expr(right, calls, sites)
         }
         .MethodCall(receiver, _, _, _, _, args, _) -> {
-            ast_comptime_walk_expr(receiver, calls, &sites)
-            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+            ast_comptime_walk_expr(receiver, calls, sites)
+            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, sites)
         }
-        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+        .StructLit(_, _, _, _, fields, _, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, sites)
         .TypedLit(_, body, _, _) -> {
             if body == {
-                .Fields(fields) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
-                .Elements(elements) -> loop element in elements -> ast_comptime_walk_expr(element, calls, &sites)
+                .Fields(fields) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, sites)
+                .Elements(elements) -> loop element in elements -> ast_comptime_walk_expr(element, calls, sites)
                 .Entries(entries) -> {
                     loop entry in entries {
-                        ast_comptime_walk_expr(entry.key, calls, &sites)
-                        ast_comptime_walk_expr(entry.value, calls, &sites)
+                        ast_comptime_walk_expr(entry.key, calls, sites)
+                        ast_comptime_walk_expr(entry.value, calls, sites)
                     }
                 }
-                .Value(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                .Value(value) -> ast_comptime_walk_expr(value, calls, sites)
                 .ByteText(_) | .Empty -> {}
             }
         }
         .EnumLit(_, _, _, args, _, _, _) -> {
             loop arg in args {
                 if arg == {
-                    .Positional(value) -> ast_comptime_walk_expr(value, calls, &sites)
-                    .Named(_, value) -> ast_comptime_walk_expr(value, calls, &sites)
+                    .Positional(value) -> ast_comptime_walk_expr(value, calls, sites)
+                    .Named(_, value) -> ast_comptime_walk_expr(value, calls, sites)
                 }
             }
         }
         .PatternTest(subject, pattern, _, _) -> {
-            ast_comptime_walk_expr(subject, calls, &sites)
-            ast_comptime_walk_pattern(pattern, calls, &sites)
+            ast_comptime_walk_expr(subject, calls, sites)
+            ast_comptime_walk_pattern(pattern, calls, sites)
         }
         .OrFallback(value, fallback, _, _, _) -> {
-            ast_comptime_walk_expr(value, calls, &sites)
+            ast_comptime_walk_expr(value, calls, sites)
             if fallback == {
-                .Value(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
+                .Value(inner) -> ast_comptime_walk_expr(inner, calls, sites)
                 .Return(returned, _) -> {
-                    if returned == .Val(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
+                    if returned == .Val(inner) -> ast_comptime_walk_expr(inner, calls, sites)
                 }
                 .Block(body, tail, _) -> {
-                    ast_comptime_walk_stmts(body, calls, &sites)
-                    if tail == .Val(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
+                    ast_comptime_walk_stmts(body, calls, sites)
+                    if tail == .Val(inner) -> ast_comptime_walk_expr(inner, calls, sites)
                 }
-                .Panic(_, args) -> loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+                .Panic(_, args) -> loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, sites)
                 else -> {}
             }
         }
         .If(cond, then_body, then_value, else_body, else_value, _, _) -> {
-            ast_comptime_walk_expr(cond, calls, &sites)
-            ast_comptime_walk_stmts(then_body, calls, &sites)
-            ast_comptime_walk_expr(then_value, calls, &sites)
-            ast_comptime_walk_stmts(else_body, calls, &sites)
-            ast_comptime_walk_expr(else_value, calls, &sites)
+            ast_comptime_walk_expr(cond, calls, sites)
+            ast_comptime_walk_stmts(then_body, calls, sites)
+            ast_comptime_walk_expr(then_value, calls, sites)
+            ast_comptime_walk_stmts(else_body, calls, sites)
+            ast_comptime_walk_expr(else_value, calls, sites)
         }
-        .TupleLit(fields, _, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+        .TupleLit(fields, _, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, sites)
         .CallValue(callee, args, _, _) -> {
-            ast_comptime_walk_expr(callee, calls, &sites)
-            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+            ast_comptime_walk_expr(callee, calls, sites)
+            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, sites)
         }
-        .PtrFromAddr(_, _, _, addr, _, _) -> ast_comptime_walk_expr(addr, calls, &sites)
+        .PtrFromAddr(_, _, _, addr, _, _) -> ast_comptime_walk_expr(addr, calls, sites)
         // Lambda bodies are suppressed under PLAIN; literals, `OptMethodCall`
         // (absent from the Rust walk) and compile-time names have no children.
         else -> {}
@@ -396,20 +396,20 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
 
 ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if pattern == {
-        .Or(alternatives, _) -> loop alternative in alternatives -> ast_comptime_walk_pattern(alternative, calls, &sites)
+        .Or(alternatives, _) -> loop alternative in alternatives -> ast_comptime_walk_pattern(alternative, calls, sites)
         .Struct(fields, _, _, _) -> {
             loop field in fields {
-                if field == .Value(_, _, value) -> ast_comptime_walk_expr(value, calls, &sites)
-                if field == .Nested(_, _, inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
+                if field == .Value(_, _, value) -> ast_comptime_walk_expr(value, calls, sites)
+                if field == .Nested(_, _, inner) -> ast_comptime_walk_pattern(inner, calls, sites)
             }
         }
-        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_comptime_walk_pattern_slot(slot, calls, &sites)
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_comptime_walk_pattern_slot(slot, calls, sites)
         .Map(entries, _, _) -> loop entry in entries {
-            ast_comptime_walk_expr(entry.key, calls, &sites)
-            ast_comptime_walk_pattern_slot(entry.slot, calls, &sites)
+            ast_comptime_walk_expr(entry.key, calls, sites)
+            ast_comptime_walk_pattern_slot(entry.slot, calls, sites)
         }
         .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
-            if inner == .Val(nested) -> ast_comptime_walk_pattern(nested, calls, &sites)
+            if inner == .Val(nested) -> ast_comptime_walk_pattern(nested, calls, sites)
         }
         else -> {}
     }
@@ -417,15 +417,15 @@ ast_comptime_walk_pattern: fn(pattern: Pattern, calls: Bool, sites: &[ComptimeNa
 
 ast_comptime_walk_pattern_slot: fn(slot: PatSlot, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if slot == {
-        .Value(value) -> ast_comptime_walk_expr(value, calls, &sites)
-        .Nested(inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
-        .Named(_, _, inner) -> ast_comptime_walk_pattern_slot(inner, calls, &sites)
+        .Value(value) -> ast_comptime_walk_expr(value, calls, sites)
+        .Nested(inner) -> ast_comptime_walk_pattern(inner, calls, sites)
+        .Named(_, _, inner) -> ast_comptime_walk_pattern_slot(inner, calls, sites)
         else -> {}
     }
 }
 
 ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite]) Never! {
-    loop statement in body -> ast_comptime_walk_stmt(statement, calls, &sites)
+    loop statement in body -> ast_comptime_walk_stmt(statement, calls, sites)
 }
 
 // Rust `walk_stmt_expr_nodes` under `WalkOpts::PLAIN`: `#Impure` and
@@ -433,76 +433,76 @@ ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite
 // blocks are crossed.
 ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if statement == {
-        .Expr(value) | .DeferClose(value, _) | .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> ast_comptime_walk_expr(value, calls, &sites)
-        .Val(binding) -> ast_comptime_walk_expr(binding.init, calls, &sites)
+        .Expr(value) | .DeferClose(value, _) | .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> ast_comptime_walk_expr(value, calls, sites)
+        .Val(binding) -> ast_comptime_walk_expr(binding.init, calls, sites)
         .Assign(target, _, _, value) -> {
             if target == {
                 .Index(base, index, _, _) -> {
-                    ast_comptime_walk_expr(base, calls, &sites)
-                    ast_comptime_walk_expr(index, calls, &sites)
+                    ast_comptime_walk_expr(base, calls, sites)
+                    ast_comptime_walk_expr(index, calls, sites)
                 }
-                .Field(base, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+                .Field(base, _, _) -> ast_comptime_walk_expr(base, calls, sites)
                 .Local(_, _) -> {}
             }
-            ast_comptime_walk_expr(value, calls, &sites)
+            ast_comptime_walk_expr(value, calls, sites)
         }
         .Return(returned, _) -> {
-            if returned == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+            if returned == .Val(value) -> ast_comptime_walk_expr(value, calls, sites)
         }
         .While(cond, body, _, _, _) -> {
-            ast_comptime_walk_expr(cond, calls, &sites)
-            ast_comptime_walk_stmts(body, calls, &sites)
+            ast_comptime_walk_expr(cond, calls, sites)
+            ast_comptime_walk_stmts(body, calls, sites)
         }
         .For(_, _, _, kind, body, _, _, _, _) -> {
             if kind == {
                 .Range(start, end, step, _) -> {
-                    ast_comptime_walk_expr(start, calls, &sites)
-                    ast_comptime_walk_expr(end, calls, &sites)
-                    if step == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                    ast_comptime_walk_expr(start, calls, sites)
+                    ast_comptime_walk_expr(end, calls, sites)
+                    if step == .Val(value) -> ast_comptime_walk_expr(value, calls, sites)
                 }
                 .In(collection, step) -> {
-                    ast_comptime_walk_expr(collection, calls, &sites)
-                    if step == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                    ast_comptime_walk_expr(collection, calls, sites)
+                    if step == .Val(value) -> ast_comptime_walk_expr(value, calls, sites)
                 }
             }
-            ast_comptime_walk_stmts(body, calls, &sites)
+            ast_comptime_walk_stmts(body, calls, sites)
         }
         .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
-            ast_comptime_walk_expr(subject, calls, &sites)
+            ast_comptime_walk_expr(subject, calls, sites)
             loop arm in arms {
-                ast_comptime_walk_expr(arm.cond, calls, &sites)
-                ast_comptime_walk_stmts(arm.body, calls, &sites)
+                ast_comptime_walk_expr(arm.cond, calls, sites)
+                ast_comptime_walk_stmts(arm.body, calls, sites)
             }
-            if else_body == .Val(body) -> ast_comptime_walk_stmts(body, calls, &sites)
+            if else_body == .Val(body) -> ast_comptime_walk_stmts(body, calls, sites)
         }
         .CountedLoop(init, cond, step, body, _, _, _) -> {
-            ast_comptime_walk_expr(init.init, calls, &sites)
-            ast_comptime_walk_expr(cond, calls, &sites)
-            if step == .Val(value) -> ast_comptime_walk_stmt(value, calls, &sites)
-            ast_comptime_walk_stmts(body, calls, &sites)
+            ast_comptime_walk_expr(init.init, calls, sites)
+            ast_comptime_walk_expr(cond, calls, sites)
+            if step == .Val(value) -> ast_comptime_walk_stmt(value, calls, sites)
+            ast_comptime_walk_stmts(body, calls, sites)
         }
         .Unsafe(_, audit, body, _) -> {
-            if audit == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
-            ast_comptime_walk_stmts(body, calls, &sites)
+            if audit == .Val(value) -> ast_comptime_walk_expr(value, calls, sites)
+            ast_comptime_walk_stmts(body, calls, sites)
         }
         .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
-            ast_comptime_walk_expr(cond, calls, &sites)
-            ast_comptime_walk_stmts(then_body, calls, &sites)
-            if else_body == .Val(body) -> ast_comptime_walk_stmts(body, calls, &sites)
+            ast_comptime_walk_expr(cond, calls, sites)
+            ast_comptime_walk_stmts(then_body, calls, sites)
+            if else_body == .Val(body) -> ast_comptime_walk_stmts(body, calls, sites)
         }
         .ContextBlock(fields, body, _) -> {
-            loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
-            ast_comptime_walk_stmts(body, calls, &sites)
+            loop field in fields -> ast_comptime_walk_expr(field.value, calls, sites)
+            ast_comptime_walk_stmts(body, calls, sites)
         }
         .ScopeMember(_, _, args, _, body, _, _, _) -> {
-            loop arg in args -> ast_comptime_walk_expr(arg, calls, &sites)
-            ast_comptime_walk_stmts(body, calls, &sites)
+            loop arg in args -> ast_comptime_walk_expr(arg, calls, sites)
+            ast_comptime_walk_stmts(body, calls, sites)
         }
-        .ComptimeBlock(body, _, _) -> ast_comptime_walk_stmts(body, calls, &sites)
+        .ComptimeBlock(body, _, _) -> ast_comptime_walk_stmts(body, calls, sites)
         .Switched(marker, body, _) -> {
-            if marker.name != "Off" -> ast_comptime_walk_stmts(body, calls, &sites)
+            if marker.name != "Off" -> ast_comptime_walk_stmts(body, calls, sites)
         }
-        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> ast_comptime_walk_stmts(body, calls, &sites)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> ast_comptime_walk_stmts(body, calls, sites)
         // `#Impure` and `#AssumeDet` bodies are suppressed under PLAIN.
         else -> {}
     }
@@ -525,7 +525,7 @@ ast_comptime_key_from_value: fn(value: CtValue) -> CtKey? Never! {
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
                 key: ast_comptime_key_from_value(field.value) ?? return None
-                &keys.push(NamedCtKey{name: field.name, value: key})
+                keys.push(NamedCtKey{name: field.name, value: key})
             }
             if type_name == "tuple" || type_name.starts_with("JetTup_") || type_name.starts_with("(") -> return Val(CtKey.Tuple{fields: keys})
             Val(CtKey.Struct{type_name: type_name, fields: keys})
@@ -560,7 +560,7 @@ ast_comptime_key_to_value: fn(key: CtKey) -> CtValue Never! {
 
 ast_comptime_key_field_values: fn(fields: [NamedCtKey]) -> [NamedCtValue] Never! {
     values := [NamedCtValue]{}
-    loop field in fields -> &values.push(NamedCtValue{name: field.name, value: ast_comptime_key_to_value(field.value)})
+    loop field in fields -> values.push(NamedCtValue{name: field.name, value: ast_comptime_key_to_value(field.value)})
     values
 }
 
@@ -703,7 +703,7 @@ ast_comptime_value_debug: fn(value: CtValue) -> String Never! {
             parts := [String]{}
             loop field in fields {
                 if ast_comptime_memo_storage_name(field.name) -> next
-                &parts.push("{ast_comptime_generated_name(ast_comptime_generated_suffix(field.name))}: {ast_comptime_value_debug(field.value)}")
+                parts.push("{ast_comptime_generated_name(ast_comptime_generated_suffix(field.name))}: {ast_comptime_value_debug(field.value)}")
             }
             if parts.len() == 0 -> return mangled
             "{mangled} {{ {parts.join(", ")} }}"
@@ -720,7 +720,7 @@ ast_comptime_value_debug: fn(value: CtValue) -> String Never! {
                 parts := [String]{}
                 loop arg in args {
                     label: arg.label ?? ""
-                    &parts.push("{label}: {ast_comptime_value_debug(arg.value)}")
+                    parts.push("{label}: {ast_comptime_value_debug(arg.value)}")
                 }
                 return "{mangled} {{ {parts.join(", ")} }}"
             }
@@ -768,10 +768,10 @@ ast_comptime_debug_escape: fn(text: String, in_char: Bool) -> String Never! {
             else -> U8{0}
         }
         if escaped == (U8{0}) {
-            &out.push(byte)
+            out.push(byte)
         } else {
-            &out.push(U8{92})
-            &out.push(escaped)
+            out.push(U8{92})
+            out.push(escaped)
         }
     }
     String.from_bytes(out) ?? text
@@ -795,22 +795,22 @@ ast_comptime_generated_path: fn(name: String) -> String Never! {
     loop byte in name.bytes() {
         alphanumeric: (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
         if alphanumeric {
-            &out.push(byte)
+            out.push(byte)
             next
         }
-        &out.push(U8{95})
+        out.push(U8{95})
         if {
-            byte == (U8{95}) -> &out.push(U8{117})
-            byte == (U8{46}) -> &out.push(U8{100})
-            byte == (U8{58}) -> &out.push(U8{99})
-            byte == (U8{47}) -> &out.push(U8{115})
-            byte == (U8{92}) -> &out.push(U8{98})
-            byte == (U8{45}) -> &out.push(U8{104})
+            byte == (U8{95}) -> out.push(U8{117})
+            byte == (U8{46}) -> out.push(U8{100})
+            byte == (U8{58}) -> out.push(U8{99})
+            byte == (U8{47}) -> out.push(U8{115})
+            byte == (U8{92}) -> out.push(U8{98})
+            byte == (U8{45}) -> out.push(U8{104})
             else -> {
                 code: Int.from_u8(byte)
-                &out.push(U8{120})
-                &out.push(hex[code /% 16])
-                &out.push(hex[code % 16])
+                out.push(U8{120})
+                out.push(hex[code /% 16])
+                out.push(hex[code % 16])
             }
         }
     }

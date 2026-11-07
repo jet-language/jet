@@ -1,7 +1,7 @@
 # tests/run_tier_diagnostics.rs::e0956_row_text_matches_aot_run_and_interpreter at tests/run_tier_diagnostics.rs:93; hand-port
-# Claim: AOT front end rejects comptime_panic.jet with an E0956 diagnostic (tests/run_tier_diagnostics.rs:141)
-# Claim: rendered text equals tests/ui/comptime_panic.stderr (tests/run_tier_diagnostics.rs:157-167)
-# Claim: snapshot expects E0953 'Your comptime code stopped the build' and E0107 'Nothing named `X` exists here' (tests/ui/comptime_panic.stderr:1-17)
+# Claim: the front end rejects comptime_panic.jet with the registered compile-time stop (tests/run_tier_diagnostics.rs:141)
+# Claim: rendered text matches tests/ui/comptime_panic.stderr (tests/run_tier_diagnostics.rs:157-167)
+# Claim: the snapshot is one E3010 stop carrying the assert message `n must be over 100`; `{X}` draws no follow-on E0107 (tests/ui/comptime_panic.stderr:1-8)
 # Not ported: Structured JSON report equality across tiers has no CLI counterpart
 # Not ported: Interpreter-tier comparison: no interpreter flag on check, only the check step is run
 fixture: e0956_row_text_matches_aot_run_and_interpreter.fixture
@@ -9,7 +9,7 @@ env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet check main.jet
-exit: 1 # tests/ui/comptime_panic.stderr:1-17 E0953 panic from comptime assert plus E0107 for {X}
-stderr: ~ "Error [jet.ComptimePanic]" # tests/ui/comptime_panic.stderr:1-17 E0953 panic from comptime assert plus E0107 for {X}
-stderr: ~ "Your comptime code stopped the build" # tests/ui/comptime_panic.stderr:1-17 E0953 panic from comptime assert plus E0107 for {X}
-stderr: ~ "Error [jet.UnknownName]" # tests/ui/comptime_panic.stderr:1-17 E0953 panic from comptime assert plus E0107 for {X}
+exit: 1 # tests/ui/comptime_panic.stderr:1-8 one E3010 stop from the comptime assert
+stderr: ~ "Error [E3010]: `n must be over 100`" # tests/ui/comptime_panic.stderr:1
+stderr: ~ "Compile-time code stopped the build" # tests/ui/comptime_panic.stderr:6
+stderr: count "Error [" = 1 # tests/ui/comptime_panic.stderr: no follow-on UnknownName for {X}

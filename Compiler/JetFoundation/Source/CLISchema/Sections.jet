@@ -112,7 +112,7 @@ cli_schema_elf_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Metadat
     loop index in 0..<count {
         section: cli_schema_elf_section(bytes, index, shoff, entsize, layout.sh_offset_at, layout.sh_size_at, layout.value_width, little, maximum)
         if section.name > names.len() -> return Err(MetadataError.Malformed{why: "ELF section name outside string table"})
-        if cli_schema_c_name_is(names[section.name..<names.len()], ELF_SECTION) -> &found.push(cli_schema_bounds(bytes, section.offset, section.size, maximum))
+        if cli_schema_c_name_is(names[section.name..<names.len()], ELF_SECTION) -> found.push(cli_schema_bounds(bytes, section.offset, section.size, maximum))
     }
     Ok(found)
 }
@@ -144,11 +144,13 @@ cli_schema_pe_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Metadata
         if raw.len() < 14 -> return Err(MetadataError.Malformed{why: "truncated PE metadata section"})
         payload_len: Int.from_u64(cli_schema_read_num(raw, 10, 4, true, maximum))
         record_len: cli_schema_size_add(46, payload_len, maximum) ?? return Err(MetadataError.Malformed{why: "record length overflow"})
-        record: cli_schema_bounds(raw, 0, record_len, maximum)
+        // The record is bounds-checked before the trailing bytes are sliced;
+        // the list keeps its own fresh view, which takes nothing from `bytes`.
+        _: cli_schema_bounds(raw, 0, record_len, maximum)
         trailing: raw[record_len..<raw.len()]
         if cli_schema_bytes_start(trailing, CLI_SCHEMA_MAGIC) -> return Err(MetadataError.Duplicate)
         loop byte in trailing { if byte != (U8{0}) -> return Err(MetadataError.Malformed{why: "nonzero bytes after PE metadata record"}) }
-        &found.push(record)
+        found.push(cli_schema_bounds(raw, 0, record_len, maximum))
     }
     Ok(found)
 }
@@ -192,7 +194,7 @@ cli_schema_mach_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Metada
                 if cli_schema_c_name_is(cli_schema_bounds(bytes, section, 16, maximum), MACH_SECTION) {
                     offset: cli_schema_usize_num(cli_schema_read_num(bytes, section + file_offset_at, 4, true, maximum), maximum)
                     length: cli_schema_usize_num(cli_schema_read_num(bytes, section + section_len_at, section_len_width, true, maximum), maximum)
-                    &found.push(cli_schema_bounds(bytes, offset, length, maximum))
+                    found.push(cli_schema_bounds(bytes, offset, length, maximum))
                 }
             }
         }
@@ -258,16 +260,16 @@ cli_schema_wasm_sections: fn(bytes: View<U8>, maximum: U64) -> [View<U8>] Metada
     loop at < bytes.len() {
         id: bytes[at]
         at += 1
-        size: cli_schema_wasm_leb(bytes, &at, maximum)
+        size: cli_schema_wasm_leb(bytes, at, maximum)
         payload: cli_schema_bounds(bytes, at, size, maximum)
         at += size
         if id == (U8{0}) {
             name_at := 0
-            name_len: cli_schema_wasm_leb(payload, &name_at, maximum)
+            name_len: cli_schema_wasm_leb(payload, name_at, maximum)
             name: cli_schema_bounds(payload, name_at, name_len, maximum)
             name_at += name_len
             expected_name: WASM_SECTION.bytes()
-            if name.len() == expected_name.len() && cli_schema_bytes_start(name, expected_name) -> &found.push(payload[name_at..<payload.len()])
+            if name.len() == expected_name.len() && cli_schema_bytes_start(name, expected_name) -> found.push(payload[name_at..<payload.len()])
         }
     }
     Ok(found)
@@ -278,7 +280,7 @@ cli_schema_put_wasm_leb: fn(out: &[U8], input: Int) Never! {
         byte := value.bit_and(127)
         value = value >> 7
         if value != 0 -> byte = byte.bit_or(128)
-        &out.push(U8.from_int(byte) ?? panic("a LEB group is one byte"))
+        out.push(U8.from_int(byte) ?? panic("a LEB group is one byte"))
         if value == 0 -> break
     }
 }
@@ -288,10 +290,10 @@ cli_schema_embed_wasm_record: fn(wasm: &[U8], record: [U8], usize_max: U64) Meta
     _: cli_schema_wasm_sections(wasm[0..<wasm.len()], usize_max)
     name: WASM_SECTION.bytes()
     payload := [U8]{}
-    cli_schema_put_wasm_leb(&payload, name.len())
-    loop byte in name -> &payload.push(byte)
-    loop byte in record -> &payload.push(byte)
-    &wasm.push(U8{0})
-    cli_schema_put_wasm_leb(&wasm, payload.len())
-    loop byte in payload -> &wasm.push(byte)
+    cli_schema_put_wasm_leb(payload, name.len())
+    loop byte in name -> payload.push(byte)
+    loop byte in record -> payload.push(byte)
+    wasm.push(U8{0})
+    cli_schema_put_wasm_leb(wasm, payload.len())
+    loop byte in payload -> wasm.push(byte)
 }

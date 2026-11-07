@@ -1,0 +1,40 @@
+// `#MustUse` on types, functions, and methods.
+// Explicit discard: `.drop("reason")` is the sole discard spelling
+// (the older `#Suppress(MustUse)`
+// lexical-scope form is retired outright).
+package: {
+    name: "must_use"
+    authority: { allow: [FS.Write, IO] }
+}
+use scope: core.mem.scope
+use fs: core.files
+
+#MustUse Token: struct {
+    id: Int
+}
+
+#MustUse mint: fn(id: Int) -> Token { return Token{id: id} }
+
+run: fn() {
+    t: mint(7)
+    print(t.id)
+    mint(99).drop("best-effort mint for metrics")
+    mint(1).drop("best-effort mint for metrics")
+    mint(2).drop("best-effort mint for metrics")
+    _g: scope.guard(
+    () -> {
+        print("cleanup")
+    },
+    )
+    print("must-use ok")
+    discard_fallible_lesson()
+}
+
+// A fallible result is discarded the same way.
+discard_fallible_lesson: fn() {
+    // `.drop("reason")` silences E0402 for a fallible result.
+    fs.write("/tmp/jet_discard_out.txt", "hello").drop("best-effort write, not critical")
+    fs.write("/tmp/jet_discard_a.txt", "x").drop("best-effort write, not critical")
+    fs.write("/tmp/jet_discard_b.txt", "y").drop("best-effort write, not critical")
+    print("discard ok")
+}

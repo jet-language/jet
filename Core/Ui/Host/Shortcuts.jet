@@ -24,7 +24,7 @@ binding: fn(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostErr
 
 // Registering the same shortcut and action again is a no-op; the same
 // shortcut for a different action conflicts with the first. A new binding
-// claims its key from the provider first (D-UI-WEB-KEYS1=A), so a browser page
+// claims its key from the provider first, so a browser page
 // cancels the default action of bound keys only.
 register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
     if !core.ui.host.__capability(4) -> return Err(UIHostError.CapabilityUnavailable{capability: "Shortcuts"})
@@ -37,7 +37,7 @@ register: fn(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
     loop claim in key_claims(binding.shortcut) {
         if !core.ui.host.__key_claim(claim) -> return Err(shortcut_failure("the provider could not claim key `{claim}`"))
     }
-    &SHORTCUTS.bindings.push(binding.copy())
+    SHORTCUTS.bindings.push(binding.copy())
     Ok(binding)
 }
 

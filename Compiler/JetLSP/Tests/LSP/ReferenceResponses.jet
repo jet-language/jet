@@ -11,7 +11,7 @@ use {
 
 lsp_action_child: fn(root: lsp_workspace_path.OSPath, name: String) -> lsp_workspace_path.OSPath Never! {
     path := root.copy()
-    lsp_workspace_path.push(&path, lsp_workspace_path.from_text(name, root.platform))
+    lsp_workspace_path.push(path, lsp_workspace_path.from_text(name, root.platform))
     path
 }
 
@@ -30,15 +30,15 @@ lsp_action_fixture: fn(root: lsp_workspace_path.OSPath, src: String, version: In
     loop extra in extra_files {
         path: lsp_action_child(root, extra.name)
         lsp_action_fs.write(path, extra.text.bytes()) ?? panic("write original dependency fixture")
-        &files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: lsp_workspace_path.from_text(extra.name, root.platform), identity: "lsp-fixture:{extra.name}", source: extra.text.copy()})
+        files.push(JetDriverAuthorizedSourceFile{path: path, relative_path: lsp_workspace_path.from_text(extra.name, root.platform), identity: "lsp-fixture:{extra.name}", source: extra.text.copy()})
     }
     snapshot.cwd = root.copy()
-    snapshot.request.authorized_sources.roots = [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root.copy(), identity: "lsp-fixture-root", allow_hardlinks: false, files: ^files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}
+    snapshot.request.authorized_sources.roots = [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: root.copy(), identity: "lsp-fixture-root", allow_hardlinks: false, files: files, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}}
     snapshot.request.authorized_sources.entry_path = main.copy()
-    server := LSPServer.new(^snapshot, root.copy())
-    &server.workspace_roots.push(root.copy())
+    server := LSPServer.new(snapshot, root.copy())
+    server.workspace_roots.push(root.copy())
     uri: lsp_path_to_uri(lsp_workspace_path.display(main))
-    server.diagnostic_state.docs[uri] = LSPDocument.new(^main, src.copy(), version)
+    server.diagnostic_state.docs[uri] = LSPDocument.new(main, src.copy(), version)
     server
 }
 
@@ -222,7 +222,7 @@ lsp_action_inline: fn(server: LSPServer, uri: String, src: String, name: String)
     assert(actions.contains("\"newText\":\"use helper\\n\""))
     assert(actions.contains(lsp_action_version(uri, 12)))
     imported: "use helper\n{src}"
-    &server.diagnostic_state.docs[uri].replace_text(imported.copy())
+    server.diagnostic_state.docs[uri].replace_text(imported.copy())
     actions: lsp_action_extract(server, uri, imported, "answer")
     assert(!actions.contains("Import `helper`"))
     assert(!actions.contains("\"newText\":\"use helper\\n\""))
@@ -251,7 +251,7 @@ lsp_action_inline: fn(server: LSPServer, uri: String, src: String, name: String)
     reworded := selected ?? panic("original registry diagnostic")
     edit: reworded.edit ?? panic("row owns SourceEdit")
     reworded.fix = "use the canonical loop separator"
-    fixes: lsp_collect_fixes_from_diagnostics([Diagnostic]{^reworded}, src)
+    fixes: lsp_collect_fixes_from_diagnostics([Diagnostic]{reworded.move()}, src)
     assert_eq(fixes.len(), 1)
     assert_eq(fixes[0].edit, edit)
     assert_eq(fixes[0].title, "use the canonical loop separator")

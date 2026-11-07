@@ -50,12 +50,12 @@ pkg_capability_snapshot_parse: fn(raw: String) -> PackageCapabilitySnapshot? Nev
             line.starts_with("api_version = ") -> version = Val(pkg_lock_parse_unsigned(line.removeprefix("api_version = "), 4294967295) ?? return None)
             line.starts_with("package = ") -> package = Val(line.removeprefix("package = "))
             line.starts_with("published_version = ") -> published = Val(line.removeprefix("published_version = "))
-            pkg_api_snapshot_line_name(line) != None -> &signatures.push(line)
+            pkg_api_snapshot_line_name(line) != None -> signatures.push(line)
             line.contains(": fn") -> {
                 name := line
                 if line.split_once(": fn") == .Val(pair) -> name = pair.before
                 if name.trim() == "" -> return None
-                &signatures.push(line)
+                signatures.push(line)
             }
             else -> return None
         }
@@ -63,7 +63,7 @@ pkg_capability_snapshot_parse: fn(raw: String) -> PackageCapabilitySnapshot? Nev
     api_version: version ?? return None
     release: published ?? return None
     name: package ?? return None
-    &signatures.sort()
+    signatures.sort()
     Val(PackageCapabilitySnapshot{api_version: api_version, package: name, published_version: release, signatures: signatures})
 }
 
@@ -73,22 +73,22 @@ pkg_api_snapshot_render: fn(package: String, published_version: String, signatur
 }
 pkg_capability_snapshot_text: fn(snapshots: [PackageCapabilitySnapshot]) -> String Never! {
     ordered := snapshots
-    &ordered.sort_by((left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) -> left.package <=> right.package)
+    ordered.sort_by((left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) -> left.package <=> right.package)
     parts := [String]{}
-    loop snapshot in ordered -> &parts.push("{snapshot.package}\n{snapshot.signatures.join("\n")}")
+    loop snapshot in ordered -> parts.push("{snapshot.package}\n{snapshot.signatures.join("\n")}")
     parts.join("\n--\n")
 }
 pkg_project_capability_digest: fn(project_root: String) -[FS, Env]> String Never! {
     directory: sys.get("JET_API_CACHE_DIR") ?? files.join(project_root, ".jet/cache/api")
     entries := files.list_dir(directory) ?? return ""
-    &entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
+    entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
     snapshots := [PackageCapabilitySnapshot]{}
     loop entry in entries {
         if !entry.name.ends_with(".api") -> next
         bytes: foundation_read_file_nofollow_at_root(directory, entry.name, PKG_MAX_LOCK_BYTES) ?? next
         raw: String.from_bytes(bytes) ?? next
         snapshot: pkg_capability_snapshot_parse(raw) ?? next
-        &snapshots.push(snapshot)
+        snapshots.push(snapshot)
     }
     pkg_capability_snapshot_text(snapshots)
 }

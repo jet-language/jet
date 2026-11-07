@@ -4,7 +4,7 @@ Point: struct { x: Int }
 Email: struct { addr: String }
 impl Email.Decode {
     decode: fn(tree: Dyn) -> Email [FieldError]! {
-        value := &tree.field("address") ?? Dyn.Text("")
+        value := tree.field("address") ?? Dyn.Text("")
         return Ok(Email{ addr: value.text() ?? "" })
     }
 }

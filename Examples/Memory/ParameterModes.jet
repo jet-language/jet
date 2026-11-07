@@ -1,0 +1,42 @@
+Parcel: struct {
+    label: String
+}
+
+impl Parcel {
+    show: fn(self) { print(self.label) }
+}
+
+read_text: fn(text: String) { print(text) }
+
+read_list: fn(values: [Int]) { print(values.len()) }
+
+read_generic: fn<T>(value: T) { print(7) }
+
+apply: fn(f: fn(Int) -> Int, value: Int) -> Int { f(value) }
+
+edit: fn(values: &[Int]) { values[0] = 9 }
+
+consume: fn(text: &&String) { print(text) }
+
+duplicate_if: fn<T>(value: &&T, yes: Bool) -> T {
+    if yes -> return value.copy()
+    return value
+}
+
+run: fn() {
+    text: "hello"
+    values := [1, 2]
+    parcel: Parcel{label: "parcel"}
+    read_text(text)
+    read_list(values)
+    read_generic(text)
+    parcel.show()
+    print(apply((n: Int) -> (n + 1), 41))
+    edit(values)
+    print(values[0])
+    values.push(values.len())
+    print(values)
+    consume(text)
+    branch: "branch"
+    print(duplicate_if(branch, true))
+}

@@ -23,7 +23,7 @@ Files:
 - `Tools/agent/jet-env jet run .../pkg/tensor_basic.jet` -> `rank:2`, `shape:[2, 3]`, `device:CPU`, `cell:4.0`.
 - `Tools/agent/jet-env jet run .../pkg/labeled_probe.jet` -> `south/margin=6.0`.
 - `Tools/agent/jet-env jet run .../pkg/plot_receipt_probe.jet` -> `rows=3 groups=2 svg=524`; verified `output.svg` and `receipt.json` were written.
-- `Tools/agent/jet-env jet run Examples/features/tooling/data_analysis.jet` -> CSV/filter/sort/group/stats/text/SVG/status example exits `0`.
+- `Tools/agent/jet-env jet run Examples/Data/Analysis/DataAnalysis.jet` -> CSV/filter/sort/group/stats/text/SVG/status example exits `0`.
 - `printf 'exec first data-1\nexec first data-2\nstate\n' | Tools/agent/jet-env jet notebook --protocol --headless .../pkg/analysis.jetnb` -> cell turns `1` and `2`, text `2` then `5`, cache entries `2`.
 - After `edit data-1 x := 4`, `state` reported `cache_entries:0`; rerunning cells reported text `(no text/plain)` then `7`, and state returned `cache_entries:2`. Descendant invalidation works.
 
@@ -51,7 +51,7 @@ Files:
 
 - Tags: `defect`
 - Primitive capability: default evaluator execution for the documented typed `core.data.inner_join` operation.
-- Evidence: `Tools/agent/jet-env jet run Examples/features/tooling/data_pipeline.jet` exits `1` with `Error [E0956]: core.data.inner_join() isn't supported by the current evaluator yet`; the diagnostic says the canonical evaluator does not cover this construct and suggests `jet build`.
+- Evidence: `Tools/agent/jet-env jet run Examples/Data/Analysis/DataPipeline.jet` exits `1` with `Error [E0956]: core.data.inner_join() isn't supported by the current evaluator yet`; the diagnostic says the canonical evaluator does not cover this construct and suggests `jet build`.
 - Areas: data analysis, backend services, web apps, AI/ML apps.
 - Severity: `blocks`
 - Workaround: use a user-written nested-loop join (`pkg/manual_join_probe.jet` succeeds for two rows), but it is quadratic and not a general table primitive.

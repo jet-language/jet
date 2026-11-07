@@ -1,0 +1,51 @@
+// #5477: `os.stop` inside `#Transact` rolls back like every other non-commit
+// exit: the changed balance is restored (through the Ledger's `Rollback`
+// implementation, which says so), then the `on_rollback` hook runs, in the
+// cleanup that runs before the process stops with the requested
+// code.
+package: {
+    name: "transact_os_stop"
+    authority: { allow: [Env, Exec, IO] }
+}
+
+use os: core.sys
+
+Ledger: struct {
+    balance: Int
+}
+
+LedgerSnap: struct {
+    balance: Int
+}
+
+impl Ledger.Rollback {
+    Snapshot: LedgerSnap
+
+    snapshot: fn(self) -> LedgerSnap { return LedgerSnap{balance: self.balance} }
+
+    restore: fn(&self, snap: &&LedgerSnap) {
+        print("balance {self.balance} restored to {snap.balance}")
+        self.balance = snap.balance
+    }
+}
+
+halt: fn() {
+    #Unsafe("the stop runs the shared cleanup boundary") {
+        os.stop(0) ?? panic("os.stop was refused")
+    }
+}
+
+withdraw: fn(ledger: &Ledger) {
+    #Transact(tx) {
+        ledger.balance -= 10
+        tx.on_rollback(() -> print("hook: release the hold"))
+        print("stopping inside the transaction")
+        halt()
+    }
+}
+
+run: fn() {
+    ledger := Ledger{balance: 100}
+    withdraw(ledger)
+    print("not reached: balance {ledger.balance}")
+}

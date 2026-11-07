@@ -102,7 +102,7 @@ MCPVersionPolicy: enum {
             .StableAnd(extra) -> {
                 supported := [MCPRevision]{MCPRevision.Stable20251125}
                 loop revision in extra {
-                    if !supported.contains(revision) -> &supported.push(revision)
+                    if !supported.contains(revision) -> supported.push(revision.copy())
                 }
                 supported
             }
@@ -186,7 +186,7 @@ MCPPolicy: struct {
         peer_revisions := [MCPRevision]{}
         loop version in peer_versions {
             if MCPRevision.parse(version) == {
-                .Val(revision) -> &peer_revisions.push(revision)
+                .Val(revision) -> peer_revisions.push(revision)
                 .None -> {}
             }
         }
@@ -210,8 +210,8 @@ MCPPolicy: struct {
         redacted := [String]{}
         loop version in peer_versions {
             if MCPRevision.parse(version) == {
-                .Val(revision) -> &redacted.push(revision.as_str())
-                .None -> &redacted.push("<unknown>")
+                .Val(revision) -> redacted.push(revision.as_str())
+                .None -> redacted.push("<unknown>")
             }
         }
         Err(MCPNegotiationError.NoCommonRevision{local: supported, peer: redacted})

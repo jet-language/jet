@@ -7,18 +7,18 @@ use {
 
 run: fn() {
     input: files.open("{work}/jsonl/input.data") ?? panic("open")
-    reader := jsonl.reader(^input) ?? panic("reader")
-    if &reader.next() == {
+    reader := jsonl.reader(input) ?? panic("reader")
+    if reader.next() == {
         .Val(v) -> print(v.text() ?? "bad")
         .None -> print("none")
         .Err(_) -> panic("first")
     }
-    if &reader.next() == {
+    if reader.next() == {
         .Val(v) -> print(v.int() ?? -1)
         .None -> print("none2")
         .Err(_) -> panic("second")
     }
-    if &reader.next() == {
+    if reader.next() == {
         .None -> print("eof")
         .Val(_) -> print("bad-eof")
         .Err(_) -> panic("eof")

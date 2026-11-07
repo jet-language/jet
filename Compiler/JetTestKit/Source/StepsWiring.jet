@@ -42,7 +42,7 @@ kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined
     i: result.steps.len() - 1
     tokens: kit_steps_tokens(kit_steps_body(original)) ?? return Err("invalid process wiring")
     words := [String]{}
-    loop token in tokens -> &words.push(token.text)
+    loop token in tokens -> words.push(token.text)
     if key == "pty" {
         if words[0] != "true" {
             result.steps[i].refused_capability = "pty-stdio"
@@ -59,12 +59,12 @@ kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined
         if key == "pty-resize" {
             size: kit_steps_terminal_dimensions(words[0]) ?? return Err("invalid terminal size")
             at: kit_steps_offset_ns(words[2]) ?? return Err("invalid terminal event time")
-            &terminal.events.push(KitTerminalEvent{kind: "resize", at: at, rows: size[0], cols: size[1]})
+            terminal.events.push(KitTerminalEvent{kind: "resize", at: at, rows: size[0], cols: size[1]})
         } else {
             delay: kit_steps_offset_ns(words[words.len() - 1]) ?? return Err("invalid terminal event delay")
             terminal.clock += delay
             sending: key == "pty-send"
-            &terminal.events.push(KitTerminalEvent{kind: if sending -> "send" else -> "close", text: if sending -> words[0] else -> "", at: terminal.clock})
+            terminal.events.push(KitTerminalEvent{kind: if sending -> "send" else -> "close", text: if sending -> words[0] else -> "", at: terminal.clock})
         }
         result.steps[i].terminal = Val(terminal)
         return Ok(result)
@@ -73,17 +73,17 @@ kit_steps_terminal_line: fn(plan: KitPlan, key: String, original: String, joined
     if key == "pty-resize" || !kit_steps_terminal_session(result.steps, label, joined) -> return Err("{key} needs a terminal step or a live terminal session")
     delay_word: words[words.len() - 1]
     delay: kit_steps_offset_ns(delay_word) ?? return Err("invalid terminal event delay")
-    if delay > 0 -> &result.steps.push(KitStep{argv: ["sleep", delay_word], stdin: "", exit: "0", assertions: [], action: "sleep"})
+    if delay > 0 -> result.steps.push(KitStep{argv: ["sleep", delay_word], stdin: "", exit: "0", assertions: [], action: "sleep"})
     eof: String.from_bytes([U8{4}]) ?? panic("EOF character")
     text: if key == "pty-send" -> words[0] else -> eof
-    &result.steps.push(KitStep{argv: [text], stdin: "", exit: "0", assertions: [], label: label, action: "send", literal_input: true, session_mode: "raw"})
+    result.steps.push(KitStep{argv: [text], stdin: "", exit: "0", assertions: [], label: label, action: "send", literal_input: true, session_mode: "raw"})
     Ok(result)
 }
 
 kit_steps_wiring_valid: fn(key: String, original: String) -> Bool {
     tokens: kit_steps_tokens(kit_steps_body(original)) ?? return false
     words := [String]{}
-    loop token in tokens -> &words.push(token.text)
+    loop token in tokens -> words.push(token.text)
     if key == "stderr-to-stdout" -> return words == ["true"]
     if key == "pty" {
         if words.len() == 0 -> return false

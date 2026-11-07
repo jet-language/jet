@@ -1,0 +1,11 @@
+use {
+    jet_foundation.[JET_TYPE_NAMES, SEMA_RESERVED_TYPES]
+    jetpack_foundation.[foundation_generated_type_name, foundation_is_reserved_generated_name]
+}
+
+#Test("generated names refuse every compiler built-in and reserved type name") {
+    loop name in JET_TYPE_NAMES -> assert(foundation_is_reserved_generated_name(name), "built-in type {name} is not reserved for generated names")
+    loop name in SEMA_RESERVED_TYPES -> assert(foundation_is_reserved_generated_name(name), "reserved type {name} is not reserved for generated names")
+    assert_eq(foundation_generated_type_name("build_context", "Schema"), "BuildContextType")
+    assert_eq(foundation_generated_type_name("unit", "Schema"), "UnitType")
+}

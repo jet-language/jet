@@ -11,7 +11,8 @@ Library: struct {
 book_at: fn(lib: Library, i: Int) -> View<Book> { lib.books[i..i] }
 
 edit_at: fn(lib: &Library, i: Int) -[]> ViewMut<Book> {
-    return &lib.books[i..i]
+    window: &lib.books[i..i]
+    return window
 }
 
 run: fn() {
@@ -23,7 +24,7 @@ run: fn() {
     }
     first: book_at(lib, 0)
     print(first[0].title)
-    dune: edit_at(&lib, 0)
+    dune: edit_at(lib, 0)
     dune[0].pages += 10
     print(lib.books[0].pages)
 }

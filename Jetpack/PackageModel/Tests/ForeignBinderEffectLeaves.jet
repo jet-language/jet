@@ -1,0 +1,34 @@
+// A program reaches a foreign language through its binder, and the binder's
+// generated wrappers publish the descriptor's effect root. One probe per binder
+// language: that root is the FFI root or a leaf Compiler/Prelude/Effects.jet
+// declares, so no binding can publish an effect the checker doesn't know.
+use {
+    jet_pkg_model.[BinderDescriptor, pkg_foreign_binders]
+    jet_foundation.[EFFECT_VOCABULARY_LEAVES]
+}
+
+pkg_test_binder_effect_problem: fn(binder: BinderDescriptor) -> String {
+    root: binder.effect_root
+    if root == "FFI" || (root.starts_with("FFI.") && EFFECT_VOCABULARY_LEAVES.contains(root)) -> return ""
+    "{binder.language.root()} publishes `{root}`, which Compiler/Prelude/Effects.jet doesn't declare"
+}
+
+#Test("every binder language publishes a declared FFI effect leaf") {
+    problems := [String]{}
+    probes := 0
+    loop binder in pkg_foreign_binders() {
+        problem: pkg_test_binder_effect_problem(binder)
+        if problem != "" -> problems.push(problem)
+        probes += 1
+    }
+    assert(probes > 0, "no binder languages")
+    assert_eq(problems.join("\n"), "")
+}
+
+#Test("a binder publishing an undeclared FFI leaf fails the probe") {
+    binder := pkg_foreign_binders()[0]
+    binder.effect_root = "FFI.Klingon"
+    assert(pkg_test_binder_effect_problem(binder).contains("publishes `FFI.Klingon`"))
+    binder.effect_root = "Net"
+    assert(pkg_test_binder_effect_problem(binder) != "")
+}

@@ -6,12 +6,12 @@ run: fn() {
     reader: Reader.over(payload)
     payload[0] = 9
     payload[3] = 9
-    &payload.push(7)
+    payload.push(7)
     first: reader.read_u8() ?? panic("short first")
-    field := &reader.take(3) ?? panic("short field")
+    field := reader.take(3) ?? panic("short field")
     payload[1] = 8
     field[0] = 0
-    rest: &reader.take(2) ?? panic("short rest")
+    rest: reader.take(2) ?? panic("short rest")
     print(first)
     print(field)
     print(rest)

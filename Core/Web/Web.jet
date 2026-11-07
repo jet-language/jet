@@ -121,8 +121,8 @@ impl __AppHandler {
     }
 }
 
-__app_handler: fn(call: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
-    __AppHandler{__cell: shared __AppHandlerCell{call: ^call}}
+__app_handler: fn(call: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> __AppHandler Never! {
+    __AppHandler{__cell: shared __AppHandlerCell{call: call.move()}}
 }
 
 // One route and the facts its registration fixed. An empty identity string
@@ -207,26 +207,26 @@ app: fn() -> App Never! {
 impl App {
     // `route`, `page` and `layout` land here with the handler's adapter, its
     // name and its typed input binding.
-    __route: fn(self, path: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
+    __route: fn(self, path: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, binding: String) -> App Never! {
         guard := self.__state.guard_edit()
         mode: guard.value.mode.copy()
         explicit: guard.value.explicit_mode
         route: __AppRoute{
-            path: path, handler: __app_handler(^handler), identity: identity, binding: binding,
+            path: path, handler: __app_handler(handler), identity: identity, binding: binding,
             mode: mode, explicit_mode: explicit,
             loader: None, loader_identity: "", loader_data_type: "", preload: false,
             pending: None, pending_identity: "", error: None, error_identity: "", form: "",
         }
-        &guard.value.routes.push(route)
+        guard.value.routes.push(route)
         self.copy()
     }
 
     // `pending`, `error` and `not_found`. A pending or error boundary belongs
     // to the route registered just before it; not-found answers every
     // unmatched navigation.
-    __boundary: fn(self, kind: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
+    __boundary: fn(self, kind: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String) -> App Never! {
         guard := self.__state.guard_edit()
-        boundary: __app_handler(^handler)
+        boundary: __app_handler(handler)
         if kind == "not_found" {
             guard.value.not_found = Val(boundary)
             return self.copy()
@@ -247,7 +247,7 @@ impl App {
 
     // `action`, `form` and `data`: one POST server function each. The first
     // action or form after a route is that route's form.
-    __action: fn(self, kind: String, name: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> App Never! {
+    __action: fn(self, kind: String, name: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!) -> App Never! {
         guard := self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last >= 0 && (kind == "action" || kind == "form") && guard.value.routes[last].form == "" {
@@ -255,42 +255,42 @@ impl App {
             route.form = name.copy()
             guard.value.routes[last] = route
         }
-        &guard.value.actions.push(__AppAction{name: name, kind: kind, handler: Val(__app_handler(^handler)), preload: false})
+        guard.value.actions.push(__AppAction{name: name, kind: kind, handler: Val(__app_handler(handler)), preload: false})
         self.copy()
     }
 
     // `loader(route_handler, loader, preload)`: the route registered just
     // before it loads its data through `handler` first.
-    __loader: fn(self, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
+    __loader: fn(self, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, identity: String, data_type: String, preload: Bool) -> App Never! {
         guard := self.__state.guard_edit()
         last: guard.value.routes.len() - 1
         if last < 0 -> panic("app loader `{identity}` has no preceding route")
         route := guard.value.routes[last].copy()
-        route.loader = Val(__app_handler(^handler))
+        route.loader = Val(__app_handler(handler))
         route.loader_identity = identity
         route.loader_data_type = data_type
         route.preload = preload
         dependency: route.identity.copy()
         guard.value.routes[last] = route
-        &guard.value.actions.push(__AppAction{name: dependency, kind: "loader", handler: None, preload: preload})
+        guard.value.actions.push(__AppAction{name: dependency, kind: "loader", handler: None, preload: preload})
         self.copy()
     }
 
     // `mount(prefix, handler[, effect[, policy]])`; "" is an absent effect or
     // policy.
-    __mount: fn(self, prefix: String, handler: ^fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
+    __mount: fn(self, prefix: String, handler: &&fn(__AppCall) -[Net, FS.Read]> __AppReply Err!, effect_name: String, policy: String) -> App Never! {
         effects := [String]{}
-        if effect_name != "" -> &effects.push(effect_name)
+        if effect_name != "" -> effects.push(effect_name.copy())
         security := [String]{}
-        if policy != "" -> &security.push(policy)
+        if policy != "" -> security.push(policy.copy())
         guard := self.__state.guard_edit()
-        &guard.value.mounts.push(__AppMount{prefix: prefix, handler: __app_handler(^handler), effects: effects, security: security})
+        guard.value.mounts.push(__AppMount{prefix: prefix, handler: __app_handler(handler), effects: effects, security: security})
         self.copy()
     }
 
     routes: fn(self, from: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.routes_from.push(from)
+        guard.value.routes_from.push(from.copy())
         self.copy()
     }
 
@@ -315,19 +315,19 @@ impl App {
 
     security: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.security.push(policy)
+        guard.value.security.push(policy.copy())
         self.copy()
     }
 
     assets: fn(self, path: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.assets.push(path)
+        guard.value.assets.push(path.copy())
         self.copy()
     }
 
     split: fn(self, name: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.split.push(name)
+        guard.value.split.push(name.copy())
         self.copy()
     }
 
@@ -335,19 +335,19 @@ impl App {
 
     cache: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.cache.push(policy)
+        guard.value.cache.push(policy.copy())
         self.copy()
     }
 
     a11y: fn(self, policy: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.a11y.push(policy)
+        guard.value.a11y.push(policy.copy())
         self.copy()
     }
 
     adapter: fn(self, name: String) -> App Never! {
         guard := self.__state.guard_edit()
-        &guard.value.adapters.push(name)
+        guard.value.adapters.push(name.copy())
         self.copy()
     }
 
@@ -457,7 +457,7 @@ __app_html: fn(status: Int, rendered: WebPage, route_data: String) -> HTTPRespon
     document: "<!doctype html><html><head><meta charset=\"utf-8\"><title>{rendered.title}</title></head><body>{rendered.body}{route_data}</body></html>"
     fields: core.http.headers_set(core.http.headers(), "content-type", "text/html; charset=utf-8")
     payload: core.http.body_text(document)
-    http_server.response_body(status, ^payload, ^fields)
+    http_server.response_body(status, payload, fields)
 }
 
 // The route identity and navigation status a served page publishes; the
@@ -492,7 +492,7 @@ __app_json: fn(status: Int, text: String) -> HTTPResponse Never! {
     typed: core.http.headers_set(core.http.headers(), "content-type", "application/json")
     fields: core.http.headers_set(typed, "content-security-policy", "default-src 'self'")
     payload: core.http.body_text(text)
-    http_server.response_body(status, ^payload, ^fields)
+    http_server.response_body(status, payload, fields)
 }
 
 __app_error_json: fn(message: String) -> String Never! { "{{\"error\":{__app_json_string(message)}}}" }
@@ -515,7 +515,7 @@ __app_trim_slashes: fn(prefix: String) -> String Never! {
 }
 
 __app_push: fn(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 __app_hex_digit: fn(value: Int) -> U8 Never! {
@@ -528,23 +528,23 @@ __app_json_string: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         n: Int.from_u8(byte)
         if n == 34 || n == 92 {
-            &out.push(U8{92})
-            &out.push(byte)
+            out.push(U8{92})
+            out.push(byte)
         } else if n == 10 {
-            __app_push(&out, "\\n")
+            __app_push(out, "\\n")
         } else if n == 13 {
-            __app_push(&out, "\\r")
+            __app_push(out, "\\r")
         } else if n == 9 {
-            __app_push(&out, "\\t")
+            __app_push(out, "\\t")
         } else if n < 32 {
-            __app_push(&out, "\\u00")
-            &out.push(__app_hex_digit(n >> 4))
-            &out.push(__app_hex_digit(n.bit_and(15)))
+            __app_push(out, "\\u00")
+            out.push(__app_hex_digit(n >> 4))
+            out.push(__app_hex_digit(n.bit_and(15)))
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
     }
-    &out.push(U8{34})
+    out.push(U8{34})
     String.from_bytes(out) ?? ""
 }
 
@@ -553,15 +553,15 @@ __app_html_attr: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         n: Int.from_u8(byte)
         if n == 38 {
-            __app_push(&out, "&amp;")
+            __app_push(out, "&amp;")
         } else if n == 60 {
-            __app_push(&out, "&lt;")
+            __app_push(out, "&lt;")
         } else if n == 62 {
-            __app_push(&out, "&gt;")
+            __app_push(out, "&gt;")
         } else if n == 34 {
-            __app_push(&out, "&quot;")
+            __app_push(out, "&quot;")
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
     }
     String.from_bytes(out) ?? ""
@@ -572,9 +572,9 @@ __app_script_safe: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         if byte == (U8{60}) {
-            __app_push(&out, "\\u003c")
+            __app_push(out, "\\u003c")
         } else {
-            &out.push(byte)
+            out.push(byte)
         }
     }
     String.from_bytes(out) ?? ""
@@ -582,14 +582,14 @@ __app_script_safe: fn(text: String) -> String Never! {
 
 __app_json_list: fn(values: [String]) -> String Never! {
     items := [String]{}
-    loop value in values -> &items.push(__app_json_string(value))
+    loop value in values -> items.push(__app_json_string(value))
     "[{items.join(",")}]"
 }
 
 // The debug spelling of a string list (`["a", "b"]`) the policy rows use.
 __app_debug_list: fn(values: [String]) -> String Never! {
     items := [String]{}
-    loop value in values -> &items.push(__app_json_string(value))
+    loop value in values -> items.push(__app_json_string(value))
     "[{items.join(", ")}]"
 }
 
@@ -602,14 +602,14 @@ __app_json_or_null: fn(value: String) -> String Never! {
 __app_route_identity: fn(path: String, handler: String) -> String Never! {
     hash := U64{14695981039346656037}
     bytes := path.bytes()
-    &bytes.push(U8{0})
-    loop byte in handler.bytes() -> &bytes.push(byte)
+    bytes.push(U8{0})
+    loop byte in handler.bytes() -> bytes.push(byte)
     loop byte in bytes {
         hash = (hash.bit_xor(U64{Int.from_u8(byte)})).wrapping_mul(U64{1099511628211})
     }
     out := [U8]{}
     loop index in 0..<16 {
-        &out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
+        out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
     }
     "route-{String.from_bytes(out) ?? ""}"
 }
@@ -640,14 +640,14 @@ __app_route_facts_json: fn(route: __AppRoute) -> String Never! {
             field: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
             parts: field.split("=").to_list()
             if parts.len() != 2 -> panic("invalid app path binding `{item}`")
-            &path_params.push(__app_field_json(parts[0], parts[1], "path", true))
+            path_params.push(__app_field_json(parts[0], parts[1], "path", true))
         } else if item.starts_with("s=") {
             spec: String.from_bytes(item.bytes().slice(2, item.bytes().len())) ?? ""
             pieces: spec.split(":").to_list()
             if pieces.len() != 2 -> panic("invalid app search binding `{item}`")
             search_codec = pieces[0].copy()
             loop field in pieces[1].split(",") {
-                if field != "" -> &search_params.push(__app_search_field_json(field, search_codec))
+                if field != "" -> search_params.push(__app_search_field_json(field, search_codec))
             }
         } else {
             panic("invalid app route binding `{item}`")
@@ -664,12 +664,12 @@ __app_facts_json: fn(app: App) -> String Never! {
     state: __app_state(app)
     routes := [String]{}
     loop route in state.routes {
-        &routes.push("    {{\"path\": {__app_json_string(route.path)}, \"handler\": {__app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {__app_route_facts_json(route)}}}")
+        routes.push("    {{\"path\": {__app_json_string(route.path)}, \"handler\": {__app_json_string(route.identity)}, \"provenance\": \"runtime\", \"render_facts\": {__app_route_facts_json(route)}}}")
     }
     actions := [String]{}
     loop action in state.actions {
         server: if action.handler == None -> "null" else -> "{{\"name\":{__app_json_string(action.name)},\"endpoint\":{__app_json_string("/actions/{action.name}")},\"method\":\"POST\",\"csrf\":\"same-origin\",\"middleware\":[]}}"
-        &actions.push("    {{\"name\": {__app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {__app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
+        actions.push("    {{\"name\": {__app_json_string(action.name)}, \"handler\": \"callable\", \"kind\": {__app_json_string(action.kind)}, \"preload\": {action.preload}, \"server_function\": {server}}}")
     }
     route_rows: if routes.len() == 0 -> "" else -> "{routes.join(",\n")}\n"
     action_rows: if actions.len() == 0 -> "" else -> "{actions.join(",\n")}\n"
@@ -756,7 +756,7 @@ openapi: fn(router: HTTPRouter) -> String Never! {
     __openapi_mux(web_http.__router_mux(router))
 }
 
-// D-WEBOPENAPI1=A for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and
+// OpenAPI for an HTTPMux (`JetHTTPRouteSource for JetHTTPMux` and
 // `jet_web_openapi`): each route's checked contract is parsed
 // (jet_openapi_contract_input) and checked against the route registered, then
 // the routes are canonicalized and checked as one document
@@ -769,7 +769,7 @@ __openapi_mux: fn(routes: HTTPMux) -> String Never! {
 #Error
 __OpenAPIFault: struct { message: String }
 impl __OpenAPIFault.Display { display: fn(self) -> String { self.message.copy() } }
-impl __OpenAPIFault.Debug { debug: fn(^self) -> String { self.message } }
+impl __OpenAPIFault.Debug { debug: fn(&&self) -> String { self.message } }
 
 __openapi_fault: fn(message: String) -> __OpenAPIFault Never! { __OpenAPIFault{message: message} }
 
@@ -842,7 +842,7 @@ __openapi_method: fn(value: String) -> Int? {
     lower := [U8]{}
     loop byte in value.bytes() {
         n: Int.from_u8(byte)
-        &lower.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
+        lower.push(if n >= 65 && n <= 90 -> U8{n + 32} else -> byte)
     }
     text: String.from_bytes(lower) ?? return None
     __openapi_index(__openapi_methods(), text)
@@ -856,7 +856,7 @@ __openapi_problem: fn(path: String, reason: String) -> String Never! {
 __openapi_mux_document: fn(mux: HTTPMux) -> String __OpenAPIFault! {
     routes := [__OpenAPIRoute]{}
     loop route in http_server.__mux_routes(mux) {
-        &routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
+        routes.push(__openapi_route_input(route.contract, route.method, route.pattern) ?? return Err(err))
     }
     __openapi_document(routes, "Jet HTTP Router", "1")
 }
@@ -872,12 +872,12 @@ __openapi_pattern: fn(pattern: String) -> __OpenAPIPattern __OpenAPIFault! {
             .Static(text) -> key = "{key}/s{text.bytes().len()}:{text}"
             .Param(name) -> {
                 key = "{key}/p:{name}"
-                &names.push(name)
+                names.push(name)
             }
             .CatchAll(name) -> {
                 key = "{key}/w:{name}"
-                &names.push(name.copy())
-                &catch_alls.push(name)
+                names.push(name.copy())
+                catch_alls.push(name)
             }
         }
     }
@@ -960,7 +960,7 @@ __openapi_integer: fn(fields: [(key: String, value: Dyn)], name: String) -> Int 
 // collected in `errors` under `path`.
 __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __OpenAPIFault! {
     fields: __openapi_object(value) ?? return Err(err)
-    if __openapi_member(fields, "type") == .Val(kind) -> return __openapi_typed_schema(kind, fields, path, &errors)
+    if __openapi_member(fields, "type") == .Val(kind) -> return __openapi_typed_schema(kind, fields, path, errors)
     if __openapi_member(fields, "anyOf") == .Val(any_of) {
         items: if any_of == {
             .Array(entries) -> entries
@@ -968,9 +968,9 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
         }
         if items.len() == 2 && __openapi_is_object(items[1]) {
             probe := [String]{}
-            second: __openapi_schema(items[1], path, &probe) ?? return Err(err)
+            second: __openapi_schema(items[1], path, probe) ?? return Err(err)
             if second == "{{\"type\":\"null\"}}" {
-                inner: __openapi_schema(items[0], path, &errors) ?? return Err(err)
+                inner: __openapi_schema(items[0], path, errors) ?? return Err(err)
                 return Ok("{{\"anyOf\":[{inner},{{\"type\":\"null\"}}]}}")
             }
         }
@@ -980,10 +980,10 @@ __openapi_schema: fn(value: Dyn, path: String, errors: &[String]) -> String __Op
             .Array(entries) -> entries
             else -> { return Err(__openapi_fault("OpenAPI schema `oneOf` must be an array")) }
         }
-        if items.len() == 0 -> &errors.push(__openapi_problem(path, "oneOf needs at least one schema"))
+        if items.len() == 0 -> errors.push(__openapi_problem(path, "oneOf needs at least one schema"))
         rendered := [String]{}
         loop item in items {
-            &rendered.push(__openapi_schema(item, path, &errors) ?? return Err(err))
+            rendered.push(__openapi_schema(item, path, errors) ?? return Err(err))
         }
         return Ok("{{\"oneOf\":[{rendered.join(",")}]}}")
     }
@@ -1002,7 +1002,7 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
     if name == "string" -> return Ok("{{\"type\":\"string\"}}")
     if name == "array" {
         items: __openapi_field(fields, "items") ?? return Err(err)
-        item: __openapi_schema(items, path, &errors) ?? return Err(err)
+        item: __openapi_schema(items, path, errors) ?? return Err(err)
         return Ok("{{\"type\":\"array\",\"items\":{item}}}")
     }
     if name != "object" -> return Err(__openapi_fault("unsupported OpenAPI schema type `{name}`"))
@@ -1019,7 +1019,7 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
         }
         loop entry in entries {
             if entry == {
-                .Text(text) -> &required.push(text)
+                .Text(text) -> required.push(text)
                 else -> return Err(__openapi_fault("OpenAPI schema `required` names must be text"))
             }
         }
@@ -1029,13 +1029,13 @@ __openapi_typed_schema: fn(kind: Dyn, fields: [(key: String, value: Dyn)], path:
         .Bool(flag) -> flag
         else -> { return Err(__openapi_fault("OpenAPI object schema `additionalProperties` must be boolean")) }
     }
-    &properties.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
+    properties.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
     rendered := [String]{}
     required_names := [String]{}
     loop property in properties {
-        schema: __openapi_schema(property.value, "{path}.{property.key}", &errors) ?? return Err(err)
-        &rendered.push("{__app_json_string(property.key)}:{schema}")
-        if required.contains(property.key) -> &required_names.push(__app_json_string(property.key))
+        schema: __openapi_schema(property.value, "{path}.{property.key}", errors) ?? return Err(err)
+        rendered.push("{__app_json_string(property.key)}:{schema}")
+        if required.contains(property.key) -> required_names.push(__app_json_string(property.key))
     }
     out := "{{\"type\":\"object\",\"properties\":{{{rendered.join(",")}}},\"additionalProperties\":{open}"
     if required_names.len() > 0 -> out = "{out},\"required\":[{required_names.join(",")}]"
@@ -1049,7 +1049,7 @@ __openapi_parameter: fn(value: Dyn) -> __OpenAPIParameter __OpenAPIFault! {
     name: __openapi_text(fields, "name") ?? return Err(err)
     schema_value: __openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
-    schema: __openapi_schema(schema_value, name, &schema_errors) ?? return Err(err)
+    schema: __openapi_schema(schema_value, name, schema_errors) ?? return Err(err)
     required: __openapi_bool(fields, "required") ?? return Err(err)
     catch_all: __openapi_bool(fields, "catch_all") ?? return Err(err)
     Ok(__OpenAPIParameter{location: location, name: name, schema: schema, schema_errors: schema_errors, required: required, catch_all: catch_all})
@@ -1061,7 +1061,7 @@ __openapi_body: fn(value: Dyn) -> __OpenAPIBody __OpenAPIFault! {
     content_type: __openapi_text(fields, "content_type") ?? return Err(err)
     schema_value: __openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
-    schema: __openapi_schema(schema_value, "requestBody", &schema_errors) ?? return Err(err)
+    schema: __openapi_schema(schema_value, "requestBody", schema_errors) ?? return Err(err)
     Ok(__OpenAPIBody{required: required, content_type: content_type, schema: schema, schema_errors: schema_errors})
 }
 
@@ -1072,7 +1072,7 @@ __openapi_response: fn(value: Dyn) -> __OpenAPIResponse __OpenAPIFault! {
     schema_value: __openapi_field(fields, "schema") ?? return Err(err)
     schema_errors := [String]{}
     schema := String?{None}
-    if !(schema_value == Dyn.Null) -> schema = Val(__openapi_schema(schema_value, "response", &schema_errors) ?? return Err(err))
+    if !(schema_value == Dyn.Null) -> schema = Val(__openapi_schema(schema_value, "response", schema_errors) ?? return Err(err))
     description: __openapi_text(fields, "description") ?? return Err(err)
     content_type: if __openapi_optional_text(fields, "content_type") == {
         .Ok(text) -> text
@@ -1087,7 +1087,7 @@ __openapi_security: fn(value: Dyn) -> __OpenAPISecurity __OpenAPIFault! {
     scopes := [String]{}
     loop scope in listed {
         if scope == {
-            .Text(text) -> &scopes.push(text)
+            .Text(text) -> scopes.push(text)
             else -> return Err(__openapi_fault("OpenAPI security scopes must be text"))
         }
     }
@@ -1109,18 +1109,18 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
     parameter_values: __openapi_array(fields, "parameters") ?? return Err(err)
     parameters := [__OpenAPIParameter]{}
     loop item in parameter_values {
-        &parameters.push(__openapi_parameter(item) ?? return Err(err))
+        parameters.push(__openapi_parameter(item) ?? return Err(err))
     }
     response_values: __openapi_array(fields, "responses") ?? return Err(err)
     responses := [__OpenAPIResponse]{}
     loop item in response_values {
-        &responses.push(__openapi_response(item) ?? return Err(err))
+        responses.push(__openapi_response(item) ?? return Err(err))
     }
     if responses.len() == 0 -> return Err(__openapi_fault("checked OpenAPI route contract has no responses"))
     security_values: __openapi_array(fields, "security") ?? return Err(err)
     security := [__OpenAPISecurity]{}
     loop item in security_values {
-        &security.push(__openapi_security(item) ?? return Err(err))
+        security.push(__openapi_security(item) ?? return Err(err))
     }
     operation_id: __openapi_text(fields, "operation_id") ?? return Err(err)
     body_value: __openapi_field(fields, "request_body") ?? return Err(err)
@@ -1142,16 +1142,16 @@ __openapi_route_input: fn(contract: String, method: String, pattern: String) -> 
 __openapi_operation_id: fn(method: Int, path: String) -> String Never! {
     name: __openapi_methods()[method]
     bytes := "jet-openapi-operation-v1:".bytes()
-    loop byte in name.bytes() -> &bytes.push(byte)
-    &bytes.push(U8{0})
-    loop byte in path.bytes() -> &bytes.push(byte)
+    loop byte in name.bytes() -> bytes.push(byte)
+    bytes.push(U8{0})
+    loop byte in path.bytes() -> bytes.push(byte)
     hash := U64{14695981039346656037}
     loop byte in bytes {
         hash = (hash.bit_xor(U64{Int.from_u8(byte)})).wrapping_mul(U64{1099511628211})
     }
     out := [U8]{}
     loop index in 0..<16 {
-        &out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
+        out.push(__app_hex_digit(Int.from_u64((hash >> (60 - index * 4)).bit_and(U64{15}))))
     }
     "jet_{name}_{String.from_bytes(out) ?? ""}"
 }
@@ -1166,21 +1166,21 @@ __openapi_compare_lists: fn(left: [String], right: [String]) -> Ordering Never! 
 
 __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
     out := route
-    &out.parameters.sort_by((left: __OpenAPIParameter, right: __OpenAPIParameter) -> {
+    out.parameters.sort_by((left: __OpenAPIParameter, right: __OpenAPIParameter) -> {
         if left.location != right.location -> return left.location <=> right.location
         left.name <=> right.name
     })
-    &out.responses.sort_by((left: __OpenAPIResponse, right: __OpenAPIResponse) -> {
+    out.responses.sort_by((left: __OpenAPIResponse, right: __OpenAPIResponse) -> {
         if left.status != right.status -> return left.status <=> right.status
         left.description <=> right.description
     })
     security := [__OpenAPISecurity]{}
     loop requirement in out.security {
         scopes := requirement.scopes.copy()
-        &scopes.sort()
-        &security.push(__OpenAPISecurity{scheme: requirement.scheme.copy(), scopes: scopes})
+        scopes.sort()
+        security.push(__OpenAPISecurity{scheme: requirement.scheme.copy(), scopes: scopes})
     }
-    &security.sort_by((left: __OpenAPISecurity, right: __OpenAPISecurity) -> {
+    security.sort_by((left: __OpenAPISecurity, right: __OpenAPISecurity) -> {
         if left.scheme != right.scheme -> return left.scheme <=> right.scheme
         __openapi_compare_lists(left.scopes, right.scopes)
     })
@@ -1192,8 +1192,8 @@ __openapi_canonical: fn(route: __OpenAPIRoute) -> __OpenAPIRoute Never! {
 // declares none.
 __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String) -> String __OpenAPIFault! {
     routes := [__OpenAPIRoute]{}
-    loop input in inputs -> &routes.push(__openapi_canonical(input))
-    &routes.sort_by((left: __OpenAPIRoute, right: __OpenAPIRoute) -> {
+    loop input in inputs -> routes.push(__openapi_canonical(input))
+    routes.sort_by((left: __OpenAPIRoute, right: __OpenAPIRoute) -> {
         if left.path != right.path -> return left.path <=> right.path
         if left.method != right.method -> return left.method <=> right.method
         left.operation_id <=> right.operation_id
@@ -1203,18 +1203,18 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
     keys := [String]{}
     operation_ids := [String]{}
     loop route in routes {
-        if !route.path.starts_with("/") || route.path.contains("?") || route.path.contains("#") -> &errors.push("invalid OpenAPI route path `{route.path}` for canonical pattern `{route.path}`")
-        if route.operation_id == "" -> &errors.push("OpenAPI route `{route.path}` needs an operationId")
+        if !route.path.starts_with("/") || route.path.contains("?") || route.path.contains("#") -> errors.push("invalid OpenAPI route path `{route.path}` for canonical pattern `{route.path}`")
+        if route.operation_id == "" -> errors.push("OpenAPI route `{route.path}` needs an operationId")
         if operation_ids.contains(route.operation_id) {
-            &errors.push("duplicate OpenAPI operationId `{route.operation_id}`")
+            errors.push("duplicate OpenAPI operationId `{route.operation_id}`")
         } else {
-            &operation_ids.push(route.operation_id.copy())
+            operation_ids.push(route.operation_id.copy())
         }
         key: "{__openapi_methods()[route.method]} {route.path}"
         if keys.contains(key) {
-            &errors.push("duplicate OpenAPI route `{key}`")
+            errors.push("duplicate OpenAPI route `{key}`")
         } else {
-            &keys.push(key.copy())
+            keys.push(key.copy())
         }
         schema_errors := [String]{}
         parameter_keys := [String]{}
@@ -1223,47 +1223,47 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
             location: __openapi_locations()[parameter.location]
             parameter_key: "{location}:{parameter.name}"
             if parameter_keys.contains(parameter_key) {
-                &schema_errors.push("parameter: duplicate {location} parameter `{parameter.name}`")
+                schema_errors.push("parameter: duplicate {location} parameter `{parameter.name}`")
             } else {
-                &parameter_keys.push(parameter_key.copy())
+                parameter_keys.push(parameter_key.copy())
             }
             if parameter.location == 0 {
-                &declared.push(parameter.name.copy())
-                if !route.names.contains(parameter.name) -> &schema_errors.push(__openapi_problem(parameter.name, "path parameter is not present in the route template"))
-                if parameter.catch_all != route.catch_alls.contains(parameter.name) -> &schema_errors.push(__openapi_problem(parameter.name, "path parameter catch-all fact disagrees with the canonical route pattern"))
+                declared.push(parameter.name.copy())
+                if !route.names.contains(parameter.name) -> schema_errors.push(__openapi_problem(parameter.name, "path parameter is not present in the route template"))
+                if parameter.catch_all != route.catch_alls.contains(parameter.name) -> schema_errors.push(__openapi_problem(parameter.name, "path parameter catch-all fact disagrees with the canonical route pattern"))
             }
-            loop problem in parameter.schema_errors -> &schema_errors.push(problem.copy())
-            if parameter.name == "" -> &schema_errors.push("parameter: parameter name must not be empty")
-            if parameter.location == 0 && !parameter.required -> &schema_errors.push(__openapi_problem(parameter.name, "path parameters are always required"))
+            loop problem in parameter.schema_errors -> schema_errors.push(problem.copy())
+            if parameter.name == "" -> schema_errors.push("parameter: parameter name must not be empty")
+            if parameter.location == 0 && !parameter.required -> schema_errors.push(__openapi_problem(parameter.name, "path parameters are always required"))
         }
         template := route.names.copy()
-        &template.sort()
+        template.sort()
         loop name in template {
-            if !declared.contains(name) -> &schema_errors.push(__openapi_problem(name, "route template parameter has no parameter fact"))
+            if !declared.contains(name) -> schema_errors.push(__openapi_problem(name, "route template parameter has no parameter fact"))
         }
         if route.body == .Val(body) {
-            loop problem in body.schema_errors -> &schema_errors.push(problem.copy())
-            if body.content_type == "" -> &schema_errors.push("requestBody: request body content type must not be empty")
+            loop problem in body.schema_errors -> schema_errors.push(problem.copy())
+            if body.content_type == "" -> schema_errors.push("requestBody: request body content type must not be empty")
         }
         statuses := [Int]{}
         loop response in route.responses {
-            if response.status < 100 || response.status > 599 -> &errors.push("response status {response.status} is out of range")
+            if response.status < 100 || response.status > 599 -> errors.push("response status {response.status} is out of range")
             if statuses.contains(response.status) {
-                &errors.push("route `{key}` declares response status {response.status} more than once")
+                errors.push("route `{key}` declares response status {response.status} more than once")
             } else {
-                &statuses.push(response.status)
+                statuses.push(response.status)
             }
-            loop problem in response.schema_errors -> &schema_errors.push(problem.copy())
+            loop problem in response.schema_errors -> schema_errors.push(problem.copy())
         }
-        if route.responses.len() == 0 -> &errors.push("route `{key}` must declare a response")
+        if route.responses.len() == 0 -> errors.push("route `{key}` must declare a response")
         loop requirement in route.security {
             if requirement.scheme == "" {
-                &errors.push("route `{key}` has an empty security scheme")
+                errors.push("route `{key}` has an empty security scheme")
             } else {
-                &errors.push("route `{key}` references unknown security scheme `{requirement.scheme}`")
+                errors.push("route `{key}` references unknown security scheme `{requirement.scheme}`")
             }
         }
-        loop problem in schema_errors -> &errors.push(problem.copy())
+        loop problem in schema_errors -> errors.push(problem.copy())
     }
     if errors.len() > 0 -> return Err(__openapi_fault(errors.join("; ")))
     paths := [String]{}
@@ -1272,10 +1272,10 @@ __openapi_document: fn(inputs: [__OpenAPIRoute], title: String, version: String)
         path: routes[index].path.copy()
         methods := [String]{}
         loop index < routes.len() && routes[index].path == path {
-            &methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
+            methods.push("{__app_json_string(__openapi_methods()[routes[index].method])}:{__openapi_route_json(routes[index])}")
             index += 1
         }
-        &paths.push("{__app_json_string(path)}:{{{methods.join(",")}}}")
+        paths.push("{__app_json_string(path)}:{{{methods.join(",")}}}")
     }
     Ok("{{\"openapi\":\"3.1.0\",\"info\":{{\"title\":{__app_json_string(title)},\"version\":{__app_json_string(version)}}},\"paths\":{{{paths.join(",")}}}}}")
 }
@@ -1288,7 +1288,7 @@ __openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
         rendered := [String]{}
         loop parameter in route.parameters {
             required: parameter.required || parameter.location == 0
-            &rendered.push("{{\"name\":{__app_json_string(parameter.name)},\"in\":{__app_json_string(__openapi_locations()[parameter.location])},\"required\":{required},\"schema\":{parameter.schema}}}")
+            rendered.push("{{\"name\":{__app_json_string(parameter.name)},\"in\":{__app_json_string(__openapi_locations()[parameter.location])},\"required\":{required},\"schema\":{parameter.schema}}}")
         }
         out = "{out},\"parameters\":[{rendered.join(",")}]"
     }
@@ -1299,15 +1299,15 @@ __openapi_route_json: fn(route: __OpenAPIRoute) -> String Never! {
         if response.schema == .Val(schema) {
             if response.content_type == .Val(content_type) -> rendered = "{rendered},\"content\":{{{__app_json_string(content_type)}:{{\"schema\":{schema}}}}}"
         }
-        &responses.push("{rendered}}}")
+        responses.push("{rendered}}}")
     }
     out = "{out},\"responses\":{{{responses.join(",")}}}"
     if route.security.len() > 0 {
         rendered := [String]{}
         loop requirement in route.security {
             scopes := [String]{}
-            loop scope in requirement.scopes -> &scopes.push(__app_json_string(scope))
-            &rendered.push("{{{__app_json_string(requirement.scheme)}:[{scopes.join(",")}]}}")
+            loop scope in requirement.scopes -> scopes.push(__app_json_string(scope))
+            rendered.push("{{{__app_json_string(requirement.scheme)}:[{scopes.join(",")}]}}")
         }
         out = "{out},\"security\":[{rendered.join(",")}]"
     }
@@ -1374,12 +1374,12 @@ live_query_count: fn(registry: LiveRegistry) -> Int {
 }
 
 // `live(source, args...)`: `args` are the encoded arguments.
-__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: ^fn() -> T E!) -> Live<T, E> Never! {
+__live_bind: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], run: &&fn() -> T E!) -> Live<T, E> Never! {
     Live<T, E>{id: live_register(source, live_key(args), 0), run: run}
 }
 
 // `subscribe(source, args..., every:)`: a binding polled every `every`.
-__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: ^fn() -> T E!) -> Live<T, E> Never! {
+__live_poll: fn<T: [Encode, Decode], E: [Encode, Decode]>(source: String, args: [String], every: Duration?, run: &&fn() -> T E!) -> Live<T, E> Never! {
     every_ns := 0
     if every == .Val(interval) && interval.ns > 0 -> every_ns = interval.ns
     Live<T, E>{id: live_register(source, live_key(args), every_ns), run: run}
@@ -1415,7 +1415,7 @@ LIVE_SYNC_SOURCE: "app.sync"
 
 live_cell_load: fn() -> [U8] { core.web.__live_load() }
 
-live_cell_replace: fn(expected: [U8], replacement: ^[U8]) -> Bool { core.web.__live_replace(expected, ^replacement) }
+live_cell_replace: fn(expected: [U8], replacement: &&[U8]) -> Bool { core.web.__live_replace(expected, replacement) }
 
 live_key: fn(args: [String]) -> String { "[{args.join(",")}]" }
 
@@ -1445,13 +1445,13 @@ live_register: fn(source: String, key: String, every_ns: Int) -> Int {
                         evicted = true
                         next
                     }
-                    &kept.push(record)
+                    kept.push(record)
                 }
                 registry.records = kept
                 registry.evictions += 1
             }
             // copy: a lost race retries with the same source and key
-            &registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, every_ns: every_ns, ran_ns: 0})
+            registry.records.push(LiveRecord{id: found, source: source.copy(), key: key.copy(), value: "", dirty: false, every_ns: every_ns, ran_ns: 0})
         }
         if live_cell_replace(seen, live_encode(registry)) -> return found
     }
@@ -1497,7 +1497,7 @@ live_store: fn(id: Int, value: String, now: Int) {
 }
 
 // Marks dirty every binding of `source`, or only the one whose key is `key`,
-// then publishes the invalidation to the WebSocket live hub (D-LIVEQUERY1):
+// then publishes the invalidation to the WebSocket live hub:
 // topic `live:<source>`, a JSON event every joined server connection receives
 // and a connection that joins later gets replayed as the topic's latest.
 live_invalidate: fn(source: String, key: String?) {
@@ -1534,26 +1534,26 @@ live_index: fn(registry: LiveRegistry, id: Int) -> Int? {
 // binding.
 live_encode: fn(registry: LiveRegistry) -> [U8] {
     out := [U8]{}
-    live_put(&out, "{registry.next_id}")
-    live_put(&out, "{registry.invalidations}")
-    live_put(&out, "{registry.changes}")
-    live_put(&out, "{registry.evictions}")
-    live_put(&out, "{registry.ws_pushes}")
+    live_put(out, "{registry.next_id}")
+    live_put(out, "{registry.invalidations}")
+    live_put(out, "{registry.changes}")
+    live_put(out, "{registry.evictions}")
+    live_put(out, "{registry.ws_pushes}")
     loop record in registry.records {
-        live_put(&out, "{record.id}")
-        live_put(&out, record.source)
-        live_put(&out, record.key)
-        live_put(&out, record.value)
-        live_put(&out, if record.dirty -> "1" else -> "0")
-        live_put(&out, "{record.every_ns}")
-        live_put(&out, "{record.ran_ns}")
+        live_put(out, "{record.id}")
+        live_put(out, record.source)
+        live_put(out, record.key)
+        live_put(out, record.value)
+        live_put(out, if record.dirty -> "1" else -> "0")
+        live_put(out, "{record.every_ns}")
+        live_put(out, "{record.ran_ns}")
     }
     out
 }
 
 live_put: fn(out: &[U8], text: String) {
-    loop byte in "{text.len()}:".bytes() -> &out.push(byte)
-    loop byte in text.bytes() -> &out.push(byte)
+    loop byte in "{text.len()}:".bytes() -> out.push(byte)
+    loop byte in text.bytes() -> out.push(byte)
 }
 
 // An empty cell is the empty registry; None when the bytes are malformed.
@@ -1572,7 +1572,7 @@ live_decode: fn(raw: [U8]) -> LiveRegistry? {
         id: Int.parse(fields[at]) ?? return None
         every_ns: Int.parse(fields[at + 5]) ?? return None
         ran_ns: Int.parse(fields[at + 6]) ?? return None
-        &records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", every_ns: every_ns, ran_ns: ran_ns})
+        records.push(LiveRecord{id: id, source: fields[at + 1], key: fields[at + 2], value: fields[at + 3], dirty: fields[at + 4] == "1", every_ns: every_ns, ran_ns: ran_ns})
         at += 7
     }
     Val(LiveRegistry{next_id: next_id, invalidations: invalidations, changes: changes, evictions: evictions, ws_pushes: ws_pushes, records: records})
@@ -1593,7 +1593,7 @@ live_fields: fn(raw: [U8]) -> [String]? {
             length = length * 10 + n - 48
         }
         if at + length > raw.len() -> return None
-        &fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
+        fields.push(String.from_bytes(raw.slice(at, at + length)) ?? return None)
         at += length
     }
     Val(fields)

@@ -1,5 +1,6 @@
 
 use process: core.process
 run: fn() {
-    process.run(["echo", "hello"]) ?? return Err("test")
+    receipt: process.cmd(["echo", "hello"]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
 }

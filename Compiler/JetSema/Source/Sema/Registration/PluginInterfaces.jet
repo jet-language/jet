@@ -71,7 +71,7 @@ sema_plugin_put_export: fn(exports: &[SemaPluginInterfaceExport], export: SemaPl
             return
         }
     }
-    &exports.push(export)
+    exports.push(export.copy())
 }
 
 sema_plugin_export_after: fn(left: SemaPluginInterfaceExport, right: SemaPluginInterfaceExport) -> Bool Never! {
@@ -113,12 +113,12 @@ sema_plugin_put_interface: fn(interfaces: &[SemaPluginInterface], interface: Sem
             return
         }
     }
-    &interfaces.push(interface)
+    interfaces.push(interface.copy())
 }
 
 sema_plugin_normalize_artifact: fn(raw: String) -> String? {
     bytes := raw.trim().bytes()
-    loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> _ := &bytes.pop()
+    loop bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{47}) -> _ := bytes.pop()
     if bytes.len() == 0 -> return None
     start := 0
     loop index in 0..<bytes.len() {
@@ -142,7 +142,7 @@ sema_plugin_put_alias: fn(aliases: &[SemaPluginArtifactAlias], artifact: String,
             return
         }
     }
-    &aliases.push(SemaPluginArtifactAlias{artifact: normalized, identity: identity})
+    aliases.push(SemaPluginArtifactAlias{artifact: normalized, identity: identity})
 }
 
 sema_plugin_identity: fn(artifact: String, digest: String) -> String Never! {
@@ -288,14 +288,14 @@ sema_plugin_interface_facts: fn(snapshots: [SemaPluginSnapshot]) -> SemaPluginIn
                 complete = false
                 next
             }
-            sema_plugin_put_export(&exports, export)
+            sema_plugin_put_export(exports, export)
         }
-        sema_plugin_sort_exports(&exports)
-        sema_plugin_put_interface(&interfaces, SemaPluginInterface{artifact: stem, identity: identity, digest: digest, exports: exports})
-        sema_plugin_put_alias(&aliases, stem, identity)
+        sema_plugin_sort_exports(exports)
+        sema_plugin_put_interface(interfaces, SemaPluginInterface{artifact: stem, identity: identity, digest: digest, exports: exports})
+        sema_plugin_put_alias(aliases, stem, identity)
         digests = "{digests}{identity}\n"
     }
-    sema_plugin_sort_interfaces(&interfaces)
+    sema_plugin_sort_interfaces(interfaces)
     SemaPluginInterfaceFacts{interfaces: interfaces, artifacts: aliases, digest: sema_plugin_sha256(digests), complete: complete}
 }
 

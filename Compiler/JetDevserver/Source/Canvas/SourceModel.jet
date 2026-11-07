@@ -67,7 +67,7 @@ ensure_no_symlink_directory: fn(path: String) CanvasSourceError! {
 write_new_file_without_symlinks: fn(path: String, bytes: [U8]) CanvasSourceError! {
     held: source_open_parent(path)
     writer := held.parent.create(held.name, if_exists: .Refuse, mode: Val(SOURCE_NEW_FILE_MODE)) ?? return Err(canvas_source_error("couldn't create Canvas source `{path}`: {err}"))
-    if source_write_all(&writer, bytes) == .Err(error) {
+    if source_write_all(writer, bytes) == .Err(error) {
         source_remove_quietly(held.parent, held.name)
         return Err(error)
     }
@@ -142,7 +142,7 @@ source_components: fn(path: String) -> [String] CanvasSourceError! {
     loop part in path.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err(canvas_source_error("Canvas paths must not contain parent components"))
-        &names.push(part)
+        names.push(part)
     }
     Ok(names)
 }
@@ -170,7 +170,7 @@ source_read_current: fn(parent: Directory, name: String) -> SourceCurrentFile? C
     loop {
         chunk: reader.read(SOURCE_MAX_BYTES + 1 - bytes.len()) ?? return Err(canvas_source_error("couldn't read Canvas source `{name}`: {err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > SOURCE_MAX_BYTES -> return Err(canvas_source_error("file exceeds the devserver response limit"))
     }
     after: reader.stat() ?? return Err(canvas_source_error("couldn't inspect Canvas source `{name}`: {err}"))
@@ -204,7 +204,7 @@ source_replace: fn(target: SourceTarget, bytes: [U8], mode: Int?) CanvasSourceEr
         if target.parent.create(name, if_exists: .Refuse, mode: Val(file_mode)) == {
             .Ok(created) -> {
                 writer := created
-                if source_write_all(&writer, bytes) == .Err(error) {
+                if source_write_all(writer, bytes) == .Err(error) {
                     source_remove_quietly(target.parent, name)
                     return Err(error)
                 }

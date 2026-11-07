@@ -81,8 +81,8 @@ silently producing a value. Record which
 Jet-owned support is available and whether a further library or compiler
 improvement is justified; do not substitute a foreign library when setup
 fails. The existing sources
-[`json_typed.jet`](../../../Examples/features/serde/json_typed.jet) and
-[`json.jet`](../../../Examples/features/serde/json.jet) establish the
+[`json_typed.jet`](../../../Examples/Data/JSON/JSONTyped.jet) and
+[`json.jet`](../../../Examples/Data/JSON/JSON.jet) establish the
 first-party example pattern, not a fresh execution result. Stop after this
 job's success and wrong-type dispositions, and preserve any missing execution
 or comparison as `unknown`.

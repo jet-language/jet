@@ -322,7 +322,7 @@ if (cells.length !== 20) fail(`Source compiler contract has ${cells.length} cell
 const sourceManifestPath = path.join(root, "Compiler", "package.jet");
 const sourceManifestSha = sha256File(sourceManifestPath);
 const canonicalProbeSpecs = [
-  { probe_id: "valid-hello", case: "valid", expected_kind: "stdout", input: "Examples/features/basics/hello.jet", expected: "Examples/features/expected/basics/hello.out" },
+  { probe_id: "valid-hello", case: "valid", expected_kind: "stdout", input: "Examples/Basics/Hello.jet", expected: "Examples/Basics/Hello.out" },
   { probe_id: "invalid-missing-return", case: "invalid", expected_kind: "diagnostics", input: "tests/ui/missing_return.jet", expected: "tests/ui/missing_return.stderr" },
 ];
 const canonicalProbes = canonicalProbeSpecs.map(spec => {

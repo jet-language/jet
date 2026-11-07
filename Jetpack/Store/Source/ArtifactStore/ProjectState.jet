@@ -136,11 +136,11 @@ StampTable: struct {
     save: fn(self, workspace_root: String) ArtifactStoreError! -[FS, Env, Rand]> {
         if !self.changed -> return
         paths := self.entries.keys().to_list()
-        &paths.sort()
+        paths.sort()
         entries := [RecordValue]{}
         loop path in paths {
             entry: self.entries[path]
-            &entries.push(RecordValue.Map{fields: [RecordField]{
+            entries.push(RecordValue.Map{fields: [RecordField]{
                 {name: "path", value: RecordValue.Str{value: path}},
                 {name: "digest", value: RecordValue.Str{value: entry.digest}},
                 {name: "size", value: RecordValue.Int{value: entry.stamp.size}},

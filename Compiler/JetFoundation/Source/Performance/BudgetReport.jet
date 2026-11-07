@@ -197,7 +197,7 @@ perf_validate_provider: fn(value: CanonicalJSON) PerfBudgetError! {
         _: perf_report_unsigned(f[perf_report_index(f, "memory_bytes")].value, "provider.memory_bytes")
         hash: perf_report_hex64(f[perf_report_index(f, "hardware_fingerprint")].value, "provider.hardware_fingerprint")
         unhashed := [CanonicalJSONField]{}
-        loop field in f { if field.key != "hardware_fingerprint" -> &unhashed.push(field.copy()) }
+        loop field in f { if field.key != "hardware_fingerprint" -> unhashed.push(field.copy()) }
         perf_verify_stable_id(perf_report_object_new(unhashed), hash) ?? return Err(perf_error("provider hardware_fingerprint mismatch"))
     }
 }
@@ -232,7 +232,7 @@ perf_validate_measurement: fn(value: CanonicalJSON) PerfBudgetError! {
     if value == .Object(f) {
         required := [String]{"budget_id", "budget_spec", "budget_spec_sha256", "source", "metric", "target_class", "unit", "direction", "provider", "comparison", "enforcement", "context_key", "policy", "samples", "statistics", "history", "baseline", "decision"}
         compile: perf_report_find(f, "compile")
-        if compile != None -> &required.push("compile")
+        if compile != None -> required.push("compile")
         perf_report_object(value, "measurement", required)
         _: perf_report_text(f[perf_report_index(f, "budget_id")].value, "measurement.budget_id")
         spec: perf_report_index(f, "budget_spec")
@@ -308,7 +308,7 @@ perf_validate_compile_record: fn(value: CanonicalJSON, root: [CanonicalJSONField
         hashes: [String]{"compiler_digest", "core_digest", "source_tree_sha256"}
         loop key in hashes { _: perf_report_hex64(f[perf_report_index(f, key)].value, "compile sample {key}") }
         ns: perf_report_unsigned(f[perf_report_index(f, "elapsed_ns")].value, "compile sample elapsed_ns")
-        &aggregate.elapsed.push(perf_rational_integer(ns))
+        aggregate.elapsed.push(perf_rational_integer(ns))
         rss: perf_report_unsigned(f[perf_report_index(f, "peak_rss_bytes")].value, "compile sample peak_rss_bytes")
         if rss > aggregate.peak_rss_bytes -> aggregate.peak_rss_bytes = rss
         phases: perf_validate_phase_totals(f[perf_report_index(f, "phase_totals")].value, "compile sample phase_totals")
@@ -344,7 +344,7 @@ perf_validate_compile_metadata: fn(value: CanonicalJSON, measurement_samples: Ca
         aggregate := PerfCompileAggregate{phases: [String:Int]{}, elapsed: [PerfRational]{}, peak_rss_bytes: 0}
         if f[records].value == .Array(entries) {
             if entries.len() != samples -> return Err(perf_error("compile.sample_records count does not match compile.samples"))
-            loop record in entries -> perf_validate_compile_record(record, f, &aggregate)
+            loop record in entries -> perf_validate_compile_record(record, f, aggregate)
         }
         if aggregate.peak_rss_bytes != peak -> return Err(perf_error("compile.peak_rss_bytes does not equal the maximum per-sample peak RSS"))
         perf_report_array(measurement_samples, "measurement.samples")
@@ -373,10 +373,10 @@ perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetE
     if value == .Object(f) {
         out := [CanonicalJSONField]{}
         loop field in f {
-            if field.key != "history" && field.key != "baseline" && field.key != "decision" -> &out.push(field.copy())
+            if field.key != "history" && field.key != "baseline" && field.key != "decision" -> out.push(field.copy())
         }
         keys: [String]{"history", "baseline", "decision"}
-        loop key in keys -> &out.push(CanonicalJSONField{key: key, value: CanonicalJSON.Null})
+        loop key in keys -> out.push(CanonicalJSONField{key: key, value: CanonicalJSON.Null})
         return Ok(perf_report_object_new(out))
     }
     Err(perf_error("measurement is not object"))
@@ -384,8 +384,8 @@ perf_sanitize_measurement: fn(value: CanonicalJSON) -> CanonicalJSON PerfBudgetE
 // Rust frame / wire_text.
 perf_report_frame: fn(input: &[U8], value: String) Never! {
     bytes: value.bytes()
-    perf_push_u64(&input, bytes.len())
-    loop byte in bytes -> &input.push(byte)
+    perf_push_u64(input, bytes.len())
+    loop byte in bytes -> input.push(byte)
 }
 perf_report_wire_text: fn(value: CanonicalJSON) -> String Never! {
     if value == {
@@ -405,17 +405,17 @@ perf_budget_context_key: fn(subject: [CanonicalJSONField], tool: [CanonicalJSONF
     if measurement[metric].value == .Object(m) {
         if measurement[provider].value == .Object(p) {
             input := "jet-budget-context-v1".bytes()
-            &input.push(U8{0})
-            perf_report_frame(&input, perf_report_wire_text(subject[perf_report_index(subject, "target_id")].value))
-            perf_report_frame(&input, perf_report_wire_text(m[perf_report_index(m, "name")].value))
-            perf_report_frame(&input, perf_report_wire_text(m[perf_report_index(m, "percentile")].value))
-            perf_report_frame(&input, perf_report_wire_text(measurement[perf_report_index(measurement, "target_class")].value))
+            input.push(U8{0})
+            perf_report_frame(input, perf_report_wire_text(subject[perf_report_index(subject, "target_id")].value))
+            perf_report_frame(input, perf_report_wire_text(m[perf_report_index(m, "name")].value))
+            perf_report_frame(input, perf_report_wire_text(m[perf_report_index(m, "percentile")].value))
+            perf_report_frame(input, perf_report_wire_text(measurement[perf_report_index(measurement, "target_class")].value))
             keys: [String]{"target_triple", "profile"}
-            loop key in keys -> perf_report_frame(&input, perf_report_wire_text(subject[perf_report_index(subject, key)].value))
+            loop key in keys -> perf_report_frame(input, perf_report_wire_text(subject[perf_report_index(subject, key)].value))
             tool_keys: [String]{"jet_version", "compiler_build_id", "stdlib_id", "runner_id", "digest"}
-            loop key in tool_keys -> perf_report_frame(&input, perf_report_wire_text(tool[perf_report_index(tool, key)].value))
+            loop key in tool_keys -> perf_report_frame(input, perf_report_wire_text(tool[perf_report_index(tool, key)].value))
             provider_keys: [String]{"kind", "identity", "version", "isolation", "cpu_arch", "cpu_model", "logical_cpus", "memory_bytes", "os", "kernel", "power_governor", "hardware_fingerprint"}
-            loop key in provider_keys -> perf_report_frame(&input, perf_report_wire_text(p[perf_report_index(p, key)].value))
+            loop key in provider_keys -> perf_report_frame(input, perf_report_wire_text(p[perf_report_index(p, key)].value))
             return Ok(sha256_hex_bytes(sha256_bytes(input[0..<input.len()])))
         }
         return Err(perf_error("provider is not object"))
@@ -439,13 +439,13 @@ perf_report_rational_or_none: fn(value: CanonicalJSON, name: String) -> PerfRati
 perf_report_quantities: fn(value: CanonicalJSON, name: String, item_name: String) -> [PerfRational] PerfBudgetError! {
     perf_report_array(value, name)
     out := [PerfRational]{}
-    if value == .Array(v) { loop q in v -> &out.push(perf_validate_rational(q, true, item_name)) }
+    if value == .Array(v) { loop q in v -> out.push(perf_validate_rational(q, true, item_name)) }
     Ok(out)
 }
 perf_report_ids: fn(value: CanonicalJSON, name: String, item_name: String) -> [String] PerfBudgetError! {
     perf_report_array(value, name)
     out := [String]{}
-    if value == .Array(v) { loop id in v -> &out.push(perf_report_text(id, item_name)) }
+    if value == .Array(v) { loop id in v -> out.push(perf_report_text(id, item_name)) }
     Ok(out)
 }
 perf_report_history_ids: fn(value: CanonicalJSON) -> [String] PerfBudgetError! {
@@ -644,7 +644,7 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                 loop key in tool_keys {
                     i: perf_report_index(tool, key)
                     _: perf_report_text(tool[i].value, "toolchain.{key}")
-                    &digest_fields.push(tool[i].copy())
+                    digest_fields.push(tool[i].copy())
                 }
                 digest: perf_report_hex64(tool[perf_report_index(tool, "digest")].value, "toolchain.digest")
                 perf_verify_stable_id(perf_report_object_new(digest_fields), digest) ?? return Err(perf_error("toolchain digest mismatch"))
@@ -668,7 +668,7 @@ perf_validate_report_content: fn(value: CanonicalJSON) PerfBudgetError! {
                             perf_validate_context_key(subject, tool, mf)
                             perf_verify_wire_evaluation(evidence, mf)
                         }
-                        &sanitized.push(perf_sanitize_measurement(measurement))
+                        sanitized.push(perf_sanitize_measurement(measurement))
                     }
                 }
                 hash_content: perf_report_object_new([CanonicalJSONField]{

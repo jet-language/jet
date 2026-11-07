@@ -1,4 +1,4 @@
-// Owner ruling (#6176; amends D-TYPEALIAS1): `Name: path` at file or module
+// Owner ruling (#6176): `Name: path` at file or module
 // scope means what its path names. The parser cannot tell `RNG: random.RNG`
 // from `MAX: other.MAX`, so it reads every bare-path right-hand side as a
 // constant binding (parser_path_binding_ahead_at). Before any module
@@ -58,11 +58,11 @@ sema_alias_classify_inputs: fn(inputs: &[SemaRegistrationModuleInput], edges: [S
     pending := [Int]{}
     loop index in 0..<inputs.len() {
         rows[inputs[index].module_identity] = index
-        if sema_alias_items_bind_paths(inputs[index].program.items) -> &pending.push(index)
+        if sema_alias_items_bind_paths(inputs[index].program.items) -> pending.push(index)
     }
     loop index in pending {
         keys := [String]{}
-        sema_alias_collect_types(inputs, edges, rows, index, inputs[index].program.items, [String]{}, &keys)
+        sema_alias_collect_types(inputs, edges, rows, index, inputs[index].program.items, [String]{}, keys)
         if keys.len() > 0 -> inputs[index].program.items = sema_alias_rewrite_items(inputs[index].program.items, keys)
     }
 }
@@ -93,13 +93,13 @@ sema_alias_expr_path: fn(value: Expr) -> [String]? Never! {
         .Ident(name, _, _) -> Val([String]{name})
         .Field(base, member, _, _) -> {
             parts := sema_alias_expr_path(base) ?? return None
-            &parts.push(member)
+            parts.push(member.copy())
             Val(parts)
         }
         .EnumLit(type_name, variant, _, args, leading_dot, _, _) -> {
             if leading_dot || args.len() > 0 || type_name == "" -> return None
             parts := type_name.split(".").to_list()
-            &parts.push(variant)
+            parts.push(variant.copy())
             Val(parts)
         }
         else -> None
@@ -114,13 +114,13 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
     loop item_index in 0..<items.len() {
         if items[item_index] == .Const(definition) {
             path: sema_alias_binding_path(definition) ?? next
-            if sema_alias_path_meaning(inputs, edges, rows, SemaAliasSite{input: index, scope: scope, depth: 0}, path) == .Type -> &keys.push(sema_alias_key(definition))
+            if sema_alias_path_meaning(inputs, edges, rows, SemaAliasSite{input: index, scope: scope, depth: 0}, path) == .Type -> keys.push(sema_alias_key(definition))
         }
         if items[item_index] == .CodeModule(code_module) {
             if code_module.body == .Val(body) {
                 inner := scope
-                &inner.push(code_module.name)
-                sema_alias_collect_types(inputs, edges, rows, index, body, inner, &keys)
+                inner.push(code_module.name)
+                sema_alias_collect_types(inputs, edges, rows, index, body, inner, keys)
             }
         }
     }
@@ -144,7 +144,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
             }
             else -> {}
         }
-        &rewritten.push(value)
+        rewritten.push(value)
     }
     rewritten
 }
@@ -188,7 +188,7 @@ sema_alias_follow: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistr
         .Module -> {
             if rest.len() == 0 -> return .Unknown
             inner := site.scope
-            &inner.push(path[0])
+            inner.push(path[0])
             sema_alias_member_meaning(inputs, edges, rows, SemaAliasSite{input: site.input, scope: inner, depth: site.depth + 1}, rest)
         }
         .Unknown -> .Unknown
@@ -256,7 +256,7 @@ sema_alias_import_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [Sem
         if binding.original == .Val(original) {
             if binding.local != path[0] -> next
             member := original.split(".").to_list()
-            loop part in rest -> &member.push(part)
+            loop part in rest -> member.push(part)
             return sema_alias_member_meaning(inputs, edges, rows, target, member)
         }
         parts: binding.local.split(".").to_list()

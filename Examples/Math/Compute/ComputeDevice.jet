@@ -1,0 +1,66 @@
+package: {
+    name: "tooling_compute_device"
+    version: "0.1.0"
+    authority: { allow: [GPU, IO, Mem.Alloc] }
+}
+
+// Device, stream, placement, transfer receipts.
+use compute: core.compute
+
+run: fn() {
+    t: compute.ones([2, 2]) ?? panic("ones")
+    print("device:{compute.device(t)}")
+    print("placement:{compute.placement(t)}")
+
+    cpu: compute.device_cpu()
+    moved: compute.on_device(t, cpu) ?? panic("on_device")
+    print("moved:{compute.device(moved)}")
+
+    stream: compute.stream_new()
+    compute.stream_sync(stream) ?? panic("sync")
+    print("stream:ok")
+
+    xfer: compute.transfer(moved, compute.device_cpu()) ?? panic("transfer")
+    print("transfer:{compute.transfer_show(xfer)}")
+    explicit_backends()
+}
+
+// CUDA and Metal are explicit: they never widen an F64 Tensor or fall back.
+explicit_backends: fn() {
+    value: compute.full([1, 1], 2.0) ?? panic("value")
+    if compute.on_device(value, compute.device_cuda()) == {
+        .Ok(_) -> { print("cuda:f64:accepted") }
+        .Err(_) -> { print("cuda:f64:rejected") }
+    }
+    if compute.on_device(value, compute.device_metal()) == {
+        .Ok(_) -> { print("metal:f64:accepted") }
+        .Err(_) -> { print("metal:f64:rejected") }
+    }
+
+    // An F32 tile may run on Metal when the host has it; the receipt, the
+    // arithmetic and the download are checked there.
+    f32_seed: compute.matrix(1, 1, 2.0) ?? panic("f32_seed")
+    f32_value: compute.matmul_f32_tile(f32_seed, f32_seed) ?? panic("f32_value")
+    expected: [Float]{8.0}
+    if compute.on_device(f32_value, compute.device_metal()) == {
+        .Ok(metal) -> {
+            if !compute.placement(metal).contains("backend=metal") -> panic("metal receipt")
+            doubled: compute.add(metal, metal) ?? panic("metal add")
+            if compute.to_list(doubled) != expected -> panic("metal arithmetic")
+            cpu: compute.transfer(doubled, compute.device_cpu()) ?? panic("metal download")
+            if compute.to_list(cpu) != expected -> panic("metal transfer")
+            metal_stream: compute.stream_new_on(compute.device_metal()) ?? panic("metal stream")
+            compute.stream_sync(metal_stream) ?? panic("metal sync")
+            if compute.det(metal) == {
+                .Ok(_) -> panic("metal det unexpectedly accepted")
+                .Err(_) -> {}
+            }
+        }
+        .Err(_) -> {}
+    }
+    print("metal:f32:checked")
+
+    stream: compute.stream_new_on(compute.device_cpu()) ?? panic("stream")
+    compute.stream_sync(stream) ?? panic("sync")
+    print("stream:cpu-ok")
+}

@@ -194,7 +194,7 @@ pkg_binder_lines: fn(text: String) -> [String] Never! {
         if index == parts.len() - 1 && parts[index] == "" -> break
         raw: parts[index].bytes()
         cut: if raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
-        &out.push(pkg_bytes_text(raw, 0, cut))
+        out.push(pkg_bytes_text(raw, 0, cut))
     }
     out
 }
@@ -209,7 +209,7 @@ pkg_binder_words: fn(text: String) -> [String] Never! {
         if cursor >= raw.len() -> break
         start: cursor
         loop cursor < raw.len() && pkg_bytes_space_width(raw, cursor) == 0 -> cursor += 1
-        &out.push(pkg_bytes_text(raw, start, cursor))
+        out.push(pkg_bytes_text(raw, start, cursor))
     }
     out
 }
@@ -254,7 +254,7 @@ pkg_binder_take_chars: fn(text: String, count: Int) -> String Never! {
     out := [String]{}
     loop scalar in text.chars() {
         if out.len() >= count -> break
-        &out.push("{scalar}")
+        out.push("{scalar}")
     }
     out.join("")
 }
@@ -279,8 +279,8 @@ pkg_binder_ascii_upper: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
         if {
-            code >= 97 && code <= 122 -> &out.push(U8.from_int(code - 32) ?? byte)
-            else -> &out.push(byte)
+            code >= 97 && code <= 122 -> out.push(U8.from_int(code - 32) ?? byte)
+            else -> out.push(byte)
         }
     }
     String.from_bytes(out) ?? value
@@ -291,7 +291,7 @@ pkg_binder_u64_le: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     rest := value
     loop index in 0..<8 {
-        &out.push(U8.from_int(rest % 256) ?? U8{0})
+        out.push(U8.from_int(rest % 256) ?? U8{0})
         rest = rest /% 256
     }
     out
@@ -299,6 +299,6 @@ pkg_binder_u64_le: fn(value: Int) -> [U8] Never! {
 
 // The bytes of `text` followed by one NUL separator.
 pkg_binder_append_field: fn(identity: &[U8], text: [U8]) {
-    loop byte in text -> &identity.push(byte)
-    &identity.push(U8{0})
+    loop byte in text -> identity.push(byte)
+    identity.push(U8{0})
 }

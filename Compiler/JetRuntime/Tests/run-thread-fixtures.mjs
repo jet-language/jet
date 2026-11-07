@@ -3,7 +3,7 @@
 // Separate modes permit one held keep-going proof: assemble, lower (including
 // negative intrinsic witnesses), audit, link, run. Standalone uses no Rust;
 // shared-link/shared-run exercise the complete Jet-authored Shared runtime.
-// rust-link/rust-run are retired reference modes (Tower #4923): UNCOVERED, exit 2.
+// rust-link/rust-run are retired reference modes (owner #38/#59): UNCOVERED, exit 2.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,7 +16,7 @@ import { parseRuntimeExports, runtimeLifecycleList } from "../../../Tools/agent/
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, mode] = process.argv.slice(2);
 if (["rust-link", "rust-run"].includes(mode)) {
-  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: `${mode}: Rust-spawned attachment fixture (a Rust thread fixture against the Rust native-pack rlib) retired (owner #38/#59; Tower #4923); no rustc invoked; no native replacement covers it` }));
+  console.log(JSON.stringify({ status: "UNCOVERED", cardRequired: true, reason: `${mode}: Rust-spawned attachment fixture (a Rust thread fixture against the Rust native-pack rlib) retired (owner #38/#59); no rustc invoked; no native replacement covers it` }));
   process.exit(2);
 }
 if (!output || !["assemble", "lower", "audit", "link", "run", "shared-link", "shared-run"].includes(mode)) {

@@ -8,10 +8,10 @@ Error [jet.ValueTypeMismatch]: `subscribe` wants String (text) for argument 1, b
 More: jet-lang.dev/e/E0112
 
 Error [jet.ValueTypeMismatch]: `next_event` wants `BrowserTimeout` for argument 1, but this is String (text)
-  --> tests/ui/browser_bidi/native_bidi_bad_method_arguments_stop_in_sema.jet:19:25
+  --> tests/ui/browser_bidi/native_bidi_bad_method_arguments_stop_in_sema.jet:19:24
     |
- 19 |     &session.next_event("soon") ?? return
-    |                         ^^^^^^
+ 19 |     session.next_event("soon") ?? return
+    |                        ^^^^^^
  Why: Every argument must match its parameter's type
  Fix: Use `BrowserTimeout` here
 More: jet-lang.dev/e/E0112
@@ -222,15 +222,6 @@ Error [jet.ValueTypeMismatch]: `send` wants String (text) for argument 2, but th
  Why: Every argument must match its parameter's type
  Fix: Put the value in text with interpolation: "{x}"
 More: jet-lang.dev/e/E0112
-
-Error [jet.MoveMarkerNotAllowed]: A value was passed with the move marker `^` to a parameter that does not consume
-  --> tests/ui/browser_bidi/native_bidi_bad_method_arguments_stop_in_sema.jet:39:24
-    |
- 39 |     session.subscribe(^event_name) ?? return
-    |                        ^^^^^^^^^^
- Why: Only parameters declared with the move marker `^` accept a moved value at the call site
- Fix: Remove the move marker `^`, or declare the parameter with that marker to take ownership
-More: jet-lang.dev/e/E0203
 
 Error [jet.ArgumentCountMismatch]: `close` expects 0 arguments, got 1
   --> tests/ui/browser_bidi/native_bidi_bad_method_arguments_stop_in_sema.jet:40:13

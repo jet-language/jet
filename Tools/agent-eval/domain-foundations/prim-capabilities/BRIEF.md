@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Learn Jet's authority/effect model (Docs/spec/safety.md, Examples/features/effects/**, safety/**, packages/**, io/db_policy.jet, os_process_control.jet). Then build: a host program that loads a plugin (a Jet package, and a WASM module if the toolchain allows) with only the capabilities the host grants (read one directory, no network), a tool that opens a possibly-malicious file inside a capability boundary, and a library that exposes an OS service (a daemon with start/stop/status) under explicit authority. Record what a library can enforce and what only the runtime can.
+Learn Jet's authority/effect model (Docs/spec/safety.md, Examples/ErrorsAndEffects/Effects/**, safety/**, packages/**, io/db_policy.jet, os_process_control.jet). Then build: a host program that loads a plugin (a Jet package, and a WASM module if the toolchain allows) with only the capabilities the host grants (read one directory, no network), a tool that opens a possibly-malicious file inside a capability boundary, and a library that exposes an OS service (a daemon with start/stop/status) under explicit authority. Record what a library can enforce and what only the runtime can.
 
 ## Answer these
 

@@ -1,0 +1,46 @@
+// #6611 c2: a call never copies on its own, so a read parameter handed to an
+// owning parameter is E0201 in every call form: a method call, a plain call, a
+// call with a trailing block, and the body of an operator hook (whose `rhs` is
+// a read parameter by the trait contract).
+Bag: struct {
+    rows: [[Int]]
+}
+
+impl Bag.Add([Int]) {
+    add: fn(self, rhs: [Int]) -> Bag {
+        rows := self.rows.copy()
+        rows.push(rhs)
+        Bag{rows: rows}
+    }
+}
+
+keep: fn(rows: &&[Int]) -> Int {
+    rows.len()
+}
+
+with_rows: fn(rows: &&[Int], body: fn() -> Int) -> Int {
+    rows.len() + body()
+}
+
+by_method: fn(item: [Int]) -> Int {
+    rows := [[Int]]{}
+    rows.push(item)
+    rows.len()
+}
+
+by_call: fn(item: [Int]) -> Int {
+    keep(item)
+}
+
+by_operator: fn(item: [Int]) -> Int {
+    bag: Bag{rows: [[Int]]{}} + item
+    bag.rows.len()
+}
+
+by_block: fn(item: [Int]) -> Int {
+    with_rows(item) { 1 }
+}
+
+run: fn() {
+    print(by_method([1]) + by_call([2]) + by_operator([3]) + by_block([4]))
+}

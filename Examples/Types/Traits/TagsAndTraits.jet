@@ -1,0 +1,61 @@
+// Methods → trait; no methods → tag.
+//
+// Tags mark intent on values (`#Reviewed String`) and erase at runtime —
+// the value is still a plain String. Traits add methods you actually call.
+Reviewed: tag { deny: [Net] }
+
+Internal: tag { deny: [DB] }
+
+Greeter: trait {
+    greet: fn(self) -> String
+}
+
+Doc: struct {
+    title: String
+}
+
+impl Doc.Greeter {
+    greet: fn(self) -> String { "reviewing: {self.title}" }
+}
+
+// Tag on a return: callers see this string is marked reviewed / internal.
+stamp_reviewed: fn(title: String) -> #Reviewed String { title.copy() }
+
+stash_internal: fn(note: String) -> #Internal String { note.copy() }
+
+// Tag on a parameter: the API documents what kind of string it expects.
+announce: fn(title: #Reviewed String) -> String { "ship it: {title}" }
+
+peek_internal: fn(note: #Internal String) -> String { "private: {note}" }
+
+run: fn() {
+    d: Doc{title: "spec"}
+    print(d.greet())
+
+    reviewed: stamp_reviewed(d.title)
+    print(announce(reviewed))
+
+    secret: stash_internal("editor notes")
+    print(peek_internal(secret))
+    value_tag_type_lesson()
+}
+
+// `#TagName T` is a value-tag qualifier in type position.
+// The tag documents intent (e.g., "this string is untrusted") without
+// changing the runtime type — the underlying value is still a plain T.
+Raw: tag { deny: [DB] }
+
+Locale: tag { deny: [Net] }
+
+Sanitized: tag { deny: [Log] }
+
+tag_score: fn(rating: #Raw Int) -> Int { rating * 2 }
+
+show_pair: fn(label: #Locale String, value: #Sanitized String) -> String { "{label}: {value}" }
+
+value_tag_type_lesson: fn() {
+    score: tag_score(21)
+    line: show_pair("Name", "Alice")
+    print("{score}")
+    print(line)
+}

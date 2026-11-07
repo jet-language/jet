@@ -324,7 +324,7 @@ function append(text) {
   generatedByte += Buffer.byteLength(text, "utf8");
   nextLine += (text.match(/\n/g) ?? []).length;
 }
-// D-MOD-CYCLE1=A: the listed Compiler/
+// The listed Compiler/
 // front-end files import their sibling packages with `use <package>.[names]`
 // or `use <package>.name`. This unit is one namespace, so those imports are
 // blanked to spaces of the same length (every byte offset and line in the

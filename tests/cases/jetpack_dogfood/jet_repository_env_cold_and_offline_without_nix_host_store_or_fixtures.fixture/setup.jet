@@ -1,3 +1,4 @@
+package: { name: "setup", authority: { allow: [Env, FS] } }
 use {
     dogfood_files: core.files
     dogfood_sys: core.sys
@@ -29,7 +30,7 @@ run: fn() {
         if name == ".git" || name == ".jet" || name == "target" || name.starts_with("target-") -> next
         destination: dogfood_files.join(project, name)
         if name == "env.jet" {
-            dogfood_files.copy2(entry.path, destination) ?? panic("copy live environment")
+            dogfood_files.copy(entry.path, destination) ?? panic("copy live environment")
         } else {
             dogfood_files.symlink(entry.path, destination) ?? panic("link live repository entry")
         }
@@ -38,5 +39,5 @@ run: fn() {
     // Original read_exact(first four) + ELF equality, never a shell stand-in.
     bytes: dogfood_files.read_bytes(jet) ?? panic("read admitted native binary")
     assert(bytes.len() >= 4, "read_exact ELF magic")
-    assert_eq(bytes[0..3], [U8]{127, 69, 76, 70}, "compiler proof must execute a real compiled binary, not a shell fixture")
+    assert(bytes[0..3] == [U8]{127, 69, 76, 70}, "compiler proof must execute a real compiled binary, not a shell fixture")
 }

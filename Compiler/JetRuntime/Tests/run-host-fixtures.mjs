@@ -3,7 +3,7 @@
 // The held proof supplies the FINAL E2 producer; fixture.o owns the full runtime.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
@@ -13,22 +13,20 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'compile', 'link', 'run'].includes(mode)) throw Error('usage: run-host-fixtures.mjs OUT assemble|lower|audit|compile|link|run');
 const out = resolve(output), dir = join(out, 'unit');
-const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n'], ['root-stdio', 'RootStdioWitness.c', 'root stdio: ok\n'], ['tcp-routes', 'TCPRoutesWitness.c', 'tcp routes: ok\n'], ['build-http', 'HostBuildHTTPWitness.c', 'build http: ok\n']];
+const fixtures = [['files', 'HostFilesTests.c', 'files raw: ok\n'], ['process', 'HostSpawnTests.c', 'process raw: ok\n'], ['root-stdio', 'RootStdioWitness.c', 'root stdio: ok\n'], ['tcp-routes', 'TCPRoutesWitness.c', 'tcp routes: ok\n'], ['build-http', 'HostBuildHTTPWitness.c', 'build http: ok\n'], ['err', 'err-report.c', 'Err88: taken cause, deep clone/projection/metadata, root+wire bytes, ledger zero\n'], ['journey', 'journey-tls.c', 'Journey TLS: isolated threads, destructor, take/adopt/reset, ledger balance, entry status1 bytes\n']];
 function command(bin, args, options = {}) {
   const result = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 1 << 27, cwd: root, ...options });
   if (result.error || result.status !== 0) throw Error(`${bin}: ${result.error?.message ?? result.status}\n${result.stdout ?? ''}${result.stderr ?? ''}`);
   return result;
 }
 if (mode === 'assemble') {
-  command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only']);
-  mkdirSync(join(dir, 'Source'), { recursive: true });
-  const fixture = readFileSync(join(root, 'Compiler/JetRuntime/Tests/Fragments.fixture/HostSpawnTests.jet'), 'utf8');
-  const source = readFileSync(join(dir, 'unit.jet'), 'utf8') + '\n' + fixture;
-  writeFileSync(join(dir, 'Source/Fixture.jet'), source);
-  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(source, 'Source/Fixture.jet')));
+  // check-runtime appends the HostSpawn test fragment to the one runtime unit.
+  command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only', '--test', 'HostSpawn']);
+  const source = readFileSync(join(dir, 'unit.jet'), 'utf8');
+  writeFileSync(join(dir, 'lifecycle.list'), runtimeLifecycleList(parseRuntimeExports(source, 'unit.jet')));
 } else if (mode === 'lower') {
   const prefix = join(dir, 'fixture');
-  const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(dir, 'Source/Fixture.jet'), prefix, lifecycle: join(dir, 'lifecycle.list'), timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 0), env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });
+  const { problem } = runNativeLibrary({ jet: candidateJetc0(), file: join(dir, 'unit.jet'), prefix, lifecycle: join(dir, 'lifecycle.list'), timeout: Number(process.env.JET_FRONT_TIMEOUT_MS ?? 0), env: { ...process.env, JET_TOOLCHAIN_ROOT: root, JET_STORE_DIR: join(out, 'store') } });
   if (problem) throw Error(problem.detail);
 } else if (mode === 'audit') {
   const object = join(dir, 'fixture.o');
@@ -45,7 +43,7 @@ if (mode === 'assemble') {
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'compile') {
   const collections = readFileSync(join(root, 'Compiler/JetRuntime/Source/Collections.jet'), 'utf8');
-  const stride = /RT_HOST_U8_STRIDE\s*:\s*comptime\s*\{\s*I64\{(1|8)\}\s*\}/.exec(collections)?.[1];
+  const stride = /^RT_HOST_U8_STRIDE\s*:\s*(?:comptime\s*\{\s*)?I64\{(1|8)\}/m.exec(collections)?.[1];
   if (!stride) throw Error('TCP witness requires the canonical native U8 epoch');
   for (const [name, source] of fixtures) command(join(root, 'Tools/agent/jet-env'), [nativeCCompiler, '-std=c11', '-O1', '-fno-stack-protector', '-fno-PIE', '-fno-builtin', '-Wall', '-Wextra', '-Werror', ...(name === 'tcp-routes' ? [`-DJET_TCP_U8_STRIDE=${stride}`] : name === 'build-http' ? [`-DJET_U8_STRIDE=${stride}`] : []), '-c', join(root, 'Compiler/JetRuntime/Tests', source), '-o', join(out, `${name}.o`)]);
 } else if (mode === 'link') {
@@ -59,7 +57,8 @@ if (mode === 'assemble') {
 } else {
   const failures = [];
   for (const [name, , expected] of fixtures) {
-    const result = spawnSync(join(out, name), [], { encoding: 'utf8', timeout: 0 });
+    // NO_COLOR pins the report policy the err and journey witnesses compare.
+    const result = spawnSync(join(out, name), [], { encoding: 'utf8', timeout: 0, env: { ...process.env, NO_COLOR: '1' } });
     writeFileSync(join(out, `${name}.receipt.json`), JSON.stringify({ status: result.status, signal: result.signal, error: result.error?.message ?? null, stdout: result.stdout, stderr: result.stderr }, null, 2) + '\n');
     if (result.error || result.status !== 0 || result.stdout !== expected || result.stderr !== '') failures.push(`${name}: ${result.error?.message ?? result.status}, stderr=${JSON.stringify(result.stderr)}`);
   }

@@ -150,7 +150,7 @@ via_option: fn(from: Int, to: Int) -> Int {
         y.name = "z{i}"
         y.next = Val(Node{name: "c{i}", next: Val(Node{name: "d", next: None})})
         total += depth(x) + depth(y)
-        cut(&y)
+        cut(y)
         total += depth(y) + y.name.len()
     }
     total
@@ -250,9 +250,9 @@ write_through: fn(from: Int, to: Int) -> Int {
         y := x.copy()
         y.inner.n = 5
         z := y.copy()
-        bump(&z.inner)
+        bump(z.inner)
         w := z.copy()
-        &w.inner.back.push(Outer{name: "b", inner: Inner{n: 2, tag: "u", back: []}})
+        w.inner.back.push(Outer{name: "b", inner: Inner{n: 2, tag: "u", back: []}})
         if x.inner.n != 1 || y.inner.n != 5 || z.inner.n != 15 || w.inner.n != 15 -> panic("a write through a copy's edge showed in another copy")
         if x.inner.tag != "t{i}" || y.inner.tag != "t{i}" || z.inner.tag != "bumped" -> panic("a tag write showed in another copy")
         if z.inner.back.len() != 0 || w.inner.back.len() != 1 -> panic("a list write showed in another copy")

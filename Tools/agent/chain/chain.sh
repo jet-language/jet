@@ -5,13 +5,15 @@
 #   chain.sh export DIR [COMMIT] [PATCH...]
 #       fresh `git archive COMMIT` (default dev HEAD) of the dev worktree in DIR, then `git apply` each PATCH;
 #       DIR/.chain-base records COMMIT (the base --auto and `check` compare against).
-#   chain.sh TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run]
+#   chain.sh TREE LEVEL|--auto [--out DIR] [--base COMMIT] [--dry-run|--check-gate]
 #       LEVEL check        : seed `jet check` of the packages TREE changes against its base (no build)
 #             s1           : s1 (seed builds Compiler) + pack1 (runtime pack by s1)
 #             full         : s1, pack1, s2 (s1 builds), pack2, s3 (s2 builds), FIXED POINT s2 == s3
 #             full+threads : full, plus t1 (s2 builds with --threads 1) compared with s3
 #       --auto picks LEVEL from the paths TREE changes against its base and prints why.
 #       --dry-run prints the level, the stage keys it can resolve and which stages the store holds; builds nothing.
+#       full and full+threads (self-hosting) start only with TREE's collect-all preflight receipt for the seed
+#       (Tools/agent/land/preflight-receipt.mjs, written by census-snap.sh); --check-gate says which and stops.
 #       Output (default TREE/.chain): RESULT (TSV: stage status rc wall_s peak_rss_mb sha256 key note; last row
 #       `verdict`), REPORT.md, s1/ s2/ s3/ t1/ (jet [+ jet.o], jet-runtime/ beside it), logs/, keys/.
 #
@@ -43,7 +45,7 @@ ROOT=$R14/snap
 STORES=("$JET_SCRATCH_ROOT/stagestore" "$JET_RUN_ROOT/stagestore")
 export CARGO_INCREMENTAL=0 JET_TARGET_CAP_GB=120
 unset CARGO_TARGET_DIR CARGO_HOME RUSTUP_HOME RUSTC
-usage() { awk 'NR>=2 && /^#/{sub(/^# ?/,""); print; next} NR>=2{exit}' "$SELF" | awk 'NR<=17'; exit 64; }
+usage() { awk 'NR>=2 && /^#/{sub(/^# ?/,""); print; next} NR>=2{exit}' "$SELF" | awk 'NR<=19'; exit 64; }
 
 if [ "${1:-}" = export ]; then
   D=${2:?usage: chain.sh export DIR [COMMIT] [PATCH...]}; C=${3:-HEAD}; shift; shift; [ $# -gt 0 ] && shift
@@ -68,10 +70,10 @@ fi
 INNER=; [ "${1:-}" = --inner ] && { INNER=1; shift; }
 [ $# -ge 1 ] || usage
 TREE=$(realpath "$1") || exit 2; shift
-LEVEL=; AUTO=; OUT=; BASE=; DRY=
+LEVEL=; AUTO=; OUT=; BASE=; DRY=; GATE=
 while [ $# -gt 0 ]; do
   case $1 in
-    --auto) AUTO=1;; --dry-run) DRY=1;;
+    --auto) AUTO=1;; --dry-run) DRY=1;; --check-gate) GATE=1;;
     --out) OUT=${2:?--out DIR}; shift;; --base) BASE=${2:?--base COMMIT}; shift;;
     check|s1|full|full+threads) LEVEL=$1;;
     *) echo "chain.sh: unknown argument $1"; usage;;
@@ -319,6 +321,15 @@ if [ -n "$AUTO" ] || [ "$LEVEL" = check ]; then
       [ ${#MEMBERS[@]} -gt 0 ] && echo "  check members: ${MEMBERS[*]}"
     fi
   fi
+fi
+# Self-hosting needs the tree's preflight receipt for this seed; check, s1 and --dry-run are ungated. The --inner
+# relaunch under build-slot.sh passed the gate already.
+if [ -n "$GATE" ] || [ -z "$DRY$INNER" ]; then
+  case $LEVEL in
+    full|full+threads) node "$HERE/../land/preflight-receipt.mjs" check chain.sh "$TREE" "$SEED" || exit 2;;
+    *) [ -n "$GATE" ] && echo "chain.sh: level $LEVEL is ungated (full and full+threads need a preflight receipt)";;
+  esac
+  [ -n "$GATE" ] && exit 0
 fi
 SEED_SHA=$(sha "$SEED/jet"); SEED_PK=$(node "$LIB" dirhash "$SEED/jet-runtime")
 if [ "$LEVEL" != check ]; then read -r BIN PIN _ <<< "$(node "$LIB" inputs "$TREE")"; else BIN=-; PIN=-; fi

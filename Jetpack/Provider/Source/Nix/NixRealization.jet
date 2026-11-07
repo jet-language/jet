@@ -90,7 +90,7 @@ provider_admitted_output_digest: fn(verification: &StoreVerification, ctx: Provi
         .Ok(_) -> {}
         .Err(_) -> return None
     }
-    sealed: store_check_seal(&verification, expected, hangar) ?? return None
+    sealed: store_check_seal(verification, expected, hangar) ?? return None
     if path == expected && digest != "" && sealed == Val((digest)) -> return Val(digest)
     None
 }
@@ -103,7 +103,7 @@ provider_hash_output_bytes: fn(verification: &StoreVerification, ctx: ProviderCt
             hangar: roots.hangar_dir()
             objects: files.join(hangar, STORE_OBJECTS_DIR)
             if path == objects || path.starts_with("{objects}/") {
-                digest: store_verified_output_hash_persistent(&verification, path, Val(hangar), false) ?? return Err(ProviderReason{message: err.message()})
+                digest: store_verified_output_hash_persistent(verification, path, Val(hangar), false) ?? return Err(ProviderReason{message: err.message()})
                 return Ok(digest)
             }
         }
@@ -121,9 +121,9 @@ provider_prepare_nix_identity: fn(verification: &StoreVerification, spec: RefSpe
     loop name in provider_sorted_keys(realized.named_outputs) {
         path: realized.named_outputs[name]
         if name.trim() == "" || path.trim() == "" -> return Err(ProviderError.BadOutput("Nix provider returned an empty named output `{name}`"))
-        digest: if provider_admitted_output_digest(&verification, ctx, realized, name, path) == {
+        digest: if provider_admitted_output_digest(verification, ctx, realized, name, path) == {
             .Val(admitted) -> admitted
-            .None -> provider_hash_output_bytes(&verification, ctx, path) ?? return Err(ProviderError.Ingest("Nix output `{name}` at `{path}` could not be hashed from its bytes: {err.message}"))
+            .None -> provider_hash_output_bytes(verification, ctx, path) ?? return Err(ProviderError.Ingest("Nix output `{name}` at `{path}` could not be hashed from its bytes: {err.message}"))
         }
         if digest.trim() == "" -> return Err(ProviderError.BadOutput("Nix output `{name}` at `{path}` has an empty byte digest"))
         digests[name] = digest
@@ -311,7 +311,10 @@ provider_record_nix_lock_after_store: fn(verification: &StoreVerification, ctx: 
     if !files.is_dir(project) -> return Ok(entry)
     if entry.reference == "" || entry.envelope.output_hash == "" -> return Ok(entry)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Ok(entry)
-    nix_realization: producer.provider == "nix" && entry.cache_identity.source_fingerprint == entry.envelope.output_hash && entry.cache_identity.recipe_fingerprint == pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes())
+    // A project lock pins a catalog closure, so only an index-backed
+    // realization (one carrying its signed index revision) publishes one; a
+    // fixture provider result has no catalog to pin.
+    nix_realization: producer.provider == "nix" && producer.facts.has_key("nix.index.revision") && entry.cache_identity.source_fingerprint == entry.envelope.output_hash && entry.cache_identity.recipe_fingerprint == pkg_sha256_hex(PROVIDER_NIX_RECIPE_ID.bytes())
     local_native: producer.facts.has_key("nix.fallback.provenance") || provider_is_local_native(producer.facts, producer.provider)
     if !nix_realization && !local_native -> return Ok(entry)
 
@@ -346,10 +349,10 @@ provider_record_nix_lock_after_store: fn(verification: &StoreVerification, ctx: 
         locked_producer.policy_facts = "policy={entry.cache_identity.policy_fingerprint}\nplatform={entry.cache_identity.platform}"
         locked_entry.producer_record = locked_producer.encode()
         published_digest: provider_project_lock_digest(Val(project)) ?? return Err(ProviderError.BadOutput(err.message()))
-        refreshed: store_refresh_lock_digest(&verification, roots, locked_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
+        refreshed: store_refresh_lock_digest(verification, roots, locked_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
         return Ok(refreshed)
     }
-    project_cas_bundle: store_publish_nix_cas_bundle(&verification, project, roots, entry.envelope.output_hash) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
+    project_cas_bundle: store_publish_nix_cas_bundle(verification, project, roots, entry.envelope.output_hash) ?? return Err(ProviderError.BadOutput("could not publish portable Nix CAS bundle: {err.message()}"))
     nix_closure: provider_nix_closure_record(entry, producer, project_cas_bundle)
     local_import: producer.facts.has_key("nix.fallback.provenance")
     catalog_tier: producer.facts.get("nix.index.tier") ?? (if local_import -> "local-import" else -> "")
@@ -387,7 +390,7 @@ provider_record_nix_lock_after_store: fn(verification: &StoreVerification, ctx: 
     }
     pkg_lock_record_nix_realization(project, lock_entry.name, lock_entry.version, lock_entry.reference, lock_entry.envelope.output_hash, nix_closure, lock_envelope) ?? return Err(ProviderError.BadOutput(err.message()))
     published_digest: provider_project_lock_digest(Val(project)) ?? return Err(ProviderError.BadOutput(err.message()))
-    refreshed: store_refresh_lock_digest(&verification, roots, lock_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
+    refreshed: store_refresh_lock_digest(verification, roots, lock_entry, published_digest) ?? return Err(ProviderError.BadOutput(err.message()))
     Ok(refreshed)
 }
 
@@ -496,14 +499,14 @@ provider_realize_from_local_nix: fn(verification: &StoreVerification, spec: RefS
         .Val(provenance) -> realized.envelope.provenance = "local-nix:{provenance}"
         .None -> {}
     }
-    provider_finalize_nix_realization(&verification, spec, table, ctx, realized)
+    provider_finalize_nix_realization(verification, spec, table, ctx, realized)
 }
 
 // A native cache admission failure as E1350, naming the missing Nix
 // reference when a registered Nix entry no longer hashes to its record.
 provider_nix_cache_error: fn(verification: &StoreVerification, roots: HangarRoots, error: NixCacheError) -[FS, Env, Time]> ProviderError Never! {
     detail := "{error.code()}: {error.what()}; why: {error.why()}; fix: {error.fix()}"
-    if provider_missing_nix_store_path(&verification, roots) == {
+    if provider_missing_nix_store_path(verification, roots) == {
         .Val(store_path) -> detail = "{detail}; missing Nix reference `{store_path}`"
         .None -> {}
     }
@@ -511,11 +514,11 @@ provider_nix_cache_error: fn(verification: &StoreVerification, roots: HangarRoot
 }
 
 provider_missing_nix_store_path: fn(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> String? Never! {
-    entries: store_list_checked(&verification, roots) ?? return None
+    entries: store_list_checked(verification, roots) ?? return None
     loop entry in entries {
         producer: ProducerRecord.decode(entry.producer_record) ?? next
         store_path: producer.facts.get("nix.store-path") ?? next
-        matches: if store_try_entry_output_hash(&verification, roots, entry) == {
+        matches: if store_try_entry_output_hash(verification, roots, entry) == {
             .Ok(digest) -> digest == entry.envelope.output_hash
             .Err(_) -> false
         }
@@ -531,8 +534,11 @@ provider_finalize_nix_realization: fn(verification: &StoreVerification, spec: Re
         .Val(progress) -> progress.phase("Registering")
         .None -> {}
     }
-    identity: provider_prepare_nix_identity(&verification, spec, table, ctx, realized)
+    identity: provider_prepare_nix_identity(verification, spec, table, ctx, realized)
     finalized := realized
+    // The envelope carries the primary output's byte digest, the same digest
+    // Store registration recomputes; a provider-side spelling never stands in.
+    finalized.envelope.output_hash = provider_primary_nix_output_digest(identity.named_output_digests) ?? return Err(ProviderError.BadOutput("Nix provider returned no non-empty `out` or `bin` output"))
     finalized.cache_identity = identity.cache_identity
     previous: realized.producer
     prepared: provider_prepared_nix_facts(identity)
@@ -565,11 +571,11 @@ provider_realization_from_index: fn(spec: RefSpec, key: NixIndexKey, verified: N
     }
     expected_names: provider_sorted_keys(verified.record.outputs)
     admitted_names := admitted.outputs.keys().to_list()
-    &admitted_names.sort()
+    admitted_names.sort()
     if expected_names != admitted_names -> return Err(ProviderError.BadOutput("Nix cache admission returned a different named-output set than the signed index"))
     if admitted.objects.len() == 0 -> return Err(ProviderError.BadOutput("Nix cache admission returned an empty closure"))
     object_paths := admitted.objects.keys().to_list()
-    &object_paths.sort()
+    object_paths.sort()
     loop store_path in object_paths {
         object: admitted.objects[store_path]
         if store_path != object.store_path -> return Err(ProviderError.BadOutput("Nix cache closure key `{store_path}` disagrees with its store path `{object.store_path}`"))
@@ -660,10 +666,10 @@ provider_realization_from_index: fn(spec: RefSpec, key: NixIndexKey, verified: N
     references := [String]{}
     loop output_name in admitted_names {
         loop digest in admitted.outputs[output_name].direct_reference_digests {
-            if !references.contains(digest) -> &references.push(digest)
+            if !references.contains(digest) -> references.push(digest.copy())
         }
     }
-    &references.sort()
+    references.sort()
     if references.contains("") -> return Err(ProviderError.BadOutput("Nix cache admission returned an empty closure reference digest"))
     Ok(Realized{
         name,

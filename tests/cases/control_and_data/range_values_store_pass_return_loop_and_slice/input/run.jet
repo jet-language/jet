@@ -1,4 +1,4 @@
-identity: fn(band: ^Range) -> Range {
+identity: fn(band: &&Range) -> Range {
     return band
 }
 run: fn() {
@@ -13,7 +13,9 @@ run: fn() {
     print(band.end)
     print(band.contains(6))
     print(band.contains(7))
-    print((7..4).contains(5))
+    // A literal `7..4` is rejected at compile time; a runtime start still builds the empty range.
+    descending_start: 7
+    print((descending_start..4).contains(5))
     total := 0
     loop n in band {
         total = (total + n)

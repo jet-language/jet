@@ -13,9 +13,9 @@ diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
 #Test("every typed diagnostic row is complete") {
     violations := [String]{}
     loop row in diagnostic_registry_rows() {
-        if row.what.trim().is_empty() -> &violations.push("{row.code}: What is empty")
-        if row.why.trim().is_empty() -> &violations.push("{row.code}: Why is empty")
-        if row.fix.trim().is_empty() -> &violations.push("{row.code}: Fix is empty")
+        if row.what.trim().is_empty() -> violations.push("{row.code}: What is empty")
+        if row.why.trim().is_empty() -> violations.push("{row.code}: Why is empty")
+        if row.fix.trim().is_empty() -> violations.push("{row.code}: Fix is empty")
     }
     assert_eq(violations.join("\n"), "")
 }
@@ -23,9 +23,9 @@ diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
 #Test("every typed diagnostic line uses ratified sentence case") {
     violations := [String]{}
     loop row in diagnostic_registry_rows() {
-        if diagnostic_sentence_case_line(row.what) != row.what -> &violations.push("{row.code} What: {row.what}")
-        if diagnostic_sentence_case_line(row.why) != row.why -> &violations.push("{row.code} Why: {row.why}")
-        if diagnostic_sentence_case_line(row.fix) != row.fix -> &violations.push("{row.code} Fix: {row.fix}")
+        if diagnostic_sentence_case_line(row.what) != row.what -> violations.push("{row.code} What: {row.what}")
+        if diagnostic_sentence_case_line(row.why) != row.why -> violations.push("{row.code} Why: {row.why}")
+        if diagnostic_sentence_case_line(row.fix) != row.fix -> violations.push("{row.code} Fix: {row.fix}")
     }
     assert_eq(violations.join("\n"), "")
 }

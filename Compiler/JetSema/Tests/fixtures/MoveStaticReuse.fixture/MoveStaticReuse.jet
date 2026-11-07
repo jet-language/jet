@@ -1,8 +1,8 @@
-// A written `^name` to a builtin static moves the name: a later use is E0121
+// A written `name.move()` to a builtin static moves the name: a later use is E0121
 // (only the operand of `shared name` may still become a share).
 run: fn() {
     items: [Int]{1}
-    cell: Shared.new(^items)
+    cell: Shared.new(items.move())
     print(items.len())
     print(cell.guard_read().value.len())
 }

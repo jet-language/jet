@@ -18,51 +18,51 @@ use {
 }
 
 parser_state_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "state" && parser_kind_at(&state, 1) == TOKEN_IDENT
+    parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "state" && parser_kind_at(state, 1) == TOKEN_IDENT
 }
 
 parser_state_section_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "state" && parser_kind_at(&state, 1) == TOKEN_LBRACE
+    parser_current_kind(state) == TOKEN_IDENT && parser_value_at(state, 0) == "state" && parser_kind_at(state, 1) == TOKEN_LBRACE
 }
 
 parser_parse_state_decl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -> StateDecl {
-    start: parser_bump(&state)
-    type_name: parser_state_dotted_name(&state, "for a state owner type")
-    parser_expect(&state, TOKEN_LBRACE, "`{{` before state names")
-    states: parser_state_names(&state)
-    close: parser_expect(&state, TOKEN_RBRACE, "`}}` after state names")
+    start: parser_bump(state)
+    type_name: parser_state_dotted_name(state, "for a state owner type")
+    parser_expect(state, TOKEN_LBRACE, "`{{` before state names")
+    states: parser_state_names(state)
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` after state names")
     StateDecl{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_name: type_name.name, type_name_span: type_name.span, states: states, span: parser_cover(start.span, close.span)}
 }
 
 parser_parse_state_section: fn(state: &JetParserState, type_name: String, type_name_span: Span) -> StateDecl {
-    start: parser_bump(&state)
-    parser_expect(&state, TOKEN_LBRACE, "`{{` before a struct state section")
-    states: parser_state_names(&state)
-    close: parser_expect(&state, TOKEN_RBRACE, "`}}` after a struct state section")
+    start: parser_bump(state)
+    parser_expect(state, TOKEN_LBRACE, "`{{` before a struct state section")
+    states: parser_state_names(state)
+    close: parser_expect(state, TOKEN_RBRACE, "`}}` after a struct state section")
     StateDecl{is_pub: false, is_package_pub: false, type_name: type_name, type_name_span: type_name_span, states: states, span: parser_cover(start.span, close.span)}
 }
 
 parser_state_names: fn(state: &JetParserState) -> [NamedSpan] {
     states := [NamedSpan]{}
-    loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
-        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI {
-            parser_bump(&state)
+    loop parser_current_kind(state) != TOKEN_RBRACE && parser_current_kind(state) != TOKEN_EOF {
+        if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI {
+            parser_bump(state)
             next
         }
-        name: parser_expect_name(&state, "for a state name")
-        &states.push(NamedSpan{name: parser_value(state, name), span: name.span})
-        if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
+        name: parser_expect_name(state, "for a state name")
+        states.push(NamedSpan{name: parser_value(state, name), span: name.span})
+        if parser_current_kind(state) == TOKEN_COMMA || parser_current_kind(state) == TOKEN_SEMI -> parser_bump(state)
     }
     states
 }
 
 parser_state_dotted_name: fn(state: &JetParserState, context: String) -> NamedSpan {
-    first: parser_expect_name(&state, context)
+    first: parser_expect_name(state, context)
     name := parser_value(state, first)
     end := first.span
-    loop parser_current_kind(&state) == TOKEN_DOT {
-        parser_bump(&state)
-        part: parser_expect_name(&state, "after `.` in a declaration type name")
+    loop parser_current_kind(state) == TOKEN_DOT {
+        parser_bump(state)
+        part: parser_expect_name(state, "after `.` in a declaration type name")
         name = "{name}.{parser_value(state, part)}"
         end = part.span
     }

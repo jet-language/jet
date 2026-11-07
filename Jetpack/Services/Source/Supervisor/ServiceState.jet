@@ -173,7 +173,14 @@ services_supervisor_failure: fn(project_dir: String, plan: DevServicePlan) -[FS]
 }
 
 // Publish a small state file as one complete replacement through a
-// create-new temporary beside it.
+// create-new temporary beside it, so a reader never observes a half-written
+// PID, port list, lifecycle, watch baseline or preset file. Every such file
+// is rebuilt or rechecked rather than trusted after a power loss: the loss
+// ends the processes the runtime state describes, the next `up` checks each
+// recorded process against its start identity, presets are rewritten per
+// launch, and an initialized data directory regains its marker. The rename
+// therefore needs no fsync, and a loaded disk never stretches a supervisor's
+// publication.
 services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
     parent: files.dirname(path)
     directory: if parent == "" -> "." else -> parent
@@ -188,9 +195,8 @@ services_write_atomic: fn(path: String, contents: [U8]) IOError! -[FS, Env]> {
 
 services_replace_through: fn(temporary: String, path: String, contents: [U8]) IOError! -[FS]> {
     writer := files.create(temporary, if_exists: .Refuse)
-    &writer.write_all(contents)
-    &writer.fsync()
-    close(^writer)
+    writer.write_all(contents)
+    close(writer)
     files.rename(temporary, path)
 }
 
@@ -236,7 +242,7 @@ services_lines: fn(text: String) -> [String] Never! {
     pieces: text.split("\n").to_list()
     count: if text.ends_with("\n") -> pieces.len() - 1 else -> pieces.len()
     carriage_return: env_shell_control(13)
-    loop index in 0..<count -> &lines.push(pieces[index].removesuffix(carriage_return))
+    loop index in 0..<count -> lines.push(pieces[index].removesuffix(carriage_return))
     lines
 }
 
@@ -273,7 +279,7 @@ services_read_process_state: fn(dir: String) -[FS]> PersistedProcessState? Servi
     loop raw in lines {
         pair: raw.trim().split_once("=") ?? return Err(invalid)
         if seen.contains(pair.before) -> return Err(invalid)
-        &seen.push(pair.before)
+        seen.push(pair.before)
         if pair.before == {
             "version" -> {
                 if pair.after != "1" -> return Err(invalid)
@@ -371,7 +377,7 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
         value: pair.after
         if key != "dependency" {
             if seen.contains(key) -> return Err(invalid)
-            &seen.push(key)
+            seen.push(key.copy())
         }
         if key == {
             "version" -> {
@@ -392,7 +398,7 @@ services_read_lifecycle: fn(dir: String) -[FS]> LifecycleFacts? ServicesError! {
                     "recovery" -> recovery = Val(value)
                     "unit" -> unit = Val(value)
                     "guardian" -> guardian = Val(value)
-                    else -> &dependencies.push(value)
+                    else -> dependencies.push(value.copy())
                 }
             }
             else -> return Err(invalid)

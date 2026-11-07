@@ -59,7 +59,7 @@ trust_pin_strip_line_comments: fn(text: String) -> String Never! {
                 break
             }
         }
-        &out.push("{pkg_bytes_text(raw, 0, cut)}\n")
+        out.push("{pkg_bytes_text(raw, 0, cut)}\n")
     }
     out.join("")
 }
@@ -311,14 +311,14 @@ trust_pin_report: fn(root: String) -[FS, Env]> String {
     out := [String]{"pin:      jet {pin}\n"}
     if trust_pin_locked_toolchain(root) == {
         .Val(toolchain) -> {
-            &out.push("locked:   {toolchain.version}\n")
-            &out.push("object:   {toolchain.id}\n")
+            out.push("locked:   {toolchain.version}\n")
+            out.push("object:   {toolchain.id}\n")
             realized: if trust_pin_realized_binary() != None -> "realized" else -> "not realized"
-            &out.push("state:    {realized}\n")
+            out.push("state:    {realized}\n")
         }
         .None -> {
-            &out.push("locked:   (unresolved — run `jet update jet`)\n")
-            &out.push("state:    not realized\n")
+            out.push("locked:   (unresolved — run `jet update jet`)\n")
+            out.push("state:    not realized\n")
         }
     }
     out.join("")

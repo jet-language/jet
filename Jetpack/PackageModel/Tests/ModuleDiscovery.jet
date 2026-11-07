@@ -97,14 +97,14 @@ use {
 #Test("workspace declaration probes share one owned session cache") {
     cache := WorkspaceDeclarationCache.new()
     source: "workspace: module {{ members: [] }}\n"
-    assert(pkg_declares_workspace_module(&cache, source))
-    assert(pkg_declares_workspace_members(&cache, source))
-    assert(pkg_declares_workspace_module(&cache, source))
+    assert(pkg_declares_workspace_module(cache, source))
+    assert(pkg_declares_workspace_members(cache, source))
+    assert(pkg_declares_workspace_module(cache, source))
     assert_eq(cache.lexes, 1)
-    assert(!pkg_declares_workspace_module(&cache, "dev: module {{ }}\n"))
+    assert(!pkg_declares_workspace_module(cache, "dev: module {{ }}\n"))
     assert_eq(cache.lexes, 2)
     independent := WorkspaceDeclarationCache.new()
-    assert(pkg_declares_workspace_members(&independent, source))
+    assert(pkg_declares_workspace_members(independent, source))
     assert_eq(independent.lexes, 1)
     assert_eq(cache.lexes, 2)
 }

@@ -53,7 +53,7 @@ int main(void) {
         assert(input->length==debug_goldens[i].input_length);
         assert(memcmp(input->data,debug_goldens[i].input,(size_t)input->length)==0);
         Text *jet_debug=jet_rt_require_debug_string(input);
-        // D-STR-ESCAPE1 uses \u{0}; Rust str Debug uses \0. Only vector 2
+        // Jet Debug uses \u{0}; Rust str Debug uses \0. Only vector 2
         // contains NUL; every other byte/escape class must match exactly.
         const char *jet_expected=i==2 ? "\"\\u{0}\\t\\r\\n\\u{1}\\u{7}\\u{8}\\u{b}\\u{c}\\u{1b}\\u{1f}\\u{7f}\"" : debug_goldens[i].expected;
         int64_t jet_length=i==2 ? (int64_t)strlen(jet_expected) : n;

@@ -55,11 +55,11 @@ diagnostic_text_lines: fn(text: String) -> [String] Never! {
         if bytes[index] == (U8{10}) {
             end := index
             if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
-            &lines.push(diagnostic_bytes_text(bytes, start, end))
+            lines.push(diagnostic_bytes_text(bytes, start, end))
             start = index + 1
         }
     }
-    if start < bytes.len() -> &lines.push(diagnostic_bytes_text(bytes, start, bytes.len()))
+    if start < bytes.len() -> lines.push(diagnostic_bytes_text(bytes, start, bytes.len()))
     lines
 }
 

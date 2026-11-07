@@ -4,7 +4,8 @@
 // published cache carries enough identity to reject a stale or hand-edited
 // bridge before the linker consumes it.
 use {
-    jetpack_foundation.[JET_KEYWORD_LIST, JET_TYPE_LIST, TYPE_ERR]
+    jet_foundation.[JET_TYPE_NAMES]
+    jetpack_foundation.[JET_KEYWORD_LIST, TYPE_ERR]
     files: core.files
     sys: core.sys
     time: core.time
@@ -115,7 +116,7 @@ ComBuildDirectory: struct {
 }
 
 impl ComBuildDirectory.Close {
-    close: fn(^self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
+    close: fn(&&self) -[FS]> { pkg_binder_remove_tree_quiet(self.path) }
 }
 
 ComSchema: struct {
@@ -144,7 +145,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     build: files.join(cache, ".com-build-{lib}-{sys.pid()}-{pkg_com_unique_suffix()}")
     pkg_binder_create_dir_all(build, "could not create COM build directory")
     scratch := ComBuildDirectory{path: build}
-    defer close(^scratch)
+    defer close(scratch)
     inspect_c: files.join(build, "inspect.c")
     inspect_exe: files.join(build, "inspect.exe")
     pkg_binder_write(inspect_c, COM_DISCOVERY_C, "could not write COM type-library inspector")
@@ -152,15 +153,15 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     command := [String]{inspect_exe}
     if input == {
         .File(_) -> {
-            &command.push("file")
-            &command.push(file_input ?? panic("file input was resolved before the COM inspector started"))
+            command.push("file")
+            command.push(file_input ?? panic("file input was resolved before the COM inspector started"))
         }
         .Registered(guid, major, minor, lcid) -> {
-            &command.push("reg")
-            &command.push(guid)
-            &command.push("{major}")
-            &command.push("{minor}")
-            &command.push("{lcid}")
+            command.push("reg")
+            command.push(guid.copy())
+            command.push("{major}")
+            command.push("{minor}")
+            command.push("{lcid}")
         }
     }
     metadata: pkg_com_run_capture(command, "COM type-library inspector")
@@ -203,20 +204,20 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     if input == {
         .File(_) -> {
             path: file_input ?? panic("file input was resolved before provenance was written")
-            &fields.push((name: "type-library", value: path))
-            &fields.push((name: "type-library-sha256", value: pkg_bridge_sha_file(path)))
+            fields.push((name: "type-library", value: path))
+            fields.push((name: "type-library-sha256", value: pkg_bridge_sha_file(path)))
         }
         .Registered(guid, major, minor, lcid) -> {
-            &fields.push((name: "registry-guid", value: guid))
-            &fields.push((name: "registry-major", value: "{major}"))
-            &fields.push((name: "registry-minor", value: "{minor}"))
-            &fields.push((name: "registry-lcid", value: "{lcid}"))
+            fields.push((name: "registry-guid", value: guid))
+            fields.push((name: "registry-major", value: "{major}"))
+            fields.push((name: "registry-minor", value: "{minor}"))
+            fields.push((name: "registry-lcid", value: "{lcid}"))
         }
     }
     artifacts: [(name: String, digest: String)]{(name: files.basename(archive), digest: archive_digest)}
     provenance: pkg_bridge_render_provenance(identity, fields, artifacts)
     methods := [String]{}
-    loop method in schema.methods -> &methods.push(method.name())
+    loop method in schema.methods -> methods.push(method.name())
     Ok(ComBindResult{source: source, archive: archive, provenance: provenance, methods: methods})
 }
 
@@ -370,15 +371,15 @@ pkg_com_input_record: fn(input: ComTypeLibraryInput, file: String?) -[FS]> Strin
 
 pkg_com_identity: fn(lib: String, descriptor: String, metadata_digest: String, generated_digest: String, input_record: String, cc: String, ar: String) -> String Never! {
     identity := ForeignIdentityBuilder.new(COM_BINDER_SCHEMA)
-    &identity.field("language", "com".bytes())
-    &identity.field("library", lib.bytes())
-    &identity.field("abi", "jet_com_{lib}".bytes())
-    &identity.field("descriptor", descriptor.bytes())
-    &identity.field("metadata-sha256", metadata_digest.bytes())
-    &identity.field("generated-sha256", generated_digest.bytes())
-    &identity.field("input", input_record.bytes())
-    &identity.field("cc", cc.bytes())
-    &identity.field("ar", ar.bytes())
+    identity.field("language", "com".bytes())
+    identity.field("library", lib.bytes())
+    identity.field("abi", "jet_com_{lib}".bytes())
+    identity.field("descriptor", descriptor.bytes())
+    identity.field("metadata-sha256", metadata_digest.bytes())
+    identity.field("generated-sha256", generated_digest.bytes())
+    identity.field("input", input_record.bytes())
+    identity.field("cc", cc.bytes())
+    identity.field("ar", ar.bytes())
     identity.finish()
 }
 
@@ -437,7 +438,7 @@ pkg_com_parse_schema: fn(bytes: [U8]) -> ComSchema ForeignBindError! {
             }
             record_tag == "METHOD" && fields.len() >= 6 -> {
                 method: pkg_com_parse_method(fields, methods)
-                &methods.push(method)
+                methods.push(method)
             }
             record_tag == "SKIP" -> {}
             else -> return Err(ForeignBindError.Source("the COM inspector returned unknown `{record_tag}` metadata"))
@@ -481,9 +482,9 @@ pkg_com_parse_method: fn(fields: [String], methods: [ComMethod]) -> ComMethod Fo
         pair: value.split_once(":") ?? return Err(ForeignBindError.Source("COM member `{raw}` has malformed parameter metadata"))
         param_name: pkg_com_project(pair.before)
         if names.contains(param_name) -> return Err(ForeignBindError.Source("COM member `{raw}` has duplicate parameter name `{param_name}`"))
-        &names.push(param_name)
+        names.push(param_name.copy())
         kind: ComKind.parse(pair.after) ?? return Err(ForeignBindError.Source("COM member `{raw}` has unsupported parameter type `{pair.after}`"))
-        &params.push(ComParam{name: param_name, kind: kind})
+        params.push(ComParam{name: param_name, kind: kind})
     }
     Ok(ComMethod{interface: interface, jet: jet, dispid: dispid, flags: flags, result: result, params: params})
 }
@@ -502,13 +503,13 @@ pkg_com_member_taken: fn(methods: [ComMethod], interface: String, jet: String) -
 pkg_com_interfaces: fn(schema: ComSchema) -> [String] Never! {
     out := [String]{schema.root_interface}
     loop method in schema.methods {
-        if !out.contains(method.interface) -> &out.push(method.interface)
+        if !out.contains(method.interface) -> out.push(method.interface)
         kinds := [ComKind]{method.result}
-        loop param in method.params -> &kinds.push(param.kind)
+        loop param in method.params -> kinds.push(param.kind)
         loop kind in kinds {
             if kind == {
                 .Object(name) -> {
-                    if !out.contains(name) -> &out.push(name)
+                    if !out.contains(name) -> out.push(name)
                 }
                 else -> {}
             }
@@ -533,9 +534,9 @@ pkg_com_render_jet: fn(lib: String, schema: ComSchema) -> String Never! {
     loop interface in interfaces -> out = "{out}{interface}: struct {{ value: Int }}\n"
     out = "{out}#Error\nComError: enum {{ WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }}\n\n"
     out = "{out}open: fn() -[FFI.Com]> {root} ComError! {{\n    value: abi.open()\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({root}{{ value: value }})\n}}\n\n"
-    out = "{out}close: fn(^object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
+    out = "{out}close: fn(&&object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
     loop interface in interfaces {
-        out = "{out}impl {interface}.Close {{\n    close: fn(^self) {{\n        abi.close(self.value)\n        code: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
+        out = "{out}impl {interface}.Close {{\n    close: fn(&&self) {{\n        abi.close(self.value)\n        code: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
         out = "{out}#Unsafe(\"dynamic IDispatch has no type-library contract\")\ndynamic_{interface}: fn(object: {interface}, name: String, args: [Dyn], flags: Int) -[FFI.Com]> Dyn ComError! {{\n    payload: json.to_string(args) ?? return Err(ComError.TypeMismatch)\n    raw: abi.dynamic(object.value, name, payload, flags)\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
     }
     out = "{out}error: fn(code: Int) -[]> ComError Never! {{\n    if code == 1 {{ return ComError.WrongApartment }}\n    if code == 2 {{ return ComError.InvalidHandle }}\n    if code == 3 {{ return ComError.InvalidArgument }}\n    if code == 5 {{ return ComError.TypeMismatch }}\n    if code == 6 {{ return ComError.Limit }}\n    return ComError.MemberFailed\n}}\n\n"
@@ -620,7 +621,7 @@ pkg_com_render_c: fn(lib: String, schema: ComSchema) -> String Never! {
 // type names are refused (except the contextual `Err`).
 pkg_com_project: fn(value: String) -> String ForeignBindError! {
     out: value.replace("-", "_")
-    if !pkg_binder_is_ident(out) || JET_KEYWORD_LIST.contains(out) || (JET_TYPE_LIST.contains(out) && out != TYPE_ERR) {
+    if !pkg_binder_is_ident(out) || JET_KEYWORD_LIST.contains(out) || (JET_TYPE_NAMES.contains(out) && out != TYPE_ERR) {
         return Err(ForeignBindError.Source("COM name `{value}` cannot be projected as a Jet identifier"))
     }
     Ok(out)

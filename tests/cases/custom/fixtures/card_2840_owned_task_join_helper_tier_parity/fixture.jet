@@ -4,11 +4,11 @@ boom: fn() -> Int {
     return 0
 }
 
-joined: fn(handle: ^Task<Int>) -> Int { handle.join() ?? 91 }
+joined: fn(handle: &&Task<Int>) -> Int { handle.join() ?? 91 }
 
 run: fn() {
     task.group g {
         handle: task boom()
-        print(joined(^handle))
+        print(joined(handle))
     }
 }

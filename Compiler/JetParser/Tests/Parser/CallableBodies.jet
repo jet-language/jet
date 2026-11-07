@@ -15,7 +15,7 @@ use {
     initializer == .Lambda(lambda, _) ?? panic("stored lambda")
     effects: lambda.effects ?? panic("lambda effect row")
     names := [String]{}
-    loop entry in effects -> &names.push(entry.name)
+    loop entry in effects -> names.push(entry.name)
     assert_eq(names, [String]{"IO"})
 }
 
@@ -81,7 +81,7 @@ run: fn() {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     assert(parsed.diagnostics.is_empty())
     families := [UnitFamilyDef]{}
-    loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
+    loop item in parsed.program.items { if item == .UnitFamily(family) -> families.push(family) }
     assert_eq(families.len(), 32)
     degree := false
     dalton := false
@@ -92,7 +92,7 @@ run: fn() {
         names := [String]{}
         loop member in family.members {
             assert(!names.contains(member.name))
-            &names.push(member.name)
+            names.push(member.name)
             assert(member.scale.numerator != 0)
             if member.name == "degree" -> degree = if member.scale_provenance == { .SymbolicPi(_, _) -> true else -> false }
             if member.name == "dalton" -> dalton = if member.scale_provenance == { .Measured(_, _, _) -> true else -> false }
@@ -111,7 +111,7 @@ run: fn() {
 #Test("standard_units_outline_matches_the_parsed_catalog") {
     parsed: parse_generated_source(SEMA_PRELUDE_UNITS_SOURCE.bytes())
     families := [UnitFamilyDef]{}
-    loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
+    loop item in parsed.program.items { if item == .UnitFamily(family) -> families.push(family) }
     outline: sema_units_catalog_outline()
     assert_eq(outline.len(), families.len())
     loop (index, family) in families {

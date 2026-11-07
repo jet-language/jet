@@ -17,41 +17,41 @@ use jet_lexer.[
 ]
 
 parser_c_module_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
-    if parser_kind_at(&state, offset) != TOKEN_HASH || parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
-    marker: parser_lookahead(&state, offset + 1)
+    if parser_kind_at(state, offset) != TOKEN_HASH || parser_kind_at(state, offset + 1) != TOKEN_IDENT -> return false
+    marker: parser_lookahead(state, offset + 1)
     word: parser_value(state, marker)
-    (word == "Import" || word == "Bindgen") && parser_kind_at(&state, offset + 2) == TOKEN_KW_MODULE
+    (word == "Import" || word == "Bindgen") && parser_kind_at(state, offset + 2) == TOKEN_KW_MODULE
 }
 
 parser_item_declaration_ahead_at: fn(state: &JetParserState, offset: Int) -> Bool Never! {
-    kind: parser_kind_at(&state, offset)
-    if parser_output_ahead_at(&state, offset) || parser_output_defaults_ahead_at(&state, offset) -> return true
+    kind: parser_kind_at(state, offset)
+    if parser_output_ahead_at(state, offset) || parser_output_defaults_ahead_at(state, offset) -> return true
     if kind == {
         TOKEN_KW_MODULE -> {
-            if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
-            next_kind: parser_kind_at(&state, offset + 2)
+            if parser_kind_at(state, offset + 1) != TOKEN_IDENT -> return false
+            next_kind: parser_kind_at(state, offset + 2)
             next_kind == TOKEN_DOT || next_kind == TOKEN_MINUS || next_kind == TOKEN_LBRACE || next_kind == TOKEN_SEMI || next_kind == TOKEN_LT || next_kind == TOKEN_LPAREN || next_kind == TOKEN_COLON
         }
-        TOKEN_KW_EXTERN -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_value_at(&state, offset + 1) == "rust"
+        TOKEN_KW_EXTERN -> parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_value_at(state, offset + 1) == "rust"
         TOKEN_KW_TAG -> true
         TOKEN_HASH -> {
-            if parser_kind_at(&state, offset + 1) != TOKEN_IDENT -> return false
-            marker_name: parser_value_at(&state, offset + 1)
-            if parser_c_module_ahead_at(&state, offset) -> return true
+            if parser_kind_at(state, offset + 1) != TOKEN_IDENT -> return false
+            marker_name: parser_value_at(state, offset + 1)
+            if parser_c_module_ahead_at(state, offset) -> return true
             if marker_name == {
-                "UnitFamily" -> parser_kind_at(&state, offset + 2) == TOKEN_LPAREN
+                "UnitFamily" -> parser_kind_at(state, offset + 2) == TOKEN_LPAREN
                 "Test" -> true
                 else -> false
             }
         }
         TOKEN_IDENT -> {
-            name: parser_value_at(&state, offset)
-            if parser_kind_at(&state, offset + 1) == TOKEN_COLON && parser_kind_at(&state, offset + 2) == TOKEN_IDENT && parser_value_at(&state, offset + 2) == "distinct" -> return true
+            name: parser_value_at(state, offset)
+            if parser_kind_at(state, offset + 1) == TOKEN_COLON && parser_kind_at(state, offset + 2) == TOKEN_IDENT && parser_value_at(state, offset + 2) == "distinct" -> return true
             if name == {
-                "state" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT || parser_kind_at(&state, offset + 1) == TOKEN_LBRACE
-                "protocol" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LBRACE
-                "migration" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LBRACE
-                "fact" -> parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_LPAREN
+                "state" -> parser_kind_at(state, offset + 1) == TOKEN_IDENT || parser_kind_at(state, offset + 1) == TOKEN_LBRACE
+                "protocol" -> parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_LBRACE
+                "migration" -> parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_LBRACE
+                "fact" -> parser_kind_at(state, offset + 1) == TOKEN_IDENT && parser_kind_at(state, offset + 2) == TOKEN_LPAREN
                 else -> false
             }
         }

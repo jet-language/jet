@@ -1,4 +1,4 @@
-// E0201: `^name` in a call argument (or a consuming receiver) cannot move
+// E0201: `name.move()` in a call argument (or a consuming receiver) cannot move
 // storage this scope does not own: a read or write parameter, a `:` name
 // that reads a field through a view, or a loop name over a borrowed
 // collection. Lowering would copy the value behind the explicit move, so the
@@ -13,30 +13,30 @@ Root: struct {
     session: Session
 }
 
-consume: fn(s: ^Session) -> Int {
+consume: fn(s: &&Session) -> Int {
     s.id
 }
 
-sink: fn(slot: &[Session], s: ^Session) {
-    &slot.push(^s)
+sink: fn(slot: &[Session], s: &&Session) {
+    slot.push(s)
 }
 
 read_param: fn(s: Session) -> Int {
-    consume(^s)
+    consume(s)
 }
 
 write_param: fn(s: &Session, slot: &[Session]) {
-    sink(&slot, ^s)
+    sink(slot, s)
 }
 
 field_view: fn(r: Root) -> Int {
     view: r.session
-    consume(^view)
+    consume(view)
 }
 
 loop_element: fn(sessions: [Session]) -> Int {
     last := 0
-    loop s in sessions -> last = consume(^s)
+    loop s in sessions -> last = consume(s)
     last
 }
 
@@ -44,7 +44,7 @@ run: fn() {
     root := Root{session: Session{id: 3, names: [String]{}}}
     slot := [Session]{}
     print(read_param(root.session))
-    write_param(&root.session, &slot)
+    write_param(root.session, slot)
     print(field_view(root))
     print(loop_element([root.session]))
 }

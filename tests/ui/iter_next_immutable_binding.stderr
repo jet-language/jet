@@ -1,8 +1,8 @@
-Error [jet.MissingWriteMarker]: Cannot write to `items` — it does not have the write-access marker `&`; required before calling `.next()`
-  --> tests/ui/iter_next_immutable_binding.jet:5:12
+Error [jet.ImmutableAssignment]: `items` was made with `:`, so it can't be changed
+  --> tests/ui/iter_next_immutable_binding.jet:5:11
     |
-  5 |     print(&items.next())
-    |            ^^^^^
- Why: This method edits the value it's called on; the write-access marker `&` is required
- Fix: Declare `items := ...`
-More: jet-lang.dev/e/E0202
+  5 |     print(items.next())
+    |           ^^^^^
+ Why: `next: fn(&self)` changes the value it's called on, so `items` must be mutable (`:=`)
+ Fix: Declare it with `items := ...`
+More: jet-lang.dev/e/E0111

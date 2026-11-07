@@ -94,21 +94,21 @@ lsp_compute_signature_change_preview: fn(db: SymbolDB, sources: [String:String],
             }
         }
         if !call_matches_identity {
-            &preview.unknown.push("unresolved_call:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
+            preview.unknown.push("unresolved_call:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
             next
         }
         source: sources.get(edge.module_path) ?? {
-            &preview.unknown.push("unavailable_source:{edge.module_path}")
+            preview.unknown.push("unavailable_source:{edge.module_path}")
             next
         }
         lexed: lex(source.bytes())
         tokens: lexed.tokens
         open: lsp_call_open(tokens, edge.call_span) ?? {
-            &preview.unknown.push("unavailable_call_arguments:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
+            preview.unknown.push("unavailable_call_arguments:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
             next
         }
         close: lsp_matching_paren(tokens, open) ?? {
-            &preview.unknown.push("incomplete_call_arguments:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
+            preview.unknown.push("incomplete_call_arguments:{edge.module_path}:{edge.call_span.start}-{edge.call_span.end}")
             next
         }
         // Rust's caller-key string is retained exactly; it is not a replacement
@@ -125,28 +125,28 @@ lsp_compute_signature_change_preview: fn(db: SymbolDB, sources: [String:String],
         }
         status := "explicit_value"
         if value == None {
-            &preview.unknown.push("missing_explicit_value:{edge.caller}")
+            preview.unknown.push("missing_explicit_value:{edge.caller}")
             status = "missing_explicit_value"
         }
         insert: tokens[close].span.start
         if value == .Val(text) {
             new_text: if open + 1 < close -> ", {text}" else -> text.copy()
-            &preview.edits.push(SignatureChangeEdit{path: edge.module_path.copy(), span: Span{start: insert, end: insert}, new_text: new_text})
+            preview.edits.push(SignatureChangeEdit{path: edge.module_path.copy(), span: Span{start: insert, end: insert}, new_text: new_text})
         }
         known_call_spans[LSPSignatureCallSpan{path: edge.module_path.copy(), start: edge.call_span.start, end: edge.call_span.end}] = true
-        &preview.callers.push(SignatureChangeCaller{identity: edge.caller.copy(), path: edge.module_path.copy(), span: Span{start: edge.call_span.start, end: edge.call_span.end}, value: value, status: status})
+        preview.callers.push(SignatureChangeCaller{identity: edge.caller.copy(), path: edge.module_path.copy(), span: Span{start: edge.call_span.start, end: edge.call_span.end}, value: value, status: status})
     }
     loop reference in db.refs {
         target: reference.target ?? next
         if target.semantic_identity != Val(identity) && !(target.module_path == definition.module_path && target.def_span == definition.def_span) -> next
         key: LSPSignatureCallSpan{path: reference.module_path.copy(), start: reference.span.start, end: reference.span.end}
-        if !known_call_spans.has_key(key) -> &preview.unknown.push("unresolved_or_higher_order_reference:{reference.module_path}:{reference.span.start}-{reference.span.end}")
+        if !known_call_spans.has_key(key) -> preview.unknown.push("unresolved_or_higher_order_reference:{reference.module_path}:{reference.span.start}-{reference.span.end}")
     }
     // #6341: Sema's checked visibility, never the declaration's spelling: a
     // Public declaration may have callers outside the checked workspace.
-    if db.declaration_visibility(definition.module_path, definition.def_span) == .Val(.Public) -> &preview.unknown.push("external_callers_outside_checked_workspace")
-    &preview.unknown.sort()
-    &preview.unknown.dedup()
+    if db.declaration_visibility(definition.module_path, definition.def_span) == .Val(.Public) -> preview.unknown.push("external_callers_outside_checked_workspace")
+    preview.unknown.sort()
+    preview.unknown.dedup()
     Ok(preview)
 }
 

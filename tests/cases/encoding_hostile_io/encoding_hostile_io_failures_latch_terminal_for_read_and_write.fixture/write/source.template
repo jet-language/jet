@@ -6,7 +6,7 @@ use {
 }
 
 writer_io: fn(writer: &cbor.CBORWriter) -[IO]> Bool {
-    if &writer.flush() == {
+    if writer.flush() == {
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Ok(_) -> return false
     }
@@ -15,18 +15,18 @@ writer_io: fn(writer: &cbor.CBORWriter) -[IO]> Bool {
 
 run: fn() {
     full_output: files.create("/dev/full") ?? panic("full open")
-    full_writer := cbor.writer(^full_output) ?? panic("full writer")
-    if &full_writer.write(encoding.DataEvent.Null) == {
+    full_writer := cbor.writer(full_output) ?? panic("full writer")
+    if full_writer.write(encoding.DataEvent.Null) == {
         .Err(first) -> {
             print(first.kind == encoding.EncodingErrorKind.IO)
-            if &full_writer.flush() == {
+            if full_writer.flush() == {
                 .Err(second) -> print(first.reason == second.reason)
                 .Ok(done) -> print(false)
             }
         }
         .Ok(_) -> {
-            if &full_writer.flush() == {
-                .Err(io_error) -> print(writer_io(&full_writer))
+            if full_writer.flush() == {
+                .Err(io_error) -> print(writer_io(full_writer))
                 .Ok(done) -> print(false)
             }
         }

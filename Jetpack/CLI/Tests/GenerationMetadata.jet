@@ -54,12 +54,12 @@ cli_generation_test_metadata: fn() -> ToolGenerationMetadata {
     loop name in invalid -> assert(cli_validate_bin_name(name) == .Err(_), "accepted {name}")
 
     case_collision := cli_generation_test_metadata()
-    &case_collision.tools.push(cli_generation_test_tool("other", "path:other", "c", "ECHO-ARGS", "other", "d"))
+    case_collision.tools.push(cli_generation_test_tool("other", "path:other", "c", "ECHO-ARGS", "other", "d"))
     assert(case_collision.format() == .Err(_))
 
     physical_collision := cli_generation_test_metadata()
     physical_collision.tools[0].bins = [String]{"foo"}
-    &physical_collision.tools.push(cli_generation_test_tool("other", "path:other", "c", "foo.exe", "other", "d"))
+    physical_collision.tools.push(cli_generation_test_tool("other", "path:other", "c", "foo.exe", "other", "d"))
     assert(physical_collision.format() == .Err(_))
     assert(cli_validate_bin_name("jetpack.exe") == .Err(_))
 }

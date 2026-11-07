@@ -1,0 +1,14 @@
+// The same pub export surface built as a
+// sandbox Component. A Component host uses one narrowed Authority for module
+// loading and preflights every declared typed import before guest execution.
+// Native hosts use the same named export surface but remain trusted in-process.
+use plugin: core.plugin
+
+run: fn() {
+    policy: Authority.from_rights(["FS.Read:repo"])
+    library: plugin.load("build/library.wasm", policy)
+    tick: library.on_tick(41) ?? panic("on_tick failed")
+    enabled: library.is_enabled(true) ?? panic("is_enabled failed")
+    greeting: library.greet("Ada") ?? panic("greet failed")
+    print("{tick}|{enabled}|{greeting}")
+}

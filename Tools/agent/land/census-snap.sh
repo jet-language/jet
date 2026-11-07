@@ -9,23 +9,31 @@
 # CENSUS_BUILD=0 skips everything after the check. CENSUS_JET_DIR names another compiler install
 # (default: the seed, $JET_SEED). Exit: 0 clean; 1 rows/failure; 2 setup failure. This is the preflight
 # AGENTS.md names; precommit.sh runs it for every compiler-input commit. Roots: Tools/agent/roots.sh.
+# A clean census of every pass (no CENSUS_BUILD=0 or CENSUS_SELFCHECK=0) writes the snapshot's preflight
+# receipt (preflight-receipt.mjs), which chain.sh full, release-compiler.mjs and publish-release.mjs require.
 # Never edit this file in place while it runs (bash reads scripts incrementally): write a new file and mv.
 set -uo pipefail
 # Its own lock: precommit censuses must never queue behind lanes' long checks (which hold census.lock).
+# The lock sits beside the one shared snapshot it guards, not under JET_RUN_ROOT: lanes have different run
+# roots, and two censuses sharing the snapshot would delete each other's tree mid-run.
 M=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$M/../roots.sh"
-mkdir -p "$JET_RUN_ROOT"
-exec 9>"$JET_RUN_ROOT/precommit-census.lock"; flock 9
+mkdir -p "$JET_SCRATCH_ROOT/discovery/r14"
+exec 9>"$JET_SCRATCH_ROOT/discovery/r14/census-snap.lock"; flock 9
 W=$JET_DEV_WORKTREE
 S=$JET_SCRATCH_ROOT/discovery/r14/snap
 OUT=$JET_SCRATCH_ROOT/discovery/r14/census
 C=${CENSUS_JET_DIR:-$(readlink -f "$JET_SEED")}
 ID=${CENSUS_JET_IDENTITY:-$(cat "$C/IDENTITY")}
 rm -rf "$S" "$OUT"; mkdir -p "$S" "$OUT"
-( cd "$W" && git archive HEAD | tar -x -C "$S" ) || { echo "EXPORT FAILED"; exit 2; }
+# CENSUS_COMMIT=<sha> censuses that commit instead of HEAD (a batch check of an exact commit).
+HEAD_SHA=$(git -C "$W" rev-parse "${CENSUS_COMMIT:-HEAD}^{commit}") || { echo "EXPORT FAILED"; exit 2; }
+( cd "$W" && git archive "$HEAD_SHA" | tar -x -C "$S" ) || { echo "EXPORT FAILED"; exit 2; }
 # A named file the worktree no longer has is a deletion: remove it from the snapshot too.
 for f in "$@"; do if [ -e "$W/$f" ]; then mkdir -p "$S/$(dirname "$f")" && cp "$W/$f" "$S/$f"; else rm -f "$S/$f"; fi; done
 cd "$S" || exit 2
+# The receipt's key: the snapshot's compiler source identity, before any pass writes into it.
+SID=$(node "$M/preflight-receipt.mjs" identity "$S") || { echo "SOURCE IDENTITY FAILED"; exit 2; }
 JET_COMPILER_IDENTITY=$ID JET_TOOLCHAIN_ROOT=${CENSUS_TOOLCHAIN_ROOT:-$S} JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$OUT/check-keep-going.tsv" \
   prlimit --stack=1073741824:1073741824 -- taskset -c 16-27 "$C/jet" check --threads 12 Compiler/JetCli > "$OUT/check.out" 2> "$OUT/check.err"
 crc=$?
@@ -61,5 +69,6 @@ if [ "${CENSUS_SELFCHECK:-1}" = 1 ]; then
   echo "selfcheck rc=$src rows=$srows"
   node "$M/census-errors.mjs" "$OUT/selfcheck-keep-going.tsv" "$S" 2>&1 | awk 'NR<=11' | cut -c1-200
   [ "$src" = 0 ] && [ "$srows" = 0 ] || exit 1
+  node "$M/preflight-receipt.mjs" write "$SID" "$(cat "$C/IDENTITY")" "$HEAD_SHA" "$@" || exit 2
 fi
 exit 0

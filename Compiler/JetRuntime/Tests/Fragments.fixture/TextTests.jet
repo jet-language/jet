@@ -18,12 +18,20 @@ text_test_word: fn(word: I64, len: I64) -> I64 {
 }
 
 text_test_piece: fn(state: I64, expected: I64) {
-    slot: text_iter_pull(state)
-    text_test_require(slot != I64{0})
+    slot: jet_rt_alloc(I64{8}, I64{8})
+    text_test_require(text_iter_pull(state, slot))
     value: rt_text_word(slot)
     text_test_require(jet_rt_string_eq(value, expected))
     jet_rt_string_drop(value)
     jet_rt_free(slot, I64{8}, I64{8})
+}
+
+// True once the split iterator is exhausted: a pull stores nothing.
+text_test_done: fn(state: I64) -> Bool {
+    slot: jet_rt_alloc(I64{8}, I64{8})
+    pulled: text_iter_pull(state, slot)
+    jet_rt_free(slot, I64{8}, I64{8})
+    !pulled
 }
 
 text_test_find_reference: fn(data: I64, len: I64, pattern: I64, n: I64, start: I64, last: Bool) -> I64 {
@@ -148,7 +156,7 @@ text_test_routes: fn() {
     rt_text_push_scalar(unicode, I64{233})
     rt_text_push_scalar(unicode, I64{128512})
     copied: jet_string_copy(unicode)
-    text_test_require(copied != unicode && jet_rt_string_eq(copied, unicode))
+    text_test_require(copied == unicode && jet_rt_string_eq(copied, unicode))
     text_test_require(jet_int_owned_to_i64(jet_string_count_bytes(unicode)) == I64{7})
     slot: jet_rt_alloc(I64{8}, I64{8})
     text_test_require(jet_string_chars(unicode, slot) == I64{3})
@@ -195,7 +203,7 @@ text_test_routes: fn() {
     inserted: jet_string_replace(unicode, empty, ascii)
     text_test_require(jet_char_len(inserted) == I64{7} && rt_text_len(inserted) == I64{11})
     unchanged: jet_string_replace(unicode, newline, ascii)
-    text_test_require(unchanged != unicode && jet_rt_string_eq(unchanged, unicode))
+    text_test_require(unchanged == unicode && jet_rt_string_eq(unchanged, unicode))
     lower: jet_text_ascii_lower(unicode)
     upper: jet_text_ascii_upper(lower)
     text_test_require(rt_text_byte(rt_text_data(lower)) == I64{97} && jet_rt_string_eq(upper, unicode))
@@ -233,9 +241,13 @@ text_tests: fn() {
     text_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
     text_test_require(jet_string_is_empty(empty) && jet_char_len(empty) == I64{0})
     word: text_test_word(I64{6513249}, I64{3})  // abc
+    // A clone shares the counted text; an equal word built apart owns its own.
     clone: jet_rt_string_clone(word)
-    text_test_require(word != clone && rt_text_data(word) != rt_text_data(clone))
-    text_test_require(jet_rt_string_eq(word, clone) && jet_rt_string_compare(word, clone) == I64{0})
+    text_test_require(clone == word)
+    jet_rt_string_drop(clone)
+    alias: text_test_word(I64{6513249}, I64{3})  // abc
+    text_test_require(word != alias && rt_text_data(word) != rt_text_data(alias))
+    text_test_require(jet_rt_string_eq(word, alias) && jet_rt_string_compare(word, alias) == I64{0})
     suffix: text_test_word(I64{25442}, I64{2})  // bc
     text_test_require(jet_string_contains(word, suffix) && jet_string_ends_with(word, suffix))
     text_test_require(!jet_string_starts_with(word, suffix) && jet_string_starts_with(word, empty) && jet_string_ends_with(word, empty))
@@ -247,13 +259,13 @@ text_tests: fn() {
     unchanged: jet_string_after(word, miss)
     text_test_require(jet_rt_string_eq(unchanged, word) && unchanged != word)
     // Self-alias append must work both with and without buffer relocation.
-    jet_rt_string_builder_push(clone, clone)
-    jet_rt_string_builder_push(clone, clone)
-    jet_rt_string_builder_push(clone, clone)
-    text_test_require(rt_text_len(clone) == I64{24} && jet_char_len(clone) == I64{24})
+    jet_rt_string_builder_push(alias, alias)
+    jet_rt_string_builder_push(alias, alias)
+    jet_rt_string_builder_push(alias, alias)
+    text_test_require(rt_text_len(alias) == I64{24} && jet_char_len(alias) == I64{24})
     at := I64{0}
     loop at < (I64{24}) {
-        text_test_require(rt_text_byte(rt_text_data(clone) + at) == I64{97} + at % I64{3})
+        text_test_require(rt_text_byte(rt_text_data(alias) + at) == I64{97} + at % I64{3})
         at += I64{1}
     }
     unicode: jet_rt_string_builder_new()
@@ -311,14 +323,14 @@ text_tests: fn() {
     rt_text_push_scalar(euro, I64{8364})
     text_test_piece(state, euro)
     text_test_piece(state, empty)
-    text_test_require(text_iter_pull(state) == I64{0} && text_iter_pull(state) == I64{0})
+    text_test_require(text_test_done(state) && text_test_done(state))
     text_iter_drop(state)
     // Nonempty delimiter: trailing empty is preserved and source is cloned.
     state2: text_iter_state(word, suffix)
     jet_rt_string_drop(word)
     text_test_piece(state2, before)
     text_test_piece(state2, empty)
-    text_test_require(text_iter_pull(state2) == I64{0})
+    text_test_require(text_test_done(state2))
     text_iter_drop(state2)
     jet_rt_string_drop(euro)
     jet_rt_string_drop(lossy)
@@ -331,7 +343,7 @@ text_tests: fn() {
     jet_rt_string_drop(before)
     jet_rt_string_drop(after)
     jet_rt_string_drop(suffix)
-    jet_rt_string_drop(clone)
+    jet_rt_string_drop(alias)
     jet_rt_string_drop(empty)
     jet_rt_string_drop(I64{0})
 }

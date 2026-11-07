@@ -24,22 +24,22 @@ cli_metadata_elf: fn(record: [U8], wide: Bool, little: Bool) -> [U8] Never! {
     record_at: header + names.len()
     table: record_at + record.len()
     out := cli_metadata_zeros(table + 3 * stride)
-    cli_metadata_copy(&out, 0, [U8]{127, 69, 76, 70})
+    cli_metadata_copy(out, 0, [U8]{127, 69, 76, 70})
     out[4] = if wide -> U8{2} else -> U8{1}
     out[5] = if little -> U8{1} else -> U8{2}
-    cli_metadata_number(&out, if wide -> 40 else -> 32, width, U64{table}, little)
-    cli_metadata_number(&out, if wide -> 58 else -> 46, 2, U64{stride}, little)
-    cli_metadata_number(&out, if wide -> 60 else -> 48, 2, U64{3}, little)
-    cli_metadata_number(&out, if wide -> 62 else -> 50, 2, U64{1}, little)
-    cli_metadata_copy(&out, header, names)
-    cli_metadata_copy(&out, record_at, record)
+    cli_metadata_number(out, if wide -> 40 else -> 32, width, U64{table}, little)
+    cli_metadata_number(out, if wide -> 58 else -> 46, 2, U64{stride}, little)
+    cli_metadata_number(out, if wide -> 60 else -> 48, 2, U64{3}, little)
+    cli_metadata_number(out, if wide -> 62 else -> 50, 2, U64{1}, little)
+    cli_metadata_copy(out, header, names)
+    cli_metadata_copy(out, record_at, record)
     offset_field: if wide -> 24 else -> 16
     size_field: if wide -> 32 else -> 20
     loop index in 1..<3 {
         base: table + index * stride
-        cli_metadata_number(&out, base, 4, if index == 1 -> U64{1} else -> U64{11}, little)
-        cli_metadata_number(&out, base + offset_field, width, U64{if index == 1 -> header else -> record_at}, little)
-        cli_metadata_number(&out, base + size_field, width, U64{if index == 1 -> names.len() else -> record.len()}, little)
+        cli_metadata_number(out, base, 4, if index == 1 -> U64{1} else -> U64{11}, little)
+        cli_metadata_number(out, base + offset_field, width, U64{if index == 1 -> header else -> record_at}, little)
+        cli_metadata_number(out, base + size_field, width, U64{if index == 1 -> names.len() else -> record.len()}, little)
     }
     out
 }
@@ -48,18 +48,18 @@ cli_metadata_pe: fn(record: [U8], count: Int, trailing: [U8]) -> [U8] Never! {
     raw: table + count * 40
     size: record.len() + trailing.len()
     out := cli_metadata_zeros(raw + count * size)
-    cli_metadata_copy(&out, 0, [U8]{77, 90})
-    cli_metadata_number(&out, 0x3c, 4, U64{0x80}, true)
-    cli_metadata_copy(&out, 0x80, [U8]{80, 69, 0, 0})
-    cli_metadata_number(&out, 0x80 + 6, 2, U64{count}, true)
+    cli_metadata_copy(out, 0, [U8]{77, 90})
+    cli_metadata_number(out, 0x3c, 4, U64{0x80}, true)
+    cli_metadata_copy(out, 0x80, [U8]{80, 69, 0, 0})
+    cli_metadata_number(out, 0x80 + 6, 2, U64{count}, true)
     loop index in 0..<count {
         base: table + index * 40
         at: raw + index * size
-        cli_metadata_copy(&out, base, ".jetcmd".bytes())
-        cli_metadata_number(&out, base + 16, 4, U64{size}, true)
-        cli_metadata_number(&out, base + 20, 4, U64{at}, true)
-        cli_metadata_copy(&out, at, record)
-        cli_metadata_copy(&out, at + record.len(), trailing)
+        cli_metadata_copy(out, base, ".jetcmd".bytes())
+        cli_metadata_number(out, base + 16, 4, U64{size}, true)
+        cli_metadata_number(out, base + 20, 4, U64{at}, true)
+        cli_metadata_copy(out, at, record)
+        cli_metadata_copy(out, at + record.len(), trailing)
     }
     out
 }
@@ -70,17 +70,17 @@ cli_metadata_mach: fn(record: [U8], wide: Bool) -> [U8] Never! {
     size: sections + stride
     at: header + size
     out := cli_metadata_zeros(at + record.len())
-    cli_metadata_copy(&out, 0, [U8]{if wide -> U8{207} else -> U8{206}, 250, 237, 254})
-    cli_metadata_number(&out, 16, 4, U64{1}, true)
-    cli_metadata_number(&out, 20, 4, U64{size}, true)
-    cli_metadata_number(&out, header, 4, if wide -> U64{25} else -> U64{1}, true)
-    cli_metadata_number(&out, header + 4, 4, U64{size}, true)
-    cli_metadata_number(&out, header + (if wide -> 64 else -> 48), 4, U64{1}, true)
+    cli_metadata_copy(out, 0, [U8]{if wide -> U8{207} else -> U8{206}, 250, 237, 254})
+    cli_metadata_number(out, 16, 4, U64{1}, true)
+    cli_metadata_number(out, 20, 4, U64{size}, true)
+    cli_metadata_number(out, header, 4, if wide -> U64{25} else -> U64{1}, true)
+    cli_metadata_number(out, header + 4, 4, U64{size}, true)
+    cli_metadata_number(out, header + (if wide -> 64 else -> 48), 4, U64{1}, true)
     base: header + sections
-    cli_metadata_copy(&out, base, "__jetcmd".bytes())
-    cli_metadata_number(&out, base + (if wide -> 40 else -> 36), if wide -> 8 else -> 4, U64{record.len()}, true)
-    cli_metadata_number(&out, base + (if wide -> 48 else -> 40), 4, U64{at}, true)
-    cli_metadata_copy(&out, at, record)
+    cli_metadata_copy(out, base, "__jetcmd".bytes())
+    cli_metadata_number(out, base + (if wide -> 40 else -> 36), if wide -> 8 else -> 4, U64{record.len()}, true)
+    cli_metadata_number(out, base + (if wide -> 48 else -> 40), 4, U64{at}, true)
+    cli_metadata_copy(out, at, record)
     out
 }
 cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8] Never! {
@@ -89,14 +89,14 @@ cli_metadata_fat: fn(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8
     first_at: 8 + 2 * stride
     second_at: first_at + first.len()
     out := cli_metadata_zeros(second_at + second.len())
-    cli_metadata_number(&out, 0, 4, if wide -> U64{0xcafebabf} else -> U64{0xcafebabe}, little)
-    cli_metadata_number(&out, 4, 4, U64{2}, little)
-    cli_metadata_number(&out, 16, width, U64{first_at}, little)
-    cli_metadata_number(&out, 16 + width, width, U64{first.len()}, little)
-    cli_metadata_number(&out, 8 + stride + 8, width, U64{second_at}, little)
-    cli_metadata_number(&out, 8 + stride + 8 + width, width, U64{second.len()}, little)
-    cli_metadata_copy(&out, first_at, first)
-    cli_metadata_copy(&out, second_at, second)
+    cli_metadata_number(out, 0, 4, if wide -> U64{0xcafebabf} else -> U64{0xcafebabe}, little)
+    cli_metadata_number(out, 4, 4, U64{2}, little)
+    cli_metadata_number(out, 16, width, U64{first_at}, little)
+    cli_metadata_number(out, 16 + width, width, U64{first.len()}, little)
+    cli_metadata_number(out, 8 + stride + 8, width, U64{second_at}, little)
+    cli_metadata_number(out, 8 + stride + 8 + width, width, U64{second.len()}, little)
+    cli_metadata_copy(out, first_at, first)
+    cli_metadata_copy(out, second_at, second)
     out
 }
 cli_metadata_leb: fn(out: &[U8], value: Int) Never! {
@@ -105,20 +105,20 @@ cli_metadata_leb: fn(out: &[U8], value: Int) Never! {
         byte := U8{rest.bit_and(127)}
         rest >>= 7
         if rest != 0 -> byte = byte.bit_or(U8{128})
-        &out.push(byte)
+        out.push(byte)
         if rest == 0 -> break
     }
 }
 cli_metadata_wasm: fn(record: [U8], count: Int) -> [U8] Never! {
     out := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
     payload := [U8]{}
-    cli_metadata_leb(&payload, 11)
-    &payload.extend("jet.command".bytes())
-    &payload.extend(record)
+    cli_metadata_leb(payload, 11)
+    payload.extend("jet.command".bytes())
+    payload.extend(record.copy())
     loop _ in 0..<count {
-        &out.push(U8{0})
-        cli_metadata_leb(&out, payload.len())
-        &out.extend(payload)
+        out.push(U8{0})
+        cli_metadata_leb(out, payload.len())
+        out.extend(payload.copy())
     }
     out
 }
@@ -174,7 +174,7 @@ cli_metadata_refuse: fn(bytes: [U8], expected: MetadataError, maximum: U64) Neve
     disagreement: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)
     cli_metadata_refuse(disagreement, MetadataError.Malformed{why: "universal Mach-O slices disagree"}, max)
     offset_overflow := cli_metadata_elf(record, true, true)
-    cli_metadata_number(&offset_overflow, 40, 8, U64{0x100000000}, true)
+    cli_metadata_number(offset_overflow, 40, 8, U64{0x100000000}, true)
     cli_metadata_refuse(offset_overflow, MetadataError.Malformed{why: "file offset overflow"}, U64{0xffffffff})
     invalid_name := cli_metadata_pe(record, 1, [U8]{})
     invalid_name[0x80 + 24] = U8{255}

@@ -38,7 +38,7 @@ run: fn(args: Args) {
         <: worker1..worker4 :>: task worker(jobs_receiver.copy(), results_sender.copy())
         listener: net.tcp_listen("127.0.0.1:{args.port}")
         loop {
-            stream := &listener.accept()
+            stream := listener.accept()
             command: "{stream.read_text(1024).trim()}"
             reply: response(command, jobs_sender.copy(), results_receiver.copy())
             stream.write_text("{reply}\n")

@@ -33,7 +33,7 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         managed_emit -> "__jet_native_emit_async"
         else -> p.name
     }
-    function_name: pkg_bind_unique_name(&used_names, foundation_generated_snake_name(seed, "function"))
+    function_name: pkg_bind_unique_name(used_names, foundation_generated_snake_name(seed, "function"))
     context_index: if managed_callback == {
         .Val(callback_index) -> callback_index + 1
         .None -> -1
@@ -47,12 +47,12 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         split: pkg_cbind_split_param_type_and_name(raw, idx)
         ty: split.ty
         jet_ty: pkg_cbind_render_param_type(p, idx, ty, length_param, contract, handles, catalog)
-        name: pkg_bind_unique_name(&used_param_names, foundation_generated_snake_name(split.name, "arg"))
-        &params.push("{name}: {jet_ty}")
+        name: pkg_bind_unique_name(used_param_names, foundation_generated_snake_name(split.name, "arg"))
+        params.push("{name}: {jet_ty}")
     }
     params_str: params.join(", ")
     close_marker: if handles.handle_for_type(p.ret) == {
-        .Val(handle) -> "#Close({handle.close})\n"
+        .Val(handle) -> "#Close({pkg_cbind_close_function_name(handle.close)})\n"
         .None -> ""
     }
     symbol: pkg_cbind_quote(p.name)
@@ -60,6 +60,13 @@ pkg_cbind_render_binding: fn(p: CProto, used_names: &[String], contract: Foreign
         .Val(result) -> Ok("{close_marker}{function_name}: fn({params_str}) -> {result} = {symbol}")
         .None -> Ok("{close_marker}{function_name}: fn({params_str}) = {symbol}")
     }
+}
+
+// The Jet name a handle's C close function `close` is bound under. `#Close`
+// and the handle fact name the Jet function, which the C symbol spells only
+// when it is already snake case (`gzclose`, not `XML_ParserFree`).
+pkg_cbind_close_function_name: fn(close: String) -> String Never! {
+    foundation_generated_snake_name(close, "function")
 }
 
 // The Jet type of one parameter: an out-length, a counted slice, an owned
@@ -80,7 +87,7 @@ pkg_cbind_render_param_type: fn(p: CProto, idx: Int, ty: String, length_param: I
     }
     if handles.handle_for_type(ty) == {
         .Val(handle) -> {
-            access: if handles.is_close_function(p.name, ty) -> "^" else -> "&"
+            access: if handles.is_close_function(p.name, ty) -> "&&" else -> "&"
             return Ok("{access}{handle.jet_name}")
         }
         .None -> {}

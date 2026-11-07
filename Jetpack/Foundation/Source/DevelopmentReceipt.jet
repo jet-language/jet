@@ -65,14 +65,14 @@ JetDevelopmentReceipt: struct {
     // presenting the same locked closure in a different order.
     identity_bytes: fn(self) -> [U8] Never! {
         out := "jet-development-act-v1".bytes()
-        &out.push(U8{0})
-        jet_receipt_frame(&out, self.act)
-        jet_receipt_frame(&out, self.locked_closure)
+        out.push(U8{0})
+        jet_receipt_frame(out, self.act)
+        jet_receipt_frame(out, self.locked_closure)
         loop input in jet_receipt_sorted_pairs(self.inputs) {
-            jet_receipt_frame(&out, input.name)
-            jet_receipt_frame(&out, input.digest)
+            jet_receipt_frame(out, input.name)
+            jet_receipt_frame(out, input.digest)
         }
-        jet_receipt_frame(&out, self.planned_action)
+        jet_receipt_frame(out, self.planned_action)
         out
     }
 }
@@ -97,7 +97,7 @@ jet_receipt_is_content_address: fn(value: String) -> Bool Never! {
 // Inputs ordered by (name, digest).
 jet_receipt_sorted_pairs: fn(values: [JetDevelopmentReceiptInput]) -> [JetDevelopmentReceiptInput] Never! {
     sorted := values.copy()
-    &sorted.sort_by((left: JetDevelopmentReceiptInput, right: JetDevelopmentReceiptInput) -> (left.name <=> right.name).then(left.digest <=> right.digest))
+    sorted.sort_by((left: JetDevelopmentReceiptInput, right: JetDevelopmentReceiptInput) -> (left.name <=> right.name).then(left.digest <=> right.digest))
     sorted
 }
 
@@ -111,8 +111,8 @@ jet_receipt_hex: fn(value: String) -> String Never! {
     out := [U8]{}
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
-        &out.push(digits[code >> 4])
-        &out.push(digits[(code).bit_and(15)])
+        out.push(digits[code >> 4])
+        out.push(digits[(code).bit_and(15)])
     }
     String.from_bytes(out) ?? ""
 }
@@ -122,8 +122,8 @@ jet_receipt_frame: fn(out: &[U8], value: String) Never! {
     bytes: value.bytes()
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{((bytes.len() >> shift)).bit_and(255)})
+        out.push(U8{((bytes.len() >> shift)).bit_and(255)})
         shift -= 8
     }
-    loop byte in bytes -> &out.push(byte)
+    loop byte in bytes -> out.push(byte)
 }

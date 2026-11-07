@@ -1,5 +1,7 @@
-// The property engine of `jet test` (D-TEST1). A parameterized `#Test fn`
-// runs as up to PROPERTY_CASES generated cases. Every generated value is
+// The property engine of `jet test`. A parameterized `#Test fn`
+// runs as up to PROPERTY_CASES generated cases, or the generated grade's
+// JET_FUZZ_ITERATIONS (`jet test --grade=generated --iterations=N`, which
+// sets it on the harness). Every generated value is
 // read from one choice sequence: each draw is a word below the generator's
 // bound. The first failing case's sequence is shrunk under a run budget by
 // deleting spans of choices, then lowering each choice (zero, else a binary
@@ -9,18 +11,25 @@
 // seed is fresh entropy.
 //
 // Generated test.invoke(ctx) draws each parameter (jet_rt_test_property_*),
-// hands the rendered inputs over (jet_rt_test_property_inputs) and calls the
-// body. Context (PROPERTY_CTX_BYTES):
+// rejects the case when one of the property's `#Pre` clauses fails on them
+// (jet_rt_test_property_reject, without running the body), else hands the
+// rendered inputs over (jet_rt_test_property_inputs) and calls the body. A
+// rejected case doesn't count toward the budget; PROPERTY_REJECT_FACTOR
+// times the budget in rejections fails the property, whose generators then
+// can't reach its precondition. Context (PROPERTY_CTX_BYTES):
 //   +0 recorded choices: count, capacity, data (a native word list)
 //   +24 replay prefix data, +32 prefix length, +40 next prefix index
 //   +48 SplitMix64 state, +56 the case's rendered inputs (owned text or 0)
 //   +64 replay mode (1: read the prefix, a choice past its end is 0)
+//   +72 the case budget (property_budget)
+//   +80 the case was rejected (1), +88 the cases rejected so far
 // A case result (PROPERTY_RUN_BYTES): +0 owned error text (0 on success),
 // +8 owned captured stdout, +16 whole-test skip.
 
 PROPERTY_CASES: I64{200}
 PROPERTY_SHRINK_RUNS: I64{2000}
-PROPERTY_CTX_BYTES: I64{72}
+PROPERTY_REJECT_FACTOR: I64{10}
+PROPERTY_CTX_BYTES: I64{96}
 PROPERTY_RUN_BYTES: I64{24}
 PROPERTY_SEED_LIMIT: I64{9223372036854775807}
 
@@ -144,12 +153,19 @@ property_simpler: fn(left: I64, right: I64) -> Bool {
     trap_store(wrapping(ctx + I64{56}), text)
 }
 
+// The running case's inputs fail one of the property's `#Pre` clauses: the
+// case is rejected, and its body doesn't run.
+#Export(c) jet_rt_test_property_reject: fn(ctx: I64) {
+    trap_store(wrapping(ctx + I64{80}), I64{1})
+}
+
 // One run of `invoke` over the context's current mode, as jet_rt_test_unit
 // runs a unit test: a stop is the case's failure, and a stop without a report
 // (process.exit) is published again on the enclosing root.
 property_case: fn(ctx: I64, invoke: I64, run: I64) {
     trap_store(ctx, I64{0})
     trap_store(wrapping(ctx + I64{40}), I64{0})
+    trap_store(wrapping(ctx + I64{80}), I64{0})
     jet_rt_test_property_inputs(ctx, I64{0})
     jet_rt_test_capture_begin()
     jet_rt_testing_clear_failure()
@@ -274,6 +290,19 @@ property_seed: fn(ctx: I64) -> I64 {
     I64{0}
 }
 
+// The run's case budget into ctx+72: JET_FUZZ_ITERATIONS (a whole number of
+// at least 1), else PROPERTY_CASES. Null on success, else the owned failure
+// text.
+property_budget: fn(ctx: I64) -> I64 {
+    trap_store(wrapping(ctx + I64{72}), PROPERTY_CASES)
+    value: test_environment(jet_rt_string_clone(rt_static_text("JET_FUZZ_ITERATIONS")))
+    if (value == I64{0}) -> return I64{0}
+    parsed: property_seed_parse(value, wrapping(ctx + I64{72}))
+    test_text_drop(value)
+    if (parsed && trap_word(wrapping(ctx + I64{72})) >= I64{1}) -> return I64{0}
+    jet_rt_string_clone(rt_static_text("JET_FUZZ_ITERATIONS must be a whole number from 1 to 9223372036854775807"))
+}
+
 // The failure report of the minimized case: where it failed, how to replay
 // it, its inputs and its own report (`error`, taken).
 property_report: fn(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
@@ -281,11 +310,12 @@ property_report: fn(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
     jet_rt_string_builder_push(target, rt_static_text("property failed on case "))
     rt_text_push_number(target, failed_case)
     jet_rt_string_builder_push(target, rt_static_text(" of "))
-    rt_text_push_number(target, PROPERTY_CASES)
+    rt_text_push_number(target, trap_word(wrapping(ctx + I64{72})))
     jet_rt_string_builder_push(target, rt_static_text(" (seed "))
     rt_text_push_number(target, seed)
     jet_rt_string_builder_push(target, rt_static_text("; replay with JET_PROP_SEED="))
     rt_text_push_number(target, seed)
+    property_report_rejected(target, ctx)
     jet_rt_string_builder_push(target, rt_static_text(")\nminimized_inputs: "))
     inputs: trap_word(wrapping(ctx + I64{56}))
     if (inputs != I64{0}) { jet_rt_string_builder_push(target, inputs) }
@@ -295,25 +325,68 @@ property_report: fn(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
     jet_rt_string_builder_finish(target)
 }
 
+// "; R rejected by `#Pre`" when the run rejected any generated case.
+property_report_rejected: fn(target: I64, ctx: I64) {
+    rejected: trap_word(wrapping(ctx + I64{88}))
+    if (rejected == I64{0}) -> return
+    jet_rt_string_builder_push(target, rt_static_text("; "))
+    rt_text_push_number(target, rejected)
+    jet_rt_string_builder_push(target, rt_static_text(" rejected by `#Pre`"))
+}
+
+// The verdict of a property whose `#Pre` rejected PROPERTY_REJECT_FACTOR
+// times its budget: what happened, why it fails, and the fix.
+property_rejected_verdict: fn(ctx: I64, ran: I64, seed: I64) -> I64 {
+    target: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, rt_static_text("property's `#Pre` rejected "))
+    rt_text_push_number(target, trap_word(wrapping(ctx + I64{88})))
+    jet_rt_string_builder_push(target, rt_static_text(" generated cases before "))
+    rt_text_push_number(target, trap_word(wrapping(ctx + I64{72})))
+    jet_rt_string_builder_push(target, rt_static_text(" met it ("))
+    rt_text_push_number(target, ran)
+    jet_rt_string_builder_push(target, rt_static_text(" did; seed "))
+    rt_text_push_number(target, seed)
+    jet_rt_string_builder_push(target, rt_static_text("; replay with JET_PROP_SEED="))
+    rt_text_push_number(target, seed)
+    jet_rt_string_builder_push(target, rt_static_text(")\nwhy: a rejected case doesn't count toward the case budget, and after "))
+    rt_text_push_number(target, PROPERTY_REJECT_FACTOR)
+    jet_rt_string_builder_push(target, rt_static_text(" times the budget in rejections the generators can't reach the precondition often enough to test the property\nfix: weaken the `#Pre`, or narrow the parameter types (an inline range such as `Int[0..100]`) so most generated cases meet it"))
+    jet_rt_string_builder_finish(target)
+}
+
 // The property test `name` (borrowed) over `invoke`: its owned outcome, as
 // jet_rt_test_unit's, carrying the cases that ran (all of them when it passes,
-// the failing case's number when one fails, 0 on a bad seed). A passing
-// property keeps its last case's stdout; a failing one reports its minimized
-// case.
+// the failing case's number when one fails, 0 on a bad seed), the cases its
+// `#Pre` rejected, and its seed. A rejected case doesn't count as a case that
+// ran. A passing property keeps its last case's stdout; a failing one reports
+// its minimized case.
 #Export(c) jet_rt_test_property: fn(name: I64, expected: Bool, _env: I64, invoke: I64) -> I64 {
     ctx: jet_rt_alloc(PROPERTY_CTX_BYTES, I64{8})
     thread_zero(ctx, PROPERTY_CTX_BYTES)
     run: jet_rt_alloc(PROPERTY_RUN_BYTES, I64{8})
     thread_zero(run, PROPERTY_RUN_BYTES)
     error := property_seed(ctx)
+    if (error == I64{0}) { error = property_budget(ctx) }
     stdout := test_text_new(I64{0})
     skipped := false
     ran := I64{0}
+    seed: trap_word(wrapping(ctx + I64{48}))
     if (error == I64{0}) {
-        seed: trap_word(wrapping(ctx + I64{48}))
-        loop ran < PROPERTY_CASES {
-            ran += I64{1}
+        budget: trap_word(wrapping(ctx + I64{72}))
+        loop ran < budget {
             property_case(ctx, invoke, run)
+            if (trap_word(wrapping(ctx + I64{80})) != I64{0}) {
+                test_text_drop(trap_word(wrapping(run + I64{8})))
+                trap_store(wrapping(run + I64{8}), I64{0})
+                rejected: trap_word(wrapping(ctx + I64{88})) + I64{1}
+                trap_store(wrapping(ctx + I64{88}), rejected)
+                if (rejected /% PROPERTY_REJECT_FACTOR >= budget) {
+                    error = property_rejected_verdict(ctx, ran, seed)
+                    break
+                }
+                next
+            }
+            ran += I64{1}
             test_text_drop(stdout)
             stdout = trap_word(wrapping(run + I64{8}))
             trap_store(wrapping(run + I64{8}), I64{0})
@@ -342,8 +415,9 @@ property_report: fn(ctx: I64, failed_case: I64, seed: I64, error: I64) -> I64 {
             }
         }
     }
+    rejected_cases: trap_word(wrapping(ctx + I64{88}))
     jet_rt_test_property_inputs(ctx, I64{0})
     property_words_free(ctx, PROPERTY_CTX_BYTES)
     jet_rt_free(run, PROPERTY_RUN_BYTES, I64{8})
-    test_outcome_new(name, expected, skipped, stdout, error, ran)
+    test_outcome_new(name, expected, skipped, stdout, error, ran, rejected_cases, seed)
 }

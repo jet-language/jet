@@ -7,11 +7,11 @@ jet_cli_receipt_lookup_bytes: fn(bytes: [U8]?, claim: JetCLIReceiptClaim, observ
     raw: bytes ?? return Ok(None)
     receipt := jet_cli_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
-    Ok(Val(jet_cli_receipt_merge_sections(^receipt, claim, published_sections)))
+    Ok(Val(jet_cli_receipt_merge_sections(receipt, claim, published_sections)))
 }
 
-jet_cli_receipt_merge_sections: fn(original: ^JetCLIReceipt, claim: JetCLIReceiptClaim, published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt JetCLIReadError! {
-    receipt := ^original
+jet_cli_receipt_merge_sections: fn(original: &&JetCLIReceipt, claim: JetCLIReceiptClaim, published_sections: [JetCLIReceiptSectionRecord]) -> JetCLIReceipt JetCLIReadError! {
+    receipt := original.move()
     loop record in published_sections {
         if record.claim_key != claim.key || record.parent_digest != receipt.digest {
             return Err(jet_cli_read_error("published receipt section has a different parent identity"))
@@ -27,7 +27,7 @@ jet_cli_receipt_merge_sections: fn(original: ^JetCLIReceipt, claim: JetCLIReceip
             }
             return Err(jet_cli_read_error("receipt section `{section.name}` conflicts with the immutable receipt"))
         }
-        if !same -> &receipt.sections.push(section)
+        if !same -> receipt.sections.push(section.copy())
     }
     receipt.sections = jet_cli_receipt_normalized_sections(receipt.sections)
     Ok(receipt)
@@ -63,15 +63,15 @@ jet_cli_receipt_redact_bytes: fn(bytes: [U8], secret_values: [String]) -> [U8] J
                 }
             }
             if matches {
-                loop byte in marker -> &output.push(byte)
+                loop byte in marker -> output.push(byte)
                 index += needle.len()
             } else {
-                &output.push(redacted[index])
+                output.push(redacted[index])
                 index += 1
             }
         }
-        loop offset in index..<redacted.len() -> &output.push(redacted[offset])
-        redacted = ^output
+        loop offset in index..<redacted.len() -> output.push(redacted[offset])
+        redacted = output.move()
     }
     if redacted.len() > JET_CLI_RECEIPT_MAX_FIELD {
         return Err(jet_cli_read_error("redacted receipt output exceeds its size limit"))
@@ -101,9 +101,9 @@ jet_cli_receipt_observe_input: fn(input: JetCLIReceiptInput) -[FS, Time.Wait]> J
     if !input.path.starts_with("/") -> return Err(jet_cli_read_error("receipt input path is not absolute: {input.path}"))
     parts := [String]{}
     loop part in input.path.split("/") {
-        if part != "" && part != "." -> &parts.push(part)
+        if part != "" && part != "." -> parts.push(part)
     }
-    name: &parts.pop() ?? return Err(jet_cli_read_error("receipt input has no file name"))
+    name: parts.pop() ?? return Err(jet_cli_read_error("receipt input has no file name"))
     held: JetCLIRootedDirectory.open("/", parts, false) ?? return Err(err)
     raw: if held.read(name, Int.MAX) == {
         .Val(bytes) -> bytes
@@ -142,7 +142,7 @@ jet_cli_receipt_read_section_records: fn(project_root: String, claim_key: String
         record: jet_cli_receipt_section_record_decode(raw)
         if jet_cli_receipt_section_record_identity(record) != entry.name -> return Err(jet_cli_read_error("receipt section record identity does not match its path: {shown}"))
         if record.claim_key != claim_key || record.parent_digest != parent_digest -> return Err(jet_cli_read_error("receipt section record belongs to a different receipt: {shown}"))
-        &records.push(record)
+        records.push(record)
         if records.len() > 256 -> return Err(jet_cli_read_error("receipt has too many sections (maximum 256)"))
     }
     Ok(records)
@@ -162,7 +162,7 @@ jet_cli_receipt_lookup: fn(project_root: String, claim: JetCLIReceiptClaim) -[FS
     receipt: jet_cli_receipt_decode(raw) ?? return Ok(None)
     if receipt.claim != claim -> return Ok(None)
     records: jet_cli_receipt_read_section_records(project_root, claim.key, receipt.digest)
-    Ok(Val(jet_cli_receipt_merge_sections(^receipt, claim, records)))
+    Ok(Val(jet_cli_receipt_merge_sections(receipt, claim, records)))
 }
 
 // True is a new immutable object; false is an identical publication or a
@@ -194,11 +194,11 @@ jet_cli_receipt_adopt_staged_sections: fn(project_root: String, claim: JetCLIRec
     adopted := [JetCLIReceiptSectionRecord]{}
     loop record in records {
         published: JetCLIReceiptSectionRecord{claim_key: claim.key, parent_digest: parent.digest, section: record.section}
-        &adopted.push(published)
+        adopted.push(published)
     }
     // Validate every conflict before publishing the first append-only record.
     checked_parent := parent
-    _: jet_cli_receipt_merge_sections(^checked_parent, claim, adopted)
+    _: jet_cli_receipt_merge_sections(checked_parent, claim, adopted)
     held: JetCLIRootedDirectory.open(project_root, [String]{".jet", "receipts", "staged", claim.key}, false) ?? return Err(err)
     loop (index, record) in adopted {
         _: jet_cli_receipt_publish_section(project_root, record)
@@ -220,8 +220,8 @@ jet_cli_receipt_list: fn(project_root: String) -[FS, Time.Wait]> [JetCLIReceipt]
         if receipt.claim.key != entry.name -> next
         records: jet_cli_receipt_read_section_records(project_root, entry.name, receipt.digest) ?? next
         key: receipt.claim
-        row: jet_cli_receipt_merge_sections(^receipt, key, records) ?? next
-        &receipts.push(row)
+        row: jet_cli_receipt_merge_sections(receipt, key, records) ?? next
+        receipts.push(row)
     }
     Ok(receipts)
 }

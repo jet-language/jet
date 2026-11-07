@@ -4,6 +4,8 @@ fixture: embedded_devserver_deadline_is_absolute_under_successful_byte_trickle.f
 env: S5_PORT={free-port:web}
 copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
 write: app.jet app.source
+step: jet check app.jet # the dev server serves only an app that compiles; a broken app fails here, not at the readiness wait
+exit: 0
 session app raw: jet dev app.jet
 stderr: null
 recv app line until ^= "App preview: " timeout 60s # original waits for the dev server readiness line

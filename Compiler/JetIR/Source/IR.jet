@@ -278,7 +278,7 @@ ir_loop_proof_rows: fn(m: IRModule) -> [String] Never! {
     loop function in m.functions {
         loop proof in function.loop_proofs {
             facts: "aliasing-free {proof.no_aliasing}, no early exit {proof.no_early_exit}, effect-free {proof.effect_free}, independent {proof.independent}"
-            &rows.push("loop {function.name} {function.source_file}:{proof.line} `{proof.local}` below {proof.extent} of {proof.element}: {facts}; lowered scalar, proven accesses {proof.recorded}, unchecked {proof.lowered}")
+            rows.push("loop {function.name} {function.source_file}:{proof.line} `{proof.local}` below {proof.extent} of {proof.element}: {facts}; lowered scalar, proven accesses {proof.recorded}, unchecked {proof.lowered}")
         }
     }
     rows
@@ -425,15 +425,15 @@ ir_intern_type: fn(m: &IRModule, key: String, row: IRType) -> Int Never! {
     found := name_rows_get(m.type_rows, full, full_hash) ?? -1
     if found < 0 {
         found = m.types.len()
-        &m.types.push(row)
-        &m.type_keys.push(full.copy())
-        name_rows_set_hashed(&m.type_rows, full, full_hash, found)
+        m.types.push(row.copy())
+        m.type_keys.push(full.copy())
+        name_rows_set_hashed(m.type_rows, full, full_hash, found)
     }
     if listed >= 0 {
-        &m.key_lists[listed].push(found)
+        m.key_lists[listed].push(found)
     } else {
-        name_rows_set_hashed(&m.key_rows, key, hash, m.key_lists.len())
-        &m.key_lists.push([Int]{found})
+        name_rows_set_hashed(m.key_rows, key, hash, m.key_lists.len())
+        m.key_lists.push([Int]{found})
     }
     found
 }
@@ -452,13 +452,13 @@ ir_row_key: fn(m: IRModule, row: Int) -> String Never! {
 ir_hashed_function: fn(name: String, key: String, prefix: String, source_file: String, line: Int) -> IRFunction Never! {
     hash: stable_id("ir.symbol", key)
     symbol := List<U8>.try_with_capacity(prefix.len() + 16) ?? panic("symbol allocation failed")
-    loop byte in prefix.bytes() -> &symbol.push(byte)
+    loop byte in prefix.bytes() -> symbol.push(byte)
     // Most significant nibble first: each rotate brings the next one down.
     rest := hash
     loop _ in 0..<16 {
         rest = rest.rotate_left(4)
         nibble: Int.from_u64(rest.bit_and(U64{15}))
-        &symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
+        symbol.push(if nibble < 10 -> U8{48 + nibble} else -> U8{87 + nibble})
     }
     made := ir_function_new(name, key, String.from_bytes(symbol) ?? panic("symbol bytes are UTF-8"), source_file, line)
     made.symbol_hash = hash
@@ -470,8 +470,8 @@ ir_intern_name: fn(m: &IRModule, text: String) -> Int Never! {
     found: name_rows_get(m.name_rows, text, hash) ?? -1
     if found >= 0 -> return found
     id: m.names.len()
-    name_rows_set_hashed(&m.name_rows, text, hash, id)
-    &m.names.push(text)
+    name_rows_set_hashed(m.name_rows, text, hash, id)
+    m.names.push(text.copy())
     id
 }
 
@@ -481,8 +481,8 @@ ir_intern_text: fn(m: &IRModule, text: String) -> Int Never! {
     found: name_rows_get(m.data_rows, text, hash) ?? -1
     if found >= 0 -> return found
     id: m.data.len()
-    &m.data.push(text.bytes())
-    name_rows_set_hashed(&m.data_rows, text, hash, id)
+    m.data.push(text.bytes())
+    name_rows_set_hashed(m.data_rows, text, hash, id)
     id
 }
 
@@ -494,16 +494,16 @@ ir_intern_bytes: fn(m: &IRModule, bytes: [U8]) -> Int Never! {
     found: name_rows_get(m.data_rows, key, hash) ?? -1
     if found >= 0 -> return found
     id: m.data.len()
-    &m.data.push(bytes)
-    name_rows_set_hashed(&m.data_rows, key, hash, id)
+    m.data.push(bytes.copy())
+    name_rows_set_hashed(m.data_rows, key, hash, id)
     id
 }
 
 // Records `message` as the failure of helper `key`, which every later use
 // of the helper reports again (ir_helper_error).
 ir_helper_failed: fn(m: &IRModule, key: String, message: String) Never! {
-    name_rows_set(&m.helper_errors, key, m.helper_messages.len())
-    &m.helper_messages.push(message)
+    name_rows_set(m.helper_errors, key, m.helper_messages.len())
+    m.helper_messages.push(message.copy())
 }
 
 ir_helper_error: fn(m: IRModule, key: String) -> String? Never! {
@@ -531,54 +531,54 @@ ir_function_new: fn(name: String, key: String, symbol: String, source_file: Stri
 // A new slot of type row `ty`; parameters must be added first, in order.
 ir_slot: fn(f: &IRFunction, ty: Int, kind: IRSlotKind, name: Int, line: Int) -> Int Never! {
     id: f.slot_type.len()
-    &f.slot_type.push(ty)
-    &f.slot_kind.push(kind)
-    &f.slot_name.push(name)
-    &f.slot_line.push(line)
+    f.slot_type.push(ty)
+    f.slot_kind.push(kind.copy())
+    f.slot_name.push(name)
+    f.slot_line.push(line)
     if kind == .Param -> f.param_count += 1
     id
 }
 
 ir_emit: fn(f: &IRFunction, op: IROp, dst: Int, a: Int, b: Int, c: Int, line: Int) -> Int Never! {
     at: f.op.len()
-    &f.op.push(op)
-    &f.dst.push(dst)
-    &f.a.push(a)
-    &f.b.push(b)
-    &f.c.push(c)
-    &f.code_line.push(line)
+    f.op.push(op.copy())
+    f.dst.push(dst)
+    f.a.push(a)
+    f.b.push(b)
+    f.c.push(c)
+    f.code_line.push(line)
     at
 }
 
 // Appends an operand list to the args pool; returns its start.
 ir_args: fn(f: &IRFunction, values: [Int]) -> Int Never! {
     start: f.args.len()
-    loop value in values -> &f.args.push(value)
+    loop value in values -> f.args.push(value)
     start
 }
 
 // Opens a Block or Loop; ir_end closes the innermost open construct.
 ir_open: fn(f: &IRFunction, op: IROp, line: Int) -> Int Never! {
-    at: ir_emit(&f, op, -1, -1, -1, -1, line)
-    &f.open.push(at)
+    at: ir_emit(f, op, -1, -1, -1, -1, line)
+    f.open.push(at)
     at
 }
 
 ir_open_if: fn(f: &IRFunction, condition: Int, line: Int) -> Int Never! {
-    at: ir_emit(&f, IROp.If, -1, condition, -1, -1, line)
-    &f.open.push(at)
+    at: ir_emit(f, IROp.If, -1, condition, -1, -1, line)
+    f.open.push(at)
     at
 }
 
 // The Else of the innermost open If.
 ir_else: fn(f: &IRFunction, line: Int) Never! {
     opener: f.open[f.open.len() - 1]
-    f.b[opener] = ir_emit(&f, IROp.Else, -1, -1, -1, -1, line)
+    f.b[opener] = ir_emit(f, IROp.Else, -1, -1, -1, -1, line)
 }
 
 ir_end: fn(f: &IRFunction, line: Int) Never! {
-    opener: &f.open.pop() ?? panic("ir_end without an open construct")
-    end: ir_emit(&f, IROp.End, -1, opener, -1, -1, line)
+    opener: f.open.pop() ?? panic("ir_end without an open construct")
+    end: ir_emit(f, IROp.End, -1, opener, -1, -1, line)
     if f.op[opener] == .If {
         f.c[opener] = end
         if f.b[opener] >= 0 -> f.a[f.b[opener]] = end
@@ -722,7 +722,7 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
     if f.asm == .Val(leaf) {
         code: loop byte in leaf.code -> "{byte}"
         regs: loop register in leaf.regs -> "{register}"
-        &lines.push("  asm regs=[{regs.join(",")}] result={leaf.result} code=[{code.join(",")}]")
+        lines.push("  asm regs=[{regs.join(",")}] result={leaf.result} code=[{code.join(",")}]")
     }
     loop slot in 0..<f.slot_type.len() {
         name: if f.slot_name[slot] >= 0 -> m.names[f.slot_name[slot]] else -> "_"
@@ -732,7 +732,7 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
             .Temp -> "temp"
         }
         ty: m.types[f.slot_type[slot]]
-        &lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}")
+        lines.push("  s{slot} {kind} {name}: {ir_kind_name(ty.kind)}/{ty.size}")
     }
     depth := 1
     loop at in 0..<f.op.len() {
@@ -745,11 +745,11 @@ ir_function_text: fn(m: IRModule, f: IRFunction) -> String Never! {
         if op == .CallRuntime -> text = "{text} {m.names[f.a[at]]}" else -> text = "{text} {f.a[at]} {f.b[at]} {f.c[at]}"
         if op == .Call || op == .CallRuntime || op == .CallIndirect {
             operands := [String]{}
-            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> &operands.push("s{f.args[index]}")
+            loop index in f.b[at]..<(f.b[at] + f.c[at]) -> operands.push("s{f.args[index]}")
             text = "{text} ({operands.join(", ")})"
         }
         if op == .Call && f.a[at] >= 0 && f.a[at] < m.functions.len() -> text = "{text} ; {m.functions[f.a[at]].key}"
-        &lines.push(text)
+        lines.push(text)
         if op == .Block || op == .Loop || op == .If || op == .Else -> depth += 1
     }
     lines.join("\n")

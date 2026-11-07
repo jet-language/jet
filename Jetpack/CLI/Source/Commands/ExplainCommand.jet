@@ -17,7 +17,7 @@ cli_optional_text: fn(value: String?) -> Dyn Never! {
 cli_cmd_explain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
-    if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(&cache, theme, parsed, query)
+    if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(cache, theme, parsed, query)
     if jet_cli_syntax_explanation(query) == .Val(explanation) {
         if parsed.flags.json {
             fields := StatusFields.new()
@@ -31,7 +31,7 @@ cli_cmd_explain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
             print(text)
         } else {
             stdout_handle := term.stdout()
-            &stdout_handle.write(diagnostic_explanation_render(explanation, theme.color)).drop("explain output is best-effort")
+            stdout_handle.write(diagnostic_explanation_render(explanation, theme.color)).drop("explain output is best-effort")
         }
         return EXIT_OK
     }
@@ -47,14 +47,14 @@ cli_cmd_explain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
         package = parsed.positional.get(1) ?? return cli_explain_error(theme, parsed, "E1274", "explain lens `{query}` needs a package ref", "causal package explanations need the lens and the package ref.", "write `jet explain {query} <ref>`.")
     }
     roots: pkg_resolve_roots()
-    if store_explain_package(&verification, roots, package, lens) == {
+    if store_explain_package(verification, roots, package, lens) == {
         .Ok(found) -> {
             explanation: found ?? return cli_explain_error(theme, parsed, "E1274", "no package record or build attempt for `{package}`", "`jet explain` reads the Hangar Store and persisted Jetpack realization attempts; neither contains this package.", "run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help.")
             if parsed.flags.json {
                 print(explanation.to_json() ?? return cli_status_encoding_error(err))
             } else {
                 stdout_handle := term.stdout()
-                &stdout_handle.write(explanation.text()).drop("explain output is best-effort")
+                stdout_handle.write(explanation.text()).drop("explain output is best-effort")
             }
             loop report in explanation.reports {
                 if report.kind == ExplainReportKind.Conflict -> return EXIT_USAGE
@@ -69,7 +69,7 @@ cli_cmd_explain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIP
 // reviewed workspace overlay policy produces.
 cli_cmd_explain_overlay: fn(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, query: String) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     dir: cli_current_dir()
-    source: if pkg_resolve_workspace_source(&cache, dir) == {
+    source: if pkg_resolve_workspace_source(cache, dir) == {
         .Ok(found) -> found ?? return cli_explain_error(theme, parsed, "E1274", "no overlay policy for `{query}`", "`package-overlay:*` explanations come from reviewed `workspace.jet` overlay policy.", "run `jetpack override draft <ref> --patch <file>` or add an `overlay` block to `workspace.jet`.")
         .Err(error) -> {
             return cli_explain_workspace_failure(parsed, error.diagnostic)
@@ -81,7 +81,7 @@ cli_cmd_explain_overlay: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
     fact: trust_explain_semantic_lock(lock, query) ?? return cli_explain_error(theme, parsed, "E1274", "no overlay record for `{query}`", "`workspace.jet` has overlay policy, but not that overlay/package key.", "query `package-overlay:<overlay>:<package>`.")
     if parsed.flags.json {
         owners := [Dyn]{}
-        loop owner in fact.owners -> &owners.push(Dyn.Text(owner))
+        loop owner in fact.owners -> owners.push(Dyn.Text(owner))
         contenders := [Dyn]{}
         loop contender in fact.contenders {
             contender_fields := StatusFields.new()
@@ -97,7 +97,7 @@ cli_cmd_explain_overlay: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
             contender_fields = contender_fields.with("signature", Dyn.Text(contender.signature))
             contender_fields = contender_fields.with("cache_provenance", Dyn.Text(contender.cache_provenance))
             contender_fields = contender_fields.with("update", Dyn.Text(contender.update_command))
-            &contenders.push(report_status_object(contender_fields))
+            contenders.push(report_status_object(contender_fields))
         }
         fields := StatusFields.new()
         fields = fields.with("query", Dyn.Text(query.copy()))
@@ -138,7 +138,7 @@ cli_explain_workspace_failure: fn(parsed: CLIParsed, diagnostic: Diagnostic) -[I
         report: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(WORKSPACE_FILE))
         line: StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
         stdout_handle := term.stdout()
-        &stdout_handle.write(line).drop("status output is best-effort")
+        stdout_handle.write(line).drop("status output is best-effort")
     } else {
         terminal_write_output(diagnostic_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}, false))
     }

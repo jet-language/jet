@@ -43,7 +43,6 @@ SemaCallArgSource: enum {
 SemaCallConventionDecision: enum {
     Accepted
     NeedsImplicitClone
-    RejectsMove
 }
 
 SemaCallBinding: struct {
@@ -149,7 +148,7 @@ sema_call_params_from_type_range: fn(ty: Type, offset: Int, fallback_name: Bool)
             result := [SemaCallParam]{}
             loop index in offset..<params.len() {
                 parameter_ty: params[index]
-                &result.push(SemaCallParam{
+                result.push(SemaCallParam{
                     label: sema_call_fn_param_label(contract, metadata, index, fallback_name),
                     name: sema_call_fn_param_name(contract, metadata, index),
                     zone: sema_call_fn_param_zone(contract, index),
@@ -189,7 +188,7 @@ sema_call_diag_unknown_label: fn(callee: String, label: String, params: [SemaCal
             already: loop existing in accepted {
                 if existing == parameter.label -> break true
             } ?? false
-            if !already -> &accepted.push(parameter.label)
+            if !already -> accepted.push(parameter.label)
         }
     }
     fix: if accepted.len() > 0 -> "`{callee}` accepts `{accepted.join("`, `")}`" else -> "`{callee}` takes no labelled arguments"
@@ -266,7 +265,7 @@ sema_call_default_refs: fn(params: [SemaCallParam], sources: [SemaCallArgSource]
         if source == {
             .Default(parameter) -> {
                 // copy: `default_ref` is a payload of read parameter `params`, which keeps the original; the pushed list `refs` owns this one
-                if parameter >= 0 && parameter < params.len() && params[parameter].default_ref == .Val(default_ref) -> &refs.push(default_ref.copy())
+                if parameter >= 0 && parameter < params.len() && params[parameter].default_ref == .Val(default_ref) -> refs.push(default_ref.copy())
             }
             else -> {}
         }
@@ -280,26 +279,26 @@ sema_call_append_rewritten_written: fn(taken: &[CallArg?], rewritten: &[CallArg]
     // cleared.
     written: taken[original_index].copy() ?? return
     taken[original_index] = None
-    &rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))
-    &sources.push(SemaCallArgSource.Written{index: original_index})
+    rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))
+    sources.push(SemaCallArgSource.Written{index: original_index})
 }
 
 sema_call_append_rewritten_default: fn(rewritten: &[CallArg], sources: &[SemaCallArgSource], default_arg: CallArg?, parameter: Int) Never! {
     default_value: default_arg ?? return
-    &rewritten.push(default_value)
-    &sources.push(SemaCallArgSource.Default{parameter: parameter})
+    rewritten.push(default_value)
+    sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
 sema_call_append_rewritten_default_ref: fn(default_refs: &[FunctionDefaultRef], sources: &[SemaCallArgSource], default_ref: FunctionDefaultRef?, parameter: Int) Never! {
     value: default_ref ?? return
-    &default_refs.push(value)
-    &sources.push(SemaCallArgSource.Default{parameter: parameter})
+    default_refs.push(value)
+    sources.push(SemaCallArgSource.Default{parameter: parameter})
 }
 
 sema_call_append_remaining_written: fn(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], source_index: Int) Never! {
     written: taken[source_index] ?? return
-    &rewritten.push(written)
-    &sources.push(SemaCallArgSource.Written{index: source_index})
+    rewritten.push(written.copy())
+    sources.push(SemaCallArgSource.Written{index: source_index})
 }
 
 sema_call_mark_written: fn(arg: CallArg, source_index: Int, parameter: Int, param: SemaCallParam, call_span: Span) -> CallArg Never! {
@@ -319,7 +318,7 @@ sema_call_make_default_arg: fn(param: SemaCallParam, parameter: Int, params: [Se
     refs := [BinderRef]{}
     loop earlier in 0..<parameter {
         // copy: `ty` is a payload of read parameter `params`, which keeps the original; field `ty` of the new BinderRef owns this one
-        if params[earlier].ty == .Val(ty) -> &refs.push(BinderRef{name: params[earlier].name, slot: earlier, ty: ty.copy()})
+        if params[earlier].ty == .Val(ty) -> refs.push(BinderRef{name: params[earlier].name, slot: earlier, ty: ty.copy()})
     }
     flags.binder_refs = refs
     Val(CallArg{convention: param.convention, expr: default_expr, span: call_span, flags: flags, label: None, spread: false})
@@ -330,7 +329,7 @@ sema_call_rewrite_args: fn(params: [SemaCallParam], args: &[CallArg], slots: [[I
     // moved at most once. This preserves its original source index even when
     // labels reorder the declaration slots.
     taken := [CallArg?]{}
-    loop arg in args -> &taken.push(Val(arg))
+    loop arg in args -> taken.push(Val(arg))
     rewritten := [CallArg]{}
     sources := [SemaCallArgSource]{}
     default_refs := [FunctionDefaultRef]{}
@@ -338,13 +337,13 @@ sema_call_rewrite_args: fn(params: [SemaCallParam], args: &[CallArg], slots: [[I
         bound_indices: slots[position]
         if {
             bound_indices.len() > 0 -> {
-                loop original_index in bound_indices -> sema_call_append_rewritten_written(&taken, &rewritten, &sources, original_index, position, params, call_span)
+                loop original_index in bound_indices -> sema_call_append_rewritten_written(taken, rewritten, sources, original_index, position, params, call_span)
             }
             else -> {
                 default_arg := sema_call_make_default_arg(params[position], position, params, call_span)
                 if {
-                    default_arg != None -> sema_call_append_rewritten_default(&rewritten, &sources, default_arg, position)
-                    params[position].default_ref != None -> sema_call_append_rewritten_default_ref(&default_refs, &sources, params[position].default_ref, position)
+                    default_arg != None -> sema_call_append_rewritten_default(rewritten, sources, default_arg, position)
+                    params[position].default_ref != None -> sema_call_append_rewritten_default_ref(default_refs, sources, params[position].default_ref, position)
                     else -> {}
                 }
             }
@@ -353,18 +352,18 @@ sema_call_rewrite_args: fn(params: [SemaCallParam], args: &[CallArg], slots: [[I
     // Preserve arguments outside the selected declaration shape for caller
     // recovery; they remain written expressions, never fabricated defaults.
     loop source_index in 0..<taken.len() {
-        if taken[source_index] != None -> sema_call_append_remaining_written(&taken, &rewritten, &sources, source_index)
+        if taken[source_index] != None -> sema_call_append_remaining_written(taken, rewritten, sources, source_index)
     }
-    loop args.len() > 0 -> _ := &args.pop()
-    loop arg in rewritten -> &args.push(arg)
+    loop args.len() > 0 -> _ := args.pop()
+    loop arg in rewritten -> args.push(arg)
     SemaCallBinding{slots: [Int]{}, sources: sources, default_refs: default_refs, source_ordered: sema_call_source_ordered(sources), rewrote: false}
 }
 
 sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     slots := [[Int]]{}
-    loop _ in params -> &slots.push([Int]{})
+    loop _ in params -> slots.push([Int]{})
     source_slots := [Int]{}
-    loop _ in args -> &source_slots.push(-1)
+    loop _ in args -> source_slots.push(-1)
 
     next_positional := 0
     saw_label := false
@@ -378,7 +377,7 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
             arg.label == None -> {
                 if saw_label {
                     if !ambiguous_reported {
-                        &diagnostics.push(sema_call_diag_ambiguous_positional(callee, arg.span))
+                        diagnostics.push(sema_call_diag_ambiguous_positional(callee, arg.span))
                         ambiguous_reported = true
                     }
                     failed = true
@@ -419,7 +418,7 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
                             probe += 1
                         }
                         if skipped >= 0 {
-                            &diagnostics.push(sema_call_diag_required_label(callee, params[skipped].label, arg.span))
+                            diagnostics.push(sema_call_diag_required_label(callee, params[skipped].label, arg.span))
                             failed = true
                             if !params[skipped].variadic && next_positional < skipped + 1 -> next_positional = skipped + 1
                         }
@@ -438,19 +437,19 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
                     positional_only: loop parameter in params {
                         if parameter.zone == ParamZone.PositionalOnly && parameter.name == label -> break true
                     } ?? false
-                    &diagnostics.push(if positional_only -> sema_call_diag_forbidden_label(callee, label, label_span) else -> sema_call_diag_unknown_label(callee, label, params, label_span))
+                    diagnostics.push(if positional_only -> sema_call_diag_forbidden_label(callee, label, label_span) else -> sema_call_diag_unknown_label(callee, label, params, label_span))
                     failed = true
                     skip_arg = true
                 }
                 if !skip_arg && params[parameter_index].zone == ParamZone.PositionalOnly {
                     label_span: (arg.label ?? CallLabel{name: label, span: arg.span}).span
-                    &diagnostics.push(sema_call_diag_forbidden_label(callee, label, label_span))
+                    diagnostics.push(sema_call_diag_forbidden_label(callee, label, label_span))
                     failed = true
                     skip_arg = true
                 }
                 if !skip_arg && slots[parameter_index].len() > 0 {
                     label_span: (arg.label ?? CallLabel{name: label, span: arg.span}).span
-                    &diagnostics.push(sema_call_diag_repeated_label(callee, label, label_span))
+                    diagnostics.push(sema_call_diag_repeated_label(callee, label, label_span))
                     failed = true
                     skip_arg = true
                 }
@@ -458,10 +457,10 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
         }
         if !skip_arg && parameter_index >= 0 {
             if arg.spread && !params[parameter_index].variadic {
-                &diagnostics.push(sema_call_diag_spread(callee, arg.span))
+                diagnostics.push(sema_call_diag_spread(callee, arg.span))
                 failed = true
             }
-            &slots[parameter_index].push(source_index)
+            slots[parameter_index].push(source_index)
             source_slots[source_index] = parameter_index
         }
     }
@@ -470,7 +469,7 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
     missing := [Int]{}
     loop (parameter_index, param) in params {
         if slots[parameter_index].len() == 0 && !sema_call_param_optional(param) {
-            &missing.push(parameter_index)
+            missing.push(parameter_index)
         }
     }
     if missing.len() > 0 {
@@ -483,11 +482,11 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
             }
             if positional_recovery {
                 sources := [SemaCallArgSource]{}
-                loop arg_index in 0..<args.len() -> &sources.push(SemaCallArgSource.Written{index: arg_index})
+                loop arg_index in 0..<args.len() -> sources.push(SemaCallArgSource.Written{index: arg_index})
                 return Val(SemaCallBinding{slots: source_slots, sources: sources, default_refs: [FunctionDefaultRef]{}, source_ordered: true, rewrote: false})
             }
         }
-        loop parameter in missing -> &diagnostics.push(sema_call_diag_missing(callee, params[parameter].label, call_span))
+        loop parameter in missing -> diagnostics.push(sema_call_diag_missing(callee, params[parameter].label, call_span))
         return None
     }
 
@@ -497,8 +496,8 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
     if unresolved {
         sources := [SemaCallArgSource]{}
         loop (parameter_index, param) in params {
-            loop written_index in slots[parameter_index] -> &sources.push(SemaCallArgSource.Written{index: written_index})
-            if slots[parameter_index].len() == 0 && param.default_ref != None -> &sources.push(SemaCallArgSource.Default{parameter: parameter_index})
+            loop written_index in slots[parameter_index] -> sources.push(SemaCallArgSource.Written{index: written_index})
+            if slots[parameter_index].len() == 0 && param.default_ref != None -> sources.push(SemaCallArgSource.Default{parameter: parameter_index})
         }
         refs: sema_call_default_refs(params, sources)
         return Val(SemaCallBinding{slots: source_slots, sources: sources, default_refs: refs, source_ordered: sema_call_source_ordered(sources), rewrote: false})
@@ -506,7 +505,7 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
 
     // Rewrite only after all shape diagnostics have passed. This guarantees
     // that a failed bind leaves the caller's source AST untouched.
-    binding := sema_call_rewrite_args(params, &args, slots, call_span)
+    binding := sema_call_rewrite_args(params, args, slots, call_span)
     binding.slots = source_slots
     binding.rewrote = false
     if binding.sources.len() != args.len() -> binding.rewrote = true
@@ -520,20 +519,20 @@ sema_call_bind_args: fn(callee: String, params: [SemaCallParam], args: &[CallArg
 
 sema_call_bind_signature: fn(callee: String, signature: Type, parameter_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     params: sema_call_params_from_type_after(signature, parameter_offset) ?? return None
-    sema_call_bind_args(callee, params, &args, call_span, &diagnostics)
+    sema_call_bind_args(callee, params, args, call_span, diagnostics)
 }
 
 sema_call_bind_direct: fn(callee: String, signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
-    sema_call_bind_signature(callee, signature, 0, &args, call_span, &diagnostics)
+    sema_call_bind_signature(callee, signature, 0, args, call_span, diagnostics)
 }
 
 sema_call_bind_value: fn(signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     params: sema_call_params_from_value_type(signature) ?? return None
-    sema_call_bind_args("this function value", params, &args, call_span, &diagnostics)
+    sema_call_bind_args("this function value", params, args, call_span, diagnostics)
 }
 
 sema_call_bind_method: fn(method: String, signature: Type, receiver_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
-    sema_call_bind_signature(method, signature, receiver_offset, &args, call_span, &diagnostics)
+    sema_call_bind_signature(method, signature, receiver_offset, args, call_span, diagnostics)
 }
 
 sema_call_binding_has_default_refs: fn(binding: SemaCallBinding) -> Bool Never! {
@@ -545,18 +544,16 @@ sema_call_binding_slot: fn(binding: SemaCallBinding, source_index: Int, arg: Cal
     if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
 }
 
-// D-CALLSITE-MARK2=A: memory marks live in signatures, so a call passes its
+// Memory marks live in signatures, so a call passes its
 // arguments plain. An unmarked place a write parameter receives is that
 // parameter's write access (sema_call_unmarked_write_place). An unmarked bare
 // name a take parameter receives is its take: at its last use the ownership
 // check moves it, and anywhere else the typed argument check marks it as the
-// take `^name` was, so a later use reports the move into this call. Any other
+// take `name.move()` was, so a later use reports the move into this call. Any other
 // unmarked argument (a call result, literal, field, or other temporary)
-// passes: an owning parameter takes it as a move. The move marker `^` on a
-// read or write parameter is always rejected.
+// passes: an owning parameter takes it as a move.
 sema_call_argument_convention: fn(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
     if {
-        arg.convention == AccessConvention.Move && param.convention != AccessConvention.Move -> SemaCallConventionDecision.RejectsMove
         arg.convention != AccessConvention.Read || !sema_call_argument_is_bare_name(arg) -> SemaCallConventionDecision.Accepted
         param.convention == AccessConvention.Move -> SemaCallConventionDecision.NeedsImplicitClone
         else -> SemaCallConventionDecision.Accepted

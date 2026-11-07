@@ -122,14 +122,14 @@ pkg_dotnet_bind: fn(path: String, source: String, lib: String, cache: String) -[
     pkg_dotnet_run([String]{"ar", "rcs", archive, object}, "ar")
     jet: pkg_dotnet_render_jet(lib, surface)
     identity := [U8]{}
-    pkg_binder_append_field(&identity, DOTNET_BIND_SCHEMA.bytes())
-    pkg_binder_append_field(&identity, source.bytes())
-    pkg_binder_append_field(&identity, inspected.stdout)
-    loop byte in hostfxr.bytes() -> &identity.push(byte)
+    pkg_binder_append_field(identity, DOTNET_BIND_SCHEMA.bytes())
+    pkg_binder_append_field(identity, source.bytes())
+    pkg_binder_append_field(identity, inspected.stdout)
+    loop byte in hostfxr.bytes() -> identity.push(byte)
     provenance := "schema={DOTNET_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\nclass={surface.class}\nhostfxr={hostfxr}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.DotNet, ".NET", lib, path, archive, "dotnet/cc/ar")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.DotNet, ".NET", lib, path, archive, "dotnet/cc/ar")
     bound := [String]{"new"}
-    loop method in surface.methods -> &bound.push(method.name)
+    loop method in surface.methods -> bound.push(method.name)
     pkg_binder_remove_tree_quiet(build)
     Ok(ForeignBindResult{source: jet, bound: bound, archive: archive, provenance: provenance})
 }
@@ -156,10 +156,10 @@ pkg_dotnet_parse_surface: fn(bytes: [U8], expected: String) -> DotNetSurface For
                 name: fields[1]
                 if !pkg_binder_is_ident(name) -> next
                 if names.contains(name) -> return Err(ForeignBindError.Source("overloaded C# method `{name}` needs an explicit overlay"))
-                &names.push(name)
+                names.push(name.copy())
                 result: DotNetScalar.parse(fields[3]) ?? return Err(ForeignBindError.Source("C# method `{name}` uses an unsupported return type; use long or double"))
                 params: pkg_dotnet_parse_scalars(fields, 4, name)
-                &methods.push(DotNetMethod{name: name, is_static: fields[2] == "S", result: result, params: params})
+                methods.push(DotNetMethod{name: name, is_static: fields[2] == "S", result: result, params: params})
             }
             else -> {}
         }
@@ -174,7 +174,7 @@ pkg_dotnet_parse_scalars: fn(fields: [String], start: Int, member: String) -> [D
     out := [DotNetScalar]{}
     loop index in start..<fields.len() {
         scalar: DotNetScalar.parse(fields[index]) ?? return Err(ForeignBindError.Source("C# member `{member}` uses an unsupported parameter type; use long or double"))
-        &out.push(scalar)
+        out.push(scalar)
     }
     Ok(out)
 }
@@ -199,13 +199,13 @@ pkg_dotnet_render_cs: fn(lib: String, surface: DotNetSurface) -> String Never! {
 
 pkg_dotnet_cs_params: fn(params: [DotNetScalar]) -> String Never! {
     parts := [String]{}
-    loop index in 0..<params.len() -> &parts.push("{params[index].cs()} arg{index}")
+    loop index in 0..<params.len() -> parts.push("{params[index].cs()} arg{index}")
     parts.join(",")
 }
 
 pkg_dotnet_args: fn(count: Int) -> String Never! {
     parts := [String]{}
-    loop index in 0..<count -> &parts.push("arg{index}")
+    loop index in 0..<count -> parts.push("arg{index}")
     parts.join(",")
 }
 
@@ -219,7 +219,7 @@ pkg_dotnet_render_jet: fn(lib: String, surface: DotNetSurface) -> String Never! 
     out = "{out}}}\nuse abi: c.{abi}\n\nHandle: struct {{ value: Int }}\n#Error\nDotNetError: enum {{ Exception InvalidHandle ResourceLimit }}\n\n"
     out = "{out}error: fn(code: Int) -[]> DotNetError Never! {{ if code == 2 {{ return DotNetError.InvalidHandle }} if code == 3 {{ return DotNetError.ResourceLimit }} return DotNetError.Exception }}\n\n"
     out = "{out}new: fn({pkg_dotnet_jet_params(surface.ctor)}) -[FFI.DotNet]> Handle DotNetError! {{\n    value: abi.new({pkg_dotnet_args(surface.ctor.len())})\n    code: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n"
-    out = "{out}close: fn(^handle: Handle) -[FFI.DotNet]> {{}}\n\nimpl Handle.Close {{\n    close: fn(^self) {{\n        abi.close(self.value)\n        if abi.take_error() != 0 {{ panic(\".NET handle close failed\") }}\n    }}\n}}\n\n"
+    out = "{out}close: fn(&&handle: Handle) -[FFI.DotNet]> {{}}\n\nimpl Handle.Close {{\n    close: fn(&&self) {{\n        abi.close(self.value)\n        if abi.take_error() != 0 {{ panic(\".NET handle close failed\") }}\n    }}\n}}\n\n"
     loop method in surface.methods {
         handle_param: if method.is_static -> "" else -> if method.params.len() > 0 -> "handle: Handle, " else -> "handle: Handle"
         handle_arg: if method.is_static -> "" else -> if method.params.len() > 0 -> "handle.value, " else -> "handle.value"
@@ -230,7 +230,7 @@ pkg_dotnet_render_jet: fn(lib: String, surface: DotNetSurface) -> String Never! 
 
 pkg_dotnet_jet_params: fn(params: [DotNetScalar]) -> String Never! {
     parts := [String]{}
-    loop index in 0..<params.len() -> &parts.push("arg{index}: {params[index].jet()}")
+    loop index in 0..<params.len() -> parts.push("arg{index}: {params[index].jet()}")
     parts.join(", ")
 }
 
@@ -256,13 +256,13 @@ pkg_dotnet_render_c: fn(lib: String, surface: DotNetSurface, hostfxr: String, as
 
 pkg_dotnet_c_params: fn(params: [DotNetScalar]) -> String Never! {
     parts := [String]{}
-    loop index in 0..<params.len() -> &parts.push("{params[index].c()} arg{index}")
+    loop index in 0..<params.len() -> parts.push("{params[index].c()} arg{index}")
     parts.join(",")
 }
 
 pkg_dotnet_c_types: fn(params: [DotNetScalar]) -> String Never! {
     parts := [String]{}
-    loop param in params -> &parts.push(param.c())
+    loop param in params -> parts.push(param.c())
     parts.join(",")
 }
 
@@ -285,8 +285,8 @@ pkg_dotnet_find_hostfxr: fn() -[FS, Env]> String ForeignBindError! {
     directory: files.join(base, "host/fxr")
     entries: files.list_dir(directory) ?? return Err(ForeignBindError.IO("could not inspect provisioned hostfxr: {err}"))
     versions := [String]{}
-    loop entry in entries -> &versions.push(entry.path)
-    &versions.sort()
+    loop entry in entries -> versions.push(entry.path)
+    versions.sort()
     name: if BinderHostOS.current() == {
         .MacOS -> "libhostfxr.dylib"
         .Windows -> "hostfxr.dll"

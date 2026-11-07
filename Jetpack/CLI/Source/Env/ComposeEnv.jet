@@ -20,7 +20,7 @@ EnvReadyStats: struct {
     record: fn(&self, entry: StoreEntry, state: SourceState) Never! {
         self.total += 1
         if state == SourceState.Cached || state == SourceState.Substituted -> self.cache_hits += 1
-        &self.realized.push(store_environment_entry_selection(entry))
+        self.realized.push(store_environment_entry_selection(entry))
     }
 
     // Refresh each selection to the most recently used matching entry.
@@ -51,15 +51,15 @@ EnvReadyStats: struct {
         loop selection in self.realized {
             version: if selection.version == "" -> cli_version_from_out(selection.name, selection.output_hash) ?? "" else -> selection.version
             pair: (name: selection.name, version: version)
-            if !pairs.contains(pair) -> &pairs.push(pair)
+            if !pairs.contains(pair) -> pairs.push(pair)
         }
-        &pairs.sort_by((left: (name: String, version: String), right: (name: String, version: String)) -> (left.name <=> right.name).then(left.version <=> right.version))
+        pairs.sort_by((left: (name: String, version: String), right: (name: String, version: String)) -> (left.name <=> right.name).then(left.version <=> right.version))
         pairs
     }
 
     realized_entries: fn(self) -> [EnvironmentSelection] Never! {
         entries := self.realized
-        &entries.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> left.key() <=> right.key())
+        entries.sort_by((left: EnvironmentSelection, right: EnvironmentSelection) -> left.key() <=> right.key())
         entries
     }
 }
@@ -72,28 +72,28 @@ cli_seal_project_producer_records: fn(verification: &StoreVerification, roots: H
     if lock_digest == "" -> return
     references := [String]{}
     loop selection in ready_stats.realized {
-        if !references.contains(selection.reference) -> &references.push(selection.reference)
+        if !references.contains(selection.reference) -> references.push(selection.reference)
     }
-    &references.sort()
+    references.sort()
     loop reference in references {
         entry: store_find_by_reference_read_only(roots, reference) ?? next
         producer: ProducerRecord.decode(entry.producer_record) ?? return Err(CLIError.Other("could not decode `{reference}` producer record: {err.message()}"))
         if producer.provider != "nix" && producer.provider != "jetpackage" -> next
-        store_refresh_lock_digest(&verification, roots, entry, lock_digest) ?? return Err(CLIError.Other("could not seal `{reference}` producer record: {err.message()}"))
+        store_refresh_lock_digest(verification, roots, entry, lock_digest) ?? return Err(CLIError.Other("could not seal `{reference}` producer record: {err.message()}"))
     }
     // Checked listing completes any closure migration or compaction before
     // the caller records the environment-entry stamp for warm reuse.
-    store_list_checked(&verification, roots) ?? return Err(CLIError.Other("could not finalize sealed closure state: {err.message()}"))
+    store_list_checked(verification, roots) ?? return Err(CLIError.Other("could not finalize sealed closure state: {err.message()}"))
 }
 
 // Warm verified realizations by their original reference, taken over from
 // the receipt's list.
-cli_index_warm_realizations: fn(^warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
+cli_index_warm_realizations: fn(&&warm: [VerifiedRealization]) -> [String: [VerifiedRealization]] Never! {
     indexed := [String: [VerifiedRealization]]{}
-    loop realized in ^warm {
+    loop realized in warm.move() {
         reference: realized.original_reference()
-        bucket := &indexed.remove(reference) ?? [VerifiedRealization]{}
-        &bucket.push(^realized)
+        bucket := indexed.remove(reference) ?? [VerifiedRealization]{}
+        bucket.push(realized)
         indexed[reference] = bucket
     }
     indexed
@@ -101,8 +101,8 @@ cli_index_warm_realizations: fn(^warm: [VerifiedRealization]) -> [String: [Verif
 
 // Take the last warm realization recorded for `reference`.
 cli_take_warm_realization: fn(warm: &[String: [VerifiedRealization]], reference: String) -> VerifiedRealization? Never! {
-    bucket := &warm.remove(reference) ?? return None
-    realized: &bucket.pop() ?? return None
+    bucket := warm.remove(reference) ?? return None
+    realized: bucket.pop() ?? return None
     if bucket.len() > 0 -> warm[reference] = bucket
     Val(realized)
 }
@@ -175,7 +175,7 @@ NativeEnvironmentProjection: struct {
         native_bin_dirs := [String]{}
         loop tool in dev_tools {
             directory: files.dirname(tool.binary)
-            if !native_bin_dirs.contains(directory) -> &native_bin_dirs.push(directory)
+            if !native_bin_dirs.contains(directory) -> native_bin_dirs.push(directory)
         }
         tzdir := LeaseText?{None}
         loader_paths := [LeaseText]{}
@@ -185,14 +185,14 @@ NativeEnvironmentProjection: struct {
                 "TZDIR" -> {
                     if tzdir == None -> tzdir = Val(path)
                 }
-                "LD_LIBRARY_PATH" -> &loader_paths.push(path)
+                "LD_LIBRARY_PATH" -> loader_paths.push(path)
                 else -> {}
             }
         }
         if sys.name() == "linux" {
             inherited: inherited_loader_path ?? ""
             loop path in inherited.split(pkg_path_separator_for_os(sys.name())) {
-                if path != "" -> &loader_paths.push(LeaseText.plain(path))
+                if path != "" -> loader_paths.push(LeaseText.plain(path))
             }
         }
         // Jetpack never creates Nix shell scratch directories; the marker
@@ -240,7 +240,7 @@ cli_native_dev_tool_paths: fn(bound: [String: String]) -> [(command: String, bin
     tools := [(command: String, binary: String)]{}
     loop tool in CLI_NATIVE_DEV_TOOLS {
         binary: bound.get(tool.variable) ?? next
-        if binary != "" -> &tools.push((command: tool.command, binary: binary))
+        if binary != "" -> tools.push((command: tool.command, binary: binary))
     }
     tools
 }
@@ -263,18 +263,18 @@ cli_native_environment_projection: fn(project_root: String, realized: [(name: St
 // Realize every ref in `plan` and compose the shell env. A realization
 // failure is reported here and travels as `Reported(code)`.
 cli_compose_env: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
-    cli_compose_env_scoped(&verification, theme, roots, flags, plan, RealizeScope.Project, false)
+    cli_compose_env_scoped(verification, theme, roots, flags, plan, RealizeScope.Project, false)
 }
 
 // A user tool installs into the user profile, so it is never reconciled
 // against the project the shell happens to stand in.
 cli_compose_env_scoped: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ShellEnv CLIError! {
-    composed: cli_compose_env_scoped_with_stats(&verification, theme, roots, flags, plan, scope, confirm_download)
-    Ok(^composed.env)
+    composed: cli_compose_env_scoped_with_stats(verification, theme, roots, flags, plan, scope, confirm_download)
+    Ok(composed.env.move())
 }
 
 cli_compose_env_scoped_with_stats: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
-    cli_compose_env_scoped_with_warm(&verification, theme, roots, flags, plan, scope, confirm_download, None, true)
+    cli_compose_env_scoped_with_warm(verification, theme, roots, flags, plan, scope, confirm_download, None, true)
 }
 
 // Whether the warm realizations cover every ref and adapter of the plan.
@@ -294,10 +294,10 @@ cli_warm_complete: fn(warm: [String: [VerifiedRealization]], plan: RunPlan) -> B
 // The composer with optional warm realizations from a verified environment
 // receipt. Cold or partial project composition still collects selections
 // for the receipt and producer sealing.
-cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, ^warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
+cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope, confirm_download: Bool, &&warm: [VerifiedRealization]?, collect_stats: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (env: ShellEnv, stats: EnvReadyStats) CLIError! {
     warm_given: warm != None
-    warm_pool := if ^warm == {
-        .Val(list) -> cli_index_warm_realizations(^list)
+    warm_pool := if warm.move() == {
+        .Val(list) -> cli_index_warm_realizations(list)
         .None -> [String: [VerifiedRealization]]{}
     }
     warm_complete: warm_given && cli_warm_complete(warm_pool, plan)
@@ -305,16 +305,16 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     needs_stats: collect_stats || (project_scope && !warm_complete)
     lock_diff := if project_scope && !warm_complete -> CLILockDiffGuard.new(theme, plan.project_root) else -> CLILockDiffGuard.inactive(theme)
     if confirm_download && !warm_complete {
-        if cli_reject_unprompted_acquisition(&verification, theme, roots, flags, plan, scope) == {
-            .Ok(download_plan) -> &lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
+        if cli_reject_unprompted_acquisition(verification, theme, roots, flags, plan, scope) == {
+            .Ok(download_plan) -> lock_diff.set_sizes(cli_sizes_from_plan(download_plan))
             .Err(error) -> {
-                close(^lock_diff)
+                close(lock_diff)
                 return Err(error)
             }
         }
     }
     // The sizes are fixed before the guard is handed to its deferred close.
-    defer close(^lock_diff)
+    defer close(lock_diff)
     cli_enforce_required_sandbox_policy(theme, flags.json)
     if cli_validate_integration_facts(plan) == {
         .Err(error) -> {
@@ -325,8 +325,8 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     }
     bin_dirs := [String]{}
     if project_scope {
-        if cli_dev_shell_projection(&verification, plan.project_root, plan.environment) == {
-            .Val(path) -> &bin_dirs.push(path)
+        if cli_dev_shell_projection(verification, plan.project_root, plan.environment) == {
+            .Val(path) -> bin_dirs.push(path)
             .None -> {}
             .Err(error) -> {
                 theme.error_coded("E1335", "the active package profile cannot project into the dev shell", error.message(), "build and switch the named package profile, then retry the shell")
@@ -356,18 +356,18 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     compose_started: time.start()
     if phase_timing -> term.eprint("TIMING compose-preamble: {time.elapsed(compose_started)}")
     loop spec in plan.refs {
-        if live_tty -> &live.set_aggregate_status("Resolving", completed_steps, total_steps)
+        if live_tty -> live.set_aggregate_status("Resolving", completed_steps, total_steps)
         style: if live_mode -> RowStyle.Silent else -> RowStyle.Ready
-        warm_hit: cli_take_warm_realization(&warm_pool, spec.raw)
+        warm_hit: cli_take_warm_realization(warm_pool, spec.raw)
         step_outcome: if warm_hit == {
             .Val(realized) -> {
-                parts: ^realized.into_parts()
-                RefOutcome.Realized{entry: parts.entry, state: parts.source_state, line: "", lease: ^parts.lease}
+                parts: realized.into_parts()
+                RefOutcome.Realized{entry: parts.entry, state: parts.source_state, line: "", lease: parts.lease.move()}
             }
             .None -> {
                 step_started: time.start()
                 slot := if live_tty -> Val(live) else -> None
-                outcome: cli_realize_ref_outcome(&verification, theme, roots, flags, plan.table, spec, name_w, style, &slot, scope)
+                outcome: cli_realize_ref_outcome(verification, theme, roots, flags, plan.table, spec, name_w, style, slot, scope)
                 if slot == .Val(updated) -> live = updated
                 if phase_timing -> term.eprint("TIMING step {spec.package}: {time.elapsed(step_started)}")
                 outcome
@@ -375,13 +375,13 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
         }
         if step_outcome == {
             .Realized(entry, state, line, lease) -> {
-                if live_mode && line != "" -> &live.finish(line)
+                if live_mode && line != "" -> live.finish(line)
                 completed_steps += 1
-                if needs_stats -> &ready_stats.record(entry, state)
+                if needs_stats -> ready_stats.record(entry, state)
                 // The child names the output below the descriptor its lease
                 // passes; this process reads metadata through the held handle.
                 leased_output: lease.child_path(entry.out) ?? {
-                    &live.clear()
+                    live.clear()
                     theme.error_coded("E1335", "the realized package output could not be confined to its executable lease", "{err}", "re-realize the package so Jetpack can hand only its verified lease to the child")
                     failed = true
                     next
@@ -394,54 +394,54 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
                     if cli_resolve_provider_paths(leased_output, meta.file, value) == {
                         .Val(resolved) -> {
                             values := provider_vars.get(meta.variable) ?? [LeaseText]{}
-                            if values.len() == 0 -> &provider_var_order.push(meta.variable)
-                            &values.push(resolved)
+                            if values.len() == 0 -> provider_var_order.push(meta.variable)
+                            values.push(resolved)
                             provider_vars[meta.variable] = values
                         }
                         .None -> if invalid_metadata == None -> invalid_metadata = Val(meta.file)
                     }
                 }
                 if invalid_metadata == .Val(file) {
-                    &live.clear()
+                    live.clear()
                     theme.error("couldn't compose package environment", "`{file}` for `{entry.reference}` contains a relative path outside its verified package output.", "reinstall the package; provider metadata paths must be absolute or contain only normal relative components.")
                     failed = true
                 }
                 if ProducerRecord.decode(entry.producer_record) == .Ok(producer) {
                     loop runtime in provider_nix_runtime_environment(producer) -> nix_vars[runtime.key] = runtime.value
                 }
-                &realized_outputs.push((name: entry.name, output: leased_output))
-                &realized_refs.push(entry.reference)
-                &cache_leases.push(^lease)
+                realized_outputs.push((name: entry.name, output: leased_output))
+                realized_refs.push(entry.reference)
+                cache_leases.push(lease.move())
             }
-            .NeedsNix(need) -> &holes.push(need)
+            .NeedsNix(need) -> holes.push(need)
             .Unavailable -> unavailable = true
             .Failed -> failed = true
         }
     }
     loop index in 0..<plan.adapters.len() {
         adapter: plan.adapters[index]
-        &live.clear()
+        live.clear()
         if total_steps > 1 && !warm_complete -> theme.progress_chain("Adapt", plan.refs.len() + index + 1, total_steps, adapter.name, "adapter")
         warm_reference: "adapt:{adapter.name}:{adapter.source}"
-        warm_hit: cli_take_warm_realization(&warm_pool, warm_reference)
+        warm_hit: cli_take_warm_realization(warm_pool, warm_reference)
         adapter_outcome: if warm_hit == {
             .Val(realized) -> {
-                parts: ^realized.into_parts()
-                Val((entry: parts.entry, state: parts.source_state, lease: ^parts.lease))
+                parts: realized.into_parts()
+                Val((entry: parts.entry, state: parts.source_state, lease: parts.lease.move()))
             }
-            .None -> cli_realize_adapter(&verification, theme, roots, flags, adapter, plan.table, true)
+            .None -> cli_realize_adapter(verification, theme, roots, flags, adapter, plan.table, true)
         }
         if adapter_outcome == {
             .Val(realized) -> {
-                if needs_stats -> &ready_stats.record(realized.entry, realized.state)
-                &realized_refs.push(realized.entry.reference)
-                &cache_leases.push(^realized.lease)
+                if needs_stats -> ready_stats.record(realized.entry, realized.state)
+                realized_refs.push(realized.entry.reference)
+                cache_leases.push(realized.lease.move())
             }
             .None -> failed = true
         }
     }
     if holes.len() > 0 {
-        &live.clear()
+        live.clear()
         cli_report_nix_bridge_required(theme, flags, holes, realized_refs)
         return Err(CLIError.Reported(EXIT_USAGE))
     }
@@ -458,17 +458,17 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
             loop lease in cache_leases {
                 if lease.executable_for(command) != None -> present = true
             }
-            if !present -> &missing_language_tools.push("{pack.name}:{tool}")
+            if !present -> missing_language_tools.push("{pack.name}:{tool}")
         }
     }
     if missing_language_tools.len() > 0 {
-        &live.clear()
+        live.clear()
         theme.error_coded("E1333", "a language pack tool is missing from the realized environment", "missing required language tools: {missing_language_tools.join(", ")}", "realize the pack's declared packages again, or remove the language selection until its tools are available")
         return Err(CLIError.Reported(EXIT_USAGE))
     }
     native_projection: if project_scope -> Val(cli_native_environment_projection(plan.project_root, realized_outputs, cli_native_dev_tool_paths(cli_native_dev_tool_bindings()), sys.get("LD_LIBRARY_PATH"))) else -> None
     if native_projection == .Val(projection) {
-        loop dir in projection.bin_dirs() -> &bin_dirs.push(dir)
+        loop dir in projection.bin_dirs() -> bin_dirs.push(dir)
     }
     composed_vars := [String: String]{}
     // The Nix compatibility provider contributes the fixed builder facts it
@@ -483,7 +483,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     }
     loop dotenv in plan.environment.lifecycle.dotenv {
         values: cli_read_dotenv_snapshot(plan.project_root, dotenv.file, dotenv.allow) ?? {
-            &live.clear()
+            live.clear()
             theme.error("couldn't load dotenv file", "{dotenv.file}: {err.message()}", "fix the dotenv path and keep each assignment in KEY=value form.")
             return Err(CLIError.Reported(EXIT_USAGE))
         }
@@ -492,13 +492,13 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     if plan.environment.lifecycle.git_hooks_path == .Val(relative) {
         loop name in plan.environment.lifecycle.unset {
             if name == "GIT_CONFIG_COUNT" || name == "GIT_CONFIG_KEY_0" || name == "GIT_CONFIG_VALUE_0" {
-                &live.clear()
+                live.clear()
                 theme.error_coded("E1333", "the environment Git hook configuration conflicts with `unset`", "Git cannot receive core.hooksPath when its configuration environment is removed", "remove the Git configuration names from `unset`, or remove `git_hooks_path`")
                 return Err(CLIError.Reported(EXIT_USAGE))
             }
         }
         hooks: env_hook_git_hooks_environment(plan.project_root, relative) ?? {
-            &live.clear()
+            live.clear()
             theme.error_coded("E1333", "the environment Git hook path is not usable", err.message(), "create an in-project hook directory and set `git_hooks_path` to its project-relative path")
             return Err(CLIError.Reported(EXIT_USAGE))
         }
@@ -521,17 +521,17 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     if native_projection == .Val(projection) {
         loop entry in projection.env_vars() {
             composed_vars[entry.key] = entry.value
-            &lease_vars.remove(entry.key).drop("a provider path may not name this variable")
+            lease_vars.remove(entry.key).drop("a provider path may not name this variable")
         }
         loop entry in projection.lease_vars() {
             lease_vars[entry.key] = entry.value
-            &composed_vars.remove(entry.key).drop("a declared value may not name this variable")
+            composed_vars.remove(entry.key).drop("a declared value may not name this variable")
         }
     }
     if project_scope && !warm_complete {
-        if cli_seal_project_producer_records(&verification, roots, plan.project_root, ready_stats) == {
+        if cli_seal_project_producer_records(verification, roots, plan.project_root, ready_stats) == {
             .Err(error) -> {
-                &live.clear()
+                live.clear()
                 theme.error_coded("E1335", "the project lock could not seal provider records", error.message(), "retry the environment entry so every producer uses the final project lock")
                 return Err(CLIError.Reported(EXIT_USER_ERROR))
             }
@@ -540,7 +540,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
     }
     // Warm reuse already carries the exact entries selected under the Hangar
     // lock; cold realizations refresh selections after publication.
-    if !warm_complete -> &ready_stats.canonicalize(roots)
+    if !warm_complete -> ready_stats.canonicalize(roots)
     env: ShellEnv{
         bin_dirs: bin_dirs,
         vars: composed_vars,
@@ -577,7 +577,7 @@ CLI_PROVIDER_METADATA_FILES: comptime { [ProviderMetadataFile]{
 cli_reject_unprompted_acquisition: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: RunPlan, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     specs := [RefSpec]{}
     loop spec in plan.refs {
-        if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) -> &specs.push(spec)
+        if provider_requires_acquisition(spec, plan.table, flags.offline, roots.hangar_dir()) -> specs.push(spec.copy())
     }
     label: if scope == {
         .Project -> if plan.environment.active_environment == {
@@ -591,19 +591,19 @@ cli_reject_unprompted_acquisition: fn(verification: &StoreVerification, theme: T
     planning_live: planning && theme.live_enabled()
     live := theme.live_region()
     if {
-        planning_live -> &live.set_aggregate_status("Planning", 0, specs.len() + plan.adapters.len())
+        planning_live -> live.set_aggregate_status("Planning", 0, specs.len() + plan.adapters.len())
         planning -> theme.status("Resolving {label} package plan...")
         else -> {}
     }
     progress: if planning_live -> Val(live.progress_handle()) else -> None
-    planned: cli_plan_downloads(&verification, theme, roots, flags, plan.table, specs, scope, progress) ?? {
-        &live.clear()
+    planned: cli_plan_downloads(verification, theme, roots, flags, plan.table, specs, scope, progress) ?? {
+        live.clear()
         return Err(err)
     }
-    &live.clear()
+    live.clear()
     download := planned
     loop adapter in plan.adapters {
-        &download.add_item(PlanItem{package: adapter.name, state: PlanState.New, download_bytes: None, disk_bytes: None})
+        download.add_item(PlanItem{package: adapter.name, state: PlanState.New, download_bytes: None, disk_bytes: None})
     }
     if download.items.len() == 0 -> return Ok(download)
     if theme.confirm_download(label, download, flags.explain_plan, flags.assume_yes) -> return Ok(download)
@@ -737,7 +737,7 @@ cli_resolve_provider_paths: fn(entry_out: LeaseText, file: String, value: String
     resolved := [LeaseText]{}
     loop path in value.split(separator) {
         if files.is_absolute(path) {
-            &resolved.push(LeaseText.plain(path))
+            resolved.push(LeaseText.plain(path))
             next
         }
         parts: path.split("/").to_list()
@@ -747,7 +747,7 @@ cli_resolve_provider_paths: fn(entry_out: LeaseText, file: String, value: String
             if part != "" -> components += 1
         }
         if components == 0 -> return None
-        &resolved.push(entry_out.child(path))
+        resolved.push(entry_out.child(path))
     }
     Val(LeaseText.join(resolved, separator))
 }

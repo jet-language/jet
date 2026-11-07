@@ -13,7 +13,7 @@ Reservation: struct {
 impl Reservation {
     #Transition(_, Pending) book: fn(guest: String) -> Reservation { {guest: guest.copy()} }
 
-    #Transition(Pending, Confirmed) pay: fn(self: ^Reservation) -> Reservation { self }
+    #Transition(Pending, Confirmed) pay: fn(self: &&Reservation) -> Reservation { self }
 }
 
 #Scrub(Input) clean: fn(raw: #Input String) -> String { raw.copy() }
@@ -44,7 +44,7 @@ unit_value: fn() -> Float {
 
 state_value: fn() -> String {
     reservation := Reservation.book("state")
-    reservation = ^reservation.pay()
+    reservation = reservation.pay()
     reservation.guest
 }
 

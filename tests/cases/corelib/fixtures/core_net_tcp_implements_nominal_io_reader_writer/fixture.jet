@@ -19,17 +19,17 @@ run: fn() {
     address: net.socket_to_string(typed_address)
     server: task {
         stream := net.tcp_accept(listener) ?? panic("accept")
-        if receive(&stream, 0) == {
+        if receive(stream, 0) == {
             .Ok(_) -> panic("zero limit looked like EOF")
             .Err(_) -> print("invalid")
         }
-        bytes: receive(&stream, 4) ?? panic("read")
+        bytes: receive(stream, 4) ?? panic("read")
         print("read:{bytes.len()}")
-        eof: receive(&stream, 4) ?? panic("eof")
+        eof: receive(stream, 4) ?? panic("eof")
         if eof.len() == 0 { print("eof") }
     }
     client := net.tcp_connect(address) ?? panic("connect")
-    _count: send_four(&client) ?? panic("write")
+    _count: send_four(client) ?? panic("write")
     client.close() ?? panic("close")
     server.join() ?? panic("server task failed")
 }

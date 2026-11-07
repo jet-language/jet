@@ -164,19 +164,19 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     // file below.
     loop path in evidence_paths(dir) {
         if files.is_symlink(path) || (files.exists(path) && !files.is_file(path)) {
-            &problems.push("evidence path is not a regular file: {path}")
+            problems.push("evidence path is not a regular file: {path}")
         } else if files.is_file(path) {
-            &problems.push("evidence report contains stale file: {path}")
+            problems.push("evidence report contains stale file: {path}")
         }
     }
-    if github && runner_os == "" -> &problems.push("GitHub runner OS identity is missing")
-    if github && runner_arch == "" -> &problems.push("GitHub runner architecture identity is missing")
+    if github && runner_os == "" -> problems.push("GitHub runner OS identity is missing")
+    if github && runner_arch == "" -> problems.push("GitHub runner architecture identity is missing")
     if runner_os == "" -> runner_os = if github -> "unknown" else -> system_name()
     if runner_arch == "" -> runner_arch = if github -> "unknown" else -> sys.arch()
 
-    files.write(stdout_file, "") ?? &problems.push("cannot initialize evidence stdout: {stdout_file}")
+    files.write(stdout_file, "") ?? problems.push("cannot initialize evidence stdout: {stdout_file}")
     nix: run_text([String]{"nix", "--version"}, root)
-    files.write(toolchain, "=== nix ===\n{if nix == "" -> "(unavailable)" else -> nix}\n") ?? &problems.push("cannot write toolchain evidence: {toolchain}")
+    files.write(toolchain, "=== nix ===\n{if nix == "" -> "(unavailable)" else -> nix}\n") ?? problems.push("cannot write toolchain evidence: {toolchain}")
 
     artifact_name: env_or("JET_CI_ARTIFACT_NAME", "not-published")
     signature_candidate: env_or("JET_CI_SIGNATURE_CANDIDATE", candidate)
@@ -189,16 +189,16 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
         toolchain_hash: hash_file(toolchain), command: command.copy(),
     }
 
-    if candidate == "" || !is_hex(candidate) -> &problems.push("missing or invalid candidate commit identity")
-    if candidate.len() != 40 -> &problems.push("candidate commit identity must be a 40-character SHA-1")
+    if candidate == "" || !is_hex(candidate) -> problems.push("missing or invalid candidate commit identity")
+    if candidate.len() != 40 -> problems.push("candidate commit identity must be a 40-character SHA-1")
     github_sha: env_or("GITHUB_SHA", "")
-    if github_sha != "" && candidate != github_sha -> &problems.push("candidate commit does not match GITHUB_SHA: {candidate} != {github_sha}")
-    if checkout != "" && candidate != checkout -> &problems.push("candidate commit does not match checked-out revision: {candidate} != {checkout}")
-    if artifact_name != "not-published" && !artifact_name.ends_with("-{candidate}") -> &problems.push("artifact name does not identify candidate: {artifact_name}")
-    if signature_candidate != candidate -> &problems.push("signature candidate does not match candidate commit: {signature_candidate} != {candidate}")
-    if release_candidate != candidate -> &problems.push("release metadata candidate does not match candidate commit: {release_candidate} != {candidate}")
+    if github_sha != "" && candidate != github_sha -> problems.push("candidate commit does not match GITHUB_SHA: {candidate} != {github_sha}")
+    if checkout != "" && candidate != checkout -> problems.push("candidate commit does not match checked-out revision: {candidate} != {checkout}")
+    if artifact_name != "not-published" && !artifact_name.ends_with("-{candidate}") -> problems.push("artifact name does not identify candidate: {artifact_name}")
+    if signature_candidate != candidate -> problems.push("signature candidate does not match candidate commit: {signature_candidate} != {candidate}")
+    if release_candidate != candidate -> problems.push("release metadata candidate does not match candidate commit: {release_candidate} != {candidate}")
     if evidence.source_hash == "unavailable" || evidence.workflow_hash == "unavailable" || evidence.toolchain_hash == "unavailable" {
-        &problems.push("candidate identity hash is unavailable")
+        problems.push("candidate identity hash is unavailable")
     }
 
     if problems.len() > 0 {
@@ -215,9 +215,9 @@ gate: fn(root: String, dir: String, command: [String]) -[Env, Exec, FS, IO, Time
     files.write(stdout_file, receipt.output) ?? ()
     files.write(stderr_file, receipt.errors) ?? ()
     out := term.stdout()
-    &out.write(receipt.output).drop("gate stdout")
+    out.write(receipt.output).drop("gate stdout")
     errors := term.stderr()
-    &errors.write(receipt.errors).drop("gate stderr")
+    errors.write(receipt.errors).drop("gate stderr")
     status: if code == 0 && candidate != "" && candidate != "unknown" -> "pass" else -> "fail"
     if !finalize(evidence, status, "{code}") {
         term.eprint("evidence finalization failed; refusing a green gate")

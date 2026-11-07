@@ -1,0 +1,27 @@
+// A generic function's result may use a type parameter that only the
+// callback fixes: `map_list<T, U>` learns `U` from what the lambda returns.
+// A lambda parameter may also name a struct declared in this file.
+
+Reading: struct {
+    celsius: Int
+}
+
+map_list: fn<T, U>(xs: [T], f: fn(T) -> U) -> [U] {
+    out := [U]{}
+    loop x in xs {
+        out.push(f(x))
+    }
+    out
+}
+
+run: fn() {
+    readings: [Reading]{{celsius: 10}, {celsius: 25}}
+    doubled: map_list(readings, (r: Reading) -> r.celsius * 2)
+    print(doubled.len())
+    print(doubled[1])
+    labels: map_list([1, 2, 3], (n: Int) -> "n{n}")
+    print(labels[2])
+    warm: map_list(readings, (r: Reading) -> r.celsius > 20)
+    print(warm[0])
+    print(warm[1])
+}

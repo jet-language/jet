@@ -1,4 +1,4 @@
-// D-OPTGC1: the Web representation of the checked automatic-root boundary.
+// The Web representation of the checked automatic-root boundary.
 // IR supplies the root, callback, edge values, and stable edit site. This
 // module owns only the runtime container mechanics; it does not rediscover
 // collection policy from names or source text.

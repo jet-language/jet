@@ -29,7 +29,7 @@ titles: fn(state: Loadable<[[String: db.DBValue]], db.DBError>) -> String {
     if state == {
         .Loaded(rows) -> {
             out := [String]{}
-            loop row in rows -> &out.push(db.row_text(row, "title") ?? "?")
+            loop row in rows -> out.push(db.row_text(row, "title") ?? "?")
             "loaded [{out.join(",")}]"
         }
         .Failed(reason) -> "failed {reason.message}"
@@ -61,7 +61,7 @@ run: fn() {
     insert(alice, "two")
     print("pushed {next_text(client)}")
     client.close(1000, "") ?? panic("close")
-    ^serving.join() ?? panic("server join")
+    serving.join() ?? panic("server join")
 
     insert(alice, "three")
     print("offline {titles(web.state(mine))}")
@@ -73,6 +73,6 @@ run: fn() {
     again: ws.connect("ws://{again_addr}/live") ?? panic("reconnect")
     print("reconnect replayed {next_text(again)}")
     again.close(1000, "") ?? panic("close again")
-    ^again_serving.join() ?? panic("server join again")
+    again_serving.join() ?? panic("server join again")
     print(web.live_stats())
 }

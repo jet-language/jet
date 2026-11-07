@@ -31,8 +31,8 @@ xml_roots_next: fn() -> Int Never! {
 xml_roots_prefix: fn(name: String?) Never! {
     if name == .Val(prefix) { _: prefix.len() }
 }
-xml_roots_shared: fn<T>(x: ^T) -> Shared<T?> {
-    shared (T?{Val(^x)})
+xml_roots_shared: fn<T>(x: &&T) -> Shared<T?> {
+    shared (T?{Val(x.move())})
 }
 #Test("xml_checker_roots_fixtures") {
     print(xml_roots_predicate())

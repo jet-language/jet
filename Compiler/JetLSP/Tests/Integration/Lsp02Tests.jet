@@ -80,18 +80,18 @@ use {
     child := Command.new(jet).args(["self", "lsp"]).current_dir(root).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().unwrap()
     stdin := child.stdin.take().unwrap()
     stdout := child.stdout.take().unwrap()
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
-    assert(read_msg(&stdout).contains("jet.budgetReports"))
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
-    assert(read_msg(&stdout).contains("publishDiagnostics"))
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/executeCommand\",\"params\":{{\"command\":\"jet.budgetReports\",\"arguments\":[\"{uri}\"]}}}}")
-    response: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    assert(read_msg(stdout).contains("jet.budgetReports"))
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+    assert(read_msg(stdout).contains("publishDiagnostics"))
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/executeCommand\",\"params\":{{\"command\":\"jet.budgetReports\",\"arguments\":[\"{uri}\"]}}}}")
+    response: read_msg(stdout)
     assert(response.contains("\"mode\":\"read_only\""), "{response}")
     assert(response.contains("\"budget_id\":\"package:api\""), "{response}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
-    _: read_msg(&stdout)
-    drop(^stdin)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _: read_msg(stdout)
+    drop(stdin)
     _: child.wait()
     after: fs.read_dir(reports).unwrap().map(entry -> {
         path: entry.unwrap().path()
@@ -174,41 +174,41 @@ use {
     child := Command.new(jet).args(["self", "lsp"]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
     stdin := child.stdin.take().expect("stdin")
     stdout := child.stdout.take().expect("stdout")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
-    init: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    init: read_msg(stdout)
     assert(init.contains("completionProvider"), "init: {init}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
     open: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}"
-    send_msg(&stdin, open)
-    _: read_msg(&stdout)
+    send_msg(stdin, open)
+    _: read_msg(stdout)
     package_offset: source.find("default.post").unwrap() + "default.post".len()
     package_pos: LSP.byte_offset_to_lsp(source, package_offset)
     package_req: "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{package_pos.line},\"character\":{package_pos.character}}}}}}}"
-    send_msg(&stdin, package_req)
-    package_resp: read_msg(&stdout)
+    send_msg(stdin, package_req)
+    package_resp: read_msg(stdout)
     assert(package_resp.contains("postgres_16") && package_resp.contains("package from default"), "package discovery completion missing: {package_resp}")
     option_offset: source.find("Service{{ re").unwrap() + "Service{{ re".len()
     option_pos: LSP.byte_offset_to_lsp(source, option_offset)
     option_req: "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{option_pos.line},\"character\":{option_pos.character}}}}}}}"
-    send_msg(&stdin, option_req)
-    option_resp: read_msg(&stdout)
+    send_msg(stdin, option_req)
+    option_resp: read_msg(stdout)
     assert(option_resp.contains("\"ready\"") && option_resp.contains("Command polled until ready."), "option discovery completion missing: {option_resp}")
     package_hover_offset: source.find("default.postgres_16").unwrap() + "default.po".len()
     package_hover_pos: LSP.byte_offset_to_lsp(source, package_hover_offset)
     package_hover_req: "{{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{package_hover_pos.line},\"character\":{package_hover_pos.character}}}}}}}"
-    send_msg(&stdin, package_hover_req)
-    package_hover_resp: read_msg(&stdout)
+    send_msg(stdin, package_hover_req)
+    package_hover_resp: read_msg(stdout)
     assert(package_hover_resp.contains("postgres_16") && package_hover_resp.contains("16.4") && package_hover_resp.contains("maintainer liveness: not-applicable"), "package discovery hover missing: {package_hover_resp}")
     option_hover_offset: source.find("ready: false").unwrap() + "rea".len()
     option_hover_pos: LSP.byte_offset_to_lsp(source, option_hover_offset)
     option_hover_req: "{{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/hover\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}},\"position\":{{\"line\":{option_hover_pos.line},\"character\":{option_hover_pos.character}}}}}}}"
-    send_msg(&stdin, option_hover_req)
-    option_hover_resp: read_msg(&stdout)
+    send_msg(stdin, option_hover_req)
+    option_hover_resp: read_msg(stdout)
     assert(option_hover_resp.contains("Environment option `ready`") && option_hover_resp.contains("Command polled until ready."), "option discovery hover missing: {option_hover_resp}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
-    _: read_msg(&stdout)
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
-    drop(^stdin)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    _: read_msg(stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{{}}}}")
+    drop(stdin)
     _: child.wait()
     _: fs.remove_dir_all(root)
 }
@@ -293,27 +293,27 @@ use {
     child := Command.new(jet).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp for imported symbols")
     stdin := child.stdin.take().expect("imported symbols stdin")
     stdout := child.stdout.take().expect("imported symbols stdout")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}")
-    initialize: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"rootUri\":\"{root_uri}\",\"capabilities\":{{}}}}}}")
+    initialize: read_msg(stdout)
     assert(initialize.contains("documentSymbolProvider"), "initialize must advertise document symbols: {initialize}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{main_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(main_source)}}}}}}}")
-    main_diagnostics: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{main_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(main_source)}}}}}}}")
+    main_diagnostics: read_msg(stdout)
     assert(main_diagnostics.contains("publishDiagnostics"), "main module open must publish diagnostics: {main_diagnostics}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{imported_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(imported_source)}}}}}}}")
-    imported_diagnostics: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{imported_uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(imported_source)}}}}}}}")
+    imported_diagnostics: read_msg(stdout)
     assert(imported_diagnostics.contains("publishDiagnostics"), "imported module open must publish diagnostics: {imported_diagnostics}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{imported_uri}\"}}}}}}")
-    symbols: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{imported_uri}\"}}}}}}")
+    symbols: read_msg(stdout)
     assert(symbols.contains("\"result\":["), "documentSymbol must return an array: {symbols}")
     assert(symbols.contains("\"name\":\"ImportedPlan\""), "imported module symbols must include ImportedPlan: {symbols}")
     assert(symbols.contains("\"kind\":23"), "imported module symbols must classify structs: {symbols}")
     assert(symbols.contains("\"name\":\"imported_helper\""), "imported module symbols must include imported_helper: {symbols}")
     assert(symbols.contains("\"kind\":12"), "imported module symbols must classify functions: {symbols}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
-    shutdown: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    shutdown: read_msg(stdout)
     assert(shutdown.contains("\"result\""), "shutdown must return a result: {shutdown}")
-    drop(^stdin)
+    drop(stdin)
     _: child.wait()
 }
 
@@ -416,7 +416,7 @@ use {
 }
 
 #Test("lsp_hover_projects_typestate_graph_facts") {
-    source: "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
+    source: "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: &&Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n"
     uri: "file:///tmp/lsp_typestate_graph_test.jet"
     run_transcript(source, [
         TranscriptStep.Send { msg: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}", expect_contains: ["hoverProvider"] },
@@ -454,42 +454,42 @@ use {
         loop index in 0..COSTLY_CALLERS {
             source.push_str("caller_{index}: fn() Int {{ return target({index}) }}\n")
         }
-        ^source
+        source.move()
     }
     source_v1: source_for("marker_one")
     uri: "file:///tmp/lsp_overlapping_revision_test.jet"
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
-    initialize: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"capabilities\":{{}}}}}}")
+    initialize: read_msg(stdout)
     assert(initialize.contains("documentSymbolProvider"), "document symbols are the costly existing request used by this fixture: {initialize}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":10,\"text\":{json_string(source_v1)}}}}}}}")
-    opened: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{{}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":10,\"text\":{json_string(source_v1)}}}}}}}")
+    opened: read_msg(stdout)
     assert(opened.contains("publishDiagnostics") && opened.contains("\"version\":10"), "open must publish the checked base revision: {opened}")
     // Queue the checked/indexed request before overlapping edits; no timing assumption.
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
     edit: (version: I32, marker: String) -> {
         "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":{version}}},\"contentChanges\":[{{\"range\":{{\"start\":{{\"line\":1,\"character\":3}},\"end\":{{\"line\":1,\"character\":13}}}},\"rangeLength\":10,\"text\":\"{marker}\"}}]}}}}"
     }
-    send_msg(&stdin, edit(11, "marker_two"))
-    send_msg(&stdin, edit(12, "marker_new"))
+    send_msg(stdin, edit(11, "marker_two"))
+    send_msg(stdin, edit(12, "marker_new"))
     // Revision 11 must not roll back revision 12.
-    send_msg(&stdin, edit(11, "marker_stale"))
-    superseded: read_msg(&stdout)
+    send_msg(stdin, edit(11, "marker_stale"))
+    superseded: read_msg(stdout)
     assert(superseded.contains("\"id\":2") && superseded.contains("marker_one") && !superseded.contains("marker_new"), "the costly request must describe only its checked base revision: {superseded}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
-    latest_diagnostics: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    latest_diagnostics: read_msg(stdout)
     assert(latest_diagnostics.contains("publishDiagnostics") && latest_diagnostics.contains("\"version\":12"), "latest diagnostics must identify the winning checked revision: {latest_diagnostics}")
-    latest_symbols: read_msg(&stdout)
+    latest_symbols: read_msg(stdout)
     assert(latest_symbols.contains("\"id\":3") && latest_symbols.contains("marker_new") && !latest_symbols.contains("marker_two") && !latest_symbols.contains("marker_stale"), "stale work must be refused and the latest edit must win: {latest_symbols}")
     // Late cancellation releases the completed request before id reuse.
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":3}}}}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
-    reused: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":3}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/documentSymbol\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}}}")
+    reused: read_msg(stdout)
     assert(reused.contains("\"id\":3") && reused.contains("marker_new") && !reused.contains("\"code\":-32800"), "late cancellation must be released before request-id reuse: {reused}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
-    shutdown: read_msg(&stdout)
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{{}}}}")
+    shutdown: read_msg(stdout)
     assert(shutdown.contains("\"id\":99") && shutdown.contains("result"))
-    drop(^stdin)
+    drop(stdin)
     _: child.wait()
 }
 
@@ -510,12 +510,12 @@ use {
     child := Command.new(jet_bin()).args(["self", "lsp"]).current_dir(root.path).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("spawn jet self lsp")
     stdin := child.stdin.take().expect("stdin")
     stdout := child.stdout.take().expect("stdout")
-    _: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    _: request_lsp(stdin, stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
     loop (uri, source) in [(_0: helper_uri, _1: helper_int), (_0: main_uri, _1: main), (_0: other_uri, _1: other)] {
-        send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
+        send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(source)}}}}}}}")
     }
     symbols: (uri: String) -> "{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}"
-    (_, opened): request_lsp_collect(&stdin, &stdout, 2, "textDocument/documentSymbol", symbols(other_uri))
+    (_, opened): request_lsp_collect(stdin, stdout, 2, "textDocument/documentSymbol", symbols(other_uri))
     main_opened: published_diagnostics_for(opened, main_uri)
     assert_eq(main_opened.len(), 1, "open publishes the importer once: {opened}")
     assert_eq(error_count(main_opened[0]), 0, "Int helper checks clean: {opened}")
@@ -523,24 +523,24 @@ use {
         "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{helper_uri}\",\"version\":{version}}},\"contentChanges\":[{{\"text\":{json_string(text)}}}]}}}}"
     }
     // Only the sibling changes; its importer must follow.
-    send_msg(&stdin, change(2, helper_text))
-    (_, broke): request_lsp_collect(&stdin, &stdout, 3, "textDocument/documentSymbol", symbols(helper_uri))
+    send_msg(stdin, change(2, helper_text))
+    (_, broke): request_lsp_collect(stdin, stdout, 3, "textDocument/documentSymbol", symbols(helper_uri))
     main_broke: published_diagnostics_for(broke, main_uri)
     assert_eq(main_broke.len(), 1, "a sibling edit re-checks its importer: {broke}")
     assert(error_count(main_broke[0]) > 0, "`String + 1` through the edited sibling is an error: {broke}")
     assert(published_diagnostics_for(broke, other_uri).is_empty(), "a document that reads nothing edited is not re-checked: {broke}")
     // Rapid revisions 3 and 4 flush exactly one importer verdict for the newest.
-    send_msg(&stdin, change(3, helper_text))
-    send_msg(&stdin, change(4, helper_int))
-    (_, repaired): request_lsp_collect(&stdin, &stdout, 4, "textDocument/documentSymbol", symbols(helper_uri))
+    send_msg(stdin, change(3, helper_text))
+    send_msg(stdin, change(4, helper_int))
+    (_, repaired): request_lsp_collect(stdin, stdout, 4, "textDocument/documentSymbol", symbols(helper_uri))
     main_repaired: published_diagnostics_for(repaired, main_uri)
     assert_eq(main_repaired.len(), 1, "one importer verdict per flush: {repaired}")
     assert_eq(error_count(main_repaired[0]), 0, "the importer verdict reflects sibling revision 4: {repaired}")
     helper_published: published_diagnostics_for(repaired, helper_uri)
     assert(helper_published.iter().all(params -> json_get(params, "version") == Dyn.Int(4)), "sibling reports carry only its newest revision: {repaired}")
     assert(published_diagnostics_for(repaired, other_uri).is_empty(), "{repaired}")
-    _: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
-    drop(^stdin)
+    _: request_lsp(stdin, stdout, 99, "shutdown", "{{}}")
+    drop(stdin)
     assert(child.wait().unwrap().success())
 }
 
@@ -551,20 +551,20 @@ use {
     stdin := child.stdin.take().expect("stdin")
     stdout := child.stdout.take().expect("stdout")
     uri: "file:///tmp/lsp_cancelled_costly_request.jet"
-    _: request_lsp(&stdin, &stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(costly_source("marker_old", 1024))}}}}}}}")
-    opened: read_msg(&stdout)
+    _: request_lsp(stdin, stdout, 1, "initialize", "{{\"capabilities\":{{}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(costly_source("marker_old", 1024))}}}}}}}")
+    opened: read_msg(stdout)
     assert(opened.contains("publishDiagnostics") && opened.contains("\"version\":1"), "open publishes its base revision: {opened}")
     // Full-text edit queues a costly re-check before the request and cancellation.
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(costly_source("marker_new", 1024))}}}]}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"version\":2}},\"contentChanges\":[{{\"text\":{json_string(costly_source("marker_new", 1024))}}}]}}}}")
     symbols: "{{\"textDocument\":{{\"uri\":\"{uri}\"}}}}"
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"textDocument/documentSymbol\",\"params\":{symbols}}}")
-    send_msg(&stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":50}}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":50,\"method\":\"textDocument/documentSymbol\",\"params\":{symbols}}}")
+    send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"method\":\"$/cancelRequest\",\"params\":{{\"id\":50}}}}")
     before := [Dyn]()
     cancelled: loop {
-        message: parse_json(read_msg(&stdout)).expect("valid LSP message")
-        if json_get(message, "id") == Dyn.Int(50) -> break ^message
-        before.push(^message)
+        message: parse_json(read_msg(stdout)).expect("valid LSP message")
+        if json_get(message, "id") == Dyn.Int(50) -> break message.move()
+        before.push(message)
     }
     error: json_object_field(cancelled, "error")
     assert_json_values_equal("cancel code", json_object_field(error, "code"), Dyn.Int(-32800))
@@ -572,11 +572,11 @@ use {
     loop published in published_diagnostics_for(before, uri) {
         assert_json_values_equal("flushed revision", json_object_field(published, "version"), Dyn.Int(2))
     }
-    (current, after): request_lsp_collect(&stdin, &stdout, 51, "textDocument/documentSymbol", symbols)
+    (current, after): request_lsp_collect(stdin, stdout, 51, "textDocument/documentSymbol", symbols)
     assert(after.iter().all(message -> json_get(message, "id") != Dyn.Int(50)), "cancelled request 50 must never answer again: {after}")
     current_text: "{current}"
     assert(current_text.contains("marker_new") && !current_text.contains("marker_old"), "the next request sees the newest revision: {current_text}")
-    _: request_lsp(&stdin, &stdout, 99, "shutdown", "{{}}")
-    drop(^stdin)
+    _: request_lsp(stdin, stdout, 99, "shutdown", "{{}}")
+    drop(stdin)
     assert(child.wait().unwrap().success())
 }

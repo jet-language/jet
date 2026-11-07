@@ -16,7 +16,7 @@ recipe_update_test_tree: fn(label: String) -[FS, Env, Rand]> String {
 
 recipe_update_test_key: fn(seed: Int) -> SigningKey {
     bytes := [U8]{}
-    loop _ in 0..<32 -> &bytes.push(U8{seed})
+    loop _ in 0..<32 -> bytes.push(U8{seed})
     crypto.SigningKey.from_bytes(bytes) ?? panic("a 32-byte seed is a signing key")
 }
 
@@ -27,7 +27,7 @@ recipe_update_test_now: fn() -[Time]> Int {
 // A canonical signature sidecar over `domain || bytes`.
 recipe_update_test_sidecar: fn(domain: String, bytes: [U8], key: SigningKey) -> [U8] {
     message := domain.bytes()
-    loop byte in bytes -> &message.push(byte)
+    loop byte in bytes -> message.push(byte)
     signature: crypto.sign(key, message) ?? panic("sign")
     ToolchainSignatureSidecar{schema: 1, key_id: RECIPE_UPDATE_TEST_KEY_ID, algorithm: "ed25519", signature: base64.encode(signature.bytes)}.canonical().bytes()
 }

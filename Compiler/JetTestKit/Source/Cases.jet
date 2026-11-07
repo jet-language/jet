@@ -10,9 +10,9 @@ kit_cases_collect: fn(root: String, directory: String) -> [KitEntry] {
         if child.name.starts_with(".") -> next
         shown: files.join(directory, child.name)
         if child.is_dir {
-            loop entry in kit_cases_collect(root, shown) -> &entries.push(entry)
+            loop entry in kit_cases_collect(root, shown) -> entries.push(entry)
         } else if child.name.ends_with(".case") {
-            &entries.push(KitEntry{path: shown, expected: shown, project: directory, suite: "cases", mode: ""})
+            entries.push(KitEntry{path: shown, expected: shown, project: directory, suite: "cases", mode: ""})
         }
     }
     entries
@@ -21,14 +21,14 @@ kit_cases_collect: fn(root: String, directory: String) -> [KitEntry] {
 // Owner-retired Rust scenarios are outside the current case corpus, not host
 // skips or CLI filters. The same committed list seals the registry manifest.
 kit_cases_retired: fn(root: String) -> [String] {
-    source: kit_exec_optional(files.join(root, "Tools/testkit/retired-with-rust.tsv")) ?? ""
+    source: kit_exec_optional(files.join(root, "Compiler/JetTestKit/retired-with-rust.tsv")) ?? ""
     retired := [String]{}
     loop raw in source.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
         fields: line.split("\t").to_list()
         assert(fields.len() == 2 && fields[1] != "", "retired case rows need an exact ID and reason")
-        if fields[0].starts_with("tests/cases/") && fields[1].starts_with("Retired with Rust:") -> &retired.push(fields[0])
+        if fields[0].starts_with("tests/cases/") && fields[1].starts_with("Retired with Rust:") -> retired.push(fields[0])
     }
     retired
 }
@@ -38,10 +38,10 @@ kit_cases_discover: fn(context: KitCtx) -> [KitEntry] {
     entries := [KitEntry]{}
     loop corpus in context.options.cases_corpora {
         loop entry in kit_cases_collect(context.root, corpus) {
-            if !kit_expect_named(retired, entry.path) -> &entries.push(entry)
+            if !kit_expect_named(retired, entry.path) -> entries.push(entry)
         }
     }
-    &entries.sort_by(entry -> entry.path)
+    entries.sort_by(entry -> entry.path)
     entries
 }
 

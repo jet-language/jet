@@ -107,10 +107,10 @@ NixIndexClient: struct {
 
     // A signed client over an explicit transport and clock (the Rust test
     // seam `for_test`).
-    with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: ^NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
+    with_transport: fn(root: String, endpoint: String, key_id: String, public_key: [U8], transport: &&NixIndexTransport, clock: NixIndexClock, offline: Bool) -> NixIndexClient NixIndexError! {
         parsed: nix_index_parse_endpoint(endpoint)
         key: crypto.VerifyKey.from_bytes(public_key) ?? return Err(NixIndexError.Invalid("test index public key is invalid"))
-        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport: ^transport})
+        Ok(NixIndexClient{endpoint: parsed, root, key_id, public_key: Val(key), local_catalog: false, offline, clock, transport: transport.move()})
     }
 
     resolve: fn(self, key: NixIndexKey) -[FS, Env, Net, Time, Time.Wait]> NixVerifiedIndexRecord NixIndexError! {
@@ -260,7 +260,7 @@ NixIndexClient: struct {
         }
         matches := [NixNativeRecipe]{}
         loop recipe in recipes {
-            if recipe.name == name && (requested ?? recipe.version) == recipe.version -> &matches.push(recipe)
+            if recipe.name == name && (requested ?? recipe.version) == recipe.version -> matches.push(recipe)
         }
         if matches.len() > 1 -> return Err(NixIndexError.Invalid("local unofficial native catalog has ambiguous recipes for `{package}`"))
         if matches.len() == 0 -> return Ok(None)
@@ -582,7 +582,7 @@ nix_index_ensure_real_directory: fn(path: String) NixIndexError! -[FS]> {
             }
             .Err(error) -> {
                 if !nix_io_is_not_found(error) -> return Err(NixIndexError.Transport("inspect {current}: {error}"))
-                files.create_dir(current) ?? return Err(NixIndexError.Transport("create {current}: {err}"))
+                files.create_dir_all(current) ?? return Err(NixIndexError.Transport("create {current}: {err}"))
             }
         }
     }
@@ -599,9 +599,9 @@ nix_index_read_regular: fn(path: String, limit: Int) -[FS]> [U8] NixIndexError! 
     if !opened.is_file || opened.id != expected.id -> return Err(NixIndexError.Transport("read {path}: file changed before reading"))
     bytes := [U8]{}
     loop {
-        chunk: &reader.read(65536) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
+        chunk: reader.read(65536) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > limit -> return Err(NixIndexError.Invalid("read {path}: file exceeds its read bound"))
     }
     after: files.stat(path) ?? return Err(NixIndexError.Transport("read {path}: {err}"))
@@ -642,8 +642,8 @@ nix_index_write_atomic: fn(path: String, bytes: [U8], replace: Bool) NixIndexErr
 
 nix_index_publish: fn(temporary: String, path: String, parent: String, bytes: [U8], replace: Bool) NixIndexError! -[FS]> {
     out := files.create(temporary, if_exists: .Refuse, mode: 0o600, links: .Refuse) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
-    &out.write_all(bytes) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
-    &out.fsync() ?? return Err(NixIndexError.Transport("write {path}: {err}"))
+    out.write_all(bytes) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
+    out.fsync() ?? return Err(NixIndexError.Transport("write {path}: {err}"))
     if replace {
         files.rename(temporary, path) ?? return Err(NixIndexError.Transport("write {path}: {err}"))
         files.fsync(parent) ?? return Err(NixIndexError.Transport("write {path}: {err}"))

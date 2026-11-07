@@ -16,7 +16,7 @@ apply_reorder_statements: fn(path: OSPath, src: String, graph_id: String, moved:
     bundle := checked ?? return .Err(edit_error("check", "Canvas could not read checked statement facts"))
     func := find_func_by_name_span(bundle, name_span) ?? return .Err(edit_error("not_found", "Canvas graph no longer exists"))
     locs := [StatementLoc]{}; block := [USize]{}
-    collect_statement_locs(src, func.body, &block, &locs)
+    collect_statement_locs(src, func.body, block, locs)
     moved_loc := locs.iter().find((loc) -> same_span(loc.anchor, moved)).cloned() ?? return .Err(edit_error("not_found", "Canvas step to move no longer exists"))
     anchor_loc := locs.iter().find((loc) -> same_span(loc.anchor, anchor)).cloned() ?? return .Err(edit_error("not_found", "Canvas anchor step no longer exists"))
     if moved_loc.block != anchor_loc.block -> return .Err(edit_error("bad_request", "can't move a step into a different branch yet"))
@@ -396,7 +396,7 @@ apply_add_pattern_arm: fn(path: OSPath, src: String, graph_id: String, node_span
     head := normalize_pattern_arm_head(pattern)
     if head.is_empty() -> return .Err(edit_error("bad_request", "pattern arm text is empty"))
     target := PatternTarget?{.None}
-    find_pattern_target(src, func.body, node_span, &target)
+    find_pattern_target(src, func.body, node_span, target)
     selected := target ?? return .Err(edit_error("not_found", "Canvas pattern node no longer exists"))
     body := fresh_arm_body(func)
     changed := if selected == {
@@ -421,7 +421,7 @@ apply_edit_pattern_arm: fn(path: OSPath, src: String, graph_id: String, pattern_
 apply_remove_pattern_arm: fn(path: OSPath, src: String, graph_id: String, pattern_span: SourceSpan) -> String Err! {
     func := checked_func_for_graph(path, src, graph_id)
     arm := RemoveArmInfo?{.None}
-    find_pattern_arm_remove_span(src, func.body, pattern_span, &arm)
+    find_pattern_arm_remove_span(src, func.body, pattern_span, arm)
     info := arm ?? return .Err(edit_error("not_found", "Canvas pattern arm no longer exists"))
     if info.only_arm_without_else -> return .Err(edit_error("bad_request", "can't remove the last pattern arm; the branch would have no path left"))
     changed := FixEngine.apply_edits(src, [edit(info.remove_span, "")]) ?? return .Err(edit_error("overlap", "Canvas pattern arm delete overlapped"))
@@ -478,7 +478,7 @@ statement_contains_span: fn(stmts: [Stmt], node_span: SourceSpan) -> Bool { stmt
 apply_append_multi_input: fn(path: OSPath, src: String, node_span: SourceSpan, element: String) -> String Err! {
     target := MultiInputTarget?{.None}
     func := checked_func_containing_span(path, src, node_span)
-    find_multi_input_target(func.body, node_span, &target)
+    find_multi_input_target(func.body, node_span, target)
     selected := target ?? return .Err(edit_error("not_found", "Canvas multi-input node no longer exists"))
     (span, item_spans) := if selected == { .List { span, item_spans } -> (_0: span, _1: item_spans) }
     list_source := src.get(span.start..span.end).ok_or_else(() -> edit_error("bad_request", "Canvas multi-input source span is stale"))
@@ -613,7 +613,7 @@ find_pattern_arm_remove_span_in_children: fn(src: String, stmt: &Stmt, pattern_s
     }
 }
 pattern_span_belongs_to_graph: fn(src: String, stmts: &[Stmt], pattern_span: SourceSpan) -> Bool {
-    found := false; find_pattern_span(src, stmts, pattern_span, &found); found
+    found := false; find_pattern_span(src, stmts, pattern_span, found); found
 }
 find_pattern_span: fn(src: String, stmts: &[Stmt], pattern_span: SourceSpan, found: &Bool) {
     if found -> return
@@ -749,7 +749,7 @@ walk_expr_children_for_multi_input: fn(expr: &Expr, node_span: SourceSpan, out: 
 }
 
 multi_input_element_belongs_to_graph: fn(stmts: [Stmt], node_span: SourceSpan, element_span: SourceSpan) -> Bool {
-    target := MultiInputTarget?{.None}; find_multi_input_target(stmts, node_span, &target)
+    target := MultiInputTarget?{.None}; find_multi_input_target(stmts, node_span, target)
     if target == {
         .Val(.List { item_spans, .. }) -> item_spans.iter().any((item_span) -> same_span(item_span, element_span))
         .None -> false

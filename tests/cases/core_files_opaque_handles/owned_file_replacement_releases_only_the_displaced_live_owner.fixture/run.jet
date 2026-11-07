@@ -6,7 +6,7 @@ use {
 
 Holder: struct { owner: files.TempFile }
 
-transfer_owner: fn(owner: ^files.TempFile) -> files.TempFile {
+transfer_owner: fn(owner: &&files.TempFile) -> files.TempFile {
     owner
 }
 
@@ -22,14 +22,14 @@ replaced_paths: fn() -> [String] {
 
 replace_moved_slot: fn() {
     owner := files.temp_file("replace-moved") ?? panic("moved")
-    moved: transfer_owner(^owner)
+    moved: transfer_owner(owner)
     path: moved.path
     owner = files.temp_file("replace-reinit") ?? panic("reinit")
     print(files.exists(path))
-    close(^moved)
+    close(moved)
     print(!files.exists(path))
     replacement: owner.path
-    close(^owner)
+    close(owner)
     print(!files.exists(replacement))
 }
 
@@ -40,7 +40,7 @@ failed_replacement: fn(root: String) -> String {
     contender: files.lock(occupied) ?? panic("hold occupied")
     owner = files.lock(occupied, timeout: Val(time.duration_ms(1))) ?? {
         print(files.exists(old_path))
-        close(^contender)
+        close(contender)
         files.remove(occupied) ?? panic("remove occupied")
         return old_path
     }
@@ -53,7 +53,7 @@ replace_aggregate_slot: fn() {
     holder.owner = files.temp_file("aggregate-after") ?? panic("after")
     print(!files.exists(old_path))
     path: holder.owner.path
-    close(^holder.owner)
+    close(holder.owner)
     print(!files.exists(path))
 }
 

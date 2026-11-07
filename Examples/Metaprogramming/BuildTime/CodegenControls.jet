@@ -1,0 +1,23 @@
+// Each marker expresses one independent intent.
+#Inline
+hint: fn(value: Int) -> Int { return value + 1 }
+
+#Inline(.Always)
+promised: fn(value: Int) -> Int { return value + 1 }
+
+#Scalar
+scalar: fn(value: Int) -> Int { return value + 1 }
+
+#Kernel(.parallel)
+kernel: fn(value: Int) -> Int { return value + 1 }
+
+#Static STORED: comptime { 7 }
+#Inline COPIED: comptime { 8 }
+
+run: fn() {
+    print("hint:{hint(6)}")
+    print("promised:{promised(6)}")
+    print("scalar:{scalar(6)}")
+    print("kernel:{kernel(6)}")
+    print("storage:{STORED}:{COPIED}")
+}

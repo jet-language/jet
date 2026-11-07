@@ -16,7 +16,7 @@ use {
     envmodel_test_write_package(dir, "", "name: \"root\"\nmembers: [\"packages/hello\", \"packages/ranker\"]\n")
     files.write(files.join(dir, "workspace.jet"), "workspace: module {{ members: 1 }}\n") ?? panic("stale workspace source")
     cache := WorkspaceDeclarationCache.new()
-    plan: envmodel_workspace_load(&cache, dir) ?? panic("membership load")
+    plan: envmodel_workspace_load(cache, dir) ?? panic("membership load")
     assert_eq(envmodel_test_member_names(plan), [String]{"hello", "ranker"})
     source: files.read(files.join(dir, "package.jet")) ?? panic("manifest bytes")
     assert_eq(plan.source_digest, pkg_sha256_hex(source.bytes()))
@@ -29,16 +29,16 @@ use {
 
 #Test("committed_monorepo_example_indexes_and_addresses_members") {
     root: envmodel_test_repo_root()
-    dir: files.join(root, "Examples/features/packages/monorepo")
+    dir: files.join(root, "Examples/Modules/Packages/Monorepo")
     source: files.read(files.join(dir, "workspace.jet")) ?? panic("committed workspace source")
     plan: envmodel_workspace_evaluate(source, dir) ?? panic("committed workspace evaluation")
     names := envmodel_test_member_names(plan)
-    &names.sort()
+    names.sort()
     assert_eq(names, [String]{"hello", "ranker"})
     members := [WorkspaceMember]{}
     ranker_path := String?{None}
     loop member in plan.members {
-        &members.push(WorkspaceMember{name: member.name, path: member.path})
+        members.push(WorkspaceMember{name: member.name, path: member.path})
         if member.name == "ranker" {
             path := member.path
             loop path.starts_with("./") -> path = path.removeprefix("./")
@@ -75,6 +75,6 @@ use {
     deep = "{deep}\n}}\n"
     files.write(files.join(dir, "noise.jet"), deep) ?? panic("deep noise")
     cache := WorkspaceDeclarationCache.new()
-    assert(envmodel_test_load_is_none(&cache, dir))
+    assert(envmodel_test_load_is_none(cache, dir))
     files.remove_all(dir) ?? panic("scratch cleanup")
 }

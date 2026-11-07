@@ -105,10 +105,10 @@ FilePlan: struct {
     source_snapshot_hash: fn(self) -> String Never! {
         canonical := "jet-managed-source-snapshot-v1\n".bytes()
         loop file in self.planned {
-            loop byte in file.declaration.destination.bytes() -> &canonical.push(byte)
-            &canonical.push(U8{0})
-            loop byte in env_hook_u64_le(file.bytes.len()) -> &canonical.push(byte)
-            loop byte in file.bytes -> &canonical.push(byte)
+            loop byte in file.declaration.destination.bytes() -> canonical.push(byte)
+            canonical.push(U8{0})
+            loop byte in env_hook_u64_le(file.bytes.len()) -> canonical.push(byte)
+            loop byte in file.bytes -> canonical.push(byte)
         }
         pkg_sha256_hex(canonical)
     }
@@ -138,7 +138,7 @@ env_files_plan: fn(project_dir: String, declarations: [ManagedFile]) -[FS, Env]>
     state_path: files.join(files_root, ENV_FILES_STATE_FILE)
     state_before: env_files_load_state(state_path)
     sorted := declarations
-    &sorted.sort_by(declaration -> declaration.destination)
+    sorted.sort_by(declaration -> declaration.destination)
     planned := [PlannedFile]{}
     actions := [FileAction]{}
     state_after := state_before
@@ -147,14 +147,14 @@ env_files_plan: fn(project_dir: String, declarations: [ManagedFile]) -[FS, Env]>
         bytes: env_files_resolve_bytes(project_root, declaration)
         digest: pkg_sha256_hex(bytes)
         kind: env_files_classify_action(destination, declaration, digest, state_before.entries, objects_dir)
-        &actions.push(FileAction{destination: declaration.destination, digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, kind: kind})
+        actions.push(FileAction{destination: declaration.destination, digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, kind: kind})
         seed: declaration.mode == FileMode.Seed
         if kind != FileActionKind.Preserve && !seed {
             state_after.entries[declaration.destination] = ManagedStateEntry{digest: digest, mode: declaration.mode, permissions: declaration.permissions, sensitive: declaration.sensitive, generation: declaration.generation}
         } else {
-            _ := &state_after.entries.remove(declaration.destination)
+            _ := state_after.entries.remove(declaration.destination)
         }
-        &planned.push(PlannedFile{declaration: declaration, bytes: bytes, digest: digest, destination: destination, action: kind})
+        planned.push(PlannedFile{declaration: declaration, bytes: bytes, digest: digest, destination: destination, action: kind})
     }
     Ok(FilePlan{actions, planned, state_before, state_after, state_path, objects_dir})
 }
@@ -311,7 +311,7 @@ env_files_apply_plan: fn(plan: FilePlan) -[FS, Env]> FileSyncReport EnvironmentE
         files.create_dir_all(backup_dir) ?? return Err(env_files_error("couldn't create managed file rollback area: {err}"))
     }
     journal := ManagedApplyJournal{backups: [ManagedBackup]{}, created: [String]{}, new_objects: [String]{}}
-    if env_files_apply_steps(plan, backup_dir, &report, &journal) == {
+    if env_files_apply_steps(plan, backup_dir, report, journal) == {
         .Err(error) -> {
             loop index in 0..<journal.created.len() {
                 env_files_remove_destination(journal.created[journal.created.len() - 1 - index]).drop("rollback removes what it can")
@@ -351,19 +351,19 @@ env_files_apply_steps: fn(plan: FilePlan, backup_dir: String, report: &FileSyncR
             .Preserve -> report.preserved += 1
             .Unchanged -> report.unchanged += 1
             .Create | .ReplaceOwned -> {
-                object: env_files_ensure_object(plan, file, &journal.new_objects)
+                object: env_files_ensure_object(plan, file, journal.new_objects)
                 if files.stat(file.destination) == .Ok(info) {
                     if info.is_dir {
                         return Err(env_files_error("managed destination `{file.declaration.destination}` became a directory"))
                     }
                     backup: files.join(backup_dir, "{index}.old")
                     files.rename(file.destination, backup) ?? return Err(env_files_error("couldn't stage `{file.declaration.destination}` for atomic replacement: {err}"))
-                    &journal.backups.push(ManagedBackup{destination: file.destination, backup: backup})
+                    journal.backups.push(ManagedBackup{destination: file.destination, backup: backup})
                 } else if file.action != FileActionKind.Create {
                     return Err(env_files_error("managed destination `{file.declaration.destination}` disappeared during sync"))
                 }
                 env_files_install_file(file, object)
-                &journal.created.push(file.destination)
+                journal.created.push(file.destination)
                 report.applied += 1
             }
         }
@@ -376,7 +376,7 @@ env_files_read_all: fn(reader: FileReader) -[FS]> [U8] IOError! {
     loop {
         chunk: reader.read(ENV_FILES_READ_CHUNK)
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
     Ok(bytes)
 }
@@ -406,7 +406,7 @@ env_files_ensure_object: fn(plan: FilePlan, file: PlannedFile, new_objects: &[St
                 }
                 else -> {}
             }
-            &new_objects.push(object)
+            new_objects.push(object.copy())
         }
     }
     Ok(object)
@@ -568,7 +568,7 @@ env_files_write_state_atomic: fn(path: String, state: ManagedFileState) Environm
             .Val(value) -> env_files_escape(value)
             .None -> ""
         }
-        &lines.push("file\t{env_files_escape(destination)}\t{env_files_escape(entry.digest)}\t{entry.mode.as_str()}\t{permissions}\t{sensitive}\t{generation}\n")
+        lines.push("file\t{env_files_escape(destination)}\t{env_files_escape(entry.digest)}\t{entry.mode.as_str()}\t{permissions}\t{sensitive}\t{generation}\n")
     }
     if env_files_publish(temp, path, lines.join("").bytes()) == {
         .Err(error) -> {
@@ -608,10 +608,10 @@ env_files_unescape: fn(value: String) -> String EnvironmentError! {
             high: env_files_hex_value(Int.from_u8(bytes[index + 1]))
             low: env_files_hex_value(Int.from_u8(bytes[index + 2]))
             if high < 0 || low < 0 -> return Err(env_files_error("managed file state has an invalid escape"))
-            &output.push(U8{high * 16 + low})
+            output.push(U8{high * 16 + low})
             index += 3
         } else {
-            &output.push(bytes[index])
+            output.push(bytes[index])
             index += 1
         }
     }

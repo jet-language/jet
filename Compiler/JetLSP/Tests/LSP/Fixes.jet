@@ -10,7 +10,7 @@ lsp_fix_test: fn(start: Int, end: Int, replacement: String, applicability: FixAp
     grades: [FixApplicability]{FixApplicability.Safe, FixApplicability.Suggested}
     safeties: [FixSafety]{FixSafety.Formatting, FixSafety.BehaviorPreserving, FixSafety.APIChanging, FixSafety.TargetChanging, FixSafety.NeedsReview}
     loop grade in grades {
-        loop safety in safeties -> &actions.push(lsp_fix_test(0, 1, "x", grade, safety))
+        loop safety in safeties -> actions.push(lsp_fix_test(0, 1, "x", grade, safety))
     }
     safe: lsp_safe_fixes(actions)
     assert_eq(safe.len(), 2)

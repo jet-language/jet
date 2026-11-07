@@ -14,7 +14,7 @@ kit_test_ledger: fn(root: String) -> String { files.join(root, "known-failing.ts
 
 kit_test_checkout_options: fn(root: String) -> KitOptions {
     options := kit_exec_defaults()
-    options.golden_corpora = ["Examples/features", "tests/run"]
+    options.golden_corpora = ["Examples", "tests/run"]
     options.ui_corpora = ["tests/ui", "tests/ui_lint"]
     options.cases_corpora = ["tests/cases"]
     options.ledger = kit_test_ledger(root)
@@ -37,7 +37,7 @@ kit_test_checkout_options: fn(root: String) -> KitOptions {
     assert(counts.contains("\"KNOWN-FAILING\":1"))
     assert(counts.contains("\"UNEXPECTED-PASS\":1"))
     results := [KitCaseResult]{known, unexpected}
-    kit_golden_mark_tier_splits(&results)
+    kit_golden_mark_tier_splits(results)
     assert(results[0].detail.starts_with("tier-split:"))
     assert(results[1].detail.starts_with("tier-split:"))
 }
@@ -100,10 +100,10 @@ kit_test_core_scratch: fn(label: String) -> String {
         assert_eq(selection.error, "")
         loop id in selection.ids {
             assert(!kit_expect_named(all, id))
-            &all.push(id)
+            all.push(id)
         }
     }
-    &all.sort()
+    all.sort()
     assert_eq(all, ids)
 }
 
@@ -155,6 +155,15 @@ kit_test_core_scratch: fn(label: String) -> String {
     files.remove_all(root) ?? panic("remove resident scratch")
 }
 
+#Test("the resident guard counts a row's files on a memory-backed scratch") {
+    root: cases_test_root("scratch-guard")
+    env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0, resident_limit: 67108864, scratch_memory: true}
+    run: kit_exec_invoke(env, ["/bin/sh", "-c", "head -c 134217728 /dev/zero > fill; sleep 20"], root, root, "")
+    assert_eq(run.limit_hit, "memory")
+    assert(run.elapsed_ns < 15000000000)
+    files.remove_all(root) ?? panic("remove scratch guard scratch")
+}
+
 #Test("concurrent children each keep their resident guard and wall-clock timeout") {
     root: cases_test_root("pool-guard")
     env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 3s, memory_limit: 0, resident_limit: 67108864}
@@ -168,17 +177,36 @@ kit_test_core_scratch: fn(label: String) -> String {
     second_stall: task kit_exec_invoke(env, stall, root, files.join(root, "d"), "")
     third_stall: task kit_exec_invoke(env, stall, root, files.join(root, "e"), "")
     fourth_stall: task kit_exec_invoke(env, stall, root, files.join(root, "f"), "")
-    loop run in [^first_grow.join() ?? panic("grow"), ^second_grow.join() ?? panic("grow")] {
+    loop run in [first_grow.join() ?? panic("grow"), second_grow.join() ?? panic("grow")] {
         assert_eq(run.limit_hit, "memory")
         assert_eq((kit_exec_process_failure(run) ?? panic("memory")).detail, "memory limit hit")
     }
-    loop run in [^first_stall.join() ?? panic("stall"), ^second_stall.join() ?? panic("stall"), ^third_stall.join() ?? panic("stall"), ^fourth_stall.join() ?? panic("stall")] {
+    loop run in [first_stall.join() ?? panic("stall"), second_stall.join() ?? panic("stall"), third_stall.join() ?? panic("stall"), fourth_stall.join() ?? panic("stall")] {
         assert(run.timed_out)
         assert_eq((kit_exec_process_failure(run) ?? panic("timeout")).status, "TIMEOUT")
     }
     // Four 3 s timeouts one after another take 12 s; at once, about 3 s.
     assert(started.elapsed().ns < 9000000000)
     files.remove_all(root) ?? panic("remove pool scratch")
+}
+
+#Test("a step whose stray job holds its output or terminal ends at the wall-clock limit as TIMEOUT") {
+    root: cases_test_root("lingering-holder")
+    env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 2s, memory_limit: 0}
+    // Job control gives the sleep a process group of its own: the child's
+    // group sweep misses it and it keeps the captured stdout (or the terminal) open.
+    stray: ["/bin/sh", "-c", "set -m; sleep 60 2>/dev/null & exit 0"]
+    started: time.instant()
+    piped: kit_exec_invoke(env, stray, root, files.join(root, "piped"), "")
+    terminal: kit_exec_invoke_terminal(env, stray, root, files.join(root, "terminal"), "", [KitEnvVar]{}, KitTerminal{rows: 24, cols: 80})
+    kit_exec_stop_strays(root)
+    loop run in [piped, terminal] {
+        assert(run.timed_out)
+        assert_eq((kit_exec_process_failure(run) ?? panic("timeout")).status, "TIMEOUT")
+    }
+    // Two 2 s limits; a holder the limit missed would keep these waits for 60 s.
+    assert(started.elapsed().ns < 20000000000)
+    files.remove_all(root) ?? panic("remove lingering-holder scratch")
 }
 
 kit_test_pool_entry: fn(env: KitEnv, root: String, index: Int) -> KitRun {
@@ -188,7 +216,7 @@ kit_test_pool_entry: fn(env: KitEnv, root: String, index: Int) -> KitRun {
 // As kit_execute_report: the pool task joins the entry's own task.
 kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int>) {
     entry: task kit_test_pool_entry(env.copy(), root.copy(), index)
-    run: ^entry.join() ?? kit_exec_failed("the entry task stopped")
+    run: entry.join() ?? kit_exec_failed("the entry task stopped")
     done.send(run.code)
 }
 
@@ -267,6 +295,50 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
     files.remove_all(root) ?? panic("remove fixture .jet scratch")
 }
 
+#Test("a flat golden entry stages its own files, every support directory and only the siblings it names") {
+    root: kit_test_core_scratch("golden-stage")
+    project: files.join(root, "group")
+    kit_exec_write(files.join(project, "main.jet"), "use helper\nrun: fn() {{}}\n")
+    kit_exec_write(files.join(project, "main.stdin"), "in\n")
+    kit_exec_write(files.join(project, "helper.jet"), "use deep\n")
+    kit_exec_write(files.join(project, "deep.jet"), "deep: 1\n")
+    kit_exec_write(files.join(project, "other.jet"), "run: fn() {{}}\n")
+    kit_exec_write(files.join(project, "other.stdin"), "in\n")
+    kit_exec_write(files.join(project, "data.txt"), "data\n")
+    kit_exec_write(files.join(project, "support/other.jet"), "inner: 2\n")
+    kit_exec_write(files.join(project, ".jet/cache"), "stale\n")
+    work: files.join(root, "work")
+    kit_golden_stage(project, KitEntry{path: "group/main.jet", expected: "expected/main", project: "group", suite: "golden", mode: ""}, work)
+    loop kept in ["main.jet", "main.stdin", "helper.jet", "deep.jet", "data.txt", "support/other.jet"] {
+        assert(files.exists(files.join(work, kept)), "{kept} is staged")
+    }
+    loop left in ["other.jet", "other.stdin", ".jet"] {
+        assert(!files.exists(files.join(work, left)), "{left} stays out")
+    }
+    kit_exec_write(files.join(project, "run.jet"), "run: fn() {{}}\n")
+    whole: files.join(root, "whole")
+    kit_golden_stage(project, KitEntry{path: "group/run.jet", expected: "expected/group", project: "group", suite: "golden", mode: ""}, whole)
+    assert(files.exists(files.join(whole, "other.stdin")), "a project entry stages its whole directory")
+    files.remove_all(root) ?? panic("remove golden stage scratch")
+}
+
+#Test("a run stages rows in memory and keeps its state on disk") {
+    root: kit_test_core_scratch("memory-root")
+    assert(kit_exec_memory_backed("/dev/shm") == files.is_dir("/dev/shm"))
+    assert(!kit_exec_memory_backed("/proc/self"))
+    kit_exec_write(files.join(root, "a.txt"), "12345")
+    kit_exec_write(files.join(root, "deep/b.txt"), "123")
+    assert_eq(kit_exec_tree_bytes(root), 8)
+    assert_eq(kit_exec_tree_bytes(files.join(root, "gone")), 0)
+    checkout: files.join(root, "checkout")
+    files.create_dir_all(checkout) ?? panic("mkdir checkout: {err}")
+    assert_eq(kit_execute_scratch_dir(files.join(checkout, "scratch"), checkout) ?? "", "")
+    on_tmp: "/tmp/jet-testkit-state-{process.current_pid()}"
+    assert_eq(kit_execute_disk_dir(on_tmp, checkout) ?? "", "")
+    files.remove_all(on_tmp) ?? panic("remove tmp state probe: {err}")
+    files.remove_all(root) ?? panic("remove memory root scratch")
+}
+
 #Test("the step timeout is a minute unless set, and an out-of-range duration is refused before discovery") {
     assert_eq(kit_exec_defaults().timeout, 60)
     options := kit_exec_defaults()
@@ -341,7 +413,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
 
 #Test("pool rows keep corpus order, suite then path, whatever the pool's size") {
     mixed := [kit_test_selected("ui", "b"), kit_test_selected("cases", "z"), kit_test_selected("golden", "a"), kit_test_selected("cases", "a")]
-    kit_execute_corpus_order(&mixed)
+    kit_execute_corpus_order(mixed)
     assert_eq(mixed.map(item -> "{item.suite} {item.entry.path}"), ["cases a", "cases z", "golden a", "ui b"])
     root: cases_test_root("pool-order")
     names: ["a", "b", "c", "d", "e"]
@@ -355,7 +427,7 @@ kit_test_selected: fn(suite: String, path: String) -> KitSelected {
         schedule: kit_execute_schedule(corpus, [String: KitHistory]{}, jobs, 0, 0)
         rows := [String]{}
         loop run in kit_execute_entries(corpus, schedule, context.options, context.env, context.known, root, run_scratch) {
-            loop result in run.results -> &rows.push("{result.case} {result.status}")
+            loop result in run.results -> rows.push("{result.case} {result.status}")
         }
         assert_eq(rows, corpus.map(item -> "{item.entry.path} PASS"))
     }

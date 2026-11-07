@@ -307,7 +307,7 @@
             {
               echo "Jet dev shell"
               echo "  compiler: JET=<admitted native jet>  (built by jet build Compiler)"
-              echo "  run:      jet run Examples/features/basics/hello.jet"
+              echo "  run:      jet run Examples/Basics/Hello.jet"
               echo "  package:  jetpack help        (JETPACK=<native jetpack>)"
               echo "  search:   rg \"pattern\" Docs Compiler Core Jetpack tests"
               echo "  LSP:      jet lsp"

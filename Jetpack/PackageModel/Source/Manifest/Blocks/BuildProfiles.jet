@@ -71,10 +71,12 @@ DevPolicy: struct {
     }
 }
 
-// One named build profile declared in `build: { … }`.
+// One named build profile declared in `build: { … }`. Like every build option,
+// `optimize` is a layer over the command's stock: None when the profile leaves
+// it to the command.
 BuildProfileDef: struct {
     name: String
-    optimize: BuildOptimize
+    optimize: BuildOptimize?
     debug_info: Bool
     small: Bool
     panic: BuildPanic?
@@ -198,9 +200,9 @@ pkg_parse_build: fn(body: String) -> [BuildProfileDef] PackageParseError! {
     loop entry in pkg_key_value_entries(body) {
         name: entry.key
         if seen.contains(name) -> return Err(PackageParseError.Composition("build field `{name}` is declared more than once"))
-        &seen.push(name)
+        seen.push(name.copy())
         if name == BUILD_FIELD_ALLOW -> next
-        &profiles.push(pkg_parse_build_profile(name, entry.value.trim()))
+        profiles.push(pkg_parse_build_profile(name, entry.value.trim()))
     }
     Ok(profiles)
 }
@@ -220,7 +222,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
     optimize_value := String?{None}
     profile := BuildProfileDef{
         name: name,
-        optimize: BuildOptimize.Off,
+        optimize: None,
         debug_info: false,
         small: false,
         panic: None,
@@ -233,7 +235,7 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
     loop field in pkg_key_value_entries(inner) {
         key: field.key
         if seen_fields.contains(key) -> return Err(PackageParseError.Composition("build profile `{name}.{key}` is declared more than once"))
-        &seen_fields.push(key)
+        seen_fields.push(key.copy())
         if key == {
             BUILD_FIELD_OPTIMIZE -> optimize_value = Val(pkg_unquote(field.value))
             BUILD_FIELD_DEBUG_INFO -> profile.debug_info = pkg_parse_build_bool(name, field.value)
@@ -279,15 +281,16 @@ pkg_parse_build_profile: fn(name: String, value: String) -> BuildProfileDef Pack
             }
         }
     }
-    selected: optimize_value ?? return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
-    if selected == BUILD_OPTIMIZE_NONE {
-        profile.optimize = BuildOptimize.Off
-    } else if selected == BUILD_OPTIMIZE_BASIC {
-        profile.optimize = BuildOptimize.Basic
-    } else if selected == BUILD_OPTIMIZE_FULL {
-        profile.optimize = BuildOptimize.Full
-    } else {
-        return Err(PackageParseError.Composition("build profile `{name}` is missing `optimize: none|basic|full`"))
+    if optimize_value == .Val(selected) {
+        if selected == BUILD_OPTIMIZE_NONE {
+            profile.optimize = Val(BuildOptimize.Off)
+        } else if selected == BUILD_OPTIMIZE_BASIC {
+            profile.optimize = Val(BuildOptimize.Basic)
+        } else if selected == BUILD_OPTIMIZE_FULL {
+            profile.optimize = Val(BuildOptimize.Full)
+        } else {
+            return Err(PackageParseError.Composition("build profile `{name}` has an unknown `optimize:` value `{selected}` — use none, basic or full"))
+        }
     }
     Ok(profile)
 }
@@ -303,7 +306,7 @@ pkg_build_option_value: fn(row: BuildOptionRow, written: String) -> String? {
         item: piece.trim()
         if item == "" -> next
         if !item.starts_with("\"") -> return None
-        &items.push(pkg_unquote(item))
+        items.push(pkg_unquote(item))
     }
     Val(build_option_list_value(items))
 }
@@ -320,7 +323,7 @@ pkg_parse_build_allow: fn(body: String) -> [String] PackageParseError! {
         loop piece in pkg_top_level_commas(inner) {
             name: pkg_unquote(piece.trim())
             if !pkg_effect_root_known(authority_root(name)) -> return Err(PackageParseError.BadEffectsBlock("`{name}` isn't a known build effect"))
-            &allow.push(name)
+            allow.push(name)
         }
     }
     Ok(allow)

@@ -48,7 +48,7 @@ test("a bare impl inside a type belongs to it, and operator overloads share one 
       One
       impl Display { display: fn(self) -> String Never! { "" } }
     }
-    Vec: struct { impl Debug { debug: fn(^self) -> String Never! { "" } } }
+    Vec: struct { impl Debug { debug: fn(&&self) -> String Never! { "" } } }
     impl Vec.Mul { mul: fn(self, rhs: Vec) -> Vec Never! { rhs } }
     impl Vec.Mul(Float) { mul: fn(self, rhs: Float) -> Vec Never! { self } }
   `);
@@ -144,8 +144,8 @@ function fixture(t) {
     example_only: fn() {}
     test_only: fn() {}
   `);
-  put("Examples/features/basics/demo.jet", "use d: core.demo\nrun: fn() { d.example_only(); d.example_only() }");
-  put("Examples/features/expected/fake.jet", "run: fn() { core.demo.unused() }");
+  put("Examples/Basics/demo.jet", "use d: core.demo\nrun: fn() { d.example_only(); d.example_only() }");
+  put("Examples/expected/fake.jet", "run: fn() { core.demo.unused() }");
   put("tests/demo.rs", 'let program = r#"run: fn() { core.demo.test_only() }"#;');
   return { root, put };
 }

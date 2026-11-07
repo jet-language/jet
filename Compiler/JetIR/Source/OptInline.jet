@@ -62,7 +62,7 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
             if selected -> grown += size
         }
         if selected -> any = true
-        &selected_sites.push(selected)
+        selected_sites.push(selected)
     }
     if !any -> return None
     out := ir_function_new(caller.name, caller.key, caller.symbol, caller.source_file, caller.line)
@@ -70,18 +70,18 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
     out.symbol_hash = caller.symbol_hash
     out.cold = caller.cold
     out.host_symbol = caller.host_symbol.copy()
-    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(&out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
+    loop slot in 0..<caller.slot_type.len() -> _ := ir_slot(out, caller.slot_type[slot], caller.slot_kind[slot], caller.slot_name[slot], caller.slot_line[slot])
     out.result = caller.result
-    loop value in caller.args -> &out.args.push(value)
+    loop value in caller.args -> out.args.push(value)
     loop at in 0..<caller.op.len() {
         if selected_sites[at] {
-            ir_opt_splice(m, &out, caller, at, bodies[caller.a[at]][0])
+            ir_opt_splice(m, out, caller, at, bodies[caller.a[at]][0])
             report.inlined_calls += 1
         } else {
-            _ := ir_emit(&out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
+            _ := ir_emit(out, caller.op[at], caller.dst[at], caller.a[at], caller.b[at], caller.c[at], caller.code_line[at])
         }
     }
-    ir_opt_compact(&out)
+    ir_opt_compact(out)
     Val(out)
 }
 
@@ -152,16 +152,16 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
     map := [Int]{}
     loop slot in 0..<callee.slot_type.len() {
         if slot < callee.param_count {
-            &map.push(caller.args[caller.b[at] + slot])
+            map.push(caller.args[caller.b[at] + slot])
             next
         }
         name: if same_file -> callee.slot_name[slot] else -> -1
         line: if same_file -> callee.slot_line[slot] else -> 0
-        &map.push(ir_slot(&f, callee.slot_type[slot], callee.slot_kind[slot], name, line))
+        map.push(ir_slot(f, callee.slot_type[slot], callee.slot_kind[slot], name, line))
     }
     dst: caller.dst[at]
     callee_facts: ir_opt_facts(callee)
-    _ := ir_emit(&f, IROp.Block, -1, -1, -1, -1, site_line)
+    _ := ir_emit(f, IROp.Block, -1, -1, -1, -1, site_line)
     depth := 0
     loop k in 0..<callee.op.len() {
         op: callee.op[k]
@@ -172,16 +172,16 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
                 // Frame storage of the inlined body is the caller's now: the
                 // result can be that storage itself, like call-site storage.
                 own: value >= callee.param_count && callee_facts.defs[value] == 1 && callee.op[callee_facts.def_at[value]] == .StackAddress
-                ir_opt_result(m, &f, dst, map[value], own, line)
+                ir_opt_result(m, f, dst, map[value], own, line)
             }
-            _ := ir_emit(&f, IROp.Br, -1, depth, -1, -1, line)
+            _ := ir_emit(f, IROp.Br, -1, depth, -1, -1, line)
             next
         }
         if op == .End -> depth -= 1
-        ir_opt_emit_mapped(&f, callee, k, map, line)
+        ir_opt_emit_mapped(f, callee, k, map, line)
         if op == .Block || op == .Loop || op == .If -> depth += 1
     }
-    _ := ir_emit(&f, IROp.End, -1, -1, -1, -1, site_line)
+    _ := ir_emit(f, IROp.End, -1, -1, -1, -1, site_line)
 }
 
 // The call's result slot `dst` takes the returned `value`: a move, or for an
@@ -190,11 +190,11 @@ ir_opt_splice: fn(m: IRModule, f: &IRFunction, caller: IRFunction, at: Int, call
 ir_opt_result: fn(m: IRModule, f: &IRFunction, dst: Int, value: Int, own: Bool, line: Int) Never! {
     ty: ir_x64_type(m, f, dst)
     if ty.kind == .Aggregate && !own {
-        _ := ir_emit(&f, IROp.StackAddress, dst, ty.size, ty.align, -1, line)
-        _ := ir_emit(&f, IROp.CopyBytes, -1, dst, value, ty.size, line)
+        _ := ir_emit(f, IROp.StackAddress, dst, ty.size, ty.align, -1, line)
+        _ := ir_emit(f, IROp.CopyBytes, -1, dst, value, ty.size, line)
         return
     }
-    _ := ir_emit(&f, IROp.Move, dst, value, -1, -1, line)
+    _ := ir_emit(f, IROp.Move, dst, value, -1, -1, line)
 }
 
 // Callee instruction `k` with its slots through `map` (its argument list
@@ -219,8 +219,8 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
     }
     if op == .Call || op == .CallRuntime || op == .CallIndirect {
         start: f.args.len()
-        loop index in b..<(b + c) -> &f.args.push(map[callee.args[index]])
+        loop index in b..<(b + c) -> f.args.push(map[callee.args[index]])
         b = start
     }
-    _ := ir_emit(&f, op, dst, a, b, c, line)
+    _ := ir_emit(f, op, dst, a, b, c, line)
 }

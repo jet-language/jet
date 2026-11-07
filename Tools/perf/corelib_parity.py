@@ -43,13 +43,12 @@ SCRATCH_ROOT = Path.home() / ".cache" / "jet-dev" / "corelib-parity"
 
 
 # These are compiler-owned surfaces with no source-level declaration shape.
-# Ptr is the ratified raw-pointer type. The other two names are reserved
-# words in function declaration position; the Rust Core dispatcher remains the
-# canonical implementation for them.
+# Ptr is the ratified raw-pointer type. `take` is a reserved word in function
+# declaration position; the Rust Core dispatcher remains the canonical
+# implementation for it.
 SOURCE_EXEMPTIONS = {
     "core.mem.Ptr": "builtin raw-pointer type",
     "core.data.stream.take": "reserved builtin stream operation",
-    "core.math.combinatorics.take": "reserved builtin combinatorics operation",
 }
 
 

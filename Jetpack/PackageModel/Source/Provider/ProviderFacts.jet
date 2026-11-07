@@ -28,12 +28,12 @@ ProviderFactValue: enum {
             .Text(text) -> Dyn.Text(text)
             .List(values) -> {
                 items := [Dyn]{}
-                loop value in values -> &items.push(value.to_json_tree())
+                loop value in values -> items.push(value.to_json_tree())
                 Dyn.Array(items)
             }
             .Map(values) -> {
                 object := [(key: String, value: Dyn)]{}
-                loop key in pkg_provider_sorted_keys(values.keys().to_list()) -> &object.push((key: key, value: values[key].to_json_tree()))
+                loop key in pkg_provider_sorted_keys(values.keys().to_list()) -> object.push((key: key, value: values[key].to_json_tree()))
                 Dyn.Object(object)
             }
         }
@@ -54,7 +54,7 @@ ProviderFactValue: enum {
             .Text(text) -> ProviderFactValue.Text(text)
             .Array(items) -> {
                 values := [ProviderFactValue]{}
-                loop item in items -> &values.push(ProviderFactValue.from_json_tree(item))
+                loop item in items -> values.push(ProviderFactValue.from_json_tree(item))
                 ProviderFactValue.List(values)
             }
             .Object(fields) -> {
@@ -175,38 +175,38 @@ ProviderFacts: struct {
         }
         name: facts.provider.copy()
         target: facts.target.copy()
-        &facts.add_fact("provider.name", ProviderFactValue.Text(name), "ref")
-        &facts.add_fact("provider.target", ProviderFactValue.Text(target), "ref")
+        facts.add_fact("provider.name", ProviderFactValue.Text(name), "ref")
+        facts.add_fact("provider.target", ProviderFactValue.Text(target), "ref")
         selector_text: facts.selector.raw.copy()
-        if selector_text != "" -> &facts.add_fact("provider.selector", ProviderFactValue.Text(selector_text), "ref")
+        if selector_text != "" -> facts.add_fact("provider.selector", ProviderFactValue.Text(selector_text), "ref")
         if explicit_provider != "" && authority.provider.trim() != "" && explicit_provider != authority.provider {
             // Named sources such as `@default` are source authorities, not
             // provider names; two recognized external providers contradict.
-            &facts.add_fact("provider.authority", ProviderFactValue.Text(authority.provider), "ref")
+            facts.add_fact("provider.authority", ProviderFactValue.Text(authority.provider), "ref")
             if pkg_provider_is_external(provider) && pkg_provider_is_external(authority.provider) {
-                &facts.add_conflict("provider", provider, authority.provider, "reference.provider")
+                facts.add_conflict("provider", provider, authority.provider, "reference.provider")
             }
         }
         if {
-            provider == "infer" -> &facts.add_loss("provider", "ambiguous provider fact: unresolved inference", "profile-source")
-            pkg_provider_is_external(provider) && authority.provider.trim() == "" -> &facts.add_loss("provider.reference", "external provider references must retain a fully qualified provider source suffix", "reference.provider")
-            pkg_provider_is_external(provider) && !details.selector.is_exact() -> &facts.add_loss("provider.selector", PROVIDER_EXACT_SELECTOR_LOSS, "reference.selector")
+            provider == "infer" -> facts.add_loss("provider", "ambiguous provider fact: unresolved inference", "profile-source")
+            pkg_provider_is_external(provider) && authority.provider.trim() == "" -> facts.add_loss("provider.reference", "external provider references must retain a fully qualified provider source suffix", "reference.provider")
+            pkg_provider_is_external(provider) && !details.selector.is_exact() -> facts.add_loss("provider.selector", PROVIDER_EXACT_SELECTOR_LOSS, "reference.selector")
             else -> {}
         }
         loop unknown in details.unknown {
-            &facts.add_loss("provider.selector", "unsupported selector fact `{unknown}` cannot be normalized losslessly", "reference.selector")
+            facts.add_loss("provider.selector", "unsupported selector fact `{unknown}` cannot be normalized losslessly", "reference.selector")
         }
         loop conflict in details.conflicts {
-            &facts.add_conflict("provider.selector.{conflict.key}", conflict.left, conflict.right, "reference.selector")
+            facts.add_conflict("provider.selector.{conflict.key}", conflict.left, conflict.right, "reference.selector")
         }
         loop duplicate in details.duplicates {
-            &facts.add_loss("provider.selector", "duplicate selector fact `{duplicate}` cannot be normalized losslessly", "reference.selector")
+            facts.add_loss("provider.selector", "duplicate selector fact `{duplicate}` cannot be normalized losslessly", "reference.selector")
         }
         identity_fields: [ProviderSelectorField]{ProviderSelectorField.Version, ProviderSelectorField.Revision, ProviderSelectorField.Digest}
         loop field in identity_fields {
             value: details.selector.value(field)
             if value != "" && !field.is_exact_value(value) {
-                &facts.add_loss("provider.selector.{field.name()}", "mutable {field.name()} selector `{value}` is not an exact provider identity", "reference.selector")
+                facts.add_loss("provider.selector.{field.name()}", "mutable {field.name()} selector `{value}` is not an exact provider identity", "reference.selector")
             }
         }
         facts
@@ -218,7 +218,7 @@ ProviderFacts: struct {
         if self.facts.get(key) == {
             .Val(existing) -> {
                 if existing != value {
-                    &self.conflicts.push(ProviderConflict{key: key, left: existing.to_json(), right: value.to_json(), source: source})
+                    self.conflicts.push(ProviderConflict{key: key, left: existing.to_json(), right: value.to_json(), source: source})
                     return
                 }
                 known: self.provenance.get(key) ?? return
@@ -232,23 +232,23 @@ ProviderFacts: struct {
     }
 
     add_loss: fn(&self, key: String, reason: String, source: String) Never! {
-        &self.losses.push(ProviderLoss{key: key, reason: reason, source: source})
+        self.losses.push(ProviderLoss{key: key, reason: reason, source: source})
     }
 
     add_conflict: fn(&self, key: String, left: String, right: String, source: String) Never! {
-        &self.conflicts.push(ProviderConflict{key: key, left: left, right: right, source: source})
+        self.conflicts.push(ProviderConflict{key: key, left: left, right: right, source: source})
     }
 
     set_profile: fn(&self, profile: String, provenance: String) Never! {
         self.profile = profile
         self.profile_provenance = provenance
-        &self.add_fact("profile.name", ProviderFactValue.Text(profile), "profile.source")
-        &self.add_fact("profile.provenance", ProviderFactValue.Text(provenance), "profile.source")
+        self.add_fact("profile.name", ProviderFactValue.Text(profile), "profile.source")
+        self.add_fact("profile.provenance", ProviderFactValue.Text(provenance), "profile.source")
     }
 
     set_resolved_source: fn(&self, source: String) Never! {
         self.resolved_source = source
-        &self.add_fact("provider.resolved_source", ProviderFactValue.Text(source), "resolver")
+        self.add_fact("provider.resolved_source", ProviderFactValue.Text(source), "resolver")
     }
 
     // Retain the exact selector a named source authority resolved while the
@@ -256,28 +256,28 @@ ProviderFacts: struct {
     set_resolved_selector: fn(&self, selector: String, source: String) Never! {
         details: ProviderSelectorDetails.parse(selector)
         loop unknown in details.unknown {
-            &self.add_loss("provider.resolved_selector", "unsupported resolved selector fact `{unknown}` cannot be normalized losslessly", source)
+            self.add_loss("provider.resolved_selector", "unsupported resolved selector fact `{unknown}` cannot be normalized losslessly", source)
         }
         loop conflict in details.conflicts {
-            &self.add_conflict("provider.resolved_selector.{conflict.key}", conflict.left, conflict.right, source)
+            self.add_conflict("provider.resolved_selector.{conflict.key}", conflict.left, conflict.right, source)
         }
         loop duplicate in details.duplicates {
-            &self.add_loss("provider.resolved_selector", "duplicate resolved selector fact `{duplicate}` cannot be normalized losslessly", source)
+            self.add_loss("provider.resolved_selector", "duplicate resolved selector fact `{duplicate}` cannot be normalized losslessly", source)
         }
         resolved: details.selector
-        &self.add_fact("provider.resolved_selector", ProviderFactValue.Text(selector), source)
+        self.add_fact("provider.resolved_selector", ProviderFactValue.Text(selector), source)
         if !resolved.is_exact() {
-            &self.add_loss("provider.resolved_selector", "resolved provider selector is not an exact version, revision, or digest", source)
+            self.add_loss("provider.resolved_selector", "resolved provider selector is not an exact version, revision, or digest", source)
             return
         }
         if self.selector.is_exact() && self.selector.canonical() != resolved.canonical() {
-            &self.add_conflict("provider.selector", self.selector.canonical(), resolved.canonical(), source)
+            self.add_conflict("provider.selector", self.selector.canonical(), resolved.canonical(), source)
             return
         }
         kept := [ProviderLoss]{}
         loop loss in self.losses {
             if loss.source == "reference.selector" && loss.key == "provider.selector" && loss.reason == PROVIDER_EXACT_SELECTOR_LOSS -> next
-            &kept.push(loss)
+            kept.push(loss.copy())
         }
         self.losses = kept
     }
@@ -289,7 +289,7 @@ ProviderFacts: struct {
             if self.native_format != format || self.native_document != document {
                 left: "{self.native_format}:sha256-{pkg_sha256_hex(self.native_document.bytes())}"
                 right: "{format}:sha256-{pkg_sha256_hex(document.bytes())}"
-                &self.add_conflict("provider.native_document", left, right, "provider.native_document")
+                self.add_conflict("provider.native_document", left, right, "provider.native_document")
             }
             return
         }
@@ -430,9 +430,9 @@ ProviderFacts: struct {
         provenance := [String: Dyn]{}
         loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = Dyn.Text(self.provenance[key].copy())
         losses := [Dyn]{}
-        loop loss in self.losses -> &losses.push(loss.to_json_tree())
+        loop loss in self.losses -> losses.push(loss.to_json_tree())
         conflicts := [Dyn]{}
-        loop conflict in self.conflicts -> &conflicts.push(conflict.to_json_tree())
+        loop conflict in self.conflicts -> conflicts.push(conflict.to_json_tree())
         object := [String: Dyn]{}
         object["schema"] = Dyn.Text(PROVIDER_FACTS_SCHEMA)
         object["provider"] = Dyn.Text(self.provider.copy())
@@ -470,10 +470,10 @@ ProviderFacts: struct {
         }
         loss_values: pkg_json_array(root.get("losses") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
         losses := [ProviderLoss]{}
-        loop item in loss_values -> &losses.push(ProviderLoss.from_json_tree(item))
+        loop item in loss_values -> losses.push(ProviderLoss.from_json_tree(item))
         conflict_values: pkg_json_array(root.get("conflicts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `conflicts` is not an array"})
         conflicts := [ProviderConflict]{}
-        loop item in conflict_values -> &conflicts.push(ProviderConflict.from_json_tree(item))
+        loop item in conflict_values -> conflicts.push(ProviderConflict.from_json_tree(item))
         Ok(ProviderFacts{
             provider: pkg_provider_required_text(root, "provider", "provider facts lack `provider`"),
             reference: pkg_provider_required_text(root, "reference", "provider facts lack `reference`"),
@@ -493,21 +493,21 @@ ProviderFacts: struct {
 
     explain_lines: fn(self) -> [String] Never! {
         lines := [String]{"provider: {self.provider}", "reference: {self.reference}", "target: {self.target}"}
-        if self.resolved_source != "" -> &lines.push("resolved-source: {self.resolved_source}")
+        if self.resolved_source != "" -> lines.push("resolved-source: {self.resolved_source}")
         if self.profile != "" {
-            &lines.push("profile: {self.profile}")
-            &lines.push("profile-provenance: {self.profile_provenance}")
+            lines.push("profile: {self.profile}")
+            lines.push("profile-provenance: {self.profile_provenance}")
         }
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) {
-            &lines.push("fact {key}: {self.facts[key].to_json()}")
+            lines.push("fact {key}: {self.facts[key].to_json()}")
             if self.provenance.get(key) == {
-                .Val(source) -> &lines.push("  provenance {key}: {source}")
+                .Val(source) -> lines.push("  provenance {key}: {source}")
                 .None -> {}
             }
         }
-        loop loss in self.losses -> &lines.push("loss {loss.key}: {loss.reason} ({loss.source})")
-        loop conflict in self.conflicts -> &lines.push("conflict {conflict.key}: {conflict.left} vs {conflict.right} ({conflict.source})")
-        if self.native_document != "" -> &lines.push("native {self.native_format}: retained")
+        loop loss in self.losses -> lines.push("loss {loss.key}: {loss.reason} ({loss.source})")
+        loop conflict in self.conflicts -> lines.push("conflict {conflict.key}: {conflict.left} vs {conflict.right} ({conflict.source})")
+        if self.native_document != "" -> lines.push("native {self.native_format}: retained")
         lines
     }
 }
@@ -550,7 +550,7 @@ pkg_provider_number_tree: fn(text: String) -> Dyn Never! {
 
 pkg_provider_sorted_keys: fn(keys: [String]) -> [String] Never! {
     out := keys
-    &out.sort()
+    out.sort()
     out
 }
 

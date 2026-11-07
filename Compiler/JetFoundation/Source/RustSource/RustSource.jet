@@ -46,63 +46,63 @@ rust_code_mask: fn(source: String) -> String Never! {
                 raw_start: rust_source_raw_string_start(bytes, index)
                 if {
                     code == 47 && rust_source_byte(bytes, index + 1) == 47 -> {
-                        rust_source_push_spaces(&out, 2)
+                        rust_source_push_spaces(out, 2)
                         index += 2
                         state = RustSourceMaskState.LineComment
                     }
                     code == 47 && rust_source_byte(bytes, index + 1) == 42 -> {
-                        rust_source_push_spaces(&out, 2)
+                        rust_source_push_spaces(out, 2)
                         index += 2
                         state = RustSourceMaskState.BlockComment(1)
                     }
                     raw_start != None -> {
                         found: raw_start
-                        rust_source_push_spaces(&out, found.prefix_len)
+                        rust_source_push_spaces(out, found.prefix_len)
                         index += found.prefix_len
                         state = RustSourceMaskState.RawStr(found.hashes)
                     }
                     code == 34 || (code == 98 && rust_source_byte(bytes, index + 1) == 34) -> {
                         width: if code == 98 -> 2 else -> 1
-                        rust_source_push_spaces(&out, width)
+                        rust_source_push_spaces(out, width)
                         index += width
                         state = RustSourceMaskState.Str(false)
                     }
                     code == 39 && rust_source_char_literal_end(bytes, index, escaped_char_ends) != None -> {
-                        &out.push(U8{32})
+                        out.push(U8{32})
                         index += 1
                         state = RustSourceMaskState.Char(false)
                     }
                     else -> {
-                        &out.push(byte)
+                        out.push(byte)
                         index += 1
                     }
                 }
             }
             .LineComment -> {
-                &out.push(blank)
+                out.push(blank)
                 if code == 10 -> state = RustSourceMaskState.Code
                 index += 1
             }
             .BlockComment(nesting) -> {
                 if {
                     code == 47 && rust_source_byte(bytes, index + 1) == 42 -> {
-                        rust_source_push_spaces(&out, 2)
+                        rust_source_push_spaces(out, 2)
                         index += 2
                         state = RustSourceMaskState.BlockComment(nesting + 1)
                     }
                     code == 42 && rust_source_byte(bytes, index + 1) == 47 -> {
-                        rust_source_push_spaces(&out, 2)
+                        rust_source_push_spaces(out, 2)
                         index += 2
                         state = if nesting == 1 -> RustSourceMaskState.Code else -> RustSourceMaskState.BlockComment(nesting - 1)
                     }
                     else -> {
-                        &out.push(blank)
+                        out.push(blank)
                         index += 1
                     }
                 }
             }
             .Str(escaped) -> {
-                &out.push(blank)
+                out.push(blank)
                 index += 1
                 if {
                     escaped -> state = RustSourceMaskState.Str(false)
@@ -113,16 +113,16 @@ rust_code_mask: fn(source: String) -> String Never! {
             }
             .RawStr(hashes) -> {
                 closes: code == 34 && rust_source_all_hashes(bytes, index + 1, hashes)
-                &out.push(blank)
+                out.push(blank)
                 index += 1
                 if closes {
-                    rust_source_push_spaces(&out, hashes)
+                    rust_source_push_spaces(out, hashes)
                     index += hashes
                     state = RustSourceMaskState.Code
                 }
             }
             .Char(escaped) -> {
-                &out.push(U8{32})
+                out.push(U8{32})
                 index += 1
                 if {
                     escaped -> state = RustSourceMaskState.Char(false)
@@ -137,7 +137,7 @@ rust_code_mask: fn(source: String) -> String Never! {
 }
 
 rust_source_push_spaces: fn(out: &[U8], count: Int) Never! {
-    loop _ in 0..<count -> &out.push(U8{32})
+    loop _ in 0..<count -> out.push(U8{32})
 }
 
 // Whether `bytes[start..<start + count]` exists and is all `#`.
@@ -205,7 +205,7 @@ strip_test_items: fn(source: String) -> String Never! {
     item_ends: rust_source_item_ends(code, brackets)
     leading: rust_source_leading_lines(raw, code)
     ends := [Int]{}
-    loop _ in code -> &ends.push(-2)
+    loop _ in code -> ends.push(-2)
     out := [U8]{}
     kept := 0
     line_start := 0
@@ -216,12 +216,12 @@ strip_test_items: fn(source: String) -> String Never! {
         at := line_start
         loop at < line_end && (rust_source_byte(code, at) == 32 || rust_source_byte(code, at) == 9) -> at += 1
         if rust_source_starts_with(code, at, "#[cfg(test)]".bytes()) || rust_source_starts_with(code, at, "#[test]".bytes()) {
-            end: rust_source_test_item_end(code, at, brackets, item_ends, &ends)
+            end: rust_source_test_item_end(code, at, brackets, item_ends, ends)
             if end == {
                 .Val(last) -> {
                     if rust_source_leading_item_start(leading, line_start, kept) == {
                         .Val(first) -> {
-                            &out.extend(raw[kept..<first])
+                            out.extend(raw[kept..<first])
                             kept = last
                             line_start = last
                             next
@@ -234,7 +234,7 @@ strip_test_items: fn(source: String) -> String Never! {
         }
         line_start = line_end
     }
-    &out.extend(raw[kept..<raw.len()])
+    out.extend(raw[kept..<raw.len()])
     String.from_bytes(out) ?? panic("stripping Rust items preserves UTF-8 bytes")
 }
 
@@ -244,12 +244,12 @@ strip_test_items: fn(source: String) -> String Never! {
 rust_source_brackets: fn(code: [U8]) -> [Int] Never! {
     closes := [Int]{}
     stack := [Int]{}
-    loop _ in code -> &closes.push(-1)
+    loop _ in code -> closes.push(-1)
     loop index in 0..<code.len() {
         byte: rust_source_byte(code, index)
-        if byte == 40 || byte == 91 || byte == 123 -> &stack.push(index)
+        if byte == 40 || byte == 91 || byte == 123 -> stack.push(index)
         if (byte == 41 || byte == 93 || byte == 125) && stack.len() > 0 {
-            open: &stack.pop() ?? panic("nonempty bracket stack")
+            open: stack.pop() ?? panic("nonempty bracket stack")
             closes[open] = index
         }
     }
@@ -301,7 +301,7 @@ rust_source_test_item_end: fn(code: [U8], at: Int, closes: [Int], item_ends: Rus
             break
         }
         if rust_source_byte(code, index) == 35 && rust_source_byte(code, index + 1) == 91 {
-            &visited.push(index)
+            visited.push(index)
             close: rust_source_closing_bracket(closes, index + 1) ?? break
             index = close + 1
             next
@@ -355,7 +355,7 @@ rust_source_escaped_char_ends: fn(bytes: [U8]) -> [Int] Never! {
         }
         escaped = normal
         normal = next_normal
-        &ends.push(normal)
+        ends.push(normal)
         index -= 1
     }
     ends
@@ -373,9 +373,9 @@ rust_source_item_ends: fn(code: [U8], closes: [Int]) -> RustSourceItemEnds Never
     semicolon := [Int]{}
     angle := [Int]{}
     loop _ in 0..<code.len() + 1 {
-        &body.push(-1)
-        &semicolon.push(-1)
-        &angle.push(-1)
+        body.push(-1)
+        semicolon.push(-1)
+        angle.push(-1)
     }
     index := code.len() - 1
     loop index >= 0 {
@@ -417,7 +417,7 @@ RustSourceLeading: struct {
 // it is `]`, otherwise -1. A removal floor may make that earlier byte irrelevant.
 rust_source_leading_lines: fn(source: [U8], code: [U8]) -> [RustSourceLeading] Never! {
     rows := [RustSourceLeading]{}
-    loop _ in 0..<code.len() + 1 -> &rows.push(RustSourceLeading{start: 0, above: -1})
+    loop _ in 0..<code.len() + 1 -> rows.push(RustSourceLeading{start: 0, above: -1})
     chain_start := 0
     chain_above := -1
     last_nonspace := -1

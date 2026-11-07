@@ -36,9 +36,9 @@ provider_json_parse_lenient: fn(input: String) -> ProviderFilteredJSON ProviderE
         if content_end > start && Int.from_u8(raw[content_end - 1]) == 13 -> content_end -= 1
         content: pkg_bytes_text(raw, start, content_end)
         if trust_json_is_provider_noise(content) {
-            &noise.push(content)
+            noise.push(content)
         } else {
-            loop index in start..<end -> &kept.push(raw[index])
+            loop index in start..<end -> kept.push(raw[index])
         }
         start = end
     }

@@ -31,7 +31,7 @@ sema_property_param_diagnostics: fn(test: TestDef) -> [Diagnostic] Never! {
     diagnostics := [Diagnostic]{}
     loop parameter in test.params {
         if sema_property_param_generatable(parameter.ty) -> next
-        &diagnostics.push(sema_error(
+        diagnostics.push(sema_error(
             "E0613",
             parameter.ty_span,
             "a property test can't generate values of type `{type_name(parameter.ty)}`",
@@ -66,6 +66,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
     temporary_name := "{sema_test_synthetic_prefix()}{test.name ?? "anonymous"}"
     synthetic := ast_func(temporary_name, test.name_span, test.span)
     synthetic.params = test.params
+    synthetic.pre = test.pre
     synthetic.body = test.body
     synthetic.compiler_generated = true
     registered := false
@@ -87,7 +88,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
         }
         symbol.id = owner_id
         symbol.ty = Val(sema_function_symbol_type(synthetic, false, owner_id, environment.source_file, environment.source_origin, environment.source_segments))
-        registered = sema_scope_add_module_symbol(&scopes, symbol)
+        registered = sema_scope_add_module_symbol(scopes, symbol)
         if !registered -> temporary_name = "{temporary_name}_"
     }
     call_facts := [SemaCallSiteFact]{}
@@ -96,7 +97,7 @@ sema_check_test_function: fn(test: TestDef, environment: SemaScopeEnvironment, p
     diagnostics := [Diagnostic]{}
     // The synthetic has no own generic parameters: its merged environment is
     // unchanged. The canonical read checker scopes and restores its name.
-    checked := sema_function_check_shared(synthetic, owner_id, TFuncKind.TopLevel, false, environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    checked := sema_function_check_shared(synthetic, owner_id, TFuncKind.TopLevel, false, environment, program, scopes, host_hooks, diagnostics, call_facts, comptime_requests, name_references)
     function := FnBody?{None}
     if checked.value == .Val(value) {
         updated_value := value

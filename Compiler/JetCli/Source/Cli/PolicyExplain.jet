@@ -72,13 +72,13 @@ jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryRe
  target: declaration.target ?? next
  if offset < target.start || offset > target.end -> next
  }
- &declarations.push(declaration)
+ declarations.push(declaration.copy())
  }
  } else {
  // Whole-file policy queries combine every loaded module, not just entry.
  loop source_module in loaded.modules {
  loop declaration in source_module.program.policy_declarations {
- if declaration.key == key -> &declarations.push(declaration)
+ if declaration.key == key -> declarations.push(declaration.copy())
  }
  }
  }
@@ -87,7 +87,7 @@ jet_cli_explain_loaded_policy: fn(key: PolicyKey, loaded: JetDriverSourceQueryRe
  named: loop declaration in declarations {
  if declaration.source == source_module.path -> break true
  } ?? false
- if named -> &sources.push(PolicySourceText{path: source_module.path, text: diagnostic_source_text(source_module.source)})
+ if named -> sources.push(PolicySourceText{path: source_module.path, text: diagnostic_source_text(source_module.source)})
  }
  explanation: jet_cli_explain_policy_lookup(key, declarations, sources) ?? {
  name: policy_key_name(key)

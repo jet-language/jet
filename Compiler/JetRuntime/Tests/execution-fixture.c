@@ -11,6 +11,7 @@
 #include <string.h>
 #include <unistd.h>
 
+extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern void jet_rt_thread_attach(void);
 extern void jet_rt_thread_detach(void);
 extern bool jet_rt_execution_begin(uint64_t, uint64_t, uint64_t);
@@ -183,7 +184,9 @@ static void flush_case(void) {
     assert(at == sizeof bytes - 1 && memcmp(output, bytes, at) == 0);
 }
 
-int main(void) {
+int main(int argc, char **argv, char **envp) {
+    // Startup env/argv capture precedes any runtime entry (HostStartup.jet).
+    jet_rt_host_arguments(argc, argv, envp);
     jet_rt_thread_attach();
     for (unsigned mode = 0; mode < 3; ++mode) {
         budget_case(mode, false);

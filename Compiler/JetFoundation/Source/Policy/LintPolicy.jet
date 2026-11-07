@@ -35,7 +35,7 @@ lint_policy_code_error: fn(detail: String, code: String, name: String?) -> LintP
 lint_registered_lints: fn() -> [DiagnosticRegistryRow] Never! {
     rows := [DiagnosticRegistryRow]{}
     loop row in DIAGNOSTIC_ROWS {
-        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> &rows.push(row)
+        if row.severity == DIAGNOSTIC_LINT && row.status != DiagnosticRegistryStatus.Retired -> rows.push(row)
     }
     rows
 }
@@ -112,7 +112,7 @@ lint_strip_comments: fn(value: String) -> String Never! {
     loop at < raw.len() {
         code: Int.from_u8(raw[at])
         if quoted {
-            &out.push(raw[at])
+            out.push(raw[at])
             if {
                 escaped -> escaped = false
                 code == 92 -> escaped = true
@@ -121,13 +121,13 @@ lint_strip_comments: fn(value: String) -> String Never! {
             }
         } else if code == 34 {
             quoted = true
-            &out.push(raw[at])
+            out.push(raw[at])
         } else if code == 47 && at + 1 < raw.len() && Int.from_u8(raw[at + 1]) == 47 {
             at += 2
             loop at < raw.len() && Int.from_u8(raw[at]) != 10 -> at += 1
-            if at < raw.len() -> &out.push(raw[at])
+            if at < raw.len() -> out.push(raw[at])
         } else {
-            &out.push(raw[at])
+            out.push(raw[at])
         }
         at += 1
     }
@@ -148,7 +148,7 @@ lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
             if lint_is_diagnostic_code_shape(name) -> return Err(lint_policy_code_error("`{name}` is a diagnostic code; `policy.lints.deny` takes named lint values", name, None))
             return Err(lint_policy_error("`{name}` isn't a registered lint policy name; allowed: {lint_known_policy_names()}"))
         }
-        &names.push(name)
+        names.push(name)
     }
     Ok(names)
 }
@@ -158,7 +158,7 @@ lint_known_policy_names: fn() -> String Never! {
     names := [String]{}
     loop row in lint_registered_lints() {
         name: row.lint_name ?? panic("lint rows have names")
-        &names.push("`{name}`")
+        names.push("`{name}`")
     }
     names.join(", ")
 }
@@ -291,7 +291,7 @@ lint_top_level_commas: fn(body: String) -> [String] Never! {
             41 | 93 | 125 -> depth -= 1
             44 -> {
                 if depth == 0 {
-                    &out.push(lint_slice(raw, start, at))
+                    out.push(lint_slice(raw, start, at))
                     start = at + 1
                 }
             }
@@ -299,7 +299,7 @@ lint_top_level_commas: fn(body: String) -> [String] Never! {
         }
     }
     tail: lint_slice(raw, start, raw.len())
-    if tail.trim() != "" -> &out.push(tail)
+    if tail.trim() != "" -> out.push(tail)
     out
 }
 
@@ -308,7 +308,7 @@ lint_key_value_entries: fn(body: String) -> [(key: String, value: String)] Never
     out := [(key: String, value: String)]{}
     loop entry in lint_top_level_commas(body) {
         parts: entry.trim().split_once(":") ?? next
-        &out.push((key: parts.before.trim(), value: parts.after.trim()))
+        out.push((key: parts.before.trim(), value: parts.after.trim()))
     }
     out
 }

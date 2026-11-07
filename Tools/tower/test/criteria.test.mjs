@@ -157,3 +157,47 @@ test('reopenCriterion resets met and verified rows and records the reason', () =
   assert.ok(events.every(e => e.by === 'repairer'));
   assert.match(events[0].note + events[1].note, /met result changed|verified result changed/);
 });
+
+test('editCriterion rewords a row, reopens a met one, and logs the old text', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Edit criteria' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'open row', 'planner'));
+  st.mutate((s) => db.addCriterion(s, '#1', 'met row', 'planner'));
+  st.mutate((s) => db.meetCriterion(s, '#1', 2, { evidence: 'built', by: 'builder' }));
+  st.mutate((s) => db.editCriterion(s, '#1', 1, { text: 'open row, reworded', reason: 'clearer', by: 'owner' }));
+  const { result } = st.mutate((s) => db.editCriterion(s, '#1', 2, { text: 'met row, now stricter', reason: 'tightened', by: 'owner' }));
+  assert.equal(result.reopened, true);
+  const [first, second] = st.load().cards[0].criteria;
+  assert.deepEqual([first.n, first.text, first.status], [1, 'open row, reworded', 'open']);
+  assert.deepEqual([second.n, second.text, second.status, second.evidence, second.metBy], [2, 'met row, now stricter', 'open', '', null]);
+  const notes = st.load().events.filter(e => e.action === 'card.criteria-edit').map(e => e.note).join('\n');
+  assert.match(notes, /#2: tightened \(reopened\); was: met row/);
+  assert.throws(() => st.mutate((s) => db.editCriterion(s, '#1', 1, { text: 'x', by: 'owner' })), (e) => e.code === 'E_INVALID'); // no reason
+  assert.throws(() => st.mutate((s) => db.editCriterion(s, '#1', 1, { text: ' ', reason: 'r', by: 'owner' })), (e) => e.code === 'E_INVALID');
+  assert.throws(() => st.mutate((s) => db.editCriterion(s, '#1', 9, { text: 'x', reason: 'r', by: 'owner' })), (e) => e.code === 'E_NOT_FOUND');
+});
+
+test('removeCriterion drops a row, logs it, and never reuses its number', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'Remove criteria' }, cfg));
+  st.mutate((s) => db.addCriterion(s, '#1', 'first', 'planner'));
+  st.mutate((s) => db.addCriterion(s, '#1', 'second', 'planner'));
+  assert.throws(() => st.mutate((s) => db.removeCriterion(s, '#1', 2, { by: 'owner' })), (e) => e.code === 'E_INVALID'); // no reason
+  st.mutate((s) => db.removeCriterion(s, '#1', 2, { reason: 'out of scope', by: 'owner' }));
+  st.mutate((s) => db.addCriterion(s, '#1', 'third', 'planner'));
+  assert.deepEqual(st.load().cards[0].criteria.map(i => [i.n, i.text]), [[1, 'first'], [3, 'third']]);
+  const event = st.load().events.find(e => e.action === 'card.criteria-remove');
+  assert.match(event.note, /#2: out of scope; was \[open\]: second/);
+});
+
+test('milestone criteria edit and remove mirror the card rules', () => {
+  const st = fresh();
+  const { result: m } = st.mutate((s) => db.addMilestone(s, { epochId: 'e1', title: 'MVP', criteria: [{ text: 'one' }, { text: 'two' }] }));
+  st.mutate((s) => db.meetMilestoneCriterion(s, m.id, 1, { evidence: 'done', by: 'builder' }));
+  const { result } = st.mutate((s) => db.editMilestoneCriterion(s, m.id, 1, { text: 'one, stricter', reason: 'tightened', by: 'owner' }));
+  assert.equal(result.reopened, true);
+  st.mutate((s) => db.removeMilestoneCriterion(s, m.id, 2, { reason: 'merged into one', by: 'owner' }));
+  st.mutate((s) => db.addMilestoneCriterion(s, m.id, 'three', 'planner'));
+  const saved = st.load().milestones.find(x => x.id === m.id);
+  assert.deepEqual(saved.criteria.map(i => [i.n, i.text, i.status]), [[1, 'one, stricter', 'open'], [3, 'three', 'open']]);
+});

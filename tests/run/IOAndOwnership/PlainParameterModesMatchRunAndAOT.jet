@@ -1,0 +1,35 @@
+
+Parcel: struct { label: String }
+Leaf: struct { text: String }
+Branch: struct { leaf: Leaf }
+
+impl Parcel {
+    show: fn(self) { print(self.label) }
+}
+
+read_text: fn(text: String) { print(text) }
+read_list: fn(values: [Int]) { print(values.len()) }
+read_generic: fn<T>(value: T) { print(7) }
+read_nested: fn(branch: Branch) { print(branch.leaf.text) }
+apply: fn(f: fn(Int) -> Int, value: Int) -[]> Int { return f(value) }
+increment: fn(value: Int) -[]> Int { return value + 1 }
+edit: fn(values: &[Int]) { values[0] = 9 }
+consume: fn(text: &&String) { print(text) }
+
+run: fn() {
+    text: "hello"
+    values := [1, 2]
+    parcel: Parcel{ label: "parcel" }
+    branch: Branch{ leaf: Leaf{ text: "nested" } }
+    callback: increment
+    read_text(text)
+    read_list(values)
+    read_generic(text)
+    read_generic(callback)
+    read_nested(branch)
+    parcel.show()
+    print(apply((n: Int) -> (n + 1), 41))
+    edit(values)
+    print(values[0])
+    consume(text)
+}

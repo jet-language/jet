@@ -8,9 +8,9 @@ store_test_read_pinned_member: fn(directory: PinnedLifecycleDirectory, name: Str
     reader := directory.open_read(name) ?? panic("open {name}")
     bytes := [U8]{}
     loop {
-        chunk: &reader.read(4096) ?? panic("read {name}")
+        chunk: reader.read(4096) ?? panic("read {name}")
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
     }
     String.from_bytes(bytes) ?? panic("member {name} is UTF-8")
 }
@@ -31,8 +31,8 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
     files.rename(files.join(roots.root, "a"), files.join(roots.root, "held")) ?? panic("move component")
     files.create_dir_all(original) ?? panic("replace component")
     file := directory.create_new("proof.partial") ?? panic("create member")
-    &file.write_all("held".bytes()) ?? panic("write member")
-    &file.fsync() ?? panic("sync member")
+    file.write_all("held".bytes()) ?? panic("write member")
+    file.fsync() ?? panic("sync member")
     directory.rename_open(file, "proof.partial", "proof.txn", false) ?? panic("publish member")
     directory.sync() ?? panic("sync directory")
     assert(!files.exists(files.join(original, "proof.txn")))
@@ -55,11 +55,11 @@ store_test_is_already_exists: fn(error: StoreError) -> Bool Never! {
     roots: store_test_temp_roots()
     directory: PinnedLifecycleDirectory.open_or_create(roots.root) ?? panic("open pinned directory")
     source := directory.create_new("source.partial") ?? panic("create source")
-    &source.write_all("source".bytes()) ?? panic("write source")
-    &source.fsync() ?? panic("sync source")
+    source.write_all("source".bytes()) ?? panic("write source")
+    source.fsync() ?? panic("sync source")
     destination := directory.create_new("destination.txn") ?? panic("create destination")
-    &destination.write_all("destination".bytes()) ?? panic("write destination")
-    &destination.fsync() ?? panic("sync destination")
+    destination.write_all("destination".bytes()) ?? panic("write destination")
+    destination.fsync() ?? panic("sync destination")
     if directory.rename_open(source, "source.partial", "destination.txn", false) == {
         .Ok(_) -> panic("no-replace publication must refuse an existing destination")
         .Err(error) -> assert(store_test_is_already_exists(error))

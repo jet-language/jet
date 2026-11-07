@@ -60,7 +60,7 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
 
 #Test("cli native dev tools project the admitted binaries named by JET and JETPACK") {
     definitions := [String]{}
-    loop tool in CLI_NATIVE_DEV_TOOLS -> &definitions.push(tool.definition)
+    loop tool in CLI_NATIVE_DEV_TOOLS -> definitions.push(tool.definition)
     assert_eq(definitions, [String]{"jetDev", "jetpackDev"})
     tools: cli_native_dev_tool_paths([String: String]{"JET": "/opt/jet/bin/jet", "JETPACK": "/opt/jetpack/bin/jetpack", "PATH": "/usr/bin"})
     assert_eq(tools, [(command: String, binary: String)]{
@@ -95,7 +95,7 @@ cli_test_provider_paths: fn(file: String, value: String) -> String? {
 
 #Test("cli native output manifest keeps output selection and target condition typed") {
     selections := [String]{}
-    loop fact in CLI_NATIVE_OUTPUT_FACTS -> &selections.push("{fact.package}|{fact.relative}|{fact.variable}")
+    loop fact in CLI_NATIVE_OUTPUT_FACTS -> selections.push("{fact.package}|{fact.relative}|{fact.variable}")
     assert_eq(selections, [String]{"tzdata|share/zoneinfo|TZDIR", "vulkan-loader|lib|LD_LIBRARY_PATH", "raylib|lib|LD_LIBRARY_PATH"})
     assert_eq(CLI_NATIVE_OUTPUT_FACTS[0].platform, NativeOutputPlatform.Any)
     assert_eq(CLI_NATIVE_OUTPUT_FACTS[1].platform, NativeOutputPlatform.Linux)

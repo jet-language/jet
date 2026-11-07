@@ -404,7 +404,7 @@ result_handler_failure_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW
 }
 
-// `&name` / `^name` written together at line start marks
+// `&name` / `name.move()` written together at line start marks
 // the place a call writes or takes, so it begins a statement. A continued
 // bitwise-and or power line keeps a space after its operator.
 place_mark_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
@@ -437,6 +437,15 @@ tuple_rename_starts_at: fn(facts: [Int], index: Int) -> Bool Never! {
     false
 }
 
+// The token at `index` ends a statement at a line break. A postfix deref
+// `p.*` ends its line like the name it dereferences; any other trailing `*`
+// is a multiplication continued on the next line.
+ends_statement_at: fn(facts: [Int], index: Int) -> Bool Never! {
+    kind: kind_at(facts, index)
+    if kind == K_STAR -> return index > 0 && kind_at(facts, index - 1) == K_DOT
+    ends_statement(kind)
+}
+
 terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
@@ -453,10 +462,10 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                 kind == K_EOF -> {
                     if last_code >= 0 {
                         previous: kind_at(facts, last_code)
-                        if ends_statement(previous) && previous != K_RBRACE {
-                            &events.push(1)
-                            &events.push(index)
-                            &events.push(facts[last_code * 4 + 2])
+                        if ends_statement_at(facts, last_code) && previous != K_RBRACE {
+                            events.push(1)
+                            events.push(index)
+                            events.push(facts[last_code * 4 + 2])
                         }
                     }
                     index += 1
@@ -466,7 +475,7 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                         previous: kind_at(facts, last_code)
                         end: facts[last_code * 4 + 2]
                         start: facts[index * 4 + 1]
-                        if newline_between(source, end, start) && ends_statement(previous) {
+                        if newline_between(source, end, start) && ends_statement_at(facts, last_code) {
                             split: if kind == {
                                 K_UNIFIED_ARROW -> true
                                 K_LBRACE -> true
@@ -474,20 +483,20 @@ terminator_events: fn(source: [U8], facts: [Int]) -> [Int] Never! {
                             }
                             if {
                                 kind == K_LBRACE && tuple_rename_starts_at(facts, index) -> {
-                                    &events.push(1)
-                                    &events.push(index)
-                                    &events.push(end)
+                                    events.push(1)
+                                    events.push(index)
+                                    events.push(end)
                                 }
                                 split && previous == K_RPAREN -> {
-                                    &events.push(2)
-                                    &events.push(index)
-                                    &events.push(start)
+                                    events.push(2)
+                                    events.push(index)
+                                    events.push(start)
                                 }
                                 else -> {
                                     if (!suppresses_terminator(kind) || scope_member_starts_at(facts, index) || dispatch_arm_starts_at(source, facts, index) || place_mark_starts_at(facts, index)) && !result_handler_failure_starts_at(facts, index) && kind != K_RPAREN && kind != K_RBRACKET {
-                                        &events.push(1)
-                                        &events.push(index)
-                                        &events.push(end)
+                                        events.push(1)
+                                        events.push(index)
+                                        events.push(end)
                                     }
                                 }
                             }
@@ -521,14 +530,14 @@ terminator_events_apply: fn(facts: [Int], events: [Int], event_index: Int, raw_i
         at: events[at_event * 3 + 2]
         if {
             event == 1 -> {
-                &tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at}))
+                tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at}))
             }
             else -> {
                 kind: kind_at(facts, raw_index)
                 start: facts[raw_index * 4 + 1]
                 end: facts[raw_index * 4 + 2]
                 spelling: split_spelling(kind)
-                &diagnostics.push(diagnostic_from_registry(
+                diagnostics.push(diagnostic_from_registry(
                     "E0986",
                     Val(Span{start: start, end: end}),
                     "`{spelling}` must stay on the same line as the closing `)`",
@@ -547,10 +556,10 @@ lex_with_terminators: fn(source: [U8], config_surface: Bool, allow_reserved_iden
     facts: raw_token_facts(source, config_surface)
     events: terminator_events(source, facts)
     terminator_diagnostics := [Diagnostic]{}
-    lexed := lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), &tables, &terminator_diagnostics)
-    diagnostics := ^lexed.diagnostics
-    &diagnostics.extend(terminator_diagnostics)
-    Lexed{tokens: ^lexed.tokens, tables: ^tables, diagnostics: ^diagnostics}
+    lexed := lex_payload_from_facts(source, facts, events, config_surface, allow_reserved_identifiers, 0, 0, source.len(), tables, terminator_diagnostics)
+    diagnostics := lexed.diagnostics.move()
+    diagnostics.extend(terminator_diagnostics)
+    Lexed{tokens: lexed.tokens.move(), tables: tables.move(), diagnostics: diagnostics.move()}
 }
 
 lex: fn(source: [U8]) -> Lexed {

@@ -1,20 +1,54 @@
 # Examples
 
-`Examples/` is the runnable source library for Jet. The feature tree is the
-primary teaching surface; each example is a small program that can be run from
-the repository root. The source and its expected output, rather than this
-index, define the behavior.
+`Examples/` is the runnable source library for Jet. Each lesson is a small
+program that runs from the repository root, and its expected output sits beside
+it. The source and that output, rather than this index, define the behavior.
+
+## Areas
+
+Read the areas in this order. Each area's `README.md` lists its lessons, and
+each lesson teaches the safe default first.
+
+| # | Area | What it covers |
+| --- | --- | --- |
+| 1 | [Basics](Basics/) | Values, output, loops, branches and functions: the shortest path through Jet. |
+| 2 | [Types](Types/) | Structs, enums, optionals, traits, patterns and units of measure. |
+| 3 | [Collections](Collections/) | Lists, maps, sets, queues and the iterator adapters over them. |
+| 4 | [Text](Text/) | Strings, formatting, Unicode, regular expressions and checked text. |
+| 5 | [Math](Math/) | Numbers, exact arithmetic, operators, randomness and numeric compute. |
+| 6 | [Memory](Memory/) | Ownership, views, shared state, allocation and the unsafe tier. |
+| 7 | [ErrorsAndEffects](ErrorsAndEffects/) | Failures and how they travel, effects and authority, and contracts. |
+| 8 | [Metaprogramming](Metaprogramming/) | Compile-time code, reflection, generics, derives, attributes and build facts. |
+| 9 | [Modules](Modules/) | Modules, packages, imports and the Jetpack package manager. |
+| 10 | [Concurrency](Concurrency/) | Tasks, channels, cancellation, parallel work and services. |
+| 11 | [Systems](Systems/) | Files, processes, the terminal, time and command-line programs. |
+| 12 | [LowLevel](LowLevel/) | Sized numbers, layout, SIMD, inline assembly, freestanding and embedded targets. |
+| 13 | [Data](Data/) | JSON and other formats, binary data, dynamic values, databases and analysis. |
+| 14 | [Network](Network/) | HTTP clients and servers, sockets, URLs and browser automation. |
+| 15 | [Crypto](Crypto/) | Hashing, signing, sealed envelopes, keys and authentication. |
+| 16 | [Interop](Interop/) | Calling C and Rust, foreign projections, and programs in other languages. |
+| 17 | [Apps](Apps/) | Interfaces, web apps, games and larger programs. |
+| 18 | [Tooling](Tooling/) | Tests, debugging, the dev loop, builds, performance and developer tools. |
+
+Start with [`Basics/Hello.jet`](Basics/Hello.jet), then
+[`Basics/FirstHour.jet`](Basics/FirstHour.jet) and the
+[`Basics/Onboarding/`](Basics/Onboarding/) project, which is the next step
+after `jet new`. The complete `new` → `run` → `check` → `test` → `fix` →
+`explain` workflow is in the [first-hour guide](../Docs/spec/guides/first-hour.md).
+
+Regression and crash-reproducer programs do not live here; they are in
+[`tests/run`](../tests/run/) and [`tests/cases`](../tests/cases/).
 
 ## Run an example
 
 Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/jet-env jet`):
 
 ```sh
-jet run Examples/features/basics/hello.jet
+jet run Examples/Basics/Hello.jet
 ```
 
-The feature runner exercises the same layout in one pass and records the
-command, result, and output for each project:
+The feature runner exercises every lesson in one pass and records the
+command, result, and output for each:
 
 ```sh
 node Tools/agent/run-feature-examples.mjs
@@ -25,75 +59,26 @@ binary (same stdin, arguments and working directory); a compile-time
 diagnostic is compared with its command word spelled `jet run`.
 
 Both runners read the central known-failing ledger
-(`Tools/testkit/known-failing.tsv`) and a `# KNOWN-FAILING` header in an
+(`tests/known-failing.tsv`) and a `# KNOWN-FAILING` header in an
 example's `.case` the same way. An owned failure reports `known-failing`
 (testkit `KNOWN-FAILING`); an owned example that passes reports
 `unexpected-pass` and fails the run until its row is removed.
 
-An example that binds a fixed TCP port declares `host-port: N` in its `.case`;
-both runners hold that port's host-wide lock while it runs, so concurrent runs
-on one host take turns instead of failing to bind.
-
-An example that reads files by their repository path, such as
-[`path.jet`](features/io/path.jet) walking `Examples/features/io`, declares
-`repo-cwd: <reason>` once, before any steps, in its `.case`. The testkit then
-runs the built program from the root of its staged source copy, which keeps
-the repository layout, instead of from the project directory. The checkout is
-never written, and `file:` assertions stay relative to the project.
-`run-feature-examples.mjs` already runs such an example from the repository
-root, or from a staged copy with the same layout, and ignores the header. Only
-goldens take the header; a `tests/cases` case refuses it.
-
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 
-Examples that depend on environment or process identity should print checked
-relationships instead of raw paths or process IDs. For example,
-[`system_projection.jet`](features/io/system_projection.jet) compares the home
-directory with its environment source and checks child exit statuses, preserving
-the system calls while keeping the stdout contract independent of the host.
+## Layout and goldens
 
-## Find an example
+A lesson is either one source file, `Area/Lesson.jet`, or a project directory,
+`Area/Lesson/` with a `run.jet`. Its expected stdout sits beside it as
+`Area/Lesson.out` in both cases. A directory that holds only a `package.jet` or
+a `workspace.jet` is a package the lessons beside it use, not a lesson. The
+golden suite (`Compiler/JetTestKit/Source/Golden.jet`) and the feature runner
+walk all of `Examples/`, so every lesson needs its golden.
 
-Start with the smallest source in [`features/basics/`](features/basics/), then
-move to a sibling with a longer name or an `expert` suffix when it exists.
-[`features/types/`](features/types/), [`features/errors/`](features/errors/),
-[`features/effects/`](features/effects/), and
-[`features/tooling/`](features/tooling/) provide useful next stops. The
-[`features/`](features/) tree is the executable registry; its directory
-structure is deliberately more complete than this index.
-
-The `expected/` tree contains output fixtures. Some top-level files and
-specialized directories are regression or integration fixtures rather than a
-learning sequence; use their neighboring source and expected-output files as
-the contract.
-
-[`struct_call_word.jet`](features/basics/struct_call_word.jet) demonstrates
-fixed-width FNV results in record fields, direct and wrapper calls, and record
-copies. Its [golden](features/expected/basics/struct_call_word.out) preserves all
-64 bits independently of the exact `Int` representation.
-
-[`view_return_lifetimes.jet`](features/memory/view_return_lifetimes.jet) shows
-borrowed returns from named owners and direct operations on the returned view.
-The caller keeps the owner alive; binding the returned view first is optional.
-
-[`view_subranges.jet`](features/memory/view_subranges.jet) shows subranges of
-declared views: `view[a..<b]` keeps the view's owner, never copies, and writes
-through a `ViewMut` subrange land in the owning list.
-
-## Auxiliary golden stream suffix
-
-The feature runner discovers `.jet` files and project directories containing a
-`run.jet`. For a source file named `topic/example.jet`, the native stdout
-fixture is `expected/topic/example.out`. For a project, the directory name is
-used as the stem, so `topic/example/run.jet` maps to
-`expected/topic/example.out`. The native checker compares stdout byte for byte;
-an example with no native golden is skipped rather than given an invented
-result.
-
-The native checker uses `.out`, `.err.out`, and `.stderr.out`; the testkit
-golden suite also checks `.test.out`. Dedicated web, harness, fuzz, and
-input-specific checks consume the other suffixes listed below:
+The native checker compares stdout byte for byte and uses `.out`, `.err.out`,
+and `.stderr.out`; the testkit golden suite also checks `.test.out`. Dedicated
+web, harness, fuzz, and input-specific checks consume the other suffixes:
 
 | Fixture | Meaning |
 | --- | --- |
@@ -106,31 +91,49 @@ input-specific checks consume the other suffixes listed below:
 | `<stem>.test.out` | `jet test` stdout, checked by the testkit golden suite on every tier after the run passes. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
 | `<stem>.ast.out` / `<stem>.mir.out` / `<stem>.lir.out` | `jet emit --ast`/`--mir`/`--lir` stdout, checked by the native feature runner after the run passes. |
+| `<stem>.case` | Steps, environment, and host requirements for a golden that needs more than `jet run`. |
 
 Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the testkit golden suite (`Compiler/JetTestKit/Source/Golden.jet`) and the
-native feature runner (`Tools/agent/run-feature-examples.mjs`). Native parity additionally
-requires an executed reference with the same exit and both output streams;
-an emit-only reference does not establish runtime parity.
+These rules apply to the testkit golden suite and the native feature runner
+(`Tools/agent/run-feature-examples.mjs`). Native parity additionally requires
+an executed reference with the same exit and both output streams; an
+emit-only reference does not establish runtime parity.
 
-The relevant golden checker is the executable definition of each mapping. Keep
-source changes and their fixtures together; do not use this README as a second
-list of expected output.
+A lesson that needs a host tool, such as a foreign compiler, declares
+`requires: tool:<name>` in its `.case`; the golden is skipped where the tool is
+missing. A lesson that binds a fixed TCP port declares `host-port: N`; both
+runners hold that port's host-wide lock while it runs, so concurrent runs on
+one host take turns instead of failing to bind.
 
-## Learning paths
+A lesson that reads files by their repository path, such as
+[`Systems/Files/Path.jet`](Systems/Files/Path.jet) walking `Examples/Systems`,
+declares `repo-cwd: <reason>` once, before any steps, in its `.case`. The
+testkit then runs the built program from the root of its staged source copy,
+which keeps the repository layout, instead of from the project directory. The
+checkout is never written, and `file:` assertions stay relative to the project.
+`run-feature-examples.mjs` already runs such an example from the repository
+root, or from a staged copy with the same layout, and ignores the header. Only
+goldens take the header; a `tests/cases` case refuses it.
 
-`features/basics/` is the shortest path through expressions, functions, and
-output. Continue through the language/data row before choosing a runtime or
-application topic.
+Examples that depend on environment or process identity should print checked
+relationships instead of raw paths or process IDs. For example,
+[`Systems/Process/SystemProjection.jet`](Systems/Process/SystemProjection.jet)
+compares the home directory with its environment source and checks child exit
+statuses, preserving the system calls while keeping the stdout contract
+independent of the host.
+
+The golden checker is the executable definition of each mapping. Keep source
+changes and their goldens together; do not use this README as a second list of
+expected output.
 
 ## Short path first
 
-Flagship examples teach the magic default first. When manual mechanics are
-worth keeping, place them in a clearly labelled `*_expert.jet` sibling rather
-than making the long form the only path (D-EXAMPLES-SHORTPATH1=A).
+Each lesson teaches the safe default first. When the manual mechanics are
+worth keeping, place them in a clearly labelled `*Expert` sibling rather than
+making the long form the only path.
 
 | Teach first | Keep beside it as expert |
 | --- | --- |
@@ -138,21 +141,15 @@ than making the long form the only path (D-EXAMPLES-SHORTPATH1=A).
 | `para_map` / `task.group` | Hand-rolled channels, tasks, and joins |
 | `files.open(...).lines()` streaming | Materializing all file text before processing |
 
-The maintained [`first_hour.jet`](features/basics/first_hour.jet) example and
-its [`first_hour_expert.jet`](features/basics/first_hour_expert.jet) sibling
-show this rule for typed CLI arguments. The
-[`onboarding/run.jet`](features/basics/onboarding/run.jet) project is the next
-step after `jet new`; the complete `new` → `run` → `check` → `test` → `fix` →
-`explain` workflow is in the [first-hour guide](../Docs/spec/guides/first-hour.md).
+[`Basics/FirstHour.jet`](Basics/FirstHour.jet) and its
+[`Basics/FirstHourExpert.jet`](Basics/FirstHourExpert.jet) sibling show this
+rule for typed CLI arguments. New examples should use the beginner default
+first and keep an expert sibling only when the manual form still teaches
+something important.
 
-New examples should use the beginner default first and keep an expert sibling
-only when the manual form still teaches something important.
-
-Call a feature a teaching example: it explains a mechanism, not merely that a
-work item closed. If a file exists only as a bare, unexplained card-closure
-record, prefix that comment with `ledger` so readers can distinguish evidence
-from teaching material. A card cited alongside a decision or mechanism
-explanation does not need the marker.
+A lesson explains a mechanism, not merely that a work item closed. Programs
+kept only as evidence that a card closed belong in `tests/run` or
+`tests/cases`.
 
 ## Current-law teaching manifest
 
@@ -163,23 +160,42 @@ normative language contract.
 
 | Source | Rule it demonstrates | UI/snapshot check | Command |
 | --- | --- | --- | --- |
-| [`features/basics/loop_forms.jet`](features/basics/loop_forms.jet) | One `loop` keyword covers infinite, conditional, source, mixed list/map iterables, and inclusive or exclusive ranges; `next` advances the source. | [`features/expected/basics/loop_forms.out`](features/expected/basics/loop_forms.out) | `target/debug/jet run Examples/features/basics/loop_forms.jet` |
+| [`Basics/LoopForms.jet`](Basics/LoopForms.jet) | One `loop` keyword covers infinite, conditional, source, mixed list/map iterables, and inclusive or exclusive ranges; `next` advances the source. | [`Basics/LoopForms.out`](Basics/LoopForms.out) | `target/debug/jet run Examples/Basics/LoopForms.jet` |
 | [`tests/ui/list_loop_mutate.jet`](../tests/ui/list_loop_mutate.jet) | An immutable loop binding cannot mutate the collection it reads; E0507 keeps the traversal domain and repair intent explicit. | [`tests/ui/list_loop_mutate.stderr`](../tests/ui/list_loop_mutate.stderr) | `target/debug/jet check tests/ui/list_loop_mutate.jet` |
-| [`features/errors/errors.jet`](features/errors/errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are distinct routes. | [`features/expected/errors/errors.out`](features/expected/errors/errors.out) | `target/debug/jet run Examples/features/errors/errors.jet` |
-| [`features/errors/typed_error_families.jet`](features/errors/typed_error_families.jet) | One declared `impl Source -> Target` rail changes only the error carrier and preserves the success payload. | [`features/expected/errors/typed_error_families.out`](features/expected/errors/typed_error_families.out) | `target/debug/jet run Examples/features/errors/typed_error_families.jet` |
-| [`features/io/scope_guard.jet`](features/io/scope_guard.jet) | A scope guard runs once at scope exit in reverse registration order, including plain-call failure propagation before the caller's `??` fallback; it remains distinct from resource-only `defer close`. | [`features/expected/io/scope_guard.out`](features/expected/io/scope_guard.out) | `target/debug/jet run Examples/features/io/scope_guard.jet` |
+| [`ErrorsAndEffects/Errors/Errors.jet`](ErrorsAndEffects/Errors/Errors.jet) | `Ok`/`Err`, unmarked propagation, `??` fallback recovery, and an explicit result-pattern handler are distinct routes. | [`ErrorsAndEffects/Errors/Errors.out`](ErrorsAndEffects/Errors/Errors.out) | `target/debug/jet run Examples/ErrorsAndEffects/Errors/Errors.jet` |
+| [`ErrorsAndEffects/Errors/TypedErrorFamilies.jet`](ErrorsAndEffects/Errors/TypedErrorFamilies.jet) | One declared `impl Source -> Target` rail changes only the error carrier and preserves the success payload. | [`ErrorsAndEffects/Errors/TypedErrorFamilies.out`](ErrorsAndEffects/Errors/TypedErrorFamilies.out) | `target/debug/jet run Examples/ErrorsAndEffects/Errors/TypedErrorFamilies.jet` |
+| [`Memory/ScopeGuard.jet`](Memory/ScopeGuard.jet) | A scope guard runs once at scope exit in reverse registration order, including plain-call failure propagation before the caller's `??` fallback; it remains distinct from resource-only `defer close`. | [`Memory/ScopeGuard.out`](Memory/ScopeGuard.out) | `target/debug/jet run Examples/Memory/ScopeGuard.jet` |
 
-The adjacent [`list_predicate_ops.jet`](features/collections/list_predicate_ops.jet)
-and [`indexed_mutation.jet`](features/collections/indexed_mutation.jet) examples
-contrast eager reads with in-place writes. Their source and neighboring golden
-files are the evidence; this manifest does not duplicate the collection API.
+[`Basics/StructCallWord.jet`](Basics/StructCallWord.jet) demonstrates
+fixed-width FNV results in record fields, direct and wrapper calls, and record
+copies. Its [golden](Basics/StructCallWord.out) preserves all 64 bits
+independently of the exact `Int` representation.
+
+[`Memory/Views/ViewReturnLifetimes.jet`](Memory/Views/ViewReturnLifetimes.jet)
+shows borrowed returns from named owners and direct operations on the returned
+view. The caller keeps the owner alive; binding the returned view first is
+optional. [`Memory/Views/ViewSubranges.jet`](Memory/Views/ViewSubranges.jet)
+shows subranges of declared views: `view[a..<b]` keeps the view's owner, never
+copies, and writes through a `ViewMut` subrange land in the owning list.
+
+The adjacent [`Collections/ListPredicateOps.jet`](Collections/ListPredicateOps.jet)
+and [`Collections/IndexedMutation.jet`](Collections/IndexedMutation.jet)
+examples contrast eager reads with in-place writes. Their source and
+neighboring golden files are the evidence; this manifest does not duplicate the
+collection API.
+
+## Programs
+
+[`Apps/Programs/`](Apps/Programs/) holds eight small end-to-end programs, each
+a top-level `.jet` with its `.out` beside it: expense report, support queue,
+inventory reorder, dispatch, failure, finite state, ownership, and wire output.
+Each opens with the anti-pattern it replaces and the rule it follows. The case
+[`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
+runs each with `jet run` and compares stdout byte for byte.
 
 ## Related executable contracts
 
-- [`suites/`](suites/README.md) describes the suite fixtures and their golden
-  checker.
-- [`jetpack/executable-lease-recovery.md`](jetpack/executable-lease-recovery.md)
+- [`Modules/Jetpack/executable-lease-recovery.md`](Modules/Jetpack/executable-lease-recovery.md)
   documents the Jetpack lease-recovery command and its safety boundary.
-- [`Compiler/JetTestKit/Source/Golden.jet`](../Compiler/JetTestKit/Source/Golden.jet) and
-  [`tests/cases/suite_goldens/user_story_suite_matches_expected_output.case`](../tests/cases/suite_goldens/user_story_suite_matches_expected_output.case)
-  are the source of truth for the two golden layouts.
+- [`Compiler/JetTestKit/Source/Golden.jet`](../Compiler/JetTestKit/Source/Golden.jet)
+  is the source of truth for the golden layout.

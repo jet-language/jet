@@ -5,15 +5,15 @@ report: fn() -> String Never! { "done" }
 fail: fn() -> String WorkerError! { Err(WorkerError.Bad) }
 run: fn() {
     values: task.all {{ report() }, { report() }} ?? panic("all failed")
-    print(values[0] ?? panic("infallible worker"))
-    print(values[1] ?? panic("infallible worker"))
+    print(values[0])
+    print(values[1])
     named: task.all {z: { report() }, a: { report() }} ?? panic("named all failed")
-    print(named.z ?? panic("infallible worker"))
-    print(named.a ?? panic("infallible worker"))
+    print(named.z)
+    print(named.a)
     raced: task.race {{ report() }, { report() }} ?? panic("race failed")
-    print(raced ?? panic("infallible worker"))
+    print(raced)
     first: task.any {{ report() }, { report() }} ?? panic("any failed")
-    print(first ?? panic("infallible worker"))
+    print(first)
     failures: task.all {{ fail() }, { fail() }} ?? panic("worker error became a waiting failure")
     loop result in failures {
         if result == {
@@ -26,7 +26,7 @@ run: fn() {
         }
     }
     worker: task fail()
-    joined: ^worker.join() ?? panic("worker error became a waiting failure")
+    joined: worker.join() ?? panic("worker error became a waiting failure")
     if joined == {
         .Err(error) -> {
             if error == {

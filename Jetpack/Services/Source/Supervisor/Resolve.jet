@@ -62,7 +62,7 @@ services_published_ports: fn(dir: String, declared: [Int]) -[FS]> [Int] Never! {
     lines: services_lines(raw)
     loop line in lines {
         port: Int.parse(line.trim()) ?? next
-        &published.push(port)
+        published.push(port)
     }
     if published.len() != declared.len() -> return declared.copy()
     published
@@ -93,13 +93,13 @@ services_command_words: fn(argument: String) -> [String] Never! {
     loop byte in argument.bytes() {
         code: Int.from_u8(byte)
         if trust_text_is_alphanumeric(code) || code == 45 {
-            &current.push(byte)
+            current.push(byte)
         } else {
-            &words.push(String.from_bytes_lossy(current))
+            words.push(String.from_bytes_lossy(current))
             current = [U8]{}
         }
     }
-    &words.push(String.from_bytes_lossy(current))
+    words.push(String.from_bytes_lossy(current))
     words
 }
 
@@ -189,7 +189,7 @@ services_validate_ports: fn(ports: [Int]) ServicesError! {
     loop port in ports {
         if port < 0 || port > 65535 -> return Err(ServicesError.new("service port `{port}` is outside 0..65535"))
         if seen.contains(port) -> return Err(ServicesError.new("service declares port `{port}` more than once"))
-        &seen.push(port)
+        seen.push(port)
     }
 }
 
@@ -200,7 +200,7 @@ services_validate_socket_names: fn(sockets: [String]) ServicesError! {
             return Err(ServicesError.new("service socket `{socket}` must be a non-empty project-relative path"))
         }
         if seen.contains(socket) -> return Err(ServicesError.new("service socket `{socket}` is declared more than once"))
-        &seen.push(socket)
+        seen.push(socket.copy())
     }
 }
 
@@ -214,8 +214,8 @@ ServicePortReservation: struct {
 // Rust `drop(allocated_ports)`: release the listeners immediately before
 // spawn so the service binds its ports without a race. A consuming free
 // function drops the reservation, and so closes every listener, on return;
-// a `^self` method with this body leaves them open (compiler defect #6572).
-services_release_ports: fn(^reservation: ServicePortReservation) Never! {}
+// a `&&self` method with this body leaves them open (compiler defect #6572).
+services_release_ports: fn(&&reservation: ServicePortReservation) Never! {}
 
 services_allocate_ports: fn(ports: [Int]) -[Net, Time.Wait]> ServicePortReservation ServicesError! {
     services_validate_ports(ports)
@@ -227,8 +227,8 @@ services_allocate_ports: fn(ports: [Int]) -[Net, Time.Wait]> ServicePortReservat
             return Err(ServicesError.new("service port {requested} is unavailable: {err}"))
         }
         address: net.listener_local_socket_addr(listener) ?? return Err(ServicesError.new("couldn't read allocated service port: {err}"))
-        &allocated.push(net.socket_port(address))
-        &listeners.push(^listener)
+        allocated.push(net.socket_port(address))
+        listeners.push(listener)
     }
     Ok(ServicePortReservation{ports: allocated, listeners})
 }
@@ -240,7 +240,7 @@ ServiceSocketReservation: struct {
     paths: [String]
     listeners: [UnixListener]
 
-    release: fn(^self) ServicesError! -[FS]> {
+    release: fn(&&self) ServicesError! -[FS]> {
         first_error := String?{None}
         loop path in self.paths {
             if files.remove(path) == .Err(error) {
@@ -253,7 +253,7 @@ ServiceSocketReservation: struct {
     }
 
     // Rust `Drop`: remove every reserved path.
-    abandon: fn(^self) Never! -[FS]> {
+    abandon: fn(&&self) Never! -[FS]> {
         loop path in self.paths -> services_remove_quiet(path)
     }
 }
@@ -262,8 +262,8 @@ services_prepare_sockets: fn(project_dir: String, sockets: [String]) -[FS, Env, 
     services_validate_socket_names(sockets)
     reservation := ServiceSocketReservation{paths: [String]{}, listeners: [UnixListener]{}}
     loop socket in sockets {
-        if services_reserve_socket(project_dir, socket, &reservation) == .Err(error) {
-            ^reservation.abandon()
+        if services_reserve_socket(project_dir, socket, reservation) == .Err(error) {
+            reservation.abandon()
             return Err(error)
         }
     }
@@ -287,8 +287,8 @@ services_reserve_socket: fn(project_dir: String, socket: String, reservation: &S
         if files.remove(path) == .Err(error) -> return Err(ServicesError.new("couldn't remove stale service socket `{path}`: {error}"))
     }
     listener: net.unix_listen(path) ?? return Err(ServicesError.new("couldn't reserve service socket `{path}`: {err}"))
-    &reservation.listeners.push(listener)
-    &reservation.paths.push(path)
+    reservation.listeners.push(listener)
+    reservation.paths.push(path)
 }
 
 // Component-wise `Path::starts_with`.

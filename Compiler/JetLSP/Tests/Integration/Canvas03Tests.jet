@@ -23,7 +23,7 @@ use {
     loop module_ref in json_top_level_objects(json_array_field(catalog, "modules")) {
         path: json_field(module_ref, "path")
         loop member in json_top_level_objects(json_array_field(module_ref, "members")) {
-            &catalog_ids.insert("canvas.core_catalog:{path}:{json_field(member, "name")}", true)
+            catalog_ids.insert("canvas.core_catalog:{path}:{json_field(member, "name")}", true)
         }
     }
     actions_request: "{{\"schema_version\":1,\"op\":\"actions\",\"revision\":\"{revision}\"}}"
@@ -31,7 +31,7 @@ use {
     core_actions: json_top_level_objects(json_array_field(actions, "actions"))
         .filter((action) -> action.contains("\"kind\":\"canvas.core_catalog\"")).collect()
     action_ids := [String:Bool]{}
-    loop action in core_actions -> &action_ids.insert(json_field(action, "action_id"), true)
+    loop action in core_actions -> action_ids.insert(json_field(action, "action_id"), true)
     assert_eq(catalog_ids, action_ids, "catalog/action coverage drift")
     stageable_reasons: ["needs_canvas_defaults", "method_only"]
     excluded_reasons: ["needs_unsafe_region", "type_member", "type_only", "value_only", "needs_signature", "not_direct_call"]

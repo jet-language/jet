@@ -60,18 +60,18 @@ pkg_bundle_wire_test_plan: fn() -> BundlePlan Never! {
 
 #Test("bundle canonical wire has exact C0 short escapes and raw DEL C1") {
     raw := [U8]{}
-    loop code in 0..<32 -> &raw.push(U8{code})
-    &raw.push(U8{34})
-    &raw.push(U8{92})
-    &raw.push(U8{127})
-    &raw.push(U8{194})
-    &raw.push(U8{128})
-    &raw.push(U8{194})
-    &raw.push(U8{159})
+    loop code in 0..<32 -> raw.push(U8{code})
+    raw.push(U8{34})
+    raw.push(U8{92})
+    raw.push(U8{127})
+    raw.push(U8{194})
+    raw.push(U8{128})
+    raw.push(U8{194})
+    raw.push(U8{159})
     text: String.from_bytes(raw) ?? panic("control fixture is UTF-8")
     expected := "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\\\"\\\\".bytes()
     suffix: [U8]{U8{127}, U8{194}, U8{128}, U8{194}, U8{159}, U8{34}, U8{10}}
-    loop byte in suffix -> &expected.push(byte)
+    loop byte in suffix -> expected.push(byte)
     assert_eq(pkg_bundle_canonical_bytes(CanonicalJSON.String(text)), expected)
 }
 

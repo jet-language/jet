@@ -54,7 +54,7 @@ envmodel_parse_program: fn(src: String) -> Program EnvModelEvalError! {
         .Val(diagnostic) -> { return Err(EnvModelEvalError{diagnostic: diagnostic}) }
         .None -> {}
     }
-    parsed: parse_config_with_source(^lexed, source)
+    parsed: parse_config_with_source(lexed, source)
     if envmodel_last_error(parsed.diagnostics) == {
         .Val(diagnostic) -> { return Err(EnvModelEvalError{diagnostic: diagnostic}) }
         .None -> {}
@@ -71,7 +71,7 @@ envmodel_environment_reads: fn(src: String) -> [EnvironmentRead] EnvModelEvalErr
     lexed: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
     reads := [EnvironmentRead]{}
-    envmodel_collect_environment_reads(lexed.tokens, lexed.tables, &reads)
+    envmodel_collect_environment_reads(lexed.tokens, lexed.tables, reads)
     Ok(reads)
 }
 
@@ -85,11 +85,11 @@ envmodel_collect_environment_reads: fn(all_tokens: [Token], tables: TokenTables,
             loop read in reads {
                 if read.name == name -> seen = true
             }
-            if !seen { &reads.push(EnvironmentRead{name: name, ty: TYPE_STRING}) }
+            if !seen { reads.push(EnvironmentRead{name: name, ty: TYPE_STRING}) }
         }
         if token.kind == TOKEN_STRING {
             loop part in token_string_parts(tables, token) {
-                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, tables, &reads)
+                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, tables, reads)
             }
         }
     }
@@ -114,7 +114,7 @@ envmodel_evaluate_modules: fn(items: [Item], src: String, base_dir: String) -> [
     loop item in items {
         if item == {
             .Module(decl) -> {
-                if decl.auto_discovered { &out.push(envmodel_evaluate_module(decl, src, scope, globals)) }
+                if decl.auto_discovered { out.push(envmodel_evaluate_module(decl, src, scope, globals)) }
             }
             else -> {}
         }
@@ -172,24 +172,24 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                     .Env -> {
                         capture: envmodel_evaluate_env_contribution(value, src, scope, globals, source)
                         reads: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
-                        envmodel_file_env_capture(^capture, contribution.path, ^reads, [DevServicePlan]{}, &environment_contributions, &entries)
+                        envmodel_file_env_capture(capture, contribution.path, reads, [DevServicePlan]{}, environment_contributions, entries)
                     }
-                    .Profile -> { &package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, decl.name)) }
+                    .Profile -> { package_profiles.push(envmodel_evaluate_package_profile_expr(contribution.path, value, src, scope, globals, decl.name)) }
                     else -> panic("contribution namespace/value shape mismatch")
                 }
             }
             .Env(lit) -> {
                 capture: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
                 services := [DevServicePlan]{}
-                loop service in lit.services -> &services.push(envmodel_evaluate_dev_service(service, scope, globals))
+                loop service in lit.services -> services.push(envmodel_evaluate_dev_service(service, scope, globals))
                 reads: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
-                envmodel_file_env_capture(^capture, contribution.path, ^reads, ^services, &environment_contributions, &entries)
+                envmodel_file_env_capture(capture, contribution.path, reads, services, environment_contributions, entries)
             }
-            .Image(lit) -> { &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
-            .Profile(lit) -> { &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
+            .Image(lit) -> { images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
+            .Profile(lit) -> { package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
             // Fleets and vmtests capture their hosts (E1244/E1245 here, E1242
             // at plan assembly).
-            .System(lit) -> &systems.push(envmodel_evaluate_system(contribution.path, lit, src, scope, globals))
+            .System(lit) -> systems.push(envmodel_evaluate_system(contribution.path, lit, src, scope, globals))
             .Fleet(lit) -> {
                 hosts := [HostPlan]?{None}
                 loop field in lit.fields {
@@ -200,7 +200,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                     }
                 }
                 captured: hosts ?? return Err(envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(lit.span)))
-                &fleets.push(FleetPlan{name: contribution.path, hosts: captured})
+                fleets.push(FleetPlan{name: contribution.path, hosts: captured})
             }
             .VMTest(lit) -> {
                 hosts := [HostPlan]?{None}
@@ -214,7 +214,7 @@ envmodel_evaluate_module: fn(decl: ModuleDecl, src: String, scope: ModuleEvalSco
                     }
                 }
                 captured: hosts ?? return Err(envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(lit.span)))
-                &vmtests.push(FleetPlan{name: contribution.path, hosts: captured})
+                vmtests.push(FleetPlan{name: contribution.path, hosts: captured})
             }
             // Performance budgets belong to the performance gate.
             .Perf(_) -> {}
@@ -248,17 +248,17 @@ envmodel_merge_all: fn(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeE
                 }
             }
             if index < 0 {
-                &keys.push(keyed.key)
-                &grouped.push([EntryContribution]{keyed.entry})
+                keys.push(keyed.key)
+                grouped.push([EntryContribution]{keyed.entry})
             } else {
                 group := grouped[index]
-                &group.push(keyed.entry)
+                group.push(keyed.entry)
                 grouped[index] = group
             }
         }
     }
     out := [MergedModuleEntry]{}
-    loop position in 0..<keys.len() -> &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
+    loop position in 0..<keys.len() -> out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
     Ok(out)
 }
 
@@ -302,7 +302,7 @@ envmodel_evaluate_hosts: fn(entries: [HostEntry], src: String, scope: ModuleEval
             }
             .None -> {}
         }
-        &captured.push(HostPlan{name: entry.name, system: entry.system, overrides: overrides, override_source: override_source})
+        captured.push(HostPlan{name: entry.name, system: entry.system, overrides: overrides, override_source: override_source})
     }
     Ok(captured)
 }
@@ -357,17 +357,17 @@ envmodel_evaluate_host_override: fn(source: String, at: Int, original_span: Span
             .Packages(expr) -> HostOverrideValue.Packages{values: envmodel_extract_packages(expr, wrapped).packages}
             .Services(entries) -> {
                 services := [ServicePlan]{}
-                loop entry in entries -> &services.push(envmodel_evaluate_system_service(entry, scope, computed.values))
+                loop entry in entries -> services.push(envmodel_evaluate_system_service(entry, scope, computed.values))
                 HostOverrideValue.Services{values: services}
             }
             .Options(entries) -> {
                 options := [OptionPlan]{}
-                loop entry in entries -> &options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_host_option(entry.value, entry.value_span, source, prefix_len, scope, computed.values)})
+                loop entry in entries -> options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_host_option(entry.value, entry.value_span, source, prefix_len, scope, computed.values)})
                 HostOverrideValue.Options{values: options}
             }
             .Other(expr) -> HostOverrideValue.Value{value: envmodel_evaluate_expression(expr, computed.values, scope)}
         }
-        &fields.push((name: field.name, value: value))
+        fields.push((name: field.name, value: value))
         common := ComputedFieldProvenance?{None}
         loop candidate in computed.provenance {
             if candidate.field == field.name {
@@ -387,7 +387,7 @@ envmodel_evaluate_host_override: fn(source: String, at: Int, original_span: Span
             .None -> dependencies = envmodel_typed_field_dependencies(field.value, field_names)
         }
         if text.is_empty() -> text = envmodel_host_field_source(source, field.span, prefix_len)
-        &provenance.push(HostOverrideProvenance{field: field.name, dependencies: dependencies, pure: pure, source: text})
+        provenance.push(HostOverrideProvenance{field: field.name, dependencies: dependencies, pure: pure, source: text})
     }
     Ok(HostOverride{fields: fields, source: source, provenance: provenance})
 }
@@ -426,7 +426,7 @@ envmodel_typed_field_dependencies: fn(value: SystemFieldValue, field_names: [Str
             loop entry in entries {
                 loop field in entry.fields {
                     loop dependency in envmodel_dependencies_for_expression(field.value, field_names) {
-                        if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                        if !dependencies.contains(dependency) -> dependencies.push(dependency)
                     }
                 }
             }
@@ -434,12 +434,12 @@ envmodel_typed_field_dependencies: fn(value: SystemFieldValue, field_names: [Str
         .Options(entries) -> {
             loop entry in entries {
                 loop dependency in envmodel_dependencies_for_expression(entry.value, field_names) {
-                    if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                    if !dependencies.contains(dependency) -> dependencies.push(dependency)
                 }
             }
         }
         .Platform(_, _, _) -> {}
     }
-    &dependencies.sort()
+    dependencies.sort()
     dependencies
 }

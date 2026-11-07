@@ -31,7 +31,7 @@ envmodel_evaluate_package_profile_expr: fn(name: String, value: Expr, src: Strin
         .StructLit(type_name, _, _, _, fields, _, _, _) -> {
             if type_name != "" && type_name != TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
             named := [NamedExpr]{}
-            loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
+            loop field in fields -> named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
             Ok(envmodel_evaluate_package_profile_fields(name, named, src, scope, globals, module_name))
         }
         else -> Err(envmodel_not_a_namespace_literal(TYPE_PROFILE, expr_span(value)))
@@ -47,7 +47,7 @@ envmodel_evaluate_package_profile_fields: fn(name: String, fields: [NamedExpr], 
         if seen.contains(field.name) {
             return Err(envmodel_error("E1332", "package generation `{name}` repeats field `{field.name}`", "one package generation must have one value for each typed fact", "keep one declaration for the field, or split the generations and compose them with `extends`", Val(field.name_span)))
         }
-        &seen.push(field.name)
+        seen.push(field.name)
     }
     field_map := [String: NamedFieldExpr]{}
     loop field in fields {
@@ -63,7 +63,7 @@ envmodel_evaluate_package_profile_fields: fn(name: String, fields: [NamedExpr], 
         extracted: envmodel_extract_packages(field.value, src)
         loop package in extracted.packages {
             raw: envmodel_pkg_ref(package)
-            if !packages.contains(raw) { &packages.push(raw) }
+            if !packages.contains(raw) { packages.push(raw) }
         }
         if extracted.adapters.len() > 0 {
             return Err(envmodel_error("E1335", "package generation `{name}` contains an adapter package", "generation packages must retain provider identity and cannot hide a build recipe inside the generation declaration", "realize the adapter as a named package, then reference its exact package identity", Val(expr_span(field.value))))
@@ -163,7 +163,7 @@ envmodel_quoted_collision_values: fn(fragment: String) -> [String] Never! {
             }
         }
         if !closed -> return [String]{}
-        &values.push(value)
+        values.push(value)
     }
     values
 }

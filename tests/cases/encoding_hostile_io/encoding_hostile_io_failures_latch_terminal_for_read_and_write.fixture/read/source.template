@@ -7,11 +7,11 @@ use {
 
 run: fn() {
     directory_input: files.open("{work}") ?? panic("open dir")
-    directory_reader := cbor.reader(^directory_input) ?? panic("reader")
-    if &directory_reader.next() == {
+    directory_reader := cbor.reader(directory_input) ?? panic("reader")
+    if directory_reader.next() == {
         .Val(_) | .None -> { print("read-ok-missed") }
         .Err(first) -> {
-            if &directory_reader.next() == {
+            if directory_reader.next() == {
                 .Val(_) | .None -> { print("not-latched") }
                 .Err(second) -> {
                     print(first.kind == encoding.EncodingErrorKind.IO)

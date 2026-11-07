@@ -1,0 +1,56 @@
+// #4717: a file larger than two 1 MiB chunks seals to a JETC v2 container
+// and opens back to the same bytes. The recipient's public key travels as
+// Bech32m text, and `from_text` reads that text back to the same key.
+// The RFC 7748 example private key keeps the printed key stable; a real
+// recipient makes its key with `X25519SecretKey.new_random()` and keeps it.
+// file_seal draws a fresh file key and nonce prefix for every container, so
+// two seals of one file differ.
+package: {
+    name: "crypto_file_seal_jetc"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc, Rand] }
+}
+
+use {
+    crypto: core.crypto
+    files: core.files
+}
+
+run: fn() {
+    identity: crypto.X25519SecretKey.from_bytes([U8]{0x77, 0x07, 0x6d, 0x0a, 0x73, 0x18, 0xa5, 0x7d, 0x3c, 0x16, 0xc1, 0x72, 0x51, 0xb2, 0x66, 0x45, 0xdf, 0x4c, 0x2f, 0x87, 0xeb, 0xc0, 0x99, 0x2a, 0xb1, 0x77, 0xfb, 0xa5, 0x1d, 0xb9, 0x2c, 0x2a}) ?? panic("identity")
+    public: identity.public_key()
+    text: public.text()
+    print("recipient: {text}")
+    back: crypto.X25519PublicKey.from_text(text) ?? panic("from_text")
+    print("from_text round trip: {back.bytes == public.bytes}")
+    if crypto.X25519PublicKey.from_text(text.to_upper()) == {
+        .Ok(_) -> print("uppercase text: accepted")
+        .Err(error) -> print("uppercase text: {error}")
+    }
+
+    dir: files.temp_dir("jet-file-seal") ?? panic("temp dir")
+    source: Path.from("{dir.path}/plain.bin")
+    sealed: Path.from("{dir.path}/plain.bin.jetc")
+    again: Path.from("{dir.path}/again.bin.jetc")
+    opened: Path.from("{dir.path}/opened.bin")
+    plain := [U8]{}
+    loop i in 0..<(2 * 1048576 + 4321) -> plain.push(U8{i %% 251})
+    files.write_bytes(source, plain) ?? panic("write source")
+
+    crypto.file_seal([back], source: source, destination: sealed) ?? panic("seal")
+    container: files.read_bytes(sealed) ?? panic("read container")
+    print("plaintext bytes: {plain.len()}")
+    print("container bytes: {container.len()}")
+    print("magic: {String.from_bytes(container[0..<4]) ?? "?"} v{container[4]}")
+    print("records: {plain.len() /% 1048576 + 1}")
+
+    crypto.file_seal([back], source: source, destination: again) ?? panic("second seal")
+    print("two seals differ: {(files.read_bytes(again) ?? panic("read again")) != container}")
+
+    crypto.file_open(identity, source: sealed, destination: opened) ?? panic("open")
+    print("opened equals plaintext: {(files.read_bytes(opened) ?? panic("read opened")) == plain}")
+
+    if crypto.file_open(identity, source: sealed, destination: opened) == {
+        .Ok(_) -> print("open over an existing file: accepted")
+        .Err(error) -> print("open over an existing file: {error}")
+    }
+}

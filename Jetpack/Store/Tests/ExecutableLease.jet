@@ -38,7 +38,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     prepared: protocol.prepare_snapshot(lease_id, scope, snapshot.path, "demo", "1", "demo@core#1", snapshot.digest, [LeaseMember]{store_lease_test_member(bytes)}) ?? panic("prepare")
     frame: protocol.encode_request(prepared.request) ?? panic("encode")
     receipt: protocol.accept_snapshot(frame, snapshot.digest, snapshot.path) ?? panic("accept")
-    close(^prepared.owner_lock)
+    close(prepared.owner_lock.move())
     (lease_id: lease_id, scope: scope, snapshot: snapshot.path, digest: snapshot.digest, receipt: receipt)
 }
 
@@ -89,7 +89,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, snapshot.digest) ?? panic("validate")
     other_digest: "sha256-{pkg_sha256_hex("different output".bytes())}"
     assert(reopened.validate_snapshot(lease_id, receipt.generation, scope, snapshot.path, other_digest) == .Err(_))
-    close(^prepared.owner_lock)
+    close(prepared.owner_lock.move())
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -111,7 +111,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     loop at < tampered.len() && tampered[at] != (U8{49}) -> at += 1
     tampered[at] = U8{50}
     assert(store_lease_test_is_err(protocol.accept_snapshot(tampered, digest, snapshot)))
-    close(^prepared.owner_lock)
+    close(prepared.owner_lock.move())
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -129,8 +129,8 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     wrong_key := prepared.request
     wrong_key.key_id = "0000000000000000"
     assert(protocol.encode_request(wrong_key) == .Err(_))
-    close(^prepared.owner_lock)
-    close(^global)
+    close(prepared.owner_lock.move())
+    close(global)
     files.remove_all(root).drop("test cleanup")
 }
 
@@ -148,8 +148,8 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     files.write(files.join(incomplete, LEASE_RECEIPT_FILE), "partial") ?? panic("partial receipt")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(incomplete))
-    close(^prepared.owner_lock)
-    close(^live)
+    close(prepared.owner_lock.move())
+    close(live)
     assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
     assert(!files.exists(snapshot.path))
     assert(!files.exists(incomplete))
@@ -167,7 +167,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     files.write(files.join(partial, LEASE_RECEIPT_FILE), "in flight") ?? panic("partial receipt")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(partial))
-    close(^owner)
+    close(owner)
     protocol.recover_stale_leases() ?? panic("recover after release")
     assert(!files.exists(partial))
     files.remove_all(root).drop("test cleanup")
@@ -206,7 +206,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     files.remove(marker) ?? panic("remove marker")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(snapshot.path))
-    close(^live)
+    close(live)
     files.write(marker, "") ?? panic("restore marker")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
     assert(!files.exists(snapshot.path))
@@ -223,7 +223,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     files.remove_all(files.join(live_root, RUNTIME_LOCK_DIR)) ?? panic("remove lock dir")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(snapshot.path))
-    close(^live)
+    close(live)
     assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
     assert(!files.exists(snapshot.path))
     files.remove_all(root).drop("test cleanup")
@@ -238,7 +238,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     published: store_lease_test_publish(protocol, root, "1-0-container-lock", "one")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while live"), 0)
     assert(files.exists(published.snapshot))
-    close(^live)
+    close(live)
     assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
     assert(!files.exists(published.snapshot))
     files.remove_all(root).drop("test cleanup")
@@ -256,7 +256,7 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     files.remove(marker) ?? panic("remove marker")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover while held"), 0)
     assert(files.exists(published.snapshot))
-    close(^live)
+    close(live)
     files.write(marker, "") ?? panic("restore marker")
     assert_eq(protocol.recover_stale_leases() ?? panic("recover after release"), 1)
     assert(!files.exists(published.snapshot))
@@ -284,6 +284,6 @@ store_lease_test_publish: fn(protocol: ExecutableLeaseProtocol, root: String, co
     current: protocol.current_receipt(first.lease_id) ?? panic("current")
     assert(current == Val((rollback_receipt)))
     assert((protocol.read_generation(first.lease_id, second_receipt.generation) ?? panic("read second")) == second_receipt)
-    close(^owner)
+    close(owner)
     files.remove_all(root).drop("test cleanup")
 }

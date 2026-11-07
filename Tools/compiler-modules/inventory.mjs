@@ -121,7 +121,7 @@ function functionLocals(tokens) {
       if (t.kind !== "identifier") continue;
       const next = tokens[i + 1]?.kind;
       const prev = tokens[i - 1]?.kind;
-      if (next === "punctuation.colon" || next === "operator.bind_immutable" || next === "operator.bind_mutable") locals.add(t.text);
+      if (next === "punctuation.colon" || next === "operator.bind_mutable") locals.add(t.text);
       else if (prev === "keyword.loop" || (prev === "punctuation.comma" && tokens[i - 3]?.kind === "keyword.loop")) locals.add(t.text);
       else if (patternParens.at(-1) && (prev === "punctuation.left_paren" || prev === "punctuation.comma")
         && (next === "punctuation.comma" || next === "punctuation.right_paren")) locals.add(t.text);
@@ -196,7 +196,7 @@ export function fileFacts(file) {
     const prev = tokens[k - 1];
     const next = tokens[k + 1];
     if (prev && prev.kind === "punctuation.dot") continue; // field, method, variant
-    if (next && (next.kind === "punctuation.colon" || next.kind === "operator.bind_immutable" || next.kind === "operator.bind_mutable")) {
+    if (next && (next.kind === "punctuation.colon" || next.kind === "operator.bind_mutable")) {
       // label, field declaration, or binding — not a use (types after `:` are separate tokens)
       continue;
     }

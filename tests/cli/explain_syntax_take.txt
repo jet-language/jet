@@ -1,0 +1,25 @@
+&&
+
+What this means:
+  Between two conditions:
+    True when both are true. The right side runs only when the left is true.
+    Example:
+      if ready && count > 0 { start() }
+
+  Before a parameter's type or `self`:
+    `name: &&T` says the function takes that argument for good; `&&self` takes the receiver.
+    Example:
+      archive: fn(name: &&String) -> String { name }
+      saved: archive(title)
+    Afterwards: The call is written plain. The caller's value moves into the function, and a later use is error E0209, which names the call. To keep using it, pass `title.copy()`.
+    Related: E0209
+
+  After `task`, before a name:
+    `task &&name { … }` moves one enclosing value into the task.
+    Example:
+      job: Job{id: 7}
+      task &&job { job.run() }
+    Afterwards: The task owns the value; a later use of the name is error E0121.
+    Related: E0121
+
+This explanation comes from Jet's syntax dictionary.

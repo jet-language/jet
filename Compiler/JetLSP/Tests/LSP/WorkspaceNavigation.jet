@@ -5,7 +5,7 @@
     server := lsp_action_fixture(root, "run: fn() {{}}\n", 1, [(name: String, text: String)]{(name: "bench.jet", text: "_bench: module {{ }}\nhidden_probe: fn() {{}}\n")})
     // Original first scan has no open entry overlay.
     uri: lsp_action_uri(root)
-    _: &server.diagnostic_state.docs.remove(uri)
+    _: server.diagnostic_state.docs.remove(uri)
     entry: lsp_action_child(root, "main.jet")
     internal: lsp_action_child(root, "bench.jet")
     sources: lsp_workspace_sources(server, Val(entry))

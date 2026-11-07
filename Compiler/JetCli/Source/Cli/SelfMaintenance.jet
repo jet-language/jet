@@ -42,72 +42,50 @@ jet_cli_devtools_new_ui: fn(args: [String], color: Bool, json: Bool) -> JetDrive
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-jet_cli_fixture_literal: fn(text: String) -> Bool Never! {
-    prefix: text.starts_with("Examples/features/") || text.starts_with("Docs/spec/") || text.starts_with("tests/ui/") || text.starts_with("tests/ui_lint/") || text.starts_with("tests/cli/") || text.starts_with("tests/release/")
-    if !prefix || text.contains("{{") || text.contains("}}") -> return false
-    text.ends_with(".jet") || text.ends_with(".md") || text.ends_with(".out") || text.ends_with(".stderr") || text.ends_with(".warn") || text.ends_with(".txt") || text.ends_with(".snapshot")
+// The fixture directory a `.case` line names, beside the case file: the
+// `fixture:` directive's one word, quotes and a trailing `# reason` dropped.
+// Templated words ({work}, {pid}, ...) only exist at run time and are skipped.
+jet_cli_case_fixture: fn(line: String) -> String? Never! {
+    text: line.trim()
+    if !text.starts_with("fixture:") -> return None
+    value := text.slice(8..<text.len()).trim()
+    value = value.split(" #").to_list()[0].trim()
+    double: value.starts_with("\"") && value.ends_with("\"")
+    single: value.starts_with("'") && value.ends_with("'")
+    if value.len() >= 2 && (double || single) -> value = value.slice(1..<(value.len() - 1))
+    if value == "" || value.contains("{{") || value.contains("}}") || value.contains(" ") -> return None
+    Val(value)
 }
 
-// Byte scanner, not a Rust parser: escaped quote bytes skip the next byte;
-// display-label exclusions examine the same forty-byte preceding window.
-jet_cli_extract_fixture_paths: fn(text: String) -> [String] Never! {
-    bytes: text.bytes()
-    paths := [String]{}
-    index := 0
-    loop index < bytes.len() {
-        if bytes[index] != 34 {
-            index += 1
-            next
-        }
-        start: index + 1
-        end := start
-        loop end < bytes.len() && bytes[end] != 34 {
-            if bytes[end] == 92 -> end += 1
-            end += 1
-        }
-        // Rust drops a literal whose trailing backslash passed EOF.
-        if end <= bytes.len() {
-            // Byte offsets: `String.slice` counts characters.
-            literal: String.from_bytes(bytes[start..<end]) ?? ""
-            before_start := if start > 40 -> start - 40 else -> 0
-            loop before_start < index && bytes[before_start] >= 128 && bytes[before_start] < 192 -> before_start += 1
-            before: String.from_bytes(bytes[before_start..<index]) ?? ""
-            display: before.contains("render_diagnostics(") || before.contains("render_all_colored(") || before.contains("render_all_json(")
-            if !display && jet_cli_fixture_literal(literal) -> &paths.push(literal)
-        }
-        index = end + 1
-    }
-    paths
-}
-
-jet_cli_collect_fixture_rs: fn(directory: String, files: &[String]) Never! -[FS]> {
-    // Core's deterministic sorted enumeration is intentional (owner ruling,
-    // 2026-10-07); Rust read_dir order is unspecified. Parity compares missing
-    // diagnostics as a set, but repeated literal occurrences still count.
+jet_cli_collect_cases: fn(directory: String, files: &[String]) Never! -[FS]> {
+    // Core's deterministic sorted enumeration keeps the report order stable.
     entries: cli_files.listdir(directory) ?? return
     loop name in entries {
         path: "{directory}/{name}"
         if cli_files.is_dir(path) {
-            jet_cli_collect_fixture_rs(path, &files)
-        } else if name.ends_with(".rs") && name != ".rs" {
-            &files.push(path)
+            jet_cli_collect_cases(path, files)
+        } else if name.ends_with(".case") && name != ".case" {
+            files.push(path)
         }
     }
 }
 
 jet_cli_devtools_fixture_paths: fn(color: Bool, json: Bool) -> JetDriverVerbOutput {
-    if !cli_files.is_dir("tests") -> return jet_cli_maintenance_error("E2104", "no `tests/` directory here", Val("run from the repo root"), color, json)
-    files := [String]{}
-    jet_cli_collect_fixture_rs("tests", &files)
+    if !cli_files.is_dir("tests/cases") -> return jet_cli_maintenance_error("E2104", "no `tests/cases/` directory here", Val("run from the repo root"), color, json)
+    cases := [String]{}
+    jet_cli_collect_cases("tests/cases", cases)
     checked := 0
     missing := [String]{}
-    loop file in files {
+    loop file in cases {
         source: cli_files.read(file) ?? ""
-        loop path in jet_cli_extract_fixture_paths(source) {
+        directory: cli_files.dirname(file)
+        loop line in source.split("\n") {
+            fixture: jet_cli_case_fixture(line) ?? next
             checked += 1
-            if !cli_files.exists(path) -> &missing.push("  {file} -> `{path}` does not exist\n")
+            path: "{directory}/{fixture}"
+            if !cli_files.is_dir(path) -> missing.push("  {file} -> `{fixture}` is not a directory beside the case\n")
         }
     }
-    if missing.len() == 0 -> return JetDriverVerbOutput{stdout: "check-fixture-paths: {checked} embedded path(s) across {files.len()} file(s), all present\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    JetDriverVerbOutput{stdout: "", stderr: "check-fixture-paths: {missing.len()} missing path(s):\n{missing.join("")}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    if missing.len() == 0 -> return JetDriverVerbOutput{stdout: "check-fixture-paths: {checked} fixture path(s) across {cases.len()} case(s), all present\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: "check-fixture-paths: {missing.len()} missing fixture path(s):\n{missing.join("")}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
 }

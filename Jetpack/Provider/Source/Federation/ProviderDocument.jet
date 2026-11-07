@@ -122,11 +122,11 @@ impl ProviderFactReport {
     // additive.
     shared_facts_for: fn(self, reference: String) -> ProviderFacts Never! {
         shared := ProviderFacts.for_reference(self.facts.family.label(), reference)
-        &shared.set_resolved_source(self.facts.source_identity)
-        &shared.set_native_document(self.native_format, self.native_document)
-        provider_add_metadata_facts(&shared, self.facts)
+        shared.set_resolved_source(self.facts.source_identity)
+        shared.set_native_document(self.native_format, self.native_document)
+        provider_add_metadata_facts(shared, self.facts)
         identity: self.facts.identity_selector()
-        if !shared.selector.is_exact() && identity.value != "" -> &shared.set_resolved_selector("#{identity.key}={identity.value}", "provider.metadata")
+        if !shared.selector.is_exact() && identity.value != "" -> shared.set_resolved_selector("#{identity.key}={identity.value}", "provider.metadata")
         selector: shared.effective_selector()
         selector_identity: if {
             selector.version != "" -> Val(selector.version)
@@ -134,9 +134,9 @@ impl ProviderFactReport {
             selector.digest != "" -> Val(selector.digest)
             else -> None
         }
-        if selector_identity != Val(identity.value) -> &shared.add_conflict("provider.selector.identity", identity.value, selector_identity ?? "<missing>", "provider.metadata")
-        loop index in 0..<self.losses.len() -> &shared.add_loss("provider.loss.{index}", self.losses[index], "provider.native_document")
-        loop index in 0..<self.conflicts.len() -> &shared.add_conflict("provider.conflict.{index}", "<provider-native-left-unavailable>", self.conflicts[index], "provider.native_document")
+        if selector_identity != Val(identity.value) -> shared.add_conflict("provider.selector.identity", identity.value, selector_identity ?? "<missing>", "provider.metadata")
+        loop index in 0..<self.losses.len() -> shared.add_loss("provider.loss.{index}", self.losses[index], "provider.native_document")
+        loop index in 0..<self.conflicts.len() -> shared.add_conflict("provider.conflict.{index}", "<provider-native-left-unavailable>", self.conflicts[index], "provider.native_document")
         shared
     }
 
@@ -194,7 +194,7 @@ provider_add_metadata_facts: fn(shared: &ProviderFacts, facts: MetadataFacts) Ne
         (key: "package.license", value: facts.license)
     }
     loop scalar in scalars {
-        if scalar.value != "" -> &shared.add_fact(scalar.key, ProviderFactValue.Text(scalar.value), "provider.metadata")
+        if scalar.value != "" -> shared.add_fact(scalar.key, ProviderFactValue.Text(scalar.value), "provider.metadata")
     }
     lists: [(key: String, values: [String])]{
         (key: "package.dependencies", values: facts.dependencies), (key: "package.dev_dependencies", values: facts.dev_dependencies),
@@ -203,14 +203,14 @@ provider_add_metadata_facts: fn(shared: &ProviderFacts, facts: MetadataFacts) Ne
         (key: "package.trust_roots", values: facts.trust_roots), (key: "package.todos", values: facts.todos)
     }
     loop list in lists {
-        if list.values.len() > 0 -> &shared.add_fact(list.key, provider_fact_text_list(list.values), "provider.metadata")
+        if list.values.len() > 0 -> shared.add_fact(list.key, provider_fact_text_list(list.values), "provider.metadata")
     }
     typed_keys := facts.typed.keys().to_list()
-    &typed_keys.sort()
+    typed_keys.sort()
     loop key in typed_keys {
         values := [ProviderFactValue]{}
-        loop value in facts.typed[key] -> &values.push(provider_typed_projection_value(value))
-        &shared.add_fact(key, ProviderFactValue.List(values), "provider.native_projection")
+        loop value in facts.typed[key] -> values.push(provider_typed_projection_value(value))
+        shared.add_fact(key, ProviderFactValue.List(values), "provider.native_projection")
     }
     if facts.replacement_candidates.len() > 0 {
         candidates := [ProviderFactValue]{}
@@ -225,15 +225,15 @@ provider_add_metadata_facts: fn(shared: &ProviderFacts, facts: MetadataFacts) Ne
             fields["unsupported_symbols"] = provider_fact_text_list(candidate.unsupported_symbols)
             fields["platforms"] = provider_fact_text_list(candidate.platforms)
             fields["proof_inputs"] = provider_fact_text_list(candidate.proof_inputs)
-            &candidates.push(ProviderFactValue.Map(fields))
+            candidates.push(ProviderFactValue.Map(fields))
         }
-        &shared.add_fact("package.replacement_candidates", ProviderFactValue.List(candidates), "provider.replacement")
+        shared.add_fact("package.replacement_candidates", ProviderFactValue.List(candidates), "provider.replacement")
     }
 }
 
 provider_fact_text_list: fn(values: [String]) -> ProviderFactValue Never! {
     items := [ProviderFactValue]{}
-    loop value in values -> &items.push(ProviderFactValue.Text(value))
+    loop value in values -> items.push(ProviderFactValue.Text(value))
     ProviderFactValue.List(items)
 }
 

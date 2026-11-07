@@ -200,13 +200,13 @@ cli_nix_index_verify_differential: fn(args: [String]) CLIToolError! -[FS, IO]> {
         actual[key] = record
     }
     compared := [String]{}
-    loop key in expected.keys().to_list() -> &compared.push(key)
+    loop key in expected.keys().to_list() -> compared.push(key)
     loop key in actual.keys().to_list() {
-        if !compared.contains(key) -> &compared.push(key)
+        if !compared.contains(key) -> compared.push(key)
     }
     mismatches := [String]{}
     loop key in compared {
-        if expected.get(key) != actual.get(key) -> &mismatches.push(key)
+        if expected.get(key) != actual.get(key) -> mismatches.push(key)
     }
     status: if mismatches.len() == 0 -> "passed" else -> "failed"
     report: json.to_string(Dyn.Object([
@@ -257,18 +257,18 @@ cli_nix_index_manifest: fn(args: [String]) CLIToolError! -[IO, FS, Env]> {
             loop file_entry in targets {
                 target: file_entry.path
                 if files.suffix(target) != ".zst" -> next
-                &staged.push(cli_nix_index_staged_target(target, file_entry.name, revision, system, endpoint))
+                staged.push(cli_nix_index_staged_target(target, file_entry.name, revision, system, endpoint))
             }
         }
     }
     listed := [(released: Int, system: String, revision: String)]{}
-    loop entry in staged -> &listed.push((released: entry.released_unix, system: entry.target.system, revision: entry.target.revision))
+    loop entry in staged -> listed.push((released: entry.released_unix, system: entry.target.system, revision: entry.target.revision))
     discoverable: cli_nix_index_newest_discoverable_targets(listed)
     targets := [NixIndexManifestTarget]{}
     loop entry in staged {
         target := entry.target
         target.discoverable = discoverable.contains((system: target.system, revision: target.revision))
-        &targets.push(target)
+        targets.push(target)
     }
     target_count: targets.len()
     bytes: nix_index_producer_manifest_bytes(channel, generation, issued_unix, expires_unix, targets) ?? return Err(CLIToolError.new(err.message()))
@@ -318,13 +318,13 @@ cli_nix_index_trim_trailing_slashes: fn(value: String) -> String Never! {
 // of each system: newest release first, ties by system then revision bytes.
 cli_nix_index_newest_discoverable_targets: fn(targets: [(released: Int, system: String, revision: String)]) -> [(system: String, revision: String)] Never! {
     ordered := targets
-    &ordered.sort_by((left: (released: Int, system: String, revision: String), right: (released: Int, system: String, revision: String)) -> (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision))
+    ordered.sort_by((left: (released: Int, system: String, revision: String), right: (released: Int, system: String, revision: String)) -> (right.released <=> left.released).then(left.system <=> right.system).then(left.revision <=> right.revision))
     counts := [String: Int]{}
     discoverable := [(system: String, revision: String)]{}
     loop entry in ordered {
         count: counts.get(entry.system) ?? 0
         pair: (system: entry.system, revision: entry.revision)
-        if count < NIX_INDEX_DISCOVERABLE_PER_SYSTEM && !discoverable.contains(pair) -> &discoverable.push(pair)
+        if count < NIX_INDEX_DISCOVERABLE_PER_SYSTEM && !discoverable.contains(pair) -> discoverable.push(pair)
         counts[entry.system] = count + 1
     }
     discoverable
@@ -387,7 +387,7 @@ cli_nix_index_read_store_paths: fn(path: String) -[FS]> [String] CLIToolError! {
     text: String.from_bytes(bytes) ?? return Err(CLIToolError.new("store-paths is not UTF-8"))
     lines := [String]{}
     loop line in text.lines() {
-        if line != "" -> &lines.push(line)
+        if line != "" -> lines.push(line)
     }
     Ok(cli_sorted_unique(lines))
 }
@@ -493,15 +493,15 @@ cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[Str
             loop entry in fields {
                 if entry.key == field {
                     if pkg_json_text(entry.value) == {
-                        .Val(text) -> if !values.contains(text) -> &values.push(text)
+                        .Val(text) -> if !values.contains(text) -> values.push(text)
                         .None -> {}
                     }
                 }
-                cli_nix_index_collect_named_strings(entry.value, field, &values)
+                cli_nix_index_collect_named_strings(entry.value, field, values)
             }
         }
         .Array(items) -> {
-            loop item in items -> cli_nix_index_collect_named_strings(item, field, &values)
+            loop item in items -> cli_nix_index_collect_named_strings(item, field, values)
         }
         else -> {}
     }
@@ -510,12 +510,12 @@ cli_nix_index_collect_named_strings: fn(value: Dyn, field: String, values: &[Str
 // Every `/nix/store/` text value anywhere in `value`.
 cli_nix_index_collect_store_paths: fn(value: Dyn, paths: &[String]) Never! {
     if value == {
-        .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> &paths.push(text)
+        .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> paths.push(text.copy())
         .Array(items) -> {
-            loop item in items -> cli_nix_index_collect_store_paths(item, &paths)
+            loop item in items -> cli_nix_index_collect_store_paths(item, paths)
         }
         .Object(fields) -> {
-            loop entry in fields -> cli_nix_index_collect_store_paths(entry.value, &paths)
+            loop entry in fields -> cli_nix_index_collect_store_paths(entry.value, paths)
         }
         else -> {}
     }
@@ -526,20 +526,20 @@ cli_nix_index_collect_store_paths: fn(value: Dyn, paths: &[String]) Never! {
 cli_nix_index_read_hydra_output_paths: fn(path: String, system: String) -[FS]> [String] CLIToolError! {
     cli_nix_index_validate_staged_input(path, "Hydra build directory")
     records := [String]{}
-    cli_nix_index_collect_json_files(path, &records)
+    cli_nix_index_collect_json_files(path, records)
     if records.len() == 0 -> return Err(CLIToolError.new("Hydra build directory contains no JSON files"))
-    &records.sort()
+    records.sort()
     output_paths := [String]{}
     loop record in records {
         value: cli_nix_index_read_json_input(record, 67108864, "Hydra build record")
         systems := [String]{}
-        cli_nix_index_collect_named_strings(value, "system", &systems)
+        cli_nix_index_collect_named_strings(value, "system", systems)
         exact := systems.len() > 0
         loop found in systems {
             if found != system -> exact = false
         }
         if !exact -> return Err(CLIToolError.new("Hydra build record has no exact `{system}` system: {record}"))
-        cli_nix_index_collect_store_paths(value, &output_paths)
+        cli_nix_index_collect_store_paths(value, output_paths)
     }
     Ok(cli_sorted_unique(output_paths))
 }
@@ -548,12 +548,12 @@ cli_nix_index_collect_json_files: fn(path: String, found: &[String]) CLIToolErro
     metadata: files.stat(path) ?? return Err(CLIToolError.new("inspect Hydra build input: {err}"))
     if metadata.is_symlink -> return Err(CLIToolError.new("Hydra build input `{path}` must not be a symlink"))
     if metadata.is_file {
-        &found.push(path)
+        found.push(path.copy())
         return
     }
     if !metadata.is_dir -> return Err(CLIToolError.new("Hydra build input `{path}` is not a file or directory"))
     entries: files.list_dir(path) ?? return Err(CLIToolError.new("read Hydra build input: {err}"))
-    loop entry in entries -> cli_nix_index_collect_json_files(entry.path, &found)
+    loop entry in entries -> cli_nix_index_collect_json_files(entry.path, found)
 }
 
 // The first non-negative integer named by one of `names`, searching nested

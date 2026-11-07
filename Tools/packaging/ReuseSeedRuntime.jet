@@ -42,15 +42,15 @@ fail: fn(message: String) -> Never {
 // sha256, and one sha256 over `<path byte count>:<path>:<size>:<bytes>` per file.
 inventory: fn(name: String, paths: [String]) -> Inventory {
     sorted := paths
-    &sorted.sort()
+    sorted.sort()
     total := crypto.new()
     rows := [InventoryFile]{}
     loop path in sorted {
         if rows.len() > 0 && rows[rows.len() - 1].path == path -> next
         bytes: files.read_bytes(path) ?? fail("can't read `{path}`: {err}")
-        &total.update("{path.count_bytes()}:{path}:{bytes.len()}:".bytes())
-        &total.update(bytes)
-        &rows.push(InventoryFile{path: path.copy(), sha256: crypto.sha256(bytes).hex()})
+        total.update("{path.count_bytes()}:{path}:{bytes.len()}:".bytes())
+        total.update(bytes)
+        rows.push(InventoryFile{path: path.copy(), sha256: crypto.sha256(bytes).hex()})
     }
     Inventory{name: name, sha256: total.digest(), files: rows}
 }
@@ -60,7 +60,7 @@ jet_files: fn(directory: String) -> [String] {
     found := [String]{}
     entries: files.walk_files(directory) ?? fail("can't list `{directory}`: {err}")
     loop entry in entries {
-        if entry.relative.ends_with(".jet") -> &found.push("{directory}/{entry.relative}")
+        if entry.relative.ends_with(".jet") -> found.push("{directory}/{entry.relative}")
     }
     found
 }
@@ -71,11 +71,11 @@ checkout_inventories: fn() -> [Inventory] {
     sources := [String]{RUNTIME_MANIFEST, RUNTIME_PACKAGE}
     loop raw in manifest.split("\n") {
         row: raw.trim()
-        if row != "" && !row.starts_with("#") -> &sources.push(row.copy())
+        if row != "" && !row.starts_with("#") -> sources.push(row.copy())
     }
     backend := [String]{}
     loop directory in BACKEND_SOURCES {
-        loop path in jet_files(directory) -> &backend.push(path)
+        loop path in jet_files(directory) -> backend.push(path)
     }
     [Inventory]{inventory("source", sources), inventory("backendInputs", backend), inventory("lifecycle", [String]{RUNTIME_LIFECYCLE})}
 }
@@ -105,7 +105,7 @@ recorded_inventory: fn(provenance: Dyn, name: String, origin: String) -> Invento
     rows := [InventoryFile]{}
     if field(recorded, "files") == {
         .Val(.Array(items)) -> {
-            loop item in items -> &rows.push(InventoryFile{path: text(field(item, "path")), sha256: text(field(item, "sha256"))})
+            loop item in items -> rows.push(InventoryFile{path: text(field(item, "path")), sha256: text(field(item, "sha256"))})
         }
         else -> fail("`{origin}` has no `{name}` file list")
     }
@@ -122,12 +122,12 @@ differing: fn(recorded: Inventory, checkout: Inventory) -> [String] {
     paths := [String]{}
     loop row in checkout.files {
         ours[row.path.copy()] = row.sha256.copy()
-        if theirs.get(row.path) != Val(row.sha256) -> &paths.push(row.path.copy())
+        if theirs.get(row.path) != Val(row.sha256) -> paths.push(row.path.copy())
     }
     loop row in recorded.files {
-        if ours.get(row.path) == None -> &paths.push(row.path.copy())
+        if ours.get(row.path) == None -> paths.push(row.path.copy())
     }
-    &paths.sort()
+    paths.sort()
     paths
 }
 
@@ -151,7 +151,7 @@ run: fn() {
         if recorded.sha256 == checkout.sha256 -> next
         paths: differing(recorded, checkout)
         if paths.len() == 0 -> fail("`{origin}` records a `{checkout.name}` hash its own file rows do not give")
-        loop path in paths -> &changed.push(path)
+        loop path in paths -> changed.push(path)
     }
     if changed.len() > 0 {
         fail("the seed's runtime pack `{pack}` was not built from this checkout: {changed.len()} of this checkout's {total} runtime input files differ from the pack's, first `{changed[0]}`.\nUse the latest published Jet release as the seed (its runtime pack matches its commit), or rebuild the runtime pack for this checkout with `Tools/packaging/prebuild-runtime.sh {compiler}`.")

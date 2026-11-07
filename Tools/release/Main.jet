@@ -57,7 +57,7 @@ parse_args: fn(args: [String]) -> Options Problem! {
         if {
             arg == "--evidence" || arg == "--key" -> {
                 if index + 1 >= args.len() -> return Err(problem(INPUT, "{arg} needs a value"))
-                if arg == "--evidence" -> &options.evidence.push(args[index + 1].copy()) else -> options.key = args[index + 1].copy()
+                if arg == "--evidence" -> options.evidence.push(args[index + 1].copy()) else -> options.key = args[index + 1].copy()
                 index += 2
                 next
             }
@@ -79,16 +79,16 @@ gather_remote: fn(root: String, commit: String, programs: Programs) -[Exec, Time
     remote := Remote{slug: "", origin_tags: [Tag]{}, local_tags: [String]{}, released: [String]{}, on_origin_dev: false, tree: "", problems: [Problem]{}}
     remote.slug = github_slug(run_argv([String]{"git", "-C", root, "remote", "get-url", "origin"}, root).output)
     listed: run_argv([String]{"git", "-C", root, "ls-remote", "--tags", "origin", "a0_*"}, root)
-    if listed.code != 0 -> &remote.problems.push(problem(REMOTE, "git ls-remote origin failed: {listed.errors.trim()}"))
+    if listed.code != 0 -> remote.problems.push(problem(REMOTE, "git ls-remote origin failed: {listed.errors.trim()}"))
     remote.origin_tags = remote_tags(listed.output)
     loop line in run_argv([String]{"git", "-C", root, "tag", "-l", "a0_*"}, root).output.split("\n").to_list() {
-        if line.trim() != "" -> &remote.local_tags.push(line.trim().copy())
+        if line.trim() != "" -> remote.local_tags.push(line.trim().copy())
     }
     if remote.slug != "" {
         released: run_argv(with_args(programs.gh, [String]{"release", "list", "-R", remote.slug, "--limit", "1000", "--json", "tagName", "--jq", ".[].tagName"}), root)
-        if released.code != 0 -> &remote.problems.push(problem(REMOTE, "gh release list failed: {released.errors.trim()}"))
+        if released.code != 0 -> remote.problems.push(problem(REMOTE, "gh release list failed: {released.errors.trim()}"))
         loop line in released.output.split("\n").to_list() {
-            if line.trim() != "" -> &remote.released.push(line.trim().copy())
+            if line.trim() != "" -> remote.released.push(line.trim().copy())
         }
     }
     if is_hex(commit, 40) {

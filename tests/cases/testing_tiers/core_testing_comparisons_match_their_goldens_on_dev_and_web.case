@@ -8,11 +8,11 @@ requires: tool:node
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 write: run.mjs = "const app = await import(process.cwd() + '/app.js');\nawait app.jet_main();\n"
-copy: {root}/Examples/features/tooling/test_compare/run.jet compare/main.jet
+copy: {root}/Examples/Tooling/Testing/TestCompare/run.jet compare/main.jet
 step: jet dev --watch=off main.jet
 cwd: compare
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_compare.out
+stdout: = ../../../Examples/Tooling/Testing/TestCompare.out
 step: jet build --target web main.jet
 cwd: compare
 exit: 0
@@ -20,12 +20,12 @@ file: compare/.jet/build/app.js !~ "testing" # the loader carries no testing glu
 step: node {work}/run.mjs
 cwd: compare/.jet/build
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_compare.out
-copy: {root}/Examples/features/tooling/test_history/run.jet history/main.jet
+stdout: = ../../../Examples/Tooling/Testing/TestCompare.out
+copy: {root}/Examples/Tooling/Testing/TestHistory/run.jet history/main.jet
 step: jet dev --watch=off main.jet
 cwd: history
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_history.out
+stdout: = ../../../Examples/Tooling/Testing/TestHistory.out
 step: jet build --target web main.jet
 cwd: history
 exit: 0
@@ -33,12 +33,12 @@ file: history/.jet/build/app.js !~ "testing" # the loader carries no testing glu
 step: node {work}/run.mjs
 cwd: history/.jet/build
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_history.out
-copy: {root}/Examples/features/tooling/test_outcomes/run.jet outcomes/main.jet
+stdout: = ../../../Examples/Tooling/Testing/TestHistory.out
+copy: {root}/Examples/Tooling/Testing/TestOutcomes/run.jet outcomes/main.jet
 step: jet dev --watch=off main.jet
 cwd: outcomes
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_outcomes.out
+stdout: = ../../../Examples/Tooling/Testing/TestOutcomes.out
 step: jet build --target web main.jet
 cwd: outcomes
 exit: 0
@@ -46,4 +46,4 @@ file: outcomes/.jet/build/app.js !~ "testing" # the loader carries no testing gl
 step: node {work}/run.mjs
 cwd: outcomes/.jet/build
 exit: 0
-stdout: = ../../../Examples/features/expected/tooling/test_outcomes.out
+stdout: = ../../../Examples/Tooling/Testing/TestOutcomes.out

@@ -27,7 +27,7 @@ lsp_call_hierarchy_incoming_response: fn(server: LSPServer, params: Dyn?, id: Dy
                 // declines; do not select a later same-spelled definition.
                 if lsp_call_hierarchy_item_json(def, doc.text) == .Val(json) {
                     span: Span{start: edge.call_span.start, end: edge.call_span.end}
-                    &rows.push("{{\"from\":{json},\"fromRanges\":[{lsp_range_json(lsp_byte_span_to_range(doc.text, span))}]}}")
+                    rows.push("{{\"from\":{json},\"fromRanges\":[{lsp_range_json(lsp_byte_span_to_range(doc.text, span))}]}}")
                 }
                 break
             }
@@ -55,7 +55,7 @@ lsp_call_hierarchy_outgoing_response: fn(server: LSPServer, params: Dyn?, id: Dy
                 if def.module_path != path || def.name != edge.callee -> next
                 if lsp_call_hierarchy_item_json(def, doc.text) == .Val(json) {
                     span: Span{start: edge.call_span.start, end: edge.call_span.end}
-                    &rows.push("{{\"to\":{json},\"fromRanges\":[{lsp_range_json(lsp_byte_span_to_range(doc.text, span))}]}}")
+                    rows.push("{{\"to\":{json},\"fromRanges\":[{lsp_range_json(lsp_byte_span_to_range(doc.text, span))}]}}")
                 }
                 break
             }
@@ -104,7 +104,7 @@ lsp_type_hierarchy_supertypes_response: fn(server: LSPServer, params: Dyn?, id: 
                 else -> { next }
             }
             source: lsp_module_source(result, def.module_path) ?? doc.text
-            if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> &rows.push(item)
+            if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> rows.push(item)
             break
         }
     }
@@ -128,7 +128,7 @@ lsp_type_hierarchy_subtypes_response: fn(server: LSPServer, params: Dyn?, id: Dy
                 else -> { next }
             }
             source: lsp_module_source(result, def.module_path) ?? doc.text
-            if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> &rows.push(item)
+            if lsp_type_hierarchy_item_json(def, source) == .Val(item) -> rows.push(item)
             break
         }
     }

@@ -2,7 +2,7 @@
 Crawler: struct {
     step: Int
 
-    drain: fn(self, _group: Group, values: ^[Int]) {
+    drain: fn(self, _group: Group, values: &&[Int]) {
         step: self.step
         handle: task values[0] + step
         print(handle.join() ?? 0)
@@ -13,6 +13,6 @@ run: fn() {
     task.group group {
         crawler: Crawler{step: 2}
         values: [40]
-        crawler.drain(group, ^values)
+        crawler.drain(group, values)
     }
 }

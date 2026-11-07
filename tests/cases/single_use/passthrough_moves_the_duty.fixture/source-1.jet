@@ -5,16 +5,16 @@
 acquire: fn(resource: String) -> Lock {
     return Lock{ resource: resource }
 }
-release: fn(lock: ^Lock) {
+release: fn(lock: &&Lock) {
     print(lock.resource)
 }
 
 
-hold: fn(lock: ^Lock) -> Lock {
+hold: fn(lock: &&Lock) -> Lock {
     return lock
 }
 run: fn() {
     db: acquire("db")
-    held: hold(^db)
-    release(^held)
+    held: hold(db)
+    release(held)
 }

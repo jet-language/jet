@@ -17,12 +17,12 @@ pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
     errors := [String]{}
     lexed: lex_generated(source.bytes())
     loop diagnostic in lexed.diagnostics {
-        &errors.push("lex {diagnostic.code}: {diagnostic.what}")
+        errors.push("lex {diagnostic.code}: {diagnostic.what}")
     }
     if errors.len() != 0 -> return errors
-    parsed: parse_lexed(^lexed)
+    parsed: parse_lexed(lexed)
     loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == 1 -> &errors.push("parse {diagnostic.code}: {diagnostic.what}")
+        if diagnostic.severity == 1 -> errors.push("parse {diagnostic.code}: {diagnostic.what}")
     }
     errors
 }
@@ -45,7 +45,7 @@ pkg_test_binder_syntax_errors: fn(source: String) -> [String] Never! {
     failures := [String]{}
     loop binder in rendered {
         errors: pkg_test_binder_syntax_errors(binder.source)
-        if errors.len() != 0 -> &failures.push("{binder.name} binder output does not parse:\n{errors.join("\n")}\n{binder.source}")
+        if errors.len() != 0 -> failures.push("{binder.name} binder output does not parse:\n{errors.join("\n")}\n{binder.source}")
     }
     if failures.len() != 0 -> panic(failures.join("\n\n"))
 }

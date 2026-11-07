@@ -101,18 +101,18 @@ cli_nix_index_test_revision: fn(value: Int) -> String {
     out := [U8]{}
     rest := value
     loop out.len() < 40 {
-        &out.push(digits[rest %% 16])
+        out.push(digits[rest %% 16])
         rest = rest /% 16
     }
-    &out.reverse()
+    out.reverse()
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
 #Test("nix index manifest retention marks newest twelve per system") {
     targets := [(released: Int, system: String, revision: String)]{}
-    loop revision in 0..<13 -> &targets.push((released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)))
-    &targets.push((released: 1, system: "aarch64-linux", revision: cli_nix_index_test_revision(90)))
-    &targets.reverse()
+    loop revision in 0..<13 -> targets.push((released: revision, system: "x86_64-linux", revision: cli_nix_index_test_revision(revision)))
+    targets.push((released: 1, system: "aarch64-linux", revision: cli_nix_index_test_revision(90)))
+    targets.reverse()
 
     discoverable: cli_nix_index_newest_discoverable_targets(targets)
     assert_eq(discoverable.len(), 13)

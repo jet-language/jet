@@ -9,7 +9,7 @@
 // Rust `print!`: stdout bytes with no added newline.
 cli_print_raw: fn(text: String) Never! -[IO]> {
     stdout_handle := term.stdout()
-    &stdout_handle.write(text).drop("a closed stdout cannot take the shell script")
+    stdout_handle.write(text).drop("a closed stdout cannot take the shell script")
 }
 
 // `jet env hook <shell>` — pure text: installing the hook is a safe editor
@@ -77,7 +77,7 @@ cli_cmd_env_export: fn(verification: &StoreVerification, cache: &WorkspaceDeclar
     // previous activation usable.
     script := ""
     if target == .Val(root) {
-        script = cli_env_export_activate(&verification, &cache, theme, parsed, kind, root, target_hash, active != None, base_path, watched_reload_ready) ?? return err.code
+        script = cli_env_export_activate(verification, cache, theme, parsed, kind, root, target_hash, active != None, base_path, watched_reload_ready) ?? return err.code
     } else if active != None {
         script = env_hook_render_unload(kind, base_path)
     }
@@ -109,8 +109,8 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
     sys.set_current_dir(root) ?? return Err(keep)
     roots: pkg_resolve_roots()
     // A malformed or foreign-only env keeps the previous activation.
-    plan := cli_load_project_plan_with_selections(&cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return Err(keep)
-    cli_apply_locked_channels(theme, root, &plan.table, parsed.flags) ?? return Err(keep)
+    plan := cli_load_project_plan_with_selections(cache, theme, parsed.flags.preset, parsed.flags.environment) ?? return Err(keep)
+    cli_apply_locked_channels(theme, root, plan.table, parsed.flags) ?? return Err(keep)
     // Trust law: the first activation of an untrusted,
     // trust-sensitive env prompts (interactive) or is refused with a hint
     // (non-interactive). A trusted or non-sensitive env activates silently.
@@ -139,19 +139,18 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
         .Val(receipt) -> cli_env_entry_matches_plan(receipt, plan)
         .None -> false
     }
-    inherited_loader_path: sys.get("LD_LIBRARY_PATH")
     local_catalog: parsed.flags.local_nix_catalog != None
     warm := [VerifiedRealization]?{None}
     if receipt_matches_plan {
         receipt: previous_receipt ?? panic("a matching receipt exists")
-        warm = if store_reuse_verified_environment(&verification, roots, receipt.stamp, root, fingerprints.definition, inherited_loader_path, receipt.packages, local_catalog) == {
+        warm = if store_reuse_verified_environment(verification, roots, receipt.stamp, root, fingerprints.definition, receipt.packages, local_catalog) == {
             .Val(found) -> Val(found)
             .None -> None
             .Err(_) -> None
         }
         if warm == None {
-            expectations: cli_environment_member_expectations(&verification, roots, root, parsed.flags, plan)
-            warm = if store_reuse_verified_environment_members(&verification, roots, receipt.packages, expectations, local_catalog) == {
+            expectations: cli_environment_member_expectations(verification, roots, root, parsed.flags, plan)
+            warm = if store_reuse_verified_environment_members(verification, roots, receipt.packages, expectations, local_catalog) == {
                 .Val(found) -> Val(found)
                 .None -> None
                 .Err(_) -> None
@@ -162,20 +161,20 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
     // A missing receipt still uses the canonical Store authority check and
     // retains its checked entries and leases for composition.
     if !warm_reused {
-        cli_replay_locked_nix(&verification, theme, roots, root, plan.refs, plan.table, parsed.flags.offline, local_catalog, &warm) ?? {
+        cli_replay_locked_nix(verification, theme, roots, root, plan.refs, plan.table, parsed.flags.offline, local_catalog, warm) ?? {
             theme.detail("locked Nix replay was unavailable: {err.message()}")
             return Err(keep)
         }
     }
-    composed: cli_compose_env_scoped_with_warm(&verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, ^warm, !warm_reused) ?? return Err(keep)
-    env := ^composed.env
+    composed: cli_compose_env_scoped_with_warm(verification, theme, roots, parsed.flags, plan, RealizeScope.Project, false, warm, !warm_reused) ?? return Err(keep)
+    env := composed.env.move()
     // Reconcile the source graph after realization. If a prompt races an
     // edit, keep the prior activation and let the next prompt retry the new
     // hash instead of emitting a plan assembled from mixed revisions.
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     plan_hash: target_hash ?? ""
     entry: cli_find_project_entry(root)
-    cli_run_lifecycle_hooks_silent(&verification, &cache, theme, parsed, roots, root, entry, &env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
+    cli_run_lifecycle_hooks_silent(verification, cache, theme, parsed, roots, root, entry, env, plan.environment.lifecycle.on_enter, "on_enter") ?? return Err(keep)
     if env_hook_definition_fingerprint_with_selections(root, parsed.flags.preset, parsed.flags.environment) != target_hash -> return Err(keep)
     script := ""
     if active -> script = env_hook_render_unload(kind, base_path)
@@ -202,7 +201,7 @@ cli_env_export_activate: fn(verification: &StoreVerification, cache: &WorkspaceD
     }
     script = "{script}{rendered}"
     if !warm_reused {
-        cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, inherited_loader_path, secret_identity ?? "", composed.stats) ?? theme.detail("couldn't record env entry: {err.message()}")
+        cli_record_env_entry_receipt(theme, root, roots, fingerprints.definition, secret_identity ?? "", composed.stats) ?? theme.detail("couldn't record env entry: {err.message()}")
     }
     if watched_reload_ready -> env_hook_clear_watch_reload(root)
     Ok(script)

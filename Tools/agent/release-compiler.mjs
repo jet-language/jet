@@ -2,10 +2,12 @@
 // release-compiler.mjs: the release gate of the a0_NNN compiler train.
 //
 //   node Tools/agent/release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N]
-//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]
+//        [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR] [--check-gate]
 //
 // COMMIT is a commit on dev. The current release is `SEEDS/current` (default
-// $JET_SEEDS, Tools/agent/roots.mjs). The tool runs every check and
+// $JET_SEEDS, Tools/agent/roots.mjs). The run starts only with COMMIT's collect-all preflight
+// receipt for the current release (Tools/agent/land/preflight-receipt.mjs, written by
+// census-snap.sh); --check-gate says whether it would start and stops. The tool runs every check and
 // reports all of them; it does not stop at the first failure:
 //   chain     chain.sh builds s1, s2 and s3 of COMMIT from the current release, every stage
 //             under norust.sh, and must reach the fixed point (s2 == s3).
@@ -28,36 +30,46 @@
 // The suites start only once the cheap checks (chain, pack, jetpack) are
 // clean: they are the expensive part (AGENTS.md, expensive launches are gated).
 //
-// Pass: writes SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
-// IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS, current.env, RELEASE.json,
-// RELEASE.md, MERGE_MSG, TAG_MSG and
-// evidence/, then prints the commands for Main: make it current (jet-use), merge it to master
-// as `Merge dev: a0_NNN <summary>`, tag it, push, and publish it as the tag's GitHub release
-// with `jet run Tools/release/Main.jet -- candidate SEEDS/a0_NNN`, then `-- publish SEEDS/a0_NNN`.
-// Fail: SEEDS is unchanged; the evidence stays
-// in the work directory. The tool never repoints `current`, merges, tags, pushes or
-// publishes. One release run at a time (a lock in the work root); the run takes one
+// Pass: assembles SEEDS/a0_NNN (the next number) with jet, jet-runtime/, jetpack, toolchain/,
+// IDENTITY, RELEASE, the C toolchain pack, SOURCE, SHA256SUMS, RELEASE.json, RELEASE.md,
+// MERGE_MSG, TAG_MSG and evidence/, then publishes it, each step only after the one before
+// succeeds: COMMIT must be on origin/dev; `git tag -a a0_NNN -F TAG_MSG COMMIT`;
+// `git push origin a0_NNN`; then the new jet runs `jet run Tools/release/Main.jet -- candidate
+// SEEDS/a0_NNN` and `-- publish SEEDS/a0_NNN` from this checkout, signing with the jet-release
+// key (`jet registry keygen --registry jet-release` writes it to $JET_KEYS_DIR, default
+// ~/.jet/keys; the run does not start without it). Only then does it write
+// SEEDS/a0_NNN/current.env and print PASS with the commands left for Main: make it current
+// (jet-use) and merge it to master as `Merge dev: a0_NNN <summary>`.
+// Fail: no current.env and no PASS. A failed check, or a publication step that fails before
+// the tag reaches origin, leaves no SEEDS/a0_NNN (the assembled directory moves to
+// SEEDS/.a0_NNN.unpublished-PID and the local tag is deleted); once the tag is on origin,
+// SEEDS/a0_NNN stays without current.env and the tool prints the steps left. The evidence
+// stays in the work directory. The tool never repoints `current`, merges or pushes master.
+// One release run at a time (a lock in the work root); the run takes one
 // build-slot.sh slot, and every suite process runs inside that slot's memory cap. Each
 // shard's `jet test` gets `--memory` (the slot's SLOT_MEMORY_MAX, 16G when unset, split
 // across the shards), because a pool left to size itself reads the host's MemAvailable
 // and every shard would claim all of it; --jobs N caps each pool at N entries at once.
-// --filter narrows
-// the suites for dry runs of the tool itself: such a
-// run is never a release (RELEASE.json scope `filtered`, which jet-use refuses).
+// --filter narrows the suites for dry runs of the tool itself: such a run is never a
+// release (RELEASE.json scope `filtered`, which jet-use refuses) and is never tagged or
+// published.
 //
 // Environment: the roots of Tools/agent/roots.mjs, JET_RELEASE_WORK (default
 // $JET_STATE_ROOT/release), JET_RELEASE_CHAIN (default Tools/agent/chain/chain.sh),
 // JET_RELEASE_SLOT (default Tools/agent/chain/build-slot.sh; empty runs without a slot),
-// JET_PACK_MUSL_LIB.
-// Exit: 0 released, 1 a check failed (nothing released), 2 the run could not start.
+// JET_PACK_MUSL_LIB, JET_KEYS_DIR (where the jet-release signing key lives; default ~/.jet/keys).
+// Exit: 0 released and published, 1 a check or a publication step failed (not admitted),
+// 2 the run could not start.
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import {
     chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, readdirSync,
     realpathSync, renameSync, rmSync, statSync, writeFileSync, appendFileSync, lstatSync, linkSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { commitSourceIdentity, gate, refusal } from './land/preflight-receipt.mjs';
 import { seedsRoot, stateRoot } from './roots.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
@@ -67,7 +79,13 @@ const STACK = ['prlimit', '--core=0', '--stack=1073741824:1073741824', '--'];
 const MUSL_DEFAULT = '/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x86_64-unknown-linux-musl-1.2.5/lib';
 // norust.sh, inline: drop every PATH directory holding cargo, rustc or rustup, refuse if one stays reachable.
 const NORUST = 'kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; [ -n "$s" ] || kept="$kept${kept:+:}$d"; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"';
-const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR]';
+const USAGE = 'usage: release-compiler.mjs COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--seeds DIR] [--work DIR] [--check-gate]';
+// The registry name of the key that signs a release's CANDIDATE.json (Tools/release/Main.jet RELEASE_KEY).
+const RELEASE_KEY = 'jet-release';
+// Where `jet registry keygen --registry jet-release` writes the private seed (Jetpack Publication Sign.jet).
+function releaseKeyPath() {
+    return join(process.env.JET_KEYS_DIR || join(process.env.HOME ?? homedir(), '.jet', 'keys'), `${RELEASE_KEY}.ed25519`);
+}
 // The pool settings of each of `shards` `jet test` runs sharing one slot: the slot's memory cap split across
 // them (each pool alone would size its budget from the whole cgroup room), and `--jobs` only when given; the
 // pool's default is one entry per core while their claims fit the budget.
@@ -81,7 +99,7 @@ export function shardPool(options, shards, slotMemory = process.env.SLOT_MEMORY_
 // ---- pure helpers (release-compiler.test.mjs) ----
 
 export function parseArgs(argv) {
-    const options = { commit: '', summary: '', dispositions: '', minGains: 10, shards: 4, jobs: 0, timeout: 0, filter: '', seeds: '', work: '', errors: [] };
+    const options = { commit: '', summary: '', dispositions: '', minGains: 10, shards: 4, jobs: 0, timeout: 0, filter: '', seeds: '', work: '', checkGate: false, errors: [] };
     const values = new Map([['--summary', 'summary'], ['--dispositions', 'dispositions'], ['--filter', 'filter'], ['--seeds', 'seeds'], ['--work', 'work']]);
     const counts = new Map([['--min-gains', 'minGains'], ['--shards', 'shards'], ['--jobs', 'jobs'], ['--timeout', 'timeout']]);
     for (let i = 0; i < argv.length; i++) {
@@ -92,7 +110,8 @@ export function parseArgs(argv) {
             if (values.has(flag)) options[values.get(flag)] = value;
             else if (!/^\d+$/.test(value)) options.errors.push(`${flag} needs a whole number, not ${value}`);
             else options[counts.get(flag)] = Number(value);
-        } else if (flag.startsWith('-')) options.errors.push(`unknown option ${flag}`);
+        } else if (flag === '--check-gate') options.checkGate = true;
+        else if (flag.startsWith('-')) options.errors.push(`unknown option ${flag}`);
         else if (options.commit) options.errors.push(`one commit, not ${options.commit} and ${flag}`);
         else options.commit = flag;
     }
@@ -335,6 +354,7 @@ function preconditions(options) {
     if (release.error) errors.push(release.error);
     if (!existsSync(chain)) errors.push(`chain.sh not found at ${chain} (JET_RELEASE_CHAIN)`);
     if (!existsSync(join(musl, 'libc.a'))) errors.push(`no musl libc.a in ${musl} (JET_PACK_MUSL_LIB)`);
+    if (!options.filter && !existsSync(releaseKeyPath())) errors.push(`no release signing key at ${releaseKeyPath()}: create it with \`jet registry keygen --registry ${RELEASE_KEY}\``);
     let dispositions = [];
     if (options.dispositions) {
         if (!existsSync(options.dispositions)) errors.push(`dispositions file ${options.dispositions} does not exist`);
@@ -345,7 +365,9 @@ function preconditions(options) {
         }
     }
     if (workRoot === seeds || workRoot.startsWith(`${seeds}/`)) errors.push('the work root must be outside the seeds directory');
-    return { errors, seeds, workRoot, chain, musl, sha, release, dispositions };
+    // The preflight gate, once the run could otherwise start: COMMIT's receipt from a census by the current release.
+    const admission = errors.length ? null : gate(commitSourceIdentity(REPO, sha), release.identity);
+    return { errors, seeds, workRoot, chain, musl, sha, release, dispositions, admission };
 }
 
 function takeLock(workRoot) {
@@ -538,9 +560,7 @@ async function suiteRun(ctx, side, suite, extra = []) {
     const runs = [];
     for (let index = 1; index <= shards; index++) {
         const tag = `${side}-${suite}${retry ? '-retry' : ''}-${index}`;
-        const scratch = join(ctx.work, 'kit', `scratch-${tag}`);
-        mkdirSync(scratch, { recursive: true });
-        const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet, JET_TEST_SCRATCH_DIR: scratch };
+        const env = { ...ctx.env, JET_COMPILER_IDENTITY: compiler.identity, JET_TOOLCHAIN_ROOT: compiler.root, JET: compiler.jet };
         // Suite rows run host tools (C compilers, rustc, interpreters) that only jet-env supplies until jet does.
         const argv = [...STACK, join(ctx.tree, 'Tools/agent/jet-env'), ctx.candidate.jet, 'test', join(ctx.tree, 'Compiler'), '--profile', suite, `--compiler=${compiler.jet}`, `--results=${join(ctx.work, 'kit', `${tag}.json`)}`];
         if (!retry) argv.push(`--shard=${index}/${shards}`);
@@ -558,7 +578,6 @@ async function suiteRun(ctx, side, suite, extra = []) {
         if (!existsSync(file) && result.rc === 2 && /no matching corpus entries/.test(readFileSync(log, 'utf8'))) continue;
         if (!existsSync(file)) { errors.push(`${tag} rc=${result.rc}${result.timedOut ? ' (timed out)' : ''} wrote no results: ${tail(log, 3)}`); continue; }
         rows.push(...JSON.parse(readFileSync(file, 'utf8')).results);
-        removeTree(join(ctx.work, 'kit', `scratch-${tag}`));
     }
     return errors.length ? { error: errors.join('; '), rows } : { rows };
 }
@@ -683,7 +702,9 @@ function assemble(ctx, gate, plan) {
     copyFileSync(ctx.ccPack.path, join(temp, ctx.ccPack.file));
     chmodSync(join(temp, ctx.ccPack.file), 0o644);
     writeFileSync(join(temp, 'SOURCE'), `${sha} (dev, ${next}: self-hosted s2 of ${sha.slice(0, 9)} from seed ${release.name}; ${verified}; release-compiler.mjs ${date})\n`);
-    writeFileSync(join(temp, 'current.env'), [
+    // jet-use installs a release from its current.env, so it waits in the work directory and
+    // reaches dest only once the release is published (release()).
+    writeFileSync(join(ctx.work, 'current.env'), [
         '# Newest verified self-hosted compiler (written by release-compiler.mjs; jet-use installs it).',
         `LABEL="${next} (dev ${sha.slice(0, 9)}, ${date}, verified: s2 == s3 ${candidate.sha.slice(0, 16)}, no Rust; ${gains.total} gains, ${lost.length} lost over ${release.name})"`,
         `JET=${dest}/jet`, `JET_IDENTITY=${candidate.identity}`, `SOURCE=${dest}/toolchain`, '',
@@ -706,11 +727,48 @@ function assemble(ctx, gate, plan) {
     return { dest, summary, scope };
 }
 
+// The publication of an assembled release (the header's Pass): each step runs only after the one
+// before succeeds, its output in logs/publish.log. The new jet runs Tools/release/Main.jet from this
+// checkout, and is the `jet` that tool finds on PATH.
+function publish(ctx, released) {
+    const { dest } = released;
+    const log = join(ctx.work, 'logs', 'publish.log');
+    const env = { ...process.env, PATH: `${dest}:${process.env.PATH ?? ''}`, JET_COMPILER_IDENTITY: ctx.candidate.identity };
+    for (const name of ['JET', 'JET_TOOLCHAIN_ROOT']) delete env[name];
+    const release = [join(dest, 'jet'), 'run', 'Tools/release/Main.jet', '--'];
+    const steps = [
+        ['fetch origin dev', ['git', '-C', REPO, 'fetch', '--quiet', 'origin', '+refs/heads/dev:refs/remotes/origin/dev']],
+        ['on origin/dev', ['git', '-C', REPO, 'merge-base', '--is-ancestor', ctx.sha, 'refs/remotes/origin/dev']],
+        ['tag', ['git', '-C', REPO, 'tag', '-a', ctx.next, '-F', join(dest, 'TAG_MSG'), ctx.sha]],
+        ['push tag', ['git', '-C', REPO, 'push', 'origin', ctx.next]],
+        ['candidate', [...release, 'candidate', dest]],
+        ['publish', [...release, 'publish', dest]],
+    ];
+    const state = { ok: false, tagged: false, pushed: false, step: '', detail: '', log, left: [] };
+    for (const [index, [step, argv]] of steps.entries()) {
+        say(`publish: ${argv.join(' ')}`);
+        appendFileSync(log, `$ ${argv.join(' ')}\n`);
+        const fd = openSync(log, 'a');
+        const result = spawnSync(argv[0], argv.slice(1), { cwd: REPO, env, stdio: ['ignore', fd, fd] });
+        closeSync(fd);
+        if (result.status !== 0) {
+            state.step = step;
+            state.detail = step === 'on origin/dev' ? `${ctx.sha.slice(0, 10)} is not on origin/dev; push dev first` : `exit ${result.status ?? result.signal ?? result.error?.code}: ${tail(log, 3)}`;
+            state.left = steps.slice(index).map(([, args]) => args.join(' '));
+            return state;
+        }
+        if (step === 'tag') state.tagged = true;
+        if (step === 'push tag') state.pushed = true;
+    }
+    state.ok = true;
+    return state;
+}
+
 function printCommands(ctx, released, plan) {
     const { dest } = released;
     const lines = [];
-    if (ctx.options.filter) lines.push(`FILTERED RUN (--filter ${ctx.options.filter}): ${ctx.next} is not a release. Do not run these commands; jet-use refuses it.`, '');
-    lines.push(`PASS: ${dest} is assembled; current still points at ${ctx.release.name}. Commands for Main:`, '');
+    if (ctx.options.filter) lines.push(`FILTERED RUN (--filter ${ctx.options.filter}): ${ctx.next} is not a release and was neither tagged nor published. Do not run these commands; jet-use refuses it.`, '');
+    else lines.push(`PASS: ${dest} is admitted: tag ${ctx.next} is on origin and published as its GitHub release; current still points at ${ctx.release.name}. Commands for Main:`, '');
     lines.push(`  jet-use ${ctx.next}`);
     lines.push(`  # without jet-use: ln -sfn ${ctx.next} ${ctx.seeds}/current.new && mv -T ${ctx.seeds}/current.new ${ctx.seeds}/current && cp ${dest}/current.env ${ctx.seeds}/current.env`);
     lines.push(`  cd ${plan.checkout || '<the checkout of master>'}`);
@@ -719,12 +777,8 @@ function printCommands(ctx, released, plan) {
         for (const r of plan.resolutions) lines.push(r.take === 'dev' ? `  git checkout --theirs -- '${r.path}' && git add -- '${r.path}'   # dev already carries master's version and edits it later` : `  # resolve '${r.path}' by hand, then git add it`);
         lines.push('  git commit --no-edit');
     }
-    lines.push(`  git tag -a ${ctx.next} -F ${dest}/TAG_MSG ${ctx.sha}`);
-    if (plan.fastForward) {
-        lines.push(`  git push origin master ${ctx.next}`);
-        lines.push(`  jet run Tools/release/Main.jet -- candidate ${dest}`);
-        lines.push(`  jet run Tools/release/Main.jet -- publish ${dest}`);
-    } else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
+    if (plan.fastForward) lines.push('  git push origin master');
+    else lines.push(`  # do not push: origin/master ${plan.origin.slice(0, 10)} is not an ancestor of ${ctx.sha.slice(0, 10)}, so the push would not fast-forward. Release a newer dev commit instead; never force-push master.`);
     process.stdout.write(`${lines.join('\n')}\n`);
 }
 
@@ -764,6 +818,27 @@ async function release(options, pre) {
     }
     const released = assemble(ctx, gate, plan);
     say(`assembled ${released.dest}`);
+    if (!options.filter) {
+        const published = publish(ctx, released);
+        if (!published.ok) {
+            const why = `${ctx.next} not admitted: publication step "${published.step}" failed (${published.detail}); log ${published.log}`;
+            if (!published.pushed) {
+                if (published.tagged) git(['tag', '-d', ctx.next]);
+                const aside = join(seeds, `.${ctx.next}.unpublished-${process.pid}`);
+                renameSync(released.dest, aside);
+                process.stdout.write(`FAIL: ${why}. ${seeds} has no ${ctx.next}: the assembled release moved to ${aside}.\n`);
+            } else {
+                process.stdout.write([
+                    `FAIL: ${why}. Tag ${ctx.next} is on origin, but ${released.dest} is not admitted (no current.env): do not jet-use it.`,
+                    `Once the cause is fixed, finish the publication from ${REPO}, then admit it:`,
+                    ...published.left.map(command => `  ${command}`),
+                    `  cp ${join(work, 'current.env')} ${released.dest}/current.env`, '',
+                ].join('\n'));
+            }
+            return 1;
+        }
+    }
+    copyFileSync(join(work, 'current.env'), join(released.dest, 'current.env'));
     printCommands(ctx, released, plan);
     return 0;
 }
@@ -774,6 +849,14 @@ async function main() {
     if (pre.errors.length) {
         process.stderr.write(`${USAGE}\n${pre.errors.map(error => `release-compiler: ${error}`).join('\n')}\n`);
         return 2;
+    }
+    if (!pre.admission.admitted) {
+        process.stderr.write(`${refusal('release-compiler', pre.admission.reason, pre.release.dir, pre.sha)}\n`);
+        return 2;
+    }
+    if (options.checkGate) {
+        process.stdout.write(`release-compiler: admitted by ${pre.admission.reason}\n`);
+        return 0;
     }
     let lock = '';
     if (!process.env.JET_RELEASE_LOCK_HELD) {

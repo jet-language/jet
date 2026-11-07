@@ -11,7 +11,7 @@ Row: struct {
 }
 
 json_parse_error: fn() -[]> String {
-    json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
+    json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.reason}"
 }
 
 json_decode_error: fn() -[]> String {
@@ -19,11 +19,11 @@ json_decode_error: fn() -[]> String {
 }
 
 toml_parse_error: fn() -[]> String {
-    toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
+    toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.reason
 }
 
 yaml_parse_error: fn() -[]> String {
-    yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
+    yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.reason
 }
 
 run: fn() {

@@ -138,7 +138,7 @@ codec_fixture_decode: fn() -> I64 {
     if !codec_fixture_rejects(jet_rt_codec_decode_float(truth, slots, slots, slots + I64{8}), slots, rt_static_text("expected Float, found Bool")) -> return I64{47}
     jet_rt_handle_drop_dyn(truth)
     absent: jet_rt_record_new_dyn_null()
-    if !codec_fixture_rejects(jet_rt_codec_decode_string(absent, slots, slots, slots + I64{8}), slots, rt_static_text("expected Text, found null")) -> return I64{48}
+    if !codec_fixture_rejects(jet_rt_codec_decode_string(absent, slots, slots, slots + I64{8}), slots, rt_static_text("expected Text, found Null")) -> return I64{48}
     jet_rt_handle_drop_dyn(absent)
     jet_rt_free(slots, I64{16}, I64{8})
     codec_fixture_text_cells()
@@ -152,13 +152,13 @@ codec_fixture_text_cells: fn() -> I64 {
     cell: jet_rt_record_new_dyn_text(rt_static_text(" 42 "))
     if !codec_fixture_rejects(jet_rt_codec_decode_i64(cell, slots, slots, slots + I64{8}), slots, rt_static_text("expected Int, found text \" 42 \"")) -> return I64{60}
     outer: jet_rt_codec_text_cells_enter()
-    if (outer != I64{0}) -> return I64{61}
+    if outer -> return I64{61}
     inner: jet_rt_codec_text_cells_enter()
     if (jet_rt_codec_decode_i64(cell, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{42}) -> return I64{62}
     jet_rt_codec_text_cells_leave(inner)
     if (jet_rt_codec_decode_int(cell, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{42}) -> return I64{63}
     if (jet_rt_codec_decode_float(cell, slots, slots, slots + I64{8}) != I64{1} || rt_f64_from_bits(text_glue_word(slots)) != Float{42.0}) -> return I64{64}
-    if !codec_fixture_rejects(jet_rt_codec_decode_i8(cell, slots, slots, slots + I64{8}), slots, rt_static_text("expected I8, found out-of-range Int")) -> return I64{65}
+    if (jet_rt_codec_decode_i8(cell, slots, slots, slots + I64{8}) != I64{1} || text_glue_word(slots) != I64{42}) -> return I64{65}
     if !codec_fixture_rejects(jet_rt_codec_decode_bool(cell, slots, slots, slots + I64{8}), slots, rt_static_text("expected Bool, found text \" 42 \"")) -> return I64{66}
     if (jet_rt_codec_decode_string(cell, slots, slots, slots + I64{8}) != I64{1} || !jet_rt_string_eq(text_glue_word(slots), rt_static_text(" 42 "))) -> return I64{67}
     jet_rt_string_drop(text_glue_word(slots))

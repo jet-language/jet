@@ -2,10 +2,10 @@
 # ORACLE-LITERAL: exact original source and expected bytes; PENDING-SAME-HEAD; runtime UNRUN.
 # Rust compiler availability and generated-Rust compilation helper requirements retire with Rust; native build retains AOT execution.
 # Spec-cited fix (GoldC-11b; Main ruling 2026-10-30): a write window `&place[r]` is the exclusive write window
-# (spec.md:1291-1293, D-SHAPE-PLACE1=A; syntax-decisions.md:713-714) and needs a changeable binding, else E0202 (spec.md:570).
+# (spec.md:1291-1293, D-SHAPE-PLACE1=A; syntax-decisions.md:713-714) and needs a changeable binding, else E0111 (spec.md:570).
 # The original wrote through `:` owners and expected the Rust runtime stop "Tensor mutable view requires exclusive
 # backing storage" (tests/compute_views.rs:112). source-0 keeps the deep-copy proof on a changeable `copied :=` owner
-# (unchanged .out); source-1 is the original source verbatim, now rejected at build with E0202 for both `:` owners.
+# (unchanged .out); source-1 is the original source verbatim, now rejected at build with E0111 for both `:` owners.
 fixture: tensor_explicit_copy_is_deep_but_implicit_clone_shares_storage.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -25,7 +25,7 @@ stdin: null
 exit: 0
 stdout: = tensor_explicit_copy_is_deep_but_implicit_clone_shares_storage.out
 step: jet build source-1/source-1.jet
-exit: 1 # spec.md:570 E0202, spec.md:1291-1293
-stderr: ~ "Error [jet.MissingWriteMarker]: Cannot take a write window into `copied`" # spec.md:570, spec.md:1291-1293
-stderr: ~ "Error [jet.MissingWriteMarker]: Cannot take a write window into `aliased`" # spec.md:570, spec.md:1291-1293
+exit: 1 # spec.md:570 E0111, spec.md:1291-1293
+stderr: ~ "Error [jet.ImmutableAssignment]: `copied` was made with `:`, so it can't be changed" # spec.md:570, spec.md:1291-1293
+stderr: ~ "Error [jet.ImmutableAssignment]: `aliased` can't be changed here" # spec.md:570, spec.md:1291-1293
 stderr: ~ "2 problems found" # spec.md:570, spec.md:1291-1293

@@ -54,7 +54,7 @@ jet_driver_comptime_input_fail: fn(what: String, why: String, fix: String, span:
 jet_driver_comptime_input_record: fn(recorder: Shared<JetDriverComptimeInputLog>?, path: String, bytes: [U8]) Never! {
     log: recorder ?? return
     permit: log.guard_edit()
-    &permit.value.records.push(JetDriverComptimeInputRecord{path: path, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
+    permit.value.records.push(JetDriverComptimeInputRecord{path: path, sha256: comptime_inputs_crypto.sha256(bytes).hex()})
 }
 
 impl JetDriverComptimeInputs.JetEvalComptimeInputAdapter {
@@ -104,7 +104,7 @@ jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, glob: String, spa
         .Value(value) -> {
             if value == .List(values) {
                 loop item in values {
-                    if item == .Text(relative) -> &found.push(relative)
+                    if item == .Text(relative) -> found.push(relative)
                 }
             }
         }
@@ -115,7 +115,7 @@ jet_driver_comptime_find: fn(adapter: JetDriverComptimeInputs, glob: String, spa
     loop relative in found {
         bytes: adapter.inputs.read_rooted(adapter.base_dir, relative, JET_DRIVER_BUILD_MAX_FILE_BYTES) ?? return Err(jet_driver_comptime_input_fail("`find` can't open `{relative}`", "{err.message} (matched while expanding `{glob}`)", "check the path — it is relative to the file's own directory", span))
         jet_driver_comptime_input_record(adapter.log, relative, bytes)
-        &strings.push(TComptimeValue.String{value: relative})
+        strings.push(TComptimeValue.String{value: relative})
     }
     Ok(TComptimeValue.List{values: strings})
 }

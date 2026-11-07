@@ -93,7 +93,7 @@ core_modules: fn(core_jet: String) -[Exec, IO]> [String] Never! {
     loop line in core_jet.split("\n") {
         loop found in row.matches(line) {
             name: found.group(1) ?? ""
-            if !modules.contains(name) -> &modules.push(name)
+            if !modules.contains(name) -> modules.push(name)
         }
     }
     modules
@@ -103,7 +103,7 @@ probe_source: fn(name: String) -> String Never! {
     "use {name}\n\nmain: fn() {{\n    print(\"ok\")\n}}\n"
 }
 
-// `^Error\b`: the header word, then the end of the line or a non-word byte.
+// `&&Error\b`: the header word, then the end of the line or a non-word byte.
 is_error_header: fn(line: String) -> Bool Never! {
     if !line.starts_with("Error") -> return false
     if line.count_bytes() == 5 -> return true
@@ -161,9 +161,9 @@ ratchet_problems: fn(ceilings: [Ceiling], results: [Summary]) -> [String] Never!
     loop result in results {
         ceiling: ceiling_of(ceilings, result.name)
         if result.errors > ceiling {
-            &problems.push("{result.name}: {result.errors} errors (ceiling {ceiling}); {result.first}")
+            problems.push("{result.name}: {result.errors} errors (ceiling {ceiling}); {result.first}")
         } else if result.errors < ceiling {
-            &problems.push("{result.name}: {result.errors} errors, below its ceiling {ceiling}; lower it with --write")
+            problems.push("{result.name}: {result.errors} errors, below its ceiling {ceiling}; lower it with --write")
         }
     }
     problems
@@ -180,15 +180,15 @@ lowered_ceilings: fn(committed: [Ceiling]?, results: [Summary]) -> Lowered Never
     loop result in results {
         ceiling: ceiling_of(ceilings, result.name)
         if result.errors > ceiling && !initialize {
-            &rises.push("{result.name}: {result.errors} errors exceed ceiling {ceiling}")
+            rises.push("{result.name}: {result.errors} errors exceed ceiling {ceiling}")
             next
         }
         dropped: result.name.copy()
         kept := out.filter(row -> row.name != dropped)
-        if result.errors != 0 -> &kept.push(Ceiling{name: result.name.copy(), errors: result.errors})
+        if result.errors != 0 -> kept.push(Ceiling{name: result.name.copy(), errors: result.errors})
         out = kept
     }
-    &out.sort_by((a: Ceiling, b: Ceiling) -> a.name <=> b.name)
+    out.sort_by((a: Ceiling, b: Ceiling) -> a.name <=> b.name)
     Lowered{kept: out, rises: rises}
 }
 
@@ -204,7 +204,7 @@ read_ceilings: fn(path: String) -[FS]> [Ceiling] CheckError! {
                 else -> -1
             }
             if count < 0 -> return Err(problem("`{path}`: {entry.key} is not an error count"))
-            &ceilings.push(Ceiling{name: entry.key.copy(), errors: count})
+            ceilings.push(Ceiling{name: entry.key.copy(), errors: count})
         }
         return ceilings
     }
@@ -222,13 +222,13 @@ sweep: fn(jet: String, root: String, modules: [String], jobs: Int, scratch: Stri
     loop name in modules {
         file: "{scratch}/{name.replace(".", "_")}.jet"
         files.write(file, probe_source(name)) ?? return Err(problem("`{file}` cannot be written: {err}"))
-        &specs.push(process.cmd([String]{jet, "check", file}).cwd(scratch).env("NO_COLOR", "1").env("JET_TOOLCHAIN_ROOT", root)
+        specs.push(process.cmd([String]{jet, "check", file}).cwd(scratch).env("NO_COLOR", "1").env("JET_TOOLCHAIN_ROOT", root)
             .timeout(time.duration_ms(CHECK_TIMEOUT_MS)).output_limit(4194304))
     }
     ran: process.run_all(specs, jobs) ?? return Err(problem("the probes cannot run: {err}"))
     results := [Summary]{}
     loop at in 0..<modules.len() {
-        &results.push(if ran[at] == {
+        results.push(if ran[at] == {
             .Ok(receipt) -> check_summary(modules[at], "{receipt.output}{receipt.errors}", if receipt.signal != None || receipt.timed_out -> 128 else -> receipt.code)
             .Err(failure) -> check_summary(modules[at], "spawn failed: {failure}", 127)
         })

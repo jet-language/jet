@@ -21,7 +21,7 @@ JetErrorDetails: struct {
 
     to_json: fn(self) -> String Never! {
         fields := [String]{}
-        loop field in self.fields -> &fields.push("{foundation_json_quote(field.name)}:{field.value}")
+        loop field in self.fields -> fields.push("{foundation_json_quote(field.name)}:{field.value}")
         span: if self.source_span == {
             .Val(value) -> "{{\"start\":{value.start},\"end\":{value.end}}}"
             .None -> "null"
@@ -54,31 +54,31 @@ JetErrorReport: struct {
             .None -> "null"
         }
         causes := [String]{}
-        loop cause in self.causes -> &causes.push(cause.to_json())
+        loop cause in self.causes -> causes.push(cause.to_json())
         cause: if {
             causes.len() == 0 -> "null"
             causes.len() == 1 -> causes[0]
             else -> "[{causes.join(",")}]"
         }
         fields := [String]{"\"schema\":\"jet.err/v1\"", "\"message\":{foundation_json_quote(self.message)}", "\"code\":{code}", "\"cause\":{cause}"}
-        if self.typed_identity == .Val(identity) -> &fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
+        if self.typed_identity == .Val(identity) -> fields.push("\"typed_identity\":{foundation_json_quote(identity)}")
         if self.context_frames.len() > 0 {
             frames := [String]{}
-            loop frame in self.context_frames -> &frames.push("{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}")
-            &fields.push("\"context_frames\":[{frames.join(",")}]")
+            loop frame in self.context_frames -> frames.push("{{\"text\":{foundation_json_quote(frame.text)},\"file\":{foundation_json_quote(frame.file)},\"line\":{frame.line}}}")
+            fields.push("\"context_frames\":[{frames.join(",")}]")
         }
-        if self.origin == .Val(origin) -> &fields.push("\"origin\":{jet_error_journey_json(origin)}")
+        if self.origin == .Val(origin) -> fields.push("\"origin\":{jet_error_journey_json(origin)}")
         if self.source_journey.len() > 0 {
             frames := [String]{}
-            loop frame in self.source_journey -> &frames.push(jet_error_journey_json(frame))
-            &fields.push("\"source_journey\":[{frames.join(",")}]")
+            loop frame in self.source_journey -> frames.push(jet_error_journey_json(frame))
+            fields.push("\"source_journey\":[{frames.join(",")}]")
         }
         if self.conversion_history.len() > 0 {
             conversions := [String]{}
-            loop conversion in self.conversion_history -> &conversions.push("{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}")
-            &fields.push("\"conversion_history\":[{conversions.join(",")}]")
+            loop conversion in self.conversion_history -> conversions.push("{{\"source\":{foundation_json_quote(conversion.source)},\"target\":{foundation_json_quote(conversion.target)}}}")
+            fields.push("\"conversion_history\":[{conversions.join(",")}]")
         }
-        if self.details == .Val(details) -> &fields.push("\"details\":{details.to_json()}")
+        if self.details == .Val(details) -> fields.push("\"details\":{details.to_json()}")
         "{{{fields.join(",")}}}"
     }
 
@@ -155,7 +155,7 @@ jet_error_conversion_from_json: fn(value: Dyn) -> JetErrorConversion JetErrorRep
 jet_error_details_from_json: fn(value: Dyn) -> JetErrorDetails JetErrorReportError! {
     fields: jet_error_json_object(value, "details")
     field_values := [JetErrorField]{}
-    loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") -> &field_values.push(JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)})
+    loop entry in jet_error_json_object(jet_error_json_field(fields, "fields"), "detail fields") -> field_values.push(JetErrorField{name: entry.key, value: jet_error_json_encode_value(entry.value)})
     span_value: jet_error_json_field(fields, "source_span")
     source_span: if span_value == {
         .Null -> None
@@ -179,21 +179,21 @@ jet_error_report_from_json: fn(value: Dyn) -> JetErrorReport JetErrorReportError
     causes := [JetErrorReport]{}
     if jet_error_json_field(fields, "cause") == {
         .Null -> {}
-        .Object(_) -> &causes.push(jet_error_report_from_json(jet_error_json_field(fields, "cause")))
-        .Array(values) -> { loop cause_value in values -> &causes.push(jet_error_report_from_json(cause_value)) }
+        .Object(_) -> causes.push(jet_error_report_from_json(jet_error_json_field(fields, "cause")))
+        .Array(values) -> { loop cause_value in values -> causes.push(jet_error_report_from_json(cause_value)) }
         else -> return Err(jet_error_report_error("error report cause is not null, an object, or an array"))
     }
     typed_identity: jet_error_json_optional_text(fields, "typed_identity")
     context := [JetErrorContextFrame]{}
-    loop context_value in jet_error_json_optional_array(fields, "context_frames") -> &context.push(jet_error_context_from_json(context_value))
+    loop context_value in jet_error_json_optional_array(fields, "context_frames") -> context.push(jet_error_context_from_json(context_value))
     origin: if jet_error_json_lookup(fields, "origin") == {
         .Val(origin_value) -> Val(jet_error_journey_from_json(origin_value))
         .None -> None
     }
     journey := [JetErrorJourneyFrame]{}
-    loop journey_value in jet_error_json_optional_array(fields, "source_journey") -> &journey.push(jet_error_journey_from_json(journey_value))
+    loop journey_value in jet_error_json_optional_array(fields, "source_journey") -> journey.push(jet_error_journey_from_json(journey_value))
     conversions := [JetErrorConversion]{}
-    loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") -> &conversions.push(jet_error_conversion_from_json(conversion_value))
+    loop conversion_value in jet_error_json_optional_array(fields, "conversion_history") -> conversions.push(jet_error_conversion_from_json(conversion_value))
     details: if jet_error_json_lookup(fields, "details") == {
         .Val(details_value) -> Val(jet_error_details_from_json(details_value))
         .None -> None
@@ -215,12 +215,12 @@ jet_error_json_encode_value: fn(value: Dyn) -> String Never! {
         .DateTime(_) -> foundation_json_quote(value.to_text() ?? "")
         .Array(values) -> {
             encoded := [String]{}
-            loop child in values -> &encoded.push(jet_error_json_encode_value(child))
+            loop child in values -> encoded.push(jet_error_json_encode_value(child))
             "[{encoded.join(",")}]"
         }
         .Object(fields) -> {
             encoded := [String]{}
-            loop entry in fields -> &encoded.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
+            loop entry in fields -> encoded.push("{foundation_json_quote(entry.key)}:{jet_error_json_encode_value(entry.value)}")
             "{{{encoded.join(",")}}}"
         }
     }

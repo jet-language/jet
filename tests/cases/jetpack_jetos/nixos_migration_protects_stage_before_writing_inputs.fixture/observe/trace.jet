@@ -24,9 +24,9 @@ run: fn() {
     }
     loop i in 0..<lines.len() {
         line: lines[i]
-        if i < first_input && line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) -> &protected.push(i)
+        if i < first_input && line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) -> protected.push(i)
     }
     numbers := [String]{}
-    loop index in protected -> &numbers.push("{index}")
+    loop index in protected -> numbers.push("{index}")
     print("{{\"mkdir\":{mkdir},\"first_input\":{first_input},\"first_output\":{first_output},\"protected\":[{parse.join(numbers, ",")}],\"insecure\":{insecure},\"collision\":{collision}}}")
 }

@@ -4,7 +4,7 @@ use files: core.files
 run: fn() {
     output := files.create("/dev/full") ?? panic("open")
     output.write_line("buffered") ?? panic("buffer")
-    if &output.flush() == {
+    if output.flush() == {
         .Ok(_) -> panic("flush succeeded")
         .Err(error) -> {
             if error == {

@@ -1,170 +1,219 @@
-// Private continuation of jet_devserver.WebHost.
+// Private continuation of WebHost: control-path routing, Canvas session
+// decoration, static serving with the live-reload script, and the script.
 use {
-    jet_devserver.WebHost.[LIVE_RELOAD_POLL_MS, MAX_STATIC_RESPONSE_BYTES, WebHost]
-    jet_devserver.[ResidentDevSession]
-    Canvas: jet_devserver.Canvas
-    jet_devserver.PausedEvaluate.[PausedEvaluateHostError]
-    jet_foundation.Dyn.[Dyn]
-    jet_foundation.JSON.[parse_json]
-    std.io.[Write, Error, ErrorKind]
-    std.sync.atomic.[AtomicU64, Ordering]
-    core.files.[OSPath]
-    core.encoding.[Dyn]
+    webhost_files: core.files
+    webhost_text: core.text
+    core.net.[TCPStream]
+    jet_foundation.[foundation_json_escape, foundation_parse_protocol_json]
 }
+
+// Points an HTML asset's `app.js?` request at this Canvas session.
 inject_canvas_session: fn(asset: CanvasAsset, session_secret: String) -> CanvasAsset {
-    asset := ^asset
-    if asset.content_type == "text/html; charset=utf-8" {
-        if asset.body.find("app.js?") == .Val(index) {
-            insert_at: index + "app.js?".len()
-            asset.body.insert_str(insert_at, "session={session_secret}&")
-        }
-    }
-    return ^asset
+    if asset.content_type != "text/html; charset=utf-8" -> return asset
+    marker: "app.js?"
+    parts: asset.body.split(marker).to_list()
+    if parts.len() < 2 -> return asset
+    injected := asset
+    injected.body = "{parts[0]}{marker}session={session_secret}&{parts[1..parts.len() - 1].join(marker)}"
+    injected
 }
-method_not_allowed: fn(stream: &impl Write) Err! {
-    write_response(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed".bytes())
+
+method_not_allowed: fn(stream: TCPStream) DevserverTransportError! -[Net, Time.Wait]> {
+    devserver_write_response(stream, "405 Method Not Allowed", "text/plain; charset=utf-8", "method not allowed".bytes())
 }
+
 web_stream_path: fn(path: String) -> Bool { path == "/__jet_web/stream" }
+
 // Same Canvas handlers, not a second editor.
 source_tool_path: fn(path: String) -> Bool {
-    path == "/__jet_canvas/project".bit_or("/__jet_canvas/source").bit_or("/__jet_canvas/command").bit_or("/__jet_canvas/transaction")
+    routes: [String]{"/__jet_canvas/project", "/__jet_canvas/source", "/__jet_canvas/command", "/__jet_canvas/transaction"}
+    routes.contains(path)
 }
+
 devtools_path: fn(path: String) -> Bool {
-    path == "/__jet_devtools".bit_or("/__jet_devtools/workbench").bit_or("/__jet_devtools/commands").bit_or("/__jet_devtools/assets").bit_or("/__jet_devtools/state").bit_or("/__jet_devtools/reconnect").bit_or("/__jet_devtools/action").bit_or("/__jet_devtools/selection").bit_or("/__jet_devtools/cursor").bit_or("/__jet_devtools/swap").bit_or("/__jet_devtools/recording").bit_or("/__jet_devtools/error").bit_or("/__jet_devtools/paused/inspect").bit_or("/__jet_devtools/paused/evaluate").bit_or("/__jet_devtools/style").bit_or("/__jet_canvas/devtools").bit_or("/canvas/devtools").bit_or("/panel/devtools")
+    routes: [String]{
+        "/__jet_devtools", "/__jet_devtools/workbench", "/__jet_devtools/commands", "/__jet_devtools/assets", "/__jet_devtools/state",
+        "/__jet_devtools/reconnect", "/__jet_devtools/action", "/__jet_devtools/selection", "/__jet_devtools/cursor", "/__jet_devtools/swap",
+        "/__jet_devtools/recording", "/__jet_devtools/error", "/__jet_devtools/paused/inspect", "/__jet_devtools/paused/evaluate",
+        "/__jet_devtools/style", "/__jet_canvas/devtools", "/canvas/devtools", "/panel/devtools"
+    }
+    routes.contains(path)
 }
+
 is_application_control_path: fn(path: String) -> Bool {
-    devtools_path(path) || web_stream_path(path) || source_tool_path(path)
-        || path == "/__jet_dev_status".bit_or("/__jet_dev_version").bit_or("/__jet_dev_disconnect").bit_or("/__jet_perf_browser")
+    control: [String]{"/__jet_dev_status", "/__jet_dev_version", "/__jet_dev_disconnect", "/__jet_perf_browser"}
+    devtools_path(path) || web_stream_path(path) || source_tool_path(path) || control.contains(path)
 }
-WEB_ERROR_REQUEST_COUNTER: AtomicU64.new(1) // GATE #4494: process-local atomic.
-next_web_error_request_id: fn() -> String { "werr-{WEB_ERROR_REQUEST_COUNTER.fetch_add(1, Ordering.SeqCst)}" }
+
+// Request ids for web error pages, unique within one host: `werr-1`, `werr-2`, ...
+WebErrorRequestIds: struct {
+    next: Int
+}
+impl WebErrorRequestIds {
+    new: fn() -> WebErrorRequestIds { WebErrorRequestIds{next: 1} }
+    issue: fn(&self) -> String {
+        id: self.next
+        self.next += 1
+        "werr-{id}"
+    }
+}
+
 paused_evaluate_error_status: fn(error: PausedEvaluateHostError) -> String {
     if error == {
-        .SessionUnavailable | .EvaluatorUnavailable -> "409 Conflict"
+        .SessionUnavailable -> "409 Conflict"
+        .EvaluatorUnavailable -> "409 Conflict"
         .InvalidRequest(_) -> "400 Bad Request"
         .Rejected(_) -> "403 Forbidden"
     }
 }
+
 session_response: fn(session: ResidentDevSession) -> String {
     "{{\"protocol\":\"jet.canvas.session\",\"schema_version\":1,\"session\":{session.json()}}}"
 }
-with_session: fn(body: String, session: &ResidentDevSession) -> String {
+
+// Inserts the session as the first member of the body's `"canvas"` object.
+with_session: fn(body: String, session: ResidentDevSession) -> String {
     marker: "\"canvas\":{{"
-    index: body.find(marker) ?? return ^body
-    insert_at: index + marker.len()
-    decorated := String.with_capacity(body.len() + session.json().len() + 16)
-    decorated.push_str(body[0..<insert_at])
-    decorated.push_str("\"session\":")
-    decorated.push_str(session.json())
-    decorated.push(',')
-    decorated.push_str(body[insert_at..<body.len()])
-    return ^decorated
+    parts: body.split(marker).to_list()
+    if parts.len() < 2 -> return body
+    "{parts[0]}{marker}\"session\":{session.json()},{parts[1..parts.len() - 1].join(marker)}"
 }
+
 current_revision_for_request: fn(canvas_file: String, request: String) -> String {
-    source_id: parse_json(request).ok().and_then((value) -> if value == {
-        .Object(object) -> object.into_iter().find_map(((name, value)) -> {
-            if name != "source_id" -> return .None
-            if value == {
-                .Text(id) | .TypedText(id) -> .Val(^id)
-                else -> .None
-            }
-        })
-        else -> .None
-    }).unwrap_or_default()
-    return current_revision_for_source_id(canvas_file, (!source_id.is_empty()).then_some(source_id.as_str()))
+    source_id := ""
+    if foundation_parse_protocol_json(request) == .Val(value) {
+        if value == .Object(fields) {
+            if webhost_source_id_field(fields) == .Val(id) -> source_id = id
+        }
+    }
+    current_revision_for_source_id(canvas_file, if source_id == "" -> None else -> Val(source_id))
 }
+
+// The first `source_id` text anywhere in the payload, depth first.
 source_id_from_payload: fn(payload: String) -> String {
-    value: if parse_json(payload) == {
-        .Ok(value) -> value
-        .Err(_) -> { return "" }
-    }
-    fn find(value: Dyn) -> String? {
-        return if value == {
-            .Object(object) -> {
-                if object.iter().find_map(((name, value)) -> {
-                    if name != "source_id" -> return .None
-                    if value == {
-                        .Text(id) | .TypedText(id) -> .Val(id.clone())
-                        else -> .None
-                    }
-                }) == .Val(source_id) -> return .Val(^source_id)
-                object.iter().find_map(((_, value)) -> find(value))
-            }
-            .Array(values) -> values.iter().find_map(find)
-            else -> .None
-        }
-    }
-    return find(&value).unwrap_or_default()
+    value: foundation_parse_protocol_json(payload) ?? return ""
+    webhost_find_source_id(value) ?? ""
 }
+
+webhost_source_id_field: fn(fields: [(key: String, value: Dyn)]) -> String? {
+    loop field in fields {
+        if field.key == "source_id" && field.value == .Text(id) -> return Val(id)
+    }
+    None
+}
+
+webhost_find_source_id: fn(value: Dyn) -> String? {
+    if value == {
+        .Object(fields) -> {
+            direct: webhost_source_id_field(fields)
+            if direct != None -> return direct
+            loop field in fields {
+                nested: webhost_find_source_id(field.value)
+                if nested != None -> return nested
+            }
+            None
+        }
+        .Array(values) -> {
+            loop item in values {
+                nested: webhost_find_source_id(item)
+                if nested != None -> return nested
+            }
+            None
+        }
+        else -> None
+    }
+}
+
+// The revision of the selected project source, or of the Canvas file when no
+// source is selected; empty when the source can't be read.
 current_revision_for_source_id: fn(canvas_file: String, source_id: String?) -> String {
-    source_path: source_id.and_then((id) -> Canvas.project_path_for_source_id(OSPath.new(canvas_file), id)).unwrap_or_else(() -> OSPath.new(canvas_file))
-    return Canvas.read_source_without_symlinks(&source_path).map((source) -> Canvas.source_revision(source)).unwrap_or_default()
+    source_path := canvas_file
+    if source_id == .Val(id) {
+        if project_path_for_source_id(canvas_file, id) == .Val(path) -> source_path = path
+    }
+    source: read_source_without_symlinks(source_path) ?? return ""
+    source_revision(source)
 }
-serve_static_from_root: fn(stream: impl Write, root: OSPath, path: String, nonce: String, session_secret: String) -> U16 Err! {
-    // The generated output root is the complete preview boundary. No source fallback.
-    relative: if static_relative_path(path) == {
-        .Ok(path) -> path
-        .Err(_) -> { write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())?; return .Ok(400) }
-    }
-    content_type: content_type_for(&relative)
-    is_html: relative.extension().and_then((extension) -> extension.to_str()).is_some_and((extension) -> extension.eq_ignore_ascii_case("html"))
-    reload_script := is_html.then(() -> live_reload_script(nonce, session_secret))
-    raw_limit: if reload_script.as_mut() == {
-        .Val(script) -> {
-            script.shrink_to_fit()
-            if !html_script_fits_budget(script.capacity()) {
-                write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "live-reload script exceeds the response budget".bytes())?
-                return .Ok(500)
-            }
-            html_raw_response_limit(script.capacity())
+
+// Serves one file from the generated output root, the complete preview
+// boundary; there is no source fallback. HTML gets the live-reload script.
+serve_static_from_root: fn(stream: TCPStream, root: String, path: String, nonce: String, session_secret: String) -[FS.Read, Net, Time.Wait]> Int DevserverTransportError! {
+    relative := ""
+    if static_relative_path(path) == {
+        .Ok(value) -> relative = value
+        .Err(_) -> {
+            devserver_write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())
+            return 400
         }
-        .None -> MAX_STATIC_RESPONSE_BYTES
     }
-    bytes: if read_static_file_bounded(root, &relative, raw_limit) == {
-        .Ok(b) -> b
+    content_type: content_type_for(relative)
+    html: webhost_is_html(relative)
+    script := ""
+    raw_limit := MAX_STATIC_RESPONSE_BYTES
+    if html {
+        script = live_reload_script(nonce, session_secret)
+        if !html_script_fits_budget(script.bytes().len()) {
+            devserver_write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "live-reload script exceeds the response budget".bytes())
+            return 500
+        }
+        raw_limit = html_raw_response_limit(script.bytes().len())
+    }
+    bytes := [U8]{}
+    if read_static_file_bounded(root, relative, raw_limit) == {
+        .Ok(value) -> bytes = value
         .Err(error) -> {
-            (status, code, body): if error.kind() == {
-                .NotFound | .InvalidData -> ("404 Not Found", 404, "not found: {path}")
-                else -> ("400 Bad Request", 400, "bad path")
+            missing: if error == {
+                .NotFound(_) -> true
+                .InvalidData(_) -> true
+                else -> false
             }
-            write_response(stream, status, "text/plain; charset=utf-8", body.as_bytes())?
-            return .Ok(code)
+            if missing {
+                devserver_write_response(stream, "404 Not Found", "text/plain; charset=utf-8", "not found: {path}".bytes())
+                return 404
+            }
+            devserver_write_response(stream, "400 Bad Request", "text/plain; charset=utf-8", "bad path".bytes())
+            return 400
         }
     }
-    if reload_script == .Val(script) {
-        html: if decode_html(^bytes) == {
-            .Ok(html) -> html
-            .Err(_) -> { write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "static HTML is not valid UTF-8".bytes())?; return .Ok(500) }
-        }
-        injected: inject_live_reload_with_script(html, script) ?? {
-            write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "static HTML response is too large".bytes())?
-            return .Ok(500)
-        }
-        write_response(stream, "200 OK", content_type, injected.as_bytes())?
-        return .Ok(200)
+    if !html {
+        devserver_write_response(stream, "200 OK", content_type, bytes)
+        return 200
     }
-    write_response(stream, "200 OK", content_type, &bytes)?
-    return .Ok(200)
+    if decode_html(bytes) == .Val(text) {
+        devserver_write_response(stream, "200 OK", content_type, inject_live_reload_with_script(text, script).bytes())
+        return 200
+    }
+    devserver_write_response(stream, "500 Internal Server Error", "text/plain; charset=utf-8", "static HTML is not valid UTF-8".bytes())
+    500
 }
-read_source_without_symlinks: fn(path: OSPath) -> String Err! { Canvas.read_source_without_symlinks(path) }
-read_web_manifest: fn(root: OSPath) -> String? {
-    bytes: read_static_file_bounded(root, &OSPath.new("web.manifest.json"), MAX_STATIC_RESPONSE_BYTES).ok()?
-    return String.from_utf8(^bytes).ok()
+
+// A `.html` file name, ASCII case-insensitively; a dot file has no extension.
+webhost_is_html: fn(relative: String) -> Bool {
+    parts: webhost_files.basename(relative).split(".").to_list()
+    if parts.len() < 2 || (parts.len() == 2 && parts[0] == "") -> return false
+    webhost_text.lower(parts[parts.len() - 1]) == "html"
 }
-decode_html: fn(bytes: [U8]) -> String Err! {
-    String.from_utf8(^bytes).map_err((_) -> Error.new(ErrorKind.InvalidData, "static HTML is not valid UTF-8")) // GATE #4409
+
+read_web_manifest: fn(root: String) -> String? {
+    bytes: read_static_file_bounded(root, "web.manifest.json", MAX_STATIC_RESPONSE_BYTES) ?? return None
+    String.from_bytes(bytes)
 }
-html_raw_response_limit: fn(script_capacity: USize) -> U64 {
-    script_bytes: U64.try_from(script_capacity).unwrap_or(U64.MAX)
-    MAX_STATIC_RESPONSE_BYTES.saturating_sub(script_bytes.saturating_mul(2)) / 2
+
+decode_html: fn(bytes: [U8]) -> String? { String.from_bytes(bytes) }
+
+// Raw HTML plus its transformed copy share one response budget with the
+// script, which appears in the transformed copy.
+html_raw_response_limit: fn(script_bytes: Int) -> Int {
+    remaining: MAX_STATIC_RESPONSE_BYTES - script_bytes * 2
+    if remaining < 0 -> 0 else -> remaining / 2
 }
-html_script_fits_budget: fn(script_capacity: USize) -> Bool {
-    script_bytes: U64.try_from(script_capacity).unwrap_or(U64.MAX)
-    script_bytes.saturating_mul(2) <= MAX_STATIC_RESPONSE_BYTES
-}
-live_reload_script: fn(nonce: String, session_secret: String) -> String {
-    perf_script: if nonce.is_empty() { "" } else {
-        format("""  var jetPerfNonce = "{}";
+
+html_script_fits_budget: fn(script_bytes: Int) -> Bool { script_bytes * 2 <= MAX_STATIC_RESPONSE_BYTES }
+
+// The browser-trace beacon, present only while a relay nonce is live.
+live_reload_perf_script: fn(nonce: String) -> String {
+    """
+  var jetPerfNonce = "{nonce}";
   self.__jetPerfNow = function () {{ return performance.now(); }};
   self.__jetPerfRecord = function (symbol, eventClass, startMs) {{
     if (!symbol || typeof performance === "undefined") return;
@@ -177,9 +226,16 @@ live_reload_script: fn(nonce: String, session_secret: String) -> String {
     }});
     try {{ navigator.sendBeacon("/__jet_perf_browser?nonce=" + jetPerfNonce + "&session=" + encodeURIComponent(jetDevSession), body); }} catch (_) {{}}
   }};
-""", nonce)
-    }
-    return format("""<script>
+
+"""
+}
+
+live_reload_script: fn(nonce: String, secret: String) -> String {
+    perf_script: if nonce == "" -> "" else -> live_reload_perf_script(nonce)
+    session_secret: foundation_json_escape(secret)
+    poll_ms: LIVE_RELOAD_POLL_MS
+    """
+<script>
 (function () {{
   var jetDevSession = "{session_secret}";
   self.__jetDevSession = jetDevSession;
@@ -450,16 +506,35 @@ live_reload_script: fn(nonce: String, session_secret: String) -> String {
   setTimeout(poll, 0);
 }})();
 </script>
-""", poll_ms: LIVE_RELOAD_POLL_MS, perf_script: perf_script, session_secret: jet_foundation.JSON.json_escape(session_secret))
-}
-inject_live_reload_with_script: fn(html: String, script: String) -> String? {
-    output_len: html.len().checked_add(script.len())?
-    // ASCII case-insensitive scan preserves byte offsets without a lowercase allocation.
-    insertion: html.as_bytes().windows("</body>".bytes().len()).position((tag_ref) -> tag_ref.iter().zip("</body>".bytes()).all(((left, right)) -> left.eq_ignore_ascii_case(right)))
-    out := String.with_capacity(output_len)
-    if insertion == .Val(index) {
-        out.push_str(html[0..<index]); out.push_str(script); out.push_str(html[index..<html.len()])
-    } else { out.push_str(html); out.push_str(script) }
-    return .Val(^out)
+
+"""
 }
 
+// Inserts the script before the first `</body>` (ASCII case-insensitive), or
+// appends it when there is none; byte offsets are kept.
+inject_live_reload_with_script: fn(html: String, script: String) -> String {
+    bytes: html.bytes()
+    out := [U8]{}
+    inserted := false
+    loop index in 0..<bytes.len() {
+        if !inserted && webhost_body_close_at(bytes, index) {
+            loop byte in script.bytes() -> out.push(byte)
+            inserted = true
+        }
+        out.push(bytes[index])
+    }
+    if !inserted -> loop byte in script.bytes() -> out.push(byte)
+    String.from_bytes(out) ?? html
+}
+
+webhost_body_close_at: fn(bytes: [U8], at: Int) -> Bool {
+    closing: "</body>".bytes()
+    if at + closing.len() > bytes.len() -> return false
+    loop offset in 0..<closing.len() {
+        byte: bytes[at + offset]
+        upper: byte >= U8{65} && byte <= U8{90}
+        lowered: if upper -> byte + U8{32} else -> byte
+        if lowered != closing[offset] -> return false
+    }
+    true
+}

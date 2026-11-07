@@ -26,7 +26,7 @@ nix_import_path_components: fn(relative: String) -> [String] NixError! {
                 if index == 0 -> return Err(NixError.ImportPath)
             }
             ".." -> return Err(NixError.ImportPath)
-            else -> &components.push(segment)
+            else -> components.push(segment.copy())
         }
     }
     Ok(components)

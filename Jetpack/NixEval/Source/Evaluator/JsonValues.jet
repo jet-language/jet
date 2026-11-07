@@ -17,8 +17,8 @@ impl NixEvaluator {
             .List(items) -> {
                 parts := [String]{}
                 loop item in items {
-                    forced: &self.force(item)
-                    &parts.push(&self.encode_json(forced, depth + 1))
+                    forced: self.force(item)
+                    parts.push(self.encode_json(forced, depth + 1))
                 }
                 joined: parts.join(",")
                 return Ok("[{joined}]")
@@ -26,9 +26,9 @@ impl NixEvaluator {
             .AttrSet(fields) -> {
                 parts := [String]{}
                 loop name in nixeval_sorted(fields.keys().to_list()) {
-                    forced: &self.force(fields[name])
-                    encoded: &self.encode_json(forced, depth + 1)
-                    &parts.push("{nixeval_json_quote(name)}:{encoded}")
+                    forced: self.force(fields[name])
+                    encoded: self.encode_json(forced, depth + 1)
+                    parts.push("{nixeval_json_quote(name)}:{encoded}")
                 }
                 joined: parts.join(",")
                 return Ok("{{{joined}}}")
@@ -48,16 +48,16 @@ impl NixEvaluator {
             .Array(items) -> {
                 values := [Int]{}
                 loop item in items {
-                    converted: &self.json_to_value(document, item, depth + 1)
-                    &values.push(&self.value_thunk(converted))
+                    converted: self.json_to_value(document, item, depth + 1)
+                    values.push(self.value_thunk(converted))
                 }
                 NixEvalValue.List(values)
             }
             .Object(members) -> {
                 fields := [String: Int]{}
                 loop entry in members {
-                    converted: &self.json_to_value(document, entry.value, depth + 1)
-                    fields[entry.key] = &self.value_thunk(converted)
+                    converted: self.json_to_value(document, entry.value, depth + 1)
+                    fields[entry.key] = self.value_thunk(converted)
                 }
                 NixEvalValue.AttrSet(fields)
             }
@@ -84,30 +84,30 @@ nixeval_json_integer_text: fn(value: Int) -> String Never! {
 
 nixeval_json_quote: fn(text: String) -> String Never! {
     out := [U8]{}
-    nixeval_push_byte(&out, 34)
+    nixeval_push_byte(out, 34)
     hex: "0123456789abcdef".bytes()
     loop byte in text.bytes() {
         value: Int.from_u8(byte)
         if value == {
-            34 -> nixeval_push_text(&out, "\\\"")
-            92 -> nixeval_push_text(&out, "\\\\")
-            10 -> nixeval_push_text(&out, "\\n")
-            13 -> nixeval_push_text(&out, "\\r")
-            9 -> nixeval_push_text(&out, "\\t")
-            8 -> nixeval_push_text(&out, "\\b")
-            12 -> nixeval_push_text(&out, "\\f")
+            34 -> nixeval_push_text(out, "\\\"")
+            92 -> nixeval_push_text(out, "\\\\")
+            10 -> nixeval_push_text(out, "\\n")
+            13 -> nixeval_push_text(out, "\\r")
+            9 -> nixeval_push_text(out, "\\t")
+            8 -> nixeval_push_text(out, "\\b")
+            12 -> nixeval_push_text(out, "\\f")
             else -> {
                 if {
                     value < 32 -> {
-                        nixeval_push_text(&out, "\\u00")
-                        &out.push(hex[value /% 16])
-                        &out.push(hex[value % 16])
+                        nixeval_push_text(out, "\\u00")
+                        out.push(hex[value /% 16])
+                        out.push(hex[value % 16])
                     }
-                    else -> &out.push(byte)
+                    else -> out.push(byte)
                 }
             }
         }
     }
-    nixeval_push_byte(&out, 34)
+    nixeval_push_byte(out, 34)
     String.from_bytes(out) ?? text
 }

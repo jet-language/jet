@@ -67,7 +67,7 @@ use {
     assert_eq(fs.read_to_string(path).unwrap(), on)
 }
 #Test("canvas_projects_typestate_diagram_facts") {
-    path: write_fixture("typestate_diagram", "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n")
+    path: write_fixture("typestate_diagram", "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: &&Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n")
     graph: graph_json_for_file(path).expect("typestate diagram")
     loop field in ["\"state_graphs\":[{{", "\"name\":\"Open\",\"terminal\":true", "\"name\":\"Orphan\",\"terminal\":true,\"reachable\":false", "\"operation\":\"open\",\"from\":\"Closed\",\"to\":\"Open\""] -> assert(graph.contains(field), graph)
 }
@@ -630,7 +630,7 @@ use {
 }
 #Test("canvas_library_action_preserves_events_example_source_and_refuses_bad_edits") {
     repo: OSPath(env.manifest_dir())
-    example: fs.read_to_string(repo.join("Examples/features/ui/events.jet")).expect("read events Canvas example")
+    example: fs.read_to_string(repo.join("Examples/Apps/UI/Events.jet")).expect("read events Canvas example")
     path: write_fixture("library_events_example", example)
     graph: graph_json_for_file(path).expect("project events example")
     source: fs.read_to_string(path).unwrap()

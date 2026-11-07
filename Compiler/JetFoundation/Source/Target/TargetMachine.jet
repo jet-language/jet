@@ -185,14 +185,14 @@ jet_target_machine_bare_metal: fn(name: String, triple: String, package_version:
 }
 
 jet_target_append_u64: fn(bytes: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &bytes.push(U8{((value >> (8 * index))).bit_and(255)})
+    loop index in 0..<8 -> bytes.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 jet_target_append_frame: fn(bytes: &[U8], label: String, value: String) Never! {
-    jet_target_append_u64(&bytes, label.bytes().len())
-    loop byte in label.bytes() -> &bytes.push(byte)
-    jet_target_append_u64(&bytes, value.bytes().len())
-    loop byte in value.bytes() -> &bytes.push(byte)
+    jet_target_append_u64(bytes, label.bytes().len())
+    loop byte in label.bytes() -> bytes.push(byte)
+    jet_target_append_u64(bytes, value.bytes().len())
+    loop byte in value.bytes() -> bytes.push(byte)
 }
 
 jet_target_json_hex: fn(value: Int) -> String Never! {
@@ -413,7 +413,7 @@ jet_target_memory_access_name: fn(value: MemoryAccess) -> String Never! {
 jet_target_memory_json: fn(regions: [MemoryRegion]) -> String Never! {
     rows := [String]{}
     loop region in regions {
-        &rows.push("{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}")
+        rows.push("{{\"name\":{jet_target_json_quote(region.name)},\"origin\":{region.origin},\"size_bytes\":{region.size.bytes},\"kind\":{jet_target_json_quote(jet_target_memory_kind_name(region.kind))},\"access\":{jet_target_json_quote(jet_target_memory_access_name(region.access))}}}")
     }
     "[{rows.join(",")}]"
 }
@@ -427,20 +427,20 @@ jet_target_hardware_json: fn(facts: TargetHardwareFacts) -> String Never! {
     loop block in facts.register_blocks {
         registers := [String]{}
         loop register in block.registers {
-            &registers.push("{{\"name\":{jet_target_json_quote(register.name)},\"offset\":{register.offset},\"width\":{jet_target_json_quote(jet_target_register_width_name(register.width))},\"access\":{jet_target_json_quote(jet_target_register_access_name(register.access))},\"volatile\":{jet_target_bool_json(register.volatile)}}}")
+            registers.push("{{\"name\":{jet_target_json_quote(register.name)},\"offset\":{register.offset},\"width\":{jet_target_json_quote(jet_target_register_width_name(register.width))},\"access\":{jet_target_json_quote(jet_target_register_access_name(register.access))},\"volatile\":{jet_target_bool_json(register.volatile)}}}")
         }
-        &blocks.push("{{\"name\":{jet_target_json_quote(block.name)},\"base\":{block.base},\"size_bytes\":{block.size.bytes},\"registers\":[{registers.join(",")}]}}")
+        blocks.push("{{\"name\":{jet_target_json_quote(block.name)},\"base\":{block.base},\"size_bytes\":{block.size.bytes},\"registers\":[{registers.join(",")}]}}")
     }
     interrupts := [String]{}
     loop interrupt in facts.interrupts {
         effects := [String]{}
-        loop effect_name in interrupt.forbidden_effects -> &effects.push(jet_target_json_quote(effect_name))
-        &interrupts.push("{{\"name\":{jet_target_json_quote(interrupt.name)},\"vector\":{interrupt.vector},\"forbidden_effects\":[{effects.join(",")}],\"bounded\":{jet_target_bool_json(interrupt.bounded)}}}")
+        loop effect_name in interrupt.forbidden_effects -> effects.push(jet_target_json_quote(effect_name))
+        interrupts.push("{{\"name\":{jet_target_json_quote(interrupt.name)},\"vector\":{interrupt.vector},\"forbidden_effects\":[{effects.join(",")}],\"bounded\":{jet_target_bool_json(interrupt.bounded)}}}")
     }
     channels := [String]{}
     loop channel in facts.dma_channels {
         ownership: if channel.ownership == TargetDMAOwnership.Borrowed -> "borrowed" else -> "transfer"
-        &channels.push("{{\"name\":{jet_target_json_quote(channel.name)},\"channel\":{channel.channel},\"transfer_width\":{jet_target_json_quote(jet_target_register_width_name(channel.transfer_width))},\"ownership\":{jet_target_json_quote(ownership)},\"max_transfer_bytes\":{jet_target_optional_int_json(channel.max_transfer_bytes)}}}")
+        channels.push("{{\"name\":{jet_target_json_quote(channel.name)},\"channel\":{channel.channel},\"transfer_width\":{jet_target_json_quote(jet_target_register_width_name(channel.transfer_width))},\"ownership\":{jet_target_json_quote(ownership)},\"max_transfer_bytes\":{jet_target_optional_int_json(channel.max_transfer_bytes)}}}")
     }
     "{{\"svd\":{svd},\"register_blocks\":[{blocks.join(",")}],\"interrupts\":[{interrupts.join(",")}],\"dma_channels\":[{channels.join(",")}]}}"
 }
@@ -457,8 +457,8 @@ jet_target_programmers_json: fn(programmers: [TargetProgrammerFacts]) -> String 
     rows := [String]{}
     loop programmer in programmers {
         config := [String]{}
-        loop value in programmer.config -> &config.push(jet_target_json_quote(value))
-        &rows.push("{{\"adapter\":{jet_target_json_quote(jet_target_programmer_adapter_name(programmer.adapter))},\"chip\":{jet_target_optional_string_json(programmer.chip)},\"config\":[{config.join(",")}],\"cpu\":{jet_target_optional_string_json(programmer.cpu)},\"executable\":{jet_target_json_quote(programmer.executable)},\"interface\":{jet_target_optional_string_json(programmer.interface)},\"machine\":{jet_target_optional_string_json(programmer.machine)},\"reset\":{jet_target_bool_json(programmer.reset)},\"speed_khz\":{jet_target_optional_int_json(programmer.speed_khz)}}}")
+        loop value in programmer.config -> config.push(jet_target_json_quote(value))
+        rows.push("{{\"adapter\":{jet_target_json_quote(jet_target_programmer_adapter_name(programmer.adapter))},\"chip\":{jet_target_optional_string_json(programmer.chip)},\"config\":[{config.join(",")}],\"cpu\":{jet_target_optional_string_json(programmer.cpu)},\"executable\":{jet_target_json_quote(programmer.executable)},\"interface\":{jet_target_optional_string_json(programmer.interface)},\"machine\":{jet_target_optional_string_json(programmer.machine)},\"reset\":{jet_target_bool_json(programmer.reset)},\"speed_khz\":{jet_target_optional_int_json(programmer.speed_khz)}}}")
     }
     "[{rows.join(",")}]"
 }
@@ -531,24 +531,24 @@ jet_target_environment_identity: fn(machine: TargetMachine) -> String Never! {
 
 jet_target_provider_identity: fn(machine: TargetMachine) -> String Never! {
     bytes := [U8]{}
-    jet_target_append_frame(&bytes, "environment", jet_target_environment_identity(machine))
-    jet_target_append_frame(&bytes, "linker", jet_target_linker_json(machine.linker))
-    jet_target_append_frame(&bytes, "allocator", jet_target_allocator_json(machine.allocator))
-    jet_target_append_frame(&bytes, "panic", jet_target_panic_json(machine.panic))
-    jet_target_append_frame(&bytes, "memory", jet_target_memory_json(machine.memory))
-    jet_target_append_frame(&bytes, "mmio", jet_target_mmio_json(machine.mmio))
-    jet_target_append_frame(&bytes, "time_wall", jet_target_clock_json(machine.wall_clock))
-    jet_target_append_frame(&bytes, "time_monotonic", jet_target_clock_json(machine.monotonic_clock))
-    jet_target_append_frame(&bytes, "time_zone_data", jet_target_clock_json(machine.zone_data))
-    jet_target_append_frame(&bytes, "time_sleep", jet_target_clock_json(machine.sleep))
-    jet_target_append_frame(&bytes, "entropy", jet_target_entropy_json(machine.entropy))
-    jet_target_append_frame(&bytes, "scheduler", jet_target_scheduler_json(machine.scheduler))
-    jet_target_append_frame(&bytes, "byte_sink", jet_target_byte_sink_json(machine.byte_sink))
-    jet_target_append_frame(&bytes, "startup", jet_target_startup_json(machine.startup))
-    jet_target_append_frame(&bytes, "provider_facts", jet_target_provider_facts_json(machine))
-    jet_target_append_frame(&bytes, "hardware", jet_target_hardware_json(machine.hardware))
-    jet_target_append_frame(&bytes, "programmers", jet_target_programmers_json(machine.programmers))
-    jet_target_append_frame(&bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
+    jet_target_append_frame(bytes, "environment", jet_target_environment_identity(machine))
+    jet_target_append_frame(bytes, "linker", jet_target_linker_json(machine.linker))
+    jet_target_append_frame(bytes, "allocator", jet_target_allocator_json(machine.allocator))
+    jet_target_append_frame(bytes, "panic", jet_target_panic_json(machine.panic))
+    jet_target_append_frame(bytes, "memory", jet_target_memory_json(machine.memory))
+    jet_target_append_frame(bytes, "mmio", jet_target_mmio_json(machine.mmio))
+    jet_target_append_frame(bytes, "time_wall", jet_target_clock_json(machine.wall_clock))
+    jet_target_append_frame(bytes, "time_monotonic", jet_target_clock_json(machine.monotonic_clock))
+    jet_target_append_frame(bytes, "time_zone_data", jet_target_clock_json(machine.zone_data))
+    jet_target_append_frame(bytes, "time_sleep", jet_target_clock_json(machine.sleep))
+    jet_target_append_frame(bytes, "entropy", jet_target_entropy_json(machine.entropy))
+    jet_target_append_frame(bytes, "scheduler", jet_target_scheduler_json(machine.scheduler))
+    jet_target_append_frame(bytes, "byte_sink", jet_target_byte_sink_json(machine.byte_sink))
+    jet_target_append_frame(bytes, "startup", jet_target_startup_json(machine.startup))
+    jet_target_append_frame(bytes, "provider_facts", jet_target_provider_facts_json(machine))
+    jet_target_append_frame(bytes, "hardware", jet_target_hardware_json(machine.hardware))
+    jet_target_append_frame(bytes, "programmers", jet_target_programmers_json(machine.programmers))
+    jet_target_append_frame(bytes, "layout_facts", jet_target_layout_cache_identity(machine.layout))
     "target-providers-v1:{sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))}"
 }
 
@@ -578,8 +578,8 @@ jet_target_machine_for_facts: fn(no_os: Bool, web_target: Bool, target_triple: S
 
 jet_target_wasm_provider: fn(name: String, implementation: String) -> ProviderContract Never! {
     bytes := [U8]{}
-    jet_target_append_frame(&bytes, "provider", name)
-    jet_target_append_frame(&bytes, "implementation", implementation)
+    jet_target_append_frame(bytes, "provider", name)
+    jet_target_append_frame(bytes, "implementation", implementation)
     digest: sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))
     ProviderContract{
         provider: name,
@@ -640,14 +640,15 @@ jet_target_package_version_from_compiler_identity: fn(identity: String) -> Strin
     Val(build_parts[0])
 }
 
+// The OS `$build.os` folds on: the triple's OS, else the host's (`host_os` is
+// a key such as `macos`), else Linux. A web, Wasm or freestanding triple names
+// no OS, so it folds on the host's.
 jet_target_active_os_name: fn(target_triple: String, host_os: String) -> String Never! {
     if {
-        target_triple.contains("windows") -> "Windows"
-        target_triple.contains("apple") || target_triple.contains("darwin") -> "MacOS"
-        target_triple.contains("linux") -> "Linux"
-        host_os == "windows" -> "Windows"
-        host_os == "macos" -> "MacOS"
-        else -> "Linux"
+        target_triple.contains("windows") -> target_os_name(TTargetOS.Windows)
+        target_triple.contains("apple") || target_triple.contains("darwin") -> target_os_name(TTargetOS.MacOS)
+        target_triple.contains("linux") -> target_os_name(TTargetOS.Linux)
+        else -> target_os_name(target_os_parse(host_os) ?? TTargetOS.Linux)
     }
 }
 
@@ -693,25 +694,25 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
     }
     result := [TargetCapability]{}
     if module_name == {
-        "core.mem" -> if helper == "Atomic" || helper == "atomic" -> &result.push(.Atomic64)
+        "core.mem" -> if helper == "Atomic" || helper == "atomic" -> result.push(.Atomic64)
         "core.term" -> {
             reads: [String]{"", "input", "readline", "read_until", "read_all_input", "take", "buffered", "stdin", "binread", "read_key", "confirm", "choose", "select"}
             writes: [String]{"", "print", "eprint", "progress", "binwrite", "stdout", "stderr", "style", "style_force"}
-            if reads.contains(helper) -> &result.push(.IORead)
-            if writes.contains(helper) -> &result.push(.IOWrite)
+            if reads.contains(helper) -> result.push(.IORead)
+            if writes.contains(helper) -> result.push(.IOWrite)
         }
-        "core.concurrency" | "core.tasks" -> &result.push(.Scheduler)
+        "core.concurrency" | "core.tasks" -> result.push(.Scheduler)
         "core.time" -> {
             if helper == {
-                "sleep" | "delay" | "yield" | "wait" -> &result.push(.TimeSleep)
-                "instant" | "monotonic" | "elapsed" | "elapsed_millis" -> &result.push(.TimeMonotonic)
-                "zone" | "zone_data" | "named_zone" -> &result.push(.TimeZoneData)
+                "sleep" | "delay" | "yield" | "wait" -> result.push(.TimeSleep)
+                "instant" | "monotonic" | "elapsed" | "elapsed_millis" -> result.push(.TimeMonotonic)
+                "zone" | "zone_data" | "named_zone" -> result.push(.TimeZoneData)
                 "" | "typed_head" | "__duration__" | "duration" -> {}
-                else -> &result.push(.TimeWall)
+                else -> result.push(.TimeWall)
             }
         }
-        "core.crypto.random" | "core.crypto.uuid" -> &result.push(.Entropy)
-        "core.hardware" -> &result.push(.Hardware)
+        "core.crypto.random" | "core.crypto.uuid" -> result.push(.Entropy)
+        "core.hardware" -> result.push(.Hardware)
         else -> {}
     }
     result
@@ -721,16 +722,16 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
 jet_target_machine_use_from_core_apis: fn(apis: [String]) -> TargetMachineUse Never! {
     usage := jet_target_machine_use_default()
     sorted := apis.copy()
-    &sorted.sort()
+    sorted.sort()
     loop api in sorted {
-        if usage.core_apis.is_empty() || usage.core_apis[usage.core_apis.len() - 1] != api -> &usage.core_apis.push(api)
+        if usage.core_apis.is_empty() || usage.core_apis[usage.core_apis.len() - 1] != api -> usage.core_apis.push(api)
     }
     loop row in jet_ring_classify_prelude_closure(usage.core_apis) {
         if jet_ring_layer_rank(row.layer) >= jet_ring_layer_rank(.Alloc) -> usage.heap_required = true
     }
     loop api in usage.core_apis {
         loop capability in jet_target_capabilities_for_core_usage(api) {
-            if !usage.required_capabilities.contains(capability) -> &usage.required_capabilities.push(capability)
+            if !usage.required_capabilities.contains(capability) -> usage.required_capabilities.push(capability)
         }
     }
     usage
@@ -846,20 +847,20 @@ jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: T
 
 // Rust push_unique / validate_provider_contract / validate_simple_capability.
 jet_target_push_unique: fn(errors: &[TargetMachineError], error: TargetMachineError) Never! {
-    if !errors.contains(error) -> &errors.push(error)
+    if !errors.contains(error) -> errors.push(error.copy())
 }
 jet_target_validate_provider_contract: fn(capability: TargetCapability, provider: ProviderContract, errors: &[TargetMachineError]) Never! {
-    if !jet_target_provider_valid(provider) -> jet_target_push_unique(&errors, .InvalidProviderContract{capability: jet_target_capability_name(capability), provider: provider.provider, sha256: provider.sha256})
+    if !jet_target_provider_valid(provider) -> jet_target_push_unique(errors, .InvalidProviderContract{capability: jet_target_capability_name(capability), provider: provider.provider, sha256: provider.sha256})
 }
 jet_target_validate_simple_capability: fn(machine: TargetMachine, capability: TargetCapability, declared: Bool, hosted_default: Bool, provider: ProviderContract?, errors: &[TargetMachineError]) Never! {
     if machine.no_os {
         if {
-            hosted_default -> jet_target_push_unique(&errors, .HostedCapabilityRequiresOS{capability: jet_target_capability_name(capability)})
-            (!declared) -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
+            hosted_default -> jet_target_push_unique(errors, .HostedCapabilityRequiresOS{capability: jet_target_capability_name(capability)})
+            (!declared) -> jet_target_push_unique(errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
             else -> {}
         }
     }
-    if provider == Val(contract) -> jet_target_validate_provider_contract(capability, contract, &errors)
+    if provider == Val(contract) -> jet_target_validate_provider_contract(capability, contract, errors)
 }
 
 // Rust validate_memory_regions; sort indices, not copied region payloads.
@@ -868,30 +869,30 @@ jet_target_validate_memory_regions: fn(regions: [MemoryRegion], errors: &[Target
     indices := [Int]{}
     loop index in 0..<regions.len() {
         region: regions[index]
-        if region.size.bytes == 0 -> &errors.push(.EmptyMemoryRegion{name: region.name})
-        if jet_target_memory_end(region) == None -> &errors.push(.MemoryAddressOverflow{name: region.name})
+        if region.size.bytes == 0 -> errors.push(.EmptyMemoryRegion{name: region.name})
+        if jet_target_memory_end(region) == None -> errors.push(.MemoryAddressOverflow{name: region.name})
         if {
-            names.has_key(region.name) -> &errors.push(.DuplicateMemoryRegion{name: region.name})
+            names.has_key(region.name) -> errors.push(.DuplicateMemoryRegion{name: region.name})
             else -> names[region.name] = true
         }
-        &indices.push(index)
+        indices.push(index)
     }
-    &indices.sort_by((a: Int, b: Int) -> regions[a].origin <=> regions[b].origin)
+    indices.sort_by((a: Int, b: Int) -> regions[a].origin <=> regions[b].origin)
     loop index in 1..<indices.len() {
         first: regions[indices[index - 1]]
         second: regions[indices[index]]
         end: jet_target_memory_end(first) ?? next
-        if end > second.origin -> &errors.push(.OverlappingMemoryRegions{first: first.name, second: second.name})
+        if end > second.origin -> errors.push(.OverlappingMemoryRegions{first: first.name, second: second.name})
     }
 }
 
 // Rust validate_linker.
 jet_target_validate_linker: fn(linker: LinkerInput, no_os: Bool, errors: &[TargetMachineError]) Never! {
     if linker == {
-        .Unspecified -> if no_os -> &errors.push(.MissingLinkerInput)
+        .Unspecified -> if no_os -> errors.push(.MissingLinkerInput)
         .File(path, sha256) -> {
-            if path.trim().is_empty() -> &errors.push(.LinkerFileMissingPath)
-            if !sha256.starts_with("sha256:") || sha256.bytes().len() <= 7 -> &errors.push(.LinkerFileMissingHash{path: path})
+            if path.trim().is_empty() -> errors.push(.LinkerFileMissingPath)
+            if !sha256.starts_with("sha256:") || sha256.bytes().len() <= 7 -> errors.push(.LinkerFileMissingHash{path: path})
         }
         else -> {}
     }
@@ -899,28 +900,28 @@ jet_target_validate_linker: fn(linker: LinkerInput, no_os: Bool, errors: &[Targe
 // Rust validate_allocator.
 jet_target_validate_allocator: fn(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
     if machine.allocator == {
-        .Unspecified -> if machine.no_os -> &errors.push(.MissingAllocatorPolicy)
-        .HostedDefault | .Counting(_) -> if machine.no_os -> &errors.push(.HostedAllocatorRequiresOS)
-        .Provider(provider) -> jet_target_validate_provider_contract(.Allocator, provider, &errors)
+        .Unspecified -> if machine.no_os -> errors.push(.MissingAllocatorPolicy)
+        .HostedDefault | .Counting(_) -> if machine.no_os -> errors.push(.HostedAllocatorRequiresOS)
+        .Provider(provider) -> jet_target_validate_provider_contract(.Allocator, provider, errors)
         .Fixed(region, size) -> {
             loop memory in machine.memory {
                 if memory.name != region -> next
                 if {
-                    memory.kind != .Ram -> &errors.push(.AllocatorRegionNotRam{region: region})
-                    size.bytes > memory.size.bytes -> &errors.push(.AllocatorRegionTooSmall{region: region, requested_bytes: size.bytes, available_bytes: memory.size.bytes})
+                    memory.kind != .Ram -> errors.push(.AllocatorRegionNotRam{region: region})
+                    size.bytes > memory.size.bytes -> errors.push(.AllocatorRegionTooSmall{region: region, requested_bytes: size.bytes, available_bytes: memory.size.bytes})
                     else -> {}
                 }
                 return
             }
-            &errors.push(.AllocatorRegionUnknown{region: region})
+            errors.push(.AllocatorRegionUnknown{region: region})
         }
         else -> {}
     }
 }
 // Rust validate_panic.
 jet_target_validate_panic: fn(machine: TargetMachine, errors: &[TargetMachineError]) Never! {
-    if machine.no_os && (machine.panic == .Unspecified || machine.panic == .HostedDefault) -> &errors.push(.MissingPanicPolicy)
-    if machine.panic == .Report(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, &errors)
+    if machine.no_os && (machine.panic == .Unspecified || machine.panic == .HostedDefault) -> errors.push(.MissingPanicPolicy)
+    if machine.panic == .Report(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, errors)
 }
 // Rust validate_ram_budget.
 jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
@@ -929,7 +930,7 @@ jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineU
     loop kind in kinds {
         present := false
         loop region in machine.memory { if region.kind == kind -> present = true }
-        if !present -> &errors.push(.MissingMemoryKind{kind: kind})
+        if !present -> errors.push(.MissingMemoryKind{kind: kind})
     }
     // CLI-37 Main/Pip ruling: keep the true RAM total in exact Int; the
     // reference's u64 sum can wrap into a false small budget. Used bytes
@@ -939,49 +940,49 @@ jet_target_validate_ram_budget: fn(machine: TargetMachine, usage: TargetMachineU
     fixed: if machine.allocator == { .Fixed(_, size) -> size.bytes else -> 0 }
     sum: usage.stack_bytes + usage.static_ram_bytes + fixed
     used: if sum > 18446744073709551615 -> 18446744073709551615 else -> sum
-    if ram > 0 && used > ram -> &errors.push(.RamOverflow{used_bytes: used, ram_bytes: ram})
+    if ram > 0 && used > ram -> errors.push(.RamOverflow{used_bytes: used, ram_bytes: ram})
 }
 // Rust validate_core_usage.
 jet_target_validate_core_usage: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
-    if usage.heap_required && !jet_target_machine_provides_capability(machine, .Allocator) -> &errors.push(.HeapRequiresAllocator)
+    if usage.heap_required && !jet_target_machine_provides_capability(machine, .Allocator) -> errors.push(.HeapRequiresAllocator)
     available: jet_target_max_runtime_layer(machine)
     loop row in jet_ring_classify_prelude_closure(usage.core_apis) {
-        if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(available) -> &errors.push(.CoreAPIUnavailable{api: row.key, required: row.layer, available: available})
+        if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(available) -> errors.push(.CoreAPIUnavailable{api: row.key, required: row.layer, available: available})
     }
 }
 
 // Rust validate_target_capabilities.
 jet_target_validate_target_capabilities: fn(machine: TargetMachine, usage: TargetMachineUse, errors: &[TargetMachineError]) Never! {
     mmio_provider: if machine.mmio == { .Provider(provider) -> Val(provider) else -> None }
-    jet_target_validate_simple_capability(machine, .MMIO, machine.mmio != .Unspecified, machine.mmio == .HostedDefault, mmio_provider, &errors)
-    jet_target_validate_simple_capability(machine, .TimeWall, machine.wall_clock != .Unspecified, machine.wall_clock == .HostedDefault, jet_target_clock_provider(machine.wall_clock), &errors)
-    jet_target_validate_simple_capability(machine, .TimeMonotonic, machine.monotonic_clock != .Unspecified, machine.monotonic_clock == .HostedDefault, jet_target_clock_provider(machine.monotonic_clock), &errors)
-    jet_target_validate_simple_capability(machine, .TimeZoneData, machine.zone_data != .Unspecified, machine.zone_data == .HostedDefault, jet_target_clock_provider(machine.zone_data), &errors)
-    jet_target_validate_simple_capability(machine, .TimeSleep, machine.sleep != .Unspecified, machine.sleep == .HostedDefault, jet_target_clock_provider(machine.sleep), &errors)
+    jet_target_validate_simple_capability(machine, .MMIO, machine.mmio != .Unspecified, machine.mmio == .HostedDefault, mmio_provider, errors)
+    jet_target_validate_simple_capability(machine, .TimeWall, machine.wall_clock != .Unspecified, machine.wall_clock == .HostedDefault, jet_target_clock_provider(machine.wall_clock), errors)
+    jet_target_validate_simple_capability(machine, .TimeMonotonic, machine.monotonic_clock != .Unspecified, machine.monotonic_clock == .HostedDefault, jet_target_clock_provider(machine.monotonic_clock), errors)
+    jet_target_validate_simple_capability(machine, .TimeZoneData, machine.zone_data != .Unspecified, machine.zone_data == .HostedDefault, jet_target_clock_provider(machine.zone_data), errors)
+    jet_target_validate_simple_capability(machine, .TimeSleep, machine.sleep != .Unspecified, machine.sleep == .HostedDefault, jet_target_clock_provider(machine.sleep), errors)
     entropy_provider: if machine.entropy == { .Provider(provider) -> Val(provider) else -> None }
-    jet_target_validate_simple_capability(machine, .Entropy, machine.entropy != .Unspecified, machine.entropy == .HostedDefault, entropy_provider, &errors)
-    jet_target_validate_simple_capability(machine, .Scheduler, machine.scheduler != .Unspecified, machine.scheduler == .HostedDefault, jet_target_scheduler_provider(machine.scheduler), &errors)
+    jet_target_validate_simple_capability(machine, .Entropy, machine.entropy != .Unspecified, machine.entropy == .HostedDefault, entropy_provider, errors)
+    jet_target_validate_simple_capability(machine, .Scheduler, machine.scheduler != .Unspecified, machine.scheduler == .HostedDefault, jet_target_scheduler_provider(machine.scheduler), errors)
     startup_provider: if machine.startup == { .Generated(provider) -> Val(provider) else -> None }
-    jet_target_validate_simple_capability(machine, .Startup, machine.startup != .Unspecified, machine.startup == .HostedDefault, startup_provider, &errors)
+    jet_target_validate_simple_capability(machine, .Startup, machine.startup != .Unspecified, machine.startup == .HostedDefault, startup_provider, errors)
     sinks: [TargetCapability]{.IORead, .IOWrite, .PanicReport}
     if machine.byte_sink == {
         .HostedDefault -> if machine.no_os {
-            loop capability in sinks -> jet_target_push_unique(&errors, .HostedCapabilityRequiresOS{capability: jet_target_capability_name(capability)})
+            loop capability in sinks -> jet_target_push_unique(errors, .HostedCapabilityRequiresOS{capability: jet_target_capability_name(capability)})
         }
         .Unspecified -> if machine.no_os {
-            loop capability in sinks -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
+            loop capability in sinks -> jet_target_push_unique(errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
         }
         .Provider(read, write, report) -> {
-            if read == Val(provider) -> jet_target_validate_provider_contract(.IORead, provider, &errors)
-            if write == Val(provider) -> jet_target_validate_provider_contract(.IOWrite, provider, &errors)
-            if report == Val(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, &errors)
+            if read == Val(provider) -> jet_target_validate_provider_contract(.IORead, provider, errors)
+            if write == Val(provider) -> jet_target_validate_provider_contract(.IOWrite, provider, errors)
+            if report == Val(provider) -> jet_target_validate_provider_contract(.PanicReport, provider, errors)
         }
         else -> {}
     }
-    if machine.panic == .Report(_) && !jet_target_machine_provides_capability(machine, .PanicReport) -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: "Panic.Report"})
-    if !usage.mmio.is_empty() && !jet_target_machine_provides_capability(machine, .MMIO) -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: "Target.MMIO"})
+    if machine.panic == .Report(_) && !jet_target_machine_provides_capability(machine, .PanicReport) -> jet_target_push_unique(errors, .MissingTargetCapability{capability: "Panic.Report"})
+    if !usage.mmio.is_empty() && !jet_target_machine_provides_capability(machine, .MMIO) -> jet_target_push_unique(errors, .MissingTargetCapability{capability: "Target.MMIO"})
     loop capability in usage.required_capabilities {
-        if !jet_target_machine_provides_capability(machine, capability) -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
+        if !jet_target_machine_provides_capability(machine, capability) -> jet_target_push_unique(errors, .MissingTargetCapability{capability: jet_target_capability_name(capability)})
     }
 }
 // Rust validate_startup_facts.
@@ -989,8 +990,8 @@ jet_target_validate_startup_facts: fn(machine: TargetMachine, errors: &[TargetMa
     if !machine.no_os -> return
     if machine.startup == {
         .Generated(provider) -> {
-            if machine.startup_entry.trim().is_empty() || machine.startup_vectors.trim().is_empty() || machine.startup_placement.trim().is_empty() -> jet_target_push_unique(&errors, .MissingTargetCapability{capability: "Target.Startup"})
-            if !jet_target_abi_valid(machine.startup_abi) -> jet_target_push_unique(&errors, .InvalidProviderContract{capability: "Target.Startup", provider: provider.provider, sha256: provider.sha256})
+            if machine.startup_entry.trim().is_empty() || machine.startup_vectors.trim().is_empty() || machine.startup_placement.trim().is_empty() -> jet_target_push_unique(errors, .MissingTargetCapability{capability: "Target.Startup"})
+            if !jet_target_abi_valid(machine.startup_abi) -> jet_target_push_unique(errors, .InvalidProviderContract{capability: "Target.Startup", provider: provider.provider, sha256: provider.sha256})
         }
         else -> {}
     }
@@ -1002,10 +1003,10 @@ jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, er
         loop region in machine.memory {
             if region.kind == .MMIO && jet_target_memory_contains(region, access.address, access.size) -> inside = true
         }
-        if !inside -> &errors.push(.MMIOOutsideRegion{address: access.address, size_bytes: access.size.bytes})
+        if !inside -> errors.push(.MMIOOutsideRegion{address: access.address, size_bytes: access.size.bytes})
         if access.unsafe_gate == {
-            Val(gate) -> if gate.reason.trim().is_empty() -> &errors.push(.MMIOEmptyUnsafeReason{address: access.address})
-            None -> &errors.push(.MMIOMissingUnsafeGate{address: access.address})
+            Val(gate) -> if gate.reason.trim().is_empty() -> errors.push(.MMIOEmptyUnsafeReason{address: access.address})
+            None -> errors.push(.MMIOMissingUnsafeGate{address: access.address})
         }
     }
 }
@@ -1014,28 +1015,28 @@ jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, er
 jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion], errors: &[TargetMachineError]) Never! {
     if hardware.svd == Val(svd) {
         digest: if svd.sha256.starts_with("sha256:") -> String.from_bytes(svd.sha256.bytes()[7..<svd.sha256.bytes().len()]) ?? "" else -> ""
-        if svd.source.trim().is_empty() || digest.trim().is_empty() -> &errors.push(.InvalidHardwareSVD{source: svd.source, sha256: svd.sha256})
+        if svd.source.trim().is_empty() || digest.trim().is_empty() -> errors.push(.InvalidHardwareSVD{source: svd.source, sha256: svd.sha256})
     }
     blocks := [String:Bool]{}
     loop block in hardware.register_blocks {
-        if block.name.trim().is_empty() -> &errors.push(.HardwareFactEmptyName{kind: "register block"})
-        if blocks.has_key(block.name) -> &errors.push(.DuplicateRegisterBlock{name: block.name})
+        if block.name.trim().is_empty() -> errors.push(.HardwareFactEmptyName{kind: "register block"})
+        if blocks.has_key(block.name) -> errors.push(.DuplicateRegisterBlock{name: block.name})
         blocks[block.name] = true
-        if block.size.bytes == 0 -> &errors.push(.RegisterBlockEmpty{name: block.name})
+        if block.size.bytes == 0 -> errors.push(.RegisterBlockEmpty{name: block.name})
         if {
-            block.base + block.size.bytes > 18446744073709551615 -> &errors.push(.RegisterBlockAddressOverflow{name: block.name})
+            block.base + block.size.bytes > 18446744073709551615 -> errors.push(.RegisterBlockAddressOverflow{name: block.name})
             else -> {
                 inside := false
                 loop region in memory {
                     if region.kind == .MMIO && jet_target_memory_contains(region, block.base, block.size) -> inside = true
                 }
-                if !inside -> &errors.push(.RegisterBlockOutsideRegion{name: block.name, address: block.base, size_bytes: block.size.bytes})
+                if !inside -> errors.push(.RegisterBlockOutsideRegion{name: block.name, address: block.base, size_bytes: block.size.bytes})
             }
         }
         registers := [String:Bool]{}
         loop register in block.registers {
-            if register.name.trim().is_empty() -> &errors.push(.HardwareFactEmptyName{kind: "register in `{block.name}`"})
-            if registers.has_key(register.name) -> &errors.push(.DuplicateRegister{block: block.name, register: register.name})
+            if register.name.trim().is_empty() -> errors.push(.HardwareFactEmptyName{kind: "register in `{block.name}`"})
+            if registers.has_key(register.name) -> errors.push(.DuplicateRegister{block: block.name, register: register.name})
             registers[register.name] = true
             width: if register.width == {
                 .U8 -> 1
@@ -1044,8 +1045,8 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
                 .U64 -> 8
             }
             if {
-                register.offset + width > 18446744073709551615 -> &errors.push(.RegisterAddressOverflow{block: block.name, register: register.name})
-                register.offset + width > block.size.bytes -> &errors.push(.RegisterOutsideBlock{block: block.name, register: register.name})
+                register.offset + width > 18446744073709551615 -> errors.push(.RegisterAddressOverflow{block: block.name, register: register.name})
+                register.offset + width > block.size.bytes -> errors.push(.RegisterOutsideBlock{block: block.name, register: register.name})
                 else -> {}
             }
         }
@@ -1053,46 +1054,46 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
     interrupts := [String:Bool]{}
     vectors := [Int:Bool]{}
     loop interrupt in hardware.interrupts {
-        if interrupt.name.trim().is_empty() -> &errors.push(.HardwareFactEmptyName{kind: "interrupt"})
-        if interrupts.has_key(interrupt.name) -> &errors.push(.DuplicateInterrupt{name: interrupt.name})
+        if interrupt.name.trim().is_empty() -> errors.push(.HardwareFactEmptyName{kind: "interrupt"})
+        if interrupts.has_key(interrupt.name) -> errors.push(.DuplicateInterrupt{name: interrupt.name})
         interrupts[interrupt.name] = true
-        if vectors.has_key(interrupt.vector) -> &errors.push(.DuplicateInterruptVector{vector: interrupt.vector})
+        if vectors.has_key(interrupt.vector) -> errors.push(.DuplicateInterruptVector{vector: interrupt.vector})
         vectors[interrupt.vector] = true
         loop effect_name in authority_holds(interrupt.forbidden_effects) {
-            if authority_parse_right(effect_name) == None -> &errors.push(.InvalidInterruptEffect{interrupt: interrupt.name, effect_name: effect_name})
+            if authority_parse_right(effect_name) == None -> errors.push(.InvalidInterruptEffect{interrupt: interrupt.name, effect_name: effect_name})
         }
     }
     channels := [String:Bool]{}
     numbers := [Int:Bool]{}
     loop channel in hardware.dma_channels {
-        if channel.name.trim().is_empty() -> &errors.push(.HardwareFactEmptyName{kind: "DMA channel"})
-        if channels.has_key(channel.name) -> &errors.push(.DuplicateDMAChannel{name: channel.name})
+        if channel.name.trim().is_empty() -> errors.push(.HardwareFactEmptyName{kind: "DMA channel"})
+        if channels.has_key(channel.name) -> errors.push(.DuplicateDMAChannel{name: channel.name})
         channels[channel.name] = true
-        if numbers.has_key(channel.channel) -> &errors.push(.DuplicateDMAChannelNumber{channel: channel.channel})
+        if numbers.has_key(channel.channel) -> errors.push(.DuplicateDMAChannelNumber{channel: channel.channel})
         numbers[channel.channel] = true
-        if channel.max_transfer_bytes == Val(bound) && bound == 0 -> &errors.push(.DMATransferSizeZero{channel: channel.name})
+        if channel.max_transfer_bytes == Val(bound) && bound == 0 -> errors.push(.DMATransferSizeZero{channel: channel.name})
     }
 }
 // Rust TargetHardwareFacts::validate.
 jet_target_hardware_validate: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion]) -> [TargetMachineError] Never! {
     errors := [TargetMachineError]{}
-    jet_target_hardware_validate_into(hardware, memory, &errors)
+    jet_target_hardware_validate_into(hardware, memory, errors)
     errors
 }
 // Rust TargetMachine::validate; preserve push order.
 jet_target_machine_validate: fn(machine: TargetMachine, usage: TargetMachineUse) -> [TargetMachineError] Never! {
     errors := [TargetMachineError]{}
-    if machine.triple.trim().is_empty() -> &errors.push(.MissingTargetTriple)
-    jet_target_validate_memory_regions(machine.memory, &errors)
-    jet_target_validate_linker(machine.linker, machine.no_os, &errors)
-    jet_target_validate_allocator(machine, &errors)
-    jet_target_validate_panic(machine, &errors)
-    jet_target_validate_ram_budget(machine, usage, &errors)
-    jet_target_validate_core_usage(machine, usage, &errors)
-    jet_target_validate_target_capabilities(machine, usage, &errors)
-    jet_target_validate_startup_facts(machine, &errors)
-    jet_target_validate_mmio(machine, usage, &errors)
-    jet_target_hardware_validate_into(machine.hardware, machine.memory, &errors)
+    if machine.triple.trim().is_empty() -> errors.push(.MissingTargetTriple)
+    jet_target_validate_memory_regions(machine.memory, errors)
+    jet_target_validate_linker(machine.linker, machine.no_os, errors)
+    jet_target_validate_allocator(machine, errors)
+    jet_target_validate_panic(machine, errors)
+    jet_target_validate_ram_budget(machine, usage, errors)
+    jet_target_validate_core_usage(machine, usage, errors)
+    jet_target_validate_target_capabilities(machine, usage, errors)
+    jet_target_validate_startup_facts(machine, errors)
+    jet_target_validate_mmio(machine, usage, errors)
+    jet_target_hardware_validate_into(machine.hardware, machine.memory, errors)
     errors
 }
 

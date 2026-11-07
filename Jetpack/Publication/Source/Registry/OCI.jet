@@ -55,7 +55,7 @@ publication_oci_referrer_root: fn(repo: String, subject: String) -[FS, Env]> Str
     if files.stat(subject_root) == {
         .Ok(subject_info) -> if subject_info.is_symlink || !subject_info.is_dir -> return Err(publication_invalid_oci("registry OCI subject referrers are not a real directory"))
         .Err(error) -> if error == {
-            .NotFound(_) -> files.create_dir(subject_root)
+            .NotFound(_) -> files.create_dir_all(subject_root)
             else -> return Err(error)
         }
     }
@@ -122,7 +122,7 @@ publication_finalize_oci_referrers: fn(repo: String, entry: PublicationIndexEntr
         bytes: payloads[index].bytes()
         digest: "sha256-{pkg_sha256_hex(bytes)}"
         publication_write_oci_file(files.join(files.join(root, "blobs"), digest), bytes, "OCI referrer blob")
-        &descriptors.push(PublicationOCIDescriptor{artifact_type: types[index], digest: digest, size: bytes.len()})
+        descriptors.push(PublicationOCIDescriptor{artifact_type: types[index], digest: digest, size: bytes.len()})
     }
     publication_write_oci_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), publication_render_oci_index(entry.content_hash, descriptors).bytes(), "OCI referrer index")
     if files.stat(pending) == .Ok(_) {
@@ -271,7 +271,7 @@ publication_oci_unavailable: fn(error: IOError, detail: String) -> IOError Never
 }
 publication_render_oci_index: fn(subject: String, descriptors: [PublicationOCIDescriptor]) -> String Never! {
     manifests := [String]{}
-    loop descriptor in descriptors -> &manifests.push("{{\"artifactType\":{foundation_json_quote(descriptor.artifact_type)},\"digest\":{foundation_json_quote(descriptor.digest)},\"mediaType\":{foundation_json_quote(descriptor.artifact_type)},\"size\":{descriptor.size}}}")
+    loop descriptor in descriptors -> manifests.push("{{\"artifactType\":{foundation_json_quote(descriptor.artifact_type)},\"digest\":{foundation_json_quote(descriptor.digest)},\"mediaType\":{foundation_json_quote(descriptor.artifact_type)},\"size\":{descriptor.size}}}")
     "{{\"schemaVersion\":2,\"subject\":{{\"digest\":{foundation_json_quote(subject)}}},\"manifests\":[{manifests.join(",")}]}}\n"
 }
 publication_verify_oci_referrers: fn(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env]> {
@@ -285,7 +285,7 @@ publication_verify_oci_referrers: fn(repo: String, entry: PublicationIndexEntry)
     referenced := [String]{}
     loop descriptor in descriptors {
         if referenced.contains(descriptor.digest) -> return Err(publication_invalid_oci("OCI referrer index repeats a blob digest"))
-        &referenced.push(descriptor.digest)
+        referenced.push(descriptor.digest)
         bytes: publication_read_oci_file(files.join(blobs, descriptor.digest), PUBLICATION_MAX_OCI_REFERRER_BYTES)
         if bytes.len() != descriptor.size -> return Err(publication_invalid_oci("OCI referrer {descriptor.artifact_type} has the wrong blob size"))
         if "sha256-{pkg_sha256_hex(bytes)}" != descriptor.digest -> return Err(publication_invalid_oci("OCI referrer {descriptor.artifact_type} failed its blob digest"))
@@ -347,14 +347,14 @@ publication_parse_oci_index: fn(bytes: [U8], subject: String) -> [PublicationOCI
         media_value: manifest.get("mediaType") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no media type"))
         media_type: pkg_json_text(media_value) ?? return Err(publication_invalid_oci("OCI referrer media type is not a string"))
         if media_type != artifact_type || !([String]{PUBLICATION_OCI_SBOM_TYPE, PUBLICATION_OCI_SIGNATURE_TYPE, PUBLICATION_OCI_PROVENANCE_TYPE, PUBLICATION_OCI_REPRODUCIBILITY_TYPE}).contains(artifact_type) || seen.contains(artifact_type) -> return Err(publication_invalid_oci("OCI referrer descriptor has an unknown or repeated artifact type"))
-        &seen.push(artifact_type)
+        seen.push(artifact_type.copy())
         digest_value: manifest.get("digest") ?? return Err(publication_invalid_oci("OCI referrer descriptor has no digest"))
         digest: pkg_json_text(digest_value) ?? return Err(publication_invalid_oci("OCI referrer digest is not a string"))
         publication_validate_oci_digest(digest)
         size_value: manifest.get("size") ?? return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
         size: foundation_json_integer(size_value) ?? return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
         if size < 0 -> return Err(publication_invalid_oci("OCI referrer descriptor size is not a non-negative integer"))
-        &descriptors.push(PublicationOCIDescriptor{artifact_type: artifact_type, digest: digest, size: size})
+        descriptors.push(PublicationOCIDescriptor{artifact_type: artifact_type, digest: digest, size: size})
     }
     Ok(descriptors)
 }

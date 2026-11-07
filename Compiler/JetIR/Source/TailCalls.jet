@@ -1,4 +1,4 @@
-// Tail calls (D-TAIL-CALL1): on every level, compile-time code included, a
+// Tail calls: on every level, compile-time code included, a
 // Call whose result its function returns is a jump (X64Select.jet
 // ir_x64_tail_jump), so tail recursion, mutual recursion too, runs in
 // constant stack. ir_tail_calls runs on the module just before selection.
@@ -29,7 +29,7 @@
 // call, so that call never has the shape; sema's tail_call_blocked lint
 // names it. Neither has a value whose Drop is not memory only (a process
 // Child's Drop kills its tree, a handle's may close a resource): the jump
-// would run that Drop before the callee instead of after it (D-DROP-ASAP1),
+// would run that Drop before the callee instead of after it,
 // so a call after which one is dropped stays a call (ir_tail_memory_only).
 // A panic unwinding a variant does not drop its owned parameters.
 
@@ -66,21 +66,21 @@ ir_tail_calls: fn(m: &IRModule) Never! {
     poll: name_rows_value(m.function_rows, IR_STOP_POLL_KEY) ?? -1
     trap: name_rows_value(m.function_rows, IR_STOP_TRAP_KEY) ?? -1
     ownable := [Int]{}
-    loop f in m.functions -> &ownable.push(ir_tail_ownable(m, f))
+    loop f in m.functions -> ownable.push(ir_tail_ownable(m, f))
     // Work items: item k < count is function k as built; each later one a
     // variant (function id k) of function sources[k] owning masks[k].
     sources := [Int]{}
     masks := [Int]{}
     loop id in 0..<count {
-        &sources.push(id)
-        &masks.push(0)
+        sources.push(id)
+        masks.push(0)
     }
     rows := name_rows()
     plans := [IRTailPlan]{}
     item := 0
     loop item < sources.len() {
-        plan: ir_tail_plan(m, m.functions[sources[item]], masks[item], poll, trap, ownable, &rows, &sources, &masks)
-        &plans.push(plan)
+        plan: ir_tail_plan(m, m.functions[sources[item]], masks[item], poll, trap, ownable, rows, sources, masks)
+        plans.push(plan)
         item += 1
     }
     // The variants copy the bodies as built, before those are rewritten.
@@ -91,12 +91,12 @@ ir_tail_calls: fn(m: &IRModule) Never! {
         v.key = "{v.key}#own<{masks[variant]}>"
         v.symbol = "{base}.own{masks[variant]}"
         v.symbol_hash = U64{0}
-        ir_tail_rewrite(&v, plans[variant], masks[variant])
-        name_rows_set(&m.function_rows, v.key, m.functions.len())
-        &m.functions.push(^v)
+        ir_tail_rewrite(v, plans[variant], masks[variant])
+        name_rows_set(m.function_rows, v.key, m.functions.len())
+        m.functions.push(v)
     }
     loop id in 0..<count {
-        if plans[id].calls.len() > 0 -> ir_tail_rewrite(&m.functions[id], plans[id], 0)
+        if plans[id].calls.len() > 0 -> ir_tail_rewrite(m.functions[id], plans[id], 0)
     }
 }
 
@@ -105,7 +105,7 @@ ir_tail_calls: fn(m: &IRModule) Never! {
 ir_tail_ownable: fn(m: IRModule, f: IRFunction) -> Int Never! {
     if f.asm != None || f.param_count > 62 -> return 0
     written := [Bool]{}
-    loop _ in 0..<f.param_count -> &written.push(false)
+    loop _ in 0..<f.param_count -> written.push(false)
     loop at in 0..<f.op.len() {
         slot: ir_x64_write(f, at)
         if slot >= 0 && slot < f.param_count -> written[slot] = true
@@ -138,18 +138,18 @@ ir_tail_plan: fn(m: IRModule, f: IRFunction, owned: Int, poll: Int, trap: Int, o
             target = name_rows_value(rows, key) ?? -1
             if target < 0 {
                 target = sources.len()
-                &sources.push(callee)
-                &masks.push(site.mask)
-                name_rows_set(&rows, key, target)
+                sources.push(callee)
+                masks.push(site.mask)
+                name_rows_set(rows, key, target)
             }
         }
-        &plan.calls.push(site.call)
-        &plan.returns.push(at)
-        &plan.targets.push(target)
-        &plan.masks.push(site.mask)
-        &plan.polls.push(site.poll)
-        loop slot in site.drops -> &plan.drops.push(slot)
-        &plan.drop_start.push(plan.drops.len())
+        plan.calls.push(site.call)
+        plan.returns.push(at)
+        plan.targets.push(target)
+        plan.masks.push(site.mask)
+        plan.polls.push(site.poll)
+        loop slot in site.drops -> plan.drops.push(slot)
+        plan.drop_start.push(plan.drops.len())
     }
     plan
 }
@@ -194,7 +194,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
             if stop_poll < 0 -> stop_poll = at
             end: f.c[at + 1]
             loop inner in (at + 2)..<(end - 1) {
-                if f.op[inner] == .Drop -> &stopped.push(f.a[inner])
+                if f.op[inner] == .Drop -> stopped.push(f.a[inner])
             }
             at = end + 1
             next
@@ -202,7 +202,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
         if op == .Drop {
             slot: f.a[at]
             if slot < 0 || slot == current || dropped.contains(slot) -> return ir_tail_none()
-            &dropped.push(slot)
+            dropped.push(slot)
         } else {
             if current < 0 || f.a[at] != current -> return ir_tail_none()
             current = f.dst[at]
@@ -241,7 +241,7 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
         param_owned: slot < f.param_count && ir_tail_has(owned, slot)
         if own && (dropped.contains(slot) || param_owned) {
             mask += bit
-            &handed.push(slot)
+            handed.push(slot)
         } else if dropped.contains(slot) || param_owned || !ir_tail_safe(m, f, slot) {
             return ir_tail_none()
         }
@@ -250,15 +250,15 @@ ir_tail_site: fn(m: IRModule, f: IRFunction, ret: Int, owned: Int, poll: Int, tr
     if general > IR_X64_ARGUMENT_REGISTERS.len() || floats > 8 -> return ir_tail_none()
     drops := [Int]{}
     loop slot in dropped {
-        if !handed.contains(slot) -> &drops.push(slot)
+        if !handed.contains(slot) -> drops.push(slot)
     }
     loop slot in 0..<f.param_count {
-        if ir_tail_has(owned, slot) && !handed.contains(slot) -> &drops.push(slot)
+        if ir_tail_has(owned, slot) && !handed.contains(slot) -> drops.push(slot)
     }
     loop slot in drops {
         if !ir_tail_memory_only(m, f.slot_type[slot]) -> return ir_tail_none()
     }
-    IRTailSite{call: call, mask: mask, poll: stop_poll, drops: ^drops}
+    IRTailSite{call: call, mask: mask, poll: stop_poll, drops: drops.move()}
 }
 
 // Whether dropping a value of type row `ty` only frees memory, so nothing
@@ -327,68 +327,68 @@ ir_tail_rewrite: fn(f: &IRFunction, plan: IRTailPlan, owned: Int) Never! {
     code := IROptCode{op: [IROp]{}, dst: [Int]{}, a: [Int]{}, b: [Int]{}, c: [Int]{}, line: [Int]{}}
     params := [Int]{}
     loop slot in 0..<f.param_count {
-        if ir_tail_has(owned, slot) -> &params.push(slot)
+        if ir_tail_has(owned, slot) -> params.push(slot)
     }
     site := 0
     at := 0
     loop at < f.op.len() {
         line: f.code_line[at]
         if site < plan.calls.len() && at == plan.calls[site] {
-            loop k in plan.drop_start[site]..<plan.drop_start[site + 1] -> ir_opt_code_put(&code, .Drop, -1, plan.drops[k], -1, -1, line)
+            loop k in plan.drop_start[site]..<plan.drop_start[site + 1] -> ir_opt_code_put(code, .Drop, -1, plan.drops[k], -1, -1, line)
             poll: plan.polls[site]
             if poll >= 0 {
                 // The stop edge as built, its Drops those of the values the
                 // jump would hand over, inside its cleanup scope if it has one.
                 stop: f.c[poll + 1] - 1
-                ir_opt_code_put(&code, .Call, f.dst[poll], f.a[poll], f.b[poll], f.c[poll], f.code_line[poll])
-                ir_opt_code_put(&code, .If, -1, f.a[poll + 1], -1, -1, f.code_line[poll])
+                ir_opt_code_put(code, .Call, f.dst[poll], f.a[poll], f.b[poll], f.c[poll], f.code_line[poll])
+                ir_opt_code_put(code, .If, -1, f.a[poll + 1], -1, -1, f.code_line[poll])
                 scoped := false
                 loop inner in (poll + 2)..<stop {
                     if f.op[inner] == .CallRuntime && f.dst[inner] >= 0 -> scoped = true
                 }
-                if !scoped -> ir_tail_put_handed(&code, f, at, plan.masks[site], line)
+                if !scoped -> ir_tail_put_handed(code, f, at, plan.masks[site], line)
                 loop inner in (poll + 2)..<stop {
                     if f.op[inner] == .Drop -> next
-                    ir_opt_code_put(&code, f.op[inner], f.dst[inner], f.a[inner], f.b[inner], f.c[inner], f.code_line[inner])
-                    if scoped && f.dst[inner] >= 0 -> ir_tail_put_handed(&code, f, at, plan.masks[site], line)
+                    ir_opt_code_put(code, f.op[inner], f.dst[inner], f.a[inner], f.b[inner], f.c[inner], f.code_line[inner])
+                    if scoped && f.dst[inner] >= 0 -> ir_tail_put_handed(code, f, at, plan.masks[site], line)
                 }
-                ir_opt_code_put(&code, .Return, f.dst[stop], f.a[stop], f.b[stop], f.c[stop], f.code_line[stop])
-                ir_opt_code_put(&code, .End, -1, -1, -1, -1, f.code_line[poll])
+                ir_opt_code_put(code, .Return, f.dst[stop], f.a[stop], f.b[stop], f.c[stop], f.code_line[stop])
+                ir_opt_code_put(code, .End, -1, -1, -1, -1, f.code_line[poll])
             }
-            ir_opt_code_put(&code, .Call, f.dst[at], plan.targets[site], f.b[at], f.c[at], line)
+            ir_opt_code_put(code, .Call, f.dst[at], plan.targets[site], f.b[at], f.c[at], line)
             ret: plan.returns[site]
             returned: if f.a[ret] >= 0 -> f.dst[at] else -> -1
-            ir_opt_code_put(&code, .Return, -1, returned, IR_TAIL_JUMP, -1, f.code_line[ret])
+            ir_opt_code_put(code, .Return, -1, returned, IR_TAIL_JUMP, -1, f.code_line[ret])
             at = ret + 1
             site += 1
             next
         }
         if f.op[at] == .Return {
             loop slot in params {
-                if !ir_tail_returns(f, f.a[at], slot) -> ir_opt_code_put(&code, .Drop, -1, slot, -1, -1, line)
+                if !ir_tail_returns(f, f.a[at], slot) -> ir_opt_code_put(code, .Drop, -1, slot, -1, -1, line)
             }
         }
-        ir_opt_code_put(&code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], line)
+        ir_opt_code_put(code, f.op[at], f.dst[at], f.a[at], f.b[at], f.c[at], line)
         at += 1
     }
     count: f.op.len()
     if params.len() > 0 && (count == 0 || (f.op[count - 1] != .Return && f.op[count - 1] != .Unreachable)) {
-        loop slot in params -> ir_opt_code_put(&code, .Drop, -1, slot, -1, -1, f.line)
-        ir_opt_code_put(&code, .Return, -1, -1, -1, -1, f.line)
+        loop slot in params -> ir_opt_code_put(code, .Drop, -1, slot, -1, -1, f.line)
+        ir_opt_code_put(code, .Return, -1, -1, -1, -1, f.line)
     }
-    f.op = ^code.op
-    f.dst = ^code.dst
-    f.a = ^code.a
-    f.b = ^code.b
-    f.c = ^code.c
-    f.code_line = ^code.line
-    ir_opt_compact(&f)
+    f.op = code.op.move()
+    f.dst = code.dst.move()
+    f.a = code.a.move()
+    f.b = code.b.move()
+    f.c = code.c.move()
+    f.code_line = code.line.move()
+    ir_opt_compact(f)
 }
 
 // Drops of the arguments of the Call at `call` that `mask` hands over.
 ir_tail_put_handed: fn(code: &IROptCode, f: IRFunction, call: Int, mask: Int, line: Int) Never! {
     loop position in 0..<f.c[call] {
-        if ir_tail_has(mask, position) -> ir_opt_code_put(&code, .Drop, -1, f.args[f.b[call] + position], -1, -1, line)
+        if ir_tail_has(mask, position) -> ir_opt_code_put(code, .Drop, -1, f.args[f.b[call] + position], -1, -1, line)
     }
 }
 

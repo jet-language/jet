@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <time.h>
 
 // A heap text is this 32-byte body behind its 8-byte owner word.
 typedef struct { unsigned char *data; int64_t len, capacity, cache; } Text;
@@ -338,6 +339,36 @@ int main(int argc, char **argv, char **envp) {
         check(receipt_timed_out(r) == 1, "timed_out set");
         check(receipt_has_signal(r) && receipt_signal(r) == 9, "timeout killed with SIGKILL");
         check(receipt_success(r) == 0, "timeout is not success");
+        drop_receipt(r);
+        jet_rt_handle_drop_process_spec(s);
+    }
+
+    // 7b. The timeout bounds the output drain too: a job that left the child's
+    // process group keeps the captured stdout open after the child exits, and
+    // the run still ends at its limit, timed out, instead of awaiting an EOF.
+    {
+        Spec *s = SPEC("/bin/sh", "-c", "set -m; sleep 30 2>/dev/null & echo $! >&2; exit 0");
+        s = replace(s, jet_process_spec_stdout(s, STREAM_CAPTURE));
+        s = replace(s, jet_process_spec_stderr(s, STREAM_CAPTURE));
+        const int64_t timeout_ns = jet_int_owned_from_i64(INT64_C(300000000));
+        s = replace(s, jet_process_spec_timeout(s, timeout_ns));
+        jet_rt_int_drop(timeout_ns);
+        struct timespec before, after;
+        clock_gettime(CLOCK_MONOTONIC, &before);
+        ProcessReceipt *r = NULL;
+        IOError *e = NULL;
+        check(jet_process_spec_run(s, &r, &e) == 1 && e == NULL, "lingering-pipe run returns receipt");
+        clock_gettime(CLOCK_MONOTONIC, &after);
+        check(after.tv_sec - before.tv_sec < 10, "lingering pipe holder does not outlast the timeout");
+        check(receipt_timed_out(r) == 1, "lingering-pipe run is timed out");
+        check(receipt_success(r) == 0, "lingering-pipe run is not success");
+        const Text *errors = receipt_errors(r);
+        char pid_text[32] = {0};
+        check(errors && errors->len > 0 && errors->len < (int64_t)sizeof pid_text, "lingering job pid reported");
+        memcpy(pid_text, errors->data, (size_t)errors->len);
+        long holder = strtol(pid_text, NULL, 10);
+        check(holder > 1, "lingering job pid parses");
+        kill((pid_t)holder, SIGKILL);
         drop_receipt(r);
         jet_rt_handle_drop_process_spec(s);
     }

@@ -15,7 +15,7 @@ use {
 lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn) -[FS, Env, Exec, IO, Time.Wait]> String? Never! {
     if method == {
         "initialize" -> {
-            lsp_configure_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
+            lsp_configure_workspace_roots(server.workspace_roots, server.workspace_folders, params, server.snapshot.cwd)
             Val(lsp_initialize_response(id))
         }
         "resources/list" -> Val(lsp_response(id, lsp_environment_resource_list_json(server.workspace_roots)))
@@ -55,14 +55,14 @@ lsp_handle_request: fn(server: &LSPServer, method: String, params: Dyn?, id: Dyn
         "typeHierarchy/subtypes" -> lsp_type_hierarchy_subtypes_response(server, params, id)
         "workspace/executeCommand" -> lsp_execute_command_response(server, params, id)
         "jet/buildGraph" -> lsp_build_graph_response(server, params, id)
-        EDITOR_WORKBENCH_METHOD | EDITOR_RECONNECT_METHOD | EDITOR_NAVIGATE_METHOD | EDITOR_SELECT_METHOD | EDITOR_COMMAND_METHOD -> lsp_editor_host_response(&server, method, params, id)
+        EDITOR_WORKBENCH_METHOD | EDITOR_RECONNECT_METHOD | EDITOR_NAVIGATE_METHOD | EDITOR_SELECT_METHOD | EDITOR_COMMAND_METHOD -> lsp_editor_host_response(server, method, params, id)
         else -> Val(lsp_response(id, "null"))
     }
 }
 
 // Rust415–429: EditorHostAdapter owns parsing, typed host state and errors.
 lsp_editor_host_response: fn(server: LSPServer, method: String, params: Dyn?, id: Dyn) -> String? Never! {
-    if (&server.editor_host.dispatch(method, params)) == {
+    if (server.editor_host.dispatch(method, params)) == {
         .Ok(result) -> Val(lsp_response(id, result))
         .Err(error) -> Val(lsp_error_response(id, Int{editor_host_error_code(error)}, "{error}"))
     }
@@ -89,14 +89,14 @@ lsp_handle_notification: fn(server: &LSPServer, method: String, params: Dyn?, st
     if method == {
         "initialized" | "notifications/initialized" | "$/cancelRequest" | "notifications/cancelled" -> {}
         "exit" -> server.shutdown = true
-        "textDocument/didOpen" -> lsp_publish_after_open(&server.diagnostic_state, &server.queries, server.snapshot, params, &stdout) ?? return Err(err)
-        "textDocument/didChange" -> lsp_publish_after_change(&server.diagnostic_state, params, server.snapshot.cwd.platform)
-        "workspace/didChangeWorkspaceFolders" -> lsp_update_workspace_roots(&server.workspace_roots, &server.workspace_folders, params, server.snapshot.cwd)
+        "textDocument/didOpen" -> lsp_publish_after_open(server.diagnostic_state, server.queries, server.snapshot, params, stdout) ?? return Err(err)
+        "textDocument/didChange" -> lsp_publish_after_change(server.diagnostic_state, params, server.snapshot.cwd.platform)
+        "workspace/didChangeWorkspaceFolders" -> lsp_update_workspace_roots(server.workspace_roots, server.workspace_folders, params, server.snapshot.cwd)
         "textDocument/didClose" -> {
             value: params ?? return
             document: value.field("textDocument") ?? return
             uri: document.field("uri") ?? return
-            if uri == .Text(text) -> lsp_close_document_diagnostics(&server.diagnostic_state, &server.queries, server.snapshot.cwd, text, &stdout) ?? return Err(err)
+            if uri == .Text(text) -> lsp_close_document_diagnostics(server.diagnostic_state, server.queries, server.snapshot.cwd, text, stdout) ?? return Err(err)
         }
         else -> {}
     }
@@ -173,14 +173,14 @@ lsp_push_workspace_root: fn(roots: &[OSPath], path: OSPath, cwd: OSPath) Never! 
     loop root in roots {
         if lsp_request_path.equals(root, normalized) -> return
     }
-    &roots.push(normalized)
+    roots.push(normalized)
 }
 
 lsp_push_workspace_folder: fn(roots: &[OSPath], folder: Dyn, cwd: OSPath) Never! {
     uri: folder.field("uri") ?? return
     if uri == .Text(text) {
         path: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
-        lsp_push_workspace_root(&roots, path, cwd)
+        lsp_push_workspace_root(roots, path, cwd)
     }
 }
 
@@ -193,7 +193,7 @@ lsp_configure_workspace_roots: fn(roots: &[OSPath], workspace_folders: &Bool, pa
                 // Presence suppresses rootUri/rootPath even for null or a
                 // wrong type; a present empty array deliberately clears roots.
                 if folders == .Array(rows) {
-                    loop folder in rows -> lsp_push_workspace_folder(&configured, folder, cwd)
+                    loop folder in rows -> lsp_push_workspace_folder(configured, folder, cwd)
                 }
             }
             .None -> {
@@ -201,12 +201,12 @@ lsp_configure_workspace_roots: fn(roots: &[OSPath], workspace_folders: &Bool, pa
                     .Val(uri) -> {
                         if uri == .Text(text) {
                             path: lsp_request_path.from_text(lsp_uri_to_path(text, cwd.platform == lsp_request_path.PathPlatform.Windows), cwd.platform)
-                            lsp_push_workspace_root(&configured, path, cwd)
+                            lsp_push_workspace_root(configured, path, cwd)
                         }
                     }
                     .None -> {
                         if value.field("rootPath") == .Val(path) {
-                            if path == .Text(text) -> lsp_push_workspace_root(&configured, lsp_request_path.from_text(text, cwd.platform), cwd)
+                            if path == .Text(text) -> lsp_push_workspace_root(configured, lsp_request_path.from_text(text, cwd.platform), cwd)
                         }
                     }
                 }
@@ -228,7 +228,7 @@ lsp_update_workspace_roots: fn(roots: &[OSPath], workspace_folders: &Bool, param
                     // Remove in place; no whole-root-vector copy per removal.
                     index := 0
                     loop index < roots.len() {
-                        if lsp_request_path.equals(roots[index], path) -> _ := &roots.remove(index) else -> index += 1
+                        if lsp_request_path.equals(roots[index], path) -> _ := roots.remove(index) else -> index += 1
                     }
                 }
             }
@@ -236,7 +236,7 @@ lsp_update_workspace_roots: fn(roots: &[OSPath], workspace_folders: &Bool, param
     }
     if event.field("added") == .Val(added) {
         if added == .Array(rows) {
-            loop folder in rows -> lsp_push_workspace_folder(&roots, folder, cwd)
+            loop folder in rows -> lsp_push_workspace_folder(roots, folder, cwd)
         }
     }
 }

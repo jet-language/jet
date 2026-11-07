@@ -1,0 +1,67 @@
+use core.encoding.[Dyn]
+
+// A move ends only the current path; a reset restores the next iteration.
+consume: fn(value: &&[Int]) -[]> Int { value.len() }
+
+move_then_return: fn() -[]> Int {
+    out := [1, 2]
+    loop {
+        count: consume(out)
+        return count
+    }
+}
+
+move_then_break: fn() -[]> Int {
+    out := [1, 2, 3]
+    count := 0
+    loop {
+        count = consume(out)
+        break
+    }
+    count
+}
+
+move_then_reset: fn() -[]> Int {
+    current := [1]
+    total := 0
+    loop i in 0..<3 {
+        total += consume(current)
+        current = [1, 2]
+        next
+    }
+    total
+}
+
+Tree: enum {
+    Object([Int])
+    Text(String)
+}
+
+owned_payload: fn(tree: &&Tree) -[]> Int {
+    owned := tree.move()
+    if owned.move() == {
+        .Object(entries) -> return consume(entries)
+        .Text(text) -> return text.count_bytes()
+    }
+}
+
+
+owned_dyn_payload: fn(tree: &&Dyn) -[]> Int {
+    owned := tree.move()
+    if owned.move() == {
+        .Text(text) -> {
+            rebuilt: Dyn.Text(text)
+            value: rebuilt.text() ?? ""
+            return value.count_bytes()
+        }
+        else -> return 0
+    }
+}
+run: fn() {
+    print(move_then_return())
+    print(move_then_break())
+    print(move_then_reset())
+    print(owned_payload(Tree.Object([1, 2, 3, 4])))
+    print(owned_payload(Tree.Text("owned")))
+    print(owned_dyn_payload(Dyn.Text("canonical")))
+}

@@ -14,7 +14,7 @@ run: fn() {
     s: sized.alloc("hello")
     print(s)
     // reset keeps the backing buffer; the arena is reusable.
-    &arena.reset()
+    arena.reset()
     y: arena.alloc(99)
     print(y)
     // Bump: one contiguous monotonic buffer until reset.
@@ -31,8 +31,8 @@ run: fn() {
     f: fixed.alloc(1)
     print(f)
     // close is the same terminal release used by every resource.
-    close(^arena)
-    close(^bump)
-    close(^pool)
-    close(^fixed)
+    close(arena)
+    close(bump)
+    close(pool)
+    close(fixed)
 }

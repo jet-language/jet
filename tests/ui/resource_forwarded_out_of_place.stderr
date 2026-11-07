@@ -4,7 +4,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  18 |     r: h.first ?? return 0
     |          ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.MissingMoveMarker]: `env` cannot be moved from borrowed storage
@@ -13,7 +13,7 @@ Error [jet.MissingMoveMarker]: `env` cannot be moved from borrowed storage
  23 |     r: env ?? return 0
     |        ^^^
  Why: `env` is a read or write parameter, so its caller keeps the value, and `Res?` can't be copied into an owned value
- Fix: Declare the parameter `^` so the caller hands the value over
+ Fix: Declare the parameter `env: &&Res?` so the caller hands the value over
 More: jet-lang.dev/e/E0201
 
 Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read from
@@ -22,7 +22,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  28 |     r: h.first ?? h.second ?? return 0
     |          ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read from
@@ -31,7 +31,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  28 |     r: h.first ?? h.second ?? return 0
     |                     ^^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read from
@@ -40,7 +40,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  33 |     r: h.first ?? {
     |          ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read from
@@ -49,7 +49,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  35 |         h.second ?? return 0
     |           ^^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read from
@@ -58,7 +58,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  41 |     r: (h.first ?? return 0)
     |           ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.MissingMoveMarker]: `left` cannot be moved from borrowed storage
@@ -67,7 +67,7 @@ Error [jet.MissingMoveMarker]: `left` cannot be moved from borrowed storage
  46 |     r: if flag -> left else -> right
     |                   ^^^^
  Why: `left` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into an owned value
- Fix: Declare the parameter `^` so the caller hands the value over
+ Fix: Declare the parameter `left: &&Res` so the caller hands the value over
 More: jet-lang.dev/e/E0201
 
 Error [jet.MissingMoveMarker]: `right` cannot be moved from borrowed storage
@@ -76,7 +76,7 @@ Error [jet.MissingMoveMarker]: `right` cannot be moved from borrowed storage
  46 |     r: if flag -> left else -> right
     |                                ^^^^^
  Why: `right` is a read or write parameter, so its caller keeps the value, and `Res` can't be copied into an owned value
- Fix: Declare the parameter `^` so the caller hands the value over
+ Fix: Declare the parameter `right: &&Res` so the caller hands the value over
 More: jet-lang.dev/e/E0201
 
 Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
@@ -94,7 +94,7 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  60 |     out.first = Val(h.first ?? return 0)
     |                       ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read from
@@ -103,16 +103,16 @@ Error [jet.CopyNotSupported]: `Res?` can't be copied out of the place it is read
  65 |     Val(h.first ?? return None)
     |           ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use it where it is, or take `h` with the move marker `^` (a `^` parameter or receiver) and move the field out with `^`
+ Fix: Use it where it is, or take `h` as a `&&` parameter or receiver and move the field out with `.move()`
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
-  --> tests/ui/resource_forwarded_out_of_place.jet:74:19
+  --> tests/ui/resource_forwarded_out_of_place.jet:74:18
     |
- 74 |         &out.push(item)
-    |                   ^^^^
+ 74 |         out.push(item)
+    |                  ^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use `item` where it is, or move the place it reads with the move marker `^` when this scope owns it
+ Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
@@ -121,14 +121,14 @@ Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read 
  81 |     out: loop item in list -> item
     |                               ^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use `item` where it is, or move the place it reads with the move marker `^` when this scope owns it
+ Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
 More: jet-lang.dev/e/E0211
 
-Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
-  --> tests/ui/resource_forwarded_out_of_place.jet:89:31
+Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
+  --> tests/ui/resource_forwarded_out_of_place.jet:89:30
     |
- 89 |         total = total + keep(^item)
-    |                               ^^^^
- Why: `item` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it
- Fix: Write `item.copy()` when `keep` should receive a copy, or move the place itself with `^` when this scope owns it
-More: jet-lang.dev/e/E0201
+ 89 |         total = total + keep(item)
+    |                              ^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
+More: jet-lang.dev/e/E0211

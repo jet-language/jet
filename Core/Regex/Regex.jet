@@ -52,7 +52,7 @@ RegexError: struct {
         display: fn(self) -> String { "invalid regex at position {self.offset}: {self.reason}" }
     }
     impl Debug {
-        debug: fn(^self) -> String Never! { "invalid regex at position {self.offset}: {self.reason}" }
+        debug: fn(&&self) -> String Never! { "invalid regex at position {self.offset}: {self.reason}" }
     }
 }
 
@@ -130,15 +130,15 @@ impl Regex {
         loop run in scan(self, raw, false, false, self.groups > 0, false, -1) {
             k := cur
             loop k < run.start {
-                &out.push(raw[k])
+                out.push(raw[k])
                 k = k + 1
             }
-            m: make_match(self, raw, run, &chars)
-            loop b in replacer(m).bytes() -> &out.push(b)
+            m: make_match(self, raw, run, chars)
+            loop b in replacer(m).bytes() -> out.push(b)
             cur = run.end
         }
         loop cur < raw.len() {
-            &out.push(raw[cur])
+            out.push(raw[cur])
             cur = cur + 1
         }
         String.from_bytes(out) ?? ""
@@ -189,8 +189,8 @@ flags: fn(ignore_case: Bool, multiline: Bool, dot_matches_newline: Bool) -> Rege
 escape: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        if is_meta(b) -> &out.push(U8{92})
-        &out.push(b)
+        if is_meta(b) -> out.push(U8{92})
+        out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
@@ -214,7 +214,7 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     groups: 0,
     names: [String]{},
     }
-    root: &p.parse_alt(-1)
+    root: p.parse_alt(-1)
     if p.i != p.cps.len() -> return Err(fail(p.i, "this `)` has no matching `(`"))
     // Case folding lets other scalars stand for a literal, so the literal
     // pre-checks only run on case-sensitive patterns.
@@ -230,10 +230,10 @@ compile_program: fn(pattern: String, flags: RegexFlags, with_dfa: Bool) -> Regex
     ys: [Int]{},
     too_big: false,
     }
-    frag: &c.compile(root)
+    frag: c.compile(root)
     if c.too_big -> return Err(fail(0, "the pattern compiles to more than {MAX_PROGRAM} instructions; use smaller repetition counts"))
-    done: &c.push(OP_MATCH, 0, 0, false)
-    &c.patch(frag.outs, done)
+    done: c.push(OP_MATCH, 0, 0, false)
+    c.patch(frag.outs, done)
     first: frag.start
     // Only an absolute start anchor pins every match to position 0.
     anchored: c.ops[first] == OP_ASSERT && (c.args[first] == A_TEXT_START || (c.args[first] == A_LINE_START && !flags.multiline))
@@ -294,7 +294,7 @@ find: fn(pattern: Regex, text: String) -> String? Never! {
     Val(slice(raw, runs[0].start, runs[0].end))
 }
 
-// String's pattern methods (D-STR-DECLINE1=C): `text.matches(pattern)` and
+// String's pattern methods: `text.matches(pattern)` and
 // `text.match(pattern)` compile `pattern` with this engine and run
 // `is_match`/`find`; a pattern that does not compile fails with compile's
 // RegexError.
@@ -312,11 +312,11 @@ find_all: fn(pattern: Regex, text: String) -> [String] Never! {
     out := [String]{}
     word: literal_text(pattern)
     if word != "" {
-        loop _ in 0..<text.count(word) -> &out.push(word.copy())
+        loop _ in 0..<text.count(word) -> out.push(word.copy())
         return out
     }
     raw: text.bytes()
-    loop run in scan(pattern, raw, false, false, false, false, -1) -> &out.push(slice(raw, run.start, run.end))
+    loop run in scan(pattern, raw, false, false, false, false, -1) -> out.push(slice(raw, run.start, run.end))
     out
 }
 
@@ -334,8 +334,8 @@ matches: fn(pattern: Regex, text: String) -> [Match] Never! {
     out := [Match]{}
     chars := CharCursor{byte: 0, count: 0}
     loop run in scan(pattern, raw, false, false, pattern.groups > 0, false, -1) {
-        m: make_match(pattern, raw, run, &chars)
-        &out.push(m)
+        m: make_match(pattern, raw, run, chars)
+        out.push(m)
     }
     out
 }
@@ -350,10 +350,10 @@ split_limit: fn(pattern: Regex, text: String, n: Int) -> [String] Never! {
     out := [String]{}
     cur := 0
     loop run in scan(pattern, raw, false, false, false, false, limit) {
-        &out.push(slice(raw, cur, run.start))
+        out.push(slice(raw, cur, run.start))
         cur = run.end
     }
-    &out.push(slice(raw, cur, raw.len()))
+    out.push(slice(raw, cur, raw.len()))
     out
 }
 
@@ -372,19 +372,19 @@ expand: fn(m: Match, template: String) -> String Never! {
         b: raw[i]
         i = i + 1
         if b != (U8{36}) || i >= raw.len() {
-            &out.push(b)
+            out.push(b)
             next
         }
         n: Int.from_u8(raw[i])
         if n == 36 {
-            &out.push(b)
+            out.push(b)
             i = i + 1
             next
         }
         if n >= 48 && n <= 57 {
             j := i
             loop j < raw.len() && raw[j] >= 48 && raw[j] <= 57 -> j = j + 1
-            loop c in group_by_reference(m, raw, i, j).bytes() -> &out.push(c)
+            loop c in group_by_reference(m, raw, i, j).bytes() -> out.push(c)
             i = j
             next
         }
@@ -392,12 +392,12 @@ expand: fn(m: Match, template: String) -> String Never! {
             j := i + 1
             loop j < raw.len() && raw[j] != (U8{125}) -> j = j + 1
             if j < raw.len() {
-                loop c in group_by_reference(m, raw, i + 1, j).bytes() -> &out.push(c)
+                loop c in group_by_reference(m, raw, i + 1, j).bytes() -> out.push(c)
                 i = j + 1
                 next
             }
         }
-        &out.push(b)
+        out.push(b)
     }
     String.from_bytes(out) ?? ""
 }
@@ -432,16 +432,16 @@ replace_n: fn(pattern: Regex, text: String, replacement: String, first_only: Boo
     loop run in scan(pattern, raw, false, false, pattern.groups > 0, false, limit) {
         k := cur
         loop k < run.start {
-            &out.push(raw[k])
+            out.push(raw[k])
             k = k + 1
         }
-        m: make_match(pattern, raw, run, &chars)
-        loop b in expand(m, replacement).bytes() -> &out.push(b)
+        m: make_match(pattern, raw, run, chars)
+        loop b in expand(m, replacement).bytes() -> out.push(b)
         cur = run.end
     }
     rest := cur
     loop rest < raw.len() {
-        &out.push(raw[rest])
+        out.push(raw[rest])
         rest = rest + 1
     }
     String.from_bytes(out) ?? ""
@@ -531,19 +531,19 @@ impl PatternParser {
     /// or -1 for the whole pattern, whose stray `)` the caller reports.
     parse_alt: fn(&self, open: Int) -> Int RegexError! {
         arms := [Int]{}
-        first: &self.parse_seq()
-        &arms.push(first)
+        first: self.parse_seq()
+        arms.push(first)
         loop self.peek() == 124 {
             self.i = self.i + 1
-            arm: &self.parse_seq()
-            &arms.push(arm)
+            arm: self.parse_seq()
+            arms.push(arm)
         }
         if open >= 0 {
             if self.peek() != 41 -> return Err(fail(open, "this `(` is never closed by a `)`"))
             self.i = self.i + 1
         }
         if arms.len() == 1 -> return Ok(arms[0])
-        Ok(&self.list(N_ALT, arms))
+        Ok(self.list(N_ALT, arms))
     }
 
     parse_seq: fn(&self) -> Int RegexError! {
@@ -551,27 +551,27 @@ impl PatternParser {
         loop {
             c: self.peek()
             if c < 0 || c == 124 || c == 41 -> break
-            atom: &self.parse_atom()
-            piece: &self.parse_quant(atom)
-            &parts.push(piece)
+            atom: self.parse_atom()
+            piece: self.parse_quant(atom)
+            parts.push(piece)
         }
-        if parts.len() == 0 -> return Ok(&self.emit(N_EMPTY, 0, 0, -1, false))
+        if parts.len() == 0 -> return Ok(self.emit(N_EMPTY, 0, 0, -1, false))
         if parts.len() == 1 -> return Ok(parts[0])
-        Ok(&self.list(N_SEQ, parts))
+        Ok(self.list(N_SEQ, parts))
     }
 
     parse_atom: fn(&self) -> Int RegexError! {
         at: self.i
-        c: &self.bump()
-        if c == 46 -> return Ok(&self.emit(N_ANY, 0, 0, -1, false))
-        if c == 94 -> return Ok(&self.emit(N_ASSERT, A_LINE_START, 0, -1, false))
-        if c == 36 -> return Ok(&self.emit(N_ASSERT, A_TEXT_END, 0, -1, false))
-        if c == 40 -> return &self.parse_group(at)
-        if c == 91 -> return &self.parse_class(at)
-        if c == 92 -> return &self.parse_escape_atom(at)
+        c: self.bump()
+        if c == 46 -> return Ok(self.emit(N_ANY, 0, 0, -1, false))
+        if c == 94 -> return Ok(self.emit(N_ASSERT, A_LINE_START, 0, -1, false))
+        if c == 36 -> return Ok(self.emit(N_ASSERT, A_TEXT_END, 0, -1, false))
+        if c == 40 -> return self.parse_group(at)
+        if c == 91 -> return self.parse_class(at)
+        if c == 92 -> return self.parse_escape_atom(at)
         if c == 42 || c == 43 || c == 63 -> return Err(fail(at, "`{scalar_text(c)}` has nothing to repeat"))
         if c == 123 -> return Err(fail(at, "`{{` has nothing to repeat; write `\\{{` for a literal brace"))
-        Ok(&self.emit(N_LIT, c, 0, -1, false))
+        Ok(self.emit(N_LIT, c, 0, -1, false))
     }
 
     // Capture numbers follow the opening `(`.
@@ -588,10 +588,10 @@ impl PatternParser {
                 capture = false
             } else if kind == 60 && after != 61 && after != 33 {
                 self.i = self.i + 1
-                name = &self.parse_group_name(open)
+                name = self.parse_group_name(open)
             } else if kind == 80 && after == 60 {
                 self.i = self.i + 2
-                name = &self.parse_group_name(open)
+                name = self.parse_group_name(open)
             } else if kind == 61 || kind == 33 || kind == 60 {
                 return Err(fail(open, "lookaround is not supported; the engine stays linear in the text"))
             } else if kind == 105 || kind == 109 || kind == 115 || kind == 120 || kind == 85 || kind == 45 {
@@ -606,13 +606,13 @@ impl PatternParser {
         if capture {
             self.groups = self.groups + 1
             index = self.groups
-            &self.names.push(name)
+            self.names.push(name)
         }
         self.depth = self.depth + 1
-        inner: &self.parse_alt(open)
+        inner: self.parse_alt(open)
         self.depth = self.depth - 1
         if !capture -> return Ok(inner)
-        Ok(&self.emit(N_GROUP, index, 0, inner, false))
+        Ok(self.emit(N_GROUP, index, 0, inner, false))
     }
 
     parse_group_name: fn(&self, open: Int) -> String RegexError! {
@@ -623,7 +623,7 @@ impl PatternParser {
             if c < 0 -> return Err(fail(open, "the group name is never closed by a `>`"))
             if c == 62 -> break
             if !is_group_name_char(c) -> return Err(fail(self.i, "a group name holds only ASCII letters, digits and `_`"))
-            &raw.push(U8{c})
+            raw.push(U8{c})
             self.i = self.i + 1
         }
         self.i = self.i + 1
@@ -653,12 +653,12 @@ impl PatternParser {
         lo := 0
         hi := -1
         if kind == N_RANGE {
-            lo = &self.parse_count(at)
+            lo = self.parse_count(at)
             hi = lo
             if self.peek() == 44 {
                 self.i = self.i + 1
                 hi = -1
-                if self.peek() != 125 -> hi = &self.parse_count(at)
+                if self.peek() != 125 -> hi = self.parse_count(at)
             }
             if self.peek() != 125 -> return Err(fail(at, "the counted repetition is never closed by a `}}`"))
             self.i = self.i + 1
@@ -674,7 +674,7 @@ impl PatternParser {
         if after == 42 || after == 43 || after == 63 || after == 123 {
             return Err(fail(self.i, "a repetition cannot directly follow another; wrap the first in `(?:…)`"))
         }
-        Ok(&self.emit(kind, lo, hi, atom, lazy))
+        Ok(self.emit(kind, lo, hi, atom, lazy))
     }
 
     /// A repetition count. Counts past MAX_REPEAT saturate, so the caller
@@ -711,31 +711,31 @@ impl PatternParser {
                 break
             }
             at: self.i
-            first: &self.parse_class_item(self.kinds.len() == lo)
+            first: self.parse_class_item(self.kinds.len() == lo)
             if self.peek() == 45 && self.peek_at(1) != 93 && self.peek_at(1) >= 0 {
                 self.i = self.i + 1
-                last: &self.parse_class_item(false)
+                last: self.parse_class_item(false)
                 if first < 0 || last < 0 -> return Err(fail(at, "a class range needs one character at each end"))
                 if last < first -> return Err(fail(at, "the class range `{scalar_text(first)}-{scalar_text(last)}` runs backwards"))
-                &self.item(K_RANGE, first, last)
+                self.item(K_RANGE, first, last)
             } else if first >= 0 {
-                &self.item(K_CHAR, first, first)
+                self.item(K_CHAR, first, first)
             } else {
-                &self.item(-first - 1, 0, 0)
+                self.item(-first - 1, 0, 0)
             }
         }
-        Ok(&self.class_node(lo, neg))
+        Ok(self.class_node(lo, neg))
     }
 
     /// One class member: a scalar (>= 0), or `-(kind + 1)` for a class
     /// escape such as `\d` or `\P{L}`. `leading` admits a literal `]`.
     parse_class_item: fn(&self, leading: Bool) -> Int RegexError! {
         at: self.i
-        c: &self.bump()
+        c: self.bump()
         if c == 93 && leading -> return Ok(c)
         if c == 91 -> return Err(fail(at, "write `\\[` for a literal `[` inside a class"))
         if c != 92 -> return Ok(c)
-        &self.parse_escape(at, true)
+        self.parse_escape(at, true)
     }
 
     parse_escape_atom: fn(&self, at: Int) -> Int RegexError! {
@@ -747,24 +747,24 @@ impl PatternParser {
         if c == 122 -> kind = A_TEXT_END
         if kind >= 0 {
             self.i = self.i + 1
-            return Ok(&self.emit(N_ASSERT, kind, 0, -1, false))
+            return Ok(self.emit(N_ASSERT, kind, 0, -1, false))
         }
-        code: &self.parse_escape(at, false)
-        if code >= 0 -> return Ok(&self.emit(N_LIT, code, 0, -1, false))
+        code: self.parse_escape(at, false)
+        if code >= 0 -> return Ok(self.emit(N_LIT, code, 0, -1, false))
         member: -code - 1
         lo: self.kinds.len()
         if member >= K_NEGATED {
-            &self.item(member - K_NEGATED, 0, 0)
-            return Ok(&self.class_node(lo, true))
+            self.item(member - K_NEGATED, 0, 0)
+            return Ok(self.class_node(lo, true))
         }
-        &self.item(member, 0, 0)
-        Ok(&self.class_node(lo, false))
+        self.item(member, 0, 0)
+        Ok(self.class_node(lo, false))
     }
 
     /// The escape after the `\` at `at`: a scalar (>= 0), or `-(kind + 1)`
     /// for a class escape.
     parse_escape: fn(&self, at: Int, in_class: Bool) -> Int RegexError! {
-        c: &self.bump()
+        c: self.bump()
         if c < 0 -> return Err(fail(at, "a `\\` at the end of the pattern escapes nothing"))
         if c >= 48 && c <= 57 -> return Err(fail(at, "backreferences are not supported; the engine stays linear in the text"))
         if c == 100 -> return Ok(-(K_DIGIT + 1))
@@ -774,11 +774,11 @@ impl PatternParser {
         if c == 115 -> return Ok(-(K_SPACE + 1))
         if c == 83 -> return Ok(-(K_SPACE + K_NEGATED + 1))
         if c == 112 {
-            kind: &self.parse_unicode_class(at)
+            kind: self.parse_unicode_class(at)
             return Ok(-(kind + 1))
         }
         if c == 80 {
-            kind: &self.parse_unicode_class(at)
+            kind: self.parse_unicode_class(at)
             return Ok(-(kind + K_NEGATED + 1))
         }
         if c == 110 -> return Ok(10)
@@ -787,7 +787,7 @@ impl PatternParser {
         if c == 102 -> return Ok(12)
         if c == 118 -> return Ok(11)
         if c == 97 -> return Ok(7)
-        if c == 120 || c == 117 -> return &self.parse_code_point(at, c)
+        if c == 120 || c == 117 -> return self.parse_code_point(at, c)
         if in_class && (c == 98 || c == 66 || c == 65 || c == 122) {
             return Err(fail(at, "`\\{scalar_text(c)}` is an assertion, so it cannot appear inside `[]`"))
         }
@@ -834,16 +834,16 @@ impl PatternParser {
         if self.peek() == 123 {
             self.i = self.i + 1
             loop {
-                c: &self.bump()
+                c: self.bump()
                 if c < 0 -> return Err(fail(at, "the Unicode class name is never closed by a `}}`"))
                 if c == 125 -> break
                 if c > 127 -> return Err(fail(at, "a Unicode class name is ASCII, as in `\\p{{L}}`"))
-                &raw.push(U8{c})
+                raw.push(U8{c})
             }
         } else {
-            c: &self.bump()
+            c: self.bump()
             if !is_ascii_letter(c) -> return Err(fail(at, "`\\p` needs a class name, as in `\\p{{L}}` or `\\pL`"))
-            &raw.push(U8{c})
+            raw.push(U8{c})
         }
         name: String.from_bytes(raw) ?? ""
         if name == "L" || name == "Letter" || name == "Alphabetic" -> return Ok(K_ALPHA)
@@ -853,25 +853,25 @@ impl PatternParser {
     }
 
     item: fn(&self, kind: Int, lo: Int, hi: Int) Never! {
-        &self.kinds.push(kind)
-        &self.los.push(lo)
-        &self.his.push(hi)
+        self.kinds.push(kind)
+        self.los.push(lo)
+        self.his.push(hi)
     }
 
     class_node: fn(&self, lo: Int, neg: Bool) -> Int Never! {
-        &self.nodes.push(Node{kind: N_CLASS, a: 0, b: 0, left: -1, neg: neg, lo: lo, hi: self.kinds.len()})
+        self.nodes.push(Node{kind: N_CLASS, a: 0, b: 0, left: -1, neg: neg, lo: lo, hi: self.kinds.len()})
         self.nodes.len() - 1
     }
 
     emit: fn(&self, kind: Int, a: Int, b: Int, left: Int, neg: Bool) -> Int Never! {
-        &self.nodes.push(Node{kind: kind, a: a, b: b, left: left, neg: neg, lo: 0, hi: 0})
+        self.nodes.push(Node{kind: kind, a: a, b: b, left: left, neg: neg, lo: 0, hi: 0})
         self.nodes.len() - 1
     }
 
     list: fn(&self, kind: Int, parts: [Int]) -> Int Never! {
         lo: self.kids.len()
-        loop part in parts -> &self.kids.push(part)
-        &self.nodes.push(Node{kind: kind, a: 0, b: 0, left: -1, neg: false, lo: lo, hi: self.kids.len()})
+        loop part in parts -> self.kids.push(part)
+        self.nodes.push(Node{kind: kind, a: 0, b: 0, left: -1, neg: false, lo: lo, hi: self.kids.len()})
         self.nodes.len() - 1
     }
 
@@ -941,17 +941,17 @@ Compiler: struct {
 impl Compiler {
     push: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Int Never! {
         if self.ops.len() >= MAX_PROGRAM -> self.too_big = true
-        &self.ops.push(op)
-        &self.args.push(arg)
-        &self.ends.push(end)
-        &self.negs.push(neg)
-        &self.xs.push(-1)
-        &self.ys.push(-1)
+        self.ops.push(op)
+        self.args.push(arg)
+        self.ends.push(end)
+        self.negs.push(neg)
+        self.xs.push(-1)
+        self.ys.push(-1)
         self.ops.len() - 1
     }
 
     single: fn(&self, op: Int, arg: Int, end: Int, neg: Bool) -> Frag Never! {
-        id: &self.push(op, arg, end, neg)
+        id: self.push(op, arg, end, neg)
         Frag{start: id, outs: [Int]{id}}
     }
 
@@ -968,7 +968,7 @@ impl Compiler {
     /// `frag` then `after`; a `frag` with no start yet is empty.
     then: fn(&self, frag: Frag, after: Frag) -> Frag Never! {
         if frag.start < 0 -> return after.copy()
-        &self.patch(frag.outs, after.start)
+        self.patch(frag.outs, after.start)
         Frag{start: frag.start, outs: after.outs.copy()}
     }
 
@@ -984,19 +984,19 @@ impl Compiler {
     }
 
     star: fn(&self, node: Int, lazy: Bool) -> Frag Never! {
-        atom: &self.compile(node)
-        split: &self.push(OP_SPLIT, 0, 0, false)
-        exit: &self.prefer(split, atom.start, lazy)
-        &self.patch(atom.outs, split)
+        atom: self.compile(node)
+        split: self.push(OP_SPLIT, 0, 0, false)
+        exit: self.prefer(split, atom.start, lazy)
+        self.patch(atom.outs, split)
         Frag{start: split, outs: [Int]{exit}}
     }
 
     optional: fn(&self, node: Int, lazy: Bool) -> Frag Never! {
-        atom: &self.compile(node)
-        split: &self.push(OP_SPLIT, 0, 0, false)
-        exit: &self.prefer(split, atom.start, lazy)
+        atom: self.compile(node)
+        split: self.push(OP_SPLIT, 0, 0, false)
+        exit: self.prefer(split, atom.start, lazy)
         outs := atom.outs
-        &outs.push(exit)
+        outs.push(exit)
         Frag{start: split, outs: outs}
     }
 
@@ -1006,16 +1006,16 @@ impl Compiler {
     compile: fn(&self, node: Int) -> Frag Never! {
         if self.too_big -> return Frag{start: 0, outs: [Int]{}}
         n: self.nodes[node].copy()
-        if n.kind == N_LIT -> return &self.single(OP_LIT, n.a, 0, false)
-        if n.kind == N_ANY -> return &self.single(OP_ANY, 0, 0, false)
-        if n.kind == N_CLASS -> return &self.single(OP_CLASS, n.lo, n.hi, n.neg)
-        if n.kind == N_ASSERT -> return &self.single(OP_ASSERT, n.a, 0, false)
+        if n.kind == N_LIT -> return self.single(OP_LIT, n.a, 0, false)
+        if n.kind == N_ANY -> return self.single(OP_ANY, 0, 0, false)
+        if n.kind == N_CLASS -> return self.single(OP_CLASS, n.lo, n.hi, n.neg)
+        if n.kind == N_ASSERT -> return self.single(OP_ASSERT, n.a, 0, false)
         if n.kind == N_SEQ {
             frag := Frag{start: -1, outs: [Int]{}}
             k := n.lo
             loop k < n.hi {
-                piece: &self.compile(self.kids[k])
-                frag = &self.then(frag, piece)
+                piece: self.compile(self.kids[k])
+                frag = self.then(frag, piece)
                 k = k + 1
             }
             return frag
@@ -1028,8 +1028,8 @@ impl Compiler {
             k := n.lo
             loop k < n.hi {
                 split := -1
-                if k + 1 < n.hi -> split = &self.push(OP_SPLIT, 0, 0, false)
-                arm: &self.compile(self.kids[k])
+                if k + 1 < n.hi -> split = self.push(OP_SPLIT, 0, 0, false)
+                arm: self.compile(self.kids[k])
                 entry := arm.start
                 if split >= 0 {
                     self.xs[split] = arm.start
@@ -1041,53 +1041,53 @@ impl Compiler {
                     start = entry
                 }
                 pending = split
-                loop code in arm.outs -> &outs.push(code)
+                loop code in arm.outs -> outs.push(code)
                 k = k + 1
             }
             return Frag{start: start, outs: outs}
         }
         if n.kind == N_GROUP {
-            open: &self.push(OP_SAVE, n.a * 2, 0, false)
-            inner: &self.compile(n.left)
+            open: self.push(OP_SAVE, n.a * 2, 0, false)
+            inner: self.compile(n.left)
             self.xs[open] = inner.start
-            close: &self.push(OP_SAVE, n.a * 2 + 1, 0, false)
-            &self.patch(inner.outs, close)
+            close: self.push(OP_SAVE, n.a * 2 + 1, 0, false)
+            self.patch(inner.outs, close)
             return Frag{start: open, outs: [Int]{close}}
         }
-        if n.kind == N_STAR -> return &self.star(n.left, n.neg)
+        if n.kind == N_STAR -> return self.star(n.left, n.neg)
         if n.kind == N_PLUS {
-            atom: &self.compile(n.left)
-            split: &self.push(OP_SPLIT, 0, 0, false)
-            exit: &self.prefer(split, atom.start, n.neg)
-            &self.patch(atom.outs, split)
+            atom: self.compile(n.left)
+            split: self.push(OP_SPLIT, 0, 0, false)
+            exit: self.prefer(split, atom.start, n.neg)
+            self.patch(atom.outs, split)
             return Frag{start: atom.start, outs: [Int]{exit}}
         }
-        if n.kind == N_OPT -> return &self.optional(n.left, n.neg)
+        if n.kind == N_OPT -> return self.optional(n.left, n.neg)
         if n.kind == N_RANGE {
             // `{min,max}`: min required copies, then max - min optional
             // copies, or one star when unbounded.
             frag := Frag{start: -1, outs: [Int]{}}
             k := 0
             loop k < n.a && !self.too_big {
-                piece: &self.compile(n.left)
-                frag = &self.then(frag, piece)
+                piece: self.compile(n.left)
+                frag = self.then(frag, piece)
                 k = k + 1
             }
             if n.b < 0 {
-                tail: &self.star(n.left, n.neg)
-                frag = &self.then(frag, tail)
+                tail: self.star(n.left, n.neg)
+                frag = self.then(frag, tail)
             } else {
                 loop k < n.b && !self.too_big {
-                    tail: &self.optional(n.left, n.neg)
-                    frag = &self.then(frag, tail)
+                    tail: self.optional(n.left, n.neg)
+                    frag = self.then(frag, tail)
                     k = k + 1
                 }
             }
-            if frag.start < 0 -> return &self.single(OP_SAVE, -1, 0, false)
+            if frag.start < 0 -> return self.single(OP_SAVE, -1, 0, false)
             return frag
         }
         // N_EMPTY: a no-op save keeps the fragment shape uniform.
-        &self.single(OP_SAVE, -1, 0, false)
+        self.single(OP_SAVE, -1, 0, false)
     }
 }
 
@@ -1131,11 +1131,11 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
             part: literal_facts(nodes, kids, kids[k])
             k = k + 1
             if part.exact {
-                loop c in part.text -> &run.push(c)
+                loop c in part.text -> run.push(c)
                 next
             }
             joined := run.copy()
-            loop c in part.prefix -> &joined.push(c)
+            loop c in part.prefix -> joined.push(c)
             if all_exact {
                 prefix = joined.copy()
                 all_exact = false
@@ -1156,7 +1156,7 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
             other: literal_facts(nodes, kids, kids[k])
             keep := [Int]{}
             loop keep.len() < common.len() && keep.len() < other.prefix.len() && common[keep.len()] == other.prefix[keep.len()] {
-                &keep.push(common[keep.len()])
+                keep.push(common[keep.len()])
             }
             common = keep
             k = k + 1
@@ -1170,7 +1170,7 @@ literal_facts: fn(nodes: [Node], kids: [Int], node: Int) -> LitFacts Never! {
 scalars_utf8: fn(cps: [Int]) -> [U8] Never! {
     out := [U8]{}
     loop cp in cps {
-        loop b in scalar_text(cp).bytes() -> &out.push(b)
+        loop b in scalar_text(cp).bytes() -> out.push(b)
     }
     out
 }
@@ -1255,31 +1255,31 @@ impl DfaBuilder {
     walk: fn(&self, re: Regex, text_start: Bool, line_start: Bool, at_end: Bool) -> Bool Never! {
         matched := false
         loop {
-            p: &self.stack.pop() ?? break
+            p: self.stack.pop() ?? break
             if self.mark[p] == self.epoch -> next
             self.mark[p] = self.epoch
             self.work = self.work + 1
             op: re.ops[p]
             if op == OP_SAVE {
-                &self.stack.push(re.xs[p])
+                self.stack.push(re.xs[p])
             } else if op == OP_SPLIT {
-                &self.stack.push(re.ys[p])
-                &self.stack.push(re.xs[p])
+                self.stack.push(re.ys[p])
+                self.stack.push(re.xs[p])
             } else if op == OP_ASSERT {
                 kind: re.args[p]
                 if kind == A_TEXT_END {
                     if at_end {
-                        &self.stack.push(re.xs[p])
+                        self.stack.push(re.xs[p])
                     } else {
-                        &self.ends.push(re.xs[p])
+                        self.ends.push(re.xs[p])
                     }
                 } else if (kind == A_TEXT_START && text_start) || (kind == A_LINE_START && line_start) {
-                    &self.stack.push(re.xs[p])
+                    self.stack.push(re.xs[p])
                 }
             } else if op == OP_MATCH {
                 matched = true
             } else if !at_end {
-                &self.out.push(p)
+                self.out.push(p)
             }
         }
         matched
@@ -1294,15 +1294,15 @@ impl DfaBuilder {
             return 0
         }
         self.epoch = self.epoch + 1
-        &self.out.clear()
-        &self.ends.clear()
-        &self.stack.clear()
-        loop s in self.seeds -> &self.stack.push(s)
-        now: &self.walk(re, text_start, line_start, false)
-        loop s in self.ends -> &self.stack.push(s)
-        later: &self.walk(re, text_start, line_start, true)
+        self.out.clear()
+        self.ends.clear()
+        self.stack.clear()
+        loop s in self.seeds -> self.stack.push(s)
+        now: self.walk(re, text_start, line_start, false)
+        loop s in self.ends -> self.stack.push(s)
+        later: self.walk(re, text_start, line_start, true)
         end: now || later
-        &self.out.sort()
+        self.out.sort()
         hash := 1
         if restart -> hash = 2
         if now -> hash = hash + 4
@@ -1325,14 +1325,14 @@ impl DfaBuilder {
             self.too_big = true
             return 0
         }
-        &self.chain.push(self.buckets.get(hash) ?? -1)
+        self.chain.push(self.buckets.get(hash) ?? -1)
         self.buckets[hash] = fresh
-        &self.los.push(self.pcs.len())
-        loop pc in self.out -> &self.pcs.push(pc)
-        &self.his.push(self.pcs.len())
-        &self.restarts.push(restart)
-        &self.match_now.push(now)
-        &self.match_end.push(end)
+        self.los.push(self.pcs.len())
+        loop pc in self.out -> self.pcs.push(pc)
+        self.his.push(self.pcs.len())
+        self.restarts.push(restart)
+        self.match_now.push(now)
+        self.match_end.push(end)
         fresh
     }
 }
@@ -1344,7 +1344,7 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     loop pc < re.ops.len() {
         op: re.ops[pc]
         if op == OP_ASSERT && (re.args[pc] == A_WORD || re.args[pc] == A_NOT_WORD) -> return no_dfa()
-        if op == OP_LIT || op == OP_ANY || op == OP_CLASS -> &consuming.push(pc)
+        if op == OP_LIT || op == OP_ANY || op == OP_CLASS -> consuming.push(pc)
         pc = pc + 1
     }
     // Bytes that every consuming instruction takes or refuses alike share a
@@ -1397,8 +1397,8 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     budget: budget,
     too_big: false,
     }
-    search: &builder.state(re, true, true, !re.anchored_start)
-    pinned: &builder.state(re, true, true, false)
+    search: builder.state(re, true, true, !re.anchored_start)
+    pinned: builder.state(re, true, true, false)
     next := [Int]{}
     from := 0
     loop from < builder.restarts.len() && !builder.too_big {
@@ -1406,17 +1406,17 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
         column := 0
         loop column < width && !builder.too_big {
             input: reps[column]
-            &builder.seeds.clear()
+            builder.seeds.clear()
             k := builder.los[from]
             loop k < builder.his[from] {
                 live: builder.pcs[k]
-                if consumes(re, live, input) -> &builder.seeds.push(re.xs[live])
+                if consumes(re, live, input) -> builder.seeds.push(re.xs[live])
                 k = k + 1
             }
             builder.work = builder.work + builder.his[from] - builder.los[from]
-            if restart -> &builder.seeds.push(re.start)
-            to: &builder.state(re, false, re.flags.multiline && input == 10, restart)
-            &next.push(to)
+            if restart -> builder.seeds.push(re.start)
+            to: builder.state(re, false, re.flags.multiline && input == 10, restart)
+            next.push(to)
             column = column + 1
         }
         from = from + 1
@@ -1425,7 +1425,7 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
     dead := [Bool]{}
     s := 0
     loop s < builder.restarts.len() {
-        &dead.push(builder.los[s] == builder.his[s] && !builder.restarts[s])
+        dead.push(builder.los[s] == builder.his[s] && !builder.restarts[s])
         s = s + 1
     }
     // The scan's table: one row of 256 entries per state, one per byte, so
@@ -1438,10 +1438,10 @@ build_dfa: fn(re: Regex) -> Dfa Never! {
         byte = 0
         loop byte < 128 {
             to: next[s * width + class[byte]]
-            if dead[to] || builder.match_now[to] -> &table.push(I64{-2 - to}) else -> &table.push(I64{to * 256})
+            if dead[to] || builder.match_now[to] -> table.push(I64{-2 - to}) else -> table.push(I64{to * 256})
             byte = byte + 1
         }
-        loop _ in 128..<256 -> &table.push(I64{-1})
+        loop _ in 128..<256 -> table.push(I64{-1})
         s = s + 1
     }
     Dfa{width: width, next: table, match_now: builder.match_now, match_end: builder.match_end, dead: dead, search: search, pinned: pinned}
@@ -1552,13 +1552,13 @@ impl VM {
         self.nt = 0
         self.epoch = self.epoch + 1
         self.m_pc = -1
-        &self.drop_captures()
+        self.drop_captures()
     }
 
     drop_captures: fn(&self) Never! {
-        &self.aslot.clear()
-        &self.apos.clear()
-        &self.aprev.clear()
+        self.aslot.clear()
+        self.apos.clear()
+        self.aprev.clear()
     }
 
     push_edge: fn(&self, pc: Int, start: Int, caps: Int) Never! {
@@ -1572,7 +1572,7 @@ impl VM {
     /// priority order, recording consuming and matching threads once per
     /// pc. The first Match reached is the epoch's preferred match.
     add: fn(&self, re: Regex, text: [U8], pc: Int, start: Int, caps: Int, pos: Int, capture: Bool) Never! {
-        &self.push_edge(pc, start, caps)
+        self.push_edge(pc, start, caps)
         loop self.sp > 0 {
             self.sp = self.sp - 1
             p: self.spc[self.sp].copy()
@@ -1584,21 +1584,21 @@ impl VM {
             if op == OP_SAVE {
                 head := c
                 if capture && re.args[p] >= 0 {
-                    &self.aslot.push(re.args[p])
-                    &self.apos.push(pos)
-                    &self.aprev.push(c)
+                    self.aslot.push(re.args[p])
+                    self.apos.push(pos)
+                    self.aprev.push(c)
                     head = self.aslot.len() - 1
                 }
-                &self.push_edge(re.xs[p], s, head)
+                self.push_edge(re.xs[p], s, head)
                 next
             }
             if op == OP_SPLIT {
-                &self.push_edge(re.ys[p], s, c)
-                &self.push_edge(re.xs[p], s, c)
+                self.push_edge(re.ys[p], s, c)
+                self.push_edge(re.xs[p], s, c)
                 next
             }
             if op == OP_ASSERT {
-                if assert_holds(re, text, re.args[p], pos, self.hi) -> &self.push_edge(re.xs[p], s, c)
+                if assert_holds(re, text, re.args[p], pos, self.hi) -> self.push_edge(re.xs[p], s, c)
                 next
             }
             if op == OP_MATCH {
@@ -1633,7 +1633,7 @@ impl VM {
             k = k + 1
             if re.ops[pc] == OP_MATCH -> break
             if !consumes(re, pc, cp) -> next
-            &self.add(re, text, re.xs[pc], start, caps, next_pos, capture)
+            self.add(re, text, re.xs[pc], start, caps, next_pos, capture)
         }
         m: self.nt - n
         j := 0
@@ -1673,7 +1673,7 @@ assert_holds: fn(re: Regex, text: [U8], kind: Int, pos: Int, hi: Int) -> Bool Ne
 
 filled: fn(n: Int, value: Int) -> [Int] Never! {
     out := [Int]{}
-    loop out.len() < n -> &out.push(value)
+    loop out.len() < n -> out.push(value)
     out
 }
 
@@ -1722,7 +1722,7 @@ scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_
             // is reachable, so the list restarts empty instead of growing
             // with the text.
             if vm.nt == 0 {
-                &vm.drop_captures()
+                vm.drop_captures()
                 // Every match starts with `prefix`, so no start before its
                 // next occurrence can match.
                 if re.prefix.len() > 0 && !single_start {
@@ -1731,7 +1731,7 @@ scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_
                     pos = found
                 }
             }
-            &vm.add(re, text, re.start, pos, -1, pos, capture)
+            vm.add(re, text, re.start, pos, -1, pos, capture)
             if vm.m_pc >= 0 {
                 has_last = true
                 last_start = pos
@@ -1740,23 +1740,23 @@ scan: fn(re: Regex, text: [U8], anchored: Bool, full: Bool, capture: Bool, stop_
             }
         }
         if has_last && stop_on_match {
-            &out.push(Run{start: last_start, end: last_end, caps: [Int]{}})
+            out.push(Run{start: last_start, end: last_end, caps: [Int]{}})
             return out
         }
         // Emit once no thread outranks the recorded match.
         if has_last && (pos >= hi || vm.nt == 0 || re.ops[vm.tpc[0]] == OP_MATCH) {
-            &out.push(Run{start: last_start, end: last_end, caps: vm.slots(last_caps, last_start, last_end, re.groups, capture)})
+            out.push(Run{start: last_start, end: last_end, caps: vm.slots(last_caps, last_start, last_end, re.groups, capture)})
             if limit >= 0 && out.len() >= limit -> return out
             resume: next_search_pos(text, last_start, last_end, hi)
             if resume > hi -> return out
-            &vm.reset()
+            vm.reset()
             has_last = false
             pos = resume
             next
         }
         if !has_last && (pos >= hi || (vm.nt == 0 && single_start)) -> return out
         next_pos: pos + lead_width(text[pos])
-        &vm.step(re, text, decode_at(text, pos), next_pos, capture)
+        vm.step(re, text, decode_at(text, pos), next_pos, capture)
         pos = next_pos
     }
 }
@@ -1791,7 +1791,7 @@ literal_runs: fn(re: Regex, text: [U8], capture: Bool, stop_on_match: Bool, limi
     loop found >= 0 {
         end: found + n
         caps: if capture && !stop_on_match -> [Int]{found, end} else -> [Int]{}
-        &out.push(Run{start: found, end: end, caps: caps})
+        out.push(Run{start: found, end: end, caps: caps})
         if stop_on_match || (limit >= 0 && out.len() >= limit) -> return out
         found = if skip -> find_skipping(text, re.prefix, shift, end) else -> find_bytes(text, re.prefix, end)
     }
@@ -1846,7 +1846,7 @@ backtrack: fn(re: Regex, text: [U8], single: Bool, full: Bool, capture: Bool) ->
             pos = find_bytes(text, re.prefix, pos)
             if pos < 0 -> break
         }
-        end: backtrack_from(re, text, pos, full, capture, &visited, &jobs, &caps)
+        end: backtrack_from(re, text, pos, full, capture, visited, jobs, caps)
         if end >= 0 {
             if capture {
                 caps[0] = pos
@@ -1878,14 +1878,14 @@ backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool,
             visited[cell >> 5] = word.bit_or(bit)
             op: re.ops[pc]
             if op == OP_SPLIT {
-                push_pair(&jobs, re.ys[pc], pos)
+                push_pair(jobs, re.ys[pc], pos)
                 pc = re.xs[pc]
                 next
             }
             if op == OP_SAVE {
                 slot: re.args[pc]
                 if capture && slot >= 0 {
-                    push_pair(&jobs, -slot - 1, caps[slot])
+                    push_pair(jobs, -slot - 1, caps[slot])
                     caps[slot] = pos
                 }
                 pc = re.xs[pc]
@@ -1907,8 +1907,8 @@ backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool,
         }
         // Undo the captures past the latest open branch, then take it.
         loop {
-            b: &jobs.pop() ?? return -1
-            a: &jobs.pop() ?? return -1
+            b: jobs.pop() ?? return -1
+            a: jobs.pop() ?? return -1
             if a >= 0 {
                 pc = a
                 pos = b
@@ -1920,8 +1920,8 @@ backtrack_from: fn(re: Regex, text: [U8], start: Int, full: Bool, capture: Bool,
 }
 
 push_pair: fn(jobs: &[Int], a: Int, b: Int) Never! {
-    &jobs.push(a)
-    &jobs.push(b)
+    jobs.push(a)
+    jobs.push(b)
 }
 
 consumes: fn(re: Regex, pc: Int, cp: Int) -> Bool Never! {
@@ -2003,19 +2003,19 @@ simple_upper: fn(cp: Int) -> Int Never! {
 scalar_text: fn(cp: Int) -> String Never! {
     out := [U8]{}
     if cp < 128 {
-        &out.push(U8{cp})
+        out.push(U8{cp})
     } else if cp < 2048 {
-        &out.push(U8{Int{192}.bit_or(cp >> 6)})
-        &out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
+        out.push(U8{Int{192}.bit_or(cp >> 6)})
+        out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
     } else if cp < 65536 {
-        &out.push(U8{Int{224}.bit_or(cp >> 12)})
-        &out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(63))})
-        &out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
+        out.push(U8{Int{224}.bit_or(cp >> 12)})
+        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(63))})
+        out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
     } else {
-        &out.push(U8{Int{240}.bit_or(cp >> 18)})
-        &out.push(U8{Int{128}.bit_or((cp >> 12).bit_and(63))})
-        &out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(63))})
-        &out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
+        out.push(U8{Int{240}.bit_or(cp >> 18)})
+        out.push(U8{Int{128}.bit_or((cp >> 12).bit_and(63))})
+        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(63))})
+        out.push(U8{Int{128}.bit_or(cp.bit_and(63))})
     }
     String.from_bytes(out) ?? ""
 }
@@ -2048,7 +2048,7 @@ decode_all: fn(raw: [U8]) -> [Int] Never! {
     out := [Int]{}
     i := 0
     loop i < raw.len() {
-        &out.push(decode_at(raw, i))
+        out.push(decode_at(raw, i))
         i = i + lead_width(raw[i])
     }
     out
@@ -2080,14 +2080,14 @@ find_match: fn(pattern: Regex, text: String) -> Match? Never! {
     runs: scan(pattern, raw, false, false, pattern.groups > 0, false, 1)
     if runs.len() == 0 -> return None
     chars := CharCursor{byte: 0, count: 0}
-    Val(make_match(pattern, raw, runs[0], &chars))
+    Val(make_match(pattern, raw, runs[0], chars))
 }
 
 /// The Match for one run; its captures come from the scan itself.
 make_match: fn(re: Regex, raw: [U8], run: Run, chars: &CharCursor) -> Match Never! {
     caps: run.caps
-    first: &chars.at(raw, run.start)
-    last: &chars.at(raw, run.end)
+    first: chars.at(raw, run.start)
+    last: chars.at(raw, run.end)
     groups := [String]{}
     spans := [Int]{}
     g := 0
@@ -2100,14 +2100,14 @@ make_match: fn(re: Regex, raw: [U8], run: Run, chars: &CharCursor) -> Match Neve
             end = caps[2 * g + 1]
         }
         if start >= 0 && end >= start {
-            &groups.push(slice(raw, start, end))
+            groups.push(slice(raw, start, end))
             at: first + char_count(raw, run.start, start)
-            &spans.push(at)
-            &spans.push(at + char_count(raw, start, end))
+            spans.push(at)
+            spans.push(at + char_count(raw, start, end))
         } else {
-            &groups.push("")
-            &spans.push(-1)
-            &spans.push(-1)
+            groups.push("")
+            spans.push(-1)
+            spans.push(-1)
         }
     }
     Match{start: first, end: last, text: slice(raw, run.start, run.end), groups: groups, spans: spans, names: re.names.copy()}

@@ -130,15 +130,15 @@ EnvironmentIntegration: struct {
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{"jet-environment-integration-v1\nkind={self.kind.as_str()}\nname={self.name}\npreset={self.preset}\n"}
-        loop key in envmodel_sorted_keys(self.options) -> &lines.push("option={key}={self.options[key]}\n")
-        envmodel_push_labeled(&lines, "package", self.packages)
-        loop file in self.files -> &lines.push("file={file.fingerprint()}\n")
-        envmodel_push_labeled(&lines, "host-check", self.host_checks)
-        envmodel_push_labeled(&lines, "task", self.tasks)
-        envmodel_push_labeled(&lines, "provider", self.providers)
-        envmodel_push_labeled(&lines, "secret-name", self.secrets)
-        envmodel_push_labeled(&lines, "grant", self.grants)
-        envmodel_push_labeled(&lines, "loss", self.losses)
+        loop key in envmodel_sorted_keys(self.options) -> lines.push("option={key}={self.options[key]}\n")
+        envmodel_push_labeled(lines, "package", self.packages)
+        loop file in self.files -> lines.push("file={file.fingerprint()}\n")
+        envmodel_push_labeled(lines, "host-check", self.host_checks)
+        envmodel_push_labeled(lines, "task", self.tasks)
+        envmodel_push_labeled(lines, "provider", self.providers)
+        envmodel_push_labeled(lines, "secret-name", self.secrets)
+        envmodel_push_labeled(lines, "grant", self.grants)
+        envmodel_push_labeled(lines, "loss", self.losses)
         lines.join("")
     }
 
@@ -185,13 +185,13 @@ IntegrationFactProjection: struct {
     fingerprint: fn(self) -> String Never! {
         lines := [String]{}
         loop fact in self.task_facts {
-            &lines.push("task-fact={fact.integration.as_str()}\t{fact.name}\t{fact.packages.join(",")}\t{fact.secrets.join(",")}\t{fact.providers.join(",")}\t{fact.host_checks.join(",")}\t{fact.grants.join(",")}\n")
+            lines.push("task-fact={fact.integration.as_str()}\t{fact.name}\t{fact.packages.join(",")}\t{fact.secrets.join(",")}\t{fact.providers.join(",")}\t{fact.host_checks.join(",")}\t{fact.grants.join(",")}\n")
         }
-        envmodel_push_labeled(&lines, "task", self.tasks)
-        envmodel_push_labeled(&lines, "provider", self.providers)
-        envmodel_push_labeled(&lines, "host-check", self.host_checks)
-        envmodel_push_labeled(&lines, "grant", self.grants)
-        envmodel_push_labeled(&lines, "loss", self.losses)
+        envmodel_push_labeled(lines, "task", self.tasks)
+        envmodel_push_labeled(lines, "provider", self.providers)
+        envmodel_push_labeled(lines, "host-check", self.host_checks)
+        envmodel_push_labeled(lines, "grant", self.grants)
+        envmodel_push_labeled(lines, "loss", self.losses)
         lines.join("")
     }
 

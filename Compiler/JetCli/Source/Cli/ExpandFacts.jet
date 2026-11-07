@@ -3,6 +3,7 @@ use {
     jet_driver.[JetDriverDocModule]
     jet_foundation.[TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, diagnostic_from_registry, diagnostic_registry_row, diagnostic_render, diagnostic_line_at, diagnostic_column_at, type_name]
     jet_sema.[SemaMemoryProjection, sema_user_template_ct_value]
+    jet_semindex.[SemIndex]
 }
 
 jet_cli_expand_checked_show: fn(value: TComptimeValue) -> String Never! {
@@ -38,8 +39,8 @@ jet_cli_expand_checked_display: fn(value: TComptimeValue?) -> String Never! {
 }
 jet_cli_expand_location: fn(fields: &[JetCLIStatusField], modules: [JetDriverDocModule], source: String, span: Span) Never! {
     if jet_cli_expand_source(modules, source) == .Val(text) {
-        &fields.push(jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(text, span.start))))
-        &fields.push(jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(text, span.start))))
+        fields.push(jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(text, span.start))))
+        fields.push(jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(text, span.start))))
     }
 }
 jet_cli_expand_memory_status: fn(projection: SemaMemoryProjection?) -> (text: String, value: JetCLIStatusValue) Never! {
@@ -50,7 +51,7 @@ jet_cli_expand_memory_status: fn(projection: SemaMemoryProjection?) -> (text: St
         .None -> (text: "not projected", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("not_projected"))}))
     }
 }
-jet_cli_expand_memory: fn(modules: [JetDriverDocModule], index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
+jet_cli_expand_memory: fn(modules: [JetDriverDocModule], index: SemIndex) -> [JetCLIExpandFact] Never! {
     // Every DocModule shares this one checked graph; never duplicate its rows.
     storage: loop unit in modules { if unit.memory_facts == .Val(value) -> break value } ?? return [JetCLIExpandFact]{}
     permit: storage.guard_read()
@@ -69,11 +70,11 @@ jet_cli_expand_memory: fn(modules: [JetDriverDocModule], index: JetCLISemIndex) 
                 jet_cli_status_field("provenance", jet_cli_status_text(declaration.provenance)),
                 jet_cli_status_field("status", status.value),
             }
-            jet_cli_expand_location(&fields, modules, declaration.source, declaration.span)
-            &facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
+            jet_cli_expand_location(fields, modules, declaration.source, declaration.span)
+            facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
         }
     }
-    &facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.text <=> right.text)
+    facts.sort_by((left: JetCLIExpandFact, right: JetCLIExpandFact) -> left.text <=> right.text)
     facts
 }
 jet_cli_expand_layout_missing: fn(value: TComptimeValue, names: [String]) -> Bool Never! {
@@ -112,7 +113,7 @@ jet_cli_expand_layout_bytes: fn(layout: TComptimeValue) -> JetCLIStatusValue Nev
 jet_cli_expand_layout_text: fn(layout: TComptimeValue) -> String Never! {
     header_parts := [String]{}
     loop name in ([String]{"kind", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "target", "guarantee", "source"}) {
-        &header_parts.push("{name}={jet_cli_expand_checked_display(jet_cli_expand_checked_field(layout, name))}")
+        header_parts.push("{name}={jet_cli_expand_checked_display(jet_cli_expand_checked_field(layout, name))}")
     }
     fields := [String]{}
     if jet_cli_expand_checked_field(layout, "fields") == .Val(.List(values)) {
@@ -121,7 +122,7 @@ jet_cli_expand_layout_text: fn(layout: TComptimeValue) -> String Never! {
             ty: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "ty"))
             offset: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "offset"))
             size: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "size"))
-            &fields.push("{name}:{ty}(offset={offset},size={size})")
+            fields.push("{name}:{ty}(offset={offset},size={size})")
         }
     }
     // Unknown byte facts name their registry report on the lines below.
@@ -142,10 +143,10 @@ jet_cli_expand_layout: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
                 jet_cli_status_field("layout", jet_cli_expand_checked_json(row.value)),
                 jet_cli_status_field("byte_facts", jet_cli_expand_layout_bytes(row.value)),
             })
-            &facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: row.name, text: "{unit.path}:{line}:{column}   {row.name}.$layout   {jet_cli_expand_layout_text(row.value)}", value: value})
+            facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: row.name, text: "{unit.path}:{line}:{column}   {row.name}.$layout   {jet_cli_expand_layout_text(row.value)}", value: value})
         }
     }
-    jet_cli_expand_sort_facts(&facts)
+    jet_cli_expand_sort_facts(facts)
     facts
 }
 jet_cli_expand_origin_receiver: fn(source: String, span: Span) -> String Never! {
@@ -182,10 +183,10 @@ jet_cli_expand_origin: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
                     jet_cli_status_field("span", jet_cli_expand_span(row.span, Val(unit.source))),
                     jet_cli_status_field("value", jet_cli_expand_checked_json(row.value)),
                 })
-                &facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.$origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
+                facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.$origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
             }
         }
     }
-    jet_cli_expand_sort_facts(&facts)
+    jet_cli_expand_sort_facts(facts)
     facts
 }

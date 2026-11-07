@@ -26,9 +26,9 @@ Report: struct {
 summarize: fn(batch: Batch) -> Report {
     services := [String]{}
     loop event in batch.events {
-        if !services.contains(event.service) -> &services.push(event.service.copy())
+        if !services.contains(event.service) -> services.push(event.service.copy())
     }
-    &services.sort()
+    services.sort()
     summaries := [Summary]{}
     loop service in services {
         count := 0
@@ -39,7 +39,7 @@ summarize: fn(batch: Batch) -> Report {
                 total_ms += event.duration_ms
             }
         }
-        &summaries.push(Summary{service: service, count: count, total_ms: total_ms})
+        summaries.push(Summary{service: service, count: count, total_ms: total_ms})
     }
     return Report{total_events: batch.events.len(), summaries: summaries}
 }

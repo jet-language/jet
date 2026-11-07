@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Build, as library Jet, four tiny embedded languages and use each from a 15-line program: a symbolic expression type with simplification and differentiation; a rules engine (facts, conditions, actions, declaration-order evaluation); a jq-style structured filter over JSON; and a spreadsheet formula evaluator with a dependency graph and incremental recompute. Use Examples/features/patterns/**, traits/**, generics/**, comptime/**, parsing/**, reflection/**.
+Build, as library Jet, four tiny embedded languages and use each from a 15-line program: a symbolic expression type with simplification and differentiation; a rules engine (facts, conditions, actions, declaration-order evaluation); a jq-style structured filter over JSON; and a spreadsheet formula evaluator with a dependency graph and incremental recompute. Use Examples/Types/Patterns/**, traits/**, generics/**, comptime/**, parsing/**, reflection/**.
 
 ## Answer these
 

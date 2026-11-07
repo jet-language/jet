@@ -57,7 +57,7 @@ lsp_references_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]
         source: result.module_sources[snapshot.module_index]
         range: lsp_checked_byte_span_to_range(source.loaded_source, ref._1) ?? return Val(lsp_error_response(id, -32603, "reference range is outside the checked snapshot"))
         ref_uri: lsp_path_to_uri(source.path)
-        &items.push("{{\"uri\":{foundation_json_quote(ref_uri)},\"range\":{lsp_range_json(range)}{data}}}")
+        items.push("{{\"uri\":{foundation_json_quote(ref_uri)},\"range\":{lsp_range_json(range)}{data}}}")
     }
     Val(lsp_response(id, "[{items.join(",")}]"))
 }
@@ -131,12 +131,12 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> St
     by_file := [String:[Span]]{}
     loop ref in spans {
         if !by_file.has_key(ref._0) -> by_file[ref._0] = [Span]{}
-        &by_file[ref._0].push(ref._1)
+        by_file[ref._0].push(ref._1)
     }
     // Rust BTreeMap iteration is lexical, independently of Jet map order.
     paths := [String]{}
-    loop (path, _) in by_file -> &paths.push(path.copy())
-    &paths.sort()
+    loop (path, _) in by_file -> paths.push(path.copy())
+    paths.sort()
     changes := [String]{}
     loop path in paths {
         snapshot: lsp_checked_source_snapshot(server.diagnostic_state, result, checked.checked_versions, path, server.snapshot.cwd.platform) ?? return Val(lsp_error_response(id, -32603, "rename source is not in a checked snapshot"))
@@ -144,14 +144,14 @@ lsp_rename_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -[FS, Env]> St
         edits := [String]{}
         loop span in by_file[path] {
             range: lsp_checked_byte_span_to_range(source.loaded_source, span) ?? return Val(lsp_error_response(id, -32603, "rename range is outside the checked snapshot"))
-            &edits.push("{{\"range\":{lsp_range_json(range)},\"newText\":{foundation_json_quote(new_name)}}}")
+            edits.push("{{\"range\":{lsp_range_json(range)},\"newText\":{foundation_json_quote(new_name)}}}")
         }
         file_uri: lsp_path_to_uri(source.path)
         version: if snapshot.version == {
             .Val(number) -> "{number}"
             .None -> "null"
         }
-        &changes.push("{{\"textDocument\":{{\"uri\":{foundation_json_quote(file_uri)},\"version\":{version}}},\"edits\":[{edits.join(",")}]}}")
+        changes.push("{{\"textDocument\":{{\"uri\":{foundation_json_quote(file_uri)},\"version\":{version}}},\"edits\":[{edits.join(",")}]}}")
     }
     old_name: lsp_ident_at(tokens, offset) ?? ""
     identity: lsp_checked_semantic_identity_at(db, tokens, module_ref.display, offset) ?? ""
@@ -172,7 +172,7 @@ lsp_rename_semantic_op: fn(index: SemIndex, identity: String, from: String, to: 
             prefix := fact.human_identity.slice(0, fact.human_identity.len() - from.len()) // #4303
             after = "{prefix}{to}"
         }
-        &targets.push("{{\"stable_id\":{foundation_json_quote(fact.stable_id)},\"before\":{foundation_json_quote(fact.human_identity)},\"after\":{foundation_json_quote(after)},\"kind\":{foundation_json_quote(fact.kind)},\"module_path\":{foundation_json_quote(fact.module_path)}}}")
+        targets.push("{{\"stable_id\":{foundation_json_quote(fact.stable_id)},\"before\":{foundation_json_quote(fact.human_identity)},\"after\":{foundation_json_quote(after)},\"kind\":{foundation_json_quote(fact.kind)},\"module_path\":{foundation_json_quote(fact.module_path)}}}")
     }
     "{{\"kind\":\"rename\",\"rule_id\":\"lsp.rename\",\"from\":{foundation_json_quote(from)},\"to\":{foundation_json_quote(to)},\"targets\":[{targets.join(",")}],\"files\":[]}}"
 }
@@ -243,14 +243,14 @@ lsp_call_argument_labels: fn(arguments: String) -> [String] Never! {
             41 | 93 | 125 -> if nested > 0 -> nested -= 1
             44 -> if nested == 0 {
                 argument := String.from_bytes(bytes[start..<index]) ?? panic("ASCII comma boundary") // #4303
-                if lsp_call_argument_label(argument) == .Val(label) -> &labels.push(label)
+                if lsp_call_argument_label(argument) == .Val(label) -> labels.push(label)
                 start = index + 1
             }
             else -> {}
         }
     }
     argument := String.from_bytes(bytes[start..<bytes.len()]) ?? panic("ASCII comma boundary") // #4303
-    if lsp_call_argument_label(argument) == .Val(label) -> &labels.push(label)
+    if lsp_call_argument_label(argument) == .Val(label) -> labels.push(label)
     labels
 }
 

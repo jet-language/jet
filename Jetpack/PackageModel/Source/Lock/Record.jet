@@ -34,7 +34,7 @@ pkg_lock_read_text: fn(path: String) -[FS]> String LockError! {
             take_length: if has_newline -> content_length + 1 else -> content_length
             if line_length + content_length > PKG_MAX_LOCK_VALUE_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_value_message(line_number)))
             if raw.len() + take_length > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
-            loop index in offset..<(offset + take_length) -> &raw.push(chunk[index])
+            loop index in offset..<(offset + take_length) -> raw.push(chunk[index])
             if {
                 has_newline -> {
                     line_length = 0
@@ -132,7 +132,7 @@ pkg_lock_record_inferred_layer: fn(project_root: String, package_name: String, l
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
             lock.packages[index].inferred_layer = Val(layer)
-            pkg_lock_ensure_build_stamp(project_root, &lock)
+            pkg_lock_ensure_build_stamp(project_root, lock)
             pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
             return
         }
@@ -147,7 +147,7 @@ pkg_lock_record_envelope: fn(project_root: String, package_name: String, envelop
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
             lock.packages[index].envelope = Val(envelope)
-            pkg_lock_ensure_build_stamp(project_root, &lock)
+            pkg_lock_ensure_build_stamp(project_root, lock)
             pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
             return
         }
@@ -162,7 +162,7 @@ pkg_lock_upsert_package: fn(lock: &LockFile, entry: LockedPackage, matches: fn(L
             return
         }
     }
-    &lock.packages.push(entry)
+    lock.packages.push(entry.copy())
 }
 
 // The first package record satisfying `matches`.
@@ -195,7 +195,7 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
     if lock.find_source_channel(source_name) == None {
         // The channel label is presentation metadata; the exact input is the
         // one canonical Nix index identity the provider selector accepts.
-        &lock.source_channels.push(LockedSourceChannel{name: source_name, channel: nix_closure.channel, exact: "github:NixOS/nixpkgs#{nix_closure.revision}"})
+        lock.source_channels.push(LockedSourceChannel{name: source_name, channel: nix_closure.channel, exact: "github:NixOS/nixpkgs#{nix_closure.revision}"})
     }
     existing_provenance: if pkg_lock_find_package_where(lock, package -> package.name == name && package.version == version && package.is_nix()) == {
         .Val(package) -> package.provenance
@@ -216,8 +216,8 @@ pkg_lock_record_nix_realization: fn(project_root: String, name: String, version:
         }
     }
     entry: LockedPackage{name: name, version: version, source: LockSource.Nix{reference: reference, output: output}, nix_closure: Val(nix_closure), envelope: Val(envelope), receipt: existing_receipt, provenance: existing_provenance}
-    pkg_lock_upsert_package(&lock, entry, package -> package.name == name && package.is_nix())
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    pkg_lock_upsert_package(lock, entry, package -> package.name == name && package.is_nix())
+    pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
 }
 
@@ -246,8 +246,8 @@ pkg_lock_record_foreign_realization: fn(project_root: String, name: String, vers
         }
     }
     entry: LockedPackage{name: name, version: version, source: source, fingerprint: envelope.output_hash, envelope: Val(envelope), receipt: existing_receipt}
-    pkg_lock_upsert_package(&lock, entry, package -> package.name == name && package.is_foreign())
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    pkg_lock_upsert_package(lock, entry, package -> package.name == name && package.is_foreign())
+    pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
 }
 
@@ -267,11 +267,11 @@ pkg_lock_record_rust_bridge: fn(project_root: String, bridge_identity: String, p
             .Val(build) -> if build.starts_with(PKG_RUST_BRIDGE_PROVENANCE_PREFIX) -> next
             .None -> {}
         }
-        &kept.push(package)
+        kept.push(package)
     }
-    loop package in packages -> &kept.push(package)
+    loop package in packages -> kept.push(package.copy())
     lock.packages = kept
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes())
 }
 
@@ -342,8 +342,8 @@ pkg_lock_record_source_realization: fn(project_root: String, name: String, versi
         .None -> None
     }
     entry: LockedPackage{name: name, version: version, source: source, fingerprint: source_hash, dependencies: dependencies, envelope: Val(envelope), receipt: existing_receipt, provenance: existing_provenance}
-    pkg_lock_upsert_package(&lock, entry, package -> package.name == name && same_provider(package))
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    pkg_lock_upsert_package(lock, entry, package -> package.name == name && same_provider(package))
+    pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
 }
 
@@ -449,9 +449,9 @@ pkg_lock_record_toolchain: fn(project_root: String, toolchain: LockedToolchain) 
             replaced = true
         }
     }
-    if !replaced -> &lock.toolchains.push(toolchain)
+    if !replaced -> lock.toolchains.push(toolchain.copy())
     lock.validate_completeness()
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    pkg_lock_ensure_build_stamp(project_root, lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(LockError.Invalid("could not write `{UNIFIED_LOCK_FILE}`: {error.message()}"))
@@ -470,8 +470,8 @@ pkg_lock_record_browser: fn(project_root: String, browser: LockedBrowser) -[FS, 
             replaced = true
         }
     }
-    if !replaced -> &lock.browsers.push(browser)
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    if !replaced -> lock.browsers.push(browser.copy())
+    pkg_lock_ensure_build_stamp(project_root, lock)
     pkg_lock_publish_or_report(project_root, pkg_lock_write(lock))
 }
 
@@ -497,9 +497,9 @@ pkg_lock_record_source_channel: fn(project_root: String, input: LockedSourceChan
             replaced = true
         }
     }
-    if !replaced -> &lock.source_channels.push(source)
+    if !replaced -> lock.source_channels.push(source)
     lock.validate_completeness()
-    pkg_lock_ensure_build_stamp(project_root, &lock)
+    pkg_lock_ensure_build_stamp(project_root, lock)
     if pkg_lock_write_atomically(project_root, pkg_lock_write(lock).bytes()) == {
         .Ok(_) -> {}
         .Err(error) -> return Err(LockError.Invalid("could not write `{UNIFIED_LOCK_FILE}`: {error.message()}"))

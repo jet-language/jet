@@ -13,7 +13,7 @@ UUIDError: struct {
         display: fn(self) -> String { self.reason }
     }
     impl Debug {
-        debug: fn(^self) -> String Never! { self.reason }
+        debug: fn(&&self) -> String Never! { self.reason }
     }
 }
 
@@ -34,14 +34,14 @@ v7: fn(clock: &Clock) -[Rand, Time]> String UUIDError! {
     }
     tail: random.bytes(10) ?? return Err(UUIDError{reason: "secure random unavailable"})
     bytes := [U8]{
-        to_u8(timestamp >> 40),
-        to_u8(timestamp >> 32),
-        to_u8(timestamp >> 24),
-        to_u8(timestamp >> 16),
-        to_u8(timestamp >> 8),
-        to_u8(timestamp),
+        wrapping(U8{timestamp >> 40}),
+        wrapping(U8{timestamp >> 32}),
+        wrapping(U8{timestamp >> 24}),
+        wrapping(U8{timestamp >> 16}),
+        wrapping(U8{timestamp >> 8}),
+        wrapping(U8{timestamp}),
     }
-    loop b in tail -> &bytes.push(b)
+    loop b in tail -> bytes.push(b)
     bytes[6] = U8{(((Int.from_u8(bytes[6])).bit_and(15))).bit_or(112)}
     bytes[8] = U8{(((Int.from_u8(bytes[8])).bit_and(63))).bit_or(128)}
     value: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
@@ -51,12 +51,12 @@ v7: fn(clock: &Clock) -[Rand, Time]> String UUIDError! {
 v5: fn(namespace: String, name: String) -> String UUIDError! {
     ns: parse_uuid(namespace) ?? return Err(UUIDError{reason: "invalid UUID namespace"})
     input := copy_bytes(ns)
-    loop b in name.bytes() -> &input.push(b)
+    loop b in name.bytes() -> input.push(b)
     digest_hex: crypto.sha1(input) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     digest: hex_decode(digest_hex) ?? return Err(UUIDError{reason: "invalid UUID digest"})
     if digest.len() != 20 -> return Err(UUIDError{reason: "invalid UUID digest length"})
     bytes := [U8]{}
-    loop i in 0..<16 -> &bytes.push(digest[i])
+    loop i in 0..<16 -> bytes.push(digest[i])
     bytes[6] = U8{(((Int.from_u8(bytes[6])).bit_and(15))).bit_or(80)}
     bytes[8] = U8{(((Int.from_u8(bytes[8])).bit_and(63))).bit_or(128)}
     value: format_uuid(bytes) ?? return Err(UUIDError{reason: "invalid UUID encoding"})
@@ -75,7 +75,7 @@ parse: fn(text: String) -> String UUIDError! {
 
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
-    loop b in bytes -> &out.push(b)
+    loop b in bytes -> out.push(b)
     out
 }
 
@@ -87,14 +87,14 @@ parse_uuid: fn(text: String) -> [U8]? {
     }
     digits := [U8]{}
     loop i in 0..<raw.len() {
-        if raw[i] != (U8{45}) -> &digits.push(raw[i])
+        if raw[i] != (U8{45}) -> digits.push(raw[i])
     }
     if digits.len() != 32 -> return None
     out := [U8]{}
     loop i in 0..<16 {
         hi: hex_value(digits[i * 2]) ?? return None
         lo: hex_value(digits[i * 2 + 1]) ?? return None
-        &out.push(to_u8(((hi << 4)).bit_or(lo)))
+        out.push(wrapping(U8{((hi << 4)).bit_or(lo)}))
     }
     Val(out.copy())
 }
@@ -111,10 +111,10 @@ format_uuid: fn(bytes: [U8]) -> String? {
     if bytes.len() != 16 -> return None
     out := [U8]{}
     loop i in 0..<16 {
-        if i == 4 || i == 6 || i == 8 || i == 10 -> &out.push(U8{45})
+        if i == 4 || i == 6 || i == 8 || i == 10 -> out.push(U8{45})
         value: Int.from_u8(bytes[i])
-        &out.push(hex_digit(value >> 4))
-        &out.push(hex_digit((value).bit_and(15)))
+        out.push(hex_digit(value >> 4))
+        out.push(hex_digit((value).bit_and(15)))
     }
     Val(String.from_bytes(out) ?? "")
 }
@@ -131,16 +131,9 @@ hex_decode: fn(text: String) -> [U8]? {
     loop i in 0..<raw.len(), 2 {
         hi: hex_value(raw[i]) ?? return None
         lo: hex_value(raw[i + 1]) ?? return None
-        &out.push(to_u8(((hi << 4)).bit_or(lo)))
+        out.push(wrapping(U8{((hi << 4)).bit_or(lo)}))
     }
     Val(out.copy())
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 #Test("UUID v7 keeps the manual Clock timestamp and RFC version and variant") {

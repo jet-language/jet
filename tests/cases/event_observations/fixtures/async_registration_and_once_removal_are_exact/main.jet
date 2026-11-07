@@ -1,0 +1,26 @@
+use {
+    event: core.event
+    term: core.term
+    time: core.time
+}
+
+run: fn() {
+    rejected_scope: event.scope()
+    rejected_scope.cancel()
+    rejected: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    rejected.on(rejected_scope, (n: Int) -> {})
+
+    once_scope: event.scope()
+    once_event: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    once_sub: once_event.once(once_scope, (n: Int) -> {})
+    once_event.emit_async(1).join() ?? panic("join")
+    once_sub.unsubscribe()
+    once_scope.cancel()
+
+    print("READY")
+    // A pipe stdout is written when its buffer fills (spec.md print); flush so
+    // the debugger session sees READY before it reads the snapshot.
+    ready_out := term.stdout()
+    ready_out.flush() ?? panic("flush")
+    time.sleep(30000ms)
+}

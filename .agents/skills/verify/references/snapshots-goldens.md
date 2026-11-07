@@ -38,7 +38,7 @@ Use `Docs/spec/contributing/examples.md` and the relevant example under
 `Examples/`. Run the exact example criterion through a fresh binary; when the
 criterion applies to both execution forms, prove `jet run` and
 `jet run --release`, then update only its matching file under
-`Examples/features/expected/`. Preserve the program's meaning and path
+`Examples/`. Preserve the program's meaning and path
 consumers rather than changing a golden to make a regression disappear.
 
 A snapshot or golden is green only after its named focused command actually

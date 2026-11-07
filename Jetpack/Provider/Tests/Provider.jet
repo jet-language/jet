@@ -60,7 +60,7 @@ provider_core_test_git_repo: fn(dir: String, files_to_write: [(path: String, tex
 }
 
 provider_core_test_realize_error: fn(verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -> ProviderError {
-    if provider_realize(&verification, spec, table, ctx) == {
+    if provider_realize(verification, spec, table, ctx) == {
         .Ok(_) -> panic("realization must fail")
         .Err(error) -> error
     }
@@ -253,7 +253,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         spec: provider_core_test_spec(case.raw)
         assert_eq(provider_resolve_kind(spec, SourceTable.empty(), true, "."), case.kind)
         assert_eq(provider_flake_ref(spec, SourceTable.empty()), case.flake)
-        if provider_for(case.kind).realize(&verification, spec, SourceTable.empty(), ctx) == {
+        if provider_for(case.kind).realize(verification, spec, SourceTable.empty(), ctx) == {
             .Ok(_) -> panic("direct ecosystem root unexpectedly used a provider")
             .Err(error) -> {
                 if error == {
@@ -278,22 +278,22 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     core_table: provider_core_test_table("mine", "file:///remote/core", ProviderKind.Core)
     core_spec: provider_core_test_spec_in("hello@mine", core_table)
     online: provider_core_test_ctx(store, false, None, None)
-    core_plan: provider_plan_downloads(&verification, [RefSpec]{core_spec}, core_table, online) ?? panic("core plan")
+    core_plan: provider_plan_downloads(verification, [RefSpec]{core_spec}, core_table, online) ?? panic("core plan")
     assert_eq(core_plan.new, 1)
     assert_eq(core_plan.items.len(), 1)
 
     registry_spec: provider_core_test_spec("rack@ruby#version=3.0.0")
-    registry_plan: provider_plan_downloads(&verification, [RefSpec]{registry_spec}, SourceTable.empty(), online) ?? panic("registry plan")
+    registry_plan: provider_plan_downloads(verification, [RefSpec]{registry_spec}, SourceTable.empty(), online) ?? panic("registry plan")
     assert_eq(registry_plan.new, 1)
     assert_eq(registry_plan.items[0].package, registry_spec.raw)
 
     offline: provider_core_test_ctx(store, true, None, None)
-    if provider_core_test_realize_error(&verification, registry_spec, SourceTable.empty(), offline) == {
+    if provider_core_test_realize_error(verification, registry_spec, SourceTable.empty(), offline) == {
         .Offline(reason) -> assert(reason.contains("--offline"))
         else -> panic("an offline registry realization must be refused as offline")
     }
     nix_spec: provider_core_test_spec("fastfetch@jetpack")
-    if provider_plan_downloads(&verification, [RefSpec]{nix_spec}, SourceTable.empty(), offline) == {
+    if provider_plan_downloads(verification, [RefSpec]{nix_spec}, SourceTable.empty(), offline) == {
         .Ok(_) -> panic("Nix planning needs a signed index")
         .Err(error) -> {
             if error == {
@@ -302,7 +302,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
             }
         }
     }
-    if provider_for(ProviderKind.Nix).realize(&verification, nix_spec, SourceTable.empty(), offline) == {
+    if provider_for(ProviderKind.Nix).realize(verification, nix_spec, SourceTable.empty(), offline) == {
         .Ok(_) -> panic("offline Nix realization without an index must fail")
         .Err(error) -> {
             if error == {
@@ -316,7 +316,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     provider_core_test_write(files.join(output, "bin/fastfetch"), "#!/bin/sh\n")
     provider_core_test_write(files.join(fixtures, provider_fixture_name(nix_spec)), "[{{\"drvPath\":\"/nix/store/test-fastfetch.drv\",\"outputs\":{{\"out\":\"{output}\"}}}}]")
     fixture_ctx: provider_core_test_ctx(store, true, Val(fixtures), None)
-    realized: provider_realize(&verification, nix_spec, SourceTable.empty(), fixture_ctx) ?? panic("fixture realization")
+    realized: provider_realize(verification, nix_spec, SourceTable.empty(), fixture_ctx) ?? panic("fixture realization")
     assert_eq(realized.source_state, SourceState.Substituted)
     assert_eq(realized.out, output)
     files.remove_all(base) ?? panic("cleanup")
@@ -405,7 +405,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
 #Test("provider shared carrier rejects unpinned external reference") {
     plan: ProviderPlanFacts.from_facts([String: String]{"action.kind": "test"}) ?? panic("plan")
     producer := ProducerRecord.new("npm", "cas:source", "source", plan, "test-toolchain", "policy=test\nplatform=any", [String: String]{}) ?? panic("producer")
-    if provider_refresh_provider_facts(&producer, "left-pad@npm") == {
+    if provider_refresh_provider_facts(producer, "left-pad@npm") == {
         .Ok(_) -> panic("an unpinned external reference must be rejected")
         .Err(error) -> {
             if error == {
@@ -480,7 +480,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     verification := StoreVerification.new()
     dir: sys.temp_dir()
     ctx: provider_core_test_ctx(dir, false, Val(files.join(dir, "definitely-not-here-xyz")), None)
-    if provider_core_test_realize_error(&verification, provider_core_test_spec("nope@jetpack"), SourceTable.empty(), ctx) == {
+    if provider_core_test_realize_error(verification, provider_core_test_spec("nope@jetpack"), SourceTable.empty(), ctx) == {
         .FixtureMissing(_) -> {}
         else -> panic("expected FixtureMissing")
     }
@@ -498,10 +498,10 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     spec: provider_core_test_spec_in("hello@mine", table)
     ctx: provider_core_test_ctx(store, false, None, None)
     assert_eq(provider_resolve_kind(spec, table, false, store), ProviderKind.Core)
-    realized: provider_realize(&verification, spec, table, ctx) ?? panic("core realization")
+    realized: provider_realize(verification, spec, table, ctx) ?? panic("core realization")
     assert_eq(realized.name, "hello")
     assert(files.is_file(files.join(realized.bin, "hello")))
-    expectation: provider_cache_expectation(&verification, spec, table, ctx) ?? panic("core cache identity")
+    expectation: provider_cache_expectation(verification, spec, table, ctx) ?? panic("core cache identity")
     assert_eq(expectation.identity, realized.cache_identity)
     shared: ProviderFacts.from_json(realized.producer.facts.get(PROVIDER_SHARED_FACTS) ?? panic("production provider embeds shared facts")) ?? panic("production provider emits provider-facts JSON")
     shared.validate() ?? panic("production provider facts are lossless")
@@ -527,9 +527,9 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     provider_core_test_write(files.join(repo, "lib/mathlib/mathlib.jet"), "mathlib: module {{ }}\n")
     table: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
     ctx: provider_core_test_ctx(store, false, None, None)
-    executable: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, ctx) ?? panic("executable")
+    executable: provider_realize(verification, provider_core_test_spec_in("hello@mine", table), table, ctx) ?? panic("executable")
     assert(executable.bin != "" && files.is_file(files.join(executable.bin, "hello")))
-    library: provider_realize(&verification, provider_core_test_spec_in("mathlib@mine", table), table, ctx) ?? panic("library")
+    library: provider_realize(verification, provider_core_test_spec_in("mathlib@mine", table), table, ctx) ?? panic("library")
     assert_eq(library.bin, "")
     assert(files.is_file(files.join(library.out, "mathlib.jet")))
     store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
@@ -548,7 +548,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         return
     }
     table: provider_core_test_table("mine", "file://{repo}#HEAD", ProviderKind.Core)
-    realized: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("remote realization")
+    realized: provider_realize(verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("remote realization")
     assert_eq(realized.name, "hello")
     assert(files.is_file(files.join(realized.bin, "hello")))
     store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
@@ -612,7 +612,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         return
     }
     table: provider_core_test_table("mine", "file://{repo}", ProviderKind.Infer)
-    realized: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("inferred realization")
+    realized: provider_realize(verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("inferred realization")
     assert_eq(realized.name, "hello")
     assert(files.is_file(files.join(realized.bin, "hello")))
     store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
@@ -639,7 +639,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     }
     upstream: "file://{repo}"
     table: provider_core_test_table("mine", upstream, ProviderKind.Core)
-    realized: provider_realize(&verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization: {err.message()}")
+    realized: provider_realize(verification, provider_core_test_spec_in("hello@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse realization: {err.message()}")
     assert_eq(realized.name, "hello")
     cache: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
     assert(files.is_file(files.join(cache, "packages/hello/package.jet")))
@@ -672,7 +672,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     }
     upstream: "file://{repo}"
     table: provider_core_test_table("mine", upstream, ProviderKind.Core)
-    provider_realize(&verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization: {err.message()}")
+    provider_realize(verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("sparse dependency realization: {err.message()}")
     cache: provider_source_cache_dir(store, RemoteSource.parse(upstream) ?? panic("remote"))
     assert(files.is_file(files.join(cache, "packages/app/package.jet")))
     assert(files.is_file(files.join(cache, "packages/logging/package.jet")))
@@ -698,7 +698,7 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
         return
     }
     table: provider_core_test_table("mine", "file://{repo}", ProviderKind.Core)
-    error: provider_core_test_realize_error(&verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None))
+    error: provider_core_test_realize_error(verification, provider_core_test_spec_in("app@mine", table), table, provider_core_test_ctx(store, false, None, None))
     assert_eq(error.code(), Val("E1233"))
     files.remove_all(base) ?? panic("cleanup")
 }
@@ -725,14 +725,14 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     table: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
     spec: provider_core_test_spec_in("hello@mine", table)
     ctx: provider_core_test_ctx(store, true, None, None)
-    realized: provider_realize(&verification, spec, table, ctx) ?? panic("canonical realization")
+    realized: provider_realize(verification, spec, table, ctx) ?? panic("canonical realization")
     assert(files.is_file(files.join(realized.out, "main.jet")))
     assert(!files.is_file(files.join(realized.out, "package.jet")))
     assert_eq(realized.version, "0.1.0")
-    before: provider_cache_expectation(&verification, spec, table, ctx) ?? panic("canonical cache identity")
+    before: provider_cache_expectation(verification, spec, table, ctx) ?? panic("canonical cache identity")
     assert_eq(before.identity, realized.cache_identity)
     files.write(files.join(source, "extra.jet"), "extra: fn() {{}}\n") ?? panic("extra source")
-    after: provider_cache_expectation(&verification, spec, table, ctx) ?? panic("changed cache identity")
+    after: provider_cache_expectation(verification, spec, table, ctx) ?? panic("changed cache identity")
     assert(before.identity.source_fingerprint != after.identity.source_fingerprint)
     assert(before.owned_output != after.owned_output)
     store_make_tree_writable_for_removal(base) ?? panic("unseal for cleanup")
@@ -750,16 +750,16 @@ provider_core_test_admitted: fn(store_path: String, hangar_path: String, digest:
     provider_core_test_write(files.join(repo, "package.jet"), "name: \"p\"\nversion: \"0.1.0\"\npackages: {{ mathlib: library }}\n")
     provider_core_test_write(files.join(repo, "lib/mathlib/mathlib.jet"), "mathlib: module {{ }}\n")
     table: provider_core_test_table("mine", "path:{repo}", ProviderKind.Core)
-    realized: provider_realize(&verification, provider_core_test_spec_in("mathlib@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("library realization")
+    realized: provider_realize(verification, provider_core_test_spec_in("mathlib@mine", table), table, provider_core_test_ctx(store, false, None, None)) ?? panic("library realization")
     assert(!realized.envelope.is_empty())
     assert(realized.envelope.output_hash.starts_with("sha256-"))
     assert(realized.envelope.platform != "")
     assert(realized.envelope.provenance.contains("mathlib@mine"))
     assert_eq(realized.envelope.signature, "")
     roots: HangarRoots{root: base, dev_mode: true}
-    entry: store_record_realized_mode(&verification, roots, realized) ?? panic("record")
+    entry: store_record_realized_mode(verification, roots, realized) ?? panic("record")
     assert_eq(entry.envelope, realized.envelope)
-    listed: store_list(&verification, roots)
+    listed: store_list(verification, roots)
     found := StoreEntry?{None}
     loop candidate in listed {
         if candidate.id == entry.id -> found = Val(candidate)

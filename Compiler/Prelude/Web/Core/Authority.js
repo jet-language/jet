@@ -1,4 +1,4 @@
-// D-AUTHORITY-NAME1=A: web carrier and narrowing operations for the ordinary
+// Web carrier and narrowing operations for the ordinary
 // Authority value.
 function jet_authority_covers(held, requested) {
   return (

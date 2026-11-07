@@ -5,8 +5,8 @@
 // means None). Event128: next0, canonical fifteen fields8..120, five owned E4
 // strings.
 //
-// The published snapshot is raw facts, not a rendered view (D-SIZE-PAYUSE1
-// A); `jet inspect` (JetCli LiveSnapshot.jet) validates and renders them.
+// The published snapshot is raw facts, not a rendered view;
+// jet_foundation's codec (Devtools/LiveSnapshot.jet) validates them for readers.
 // Little-endian words, then sections:
 //   magic "JETLIVE1", sequence, pid, captured unix ms (0 when the clock
 //   fails), elapsed ns since the run started, boot-clock ns when the writer
@@ -503,7 +503,7 @@ observe_env_key: fn(index: I64) -> I64 {
     jet_rt_free(inputs, I64{56}, I64{8})
 }
 
-// The observation start jet_rt_main runs before the entry (D-SIZE-PAYUSE1 A).
+// The observation start jet_rt_main runs before the entry.
 // Its hook is kept only in a program that links something to observe: a
 // task (Observe.jet observe_task_linked), a channel, a live value or an
 // event (the snapshot's section code words). Any other program links no

@@ -1,7 +1,7 @@
 // An argument's exact field move must not become an implicit copy.
 Run: struct { graph: [String], rest: [String] }
-consume: fn(value: ^[String]) { print(value.len()) }
-hop: fn(run: ^Run) {
-    consume(^run.graph)
+consume: fn(value: &&[String]) { print(value.len()) }
+hop: fn(run: &&Run) {
+    consume(run.graph.move())
     print(run.graph.len())
 }

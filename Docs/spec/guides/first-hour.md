@@ -3,7 +3,7 @@
 This tutorial is for a new Jet user who can open a terminal and edit a file.
 It walks through `new`, `run`, `check`, `test`, a manual correction, and
 `explain`. The executable teaching source is
-[`Examples/features/basics/onboarding/run.jet`](../../../Examples/features/basics/onboarding/run.jet);
+[`Examples/Basics/Onboarding/run.jet`](../../../Examples/Basics/Onboarding/run.jet);
 the CLI recovery behavior is exercised by
 [`tests/cases/onboarding_recovery`](../../../tests/cases/onboarding_recovery/) and the
 terminal/editor matrix by
@@ -254,7 +254,7 @@ controls.
 | Ambiguous project | Open the intended workspace member. | `jet run -p <member>` or `jet run path/to/run.jet` | Jet refuses an ambiguous bare run and tells you how to select one member or file. |
 | Legacy layout | Open the migrated canonical file. | `jet run` | One retired `main.jet` layout is renamed to `run.jet` with a notice; a canonical-plus-retired pair must be reduced to one entry. |
 | Offline or unsupported host | No editor path is usable until Jet is installed on a supported host. | Reconnect and finish install/fetch; on an unsupported release host, use the platform-specific track. | Do not continue with a partial install or replace the local workflow with a manual remote rebuild. |
-| Learn next | Open the executable first-hour example. | `jet run Examples/features/basics/first_hour.jet` | Continue with the golden-tested example and then choose the next example from its index. |
+| Learn next | Open the executable first-hour example. | `jet run Examples/Basics/FirstHour.jet` | Continue with the golden-tested example and then choose the next example from its index. |
 
 Bare `jet`, with no command, prints the command palette: every command under
 its category, as the same static text whether or not a terminal is attached.
@@ -282,7 +282,7 @@ its category, as the same static text whether or not a terminal is attached.
 From a Jet checkout, run the executable, golden-tested capstone:
 
 ```sh
-jet run Examples/features/basics/first_hour.jet
+jet run Examples/Basics/FirstHour.jet
 ```
 
 It prints the three first shipping steps:
@@ -295,6 +295,6 @@ Shipping first-hour
 ```
 
 The matching expert path is
-[`first_hour_expert.jet`](../../../Examples/features/basics/first_hour_expert.jet).
+[`first_hour_expert.jet`](../../../Examples/Basics/FirstHourExpert.jet).
 It demonstrates raw `process.args()` while the flagship keeps the typed
 `#CLI` entry short.

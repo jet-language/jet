@@ -1,7 +1,7 @@
-// D-DECL-COLON1: every declaration is written `name: value`; the colon
+// Every declaration is written `name: value`; the colon
 // pre-pass (Parser/ColonDeclarations.jet) reads each form as the item its
-// retired keyword head was, and reports the retired spellings as E0397.
-use jet_foundation.[Diagnostic, Program]
+// keyword-first head builds.
+use jet_foundation.[Program]
 
 colon_test_items: fn(program: Program) -> [String] {
     rows := [String]{}
@@ -19,7 +19,7 @@ colon_test_items: fn(program: Program) -> [String] {
             .ModuleAlias(value) -> "module alias {value.name} = {value.target}"
             else -> "other"
         }
-        &rows.push(row)
+        rows.push(row)
     }
     rows
 }
@@ -119,78 +119,23 @@ run: fn() { print(int_cache.size()) }
     assert(parser_test_stable(source).contains("        count: 1\n        print(count)\n"))
 }
 
-#Test("each retired spelling reports E0397 with the edit to its colon spelling") {
-    source: `use math :: core.math
-
-limit :: 3
-
-struct Point {
-    x: Int
-}
-
-enum Mode {
-    Fast
-}
-
-trait Shape {
-    fn area(self) -> Int
-}
-
-impl Point.Shape {
-    fn area(self) -> Int { self.x }
-}
-
-module geometry {
-    fn twice(value: Int) -> Int { value * 2 }
-}
-
-fn run() {
-    point :: Point{x: limit}
-    print("{math.abs(geometry.twice(point.area()))}")
-}
-`
-    fixed: `use math: core.math
-
-limit: 3
-
-Point: struct {
-    x: Int
-}
-
-Mode: enum {
-    Fast
-}
-
-Shape: trait {
-    area: fn(self) -> Int
-}
-
-impl Point.Shape {
-    area: fn(self) -> Int { self.x }
-}
-
-geometry: module {
-    twice: fn(value: Int) -> Int { value * 2 }
-}
-
-run: fn() {
-    point: Point{x: limit}
-    print("{math.abs(geometry.twice(point.area()))}")
-}
-`
-    diagnostics: parser_test_errors(source)
-    edits := [String]{}
-    applied := source
-    loop index in 0..<diagnostics.len() {
-        diagnostic: diagnostics[diagnostics.len() - 1 - index]
-        assert_eq(diagnostic.code, "E0397")
-        edit: diagnostic.edit ?? panic("E0397 carries its edit")
-        &edits.push(edit.new_text)
-        bytes: applied.bytes()
-        applied = "{String.from_bytes_lossy(bytes[0..<edit.span.start])}{edit.new_text}{String.from_bytes_lossy(bytes[edit.span.end..<bytes.len()])}"
+#Test("a keyword before the declared name and the `::` sigil declare nothing") {
+    sources: [String]{
+        "limit :: 3\n",
+        "struct Point {{\n    x: Int\n}}\n",
+        "fn run() {{}}\n",
+        "geometry: module {{\n    fn twice(value: Int) -> Int {{ value * 2 }}\n}}\n",
+        "Point: struct {{\n    x: Int\n    fn area(self) -> Int {{ self.x }}\n}}\n",
+        "Point: struct {{}}\nimpl Point {{\n    fn area(self) -> Int {{ 1 }}\n}}\n",
+        "Shape: trait {{\n    type Output\n}}\n",
+        "run: fn() {{\n    point :: 3\n    print(point)\n}}\n",
     }
-    &edits.reverse()
-    assert_eq(edits.join(" | "), ": | : | Point: struct | Mode: enum | Shape: trait | area: fn | area: fn | geometry: module | twice: fn | run: fn | :")
-    assert_eq(applied, fixed)
-    _: parser_test_program(fixed)
+    loop source in sources {
+        diagnostics: parser_test_errors(source)
+        assert(diagnostics.len() > 0, "no error for {source}")
+        loop diagnostic in diagnostics {
+            assert(diagnostic.edit == .None, "{source}: {diagnostic.code} carries an edit")
+        }
+    }
+    _: parser_test_program("run: fn() {{\n    fn helper() -> Int {{ 1 }}\n    print(helper())\n}}\n")
 }

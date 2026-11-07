@@ -58,7 +58,7 @@ jet run
 The same diagnostic has an executable fixture in
 [`tests/ui/unknown_function.jet`](../../../tests/ui/unknown_function.jet) and a
 matching UI snapshot. The small first-contact program is
-[`Examples/features/basics/hello.jet`](../../../Examples/features/basics/hello.jet).
+[`Examples/Basics/Hello.jet`](../../../Examples/Basics/Hello.jet).
 
 ## 2. Recover a missing entry
 

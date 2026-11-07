@@ -68,6 +68,7 @@ for (const [seed, normalized] of [["17", "17"], ["+00017", "17"], ["0", "0"], ["
 }
 check("property case count", ["cases"], {}, { status: 0, stdout: "a: pass\n1 passed, 0 failed, 0 skipped\n", stderr: "" });
 check("unknown fifth header field", ["property"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
+check("case count without rejected and seed", ["cases-bare"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
 check("case count overflow", ["cases-overflow"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
 check("truncated wire", ["malformed"], {}, { status: 101, stdout: "", stderr: "internal error: native test record is invalid\n" });
 if (failures.length) {

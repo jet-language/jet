@@ -40,7 +40,7 @@ use {
     fs.write(binary, "#!/bin/sh\nprintf 'executed\\n' > \"$VSCODE_BINARY_MARKER\"\n").expect("write hostile workspace binary")
     permissions := fs.metadata(binary).expect("stat hostile workspace binary").permissions()
     permissions.set_mode(0o755)
-    fs.set_permissions(binary, ^permissions).expect("make hostile workspace binary executable")
+    fs.set_permissions(binary, permissions).expect("make hostile workspace binary executable")
     run_file: workspace.join("src/hostile file.jet")
     fs.create_dir_all(run_file.parent().expect("run file parent")).expect("create hostile workspace source directory")
     fs.write(run_file, "run: fn() {{}}\n").expect("write hostile workspace source")

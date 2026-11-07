@@ -72,7 +72,7 @@ parse_rows: fn(input: String) -> [WeightedRow] ShardError! {
         line_start = at + 1
         if fields.weight == "" || fields.item == "" -> return Err(ShardError{message: "error: weighted shard input rows must be '<weight>\\t<item>'", code: 65})
         if !is_digits(fields.weight) -> return Err(ShardError{message: "error: weighted shard input has non-integer weight '{fields.weight}'", code: 65})
-        &rows.push(WeightedRow{weight: digits_value(fields.weight), item: fields.item})
+        rows.push(WeightedRow{weight: digits_value(fields.weight), item: fields.item})
     }
     Ok(rows)
 }
@@ -84,9 +84,9 @@ ShardPlan: struct {
 
 assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
     ordered := rows
-    &ordered.sort_by((left: WeightedRow, right: WeightedRow) -> (right.weight <=> left.weight).then(left.item <=> right.item))
+    ordered.sort_by((left: WeightedRow, right: WeightedRow) -> (right.weight <=> left.weight).then(left.item <=> right.item))
     loads := [Int]{}
-    loop _ in 0..<shard_count -> &loads.push(0)
+    loop _ in 0..<shard_count -> loads.push(0)
     selected := [String]{}
     selected_seconds := 0
     loop row in ordered {
@@ -96,7 +96,7 @@ assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: 
         }
         loads[lightest] = loads[lightest] + row.weight
         if lightest == shard_index {
-            &selected.push(row.item)
+            selected.push(row.item)
             selected_seconds += row.weight
         }
     }
@@ -112,7 +112,7 @@ assign: fn(rows: [WeightedRow], shard_index: Int, shard_count: Int, index_text: 
         spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
     }
     load_words := [String]{}
-    loop load in loads -> &load_words.push("{load}")
+    loop load in loads -> load_words.push("{load}")
     summary: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {rows.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
     ShardPlan{selected: selected, summary: summary}
 }

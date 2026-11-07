@@ -33,15 +33,15 @@ ChunkReader: struct {
 }
 Recipient: struct { id: [U8], public: crypto.X25519PublicKey }
 
-append: fn(out: &[U8], bytes: [U8]) Never! { loop byte in bytes -> &out.push(byte) }
+append: fn(out: &[U8], bytes: [U8]) Never! { loop byte in bytes -> out.push(byte) }
 bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
-    loop i in start..<end -> &out.push(raw[i])
+    loop i in start..<end -> out.push(raw[i])
     out
 }
 little: fn(value: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
-    loop i in 0..<width -> &out.push(U8{(value >> (i * 8)).bit_and(255)})
+    loop i in 0..<width -> out.push(U8{(value >> (i * 8)).bit_and(255)})
     out
 }
 integer: fn(raw: [U8], start: Int, width: Int) -> Int Never! {
@@ -58,46 +58,46 @@ order: fn(left: [U8], right: [U8]) -> Int Never! {
 }
 id: fn(public: [U8]) -> [U8] Never! {
     material := "JETC2 recipient id".bytes()
-    append(&material, public)
+    append(material, public)
     bytes(crypto.sha256(material).bytes, 0, 16)
 }
 nonce: fn(prefix: [U8], index: Int) -> [U8] Never! {
     out := prefix.copy()
-    append(&out, little(index, 8))
+    append(out, little(index, 8))
     out
 }
 info: fn(domain: String, ephemeral: [U8], recipient: [U8]) -> [U8] Never! {
     out := domain.bytes()
-    append(&out, ephemeral)
-    append(&out, recipient)
+    append(out, ephemeral)
+    append(out, recipient)
     out
 }
 wrap_aad: fn(fixed: [U8], base: [U8], recipient_id: [U8], public: [U8]) -> [U8] Never! {
     out := "JETC2 wrap aad".bytes()
-    append(&out, fixed)
-    append(&out, base)
-    append(&out, recipient_id)
-    append(&out, public)
+    append(out, fixed)
+    append(out, base)
+    append(out, recipient_id)
+    append(out, public)
     out
 }
 header_aad: fn(fixed: [U8], header: [U8]) -> [U8] Never! {
     out := "JETC2 header".bytes()
-    append(&out, fixed)
-    append(&out, header)
+    append(out, fixed)
+    append(out, header)
     out
 }
 chunk_aad: fn(hash: [U8], index: Int, length: Int, flags: U8) -> [U8] Never! {
     out := "JETC2 chunk".bytes()
-    append(&out, hash)
-    append(&out, little(index, 8))
-    append(&out, little(length, 4))
-    &out.push(flags)
+    append(out, hash)
+    append(out, little(index, 8))
+    append(out, little(length, 4))
+    out.push(flags)
     out
 }
 seal: fn(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
     #Unsafe("Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains") {
         if expert.xchacha20poly1305_seal(key, nonce, plain, aad) == {
-            .Ok(bytes) -> return Ok(^bytes)
+            .Ok(bytes) -> return Ok(bytes)
             .Err(_) -> return Err(.SealFailed)
         }
     }
@@ -115,11 +115,11 @@ derive_key: fn(shared: crypto.SharedSecret, salt: [U8], context: [U8], width: In
         material := expert.shared_secret_bytes(shared)
         if crypto.hkdf_sha256(material, salt, context, width) == {
             .Ok(value) -> {
-                crypto.wipe(&material)
-                return Ok(^value)
+                crypto.wipe(material)
+                return Ok(value)
             }
             .Err(error) -> {
-                crypto.wipe(&material)
+                crypto.wipe(material)
                 return Err(error)
             }
         }
@@ -130,11 +130,11 @@ seal_key: fn(key: crypto.Secret, nonce: [U8], plain: [U8], aad: [U8]) -> [U8] cr
         material := expert.secret_bytes(key)
         if seal(material, nonce, plain, aad) == {
             .Ok(value) -> {
-                crypto.wipe(&material)
-                return Ok(^value)
+                crypto.wipe(material)
+                return Ok(value)
             }
             .Err(error) -> {
-                crypto.wipe(&material)
+                crypto.wipe(material)
                 return Err(error)
             }
         }
@@ -145,11 +145,11 @@ open_key: fn(key: crypto.Secret, nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] c
         material := expert.secret_bytes(key)
         if open_record(material, nonce, cipher, aad) == {
             .Ok(value) -> {
-                crypto.wipe(&material)
-                return Ok(^value)
+                crypto.wipe(material)
+                return Ok(value)
             }
             .Err(error) -> {
-                crypto.wipe(&material)
+                crypto.wipe(material)
                 return Err(error)
             }
         }
@@ -161,13 +161,13 @@ seal_wrap: fn(key: crypto.Secret, nonce: crypto.Secret, plain: crypto.Secret, aa
         plain_bytes := expert.secret_bytes(plain)
         if seal_key(key, nonce_bytes, plain_bytes, aad) == {
             .Ok(value) -> {
-                crypto.wipe(&nonce_bytes)
-                crypto.wipe(&plain_bytes)
-                return Ok(^value)
+                crypto.wipe(nonce_bytes)
+                crypto.wipe(plain_bytes)
+                return Ok(value)
             }
             .Err(error) -> {
-                crypto.wipe(&nonce_bytes)
-                crypto.wipe(&plain_bytes)
+                crypto.wipe(nonce_bytes)
+                crypto.wipe(plain_bytes)
                 return Err(error)
             }
         }
@@ -178,11 +178,11 @@ open_wrap: fn(key: crypto.Secret, nonce: crypto.Secret, cipher: [U8], aad: [U8])
         nonce_bytes := expert.secret_bytes(nonce)
         if open_key(key, nonce_bytes, cipher, aad) == {
             .Ok(value) -> {
-                crypto.wipe(&nonce_bytes)
-                return Ok(^value)
+                crypto.wipe(nonce_bytes)
+                return Ok(value)
             }
             .Err(error) -> {
-                crypto.wipe(&nonce_bytes)
+                crypto.wipe(nonce_bytes)
                 return Err(error)
             }
         }
@@ -210,7 +210,7 @@ canonical: fn(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCr
     sorted := [Recipient]{}
     loop public in recipients {
         if public.bytes.len() != 32 -> return Err(.SealFailed)
-        &sorted.push(Recipient{id: id(public.bytes), public: public})
+        sorted.push(Recipient{id: id(public.bytes), public: public})
     }
     loop i in 1..<sorted.len() {
         current: sorted[i]
@@ -235,7 +235,7 @@ secret_length: fn(secret: crypto.Secret) -> Int Never! {
     #Unsafe("Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy") {
         material := expert.secret_bytes(secret)
         length: material.len()
-        crypto.wipe(&material)
+        crypto.wipe(material)
         return length
     }
 }
@@ -265,7 +265,7 @@ secret_length: fn(secret: crypto.Secret) -> Int Never! {
 // Exactly four independent draws, supplied after source snapshot/revalidation:
 // file id 16, key 32, ephemeral secret 32, nonce prefix 16.
 writer: fn(sorted: [Recipient], plain_length: Int,
-    file_id: [U8], file_key: ^crypto.Secret, ephemeral_secret: ^crypto.Secret,
+    file_id: [U8], file_key: &&crypto.Secret, ephemeral_secret: &&crypto.Secret,
     nonce_prefix: [U8]) -> Writer crypto.FileCryptoError! {
     body: body_length(plain_length) ?? return Err(.SourceIO)
     if file_id.len() != 16 || secret_length(file_key) != 32 || secret_length(ephemeral_secret) != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed)
@@ -274,43 +274,43 @@ writer: fn(sorted: [Recipient], plain_length: Int,
         ephemeral_key = crypto.X25519SecretKey.from_bytes(expert.secret_bytes(ephemeral_secret)) ?? return Err(.SealFailed)
     }
     ephemeral: if crypto.x25519_public(ephemeral_key) == {
-        .Ok(value) -> ^value
+        .Ok(value) -> value.move()
         .Err(_) -> { return Err(.SealFailed) }
     }
     fixed := [U8]{74, 69, 84, 67, 2, 1, 1, 0}
-    append(&fixed, little(BASE + STANZA * sorted.len() + TAG, 4))
-    append(&fixed, little(body, 8))
+    append(fixed, little(BASE + STANZA * sorted.len() + TAG, 4))
+    append(fixed, little(body, 8))
     header := file_id.copy()
-    append(&header, ephemeral.bytes)
-    append(&header, nonce_prefix)
-    append(&header, little(CHUNK, 4))
-    append(&header, little(sorted.len(), 2))
-    append(&header, little(0, 4))
+    append(header, ephemeral.bytes)
+    append(header, nonce_prefix)
+    append(header, little(CHUNK, 4))
+    append(header, little(sorted.len(), 2))
+    append(header, little(0, 4))
     base: header.copy()
     loop recipient in sorted {
         shared: if crypto.x25519(ephemeral_key, recipient.public) == {
-            .Ok(value) -> ^value
+            .Ok(value) -> value.move()
             .Err(_) -> { return Err(.SealFailed) }
         }
         kek: if derive_key(shared, file_id, info("JETC2 wrap key", ephemeral.bytes, recipient.public.bytes), 32) == {
-            .Ok(value) -> ^value
+            .Ok(value) -> value.move()
             .Err(_) -> { return Err(.SealFailed) }
         }
         wrap_nonce: if derive_key(shared, file_id, info("JETC2 wrap nonce", ephemeral.bytes, recipient.public.bytes), 24) == {
-            .Ok(value) -> ^value
+            .Ok(value) -> value.move()
             .Err(_) -> { return Err(.SealFailed) }
         }
         wrapped: seal_wrap(kek, wrap_nonce, file_key, wrap_aad(fixed, base, recipient.id, recipient.public.bytes))
-        append(&header, recipient.id)
-        append(&header, recipient.public.bytes)
-        append(&header, wrapped)
+        append(header, recipient.id)
+        append(header, recipient.public.bytes)
+        append(header, wrapped)
     }
     auth_tag: seal_key(file_key, nonce(nonce_prefix, 0), [U8]{}, header_aad(fixed, header))
-    append(&header, auth_tag)
+    append(header, auth_tag)
     prefix := fixed.copy()
-    append(&prefix, header)
+    append(prefix, header)
     hash: crypto.sha256(prefix).bytes
-    Ok(Writer{prefix: prefix, header_hash: hash, key: ^file_key,
+    Ok(Writer{prefix: prefix, header_hash: hash, key: file_key.move(),
         nonce_prefix: nonce_prefix, remaining: plain_length, index: 1, final: false})
 }
 
@@ -323,7 +323,7 @@ seal_chunk: fn(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
     encrypted: seal_key(state.key, nonce(state.nonce_prefix, state.index), plain,
         chunk_aad(state.header_hash, state.index, expected, flags))
     record := little(expected, 4)
-    &record.push(flags)
+    record.push(flags)
     state.remaining -= expected
     state.index += 1
     state.final = flags == (U8{1})
@@ -379,8 +379,8 @@ reader: fn(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: I
     opened: open_key(key, nonce(prefix, 0), bytes(header, length - TAG, length), header_aad(fixed, bytes(header, 0, length - TAG)))
     if opened.len() != 0 -> return Err(.OpenFailed)
     all := fixed.copy()
-    append(&all, header)
-    Ok(ChunkReader{header_hash: crypto.sha256(all).bytes, key: ^key, nonce_prefix: prefix,
+    append(all, header)
+    Ok(ChunkReader{header_hash: crypto.sha256(all).bytes, key: key.move(), nonce_prefix: prefix,
         remaining: integer(fixed, 12, 8), index: 1, final: false})
 }
 open_chunk: fn(state: &ChunkReader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
@@ -394,7 +394,7 @@ open_chunk: fn(state: &ChunkReader, framing: [U8], encrypted: [U8]) -> crypto.Se
     state.remaining -= length + 21
     state.index += 1
     state.final = flags == (U8{1})
-    Ok(^clear)
+    Ok(clear)
 }
 finish: fn(state: ChunkReader, trailing: [U8]) crypto.FileCryptoError! {
     if !state.final || state.remaining != 0 || trailing.len() != 0 -> return Err(.OpenFailed)
@@ -427,8 +427,8 @@ finish: fn(state: ChunkReader, trailing: [U8]) crypto.FileCryptoError! {
         identity_bytes := [U8]{}
         other_bytes := [U8]{}
         loop _ in 0..<32 {
-            &identity_bytes.push(U8{7})
-            &other_bytes.push(U8{9})
+            identity_bytes.push(U8{7})
+            other_bytes.push(U8{9})
         }
         identity: crypto.X25519SecretKey{bytes: identity_bytes}
         other: crypto.X25519SecretKey{bytes: other_bytes}
@@ -439,14 +439,14 @@ finish: fn(state: ChunkReader, trailing: [U8]) crypto.FileCryptoError! {
         key := [U8]{}
         ephemeral := [U8]{}
         prefix := [U8]{}
-        loop i in 0..<16 -> &file_id.push(U8{i})
-        loop i in 16..<48 -> &key.push(U8{i})
-        loop i in 48..<80 -> &ephemeral.push(U8{i})
-        loop i in 80..<96 -> &prefix.push(U8{i})
+        loop i in 0..<16 -> file_id.push(U8{i})
+        loop i in 16..<48 -> key.push(U8{i})
+        loop i in 48..<80 -> ephemeral.push(U8{i})
+        loop i in 80..<96 -> prefix.push(U8{i})
         file_key: crypto.Secret{bytes: key}
         ephemeral_secret: crypto.Secret{bytes: ephemeral}
         state := writer(recipients, lengths[case], file_id,
-            ^file_key, ^ephemeral_secret, prefix) ?? panic("writer")
+            file_key, ephemeral_secret, prefix) ?? panic("writer")
         decoded := reader(identity, bytes(state.prefix, 0, 20),
             bytes(state.prefix, 20, state.prefix.len()), state.prefix.len() + (body_length(lengths[case]) ?? -1)) ?? panic("reader")
         container := state.prefix.copy()
@@ -454,11 +454,11 @@ finish: fn(state: ChunkReader, trailing: [U8]) crypto.FileCryptoError! {
         loop !state.final {
             count: if state.remaining >= CHUNK -> CHUNK else -> state.remaining
             plain := [U8]{}
-            loop i in 0..<count -> &plain.push(U8{(offset + i) %% 251})
-            record: seal_chunk(&state, plain) ?? panic("seal record")
-            append(&container, record.framing)
-            append(&container, record.cipher)
-            clear: open_chunk(&decoded, record.framing, record.cipher) ?? panic("open record")
+            loop i in 0..<count -> plain.push(U8{(offset + i) %% 251})
+            record: seal_chunk(state, plain) ?? panic("seal record")
+            append(container, record.framing)
+            append(container, record.cipher)
+            clear: open_chunk(decoded, record.framing, record.cipher) ?? panic("open record")
             assert(crypto.constant_time_equal(clear, crypto.Secret.from_bytes(plain)))
             offset += count
         }

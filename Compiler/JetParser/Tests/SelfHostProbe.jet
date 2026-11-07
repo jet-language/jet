@@ -10,10 +10,10 @@ use {
 
 selfhost_parser_text: fn(facts: &[Int], text: String) {
     bytes := text.bytes()
-    &facts.push(bytes.len())
+    facts.push(bytes.len())
     index := 0
     loop index < bytes.len() {
-        &facts.push(Int.from_u8(bytes[index]))
+        facts.push(Int.from_u8(bytes[index]))
         index += 1
     }
 }
@@ -21,64 +21,64 @@ selfhost_parser_text: fn(facts: &[Int], text: String) {
 selfhost_parser_label: fn(facts: &[Int], label: CallLabel?) {
     if label == {
         .Val(value) -> {
-            &facts.push(1)
-            selfhost_parser_text(&facts, value.name)
-            &facts.push(value.span.start)
-            &facts.push(value.span.end)
+            facts.push(1)
+            selfhost_parser_text(facts, value.name)
+            facts.push(value.span.start)
+            facts.push(value.span.end)
         }
-        .None -> &facts.push(0)
+        .None -> facts.push(0)
     }
 }
 
 selfhost_parser_expr: fn(facts: &[Int], expression: Expr) {
     if expression == {
         .Ident(name, span, _) -> {
-            &facts.push(1)
-            selfhost_parser_text(&facts, name)
-            &facts.push(span.start)
-            &facts.push(span.end)
+            facts.push(1)
+            selfhost_parser_text(facts, name)
+            facts.push(span.start)
+            facts.push(span.end)
         }
         .Spread(value, span, _) -> {
-            &facts.push(2)
-            &facts.push(span.start)
-            &facts.push(span.end)
-            selfhost_parser_expr(&facts, value)
+            facts.push(2)
+            facts.push(span.start)
+            facts.push(span.end)
+            selfhost_parser_expr(facts, value)
         }
         .Field(base, member, span, _) -> {
-            &facts.push(3)
-            selfhost_parser_text(&facts, member)
-            &facts.push(span.start)
-            &facts.push(span.end)
-            selfhost_parser_expr(&facts, base)
+            facts.push(3)
+            selfhost_parser_text(facts, member)
+            facts.push(span.start)
+            facts.push(span.end)
+            selfhost_parser_expr(facts, base)
         }
         .OptField(base, member, member_span, _, span, _) -> {
-            &facts.push(5)
-            selfhost_parser_text(&facts, member)
-            &facts.push(member_span.start)
-            &facts.push(member_span.end)
-            &facts.push(span.start)
-            &facts.push(span.end)
-            selfhost_parser_expr(&facts, base)
+            facts.push(5)
+            selfhost_parser_text(facts, member)
+            facts.push(member_span.start)
+            facts.push(member_span.end)
+            facts.push(span.start)
+            facts.push(span.end)
+            selfhost_parser_expr(facts, base)
         }
         .OptMethodCall(receiver, method, method_span, _, args, span, _) -> {
-            &facts.push(6)
-            selfhost_parser_text(&facts, method)
-            &facts.push(method_span.start)
-            &facts.push(method_span.end)
-            &facts.push(span.start)
-            &facts.push(span.end)
-            &facts.push(args.len())
-            loop argument in args -> selfhost_parser_call_arg(&facts, argument)
-            selfhost_parser_expr(&facts, receiver)
+            facts.push(6)
+            selfhost_parser_text(facts, method)
+            facts.push(method_span.start)
+            facts.push(method_span.end)
+            facts.push(span.start)
+            facts.push(span.end)
+            facts.push(args.len())
+            loop argument in args -> selfhost_parser_call_arg(facts, argument)
+            selfhost_parser_expr(facts, receiver)
         }
         .MethodCall(receiver, method, _, _, _, args, _) -> {
-            &facts.push(7)
-            selfhost_parser_text(&facts, method)
-            &facts.push(args.len())
-            loop argument in args -> selfhost_parser_call_arg(&facts, argument)
-            selfhost_parser_expr(&facts, receiver)
+            facts.push(7)
+            selfhost_parser_text(facts, method)
+            facts.push(args.len())
+            loop argument in args -> selfhost_parser_call_arg(facts, argument)
+            selfhost_parser_expr(facts, receiver)
         }
-        else -> &facts.push(0)
+        else -> facts.push(0)
     }
 }
 
@@ -86,29 +86,29 @@ selfhost_parser_call_arg: fn(facts: &[Int], argument: CallArg) {
     convention := 0
     if argument.convention == AccessConvention.Write -> convention = 1
     if argument.convention == AccessConvention.Move -> convention = 2
-    &facts.push(convention)
-    &facts.push(argument.span.start)
-    &facts.push(argument.span.end)
+    facts.push(convention)
+    facts.push(argument.span.start)
+    facts.push(argument.span.end)
     spread := 0
     if argument.spread -> spread = 1
-    &facts.push(spread)
-    selfhost_parser_label(&facts, argument.label)
-    selfhost_parser_expr(&facts, argument.expr)
+    facts.push(spread)
+    selfhost_parser_label(facts, argument.label)
+    selfhost_parser_expr(facts, argument.expr)
 }
 
 selfhost_parser_marker: fn(facts: &[Int], marker: Marker) {
-    &facts.push(marker.args.len())
+    facts.push(marker.args.len())
     index := 0
     loop index < marker.args.len() {
         label := CallLabel?{None}
         if index < marker.arg_labels.len() -> label = marker.arg_labels[index]
-        selfhost_parser_label(&facts, label)
+        selfhost_parser_label(facts, label)
         if marker.args[index] == {
-            .Expr(value) -> selfhost_parser_expr(&facts, value)
+            .Expr(value) -> selfhost_parser_expr(facts, value)
             .EffectRow(_, span) -> {
-                &facts.push(4)
-                &facts.push(span.start)
-                &facts.push(span.end)
+                facts.push(4)
+                facts.push(span.start)
+                facts.push(span.end)
             }
         }
         index += 1
@@ -116,34 +116,34 @@ selfhost_parser_marker: fn(facts: &[Int], marker: Marker) {
 }
 
 selfhost_parser_diagnostic: fn(facts: &[Int], diagnostic: Diagnostic) {
-    selfhost_parser_text(&facts, diagnostic.code)
-    &facts.push(diagnostic.severity)
-    selfhost_parser_text(&facts, diagnostic.what)
-    selfhost_parser_text(&facts, diagnostic.why)
-    selfhost_parser_text(&facts, diagnostic.fix)
+    selfhost_parser_text(facts, diagnostic.code)
+    facts.push(diagnostic.severity)
+    selfhost_parser_text(facts, diagnostic.what)
+    selfhost_parser_text(facts, diagnostic.why)
+    selfhost_parser_text(facts, diagnostic.fix)
     if diagnostic.span == {
         .Val(span) -> {
-            &facts.push(1)
-            &facts.push(span.start)
-            &facts.push(span.end)
+            facts.push(1)
+            facts.push(span.start)
+            facts.push(span.end)
         }
-        .None -> &facts.push(0)
+        .None -> facts.push(0)
     }
     if diagnostic.edit == {
         .Val(edit) -> {
-            &facts.push(1)
-            &facts.push(edit.span.start)
-            &facts.push(edit.span.end)
-            selfhost_parser_text(&facts, edit.new_text)
+            facts.push(1)
+            facts.push(edit.span.start)
+            facts.push(edit.span.end)
+            selfhost_parser_text(facts, edit.new_text)
         }
-        .None -> &facts.push(0)
+        .None -> facts.push(0)
     }
     applicability := 0
     if diagnostic.applicability == .Val(value) {
         if value == DiagnosticFixApplicability.Safe -> applicability = 1
         if value == DiagnosticFixApplicability.Suggested -> applicability = 2
     }
-    &facts.push(applicability)
+    facts.push(applicability)
     safety := 0
     if diagnostic.safety == .Val(value) {
         if value == DiagnosticFixSafety.Formatting -> safety = 1
@@ -152,12 +152,12 @@ selfhost_parser_diagnostic: fn(facts: &[Int], diagnostic: Diagnostic) {
         if value == DiagnosticFixSafety.TargetChanging -> safety = 4
         if value == DiagnosticFixSafety.NeedsReview -> safety = 5
     }
-    &facts.push(safety)
-    &facts.push(diagnostic.labels.len())
+    facts.push(safety)
+    facts.push(diagnostic.labels.len())
     loop label in diagnostic.labels {
-        &facts.push(label.span.start)
-        &facts.push(label.span.end)
-        selfhost_parser_text(&facts, label.message)
+        facts.push(label.span.start)
+        facts.push(label.span.end)
+        selfhost_parser_text(facts, label.message)
     }
 }
 
@@ -167,10 +167,10 @@ selfhost_parser_probe: fn(source: [U8]) -> [Int] {
 
 selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
     facts := [Int]{}
-    &facts.push(parsed.diagnostics.len())
+    facts.push(parsed.diagnostics.len())
     index := 0
     loop index < parsed.diagnostics.len() {
-        selfhost_parser_diagnostic(&facts, parsed.diagnostics[index])
+        selfhost_parser_diagnostic(facts, parsed.diagnostics[index])
         index += 1
     }
 
@@ -181,8 +181,8 @@ selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
         index += 1
     }
     if !show_ast {
-        &facts.push(0)
-        &facts.push(0)
+        facts.push(0)
+        facts.push(0)
         return facts
     }
 
@@ -192,11 +192,11 @@ selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
             .Expr(expression) -> {
                 if expression == {
                     .Call(call, _) -> {
-                        &facts.push(1)
-                        &facts.push(call.args.len())
+                        facts.push(1)
+                        facts.push(call.args.len())
                         index = 0
                         loop index < call.args.len() {
-                            selfhost_parser_call_arg(&facts, call.args[index])
+                            selfhost_parser_call_arg(facts, call.args[index])
                             index += 1
                         }
                         return facts
@@ -205,8 +205,8 @@ selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
                 }
             }
             .Switched(marker, _, _) -> {
-                &facts.push(3)
-                selfhost_parser_marker(&facts, marker)
+                facts.push(3)
+                selfhost_parser_marker(facts, marker)
                 return facts
             }
             else -> {}
@@ -218,15 +218,15 @@ selfhost_parser_result_facts: fn(parsed: ParseResult) -> [Int] {
         if item == {
             .Func(function) -> {
                 if function.markers.len() > 0 {
-                    &facts.push(2)
-                    selfhost_parser_marker(&facts, function.markers[0])
+                    facts.push(2)
+                    selfhost_parser_marker(facts, function.markers[0])
                     return facts
                 }
             }
             else -> {}
         }
     }
-    &facts.push(0)
-    &facts.push(0)
+    facts.push(0)
+    facts.push(0)
     facts
 }

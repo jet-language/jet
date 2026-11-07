@@ -388,7 +388,7 @@ NixClosureRecord: struct {
         loop reference in self.references {
             if !pkg_lock_is_cas_digest(reference) -> return Err(LockError.Invalid("Nix closure record contains an invalid reference identity"))
             if seen.contains(reference) -> return Err(LockError.Invalid("Nix closure record repeats an ordered reference"))
-            &seen.push(reference)
+            seen.push(reference.copy())
         }
         if self.size == 0 || self.size > PKG_MAX_NIX_NAR_SIZE -> return Err(LockError.Invalid("Nix closure record has an invalid NAR size"))
     }

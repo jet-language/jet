@@ -16,7 +16,7 @@ cli_cmd_search: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPa
         theme.error("search needs a query", "`jet search` reads the local discovery index; it never fetches.", "write `jet search postgres`.")
         return EXIT_USAGE
     }
-    index: cli_discovery_index(&verification, &cache, theme, parsed) ?? return cli_update_exit_code(err)
+    index: cli_discovery_index(verification, cache, theme, parsed) ?? return cli_update_exit_code(err)
     records: index.search(query)
     if parsed.flags.json {
         print(env_discovery_search_json(records))
@@ -38,7 +38,7 @@ cli_cmd_info: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPars
         theme.error("info needs a package ref", "`jet info` reads the local discovery index; it never fetches.", "write `jet info default.ripgrep`.")
         return EXIT_USAGE
     }
-    index: cli_discovery_index(&verification, &cache, theme, parsed) ?? return cli_update_exit_code(err)
+    index: cli_discovery_index(verification, cache, theme, parsed) ?? return cli_update_exit_code(err)
     record: index.info(query) ?? {
         fix: if index.nearest(query) == {
             .Val(nearest) -> "try `jet info {nearest}`."
@@ -80,13 +80,13 @@ cli_discovery_index: fn(verification: &StoreVerification, cache: &WorkspaceDecla
         }
     }
     roots: pkg_resolve_roots()
-    store_entries: store_list(&verification, roots)
-    env_discovery_merge_store_entries(&index, store_entries)
-    if pkg_lock_load(project_dir) == .Val(lock) -> env_discovery_merge_lock(&index, lock)
+    store_entries: store_list(verification, roots)
+    env_discovery_merge_store_entries(index, store_entries)
+    if pkg_lock_load(project_dir) == .Val(lock) -> env_discovery_merge_lock(index, lock)
     if files.exists(EnvFile.path_in(project_dir)) {
-        plan: cli_load_project_plan(&cache, theme)
-        env_discovery_merge_refs(&index, plan.refs, cli_fixtures_for(parsed.flags), store_entries)
-        env_discovery_merge_adapters(&index, plan.adapters)
+        plan: cli_load_project_plan(cache, theme)
+        env_discovery_merge_refs(index, plan.refs, cli_fixtures_for(parsed.flags), store_entries)
+        env_discovery_merge_adapters(index, plan.adapters)
         env_discovery_write(project_dir, index) ?? {
             theme.error("couldn't write local discovery index", err.message, "check permissions on `.jet/discovery/`.")
             return Err(CLIError.Reported(EXIT_USAGE))
@@ -157,8 +157,8 @@ cli_cmd_override: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, 
         .Val(halves) -> halves.before
         .None -> reference
     }
-    workspace: cli_workspace_root(&cache, cli_current_dir())
-    path: if pkg_resolve_workspace_source(&cache, workspace) == {
+    workspace: cli_workspace_root(cache, cli_current_dir())
+    path: if pkg_resolve_workspace_source(cache, workspace) == {
         .Ok(found) -> if found == {
             .Val(source) -> source.path
             .None -> files.join(workspace, WORKSPACE_FILE)
@@ -194,7 +194,7 @@ cli_cmd_logs: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
             .Ok(found) -> {
                 text: found ?? return cli_missing_logs(theme, package)
                 stdout_handle := term.stdout()
-                &stdout_handle.write(text).drop("log output is best-effort")
+                stdout_handle.write(text).drop("log output is best-effort")
                 return EXIT_OK
             }
             .Err(error) -> return cli_read_logs_error(theme, error.message())
@@ -204,7 +204,7 @@ cli_cmd_logs: fn(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time
             .Ok(found) -> {
                 attempt: found ?? return cli_missing_logs(theme, package)
                 stdout_handle := term.stdout()
-                &stdout_handle.write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
+                stdout_handle.write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
                 return EXIT_OK
             }
             .Err(error) -> return cli_read_logs_error(theme, error.message())

@@ -1,0 +1,216 @@
+// Ports of the deleted public-API producer tests (#6096 c13, c24, c62) from
+// tests/pkg.rs:5903-6268. The Rust extract_public_api_for_package(source,
+// path, package) maps to jet_cli_publish_public_api over a one-file package
+// with that name, ApiFreeze snapshots map to the api_version 4 text
+// pkg_api_snapshot_render writes and publication_api_snapshot_items reads
+// back, and diff_public_api maps to publication_diff_public_api. The
+// Rust-era `^T` take sigil is `&&T`. A test marked expected_fail states a
+// behavior the producer does not have yet; its comment names the gap.
+use {
+    jet_cli.[jet_cli_publish_public_api]
+    jet_foundation.[PublicAPIItem]
+    jet_pkg_model.[PKG_API_SNAPSHOT_VERSION, pkg_api_snapshot_render, pkg_capability_snapshot_parse]
+    jetpack_publication.[PublicationBreakingChange, publication_api_snapshot_items, publication_diff_public_api]
+    pap_files: core.files
+    pap_process: core.process
+    pap_sys: core.sys
+}
+
+PapFixtureRoot: struct { path: String }
+impl PapFixtureRoot.Close {
+    close: fn(&&self) -[FS]> {
+        pap_files.remove_all(self.path).drop("test root cleanup")
+    }
+}
+
+pap_root: fn(label: String) -[FS, Env]> String {
+    root: pap_files.join(pap_sys.temp_dir(), "jet-public-api-{label}-{pap_process.current_pid()}")
+    pap_files.remove_all(root).drop("a stale test root may be absent")
+    pap_files.create_dir_all(root) ?? panic("create public API test root")
+    pap_files.realpath(root) ?? panic("canonical public API test root")
+}
+
+// The rows `jet registry publish` freezes for a one-file package named
+// `package` whose entry is `source`, in its own directory `root/label`.
+pap_api: fn(root: String, label: String, package: String, source: String) -> [PublicAPIItem] {
+    dir: pap_files.join(root, label)
+    pap_files.create_dir_all(dir) ?? panic("create {dir}")
+    pap_files.write(pap_files.join(dir, "package.jet"), "name: \"{package}\"\nversion: \"1.0.0\"\nedition: \"2026\"\n") ?? panic("write {dir}/package.jet")
+    entry: pap_files.join(dir, "main.jet")
+    pap_files.write(entry, source) ?? panic("write {entry}")
+    api: jet_cli_publish_public_api(dir, entry, false)
+    if api.refusal != "" -> panic("{label} does not compile:\n{api.refusal}")
+    api.rows
+}
+
+// The rows a published snapshot of `rows` reads back as: what the next
+// publish of the package diffs against.
+pap_frozen: fn(package: String, rows: [PublicAPIItem]) -> [PublicAPIItem] {
+    text: pkg_api_snapshot_render(package, "1.0.0", loop row in rows -> row.signature.copy())
+    snapshot: pkg_capability_snapshot_parse(text) ?? panic("the snapshot of {package} does not parse:\n{text}")
+    assert_eq(snapshot.api_version, PKG_API_SNAPSHOT_VERSION)
+    publication_api_snapshot_items(snapshot)
+}
+
+pap_find: fn(rows: [PublicAPIItem], name: String) -> PublicAPIItem {
+    loop row in rows {
+        if row.name == name -> return row.copy()
+    }
+    panic("no public API row `{name}` in:\n{pap_text(rows)}")
+}
+
+pap_text: fn(rows: [PublicAPIItem]) -> String {
+    (loop row in rows -> row.signature.copy()).join("\n")
+}
+
+pap_changes: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] {
+    publication_diff_public_api(old, new)
+}
+
+// tests/pkg.rs:5903 capability_sigil_frozen_in_public_api.
+#Test("capability_sigil_frozen_in_public_api") {
+    root: pap_root("sigil")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    write_api: pap_api(root, "write", "bank", "Account: struct {{ balance: Int }}\ndeposit: fn(a: &Account, amount: Int) -> Int {{\n    a.balance = a.balance + amount\n    a.balance\n}}\n")
+    deposit: pap_find(write_api, "deposit")
+    assert(deposit.signature.contains("a: &Account"), "the write sigil is frozen onto the parameter type, got `{deposit.signature}`")
+    read_api: pap_api(root, "read", "bank", "Account: struct {{ balance: Int }}\ndeposit: fn(a: Account, amount: Int) -> Int {{ a.balance + amount }}\n")
+    assert(pap_changes(read_api, write_api).len() > 0, "a read -> write capability drift on a public fn is a breaking change")
+}
+
+// tests/pkg.rs:5949 cli_typed_default_is_not_frozen_as_positional (c62).
+// A typed default keeps its field a flag (`= _`), and the required field's
+// bare positional is frozen: declaration order is part of the command
+// interface (spec.md "Field mapping").
+#Test("cli_typed_default_is_not_frozen_as_positional") {
+    root: pap_root("cli-default")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    api: pap_api(root, "config", "config", "#CLI\nConfig: struct {{\n    port: Int{{3000}}\n    required: Int\n}}\n")
+    assert_eq(pap_find(api, "Config").signature, "struct Config")
+    port: pap_find(api, "Config.port").signature
+    assert_eq(port, "field Config.port: Int = _")
+    required: pap_find(api, "Config.required").signature
+    assert_eq(required, "field Config.required: Int [positional 0]")
+}
+
+// tests/pkg.rs:5967 physical_unit_api_freeze_and_semver_share_one_canonical_signature (c24).
+// Only the families a package declares are its rows: a package that names
+// the standard Length family through a bound freezes its `keep`, not the
+// core.units family, so moving `keep` to a Time bound is one change.
+#Test("physical_unit_api_freeze_and_semver_share_one_canonical_signature") {
+    root: pap_root("unit-freeze")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    current: "#UnitFamily(Length, base: meter) {{\n    meter\n    millimeter(scale: 1/1000)\n}}\ndistance: fn() -> Millimeter {{ Millimeter.from_float(1.0) }}\n"
+    current_api: pap_api(root, "current", "physics", current)
+    frozen: pap_frozen("physics", current_api)
+    assert_eq(pap_changes(frozen, current_api).len(), 0)
+    assert_eq(pap_changes(current_api, frozen).len(), 0)
+
+    changed_api: pap_api(root, "changed", "physics", "#UnitFamily(Length, base: meter) {{\n    meter\n    millimeter(scale: 1/100)\n}}\ndistance: fn() -> Millimeter {{ Millimeter.from_float(1.0) }}\n")
+    assert_eq(pap_changes(current_api, changed_api).len(), 1)
+    foreign_api: pap_api(root, "foreign", "geometry", current)
+    assert_eq(pap_changes(current_api, foreign_api).len(), 1)
+
+    affine_api: pap_api(root, "affine", "physics", "#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}}\ntarget: fn() -> CelsiusPoint {{ CelsiusPoint.from_float(20.0) }}\n")
+    shifted_api: pap_api(root, "shifted", "physics", "#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27415/100)\n}}\ntarget: fn() -> CelsiusPoint {{ CelsiusPoint.from_float(20.0) }}\n")
+    assert_eq(pap_changes(affine_api, shifted_api).len(), 1)
+
+    length_api: pap_api(root, "length", "physics", "keep: fn<Q: Quantity<Length, .Linear>>(value: &&Q) -> Q {{ value }}\n")
+    time_api: pap_api(root, "time", "physics", "keep: fn<Q: Quantity<Time, .Linear>>(value: &&Q) -> Q {{ value }}\n")
+    assert_eq(pap_find(length_api, "keep").signature, "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) Q Never! -[]>")
+    keep_changes: pap_changes(length_api, time_api)
+    assert(keep_changes.len() == 1, "{keep_changes.len()} changes\nLength API:\n{pap_text(length_api)}\nTime API:\n{pap_text(time_api)}")
+}
+
+// tests/pkg.rs:6066 soft_public_names_are_not_semver_promises (c24).
+// An underscore name is soft-public and carries no SemVer promise, so it is
+// never frozen.
+#Test("soft_public_names_are_not_semver_promises") {
+    root: pap_root("soft")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    old_api: pap_api(root, "old", "soft", "stable: fn() {{}}\n_unstable: fn() {{}}\n")
+    new_api: pap_api(root, "new", "soft", "stable: fn() {{}}\n")
+    loop row in old_api {
+        assert(row.name != "_unstable", "an underscore name is not a public API promise, got `{row.signature}`")
+    }
+    assert_eq(pap_changes(old_api, new_api).len(), 0)
+}
+
+// tests/pkg.rs:6086 inferred_public_effect_drift_is_breaking (c24).
+#Test("inferred_public_effect_drift_is_breaking") {
+    root: pap_root("effect-drift")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    pure_api: pap_api(root, "pure", "report", "report: fn() -> Int {{ 1 }}\n")
+    io_api: pap_api(root, "io", "report", "report: fn() -> Int {{\n    print(\"report\")\n    1\n}}\n")
+    pure: pap_find(pure_api, "report").signature
+    io: pap_find(io_api, "report").signature
+    assert(pure.contains("-[]>"), pure)
+    assert(io.contains("-[IO]>"), io)
+    assert_eq(pap_changes(pure_api, io_api).len(), 1)
+}
+
+// tests/pkg.rs:6136 v2_snapshot_upgrade_matches_duplicate_inline_leaves (c13).
+// The api_version 2 reader is gone under the greenfield rule (a registry
+// snapshot that is not api_version 4 is refused), so the port keeps the
+// behavior that survives: two inline modules' same-named leaves stay two
+// distinct rows, and the published snapshot of them reads back with no
+// change against the current API.
+#Test("v2_snapshot_upgrade_matches_duplicate_inline_leaves") {
+    root: pap_root("inline-leaves")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    current: pap_api(root, "current", "demo", "bench: module {{\n    report: fn() {{}}\n}}\nfiles: module {{\n    report: fn(x: Int) {{}}\n}}\n")
+    assert(pap_find(current, "bench.report").signature.starts_with("fn bench.report()"), pap_text(current))
+    assert(pap_find(current, "files.report").signature.starts_with("fn files.report(x: Int)"), pap_text(current))
+    previous: pap_frozen("demo", current)
+    assert_eq(pap_changes(previous, current).len(), 0)
+}
+
+// tests/pkg.rs:6179 public_effect_metadata_preserves_symbolic_rows (c13).
+#Test("public_effect_metadata_preserves_symbolic_rows") {
+    root: pap_root("open-row")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    api: pap_api(root, "open", "open", "invoke: fn<E>(act: fn() -[..E]> Int) -[..E]> Int {{ act() }}\n")
+    invoke: pap_find(api, "invoke").signature
+    assert(invoke.contains("-[..E]>"), invoke)
+}
+
+// tests/pkg.rs:6194 public_trait_effect_contract_drift_is_breaking (c13).
+#Test("public_trait_effect_contract_drift_is_breaking") {
+    root: pap_root("trait-effect")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    old_api: pap_api(root, "old", "render", "Render: trait {{\n    draw: fn(self) -[IO]> Int\n}}\n")
+    new_api: pap_api(root, "new", "render", "Render: trait {{\n    draw: fn(self) -[GPU]> Int\n}}\n")
+    old: pap_find(old_api, "Render.draw").signature
+    new: pap_find(new_api, "Render.draw").signature
+    assert(old.contains("-[IO]>"), old)
+    assert(new.contains("-[GPU]>"), new)
+    assert(pap_changes(old_api, new_api).len() > 0, "trait method effect drift is breaking")
+}
+
+// tests/pkg.rs:6218 physical_unit_trait_methods_use_canonical_dimensions (c13).
+// The prelude `Meter` is spelled with its canonical dimension, so it and a
+// local same-named nominal family (which shadows the prelude member) are
+// different public types; the frozen snapshot keeps
+// the producer's row, and the package freezes no core.units family.
+#Test("physical_unit_trait_methods_use_canonical_dimensions") {
+    root: pap_root("unit-trait")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    prelude_api: pap_api(root, "prelude", "physics", "Measure: trait {{\n    scale: fn(value: Meter) -> Meter\n}}\n")
+    method: pap_find(prelude_api, "Measure.scale")
+    assert_eq(method.signature, "require Measure.scale(value: Meter[core.units%3A%3ALength:1]) Meter[core.units%3A%3ALength:1]")
+    frozen: pap_frozen("physics", prelude_api)
+    assert_eq(pap_find(frozen, "Measure.scale").signature, method.signature)
+    local_api: pap_api(root, "local", "physics", "#UnitFamily(Length, base: meter) {{\n    meter\n}}\nMeasure: trait {{\n    scale: fn(value: Meter) -> Meter\n}}\n")
+    changes: pap_changes(prelude_api, local_api)
+    names: loop change in changes -> change.item_name.copy()
+    assert(names == [String]{"Measure.scale"}, "changes {names.join(", ")}\nprelude API:\n{pap_text(prelude_api)}\nlocal API:\n{pap_text(local_api)}")
+}

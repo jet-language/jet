@@ -14,6 +14,10 @@ host_argv := I64{0}
 
 host_envp := I64{0}
 
+// 1 when host_envp is a main's startup stack, whose pointer array and strings
+// live as long as the process; an entryless host only lends its envp.
+host_envp_lives := I64{0}
+
 host_env_rows := I64{0}
 
 host_env_length := I64{0}
@@ -24,9 +28,9 @@ host_env_length := I64{0}
 host_env_pending := I64{0}
 
 // jet_rt_host_env_capture, installed by jet_rt_host_env_init: the
-// before-user-code environment snapshot (D-EFF-ENV-SNAPSHOT1 A) is taken
+// before-user-code environment snapshot is taken
 // exactly when the program links a reader of it; a program with none cannot
-// tell the copy was never made (D-EFF-CORE-INIT1 A).
+// tell the copy was never made.
 host_env_capture_code := I64{0}
 
 // runtime-init: 4 when host_env_rows,host_env_length,logical_env_root
@@ -80,6 +84,7 @@ host_arguments_register: fn(argc: I64, argv: I64, envp: I64, main: Bool) {
     #Unsafe("host argument registration is single-threaded and precedes user code") {
         host_argv = argv
         host_envp = envp
+        host_envp_lives = if main -> I64{1} else -> I64{0}
     }
     capture: host_env_capture_code
     if (capture != I64{0}) {
@@ -283,7 +288,7 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     }
 }
 
-// D-JOB-SUBCMD1=C: 1 when the program's first word (argv[1]) is the
+// 1 when the program's first word (argv[1]) is the
 // `length` bytes at `data`, the name of a job the entry function runs in
 // place of `run: fn` (JetIR ir_entry_function); 0 otherwise.
 #Export(c) jet_rt_entry_job_selected: fn(data: I64, length: I64) -> I64 {
@@ -299,6 +304,29 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
         }
     }
     I64{1}
+}
+
+// E1294: after the job branches of a program whose argv can
+// select a job (JetIR ir_entry_unknown_job), a first word (argv[1]) that is
+// not a flag names no job: end the process with the report `prefix`, the
+// word, then `suffix` (which lists the declared jobs). Without such a word,
+// return and the entry runs.
+#Export(c) jet_rt_entry_job_unknown: fn(prefix: I64, prefix_length: I64, suffix: I64, suffix_length: I64) {
+    host_arguments_require()
+    if (host_argc < I64{2}) { return }
+    bytes: host_argument_bytes(I64{1})
+    length: host_startup_byte_length(bytes)
+    first := I64{0}
+    if (length > I64{0}) {
+        #Unsafe("argv[1] is an immutable startup string of `length` bytes") {
+            first = os_load_u8(bytes)
+        }
+    }
+    if (first == I64{45}) { return }
+    text: rt_text_copy(prefix, prefix_length)
+    rt_text_append(text, bytes, length)
+    rt_text_append(text, suffix, suffix_length)
+    jet_rt_entry_error_exit(text)
 }
 
 // jet_std_io_args: std::env::args().collect(), argv[0] first, through the
@@ -374,6 +402,37 @@ host_environment_value_bytes: fn(key_data: I64, key_length: I64) -> I64 {
         }
     }
     I64{0}
+}
+
+// The startup value of `key` read straight from a main's live envp: the first
+// matching row (the index's rule), invalid UTF-8 as absent, and 0 for an
+// entryless host. No index and no allocation, so a root stop that reads it
+// (ProductionReceipt.jet) links neither the environment capture nor the
+// allocator.
+host_startup_environment_value: fn(key: I64) -> I64 {
+    if (host_envp_lives == I64{0} || host_envp == I64{0}) -> return I64{0}
+    key_data: rt_text_data(key)
+    key_length: rt_text_len(key)
+    index := I64{0}
+    loop {
+        entry := I64{0}
+        #Unsafe("a main's startup envp is a live, null-terminated pointer array") {
+            entry = os_load_i64(wrapping(host_envp + index * I64{8}))
+        }
+        if (entry == I64{0}) -> return I64{0}
+        if (host_environment_split(entry) == key_length && rt_text_equal_bytes(entry, key_data, key_length)) {
+            value: wrapping(entry + key_length + I64{1})
+            length: host_startup_byte_length(value)
+            at := I64{0}
+            loop at < length {
+                width: rt_text_valid_width(wrapping(value + at), wrapping(length - at), I64{1})
+                if (width < I64{0}) -> return I64{0}
+                at = wrapping(at + width)
+            }
+            return value
+        }
+        index = wrapping(index + I64{1})
+    }
 }
 
 // std::env::var parity for internal runtime flags: invalid UTF-8 is absent.

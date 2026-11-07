@@ -12,9 +12,9 @@ lsp_build_navigation_symbol_db: fn(result: JetDriverCompilerCheckResult) -> Symb
     owner: result.bundle ?? return db
     permit: owner.guard_read()
     checked: result.graph ?? return db
-    lsp_rebind_checked_reference_identities(&db)
-    lsp_add_checked_type_references(permit.value, checked.effect_facts.name_ledger, &db)
-    lsp_rebind_checked_reference_identities(&db)
+    lsp_rebind_checked_reference_identities(db)
+    lsp_add_checked_type_references(permit.value, checked.effect_facts.name_ledger, db)
+    lsp_rebind_checked_reference_identities(db)
     db
 }
 
@@ -71,58 +71,58 @@ lsp_navigation_target_kind_matches: fn(kind: SymKind, target: String) -> Bool Ne
 
 lsp_add_checked_type_references: fn(bundle: ProgramBundle, ledger: NameLedger, db: &SymbolDB) Never! {
     loop (module_idx, module_ref) in bundle.modules {
-        loop item in module_ref.items -> lsp_add_item_type_references(item, module_idx, module_ref.display, module_ref.source, ledger, &db)
+        loop item in module_ref.items -> lsp_add_item_type_references(item, module_idx, module_ref.display, module_ref.source, ledger, db)
     }
 }
 
 lsp_add_item_type_references: fn(item: Item, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
     if item == {
-        .Func(function) -> lsp_add_func_type_references(function, module_idx, module_path, source, ledger, &db)
+        .Func(function) -> lsp_add_func_type_references(function, module_idx, module_path, source, ledger, db)
         .Struct(definition) -> {
-            loop field in definition.fields -> lsp_add_checked_type_reference(field.ty, field.ty_span, module_idx, module_path, source, ledger, &db)
-            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            loop field in definition.fields -> lsp_add_checked_type_reference(field.ty, field.ty_span, module_idx, module_path, source, ledger, db)
+            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, db)
             loop implementation in definition.trait_impls {
-                loop method in implementation.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+                loop method in implementation.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, db)
             }
         }
         .Enum(definition) -> {
             loop variant in definition.variants {
                 if variant.payload == {
-                    .Single(ty, span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, &db)
-                    .Named(fields) -> loop field in fields -> lsp_add_checked_type_reference(field.ty, field.ty_span, module_idx, module_path, source, ledger, &db)
+                    .Single(ty, span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, db)
+                    .Named(fields) -> loop field in fields -> lsp_add_checked_type_reference(field.ty, field.ty_span, module_idx, module_path, source, ledger, db)
                     .Unit -> {}
                 }
             }
-            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, db)
             loop implementation in definition.trait_impls {
-                loop method in implementation.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+                loop method in implementation.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, db)
             }
         }
-        .Distinct(definition) -> lsp_add_checked_type_reference(definition.base, definition.base_span, module_idx, module_path, source, ledger, &db)
-        .TypeAlias(definition) -> lsp_add_checked_type_reference(definition.target, definition.target_span, module_idx, module_path, source, ledger, &db)
+        .Distinct(definition) -> lsp_add_checked_type_reference(definition.base, definition.base_span, module_idx, module_path, source, ledger, db)
+        .TypeAlias(definition) -> lsp_add_checked_type_reference(definition.target, definition.target_span, module_idx, module_path, source, ledger, db)
         .Impl(definition) -> {
-            lsp_add_named_type_reference(definition.type_name, definition.type_span, module_idx, module_path, source, ledger, &db)
+            lsp_add_named_type_reference(definition.type_name, definition.type_span, module_idx, module_path, source, ledger, db)
             if definition.trait_name == .Val(name) {
-                if definition.trait_span == .Val(span) -> lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, &db)
+                if definition.trait_span == .Val(span) -> lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, db)
             }
-            loop associated in definition.assoc_type_impls -> lsp_add_checked_type_reference(associated.ty, associated.span, module_idx, module_path, source, ledger, &db)
-            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, &db)
+            loop associated in definition.assoc_type_impls -> lsp_add_checked_type_reference(associated.ty, associated.span, module_idx, module_path, source, ledger, db)
+            loop method in definition.methods -> lsp_add_func_type_references(method, module_idx, module_path, source, ledger, db)
         }
         .Trait(definition) -> loop method in definition.methods {
-            loop parameter in method.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, &db)
+            loop parameter in method.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, db)
         }
         .CodeModule(definition) -> if definition.body == .Val(body) {
-            loop nested in body -> lsp_add_item_type_references(nested, module_idx, module_path, source, ledger, &db)
+            loop nested in body -> lsp_add_item_type_references(nested, module_idx, module_path, source, ledger, db)
         }
-        .GenericModule(definition) -> loop nested in definition.body -> lsp_add_item_type_references(nested, module_idx, module_path, source, ledger, &db)
+        .GenericModule(definition) -> loop nested in definition.body -> lsp_add_item_type_references(nested, module_idx, module_path, source, ledger, db)
         else -> {}
     }
 }
 
 lsp_add_func_type_references: fn(function: Func, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
-    loop parameter in function.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, &db)
+    loop parameter in function.params -> lsp_add_checked_type_reference(parameter.ty, parameter.ty_span, module_idx, module_path, source, ledger, db)
     if function.return_type == .Val(ty) {
-        if function.return_type_span == .Val(span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, &db)
+        if function.return_type_span == .Val(span) -> lsp_add_checked_type_reference(ty, span, module_idx, module_path, source, ledger, db)
     }
 }
 
@@ -131,7 +131,7 @@ lsp_add_checked_type_reference: fn(ty: Type, span: Span, module_idx: Int, module
         .Named(name) | .Apply(name, _) -> name
         .TraitObject(names) -> { if names.len() != 1 -> return; names[0] } else -> { return }
     }
-    lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, &db)
+    lsp_add_named_type_reference(name, span, module_idx, module_path, source, ledger, db)
 }
 
 lsp_add_named_type_reference: fn(name: String, span: Span, module_idx: Int, module_path: String, source: String, ledger: NameLedger, db: &SymbolDB) Never! {
@@ -149,7 +149,7 @@ lsp_add_named_type_reference: fn(name: String, span: Span, module_idx: Int, modu
             if target.semantic_identity == Val((identity)) -> return
         }
     }
-    &db.refs.push(SymRef{name: name.copy(), span: span, module_path: module_path.copy(), scope_identity: None, target: Val(DefinitionAnchor{module_path: target_path.copy(), kind: declaration.kind.copy(), def_span: SourceSpan{start: declaration.span.start, end: declaration.span.end}, semantic_identity: Val(identity)}), fact: None})
+    db.refs.push(SymRef{name: name.copy(), span: span, module_path: module_path.copy(), scope_identity: None, target: Val(DefinitionAnchor{module_path: target_path.copy(), kind: declaration.kind.copy(), def_span: SourceSpan{start: declaration.span.start, end: declaration.span.end}, semantic_identity: Val(identity)}), fact: None})
 }
 
 // Foundation's ledger methods determine exact alias/nominal precedence.

@@ -65,7 +65,7 @@ function packageManifest(pkg) {
   const lines = [
     `name: "${PACKAGE_NAMES[pkg]}"`,
     'version: "0.1.0"',
-    'edition: "2028"',
+    'edition: "2026"',
   ];
   if (deps.length > 0) {
     lines.push("deps: {");

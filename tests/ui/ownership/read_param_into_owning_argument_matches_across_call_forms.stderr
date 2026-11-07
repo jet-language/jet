@@ -1,0 +1,17 @@
+Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:10:15
+    |
+ 10 |     rows.push(item)
+    |               ^^^^
+ Why: `item` is a read or write parameter, so its caller keeps the value; moving it here would copy it
+ Fix: Write `item.copy()` when `.push()` should receive a copy, or declare the parameter `item: &&[Int]` so the caller hands the value over
+More: jet-lang.dev/e/E0201
+
+Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
+  --> tests/ui/ownership/read_param_into_owning_argument_matches_across_call_forms.jet:15:10
+    |
+ 15 |     keep(item)
+    |          ^^^^
+ Why: `item` is a read or write parameter, so its caller keeps the value; moving it here would copy it
+ Fix: Write `item.copy()` when `keep` should receive a copy, or declare the parameter `item: &&[Int]` so the caller hands the value over
+More: jet-lang.dev/e/E0201

@@ -8,7 +8,7 @@ use {
 
 JetCLIPinFixtureRoot: struct { path: String }
 impl JetCLIPinFixtureRoot.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         cli_files.remove_all(self.path).drop("test project cleanup")
     }
 }
@@ -16,7 +16,7 @@ impl JetCLIPinFixtureRoot.Close {
 #Test("update jet preserves exact human status and locked version") {
     root: cli_files.tmpdir("jet-cli-pin-") ?? panic("temporary pin project")
     owner: JetCLIPinFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     output: jet_cli_update_jet_pin(root, Val("0.4"), "0.4.2", false, false, false)
     assert_eq(output.stdout, "")
     assert_eq(output.stderr, "jet: pinned toolchain 0.4 → 0.4.0 (locked in .jet/lock)\n")
@@ -29,7 +29,7 @@ impl JetCLIPinFixtureRoot.Close {
 #Test("update jet suppresses human status in machine and quiet modes") {
     root: cli_files.tmpdir("jet-cli-pin-modes-") ?? panic("temporary pin project")
     owner: JetCLIPinFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     modes: [(json: Bool, quiet: Bool)]{(json: true, quiet: false), (json: false, quiet: true), (json: true, quiet: true)}
     loop mode in modes {
         output: jet_cli_update_jet_pin(root, Val("0.4.2"), "0.4.2", false, mode.json, mode.quiet)
@@ -45,7 +45,7 @@ impl JetCLIPinFixtureRoot.Close {
 #Test("update jet pin diagnostics remain exact stderr in machine quiet mode") {
     root: cli_files.tmpdir("jet-cli-pin-invalid-") ?? panic("temporary pin project")
     owner: JetCLIPinFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     output: jet_cli_update_jet_pin(root, Val("1"), "0.4.2", false, true, true)
     assert_eq(output.stdout, "")
     assert_eq(output.stderr, "Error [jet.InvalidToolchainPin]: `1` is not a valid toolchain pin\n Why: The `jet:` field pins which Jet toolchain builds this project — its value is a channel ref, not a version range.\n Fix: Write a channel: `jet: 0.4` (track the 0.4 series), `jet: 0.4.2` (exact), or a named channel like `jet: main`.\nMore: jet-lang.dev/e/E1249\n")

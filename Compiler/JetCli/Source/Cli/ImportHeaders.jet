@@ -166,11 +166,11 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [(name
             name: jet_cli_import_byte_slice(part.bytes(), 0, colon).trim().copy()
             if !jet_cli_import_identifier(name) -> return Err(jet_cli_import_text_error("parameter `{name}` is not a safe Jet identifier"))
             ty: jet_cli_import_byte_slice(part.bytes(), colon + 1, part.bytes().len()).trim().copy()
-            &output.push((name: name, ty: jet_cli_import_map_foreign_type(language, ty)))
+            output.push((name: name, ty: jet_cli_import_map_foreign_type(language, ty)))
         } else {
             if language == "js" {
                 if !jet_cli_import_identifier(part) -> return Err(jet_cli_import_text_error("parameter `{part}` is not a safe Jet identifier"))
-                &output.push((name: part, ty: "__js__"))
+                output.push((name: part, ty: "__js__"))
             } else {
                 tokens: jet_cli_import_words(part)
                 if tokens.len() < 2 -> return Err(jet_cli_import_text_error("Java/C# parameters must use one scalar type and one name"))
@@ -180,7 +180,7 @@ jet_cli_import_parse_foreign_params: fn(language: String, raw: String) -> [(name
                     if tokens[at] == "ref" || tokens[at] == "out" || tokens[at] == "in" -> unsafe_parameter = true
                 }
                 if unsafe_parameter -> return Err(jet_cli_import_text_error("parameter `{name}` has no safe scalar mapping"))
-                &output.push((name: name, ty: jet_cli_import_map_foreign_type(language, tokens[tokens.len() - 2])))
+                output.push((name: name, ty: jet_cli_import_map_foreign_type(language, tokens[tokens.len() - 2])))
             }
         }
     }
@@ -196,15 +196,15 @@ jet_cli_import_parse_go_params: fn(raw: String) -> [(name: String, ty: String)] 
     loop part in jet_cli_import_split_commas(raw) {
         tokens: jet_cli_import_words(part)
         if tokens.len() == 1 && jet_cli_import_identifier(tokens[0]) {
-            &pending.push(tokens[0].copy())
+            pending.push(tokens[0].copy())
         } else {
             if tokens.len() != 2 || !jet_cli_import_identifier(tokens[0]) -> return Err(jet_cli_import_text_error("Go parameters must use one or more names followed by one scalar type"))
             mapped: jet_cli_import_map_foreign_type("go", tokens[1])
-            &pending.push(tokens[0].copy())
+            pending.push(tokens[0].copy())
             loop name in pending {
                 if names.has_key(name) -> return Err(jet_cli_import_text_error("duplicate Go parameter `{name}`"))
-                &names.add(name.copy(), true).drop("duplicate Go names were refused")
-                &params.push((name: name.copy(), ty: mapped.copy()))
+                names.add(name.copy(), true).drop("duplicate Go names were refused")
+                params.push((name: name.copy(), ty: mapped.copy()))
             }
             pending = []
         }

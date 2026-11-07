@@ -13,13 +13,13 @@ step: jetpack tool install omp@releases#1.0.0 --no-color --offline --fixtures {w
 cwd: project
 exit: 0
 capture: mode = permissions file home/.jet/bin
-step: jet run deny.jet -- {work}/home/.jet/bin
+step: jet run --allow=FS.Read,FS.Write deny.jet -- {work}/home/.jet/bin
 exit: 0
 step: jetpack tool uninstall omp --no-color
 cwd: project
 exit: 2
-chmod: home/.jet/bin {cap:mode}
 stderr: ~ "Error [jet.JetpackCommandFailed]" # original contains predicate
-stderr: ~ "managed tool `omp`" # original contains predicate
+stderr: ~ "Managed tool `omp`" # original contains predicate (the renderer sentence-cases the headline)
 stderr: ~ "managed by jetpack" # original contains predicate
 stderr: ~ "jetpack update tools -y" # original contains predicate
+chmod: home/.jet/bin {cap:mode}

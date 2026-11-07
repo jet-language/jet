@@ -51,7 +51,7 @@ jet_cli_dependency_with_notice: fn(error: JetCLIDependencyError, notice: String)
 }
 jet_cli_package_input_entry: fn(root: String, color: Bool, json: Bool) -[FS, Env]> (path: String, notice: String) JetCLIDependencyError! {
     notices := [String]{}
-    entry: if jet_cli_find_project_entry(root, "fetch", color, &notices) == {
+    entry: if jet_cli_find_project_entry(root, "fetch", color, notices) == {
         .Entry(found) -> found.path
         .Refused(plan) -> {
             if plan == {
@@ -75,7 +75,7 @@ jet_cli_dependency_input_at_entry: fn(root: String, entry: String, color: Bool, 
         .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic())) }
     }
     cache := WorkspaceDeclarationCache.new()
-    found: if pkg_package_facts_for_entry(&cache, entry) == {
+    found: if pkg_package_facts_for_entry(cache, entry) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(jet_cli_dependency_source_error(entry, source.raw, error.diagnostic)) }
     }

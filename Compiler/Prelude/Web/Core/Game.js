@@ -1,4 +1,4 @@
-// D-GAME / D-FOUND-COREAPI1=A: Web projection of the shared headless game
+// Web projection of the shared headless game
 // facts. The Foundation frame plan is; this adapter only stores typed scene
 // facts and executes that plan.
 
@@ -58,7 +58,7 @@ function jet_game_frame_budget_present(plan) {
 const JET_GAME_DEVTOOLS_PROTOCOL = "jet.devtools.v1";
 const JET_GAME_DEVTOOLS_MAX_COMMANDS = 256;
 
-// D-GAME-WASM-BRIDGE1: JavaScript is only the browser transport and frame
+// JavaScript is only the browser transport and frame
 // scheduler. Validation, identity checks, transitions, world edits, and event
 // sequencing live in the canonical Rust GameDevProtocol Wasm exports.
 function jet_game_devtools_identity(sceneName) {

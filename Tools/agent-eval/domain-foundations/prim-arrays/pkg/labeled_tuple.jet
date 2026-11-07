@@ -23,7 +23,7 @@ lookup: fn(array: (values: Tensor, dims: [String], coords: [Coordinate]), dim: S
     label_index: find_text(coordinate.labels, label)
     if label_index == None -> return None
     indexes := [Int]{}
-    loop _i in 0..<array.dims.len() -> &indexes.push(0)
+    loop _i in 0..<array.dims.len() -> indexes.push(0)
     indexes[axis] = label_index ?? 0
     cell: compute.get(array.values, indexes) ?? panic("labeled lookup")
     return Val(cell)

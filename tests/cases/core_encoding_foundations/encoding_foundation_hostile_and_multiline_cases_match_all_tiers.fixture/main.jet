@@ -12,15 +12,15 @@ use {
 run: fn() {
     print(yaml.parse(": value\n") == .Err(_))
     data := [U8]{}
-    loop i in 0..<46 -> &data.push(U8{i})
+    loop i in 0..<46 -> data.push(U8{i})
     print(toml.parse("x = bare") == .Err(_))
-    print(toml.parse("date = 2024-02-29") != .Err(_))
+    print(toml.parse("date = 2024-02-29") == .Ok(_))
     print(toml.parse("date = 2023-02-29") == .Err(_))
     print(hex.a2b_uu(hex.b2a_uu(data)) == data)
     print(base64.a85decode("uuuuu") == .Err(_))
     print(base64.b85decode("~~~~~") == .Err(_))
     print(binary.unpack("I", [U8]{0, 0, 0, 0, 0}) == .Err(_))
-    print(json.parse("1e9999") == .Err(_))
+    print(json.decode<Float>("1e9999") == .Err(_))
     print(xml.parse("<1root/>") == .Err(_))
     print(xml.parse("<r>&</r>") == .Err(_))
 }

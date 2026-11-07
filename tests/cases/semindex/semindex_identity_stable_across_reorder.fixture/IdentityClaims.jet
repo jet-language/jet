@@ -5,7 +5,12 @@ use {
 }
 
 s5f_member: fn(value: Dyn, name: String) -> Dyn {
-    if value == .Object(fields) -> return fields.get(name) ?? panic("missing JSON member {name}")
+    if value == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value
+        }
+        panic("missing JSON member {name}")
+    }
     panic("expected JSON object for {name}")
 }
 s5f_array: fn(value: Dyn) -> [Dyn] {
@@ -23,14 +28,14 @@ s5f_index: fn(path: String) -> Dyn {
 }
 s5f_sorted_identities: fn(index: Dyn) -> [String] {
     identities := [String]{}
-    loop definition in s5f_array(s5f_member(index, "definitions")) -> &identities.push(s5f_text(s5f_member(definition, "identity")))
-    &identities.sort()
+    loop definition in s5f_array(s5f_member(index, "definitions")) -> identities.push(s5f_text(s5f_member(definition, "identity")))
+    identities.sort()
     identities
 }
 s5f_original_identity_assertions: fn() {
     before: s5f_sorted_identities(s5f_index("before.json"))
     after: s5f_sorted_identities(s5f_index("after.json"))
-    assert_eq(before, after, "original sorted identity arrays differ: before={before}; after={after}")
+    assert(before == after, "original sorted identity arrays differ: before={before}; after={after}")
     module_found := false
     fn_found := false
     type_found := false

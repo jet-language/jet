@@ -60,26 +60,26 @@ ir_x64_loop_align: fn(length: Int) -> Int Never! {
 // each loop ending at `ends` (the same index), and returns the layout map.
 ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64Relax Never! {
     ordered := sites.copy()
-    &ordered.sort()
+    ordered.sort()
     r := IRX64Relax{sites: [Int]{}, starts: [Int]{}, lengths: [Int]{}, short: [Bool]{}, stays_long: [Bool]{}, shrunk: [Int]{}, heads: [Int]{}, ends: [Int]{}, pads: [Int]{}, padded: [Int]{}, align: X64_FUNCTION_ALIGN}
     targets := [Int]{}
     loop site in ordered {
         if r.sites.len() > 0 && r.sites[r.sites.len() - 1] == site -> next
         jump: Int.from_u8(code[site - 1]) == 0xe9
-        &r.sites.push(site)
-        &r.starts.push(if jump -> site - 1 else -> site - 2)
-        &r.lengths.push(if jump -> 5 else -> 6)
-        &r.short.push(false)
-        &r.stays_long.push(false)
-        &r.shrunk.push(0)
-        &targets.push(site + 4 + ir_x64_rel32_at(code, site))
+        r.sites.push(site)
+        r.starts.push(if jump -> site - 1 else -> site - 2)
+        r.lengths.push(if jump -> 5 else -> 6)
+        r.short.push(false)
+        r.stays_long.push(false)
+        r.shrunk.push(0)
+        targets.push(site + 4 + ir_x64_rel32_at(code, site))
     }
     // The heads in code order (few per function).
     loop (index, head) in heads {
-        &r.heads.push(head)
-        &r.ends.push(ends[index])
-        &r.pads.push(0)
-        &r.padded.push(0)
+        r.heads.push(head)
+        r.ends.push(ends[index])
+        r.pads.push(0)
+        r.padded.push(0)
         at := r.heads.len() - 1
         loop at > 0 && r.heads[at - 1] > r.heads[at] {
             moved: r.heads[at - 1]
@@ -94,7 +94,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
     changed := true
     loop changed {
         changed = false
-        ir_x64_relax_pad(&r)
+        ir_x64_relax_pad(r)
         // A short branch the padding pushed out of reach goes back to long.
         loop index in 0..<r.sites.len() {
             if !r.short[index] -> next
@@ -107,7 +107,7 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
             }
         }
         if changed {
-            ir_x64_relax_shrink(&r)
+            ir_x64_relax_shrink(r)
             next
         }
         shorten := [Int]{}
@@ -120,11 +120,11 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
             from: ir_x64_relaxed_end(r, end) - saving
             to: ir_x64_relaxed_at(r, targets[index]) - (if targets[index] >= end -> saving else -> 0)
             reach: to - from
-            if reach >= -128 && reach <= 127 -> &shorten.push(index)
+            if reach >= -128 && reach <= 127 -> shorten.push(index)
         }
         loop index in shorten -> r.short[index] = true
         if shorten.len() > 0 {
-            ir_x64_relax_shrink(&r)
+            ir_x64_relax_shrink(r)
             changed = true
         }
     }
@@ -135,38 +135,38 @@ ir_x64_relax: fn(code: &[U8], sites: [Int], heads: [Int], ends: [Int]) -> IRX64R
     loop branch < r.sites.len() || head < r.heads.len() {
         // A head's no-ops go before a branch that starts there.
         if head < r.heads.len() && (branch >= r.sites.len() || r.heads[head] <= r.starts[branch]) {
-            loop at in copied..<r.heads[head] -> &out.push(code[at])
+            loop at in copied..<r.heads[head] -> out.push(code[at])
             copied = r.heads[head]
-            x64_nops(&out, r.pads[head])
+            x64_nops(out, r.pads[head])
             head += 1
             next
         }
         index: branch
         branch += 1
         start: r.starts[index]
-        loop at in copied..<start -> &out.push(code[at])
+        loop at in copied..<start -> out.push(code[at])
         end: r.starts[index] + r.lengths[index]
         target: ir_x64_relaxed_at(r, targets[index])
         jump: r.lengths[index] == 5
         if r.short[index] {
-            &out.push(if jump -> U8{0xeb} else -> U8{0x70 + (Int.from_u8(code[start + 1]) - 0x80)})
+            out.push(if jump -> U8{0xeb} else -> U8{0x70 + (Int.from_u8(code[start + 1]) - 0x80)})
             reach: target - (out.len() + 1)
-            &out.push(U8{reach.bit_and(255)})
+            out.push(U8{reach.bit_and(255)})
         } else {
             if jump {
-                &out.push(U8{0xe9})
+                out.push(U8{0xe9})
             } else {
-                &out.push(U8{0x0f})
-                &out.push(code[start + 1])
+                out.push(U8{0x0f})
+                out.push(code[start + 1])
             }
             field: out.len()
-            loop _ in 0..<4 -> &out.push(U8{0})
-            x64_patch_rel32(&out, field, target)
+            loop _ in 0..<4 -> out.push(U8{0})
+            x64_patch_rel32(out, field, target)
         }
         copied = end
     }
-    loop at in copied..<code.len() -> &out.push(code[at])
-    code = ^out
+    loop at in copied..<code.len() -> out.push(code[at])
+    code = out.move()
     r
 }
 
@@ -252,12 +252,12 @@ ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
 // 32-byte window, and the forward jump lands after it.
 #Test("A small loop's head starts on its window after the branches before it shrink") {
     code := [U8]{0xe9, 0, 0, 0, 0, 0x90, 0x90, 0x90}
-    loop _ in 0..<20 -> &code.push(U8{0x90})
-    &code.push(U8{0xe9})
-    loop _ in 0..<4 -> &code.push(U8{0})
-    x64_patch_rel32(&code, 1, 33)
-    x64_patch_rel32(&code, 29, 8)
-    r: ir_x64_relax(&code, [Int]{1, 29}, [Int]{8}, [Int]{33})
+    loop _ in 0..<20 -> code.push(U8{0x90})
+    code.push(U8{0xe9})
+    loop _ in 0..<4 -> code.push(U8{0})
+    x64_patch_rel32(code, 1, 33)
+    x64_patch_rel32(code, 29, 8)
+    r: ir_x64_relax(code, [Int]{1, 29}, [Int]{8}, [Int]{33})
     assert_eq(r.align, 32)
     assert_eq(ir_x64_relaxed_at(r, 8), 32)
     assert_eq(code.len(), 54)
@@ -273,12 +273,12 @@ ir_x64_relax_padded: fn(r: IRX64Relax, at: Int, inclusive: Bool) -> Int Never! {
 // stays long, and the head still starts on 16.
 #Test("A branch the head's padding pushes out of reach stays long") {
     code := [U8]{0xe9, 0, 0, 0, 0}
-    loop _ in 0..<118 -> &code.push(U8{0x90})
-    &code.push(U8{0xe9})
-    loop _ in 0..<4 -> &code.push(U8{0})
-    x64_patch_rel32(&code, 1, 128)
-    x64_patch_rel32(&code, 124, 122)
-    r: ir_x64_relax(&code, [Int]{1, 124}, [Int]{122}, [Int]{128})
+    loop _ in 0..<118 -> code.push(U8{0x90})
+    code.push(U8{0xe9})
+    loop _ in 0..<4 -> code.push(U8{0})
+    x64_patch_rel32(code, 1, 128)
+    x64_patch_rel32(code, 124, 122)
+    r: ir_x64_relax(code, [Int]{1, 124}, [Int]{122}, [Int]{128})
     assert_eq(r.align, 16)
     assert_eq(ir_x64_relaxed_at(r, 122), 128)
     assert_eq(code.len(), 131)

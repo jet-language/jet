@@ -45,7 +45,7 @@ GateInputs: struct {
 records: fn(text: String) -> [String] Never! {
     if text == "" -> return [String]{}
     lines := pieces(text, "\n")
-    if text.ends_with("\n") -> _: &lines.pop()
+    if text.ends_with("\n") -> _: lines.pop()
     lines
 }
 
@@ -108,19 +108,19 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     baseline_owner := [String:String]{}
     baseline_seen := [String:Bool]{}
     baseline_lines: records(inputs.baseline ?? "")
-    if inputs.baseline == None || baseline_lines.len() == 0 || baseline_lines[0] != BASELINE_HEADER -> &problems.push("baseline schema drifted")
+    if inputs.baseline == None || baseline_lines.len() == 0 || baseline_lines[0] != BASELINE_HEADER -> problems.push("baseline schema drifted")
     loop (index, line) in baseline_lines {
         if index == 0 || line == "" -> next
         fields: pieces(line, "\t")
         if fields.len() != 4 || fields[0] != "1" || fields[2] != "pass" {
-            &problems.push("bad Jet baseline row: {line}")
+            problems.push("bad Jet baseline row: {line}")
             next
         }
         id: fields[1].copy()
-        if baseline_seen.get(id) != None -> &problems.push("duplicate Jet baseline task: {id}")
+        if baseline_seen.get(id) != None -> problems.push("duplicate Jet baseline task: {id}")
         baseline_seen[id.copy()] = true
-        if !owner_ok(fields[3]) -> &problems.push("Jet baseline loss has no card or ratified non-goal: {id}")
-        &baseline_tasks.push(id.copy())
+        if !owner_ok(fields[3]) -> problems.push("Jet baseline loss has no card or ratified non-goal: {id}")
+        baseline_tasks.push(id.copy())
         baseline_status[id.copy()] = fields[2].copy()
         baseline_owner[id] = fields[3].copy()
     }
@@ -128,17 +128,17 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     matrix_arch := [String:String]{}
     matrix_count := 0
     matrix_lines: records(inputs.matrix ?? "")
-    if inputs.matrix == None || matrix_lines.len() == 0 || matrix_lines[0] != MATRIX_HEADER -> &problems.push("native OS matrix schema drifted")
+    if inputs.matrix == None || matrix_lines.len() == 0 || matrix_lines[0] != MATRIX_HEADER -> problems.push("native OS matrix schema drifted")
     loop (index, line) in matrix_lines {
         if index == 0 || line == "" -> next
         fields: pieces(line, "\t")
         if fields.len() != 6 || fields[0] != "1" {
-            &problems.push("bad native OS matrix row: {line}")
+            problems.push("bad native OS matrix row: {line}")
             next
         }
-        if fields[1] == "" || fields[2] == "" || (fields[3] != "required" && fields[3] != "excluded") || !adapters_ok(fields[4]) || fields[5] == "" -> &problems.push("bad native OS matrix metadata: {line}")
+        if fields[1] == "" || fields[2] == "" || (fields[3] != "required" && fields[3] != "excluded") || !adapters_ok(fields[4]) || fields[5] == "" -> problems.push("bad native OS matrix metadata: {line}")
         os: fields[1].copy()
-        if matrix_requirement.get(os) != None -> &problems.push("duplicate native OS matrix row: {os}")
+        if matrix_requirement.get(os) != None -> problems.push("duplicate native OS matrix row: {os}")
         matrix_requirement[os.copy()] = fields[3].copy()
         matrix_arch[os] = fields[2].copy()
         matrix_count += 1
@@ -148,25 +148,25 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     manifest_owner := [String:String]{}
     manifest_count := 0
     manifest_lines: records(inputs.manifest ?? "")
-    if inputs.manifest == None || manifest_lines.len() == 0 || manifest_lines[0] != MANIFEST_HEADER -> &problems.push("corpus manifest schema drifted")
+    if inputs.manifest == None || manifest_lines.len() == 0 || manifest_lines[0] != MANIFEST_HEADER -> problems.push("corpus manifest schema drifted")
     loop (index, line) in manifest_lines {
         if index == 0 || line == "" -> next
         fields: pieces(line, "\t")
         if fields.len() != 13 || fields[0] != "1" {
-            &problems.push("bad corpus manifest row: {line}")
+            problems.push("bad corpus manifest row: {line}")
             next
         }
         id: fields[1].copy()
-        if manifest_domain.get(id) != None -> &problems.push("duplicate corpus manifest task: {id}")
+        if manifest_domain.get(id) != None -> problems.push("duplicate corpus manifest task: {id}")
         manifest_domain[id.copy()] = fields[2].copy()
         manifest_case[id.copy()] = fields[3].copy()
         manifest_owner[id.copy()] = fields[12].copy()
-        if !owner_ok(fields[12]) -> &problems.push("bad manifest loss owner: {id}")
+        if !owner_ok(fields[12]) -> problems.push("bad manifest loss owner: {id}")
         manifest_count += 1
     }
-    if baseline_tasks.len() == 0 -> &problems.push("Jet baseline is empty or missing")
-    if matrix_count == 0 -> &problems.push("native OS matrix is empty or missing")
-    if manifest_count == 0 -> &problems.push("corpus manifest is empty or missing")
+    if baseline_tasks.len() == 0 -> problems.push("Jet baseline is empty or missing")
+    if matrix_count == 0 -> problems.push("native OS matrix is empty or missing")
+    if manifest_count == 0 -> problems.push("corpus manifest is empty or missing")
 
     header_seen := false
     host_os := ""
@@ -179,91 +179,91 @@ report_problems: fn(report: String, inputs: GateInputs) -> [String] Never! {
     loop line in records(report) {
         if line.starts_with("#") || is_blank(line) -> next
         if !header_seen {
-            if line != REPORT_HEADER -> &problems.push("report schema drifted")
+            if line != REPORT_HEADER -> problems.push("report schema drifted")
             header_seen = true
             next
         }
         f: pieces(line, "\t")
         if f.len() != 26 || f[0] != "1" {
-            &problems.push("bad report row: {line}")
+            problems.push("bad report row: {line}")
             next
         }
         if host_os == "" {
             host_os = f[1].copy()
             host_arch = f[2].copy()
         }
-        if f[1] != host_os || f[2] != host_arch -> &problems.push("report mixes OS or architecture")
+        if f[1] != host_os || f[2] != host_arch -> problems.push("report mixes OS or architecture")
         id: f[3].copy()
-        if seen.get(id) != None -> &problems.push("duplicate report task: {id}")
+        if seen.get(id) != None -> problems.push("duplicate report task: {id}")
         seen[id.copy()] = true
         if manifest_domain.get(id) == {
             .Val(domain) -> {
-                if f[4] != domain || f[5] != (manifest_case.get(id) ?? "") -> &problems.push("task metadata drifted: {id}")
-                if f[11] != (manifest_owner.get(id) ?? "") -> &problems.push("loss owner drifted from manifest: {id}")
+                if f[4] != domain || f[5] != (manifest_case.get(id) ?? "") -> problems.push("task metadata drifted: {id}")
+                if f[11] != (manifest_owner.get(id) ?? "") -> problems.push("loss owner drifted from manifest: {id}")
             }
-            .None -> &problems.push("report has unknown task: {id}")
+            .None -> problems.push("report has unknown task: {id}")
         }
-        if !adapter_status(f[6]) || !adapter_status(f[7]) || !adapter_status(f[8]) || !adapter_status(f[9]) -> &problems.push("bad adapter status: {id}")
-        if f[10] != "pass" && f[10] != "loss" -> &problems.push("bad corpus score: {id}")
-        if current.get(id) == None -> &current_tasks.push(id.copy())
+        if !adapter_status(f[6]) || !adapter_status(f[7]) || !adapter_status(f[8]) || !adapter_status(f[9]) -> problems.push("bad adapter status: {id}")
+        if f[10] != "pass" && f[10] != "loss" -> problems.push("bad corpus score: {id}")
+        if current.get(id) == None -> current_tasks.push(id.copy())
         current[id.copy()] = f[6].copy()
         current_owner[id.copy()] = f[11].copy()
-        if f[12] != "0" -> &problems.push("corpus command exited {f[12]}: {id}")
+        if f[12] != "0" -> problems.push("corpus command exited {f[12]}: {id}")
         expected_score: if f[12] == "0" && f[6] == "pass" && f[7] == "pass" && f[8] == "pass" && f[9] == "pass" -> "pass" else -> "loss"
-        if f[10] != expected_score -> &problems.push("corpus score drifted: {id}")
-        if f[6] == "loss" && !owner_ok(f[11]) -> &problems.push("Jet loss has no card or ratified non-goal: {id}")
-        if !nonnegative_integer(f[12]) -> &problems.push("bad corpus exit code: {id}")
+        if f[10] != expected_score -> problems.push("corpus score drifted: {id}")
+        if f[6] == "loss" && !owner_ok(f[11]) -> problems.push("Jet loss has no card or ratified non-goal: {id}")
+        if !nonnegative_integer(f[12]) -> problems.push("bad corpus exit code: {id}")
         loop metric in 14..<26 {
-            if !nonnegative_integer(f[metric - 1]) -> &problems.push("bad report metric in {id}: column={metric}")
+            if !nonnegative_integer(f[metric - 1]) -> problems.push("bad report metric in {id}: column={metric}")
         }
         if !lower_hex64(f[25]) {
-            &problems.push("bad policy digest: {id}")
+            problems.push("bad policy digest: {id}")
         } else if f[25] != inputs.policy_digest {
-            &problems.push("policy digest is not the frozen policy: {id}")
+            problems.push("policy digest is not the frozen policy: {id}")
         }
         if report_digest == "" {
             report_digest = f[25].copy()
         } else if f[25] != report_digest {
-            &problems.push("policy digest drifted: {id}")
+            problems.push("policy digest drifted: {id}")
         }
     }
 
     if !header_seen {
-        &problems.push("report has no header")
+        problems.push("report has no header")
     } else if host_os == "" {
-        &problems.push("report has no task rows")
+        problems.push("report has no task rows")
     } else {
         requirement: matrix_requirement.get(host_os) ?? ""
         if matrix_requirement.get(host_os) == None {
-            &problems.push("OS is absent from frozen matrix: {host_os}")
+            problems.push("OS is absent from frozen matrix: {host_os}")
         } else if requirement != "required" {
-            &problems.push("OS is excluded by frozen matrix: {host_os}")
+            problems.push("OS is excluded by frozen matrix: {host_os}")
         } else {
             arch: matrix_arch.get(host_os) ?? ""
-            if arch != "any" && arch != host_arch -> &problems.push("architecture {host_arch} is not allowed for {host_os}")
+            if arch != "any" && arch != host_arch -> problems.push("architecture {host_arch} is not allowed for {host_os}")
         }
     }
     loop id in baseline_tasks {
         owner: baseline_owner.get(id) ?? ""
         if manifest_owner.get(id) == {
             .Val(manifest) -> {
-                if owner != manifest -> &problems.push("Jet baseline loss owner drifted from manifest: {id}")
+                if owner != manifest -> problems.push("Jet baseline loss owner drifted from manifest: {id}")
             }
-            .None -> &problems.push("Jet baseline names unknown task: {id}")
+            .None -> problems.push("Jet baseline names unknown task: {id}")
         }
         if current.get(id) == {
             .Val(status) -> {
-                if (baseline_status.get(id) ?? "") == "pass" && status != "pass" -> &problems.push("Jet regression: task={id} baseline=pass current={status} owner={owner}")
+                if (baseline_status.get(id) ?? "") == "pass" && status != "pass" -> problems.push("Jet regression: task={id} baseline=pass current={status} owner={owner}")
             }
-            .None -> &problems.push("report is missing baseline task: {id}")
+            .None -> problems.push("report is missing baseline task: {id}")
         }
-        if owner != (current_owner.get(id) ?? "") -> &problems.push("loss owner drifted: {id}")
+        if owner != (current_owner.get(id) ?? "") -> problems.push("loss owner drifted: {id}")
     }
     loop id in current_tasks {
-        if manifest_domain.get(id) == None -> &problems.push("report has unknown task: {id}")
+        if manifest_domain.get(id) == None -> problems.push("report has unknown task: {id}")
     }
-    if baseline_tasks.len() != manifest_count -> &problems.push("Jet baseline task count drifted")
-    if current_tasks.len() != manifest_count -> &problems.push("report task count drifted")
+    if baseline_tasks.len() != manifest_count -> problems.push("Jet baseline task count drifted")
+    if current_tasks.len() != manifest_count -> problems.push("report task count drifted")
     problems
 }
 
@@ -343,9 +343,9 @@ uncovered: fn(reason: String) -[IO, Time.Wait]> Int Never! {
 
 passthrough: fn(receipt: ProcessReceipt) Never! -[IO]> {
     out := term.stdout()
-    &out.write(receipt.output).drop("corpus stdout")
+    out.write(receipt.output).drop("corpus stdout")
     errors := term.stderr()
-    &errors.write(receipt.errors).drop("corpus stderr")
+    errors.write(receipt.errors).drop("corpus stderr")
 }
 
 gate_usage: fn() -[IO, Time.Wait]> Int Never! {
@@ -380,18 +380,17 @@ gate_main: fn(args: [String]) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
         return 1
     }
     run_dir: made.output.trim()
-    code: gate_corpus(root, scratch, run_dir.copy(), report)
+    code: gate_corpus(root, run_dir.copy(), report)
     files.remove_all(run_dir).drop("the run directory is scratch")
     code
 }
 
-gate_corpus: fn(root: String, scratch: String, run_dir: String, report: String) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
+gate_corpus: fn(root: String, run_dir: String, report: String) -[FS, Env, Exec, IO, Time.Wait]> Int Never! {
     jet: process.env_get("JET") ?? ""
     if jet == "" -> return uncovered("JET must name an executable jet binary")
     executable: process.cmd([String]{"test", "-x", jet.copy()}).run() ?? return uncovered("JET must name an executable jet binary")
     if executable.code != 0 -> return uncovered("JET must name an executable jet binary")
     receipt: process.cmd([String]{jet.copy(), "test", "{root}/Compiler", "--profile", "cases", "agent_workloads", "--color=never"})
-        .env("JET_TEST_SCRATCH_DIR", scratch)
         .env("JET_CI_EVIDENCE_DIR", run_dir)
         .stdout(.Inherit)
         .stderr(.Inherit)
@@ -440,17 +439,17 @@ corpus_rows: fn(manifest: String, digest: String, target: String, column: Int, v
         if index == 0 -> next
         source: pieces(line, "\t")
         row := [String]{"1", "linux", "x86_64", source[1].copy(), source[2].copy(), source[3].copy(), "pass", "pass", "pass", "pass", "pass", source[12].copy(), "0"}
-        loop _ in 0..<12 -> &row.push("1")
-        &row.push(digest.copy())
+        loop _ in 0..<12 -> row.push("1")
+        row.push(digest.copy())
         if column > 0 && (target == "" || row[3] == target) -> row[column - 1] = value.copy()
-        &rows.push(row)
+        rows.push(row)
     }
     rows
 }
 
 corpus_report: fn(rows: [[String]]) -> String Never! {
     lines := [String]{"# generated by the AgentWorkloads #Test", REPORT_HEADER}
-    loop row in rows -> &lines.push(row.join("\t"))
+    loop row in rows -> lines.push(row.join("\t"))
     body: lines.join("\n")
     "{body}\n"
 }
@@ -504,7 +503,7 @@ MatrixRow: struct {
 // Every `separator`-separated piece of `text`, the piece after the last one included.
 pieces: fn(text: String, separator: String) -> [String] Never! {
     out := [String]{}
-    loop piece in text.split(separator) -> &out.push(piece)
+    loop piece in text.split(separator) -> out.push(piece)
     out
 }
 
@@ -518,12 +517,12 @@ matrix_rows: fn(text: String) -> [MatrixRow] Never! {
         if index >= complete -> break
         fields := [String]{}
         loop field in line.split("\t") {
-            if field != "" -> &fields.push(field)
+            if field != "" -> fields.push(field)
         }
         version: if fields.len() > 0 -> fields[0].copy() else -> ""
         os: if fields.len() > 1 -> fields[1].copy() else -> ""
         requirement: if fields.len() > 3 -> fields[3].copy() else -> ""
-        &rows.push(MatrixRow{version: version, os: os, requirement: requirement})
+        rows.push(MatrixRow{version: version, os: os, requirement: requirement})
     }
     rows
 }

@@ -27,7 +27,7 @@ CoreProvider: struct {
     plan_downloads: fn(self, verification: &StoreVerification, specs: [RefSpec], table: SourceTable, ctx: ProviderCtx) -> DownloadPlan ProviderError! {
         plan := DownloadPlan.empty()
         loop spec in specs {
-            if self.requires_acquisition(spec, table) -> &plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
+            if self.requires_acquisition(spec, table) -> plan.add_item(PlanItem{package: spec.raw, state: PlanState.New, download_bytes: None, disk_bytes: None})
         }
         Ok(plan)
     }
@@ -274,7 +274,7 @@ CargoBuildScratch: struct {
             }
             .Err(_) -> {}
         }
-        files.create_dir(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
+        files.create_dir_all(path) ?? return Err(CargoBuildError.Failed("could not create build scratch: {err}"))
         started: time.unix_ns() /% 1000000000
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={pid}\nstarted={started}\n") ?? return Err(CargoBuildError.Failed("could not mark build scratch active: {err}"))
         Ok(CargoBuildScratch{path})
@@ -363,7 +363,7 @@ provider_build_rlib_from_cargo: fn(pkg_dir: String, hangar_dir: String, toolchai
 // the object; the caller removes the scratch whatever the outcome.
 provider_build_rlib_in_scratch: fn(pkg_dir: String, scratch: CargoBuildScratch, toolchain: CargoToolchain, offline: Bool) -[FS, Env, Exec, Time.Wait]> CargoBuildReceipt CargoBuildError! {
     args := [String]{"build", "--lib", "--release", "--manifest-path", "/work/source/Cargo.toml", "--locked"}
-    if offline -> &args.push("--offline")
+    if offline -> args.push("--offline")
     files.create_dir_all(files.join(scratch.path, "home")) ?? return Err(CargoBuildError.Failed("could not create Cargo home: {err}"))
     files.create_dir_all(files.join(scratch.path, "cargo-home")) ?? return Err(CargoBuildError.Failed("could not create Cargo cache home: {err}"))
     env: [String: String]{

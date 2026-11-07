@@ -74,7 +74,7 @@ pkg_parse_test_profiles: fn(body: String) -> [TestProfileDef] PackageParseError!
     loop entry in pkg_key_value_entries(body) {
         repeated: entry.key.copy()
         if profiles.any(profile -> profile.name == repeated) -> return Err(PackageParseError.Composition("test profile `{entry.key}` is declared more than once"))
-        &profiles.push(pkg_parse_test_profile(entry.key, entry.value))
+        profiles.push(pkg_parse_test_profile(entry.key, entry.value))
     }
     Ok(profiles)
 }
@@ -86,7 +86,7 @@ pkg_parse_test_profile: fn(name: String, value: String) -> TestProfileDef Packag
     seen := [String]{}
     loop field in pkg_key_value_entries(pkg_test_record(value, TEST_PROFILE_CTOR, site)) {
         if seen.contains(field.key) -> return Err(PackageParseError.Composition("{site} declares `{field.key}` more than once"))
-        &seen.push(field.key)
+        seen.push(field.key)
         if field.key == {
             "suites" -> profile.suites = pkg_test_names(field.value, "{site} field `suites`")
             "baseline" -> {
@@ -99,7 +99,7 @@ pkg_parse_test_profile: fn(name: String, value: String) -> TestProfileDef Packag
                 if !row.ported -> return Err(PackageParseError.Composition("{site} field `{field.key}` is not ported to the Jet test runner yet"))
                 raw: if row.kind == TestSettingKind.Text || row.kind == TestSettingKind.Path -> pkg_unquote(field.value) else -> field.value.trim()
                 setting: test_setting_value(row, raw) ?? return Err(PackageParseError.Composition("{site} needs `{field.key}:` as {test_setting_hint(row)}"))
-                &profile.settings.push(TestSetting{name: row.name.copy(), value: setting, source: source.copy()})
+                profile.settings.push(TestSetting{name: row.name.copy(), value: setting, source: source.copy()})
             }
         }
     }
@@ -111,7 +111,7 @@ pkg_parse_test_profile: fn(name: String, value: String) -> TestProfileDef Packag
 pkg_test_profile_fields: fn() -> String Never! {
     names := [String]{"suites", "baseline"}
     loop row in JET_TEST_SETTINGS {
-        if row.ported -> &names.push(row.name.copy())
+        if row.ported -> names.push(row.name.copy())
     }
     names.join(", ")
 }
@@ -123,7 +123,7 @@ pkg_test_names: fn(value: String, site: String) -> [String] PackageParseError! {
     names := [String]{}
     loop name in pkg_parse_list(text) {
         if names.contains(name) -> return Err(PackageParseError.Composition("{site} lists `{name}` more than once"))
-        &names.push(name)
+        names.push(name)
     }
     if names.len() == 0 -> return Err(PackageParseError.Composition("{site} needs a list such as `[tests]`"))
     Ok(names)
@@ -145,7 +145,7 @@ pkg_parse_test_suites: fn(body: String) -> [TestSuiteDef] PackageParseError! {
             if path == "" -> return Err(PackageParseError.Composition("{site} needs `{field.key}:` as a directory path"))
             found = Val(TestSuiteDef{name: entry.key.copy(), kind: kind, corpus: path})
         }
-        &suites.push(found ?? return Err(PackageParseError.Composition("{site} needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")))
+        suites.push(found ?? return Err(PackageParseError.Composition("{site} needs `golden_corpus:`, `ui_corpus:` or `cases_corpus:` naming its directory")))
     }
     Ok(suites)
 }
@@ -179,14 +179,14 @@ impl PackageFacts {
     // suite neither declares.
     test_suites_refusal: fn(self, code_suites: [String]) -> String? Never! {
         known := [String]{TEST_SUITE_TESTS}
-        loop suite in self.test_suites -> &known.push(suite.name)
+        loop suite in self.test_suites -> known.push(suite.name)
         loop code in code_suites {
             if known.contains(code) {
                 where: if code == TEST_SUITE_TESTS -> "as the built-in suite of every #Test" else -> "in `suites:` of package.jet"
                 return Val("test suite `{code}` is declared twice: {where}, and by `t.suite(\"{code}\", …)` in test.jet; a suite has one name")
             }
         }
-        loop code in code_suites -> &known.push(code)
+        loop code in code_suites -> known.push(code.copy())
         loop profile in self.test_profiles {
             loop suite in profile.suites {
                 if !known.contains(suite) -> return Val("test profile `{profile.name}` names unknown suite `{suite}` (known: {known.join(", ")})")
@@ -226,7 +226,7 @@ pkg_test_code_suites: fn(source: String) -> [String] Never! {
         if method.kind != TOKEN_IDENT || lexed.tokens[index - 1].kind != TOKEN_DOT || lexed.tokens[index + 1].kind != TOKEN_LPAREN || literal.kind != TOKEN_STRING -> next
         if pkg_test_source_bytes(source, method.span.start, method.span.end) != "suite" -> next
         name: pkg_test_source_bytes(source, literal.span.start + 1, literal.span.end - 1)
-        if name != "" && !names.contains(name) -> &names.push(name)
+        if name != "" && !names.contains(name) -> names.push(name)
     }
     names
 }
@@ -242,7 +242,7 @@ pkg_test_sets_settings: fn(source: String) -> Bool Never! {
         if index + 2 >= tokens.len() -> break
         if tokens[index].kind != TOKEN_IDENT || tokens[index + 1].kind != TOKEN_COLON || tokens[index + 2].kind != TOKEN_IDENT -> next
         if pkg_test_source_bytes(source, tokens[index + 2].span.start, tokens[index + 2].span.end) != "Test" -> next
-        &params.push(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end))
+        params.push(pkg_test_source_bytes(source, tokens[index].span.start, tokens[index].span.end))
     }
     if params.len() == 0 -> return false
     loop index in 0..<tokens.len() {

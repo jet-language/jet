@@ -15,9 +15,11 @@ export const faultReportSource = join(root, 'Compiler/JetRuntime/Assets/FaultRep
 
 // Writes DIRECTORY/fault-report.S and DIRECTORY/fault-report.o, whose global
 // function jet_rt_fault_report is report.S's code, and returns the object path.
+// The empty .note.GNU-stack section keeps the linked program's stack
+// non-executable.
 export function faultReportObject(directory) {
   const source = join(directory, 'fault-report.S'), object = join(directory, 'fault-report.o');
-  writeFileSync(source, `    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include ${JSON.stringify(faultReportSource)}\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n`, { flag: 'wx' });
+  writeFileSync(source, `    .text\n    .globl jet_rt_fault_report\n    .type jet_rt_fault_report, @function\njet_rt_fault_report:\n    .include ${JSON.stringify(faultReportSource)}\n    .size jet_rt_fault_report, . - jet_rt_fault_report\n    .section .note.GNU-stack,"",@progbits\n`, { flag: 'wx' });
   const r = spawnSync(join(root, 'Tools/agent/jet-env'), ['as', '--64', '-o', object, source], { encoding: 'utf8' });
   if (r.error || r.status !== 0) throw Error(`fault report assembly: ${r.error?.message ?? r.status}\n${r.stdout ?? ''}${r.stderr ?? ''}`);
   return object;

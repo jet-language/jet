@@ -73,12 +73,12 @@ ReceiptRecord: struct {
     to_bytes: fn(self) -> [U8] StoreDiagnosticRecordError! {
         revisions := [String]{}
         loop recorded in self.modules {
-            if !revisions.contains(recorded.digest) -> &revisions.push(recorded.digest)
+            if !revisions.contains(recorded.digest) -> revisions.push(recorded.digest)
         }
         diagnostics: store_encode_diagnostics(self.diagnostics, revisions)
         facts := [RecordValue]{}
         loop fact in self.facts {
-            &facts.push(RecordValue.Map{fields: [RecordField]{
+            facts.push(RecordValue.Map{fields: [RecordField]{
                 {name: "name", value: RecordValue.Str{value: fact.name}},
                 {name: "value", value: RecordValue.Str{value: fact.value}},
             }})
@@ -113,7 +113,7 @@ ReceiptRecord: struct {
         diagnostics: store_decode_diagnostics(store_receipt_elements(reader, STORE_RECEIPT_SECTION_ORIGINS), store_receipt_elements(reader, STORE_RECEIPT_SECTION_DIAGNOSTICS), source_for_revision)
         facts := [ReceiptFact]{}
         loop fact in store_receipt_elements(reader, STORE_RECEIPT_SECTION_FACTS) {
-            &facts.push(ReceiptFact{name: store_receipt_text(fact, "name"), value: store_receipt_text(fact, "value")})
+            facts.push(ReceiptFact{name: store_receipt_text(fact, "name"), value: store_receipt_text(fact, "value")})
         }
         Ok(ReceiptRecord{schema: STORE_RECEIPT_SCHEMA, verb: verb, closure: closure, modules: modules, inputs: inputs, diagnostics: diagnostics, facts: store_receipt_sorted_facts(facts)})
     }
@@ -122,10 +122,10 @@ ReceiptRecord: struct {
 // Rust `Vec::sort` then `dedup` over `(path, digest)`.
 store_receipt_sorted_inputs: fn(inputs: [ReceiptInput]) -> [ReceiptInput] Never! {
     sorted := inputs
-    &sorted.sort_by((left: ReceiptInput, right: ReceiptInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
+    sorted.sort_by((left: ReceiptInput, right: ReceiptInput) -> (left.path <=> right.path).then(left.digest <=> right.digest))
     unique := [ReceiptInput]{}
     loop input in sorted {
-        if unique.len() == 0 || unique[unique.len() - 1] != input -> &unique.push(input)
+        if unique.len() == 0 || unique[unique.len() - 1] != input -> unique.push(input)
     }
     unique
 }
@@ -135,9 +135,9 @@ store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
     by_name := [String: String]{}
     loop fact in facts -> by_name[fact.name] = fact.value
     names := by_name.keys().to_list()
-    &names.sort()
+    names.sort()
     sorted := [ReceiptFact]{}
-    loop name in names -> &sorted.push(ReceiptFact{name: name, value: by_name[name]})
+    loop name in names -> sorted.push(ReceiptFact{name: name, value: by_name[name]})
     sorted
 }
 
@@ -145,7 +145,7 @@ store_receipt_sorted_facts: fn(facts: [ReceiptFact]) -> [ReceiptFact] Never! {
 store_receipt_encode_inputs: fn(inputs: [ReceiptInput]) -> [RecordValue] Never! {
     values := [RecordValue]{}
     loop input in inputs {
-        &values.push(RecordValue.Map{fields: [RecordField]{
+        values.push(RecordValue.Map{fields: [RecordField]{
             {name: "path", value: RecordValue.Str{value: input.path}},
             {name: "digest", value: RecordValue.Str{value: input.digest}},
         }})
@@ -163,7 +163,7 @@ store_receipt_text: fn(value: RecordValue, name: String) -> String StoreDiagnost
 // Rust receipt.rs:176 `decode_inputs`.
 store_receipt_decode_inputs: fn(values: [RecordValue]) -> [ReceiptInput] StoreDiagnosticRecordError! {
     inputs := [ReceiptInput]{}
-    loop value in values -> &inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
+    loop value in values -> inputs.push(ReceiptInput{path: store_receipt_text(value, "path"), digest: store_receipt_text(value, "digest")})
     Ok(inputs)
 }
 

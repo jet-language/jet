@@ -1,4 +1,4 @@
-// `jet test`'s settings (D-TEST-INVOKE1=A, jet_foundation
+// `jet test`'s settings (jet_foundation
 // Registry/TestSettings.jet): the selected test profile's, then those of
 // test.jet's `test: fn`, then the flags, each later layer replacing the
 // earlier. A run decides them once; each child it starts (a profile run, an
@@ -80,14 +80,20 @@ jet_cli_test_setting_source: fn(settings: [TestSetting], name: String) -> String
 
 // The combinations no run can carry out, refused before anything builds:
 // `list` runs nothing and a slice blesses only part of the rows, so neither
-// takes `update_snapshots`; a corpus-pool setting needs a corpus suite
-// (`corpus`: the run has one); a `cases` file must be readable and a
-// `results` file writable before any test runs.
+// takes `update_snapshots`, and `list` has no run to `record`; a corpus-pool
+// setting needs a corpus suite (`corpus`: the run has one); `iterations` and
+// `seed` steer the generated grade, so each needs `grade`; a `cases` file
+// must be readable and a `results` file writable before any test runs.
 jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: Bool) -[FS]> JetCLIPlan? Never! {
+    // Only a native test run is instrumented; a corpus row never is.
+    if corpus && test_settings_on(settings, "coverage") -> return Val(jet_cli_not_ported("test --coverage", color))
     update: test_settings_on(settings, "update_snapshots")
     blessing: "`update_snapshots` ({jet_cli_test_setting_source(settings, "update_snapshots")})"
     if update && test_settings_on(settings, "list") {
         return Val(jet_cli_fail("E2104", "`list` ({jet_cli_test_setting_source(settings, "list")}) and {blessing} don't combine", jet_cli_why("E2104"), "drop one of them: `list` runs no test, so it blesses nothing", color, JET_DRIVER_EXIT_USAGE))
+    }
+    if test_settings_get(settings, "record") != None && test_settings_on(settings, "list") {
+        return Val(jet_cli_fail("E2104", "`list` ({jet_cli_test_setting_source(settings, "list")}) and `record` ({jet_cli_test_setting_source(settings, "record")}) don't combine", jet_cli_why("E2104"), "drop one of them: `list` runs no test, so it records nothing", color, JET_DRIVER_EXIT_USAGE))
     }
     if update && test_settings_shard_count(settings) > 1 {
         shard: test_settings_get(settings, "shard") ?? ""
@@ -96,6 +102,10 @@ jet_cli_test_settings_refusal: fn(settings: [TestSetting], corpus: Bool, color: 
     loop setting in settings {
         if corpus || setting.value == "false" || !JET_CLI_TEST_CORPUS_SETTINGS.contains(setting.name) -> next
         return Val(jet_cli_fail("E2104", "`{setting.name}` ({setting.source}) steers the corpus suites, and this run has none", jet_cli_why("E2104"), "drop `{test_setting_flag(setting.name)}`, or run a test profile whose suites include a golden, ui or cases corpus", color, JET_DRIVER_EXIT_USAGE))
+    }
+    loop name in JET_CLI_TEST_GENERATED_SETTINGS {
+        if test_settings_get(settings, "grade") != None || test_settings_get(settings, name) == None -> next
+        return Val(jet_cli_fail("E2104", "`{name}` ({jet_cli_test_setting_source(settings, name)}) steers the generated grade, and this run has no `grade`", jet_cli_why("E2104"), "add `--grade=generated`, or drop `{test_setting_flag(name)}`", color, JET_DRIVER_EXIT_USAGE))
     }
     if test_settings_get(settings, "cases") == .Val(list) {
         _: cli_files.read(list) ?? return Val(jet_cli_fail("E2104", "the `cases` file `{list}` ({jet_cli_test_setting_source(settings, "cases")}) can't be read: {err}", jet_cli_why("E2104"), "name a file that lists one test name or corpus row id per line", color, JET_DRIVER_EXIT_USER_ERROR))
@@ -134,14 +144,14 @@ jet_cli_test_child_words: fn(jet_argv: [String]) -> [String] Never! {
     loop index < jet_argv.len() {
         argument: jet_argv[index]
         if argument == "--" {
-            loop rest in index..<jet_argv.len() -> &words.push(jet_argv[rest].copy())
+            loop rest in index..<jet_argv.len() -> words.push(jet_argv[rest].copy())
             break
         }
         if argument == "--profile" {
             index += 2
             next
         }
-        if !argument.starts_with("--profile=") && !jet_cli_test_parent_word(argument) -> &words.push(argument.copy())
+        if !argument.starts_with("--profile=") && !jet_cli_test_parent_word(argument) -> words.push(argument.copy())
         index += 1
     }
     words
@@ -151,7 +161,7 @@ jet_cli_test_child_words: fn(jet_argv: [String]) -> [String] Never! {
 jet_cli_test_child_settings: fn(settings: [TestSetting]) -> [TestSetting] Never! {
     kept := [TestSetting]{}
     loop setting in settings {
-        if !JET_CLI_TEST_PARENT_SETTINGS.contains(setting.name) -> &kept.push(setting.copy()) // copy: the decided list stays whole for the parent.
+        if !JET_CLI_TEST_PARENT_SETTINGS.contains(setting.name) -> kept.push(setting.copy()) // copy: the decided list stays whole for the parent.
     }
     kept
 }
@@ -166,12 +176,12 @@ jet_cli_test_build_argv: fn(jet_argv: [String], level: String) -> [String] Never
         if argument == "--" && !passthrough {
             passthrough = true
             // Before the `--`, so the build options read it.
-            if level != "" -> &argv.push("--optimize={level}")
+            if level != "" -> argv.push("--optimize={level}")
         }
         if !passthrough && (argument == "--optimize" || argument.starts_with("--optimize=")) -> next
-        &argv.push(argument.copy())
+        argv.push(argument.copy())
     }
-    if !passthrough && level != "" -> &argv.push("--optimize={level}")
+    if !passthrough && level != "" -> argv.push("--optimize={level}")
     argv
 }
 
@@ -194,11 +204,11 @@ jet_cli_test_settings_fan_out: fn(jet_argv: [String], settings: [TestSetting], q
     envs := [[String]]{}
     loop level in picked {
         args := words.copy() // copy: each level run starts from the same words.
-        if level != "" -> &args.push("--optimize={level}")
-        &names.push(if levels.len() > 1 -> "optimize {level}" else -> "compiler {compiler}")
-        &tiers.push(if levels.len() > 1 -> "{TEST_SUITE_TESTS} at optimize {level}" else -> TEST_SUITE_TESTS)
-        &member_args.push(^args)
-        &envs.push([String]{TEST_SETTINGS_ENV, inherited.copy()}) // copy: every child gets the same settings.
+        if level != "" -> args.push("--optimize={level}")
+        names.push(if levels.len() > 1 -> "optimize {level}" else -> "compiler {compiler}")
+        tiers.push(if levels.len() > 1 -> "{TEST_SUITE_TESTS} at optimize {level}" else -> TEST_SUITE_TESTS)
+        member_args.push(args)
+        envs.push([String]{TEST_SETTINGS_ENV, inherited.copy()}) // copy: every child gets the same settings.
     }
     // A `list` run runs no test, so it has no verdict to write.
     results: if test_settings_on(settings, "list") -> "" else -> test_settings_get(settings, "results") ?? ""
@@ -213,10 +223,10 @@ jet_cli_test_runs_envs: fn(envs: [[String]], count: Int, scratch: String) -> [[S
     loop index in 0..<count {
         row := if index < envs.len() -> envs[index].copy() else -> [String]{} // copy: each child task owns its environment row.
         if scratch != "" {
-            &row.push(EVIDENCE_REPORT_ENV)
-            &row.push(jet_cli_rooted_join(scratch, "{index}.bin"))
+            row.push(EVIDENCE_REPORT_ENV)
+            row.push(jet_cli_rooted_join(scratch, "{index}.bin"))
         }
-        &rows.push(^row)
+        rows.push(row)
     }
     rows
 }
@@ -239,7 +249,7 @@ jet_cli_test_runs_results_write: fn(path: String, scratch: String, names: [Strin
             problems = "{problems}jet test: run `{names[index]}`: couldn't read its test evidence: {err.message}\n"
             next
         }
-        loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, tier) -> &results.push(result)
+        loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, tier) -> results.push(result)
     }
     if jet_cli_test_results_write(path, results, [String]{TEST_SUITE_TESTS}, jet) == .Val(problem) -> problems = "{problems}jet test: {problem}\n"
     problems
@@ -262,6 +272,28 @@ jet_cli_test_settings_apply: fn(options: &JetCLITestOptions, settings: [TestSett
     options.settings = settings.copy() // copy: the caller's decided list stays its own.
 }
 
+// The settings that steer the generated grade alone.
+JET_CLI_TEST_GENERATED_SETTINGS: [String]{"iterations", "seed"}
+
+// The case budget of each property test under the generated grade: the
+// `iterations` setting, 1000 when unset; None when the run has no `grade`
+// (each property then keeps its default budget).
+jet_cli_test_generated_iterations: fn(settings: [TestSetting]) -> String? Never! {
+    if test_settings_get(settings, "grade") == None -> return None
+    Val(test_settings_get(settings, "iterations") ?? "1000")
+}
+
+// The base seed of every property test under the generated grade: the
+// `seed` setting, else JET_PROP_SEED when `inherited` (the caller's
+// environment names one, so None keeps it), else the fixed 0; None when the
+// run has no `grade` (each property then seeds itself).
+jet_cli_test_generated_seed: fn(settings: [TestSetting], inherited: Bool) -> String? Never! {
+    if test_settings_get(settings, "grade") == None -> return None
+    if test_settings_get(settings, "seed") == .Val(seed) -> return Val(seed)
+    if inherited -> return None
+    Val("0")
+}
+
 // The verdict row of one claim outcome: PASS or FAIL, KNOWN-FAILING and
 // UNEXPECTED-PASS for an expected failure, UNSUPPORTED for a claim that
 // didn't run and ERROR for one that couldn't (jet_testkit's statuses).
@@ -281,7 +313,7 @@ jet_cli_test_record_results: fn(records: [EvidenceRecord], suite: String, tier: 
     loop record in records {
         status: jet_cli_test_record_status(record.outcome, record.expectation == EvidenceExpectation.ExpectedFailure)
         // copy: the rows outlive the records and the caller's names.
-        &results.push(KitCaseResult{suite: suite.copy(), case: record.identity.claim_id.copy(), tier: tier.copy(), status: status, detail: record.detail.replace("\n", " "), exit: 0})
+        results.push(KitCaseResult{suite: suite.copy(), case: record.identity.claim_id.copy(), tier: tier.copy(), status: status, detail: record.detail.replace("\n", " "), exit: 0})
     }
     results
 }

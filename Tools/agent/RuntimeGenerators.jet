@@ -62,10 +62,10 @@ runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
                     if plan.write_source -> write_output(TRAP_TARGET_PATH, trap.source) ?? return Err(err)
                     if plan.write_defects -> write_output(TRAP_DEFECT_TARGET_PATH, trap.defects) ?? return Err(err)
                 }
-                .Err(error) -> &problems.push(error.message)
+                .Err(error) -> problems.push(error.message)
             }
         }
-        .Err(error) -> &problems.push(error.message)
+        .Err(error) -> problems.push(error.message)
     }
     if defects_only {
         if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
@@ -73,44 +73,44 @@ runtime_generators_main: fn(args: [String]) -[FS]> String GeneratorError! {
     }
     outputs := [GeneratedFile]{}
     if render_scheduler_messages(registry) == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: SCHEDULER_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: SCHEDULER_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     if render_test_messages() == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: TEST_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: TEST_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     if render_observe_messages(registry) == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: OBSERVE_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: OBSERVE_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     if render_services_messages(registry) == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: SERVICES_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: SERVICES_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     if render_lifecycle_list() == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: LIFECYCLE_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: LIFECYCLE_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     if read_needed_text() == {
         .Ok(needed) -> {
-            loop file in needed -> &outputs.push(file)
+            loop file in needed -> outputs.push(file)
         }
-        .Err(error) -> &problems.push(error.message)
+        .Err(error) -> problems.push(error.message)
     }
     if read_stop_registry() == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: STOP_EXPORTS_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: STOP_EXPORTS_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     if read_host_errors() == {
-        .Ok(text) -> &outputs.push(GeneratedFile{path: HOST_ERRORS_TARGET_PATH, text: text})
-        .Err(error) -> &problems.push(error.message)
+        .Ok(text) -> outputs.push(GeneratedFile{path: HOST_ERRORS_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
     }
     loop output in outputs {
         current: output_current(output.path, output.text) ?? return Err(err)
         if current -> next
         if check {
-            &problems.push("{output.path} is stale; run jet Tools/agent/RuntimeGenerators.jet")
+            problems.push("{output.path} is stale; run jet Tools/agent/RuntimeGenerators.jet")
         } else {
             write_output(output.path, output.text) ?? return Err(err)
         }
@@ -193,7 +193,7 @@ text_words: fn(text: String) -> [TextWord] Never! {
     at := 0
     loop at < bytes.len() {
         end: if at + 8 < bytes.len() -> at + 8 else -> bytes.len()
-        &words.push(TextWord{offset: at, value: packed_word(bytes, at, end), count: end - at})
+        words.push(TextWord{offset: at, value: packed_word(bytes, at, end), count: end - at})
         at += 8
     }
     words
@@ -236,16 +236,16 @@ quoted_literal: fn(text: String) -> QuotedLiteral? Never! {
             if index + 1 >= bytes.len() -> return None
             escaped: Int.from_u8(bytes[index + 1])
             if {
-                escaped == 34 || escaped == 92 -> &out.push(bytes[index + 1])
-                escaped == 110 -> &out.push(U8.from_int(10) ?? return None)
-                escaped == 116 -> &out.push(U8.from_int(9) ?? return None)
-                escaped == 114 -> &out.push(U8.from_int(13) ?? return None)
+                escaped == 34 || escaped == 92 -> out.push(bytes[index + 1])
+                escaped == 110 -> out.push(U8.from_int(10) ?? return None)
+                escaped == 116 -> out.push(U8.from_int(9) ?? return None)
+                escaped == 114 -> out.push(U8.from_int(13) ?? return None)
                 else -> return None
             }
             index += 2
             next
         }
-        &out.push(bytes[index])
+        out.push(bytes[index])
         index += 1
     }
     None
@@ -593,7 +593,7 @@ render_services_messages: fn(registry: String) -> String GeneratorError! {
     loop code in ["R0801", "R0802", "R0803"] {
         loop field in ["what", "why", "fix"] {
             text: registry_field(registry, code, field) ?? return Err(err)
-            &literals.push(MessageLiteral{name: "sentry_{code.lower()}_{field}", text: text})
+            literals.push(MessageLiteral{name: "sentry_{code.lower()}_{field}", text: text})
         }
     }
     source := "// Generated by Tools/agent/gen-runtime-services-messages.mjs; owned E4 literals.\n"
@@ -676,11 +676,11 @@ debug_intervals: fn(debug: String) -> [Int] GeneratorError! {
         if code >= 48 && code <= 57 {
             current = if current < 0 -> code - 48 else -> current * 10 + code - 48
         } else if current >= 0 {
-            &values.push(current)
+            values.push(current)
             current = -1
         }
     }
-    if current >= 0 -> &values.push(current)
+    if current >= 0 -> values.push(current)
     if values.len() % 2 != 0 -> return Err(generator_fail("invalid Rust Debug intervals"))
     loop index in 1..<values.len() {
         if values[index] < values[index - 1] -> return Err(generator_fail("invalid Rust Debug intervals"))
@@ -746,7 +746,7 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
             word += Int.from_u8(byte) * scale
             scale *= 256
         }
-        &registered.push("code == I64{{{word}}}")
+        registered.push("code == I64{{{word}}}")
         if code != coded_stops[coded_stops.len() - 1] -> branches = "{branches}        (code == I64{{{word}}}) -> trap_footer_{code.lower()}()\n"
     }
     last_coded: coded_stops[coded_stops.len() - 1].lower()
@@ -825,7 +825,7 @@ render_trap_messages: fn(registry: String, routes: String, debug: String) -> Tra
     loop row_start < values.len() {
         row_end: if row_start + 12 < values.len() -> row_start + 12 else -> values.len()
         words := [String]{}
-        loop index in row_start..<row_end -> &words.push("I64{{{values[index]}}}")
+        loop index in row_start..<row_end -> words.push("I64{{{values[index]}}}")
         source = "{source}    {words.join(", ")},\n"
         row_start += 12
     }
@@ -874,7 +874,7 @@ emitted_words: fn(source: String, name: String, sink: String) -> [String] Never!
         if line == "}}" -> break
         trimmed: line.trim()
         if !trimmed.starts_with("{sink}(I64{{") -> return [String]{}
-        &words.push(byte_tail(trimmed, byte_len(sink)))
+        words.push(byte_tail(trimmed, byte_len(sink)))
     }
     words
 }
@@ -1081,7 +1081,7 @@ signature_parameters: fn(signature: String) -> [String] Never! {
     if close <= 0 -> return items
     loop item in byte_slice(signature, 1, close).split(",") {
         trimmed: item.trim()
-        if trimmed != "" -> &items.push(trimmed)
+        if trimmed != "" -> items.push(trimmed)
     }
     items
 }
@@ -1129,19 +1129,19 @@ masked_parameter_problems: fn(source: String, head: ExportHead, path: String) ->
     problems := [String]{}
     rows := [MaskedParameter]{}
     loop row in masked_word_parameters() {
-        if row.symbol == head.name -> &rows.push(row)
+        if row.symbol == head.name -> rows.push(row)
     }
     if rows.len() == 0 -> return problems
     code: if code_only(source) == {
         .Ok(text) -> text.bytes()
         .Err(error) -> {
-            &problems.push("{path}: {error.message}")
+            problems.push("{path}: {error.message}")
             return problems
         }
     }
     body_end: group_end(code, head.body, code.len(), 123, 125)
     if body_end < 0 {
-        &problems.push("{path}: unterminated masked export {head.name}")
+        problems.push("{path}: unterminated masked export {head.name}")
         return problems
     }
     parameters: signature_parameters(head.signature.trim())
@@ -1149,7 +1149,7 @@ masked_parameter_problems: fn(source: String, head: ExportHead, path: String) ->
         if row.index >= parameters.len() -> next
         name: i64_parameter_name(parameters[row.index])
         if name == "" -> next
-        if !has_mask(code, head.body, body_end, name, row.mask) -> &problems.push("{path}: {head.name} parameter {row.index} requires the reviewed low-{row.bits}-bit mask")
+        if !has_mask(code, head.body, body_end, name, row.mask) -> problems.push("{path}: {head.name} parameter {row.index} requires the reviewed low-{row.bits}-bit mask")
     }
     problems
 }
@@ -1172,16 +1172,16 @@ runtime_exports: fn(source: String, path: String) -> ParsedExports Never! {
                     if previous_line >= 0 {
                         if lifecycle_hook(byte_slice(source, previous_line, line_start - 1)) == {
                             .Val(hook) -> {
-                                if hook.priority > MAX_LIFECYCLE_PRIORITY -> &problems.push("{path}: lifecycle priority exceeds {MAX_LIFECYCLE_PRIORITY}")
+                                if hook.priority > MAX_LIFECYCLE_PRIORITY -> problems.push("{path}: lifecycle priority exceeds {MAX_LIFECYCLE_PRIORITY}")
                                 lifecycle = if hook.guards == "" -> "{hook.kind} {hook.priority}" else -> "{hook.kind} {hook.priority} {hook.guards}"
                             }
                             .None -> {}
                         }
                     }
                     signature: head.signature.trim()
-                    if !signature.starts_with("(") || !signature.contains(")") -> &problems.push("unparsed runtime #Export(c) {head.name} signature in {path}")
-                    loop problem in masked_parameter_problems(source, head, path) -> &problems.push(problem)
-                    &exports.push(RuntimeExport{name: head.name, lifecycle: lifecycle})
+                    if !signature.starts_with("(") || !signature.contains(")") -> problems.push("unparsed runtime #Export(c) {head.name} signature in {path}")
+                    loop problem in masked_parameter_problems(source, head, path) -> problems.push(problem)
+                    exports.push(RuntimeExport{name: head.name, lifecycle: lifecycle})
                 }
                 .None -> {}
             }
@@ -1200,19 +1200,19 @@ lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
     rows := [String]{}
     loop source in sources {
         parsed: runtime_exports(source.text, source.path)
-        loop problem in parsed.problems -> &problems.push(problem)
+        loop problem in parsed.problems -> problems.push(problem)
         loop export in parsed.exports {
             if names.contains(export.name) {
-                &problems.push("duplicate runtime #Export(c) {export.name}")
+                problems.push("duplicate runtime #Export(c) {export.name}")
                 next
             }
-            &names.push(export.name)
-            if export.lifecycle != "" -> &rows.push("{export.name} {export.lifecycle}")
+            names.push(export.name)
+            if export.lifecycle != "" -> rows.push("{export.name} {export.lifecycle}")
         }
     }
-    if names.len() == 0 -> &problems.push("empty runtime #Export(c) declarations")
+    if names.len() == 0 -> problems.push("empty runtime #Export(c) declarations")
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
-    &rows.sort()
+    rows.sort()
     lines := [String]{
         "# Runtime object lifecycle hooks: <#Export(c) symbol> init|fini <priority 0..65535> [<guard storage>,...].",
         "# Lower init priorities run first (.init_array); fini rows run at exit (.fini_array).",
@@ -1220,7 +1220,7 @@ lifecycle_list: fn(sources: [RuntimeSource]) -> String GeneratorError! {
         "# Rows only order hooks; the export set is exactly the sources' #Export(c) functions.",
         "# Generated by Tools/agent/gen-runtime-lifecycle.mjs from `// runtime-init|fini: N [when guard,...]` comments.",
     }
-    loop row in rows -> &lines.push(row)
+    loop row in rows -> lines.push(row)
     Ok("{lines.join("\n")}\n")
 }
 
@@ -1232,7 +1232,7 @@ read_runtime_sources: fn() -[FS]> [RuntimeSource] GeneratorError! {
     listed: files.list_dir(RUNTIME_SOURCE_DIRECTORY) ?? return Err(generator_fail("cannot list {RUNTIME_SOURCE_DIRECTORY}: {err}"))
     names := [String]{}
     loop entry in listed {
-        if entry.name.ends_with(".jet") -> &names.push(entry.name)
+        if entry.name.ends_with(".jet") -> names.push(entry.name)
     }
     sources := [RuntimeSource]{}
     problems := unlisted_runtime_sources(listing, names)
@@ -1240,8 +1240,8 @@ read_runtime_sources: fn() -[FS]> [RuntimeSource] GeneratorError! {
         path: raw.trim()
         if path == "" || path.starts_with("#") -> next
         if files.read(path) == {
-            .Ok(text) -> &sources.push(RuntimeSource{path: path, text: text})
-            .Err(error) -> &problems.push("{RUNTIME_SOURCES_PATH} names {path}, which cannot be read: {error}")
+            .Ok(text) -> sources.push(RuntimeSource{path: path, text: text})
+            .Err(error) -> problems.push("{RUNTIME_SOURCES_PATH} names {path}, which cannot be read: {error}")
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
@@ -1252,13 +1252,13 @@ read_runtime_sources: fn() -[FS]> [RuntimeSource] GeneratorError! {
 // one problem each in name order.
 unlisted_runtime_sources: fn(listing: String, names: [String]) -> [String] Never! {
     lines := [String]{}
-    loop raw in listing.split("\n") -> &lines.push(raw.trim())
+    loop raw in listing.split("\n") -> lines.push(raw.trim())
     sorted := names.copy()
-    &sorted.sort()
+    sorted.sort()
     problems := [String]{}
     loop name in sorted {
         path: "{RUNTIME_SOURCE_DIRECTORY}/{name}"
-        if !lines.contains(path) -> &problems.push("{path} is not in {RUNTIME_SOURCES_PATH}; list it or delete it")
+        if !lines.contains(path) -> problems.push("{path} is not in {RUNTIME_SOURCES_PATH}; list it or delete it")
     }
     problems
 }
@@ -1409,7 +1409,7 @@ alphabetic_ranges: fn(derived: String) -> [TextRange] GeneratorError! {
         lo: parse_hex(field_before(extent, "..")) ?? return Err(generator_fail("malformed Alphabetic row: {raw}"))
         hi_text: field_after(extent, "..") ?? field_before(extent, "..")
         hi: parse_hex(hi_text) ?? return Err(generator_fail("malformed Alphabetic row: {raw}"))
-        &rows.push(TextRange{lo: lo, hi: hi, result: "true"})
+        rows.push(TextRange{lo: lo, hi: hi, result: "true"})
     }
     Ok(rows)
 }
@@ -1435,11 +1435,11 @@ numeric_ranges: fn(data: String) -> [TextRange] GeneratorError! {
         }
         if name.ends_with(", Last>") {
             if pending_lo < 0 || pending_category != category -> return Err(generator_fail("malformed UCD range: {raw}"))
-            if is_numeric_category(category) -> &rows.push(TextRange{lo: pending_lo, hi: cp, result: "true"})
+            if is_numeric_category(category) -> rows.push(TextRange{lo: pending_lo, hi: cp, result: "true"})
             pending_lo = -1
             next
         }
-        if is_numeric_category(category) -> &rows.push(TextRange{lo: cp, hi: cp, result: "true"})
+        if is_numeric_category(category) -> rows.push(TextRange{lo: cp, hi: cp, result: "true"})
     }
     if pending_lo >= 0 -> return Err(generator_fail("unterminated UCD range"))
     Ok(rows)
@@ -1449,7 +1449,7 @@ numeric_ranges: fn(data: String) -> [TextRange] GeneratorError! {
 // serialization checked against the frozen hash.
 merged_ranges: fn(name: String, input: [TextRange], frozen: String) -> [TextRange] GeneratorError! {
     sorted := input
-    &sorted.sort_by((left: TextRange, right: TextRange) -> left.lo <=> right.lo)
+    sorted.sort_by((left: TextRange, right: TextRange) -> left.lo <=> right.lo)
     rows := [TextRange]{}
     loop range in sorted {
         if range.lo > range.hi || range.hi > MAX_SCALAR -> return Err(generator_fail("invalid UCD range {name}"))
@@ -1457,11 +1457,11 @@ merged_ranges: fn(name: String, input: [TextRange], frozen: String) -> [TextRang
         if last >= 0 && range.lo <= rows[last].hi + 1 {
             if range.hi > rows[last].hi -> rows[last] = TextRange{lo: rows[last].lo, hi: range.hi, result: "true"}
         } else {
-            &rows.push(range)
+            rows.push(range)
         }
     }
     serialized := [String]{}
-    loop range in rows -> &serialized.push("(0x{upper_hex(range.lo)},0x{upper_hex(range.hi)})")
+    loop range in rows -> serialized.push("(0x{upper_hex(range.lo)},0x{upper_hex(range.hi)})")
     digest: crypto.sha256(serialized.join(",").bytes()).hex()
     if digest != frozen -> return Err(generator_fail("frozen range parity mismatch: {name}"))
     Ok(rows)
@@ -1504,13 +1504,13 @@ render_needed_text: fn(alphabetic_input: [TextRange], numeric_input: [TextRange]
         part: alphabetic[at..<end]
         index: chunks.len()
         helper: "compiler_text_alphabetic_{index}"
-        &chunks.push(TextRange{lo: part[0].lo, hi: part[part.len() - 1].hi, result: "{helper}(cp)"})
-        &outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextAlphabetic{index}.jet", text: "{header}{decision_function(helper, decision_tree(part, "    "))}"})
+        chunks.push(TextRange{lo: part[0].lo, hi: part[part.len() - 1].hi, result: "{helper}(cp)"})
+        outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextAlphabetic{index}.jet", text: "{header}{decision_function(helper, decision_tree(part, "    "))}"})
         at = end
     }
-    &outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextAlphabetic.jet", text: "{header}{decision_function("compiler_text_alphabetic", decision_tree(chunks, "    "))}"})
+    outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextAlphabetic.jet", text: "{header}{decision_function("compiler_text_alphabetic", decision_tree(chunks, "    "))}"})
     numeric: merged_ranges("NUMERIC", numeric_input, NUMERIC_RANGES_SHA256) ?? return Err(err)
-    &outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextNumeric.jet", text: "{needed_text_header("NUMERIC", NUMERIC_RANGES_SHA256)}{decision_function("compiler_text_numeric", decision_tree(numeric, "    "))}"})
+    outputs.push(GeneratedFile{path: "{NEEDED_TEXT_DIRECTORY}/CompilerNeededTextNumeric.jet", text: "{needed_text_header("NUMERIC", NUMERIC_RANGES_SHA256)}{decision_function("compiler_text_numeric", decision_tree(numeric, "    "))}"})
     Ok(outputs)
 }
 
@@ -1580,7 +1580,7 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
         if byte == 47 && code_at(source, at + 1) == 47 {
             end := at
             loop end < length && Int.from_u8(source[end]) != 10 -> end += 1
-            blank_range(source, &code, at, end)
+            blank_range(source, code, at, end)
             at = end
         } else if byte == 47 && code_at(source, at + 1) == 42 {
             begin: at
@@ -1598,7 +1598,7 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
                 }
             }
             if depth > 0 -> return Err(generator_fail("unclosed runtime source comment"))
-            blank_range(source, &code, begin, at)
+            blank_range(source, code, begin, at)
         } else if byte == 34 || byte == 39 {
             triple: byte == 34 && code_at(source, at + 1) == 34 && code_at(source, at + 2) == 34
             delimiter_len: if triple -> 3 else -> 1
@@ -1611,9 +1611,9 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
                 } else if byte == 34 && current == 123 && code_at(source, at + 1) == 123 {
                     at += 2
                 } else if byte == 34 && current == 123 {
-                    blank_range(source, &code, literal, at + 1)
+                    blank_range(source, code, literal, at + 1)
                     expression: at + 1
-                    at = mask_scan(source, &code, expression, true) ?? return Err(err)
+                    at = mask_scan(source, code, expression, true) ?? return Err(err)
                     loop cursor in expression..<at {
                         if Int.from_u8(code[cursor]) == 10 -> code[cursor] = U8{32}
                     }
@@ -1624,7 +1624,7 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
             }
             if at >= length -> return Err(generator_fail("unclosed runtime source literal"))
             at += delimiter_len
-            blank_range(source, &code, literal, at)
+            blank_range(source, code, literal, at)
         } else if byte == 123 {
             braces += 1
             at += 1
@@ -1644,7 +1644,7 @@ mask_scan: fn(source: [U8], code: &[U8], start: Int, interpolation: Bool) -> Int
 code_only: fn(source: String) -> String GeneratorError! {
     bytes: source.bytes()
     code := source.bytes()
-    mask_scan(bytes, &code, 0, false) ?? return Err(err)
+    mask_scan(bytes, code, 0, false) ?? return Err(err)
     Ok(String.from_bytes_lossy(code))
 }
 
@@ -1677,7 +1677,7 @@ unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
             else if current == 62 -> depth -= 1
             cursor += 1
         }
-        if depth == 0 && code_at(code, cursor) == 40 -> &problems.push("{path}: unsupported generic call {byte_slice(String.from_bytes_lossy(code), start, at)}")
+        if depth == 0 && code_at(code, cursor) == 40 -> problems.push("{path}: unsupported generic call {byte_slice(String.from_bytes_lossy(code), start, at)}")
     }
     loop at in 0..<code.len() {
         closer: Int.from_u8(code[at])
@@ -1685,7 +1685,7 @@ unsupported_calls: fn(code: [U8], path: String) -> [String] Never! {
         cursor := at + 1
         loop cursor < code.len() && Int.from_u8(code[cursor]) != 10 && is_space_byte(Int.from_u8(code[cursor])) -> cursor += 1
         if code_at(code, cursor) == 40 {
-            &problems.push("{path}: unsupported computed call")
+            problems.push("{path}: unsupported computed call")
             break
         }
     }
@@ -1744,7 +1744,7 @@ function_heads: fn(text: String, code: [U8]) -> [FunctionHead] Never! {
         if at == 0 || Int.from_u8(code[at - 1]) == 10 {
             if colon_function_head(text, code, at) == {
                 .Val(head) -> {
-                    &heads.push(head)
+                    heads.push(head.copy())
                     at = head.end
                     next
                 }
@@ -1763,7 +1763,7 @@ function_heads: fn(text: String, code: [U8]) -> [FunctionHead] Never! {
         name_end := spaced
         loop name_end < code.len() && is_name_byte(Int.from_u8(code[name_end])) -> name_end += 1
         end: skip_spaces(code, name_end)
-        &heads.push(FunctionHead{start: at, name: byte_slice(text, spaced, name_end), end: end})
+        heads.push(FunctionHead{start: at, name: byte_slice(text, spaced, name_end), end: end})
         at = end
     }
     heads
@@ -1793,7 +1793,7 @@ bound_names: fn(text: String, code: [U8], from: Int, to: Int, assign: Bool) -> [
             loop cursor < to && is_space_byte(Int.from_u8(code[cursor])) -> cursor += 1
         }
         if cursor >= to || Int.from_u8(code[cursor]) != 58 -> next
-        &names.push(byte_slice(text, start, at))
+        names.push(byte_slice(text, start, at))
     }
     names
 }
@@ -1822,7 +1822,7 @@ named_calls: fn(text: String, code: [U8], from: Int, to: Int) -> [NamedCall] Nev
         before := start
         loop before > from && is_space_byte(Int.from_u8(code[before - 1])) -> before -= 1
         if before > from && Int.from_u8(code[before - 1]) == 46 -> next
-        &calls.push(NamedCall{name: byte_slice(text, start, at), open: cursor + 1})
+        calls.push(NamedCall{name: byte_slice(text, start, at), open: cursor + 1})
     }
     calls
 }
@@ -1869,7 +1869,7 @@ rail_installs: fn(text: String, code: [U8]) -> [RailInstall] Never! {
         if !address.starts_with("rt_") || !address.ends_with("_address") -> next
         open: skip_spaces(code, address_at + byte_len(address))
         if code_at(code, open) != 40 || code_at(code, skip_spaces(code, open + 1)) != 41 -> next
-        &installs.push(RailInstall{word: word, address: address})
+        installs.push(RailInstall{word: word, address: address})
     }
     installs
 }
@@ -1947,82 +1947,82 @@ runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -
         text: if code_only(source.text) == {
             .Ok(masked) -> masked
             .Err(error) -> {
-                &problems.push("{path}: {error.message}")
+                problems.push("{path}: {error.message}")
                 next
             }
         }
         code: text.bytes()
-        loop problem in unsupported_calls(code, path) -> &problems.push(problem)
+        loop problem in unsupported_calls(code, path) -> problems.push(problem)
         loop install in rail_installs(text, code) {
             symbol: addresses.get(install.address) ?? ""
             if symbol == "" {
-                &problems.push("unknown runtime function address {install.address} installed in {install.word}")
+                problems.push("unknown runtime function address {install.address} installed in {install.word}")
                 next
             }
             symbols := installed.get(install.word) ?? [String]{}
-            if !symbols.contains(symbol) -> &symbols.push(symbol)
+            if !symbols.contains(symbol) -> symbols.push(symbol)
             installed[install.word] = symbols
         }
         parsed: runtime_exports(text, path)
-        loop problem in parsed.problems -> &problems.push(problem)
+        loop problem in parsed.problems -> problems.push(problem)
         loop export in parsed.exports {
             if exports.contains(export.name) {
-                &problems.push("duplicate runtime #Export(c) {export.name}")
+                problems.push("duplicate runtime #Export(c) {export.name}")
                 next
             }
-            &exports.push(export.name)
+            exports.push(export.name)
         }
         heads: function_heads(text, code)
         loop index in 0..<heads.len() {
             head: heads[index]
             limit: if index + 1 < heads.len() -> heads[index + 1].start else -> code.len()
             if code_at(code, head.end) != 40 {
-                &problems.push("{path}: unsupported function declaration {head.name}")
+                problems.push("{path}: unsupported function declaration {head.name}")
                 next
             }
             parameters_end: group_end(code, head.end + 1, limit, 40, 41)
             if parameters_end < 0 {
-                &problems.push("{path}: unclosed {head.name} parameters")
+                problems.push("{path}: unclosed {head.name} parameters")
                 next
             }
             at := parameters_end
             loop at < limit && Int.from_u8(code[at]) != 123 && Int.from_u8(code[at]) != 61 -> at += 1
             if code_at(code, at) == 61 && at < limit -> next
             if at >= limit {
-                &problems.push("{path}: missing {head.name} body")
+                problems.push("{path}: missing {head.name} body")
                 next
             }
             body_start: at + 1
             body_end: group_end(code, body_start, limit, 123, 125)
             if body_end < 0 {
-                &problems.push("{path}: unclosed {head.name} body")
+                problems.push("{path}: unclosed {head.name} body")
                 next
             }
             if functions.has_key(head.name) {
-                &problems.push("duplicate runtime function {head.name}")
+                problems.push("duplicate runtime function {head.name}")
                 next
             }
             bound := bound_names(text, code, head.end + 1, parameters_end - 1, false)
-            loop name in bound_names(text, code, body_start, body_end - 1, true) -> &bound.push(name)
+            loop name in bound_names(text, code, body_start, body_end - 1, true) -> bound.push(name)
             calls := [String]{}
             words := [String]{}
             loop call in named_calls(text, code, body_start, body_end - 1) {
                 if bound.contains(call.name) {
-                    &problems.push("{path}: unsupported bound-value call {call.name} in {head.name}")
+                    problems.push("{path}: unsupported bound-value call {call.name} in {head.name}")
                     next
                 }
-                &calls.push(call.name)
+                calls.push(call.name)
                 if !call.name.starts_with("coll_call") && !call.name.starts_with("os_call") -> next
                 argument: word_after(text, code, call.open, body_end - 1)
                 word: if argument.ends_with("_rail_code") -> argument else -> rail_binding(text, code, body_start, body_end - 1, argument)
-                if word != "" && !words.contains(word) -> &words.push(word)
+                if word != "" && !words.contains(word) -> words.push(word)
             }
             if words.len() > 0 -> rail_calls[head.name] = words
-            &order.push(head.name)
+            order.push(head.name)
             functions[head.name] = calls
         }
     }
-    if !functions.has_key(PANIC_PUBLICATION_ROOT) -> &problems.push("missing runtime panic publication root")
+    if !functions.has_key(PANIC_PUBLICATION_ROOT) -> problems.push("missing runtime panic publication root")
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     loop name in order {
         words: rail_calls.get(name) ?? [String]{}
@@ -2030,7 +2030,7 @@ runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -
         calls := functions.get(name) ?? [String]{}
         loop word in words {
             symbols: installed.get(word) ?? [String]{}
-            loop symbol in symbols -> &calls.push(symbol)
+            loop symbol in symbols -> calls.push(symbol)
         }
         functions[name] = calls
     }
@@ -2040,9 +2040,9 @@ runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -
         calls: functions.get(name) ?? [String]{}
         loop callee in calls {
             if seen.contains(callee) || !functions.has_key(callee) -> next
-            &seen.push(callee)
+            seen.push(callee.copy())
             list := callers.get(callee) ?? [String]{}
-            &list.push(name)
+            list.push(name.copy())
             callers[callee] = list
         }
     }
@@ -2053,14 +2053,14 @@ runtime_stop_exports: fn(sources: [RuntimeSource], addresses: [String:String]) -
         cursor += 1
         reaching: callers.get(callee) ?? [String]{}
         loop caller in reaching {
-            if !reached.contains(caller) -> &reached.push(caller)
+            if !reached.contains(caller) -> reached.push(caller)
         }
     }
     symbols := [String]{}
     loop name in exports {
-        if reached.contains(name) -> &symbols.push(name)
+        if reached.contains(name) -> symbols.push(name)
     }
-    &symbols.sort()
+    symbols.sort()
     Ok(symbols)
 }
 
@@ -2073,9 +2073,9 @@ render_stop_registry: fn(symbols: [String]) -> String Never! {
         "// The symbols land as literal data: no compile-time execution host is needed.",
         "RUNTIME_STOP_EXPORTS: comptime {{ [String]{{",
     }
-    loop symbol in symbols -> &lines.push("    \"{symbol}\",")
+    loop symbol in symbols -> lines.push("    \"{symbol}\",")
     tail: [String]{"}} }}", "", "runtime_export_can_stop: fn(symbol: String) -> Bool Never! {{", "    loop candidate in RUNTIME_STOP_EXPORTS {{", "        if candidate == symbol -> return true", "    }}", "    false", "}}"}
-    loop line in tail -> &lines.push(line)
+    loop line in tail -> lines.push(line)
     "{lines.join("\n")}\n"
 }
 
@@ -2083,13 +2083,13 @@ read_stop_registry: fn() -[FS]> String GeneratorError! {
     names := [String]{}
     listed: files.list_dir(RUNTIME_SOURCE_DIRECTORY) ?? return Err(generator_fail("cannot list {RUNTIME_SOURCE_DIRECTORY}: {err}"))
     loop entry in listed {
-        if entry.name.ends_with(".jet") -> &names.push(entry.name)
+        if entry.name.ends_with(".jet") -> names.push(entry.name)
     }
-    &names.sort()
+    names.sort()
     sources := [RuntimeSource]{}
     loop name in names {
         text: files.read("{RUNTIME_SOURCE_DIRECTORY}/{name}") ?? return Err(generator_fail("cannot read {RUNTIME_SOURCE_DIRECTORY}/{name}: {err}"))
-        &sources.push(RuntimeSource{path: name, text: text})
+        sources.push(RuntimeSource{path: name, text: text})
     }
     library: files.read(BUILD_LIBRARY_PATH) ?? return Err(generator_fail("cannot read {BUILD_LIBRARY_PATH}: {err}"))
     symbols: runtime_stop_exports(sources, runtime_function_addresses(library)) ?? return Err(err)
@@ -2248,7 +2248,7 @@ line_words: fn(line: String) -> [String] Never! {
         if at >= bytes.len() -> break
         start: at
         loop at < bytes.len() && !is_space_byte(Int.from_u8(bytes[at])) -> at += 1
-        &words.push(byte_slice(line, start, at))
+        words.push(byte_slice(line, start, at))
     }
     words
 }
@@ -2259,7 +2259,7 @@ errno_definitions: fn(header: String) -> [ErrnoDefinition] Never! {
         words: line_words(line)
         if words.len() != 3 || words[0] != "#define" || !words[1].starts_with("E") || !is_word(words[1]) || !is_word(words[2]) -> next
         if !line.starts_with("#define") -> next
-        &rows.push(ErrnoDefinition{name: words[1], value: words[2]})
+        rows.push(ErrnoDefinition{name: words[1], value: words[2]})
     }
     rows
 }
@@ -2276,7 +2276,7 @@ errno_number: fn(definitions: [ErrnoDefinition], name: String) -> Int GeneratorE
             }
         }
         if chain.contains(current) -> return Err(generator_fail("unresolved errno {name}"))
-        &chain.push(current)
+        chain.push(current.copy())
         found := ""
         loop definition in definitions {
             if definition.name == current {
@@ -2305,15 +2305,15 @@ errno_messages: fn(table: String, definitions: [ErrnoDefinition]) -> [ErrnoMessa
         literal: quoted_literal(literal_text) ?? return Err(generator_fail("unsupported strerror literal: {line}"))
         if !byte_tail(literal_text, literal.spelling_len).starts_with(")") -> next
         if errno_number(definitions, name) == {
-            .Ok(number) -> &messages.push(ErrnoMessage{number: number, text: literal.value})
-            .Err(error) -> &problems.push(error.message)
+            .Ok(number) -> messages.push(ErrnoMessage{number: number, text: literal.value})
+            .Err(error) -> problems.push(error.message)
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
     numbers := [Int]{}
     loop message in messages {
         if numbers.contains(message.number) -> return Err(generator_fail("invalid strerror source entries"))
-        &numbers.push(message.number)
+        numbers.push(message.number)
     }
     if messages.len() == 0 || messages[0].number != 0 -> return Err(generator_fail("invalid strerror source entries"))
     Ok(messages)
@@ -2328,7 +2328,7 @@ leading_name: fn(text: String) -> String Never! {
 }
 
 errno_word_rows: fn(text: String, indent: String, rows: &[String]) {
-    loop word in text_words(text) -> &rows.push("{indent}rt_text_push_word(text, I64{{{word.value}}}, I64{{{word.count}}})")
+    loop word in text_words(text) -> rows.push("{indent}rt_text_push_word(text, I64{{{word.value}}}, I64{{{word.count}}})")
 }
 
 // One static text holds the messages, a line per errno 0..highest in errno
@@ -2340,7 +2340,7 @@ render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
         if message.number > highest -> highest = message.number
     }
     lines := [String]{}
-    loop lines.len() <= highest -> &lines.push("")
+    loop lines.len() <= highest -> lines.push("")
     loop message in messages {
         loop byte in message.text.bytes() {
             code: Int.from_u8(byte)
@@ -2378,12 +2378,12 @@ render_host_errors: fn(messages: [ErrnoMessage]) -> String GeneratorError! {
         "}}",
     }
     middle: [String]{"", "host_errno_cause_append: fn(text: I64, errno: I64) {{", "    host_errno_append(text, errno)"}
-    loop row in middle -> &rows.push(row)
-    errno_word_rows(" (os error ", "    ", &rows)
-    &rows.push("    rt_text_push_number(text, errno)")
-    errno_word_rows(")", "    ", &rows)
+    loop row in middle -> rows.push(row)
+    errno_word_rows(" (os error ", "    ", rows)
+    rows.push("    rt_text_push_number(text, errno)")
+    errno_word_rows(")", "    ", rows)
     tail: [String]{"}}", "", "host_errno_text: fn(errno: I64) -> I64 {{", "    text: jet_rt_string_builder_new()", "    host_errno_append(text, errno)", "    jet_rt_string_builder_finish(text)", "}}", "", "host_errno_cause: fn(errno: I64) -> I64 {{", "    text: jet_rt_string_builder_new()", "    host_errno_cause_append(text, errno)", "    jet_rt_string_builder_finish(text)", "}}"}
-    loop row in tail -> &rows.push(row)
+    loop row in tail -> rows.push(row)
     Ok("{rows.join("\n")}\n")
 }
 
@@ -2425,9 +2425,9 @@ read_host_errors: fn() -[FS]> String GeneratorError! {
         path: "{MUSL_ASSETS_DIRECTORY}/{name}"
         if files.read_bytes(path) == {
             .Ok(bytes) -> {
-                if crypto.sha256(bytes).hex() != manifest_sha256(manifest, name) -> &problems.push("{name}: pinned errno asset changed")
+                if crypto.sha256(bytes).hex() != manifest_sha256(manifest, name) -> problems.push("{name}: pinned errno asset changed")
             }
-            .Err(error) -> &problems.push("cannot read {path}: {error}")
+            .Err(error) -> problems.push("cannot read {path}: {error}")
         }
     }
     if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))

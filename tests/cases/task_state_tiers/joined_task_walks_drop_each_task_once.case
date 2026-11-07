@@ -1,0 +1,15 @@
+# A walk that takes a List of Tasks takes each Task out of it, and a walk that
+# takes a Map of Tasks takes each entry's Task, so the join in the body is the
+# Task's only end. The checked heap traps the second drop a borrowed walk would
+# leave to the collection's own drop, on every tier.
+fixture: joined_task_walks_drop_each_task_once.fixture
+env: NO_COLOR=1
+step: jet run --checked-alloc --optimize=none main.jet
+exit: 0
+stdout: = "joined 12\nindexed 64\nfixed 30\nmapped 10\nkeyed 58\n"
+step: jet run --checked-alloc --optimize=basic main.jet
+exit: 0
+stdout: = "joined 12\nindexed 64\nfixed 30\nmapped 10\nkeyed 58\n"
+step: jet run --checked-alloc --optimize=full main.jet
+exit: 0
+stdout: = "joined 12\nindexed 64\nfixed 30\nmapped 10\nkeyed 58\n"

@@ -1,6 +1,11 @@
 // SETUP-PORT tests/jetpack_tool.rs:864-868, permission bit mutation only.
-use core.files
-run: fn(path: String) {
-    mode: files.stat(path.copy()).mode
-    files.set_mode(path, mode & !146)
+use {
+    core.files
+    core.process
+}
+run: fn() {
+    path: process.args()[0]
+    mode: (files.stat(path.copy()) ?? panic("stat {path}: {err}")).mode
+    // Clear the write bits (0o222), keeping every other bit.
+    files.set_mode(path.copy(), mode - mode.bit_and(146)) ?? panic("chmod {path}: {err}")
 }

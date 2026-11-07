@@ -33,7 +33,7 @@ kit_steps_file_action: fn(step: KitStep, env: KitEnv, work: String, scratch: Str
         loop raw in step.argv.slice(2, step.argv.len()) {
             source: kit_steps_work_path(raw, env, work, scratch, built) ?? return kit_exec_failed("concat source escapes work directory")
             bytes: files.read_bytes(source) ?? return kit_exec_failed("concat source {source}: {err}")
-            loop byte in bytes -> &combined.push(byte)
+            loop byte in bytes -> combined.push(byte)
         }
         files.create_dir_all(files.dirname(destination)) ?? return kit_exec_failed("mkdir concat: {err}")
         files.write_bytes(destination, combined) ?? return kit_exec_failed("write concat: {err}")

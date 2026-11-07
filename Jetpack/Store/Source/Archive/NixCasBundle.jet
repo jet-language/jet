@@ -13,7 +13,7 @@ STORE_PROJECT_NIX_CAS_DIR: "nix-cas"
 // its `sha256-<hex>` digest.
 store_export_nix_cas_bundle: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> (bytes: [U8], digest: String) StoreError! {
     _lock: env_runtime_lock(roots.root, "hangar")
-    archive: store_nix_cas_build_unlocked(&verification, roots, target)
+    archive: store_nix_cas_build_unlocked(verification, roots, target)
     bytes: archive.encode()
     digest: "sha256-{pkg_sha256_hex(bytes)}"
     Ok((bytes: bytes, digest: digest))
@@ -23,7 +23,7 @@ store_export_nix_cas_bundle: fn(verification: &StoreVerification, roots: HangarR
 // An identical existing bundle is reused; different bytes under the same
 // digest fail closed.
 store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: String, roots: HangarRoots, target: String) -> String StoreError! {
-    exported: store_export_nix_cas_bundle(&verification, roots, target)
+    exported: store_export_nix_cas_bundle(verification, roots, target)
     bytes: exported.bytes
     digest: exported.digest
     directory: files.join(pkg_managed_dir(project), STORE_PROJECT_NIX_CAS_DIR)
@@ -60,7 +60,7 @@ store_publish_nix_cas_bundle: fn(verification: &StoreVerification, project: Stri
 // Import a project Nix CAS bundle only after checking its declared digest.
 // Returns the import report and the manifest's member keys.
 store_import_nix_cas_bundle: fn(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
-    store_nix_cas_import_with_expectation(&verification, project, roots, digest, None)
+    store_nix_cas_import_with_expectation(verification, project, roots, digest, None)
 }
 
 // Import a Nix CAS bundle against the lock's complete closure identity. The
@@ -79,7 +79,7 @@ store_import_nix_cas_bundle_checked: fn(verification: &StoreVerification, projec
         cache_key: closure.cache_key,
         references: closure.references,
     }
-    store_nix_cas_import_with_expectation(&verification, project, roots, digest, Val(expectation))
+    store_nix_cas_import_with_expectation(verification, project, roots, digest, Val(expectation))
 }
 
 store_nix_cas_import_with_expectation: fn(verification: &StoreVerification, project: String, roots: HangarRoots, digest: String, expectation: NixReplayExpectation?) -> (report: HangarArchiveReport, digests: [String]) StoreError! {
@@ -93,8 +93,8 @@ store_nix_cas_import_with_expectation: fn(verification: &StoreVerification, proj
     store_nix_cas_validate_bundle(archive, expectation)
     manifest: archive.nix_manifest ?? return Err(StoreError.InvalidData("project Nix CAS bundle has no closure manifest"))
     digests := [String]{}
-    loop member in manifest.members -> &digests.push(member.key)
-    report: store_archive_import_verified(&verification, roots, archive, true)
+    loop member in manifest.members -> digests.push(member.key)
+    report: store_archive_import_verified(verification, roots, archive, true)
     Ok((report: report, digests: digests))
 }
 
@@ -128,12 +128,12 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
         if object.meta != "" -> return Err(StoreError.InvalidData("project Nix CAS bundle contains package metadata"))
         if object.id != object.digest -> return Err(StoreError.InvalidData("Nix CAS bundle object id disagrees with its digest"))
         store_nix_cas_validate_cas(object.digest, "Nix CAS member")
-        &object_keys.push(object.digest)
+        object_keys.push(object.digest)
         if objects.get(object.digest) != None -> return Err(StoreError.InvalidData("Nix CAS bundle contains duplicate members"))
         objects[object.digest] = object
     }
     member_keys := [String]{}
-    loop member in manifest.members -> &member_keys.push(member.key)
+    loop member in manifest.members -> member_keys.push(member.key)
     if !store_nix_cas_is_sorted_unique(object_keys) || !store_nix_cas_is_sorted_unique(member_keys) {
         return Err(StoreError.InvalidData("Nix closure manifest members must be sorted and unique"))
     }
@@ -175,7 +175,7 @@ store_nix_cas_validate_bundle: fn(archive: HangarArchive, expectation: NixReplay
 
     visiting := [String: Bool]{}
     reachable := [String: Bool]{}
-    store_nix_cas_visit(manifest.output, edges, &visiting, &reachable)
+    store_nix_cas_visit(manifest.output, edges, visiting, reachable)
     unreachable := reachable.len() != member_keys.len()
     loop key in member_keys {
         if reachable.get(key) == None -> unreachable = true
@@ -189,8 +189,8 @@ store_nix_cas_visit: fn(key: String, edges: [String: [String]], visiting: &[Stri
     if visiting.get(key) != None -> return Err(StoreError.InvalidData("Nix closure manifest contains a reference cycle"))
     visiting[key] = true
     references: edges.get(key) ?? return Err(StoreError.InvalidData("Nix closure manifest has a missing graph node"))
-    loop reference in references -> store_nix_cas_visit(reference, edges, &visiting, &reachable)
-    _: &visiting.remove(key)
+    loop reference in references -> store_nix_cas_visit(reference, edges, visiting, reachable)
+    _: visiting.remove(key)
     reachable[key] = true
 }
 
@@ -239,7 +239,7 @@ store_nix_cas_validate_platform: fn(value: String) StoreError! {
 // objects, rooted at the output digest, with a manifest built from the
 // closure graph and the producer's locked index facts.
 store_nix_cas_build_unlocked: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> HangarArchive StoreError! {
-    entry: store_archive_select_entry_unlocked(&verification, roots, target)
+    entry: store_archive_select_entry_unlocked(verification, roots, target)
     producer: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("Nix CAS export has invalid producer record: {err.message()}"))
     if producer.provider != "nix" {
         return Err(StoreError.InvalidData("Nix CAS export requires a Nix producer record; generic Hangar entries use generic archives"))
@@ -254,15 +254,15 @@ store_nix_cas_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
         }
         .None -> {}
     }
-    graph: store_closure_graph_structure_unlocked(&verification, roots)
+    graph: store_closure_graph_structure_unlocked(verification, roots)
     root_digest: entry.envelope.output_hash
-    full: store_archive_build_unlocked(&verification, roots, target, true, true)
+    full: store_archive_build_unlocked(verification, roots, target, true, true)
     objects := [HangarArchiveObject]{}
     has_output := false
     loop object in full.objects {
         if object.meta != "" -> next
         if object.digest == root_digest -> has_output = true
-        &objects.push(object)
+        objects.push(object)
     }
     if !has_output -> return Err(StoreError.InvalidData("Nix CAS bundle is missing its output object"))
     manifest: store_nix_cas_build_manifest(objects, graph, root_digest, platform, revision, cache_key)
@@ -273,7 +273,7 @@ store_nix_cas_build_unlocked: fn(verification: &StoreVerification, roots: Hangar
 
 store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureGraph, output: String, platform: String, revision: String, cache_key: String) -> NixClosureManifest StoreError! {
     object_keys := [String]{}
-    loop object in objects -> &object_keys.push(object.digest)
+    loop object in objects -> object_keys.push(object.digest)
     members := [NixClosureMember]{}
     loop object in objects {
         bytes: store_nix_cas_canonical_object_bytes(object)
@@ -283,14 +283,14 @@ store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureG
                 return Err(StoreError.InvalidData("Nix closure graph references an object outside the exported member set"))
             }
         }
-        &members.push(NixClosureMember{
+        members.push(NixClosureMember{
             key: object.digest,
             hash: "sha256-{pkg_sha256_hex(bytes)}",
             size: bytes.len(),
             references: store_archive_sorted_unique(references),
         })
     }
-    &members.sort_by(member -> member.key)
+    members.sort_by(member -> member.key)
     Ok(NixClosureManifest{output, platform, revision, cache_key, members})
 }
 
@@ -298,7 +298,7 @@ store_nix_cas_build_manifest: fn(objects: [HangarArchiveObject], graph: ClosureG
 // node in archive encoding, without identity or metadata.
 store_nix_cas_canonical_object_bytes: fn(object: HangarArchiveObject) -> [U8] StoreError! {
     bytes := [U8]{}
-    store_archive_put_raw_u32(&bytes, object.root_mode)
-    loop node in object.nodes -> node.encode_into(&bytes)
+    store_archive_put_raw_u32(bytes, object.root_mode)
+    loop node in object.nodes -> node.encode_into(bytes)
     Ok(bytes)
 }

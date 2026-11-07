@@ -10,7 +10,7 @@ read_records: fn(path: Path) -> [String] {
     records := [String]{}
     if !fs.exists(path) -> return records
     reader: fs.open(path) ?? return records
-    loop line in reader.lines() -> &records.push(line)
+    loop line in reader.lines() -> records.push(line)
     return records
 }
 
@@ -20,7 +20,7 @@ compact_records: fn(path: Path, records: [String]) -> Bool {
     loop record in records {
         writer.write_line(record) ?? return false
     }
-    &writer.flush() ?? return false
+    writer.flush() ?? return false
     fs.fsync(temp) ?? return false
     fs.rename(temp, path) ?? return false
     return true

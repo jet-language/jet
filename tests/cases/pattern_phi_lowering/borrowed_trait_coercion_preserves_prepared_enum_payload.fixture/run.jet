@@ -13,14 +13,14 @@ admit: fn(parent: &Int, producer: Producer) -> Int Never! {
 }
 attach: fn(host: &Host, prepared: Preparation) -> Int Never! {
     if prepared == .Prepared(producer) {
-        return admit(&host.parent, producer)
+        return admit(host.parent, producer)
     }
     0
 }
 run: fn() {
     host := Host{parent: 10}
     prepared: Preparation.Prepared{producer: CanonicalProducer{values: [Int]{7}}}
-    print(attach(&host, prepared))
-    print(attach(&host, prepared))
+    print(attach(host, prepared))
+    print(attach(host, prepared))
     print(host.parent)
 }

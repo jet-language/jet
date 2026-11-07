@@ -23,8 +23,8 @@ use {
 env_workspace_lock_write: fn(cache: &WorkspaceDeclarationCache, workspace_root: String, plan: WorkspacePlan) EnvironmentError! -[FS, Env, Exec, Time, Time.Wait]> {
     // crates/jetpack/src/WorkspaceLock.rs:25-49: refusal precedes the
     // process lock too, whose acquisition can create filesystem state.
-    pkg_check_workspace_overlay_gates(&cache, workspace_root, plan.overlay_policy) ?? return Err(EnvironmentError.Gate(err))
-    if env_workspace_lock_write_locked(&cache, workspace_root, plan) == .Err(error) {
+    pkg_check_workspace_overlay_gates(cache, workspace_root, plan.overlay_policy) ?? return Err(EnvironmentError.Gate(err))
+    if env_workspace_lock_write_locked(cache, workspace_root, plan) == .Err(error) {
         return Err(EnvironmentError.Other("could not write workspace lock: {error.message()}"))
     }
 }
@@ -38,7 +38,7 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
     resolver: AuthorityResolver.open(workspace_root) ?? return Err(env_workspace_lock_invalid("workspace authority cannot be opened: {err.message()}"))
     existing_lock := CheckedFile?{None}
     if resolver.checked_file(PKG_WORKSPACE_LOCK) == {
-        .Ok(file) -> existing_lock = Val(^file)
+        .Ok(file) -> existing_lock = Val(file.move())
         .Err(error) -> {
             if !error.is_missing() -> return Err(env_workspace_lock_invalid("workspace lock cannot be opened: {error.message()}"))
         }
@@ -50,7 +50,7 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
         lock = pkg_lock_parse(raw) ?? return Err(env_workspace_lock_invalid("existing lock is malformed: {err.message()}"))
     }
     lock.version = PKG_LOCK_VERSION
-    source: if resolver.resolve_workspace_source(&cache) == {
+    source: if resolver.resolve_workspace_source(cache) == {
         .Ok(found) -> found
         .Err(error) -> { return Err(env_workspace_lock_invalid("workspace authority cannot be resolved: {error.message()}")) }
     }
@@ -76,7 +76,7 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
     }
     members := [LockedWorkspaceMember]{}
     loop member in plan.members {
-        &members.push(env_workspace_lock_member(resolver, member, source_digest))
+        members.push(env_workspace_lock_member(resolver, member, source_digest))
     }
     lock.workspace_members = members
     if source == .Val(checked) {
@@ -92,7 +92,7 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
         loop existing in lock.comptime_inputs {
             if existing.path == input.path -> recorded = true
         }
-        if !recorded -> &lock.comptime_inputs.push(input)
+        if !recorded -> lock.comptime_inputs.push(input.copy())
     }
     if existing_lock == {
         .Val(file) -> resolver.revalidate_file(file) ?? return Err(env_workspace_lock_invalid("existing lock changed before write: {err.message()}"))
@@ -105,9 +105,9 @@ env_workspace_lock_write_locked: fn(cache: &WorkspaceDeclarationCache, workspace
             }
         }
     }
-    pkg_lock_ensure_build_stamp(workspace_root, &lock)
+    pkg_lock_ensure_build_stamp(workspace_root, lock)
     pkg_lock_write_atomically(workspace_root, pkg_lock_write(lock).bytes()) ?? return Err(EnvironmentError.Other(err.message()))
-    close(^guard)
+    close(guard)
 }
 
 // One checked lock entry: a flat Package member at a safe relative path whose

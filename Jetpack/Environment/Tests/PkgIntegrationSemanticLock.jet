@@ -39,7 +39,7 @@ s6_semantic_pkg: fn(owner: String, key: String, exact: String, hash: String) -> 
     assert(invalidations[0].policy_fingerprint_before != invalidations[0].policy_fingerprint_after)
     records: env_overlay_semantic_records(before, "app", "x86_64-linux") ?? panic("real overlay records")
     lock := SemanticLockFile.with_records([SemanticRecord]{s6_semantic_pkg("app", "foo", "1.0.0", "sha256-foo"), records[0]})
-    trust_apply_overlay_invalidations(&lock, invalidations)
+    trust_apply_overlay_invalidations(lock, invalidations)
     foo := SemanticRecord?{None}
     loop record in lock.records {
         assert(record.identity.kind != LockRecordKind.PackageOverlay)

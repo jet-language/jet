@@ -21,7 +21,7 @@ acquire ambient `FS` authority; native file constructors retain their existing
 Use the vocabulary in [Jet vocabulary](vocabulary.md). Conformance evidence
 lives in [`tests/encoding_corpus.rs`](../../tests/encoding_corpus.rs),
 [`tests/encoding_parity.rs`](../../tests/encoding_parity.rs), and the
-encoding examples under [`Examples/features/serde`](../../Examples/features/serde/).
+encoding examples under [`Examples/Data`](../../Examples/Data/).
 
 The rules below describe durable contracts and their reasons. Decision IDs are
 citations; a narrower decision controls the public surface where it says so.
@@ -185,13 +185,13 @@ finish: fn(&self) encoding.EncodingError!
 ```
 
 `&self` is the edit access because each call advances state; callers keep a
-handle in a changeable binding. Constructors consume file handles with `^`:
+handle in a changeable binding. Constructors consume file handles with `&&`:
 
 ```jet
-reader(input: ^files.FileReader,
+reader(input: &&files.FileReader,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Reader encoding.EncodingError!
-writer(output: ^files.FileWriter,
+writer(output: &&files.FileWriter,
        limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()})
     -> Writer encoding.EncodingError!
 ```
@@ -259,7 +259,7 @@ use {
 
 run: fn() (EncodingError | IOError)! {
     input: files.open("catalog.json") ?? return
-    reader: json.reader(^input, limits: encoding.EncodingLimits.safe()) ?? return
+    reader: json.reader(input, limits: encoding.EncodingLimits.safe()) ?? return
     loop event in reader {
         if event == .Key("item") { print("item") }
     }
@@ -596,11 +596,11 @@ retaining the item, allocating, or truncating. (D-ENCXML1=A)
 Use these reader and writer constructors:
 
 ```jet
-xml.reader(input: ^files.FileReader,
+xml.reader(input: &&files.FileReader,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLParseOptions{xml.XMLParseOptions.safe()})
     -> xml.XMLReader encoding.EncodingError!
-xml.writer(output: ^files.FileWriter,
+xml.writer(output: &&files.FileWriter,
            limits: encoding.EncodingLimits{encoding.EncodingLimits.safe()},
            xml: xml.XMLRenderOptions{xml.XMLRenderOptions.safe()})
     -> xml.XMLWriter encoding.EncodingError!
@@ -786,21 +786,25 @@ count is `5`.
 ## JSON numbers and canonical output
 
 Keep one JSON number tokenizer for dynamic and typed decoding. Untyped
-`json.parse` maps integral numbers to exact `Int` and fractional numbers to
-`Float`. Typed `json.decode<T>` and `data.json<T>` retain each valid number
-token until the target consumes it. `Decimal` parses the token directly,
+`json.parse` keeps each valid number token as `Dyn.Number`, preserving its
+exact spelling: `1.50` re-renders as `1.50`, and `1e400` and integers beyond
+any machine width parse exactly. Typed `json.decode<T>` and `data.json<T>`, and
+a typed read of a parsed `Dyn.Number`, consume that token at the destination,
+which checks range there. `Decimal` parses the token directly,
 preserving sign, exponent, and lexical scale (`12.340` remains `12.340`).
 The exact integer destination is arbitrary-precision `Int` under D-INTBIG1 and
 D-TYPE2-NUM1; `JetBigInt` is internal storage, not a user-facing decode
-target. Exact `Int` rejects non-integral fractions. Neither target falls back
-to quoted text or round-trips through binary64.
+target. Exact `Int` rejects non-integral fractions. `Float` rejects a token
+outside binary64's finite range, so `json.decode<Float>("1e9999")` is an
+error. Neither target falls back to quoted text or round-trips through
+binary64.
 
 Whole-value and stream decoding share the tokenizer, projection, limits, and
-field-error vocabulary. Invalid JSON, non-finite input, target mismatch,
-fixed-width overflow, and digit/exponent-limit failures remain ordinary JSON
-or `[FieldError]` values. Canonical output uses the separate JSON
-canonicalization law; this decision adds no second writer. (D-JSON-EXACTNUM1=A;
-D-INTBIG1; D-TYPE2-NUM1)
+field-error vocabulary. Invalid JSON, `NaN` and `Infinity` spellings, target
+mismatch, non-finite `Float` reads, fixed-width overflow, and
+digit/exponent-limit failures remain ordinary JSON or `[FieldError]` values.
+Canonical output uses the separate JSON canonicalization law; this decision
+adds no second writer. (D-DATATREE-RULES1=A; D-INTBIG1; D-TYPE2-NUM1)
 
 Use RFC 8785 JSON Canonicalization Scheme for hashing and signing. It must not
 depend on incidental renderer behavior: `json.canonical` is the JCS contract,
@@ -1322,9 +1326,9 @@ and their `MANIFEST.tsv` rows for URL, license, and SHA-256 metadata.
 manifest before use. Label local hostile oracles `local`; they are not
 independent RFC corpora. Checked examples cover whole-value breadth, base
 allowances, reader/writer lifecycle, and shared types; their goldens are under
-[`Examples/features/expected/serde`](../../Examples/features/expected/serde/).
+[`Examples/Data`](../../Examples/Data/).
 The matched Python fixture is
-[`encoding_json_stream.py`](../../Examples/features/serde/encoding_json_stream.py).
+[`encoding_json_stream.py`](../../Examples/Data/JSON/encoding_json_stream.py).
 It uses `json.dump(..., sort_keys=True, separators=(",", ":"))` and
 `json.load` for the same canonical file round trip. The parity test must
 exercise the Jet fixture on AOT, resident JIT, and the forced interpreter;

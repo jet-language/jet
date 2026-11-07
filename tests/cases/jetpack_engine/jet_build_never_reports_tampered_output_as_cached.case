@@ -1,5 +1,4 @@
 # HAND-PORT tests/jetpack_engine.rs:9117-9156 jet_build_never_reports_tampered_output_as_cached
-# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
 # Retargeted off the retired `jetpack build` (2b160ee885): build -> env --prep / use --prep, run -> env / use, test -> jet test.
 fixture: jet_build_never_reports_tampered_output_as_cached.fixture
 env: NO_COLOR=1
@@ -25,10 +24,10 @@ cwd: project
 env: PATH=/usr/bin:/bin
 exit: nonzero
 stderr: ~ "E2604" # original contains predicate
-step: jetpack env --prep --no-color --trust
+step: jetpack env --no-color --trust -- hello
 cwd: project
 env: PATH=/usr/bin:/bin
 exit: 0
-stderr: ~ "built" # original contains predicate
-stderr: !~ "1 cached" # original negative contains predicate
+stdout: ~ "hello from jet-pkgs" # the consumer runs the rebuilt output, not the tampered bytes
+stderr: ~ "cache hit 0 percent" # the quarantined entry is built again, never counted as cached
 

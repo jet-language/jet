@@ -61,9 +61,9 @@ two_digits: fn(value: Int) -> String Never! { if value < 10 -> "0{value}" else -
 // (which names the shard as its arguments spelled it).
 weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, index_text: String, count_text: String) -> ShardPlan Never! {
     ordered := items
-    &ordered.sort_by((left: WeightedItem, right: WeightedItem) -> (right.weight <=> left.weight).then(left.item <=> right.item))
+    ordered.sort_by((left: WeightedItem, right: WeightedItem) -> (right.weight <=> left.weight).then(left.item <=> right.item))
     loads := [Int]{}
-    loop _ in 0..<shard_count -> &loads.push(0)
+    loop _ in 0..<shard_count -> loads.push(0)
     selected := [String]{}
     selected_seconds := 0
     loop row in ordered {
@@ -73,7 +73,7 @@ weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, i
         }
         loads[lightest] = loads[lightest] + row.weight
         if lightest == shard_index {
-            &selected.push(row.item)
+            selected.push(row.item)
             selected_seconds += row.weight
         }
     }
@@ -89,7 +89,7 @@ weighted_shards: fn(items: [WeightedItem], shard_index: Int, shard_count: Int, i
         spread = "{hundredths /% 100}.{two_digits(hundredths % 100)}x"
     }
     load_words := [String]{}
-    loop load in loads -> &load_words.push("{load}")
+    loop load in loads -> load_words.push("{load}")
     summary: "weighted-shards: shard {index_text}/{count_text} selected {selected.len()} of {items.len()} items, predicted {selected_seconds}s (shard loads: {load_words.join(" ")}; spread {heaviest}s/{lightest_load}s = {spread})"
     ShardPlan{selected: selected, summary: summary}
 }
@@ -105,10 +105,10 @@ shard_plan: fn(args: [String]) -> ShardPlan ShardError! {
     shard_index: digits_value(index_text)
     if shard_index >= shard_count -> return Err(ShardError{message: "error: SHARD_INDEX ({index_text}) must be < SHARD_COUNT ({count_text})", code: 64})
     items := [WeightedItem]{}
-    loop suite in SUITES -> &items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
+    loop suite in SUITES -> items.push(WeightedItem{weight: DEFAULT_WEIGHT, item: suite})
     plan: weighted_shards(items, shard_index, shard_count, index_text, count_text)
     selected := plan.selected
-    &selected.sort()
+    selected.sort()
     Ok(ShardPlan{selected: selected, summary: plan.summary})
 }
 

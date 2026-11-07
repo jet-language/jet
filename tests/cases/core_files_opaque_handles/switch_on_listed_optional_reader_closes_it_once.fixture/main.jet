@@ -21,7 +21,7 @@ member_size: fn(members: &[Member], index: Int) -> Int IOError! {
 member_bytes: fn(members: &[Member], index: Int) -> Int IOError! {
     total := 0
     if &members[index].file == .Val(input) {
-        &input.seek(0)
+        input.seek(0)
         loop {
             chunk: input.read(65536)
             if chunk.len() == 0 -> break
@@ -43,12 +43,12 @@ run: fn() {
     main: files.open("main.jet") ?? panic("open main.jet")
     members := [Member]{Member{name: "main", file: Val(main)}, Member{name: "none", file: None}}
     loop round in 0..<3 {
-        size: member_size(&members, 0) ?? panic("size")
-        absent: member_size(&members, 1) ?? panic("size")
+        size: member_size(members, 0) ?? panic("size")
+        absent: member_size(members, 1) ?? panic("size")
         print("round {round}: main has bytes {size > 0}, none {absent}")
     }
-    bytes: member_bytes(&members, 0) ?? panic("bytes")
-    print("read every byte {bytes == (member_size(&members, 0) ?? -2)}")
+    bytes: member_bytes(members, 0) ?? panic("bytes")
+    print("read every byte {bytes == (member_size(members, 0) ?? -2)}")
     package: files.open("package.jet") ?? panic("open package.jet")
     readers: [FileReader?]{Val(package), None}
     loop round in 0..<3 -> print("present {present(readers, 0)} {present(readers, 1)}")

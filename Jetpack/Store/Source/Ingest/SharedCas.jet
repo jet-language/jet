@@ -34,7 +34,7 @@ store_hex8: fn(value: Int) -> String Never! {
     out := [U8]{}
     loop index in 0..<8 {
         shift: (7 - index) * 4
-        &out.push(digits[((value >> shift)).bit_and(15)])
+        out.push(digits[((value >> shift)).bit_and(15)])
     }
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
@@ -65,7 +65,7 @@ store_share_tree_files_unlocked_with_report: fn(roots: HangarRoots, root: String
     store_make_tree_writable_for_removal(canonical_root)
     used := Set<String>.new()
     report := SharedCASReport{optimized_files: 0, optimized_bytes: 0}
-    store_share_node(canonical_root, shared, &used, &report)
+    store_share_node(canonical_root, shared, used, report)
     store_seal_node(canonical_root)
     store_fsync_tree(canonical_root)
     Ok(report)
@@ -76,8 +76,8 @@ store_share_node: fn(path: String, shared: String, used: &Set<String>, report: &
     if info.is_symlink -> return
     if info.is_dir {
         entries := files.list_dir(path)
-        &entries.sort_by((entry: files.DirEntry) -> entry.name)
-        loop entry in entries -> store_share_node(entry.path, shared, &used, &report)
+        entries.sort_by((entry: files.DirEntry) -> entry.name)
+        loop entry in entries -> store_share_node(entry.path, shared, used, report)
         return
     }
     if !info.is_file -> return
@@ -88,11 +88,11 @@ store_share_node: fn(path: String, shared: String, used: &Set<String>, report: &
     // the first shared occurrence as used; otherwise its equal, unshared
     // sibling could be linked in-tree.
     if info.links > 1 {
-        &used.add(key)
+        used.add(key)
         return
     }
     if used.has(key) -> return
-    &used.add(key)
+    used.add(key.copy())
     ensured: store_ensure_shared_file(shared, key, path, info, mode)
     if store_same_file_inode(path, ensured.path) -> return
     linked := true
@@ -142,9 +142,9 @@ store_ensure_shared_file: fn(shared: String, key: String, source_path: String, s
     loop {
         chunk: input.read(65536)
         if chunk.len() == 0 -> break
-        &output.write_all(chunk)
+        output.write_all(chunk)
     }
-    &output.fsync()
+    output.fsync()
     files.set_mode(partial, mode)
     files.rename(partial, destination) ?? {
         failure: err
@@ -164,8 +164,8 @@ store_files_equal: fn(left: String, right: String) -[FS]> Bool StoreError! {
     left_reader := files.open(left)
     right_reader := files.open(right)
     loop {
-        left_chunk: &left_reader.read(65536)
-        right_chunk: &right_reader.read(65536)
+        left_chunk: left_reader.read(65536)
+        right_chunk: right_reader.read(65536)
         if left_chunk.len() != right_chunk.len() -> return Ok(false)
         if left_chunk.len() == 0 -> return Ok(true)
         if left_chunk != right_chunk -> return Ok(false)

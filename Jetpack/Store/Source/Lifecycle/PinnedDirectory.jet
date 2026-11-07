@@ -59,7 +59,7 @@ PinnedLifecycleDirectory: struct {
         entries: self.directory.list()
         loop entry in entries {
             if names.len() >= maximum -> break
-            &names.push(entry.name)
+            names.push(entry.name)
         }
         Ok(names)
     }
@@ -136,13 +136,13 @@ store_pinned_components: fn(absolute: String) -> PinnedPathParts StoreError! {
     parts := [String]{}
     segments: files.split_slash(absolute)
     loop part in segments {
-        if part != "" -> &parts.push(part)
+        if part != "" -> parts.push(part)
     }
     if absolute.starts_with("/") -> return Ok(PinnedPathParts{anchor: "/", names: parts})
     if parts.len() == 0 -> return Err(StoreError.InvalidInput("pinned directory has no normal component"))
     anchor: "{parts[0]}/"
     names := [String]{}
-    loop index in 1..<parts.len() -> &names.push(parts[index])
+    loop index in 1..<parts.len() -> names.push(parts[index])
     Ok(PinnedPathParts{anchor, names})
 }
 

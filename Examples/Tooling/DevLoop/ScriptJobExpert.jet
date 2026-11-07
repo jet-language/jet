@@ -1,0 +1,68 @@
+#!/usr/bin/env jet
+// EXPERT VARIANT — script_job.jet is the short path; this sibling exposes the
+// knobs only when the job needs them.
+//
+// Environment is selected as data, not reconstructed by the script: env.dev is
+// the checked environment profile. Authority is explicit in the package
+// manifest. A deadline is lexical/dynamic scope around the work. `.Ship` is
+// the distribution choice for the same checked job; it does not turn source
+// text into a runtime eval surface.
+//
+// Run the ordinary entry with `jet run .../script_job_expert.jet`, or select the
+// named job with `jet run .../script_job_expert.jet -- ship_job`. Both routes
+// use this one checked function and the host still owns the main loop. A
+// release build (`jet build --release`) is an artifact of the same source, not
+// a promise that every target has identical OS capabilities.
+//
+// Isolation remains bounded: a fresh job/session boundary is useful for state
+// separation, but it is not a sandbox, a network denial, a child-kill promise,
+// or a distribution protocol. Add those controls at the package/host boundary
+// when they are part of the deployment contract.
+package: {
+    name: "script_job_expert"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc, Time] }
+}
+use time: core.time
+
+env.dev: module {
+    formatter: pkgs.nixfmt
+}
+
+#Error
+InputError: struct {
+    message: String
+}
+
+#SingleUse Lease: struct {
+    name: String
+}
+
+acquire: fn(name: String) -> Lease { Lease{name: name.copy()} }
+
+release: fn(lease: &&Lease) { print("cleanup: released {lease.name}") }
+
+checked_input: fn(value: String) -> String InputError! {
+    if value == "bad" -> return Err(InputError{message: "input is not valid"})
+    Ok(value)
+}
+
+#[Job(.Ship), Doc("run the controlled scripting job")]
+ship_job: fn() {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 1000) {
+        print("expert: environment=dev")
+        print("expert: authority=IO")
+        print("expert: deadline=1000ms")
+        print("expert: distribution=ship")
+
+        lease: acquire("workspace")
+        message: checked_input("bad") ?? {
+            print("real error: {err.message}")
+            "recovered"
+        }
+        print("result: {message}")
+        release(lease)
+    }
+}
+
+run: fn() { ship_job() }

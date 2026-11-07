@@ -56,7 +56,7 @@ env_transition_test_error: fn(result: TransitionResult EnvironmentError!, what: 
 
 #Test("transition journal preserves every byte and distinguishes absent from empty") {
     bytes := [U8]{}
-    loop value in 0..<256 -> &bytes.push(U8{value})
+    loop value in 0..<256 -> bytes.push(U8{value})
     encoded: env_transition_encode_state(Val(bytes))
     assert(encoded.starts_with("f00010203"))
     assert(encoded.ends_with("fcfdfeff"))

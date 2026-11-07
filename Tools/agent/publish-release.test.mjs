@@ -11,6 +11,8 @@ test('build takes its own options and refuses any other step', () => {
     assert.deepEqual(parseArgs(['build', 'a', 'b', '--seed', 's', '--out', 'o']).errors, ['one commit, not a and b']);
     assert.deepEqual(parseArgs(['build', 'a', '--seed', 's', '--out', 'o', '--threads', '0']).errors, ['--threads needs a positive whole number, not 0']);
     assert.deepEqual(parseArgs(['build', 'a', '--seed', 's', '--out', 'o', '--dry-run']).errors, ['unknown option --dry-run']);
+    const gateOnly = parseArgs(['build', 'a', '--seed', 's', '--check-gate']);
+    assert.deepEqual([gateOnly.checkGate, gateOnly.errors], [true, []]);
     assert.deepEqual(parseArgs(['publish', 'out']).errors, ['unknown command publish: want build (Tools/release/Main.jet gates and publishes)']);
     assert.deepEqual(parseArgs([]).errors, ['unknown command (none): want build (Tools/release/Main.jet gates and publishes)']);
 });

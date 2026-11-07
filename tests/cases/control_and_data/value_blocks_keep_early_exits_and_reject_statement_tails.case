@@ -18,13 +18,14 @@ stdout: = value_blocks_keep_early_exits_and_reject_statement_tails.stdout.expect
 stderr: == default
 step: jet check --json invalid-0/main.jet
 exit: nonzero
-json: stdout doc $.reports[?code="E0114"] #>= 1
-json: stdout doc $.reports[?code="E0114"][0].span != null # original first matching diagnostic.span.is_some()
+# A statement `if` tail with unit arms is a Unit value, so it reports E0113 naming `Unit` (spec: E0113 reports the value's type).
+json: stdout doc $.reports[?code="E0113"] #>= 1
+json: stdout doc $.reports[?code="E0113"][0].span != null # original first matching diagnostic.span.is_some()
 step: jet check --json invalid-1/main.jet
 exit: nonzero
 json: stdout doc $.reports[?code="E0003"] #>= 1
 json: stdout doc $.reports[?code="E0003"][0].span != null # original first matching diagnostic.span.is_some()
 step: jet check --json invalid-2/main.jet
 exit: nonzero
-json: stdout doc $.reports[?code="E0114"] #>= 1
-json: stdout doc $.reports[?code="E0114"][0].span != null # original first matching diagnostic.span.is_some()
+json: stdout doc $.reports[?code="E0116"] #>= 1 # a `??` fallback that ends in a valueless call is E0116 ValuelessCallUsedAsValue (was the generic E0114)
+json: stdout doc $.reports[?code="E0116"][0].span != null # original first matching diagnostic.span.is_some()

@@ -251,6 +251,25 @@ test('card criteria --reopen reopens a verified row and audits the reason', () =
   assert.match(help, /milestone verify/);
 });
 
+test('card criteria --edit and --remove change rows from the CLI', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-criteria-edit-'));
+  run(cwd, ['init', '--name', 'Criteria Edit']);
+  run(cwd, ['card', 'add', '--title', 'Criteria card', '--by', 'planner']);
+  run(cwd, ['card', 'criteria', '#1', '--add', 'ship it', '--by', 'planner']);
+  run(cwd, ['card', 'criteria', '#1', '--add', 'drop me', '--by', 'planner']);
+  const edited = JSON.parse(run(cwd, [
+    'card', 'criteria', '#1', '--edit', '1', '--text', 'ship it on every tier', '--reason', 'scope made explicit',
+    '--by', 'owner', '--json',
+  ]).out);
+  assert.equal(edited.text, 'ship it on every tier');
+  run(cwd, ['card', 'criteria', '#1', '--remove', '2', '--reason', 'not needed', '--by', 'owner']);
+  const rows = JSON.parse(run(cwd, ['card', 'criteria', '#1', '--json']).out);
+  assert.deepEqual(rows.map(r => [r.n, r.text]), [[1, 'ship it on every tier']]);
+  const help = run(cwd, ['help']).out;
+  assert.match(help, /--edit n --text/);
+  assert.match(help, /--remove n/);
+});
+
 test('status renders and reports the open-card trend for a chosen window', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'tower-cli-status-trend-'));
   run(cwd, ['init', '--name', 'Status Trend']);

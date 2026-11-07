@@ -5,6 +5,8 @@ use jet_foundation.[
     EnumLitArg,
     Expr,
     LValue,
+    MARKER_DEBUG_ONLY,
+    MARKER_OFF,
     Pattern,
     PatSlot,
     Stmt,
@@ -183,7 +185,7 @@ sema_ownership_last_use_statement: fn(statement: Stmt, name: String) -> Bool {
             return sema_ownership_last_use_statements(body, name)
         }
         .Switched(marker, body, _) -> {
-            if marker.name == "Off" || marker.name == "DebugOnly" -> return false
+            if marker.name == MARKER_OFF || marker.name == MARKER_DEBUG_ONLY -> return false
             return sema_ownership_last_use_statements(body, name)
         }
         .Loop(body, _, _, _) | .Unsafe(_, _, body, _) | .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) -> return sema_ownership_last_use_statements(body, name)
@@ -216,7 +218,7 @@ sema_ownership_name_live_after: fn(name: String, tail_store: &SemaStatementTailS
     frame_index := context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {
         body_id: context.lambda_statement_tails[frame_index].body_id
-        if sema_ownership_tail_last_read(&tail_store, body_id, name) >= context.lambda_statement_tails[frame_index].start_index -> return true
+        if sema_ownership_tail_last_read(tail_store, body_id, name) >= context.lambda_statement_tails[frame_index].start_index -> return true
         frame_index -= 1
     }
     false

@@ -61,9 +61,9 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .Toolchain)
         if self.toolchain_names.contains(checked) -> return Err(HermeticBuildError.DuplicateToolchainName(checked))
         build_validate_toolchain(checked, spec)
-        &self.toolchain_names.push(checked)
+        self.toolchain_names.push(checked.copy())
         id: self.toolchains.len()
-        &self.toolchains.push(HermeticBuildToolchain{
+        self.toolchains.push(HermeticBuildToolchain{
             id: id, name: checked, role: spec.role, host_triple: spec.host_triple, target_triple: spec.target_triple,
             sdk: spec.sdk, linker: spec.linker, sysroot: spec.sysroot, tools: spec.tools,
             resolution: spec.resolution, mounts: spec.mounts, provenance: spec.provenance,
@@ -75,9 +75,9 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .SigningIdentity)
         if self.signing_identity_names.contains(checked) -> return Err(HermeticBuildError.DuplicateSigningIdentityName(checked))
         build_validate_identity(checked, spec.label, spec.provenance)
-        &self.signing_identity_names.push(checked)
+        self.signing_identity_names.push(checked.copy())
         id: self.signing_identities.len()
-        &self.signing_identities.push(HermeticBuildSigningIdentity{id: id, name: checked, label: spec.label, provenance: spec.provenance})
+        self.signing_identities.push(HermeticBuildSigningIdentity{id: id, name: checked, label: spec.label, provenance: spec.provenance})
         Ok(SigningIdentityHandle{id: id, context: self.context})
     }
 
@@ -87,58 +87,58 @@ HermeticBuildContext: struct {
         toolchain: spec.toolchain ?? self.default_toolchain
         self.check_toolchain_ref(toolchain)
         build_validate_probe(checked, spec)
-        &self.probe_names.push(checked)
+        self.probe_names.push(checked.copy())
         id: self.probes.len()
-        &self.probes.push(HermeticBuildProbe{id: id, name: checked, kind: spec.kind, reproducibility: spec.reproducibility, provenance: spec.provenance, toolchain: toolchain})
+        self.probes.push(HermeticBuildProbe{id: id, name: checked, kind: spec.kind, reproducibility: spec.reproducibility, provenance: spec.provenance, toolchain: toolchain})
         Ok(ProbeHandle{id: id, context: self.context})
     }
 
     find_program: fn(&self, name: String, program: String) -> ProbeHandle HermeticBuildError! {
-        &self.probe(name, ProbeSpec.find_program(program))
+        self.probe(name, ProbeSpec.find_program(program))
     }
 
     pkg_config: fn(&self, name: String, package: String) -> ProbeHandle HermeticBuildError! {
-        &self.probe(name, ProbeSpec.pkg_config(package))
+        self.probe(name, ProbeSpec.pkg_config(package))
     }
 
     header_check: fn(&self, name: String, header: String) -> ProbeHandle HermeticBuildError! {
-        &self.probe(name, ProbeSpec.header_check(header))
+        self.probe(name, ProbeSpec.header_check(header))
     }
 
     compile_check: fn(&self, name: String, check_name: String, includes: [String], code: String) -> ProbeHandle HermeticBuildError! {
-        &self.probe(name, ProbeSpec.compile_check(check_name, includes, code))
+        self.probe(name, ProbeSpec.compile_check(check_name, includes, code))
     }
 
     add_executable: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Executable, spec)
+        self.push_target(name, .Executable, spec)
     }
 
     add_library: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Library, spec)
+        self.push_target(name, .Library, spec)
     }
 
     add_test: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Test, spec)
+        self.push_target(name, .Test, spec)
     }
 
     add_asset_bundle: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .AssetBundle, spec)
+        self.push_target(name, .AssetBundle, spec)
     }
 
     add_doc: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Doc, spec)
+        self.push_target(name, .Doc, spec)
     }
 
     add_install: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Install, spec)
+        self.push_target(name, .Install, spec)
     }
 
     add_package: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Package, spec)
+        self.push_target(name, .Package, spec)
     }
 
     add_publish: fn(&self, name: String, spec: TargetSpec) -> TargetRef HermeticBuildError! {
-        &self.push_target(name, .Publish, spec)
+        self.push_target(name, .Publish, spec)
     }
 
     action: fn(&self, name: String, spec: ActionSpec) -> HermeticActionHandle HermeticBuildError! {
@@ -146,10 +146,10 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .Action)
         if self.action_names.contains(checked) -> return Err(HermeticBuildError.DuplicateActionName(checked))
         self.validate_action_spec(checked, spec)
-        &self.action_names.push(checked)
+        self.action_names.push(checked.copy())
         toolchain: spec.toolchain ?? self.default_toolchain
         id: self.actions.len()
-        &self.actions.push(HermeticBuildAction{
+        self.actions.push(HermeticBuildAction{
             id: id, name: checked, inputs: spec.inputs, outputs: spec.outputs, argv: spec.argv, env: spec.env,
             env_allowlist: spec.env_allowlist, caps: spec.caps, cache: spec.cache, kind: spec.kind,
             toolchain: toolchain, probes: spec.probes, signing_identity: spec.signing_identity, labels: spec.labels,
@@ -171,10 +171,10 @@ HermeticBuildContext: struct {
         checked: build_check_name(name, .Target)
         if self.target_names.contains(checked) -> return Err(HermeticBuildError.DuplicateTargetName(checked))
         self.validate_target_spec(spec)
-        &self.target_names.push(checked)
+        self.target_names.push(checked.copy())
         toolchain: spec.toolchain ?? self.default_toolchain
         id: self.targets.len()
-        &self.targets.push(HermeticBuildTarget{
+        self.targets.push(HermeticBuildTarget{
             id: id, name: checked, kind: kind, sources: spec.sources, inputs: spec.inputs, outputs: spec.outputs,
             deps: spec.deps, actions: spec.actions, probes: spec.probes, toolchain: toolchain,
             signing_identity: spec.signing_identity, metadata: spec.metadata,

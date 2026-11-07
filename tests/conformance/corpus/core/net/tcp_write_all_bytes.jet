@@ -7,7 +7,7 @@ run: fn() {
     client: net.tcp_connect(address) ?? panic("connect")
     server: net.tcp_accept(listener) ?? panic("accept")
     print((() -> {
-        net.tcp_write_all_bytes(&client, "all".bytes()) ?? panic("write")
+        net.tcp_write_all_bytes(client, "all".bytes()) ?? panic("write")
         true
     })())
     received: server.read_text(3) ?? panic("read")

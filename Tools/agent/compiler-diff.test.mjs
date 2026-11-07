@@ -30,27 +30,25 @@ function observed(overrides = {}) {
 
 test("golden discovery matches the Rust loader's project-root rule", () => {
   const stems = new Set(collectGoldenEntries().map((entry) => entry.stem));
-  assert.ok(stems.has("basics/onboarding"), "nested run.jet project was not discovered");
-  for (const module of ["foundations/storage/cache", "foundations/tooling/load", "packages/sandbox_mathkit/sandbox_src"]) {
+  assert.ok(stems.has("Basics/Onboarding"), "nested run.jet project was not discovered");
+  for (const module of ["Modules/Packages/SandboxMathKit/sandbox_src"]) {
     assert.ok(!stems.has(module), `module/member fixture treated as an executable: ${module}`);
   }
 });
 
 test("golden failure exit follows the report contract without guessing unknown forms", () => {
   assert.equal(goldenFailureExit("unknown/stem", "Stop [E3001]: panic\n"), 70);
-  assert.equal(goldenFailureExit("concurrency/deadline_context", "Error [E3003]: deadline\n"), 70);
-  assert.equal(goldenFailureExit("memory/unsafe_sentries", "Runtime fault [R0802]: bad pointer\nexit: 70\n"), 70);
-  assert.equal(goldenFailureExit("memory/unsafe_sentries_provenance", "Runtime fault [R0801]: bad pointer\n"), 70);
+  assert.equal(goldenFailureExit("Concurrency/DeadlineContext", "Error [E3003]: deadline\n"), 70);
+  assert.equal(goldenFailureExit("Memory/Unsafe/UnsafeSentries", "Runtime fault [R0802]: bad pointer\nexit: 70\n"), 70);
+  assert.equal(goldenFailureExit("Memory/Unsafe/UnsafeSentriesProvenance", "Runtime fault [R0801]: bad pointer\n"), 70);
   for (const report of ["Runtime fault [R0801]: bad pointer\nexit: 1\n", "Runtime fault [R0802]: bad pointer\nexit: 101\n"]) {
-    assert.equal(goldenFailureExit("memory/unsafe_sentries", report), null);
+    assert.equal(goldenFailureExit("Memory/Unsafe/UnsafeSentries", report), null);
   }
-  assert.equal(goldenFailureExit("io/log_fatal", ""), 1);
   assert.equal(goldenFailureExit("unknown/stem", ""), null);
   for (const stem of [
-    "errors/propagation_journey", "errors/propagation_journey_direct",
-    "errors/propagation_journey_one_hop", "errors/propagation_journey_core",
-    "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge",
-    "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run",
+    "ErrorsAndEffects/Errors/PropagationJourney", "ErrorsAndEffects/Errors/ErrorContext",
+    "ErrorsAndEffects/Errors/DefaultErrorConversion", "ErrorsAndEffects/Errors/DefaultErrEdge",
+    "ErrorsAndEffects/Errors/FatalExit", "Data/DecodeErrorExit", "Crypto/CryptoErrorRun",
   ]) {
     assert.equal(goldenFailureExit(stem, "source-proved entry report\n"), 1);
   }
@@ -61,8 +59,8 @@ test("golden failure exit follows the report contract without guessing unknown f
 
 test("interactive answers come from the example .stdin goldens", () => {
   const table = loadExampleStdin();
-  assert.equal(table.get("io/stdin_input"), "alpha\nbeta\n");
-  assert.equal(table.get("io/terminal"), "h");
+  assert.equal(table.get("Systems/Terminal/StdinInput"), "alpha\nbeta\ngamma\ndelta\n");
+  assert.equal(table.get("Systems/Terminal/Terminal"), "h");
 });
 
 test("the most specific differing field is reported first", () => {

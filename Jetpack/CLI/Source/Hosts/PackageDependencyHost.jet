@@ -43,7 +43,7 @@ cli_run_package_dependency_host: fn(args: [String]) -[IO, FS, Env, Exec, Net, Ti
     output: cli_package_dependency(args[0], args[1], cli_tail(args, 4), args[2] == "1", args[3] == "1")
     if output.stdout.len() > 0 {
         stdout_handle := term.stdout()
-        &stdout_handle.write(output.stdout).drop("package output is best-effort")
+        stdout_handle.write(output.stdout).drop("package output is best-effort")
     }
     if output.stderr.len() > 0 -> terminal_write_output(output.stderr)
     output.exit_code
@@ -73,7 +73,7 @@ cli_package_dependency_words: fn(raw: [String], color: Bool, json: Bool) -[FS, E
         word: raw[index]
         index += 1
         if !word.starts_with("-") || word == "-" {
-            &words.push(word)
+            words.push(word.copy())
             next
         }
         if PACKAGE_DEPENDENCY_OUTPUT_FLAGS.contains(word) || word.starts_with("--color=") -> next
@@ -144,7 +144,7 @@ cli_package_dependency_read: fn(path: String, color: Bool, json: Bool) -[FS, Env
 cli_package_dependency_input: fn(root: String, entry: String, color: Bool, json: Bool) -[FS, Env]> PackageDependencyInput PackageDependencyError! {
     cache := WorkspaceDeclarationCache.new()
     if !files.exists(entry) {
-        rooted: if pkg_package_facts_for_root(&cache, root) == {
+        rooted: if pkg_package_facts_for_root(cache, root) == {
             .Ok(value) -> value
             .Err(error) -> { return Err(cli_package_dependency_source_error(PACKAGE_FILE, "", error.diagnostic)) }
         }
@@ -155,14 +155,14 @@ cli_package_dependency_input: fn(root: String, entry: String, color: Bool, json:
         .Ok(value) -> value
         .Err(error) -> { return Err(cli_package_dependency_source_error(entry, source.raw, error.diagnostic())) }
     }
-    found: if pkg_package_facts_for_entry(&cache, entry) == {
+    found: if pkg_package_facts_for_entry(cache, entry) == {
         .Ok(value) -> value
         .Err(error) -> { return Err(cli_package_dependency_source_error(entry, source.raw, error.diagnostic)) }
     }
     facts: found ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't resolve package facts for {entry}", None, color, json))
     if inline == .Val(block) {
         manifest: pkg_to_manifest(facts, block.body(source.raw)) ?? return Err(cli_package_dependency_source_error(entry, block.body(source.raw), err.diagnostic))
-        return Ok(PackageDependencyInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: ^source.authority})
+        return Ok(PackageDependencyInput{path: entry, raw: source.raw, inline: inline, manifest: manifest, authority: source.authority.move()})
     }
     cli_package_dependency_root_input(root, facts, color, json)
 }
@@ -176,7 +176,7 @@ cli_package_dependency_root_input: fn(root: String, facts: PackageFacts, color: 
     path: located ?? return Err(cli_package_dependency_cli_error("E2105", "couldn't locate {PACKAGE_FILE}", None, color, json))
     carrier: cli_package_dependency_read(path, color, json)
     manifest: pkg_to_manifest(facts, carrier.raw) ?? return Err(cli_package_dependency_source_error(path, carrier.raw, err.diagnostic))
-    Ok(PackageDependencyInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: ^carrier.authority})
+    Ok(PackageDependencyInput{path: path, raw: carrier.raw, inline: None, manifest: manifest, authority: carrier.authority.move()})
 }
 
 cli_package_dependency_edit: fn(input: PackageDependencyInput, name: String, spec: DepSpec?) -> String Never! {
@@ -264,7 +264,7 @@ cli_package_dependency_script_lock: fn(root: String, script: String, offline: Bo
                 pkg_inline_deps_resolve(dep, script_dir) ?? return PackageDependencyOutput{stderr: diagnostic_render_all(script, source.raw, [Diagnostic]{pkg_inline_deps_e1253(dep, err)}, color), exit_code: EXIT_USER_ERROR}
             }
         }
-        &deps.push(LockedInlineDep{name: dep.name, selector: dep.selector, resolved: resolved.resolved_version, content_hash: resolved.content_hash})
+        deps.push(LockedInlineDep{name: dep.name, selector: dep.selector, resolved: resolved.resolved_version, content_hash: resolved.content_hash})
     }
     script_hash: pkg_inline_deps_file_hash(path) ?? return cli_package_dependency_cli_error("E2105", "couldn't hash {script}: {err}", None, color, json).output
     env_script_lock_write(path, ScriptLockFile{version: SCRIPT_LOCK_VERSION, script_hash: script_hash, deps: deps}) ?? return cli_package_dependency_cli_error("E2105", "couldn't write {env_script_lock_sidecar_path(script)}: {err}", None, color, json).output
@@ -280,13 +280,13 @@ cli_package_dependency_inline_fetch: fn(script: String, script_dir: String, dep:
     root: files.canonicalize(script_dir) ?? return Err(pkg_fetch_error("E1224", "couldn't open the script directory", "{err}", "restore the script's directory"))
     parts: pkg_inline_deps_numeric_version(dep.selector) ?? return Err(pkg_fetch_registry_error(dep.name, "invalid inline selector `{dep.selector}`"))
     words := [String]{}
-    loop part in parts -> &words.push("{part}")
+    loop part in parts -> words.push("{part}")
     requirement: if words.len() == 3 -> "={words.join(".")}" else -> "{words.join(".")}.*"
     roots: pkg_resolve_roots()
     context: ProviderCtx{fixtures: provider_fixtures_from_env(None), store_dir: roots.hangar_dir(), offline: false, project_dir: Val(root), nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
     resolver := PackageFetchResolver{root: root, previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: pkg_fetch_update_scope(None, PackageFetchOptions{}), foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
     verification := StoreVerification.new()
-    pkg_fetch_resolve(&verification, roots, context, &resolver, dep.name, DepSpec.Registry(requirement), root, [String]{"{script} (script)", dep.name})
+    pkg_fetch_resolve(verification, roots, context, resolver, dep.name, DepSpec.Registry(requirement), root, [String]{"{script} (script)", dep.name})
     node: resolver.nodes[dep.name]
     cli_package_dependency_inline_copy(root, dep.name, node.package.version, node.directory) ?? return Err(pkg_fetch_error("E1224", "couldn't copy `{dep.name}` into .jet/inline-deps", "{err}", "make the script directory writable, then run the script again"))
 }
@@ -338,7 +338,7 @@ cli_package_dependency: fn(root: String, entry: String, raw: [String], color: Bo
         return PackageDependencyOutput{stdout: "{prefix}{failed.stdout}", stderr: failed.stderr, exit_code: failed.exit_code}
     }
     verification := StoreVerification.new()
-    fetched: pkg_fetch(&verification, root, input.manifest, pkg_lock_load(root), options) ?? {
+    fetched: pkg_fetch(verification, root, input.manifest, pkg_lock_load(root), options) ?? {
         failed: cli_package_dependency_source_error(input.path, input.raw, err.diagnostic).output
         return PackageDependencyOutput{stdout: prefix, stderr: failed.stderr, exit_code: failed.exit_code}
     }
@@ -357,13 +357,13 @@ cli_package_dependency_vendor: fn(root: String, raw: [String], fetched: PackageF
     target: if chosen.starts_with("/") -> chosen else -> files.join(root, chosen)
     files.create_dir_all(target) ?? return cli_package_dependency_cli_error("E2105", "couldn't create the vendor directory {target}: {err}", None, color, json).output
     names := fetched.directories.keys().to_list()
-    &names.sort()
+    names.sort()
     entries := [String]{}
     loop name in names {
         source: fetched.directories.get(name) ?? next
         cli_package_dependency_vendor_copy(target, name, source) ?? return cli_package_dependency_cli_error("E2105", "couldn't copy `{name}` into {target}: {err}", Val("vendored dependency trees hold only regular files and directories; fix `{name}`'s source, then run `jet registry vendor` again"), color, json).output
         loop package in fetched.lock.packages {
-            if package.name == name -> &entries.push("    {{ \"name\": {pkg_json_quote(package.name)}, \"version\": {pkg_json_quote(package.version)}, \"fingerprint\": {pkg_json_quote(package.fingerprint)} }}")
+            if package.name == name -> entries.push("    {{ \"name\": {pkg_json_quote(package.name)}, \"version\": {pkg_json_quote(package.version)}, \"fingerprint\": {pkg_json_quote(package.fingerprint)} }}")
         }
     }
     manifest: "{{\n  \"vendor_format\": 1,\n  \"packages\": [\n{entries.join(",\n")}\n  ]\n}}\n"

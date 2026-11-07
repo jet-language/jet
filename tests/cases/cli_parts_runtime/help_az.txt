@@ -56,7 +56,6 @@ bind <name> --update --accept <candidate-digest> Resolve and record a checked fo
   jet run [-A] [<file.jet|dir>] [--no-prepare] [-- <args>] Run a program or project
   jet search <query>                   Search the local package catalog
   jet self <command>                   Manage the Jet installation and editor tools
-  jet shared-store <command>           Manage the optional shared package broker
   jet split [args]                     Extract closed Package facts into Configs or members
   jet status [<file.jet|dir>]          Show what the project has proved
   jet test [<file.jet|dir>] [<filter>] [--profile=<name>] [--filter=<text>] [--shard=<i/n>] [--list] [--results=<file>] [--optimize=<levels>] [--time-limit=<duration>] [--compiler=<jet>] [--capture=<failed|all|none>] [--fresh] [--docs] [-u] Run tests
@@ -162,12 +161,6 @@ Self Commands:
   jet self lsp                                              Start the language server
   jet self exec --workspace <dir> [--exec <path>] [--read <path>] [--write <path>] -- <program> [args] Execute one command in an authority-bound workspace
 
-Shared-Store Commands:
-  jet shared-store install                                          Install the optional shared package broker
-  jet shared-store enroll <uid> [--read-only]                       Grant a user shared-store broker access
-  jet shared-store status                                           Show shared-store broker configuration
-  jet shared-store broker [--fd <n>]                                Serve one shared-store broker request
-
 Flags:
   --live                       With inspect: Process id for a live plane scope
   --observe                    With run: Expose bounded live runtime facts for attachment
@@ -212,9 +205,7 @@ Flags:
   --effect                     With find: Require an effect such as FS.Read
   --example                    With find: Search by input/output example
   --lock                       With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy
-  --read-only                  With shared-store enroll: Grant read-only broker access
   --host                       With cache limit: Host-wide store cap
-  --fd                         With shared-store broker: Inherited broker socket descriptor
   -p                           With run/dev/debug/check/build/jobs: Pick a workspace member by name
   --annotated                  With new: Include commented example deps
   --force                      With publish/inspect gates: Bypass pre-publish gate (with warning)
@@ -374,10 +365,10 @@ Flags:
   --compiler                   With test: Build and run the tests with the named jet; --compiler=<text>, `compiler: "x"`, `t.compiler("x")`
   --jetpack                    With test: Run the corpora's jetpack steps and engine verbs with the named jetpack; --jetpack=<text>, `jetpack: "x"`, `t.jetpack("x")`
   --where                      With test: Filter recorded package, dependency, path, tag, or status facts (not ported to the Jet test runner yet); --where=<text>, `where: "x"`, `t.where("x")`
-  --grade                      With test: Select the generated property-test grade: generated (not ported to the Jet test runner yet); --grade=<text>, `grade: "x"`, `t.grade("x")`
-  --iterations                 With test: Generated-grade case budget (default 1000) (not ported to the Jet test runner yet); --iterations=<n>, `iterations: 4`, `t.iterations(4)`
+  --grade                      With test: Select the generated property-test grade: generated; --grade=<text>, `grade: "x"`, `t.grade("x")`
+  --iterations                 With test: Generated-grade case budget (default 1000); --iterations=<n>, `iterations: 4`, `t.iterations(4)`
   --time                       With test: Generated-grade wall-clock budget in seconds (not ported to the Jet test runner yet); --time=<n>, `time: 4`, `t.time(4)`
-  --seed                       With test: Generated-grade base PRNG seed (default: fixed, reproducible) (not ported to the Jet test runner yet); --seed=<n>, `seed: 7`, `t.seed(7)`
+  --seed                       With test: Generated-grade base PRNG seed (default: fixed 0, reproducible); --seed=<n>, `seed: 7`, `t.seed(7)`
   --corpus                     With test: Generated-grade corpus directory (default: .jet/fuzz/<test>) (not ported to the Jet test runner yet); --corpus=<text>, `corpus: "x"`, `t.corpus("x")`
   --browser-retries            With test: Retry each browser attempt up to five times (not ported to the Jet test runner yet); --browser-retries=<n>, `browser_retries: 4`, `t.browser_retries(4)`
   --browser-reporter           With test: Browser report format: text, json, or html (not ported to the Jet test runner yet); --browser-reporter=<text>, `browser_reporter: "x"`, `t.browser_reporter("x")`

@@ -44,14 +44,14 @@ x64_jetline_read: fn(elf: [U8]) -> X64Jetline? Never! {
         length: link_debug_addr(elf, header + 32)
         if offset < 0 || length < 0 || offset + length > elf.len() -> return None
         table := elf[offset..<offset + length]
-        return Val(x64_jetline_parse(^table))
+        return Val(x64_jetline_parse(table))
     }
     None
 }
 
 // The functions of the linked blocks in `table`; a block or record that
 // runs past its end ends the read.
-x64_jetline_parse: fn(table: ^[U8]) -> X64Jetline Never! {
+x64_jetline_parse: fn(table: &&[U8]) -> X64Jetline Never! {
     functions := [X64JetlineFunction]{}
     at := 0
     loop at + 20 <= table.len() {
@@ -64,14 +64,14 @@ x64_jetline_parse: fn(table: ^[U8]) -> X64Jetline Never! {
         cursor := at + 20
         loop _ in 0..<count {
             if cursor >= end -> break
-            low: address + x64_jetline_sleb(table, &cursor)
-            high: low + link_debug_uleb(table, &cursor)
-            name: link_debug_uleb(table, &cursor)
-            file: link_debug_uleb(table, &cursor)
-            decl: link_debug_uleb(table, &cursor)
-            rows: link_debug_uleb(table, &cursor)
+            low: address + x64_jetline_sleb(table, cursor)
+            high: low + link_debug_uleb(table, cursor)
+            name: link_debug_uleb(table, cursor)
+            file: link_debug_uleb(table, cursor)
+            decl: link_debug_uleb(table, cursor)
+            rows: link_debug_uleb(table, cursor)
             if rows < 0 || cursor + rows > end -> break
-            &functions.push(X64JetlineFunction{
+            functions.push(X64JetlineFunction{
                 low: low,
                 high: high,
                 name: x64_jetline_text(table, strings + name),
@@ -86,7 +86,7 @@ x64_jetline_parse: fn(table: ^[U8]) -> X64Jetline Never! {
         }
         at = end
     }
-    X64Jetline{table: ^table, functions: functions}
+    X64Jetline{table: table.move(), functions: functions}
 }
 
 // The index of the function holding link-time address `pc`, else -1.
@@ -106,8 +106,8 @@ x64_jetline_line: fn(lines: X64Jetline, function: X64JetlineFunction, pc: Int) -
     previous := -1
     previous_line := 0
     loop at < function.rows_end {
-        address += link_debug_uleb(lines.table, &at)
-        line += x64_jetline_sleb(lines.table, &at)
+        address += link_debug_uleb(lines.table, at)
+        line += x64_jetline_sleb(lines.table, at)
         if previous >= 0 && pc >= previous && pc < address -> return Val(previous_line)
         previous = address
         previous_line = line

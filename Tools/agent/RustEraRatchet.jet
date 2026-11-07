@@ -50,7 +50,7 @@ git_lines: fn(argv: [String], allow_empty: Bool) -[Exec, IO, Time.Wait]> [String
     if receipt.code != 0 -> return Err(RatchetError{message: "{argv.join(" ")} failed ({receipt.code}): {receipt.errors}"})
     lines := [String]{}
     loop line in receipt.output.split("\n") {
-        if line != "" -> &lines.push(line.copy())
+        if line != "" -> lines.push(line.copy())
     }
     Ok(lines)
 }
@@ -80,7 +80,7 @@ is_reader: fn(table: String, path: String) -> Bool Never! {
 
 unread_tables: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     argv := [String]{"git", "ls-files", "--"}
-    loop root in DATA_ROOTS -> &argv.push(root)
+    loop root in DATA_ROOTS -> argv.push(root)
     unread := [String]{}
     loop table in git_lines(argv, false) ?? return Err(err) {
         if !is_harness_table(table) -> next
@@ -89,7 +89,7 @@ unread_tables: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
         loop path in naming {
             if is_reader(table, path) -> read = true
         }
-        if !read -> &unread.push(table.copy())
+        if !read -> unread.push(table.copy())
     }
     Ok(unread)
 }
@@ -106,14 +106,14 @@ stale_citations: fn(rows: [String]) -> [String] Never! {
         location: row.partition(":")
         rest: location.tail.partition(":")
         if exempt(location.head) || !CITATION.is_match(rest.tail) || UPSTREAM_LIBRARY.is_match(rest.tail) -> next
-        &stale.push(row.copy())
+        stale.push(row.copy())
     }
     stale
 }
 
 citation_rows: fn() -[Exec, IO, Time.Wait]> [String] RatchetError! {
     argv := [String]{"git", "grep", "-n", "-I", "-E", "-e", CITATION_GREP, "--"}
-    loop root in CITATION_ROOTS -> &argv.push(root)
+    loop root in CITATION_ROOTS -> argv.push(root)
     git_lines(argv, true)
 }
 

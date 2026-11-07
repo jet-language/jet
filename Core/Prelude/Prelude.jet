@@ -14,7 +14,7 @@ use core: core
 // including the optional-to-failure view, are ordinary reachable Jet bodies.
 keep: fn<T>(value: T) -> T Never! { value }
 
-identity: fn(value: ^String) -> String Never! { value }
+identity: fn(value: &&String) -> String Never! { value }
 
 always: fn(value: Bool) -> Bool Never! { value }
 
@@ -102,7 +102,7 @@ clamp: fn<T: Comparable>(x: T, lo: T, hi: T) -> T Never! {
 // The caller materializes the receiver and then `why`,
 // even when the payload is present. Own those evaluated values, not a later
 // read of the caller's optional. Construct an Err only for clean absence.
-option_or_err: fn<T>(value: ^T?, why: ^String) -> T Err! {
+option_or_err: fn<T>(value: &&T?, why: &&String) -> T Err! {
     return if value == {
         .Val(payload) -> Ok(payload)
         .None -> Err(why)

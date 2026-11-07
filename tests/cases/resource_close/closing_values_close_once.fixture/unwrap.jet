@@ -3,7 +3,7 @@ use files: core.files
 
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 // Closes through the FileReader it holds, and the Res beside it.
@@ -29,7 +29,7 @@ ok_checked: fn(name: String) -> Checked Err! {
 unwrap_option_res: fn(name: String) -> Res? {
     held: some_res(name)
     found: held ?? return None
-    Val(^found)
+    Val(found.move())
 }
 
 check_option_res: fn() {
@@ -41,7 +41,7 @@ check_option_res: fn() {
 
 unwrap_result_res: fn(name: String) -> Res Err! {
     found: ok_res(name) ?? return Err("missing")
-    Ok(^found)
+    Ok(found)
 }
 
 check_result_res: fn() {
@@ -54,7 +54,7 @@ check_result_res: fn() {
 unwrap_option_reader: fn(name: String) -> Checked? {
     held: some_checked(name)
     found: held ?? return None
-    Val(^found)
+    Val(found.move())
 }
 
 check_option_reader: fn() {
@@ -66,7 +66,7 @@ check_option_reader: fn() {
 
 unwrap_result_reader: fn(name: String) -> Checked Err! {
     found: ok_checked(name) ?? return Err("missing")
-    Ok(^found)
+    Ok(found)
 }
 
 check_result_reader: fn() {

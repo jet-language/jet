@@ -321,7 +321,7 @@ SourceTable: struct {
     // Declared names, sorted; used to make "unknown source" errors helpful.
     declared_names: fn(self) -> [String] Never! {
         names := self.named.keys().to_list()
-        &names.sort()
+        names.sort()
         names
     }
 
@@ -330,7 +330,7 @@ SourceTable: struct {
         out := [NamedSourceDecl]{}
         loop name in self.declared_names() {
             entry: self.named[name]
-            &out.push(NamedSourceDecl{name: name, upstream: entry.upstream, via: entry.via})
+            out.push(NamedSourceDecl{name: name, upstream: entry.upstream, via: entry.via})
         }
         out
     }
@@ -347,7 +347,7 @@ SourceTable: struct {
     trust_lines: fn(self) -> [String] Never! {
         out := [String]{}
         loop decl in self.declarations() {
-            &out.push("{decl.name}={decl.upstream}@{decl.via.identity()}")
+            out.push("{decl.name}={decl.upstream}@{decl.via.identity()}")
         }
         out
     }
@@ -522,7 +522,7 @@ WorkspaceIndex: struct {
     from_members: fn(members: [WorkspaceMember]) -> WorkspaceIndex Never! {
         normalized := [WorkspaceMember]{}
         loop member in members {
-            &normalized.push(WorkspaceMember{name: member.name, path: pkg_normalize_member_path(member.path)})
+            normalized.push(WorkspaceMember{name: member.name, path: pkg_normalize_member_path(member.path)})
         }
         WorkspaceIndex{members: normalized}
     }
@@ -537,7 +537,7 @@ WorkspaceIndex: struct {
     candidate_labels: fn(self, path_form: Bool) -> [String] Never! {
         out := [String]{}
         loop member in self.members {
-            &out.push(if path_form -> member.path else -> member.name)
+            out.push(if path_form -> member.path else -> member.name)
         }
         out
     }
@@ -547,7 +547,7 @@ WorkspaceIndex: struct {
         wanted: pkg_normalize_member_path(query)
         out := [String]{}
         loop member in self.members {
-            if member.path == wanted -> &out.push(member.path)
+            if member.path == wanted -> out.push(member.path)
         }
         out
     }
@@ -556,7 +556,7 @@ WorkspaceIndex: struct {
     by_name: fn(self, query: String) -> [String] Never! {
         out := [String]{}
         loop member in self.members {
-            if member.name == query -> &out.push(member.path)
+            if member.name == query -> out.push(member.path)
         }
         out
     }
@@ -643,17 +643,17 @@ pkg_ref_split_selector: fn(text: String) -> (source: String, selector: String?, 
 // list. Ties order by label; the list is deterministic.
 pkg_ref_nearest: fn(query: String, labels: [String]) -> [String] Never! {
     scored := [(distance: Int, label: String)]{}
-    loop label in labels -> &scored.push((distance: pkg_edit_distance(query, label), label: label))
+    loop label in labels -> scored.push((distance: pkg_edit_distance(query, label), label: label))
     // Two stable passes order by (distance, label).
-    &scored.sort_by(entry -> entry.label)
-    &scored.sort_by(entry -> entry.distance)
+    scored.sort_by(entry -> entry.label)
+    scored.sort_by(entry -> entry.distance)
     out := [String]{}
     query_len: query.bytes().len()
     loop entry in scored {
         if out.len() == 3 -> break
         label_len: entry.label.bytes().len()
         longest: if query_len > label_len -> query_len else -> label_len
-        if entry.distance <= longest /% 2 + 1 -> &out.push(entry.label)
+        if entry.distance <= longest /% 2 + 1 -> out.push(entry.label)
     }
     out
 }
@@ -661,13 +661,13 @@ pkg_ref_nearest: fn(query: String, labels: [String]) -> [String] Never! {
 // Classic Levenshtein distance over Unicode scalars.
 pkg_edit_distance: fn(a: String, b: String) -> Int Never! {
     left := [String]{}
-    loop scalar in a.chars() -> &left.push("{scalar}")
+    loop scalar in a.chars() -> left.push("{scalar}")
     right := [String]{}
-    loop scalar in b.chars() -> &right.push("{scalar}")
+    loop scalar in b.chars() -> right.push("{scalar}")
     // One row of the classic DP; `diagonal` holds the previous row's value
     // one column to the left.
     row := [Int]{}
-    loop j in 0..<(right.len() + 1) -> &row.push(j)
+    loop j in 0..<(right.len() + 1) -> row.push(j)
     diagonal := 0
     loop i in 1..<(left.len() + 1) {
         diagonal = row[0].copy()

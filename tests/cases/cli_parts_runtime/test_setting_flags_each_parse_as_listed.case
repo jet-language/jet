@@ -87,23 +87,31 @@ stderr: ~ "`jet test --where` is not built yet" # unported rows are refused, nev
 step: jet test --profile full --list --coverage
 cwd: {work}/app
 exit: 2
-stderr: ~ "`jet test --coverage` is not built yet" # unported row refused
+stderr: ~ "`jet test --coverage` is not built yet" # a corpus row is never instrumented, so a corpus run refuses it
 step: jet test --profile full --list --grade=generated
 cwd: {work}/app
-exit: 2
-stderr: ~ "`jet test --grade` is not built yet" # unported row refused
+exit: 0
+stderr: ~ "grade generated (flag)" # the generated grade is taken
+step: jet test --profile full --list --grade=generated --iterations=4
+cwd: {work}/app
+exit: 0
+stderr: ~ "iterations 4 (flag)" # its case budget is taken beside the grade
 step: jet test --profile full --list --iterations=4
 cwd: {work}/app
 exit: 2
-stderr: ~ "`jet test --iterations` is not built yet" # unported row refused
+stderr: ~ "`iterations` (flag) steers the generated grade, and this run has no `grade`" # refused without the grade
 step: jet test --profile full --list --time=4
 cwd: {work}/app
 exit: 2
 stderr: ~ "`jet test --time` is not built yet" # unported row refused
+step: jet test --profile full --list --grade=generated --seed=7
+cwd: {work}/app
+exit: 0
+stderr: ~ "seed 7 (flag)" # its base seed is taken beside the grade
 step: jet test --profile full --list --seed=7
 cwd: {work}/app
 exit: 2
-stderr: ~ "`jet test --seed` is not built yet" # unported row refused
+stderr: ~ "`seed` (flag) steers the generated grade, and this run has no `grade`" # refused without the grade
 step: jet test --profile full --list --corpus=x
 cwd: {work}/app
 exit: 2
@@ -115,7 +123,7 @@ stderr: ~ "`jet test --watch` is not built yet" # unported row refused
 step: jet test --profile full --list --record=x
 cwd: {work}/app
 exit: 2
-stderr: ~ "`jet test --record` is not built yet" # unported row refused
+stderr: ~ "`list` (flag) and `record` (flag) don't combine" # list runs nothing to record
 step: jet test --profile full --list --browser=x
 cwd: {work}/app
 exit: 2

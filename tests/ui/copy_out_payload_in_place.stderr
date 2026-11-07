@@ -4,7 +4,7 @@ Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read 
  15 |         applied := held
     |                    ^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use `held` where it is, or move the place it reads with the move marker `^` when this scope owns it
+ Fix: Use `held` where it is, or move the place it reads with `.move()` when this scope owns it
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
@@ -13,32 +13,32 @@ Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read 
  23 |         applied := held
     |                    ^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use `held` where it is, or move the place it reads with the move marker `^` when this scope owns it
+ Fix: Use `held` where it is, or move the place it reads with `.move()` when this scope owns it
 More: jet-lang.dev/e/E0211
 
 Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
-  --> tests/ui/copy_out_payload_in_place.jet:32:48
+  --> tests/ui/copy_out_payload_in_place.jet:32:47
     |
- 32 |         loop entry in existing -> &merged.push(entry)
-    |                                                ^^^^^
+ 32 |         loop entry in existing -> merged.push(entry)
+    |                                               ^^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
- Fix: Use `entry` where it is, or move the place it reads with the move marker `^` when this scope owns it
+ Fix: Use `entry` where it is, or move the place it reads with `.move()` when this scope owns it
 More: jet-lang.dev/e/E0211
 
-Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
-  --> tests/ui/copy_out_payload_in_place.jet:44:39
+Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
+  --> tests/ui/copy_out_payload_in_place.jet:44:37
     |
- 44 |     loop item in items -> &sink.push(^item)
-    |                                       ^^^^
- Why: `item` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it
- Fix: Write `item.copy()` when `.push()` should receive a copy, or move the place itself with `^` when this scope owns it
-More: jet-lang.dev/e/E0201
+ 44 |     loop item in items -> sink.push(item)
+    |                                     ^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
+More: jet-lang.dev/e/E0211
 
-Error [jet.MissingMoveMarker]: `item` cannot be moved from borrowed storage
-  --> tests/ui/copy_out_payload_in_place.jet:50:39
+Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
+  --> tests/ui/copy_out_payload_in_place.jet:50:37
     |
- 50 |     loop item in items -> &sink.push(^item)
-    |                                       ^^^^
- Why: `item` reads its value through a view of the place it was bound to, so that place keeps the value; moving it here would copy it
- Fix: Write `item.copy()` when `.push()` should receive a copy, or move the place itself with `^` when this scope owns it
-More: jet-lang.dev/e/E0201
+ 50 |     loop item in items -> sink.push(item)
+    |                                     ^^^^
+ Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
+ Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it
+More: jet-lang.dev/e/E0211

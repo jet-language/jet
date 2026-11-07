@@ -22,7 +22,7 @@ use {
     source: "BEGIN {{ die \"compile-time code must not execute\" }}\nuse Hostile::Module;\nsub Safe {{ }}\n"
     functions: pkg_perl_parse_function_names(source.bytes()) ?? panic("source discovery must not invoke Perl")
     names := [String]{}
-    loop function in functions -> &names.push(function.perl)
+    loop function in functions -> names.push(function.perl)
     assert_eq(names, [String]{"Safe"})
 }
 

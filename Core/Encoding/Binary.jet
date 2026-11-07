@@ -41,35 +41,35 @@ pack_i8: fn(n: Int) -> [U8] BinaryError! {
 
 pack_u16le: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 65535 -> return Err(BinaryError.Range)
-    [U8]{to_u8(n), to_u8(n >> 8)}
+    [U8]{wrapping(U8{n}), wrapping(U8{n >> 8})}
 }
 
 pack_u16be: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 65535 -> return Err(BinaryError.Range)
-    [U8]{to_u8(n >> 8), to_u8(n)}
+    [U8]{wrapping(U8{n >> 8}), wrapping(U8{n})}
 }
 
 pack_u32le: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 4294967295 -> return Err(BinaryError.Range)
-    [U8]{to_u8(n), to_u8(n >> 8), to_u8(n >> 16), to_u8(n >> 24)}
+    [U8]{wrapping(U8{n}), wrapping(U8{n >> 8}), wrapping(U8{n >> 16}), wrapping(U8{n >> 24})}
 }
 
 pack_u32be: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 4294967295 -> return Err(BinaryError.Range)
-    [U8]{to_u8(n >> 24), to_u8(n >> 16), to_u8(n >> 8), to_u8(n)}
+    [U8]{wrapping(U8{n >> 24}), wrapping(U8{n >> 16}), wrapping(U8{n >> 8}), wrapping(U8{n})}
 }
 
 pack_u64le: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> &out.push(to_u8(n >> (k * 8)))
+    loop k in 0..<8 -> out.push(wrapping(U8{n >> (k * 8)}))
     out
 }
 
 pack_u64be: fn(n: Int) -> [U8] BinaryError! {
     if n < 0 || n > 18446744073709551615 -> return Err(BinaryError.Range)
     out := [U8]{}
-    loop k in 0..<8 -> &out.push(to_u8(n >> ((7 - k) * 8)))
+    loop k in 0..<8 -> out.push(wrapping(U8{n >> ((7 - k) * 8)}))
     out
 }
 
@@ -173,14 +173,14 @@ pack: fn(fmt: String, values: [Int]) -> [U8] BinaryError! {
     i := 0
     loop op in spec.ops {
         if op.code == 120 {
-            loop _ in 0..<op.repeat -> &out.push(U8{0})
+            loop _ in 0..<op.repeat -> out.push(U8{0})
             next
         }
         r := 0
         loop r < op.repeat {
             if i >= values.len() -> return Err(BinaryError.Values)
             packed: pack_one(op.code, spec.little, values[i])
-            loop b in packed -> &out.push(b)
+            loop b in packed -> out.push(b)
             i = i + 1
             r = r + 1
         }
@@ -203,7 +203,7 @@ unpack: fn(fmt: String, data: [U8]) -> [Int] BinaryError! {
         r := 0
         loop r < op.repeat {
             pair: unpack_one(op.code, spec.little, data, off)
-            &out.push(pair.value)
+            out.push(pair.value)
             off = pair.next
             r = r + 1
         }
@@ -223,11 +223,11 @@ iter_unpack: fn(fmt: String, data: [U8]) -> [[Int]] BinaryError! {
         chunk := [U8]{}
         k := 0
         loop k < size {
-            &chunk.push(data[off + k])
+            chunk.push(data[off + k])
             k = k + 1
         }
         row: unpack(fmt, chunk)
-        &rows.push(row)
+        rows.push(row)
         off = off + size
     }
     Ok(rows)
@@ -285,13 +285,13 @@ parse_fmt: fn(fmt: String) -> Spec BinaryError! {
             i = i + 1
             if rep < 1 -> return Err(BinaryError.Format)
             w: width(code) ?? return Err(BinaryError.Format)
-            &ops.push(Op{code: code, repeat: rep})
+            ops.push(Op{code: code, repeat: rep})
             size = size + w * rep
             if code != 120 -> count = count + rep
             next
         }
         w: width(n) ?? return Err(BinaryError.Format)
-        &ops.push(Op{code: n, repeat: 1})
+        ops.push(Op{code: n, repeat: 1})
         size = size + w
         if n != 120 -> count = count + 1
         i = i + 1
@@ -364,11 +364,4 @@ unpack_one: fn(code: Int, little: Bool, data: [U8], offset: Int) -> (next: Int, 
     if little -> n = unpack_u64le(data, offset) ?? return Err(BinaryError.Buffer) else -> n = unpack_u64be(data, offset) ?? return Err(BinaryError.Buffer)
     if code == 113 -> n = sign_extend(n, 64)
     (value: n, next: offset + 8)
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }

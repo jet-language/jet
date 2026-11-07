@@ -7,12 +7,12 @@ use {
 }
 filled: fn(value: Int, count: Int) -> [U8] {
     out := [U8]{}
-    loop _ in 0..<count -> &out.push((U8{value}))
+    loop _ in 0..<count -> out.push((U8{value}))
     out
 }
 cut: fn(bytes: [U8], start: Int, end: Int) -> [U8] {
     out := [U8]{}
-    loop i in start..<end -> &out.push(bytes[i])
+    loop i in start..<end -> out.push(bytes[i])
     out
 }
 hex: fn(text: String) -> [U8] {
@@ -23,7 +23,7 @@ hex: fn(text: String) -> [U8] {
         b: Int.from_u8(raw[2 * i + 1])
         high: if a <= 57 -> a - 48 else -> a - 87
         low: if b <= 57 -> b - 48 else -> b - 87
-        &out.push((U8{high * 16 + low}))
+        out.push((U8{high * 16 + low}))
     }
     out
 }

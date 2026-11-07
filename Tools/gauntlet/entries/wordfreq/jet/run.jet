@@ -23,10 +23,10 @@ run: fn(args: Args) IOError! {
                     word: String.from_bytes(token) ?? panic("invalid utf8")
                     counts[word] = (counts.get(word) ?? 0) + 1
                     total += 1
-                    &token.clear()
+                    token.clear()
                 }
             }
-            else -> &token.push(byte)
+            else -> token.push(byte)
         }
     }
     if !token.is_empty() {
@@ -35,7 +35,7 @@ run: fn(args: Args) IOError! {
         total += 1
     }
     ranked := counts.to_list()
-    &ranked.sort_by((left, right) -> (right.value <=> left.value).then(left.key <=> right.key))
+    ranked.sort_by((left, right) -> (right.value <=> left.value).then(left.key <=> right.key))
     shown := 0
     loop item in ranked {
         if shown == 20 -> break

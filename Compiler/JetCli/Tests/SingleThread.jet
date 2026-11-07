@@ -10,18 +10,18 @@ use {
 single_thread_test_fn: fn(m: &IRModule, name: String, runtime: [String], calls: [Int], addresses: [Int]) -> IRFunction {
     f := ir_function_new(name, name, name, "main.jet", 1)
     loop symbol in runtime {
-        row: ir_intern_name(&m, symbol)
-        _: ir_emit(&f, IROp.CallRuntime, -1, row, 0, 0, 1)
+        row: ir_intern_name(m, symbol)
+        _: ir_emit(f, IROp.CallRuntime, -1, row, 0, 0, 1)
     }
-    loop callee in calls -> _ := ir_emit(&f, IROp.Call, -1, callee, 0, 0, 1)
-    loop callee in addresses -> _ := ir_emit(&f, IROp.FunctionAddress, -1, callee, -1, -1, 1)
+    loop callee in calls -> _ := ir_emit(f, IROp.Call, -1, callee, 0, 0, 1)
+    loop callee in addresses -> _ := ir_emit(f, IROp.FunctionAddress, -1, callee, -1, -1, 1)
     f
 }
 
 single_thread_test_program: fn(runtime: [String]) -> IRModule {
     m := ir_module_new()
-    f: single_thread_test_fn(&m, "run", runtime, [Int]{}, [Int]{})
-    &m.functions.push(f)
+    f: single_thread_test_fn(m, "run", runtime, [Int]{}, [Int]{})
+    m.functions.push(f)
     m
 }
 
@@ -37,20 +37,20 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
 
 #Test("the thread receipt names each export that reaches a thread start, a signal handler or a library load") {
     m := ir_module_new()
-    start: single_thread_test_fn(&m, "start", ["pthread_create"], [Int]{}, [Int]{})
-    &m.functions.push(start)
-    spawn: single_thread_test_fn(&m, "spawn", [String]{}, [Int]{0}, [Int]{})
-    &m.functions.push(spawn)
-    plain: single_thread_test_fn(&m, "plain", ["jet_rt_alloc"], [Int]{}, [Int]{})
-    &m.functions.push(plain)
-    address: single_thread_test_fn(&m, "address", [String]{}, [Int]{}, [Int]{0})
-    &m.functions.push(address)
-    routed: single_thread_test_fn(&m, "routed", ["jet_rt_spawn"], [Int]{}, [Int]{})
-    &m.functions.push(routed)
-    handler: single_thread_test_fn(&m, "handler", ["signal"], [Int]{}, [Int]{})
-    &m.functions.push(handler)
-    load: single_thread_test_fn(&m, "load", ["dlopen"], [Int]{}, [Int]{})
-    &m.functions.push(load)
+    start: single_thread_test_fn(m, "start", ["pthread_create"], [Int]{}, [Int]{})
+    m.functions.push(start)
+    spawn: single_thread_test_fn(m, "spawn", [String]{}, [Int]{0}, [Int]{})
+    m.functions.push(spawn)
+    plain: single_thread_test_fn(m, "plain", ["jet_rt_alloc"], [Int]{}, [Int]{})
+    m.functions.push(plain)
+    address: single_thread_test_fn(m, "address", [String]{}, [Int]{}, [Int]{0})
+    m.functions.push(address)
+    routed: single_thread_test_fn(m, "routed", ["jet_rt_spawn"], [Int]{}, [Int]{})
+    m.functions.push(routed)
+    handler: single_thread_test_fn(m, "handler", ["signal"], [Int]{}, [Int]{})
+    m.functions.push(handler)
+    load: single_thread_test_fn(m, "load", ["dlopen"], [Int]{}, [Int]{})
+    m.functions.push(load)
     exports: [IRLibraryExport]{
         single_thread_test_export(1, "jet_rt_spawn", -1),
         single_thread_test_export(2, "jet_rt_plain", 0),
@@ -65,12 +65,12 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
     assert_eq(ir_thread_exports(m, hooked), ["*"])
     // A guarded one runs when the program keeps its guard storage (data row
     // 7): every export that can reach that storage is listed.
-    keeper := single_thread_test_fn(&m, "keeper", [String]{}, [Int]{}, [Int]{})
-    _ := ir_emit(&keeper, IROp.DataAddress, -1, 7, -1, -1, 1)
-    &m.functions.push(keeper)
-    other := single_thread_test_fn(&m, "other", [String]{}, [Int]{}, [Int]{})
-    _ := ir_emit(&other, IROp.DataAddress, -1, 8, -1, -1, 1)
-    &m.functions.push(other)
+    keeper := single_thread_test_fn(m, "keeper", [String]{}, [Int]{}, [Int]{})
+    _ := ir_emit(keeper, IROp.DataAddress, -1, 7, -1, -1, 1)
+    m.functions.push(keeper)
+    other := single_thread_test_fn(m, "other", [String]{}, [Int]{}, [Int]{})
+    _ := ir_emit(other, IROp.DataAddress, -1, 8, -1, -1, 1)
+    m.functions.push(other)
     guarded: [IRLibraryExport]{
         IRLibraryExport{function: 5, symbol: "jet_rt_handler", init_priority: 3, fini_priority: -1, guards: [Int]{7}},
         single_thread_test_export(7, "jet_rt_keeper", -1),
@@ -103,7 +103,7 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
 
 #Test("a plugin keeps the locked RC forms") {
     m := single_thread_test_program([String]{})
-    &m.functions.push(ir_function_new("guest", "{IR_PLUGIN_GUEST_PREFIX}guest.wasm>", "guest", "", 1))
+    m.functions.push(ir_function_new("guest", "{IR_PLUGIN_GUEST_PREFIX}guest.wasm>", "guest", "", 1))
     assert(!jet_cli_single_thread(m, single_thread_test_runtime(Val("")), [String:Bool]{}))
 }
 
@@ -111,10 +111,10 @@ single_thread_test_export: fn(function: Int, symbol: String, init_priority: Int)
     m := single_thread_test_program([String]{})
     poll := ir_function_new("jet_ir_stop_poll", "jet_ir_stop_poll#asm", "jet_ir_stop_poll", "", 0)
     poll.asm = Val(IRAsmLeaf{code: [U8]{}, regs: [Int]{}, result: 0})
-    &m.functions.push(poll)
+    m.functions.push(poll)
     assert(jet_cli_single_thread(m, single_thread_test_runtime(Val("")), [String:Bool]{}))
     leaf := ir_function_new("pause", "main.jet::pause#asm", "main_pause__asm", "main.jet", 3)
     leaf.asm = Val(IRAsmLeaf{code: [U8]{0xf3, 0x90}, regs: [Int]{}, result: -1})
-    &m.functions.push(leaf)
+    m.functions.push(leaf)
     assert(!jet_cli_single_thread(m, single_thread_test_runtime(Val("")), [String:Bool]{}))
 }

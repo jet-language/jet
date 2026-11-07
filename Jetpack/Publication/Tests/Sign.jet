@@ -77,7 +77,7 @@ PUBLICATION_SIGN_E1292_SNAPSHOT: "Error [jet.MissingRandomness]: Jet could not c
 
 publication_sign_test_seed: fn(byte: Int) -> [U8] Never! {
     seed := [U8]{}
-    loop _ in 0..<32 -> &seed.push(U8{byte})
+    loop _ in 0..<32 -> seed.push(U8{byte})
     seed
 }
 #Test("publication sign real Ed25519 roundtrip tamper and wrong key") {
@@ -91,8 +91,8 @@ publication_sign_test_seed: fn(byte: Int) -> [U8] Never! {
     assert(!(publication_verify(public, "sha256-tampered", signature) ?? panic("verify tamper")))
     other: crypto.SigningKey.from_bytes(publication_sign_test_seed(8)) ?? panic("other seed")
     assert(!(publication_verify(hex.encode(other.public_key().bytes), message, signature) ?? panic("wrong key")))
-    close(^key)
-    close(^other)
+    close(key)
+    close(other)
 }
 #Test("publication sign RFC8032 empty message wire") {
     seed: publication_sign_hex_decode("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60") ?? panic("seed vector")
@@ -103,7 +103,7 @@ publication_sign_test_seed: fn(byte: Int) -> [U8] Never! {
 }
 #Test("publication sign malformed author keys and signatures never verify") {
     zeros := [U8]{}
-    loop _ in 0..<64 -> &zeros.push(U8{0})
+    loop _ in 0..<64 -> zeros.push(U8{0})
     loop key in ([String]{"", "gg", "00", "01".repeat(32), "00".repeat(32)}) {
         assert(!(publication_verify(key, "sha256-x", base64.encode(zeros)) ?? panic("invalid key")))
     }
@@ -176,9 +176,9 @@ publication_sign_test_root: fn(label: String) -[FS, Env]> String Never! {
     secret := [U8]{}
     expected := [U8]{}
     loop _ in 0..<96 {
-        &secret.push(U8{165})
-        &expected.push(U8{0})
+        secret.push(U8{165})
+        expected.push(U8{0})
     }
-    crypto.wipe(&secret)
+    crypto.wipe(secret)
     assert_eq(secret, expected)
 }

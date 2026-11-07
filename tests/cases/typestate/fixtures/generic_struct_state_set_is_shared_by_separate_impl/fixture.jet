@@ -5,10 +5,10 @@ Box: struct<T> {
 }
 
 impl Box {
-    #Transition(_, Empty) new: fn(value: ^T) -[]> Box<T> {
+    #Transition(_, Empty) new: fn(value: &&T) -[]> Box<T> {
         return Box<T>{ value: value }
     }
-    #Transition(Empty, Full) fill: fn(self: ^Box<T>) -[]> Box<T> {
+    #Transition(Empty, Full) fill: fn(self: &&Box<T>) -[]> Box<T> {
         return self
     }
 }
@@ -21,6 +21,6 @@ impl Box {
 
 run: fn() {
     box := Box<Int>.new(1)
-    box = ^box.fill()
+    box = box.fill()
     print(box.read())
 }

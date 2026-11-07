@@ -106,7 +106,7 @@ WasmGlobal: struct {
     init: WasmConstExpr
 }
 
-WasmExport: struct {
+WasmModuleExport: struct {
     name: String
     kind: Int
     index: Int
@@ -163,7 +163,7 @@ WasmModule: struct {
     tables: [WasmTableType]
     memories: [WasmLimits]
     globals: [WasmGlobal]
-    exports: [WasmExport]
+    exports: [WasmModuleExport]
     start: Int?
     elems: [WasmElem]
     datas: [WasmData]
@@ -176,7 +176,7 @@ WasmModule: struct {
     empty: fn() -> WasmModule Never! {
         WasmModule{
             types: [WasmFuncType]{}, imports: [WasmImport]{}, funcs: [Int]{}, tables: [WasmTableType]{},
-            memories: [WasmLimits]{}, globals: [WasmGlobal]{}, exports: [WasmExport]{}, start: None,
+            memories: [WasmLimits]{}, globals: [WasmGlobal]{}, exports: [WasmModuleExport]{}, start: None,
             elems: [WasmElem]{}, datas: [WasmData]{}, data_count: None, codes: [WasmCode]{},
             name: "", function_names: [Int:String]{},
         }
@@ -247,7 +247,7 @@ WasmModule: struct {
         self.imported(WASM_EXTERN_GLOBAL) + self.globals.len()
     }
 
-    export_named: fn(self, name: String) -> WasmExport? {
+    export_named: fn(self, name: String) -> WasmModuleExport? {
         loop entry in self.exports {
             if entry.name == name -> return Val(entry)
         }

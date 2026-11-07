@@ -113,14 +113,14 @@ CacheReceiptPin: struct {
 store_publish_cache_entry: fn(verification: &StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
     binding: store_read_cache_binding(roots, role)
     if !binding.allow_write -> return Err(StoreError.InvalidData("cache binding is read-only; publishing needs a write grant"))
-    entry: store_cache_select_entry(&verification, roots, target)
+    entry: store_cache_select_entry(verification, roots, target)
     store_cache_ensure_reproducible_for_shared_cache(roots, entry)
     metadata: files.stat(entry.out)
     if metadata.is_symlink || (!metadata.is_dir && !metadata.is_file) {
         return Err(StoreError.InvalidData("only a local Hangar file or directory can be published as a NAR"))
     }
     if entry.envelope.output_hash == "" -> return Err(StoreError.InvalidData("Hangar entry has no output identity for cache publication"))
-    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
+    if store_try_entry_output_hash(verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local output does not match the Hangar entry output identity"))
     }
     written: store_write_nar(entry.out)
@@ -133,15 +133,15 @@ store_publish_cache_entry: fn(verification: &StoreVerification, roots: HangarRoo
     failures := [String]{}
     loop mirror in binding.mirrors {
         endpoint: store_cache_parse_endpoint(mirror) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
         store_cache_validate_endpoint_binding(binding, endpoint, true) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
         proof: store_cache_publish_endpoint(endpoint, info, nar, key, entry, role) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
         builder: store_cache_builder_for_entry(entry)
@@ -181,7 +181,7 @@ store_stage_cache_from_hangar: fn(verification: &StoreVerification, roots: Hanga
     target: store_cache_absolutize_host_path(destination)
     store_cache_ensure_directory(target)
     key: store_cache_read_trust_key(binding.trust_key)
-    entries: store_list_checked(&verification, roots)
+    entries: store_list_checked(verification, roots)
     bytes := 0
     loop entry in entries {
         store_cache_ensure_reproducible_for_shared_cache(roots, entry)
@@ -190,7 +190,7 @@ store_stage_cache_from_hangar: fn(verification: &StoreVerification, roots: Hanga
             return Err(StoreError.InvalidData("only a local Hangar file or directory can be staged as a NAR"))
         }
         if entry.envelope.output_hash == "" -> return Err(StoreError.InvalidData("Hangar entry has no output identity for cache staging"))
-        if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
+        if store_try_entry_output_hash(verification, roots, entry) != entry.envelope.output_hash {
             return Err(StoreError.InvalidData("local output does not match the Hangar entry output identity"))
         }
         written: store_write_nar(entry.out)
@@ -211,7 +211,7 @@ store_stage_cache_from_hangar: fn(verification: &StoreVerification, roots: Hanga
 // restoring it.
 store_verify_cache_transfer: fn(verification: &StoreVerification, roots: HangarRoots, target: String, role: String) -> CacheTransferReport StoreError! {
     binding: store_read_cache_binding(roots, role)
-    expected: store_cache_select_entry(&verification, roots, target)
+    expected: store_cache_select_entry(verification, roots, target)
     store_cache_ensure_reproducible_for_shared_cache(roots, expected)
     key: store_cache_read_trust_key(binding.trust_key)
     store_cache_verify_writer_authority(roots, expected, role, key)
@@ -219,14 +219,14 @@ store_verify_cache_transfer: fn(verification: &StoreVerification, roots: HangarR
     failures := [String]{}
     loop mirror in binding.mirrors {
         endpoint: store_cache_parse_endpoint(mirror) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
         store_cache_validate_endpoint_binding(binding, endpoint, false) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
-        if store_cache_verify_hangar_endpoint(&verification, roots, endpoint, expected) == {
+        if store_cache_verify_hangar_endpoint(verification, roots, endpoint, expected) == {
             .Ok(hit) -> {
                 if hit == {
                     .Val(bytes) -> return Ok(store_cache_hangar_report(binding, mirror, expected, key, bytes))
@@ -234,24 +234,24 @@ store_verify_cache_transfer: fn(verification: &StoreVerification, roots: HangarR
                 }
             }
             .Err(error) -> {
-                &failures.push("{mirror}: {error.message()}")
+                failures.push("{mirror}: {error.message()}")
             }
         }
         found: if store_cache_find_artifact(endpoint, target, Val(expected), key) == {
             .Ok(value) -> value
             .Err(error) -> {
-                &failures.push("{mirror}: {error.message()}")
+                failures.push("{mirror}: {error.message()}")
                 next
             }
         }
             if found == {
                 .Val(artifact) -> {
                     store_cache_verify_artifact_bytes(artifact.info, artifact.nar) ?? {
-                        &failures.push("{mirror}: NAR validation failed: {err.message()}")
+                        failures.push("{mirror}: NAR validation failed: {err.message()}")
                         next
                     }
                     store_cache_verify_decoded_output_hash(roots, expected, artifact.nar) ?? {
-                        &failures.push("{mirror}: output identity failed: {err.message()}")
+                        failures.push("{mirror}: output identity failed: {err.message()}")
                         next
                     }
                     // Admit the signed receipt only after the complete payload
@@ -260,13 +260,13 @@ store_verify_cache_transfer: fn(verification: &StoreVerification, roots: HangarR
                     // and then freeze a later valid receipt behind a rollback
                     // decision.
                     store_cache_verify_receipt(roots, role, expected, artifact.receipt, key) ?? {
-                        &failures.push("{mirror}: trust receipt rejected: {err.message()}")
+                        failures.push("{mirror}: trust receipt rejected: {err.message()}")
                         next
                     }
                     return Ok(store_cache_report_for(binding, mirror, artifact.info, artifact.nar.len(), Val(expected), Val(artifact.receipt)))
                 }
                 .None -> {
-                    &failures.push("{mirror}: cache entry not found")
+                    failures.push("{mirror}: cache entry not found")
                 }
             }
     }
@@ -280,7 +280,7 @@ store_substitute_cache_entry: fn(verification: &StoreVerification, roots: Hangar
     binding: store_read_cache_binding(roots, role)
     if store_archive_lstat_ok(destination) != None -> return Err(StoreError.InvalidData("cache substitution destination already exists"))
     store_cache_validate_path_components(destination)
-    expected: store_cache_select_entry(&verification, roots, target)
+    expected: store_cache_select_entry(verification, roots, target)
     store_cache_ensure_reproducible_for_shared_cache(roots, expected)
     key: store_cache_read_trust_key(binding.trust_key)
     store_cache_verify_writer_authority(roots, expected, role, key)
@@ -288,14 +288,14 @@ store_substitute_cache_entry: fn(verification: &StoreVerification, roots: Hangar
     failures := [String]{}
     loop mirror in binding.mirrors {
         endpoint: store_cache_parse_endpoint(mirror) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
         store_cache_validate_endpoint_binding(binding, endpoint, false) ?? {
-            &failures.push("{mirror}: {err.message()}")
+            failures.push("{mirror}: {err.message()}")
             next
         }
-        if store_cache_substitute_hangar_endpoint(&verification, roots, endpoint, expected, destination) == {
+        if store_cache_substitute_hangar_endpoint(verification, roots, endpoint, expected, destination) == {
             .Ok(hit) -> {
                 if hit == {
                     .Val(bytes) -> return Ok(store_cache_hangar_report(binding, mirror, expected, key, bytes))
@@ -303,13 +303,13 @@ store_substitute_cache_entry: fn(verification: &StoreVerification, roots: Hangar
                 }
             }
             .Err(error) -> {
-                &failures.push("{mirror}: {error.message()}")
+                failures.push("{mirror}: {error.message()}")
             }
         }
         found: if store_cache_find_artifact(endpoint, target, Val(expected), key) == {
             .Ok(value) -> value
             .Err(error) -> {
-                &failures.push("{mirror}: {error.message()}")
+                failures.push("{mirror}: {error.message()}")
                 next
             }
         }
@@ -317,7 +317,7 @@ store_substitute_cache_entry: fn(verification: &StoreVerification, roots: Hangar
                 .Val(artifact) -> {
                     stats: store_cache_restore_artifact(roots, role, expected, artifact, key, destination) ?? {
                         store_cache_remove_tree(destination).drop("the failed restore may not have created the destination")
-                        &failures.push("{mirror}: {err.message()}")
+                        failures.push("{mirror}: {err.message()}")
                         next
                     }
                     return Ok(CacheTransferReport{
@@ -337,7 +337,7 @@ store_substitute_cache_entry: fn(verification: &StoreVerification, roots: Hangar
                     })
                 }
                 .None -> {
-                    &failures.push("{mirror}: cache entry not found")
+                    failures.push("{mirror}: cache entry not found")
                 }
             }
     }
@@ -389,7 +389,7 @@ store_cache_require_allowed_builder: fn(roots: HangarRoots, role: String, entry:
 // The entry whose id, reference, output digest, or `name@version` equals
 // `target`.
 store_cache_select_entry: fn(verification: &StoreVerification, roots: HangarRoots, target: String) -> StoreEntry StoreError! {
-    loop entry in store_list_checked(&verification, roots) {
+    loop entry in store_list_checked(verification, roots) {
         if entry.id == target || entry.reference == target || entry.envelope.output_hash == target || "{entry.name}@{entry.version}" == target {
             return Ok(entry)
         }
@@ -414,7 +414,7 @@ store_cache_entry_store_name: fn(entry: StoreEntry) -> String Never! {
 
 store_cache_hangar_references: fn(entry: StoreEntry) -> [String] Never! {
     references := [String]{}
-    loop reference in entry.references -> &references.push("/jet/hangar/{reference}")
+    loop reference in entry.references -> references.push("/jet/hangar/{reference}")
     references
 }
 
@@ -442,7 +442,7 @@ store_cache_deriver: fn(entry: StoreEntry) -> String StoreError! {
     }
     ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.InvalidData("cache entry has invalid producer provenance: {err.message()}"))
     canonical := "jet.cache-deriver.v2".bytes()
-    &canonical.push(U8{0})
+    canonical.push(U8{0})
     values: [String]{
         store_entry_action_key(entry),
         entry.envelope.output_hash,
@@ -456,12 +456,12 @@ store_cache_deriver: fn(entry: StoreEntry) -> String StoreError! {
         entry.platform_artifact_kind,
         entry.producer_record,
     }
-    loop value in values -> store_cache_put_field(&canonical, value)
-    store_cache_put_be_u64(&canonical, entry.named_outputs.len())
+    loop value in values -> store_cache_put_field(canonical, value)
+    store_cache_put_be_u64(canonical, entry.named_outputs.len())
     // Rust iterates the BTreeMap in key order.
     loop name in store_archive_sorted_unique(entry.named_outputs.keys().to_list()) {
-        store_cache_put_field(&canonical, name)
-        store_cache_put_field(&canonical, entry.named_outputs[name])
+        store_cache_put_field(canonical, name)
+        store_cache_put_field(canonical, entry.named_outputs[name])
     }
     Ok("/jet/derivations/{pkg_sha256_hex(canonical)}")
 }
@@ -469,15 +469,15 @@ store_cache_deriver: fn(entry: StoreEntry) -> String StoreError! {
 store_cache_put_be_u64: fn(out: &[U8], value: Int) Never! {
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{((value >> shift)).bit_and(255)})
+        out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
 }
 
 store_cache_put_field: fn(out: &[U8], value: String) Never! {
     raw: value.bytes()
-    store_cache_put_be_u64(&out, raw.len())
-    loop byte in raw -> &out.push(byte)
+    store_cache_put_be_u64(out, raw.len())
+    loop byte in raw -> out.push(byte)
 }
 
 // Fetch the signed narinfo, receipt, and NAR for `expected` from one
@@ -598,7 +598,7 @@ store_cache_admissions_for_explain: fn(roots: HangarRoots, entry: StoreEntry) ->
         reason: "cache provenance is not admissible: {err.message()}"
         denied := [CacheAdmission]{}
         loop binding in bindings {
-            &denied.push(CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: "", provenance: "", receipt_version: None, receipt_expires_unix: None, reason: reason})
+            denied.push(CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: "", provenance: "", receipt_version: None, receipt_expires_unix: None, reason: reason})
         }
         return Ok(denied)
     }
@@ -635,7 +635,7 @@ store_cache_admissions_for_explain: fn(roots: HangarRoots, entry: StoreEntry) ->
                 }
             }
         }
-        &admissions.push(admission)
+        admissions.push(admission)
     }
     Ok(admissions)
 }
@@ -646,7 +646,7 @@ store_cache_fingerprint_for_key: fn(key: TrustKey) -> String Never! {
 
 store_cache_fingerprint_for_info: fn(info: NarInfo) -> String Never! {
     parts := [String]{}
-    loop signature in info.signatures -> &parts.push("{signature.key_id}:{signature.algorithm}")
+    loop signature in info.signatures -> parts.push("{signature.key_id}:{signature.algorithm}")
     parts.join(",")
 }
 
@@ -693,9 +693,9 @@ store_cache_decode_and_compare: fn(staging: String, expected: StoreEntry, nar: [
 // deriver are exactly the ones publication would write and it claims no CA.
 store_cache_nar_info_matches_entry: fn(info: NarInfo, entry: StoreEntry) -> Bool Never! {
     expected_references := store_cache_hangar_references(entry)
-    &expected_references.sort()
+    expected_references.sort()
     actual_references := info.references
-    &actual_references.sort()
+    actual_references.sort()
     expected_deriver: if store_cache_deriver(entry) == {
         .Ok(deriver) -> Val(deriver)
         .Err(_) -> None
@@ -857,22 +857,22 @@ store_cache_encode_receipt: fn(receipt: CacheReceipt) -> String StoreError! {
     }
     receipt.provenance.validate() ?? return Err(StoreError.InvalidData(err.message()))
     out := "{STORE_CACHE_RECEIPT_MAGIC}\n"
-    store_cache_line(&out, "role", receipt.role)
-    store_cache_line(&out, "witness", receipt.witness)
-    store_cache_line(&out, "version", "{receipt.version}")
-    store_cache_line(&out, "issued", "{receipt.issued_unix}")
-    store_cache_line(&out, "expires", "{receipt.expires_unix}")
-    store_cache_line(&out, "reference", receipt.provenance.reference)
-    store_cache_line(&out, "source", receipt.provenance.source)
-    store_cache_line(&out, "builder", receipt.provenance.builder)
-    store_cache_line(&out, "action", receipt.provenance.action)
-    store_cache_line(&out, "output", receipt.provenance.output)
-    store_cache_line(&out, "platform", receipt.provenance.platform)
-    store_cache_line(&out, "sandbox", receipt.provenance.sandbox)
-    store_cache_line(&out, "policy", receipt.provenance.policy)
-    store_cache_line(&out, "signature_key", receipt.signature.key_id)
-    store_cache_line(&out, "signature_algorithm", receipt.signature.algorithm)
-    store_cache_line(&out, "signature", receipt.signature.sig_hex)
+    store_cache_line(out, "role", receipt.role)
+    store_cache_line(out, "witness", receipt.witness)
+    store_cache_line(out, "version", "{receipt.version}")
+    store_cache_line(out, "issued", "{receipt.issued_unix}")
+    store_cache_line(out, "expires", "{receipt.expires_unix}")
+    store_cache_line(out, "reference", receipt.provenance.reference)
+    store_cache_line(out, "source", receipt.provenance.source)
+    store_cache_line(out, "builder", receipt.provenance.builder)
+    store_cache_line(out, "action", receipt.provenance.action)
+    store_cache_line(out, "output", receipt.provenance.output)
+    store_cache_line(out, "platform", receipt.provenance.platform)
+    store_cache_line(out, "sandbox", receipt.provenance.sandbox)
+    store_cache_line(out, "policy", receipt.provenance.policy)
+    store_cache_line(out, "signature_key", receipt.signature.key_id)
+    store_cache_line(out, "signature_algorithm", receipt.signature.algorithm)
+    store_cache_line(out, "signature", receipt.signature.sig_hex)
     Ok(out)
 }
 
@@ -888,25 +888,25 @@ store_cache_decode_receipt: fn(bytes: [U8]) -> CacheReceipt StoreError! {
         if fields.get(pair.before) != None -> return Err(StoreError.InvalidData("cache trust receipt has a duplicate field"))
         fields[pair.before] = pair.after
     }
-    role: store_cache_take_field(&fields, "role")
-    witness: store_cache_take_field(&fields, "witness")
-    version: store_cache_parse_u64(store_cache_take_field(&fields, "version")) ?? return Err(StoreError.InvalidData("cache trust receipt version is not an integer"))
-    issued_unix: store_cache_parse_u64(store_cache_take_field(&fields, "issued")) ?? return Err(StoreError.InvalidData("cache trust receipt issue time is not an integer"))
-    expires_unix: store_cache_parse_u64(store_cache_take_field(&fields, "expires")) ?? return Err(StoreError.InvalidData("cache trust receipt expiry is not an integer"))
+    role: store_cache_take_field(fields, "role")
+    witness: store_cache_take_field(fields, "witness")
+    version: store_cache_parse_u64(store_cache_take_field(fields, "version")) ?? return Err(StoreError.InvalidData("cache trust receipt version is not an integer"))
+    issued_unix: store_cache_parse_u64(store_cache_take_field(fields, "issued")) ?? return Err(StoreError.InvalidData("cache trust receipt issue time is not an integer"))
+    expires_unix: store_cache_parse_u64(store_cache_take_field(fields, "expires")) ?? return Err(StoreError.InvalidData("cache trust receipt expiry is not an integer"))
     provenance: CacheProvenance{
-        reference: store_cache_take_field(&fields, "reference"),
-        source: store_cache_take_field(&fields, "source"),
-        builder: store_cache_take_field(&fields, "builder"),
-        action: store_cache_take_field(&fields, "action"),
-        output: store_cache_take_field(&fields, "output"),
-        platform: store_cache_take_field(&fields, "platform"),
-        sandbox: store_cache_take_field(&fields, "sandbox"),
-        policy: store_cache_take_field(&fields, "policy"),
+        reference: store_cache_take_field(fields, "reference"),
+        source: store_cache_take_field(fields, "source"),
+        builder: store_cache_take_field(fields, "builder"),
+        action: store_cache_take_field(fields, "action"),
+        output: store_cache_take_field(fields, "output"),
+        platform: store_cache_take_field(fields, "platform"),
+        sandbox: store_cache_take_field(fields, "sandbox"),
+        policy: store_cache_take_field(fields, "policy"),
     }
     signature: TrustSignature{
-        key_id: store_cache_take_field(&fields, "signature_key"),
-        algorithm: store_cache_take_field(&fields, "signature_algorithm"),
-        sig_hex: store_cache_take_field(&fields, "signature"),
+        key_id: store_cache_take_field(fields, "signature_key"),
+        algorithm: store_cache_take_field(fields, "signature_algorithm"),
+        sig_hex: store_cache_take_field(fields, "signature"),
     }
     if fields.len() != 0 -> return Err(StoreError.InvalidData("cache trust receipt has an unknown field"))
     provenance.validate() ?? return Err(StoreError.InvalidData(err.message()))
@@ -915,7 +915,7 @@ store_cache_decode_receipt: fn(bytes: [U8]) -> CacheReceipt StoreError! {
 
 store_cache_take_field: fn(fields: &[String: String], name: String) -> String StoreError! {
     value: fields.get(name) ?? return Err(StoreError.InvalidData("cache trust receipt has no {name} field"))
-    _: &fields.remove(name)
+    _: fields.remove(name)
     Ok(value)
 }
 
@@ -1015,7 +1015,7 @@ store_cache_publish_endpoint: fn(endpoint: CacheEndpoint, info: NarInfo, nar: [U
 // The Hangar endpoint verifies the live output and serves its NAR.
 store_cache_verify_hangar_endpoint: fn(verification: &StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry) -> [U8]? StoreError! {
     if !endpoint.is_hangar() -> return Ok(None)
-    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
+    if store_try_entry_output_hash(verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }
     Ok(Val(store_write_nar(entry.out).bytes))
@@ -1025,7 +1025,7 @@ store_cache_verify_hangar_endpoint: fn(verification: &StoreVerification, roots: 
 // re-hashes it, and serves its NAR; a failure removes the copy.
 store_cache_substitute_hangar_endpoint: fn(verification: &StoreVerification, roots: HangarRoots, endpoint: CacheEndpoint, entry: StoreEntry, destination: String) -> [U8]? StoreError! {
     if !endpoint.is_hangar() -> return Ok(None)
-    nar: store_cache_copy_hangar_output(&verification, roots, entry, destination) ?? {
+    nar: store_cache_copy_hangar_output(verification, roots, entry, destination) ?? {
         store_cache_remove_tree(destination).drop("the failed copy may not have created the destination")
         return Err(err)
     }
@@ -1033,7 +1033,7 @@ store_cache_substitute_hangar_endpoint: fn(verification: &StoreVerification, roo
 }
 
 store_cache_copy_hangar_output: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, destination: String) -> [U8] StoreError! {
-    if store_try_entry_output_hash(&verification, roots, entry) != entry.envelope.output_hash {
+    if store_try_entry_output_hash(verification, roots, entry) != entry.envelope.output_hash {
         return Err(StoreError.InvalidData("local Hangar output hash disagrees with its identity"))
     }
     store_cache_copy_tree(entry.out, destination)
@@ -1048,7 +1048,7 @@ store_cache_copy_tree: fn(source: String, destination: String) StoreError! {
     parent: files.dirname(destination)
     if parent != "" -> files.create_dir_all(parent)
     hardlinks := [String: String]{}
-    store_copy_snapshot_node(source, destination, &hardlinks)
+    store_copy_snapshot_node(source, destination, hardlinks)
 }
 
 // Publish a signed narinfo, NAR, and receipt into a local mirror under the
@@ -1147,7 +1147,7 @@ store_cache_write_resumable: fn(path: String, bytes: [U8]) StoreError! {
     if offset == 0 && store_archive_lstat_ok(partial) == None {
         files.create(partial, if_exists: .Refuse)
     }
-    out: &files.append(partial)
+    out: files.append(partial)
     out.write_all(bytes[offset..<bytes.len()])
     out.fsync()
     if store_archive_lstat_ok(path) == {

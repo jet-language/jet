@@ -22,25 +22,25 @@ ToolLiveInstall: struct {
 // Copy every tool's executables into `generation_dir/bin`, record each
 // projection digest on the tool, and sync the directory. A live install
 // supplies its own lease; any other tool re-leases its checked StoreEntry.
-cli_materialize_generation_bins: fn(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], ^live: ToolLiveInstall?) CLIError! -[FS, Env, Exec, Time, Rand]> {
+cli_materialize_generation_bins: fn(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], &&live: ToolLiveInstall?) CLIError! -[FS, Env, Exec, Time, Rand]> {
     bin_dir: files.join(generation_dir, "bin")
-    files.create_dir(bin_dir)
+    files.create_dir_all(bin_dir)
     projected := [String]{}
-    held_live := ^live
+    held_live := live.move()
     loop index in 0..<tools.len() {
         tool: tools[index]
         if tool.bins.len() != tool.members.len() || tool.bins.len() == 0 -> return Err(CLIError.Other("profile tool has mismatched bin/member pairs"))
         if &held_live == .Val(install) {
             receipt: install.receipt
             if receipt.reference == tool.reference && receipt.output_hash == tool.output_hash && receipt.store_root == tool.store_root {
-                tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, &install.lease, &projected)
+                tools[index].member_digests = cli_tool_project_bins(bin_dir, tool, install.lease, projected)
                 next
             }
         }
         roots: HangarRoots{root: tool.store_root, dev_mode: true}
-        entry: cli_tool_store_entry(&verification, roots, tool)
-        fallback := store_snapshot_lease(&verification, roots, entry) ?? return Err(CLIError.Store(err))
-        if cli_tool_project_bins(bin_dir, tool, &fallback, &projected) == {
+        entry: cli_tool_store_entry(verification, roots, tool)
+        fallback := store_snapshot_lease(verification, roots, entry) ?? return Err(CLIError.Store(err))
+        if cli_tool_project_bins(bin_dir, tool, fallback, projected) == {
             .Ok(digests) -> {
                 fallback.release()
                 tools[index].member_digests = digests
@@ -56,7 +56,7 @@ cli_materialize_generation_bins: fn(verification: &StoreVerification, generation
 
 // The checked StoreEntry that authorizes a recorded tool.
 cli_tool_store_entry: fn(verification: &StoreVerification, roots: HangarRoots, tool: InstalledUserTool) -> StoreEntry CLIError! {
-    loop entry in (store_list_checked(&verification, roots) ?? return Err(CLIError.Store(err))) {
+    loop entry in (store_list_checked(verification, roots) ?? return Err(CLIError.Store(err))) {
         if entry.reference == tool.reference && entry.envelope.output_hash == tool.output_hash -> return Ok(entry)
     }
     Err(CLIError.Other("profile StoreEntry authority is unavailable"))
@@ -74,19 +74,19 @@ cli_tool_project_bins: fn(bin_dir: String, tool: InstalledUserTool, lease: &Cach
         physical: cli_physical_bin_name(bin)
         folded: pkg_ascii_lower(physical)
         if projected.contains(folded) -> return Err(CLIError.Other("duplicate profile bin `{bin}`"))
-        &projected.push(folded)
+        projected.push(folded)
         destination: files.join(bin_dir, physical)
-        proof: &lease.copy_profile_executable(member, destination)
+        proof: lease.copy_profile_executable(member, destination)
         if sys.is_unix() && ((proof.mode).bit_and(TOOL_PROFILE_EXEC_BITS)) == 0 -> return Err(CLIError.Other("profile projection is not executable"))
         cli_make_profile_projection_read_only(destination)
-        &digests.push(proof.digest)
+        digests.push(proof.digest)
     }
     Ok(digests)
 }
 
 // The member's no-follow source file inside the tool's checked StoreEntry.
 cli_validated_store_member: fn(verification: &StoreVerification, tool: InstalledUserTool, member: String) -[FS, Env, Time]> String CLIError! {
-    entry: cli_tool_store_entry(&verification, HangarRoots{root: tool.store_root, dev_mode: true}, tool)
+    entry: cli_tool_store_entry(verification, HangarRoots{root: tool.store_root, dev_mode: true}, tool)
     source: files.join(entry.bin, member)
     info: files.stat(source)
     if !info.is_file || info.is_symlink -> return Err(CLIError.Other("profile executable member is not a no-follow file"))
@@ -100,14 +100,14 @@ cli_validate_generation_bins: fn(verification: &StoreVerification, generation: I
     bin_dir: files.join(files.join(cli_tool_generations_dir(), "{generation}"), "bin")
     expected := [String]{}
     loop tool in tools {
-        loop bin in tool.bins -> &expected.push(cli_physical_bin_name(bin))
+        loop bin in tool.bins -> expected.push(cli_physical_bin_name(bin))
     }
     actual := [String]{}
-    loop entry in files.list_dir(bin_dir) -> &actual.push(entry.name)
+    loop entry in files.list_dir(bin_dir) -> actual.push(entry.name)
     if cli_sorted_unique(actual) != cli_sorted_unique(expected) -> return Err(CLIError.Other("tool generation bin projection mismatch"))
     loop tool in tools {
         if tool.bins.len() != tool.member_digests.len() -> return Err(CLIError.Other("profile projection proof count mismatch"))
-        loop member in tool.members -> cli_validated_store_member(&verification, tool, member)
+        loop member in tool.members -> cli_validated_store_member(verification, tool, member)
         loop index in 0..<tool.bins.len() {
             bin: tool.bins[index]
             proof: store_profile_file_proof(files.join(bin_dir, cli_physical_bin_name(bin)))
@@ -175,9 +175,9 @@ cli_read_bounded: fn(path: String) -[FS]> String CLIError! {
     if reader.stat().size > TOOL_PROFILE_MAX_METADATA_BYTES -> return Err(CLIError.Other("profile metadata exceeds byte bound"))
     bytes := [U8]{}
     loop {
-        chunk: &reader.read(TOOL_PROFILE_MAX_METADATA_BYTES + 1 - bytes.len())
+        chunk: reader.read(TOOL_PROFILE_MAX_METADATA_BYTES + 1 - bytes.len())
         if chunk.len() == 0 -> break
-        loop byte in chunk -> &bytes.push(byte)
+        loop byte in chunk -> bytes.push(byte)
         if bytes.len() > TOOL_PROFILE_MAX_METADATA_BYTES -> return Err(CLIError.Other("profile metadata exceeds byte bound"))
     }
     text: String.from_bytes(bytes) ?? return Err(CLIError.Other("profile metadata is not UTF-8"))
@@ -187,8 +187,8 @@ cli_read_bounded: fn(path: String) -[FS]> String CLIError! {
 // Exclusive create (never replace), write, and fsync.
 cli_write_synced: fn(path: String, bytes: [U8]) CLIError! -[FS]> {
     writer := files.create(path, if_exists: CreateIfExists.Refuse)
-    &writer.write_all(bytes)
-    &writer.fsync()
+    writer.write_all(bytes)
+    writer.fsync()
 }
 
 // Atomically replace `destination` with the staged `partial`.

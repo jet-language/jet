@@ -20,7 +20,7 @@ read_exact: fn(stream: TCPStream, size: Int) -> [U8] {
     loop out.len() < size {
         chunk: stream.read(size - out.len()) ?? panic("frame read_exact")
         assert(chunk.len() > 0)
-        loop byte in chunk { &out.push(byte) }
+        loop byte in chunk { out.push(byte) }
     }
     return out
 }
@@ -43,7 +43,7 @@ first_headers: fn(stream: TCPStream) -> Frame {
     }
 }
 preface: fn(stream: &TCPStream, timeout: Int) {
-    net.set_read_timeout(&stream, timeout) ?? panic("read timeout")
+    net.set_read_timeout(stream, timeout) ?? panic("read timeout")
     assert_eq(read_exact(stream, 24), "PRI * HTTP/2.0{PEER_CRLF}{PEER_CRLF}SM{PEER_CRLF}{PEER_CRLF}".bytes())
     assert(read_frame(stream).kind == 4)
     write_frame(stream, 4, 0, 0, [U8]{})
@@ -52,14 +52,14 @@ preface: fn(stream: &TCPStream, timeout: Int) {
 run: fn() {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     publish(listener, "{work}/addr.txt")
-    stream := &listener.accept() ?? panic("accept")
-    net.set_write_timeout(&stream, 10000) ?? panic("write timeout")
-    preface(&stream, 10000)
+    stream := listener.accept() ?? panic("accept")
+    net.set_write_timeout(stream, 10000) ?? panic("write timeout")
+    preface(stream, 10000)
     request: first_headers(stream)
     assert(request.id == 1)
     write_frame(stream, 1, 4, 1, [U8]{136})
     chunk := [U8]{}
-    loop index in 0..<65536 { &chunk.push(U8{120}) }
+    loop index in 0..<65536 { chunk.push(U8{120}) }
     loop index in 0..<1024 { write_frame(stream, 0, 0, 1, chunk) }
     write_frame(stream, 0, 1, 1, "x".bytes())
 }

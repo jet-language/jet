@@ -31,7 +31,7 @@ jet_cli_record_index_query: fn(index: JetCLIRecordIndex, authenticated: Bool) ->
 jet_cli_record_index_query_identity: fn(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in jet_cli_record_index_query(index, authenticated) {
-        if entry.identity == identity -> &rows.push(entry)
+        if entry.identity == identity -> rows.push(entry)
     }
     rows
 }
@@ -39,7 +39,7 @@ jet_cli_record_index_query_identity: fn(index: JetCLIRecordIndex, identity: JetC
 jet_cli_record_index_query_kind: fn(index: JetCLIRecordIndex, kind: String, authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in jet_cli_record_index_query(index, authenticated) {
-        if entry.kind == kind -> &rows.push(entry)
+        if entry.kind == kind -> rows.push(entry)
     }
     rows
 }
@@ -78,14 +78,14 @@ jet_cli_record_index_evict: fn(entries: &[JetCLIRecordIndexEntry], budget: U64) 
         }
         if total <= budget -> return
         visited := [Bool]{}
-        loop _ in 0..<entries.len() -> &visited.push(false)
+        loop _ in 0..<entries.len() -> visited.push(false)
         selected := [Bool]{}
         selected_sequence := U64.MAX
         selected_id := ""
         loop start in 0..<entries.len() {
             if visited[start] || !jet_cli_record_entry_is_disposable(entries[start]) -> next
             group := [Bool]{}
-            loop _ in 0..<entries.len() -> &group.push(false)
+            loop _ in 0..<entries.len() -> group.push(false)
             group[start] = true
             visited[start] = true
             loop {
@@ -122,7 +122,7 @@ jet_cli_record_index_evict: fn(entries: &[JetCLIRecordIndexEntry], budget: U64) 
                 }
             }
             if !referenced && (selected.len() == 0 || sequence < selected_sequence || (sequence == selected_sequence && id < selected_id)) {
-                selected = ^group
+                selected = group.move()
                 selected_sequence = sequence
                 selected_id = id
             }
@@ -132,9 +132,9 @@ jet_cli_record_index_evict: fn(entries: &[JetCLIRecordIndexEntry], budget: U64) 
         }
         kept := [JetCLIRecordIndexEntry]{}
         loop position in 0..<entries.len() {
-            if !selected[position] -> &kept.push(entries[position])
+            if !selected[position] -> kept.push(entries[position])
         }
-        entries = ^kept
+        entries = kept.move()
     }
 }
 
@@ -146,8 +146,8 @@ jet_cli_record_index_update: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIn
         return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` conflicts with an existing identity"))
     }
     candidate := index.entries
-    &candidate.push(row)
-    jet_cli_record_index_evict(&candidate, index.budget)
+    candidate.push(row.copy())
+    jet_cli_record_index_evict(candidate, index.budget)
     jet_cli_record_snapshot_validate(candidate, index.budget)
     retained := false
     loop current in candidate {
@@ -156,7 +156,7 @@ jet_cli_record_index_update: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIn
     if !retained {
         return Err(jet_cli_read_error("disposable record `{row.kind}/{row.artifact_id}` exceeds the byte budget and was not retained"))
     }
-    index.entries = ^candidate
+    index.entries = candidate.move()
 }
 
 jet_cli_record_index_replace: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordIndexEntry) JetCLIReadError! {
@@ -174,7 +174,7 @@ jet_cli_record_index_replace: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordI
         break
     }
     if !found -> return Err(jet_cli_read_error("record `{row.kind}/{row.artifact_id}` does not exist"))
-    jet_cli_record_index_evict(&candidate, index.budget)
+    jet_cli_record_index_evict(candidate, index.budget)
     jet_cli_record_snapshot_validate(candidate, index.budget)
     retained := false
     loop current in candidate {
@@ -183,15 +183,15 @@ jet_cli_record_index_replace: fn(index: &JetCLIRecordIndex, entry: JetCLIRecordI
     if !retained {
         return Err(jet_cli_read_error("disposable record `{row.kind}/{row.artifact_id}` exceeds the byte budget and was not retained"))
     }
-    index.entries = ^candidate
+    index.entries = candidate.move()
 }
 
 jet_cli_record_index_set_budget: fn(index: &JetCLIRecordIndex, budget: U64) JetCLIReadError! {
     if budget == 0 -> return Err(jet_cli_read_error("record budget byte limit must be greater than zero"))
     candidate := index.entries
-    jet_cli_record_index_evict(&candidate, budget)
+    jet_cli_record_index_evict(candidate, budget)
     jet_cli_record_snapshot_validate(candidate, budget)
-    index.entries = ^candidate
+    index.entries = candidate.move()
     index.budget = budget
 }
 
@@ -200,8 +200,8 @@ jet_cli_record_index_to_bytes: fn(index: JetCLIRecordIndex) -> [U8] JetCLIReadEr
     bytes := [U8]{}
     loop entry in index.entries {
         line: jet_cli_record_index_to_jsonl(entry)
-        loop byte in line.bytes() -> &bytes.push(byte)
-        &bytes.push(U8{10})
+        loop byte in line.bytes() -> bytes.push(byte)
+        bytes.push(U8{10})
         if bytes.len() > 268435456 -> return Err(jet_cli_read_error("record index exceeds the 256 MiB limit"))
     }
     Ok(bytes)
@@ -215,14 +215,14 @@ jet_cli_record_index_save_replay: fn(index: &JetCLIRecordIndex, artifact_id: Str
     saved.path = path
     saved.size = size
     saved.saved = true
-    jet_cli_record_index_replace(&index, saved)
+    jet_cli_record_index_replace(index, saved)
     Ok(saved)
 }
 
 jet_cli_record_index_saved_replays: fn(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity) -> [JetCLIRecordIndexEntry] Never! {
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {
-        if entry.kind == "replay" && entry.saved && entry.identity == identity -> &rows.push(entry)
+        if entry.kind == "replay" && entry.saved && entry.identity == identity -> rows.push(entry.copy())
     }
     loop position in 1..<rows.len() {
         row: rows[position]
@@ -243,10 +243,10 @@ jet_cli_record_index_remove_replay: fn(index: &JetCLIRecordIndex, artifact_id: S
     removed: jet_cli_record_index_find(index, "replay", artifact_id, true) ?? return Err(jet_cli_read_error("replay `{artifact_id}` is not indexed"))
     candidate := [JetCLIRecordIndexEntry]{}
     loop entry in index.entries {
-        if entry.kind != "replay" || entry.artifact_id != artifact_id -> &candidate.push(entry)
+        if entry.kind != "replay" || entry.artifact_id != artifact_id -> candidate.push(entry.copy())
     }
     jet_cli_record_snapshot_validate(candidate, index.budget)
-    index.entries = ^candidate
+    index.entries = candidate.move()
     Ok(removed)
 }
 
@@ -283,10 +283,10 @@ jet_cli_record_index_remove_disposable: fn(project_root: String, path: String) J
     parts := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        &parts.push(part)
+        parts.push(part)
     }
     if parts.len() == 0 -> return Err(jet_cli_read_error("disposable artifact has no file name"))
-    name: &parts.pop() ?? return Err(jet_cli_read_error("disposable artifact has no file name"))
+    name: parts.pop() ?? return Err(jet_cli_read_error("disposable artifact has no file name"))
     present: JetCLIRootedDirectory.present(project_root, parts) ?? return Err(err)
     if !present -> return
     held: JetCLIRootedDirectory.open_cache(project_root, parts, false) ?? return Err(err)
@@ -305,8 +305,8 @@ jet_cli_record_index_store_held: fn(index: JetCLIRecordIndex, held: JetCLIRooted
     }
 }
 
-jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: ^JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry JetCLIReadError! {
-    updated := ^entry
+jet_cli_record_index_fresh_sequence: fn(index: JetCLIRecordIndex, entry: &&JetCLIRecordIndexEntry) -> JetCLIRecordIndexEntry JetCLIReadError! {
+    updated := entry.move()
     maximum := U64{0}
     loop existing in index.entries {
         if existing.kind == updated.kind && existing.artifact_id == updated.artifact_id -> return Ok(updated)
@@ -325,7 +325,7 @@ jet_cli_record_index_store: fn(index: JetCLIRecordIndex, project_root: String) J
     jet_cli_record_index_store_held(index, held, project_root, previous.entries)
 }
 
-jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: ^JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: &&JetCLIRecordIndexEntry, supersede: Bool{false}) JetCLIReadError! -[FS, Env, Time]> {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
@@ -333,31 +333,31 @@ jet_cli_record_index_publish_and_store: fn(index: &JetCLIRecordIndex, project_ro
     if supersede {
         retained := [JetCLIRecordIndexEntry]{}
         loop existing in candidate.entries {
-            if existing.kind != entry.kind || existing.artifact_id != entry.artifact_id -> &retained.push(existing)
+            if existing.kind != entry.kind || existing.artifact_id != entry.artifact_id -> retained.push(existing)
         }
-        candidate.entries = ^retained
+        candidate.entries = retained.move()
     }
-    fresh: jet_cli_record_index_fresh_sequence(candidate, ^entry)
-    jet_cli_record_index_update(&candidate, fresh)
+    fresh: jet_cli_record_index_fresh_sequence(candidate, entry)
+    jet_cli_record_index_update(candidate, fresh)
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
-    index = ^candidate
+    index = candidate.move()
 }
 
-jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entries: ^[JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
+jet_cli_record_index_upsert_many_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entries: &&[JetCLIRecordIndexEntry]) JetCLIReadError! -[FS, Env, Time]> {
     held: JetCLIRootedDirectory.open_cache(project_root, [String]{".jet", "records"}, true) ?? return Err(err)
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
-    loop entry in ^entries {
+    loop entry in entries.move() {
         if jet_cli_record_index_find(candidate, entry.kind, entry.artifact_id, true) != None {
-            jet_cli_record_index_replace(&candidate, entry)
+            jet_cli_record_index_replace(candidate, entry)
         } else {
-            fresh: jet_cli_record_index_fresh_sequence(candidate, ^entry)
-            jet_cli_record_index_update(&candidate, fresh)
+            fresh: jet_cli_record_index_fresh_sequence(candidate, entry)
+            jet_cli_record_index_update(candidate, fresh)
         }
     }
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
-    index = ^candidate
+    index = candidate.move()
 }
 
 jet_cli_record_index_replace_and_store: fn(index: &JetCLIRecordIndex, project_root: String, entry: JetCLIRecordIndexEntry) JetCLIReadError! -[FS, Env, Time]> {
@@ -365,9 +365,9 @@ jet_cli_record_index_replace_and_store: fn(index: &JetCLIRecordIndex, project_ro
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
-    jet_cli_record_index_replace(&candidate, entry)
+    jet_cli_record_index_replace(candidate, entry)
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
-    index = ^candidate
+    index = candidate.move()
 }
 
 jet_cli_record_index_save_replay_and_store: fn(index: &JetCLIRecordIndex, project_root: String, artifact_id: String, identity: JetCLIRecordIdentity, path: String, size: U64) -[FS, Env, Time]> JetCLIRecordIndexEntry JetCLIReadError! {
@@ -375,9 +375,9 @@ jet_cli_record_index_save_replay_and_store: fn(index: &JetCLIRecordIndex, projec
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
-    saved: jet_cli_record_index_save_replay(&candidate, artifact_id, identity, path, size)
+    saved: jet_cli_record_index_save_replay(candidate, artifact_id, identity, path, size)
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
-    index = ^candidate
+    index = candidate.move()
     Ok(saved)
 }
 
@@ -386,9 +386,9 @@ jet_cli_record_index_remove_replay_and_store: fn(index: &JetCLIRecordIndex, proj
     owner: held.lock("record index") ?? return Err(err)
     candidate := jet_cli_record_index_reload(held, index)
     previous: candidate.entries
-    removed: jet_cli_record_index_remove_replay(&candidate, artifact_id)
+    removed: jet_cli_record_index_remove_replay(candidate, artifact_id)
     jet_cli_record_index_store_held(candidate, held, project_root, previous)
-    index = ^candidate
+    index = candidate.move()
     Ok(removed)
 }
 
@@ -412,7 +412,7 @@ jet_cli_record_index_test_row: fn(run: Int) -> JetCLIRecordIndexEntry Never! {
     index := jet_cli_record_index_new() ?? panic("index")
     loop run in 1..<4 {
         fresh: jet_cli_record_index_fresh_sequence(index, jet_cli_record_index_test_row(run)) ?? panic("fresh sequence {run}")
-        jet_cli_record_index_update(&index, fresh) ?? panic("append {run}")
+        jet_cli_record_index_update(index, fresh) ?? panic("append {run}")
         bytes: jet_cli_record_index_to_bytes(index) ?? panic("store {run}")
         index = jet_cli_record_index_from_bytes(bytes) ?? panic("reload {run}")
     }
@@ -425,7 +425,7 @@ jet_cli_record_index_test_row: fn(run: Int) -> JetCLIRecordIndexEntry Never! {
     cli_files.create_dir_all(root) ?? panic("create record test root")
     loop run in 1..<4 {
         index := jet_cli_record_index_load(root) ?? panic("load {run}: {err.message}")
-        jet_cli_record_index_publish_and_store(&index, root, jet_cli_record_index_test_row(run)) ?? panic("publish {run}: {err.message}")
+        jet_cli_record_index_publish_and_store(index, root, jet_cli_record_index_test_row(run)) ?? panic("publish {run}: {err.message}")
     }
     stored: jet_cli_record_index_load(root) ?? panic("reload: {err.message}")
     assert_eq(stored.entries.len(), 3)
@@ -434,7 +434,7 @@ jet_cli_record_index_test_row: fn(run: Int) -> JetCLIRecordIndexEntry Never! {
     torn: jet_cli_record_index_load(root) ?? panic("torn load: {err.message}")
     assert_eq(torn.entries.len(), 0)
     rebuilt := jet_cli_record_index_load(root) ?? panic("rebuild load: {err.message}")
-    jet_cli_record_index_publish_and_store(&rebuilt, root, jet_cli_record_index_test_row(4)) ?? panic("rebuild: {err.message}")
+    jet_cli_record_index_publish_and_store(rebuilt, root, jet_cli_record_index_test_row(4)) ?? panic("rebuild: {err.message}")
     restored: jet_cli_record_index_load(root) ?? panic("restored: {err.message}")
     cli_files.remove_all(root).drop("the test root is scratch")
     assert_eq(restored.entries.len(), 1)

@@ -98,7 +98,7 @@ NixBuildScratch: struct {
         nix_builder_create_real_directory(root, "Hangar build scratch root")
         sequence: process_sequence_take(NIX_BUILDER_SCRATCH_SEQUENCE)
         path: files.join(root, "native-{pkg_sha256_hex(drv_path.bytes())}-{sequence}")
-        files.create_dir(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
+        files.create_dir_all(path) ?? return Err(NativeNixBuildError.Store("creating native build scratch: {err}"))
         files.write(files.join(path, STORE_ACTIVE_TMP_MARKER), "pid={process.current_pid()}\n") ?? return Err(NativeNixBuildError.Store("marking native build scratch: {err}"))
         Ok(NixBuildScratch{path})
     }
@@ -152,7 +152,7 @@ nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, eva
     }
     loop name in names -> env[name] = "{NIX_BUILDER_OUTPUT_ROOT}/{name}"
     args := [String]{}
-    loop arg in evaluation.args -> &args.push(nix_builder_rewrite_output_paths(arg, evaluation, names))
+    loop arg in evaluation.args -> args.push(nix_builder_rewrite_output_paths(arg, evaluation, names))
 
     sandbox: foundation_run_native_sandboxed(evaluation.builder, args, source_dir, Val(output), env, false) ?? return Err(NativeNixBuildError.SandboxUnavailable(err.message()))
     if !sandbox.receipt.success -> return Err(NativeNixBuildError.Failed(nix_builder_command_failure(sandbox.receipt)))
@@ -195,14 +195,14 @@ provider_nix_build_repository_output: fn(verification: &StoreVerification, roots
     source: files.read(flake) ?? return Err(NativeNixBuildError.Invalid("reading flake source `{flake}`: {err}"))
     evaluation: nix_evaluate_derivation_output(source, system, attribute) ?? return Err(NativeNixBuildError.Invalid(err.message()))
     build: provider_nix_build_derivation(roots, project, evaluation)
-    provider_nix_admit_built_derivation(&verification, roots, build, reference, version)
+    provider_nix_admit_built_derivation(verification, roots, build, reference, version)
 }
 
 // Promote a native build through the same Nix Store registration as
 // substituted outputs; the build scratch is removed once the projection has
 // moved every output into Hangar (or refused them).
 provider_nix_admit_built_derivation: fn(verification: &StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
-    admitted: nix_builder_admit(&verification, roots, build, reference, version)
+    admitted: nix_builder_admit(verification, roots, build, reference, version)
     build.scratch.remove()
     admitted
 }
@@ -255,7 +255,7 @@ nix_builder_admit: fn(verification: &StoreVerification, roots: HangarRoots, buil
         references: [String]{},
         producer,
     }
-    entry: store_record_realized_mode(&verification, roots, realized) ?? return Err(NativeNixBuildError.Store(err.message()))
+    entry: store_record_realized_mode(verification, roots, realized) ?? return Err(NativeNixBuildError.Store(err.message()))
     Ok(entry)
 }
 
@@ -276,8 +276,8 @@ nix_builder_validate_builder: fn(evaluation: NixNativeDerivation) NativeNixBuild
 // of the derivation's own declared outputs.
 nix_builder_validate_literal_store_paths: fn(evaluation: NixNativeDerivation) NativeNixBuildError! {
     values := [String]{}
-    loop entry in evaluation.env -> &values.push(entry.value)
-    loop arg in evaluation.args -> &values.push(arg)
+    loop entry in evaluation.env -> values.push(entry.value)
+    loop arg in evaluation.args -> values.push(arg.copy())
     loop value in values {
         if !value.contains("/nix/store/") || value == "/nix/store" -> next
         admitted := false
@@ -330,7 +330,7 @@ nix_builder_command_failure: fn(receipt: ProcessReceipt) -> String Never! {
     kept := [String]{}
     loop scalar in detail.chars() {
         if kept.len() == NIX_BUILDER_FAILURE_CHARS -> break
-        &kept.push("{scalar}")
+        kept.push("{scalar}")
     }
     kept.join("")
 }

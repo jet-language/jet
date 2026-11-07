@@ -29,14 +29,14 @@ LanguagePack: struct {
     // even when its package list is unchanged.
     fingerprint: fn(self) -> String Never! {
         lines := [String]{"jet-language-pack-v1\n", "name={self.name}\n"}
-        envmodel_push_labeled(&lines, "package", self.packages)
-        envmodel_push_labeled(&lines, "venv-package", self.venv_packages)
-        loop name in envmodel_sorted_keys(self.variables) -> &lines.push("var={name}={self.variables[name]}\n")
-        loop name in envmodel_sorted_keys(self.commands) -> &lines.push("command={name}={self.commands[name]}\n")
-        &lines.push("host={self.host}\n")
-        envmodel_push_labeled(&lines, "platform", self.platforms)
-        &lines.push("license={self.license}\n")
-        envmodel_push_labeled(&lines, "required-tool", self.required_tools)
+        envmodel_push_labeled(lines, "package", self.packages)
+        envmodel_push_labeled(lines, "venv-package", self.venv_packages)
+        loop name in envmodel_sorted_keys(self.variables) -> lines.push("var={name}={self.variables[name]}\n")
+        loop name in envmodel_sorted_keys(self.commands) -> lines.push("command={name}={self.commands[name]}\n")
+        lines.push("host={self.host}\n")
+        envmodel_push_labeled(lines, "platform", self.platforms)
+        lines.push("license={self.license}\n")
+        envmodel_push_labeled(lines, "required-tool", self.required_tools)
         lines.join("")
     }
 
@@ -137,18 +137,18 @@ LanguageExpansion: struct {
 
     fingerprint: fn(self) -> String Never! {
         lines := [String]{"jet-language-expansion-v1\n"}
-        loop selection in self.selections -> &lines.push("selection={selection.fingerprint()}\n")
-        loop pack in self.packs -> &lines.push("pack={pack.fingerprint()}")
-        envmodel_push_labeled(&lines, "expanded-package", self.packages)
-        loop name in envmodel_sorted_keys(self.variables) -> &lines.push("expanded-var={name}={self.variables[name]}\n")
-        loop name in envmodel_sorted_keys(self.commands) -> &lines.push("expanded-command={name}={self.commands[name]}\n")
-        loop projection in self.projections -> &lines.push("projection={projection.fingerprint()}")
+        loop selection in self.selections -> lines.push("selection={selection.fingerprint()}\n")
+        loop pack in self.packs -> lines.push("pack={pack.fingerprint()}")
+        envmodel_push_labeled(lines, "expanded-package", self.packages)
+        loop name in envmodel_sorted_keys(self.variables) -> lines.push("expanded-var={name}={self.variables[name]}\n")
+        loop name in envmodel_sorted_keys(self.commands) -> lines.push("expanded-command={name}={self.commands[name]}\n")
+        loop projection in self.projections -> lines.push("projection={projection.fingerprint()}")
         lines.join("")
     }
 
     // Add `package` to the expanded package list once.
     add_package: fn(&self, package: String) Never! {
-        if !self.packages.contains(package) -> &self.packages.push(package)
+        if !self.packages.contains(package) -> self.packages.push(package.copy())
     }
 }
 
@@ -162,10 +162,10 @@ LanguagePackCatalog: struct {
     builtin: fn() -> LanguagePackCatalog Never! {
         catalog := LanguagePackCatalog{}
         loop pack in envmodel_core_language_packs() {
-            if &catalog.register(pack) == .Err(_) -> panic("built-in language pack names are unique")
+            if catalog.register(pack) == .Err(_) -> panic("built-in language pack names are unique")
         }
         loop row in envmodel_extended_language_rows() {
-            if &catalog.register(row.pack()) == .Err(_) -> panic("extended built-in language pack names are unique")
+            if catalog.register(row.pack()) == .Err(_) -> panic("extended built-in language pack names are unique")
         }
         catalog
     }
@@ -199,7 +199,7 @@ LanguagePackCatalog: struct {
     // packages or host variables changes this fingerprint.
     fingerprint: fn(self) -> String Never! {
         lines := [String]{"jet-language-catalog-v1\n"}
-        loop name in envmodel_sorted_keys(self.packs) -> &lines.push("{self.packs[name].fingerprint()}\n")
+        loop name in envmodel_sorted_keys(self.packs) -> lines.push("{self.packs[name].fingerprint()}\n")
         pkg_sha256_hex(lines.join("").bytes())
     }
 
@@ -227,7 +227,7 @@ LanguagePackCatalog: struct {
                 }
             }
             if duplicate -> next
-            &expansion.selections.push(normalized)
+            expansion.selections.push(normalized.copy())
             projection := LanguageProjection{selection: normalized, pack: pack, host: pack.host, platform: platform, license: pack.license}
             if selection.enable && pack.license.trim() == "" {
                 return Err(EnvironmentFactError.new("language pack `{pack.name}` has no license fact"))
@@ -237,60 +237,60 @@ LanguagePackCatalog: struct {
             }
             missing_tools := [String]{}
             loop tool in pack.required_tools {
-                if pack.commands.get(tool) == None -> &missing_tools.push(tool)
+                if pack.commands.get(tool) == None -> missing_tools.push(tool)
             }
             if selection.enable && missing_tools.len() > 0 {
                 return Err(EnvironmentFactError.new("language pack `{pack.name}` is missing catalog tools: {missing_tools.join(", ")}"))
             }
             projection.missing_tools = missing_tools
-            &projection.changed.push("host={pack.host}")
-            &projection.changed.push("platform={platform}")
-            &projection.changed.push("license={pack.license}")
-            if selection.version == .Val(version) -> &projection.changed.push("version={version}")
-            if selection.channel == .Val(channel) -> &projection.changed.push("channel={channel}")
-            if selection.venv -> &projection.changed.push("venv=true")
-            if selection.extra_packages.len() > 0 -> &projection.changed.push("extra={selection.extra_packages.join(",")}")
+            projection.changed.push("host={pack.host}")
+            projection.changed.push("platform={platform}")
+            projection.changed.push("license={pack.license}")
+            if selection.version == .Val(version) -> projection.changed.push("version={version}")
+            if selection.channel == .Val(channel) -> projection.changed.push("channel={channel}")
+            if selection.venv -> projection.changed.push("venv=true")
+            if selection.extra_packages.len() > 0 -> projection.changed.push("extra={selection.extra_packages.join(",")}")
             if !selection.enable {
-                &projection.omitted.extend(pack.packages)
-                &projection.omitted.extend(pack.venv_packages)
-                &projection.omitted.extend(selection.extra_packages)
-                &projection.changed.push("enable=false")
-                &expansion.projections.push(projection)
+                projection.omitted.extend(pack.packages)
+                projection.omitted.extend(pack.venv_packages)
+                projection.omitted.extend(selection.extra_packages)
+                projection.changed.push("enable=false")
+                expansion.projections.push(projection)
                 next
             }
             if !expansion.applied.contains(pack.name) {
-                &expansion.applied.push(pack.name)
-                &expansion.packs.push(pack)
+                expansion.applied.push(pack.name)
+                expansion.packs.push(pack.copy())
             }
             loop package in pack.packages {
                 versioned: envmodel_versioned_package(package, selection.version)
-                &expansion.add_package(versioned)
-                &projection.included.push(versioned)
+                expansion.add_package(versioned)
+                projection.included.push(versioned)
             }
             loop package in selection.extra_packages {
-                &expansion.add_package(package)
-                &projection.included.push(package)
+                expansion.add_package(package)
+                projection.included.push(package.copy())
             }
             if {
                 selection.venv -> {
                     loop package in pack.venv_packages {
                         versioned: envmodel_versioned_package(package, selection.version)
-                        &expansion.add_package(versioned)
-                        &projection.included.push(versioned)
+                        expansion.add_package(versioned)
+                        projection.included.push(versioned)
                     }
                 }
-                else -> { &projection.omitted.extend(pack.venv_packages) }
+                else -> { projection.omitted.extend(pack.venv_packages) }
             }
-            loop key in envmodel_sorted_keys(pack.variables) -> envmodel_merge_language_fact(&expansion.variables, pack.name, "variable", key, pack.variables[key])
-            loop key in envmodel_sorted_keys(pack.commands) -> envmodel_merge_language_fact(&expansion.commands, pack.name, "command", key, pack.commands[key])
-            &expansion.projections.push(projection)
+            loop key in envmodel_sorted_keys(pack.variables) -> envmodel_merge_language_fact(expansion.variables, pack.name, "variable", key, pack.variables[key])
+            loop key in envmodel_sorted_keys(pack.commands) -> envmodel_merge_language_fact(expansion.commands, pack.name, "command", key, pack.commands[key])
+            expansion.projections.push(projection)
         }
         Ok(expansion)
     }
 
     expand_names: fn(self, names: [String]) -[Env]> LanguageExpansion EnvironmentFactError! {
         selections := [LanguageSpec]{}
-        loop name in names -> &selections.push(LanguageSpec{name: name, enable: true})
+        loop name in names -> selections.push(LanguageSpec{name: name, enable: true})
         self.expand(selections)
     }
 }
@@ -300,7 +300,7 @@ LanguagePackCatalog: struct {
 envmodel_language_key: fn(name: String) -> String Never! {
     out := [U8]{}
     loop byte in name.bytes() {
-        if pkg_bytes_is_word(Int.from_u8(byte)) && Int.from_u8(byte) != 95 -> &out.push(byte)
+        if pkg_bytes_is_word(Int.from_u8(byte)) && Int.from_u8(byte) != 95 -> out.push(byte)
     }
     pkg_ascii_lower(String.from_bytes(out) ?? "")
 }
@@ -382,7 +382,7 @@ LanguageCatalogRow: struct {
 
 envmodel_extended_language_names: fn() -> [String] Never! {
     names := [String]{}
-    loop row in envmodel_extended_language_rows() -> &names.push(row.name)
+    loop row in envmodel_extended_language_rows() -> names.push(row.name)
     names
 }
 

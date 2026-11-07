@@ -97,11 +97,14 @@ pkg_e2001: fn(requested: String) -> Diagnostic Never! {
         "upgrade with `{BINARY_NAME} self upgrade`, or set `{MANIFEST_FIELD_EDITION}: \"{pkg_latest_edition()}\"` in `{PACKAGE_FILE}`.")
 }
 
+// The first line of the `jet --version` banner, which bare `jet` also prints.
+pkg_version_line: fn() -> String Never! { "{LANG_NAME} {COMPILER_VERSION}" }
+
 // The `jet --version` banner (E2-D1).
 pkg_version_banner: fn() -> String Never! {
     release: pkg_current_release_status()
     policy_state: if release.policy_active -> "active" else -> "not active"
-    "{LANG_NAME} {COMPILER_VERSION}\nrelease status: {release.channel}\nrelease disposition: {release.disposition}\nrelease readiness: {release.readiness}\n1.0 compatibility policy: {release.policy} ({release.policy_disposition}; {policy_state})\nsupported editions: {SUPPORTED_EDITIONS.join(", ")} (newest: {pkg_latest_edition()})\nregistry protocol: v{REGISTRY_COMPAT}\n"
+    "{pkg_version_line()}\nrelease status: {release.channel}\nrelease disposition: {release.disposition}\nrelease readiness: {release.readiness}\n1.0 compatibility policy: {release.policy} ({release.policy_disposition}; {policy_state})\nsupported editions: {SUPPORTED_EDITIONS.join(", ")} (newest: {pkg_latest_edition()})\nregistry protocol: v{REGISTRY_COMPAT}\n"
 }
 
 // The one error carrier of the compiler-facing manifest API: the registered
@@ -251,11 +254,11 @@ pkg_version_triple: fn(text: String) -> [Int] Never! {
     out := [Int]{}
     loop index in 0..<3 {
         if index >= parts.len() {
-            &out.push(0)
+            out.push(0)
             next
         }
         piece: if index == 2 && parts.len() > 3 -> parts[2..<parts.len()].join(".") else -> parts[index]
-        &out.push(pkg_parse_u64(piece) ?? 0)
+        out.push(pkg_parse_u64(piece) ?? 0)
     }
     out
 }

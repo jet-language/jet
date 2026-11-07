@@ -1,0 +1,41 @@
+package: {
+    name: "tooling_data_plot"
+    version: "0.1.0"
+    authority: { allow: [IO, Mem.Alloc] }
+}
+
+// Deterministic line plots over grouped typed data.
+use data: core.data
+
+#Codable
+Sale: struct {
+    month: String
+    value: Float
+}
+
+run: fn() {
+    rows: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0\nMar,5.0") ?? panic("csv")
+    groups: data.query(rows)
+        .group_by(sale -> sale.month)
+        .mean(sale -> sale.value)
+        .collect() ?? panic("groups")
+    options: DataLineOptions{
+        title: "Sales",
+        x_label: "month",
+        y_label: "value",
+        markers: true,
+        reference: Val(6.0),
+        style: "dashed",
+        color: "#2f6f73",
+        legend: "revenue"
+    }
+    print(data.line_text(groups, options) ?? panic("line text"))
+    svg: data.line_svg(groups, options) ?? panic("line svg")
+    print("svg bytes: {svg.len()}")
+
+    invalid_options: DataLineOptions{title: "Sales", x_label: "month", y_label: "value", markers: false, reference: None, style: "zig", color: "#2f6f73", legend: ""}
+    if data.line_text(groups, invalid_options) == {
+        .Ok(_) -> { print("invalid line: ok") }
+        .Err(error) -> { print("invalid line: {error}") }
+    }
+}

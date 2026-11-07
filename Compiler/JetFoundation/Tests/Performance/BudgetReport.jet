@@ -29,8 +29,8 @@ br_q: fn(value: Int) -> CanonicalJSON Never! { perf_rational_to_json(perf_ration
 br_set: fn(value: CanonicalJSON, key: String, replacement: CanonicalJSON) -> CanonicalJSON Never! {
     if value == .Object(f) {
         out := [CanonicalJSONField]{}
-        loop field in f { if field.key != key -> &out.push(field.copy()) }
-        &out.push(br_f(key, replacement))
+        loop field in f { if field.key != key -> out.push(field.copy()) }
+        out.push(br_f(key, replacement))
         return br_o(out)
     }
     panic("test object required")
@@ -125,20 +125,20 @@ br_phases: fn(ns: Int) -> CanonicalJSON Never! { CanonicalJSON.Array([CanonicalJ
 br_compile: fn() -> CanonicalJSON Never! {
     identity: [CanonicalJSONField]{br_f("backend", br_s("fixture")), br_f("cache_state", br_s("Clean")), br_f("clock", br_s("process_cpu")), br_f("compiler_digest", br_s(br_zero_hash())), br_f("core_digest", br_s(br_zero_hash())), br_f("edit_bytes", br_i(0)), br_f("host", br_s("linux")), br_f("linker", br_s("fixture")), br_f("profile", br_s("debug")), br_f("source_tree_sha256", br_s(br_zero_hash())), br_f("target", br_s("native")), br_f("workload_bytes", br_i(100))}
     record_fields := identity.copy()
-    &record_fields.push(br_f("elapsed_ns", br_i(9)))
-    &record_fields.push(br_f("peak_rss_bytes", br_i(10)))
-    &record_fields.push(br_f("phase_totals", br_phases(8)))
+    record_fields.push(br_f("elapsed_ns", br_i(9)))
+    record_fields.push(br_f("peak_rss_bytes", br_i(10)))
+    record_fields.push(br_f("phase_totals", br_phases(8)))
     record: br_o(record_fields)
     records := [CanonicalJSON]{}
-    loop _ in 0..<20 -> &records.push(record.copy())
+    loop _ in 0..<20 -> records.push(record.copy())
     root := identity.copy()
     additions: [CanonicalJSONField]{br_f("edit_sha256", br_s(br_zero_hash())), br_f("peak_rss_bytes", br_i(10)), br_f("phase_totals", br_phases(160)), br_f("sample_records", CanonicalJSON.Array(records)), br_f("samples", br_i(20)), br_f("variance", br_q(0)), br_f("warmups", br_i(1))}
-    loop field in additions -> &root.push(field)
+    loop field in additions -> root.push(field)
     br_o(root)
 }
 br_compile_samples: fn() -> CanonicalJSON Never! {
     samples := [CanonicalJSON]{}
-    loop _ in 0..<20 -> &samples.push(br_q(9))
+    loop _ in 0..<20 -> samples.push(br_q(9))
     CanonicalJSON.Array(samples)
 }
 #Test("canonical_json_sorts_keys_escapes_and_hashes_lf_terminated_content reader") {
@@ -302,7 +302,7 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     br_error(perf_validate_compile_metadata(br_set(compile, "peak_rss_bytes", br_i(9)), samples), "compile.peak_rss_bytes does not equal the maximum per-sample peak RSS")
     br_error(perf_validate_compile_metadata(compile, CanonicalJSON.Array([CanonicalJSON]{})), "measurement.samples count does not match compile.sample_records")
     bad_samples := [CanonicalJSON]{}
-    loop _ in 0..<20 -> &bad_samples.push(br_q(10))
+    loop _ in 0..<20 -> bad_samples.push(br_q(10))
     br_error(perf_validate_compile_metadata(compile, CanonicalJSON.Array(bad_samples)), "measurement.samples does not match compile.sample_records")
     br_error(perf_validate_compile_metadata(br_set(compile, "phase_totals", br_phases(159)), samples), "compile.phase_totals does not equal the per-sample phase totals")
     br_error(perf_validate_compile_metadata(br_set(compile, "variance", br_q(1)), samples), "compile.variance does not match elapsed samples")
@@ -316,7 +316,7 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
         if records == .Array(values) {
             aggregate := PerfCompileAggregate{phases: [String:Int]{}, elapsed: [PerfRational]{}, peak_rss_bytes: 0}
             keys: [String]{"backend", "cache_state", "clock", "compiler_digest", "core_digest", "edit_bytes", "host", "linker", "profile", "source_tree_sha256", "target", "workload_bytes"}
-            loop key in keys -> br_error(perf_validate_compile_record(br_set(values[0], key, CanonicalJSON.Null), root, &aggregate), "compile sample record `{key}` does not match its row identity")
+            loop key in keys -> br_error(perf_validate_compile_record(br_set(values[0], key, CanonicalJSON.Null), root, aggregate), "compile sample record `{key}` does not match its row identity")
         }
     }
     if perf_validate_phase_totals(CanonicalJSON.Array([CanonicalJSON]{}), "phase") == {
@@ -345,7 +345,7 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
     keys: [String]{"retained", "excluded"}
     loop key in keys -> br_error(perf_validate_report_content(br_set(content, "privacy", br_set(privacy, key, CanonicalJSON.Array([CanonicalJSON]{br_s("z"), br_s("a")})))), "privacy.{key} is not sorted")
     input := [U8]{}
-    perf_report_frame(&input, "é")
+    perf_report_frame(input, "é")
     assert_eq(input, [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{2}, U8{195}, U8{169}})
     assert_eq(perf_report_wire_text(CanonicalJSON.Null), "")
     assert_eq(perf_report_wire_text(br_i(10)), "10")
@@ -441,8 +441,8 @@ br_compile_samples: fn() -> CanonicalJSON Never! {
         samples := [CanonicalJSON]{}
         loop index in 0..<20 {
             elapsed: if { index % 2 == 0 -> 8 else -> 10 }
-            &changed.push(br_set(values[index], "elapsed_ns", br_i(elapsed)))
-            &samples.push(br_q(elapsed))
+            changed.push(br_set(values[index], "elapsed_ns", br_i(elapsed)))
+            samples.push(br_q(elapsed))
         }
         compile: br_set(br_set(root, "sample_records", CanonicalJSON.Array(changed)), "variance", br_q(1))
         perf_validate_compile_metadata(compile, CanonicalJSON.Array(samples)) ?? panic(err.message)

@@ -1,4 +1,4 @@
-// Rust `synthesize_impls` (S62 + D-LIB2): a written trait impl answers every
+// Rust `synthesize_impls` (S62 and default bodies): a written trait impl answers every
 // method of a trait its module declares, as written methods registered and
 // checked like any other. A `using` delegation impl gets one forwarding method
 // per trait method, `self.<field>.<m>(args…)`, when the field's type implements
@@ -97,11 +97,11 @@ sema_trait_impl_filled_methods: fn(type_name: String, trait_name: String, method
         if written -> next
         function := sema_trait_impl_method(sig)
         function.body = body.copy()
-        &extras.push(function)
+        extras.push(function)
     }
     if extras.len() == 0 -> return None
     updated := methods.copy()
-    loop extra in extras -> &updated.push(extra)
+    loop extra in extras -> updated.push(extra)
     Val(updated)
 }
 
@@ -131,7 +131,7 @@ sema_trait_impl_forward: fn(sig: TraitMethodSig, field_name: String) -> Func Nev
             self_span = param.name_span
             next
         }
-        &args.push(CallArg{convention: param.convention, expr: Expr.Ident{name: param.name.copy(), span: param.name_span, id: AST_NODE_GENERATED}, span: param.name_span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
+        args.push(CallArg{convention: param.convention, expr: Expr.Ident{name: param.name.copy(), span: param.name_span, id: AST_NODE_GENERATED}, span: param.name_span, flags: ast_empty_call_arg_flags(), label: None, spread: false})
     }
     receiver: Expr.Field{base: Expr.Ident{name: "self", span: self_span, id: AST_NODE_GENERATED}, member: field_name.copy(), span: Span{start: span.start, end: self_span.end}, id: AST_NODE_GENERATED}
     call: Expr.MethodCall{receiver: receiver, method: sig.name.copy(), method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}

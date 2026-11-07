@@ -101,7 +101,7 @@ Key: enum {
 }
 print: fn(text: String) Never! -[IO, Time.Wait]> {
     out := stdout()
-    &out.write_line(text).drop("stdout write")
+    out.write_line(text).drop("stdout write")
 }
 
 // The write's failure is discarded, so eprint skips stdio_write's IOError:
@@ -467,12 +467,12 @@ sgr: fn(spec: String) -> String {
             token: ascii_lower(String.from_bytes(cur) ?? "")
             cur = [U8]{}
             code: token_code(token)
-            if code.len() > 0 -> &parts.push(code)
-        } else { &cur.push(b) }
+            if code.len() > 0 -> parts.push(code)
+        } else { cur.push(b) }
     }
     token: ascii_lower(String.from_bytes(cur) ?? "")
     code: token_code(token)
-    if code.len() > 0 -> &parts.push(code)
+    if code.len() > 0 -> parts.push(code)
     out := ""
     loop i in 0..<parts.len() {
         if i > 0 -> out = "{out};"
@@ -524,7 +524,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }
@@ -542,7 +542,7 @@ ascii_lower: fn(text: String) -> String {
     out := [U8]{}
     loop b in text.bytes() {
         n: b
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
 }

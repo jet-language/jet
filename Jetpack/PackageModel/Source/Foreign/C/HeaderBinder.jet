@@ -1,6 +1,6 @@
 use {
     cbind_core_files: core.files
-    jetpack_foundation.[foundation_generated_snake_name]
+    jetpack_foundation.[SYSTEM_LIB_TARGET, foundation_generated_snake_name]
 }
 
 // Native C header -> Jet `#Bindgen` cache generator, ported from
@@ -9,13 +9,16 @@ use {
 // The generator stays inside Jet: no bindgen, no libclang. The focused parser
 // (HeaderParser.jet) binds scalar values, strings, uncounted object pointers,
 // typed pointer/count slices, and complete C-layout records, while the
-// opaque-handle seam (OpaqueHandleBinder.jet) records owned nominal types plus
+// opaque-handle seam (OpaqueHandleBinder.jet) records owned handle facts plus
 // explicit close/thread/link facts. A declaration it cannot map is skipped and
 // reported, never faked. Anything beyond this subset is an
 // `#Import c.<lib>: module` overlay, which still wins on merge.
 //
 // Output is a `#Bindgen c.<lib>.__bindgen__: module` cache; each binding is
-// `name: fn(p: T, ...) -> R = "c_symbol"`.
+// `name: fn(p: T, ...) -> R = "c_symbol"`. The cache declares no handle
+// types: each handle is a row of the `<lib>.metadata` sidecar
+// (pkg_cbind_bind_files), which the compiler turns into its foreign handle
+// type, so a handle crosses the C ABI as the native pointer it is.
 
 // Why a C header could not produce a binding cache.
 #Error
@@ -51,8 +54,8 @@ CBindResult: struct {
 // space-joined flag list, `""` when there are none.
 pkg_cbind_compute_bind_hash: fn(header_src: String, cflags: String) -> String Never! {
     input := header_src.bytes()
-    &input.push(U8{0})
-    loop byte in cflags.bytes() -> &input.push(byte)
+    input.push(U8{0})
+    loop byte in cflags.bytes() -> input.push(byte)
     pkg_sha256_hex(input)
 }
 
@@ -79,6 +82,196 @@ pkg_cbind_write_bind_hash: fn(cache_path: String, header_src: String, cflags: St
     cbind_core_files.write(pkg_cbind_hash_sidecar_path(cache_path), pkg_cbind_compute_bind_hash(header_src, cflags))
 }
 
+// What one header bind writes beside its `<lib>.jet` cache.
+CBindFiles: struct {
+    // The `#Bindgen` cache text.
+    cache: String
+    // The `<lib>.metadata` handle and link facts; None when the binding
+    // records no handle and no link beyond the library itself.
+    metadata: String?
+    // The `<lib>.hash` text: the bind hash of the header bytes.
+    hash: String
+    // Function names bound, and prototypes skipped with their reason.
+    bound: [String]
+    skipped: [(name: String, reason: String)]
+    // Opaque typedefs withheld because their ownership was not resolvable;
+    // neither the command nor the compiler publishes a bind that has any.
+    handle_skipped: [(reason: String, typedef_name: String)]
+    // What the `<lib>.provenance` record adds (pkg_cbind_provenance): the
+    // handle facts' stable keys (sorted, unique), the link closure's stable
+    // key, and the boundary row the cache stamps.
+    handle_keys: [String]
+    link_closure: String
+    boundary: ForeignBoundaryContract
+}
+
+// The one C header bind: `jet inspect bind <header.h>` and the compiler's
+// refresh of a missing or stale cache both write exactly these files.
+pkg_cbind_bind_files: fn(header_src: String, lib: String, overlay: HandleOverlay) -> CBindFiles CBindError! {
+    result: pkg_cbind_generate_with_overlay(header_src, lib, overlay)
+    facts := [FFIHandleFact]{}
+    loop handle in result.handles -> facts.push(pkg_cffi_canonical_handle_fact(handle))
+    closure: pkg_cffi_canonical_link_closure(result.link_closure)
+    closure_key: closure.stable_key()
+    handle_keys: loop fact in pkg_cffi_sorted_facts(facts) -> fact.stable_key()
+    metadata: if facts.len() == 0 && result.link_closure.transitive.len() == 0 -> None else -> Val(pkg_cffi_render_binding_metadata(result.link_closure.primary, facts, closure))
+    Ok(CBindFiles{cache: result.source, metadata: metadata, hash: pkg_cbind_compute_bind_hash(header_src, ""), bound: result.bound, skipped: result.skipped, handle_skipped: result.handle_skipped, handle_keys: handle_keys, link_closure: closure_key, boundary: result.boundary})
+}
+
+// The binder schema a C binding's identity and provenance name.
+C_BINDER_SCHEMA: "jet-c-bind-v1"
+
+// The `<stem>.provenance` record of one header bind (Rust CFFI.rs
+// write_c_binding_provenance). Its identity covers the header, the cache, the
+// handle facts, the link closure, the package's declared C dependency
+// `dependency` (None when it declares none) and each local archive in
+// `archives` that dependency links, so a changed archive makes the binding
+// stale (pkg_cbind_stale_input). The rows then name the same inputs with
+// their digests, the boundary row the cache stamps, and the cache and
+// metadata artifacts.
+pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_path: String, header_src: String, cache_path: String, dependency: String?, archives: [ArchiveInput]) -[Env]> String ForeignBridgeError! {
+    descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
+    language: (ForeignLanguage.C).root()
+    header_sha: pkg_sha256_hex(header_src.bytes())
+    cache_sha: pkg_sha256_hex(bound.cache.bytes())
+    identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
+    identity.field("language", language.bytes())
+    identity.field("binder_schema", C_BINDER_SCHEMA.bytes())
+    identity.field("library", lib.bytes())
+    identity.field("abi", "c_{lib}".bytes())
+    identity.field("descriptor", descriptor.stamp().bytes())
+    identity.field("header_path", header_path.bytes())
+    identity.field("header_bytes", header_src.bytes())
+    identity.field("cache_path", cache_path.bytes())
+    identity.field("cache_bytes", bound.cache.bytes())
+    identity.field("handle_facts", bound.handle_keys.join("\n").bytes())
+    identity.field("link_closure", bound.link_closure.bytes())
+    if dependency == {
+        .Val(target) -> identity.field("dependency", target.bytes())
+        .None -> identity.field("dependency_missing", "true".bytes())
+    }
+    pkg_bridge_add_archive_inputs(identity, archives.copy())
+    fields := [(name: String, value: String)]{
+        (name: "language", value: language),
+        (name: "abi", value: "c_{lib}"),
+        (name: "transport", value: "direct-c-abi"),
+        (name: "binder-schema", value: C_BINDER_SCHEMA),
+        (name: "descriptor", value: descriptor.stamp()),
+        (name: "source", value: header_path),
+        (name: "source-sha256", value: header_sha),
+        (name: "cache", value: cache_path),
+        (name: "cache-sha256", value: cache_sha),
+    }
+    loop field in bound.boundary.provenance_fields() -> fields.push(field)
+    // One `handle-fact` row per handle: a stable key is itself a
+    // `key=value;...` record, never folded into one multi-line value.
+    loop key in bound.handle_keys -> fields.push((name: "handle-fact", value: key))
+    fields.push((name: "link-closure", value: bound.link_closure))
+    if dependency == .Val(target) -> fields.push((name: "dependency", value: target))
+    loop input in archives {
+        fields.push((name: "linked-library", value: input.library))
+        fields.push((name: "linked-archive", value: input.path))
+        digest: if input.bytes == .Val(bytes) -> pkg_sha256_hex(bytes) else -> "missing"
+        fields.push((name: "linked-archive-sha256", value: digest))
+    }
+    artifacts := [(name: String, digest: String)]{(name: "{stem}.jet", digest: cache_sha)}
+    if bound.metadata == .Val(text) -> artifacts.push((name: "{stem}.metadata", digest: pkg_sha256_hex(text.bytes())))
+    pkg_bridge_render_provenance(identity.finish(), fields, artifacts)
+}
+
+// What changed since a C binding's provenance record `provenance` was
+// written: the generated cache `cache` (the current `<stem>.jet` bytes) when
+// its digest differs from the recorded one, else the first recorded local
+// archive whose bytes differ (a missing archive reads as `missing`). None
+// when the cache and every recorded archive are unchanged.
+pkg_cbind_stale_input: fn(provenance: String, cache: [U8]) -[FS]> String? Never! {
+    archive := ""
+    loop line in provenance.split("\n") {
+        row: line.split_once("=") ?? next
+        if row.before == "cache-sha256" && row.after != pkg_sha256_hex(cache) -> return Val("the generated cache")
+        if row.before == "linked-archive" -> archive = row.after
+        if row.before != "linked-archive-sha256" || archive == "" -> next
+        current: if cbind_core_files.read_bytes(archive) == .Ok(bytes) -> pkg_sha256_hex(bytes) else -> "missing"
+        if current != row.after -> return Val("the local archive `{archive}`")
+        archive = ""
+    }
+    None
+}
+
+// The `<lib>: c@<target>` dependency the Package source `package_source`
+// (read from `package_path`) declares; None when it declares none or does
+// not parse.
+pkg_cbind_declared_dependency: fn(package_source: String, package_path: String, lib: String) -> String? Never! {
+    facts: PackageFacts.parse(package_source, package_path) ?? return None
+    source: facts.deps.get(lib) ?? return None
+    if source == {
+        .CLib(target) -> Val(target)
+        else -> None
+    }
+}
+
+// The local archive a declared C dependency `target` links for `lib`: a
+// directory target, relative to `project_root`, names `lib<lib>.a` there.
+// `system` and `nixpkgs:` targets are provisioned, never local archives.
+pkg_cbind_local_archives: fn(project_root: String, target: String, lib: String) -[FS, Env]> [ArchiveInput] Never! {
+    if target == SYSTEM_LIB_TARGET || target.starts_with("nixpkgs:") -> return [ArchiveInput]{}
+    directory: if cbind_core_files.is_absolute(target) -> target else -> cbind_core_files.join(project_root, target)
+    pkg_bridge_local_archive_inputs([String]{directory}, [String]{lib})
+}
+
+C_BINDING_METADATA_SCHEMA: "jet-c-binding-metadata-v1"
+
+// Facts sorted by their stable key, exact duplicates removed.
+pkg_cffi_sorted_facts: fn(facts: [FFIHandleFact]) -> [FFIHandleFact] Never! {
+    sorted := facts
+    sorted.sort_by(fact -> fact.stable_key())
+    unique := [FFIHandleFact]{}
+    loop fact in sorted {
+        if unique.len() > 0 && unique[unique.len() - 1] == fact -> next
+        unique.push(fact)
+    }
+    unique
+}
+
+// The binder's handle fact as the canonical bundle fact.
+pkg_cffi_canonical_handle_fact: fn(fact: HandleFact) -> FFIHandleFact Never! {
+    FFIHandleFact{lib: fact.link_closure.primary, typedef_name: fact.typedef_name, jet_name: fact.jet_name, close: pkg_cbind_close_function_name(fact.close), close_source: fact.close_source, thread_safety: fact.thread_safety}
+}
+
+pkg_cffi_canonical_link_closure: fn(closure: LinkClosure) -> FFILinkClosure Never! {
+    FFILinkClosure.new([String]{closure.primary}, closure.transitive)
+}
+
+// Percent-escape every byte outside `[A-Za-z0-9._/-]` as `%XX`.
+pkg_cffi_metadata_escape: fn(value: String) -> String Never! {
+    digits: "0123456789ABCDEF".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        code: Int.from_u8(byte)
+        plain: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 46 || code == 95 || code == 45 || code == 47
+        if plain {
+            out.push(byte)
+            next
+        }
+        out.push(U8{37})
+        out.push(digits[code >> 4])
+        out.push(digits[(code).bit_and(15)])
+    }
+    String.from_bytes(out) ?? ""
+}
+
+// The `.metadata` sidecar text: schema, library, link closure, then one
+// `handle=lib|typedef|JetName|close|close-source|thread-safety` row per fact.
+pkg_cffi_render_binding_metadata: fn(lib: String, handle_facts: [FFIHandleFact], link_closure: FFILinkClosure) -> String Never! {
+    out := "schema={C_BINDING_METADATA_SCHEMA}\nlibrary={pkg_cffi_metadata_escape(lib)}\n"
+    loop direct in link_closure.direct -> out = "{out}closure.direct={pkg_cffi_metadata_escape(direct)}\n"
+    loop transitive in link_closure.transitive -> out = "{out}closure.transitive={pkg_cffi_metadata_escape(transitive)}\n"
+    loop fact in pkg_cffi_sorted_facts(handle_facts) {
+        out = "{out}handle={pkg_cffi_metadata_escape(fact.lib)}|{pkg_cffi_metadata_escape(fact.typedef_name)}|{pkg_cffi_metadata_escape(fact.jet_name)}|{pkg_cffi_metadata_escape(fact.close)}|{pkg_ffi_close_source_name(fact.close_source)}|{pkg_ffi_thread_safety_name(fact.thread_safety)}\n"
+    }
+    out
+}
+
 // Translate C header source into a `#Bindgen` cache for library `lib`. The
 // only failure is structural (no bindable function at all), so the caller can
 // surface E3208 instead of writing an empty cache.
@@ -101,7 +294,7 @@ pkg_cbind_generate_with_options: fn(header_src: String, lib: String, overlay: Ha
 // header/overlay generation.
 pkg_cbind_generate_with_overlay_and_plans: fn(header_src: String, lib: String, overlay: HandleOverlay, plans: [String: BindingPlan]) -> CBindResult CBindError! {
     result := pkg_cbind_generate_with_overlay(header_src, lib, overlay)
-    pkg_cbind_attach_plans(&result, plans, "generated")
+    pkg_cbind_attach_plans(result, plans, "generated")
     Ok(result)
 }
 
@@ -116,7 +309,7 @@ pkg_cbind_generate_with_contract_and_plans: fn(header_src: String, lib: String, 
     previous_stamp: result.boundary.stamp()
     result.source = result.source.replace(previous_stamp, contract.stamp())
     result.boundary = contract.copy()
-    pkg_cbind_attach_plans(&result, plans, "canonical")
+    pkg_cbind_attach_plans(result, plans, "canonical")
     Ok(result)
 }
 
@@ -138,34 +331,35 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
     lines := [String]{}
     used_names := [String]{}
     loop handle in discovery.handles {
-        if !used_names.contains(handle.jet_name) -> &used_names.push(handle.jet_name)
+        if !used_names.contains(handle.jet_name) -> used_names.push(handle.jet_name)
     }
 
     loop raw_decl in pkg_opaque_split_declarations(cleaned) {
         decl: raw_decl.trim()
         if decl == "" -> next
         proto: pkg_cbind_parse_prototype(decl) ?? next
-        if pkg_cbind_render_binding(proto, &used_names, contract, discovery, catalog) == {
+        if pkg_cbind_render_binding(proto, used_names, contract, discovery, catalog) == {
             .Ok(line) -> {
-                &bound.push(proto.name)
-                &lines.push("    {line}\n")
+                bound.push(proto.name)
+                // A `#Close(...)` marker line comes first; each line is indented.
+                loop part in line.split("\n") -> lines.push("    {part}\n")
                 if pkg_cbind_managed_callback_param_index(proto, catalog) != None {
-                    &lines.push("    {proto.name}: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
+                    lines.push("    {proto.name}: fn(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
                 }
                 if proto.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(proto) {
-                    &lines.push("    unsubscribe: fn(subscription: ^FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
+                    lines.push("    unsubscribe: fn(subscription: &&FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
                 }
                 if proto.name == "emit_async" {
-                    &lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
+                    lines.push("    emit_async: fn(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
                 }
             }
-            .Err(skip) -> &skipped.push((name: proto.name, reason: skip.reason))
+            .Err(skip) -> skipped.push((name: proto.name, reason: skip.reason))
         }
     }
 
     if bound.len() == 0 {
         unresolved := [String]{}
-        loop entry in discovery.unresolved -> &unresolved.push("`{entry.typedef_name}`: {entry.reason}")
+        loop entry in discovery.unresolved -> unresolved.push("`{entry.typedef_name}`: {entry.reason}")
         suffix: if unresolved.len() == 0 -> "" else -> "; opaque handle bindings were unresolved: {unresolved.join("; ")}"
         return Err(CBindError{message: "no bindable C function prototypes found for `{lib}`{suffix}"})
     }
@@ -186,16 +380,16 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
         boundary.cleanup = "no generated close contract"
     } else {
         handle_names := [String]{}
-        loop handle in discovery.handles -> &handle_names.push(handle.jet_name)
+        loop handle in discovery.handles -> handle_names.push(handle.jet_name)
         boundary.ownership = "owned opaque handles: {handle_names.join(",")}"
         boundary.cleanup = "overlay/conventional close symbol consumes each handle"
     }
     boundary.copy_cost = "scalar values copy by value; records retain declared C layout; handles never copy native state"
     assumptions := [String]{}
-    loop entry in discovery.unresolved -> &assumptions.push("{entry.typedef_name}: {entry.reason}")
+    loop entry in discovery.unresolved -> assumptions.push("{entry.typedef_name}: {entry.reason}")
     boundary.assumptions = assumptions
     boundary_stamp: boundary.stamp()
-    type_declarations: "{discovery.render_type_declarations()}{catalog.render_type_declarations()}"
+    type_declarations: catalog.render_type_declarations()
     source: "// jet-ffi-descriptor={descriptor_stamp}\n// jet-ffi-boundary={boundary_stamp}\n{type_declarations}#Bindgen c.{module_lib}.__bindgen__: module {{\n{lines.join("")}}}\n"
     Ok(CBindResult{
         source: source,
@@ -220,7 +414,7 @@ pkg_cbind_c_descriptor: fn() -> BinderDescriptor CBindError! {
 pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], against: String) CBindError! {
     boundary_digest: result.boundary.digest()
     names := plans.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names {
         plan: plans[name]
         if name != plan.operation.name -> return Err(CBindError{message: "adaptation plan key `{name}` names `{plan.operation.name}`"})
@@ -230,7 +424,7 @@ pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], a
     loop name in names {
         plan: plans[name]
         result.source = "{result.source}{plan.render_facade()}\n"
-        &selected.push(plan)
+        selected.push(plan.copy())
     }
     result.plans = selected
 }
@@ -240,11 +434,11 @@ pkg_cbind_attach_plans: fn(result: &CBindResult, plans: [String: BindingPlan], a
 // (`close={"k": "v"};thread-safety={"k": Safe};links=["a"]`).
 pkg_cbind_boundary_overlay_identity: fn(overlay: HandleOverlay) -> String Never! {
     close_keys := overlay.close_functions.keys().to_list()
-    &close_keys.sort()
+    close_keys.sort()
     close := [String]{}
-    loop key in close_keys -> &close.push("{pkg_cbind_debug_quote(key)}: {pkg_cbind_debug_quote(overlay.close_functions[key])}")
+    loop key in close_keys -> close.push("{pkg_cbind_debug_quote(key)}: {pkg_cbind_debug_quote(overlay.close_functions[key])}")
     safety_keys := overlay.thread_safety.keys().to_list()
-    &safety_keys.sort()
+    safety_keys.sort()
     safety := [String]{}
     loop key in safety_keys {
         spelled: if overlay.thread_safety[key] == {
@@ -252,12 +446,12 @@ pkg_cbind_boundary_overlay_identity: fn(overlay: HandleOverlay) -> String Never!
             .Safe -> "Safe"
             .Unsafe -> "Unsafe"
         }
-        &safety.push("{pkg_cbind_debug_quote(key)}: {spelled}")
+        safety.push("{pkg_cbind_debug_quote(key)}: {spelled}")
     }
     links := overlay.links
-    &links.sort()
+    links.sort()
     quoted_links := [String]{}
-    loop link in links -> &quoted_links.push(pkg_cbind_debug_quote(link))
+    loop link in links -> quoted_links.push(pkg_cbind_debug_quote(link))
     "close={{{close.join(", ")}}};thread-safety={{{safety.join(", ")}}};links=[{quoted_links.join(", ")}]"
 }
 
@@ -272,7 +466,7 @@ pkg_cbind_debug_quote: fn(value: String) -> String Never! {
         // C1 controls U+0080..U+009F encode as 0xC2 0x80..0x9F.
         second: pkg_bytes_code(raw, index + 1)
         if code == 0xC2 && second >= 0x80 && second <= 0x9F {
-            &out.push("\\u{{{pkg_cbind_lower_hex(second)}}}")
+            out.push("\\u{{{pkg_cbind_lower_hex(second)}}}")
             index += 2
             next
         }
@@ -283,23 +477,23 @@ pkg_cbind_debug_quote: fn(value: String) -> String Never! {
             else -> 1
         }
         if code == {
-            34 -> &out.push("\\\"")
-            92 -> &out.push("\\\\")
-            9 -> &out.push("\\t")
-            10 -> &out.push("\\n")
-            13 -> &out.push("\\r")
-            0 -> &out.push("\\0")
+            34 -> out.push("\\\"")
+            92 -> out.push("\\\\")
+            9 -> out.push("\\t")
+            10 -> out.push("\\n")
+            13 -> out.push("\\r")
+            0 -> out.push("\\0")
             else -> {
                 if code < 32 || code == 127 {
-                    &out.push("\\u{{{pkg_cbind_lower_hex(code)}}}")
+                    out.push("\\u{{{pkg_cbind_lower_hex(code)}}}")
                 } else {
-                    &out.push(pkg_bytes_text(raw, index, index + width))
+                    out.push(pkg_bytes_text(raw, index, index + width))
                 }
             }
         }
         index += width
     }
-    &out.push("\"")
+    out.push("\"")
     out.join("")
 }
 

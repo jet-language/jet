@@ -5,7 +5,6 @@ step: jet build --profile=debug http_duplicate_route.jet
 exit: 0
 step: built
 exit: nonzero
-stderr: ~ "panic: E2804: duplicate route `GET /users/:name`" # original ed77c235f tests/tir_language_features.rs:1174 contains predicate
-stderr: ~ "http_duplicate_route.jet:9" # original ed77c235f tests/tir_language_features.rs:1178 contains predicate
+stderr: ~ "Stop [E2804]: Two routes both match `GET /users/:name`." # original ed77c235f tests/tir_language_features.rs:1174 contains predicate, in the E2804 registry wording core.rt.__coded_stop renders
+stderr: ~ "http_duplicate_route.jet:11" # original ed77c235f tests/tir_language_features.rs:1178 contains predicate; the second `router.get` line
 stderr: !~ "thread 'main' panicked" # original ed77c235f tests/tir_language_features.rs:1182 not contains predicate
-# ORIGINAL-TEST-BUG PENDING-SAME-HEAD: literal lacks fn run() opener; lone closing brace means original compile_with_path.expect success cannot reach E2804; source/assertions kept verbatim, no card from static suspicion.

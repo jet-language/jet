@@ -1,8 +1,8 @@
-Error [jet.MissingWriteMarker]: Cannot write to `xs` — it does not have the write-access marker `&`; required before calling `.push()`
-  --> tests/ui/read_param_method_write_fix.jet:2:23
+Error [jet.FieldWriteWithoutMarker]: `.push()` changes `xs`, which has read access only
+  --> tests/ui/read_param_method_write_fix.jet:2:22
     |
-  2 | bad: fn(xs: [Int]) { &xs.push(1) }
-    |                       ^^
- Why: This method edits the value it's called on; the write-access marker `&` is required
- Fix: Change the parameter to `xs: &[Int]` and pass the argument with `&` at the call site
-More: jet-lang.dev/e/E0202
+  2 | bad: fn(xs: [Int]) { xs.push(1) }
+    |                      ^^
+ Why: `push: fn(&self, &&Int)` changes the value it's called on, but an unmarked parameter gives read access only
+ Fix: Change the parameter to `xs: &[Int]`
+More: jet-lang.dev/e/E0205

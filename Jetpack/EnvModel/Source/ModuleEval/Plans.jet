@@ -55,12 +55,12 @@ SecretSpec: struct {
             .Stored -> "stored"
             .Compose(_, from) -> {
                 sorted := from
-                &sorted.sort()
+                sorted.sort()
                 "compose:{sorted.join(",")}"
             }
         }
         allowed := self.allowed_environments
-        &allowed.sort()
+        allowed.sort()
         rotation: if self.rotation == {
             .Unset -> "none"
             .MaxAge(seconds) -> "max_age:{seconds}"
@@ -522,6 +522,6 @@ EnvironmentFacts: struct {
 // The keys of a string map in byte order (Rust `BTreeMap` key order).
 envmodel_sorted_keys_of: fn(values: [String: String]) -> [String] Never! {
     keys := values.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }

@@ -119,7 +119,7 @@ ArtifactStoredEntry: struct {
 store_artifact_sort_entries: fn(entries: [ArtifactStoredEntry]) -> [ArtifactStoredEntry] Never! {
     out := entries
     out = loop fresh_item in out -> fresh_item
-    &out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> store_artifact_entry_order(left, right))
+    out.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> store_artifact_entry_order(left, right))
     out
 }
 
@@ -265,7 +265,7 @@ ArtifactStore: struct {
             else -> {}
         }
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         store_artifact_atomic_write(pointer, object.text().bytes())
         Ok(object)
     }
@@ -330,7 +330,7 @@ ArtifactStore: struct {
         encoded: store_artifact_encode_action(action, record)
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
             .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
@@ -385,11 +385,11 @@ ArtifactStore: struct {
     touch_actions: fn(self, actions: [ActionHandle]) Never! -[FS, Env, Time, Rand]> {
         if actions.len() == 0 -> return
         lock: self.acquire_lock() ?? return
-        defer close(^lock)
+        defer close(lock)
         entries := [ArtifactJournalAppend]{}
         loop action in actions {
             info: files.stat(self.action_path(action)) ?? next
-            &entries.push(ArtifactJournalAppend{operation: "touch", key: ArtifactEntryKey.Action(action.key()), length: info.size})
+            entries.push(ArtifactJournalAppend{operation: "touch", key: ArtifactEntryKey.Action(action.key()), length: info.size})
         }
         self.append_journal_entries_locked(entries).drop("recency is advisory; a failed touch only costs eviction order")
     }
@@ -414,7 +414,7 @@ ArtifactStore: struct {
         if records.len() == 0 -> return
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         journal := [ArtifactJournalAppend]{}
         pending := [ArtifactPendingWrite]{}
         loop record in records {
@@ -426,14 +426,14 @@ ArtifactStore: struct {
                 .Bytes(existing) -> {
                     if store_artifact_decode_action(record.action, existing) == {
                         .Ok(value) -> {
-                            if value == record.bytes -> &journal.push(ArtifactJournalAppend{operation: "touch", key: key, length: existing.len()})
+                            if value == record.bytes -> journal.push(ArtifactJournalAppend{operation: "touch", key: key, length: existing.len()})
                             next
                         }
                         .Err(error) -> self.quarantine_locked(key, path, error.reason)
                     }
                 }
             }
-            &pending.push(ArtifactPendingWrite{path: path, key: key, encoded: store_artifact_encode_action(record.action, record.bytes)})
+            pending.push(ArtifactPendingWrite{path: path, key: key, encoded: store_artifact_encode_action(record.action, record.bytes)})
         }
         if pending.len() > 0 {
             incoming := 0
@@ -442,7 +442,7 @@ ArtifactStore: struct {
         }
         loop write in pending {
             if durable -> store_artifact_atomic_write(write.path, write.encoded) else -> store_artifact_replace_unsynced(write.path, write.encoded)
-            &journal.push(ArtifactJournalAppend{operation: "put", key: write.key, length: write.encoded.len()})
+            journal.push(ArtifactJournalAppend{operation: "put", key: write.key, length: write.encoded.len()})
         }
         self.append_journal_entries_locked(journal)
     }
@@ -484,7 +484,7 @@ ArtifactStore: struct {
 
     acquire_lease: fn(self, objects: [ObjectHandle]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         targets := [LeaseTarget]{}
-        loop object in objects -> &targets.push(LeaseTarget.Blob(object))
+        loop object in objects -> targets.push(LeaseTarget.Blob(object))
         self.acquire_artifact_lease(targets)
     }
 
@@ -496,11 +496,11 @@ ArtifactStore: struct {
     acquire_artifact_lease: fn(self, targets: [LeaseTarget]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         directory: files.join(self.root(), "leases")
         path: files.join(directory, "lease-{self.owner_value.pid()}-{store_artifact_unique_token()}")
         keys := [ArtifactEntryKey]{}
-        loop target in targets -> &keys.push(target.entry_key())
+        loop target in targets -> keys.push(target.entry_key())
         text := self.owner_value.owner_line("lease")
         loop key in store_artifact_unique_keys(keys) -> text = "{text}{key.kind_name()}|{key.wire_value()}\n"
         store_artifact_create_new_synced(path, text.bytes())
@@ -511,7 +511,7 @@ ArtifactStore: struct {
     status: fn(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus ArtifactStoreError! {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         self.status_locked()
     }
 
@@ -535,7 +535,7 @@ ArtifactStore: struct {
     set_host_limit: fn(self, limit_bytes: Int?) ArtifactStoreError! -[FS, Env, Time, Rand]> {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         path: self.host_limit_path()
         if limit_bytes == {
             .Val(limit) -> store_artifact_atomic_write(path, "{limit}\n".bytes())
@@ -554,7 +554,7 @@ ArtifactStore: struct {
     prune: fn(self, target_bytes: Int?) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport ArtifactStoreError! {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         target: if target_bytes == {
             .Val(bytes) -> bytes
             else -> self.limit()
@@ -656,7 +656,7 @@ ArtifactStore: struct {
             .Corrupt -> Ok(ArtifactRestore.Corrupt)
             .Hit(artifact) -> {
                 lease: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)}) ?? return Err(err)
-                defer close(^lease)
+                defer close(lease)
                 bytes: files.read_bytes(artifact.path)
                 store_artifact_atomic_write(destination, bytes)
                 store_artifact_set_executable(destination, artifact.executable)
@@ -668,7 +668,7 @@ ArtifactStore: struct {
     publish_data: fn(self, key: ArtifactEntryKey, path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         self.ensure_layout()
         lock: self.acquire_lock() ?? return Err(err)
-        defer close(^lock)
+        defer close(lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
             .Corrupt(reason) -> self.quarantine_locked(key, path, reason)
@@ -721,7 +721,7 @@ ArtifactStore: struct {
             else -> None
         }
         statuses := [ArtifactEntryStatus]{}
-        loop entry in entries -> &statuses.push(entry.status())
+        loop entry in entries -> statuses.push(entry.status())
         Ok(ArtifactStoreStatus{
             root: self.root(),
             footprint_bytes: footprint,
@@ -750,7 +750,7 @@ ArtifactStore: struct {
         // on sort stability across two passes.
         order := entries.copy()
         order = loop fresh_item in order -> fresh_item
-        &order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
+        order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
         after := before
         removed := [ArtifactEntryStatus]{}
         loop entry in order {
@@ -761,7 +761,7 @@ ArtifactStore: struct {
                     store_artifact_sync_dir(files.dirname(entry.path))
                     after = store_artifact_saturating_sub(after, entry.size_bytes)
                     self.append_journal_locked("remove", entry.key, entry.size_bytes)
-                    &removed.push(entry.status())
+                    removed.push(entry.status())
                 }
                 .Err(error) -> {
                     if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
@@ -847,14 +847,14 @@ ArtifactStore: struct {
     // failure leaves the entry for the next reader.
     quarantine_after_read: fn(self, key: ArtifactEntryKey, path: String, reason: String) Never! -[FS, Env, Time, Rand]> {
         lock: self.acquire_lock() ?? return
-        defer close(^lock)
+        defer close(lock)
         self.quarantine_locked(key, path, reason).drop("a reader reports the miss whether or not the quarantine lands")
     }
 
     // Best-effort journal touch after a verified read.
     touch_after_read: fn(self, key: ArtifactEntryKey, length: Int) Never! -[FS, Env, Time, Rand]> {
         lock: self.acquire_lock() ?? return
-        defer close(^lock)
+        defer close(lock)
         self.append_journal_locked("touch", key, length).drop("recency is advisory; the verified bytes are returned regardless")
     }
 
@@ -899,7 +899,7 @@ ArtifactStore: struct {
         base: last_sequence ?? 0
         lines := [String]{}
         loop (index, entry) in entries {
-            &lines.push(store_artifact_journal_line(entry.operation, entry.key, entry.length, store_artifact_saturating_add(base, index + 1)))
+            lines.push(store_artifact_journal_line(entry.operation, entry.key, entry.length, store_artifact_saturating_add(base, index + 1)))
         }
         store_artifact_append_synced(journal_path, lines.join("").bytes())
     }
@@ -911,10 +911,10 @@ ArtifactStore: struct {
         journal: store_artifact_read_journal(journal_path)
         entries := self.annotated_entries(journal, [String: Bool]{})
         entries = loop fresh_item in entries -> fresh_item
-        &entries.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
+        entries.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> (left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
         lines := [String]{}
         loop index in 0..<entries.len() {
-            &lines.push(store_artifact_journal_line("put", entries[index].key, entries[index].size_bytes, index + 1))
+            lines.push(store_artifact_journal_line("put", entries[index].key, entries[index].size_bytes, index + 1))
         }
         store_artifact_atomic_write(journal_path, lines.join("").bytes())
     }
@@ -936,10 +936,10 @@ ArtifactStore: struct {
             record: store_artifact_parse_lease(bytes) ?? next
             if store_artifact_owner_liveness(record.owner, self.owner_value) == {
                 .Val(alive) -> {
-                    if alive -> &live.push(record)
+                    if alive -> live.push(record)
                     if !alive && clean_stale && store_artifact_try_remove(path) -> store_artifact_sync_dir(directory)
                 }
-                else -> &live.push(record)
+                else -> live.push(record)
             }
         }
         Ok(live)
@@ -947,8 +947,8 @@ ArtifactStore: struct {
 
     scan_entries: fn(self) -[FS]> [ArtifactStoredEntry] ArtifactStoreError! {
         entries := [ArtifactStoredEntry]{}
-        store_artifact_scan_flat_namespace(files.join(self.root(), "cas"), .Blob, None, &entries)
-        store_artifact_scan_flat_namespace(files.join(self.root(), "ac"), .Action, None, &entries)
+        store_artifact_scan_flat_namespace(files.join(self.root(), "cas"), .Blob, None, entries)
+        store_artifact_scan_flat_namespace(files.join(self.root(), "ac"), .Action, None, entries)
         lto_root: files.join(self.root(), "lto")
         loop namespace_path in store_artifact_sorted_children(lto_root) {
             metadata: if files.stat(namespace_path) == {
@@ -961,7 +961,7 @@ ArtifactStore: struct {
             if !metadata.is_dir || metadata.is_symlink -> next
             namespace: files.basename(namespace_path)
             LTONamespace.new(namespace) ?? next
-            store_artifact_scan_flat_namespace(namespace_path, .LTO, Val(namespace), &entries)
+            store_artifact_scan_flat_namespace(namespace_path, .LTO, Val(namespace), entries)
         }
         Ok(store_artifact_sort_entries(entries))
     }
@@ -981,7 +981,7 @@ ArtifactStore: struct {
                 .Ok(writer) -> {
                     writer.write_all(owner_line.bytes())
                     writer.fsync()
-                    close(^writer)
+                    close(writer)
                     store_artifact_sync_dir(locks)
                     return Ok(ArtifactStoreLock{path, owner_line: owner_line.bytes()})
                 }
@@ -1040,7 +1040,7 @@ store_artifact_scan_flat_namespace: fn(directory: String, kind: ArtifactEntryKin
             .Action -> ArtifactEntryKey.Action(name)
             .LTO -> ArtifactEntryKey.LTO{namespace: namespace ?? panic("an LTO scan always names its namespace"), key: name}
         }
-        &output.push(ArtifactStoredEntry{key, path, size_bytes: metadata.size, last_use: 0, pinned: false})
+        output.push(ArtifactStoredEntry{key, path, size_bytes: metadata.size, last_use: 0, pinned: false})
     }
 }
 

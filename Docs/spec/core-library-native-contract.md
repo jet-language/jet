@@ -11,7 +11,7 @@ are under [`Core/`](../../Core/). Generated call and module views are derived
 from those inputs by the [Core table generator](../../Tools/agent/gen-core-tables.mjs).
 The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
 identity rows; runnable provider examples live under
-[`Examples/features/`](../../Examples/features/).
+[`Examples/`](../../Examples/).
 
 The compiler under `Compiler/` is written in Jet and is the compiler the CLI
 runs. No Core contract is defined as permanently owned by a particular compiler
@@ -83,7 +83,7 @@ the same abort a panic during unwinding gets. No additional TLS state
 or specialized plain cleanup call graph is introduced.
 The Source acceptance runner
 `Compiler/JetBackend/Tests/run-trap-source-fixtures.mjs` reuses the registered
-`defer close(^resource)` examples, checking native task publication, plain
+`defer close(resource)` examples, checking native task publication, plain
 task/root fatal report parity, LIFO closes exactly once, cancellation held
 through closing and delivered at the next wait, fatal panic inside closing,
 and the plain no-task output against its existing byte golden. Its

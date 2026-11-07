@@ -20,7 +20,7 @@ provider_index_test_record: fn(name: String) -> PackageIndexEntry {
     table: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "default", upstream: "nixpkgs:nixos-24.05", via: ProviderKind.Nix}})
     spec: RefSpec.classify_in("ripgrep@default", table) ?? panic("ref")
     index := PackageIndex.empty()
-    &index.add_package(env_discovery_record_for_ref(spec, "14.1.0", "fixture"))
+    index.add_package(env_discovery_record_for_ref(spec, "14.1.0", "fixture"))
     encoded: env_discovery_record_to_json(index.packages[0])
     parsed: env_discovery_record_from_json(json.parse(encoded) ?? panic("record JSON")) ?? panic("record")
     assert_eq(parsed.name, "ripgrep")
@@ -36,7 +36,7 @@ provider_index_test_record: fn(name: String) -> PackageIndexEntry {
     explicit: RefSpec.classify("ripgrep@jetpack") ?? panic("explicit ref")
     assert_eq(bare, explicit)
     index := PackageIndex.empty()
-    env_discovery_merge_refs(&index, [RefSpec]{bare, explicit}, None, [StoreEntry]{})
+    env_discovery_merge_refs(index, [RefSpec]{bare, explicit}, None, [StoreEntry]{})
     assert_eq(index.packages.len(), 1)
     record: index.info("ripgrep") ?? panic("info")
     assert_eq(record.source, "jetpack")
@@ -64,7 +64,7 @@ provider_index_test_record: fn(name: String) -> PackageIndexEntry {
         last_used_at: 0,
     }
     index := PackageIndex.empty()
-    env_discovery_merge_store_entries(&index, [StoreEntry]{entry})
+    env_discovery_merge_store_entries(index, [StoreEntry]{entry})
     record: index.info("ripgrep@jetpack") ?? panic("info")
     assert_eq(record.source, "jetpack")
     assert_eq(record.reference, "ripgrep@jetpack")
@@ -73,7 +73,7 @@ provider_index_test_record: fn(name: String) -> PackageIndexEntry {
 #Test("discovery registry lock records tier and gate status for info") {
     lock: pkg_lock_parse("version = 1\n\n[[package]]\nname = \"textkit\"\nversion = \"1.2.0\"\nsource = {{ registry = \"jet\", reference = \"textkit@jet\", output = \"out\", source-hash = \"sha256-tree\", repository = \"https://registry\", authority = \"jet-registry-index\", tier = \"community\", gate-status = \"signature=passed;audit=passed;name=passed;liveness=passed;review=not-required\" }}\nfingerprint = \"fp\"\ndependencies = []\n") ?? panic("registry lock parses")
     index := PackageIndex.empty()
-    env_discovery_merge_lock(&index, lock)
+    env_discovery_merge_lock(index, lock)
     record: index.info("jet.textkit") ?? panic("registry record is indexed")
     assert_eq(record.tier, "community")
     assert_eq(record.gate_status, "signature=passed;audit=passed;name=passed;liveness=passed;review=not-required")
@@ -87,7 +87,7 @@ provider_index_test_record: fn(name: String) -> PackageIndexEntry {
 #Test("discovery completions and nearest are local index only") {
     index := PackageIndex.empty()
     names: [String]{"postgres_16", "postgres_17", "ripgrep"}
-    loop name in names -> &index.add_package(provider_index_test_record(name))
+    loop name in names -> index.add_package(provider_index_test_record(name))
     assert_eq(index.package_completions("default", "post"), [String]{"postgres_16", "postgres_17"})
     assert_eq(index.nearest("postgress_16"), Val("default.postgres_16"))
 }

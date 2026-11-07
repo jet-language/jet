@@ -37,8 +37,9 @@ if [ "$1" = "jet" ] && [ -n "${JET:-}" ]; then
   set -- "$JET" "$@"
 fi
 
-# /tmp is RAM-backed tmpfs on this machine; build output or test scratch there
-# fills swap and triggers kernel OOM kills. Check after every environment
+# /tmp is RAM-backed tmpfs on this machine; build output there fills swap and
+# triggers kernel OOM kills. (`jet test` stages its rows in memory itself and
+# counts their files against its memory budget.) Check after every environment
 # boundary: direnv and nix can import these variables after the outer process
 # starts.
 check_scratch_dirs() {

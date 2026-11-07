@@ -337,14 +337,14 @@ PackageVariant: struct {
 
     with_feature: fn(self, feature: String) -> PackageVariant Never! {
         out := self
-        &out.add_feature(feature)
+        out.add_feature(feature)
         out
     }
 
     add_feature: fn(&self, feature: String) Never! {
         if self.features.contains(feature) -> return
-        &self.features.push(feature)
-        &self.features.sort()
+        self.features.push(feature.copy())
+        self.features.sort()
     }
 
     // Canonical identity string for action keys and the semantic lock
@@ -390,21 +390,21 @@ PackageVariant: struct {
     // that separates the first two survivors.
     select: fn(self, candidates: [VariantCandidate], maps: [VariantMapEntry]) -> VariantCandidate VariantSelectError! {
         mapped := [PackageVariant]{}
-        loop candidate in candidates -> &mapped.push(candidate.mapped_variant(maps))
+        loop candidate in candidates -> mapped.push(candidate.mapped_variant(maps))
         pool := [Int]{}
         loop index in 0..<mapped.len() {
-            if mapped[index].matches_exact(self) -> &pool.push(index)
+            if mapped[index].matches_exact(self) -> pool.push(index)
         }
         if pool.len() == 0 {
             loop index in 0..<mapped.len() {
-                if mapped[index].matches_compatible(self) -> &pool.push(index)
+                if mapped[index].matches_compatible(self) -> pool.push(index)
             }
         }
         if pool.len() == 0 -> return Err(VariantSelectError.NoMatch{need: self, candidate_count: candidates.len()})
         if pool.len() == 1 -> return Ok(candidates[pool[0]])
         labels := [String]{}
-        loop index in pool -> &labels.push(candidates[index].label)
-        &labels.sort()
+        loop index in pool -> labels.push(candidates[index].label)
+        labels.sort()
         first: mapped[pool[0]]
         second: mapped[pool[1]]
         // Identical mapped variants differ only in provider facts that no
@@ -420,7 +420,7 @@ PackageVariant: struct {
         missing := [String]{}
         loop variant in declared {
             key: variant.identity_key()
-            if !locked_identities.contains(key) -> &missing.push(key)
+            if !locked_identities.contains(key) -> missing.push(key)
         }
         missing
     }
@@ -467,7 +467,7 @@ VariantCandidate: struct {
                 .Linkage -> variant.linkage = VariantLinkage.parse(value) ?? variant.linkage
                 .ABI -> variant.abi = VariantABI.parse(value) ?? variant.abi
                 .Artifact -> variant.artifact = ArtifactKind.parse(value) ?? variant.artifact
-                .Features -> &variant.add_feature(value)
+                .Features -> variant.add_feature(value)
                 .ProviderFacts -> {}
             }
         }

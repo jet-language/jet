@@ -1,4 +1,4 @@
-// `read_compatible` (D-PERFBUDGET-INTEGRATION1): a read-only projection of the
+// `read_compatible`: a read-only projection of the
 // canonical performance budget reports under `<root>/.jet/perf/reports`. It
 // never measures, creates or rewrites a report. The budget engine's own
 // verifier checks each `.json` report, and only a report whose recorded member
@@ -47,16 +47,16 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
     // No reports folder is an empty projection; a folder that is a link or
     // can't be opened is a rejection, so the proof can't read as complete.
     present: JetCLIRootedDirectory.present(root, parts) ?? {
-        &projection.rejected.push(jet_cli_budget_relative(root, err.message))
+        projection.rejected.push(jet_cli_budget_relative(root, err.message))
         return projection
     }
     if !present -> return projection
     held: JetCLIRootedDirectory.open(root, parts, false) ?? {
-        &projection.rejected.push(jet_cli_budget_relative(root, err.message))
+        projection.rejected.push(jet_cli_budget_relative(root, err.message))
         return projection
     }
     entries: held.list() ?? {
-        &projection.rejected.push(jet_cli_budget_relative(root, err.message))
+        projection.rejected.push(jet_cli_budget_relative(root, err.message))
         return projection
     }
     wanted: loop source in sources -> JetCLIBudgetSource{path: jet_cli_budget_normal(source.path), sha256: source.sha256.copy()}
@@ -64,11 +64,11 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
         if !entry.name.ends_with(".json") -> next
         label: entry.name
         if !entry.is_file {
-            &projection.rejected.push("{label}: not a regular no-follow report")
+            projection.rejected.push("{label}: not a regular no-follow report")
             next
         }
         if entry.size > JET_CLI_BUDGET_REPORT_LIMIT {
-            &projection.rejected.push("{label}: report exceeds 16 MiB projection limit")
+            projection.rejected.push("{label}: report exceeds 16 MiB projection limit")
             next
         }
         bytes := [U8]{}
@@ -77,18 +77,18 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
                 if found == {
                     .Val(contents) -> bytes = contents
                     None -> {
-                        &projection.rejected.push("{label}: unreadable: it was removed while it was read")
+                        projection.rejected.push("{label}: unreadable: it was removed while it was read")
                         next
                     }
                 }
             }
             .Err(error) -> {
-                &projection.rejected.push("{label}: unreadable: {jet_cli_budget_relative(root, error.message)}")
+                projection.rejected.push("{label}: unreadable: {jet_cli_budget_relative(root, error.message)}")
                 next
             }
         }
         report: perf_verify_budget_report(bytes) ?? {
-            &projection.rejected.push("{label}: {err.message}")
+            projection.rejected.push("{label}: {err.message}")
             next
         }
         facts := [JetCLIBudgetFact]{}
@@ -98,7 +98,7 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
                 if found == .Val(rows) -> facts = rows else -> next
             }
             .Err(error) -> {
-                &projection.rejected.push(error.message)
+                projection.rejected.push(error.message)
                 next
             }
         }
@@ -109,10 +109,10 @@ jet_cli_budget_read_compatible: fn(root: String, sources: [JetCLIBudgetSource]) 
                 replaced = true
                 if jet_cli_budget_worse(fact, known) -> projection.facts[index] = fact.copy()
             }
-            if !replaced -> &projection.facts.push(fact.copy())
+            if !replaced -> projection.facts.push(fact.copy())
         }
     }
-    &projection.facts.sort_by((left: JetCLIBudgetFact, right: JetCLIBudgetFact) -> left.budget_id <=> right.budget_id)
+    projection.facts.sort_by((left: JetCLIBudgetFact, right: JetCLIBudgetFact) -> left.budget_id <=> right.budget_id)
     projection
 }
 
@@ -159,7 +159,7 @@ jet_cli_budget_facts: fn(label: String, report: CanonicalJSON, wanted: [JetCLIBu
     facts := [JetCLIBudgetFact]{}
     loop measurement in measurements {
         fact: jet_cli_budget_fact(report_id, evidence_id, measurement) ?? return Err(jet_cli_read_error("{label}: measurement projection fields are invalid"))
-        &facts.push(fact)
+        facts.push(fact)
     }
     Ok(Val(facts))
 }

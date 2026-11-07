@@ -98,7 +98,7 @@ pkg_cobol_bind: fn(source_path: String, source: String, copybook_path: String, c
     layout: pkg_cobol_parse_copybook(copybook)
     packed := [CobolFieldLayout]{}
     loop field in layout.fields {
-        if field.kind.is_packed() -> &packed.push(field)
+        if field.kind.is_packed() -> packed.push(field)
     }
     if packed.len() != 1 -> return Err(ForeignBindError.Source("the callable v1 bridge requires exactly one COMP-3 field"))
     input := CobolFieldLayout?{None}
@@ -125,16 +125,16 @@ pkg_cobol_bind: fn(source_path: String, source: String, copybook_path: String, c
     runtime_dir: pkg_cobol_runtime_dir_from_flags(runtime_flags) ?? return Err(ForeignBindError.Source("cob-config did not report an absolute libcob directory"))
     pkg_binder_write(bridge_c, pkg_cobol_render_bridge(program, layout, packed[0], input, lib), "could not write the COBOL C bridge")
     compile := [String]{"cc", "-c", "-fPIC"}
-    loop flag in cflags -> &compile.push(flag)
-    &compile.push(bridge_c)
-    &compile.push("-o")
-    &compile.push(bridge_o)
+    loop flag in cflags -> compile.push(flag)
+    compile.push(bridge_c.copy())
+    compile.push("-o")
+    compile.push(bridge_o.copy())
     pkg_cobol_run(compile, "cc")
     pkg_binder_write(probe_c, "int main(void) {{ return 0; }}\n", "could not write the COBOL link probe")
     link := [String]{"cc", "-Wl,--no-undefined", object, bridge_o, probe_c}
-    loop flag in runtime_flags -> &link.push(flag)
+    loop flag in runtime_flags -> link.push(flag)
     tail: [String]{"-pthread", "-ldl", "-lm", "-o", probe}
-    loop flag in tail -> &link.push(flag)
+    loop flag in tail -> link.push(flag)
     if pkg_cobol_prove_link(link) == {
         .Ok(_) -> {}
         .Err(error) -> {
@@ -177,15 +177,15 @@ pkg_cobol_parse_copybook: fn(source: String) -> CobolRecordLayout ForeignBindErr
         if !pkg_binder_is_ident(name) || name == "_" || name.starts_with("__") || foundation_is_reserved_generated_name(name) || names.contains(name) {
             return Err(ForeignBindError.Source("copybook field name `{words[1]}` is not a unique, usable Jet identifier"))
         }
-        &names.push(name)
+        names.push(name.copy())
         if words.len() < 3 || pkg_binder_ascii_upper(words[2]) != "PIC" -> return Err(ForeignBindError.Source("copybook field `{words[1]}` must use a PIC clause"))
         if words.len() < 4 -> return Err(ForeignBindError.Source("copybook field `{words[1]}` has no PIC shape"))
         pic: pkg_binder_ascii_upper(words[3])
         clauses := [String]{}
-        loop index in 4..<words.len() -> &clauses.push(pkg_binder_ascii_upper(words[index]))
+        loop index in 4..<words.len() -> clauses.push(pkg_binder_ascii_upper(words[index]))
         kind: pkg_cobol_parse_pic(pic, clauses)
         width: kind.width()
-        &fields.push(CobolFieldLayout{name: name, offset: offset, width: width, kind: kind})
+        fields.push(CobolFieldLayout{name: name, offset: offset, width: width, kind: kind})
         offset = offset + width
     }
     name: record ?? return Err(ForeignBindError.Source("copybook has no level 01 record"))
@@ -305,20 +305,20 @@ pkg_cobol_render_provenance: fn(source_path: String, foreign_source: String, gen
     descriptor: pkg_cobol_descriptor_stamp()
     program_symbol: pkg_cobol_c_symbol(program)
     facts := [String]{}
-    loop field in layout.fields -> &facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
+    loop field in layout.fields -> facts.push("{field.name}:{field.offset}:{field.width}:{field.kind.debug()}")
     layout_facts: facts.join(",")
     identity := ForeignIdentityBuilder.new(COBOL_BIND_SCHEMA)
-    &identity.field("descriptor", descriptor.bytes())
-    &identity.field("source", foreign_source.bytes())
-    &identity.field("generated", generated_source.bytes())
-    &identity.field("copybook", copybook.bytes())
-    &identity.field("program", program.bytes())
-    &identity.field("program_symbol", program_symbol.bytes())
-    &identity.field("layout", layout_facts.bytes())
-    &identity.field("runtime", runtime_dir.bytes())
+    identity.field("descriptor", descriptor.bytes())
+    identity.field("source", foreign_source.bytes())
+    identity.field("generated", generated_source.bytes())
+    identity.field("copybook", copybook.bytes())
+    identity.field("program", program.bytes())
+    identity.field("program_symbol", program_symbol.bytes())
+    identity.field("layout", layout_facts.bytes())
+    identity.field("runtime", runtime_dir.bytes())
     archive_bytes: pkg_binder_read_bytes(archive, "could not read the COBOL archive for provenance")
     provenance := "schema={COBOL_BIND_SCHEMA}\nidentity={identity.finish()}\ndescriptor={descriptor}\nabi=C\nprogram={program}\nprogram_symbol={program_symbol}\nsource_path={source_path}\nsource_sha256={pkg_sha256_hex(foreign_source.bytes())}\ngenerated_sha256={pkg_sha256_hex(generated_source.bytes())}\ncopybook_path={copybook_path}\ncopybook_sha256={pkg_sha256_hex(copybook.bytes())}\nrecord={layout.name}\nrecord_width={layout.width}\nfields={layout_facts}\nruntime={runtime_dir}\narchive_sha256={pkg_sha256_hex(archive_bytes)}\n"
-    pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Cobol, "COBOL", lib, source_path, archive, "cobc/cc/ar")
+    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Cobol, "COBOL", lib, source_path, archive, "cobc/cc/ar")
     Ok(provenance)
 }
 
@@ -489,10 +489,10 @@ pkg_cobol_upper_camel: fn(name: String) -> String Never! {
         loop scalar in part.chars() {
             if {
                 first == "" && rest.len() == 0 -> first = pkg_binder_ascii_upper("{scalar}")
-                else -> &rest.push("{scalar}")
+                else -> rest.push("{scalar}")
             }
         }
-        &parts.push("{first}{rest.join("")}")
+        parts.push("{first}{rest.join("")}")
     }
     parts.join("")
 }

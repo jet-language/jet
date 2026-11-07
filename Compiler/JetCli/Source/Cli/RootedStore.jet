@@ -118,7 +118,7 @@ JetCLIRootedDirectory: struct {
         loop {
             chunk: reader.read(JET_CLI_ROOTED_READ_CHUNK) ?? return Err(jet_cli_read_error("could not read `{shown}`: {jet_cli_io_error_text(err)}"))
             if chunk.len() == 0 -> break
-            loop byte in chunk -> &bytes.push(byte)
+            loop byte in chunk -> bytes.push(byte)
             if bytes.len() > limit -> return Err(jet_cli_read_error("`{shown}` exceeds {limit} bytes"))
         }
         after: reader.stat() ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
@@ -137,9 +137,9 @@ JetCLIRootedDirectory: struct {
                 if err == .NotFound(_) -> next
                 return Err(jet_cli_read_error("could not inspect `{entry.path}`: {jet_cli_io_error_text(err)}"))
             }
-            &rows.push(JetCLIRootedEntry{name: entry.name, is_file: info.is_file && !info.is_symlink, is_dir: info.is_dir && !info.is_symlink, is_symlink: info.is_symlink, size: info.size})
+            rows.push(JetCLIRootedEntry{name: entry.name, is_file: info.is_file && !info.is_symlink, is_dir: info.is_dir && !info.is_symlink, is_symlink: info.is_symlink, size: info.size})
         }
-        &rows.sort_by((left: JetCLIRootedEntry, right: JetCLIRootedEntry) -> left.name <=> right.name)
+        rows.sort_by((left: JetCLIRootedEntry, right: JetCLIRootedEntry) -> left.name <=> right.name)
         Ok(rows)
     }
 
@@ -181,12 +181,12 @@ JetCLIRootedDirectory: struct {
                 }
                 return Err(jet_cli_read_error("could not stage `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(err)}"))
             }
-            if jet_cli_rooted_fill(&writer, bytes, mode, self.durable) == .Err(error) {
-                close(^writer)
+            if jet_cli_rooted_fill(writer, bytes, mode, self.durable) == .Err(error) {
+                close(writer)
                 self.discard(temp)
                 return Err(jet_cli_read_error("could not write `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(error)}"))
             }
-            close(^writer)
+            close(writer)
             return Ok(temp)
         }
     }

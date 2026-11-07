@@ -16,7 +16,7 @@ run: fn() {
     protocol: session.protocol("bidi") ?? return
 
     session.subscribe(1) ?? return
-    &session.next_event("soon") ?? return
+    session.next_event("soon") ?? return
     session.add_intercept(1) ?? return
     session.add_intercept_url(1, 2) ?? return
     session.continue_request(1) ?? return
@@ -36,6 +36,6 @@ run: fn() {
     locator.press(1) ?? return
     protocol.send(1, 2) ?? return
     event_name: "log.entryAdded"
-    session.subscribe(^event_name) ?? return
+    session.subscribe(event_name) ?? return
     session.close(1) ?? return
 }

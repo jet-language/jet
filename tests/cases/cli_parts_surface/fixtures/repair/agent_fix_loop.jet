@@ -14,7 +14,7 @@ S1RepairReport: struct { code: String, edits: [S1RepairEdit] }
 S1RepairDone: struct { state: [S1RepairFile], rounds: Int }
 
 s1_repair_field: fn(tree: encoding.Dyn, key: String) -> encoding.Dyn {
-    &tree.field(key) ?? panic("machine report missing {key}")
+    tree.field(key) ?? panic("machine report missing {key}")
 }
 s1_repair_string: fn(tree: encoding.Dyn, key: String) -> String {
     value: s1_repair_field(tree, key)
@@ -39,7 +39,7 @@ s1_repair_parse_report: fn(value: encoding.Dyn) -> S1RepairReport {
     edits := [S1RepairEdit]{}
     loop edit in s1_repair_array(s1_repair_field(value, "fix_edits")) {
         span: s1_repair_field(edit, "span")
-        &edits.push(S1RepairEdit{
+        edits.push(S1RepairEdit{
             code: code.copy(), file: s1_repair_string(edit, "file"),
             start: s1_repair_usize(span, "start"), end: s1_repair_usize(span, "end"),
             new_text: s1_repair_string(edit, "new_text"),
@@ -68,7 +68,7 @@ s1_repair_check: fn(dir: String, jet: String, state: [S1RepairFile]) -> [S1Repai
         } else {
             assert_eq(s1_repair_string(status, "action"), "diagnostics")
             assert(output.code == 1, "check failed")
-            loop row in rows -> &reports.push(row)
+            loop row in rows -> reports.push(row)
         }
     }
     reports
@@ -83,9 +83,9 @@ s1_repair_same: fn(left: [S1RepairFile], right: [S1RepairFile]) -> Bool Never! {
 s1_repair_codes: fn(reports: [S1RepairReport]) -> [String] Never! {
     codes := [String]{}
     loop report in reports {
-        if !codes.contains(report.code) -> &codes.push(report.code)
+        if !codes.contains(report.code) -> codes.push(report.code)
     }
-    &codes.sort()
+    codes.sort()
     codes
 }
 #Error
@@ -93,7 +93,7 @@ S1RepairError: enum { Failed(String) }
 s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1RepairFile] S1RepairError! {
     // surface.rs1404-1453: group edits by file, reject untracked files, descending spans.
     paths := [String]{}
-    loop file in state -> &paths.push(file.path)
+    loop file in state -> paths.push(file.path)
     loop report in reports {
         if report.edits.len() == 0 -> return Err(S1RepairError.Failed("report {report.code} has no fix_edits"))
         loop edit in report.edits {
@@ -105,10 +105,10 @@ s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repa
         edits := [S1RepairEdit]{}
         loop report in reports {
             loop edit in report.edits {
-                if edit.file == file.path -> &edits.push(edit)
+                if edit.file == file.path -> edits.push(edit.copy())
             }
         }
-        &edits.sort_by((left: S1RepairEdit, right: S1RepairEdit) -> {
+        edits.sort_by((left: S1RepairEdit, right: S1RepairEdit) -> {
             order: right.start <=> left.start
             if order != Ordering.Equal -> return order
             right.end <=> left.end
@@ -131,11 +131,11 @@ s1_repair_apply: fn(state: [S1RepairFile], reports: [S1RepairReport]) -> [S1Repa
                 return Err(S1RepairError.Failed("invalid span {edit.start}..{edit.end} for fix_edit {edit.code} in {file.path}"))
             }
             replacement := fixed.slice(0, edit.start)
-            loop byte in edit.new_text.bytes() -> &replacement.push(byte)
-            loop byte in fixed.slice(edit.end, fixed.len()) -> &replacement.push(byte)
+            loop byte in edit.new_text.bytes() -> replacement.push(byte)
+            loop byte in fixed.slice(edit.end, fixed.len()) -> replacement.push(byte)
             fixed = replacement
         }
-        &next_state.push(S1RepairFile{path: file.path, source: String.from_bytes(fixed) ?? panic("fixed source UTF8")})
+        next_state.push(S1RepairFile{path: file.path, source: String.from_bytes(fixed) ?? panic("fixed source UTF8")})
     }
     Ok(next_state)
 }
@@ -154,12 +154,12 @@ s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: S
         if has_previous {
             introduced := [String]{}
             loop code in codes {
-                if !previous_codes.contains(code) -> &introduced.push(code)
+                if !previous_codes.contains(code) -> introduced.push(code)
             }
             if introduced.len() != 0 -> return Err(S1RepairError.Failed("fix_edit regression introduced report code(s): {introduced.join(", ")}"))
         }
         if round == max_rounds -> return Err(S1RepairError.Failed("round bound {max_rounds} exceeded; offending code(s): {codes.join(", ")}"))
-        &seen.push(state.copy())
+        seen.push(state.copy())
         if s1_repair_apply(state, reports) == {
             .Ok(next_state) -> state = next_state
             .Err(error) -> return Err(error)
@@ -172,9 +172,12 @@ s1_repair_loop: fn(initial: [S1RepairFile], max_rounds: Int, dir: String, jet: S
 #Test("agent fix loop corpus converges without report regression") {
     dir: sys.current_dir() ?? panic("cwd")
     jet: sys.get("JET_BIN") ?? panic("JET_BIN")
+    // Reports name a file under the folder jet ran in relative to it
+    // (D-REPORT-PATH1, Docs/spec/diagnostics.md:161), so the state keys are
+    // the paths `jet check` runs in `dir` report.
     initial: [S1RepairFile]{
-        S1RepairFile{path: "{dir}/helper.jet", source: files.read("helper.source") ?? panic("helper fixture")},
-        S1RepairFile{path: "{dir}/run.jet", source: files.read("run.source") ?? panic("run fixture")},
+        S1RepairFile{path: "helper.jet", source: files.read("helper.source") ?? panic("helper fixture")},
+        S1RepairFile{path: "run.jet", source: files.read("run.source") ?? panic("run fixture")},
     }
     reports: s1_repair_check(dir, jet, initial)
     counts := [Int]{0, 0}

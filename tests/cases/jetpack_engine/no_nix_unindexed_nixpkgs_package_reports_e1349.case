@@ -15,9 +15,12 @@ exit: 0
 spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source unindexed -
 await: file peer.port timeout 30s
 capture: port = text file peer.port
-step: jetpack use --prep postgres@jetpack --no-color
+# The Rust `jetpack build postgres@nixpkgs` realized against the project lock; `use` is projectless,
+# so the project-scoped form is `env --prep` of an env naming the package (project/env.jet, .jet/lock).
+step: jetpack env --env dev --prep --trust --yes --no-color
 cwd: project
 env: PATH=
+unset: JETPACK_FIXTURES
 exit: 2
 stderr: ~ "E1349" # original contains predicate
 stderr: ~ "postgres" # original contains predicate

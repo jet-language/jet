@@ -1,0 +1,39 @@
+// body_rules — a result follows the one arrow, named bodies use braces, a
+// body's last expression is its value, and `return` exits early.
+double: fn(n: Int) -> Int { n * 2 }
+
+bump: fn(n: Int) -> Int {
+    print(n)
+    n + 1
+}
+
+twice: fn(n: Int) -> Int {
+    adjusted: n + 1
+    adjusted * 2
+}
+
+early: fn(n: Int) -> Int {
+    if n == 0 -> return 7
+    n * 2
+}
+
+label: fn(n: Int) -> String {
+    if n == {
+        1 -> "one"
+        else -> "other"
+    }
+}
+
+_report: fn(value: Int) { print("report {value}") }
+
+_save: fn() { return Err("not implemented") }
+
+run: fn() {
+    if true -> print("if arrow")
+    loop value in [1, 2] -> print("loop {value}")
+    print(twice(3))
+    print(early(0))
+    print(early(3))
+    print(label(1))
+    print(bump(double(20)))
+}

@@ -13,8 +13,8 @@ native_runtime_publication_blobs: fn(fields: [String: Dyn]) -> [NativeRuntimePub
     loop value in native_pack_array_field(fields, "blobs") {
         row: native_pack_fields(value, [String]{"object", "path"})
         object: native_pack_handle_field(row, "object")
-        native_pack_unique(&seen, object.text())
-        &result.push(NativeRuntimePublicationBlob{object, path: native_pack_text_field(row, "path")})
+        native_pack_unique(seen, object.text())
+        result.push(NativeRuntimePublicationBlob{object, path: native_pack_text_field(row, "path")})
     }
     Ok(result)
 }
@@ -42,10 +42,10 @@ native_runtime_publication_steps: fn(store: ArtifactStore, fields: [String: Dyn]
         inputs: native_pack_roles_field_empty(row, "inputs")
         outputs: native_pack_roles_field_empty(row, "outputs")
         log: native_pack_handle_field(row, "log")
-        _: native_pack_blob(store, log, &census)
+        _: native_pack_blob(store, log, census)
         // Every issued step record comes through the one Jet canonical codec.
         receipt: store.publish_blob(native_pack_encode(value))
-        &steps.push(NativeRuntimeObservedStep{id, observed_rc, invocation, inputs, outputs, receipt})
+        steps.push(NativeRuntimeObservedStep{id, observed_rc, invocation, inputs, outputs, receipt})
     }
     Ok(steps)
 }
@@ -54,7 +54,7 @@ native_runtime_publication_execute: fn(mode: String, request_path: String, resul
     census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
     request: json.parse(files.read(request_path))
     keys := [String]{"schema", "subject", "blobs", "admission", "rail_contract", "job", "proof_done", "proof_terminal", "final_source_tree", "generation", "raw_frontend", "steps", "compiler"}
-    if mode == "publish" -> &keys.push("publication_authorization")
+    if mode == "publish" -> keys.push("publication_authorization")
     fields: native_pack_fields(request, keys)
     native_pack_schema(fields, "jet.native-runtime-publication-request/v1")
     blobs: native_runtime_publication_blobs(fields)
@@ -83,7 +83,7 @@ native_runtime_publication_execute: fn(mode: String, request_path: String, resul
     authorization: native_pack_handle_field(fields, "publication_authorization")
     compiler: native_pack_handle_field(fields, "compiler")
     published: native_runtime_pack_publish(store, subject, evidence.approval(prepared, authorization), compiler)
-    composition: NativeCandidateComposition.from_bytes(native_pack_blob(store, published.object, &census))
+    composition: NativeCandidateComposition.from_bytes(native_pack_blob(store, published.object, census))
     result: native_pack_encode(Dyn.Object([String: Dyn]{
         "schema": Dyn.Text("jet.native-runtime-published-candidate/v1"),
         "compiler": native_pack_handle_tree(compiler), "composition": native_pack_handle_tree(published.object),

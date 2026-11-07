@@ -66,12 +66,12 @@ NixNativeBoundary: struct {
         self.evaluate_devshell_output_with_import_authority(source, system, output, None)
     }
 
-    evaluate_devshell_with_import_authority: fn(self, source: String, system: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
-        self.evaluate_devshell_output_with_import_authority(source, system, "default", ^authority)
+    evaluate_devshell_with_import_authority: fn(self, source: String, system: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+        self.evaluate_devshell_output_with_import_authority(source, system, "default", authority)
     }
 
-    evaluate_devshell_output_with_import_authority: fn(self, source: String, system: String, output: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
-        if nixeval_evaluate_devshell_output_with_import_authority(source, system, output, ^authority) == {
+    evaluate_devshell_output_with_import_authority: fn(self, source: String, system: String, output: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+        if nixeval_evaluate_devshell_output_with_import_authority(source, system, output, authority) == {
             .Ok(shell) -> return Ok(shell)
             .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
         }
@@ -81,8 +81,8 @@ NixNativeBoundary: struct {
         self.evaluate_derivation_with_import_authority(source, system, None)
     }
 
-    evaluate_derivation_with_import_authority: fn(self, source: String, system: String, authority: ^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
-        if nixeval_evaluate_derivation_with_import_authority(source, system, ^authority) == {
+    evaluate_derivation_with_import_authority: fn(self, source: String, system: String, authority: &&NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
+        if nixeval_evaluate_derivation_with_import_authority(source, system, authority) == {
             .Ok(evaluation) -> return nix_materialize_evaluated(evaluation)
             .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
         }
@@ -92,8 +92,8 @@ NixNativeBoundary: struct {
         self.evaluate_derivation_output_with_import_authority(source, system, attribute, None)
     }
 
-    evaluate_derivation_output_with_import_authority: fn(self, source: String, system: String, attribute: String, authority: ^NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
-        if nixeval_evaluate_derivation_output_with_import_authority(source, system, attribute, ^authority) == {
+    evaluate_derivation_output_with_import_authority: fn(self, source: String, system: String, attribute: String, authority: &&NixEvalAuthority?) -> NixNativeDerivation NixEvalError! {
+        if nixeval_evaluate_derivation_output_with_import_authority(source, system, attribute, authority) == {
             .Ok(evaluation) -> return nix_materialize_evaluated(evaluation)
             .Err(error) -> return Err(NixEvalError.Evaluation(error.message()))
         }
@@ -121,7 +121,7 @@ nix_materialize_derivation: fn(evaluation: NixEvalDerivation) -> NixNativeDeriva
     unresolved: NixDerivation{outputs: declared, input_drvs: [NixInputDrv]{}, input_srcs, platform: evaluation.system, builder: evaluation.builder, args: evaluation.args, env: evaluation.env}
 
     store := nix_derivation_store([String: NixDerivation]{})
-    modulo: &store.hash_modulo("{store_dir}/jet-native-evaluator.drv", unresolved, true)
+    modulo: store.hash_modulo("{store_dir}/jet-native-evaluator.drv", unresolved, true)
     outputs := [String: NixDerivationOutput]{}
     env := evaluation.env
     loop name in unresolved.output_names() {
@@ -135,6 +135,6 @@ nix_materialize_derivation: fn(evaluation: NixEvalDerivation) -> NixNativeDeriva
     aterm: drv.unparse(false, None)
     drv_path: nix_make_text_path(store_dir, "{evaluation.name}.drv", aterm.bytes(), drv.references_for_drv_path())
     nix_verify_drv_path(store_dir, drv_path, aterm.bytes(), drv)
-    &store.verify_output_paths(store_dir, drv_path, drv)
+    store.verify_output_paths(store_dir, drv_path, drv)
     Ok(NixNativeDerivation{name: evaluation.name, drv_path, outputs: drv.outputs, builder: evaluation.builder, args: evaluation.args, env: drv.env, input_sources: input_srcs})
 }

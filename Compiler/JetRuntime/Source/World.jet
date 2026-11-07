@@ -97,7 +97,7 @@ world_decimal: fn(data: I64, value: I64) -> I64 {
     loop {
         half: (number >> I64{1}).bit_and(I64{9223372036854775807})
         quotient: half /% I64{5}
-        digit: wrapping(number - quotient * I64{10})
+        digit: wrapping(number - wrapping(quotient * I64{10}))
         trap_put(wrapping(data + count), I64{48} + digit)
         count += I64{1}
         number = quotient

@@ -18,7 +18,7 @@ GateKind: enum {
     // A build option value that removes a runtime memory-safety check
     // (`bounds: off`, `bounds: report`; JetFoundation BuildOptions.jet).
     CheckRemoval
-    // The `link_args` build option (D-TARGET-LINKER1): native link inputs
+    // The `link_args` build option: native link inputs
     // the program's own declarations don't name.
     LinkOverride
 }
@@ -138,23 +138,23 @@ gate_same_fact: fn(left: GateEntry, right: GateEntry) -> Bool Never! {
     left.span != None && left.span == right.span && left.source == right.source
 }
 
-gate_ledger_push: fn(ledger: &GateLedger, entry: ^GateEntry) Never! {
+gate_ledger_push: fn(ledger: &GateLedger, entry: &&GateEntry) Never! {
     written := entry
-    if written.provenance.len() == 0 -> &written.provenance.push(written.source)
+    if written.provenance.len() == 0 -> written.provenance.push(written.source)
     loop index in 0..<ledger.rows.len() {
         if !gate_same_fact(ledger.rows[index], written) -> next
         loop provenance in written.provenance {
             if !ledger.rows[index].provenance.contains(provenance) {
-                &ledger.rows[index].provenance.push(provenance)
+                ledger.rows[index].provenance.push(provenance)
             }
         }
         if ledger.rows[index].reason == .None -> ledger.rows[index].reason = written.reason
         if ledger.rows[index].status == .None -> ledger.rows[index].status = written.status
-        &ledger.rows[index].provenance.sort()
+        ledger.rows[index].provenance.sort()
         return
     }
-    &written.provenance.sort()
-    &ledger.rows.push(^written)
+    written.provenance.sort()
+    ledger.rows.push(written)
 }
 
 gate_entry_compare: fn(left: GateEntry, right: GateEntry) -> Ordering Never! {
@@ -177,7 +177,7 @@ gate_entry_compare: fn(left: GateEntry, right: GateEntry) -> Ordering Never! {
 
 gate_ledger_sort: fn(ledger: &GateLedger) Never! {
     ledger.rows = loop fresh_item in ledger.rows -> fresh_item
-    &ledger.rows.sort_by((left: GateEntry, right: GateEntry) -> gate_entry_compare(left, right))
+    ledger.rows.sort_by((left: GateEntry, right: GateEntry) -> gate_entry_compare(left, right))
 }
 
 gate_source_entry: fn(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {

@@ -45,7 +45,7 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
     if assertion.stream == "entries" {
         path: kit_steps_work_path(assertion.path, context.env, context.work, context.scratch, state.built) ?? return kit_expect_verdict("REFUSED", "entries directory escapes work")
         words := [String]{}
-        loop word in assertion.alternatives -> &words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "entries filter token unavailable"))
+        loop word in assertion.alternatives -> words.push(kit_steps_runtime_expand(word, context, state) ?? return kit_expect_verdict("ERROR", "entries filter token unavailable"))
         paths: kit_steps_entries(path, words) ?? return kit_expect_verdict("ERROR", "{err}")
         expected: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "entries count token unavailable")
         matches: kit_steps_compare(paths.len(), assertion.mode, Int.parse(expected) ?? -1)
@@ -169,7 +169,7 @@ kit_steps_check_assertion: fn(assertion: KitAssertion, context: KitStepCtx, stat
             alternatives := [String]{}
             loop alternative in assertion.alternatives {
                 expanded: kit_steps_runtime_expand(alternative, context, state) ?? return kit_expect_verdict("ERROR", "substring token unavailable")
-                &alternatives.push(expanded)
+                alternatives.push(expanded)
             }
             matches: kit_steps_file_predicate(bytes, assertion.mode, value, extra, alternatives)
             return if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "file byte predicate {assertion.mode} failed")

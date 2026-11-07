@@ -5,9 +5,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>E0205 — Jet diagnostic</title>
-<meta name="description" content="`self.field = v` without the write-access marker `&amp;` on the receiver">
+<meta name="description" content="`self.field = v` in a method whose receiver is read-only">
 <meta property="og:title" content="E0205 — Jet diagnostic">
-<meta property="og:description" content="`self.field = v` without the write-access marker `&amp;` on the receiver">
+<meta property="og:description" content="`self.field = v` in a method whose receiver is read-only">
 <link rel="icon" type="image/svg+xml" href="../../assets/favicon.svg">
 <link rel="stylesheet" href="../../assets/site.css">
 </head>
@@ -25,25 +25,25 @@
 <div class="page-header">
 <p class="eyebrow">// diagnostic</p>
 <h1>E0205</h1>
-<p>`self.field = v` without the write-access marker `&amp;` on the receiver</p>
+<p>`self.field = v` in a method whose receiver is read-only</p>
 </div>
 </section>
 <article class="wrap article">
 <h2>What</h2>
-<p class="diag-copy what" data-registry-field="what">`self.field = v` without the write-access marker `&amp;` on the receiver</p>
+<p class="diag-copy what" data-registry-field="what">`self.field = v` in a method whose receiver is read-only</p>
 <h2>Why</h2>
 <p class="diag-copy why" data-registry-field="why">The registered sema rule applies here</p>
 <h2>Fix</h2>
-<p class="diag-copy fix" data-registry-field="fix">Add `&amp;` to the receiver before assigning to `self.field`.</p>
+<p class="diag-copy fix" data-registry-field="fix">Write the receiver as `&amp;self` before assigning to `self.field`.</p>
 <h2>Worked example</h2>
 <p>First UI snapshot mentioning <code>E0205</code>: <code>tests/ui/ownership/body_write_to_unmarked_param_is_error.stderr</code>.</p>
-<pre class="diag">Error [jet.FieldWriteWithoutMarker]: Cannot edit `n` — `c` does not have the write-access marker `&amp;`
-  --&gt; body_write_to_unmarked_param_is_error.jet:6:7
+<pre class="diag">Error [jet.FieldWriteWithoutMarker]: Cannot edit `n` — `c` has read access only
+  --&gt; tests/ui/ownership/body_write_to_unmarked_param_is_error.jet:6:7
     |
   6 |     c.n = c.n + 1
     |       ^
- Why: Editing a field requires the write-access marker `&amp;` on the owning place
- Fix: Mark the parameter with the write-access marker `&amp;`: `c: &amp;Counter` to grant write access
+ Why: Editing a field requires write access to the owning place
+ Fix: Change the parameter to `c: &amp;Counter`
 More: jet-lang.dev/e/E0205
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

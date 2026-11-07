@@ -10,10 +10,10 @@ DYN_SURFACE_PATHS: [String]{
     "Docs/spec/syntax-decisions.md",
     "Docs/spec/encoding-decisions.md",
     "Docs/spec/reference/core-library.md",
-    "Examples/features/serde/dyn_accessors.jet",
-    "Examples/features/serde/encoding_breadth.jet",
-    "Examples/features/serde/encoding_base.jet",
-    "Examples/features/serde/encoding_base_expert/run.jet",
+    "Examples/Data/Dyn/DynAccessors.jet",
+    "Examples/Data/EncodingBreadth.jet",
+    "Examples/Data/EncodingBase.jet",
+    "Examples/Data/EncodingBaseExpert/run.jet",
 }
 
 DYN_SURFACE_HISTORICAL_LABELS: [String]{"retired `Data`", "old `Data`", "former `Data`", "historical `Data`", "pre-`Dyn`", "edition 2026"}
@@ -41,10 +41,10 @@ dyn_surface_path_segment: fn(bytes: [U8], start: Int, end: Int) -> Bool {
 
 dyn_surface_collect: fn(bytes: [U8], tables: TokenTables, tokens: [Token], identifier: String, offsets: &[Int]) {
     loop token in tokens {
-        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == identifier && !dyn_surface_path_segment(bytes, token.span.start, token.span.end) -> &offsets.push(token.span.start)
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token) == identifier && !dyn_surface_path_segment(bytes, token.span.start, token.span.end) -> offsets.push(token.span.start)
         if token.literal < 0 -> next
         loop part in tables.literals[token.literal].string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> dyn_surface_collect(bytes, tables, part.tokens, identifier, &offsets)
+            if part.kind == STRING_PART_INTERPOLATION -> dyn_surface_collect(bytes, tables, part.tokens, identifier, offsets)
         }
     }
 }
@@ -55,7 +55,7 @@ dyn_surface_source_offsets: fn(source: String, identifier: String) -> [Int] {
     bytes: source.bytes()
     lexed: lex(source.bytes())
     offsets := [Int]{}
-    dyn_surface_collect(bytes, lexed.tables, lexed.tokens, identifier, &offsets)
+    dyn_surface_collect(bytes, lexed.tables, lexed.tokens, identifier, offsets)
     offsets
 }
 
@@ -121,7 +121,7 @@ dyn_surface_fence_lines: fn(source: String, start_line: Int, source_lines: [Stri
         loop existing in out {
             if existing.line == line_no -> seen = true
         }
-        if !seen -> &out.push(DynSurfaceLine{line: line_no, text: source_lines[line_no - 1]})
+        if !seen -> out.push(DynSurfaceLine{line: line_no, text: source_lines[line_no - 1]})
     }
 }
 
@@ -143,10 +143,10 @@ dyn_surface_markdown_lines: fn(text: String, identifier: String) -> [DynSurfaceL
                 else -> false
             }
             if !closes {
-                &fenced.push(line)
+                fenced.push(line)
                 next
             }
-            dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, &out)
+            dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, out)
             open = false
             next
         }
@@ -158,15 +158,15 @@ dyn_surface_markdown_lines: fn(text: String, identifier: String) -> [DynSurfaceL
             fenced = [String]{}
             next
         }
-        if dyn_surface_inline_code_has(line, identifier) -> &out.push(DynSurfaceLine{line: index + 1, text: line})
+        if dyn_surface_inline_code_has(line, identifier) -> out.push(DynSurfaceLine{line: index + 1, text: line})
     }
-    if open -> dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, &out)
+    if open -> dyn_surface_fence_lines("{fenced.join("\n")}\n", start_line, source_lines, identifier, out)
     out
 }
 
 dyn_surface_line_numbers: fn(lines: [DynSurfaceLine]) -> [Int] {
     numbers := [Int]{}
-    loop line in lines -> &numbers.push(line.line)
+    loop line in lines -> numbers.push(line.line)
     numbers
 }
 
@@ -183,14 +183,14 @@ dyn_surface_historical: fn(line: String) -> Bool {
         text: dyn_surface_files.read(path) ?? panic("cannot read Dyn inventory surface {path}")
         if path.ends_with(".md") {
             loop found in dyn_surface_markdown_lines(text, "Data") {
-                if !dyn_surface_historical(found.text) -> &failures.push("{path}:{found.line}: {found.text.trim()}")
+                if !dyn_surface_historical(found.text) -> failures.push("{path}:{found.line}: {found.text.trim()}")
             }
             next
         }
         lines: text.lines()
         loop offset in dyn_surface_source_offsets(text, "Data") {
             line_no: dyn_surface_line_of(text, offset)
-            &failures.push("{path}:{line_no}: {lines[line_no - 1].trim()}")
+            failures.push("{path}:{line_no}: {lines[line_no - 1].trim()}")
         }
     }
     assert(failures.is_empty(), "current dynamic-encoding surfaces must use `Dyn`; label historical `Data` references explicitly:\n{failures.join("\n")}")

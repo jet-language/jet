@@ -5,8 +5,9 @@
 // (close during an operation, repeated close).
 // Usage: JET_FRONT_JETC0=<native CLI> node run-files-walk-fixtures.mjs OUT assemble|lower|audit|link|run
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
@@ -41,7 +42,10 @@ if (mode === 'assemble') {
   const symbols = command('nm', ['-g', '--defined-only', '--format=posix', join(dir, 'fixture.o')]).stdout;
   for (const name of ['jet_rt_files_walk_fixture', 'jet_rt_files_ignore_fixture', 'jet_walk8_open', 'jet_walk8_close', 'jet_walk8_next', 'jet_std_fs_list_dir_raw']) if (symbols.split('\n').filter(line => line.startsWith(`${name} T `)).length !== 1) throw Error(`expected one strong Jet ${name}`);
 } else if (mode === 'link') {
-  command(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, 'Compiler/JetRuntime/Tests/FilesWalkWitness.c'), join(dir, 'fixture.o'), '-lpthread', '-ldl', '-lm', '-o', join(out, 'files-walk-fixture')]);
+  // The fixture object imports jet_rt_fault_report, which Jet's linker writes
+  // into each image; this platform link takes it from the shared report source.
+  const faultReport = faultReportObject(mkdtempSync(join(out, 'fault-report-')));
+  command(nativeCCompiler, ['-std=c11', '-Wall', '-Wextra', '-Werror', join(root, 'Compiler/JetRuntime/Tests/FilesWalkWitness.c'), join(dir, 'fixture.o'), faultReport, '-lpthread', '-ldl', '-lm', '-o', join(out, 'files-walk-fixture')]);
 } else {
   mkdirSync(join(out, 'scratch'), { recursive: true });
   const result = spawnSync(join(out, 'files-walk-fixture'), [], { encoding: 'utf8', timeout: 60000, env: { ...process.env, TMPDIR: join(out, 'scratch') } });

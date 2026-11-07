@@ -19,19 +19,19 @@ get: fn(key: String) -[Browser]> String? Never! {
 set: fn(key: String, value: String) Never! -[Browser]> {
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
-    _: &guard.value.entries.add(key, value)
+    _: guard.value.entries.add(key.copy(), value.copy())
 }
 
 remove: fn(key: String) Never! -[Browser]> {
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
-    _: &guard.value.entries.remove(key)
+    _: guard.value.entries.remove(key)
 }
 
 clear: fn() Never! -[Browser]> {
     state: core.mem.__process_shared(init_local_storage)
     guard := state.guard_edit()
-    &guard.value.entries.clear()
+    guard.value.entries.clear()
 }
 
 get_or: fn(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
@@ -79,8 +79,8 @@ test_helper_effects: fn() Never! -[Browser]> {
 #Test("two tasks do not lose independent local storage writes") {
     first: task { loop i in 0..<64 -> set("Core.local.first.{i}", "{i}") }
     second: task { loop i in 0..<64 -> set("Core.local.second.{i}", "{i}") }
-    ^first.join() ?? panic("first storage writer failed")
-    ^second.join() ?? panic("second storage writer failed")
+    first.join() ?? panic("first storage writer failed")
+    second.join() ?? panic("second storage writer failed")
     loop i in 0..<64 {
         assert_eq(get("Core.local.first.{i}"), Val("{i}"))
         assert_eq(get("Core.local.second.{i}"), Val("{i}"))

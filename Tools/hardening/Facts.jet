@@ -111,10 +111,10 @@ parse_core: fn(sources: [SourceFile]) -> ParsedCore Never! {
         source := SourceFile?{None}
         loop file in sources { if file.path == row.path -> source = Val(file.copy()) }
         file: source ?? {
-            &out.errors.push("Core source `{row.path}` for `{row.module_name}` is missing")
+            out.errors.push("Core source `{row.path}` for `{row.module_name}` is missing")
             next
         }
-        parse_into(&out, row.module_name, file)
+        parse_into(out, row.module_name, file)
     }
     out
 }
@@ -123,7 +123,7 @@ parse_into: fn(out: &ParsedCore, module_name: String, file: SourceFile) Never! {
     bytes: file.text.bytes()
     starts: parser_line_starts(bytes)
     lexed: lex_generated(bytes)
-    parsed: parse_lexed_with_source(^lexed, bytes, starts.copy())
+    parsed: parse_lexed_with_source(lexed, bytes, starts.copy())
     loop item in parsed.program.items {
         if item == {
             .Func(f) -> {
@@ -177,12 +177,12 @@ type_text: fn(ty: Type) -> String Never! {
         .Named(name) -> name.copy()
         .Apply(name, args) -> {
             parts := [String]{}
-            loop arg in args -> &parts.push(type_text(arg))
+            loop arg in args -> parts.push(type_text(arg))
             "{name}<{parts.join(", ")}>"
         }
         .Tuple(fields) -> {
             parts := [String]{}
-            loop field in fields -> &parts.push(if field.name == "" -> type_text(field.ty) else -> "{field.name}: {type_text(field.ty)}")
+            loop field in fields -> parts.push(if field.name == "" -> type_text(field.ty) else -> "{field.name}: {type_text(field.ty)}")
             "({parts.join(", ")})"
         }
         .Shared(inner) -> "Shared<{type_text(inner)}>"
@@ -222,7 +222,7 @@ result_class: fn(ty: Type?, core: ParsedCore) -> String Never! {
 compiler_record_fields: fn(name: String) -> [String] Never! {
     out := [String]{}
     fields: ir_compiler_owned_record_fields(name, ir_compiler_owned_core_fields()) ?? return out
-    loop field in fields -> &out.push(field.name.copy())
+    loop field in fields -> out.push(field.name.copy())
     out
 }
 
@@ -259,7 +259,7 @@ parse_special_routes: fn(text: String) -> [SpecialRoute] Err! {
         if cells.len() != 3 || cells[0].trim() == "" || cells[1].trim() == "" || cells[2].trim() == "" {
             return Err("{SPECIAL_ROUTES_PATH}:{index + 1}: a row needs key, path and needle separated by tabs")
         }
-        &out.push(SpecialRoute{key: cells[0].copy(), path: cells[1].copy(), needle: cells[2].copy(), row: index + 1})
+        out.push(SpecialRoute{key: cells[0].copy(), path: cells[1].copy(), needle: cells[2].copy(), row: index + 1})
     }
     Ok(out)
 }
@@ -279,13 +279,13 @@ surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFi
             id: "module:{export.module_name}.{member}"
             if seen.get(id) != None -> next
             seen[id.copy()] = true
-            &rows.push(module_call_row(id, export.module_name, member, core, route_files))
+            rows.push(module_call_row(id, export.module_name, member, core, route_files))
         }
         loop name in export.type_exports {
             id: "type:{export.module_name}.{name}"
             if seen.get(id) != None -> next
             seen[id.copy()] = true
-            &rows.push(nominal_row(id, export.module_name, name, core, route_files))
+            rows.push(nominal_row(id, export.module_name, name, core, route_files))
         }
     }
     loop record in CORE_CALLS {
@@ -294,7 +294,7 @@ surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFi
             id: "receiver:{owner}.{record.member}"
             if seen.get(id) != None -> next
             seen[id.copy()] = true
-            &rows.push(receiver_row(id, owner, record.member, symbol_name(record.symbol), core, route_files, declared_aot: core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_AOT)))
+            rows.push(receiver_row(id, owner, record.member, symbol_name(record.symbol), core, route_files, declared_aot: core_call_coverage_contains(record.coverage, CORE_CALL_COVERAGE_AOT)))
         }
     }
     compiler_fields: ir_compiler_owned_core_fields()
@@ -303,10 +303,10 @@ surface: fn(core: ParsedCore, specials: [SpecialRoute], special_files: [SourceFi
         id: "field:{field.owner}.{field.field}"
         if seen.get(id) != None -> next
         seen[id.copy()] = true
-        &rows.push(field_row(id, field.owner, field.field, compiler_fields, core, route_files))
+        rows.push(field_row(id, field.owner, field.field, compiler_fields, core, route_files))
     }
-    apply_specials(&rows, &errors, specials, special_files)
-    &rows.sort_by((left: SurfaceRow, right: SurfaceRow) -> left.id <=> right.id)
+    apply_specials(rows, errors, specials, special_files)
+    rows.sort_by((left: SurfaceRow, right: SurfaceRow) -> left.id <=> right.id)
     Surface{rows: rows, errors: errors}
 }
 
@@ -456,29 +456,29 @@ apply_specials: fn(rows: &[SurfaceRow], errors: &[String], specials: [SpecialRou
     loop special in specials {
         where: "{SPECIAL_ROUTES_PATH}:{special.row}"
         if keys.get(special.key) != None {
-            &errors.push("{where}: duplicate special route `{special.key}`")
+            errors.push("{where}: duplicate special route `{special.key}`")
             next
         }
         keys[special.key.copy()] = true
         text := String?{None}
         loop file in special_files { if file.path == special.path -> text = Val(file.text.copy()) }
         body: text ?? {
-            &errors.push("{where}: `{special.path}` does not exist")
+            errors.push("{where}: `{special.path}` does not exist")
             next
         }
         line: line_of(body, special.needle)
         if line == 0 {
-            &errors.push("{where}: `{special.path}` does not contain `{special.needle}`")
+            errors.push("{where}: `{special.path}` does not contain `{special.needle}`")
             next
         }
         index := -1
         loop (at, row) in rows { if row.id == special.key -> index = at }
         if index < 0 {
-            &errors.push("{where}: `{special.key}` is not a surface row")
+            errors.push("{where}: `{special.key}` is not a surface row")
             next
         }
         if rows[index].route != None {
-            &errors.push("{where}: `{special.key}` already routes through {route_text(rows[index].route)}; delete the special row")
+            errors.push("{where}: `{special.key}` already routes through {route_text(rows[index].route)}; delete the special row")
             next
         }
         rows[index].route = Val(Route{kind: "special", path: special.path.copy(), line: line, symbol: special.needle.copy()})

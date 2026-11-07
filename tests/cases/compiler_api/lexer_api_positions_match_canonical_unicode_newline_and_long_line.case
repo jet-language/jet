@@ -5,8 +5,8 @@ env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
 step: jet inspect compiler lex input.jet
 env: NO_COLOR=1
-exit: 0 # tests/compiler_api.rs:24 token positions; π at line 2 col 14 (1-based)
-stdout: ~ "\"kind\":\"eof\"" # tests/compiler_api.rs:24 token positions; π at line 2 col 14 (1-based)
-stdout: ~ "\"text\":\"π\"" # tests/compiler_api.rs:24 token positions; π at line 2 col 14 (1-based)
-stdout: ~ "\"start\":{\"line\":2,\"column\":14}" # tests/compiler_api.rs:24 token positions; π at line 2 col 14 (1-based)
-stdout: ~ "\"end\":{\"line\":2,\"column\":15}" # tests/compiler_api.rs:24 token positions; π at line 2 col 14 (1-based)
+exit: 0 # tests/compiler_api.rs:24 token positions; π at line 2 col 12 (1-based) after `value: π` (D-DECL-COLON1)
+stdout: ~ "\"kind\":\"eof\"" # tests/compiler_api.rs:24 token positions
+stdout: ~ "\"text\":\"π\"" # tests/compiler_api.rs:24 token positions
+stdout: ~ "\"start\":{\"line\":2,\"column\":12}" # π starts at line 2 col 12, counted in code points
+stdout: ~ "\"end\":{\"line\":2,\"column\":13}" # π is one code point wide

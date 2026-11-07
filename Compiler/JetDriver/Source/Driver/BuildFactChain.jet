@@ -21,20 +21,20 @@ jet_driver_setting_writers: fn(package: JetDriverPackageInfo, setting: JetDriver
     key: "Build.Settings.{setting.name}"
     manifest: jet_driver_manifest_label(package)
     writers := [JetDriverSettingWriter]{}
-    &writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{manifest}:settings.{setting.name} (default)", None))
+    writers.push(jet_driver_setting_writer(key, setting.ty, setting.default, ContributionLayer.Declaration, SourceScope.Package, "{manifest}:settings.{setting.name} (default)", None))
     loop entry in package.profile_settings {
         if entry.profile != profile || entry.name != setting.name -> next
-        &writers.push(jet_driver_setting_writer(key, setting.ty, entry.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{profile}.settings.{setting.name}", None))
+        writers.push(jet_driver_setting_writer(key, setting.ty, entry.value, ContributionLayer.OptimizationBundle, SourceScope.Package, "{manifest}:build.{profile}.settings.{setting.name}", None))
     }
     loop contribution in contributions {
         if contribution.package != package.name || contribution.key != key || contribution.layer != "environment" -> next
         text: jet_driver_locked_setting_text(contribution.value) ?? next
         reason: if contribution.reason == "" -> String?{None} else -> Val(contribution.reason)
-        &writers.push(jet_driver_setting_writer(key, setting.ty, text, ContributionLayer.Environment, jet_driver_source_scope(contribution.scope), contribution.source, reason))
+        writers.push(jet_driver_setting_writer(key, setting.ty, text, ContributionLayer.Environment, jet_driver_source_scope(contribution.scope), contribution.source, reason))
     }
     loop override in overrides {
         if override.name != setting.name -> next
-        &writers.push(jet_driver_setting_writer(key, setting.ty, override.value, ContributionLayer.CommandLine, SourceScope.Package, "command line:--set {override.name}={override.value}", None))
+        writers.push(jet_driver_setting_writer(key, setting.ty, override.value, ContributionLayer.CommandLine, SourceScope.Package, "command line:--set {override.name}={override.value}", None))
     }
     writers
 }
@@ -51,7 +51,7 @@ jet_driver_setting_writer: fn(key: String, ty: String, text: String, layer: Cont
 jet_driver_setting_effective_text: fn(writers: [JetDriverSettingWriter]) -> String Never! {
     if writers.len() == 0 -> return ""
     contributions := [FactContribution]{}
-    loop writer in writers -> &contributions.push(writer.contribution)
+    loop writer in writers -> contributions.push(writer.contribution)
     if pkg_fact_resolve(FactKey.new(writers[0].contribution.key), contributions) == .Ok(resolved) {
         if resolved == .Val(fact) {
             effective: fact.provenance[fact.effective]
@@ -82,7 +82,7 @@ jet_driver_setting_fact_value: fn(ty: String, text: String) -> FactValue Never! 
     if declared == "Char" {
         body: jet_driver_setting_unquoted(raw, "'")
         chars := [Char]{}
-        loop ch in body.chars() -> &chars.push(ch)
+        loop ch in body.chars() -> chars.push(ch)
         if chars.len() == 1 -> return FactValue.Char{value: chars[0]}
         return FactValue.Text{value: raw}
     }
@@ -138,16 +138,16 @@ jet_driver_setting_override_diagnostics: fn(load: JetDriverLoadResult, request: 
             if setting.name == override.name -> break true
         } ?? false
         if !known {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`$build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0302", "`$build.settings.{override.name}` is undeclared", "`--set {override.name}={override.value}` gives it a value, but `package.jet` declares no such setting", "add `{override.name}: Type = default` to the `settings: {{ … }}` block in `package.jet`, or drop the `--set`"))
         }
     }
     found: package ?? return diagnostics
     loop setting in found.settings {
         writers: jet_driver_setting_writers(found, setting, request.profile, request.build_contributions, request.setting_overrides)
         contributions := [FactContribution]{}
-        loop writer in writers -> &contributions.push(writer.contribution)
+        loop writer in writers -> contributions.push(writer.contribution)
         if pkg_fact_resolve(FactKey.new("Build.Settings.{setting.name}"), contributions) == .Err(error) {
-            &diagnostics.push(jet_driver_fact_error_diagnostic(error))
+            diagnostics.push(jet_driver_fact_error_diagnostic(error))
         }
     }
     diagnostics
@@ -172,7 +172,7 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
     refusals: jet_driver_setting_override_diagnostics(load, request)
     if refusals.len() > 0 -> return JetDriverBuildFactExplanation{fact: None, diagnostics: refusals}
     diagnostics := [Diagnostic]{}
-    target: jet_driver_selected_target_machine(request, &diagnostics) ?? return JetDriverBuildFactExplanation{fact: None, diagnostics: diagnostics}
+    target: jet_driver_selected_target_machine(request, diagnostics) ?? return JetDriverBuildFactExplanation{fact: None, diagnostics: diagnostics}
     facts: jet_driver_build_facts(load, request, target)
     package: jet_driver_entry_package(load)
     contributions := [FactContribution]{}
@@ -181,7 +181,7 @@ jet_driver_explain_build_fact: fn(request: JetDriverCompileRequest, key: String)
         if package == .Val(found) {
             loop setting in found.settings {
                 if setting.name != name -> next
-                loop writer in jet_driver_setting_writers(found, setting, request.profile, request.build_contributions, request.setting_overrides) -> &contributions.push(writer.contribution)
+                loop writer in jet_driver_setting_writers(found, setting, request.profile, request.build_contributions, request.setting_overrides) -> contributions.push(writer.contribution)
             }
         }
         if contributions.len() == 0 {
@@ -230,7 +230,7 @@ jet_driver_fixed_fact_writers: fn(key: String, facts: SemaBuildFacts, package: J
         "Build.OS" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: facts.os}, "<target>")}
         "Build.Profile" -> {
             writers := [FactContribution]{jet_driver_fact_writer(key, FactValue.Text{value: "dev"}, "<default>")}
-            if facts.profile != "dev" -> &writers.push(FactContribution.new(key, FactValue.Text{value: facts.profile}, SourceScope.Package, ContributionLayer.CommandLine, "command line:--profile={facts.profile}"))
+            if facts.profile != "dev" -> writers.push(FactContribution.new(key, FactValue.Text{value: facts.profile}, SourceScope.Package, ContributionLayer.CommandLine, "command line:--profile={facts.profile}"))
             return writers
         }
         "Build.Stamp.Git" -> return [FactContribution]{jet_driver_fact_writer(key, FactValue.OptionalText{value: facts.stamp_git}, jet_driver_stamp_source(stamped, "git"))}

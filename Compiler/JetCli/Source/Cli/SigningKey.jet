@@ -1,6 +1,6 @@
 // `jet registry keygen [--registry <name>] [--force]` and `jet registry key
 // backup [<dest>] [--registry <name>]` (`"keygen"`/`"key"`,
-// `run_keygen`/`run_key_backup`; c146, D-PKGSIGN1): the Ed25519 package-signing
+// `run_keygen`/`run_key_backup`; c146): the Ed25519 package-signing
 // key that `jet registry publish` signs with. The key files and their
 // owner-only writes belong to Jetpack/Publication (Sign.jet).
 use {
@@ -31,7 +31,7 @@ jet_cli_signing_words: fn(jet_argv: [String]) -> [String] Never! {
             skip_next = true
             next
         }
-        if !argument.starts_with("-") -> &words.push(argument)
+        if !argument.starts_with("-") -> words.push(argument.copy())
     }
     words
 }

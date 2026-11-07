@@ -95,8 +95,8 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                         bad = Val("clobber register `{raw}` is listed more than once")
                     }
                     else -> {
-                        &seen_clobbers.push(register)
-                        &clobbers.push(register)
+                        seen_clobbers.push(register.copy())
+                        clobbers.push(register)
                     }
                 }
             }
@@ -170,7 +170,7 @@ inline_assembly_contract: fn(function: Func, target: String) -> InlineAsmContrac
                     bad = Val("`{{{name}}}` doesn't name a Jet parameter")
                 }
                 !used.contains(name) -> {
-                    &used.push(name)
+                    used.push(name)
                 }
             }
             rest = String.from_bytes(bytes.slice(close + 1, bytes.len())) ?? ""
@@ -226,12 +226,12 @@ inline_assembly_clobber_tokens: fn(text: String) -> [String] Never! {
     index := 0
     loop index < bytes.len() {
         if Int.from_u8(bytes[index]) == 44 || inline_assembly_ascii_whitespace(bytes[index]) {
-            if index > start -> &tokens.push(String.from_bytes(bytes.slice(start, index)) ?? "")
+            if index > start -> tokens.push(String.from_bytes(bytes.slice(start, index)) ?? "")
             start = index + 1
         }
         index += 1
     }
-    if start < bytes.len() -> &tokens.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
+    if start < bytes.len() -> tokens.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
     tokens
 }
 

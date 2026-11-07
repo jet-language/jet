@@ -1,0 +1,72 @@
+// Method receivers — &self (write), &&self (consume), self (read).
+Buffer: struct {
+    data: String
+    size: Int
+}
+
+impl Buffer {
+    peek: fn(self) -> Int { self.size }
+
+    describe: fn(self) {
+        // plain self — read only
+        print("buf[{self.size}]: {self.data}")
+    }
+
+    append: fn(&self, chunk: String) {
+        // &self — mutate the receiver in place
+        self.data = "{self.data}{chunk}"
+        self.size += 1
+    }
+
+    seal: fn(&&self) -> String { "[sealed: {self.data}]" }
+}
+
+run: fn() {
+    buf := Buffer{data: "hello", size: 1}
+    print(buf.peek())  // plain read
+    buf.describe()  // plain self, read
+    buf.append(" world")  // &self write
+    buf.describe()
+    result: buf.seal()  // &&self consume; buf gone after this
+    print(result)
+    infer_capability_lesson()
+    infer_receiver_lesson()
+}
+
+// Signatures can't lie — an unmarked parameter is always `Read`,
+// decided at parse time, never inferred from the body. A function that
+// mutates its parameter must say so explicitly with `&`; the call site
+// mirrors it (`&c`), so mutation stays visible at both ends.
+Counter: struct {
+    value: Int
+}
+
+// `c` is `&Counter` because the body mutates it — the signature states the
+// access it needs, rather than the compiler guessing it from usage.
+bump: fn(c: &Counter, by: Int) { c.value += by }
+
+// `c` is unmarked — a plain read, which is all this function needs.
+value_of: fn(c: Counter) -> Int { c.value }
+
+infer_capability_lesson: fn() {
+    c := Counter{value: 0}
+    bump(c, 5)
+    bump(c, 3)
+    print(value_of(c))
+}
+
+Player: struct {
+    hp: Int
+}
+
+impl Player {
+    damage: fn(&self, n: Int) { self.hp -= n }
+}
+
+hurt: fn(p: &Player) { p.damage(5) }
+
+infer_receiver_lesson: fn() {
+    x := Player{hp: 100}
+    hurt(x)
+    print(x.hp)
+}

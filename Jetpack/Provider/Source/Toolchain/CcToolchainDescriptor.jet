@@ -181,7 +181,7 @@ CcToolchainDescriptor: struct {
     // The cache source identity: every field that names the toolchain bytes.
     source_fingerprint: fn(self) -> String Never! {
         mounts := [String]{}
-        loop mount in self.mounts -> &mounts.push("{mount.store_path}={mount.digest}")
+        loop mount in self.mounts -> mounts.push("{mount.store_path}={mount.digest}")
         lines: [String]{
             CC_TOOLCHAIN_RECIPE_ID,
             "layout={self.layout.label()}",
@@ -424,7 +424,7 @@ provider_cc_path_parts: fn(path: String) -> [String] Never! {
     segments: path.split("/").to_list()
     loop part in segments {
         if part == "" || part == "." -> next
-        &parts.push(part)
+        parts.push(part)
     }
     parts
 }

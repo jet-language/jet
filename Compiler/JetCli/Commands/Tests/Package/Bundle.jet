@@ -29,23 +29,23 @@ BundleTestTransport: struct {
     recorded: BundleReceipt?
     impl JetCLIBundleHost {
     current_dir: fn(&self) -> bundle_paths.Path JetCLIBundleError! {
-        &self.events.push("cwd")
+        self.events.push("cwd")
         if self.failure == "cwd" -> return Err(jet_cli_bundle_error("cwd denied"))
         Ok(bundle_paths.of("/project"))
     }
     metadata_no_follow: fn(&self, path: bundle_paths.Path) -> JetCLIBundleMetadata JetCLIBundleError! {
-        &self.events.push("inspect:{path.raw}")
+        self.events.push("inspect:{path.raw}")
         if self.failure == "inspect" -> return Err(jet_cli_bundle_error("denied"))
         Ok(JetCLIBundleMetadata{symlink: self.symlink, regular: self.regular})
     }
     read_bytes: fn(&self, path: bundle_paths.Path) -> [U8] JetCLIBundleError! {
-        &self.events.push("read:{path.raw}")
+        self.events.push("read:{path.raw}")
         if self.failure == "read" -> return Err(jet_cli_bundle_error("denied"))
         if path.raw.ends_with(".png") -> return Ok("icon payload".bytes())
         Ok("executable payload".bytes())
     }
     materialize: fn(&self, plan: &BundlePlan, output: bundle_paths.Path) -> JetCLIBundleMaterializedFacts JetCLIBundleError! {
-        &self.events.push("materialize:{output.raw}")
+        self.events.push("materialize:{output.raw}")
         assert(plan.identity.starts_with("jet-bundle-plan-sha256:"))
         assert(plan.files.len() >= 3)
         if self.failure == "materialize" -> return Err(jet_cli_bundle_error("native tool failed"))
@@ -57,7 +57,7 @@ BundleTestTransport: struct {
                 mechanism: "fixture-transport", policy: "checked"}, signing: self.signing})
     }
     record: fn(&self, request: JetCLIBundleStoreRequest) -> String JetCLIBundleError! {
-        &self.events.push("record")
+        self.events.push("record")
         assert_eq(request.command, "package")
         assert_eq(request.cwd.raw, "/project")
         assert_eq(request.input_paths[0].raw, "app.bin")
@@ -84,7 +84,7 @@ bundle_test_parse_error: fn(args: [String]) -> String Never! {
     panic("expected parser refusal")
 }
 bundle_test_build_error: fn(options: JetCLIBundleOptions, host: &BundleTestTransport) -> String Never! {
-    _: jet_cli_bundle_build<BundleTestTransport>(options, &host) ?? return err.message
+    _: jet_cli_bundle_build<BundleTestTransport>(options, host) ?? return err.message
     panic("expected build refusal")
 }
 bundle_test_json_field: fn(tree: Dyn, name: String) -> Dyn Never! {
@@ -129,47 +129,47 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
     flags: [String]{"--source=main.jet", "--profile=release", "--phase=build", "--backend=aot", "--renderer=headless", "--cook=fast", "--export-preset=store", "--deploy-to=/out", "--crash-reporter=off", "--crash-consent=denied", "--dry-run", "--explain", "--cancel", "--resume", "--clean", "--scripts-only", "--run-now", "main.jet"}
     loop flag in flags {
         host := bundle_test_transport()
-        assert_eq(bundle_test_build_error(bundle_test_options([String]{flag}), &host), "game package options require `--kind game`")
+        assert_eq(bundle_test_build_error(bundle_test_options([String]{flag}), host), "game package options require `--kind game`")
         assert_eq(host.events.len(), 0)
     }
     host := bundle_test_transport()
-    assert_eq(bundle_test_build_error(jet_cli_bundle_options_default(), &host), "`jet package` needs an explicit `--target`")
-    assert_eq(bundle_test_build_error(bundle_test_options([String]{"--target=linux"}), &host), "`jet package` needs `--executable <path>`")
+    assert_eq(bundle_test_build_error(jet_cli_bundle_options_default(), host), "`jet package` needs an explicit `--target`")
+    assert_eq(bundle_test_build_error(bundle_test_options([String]{"--target=linux"}), host), "`jet package` needs `--executable <path>`")
     assert_eq(host.events.len(), 0)
 }
 #Test("no-follow inspection precedes reading and reports exact input failures") {
     options: bundle_test_options(bundle_test_args("linux"))
     host := bundle_test_transport()
     host.symlink = true
-    assert_eq(bundle_test_build_error(options, &host), "executable `app.bin` is not a regular file")
+    assert_eq(bundle_test_build_error(options, host), "executable `app.bin` is not a regular file")
     assert_eq(host.events, [String]{"inspect:app.bin"})
     host = bundle_test_transport()
     host.regular = false
-    assert_eq(bundle_test_build_error(options, &host), "executable `app.bin` is not a regular file")
+    assert_eq(bundle_test_build_error(options, host), "executable `app.bin` is not a regular file")
     host = bundle_test_transport()
     host.failure = "inspect"
-    assert_eq(bundle_test_build_error(options, &host), "could not inspect executable `app.bin`: denied")
+    assert_eq(bundle_test_build_error(options, host), "could not inspect executable `app.bin`: denied")
     host = bundle_test_transport()
     host.failure = "read"
-    assert_eq(bundle_test_build_error(options, &host), "could not read executable `app.bin`: denied")
+    assert_eq(bundle_test_build_error(options, host), "could not read executable `app.bin`: denied")
     assert_eq(host.events, [String]{"inspect:app.bin", "read:app.bin"})
 }
 #Test("canonical icon updater and target validation precede materialization") {
     host := bundle_test_transport()
     options := bundle_test_options(bundle_test_args("linux"))
     options.icon = Val(bundle_paths.of("logo.unknown"))
-    assert_eq(bundle_test_build_error(options, &host), "`jet package --icon` needs `--icon-format` when the extension is unknown")
+    assert_eq(bundle_test_build_error(options, host), "`jet package --icon` needs `--icon-format` when the extension is unknown")
     assert_eq(host.events.len(), 4)
     options.icon = None
     options.update_channel = Val("stable")
-    assert_eq(bundle_test_build_error(options, &host), "`--update-channel` and `--update-url` must be supplied together")
+    assert_eq(bundle_test_build_error(options, host), "`--update-channel` and `--update-url` must be supplied together")
     options.update_channel = None
     options.target = Val(BundleTarget.WindowsMsix)
     options.publisher = ""
-    assert_eq(bundle_test_build_error(options, &host), "bundle field `metadata.publisher` is empty")
+    assert_eq(bundle_test_build_error(options, host), "bundle field `metadata.publisher` is empty")
     options.target = Val(BundleTarget.LinuxAppImage)
     options.icon = Val(bundle_paths.of("logo.icns"))
-    assert(bundle_test_build_error(options, &host).contains("icon.format"))
+    assert(bundle_test_build_error(options, host).contains("icon.format"))
 }
 #Test("output suffix and control refusal preserves unresolved relative spelling") {
     cwd: bundle_paths.of("/project")
@@ -187,7 +187,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
         host.signing = Val(BundleSigningFact.signed())
         args: bundle_test_args(target)
         options: bundle_test_options(args)
-        result: jet_cli_bundle_run_desktop<BundleTestTransport>(args, options, true, &host)
+        result: jet_cli_bundle_run_desktop<BundleTestTransport>(args, options, true, host)
         assert_eq(result.exit_code, 0)
         assert_eq(result.stderr, "")
         assert_eq(host.events[0], "inspect:app.bin")
@@ -214,7 +214,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
     options.icon = Val(bundle_paths.of("logo.png"))
     options.update_channel = Val("stable")
     options.update_url = Val("https://example.invalid/update")
-    built: jet_cli_bundle_build<BundleTestTransport>(options, &host) ?? panic(err.message)
+    built: jet_cli_bundle_build<BundleTestTransport>(options, host) ?? panic(err.message)
     assert_eq(built.input_paths.len(), 2)
     assert_eq(built.plan.inputs.len(), 2)
     assert(built.plan.file_paths().contains("usr/share/icons/hicolor/256x256/apps/app.png"))
@@ -229,7 +229,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
         host := bundle_test_transport()
         host.failure = failure
         args: bundle_test_args("linux")
-        result: jet_cli_bundle_run_desktop<BundleTestTransport>(args, bundle_test_options(args), false, &host)
+        result: jet_cli_bundle_run_desktop<BundleTestTransport>(args, bundle_test_options(args), false, host)
         assert_eq(result.exit_code, 1)
         assert_eq(result.stdout, "")
         assert_eq(result.stderr, if failure == "materialize" -> "jet package: native tool failed\n" else -> "jet package: receipt store denied\n")
@@ -243,15 +243,15 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
 }
 #Test("planned report never promotes logical artifact facts to transport evidence") {
     host := bundle_test_transport()
-    built := jet_cli_bundle_build<BundleTestTransport>(bundle_test_options(bundle_test_args("linux")), &host) ?? panic(err.message)
+    built := jet_cli_bundle_build<BundleTestTransport>(bundle_test_options(bundle_test_args("linux")), host) ?? panic(err.message)
     logical := built.plan.emit()
-    tree: json.parse(jet_cli_bundle_report(&logical, &built.plan, built.output, "", true, true)) ?? panic("JSON")
+    tree: json.parse(jet_cli_bundle_report(logical, built.plan, built.output, "", true, true)) ?? panic("JSON")
     _: bundle_test_tree_eq(bundle_test_json_field(tree, "artifact_status"), Dyn.Text("planned"))
     materialization: bundle_test_json_field(tree, "materialization")
     assert(bundle_test_json_field(materialization, "artifact_sha256") == .Null)
     assert(bundle_test_json_field(materialization, "bytes") == .Null)
     assert(bundle_test_json_field(materialization, "materializer") == .Null)
-    human: jet_cli_bundle_report(&logical, &built.plan, built.output, "", true, false)
+    human: jet_cli_bundle_report(logical, built.plan, built.output, "", true, false)
     assert(human.contains("execution: planned\nmaterialization: planned\n"))
     assert(human.ends_with("receipt: \n"))
 }
@@ -285,7 +285,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
 #Test("desktop human report is byte exact and failed receipt stays on stderr") {
     host := bundle_test_transport()
     args: bundle_test_args("linux")
-    result: jet_cli_bundle_run_desktop<BundleTestTransport>(args, bundle_test_options(args), false, &host)
+    result: jet_cli_bundle_run_desktop<BundleTestTransport>(args, bundle_test_options(args), false, host)
     assert_eq(result.exit_code, 0)
     receipt: host.recorded ?? panic("receipt")
     assert_eq(result.stdout, "package plan: {receipt.plan_identity}\ntarget: linux-appimage\nartifact: app.AppImage\noutput: /project/app.AppImage\nexecution: materialized\nmaterialization: materialized\nfiles: {receipt.files.len()}\nreceipt: fixture-store-receipt\n")
@@ -296,7 +296,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
     host := bundle_test_transport()
     options := bundle_test_options(bundle_test_args("linux"))
     options.name = Val("")
-    assert_eq(bundle_test_build_error(options, &host), "bundle field `package` is empty")
+    assert_eq(bundle_test_build_error(options, host), "bundle field `package` is empty")
     assert_eq(host.events, [String]{"inspect:app.bin", "read:app.bin"})
 }
 
@@ -305,8 +305,8 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
 #Test("desktop Front routes owned flags into the canonical package host") {
     facts: JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: Val("C.UTF-8")}
     raw := bundle_test_args("linux")
-    &raw.push("--json")
-    &raw.push("--quiet")
+    raw.push("--json")
+    raw.push("--quiet")
     plan: jet_cli_front(raw, facts)
     if plan == {
         .PackageDesktop(arguments, options, machine) -> {
@@ -318,9 +318,9 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
         else -> panic("desktop package must route to the canonical bundle host")
     }
     direct_host := bundle_test_transport()
-    direct: jet_cli_bundle_run_desktop<BundleTestTransport>(raw, bundle_test_options(raw), true, &direct_host)
+    direct: jet_cli_bundle_run_desktop<BundleTestTransport>(raw, bundle_test_options(raw), true, direct_host)
     routed_host := bundle_test_transport()
-    routed: jet_cli_dispatch_with_package<BundleTestTransport>(raw, facts, &routed_host)
+    routed: jet_cli_dispatch_with_package<BundleTestTransport>(raw, facts, routed_host)
     assert_eq(routed.stdout.bytes(), direct.stdout.bytes())
     assert_eq(routed.stderr.bytes(), direct.stderr.bytes())
     assert_eq(routed.exit_code, direct.exit_code)
@@ -329,12 +329,12 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
 #Test("desktop Front parser errors and generic help never invoke a producer") {
     facts: JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: Val("C.UTF-8")}
     host := bundle_test_transport()
-    refused: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"package", "--target=alien"}, facts, &host)
+    refused: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"package", "--target=alien"}, facts, host)
     assert_eq(refused.stdout, "")
     assert_eq(refused.stderr, "jet package: unknown package target `alien`\n")
     assert_eq(refused.exit_code, 1)
     assert_eq(host.events, [String]{})
-    help: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"package", "--help"}, facts, &host)
+    help: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"package", "--help"}, facts, host)
     assert_eq(help.stdout, jet_cli_command_help("package"))
     assert_eq(help.stderr, "")
     assert_eq(help.exit_code, 0)
@@ -354,7 +354,7 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
         else -> panic("pre-command output must reach the canonical bundle parser")
     }
     host := bundle_test_transport()
-    refused: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"--verbose", "package", "--target=linux", "--executable", "app.bin"}, facts, &host)
+    refused: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"--verbose", "package", "--target=linux", "--executable", "app.bin"}, facts, host)
     assert_eq(refused.stdout, "")
     assert_eq(refused.stderr, "jet package: unknown package flag `--verbose`\n")
     assert_eq(refused.exit_code, 1)
@@ -380,7 +380,7 @@ bundle_test_wire_artifact: fn(plan: BundlePlan, materialized: Bool) -> BundleArt
     // the factory name or its logical digest/byte facts.
     artifact := plan.materialized_artifact("artifact-hash", 9007199254740993)
     if materialized {
-        &artifact.receipt.record_materializer(BundleMaterializerFact{
+        artifact.receipt.record_materializer(BundleMaterializerFact{
             tool: "native-é", tool_identity: "tool-hash", tool_version: "1.0",
             executable: "/tools/native", authority: "Build.native_sandboxed",
             mechanism: "native", policy: "checked"})
@@ -402,7 +402,7 @@ bundle_test_wire_expected: fn(materialized: Bool, explain: Bool) -> String Never
 bundle_test_wire_report: fn(materialized: Bool, explain: Bool) -> String Never! {
     plan: bundle_test_wire_plan()
     artifact: bundle_test_wire_artifact(plan, materialized)
-    jet_cli_bundle_report(&artifact, &plan, bundle_paths.of("/dist/démo.AppImage"), "store\n\"\\é", explain, true)
+    jet_cli_bundle_report(artifact, plan, bundle_paths.of("/dist/démo.AppImage"), "store\n\"\\é", explain, true)
 }
 
 #Test("package materialized status is whole byte exact with ordered nested fields") {

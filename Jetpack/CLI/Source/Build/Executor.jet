@@ -122,17 +122,17 @@ build_execute_build_plan: fn(plan: HermeticBuildPlan, project_root: String, arti
                 handle: HermeticActionHandle{id: action.id, context: plan.context}
                 if build_execute_one_action(plan, action, handle, project_root, artifact_store, grants, probes) == {
                     .Ok(outcome) -> {
-                        &completed.push(BuildActionOutcomeRow{action: handle, outcome})
-                        &results.push(None)
+                        completed.push(BuildActionOutcomeRow{action: handle, outcome})
+                        results.push(None)
                     }
-                    .Err(error) -> &results.push(Val(error))
+                    .Err(error) -> results.push(Val(error))
                 }
             }
             loop result in results {
                 if result == .Val(error) -> return Err(error)
             }
-            &completed.sort_by((left: BuildActionOutcomeRow, right: BuildActionOutcomeRow) -> left.action.id <=> right.action.id)
-            loop row in completed -> &outcomes.push(row)
+            completed.sort_by((left: BuildActionOutcomeRow, right: BuildActionOutcomeRow) -> left.action.id <=> right.action.id)
+            loop row in completed -> outcomes.push(row)
         }
     }
     report: plan.execution_report(outcomes) ?? return Err(BuildExecutionError.InvalidGraph(err))
@@ -149,7 +149,7 @@ build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] 
     held := [[String: Int]]{}
     loop action_id in actions {
         pools := [String]{}
-        loop pool in build_action_pools(plan.actions[action_id]) -> build_insert_sorted_text(&pools, pool.as_str())
+        loop pool in build_action_pools(plan.actions[action_id]) -> build_insert_sorted_text(pools, pool.as_str())
         slot := -1
         loop index in 0..<held.len() {
             used: held[index]
@@ -164,15 +164,15 @@ build_execution_batches: fn(plan: HermeticBuildPlan, actions: [Int]) -> [[Int]] 
             }
         }
         if slot < 0 {
-            &batches.push([Int]{})
-            &held.push([String: Int]{})
+            batches.push([Int]{})
+            held.push([String: Int]{})
             slot = batches.len() - 1
         }
         counts := held[slot]
         loop pool in pools -> counts[pool] = (counts.get(pool) ?? 0) + 1
         held[slot] = counts
         batch := batches[slot]
-        &batch.push(action_id)
+        batch.push(action_id)
         batches[slot] = batch
     }
     batches
@@ -222,10 +222,10 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
     executable_bytes: if files.is_file(executable) -> (files.read_bytes(executable) ?? return Err(build_io_action(action, BuildIOError.from(err)))) else -> action.argv[0].bytes()
     executable_digest: ContentDigest.from_bytes(executable_bytes)
     action_probe_names := [String]{}
-    loop probe in action.probes -> &action_probe_names.push(plan.probes[probe.id].name)
+    loop probe in action.probes -> action_probe_names.push(plan.probes[probe.id].name)
     effective_probe_facts := [BuildProbeFact]{}
     loop fact in probe_facts {
-        if action_probe_names.contains(fact.name) -> &effective_probe_facts.push(fact)
+        if action_probe_names.contains(fact.name) -> effective_probe_facts.push(fact.copy())
     }
     if plan.action(handle) == None -> return Err(BuildExecutionError.InvalidGraph(HermeticBuildError.UnknownAction(handle.id)))
     key: build_canonical_effective_action_key(plan, action, snapshots, grants, executable_digest, effective_probe_facts)
@@ -278,7 +278,7 @@ build_execute_one_action: fn(plan: HermeticBuildPlan, action: HermeticBuildActio
     runtime_env: build_runtime_toolchain_environment(plan, action.toolchain, build_action_environment(action))
     mounts := [NativeSandboxMount]{}
     if plan.toolchain(action.toolchain) == .Val(toolchain) {
-        loop mount in toolchain.mounts -> &mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
+        loop mount in toolchain.mounts -> mounts.push(NativeSandboxMount{source: mount.source, destination: mount.destination})
     }
     share_network: build_action_shares_network(grants, action.caps)
     timeout: time.duration_ms(NATIVE_SANDBOX_DEFAULT_ACTION_TIMEOUT_MS)
@@ -322,7 +322,7 @@ build_publish_sandbox_outputs: fn(sandbox: String, project_root: String, action:
         from: build_resolve_under(sandbox, declared)
         bytes: build_secure_read_file(sandbox, from, build_read_budget(total))
         total += bytes.len()
-        &contents.push(bytes)
+        contents.push(bytes)
     }
     loop index in 0..<action.outputs.len() {
         to: build_resolve_under(project_root, action.outputs[index])
@@ -359,7 +359,7 @@ build_execute_probes: fn(plan: HermeticBuildPlan, selected: [Int]) -[FS, Env, Ex
                 build_run_compile_probe(plan, probe.toolchain, source)
             }
         }
-        &facts.push(BuildProbeFact{name: probe.name, success: result.success, detail: result.detail, reproducibility: probe.reproducibility, toolchain: probe.toolchain, toolchain_provenance: build_toolchain_provenance_digest(plan, probe.toolchain)})
+        facts.push(BuildProbeFact{name: probe.name, success: result.success, detail: result.detail, reproducibility: probe.reproducibility, toolchain: probe.toolchain, toolchain_provenance: build_toolchain_provenance_digest(plan, probe.toolchain)})
         if !result.success -> return Err(BuildExecutionError.ProbeFailed{probe: probe.name, detail: result.detail})
     }
     Ok(facts)
@@ -511,7 +511,7 @@ build_path_parts: fn(path: String) -> [String] Never! {
     parts := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        &parts.push(part)
+        parts.push(part)
     }
     parts
 }
@@ -597,7 +597,7 @@ build_debug_toolchain: fn(t: HermeticBuildToolchain) -> String Never! {
         .None -> "None"
     }
     tool_keys := t.tools.keys().to_list()
-    &tool_keys.sort()
+    tool_keys.sort()
     tools: loop key in tool_keys -> "{build_debug_quote(key)}: {build_debug_quote(t.tools[key])}"
     resolution: if t.resolution == ToolchainResolution.Ambient -> "Ambient" else -> "DeclaredOnly"
     mounts: loop mount in t.mounts -> "BuildMount {{ source: {build_debug_quote(mount.source)}, destination: {build_debug_quote(mount.destination)}, identity: {build_debug_quote(mount.identity)} }}"

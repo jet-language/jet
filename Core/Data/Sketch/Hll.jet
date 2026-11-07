@@ -17,7 +17,7 @@ new: fn() -> HyperLogLog Never! { HyperLogLog.new() }
 impl HyperLogLog {
     new: fn() -> HyperLogLog Never! {
         registers := [U8]{}
-        loop _ in 0..<256 -> &registers.push(U8{0})
+        loop _ in 0..<256 -> registers.push(U8{0})
         HyperLogLog{registers: registers}
     }
 
@@ -53,11 +53,11 @@ rounded_count: fn(estimate: Float) -> Int Never! {
 #Test("HLL preserves shipped distinct counts and independent clones") {
     hll := new()
     assert_eq(hll.count(), 0)
-    &hll.add("apple")
+    hll.add("apple")
     clone := hll.copy()
-    &clone.add("banana")
-    &clone.add("cherry")
-    &clone.add("apple")
+    clone.add("banana")
+    clone.add("cherry")
+    clone.add("apple")
     assert_eq(hll.count(), 1)
     assert_eq(clone.count(), 3)
 }

@@ -100,7 +100,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     loop application in p.applied_rules {
         if application.marker.name == "Transition" {
             labels := [String?]{}
-            loop label in application.marker.arg_labels -> &labels.push(if label == .Val(named) -> Val(named.name) else -> None)
+            loop label in application.marker.arg_labels -> labels.push(if label == .Val(named) -> Val(named.name) else -> None)
             assert(labels == [String?]{Val("to"), Val("from")})
             found = true
             break
@@ -289,8 +289,14 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     ds: entry02_errors(source)
     assert(entry02_diag(ds, "E0003").fix.contains("save: fn(path: String) IOError!"))
 }
-#Test("missing_function_body_is_e0081") {
-    _: entry02_diag(entry02_errors("greet: fn(name: String) -> String\nrun: fn() {{}}\n"), "E0081")
+#Test("missing_method_body_is_e0081") {
+    _: entry02_diag(entry02_errors("Greeter: struct {{}}\nimpl Greeter {{\n    greet: fn(self, name: String) -> String\n}}\nrun: fn() {{}}\n"), "E0081")
+}
+// A bodiless `name: fn(…)` at file level is a function type.
+#Test("bodiless_file_level_fn_is_a_function_type") {
+    p: entry02_program("Pick: fn(Int) -> Int\nhost_open: fn(path: String) -[FS]> Int\nrun: fn() {{}}\n")
+    assert(if entry02_alias(p, "Pick").target == { .Fn(_, _, _, _, _, _) -> true else -> false })
+    assert(if entry02_alias(p, "host_open").target == { .Fn(_, _, _, _, _, _) -> true else -> false })
 }
 #Test("member_spread_parses") {
     p: entry02_program("run: fn() {{ x: a.[b, c] }}")
@@ -307,7 +313,7 @@ entry02_unit_result: fn(ty: Type?, error_name: String) -> Bool {
     assert_eq(groups.len(), 1)
     use_site := lex("unrelated: 99\n#Pair run: fn() {{}}\n".bytes())
     assert(use_site.diagnostics.is_empty())
-    expanded: expand_named_marker_groups_with_uses(use_site.tokens, &use_site.tables, groups)
+    expanded: expand_named_marker_groups_with_uses(use_site.tokens, use_site.tables, groups)
     assert_eq(expanded.uses.len(), 1)
     assert_eq(expanded.uses[0].name, "Pair")
     found_integer := false

@@ -78,7 +78,7 @@ scalar_count: fn(text: String) -> Int Never! { decode_scalars(text).len() }
 
 scalars: fn(text: String) -> [String] Never! {
     out := [String]{}
-    loop cp in decode_scalars(text) -> &out.push(encode_cp(cp))
+    loop cp in decode_scalars(text) -> out.push(encode_cp(cp))
     out
 }
 
@@ -108,14 +108,14 @@ sentences: fn(text: String) -> [String] Never! { split_sentences(text) }
 /// Scalars absent from the pinned name index are labeled `UNASSIGNED`.
 inspect: fn(text: String) -> [String] Never! {
     out := [String]{}
-    loop cp in decode_scalars(text) -> &out.push("{hex_cp(cp)} {unicode_name(cp)}")
+    loop cp in decode_scalars(text) -> out.push("{hex_cp(cp)} {unicode_name(cp)}")
     out
 }
 
 /// `"index:scalar"` pairs, index in bytes.
 char_indices: fn(text: String) -> [String] Never! {
     out := [String]{}
-    loop pair in decode_indexed(text) -> &out.push("{pair.index}:{encode_cp(pair.cp)}")
+    loop pair in decode_indexed(text) -> out.push("{pair.index}:{encode_cp(pair.cp)}")
     out
 }
 
@@ -130,7 +130,7 @@ word_views: fn(text: String) -> [String] Never! { words(text) }
 line_views: fn(text: String) -> [String] Never! { split_lines(text) }
 byte_views: fn(text: String) -> [String] Never! {
     out := [String]{}
-    loop b in text_unicode_string.utf8_bytes(text) -> &out.push("{b}")
+    loop b in text_unicode_string.utf8_bytes(text) -> out.push("{b}")
     out
 }
 
@@ -263,7 +263,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> String {
     i := lo
     loop {
         if i >= hi -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }
@@ -296,7 +296,7 @@ pad_side: fn(text: String, width: Int, fill: String, left: Bool) -> String {
     added := [String]{}
     i := 0
     loop added.len() < extra {
-        &added.push(units[i])
+        added.push(units[i])
         i = (i + 1) % units.len()
     }
     prefix := ""
@@ -314,19 +314,19 @@ split_limit: fn(text: String, sep: String, n: Int, from_right: Bool) -> [String]
     rest := text
     loop {
         if parts.len() + 1 >= n {
-            &parts.push(rest)
+            parts.push(rest)
             return parts
         }
         at: find_sep(rest, sep, from_right)
         if at < 0 {
-            &parts.push(rest)
+            parts.push(rest)
             return parts
         }
         if from_right {
-            &parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len()))
+            parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len()))
             rest = slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at)
         } else {
-            &parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at))
+            parts.push(slice_bytes(text_unicode_string.utf8_bytes(rest), 0, at))
             rest = slice_bytes(text_unicode_string.utf8_bytes(rest), at + text_unicode_string.utf8_bytes(sep).len(), text_unicode_string.utf8_bytes(rest).len())
         }
     }
@@ -376,9 +376,9 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
         width: text_unicode_string.utf8_width_at(raw, i)
         if width == 1 {
             if first < 128 {
-                &out.push(IndexedCp{index: start, cp: first})
+                out.push(IndexedCp{index: start, cp: first})
             } else {
-                &out.push(IndexedCp{index: start, cp: 65533})
+                out.push(IndexedCp{index: start, cp: 65533})
             }
             i = i + 1
             next
@@ -399,18 +399,18 @@ decode_indexed: fn(text: String) -> [IndexedCp] Never! {
             k = k + 1
         }
         if !valid {
-            &out.push(IndexedCp{index: start, cp: 65533})
+            out.push(IndexedCp{index: start, cp: 65533})
             i = i + 1
             next
         }
-        &out.push(IndexedCp{index: start, cp: cp})
+        out.push(IndexedCp{index: start, cp: cp})
         i = i + width
     }
 }
 
 encode_cp: fn(cp: Int) -> String {
     out := [U8]{}
-    text_unicode_string.append_cp(&out, cp)
+    text_unicode_string.append_cp(out, cp)
     String.from_bytes(out) ?? ""
 }
 
@@ -531,7 +531,7 @@ decompose: fn(text: String, compat: Bool) -> [Int] {
     raw := [Int]{}
     loop cp in decode_scalars(text) {
         pieces: decompose_cp(cp, compat)
-        loop p in pieces -> &raw.push(p)
+        loop p in pieces -> raw.push(p)
     }
     canon_order(raw)
 }
@@ -610,7 +610,7 @@ decompose_cp: fn(cp: Int, compat: Bool) -> [Int] {
 
 canon_order: fn(cps: [Int]) -> [Int] {
     out := [Int]{}
-    loop c in cps -> &out.push(c)
+    loop c in cps -> out.push(c)
     i := 1
     loop {
         if i >= out.len() -> return out
@@ -643,7 +643,7 @@ compose: fn(cps: [Int]) -> String {
                 next
             }
         }
-        &out.push(cp)
+        out.push(cp)
         if cc == 0 {
             starter = out.len() - 1
             last_class = -1
@@ -737,7 +737,7 @@ split_graphemes: fn(text: String) -> [String] {
     i := 1
     loop {
         if i >= cps.len() {
-            &out.push(encode_cps(cluster))
+            out.push(encode_cps(cluster))
             return out
         }
         prev: cluster[cluster.len() - 1]
@@ -747,11 +747,11 @@ split_graphemes: fn(text: String) -> [String] {
         if prev == 0x200D && is_emoji(cur) -> break_here = !has_emoji_zwj_prefix(cluster)
         if is_ri(prev) && is_ri(cur) && ri_run % 2 == 0 -> break_here = true
         if break_here {
-            &out.push(encode_cps(cluster))
+            out.push(encode_cps(cluster))
             cluster = [Int]{cur}
             ri_run = if is_ri(cur) -> 1 else -> 0
         } else {
-            &cluster.push(cur)
+            cluster.push(cur)
             if is_ri(cur) -> ri_run = ri_run + 1 else -> ri_run = 0
         }
         i = i + 1
@@ -888,7 +888,7 @@ word_reduce: fn(pairs: [IndexedCp], byte_len: Int) -> [WordUnit] Never! {
                 next
             }
         }
-        &units.push(WordUnit{class: class, first: cp, last: class, end: end})
+        units.push(WordUnit{class: class, first: cp, last: class, end: end})
     }
     units
 }
@@ -928,10 +928,10 @@ word_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
         if i + 1 < units.len() {
             split: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic_window)
-            if split -> &out.push(units[i].end)
+            if split -> out.push(units[i].end)
         }
     }
-    &out.push(byte_len)
+    out.push(byte_len)
     out
 }
 split_words: fn(text: String) -> [String] Never! {
@@ -950,7 +950,7 @@ split_words: fn(text: String) -> [String] Never! {
             if !keep -> keep = segment_contains(alphabetic_window, pairs[at].cp) || segment_contains(numeric_window, pairs[at].cp)
             at = at + 1
         }
-        if keep -> &out.push(slice_bytes(raw, start, end))
+        if keep -> out.push(slice_bytes(raw, start, end))
         start = end
     }
     out
@@ -973,7 +973,7 @@ sentence_lower_follows: fn(units: [SentenceUnit], from: Int) -> Bool Never! {
 sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     n: units.len()
     breaks := [Bool]{}
-    loop _ in 1..<n -> &breaks.push(false)
+    loop _ in 1..<n -> breaks.push(false)
     i := 0
     loop i + 1 < n {
         current: units[i].class
@@ -1029,13 +1029,13 @@ sentence_boundaries: fn(pairs: [IndexedCp], byte_len: Int) -> [Int] Never! {
                 next
             }
         }
-        &units.push(SentenceUnit{class: class, end: end})
+        units.push(SentenceUnit{class: class, end: end})
     }
     breaks: sentence_breaks(units)
     loop i in 0..<breaks.len() {
-        if breaks[i] -> &out.push(units[i].end)
+        if breaks[i] -> out.push(units[i].end)
     }
-    &out.push(byte_len)
+    out.push(byte_len)
     out
 }
 split_sentences: fn(text: String) -> [String] Never! {
@@ -1044,7 +1044,7 @@ split_sentences: fn(text: String) -> [String] Never! {
     start := 0
     loop end in sentence_boundaries(decode_indexed(text), raw.len()) {
         sentence: slice_bytes(raw, start, end).trim()
-        if sentence != "" -> &out.push(sentence)
+        if sentence != "" -> out.push(sentence)
         start = end
     }
     out
@@ -1058,7 +1058,7 @@ split_lines: fn(text: String) -> [String] {
     i := 0
     loop i < raw.len() {
         if raw[i] == (U8{10}) || raw[i] == (U8{13}) {
-            &out.push(slice_bytes(raw, start, i))
+            out.push(slice_bytes(raw, start, i))
             if raw[i] == (U8{13}) && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> i = i + 1
             i = i + 1
             start = i
@@ -1066,7 +1066,7 @@ split_lines: fn(text: String) -> [String] {
         }
         i = i + 1
     }
-    if start < raw.len() -> &out.push(slice_bytes(raw, start, raw.len()))
+    if start < raw.len() -> out.push(slice_bytes(raw, start, raw.len()))
     out
 }
 
@@ -1076,22 +1076,22 @@ hex_cp: fn(cp: Int) -> String {
     hb: hex.bytes()
     n := cp
     digits := [U8]{}
-    if n == 0 -> &digits.push(U8{48})
+    if n == 0 -> digits.push(U8{48})
     loop {
         if n == 0 -> break
-        &digits.push(hb[n % 16])
+        digits.push(hb[n % 16])
         n = n /% 16
     }
     // pad to 4
     loop {
         if digits.len() >= 4 -> break
-        &digits.push(U8{48})
+        digits.push(U8{48})
     }
     out := [U8]{85, 43} // U+
     i := digits.len() - 1
     loop {
         if i < 0 -> return String.from_bytes(out) ?? ""
-        &out.push(digits[i])
+        out.push(digits[i])
         i = i - 1
     }
 }
@@ -1109,11 +1109,11 @@ unicode_name: fn(cp: Int) -> String Never! {
     names: asset[pool_start..<asset.len()]
     span: text_tables.name_span(index, names, cp) ?? return "UNASSIGNED"
     name := [U8]{}
-    loop at in span.start..<(span.start + span.length) -> &name.push(names[at])
+    loop at in span.start..<(span.start + span.length) -> name.push(names[at])
     String.from_bytes(name) ?? "UNASSIGNED"
 }
 
-// D-TEXT-COLLATE1=A: Unicode's default collation order. This is UTS #10 over
+// Unicode's default collation order. This is UTS #10 over
 // the CLDR 48 root table for Unicode 17.0.0 (Core/Text/CollationTable.jet),
 // and English uses it untailored. Variable weighting is non-ignorable. Levels
 // 1-3 are followed by an identical level on the NFD scalars, so `collate` is
@@ -1138,12 +1138,12 @@ collation_key: fn(value: String) -> [U8] Never! {
         at := level
         loop at < elements.len() {
             weight: elements[at]
-            if weight != 0 -> push_collation_weight(&key, weight, width)
+            if weight != 0 -> push_collation_weight(key, weight, width)
             at += 3
         }
-        push_collation_weight(&key, 0, width)
+        push_collation_weight(key, 0, width)
     }
-    loop scalar in scalars -> push_collation_weight(&key, scalar, 3)
+    loop scalar in scalars -> push_collation_weight(key, scalar, 3)
     key
 }
 
@@ -1157,7 +1157,7 @@ compare_collation_keys: fn(left: [U8], right: [U8]) -> Ordering Never! {
 }
 
 push_collation_weight: fn(key: &[U8], weight: Int, width: Int) Never! {
-    loop at in 0..<width -> &key.push(U8{(weight >> (8 * (width - 1 - at))).bit_and(Int{255})})
+    loop at in 0..<width -> key.push(U8{(weight >> (8 * (width - 1 - at))).bit_and(Int{255})})
 }
 
 COLLATION_ABSENT: 16777215
@@ -1186,7 +1186,7 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
     ccc: ccc_asset[40..<text_asset.uint(ccc_bytes, 28, 4)]
     out := [Int]{}
     taken := [Bool]{}
-    loop _scalar in scalars -> &taken.push(false)
+    loop _scalar in scalars -> taken.push(false)
     at := 0
     loop at < scalars.len() {
         if taken[at] {
@@ -1199,7 +1199,7 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
         loop next_at < scalars.len() && key.len() < 3 && !taken[next_at] {
             found: collation_contraction_row(contractions, key, scalars[next_at])
             if found < 0 -> break
-            &key.push(scalars[next_at])
+            key.push(scalars[next_at])
             row = found
             next_at += 1
         }
@@ -1213,7 +1213,7 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
             if !taken[probe] {
                 found: if class > skipped_class -> collation_contraction_row(contractions, key, scalars[probe]) else -> -1
                 if found >= 0 {
-                    &key.push(scalars[probe])
+                    key.push(scalars[probe])
                     taken[probe] = true
                     row = found
                 } else {
@@ -1225,9 +1225,9 @@ collation_elements: fn(scalars: [Int]) -> [Int] Never! {
         if row >= 0 {
             first: text_asset.uint(contractions, row + 9, 3)
             count: text_asset.uint(contractions, row + 12, 1)
-            collation_push_elements(&out, pool, first, count)
+            collation_push_elements(out, pool, first, count)
         } else {
-            collation_single_elements(&out, singles, pool, ideographs, scalars[at])
+            collation_single_elements(out, singles, pool, ideographs, scalars[at])
         }
         at = next_at
     }
@@ -1279,9 +1279,9 @@ collation_row_rank: fn(contractions: View<U8>, row: Int) -> Int Never! {
 collation_push_elements: fn(out: &[Int], pool: View<U8>, first: Int, count: Int) Never! {
     loop index in first..<first + count {
         at: index * 5
-        &out.push(text_asset.uint(pool, at, 2))
-        &out.push(text_asset.uint(pool, at + 2, 2))
-        &out.push(text_asset.uint(pool, at + 4, 1))
+        out.push(text_asset.uint(pool, at, 2))
+        out.push(text_asset.uint(pool, at + 2, 2))
+        out.push(text_asset.uint(pool, at + 4, 1))
     }
 }
 
@@ -1298,18 +1298,18 @@ collation_single_elements: fn(out: &[Int], singles: View<U8>, pool: View<U8>, id
             found < scalar -> low = mid + 1
             found > scalar -> high = mid
             else -> {
-                collation_push_elements(&out, pool, text_asset.uint(singles, row + 3, 3), text_asset.uint(singles, row + 6, 1))
+                collation_push_elements(out, pool, text_asset.uint(singles, row + 3, 3), text_asset.uint(singles, row + 6, 1))
                 return
             }
         }
     }
     implicit: collation_implicit(ideographs, scalar)
-    &out.push(implicit.base)
-    &out.push(32)
-    &out.push(2)
-    &out.push(implicit.trail)
-    &out.push(0)
-    &out.push(0)
+    out.push(implicit.base)
+    out.push(32)
+    out.push(2)
+    out.push(implicit.trail)
+    out.push(0)
+    out.push(0)
 }
 
 // UTS #10 (UCA 17.0.0) section 10.1.3: [.AAAA.0020.0002][.BBBB.0000.0000].

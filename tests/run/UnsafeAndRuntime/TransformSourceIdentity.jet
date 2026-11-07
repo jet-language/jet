@@ -1,0 +1,20 @@
+// Source nominal identity and return-type pins; Transform has no Display.
+use math: core.math
+TRANSFORM_NAME: comptime { Transform.$name }
+QUALIFIED_TRANSFORM_NAME: comptime { math.Transform.$name }
+transform: fn(value: &&Transform<Screen, World>) -> math.Transform<Screen, World> { value.move() }
+transform2: fn(value: &&Transform2<F32, Screen, World>) -> math.Transform2<F32, Screen, World> { value.move() }
+ray: fn(value: &&Ray2<Float, Screen, World>) -> math.Ray2<Float, Screen, World> { value.move() }
+float_then: fn(a: Transform2<Float, Screen, World>, b: Transform2<Float, World, View>) -> Transform<Screen, View> TransformError! { a.then(b) }
+float_inverse: fn(a: Transform2<Float, Screen, World>) -> Transform<World, Screen> TransformError! { a.inverse() }
+run: fn() {
+    a: Transform<Screen, World>.affine(1.0, 0.0, 0.0, 1.0, 2.0, 3.0, 1, 2)
+    b: transform(a.copy())
+    print(TRANSFORM_NAME == QUALIFIED_TRANSFORM_NAME)
+    print(a == b)
+    narrow: Transform2<F32, Screen, World>.affine(F32{1.0}, F32{0.0}, F32{0.0}, F32{1.0}, F32{2.0}, F32{3.0}, 1, 2)
+    assert_eq(transform2(narrow).tx, 2.0)
+    r: a.ray(ScreenPoint.new(1.0, 2.0)) ?? panic("ray")
+    // A Float always prints a decimal part: `3.0` (S21, Docs/spec/syntax-decisions.md:1136).
+    print(ray(r).origin.x)
+}

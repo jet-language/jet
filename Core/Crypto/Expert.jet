@@ -15,8 +15,6 @@ use {
 
 C_AES_RCON: [U8]{1, 2, 4, 8, 16, 32, 64, 128, 27, 54}
 
-C_MASK32: 4294967295
-
 /// BLAKE2b initialization vector (RFC 7693 2.6).
 C_BLAKE2B_IV: [Int]{
     0x6a09e667f3bcc908,
@@ -29,29 +27,9 @@ C_BLAKE2B_IV: [Int]{
     0x5be0cd19137e2179,
 }
 
-wrap32: fn(n: Int) -> Int Never! { n.bit_and(C_MASK32) }
-
-rotl32: fn(x: Int, n: Int) -> Int Never! {
-    v: (x).bit_and(C_MASK32)
-    r: (n).bit_and(31)
-    if r == 0 -> return v
-    ((((v << r)).bit_or((v >> (32 - r))))).bit_and(C_MASK32)
-}
-
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    U8{v}
-}
-
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
-    loop b in bytes -> &out.push(b)
-    out
-}
-
-copy_ints: fn(values: [Int]) -> [Int] Never! {
-    out := [Int]{}
-    loop value in values -> &out.push(value)
+    loop b in bytes -> out.push(b)
     out
 }
 
@@ -60,7 +38,7 @@ slice_u8: fn(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     i := start
     loop {
         if i >= end || i >= bytes.len() -> return out
-        &out.push(bytes[i])
+        out.push(bytes[i])
         i = i + 1
     }
 }
@@ -69,7 +47,7 @@ le_bytes: fn(n: Int, width: Int) -> [U8] Never! {
     out := [U8]{}
     v := n
     loop i in 0..<width {
-        &out.push(to_u8(v))
+        out.push(wrapping(U8{v}))
         v = v >> 8
     }
     out
@@ -82,12 +60,13 @@ ed25519_sign_raw: fn(seed: [U8], msg: [U8]) -> [U8] Never! { ct.ed_sign(seed, ms
 ed25519_verify_raw: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! { ct.ed_verify(pk, msg, sig) }
 
 
-chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
-    st := [Int]{
-        0x61707865,
-        0x3320646e,
-        0x79622d32,
-        0x6b206574,
+/// RFC 8439 ChaCha20 state: constants, key, 32-bit block counter, nonce.
+chacha20_state: fn(key: [U8], nonce: [U8], counter: Int) -> [U32] Never! {
+    [U32]{
+        U32{0x61707865},
+        U32{0x3320646e},
+        U32{0x79622d32},
+        U32{0x6b206574},
         u32le(key, 0),
         u32le(key, 4),
         u32le(key, 8),
@@ -96,64 +75,93 @@ chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
         u32le(key, 20),
         u32le(key, 24),
         u32le(key, 28),
-        wrap32(counter),
+        wrapping(U32{counter}),
         u32le(nonce, 0),
         u32le(nonce, 4),
         u32le(nonce, 8),
     }
-    w := copy_ints(st)
+}
+
+/// The sixteen-word working buffer every block of one call reuses.
+chacha20_words: fn() -> [U32] Never! {
+    w := [U32]{}
+    loop _ in 0..<16 -> w.push(U32{0})
+    w
+}
+
+/// The twenty ChaCha rounds of `state` into `w`, before the final addition.
+chacha20_rounds: fn(state: [U32], w: &[U32]) Never! {
+    loop i in 0..<16 -> w[i] = state[i]
     loop _ in 0..<10 {
-        qr(&w, 0, 4, 8, 12)
-        qr(&w, 1, 5, 9, 13)
-        qr(&w, 2, 6, 10, 14)
-        qr(&w, 3, 7, 11, 15)
-        qr(&w, 0, 5, 10, 15)
-        qr(&w, 1, 6, 11, 12)
-        qr(&w, 2, 7, 8, 13)
-        qr(&w, 3, 4, 9, 14)
+        qr(w, 0, 4, 8, 12)
+        qr(w, 1, 5, 9, 13)
+        qr(w, 2, 6, 10, 14)
+        qr(w, 3, 7, 11, 15)
+        qr(w, 0, 5, 10, 15)
+        qr(w, 1, 6, 11, 12)
+        qr(w, 2, 7, 8, 13)
+        qr(w, 3, 4, 9, 14)
     }
-    loop i in 0..<16 -> w[i] = wrap32(w[i] + st[i])
+}
+
+#Arithmetic(.Wrapping)
+chacha20_block: fn(key: [U8], nonce: [U8], counter: Int) -> [U8] Never! {
+    state: chacha20_state(key, nonce, counter)
+    w := chacha20_words()
+    chacha20_rounds(state, w)
     out := [U8]{}
-    loop i in 0..<16 {
-        v: w[i]
-        &out.push(to_u8(v))
-        &out.push(to_u8(v >> 8))
-        &out.push(to_u8(v >> 16))
-        &out.push(to_u8(v >> 24))
-    }
+    loop i in 0..<16 -> push_u32le(out, w[i] + state[i])
     out
 }
 
-qr: fn(s: &[Int], a: Int, b: Int, c: Int, d: Int) Never! {
-    s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32((s[d]).bit_xor(s[a]), 16)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32((s[b]).bit_xor(s[c]), 12)
-    s[a] = wrap32(s[a] + s[b])
-    s[d] = rotl32((s[d]).bit_xor(s[a]), 8)
-    s[c] = wrap32(s[c] + s[d])
-    s[b] = rotl32((s[b]).bit_xor(s[c]), 7)
+#Arithmetic(.Wrapping)
+qr: fn(s: &[U32], ia: Int, ib: Int, ic: Int, id: Int) Never! {
+    a := s[ia]
+    b := s[ib]
+    c := s[ic]
+    d := s[id]
+    a += b
+    d = (d.bit_xor(a)).rotate_left(16)
+    c += d
+    b = (b.bit_xor(c)).rotate_left(12)
+    a += b
+    d = (d.bit_xor(a)).rotate_left(8)
+    c += d
+    b = (b.bit_xor(c)).rotate_left(7)
+    s[ia] = a
+    s[ib] = b
+    s[ic] = c
+    s[id] = d
 }
 
-u32le: fn(bytes: [U8], off: Int) -> Int Never! {
-    if off + 3 >= bytes.len() -> return 0
-    (((((u8_int(bytes[off])).bit_or((u8_int(bytes[off + 1]) << 8))).bit_or((u8_int(bytes[off + 2]) << 16))).bit_or((u8_int(bytes[off + 3]) << 24)))).bit_and(C_MASK32)
+u32le: fn(bytes: [U8], off: Int) -> U32 Never! {
+    if off + 3 >= bytes.len() -> return U32{0}
+    U32{bytes[off]}.bit_or(U32{bytes[off + 1]} << 8).bit_or(U32{bytes[off + 2]} << 16).bit_or(U32{bytes[off + 3]} << 24)
 }
 
+push_u32le: fn(out: &[U8], value: U32) Never! {
+    loop k in 0..<4 -> out.push(U8{(value >> (8 * k)).bit_and(U32{255})})
+}
+
+#Arithmetic(.Wrapping)
 chacha20_xor: fn(key: [U8], nonce: [U8], counter: Int, plain: [U8]) -> [U8] Never! {
+    state := chacha20_state(key, nonce, counter)
+    w := chacha20_words()
     out := [U8]{}
     i := 0
-    ctr := counter
-    loop {
-        if i >= plain.len() -> return out
-        block: chacha20_block(key, nonce, ctr)
-        ctr = ctr + 1
-        loop j in 0..<64 {
-            if i >= plain.len() -> return out
-            &out.push(to_u8(u8_int(plain[i]).bit_xor(u8_int(block[j]))))
-            i = i + 1
+    loop i < plain.len() {
+        chacha20_rounds(state, w)
+        loop k in 0..<16 {
+            word: w[k] + state[k]
+            loop shift in 0..<4 {
+                if i >= plain.len() -> return out
+                out.push(plain[i].bit_xor(U8{(word >> (8 * shift)).bit_and(U32{255})}))
+                i += 1
+            }
         }
+        state[12] = state[12] + U32{1}
     }
+    out
 }
 
 poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! { ct.poly1305(key, data) }
@@ -161,7 +169,7 @@ poly1305: fn(key: [U8], data: [U8]) -> [U8] Never! { ct.poly1305(key, data) }
 pad16: fn(n: Int) -> [U8] Never! {
     out := [U8]{}
     rem: (16 - (n % 16)) % 16
-    loop _ in 0..<rem -> &out.push(U8{0})
+    loop _ in 0..<rem -> out.push(U8{0})
     out
 }
 
@@ -169,16 +177,16 @@ chacha_poly_seal: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Nev
     otk: chacha20_block(key, nonce, 0)
     ciphertext: chacha20_xor(key, nonce, 1, plain)
     mac_data := [U8]{}
-    loop b in aad -> &mac_data.push(b)
-    loop b in pad16(aad.len()) -> &mac_data.push(b)
-    loop b in ciphertext -> &mac_data.push(b)
-    loop b in pad16(ciphertext.len()) -> &mac_data.push(b)
-    loop b in le_bytes(aad.len(), 8) -> &mac_data.push(b)
-    loop b in le_bytes(ciphertext.len(), 8) -> &mac_data.push(b)
+    loop b in aad -> mac_data.push(b)
+    loop b in pad16(aad.len()) -> mac_data.push(b)
+    loop b in ciphertext -> mac_data.push(b)
+    loop b in pad16(ciphertext.len()) -> mac_data.push(b)
+    loop b in le_bytes(aad.len(), 8) -> mac_data.push(b)
+    loop b in le_bytes(ciphertext.len(), 8) -> mac_data.push(b)
     auth_tag: poly1305(otk, mac_data)
     out := [U8]{}
-    loop b in ciphertext -> &out.push(b)
-    loop b in auth_tag -> &out.push(b)
+    loop b in ciphertext -> out.push(b)
+    loop b in auth_tag -> out.push(b)
     out
 }
 
@@ -188,12 +196,12 @@ chacha_poly_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     auth_tag: slice_u8(cipher, cipher.len() - 16, cipher.len())
     otk: chacha20_block(key, nonce, 0)
     mac_data := [U8]{}
-    loop b in aad -> &mac_data.push(b)
-    loop b in pad16(aad.len()) -> &mac_data.push(b)
-    loop b in ciphertext -> &mac_data.push(b)
-    loop b in pad16(ciphertext.len()) -> &mac_data.push(b)
-    loop b in le_bytes(aad.len(), 8) -> &mac_data.push(b)
-    loop b in le_bytes(ciphertext.len(), 8) -> &mac_data.push(b)
+    loop b in aad -> mac_data.push(b)
+    loop b in pad16(aad.len()) -> mac_data.push(b)
+    loop b in ciphertext -> mac_data.push(b)
+    loop b in pad16(ciphertext.len()) -> mac_data.push(b)
+    loop b in le_bytes(aad.len(), 8) -> mac_data.push(b)
+    loop b in le_bytes(ciphertext.len(), 8) -> mac_data.push(b)
     expect: poly1305(otk, mac_data)
     equal: constant_time_equal_bytes(auth_tag, expect) ?? return None
     if equal -> return Val(chacha20_xor(key, nonce, 1, ciphertext))
@@ -202,11 +210,11 @@ chacha_poly_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
 
 
 hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
-    st := [Int]{
-        0x61707865,
-        0x3320646e,
-        0x79622d32,
-        0x6b206574,
+    state: [U32]{
+        U32{0x61707865},
+        U32{0x3320646e},
+        U32{0x79622d32},
+        U32{0x6b206574},
         u32le(key, 0),
         u32le(key, 4),
         u32le(key, 8),
@@ -220,40 +228,25 @@ hchacha20: fn(key: [U8], nonce16: [U8]) -> [U8] Never! {
         u32le(nonce16, 8),
         u32le(nonce16, 12),
     }
-    loop _ in 0..<10 {
-        qr(&st, 0, 4, 8, 12)
-        qr(&st, 1, 5, 9, 13)
-        qr(&st, 2, 6, 10, 14)
-        qr(&st, 3, 7, 11, 15)
-        qr(&st, 0, 5, 10, 15)
-        qr(&st, 1, 6, 11, 12)
-        qr(&st, 2, 7, 8, 13)
-        qr(&st, 3, 4, 9, 14)
-    }
+    w := chacha20_words()
+    chacha20_rounds(state, w)
     out := [U8]{}
-    loop k in 0..<4 -> hchacha_word(&out, st[k])
-    loop k in 12..<16 -> hchacha_word(&out, st[k])
+    loop k in 0..<4 -> push_u32le(out, w[k])
+    loop k in 12..<16 -> push_u32le(out, w[k])
     out
-}
-
-hchacha_word: fn(out: &[U8], value: Int) Never! {
-    &out.push(to_u8(value))
-    &out.push(to_u8(value >> 8))
-    &out.push(to_u8(value >> 16))
-    &out.push(to_u8(value >> 24))
 }
 
 xchacha_seal: fn(key: [U8], nonce24: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     sub: hchacha20(key, slice_u8(nonce24, 0, 16))
     nonce := [U8]{0, 0, 0, 0}
-    loop b in slice_u8(nonce24, 16, 24) -> &nonce.push(b)
+    loop b in slice_u8(nonce24, 16, 24) -> nonce.push(b)
     chacha_poly_seal(sub, nonce, aad, plain)
 }
 
 xchacha_open: fn(key: [U8], nonce24: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     sub: hchacha20(key, slice_u8(nonce24, 0, 16))
     nonce := [U8]{0, 0, 0, 0}
-    loop b in slice_u8(nonce24, 16, 24) -> &nonce.push(b)
+    loop b in slice_u8(nonce24, 16, 24) -> nonce.push(b)
     chacha_poly_open(sub, nonce, aad, cipher)
 }
 
@@ -320,13 +313,13 @@ hkdf_sha256_raw: fn(ikm: [U8], salt: [U8], info: [U8], len: Int) -> Secret Crypt
     counter := 1
     loop out.len() < len {
         material := [U8]{}
-        loop b in previous -> &material.push(b)
-        loop b in info -> &material.push(b)
-        &material.push(to_u8(counter))
+        loop b in previous -> material.push(b)
+        loop b in info -> material.push(b)
+        material.push(wrapping(U8{counter}))
         previous = hmac_sha256_local(prk, material)
         loop b in previous {
             if out.len() >= len -> break
-            &out.push(b)
+            out.push(b)
         }
         counter = counter + 1
     }
@@ -384,25 +377,25 @@ migrate_v1: fn(key: [U8], source: Path, recipients: [X25519PublicKey], destinati
 aes_gcm_seal: fn(key: [U8], nonce: [U8], aad: [U8], plain: [U8]) -> [U8] Never! {
     work := aes_workspace()
     state := zeros16()
-    rk := aes256_expand(key, &state, &work)
+    rk := aes256_expand(key, state, work)
     h := zeros16()
-    aes256_encrypt_block(rk, h, &state, &work)
+    aes256_encrypt_block(rk, h, state, work)
     loop i in 0..<16 -> h[i] = state[i]
     j0 := zeros16()
     loop i in 0..<12 -> j0[i] = nonce[i]
     j0[15] = U8{1}
     mask := zeros16()
-    aes256_encrypt_block(rk, j0, &state, &work)
+    aes256_encrypt_block(rk, j0, state, work)
     loop i in 0..<16 -> mask[i] = state[i]
-    out := aes_ctr(rk, j0, plain, plain.len(), &state, &work)
+    out := aes_ctr(rk, j0, plain, plain.len(), state, work)
     auth_tag := gcm_tag(h, mask, aad, out, out.len())
-    loop b in auth_tag -> &out.push(b)
-    crypto.wipe(&rk)
-    crypto.wipe(&state)
-    crypto.wipe(&h)
-    crypto.wipe(&mask)
-    crypto.wipe(&auth_tag)
-    aes_workspace_clear(&work)
+    loop b in auth_tag -> out.push(b)
+    crypto.wipe(rk)
+    crypto.wipe(state)
+    crypto.wipe(h)
+    crypto.wipe(mask)
+    crypto.wipe(auth_tag)
+    aes_workspace_clear(work)
     out
 }
 
@@ -410,40 +403,40 @@ aes_gcm_open: fn(key: [U8], nonce: [U8], aad: [U8], cipher: [U8]) -> [U8]? {
     body_len: cipher.len() - 16
     work := aes_workspace()
     state := zeros16()
-    rk := aes256_expand(key, &state, &work)
+    rk := aes256_expand(key, state, work)
     h := zeros16()
-    aes256_encrypt_block(rk, h, &state, &work)
+    aes256_encrypt_block(rk, h, state, work)
     loop i in 0..<16 -> h[i] = state[i]
     j0 := zeros16()
     loop i in 0..<12 -> j0[i] = nonce[i]
     j0[15] = U8{1}
     mask := zeros16()
-    aes256_encrypt_block(rk, j0, &state, &work)
+    aes256_encrypt_block(rk, j0, state, work)
     loop i in 0..<16 -> mask[i] = state[i]
     expect := gcm_tag(h, mask, aad, cipher, body_len)
     different := U8{0}
     loop i in 0..<16 -> different = different.bit_or((expect[i].bit_xor(cipher[body_len + i])))
-    crypto.wipe(&h)
-    crypto.wipe(&mask)
-    crypto.wipe(&expect)
+    crypto.wipe(h)
+    crypto.wipe(mask)
+    crypto.wipe(expect)
     // The only secret-result branch is after the complete tag comparison.
     // No plaintext is allocated or written before authentication succeeds.
     if different != (U8{0}) {
-        crypto.wipe(&rk)
-        crypto.wipe(&state)
-        aes_workspace_clear(&work)
+        crypto.wipe(rk)
+        crypto.wipe(state)
+        aes_workspace_clear(work)
         return None
     }
-    out: aes_ctr(rk, j0, cipher, body_len, &state, &work)
-    crypto.wipe(&rk)
-    crypto.wipe(&state)
-    aes_workspace_clear(&work)
+    out: aes_ctr(rk, j0, cipher, body_len, state, work)
+    crypto.wipe(rk)
+    crypto.wipe(state)
+    aes_workspace_clear(work)
     Val(out)
 }
 
 zeros16: fn() -> [U8] Never! {
     out := [U8]{}
-    loop i in 0..<16 -> &out.push(U8{0})
+    loop i in 0..<16 -> out.push(U8{0})
     out
 }
 
@@ -462,11 +455,11 @@ aes_ctr: fn(rk: [U8], j0: [U8], data: [U8], count: Int, state: &[U8], work: &[U6
     ctr := copy_bytes(j0)
     i := 0
     loop i < count {
-        inc32(&ctr)
-        aes256_encrypt_block(rk, ctr, &state, &work)
+        inc32(ctr)
+        aes256_encrypt_block(rk, ctr, state, work)
         j := 0
         loop j < 16 && i < count {
-            &out.push(data[i].bit_xor(state[j]))
+            out.push(data[i].bit_xor(state[j]))
             i = i + 1
             j = j + 1
         }
@@ -478,11 +471,11 @@ gcm_tag: fn(h: [U8], ek0: [U8], aad: [U8], ct: [U8], count: Int) -> [U8] Never! 
     y := [U64]{U64{0}, U64{0}}
     high: aes_load_be64(h, 0)
     low: aes_load_be64(h, 8)
-    ghash_blocks(&y, high, low, aad, aad.len())
-    ghash_blocks(&y, high, low, ct, count)
+    ghash_blocks(y, high, low, aad, aad.len())
+    ghash_blocks(y, high, low, ct, count)
     y[0] = y[0].bit_xor(U64{aad.len() * 8})
     y[1] = y[1].bit_xor(U64{count * 8})
-    gf128_mul(&y, high, low)
+    gf128_mul(y, high, low)
     out := zeros16()
     loop i in 0..<16 {
         word: y[i /% 8] >> (56 - 8 * (i %% 8))
@@ -511,7 +504,7 @@ ghash_blocks: fn(y: &[U64], high: U64, low: U64, data: [U8], count: Int) Never! 
         }
         y[0] = y[0].bit_xor(a)
         y[1] = y[1].bit_xor(b)
-        gf128_mul(&y, high, low)
+        gf128_mul(y, high, low)
         off = off + 16
     }
 }
@@ -539,13 +532,11 @@ gf128_mul: fn(x: &[U64], high: U64, low: U64) Never! {
     x[1] = zl
 }
 
-u8_int: fn(b: U8) -> Int Never! { Int.from_u8(b) }
-
 
 // Six eight-plane banks, allocated once and reused by every round/block.
 aes_workspace: fn() -> [U64] Never! {
     work := [U64]{}
-    loop _ in 0..<48 -> &work.push(U64{0})
+    loop _ in 0..<48 -> work.push(U64{0})
     work
 }
 
@@ -556,7 +547,7 @@ aes_workspace_clear: fn(work: &[U64]) Never! {
 
 aes256_expand: fn(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
     w := [U8]{}
-    loop b in key -> &w.push(b)
+    loop b in key -> w.push(b)
     loop i in 8..<60 {
         loop j in 0..<4 -> state[j] = w[(i - 1) * 4 + j]
         loop j in 4..<16 -> state[j] = U8{0}
@@ -564,28 +555,28 @@ aes256_expand: fn(key: [U8], state: &[U8], work: &[U64]) -> [U8] Never! {
             first: state[0].copy()
             loop j in 0..<3 -> state[j] = state[j + 1]
             state[3] = first
-            sub_bytes(&state, &work)
+            sub_bytes(state, work)
             state[0] = state[0].bit_xor(C_AES_RCON[i /% 8 - 1])
         } else {
-            if i %% 8 == 4 -> sub_bytes(&state, &work)
+            if i %% 8 == 4 -> sub_bytes(state, work)
         }
-        loop j in 0..<4 -> &w.push(w[(i - 8) * 4 + j].bit_xor(state[j]))
+        loop j in 0..<4 -> w.push(w[(i - 8) * 4 + j].bit_xor(state[j]))
     }
     w
 }
 
 aes256_encrypt_block: fn(rk: [U8], block: [U8], s: &[U8], work: &[U64]) Never! {
     loop i in 0..<16 -> s[i] = block[i]
-    add_round(&s, rk, 0)
+    add_round(s, rk, 0)
     loop round in 1..<14 {
-        sub_bytes(&s, &work)
-        shift_rows(&s)
-        mix_columns(&s)
-        add_round(&s, rk, round)
+        sub_bytes(s, work)
+        shift_rows(s)
+        mix_columns(s)
+        add_round(s, rk, round)
     }
-    sub_bytes(&s, &work)
-    shift_rows(&s)
-    add_round(&s, rk, 14)
+    sub_bytes(s, work)
+    shift_rows(s)
+    add_round(s, rk, 14)
 }
 
 add_round: fn(s: &[U8], rk: [U8], round: Int) Never! {
@@ -599,19 +590,19 @@ sub_bytes: fn(s: &[U8], w: &[U64]) Never! {
         w[p] = U64{0}
         loop lane in 0..<16 -> w[p] = w[p].bit_or((((U64.from_u8(s[lane]) >> p).bit_and(U64{1})) << lane))
     }
-    aes_square(&w, 0, 8)           // x^2
-    aes_multiply(&w, 8, 0, 16)     // x^3
-    aes_square(&w, 16, 24)         // x^6
-    aes_square(&w, 24, 24)         // x^12
-    aes_multiply(&w, 24, 16, 32)   // x^15
+    aes_square(w, 0, 8)           // x^2
+    aes_multiply(w, 8, 0, 16)     // x^3
+    aes_square(w, 16, 24)         // x^6
+    aes_square(w, 24, 24)         // x^12
+    aes_multiply(w, 24, 16, 32)   // x^15
     loop p in 0..<8 -> w[16 + p] = w[32 + p]
-    aes_square(&w, 16, 16)         // x^30
-    aes_square(&w, 16, 16)         // x^60
-    aes_square(&w, 16, 16)         // x^120
-    aes_square(&w, 16, 16)         // x^240
-    aes_multiply(&w, 16, 24, 32)   // x^252
+    aes_square(w, 16, 16)         // x^30
+    aes_square(w, 16, 16)         // x^60
+    aes_square(w, 16, 16)         // x^120
+    aes_square(w, 16, 16)         // x^240
+    aes_multiply(w, 16, 24, 32)   // x^252
     loop p in 0..<8 -> w[16 + p] = w[32 + p]
-    aes_multiply(&w, 16, 8, 32)    // x^254 (zero also follows this chain)
+    aes_multiply(w, 16, 8, 32)    // x^254 (zero also follows this chain)
     loop p in 0..<8 {
         w[p] = w[32 + p].bit_xor(w[32 + ((p + 4) %% 8)]).bit_xor(w[32 + ((p + 5) %% 8)]).bit_xor(w[32 + ((p + 6) %% 8)]).bit_xor(w[32 + ((p + 7) %% 8)])
         if ((0x63 >> p).bit_and(1)) != 0 -> w[p] = w[p].bit_xor(U64{65535})
@@ -728,14 +719,14 @@ xtime: fn(a: U8) -> U8 Never! {
     }
     work := aes_workspace()
     state := zeros16()
-    rk := aes256_expand(key, &state, &work)
+    rk := aes256_expand(key, state, work)
     loop i in 0..<4 {
-        aes256_encrypt_block(rk, plain[i], &state, &work)
+        aes256_encrypt_block(rk, plain[i], state, work)
         assert_eq(state, cipher[i])
     }
-    crypto.wipe(&rk)
-    crypto.wipe(&state)
-    aes_workspace_clear(&work)
+    crypto.wipe(rk)
+    crypto.wipe(state)
+    aes_workspace_clear(work)
 }
 
 /// RFC 9106 Argon2id.  The portable implementation supports one to eight
@@ -747,26 +738,26 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
     lane_length: memory_blocks /% lanes
     segment_length: lane_length /% 4
     h0_input := [U8]{}
-    loop b in le_bytes(lanes, 4) -> &h0_input.push(b)
-    loop b in le_bytes(out_len, 4) -> &h0_input.push(b)
-    loop b in le_bytes(memory_kib, 4) -> &h0_input.push(b)
-    loop b in le_bytes(iterations, 4) -> &h0_input.push(b)
-    loop b in le_bytes(0x13, 4) -> &h0_input.push(b)
-    loop b in le_bytes(2, 4) -> &h0_input.push(b)
-    loop b in le_bytes(password.len(), 4) -> &h0_input.push(b)
-    loop b in password -> &h0_input.push(b)
-    loop b in le_bytes(salt.len(), 4) -> &h0_input.push(b)
-    loop b in salt -> &h0_input.push(b)
-    loop b in le_bytes(0, 4) -> &h0_input.push(b)
-    loop b in le_bytes(0, 4) -> &h0_input.push(b)
+    loop b in le_bytes(lanes, 4) -> h0_input.push(b)
+    loop b in le_bytes(out_len, 4) -> h0_input.push(b)
+    loop b in le_bytes(memory_kib, 4) -> h0_input.push(b)
+    loop b in le_bytes(iterations, 4) -> h0_input.push(b)
+    loop b in le_bytes(0x13, 4) -> h0_input.push(b)
+    loop b in le_bytes(2, 4) -> h0_input.push(b)
+    loop b in le_bytes(password.len(), 4) -> h0_input.push(b)
+    loop b in password -> h0_input.push(b)
+    loop b in le_bytes(salt.len(), 4) -> h0_input.push(b)
+    loop b in salt -> h0_input.push(b)
+    loop b in le_bytes(0, 4) -> h0_input.push(b)
+    loop b in le_bytes(0, 4) -> h0_input.push(b)
     h0: blake2b(h0_input, 64)
     memory := [U64]{}
-    loop _ in 0..<(memory_blocks * 128) -> &memory.push(U64{0})
+    loop _ in 0..<(memory_blocks * 128) -> memory.push(U64{0})
     loop lane in 0..<lanes {
         loop block_index in 0..<2 {
             init_input := copy_bytes(h0)
-            loop b in le_bytes(block_index, 4) -> &init_input.push(b)
-            loop b in le_bytes(lane, 4) -> &init_input.push(b)
+            loop b in le_bytes(block_index, 4) -> init_input.push(b)
+            loop b in le_bytes(lane, 4) -> init_input.push(b)
             block_bytes: argon2_blake2b_long(init_input, 1024)
             position: lane * lane_length + block_index
             loop word in 0..<128 -> memory[position * 128 + word] = load_le64(block_bytes, word * 8, 1024)
@@ -777,10 +768,10 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
     address_block := [U64]{}
     input_block := [U64]{}
     loop _ in 0..<128 {
-        &work.push(U64{0})
-        &saved.push(U64{0})
-        &address_block.push(U64{0})
-        &input_block.push(U64{0})
+        work.push(U64{0})
+        saved.push(U64{0})
+        address_block.push(U64{0})
+        input_block.push(U64{0})
     }
     loop pass in 0..<iterations {
         loop slice in 0..<4 {
@@ -795,7 +786,7 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
                     input_block[4] = U64{iterations}
                     input_block[5] = U64{2}
                     input_block[6] = U64{0}
-                    if first_block != 0 -> argon2_next_addresses(&address_block, &input_block, &saved)
+                    if first_block != 0 -> argon2_next_addresses(address_block, input_block, saved)
                 }
                 loop index in first_block..<segment_length {
                     position: lane * lane_length + slice * segment_length + index
@@ -804,7 +795,7 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
                         index == 0 -> lane * lane_length + slice * segment_length - 1
                         else -> position - 1
                     }
-                    if data_independent && index %% 128 == 0 -> argon2_next_addresses(&address_block, &input_block, &saved)
+                    if data_independent && index %% 128 == 0 -> argon2_next_addresses(address_block, input_block, saved)
                     random_word: argon2_random_word(memory, address_block, data_independent, index, previous_position * 128)
                     reference_lane: if pass == 0 && slice == 0 -> lane else -> Int.from_u64((random_word >> 32) %% U64{lanes})
                     same_lane: reference_lane == lane
@@ -818,7 +809,7 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
                     start: if pass != 0 && slice != 3 -> (slice + 1) * segment_length else -> 0
                     reference_index: (start + argon2_mapping((random_word).bit_and(U64{0xffffffff}), area)) %% lane_length
                     reference_position: reference_lane * lane_length + reference_index
-                    argon2_fill_block(&memory, &work, &saved, previous_position * 128, reference_position * 128, position * 128, pass != 0)
+                    argon2_fill_block(memory, work, saved, previous_position * 128, reference_position * 128, position * 128, pass != 0)
                 }
             }
         }
@@ -830,7 +821,7 @@ argon2id_raw: fn(password: [U8], salt: [U8], memory_kib: Int, iterations: Int, l
     }
     result_bytes := [U8]{}
     loop word in work {
-        loop b in 0..<8 -> &result_bytes.push(U8{(word >> (b * 8)).bit_and(U64{255})})
+        loop b in 0..<8 -> result_bytes.push(U8{(word >> (b * 8)).bit_and(U64{255})})
     }
     argon2_blake2b_long(result_bytes, out_len)
 }
@@ -846,20 +837,20 @@ load_le64: fn(bytes: [U8], off: Int, end: Int) -> U64 Never! {
 
 argon2_blake2b_long: fn(data: [U8], out_len: Int) -> [U8] Never! {
     prefixed := [U8]{}
-    loop b in le_bytes(out_len, 4) -> &prefixed.push(b)
-    loop b in data -> &prefixed.push(b)
+    loop b in le_bytes(out_len, 4) -> prefixed.push(b)
+    loop b in data -> prefixed.push(b)
     if out_len <= 64 -> return blake2b(prefixed, out_len)
     out := [U8]{}
     value := blake2b(prefixed, 64)
-    loop i in 0..<32 -> &out.push(value[i])
+    loop i in 0..<32 -> out.push(value[i])
     produced := 32
     loop produced + 64 < out_len {
         value = blake2b(value, 64)
-        loop i in 0..<32 -> &out.push(value[i])
+        loop i in 0..<32 -> out.push(value[i])
         produced += 32
     }
     last: blake2b(value, out_len - produced)
-    loop b in last -> &out.push(b)
+    loop b in last -> out.push(b)
     out
 }
 
@@ -885,13 +876,13 @@ argon2_next_addresses: fn(address_block: &[U64], input_block: &[U64], saved: &[U
         address_block[i] = input_block[i]
         saved[i] = input_block[i]
     }
-    argon2_permute(&address_block)
+    argon2_permute(address_block)
     loop i in 0..<128 {
         mixed: (address_block[i]).bit_xor(saved[i])
         address_block[i] = mixed
         saved[i] = mixed
     }
-    argon2_permute(&address_block)
+    argon2_permute(address_block)
     loop i in 0..<128 -> address_block[i] = (address_block[i]).bit_xor(saved[i])
 }
 
@@ -903,7 +894,7 @@ argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], previous: Int
         work[i] = mixed
         if with_xor -> saved[i] = (mixed).bit_xor(memory[next + i]) else -> saved[i] = mixed
     }
-    argon2_permute(&work)
+    argon2_permute(work)
     loop i in 0..<128 -> memory[next + i] = (work[i]).bit_xor(saved[i])
 }
 
@@ -912,23 +903,23 @@ argon2_fill_block: fn(memory: &[U64], work: &[U64], saved: &[U64], previous: Int
 argon2_permute: fn(block: &[U64]) Never! {
     loop i in 0..<8 {
         b: i * 16
-        argon2_round(&block, b, b + 1, b + 2, b + 3, b + 4, b + 5, b + 6, b + 7, b + 8, b + 9, b + 10, b + 11, b + 12, b + 13, b + 14, b + 15)
+        argon2_round(block, b, b + 1, b + 2, b + 3, b + 4, b + 5, b + 6, b + 7, b + 8, b + 9, b + 10, b + 11, b + 12, b + 13, b + 14, b + 15)
     }
     loop i in 0..<8 {
         b: i * 2
-        argon2_round(&block, b, b + 1, b + 16, b + 17, b + 32, b + 33, b + 48, b + 49, b + 64, b + 65, b + 80, b + 81, b + 96, b + 97, b + 112, b + 113)
+        argon2_round(block, b, b + 1, b + 16, b + 17, b + 32, b + 33, b + 48, b + 49, b + 64, b + 65, b + 80, b + 81, b + 96, b + 97, b + 112, b + 113)
     }
 }
 
 argon2_round: fn(v: &[U64], i0: Int, i1: Int, i2: Int, i3: Int, i4: Int, i5: Int, i6: Int, i7: Int, i8: Int, i9: Int, i10: Int, i11: Int, i12: Int, i13: Int, i14: Int, i15: Int) Never! {
-    argon2_g(&v, i0, i4, i8, i12)
-    argon2_g(&v, i1, i5, i9, i13)
-    argon2_g(&v, i2, i6, i10, i14)
-    argon2_g(&v, i3, i7, i11, i15)
-    argon2_g(&v, i0, i5, i10, i15)
-    argon2_g(&v, i1, i6, i11, i12)
-    argon2_g(&v, i2, i7, i8, i13)
-    argon2_g(&v, i3, i4, i9, i14)
+    argon2_g(v, i0, i4, i8, i12)
+    argon2_g(v, i1, i5, i9, i13)
+    argon2_g(v, i2, i6, i10, i14)
+    argon2_g(v, i3, i7, i11, i15)
+    argon2_g(v, i0, i5, i10, i15)
+    argon2_g(v, i1, i6, i11, i12)
+    argon2_g(v, i2, i7, i8, i13)
+    argon2_g(v, i3, i4, i9, i14)
 }
 
 /// BlaMka G: BLAKE2b G with each x + y replaced by
@@ -958,22 +949,22 @@ argon2_g: fn(v: &[U64], ia: Int, ib: Int, ic: Int, id: Int) Never! {
 /// work and message buffers are allocated once per call.
 blake2b: fn(data: [U8], out_len: Int) -> [U8] Never! {
     h := [U64]{}
-    loop word in C_BLAKE2B_IV -> &h.push(U64{word})
+    loop word in C_BLAKE2B_IV -> h.push(U64{word})
     h[0] = (h[0]).bit_xor(U64{(0x01010000).bit_or(out_len)})
     v := [U64]{}
     m := [U64]{}
     loop _ in 0..<16 {
-        &v.push(U64{0})
-        &m.push(U64{0})
+        v.push(U64{0})
+        m.push(U64{0})
     }
     i := 0
     loop i + 128 < data.len() {
-        blake2b_compress(&h, &v, &m, data, i, i + 128, false)
+        blake2b_compress(h, v, m, data, i, i + 128, false)
         i += 128
     }
-    blake2b_compress(&h, &v, &m, data, i, data.len(), true)
+    blake2b_compress(h, v, m, data, i, data.len(), true)
     out := [U8]{}
-    loop k in 0..<out_len -> &out.push(U8{(h[k /% 8] >> ((k %% 8) * 8)).bit_and(U64{255})})
+    loop k in 0..<out_len -> out.push(U8{(h[k /% 8] >> ((k %% 8) * 8)).bit_and(U64{255})})
     out
 }
 
@@ -1184,14 +1175,14 @@ blake2b_compress: fn(h: &[U64], v: &[U64], m: &[U64], data: [U8], start: Int, en
     if last -> v[14] = (v[14]).bit_xor(U64.MAX)
     loop r in 0..<12 {
         base: r * 16
-        blake2b_mix(&v, 0, 4, 8, 12, m[C_BLAKE2B_SIGMA[base]], m[C_BLAKE2B_SIGMA[base + 1]])
-        blake2b_mix(&v, 1, 5, 9, 13, m[C_BLAKE2B_SIGMA[base + 2]], m[C_BLAKE2B_SIGMA[base + 3]])
-        blake2b_mix(&v, 2, 6, 10, 14, m[C_BLAKE2B_SIGMA[base + 4]], m[C_BLAKE2B_SIGMA[base + 5]])
-        blake2b_mix(&v, 3, 7, 11, 15, m[C_BLAKE2B_SIGMA[base + 6]], m[C_BLAKE2B_SIGMA[base + 7]])
-        blake2b_mix(&v, 0, 5, 10, 15, m[C_BLAKE2B_SIGMA[base + 8]], m[C_BLAKE2B_SIGMA[base + 9]])
-        blake2b_mix(&v, 1, 6, 11, 12, m[C_BLAKE2B_SIGMA[base + 10]], m[C_BLAKE2B_SIGMA[base + 11]])
-        blake2b_mix(&v, 2, 7, 8, 13, m[C_BLAKE2B_SIGMA[base + 12]], m[C_BLAKE2B_SIGMA[base + 13]])
-        blake2b_mix(&v, 3, 4, 9, 14, m[C_BLAKE2B_SIGMA[base + 14]], m[C_BLAKE2B_SIGMA[base + 15]])
+        blake2b_mix(v, 0, 4, 8, 12, m[C_BLAKE2B_SIGMA[base]], m[C_BLAKE2B_SIGMA[base + 1]])
+        blake2b_mix(v, 1, 5, 9, 13, m[C_BLAKE2B_SIGMA[base + 2]], m[C_BLAKE2B_SIGMA[base + 3]])
+        blake2b_mix(v, 2, 6, 10, 14, m[C_BLAKE2B_SIGMA[base + 4]], m[C_BLAKE2B_SIGMA[base + 5]])
+        blake2b_mix(v, 3, 7, 11, 15, m[C_BLAKE2B_SIGMA[base + 6]], m[C_BLAKE2B_SIGMA[base + 7]])
+        blake2b_mix(v, 0, 5, 10, 15, m[C_BLAKE2B_SIGMA[base + 8]], m[C_BLAKE2B_SIGMA[base + 9]])
+        blake2b_mix(v, 1, 6, 11, 12, m[C_BLAKE2B_SIGMA[base + 10]], m[C_BLAKE2B_SIGMA[base + 11]])
+        blake2b_mix(v, 2, 7, 8, 13, m[C_BLAKE2B_SIGMA[base + 12]], m[C_BLAKE2B_SIGMA[base + 13]])
+        blake2b_mix(v, 3, 4, 9, 14, m[C_BLAKE2B_SIGMA[base + 14]], m[C_BLAKE2B_SIGMA[base + 15]])
     }
     loop i in 0..<8 -> h[i] = ((h[i]).bit_xor(v[i])).bit_xor(v[i + 8])
 }

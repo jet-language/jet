@@ -158,6 +158,20 @@ JetDriverDocModule: struct {
     app_route_roots: [AppRouteRoot]{[AppRouteRoot]{}}
 }
 
+// The order of a documented item's kind among items of one qualified name:
+// `jet doc` and the semantic index's documentation graph both sort by it.
+jet_driver_doc_kind_rank: fn(kind: String) -> Int Never! {
+    if kind == {
+        "module" -> 0
+        "marker" | "fact" -> 1
+        "protocol" | "trait" | "tag" | "effect" -> 2
+        "struct" | "enum" | "distinct" | "type_alias" | "unit_family" -> 3
+        "field" | "variant" -> 4
+        "function" -> 5
+        else -> 6
+    }
+}
+
 // One Core library source module the host embeds (a CORE_SOURCE_OWNED_ROWS
 // row): a public `source_module` of Prelude/Core.jet, a compiler-private
 // part of Prelude/CoreSourceParts.tsv, or a private runtime unit. `path` is the repository path;
@@ -208,7 +222,7 @@ jet_driver_core_text: fn(text: String) -> Shared<JetDriverCoreText> Never! {
     shared JetDriverCoreText{file: "", reader: None, text: Val(text)}
 }
 
-jet_driver_core_text_file: fn(file: String, ^reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
+jet_driver_core_text_file: fn(file: String, &&reader: JetDriverCoreSourceReader) -> Shared<JetDriverCoreText> Never! {
     shared JetDriverCoreText{file: file, reader: Val(reader), text: None}
 }
 
@@ -258,7 +272,7 @@ JetDriverCompileRequest: struct {
     selected_entry: String?{None}
     profile: String{"dev"}
     // A shipped artifact (`jet build`): sema rejects every remaining `debug`
-    // trace (D-DBG1, E3405), as a release-profile compile does.
+    // trace (E3405), as a release-profile compile does.
     artifact_build: Bool{false}
     capture_build_program: Bool{false}
     capture_build_nodes: Bool{false}
@@ -278,7 +292,7 @@ JetDriverCompileRequest: struct {
     // the provenance `$build.stamp.*` folds. None keeps the default stamp
     // (jet_driver_build_facts).
     build_stamp: BuildStamp?{None}
-    // The `[[build.contribution]]` rows of that lock (D-CONF-SPLIT1): what
+    // The `[[build.contribution]]` rows of that lock: what
     // `build: fn` contributed to declared settings, which
     // jet_driver_build_settings folds over the defaults and profile values.
     build_contributions: [LockedBuildContribution]{[LockedBuildContribution]{}}
@@ -365,8 +379,8 @@ JetDriverSharedBuildInputs: struct {
         permit.value.transport.read_rooted(root, relative, limit)
     }
 }
-jet_driver_shared_build_inputs: fn(transport: ^JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
-    JetDriverSharedBuildInputs{storage: shared JetDriverBuildInputsStorage{transport: ^transport}}
+jet_driver_shared_build_inputs: fn(transport: &&JetDriverBuildInputs) -> JetDriverSharedBuildInputs Never! {
+    JetDriverSharedBuildInputs{storage: shared JetDriverBuildInputsStorage{transport: transport.move()}}
 }
 JetDriverBuildHTTPInputsStorage: struct { transport: JetDriverBuildHTTPInputs }
 JetDriverSharedBuildHTTPInputs: struct {
@@ -380,8 +394,8 @@ JetDriverSharedBuildHTTPInputs: struct {
         permit.value.transport.get(url, addresses, port, timeout_ms, limit)
     }
 }
-jet_driver_shared_build_http_inputs: fn(transport: ^JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
-    JetDriverSharedBuildHTTPInputs{storage: shared JetDriverBuildHTTPInputsStorage{transport: ^transport}}
+jet_driver_shared_build_http_inputs: fn(transport: &&JetDriverBuildHTTPInputs) -> JetDriverSharedBuildHTTPInputs Never! {
+    JetDriverSharedBuildHTTPInputs{storage: shared JetDriverBuildHTTPInputsStorage{transport: transport.move()}}
 }
 JetDriverBuildHTTPResponse: struct {
     status: Int
@@ -490,7 +504,7 @@ JetDriverPackageInfo: struct {
     // (`$build.settings.*`, jet_driver_build_facts).
     settings: [JetDriverPackageSetting]{[JetDriverPackageSetting]{}}
     profile_settings: [JetDriverProfileSetting]{[JetDriverProfileSetting]{}}
-    // `boundaries: { deny: [...] }` (D-STRUCT-EDGE1=A): denied import edges
+    // `boundaries: { deny: [...] }`: denied import edges
     // between this package's modules and any loaded module (Boundaries.jet).
     boundaries: [ImportBoundary]{[ImportBoundary]{}}
 }
@@ -590,6 +604,8 @@ JetDriverLoadResult: struct {
     // The entry package's member files that declare a top-level `run: fn`
     // (Loader.jet `jet_driver_run_member_paths`).
     run_member_paths: [String]{[String]{}}
+    // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal.
+    typed_goals: Bool{false}
 }
 
 // The entry package's written authority policy, for the host's application
@@ -627,6 +643,9 @@ JetDriverCompileResult: struct {
     authority_policy: JetDriverAuthorityPolicy?{None}
     // `JetDriverCompileMode.Doc`: the checked user modules, in load order.
     doc_modules: [JetDriverDocModule]{[JetDriverDocModule]{}}
+    // `JetDriverCompileMode.Check`: a checked body holds a `#Todo` goal, so
+    // `jet check` prints the goal cards from a Doc projection.
+    typed_goals: Bool{false}
     // `JetDriverCompileMode.Doc` that fails after registration: the structure
     // facts the registration graph already proved (Sema
     // `sema_name_structure_facts`), so `jet inspect structure` prints them
@@ -659,6 +678,9 @@ JetDriverCompileResult: struct {
     run_member_paths: [String]{[String]{}}
     // The entry package's `allocator:` policy (jet_driver_entry_allocator).
     allocator: AllocatorPolicy{AllocatorPolicy.HostedDefault}
+    // A compile through assembly: the encoded JetCommandSchema record its
+    // artifact carries (JetSema Registration/CliSchema.jet, spec.md:4675).
+    command_record: [U8]{[U8]{}}
 }
 
 // The `allocator:` policy of the entry package of `load`
@@ -693,7 +715,7 @@ jet_driver_source_segments: fn(path: String, source: String) -> [SemaSourceSegme
     bytes: source.bytes()
     line_starts := [Int]{0}
     loop index in 0..<bytes.len() {
-        if bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
+        if bytes[index] == (U8{10}) -> line_starts.push(index + 1)
     }
     [SemaSourceSegment{generated: Span{start: 0, end: bytes.len()}, source_file: path, source_start: 0, line_starts: line_starts, origin: SemaSourceOrigin.Snapshot}]
 }
@@ -726,8 +748,8 @@ jet_driver_display_path: fn(entry_root: String, path: String) -> String Never! {
     common := 0
     loop common < root_parts.len() && common < path_parts.len() && root_parts[common] == path_parts[common] -> common += 1
     parts := [String]{}
-    loop _ in common..<root_parts.len() -> &parts.push("..")
-    loop index in common..<path_parts.len() -> &parts.push(path_parts[index])
+    loop _ in common..<root_parts.len() -> parts.push("..")
+    loop index in common..<path_parts.len() -> parts.push(path_parts[index])
     parts.join("/")
 }
 
@@ -735,7 +757,7 @@ jet_driver_display_path: fn(entry_root: String, path: String) -> String Never! {
 jet_driver_path_segments: fn(path: String) -> [String] Never! {
     segments := [String]{}
     loop segment in path.split("/").to_list() {
-        if segment.len() > 0 -> &segments.push(segment)
+        if segment.len() > 0 -> segments.push(segment)
     }
     segments
 }
@@ -753,9 +775,9 @@ jet_driver_physical_path: fn(entry_root: String, display: String) -> String Neve
     parts := jet_driver_path_segments(entry_root)
     loop segment in jet_driver_path_segments(display) {
         if segment != ".." {
-            &parts.push(segment)
+            parts.push(segment)
         } else if parts.len() > 0 {
-            _ := &parts.pop()
+            _ := parts.pop()
         }
     }
     joined: parts.join("/")
@@ -787,12 +809,12 @@ jet_driver_row_diagnostic: fn(code: String, span: Span?) -> Diagnostic {
 
 jet_driver_diagnostic_at_source: fn(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic: diagnostic_from_registry(code, span, what, why, fix)
-    diagnostic_with_source_path(^diagnostic, source_path, aggregate_source_offset)
+    diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
 }
 
 jet_driver_lint_diagnostic_at_source: fn(code: String, span: Span?, source_path: String, aggregate_source_offset: Int, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic: diagnostic_from_registry(code, span, what, why, fix)
-    diagnostic_with_source_path(^diagnostic, source_path, aggregate_source_offset)
+    diagnostic_with_source_path(diagnostic, source_path, aggregate_source_offset)
 }
 
 jet_driver_module_index_key: fn(package_identity: String, module_name: String) -> String Never! {
@@ -810,33 +832,33 @@ jet_driver_build_source_index: fn(source_units: [JetDriverSourceUnit]) -> JetDri
         module_key: jet_driver_module_index_key(unit.package_identity, unit.module_name)
         valid := true
         if unit.package_identity.len() == 0 {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no package identity", "module identities must be scoped to the package selected by the loader", "resolve the package identity from its authorized manifest"))
             valid = false
         }
         if unit.module_name.len() == 0 {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no module identity", "every loaded source belongs to one named module", "derive a module name from the checked source path"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no module identity", "every loaded source belongs to one named module", "derive a module name from the checked source path"))
             valid = false
         }
         if unit.path.len() == 0 || unit.relative_path.len() == 0 {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no canonical path", "source identity and diagnostics require a stable path inside one authority root", "supply the canonical path and root-relative path selected by the native authority adapter"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0003", "a source unit has no canonical path", "source identity and diagnostics require a stable path inside one authority root", "supply the canonical path and root-relative path selected by the native authority adapter"))
             valid = false
         }
         if by_identity.get(identity) != None {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the source unit identity is duplicated", "one package path identifies exactly one source unit", "remove the duplicate source unit"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the source unit identity is duplicated", "one package path identifies exactly one source unit", "remove the duplicate source unit"))
             valid = false
         }
         if by_path.get(unit.path) != None {
-            &diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the canonical source path is duplicated", "one path identifies exactly one checked source record", "keep only one source record for this canonical path"))
+            diagnostics.push(jet_driver_diagnostic_without_span("E0105", "the canonical source path is duplicated", "one path identifies exactly one checked source record", "keep only one source record for this canonical path"))
             valid = false
         }
         if valid {
-            _ := &by_identity.add(identity, index)
-            _ := &by_path.add(unit.path, index)
+            _ := by_identity.add(identity, index)
+            _ := by_path.add(unit.path, index)
             if {
                 by_module_name.get(module_key) != None -> {
-                    _ := &ambiguous_module_names.add(module_key, true)
+                    _ := ambiguous_module_names.add(module_key, true)
                 }
-                else -> _ := &by_module_name.add(module_key, index)
+                else -> _ := by_module_name.add(module_key, index)
             }
         }
     }
@@ -920,7 +942,7 @@ jet_driver_package_target_facts: fn(request: JetDriverCompileRequest, package: J
     loop dependency in request.authorized_sources.script_dependencies {
         root: request.authorized_sources.roots[package.root_index]
         if root.identity == request.authorized_sources.entry_root_identity || root.identity == dependency.root_identity {
-            &facts.push(PackageKeyTargetFact{name: "inline:{dependency.name}", value: jet_driver_script_dependency_identity(dependency)})
+            facts.push(PackageKeyTargetFact{name: "inline:{dependency.name}", value: jet_driver_script_dependency_identity(dependency)})
         }
     }
     facts
@@ -942,7 +964,7 @@ jet_driver_package_source_digest: fn(package: JetDriverPackageInfo, request: Jet
     loop unit in source_units {
         if unit.package_identity != package.identity -> next
         source: jet_driver_source_unit_text(request, unit) ?? return None
-        &files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: source})
+        files.push(PackageKeySourceFile{relative_path: unit.relative_path, source: source})
     }
     Val(package_key_source_digest(files, jet_driver_package_manifest_source(package, request.authorized_sources)))
 }
@@ -957,7 +979,7 @@ jet_driver_package_check_key: fn(package: JetDriverPackageInfo, packages: [JetDr
         loop candidate in packages {
             if candidate.root_index != dependency.target_root_index -> next
             digest: interface_digests.get(candidate.identity) ?? return None
-            &dependencies.push(PackageKeyDependency{identity: candidate.identity, interface_digest: digest})
+            dependencies.push(PackageKeyDependency{identity: candidate.identity, interface_digest: digest})
         }
     }
     target: package_key_target_facts_digest(jet_driver_package_target_facts(request, package))

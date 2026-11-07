@@ -13,18 +13,18 @@ cwd: project
 exit: 0
 capture: changed = text file.replace("\"reference\":\"omp@releases#1.0.0\"", "\"reference\":\"omp@releases#0.9.0\"") home/.jet/tools/manifest.json
 write: home/.jet/tools/manifest.json = "{cap:changed}"
-step root_before: jet run snapshot.jet -- {work}/root
+step root_before: jet run --allow=Env,FS.Read snapshot.jet -- {work}/root
 exit: 0
-step home_before: jet run snapshot.jet -- {work}/home
+step home_before: jet run --allow=Env,FS.Read snapshot.jet -- {work}/home
 exit: 0
 step: jetpack hangar list --json --offline --no-color --yes
 cwd: project
 exit: 0
 stderr: empty
-step: jet run snapshot.jet -- {work}/root
+step: jet run --allow=Env,FS.Read snapshot.jet -- {work}/root
 exit: 0
 stdout: == root_before
-step: jet run snapshot.jet -- {work}/home
+step: jet run --allow=Env,FS.Read snapshot.jet -- {work}/home
 exit: 0
 stdout: == home_before
 step: jetpack tool list --no-color

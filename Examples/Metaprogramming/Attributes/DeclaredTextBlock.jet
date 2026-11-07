@@ -1,0 +1,29 @@
+// The library rule owns checking; Jet owns the braces.
+MissingGreeting: struct {
+    impl Diagnostic {
+        what: fn(self) -> String { "checked text does not contain the required phrase" }
+        why: fn(self) -> String { "this block language requires its greeting" }
+        fix: fn(self) -> String { "add `inside checked text` to the block" }
+    }
+}
+
+Checked: struct {
+    impl Marker {
+        sites: [.Block]
+
+        expand: fn(self, target: Target) {
+            if !target.contains("inside checked text") {
+                reject(MissingGreeting{})
+            }
+            fn checked_value() -> String { "checked block" }
+        }
+    }
+}
+
+run: fn() {
+    #Checked {
+        print("inside checked text")
+    }
+    print("outside block")
+    print(checked_value())
+}

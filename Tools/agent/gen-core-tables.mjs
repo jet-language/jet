@@ -140,7 +140,7 @@ function ensureCoreNames() {
 // Jet compiler type-checks the rows; this projection only checks table-level
 // laws (unique receiver/method keys and known laws) and renders the reference
 // tables.
-const OPERATION_ROW = /^CollectionOperationRow\{receivers: CollectionReceivers\.(\w+), name: "(\w+)", minimum_arity: (\d+), maximum_arity: (\d+), access: CollectionAccess\.(\w+), args: \[CollectionArg\]\{([^}]*)\}, result: CollectionResult\.(\w+), op: (.+), law: CollectionLaw\.(\w+), empty: "([^"]*)", status: CollectionStatus\.(\w+)\},?$/;
+const OPERATION_ROW = /^CollectionOperationRow\{receivers: CollectionReceivers\.(\w+), name: "(\w+)", minimum_arity: (\d+), maximum_arity: (\d+), access: CollectionAccess\.(\w+), args: \[CollectionArg\]\{([^}]*)\}, result: CollectionResult\.(\w+), op: (.+), law: CollectionLaw\.(\w+), empty: "([^"]*)", status: CollectionStatus\.(\w+)(?:, stores: true)?\},?$/;
 const LAW_ROW = /^CollectionLawFacts\{law: CollectionLaw\.(\w+), timing: "([^"]*)", result: "([^"]*)", callbacks: "([^"]*)", stop: "([^"]*)", failure: "([^"]*)", buffering: "([^"]*)"\},?$/;
 const RECEIVER_TEXT = {
   List: "`[T]`", Iter: "`Iter<T>`", View: "`View<T>`", Sequence: "`[T]`, `Iter<T>`",

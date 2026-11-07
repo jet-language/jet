@@ -40,7 +40,7 @@ jet_cli_prove_solver: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
             if claimed[index] -> next
             if index != group.entry && !group.files.contains(member.absolute) -> next
             claimed[index] = true
-            &owned.push(member.copy())
+            owned.push(member.copy())
         }
         entry: members[group.entry].path
         front: jet_cli_solver_inputs(jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Check)) ?? return Err(JetCLIProveStop{output: jet_cli_ice("the solver's check compile of `{entry}` failed inside Jet")})
@@ -48,13 +48,13 @@ jet_cli_prove_solver: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMem
             .Refused(output) -> return Err(JetCLIProveStop{output: output.copy()})
             .Checked(found) -> {
                 if found == .Val(inputs) {
-                    loop row in jet_cli_solver_rows(identity, owned, inputs, cwd) -> &rows.push(row)
+                    loop row in jet_cli_solver_rows(identity, owned, inputs, cwd) -> rows.push(row)
                 }
             }
         }
     }
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-    &rows.sort_by((left: JetCLISolverRow, right: JetCLISolverRow) -> jet_cli_solver_row_order(left, right))
+    rows.sort_by((left: JetCLISolverRow, right: JetCLISolverRow) -> jet_cli_solver_row_order(left, right))
     loop index in 0..<rows.len() {
         if index >= JET_CLI_SOLVER_MAX_OBLIGATIONS {
             rows[index].outcome = JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: "structural_limit", steps: 0})
@@ -72,12 +72,12 @@ JetCLISolverFront: enum {
     Refused(output: JetDriverVerbOutput)
 }
 
-jet_cli_solver_inputs: fn(prepared: ^JetCLIPrepared) -> JetCLISolverFront {
-    if ^prepared == {
+jet_cli_solver_inputs: fn(prepared: &&JetCLIPrepared) -> JetCLISolverFront {
+    if prepared.move() == {
         .Refused(output) -> JetCLISolverFront.Refused{output: output}
         .Prepared(request, _) -> {
             front := jet_driver_lowering_inputs(request, None)
-            JetCLISolverFront.Checked{inputs: ^front.inputs}
+            JetCLISolverFront.Checked{inputs: front.inputs.move()}
         }
     }
 }
@@ -90,7 +90,7 @@ jet_cli_solver_obligation_id: fn(identity: JetCLIProveIdentity, kind: String, pa
         "{diagnostic_line_at(source, span.end)}", "{diagnostic_column_at(source, span.end)}",
         formula_sha,
     }
-    loop field in fields -> jet_cli_receipt_frame(&out, field.bytes())
+    loop field in fields -> jet_cli_receipt_frame(out, field.bytes())
     prove_crypto.sha256(out).hex()
 }
 
@@ -111,7 +111,7 @@ jet_cli_solver_rows: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
     callees: JetCLISolverCallees{decls: inputs.decls, names: names}
     files := [String]{}
     loop function in inputs.functions {
-        if !files.contains(function.source_file) -> &files.push(function.source_file.copy())
+        if !files.contains(function.source_file) -> files.push(function.source_file.copy())
     }
     rows := [JetCLISolverRow]{}
     loop member in members {
@@ -121,7 +121,7 @@ jet_cli_solver_rows: fn(identity: JetCLIProveIdentity, members: [JetCLIProveMemb
             loop obligation in jet_cli_solver_obligations(inputs.functions, callees, file, member.source) {
                 formula_sha: if obligation.formula == .Val(formula) -> jet_cli_solver_formula_sha256(formula) else -> ""
                 obligation_id: jet_cli_solver_obligation_id(identity, obligation.kind, member.path, member.source, obligation.span, formula_sha)
-                &rows.push(JetCLISolverRow{
+                rows.push(JetCLISolverRow{
                     obligation: obligation,
                     path: member.path.copy(),
                     line: diagnostic_line_at(member.source, obligation.span.start),
@@ -144,7 +144,7 @@ jet_cli_solver_absolute: fn(file: String, cwd: String) -> String Never! {
     joined: if file.starts_with("/") -> file.copy() else -> "{cwd}/{file}"
     parts := [String]{}
     loop part in joined.split("/").to_list() {
-        if part != "" && part != "." -> &parts.push(part)
+        if part != "" && part != "." -> parts.push(part)
     }
     "/{parts.join("/")}"
 }

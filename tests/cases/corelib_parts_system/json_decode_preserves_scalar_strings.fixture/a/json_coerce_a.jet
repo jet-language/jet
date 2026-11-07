@@ -1,0 +1,10 @@
+
+use json: core.encoding.json
+run: fn() {
+    data: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
+    if data == .Object(_) {
+        if (data.field("port") ?? Dyn.Null) == .Text(text) {
+            print(text)
+        }
+    }
+}

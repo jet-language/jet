@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Build, as library Jet: an append-only log with fsync and crash-safe recovery; a key-value store over it with a compaction step; a bounded connection pool with health checks; a durable queue with consumer groups and at-least-once delivery; and a content-addressed cache. Use Examples/features/io/files.jet, byte_buffer.jet, db*.jet, stream.jet, concurrency/**. Crash the process mid-write (kill it) and prove recovery.
+Build, as library Jet: an append-only log with fsync and crash-safe recovery; a key-value store over it with a compaction step; a bounded connection pool with health checks; a durable queue with consumer groups and at-least-once delivery; and a content-addressed cache. Use Examples/Systems/Files/Files.jet, byte_buffer.jet, db*.jet, stream.jet, concurrency/**. Crash the process mid-write (kill it) and prove recovery.
 
 ## Answer these
 

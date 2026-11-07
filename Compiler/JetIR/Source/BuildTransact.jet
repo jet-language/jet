@@ -47,45 +47,45 @@ ir_transaction_row: fn(m: &IRModule) -> Int Never! {
         // The function key is its symbol, so x64 resolves the row's drop
         // symbol to this module function.
         id: m.functions.len()
-        &m.functions.push(ir_function_new("transaction.drop", symbol, symbol, "", 0))
-        name_rows_set(&m.function_rows, symbol, id)
+        m.functions.push(ir_function_new("transaction.drop", symbol, symbol, "", 0))
+        name_rows_set(m.function_rows, symbol, id)
         a := ir_builder_new(m.functions[id].copy())
-        ir_transaction_drop_body(&m, &a)
-        m.functions[id] = ^a.f
+        ir_transaction_drop_body(m, a)
+        m.functions[id] = a.f.move()
     }
     ty: Type.Named{name: "Transaction"}
-    ir_intern_type(&m, "Transaction", ir_owned_layout(IRTypeKind.Pointer, ty, symbol, ""))
+    ir_intern_type(m, "Transaction", ir_owned_layout(IRTypeKind.Pointer, ty, symbol, ""))
 }
 
 ir_stm_row: fn(m: &IRModule) -> Int Never! {
     ty: Type.Named{name: "Stm"}
-    ir_intern_type(&m, "Stm", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_stm_rollback", ""))
+    ir_intern_type(m, "Stm", ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_stm_rollback", ""))
 }
 
 // Drop glue of a Transaction: the chosen list runs, the other is released
 // un-run, and the box is freed. A null handle (one an early exit already
 // dropped) is nothing.
 ir_transaction_drop_body: fn(m: &IRModule, a: &IRBuilder) Never! {
-    pointer_row: ir_pointer_row(&m)
-    handle: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "handle"))
-    live: ir_option_is_some(&m, &a, handle)
-    ir_open_if(&a.f, live, a.line)
-    committed: ir_load_word(&m, &a, handle, 0)
-    commit_hooks: ir_load_word(&m, &a, handle, 8)
-    rollback_hooks: ir_load_word(&m, &a, handle, 16)
-    zero: ir_word_const(&m, &a, 0)
-    clean: ir_bool_op(&m, &a, IROp.Ne, committed, zero)
-    ir_open_if(&a.f, clean, a.line)
-    ir_transaction_walk(&m, &a, commit_hooks, true, false)
-    ir_transaction_walk(&m, &a, rollback_hooks, false, false)
-    ir_else(&a.f, a.line)
-    ir_transaction_walk(&m, &a, rollback_hooks, true, true)
-    ir_transaction_walk(&m, &a, commit_hooks, false, false)
-    ir_end(&a.f, a.line)
-    size: ir_word_const(&m, &a, 24)
-    ir_free(&m, &a, handle, size)
-    ir_end(&a.f, a.line)
-    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    pointer_row: ir_pointer_row(m)
+    handle: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "handle"))
+    live: ir_option_is_some(m, a, handle)
+    ir_open_if(a.f, live, a.line)
+    committed: ir_load_word(m, a, handle, 0)
+    commit_hooks: ir_load_word(m, a, handle, 8)
+    rollback_hooks: ir_load_word(m, a, handle, 16)
+    zero: ir_word_const(m, a, 0)
+    clean: ir_bool_op(m, a, IROp.Ne, committed, zero)
+    ir_open_if(a.f, clean, a.line)
+    ir_transaction_walk(m, a, commit_hooks, true, false)
+    ir_transaction_walk(m, a, rollback_hooks, false, false)
+    ir_else(a.f, a.line)
+    ir_transaction_walk(m, a, rollback_hooks, true, true)
+    ir_transaction_walk(m, a, commit_hooks, false, false)
+    ir_end(a.f, a.line)
+    size: ir_word_const(m, a, 24)
+    ir_free(m, a, handle, size)
+    ir_end(a.f, a.line)
+    ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
 }
 
 // Walks the hook list from `head`: each node's callback runs (when `run`) and
@@ -95,47 +95,47 @@ ir_transaction_drop_body: fn(m: &IRModule, a: &IRBuilder) Never! {
 // deadline, and a failure in it is reported as a secondary failure, so the
 // call has no stop check and the walk goes on to the next hook.
 ir_transaction_walk: fn(m: &IRModule, a: &IRBuilder, head: Int, run: Bool, guarded: Bool) Never! {
-    node: ir_temp_like(&m, &a, head)
-    ir_emit(&a.f, IROp.Copy, node, head, -1, -1, a.line)
-    exit: ir_open(&a.f, IROp.Block, a.line)
-    _: ir_open(&a.f, IROp.Loop, a.line)
-    more: ir_option_is_some(&m, &a, node)
-    ir_exit_unless(&m, &a, more, exit)
-    boxed: ir_load_word(&m, &a, node, 0)
+    node: ir_temp_like(m, a, head)
+    ir_emit(a.f, IROp.Copy, node, head, -1, -1, a.line)
+    exit: ir_open(a.f, IROp.Block, a.line)
+    _: ir_open(a.f, IROp.Loop, a.line)
+    more: ir_option_is_some(m, a, node)
+    ir_exit_unless(m, a, more, exit)
+    boxed: ir_load_word(m, a, node, 0)
     if run && guarded {
-        word_row: ir_word_row(&m)
-        frame: ir_runtime(&m, &a, "jet_rt_transaction_hook_enter", [Int]{}, word_row)
+        word_row: ir_word_row(m)
+        frame: ir_runtime(m, a, "jet_rt_transaction_hook_enter", [Int]{}, word_row)
         stopping: a.stopping
         a.stopping = true
-        ir_transaction_hook_call(&m, &a, node, boxed)
+        ir_transaction_hook_call(m, a, node, boxed)
         a.stopping = stopping
-        _: ir_runtime(&m, &a, "jet_rt_transaction_hook_leave", [Int]{frame}, -1)
+        _: ir_runtime(m, a, "jet_rt_transaction_hook_leave", [Int]{frame}, -1)
     } else if run {
-        ir_transaction_hook_call(&m, &a, node, boxed)
+        ir_transaction_hook_call(m, a, node, boxed)
     }
-    following: ir_load_word(&m, &a, node, 8)
-    ir_closure_unref(&m, &a, boxed)
-    size: ir_word_const(&m, &a, 24)
-    ir_free(&m, &a, node, size)
-    ir_emit(&a.f, IROp.Copy, node, following, -1, -1, a.line)
-    ir_emit(&a.f, IROp.Br, -1, 0, -1, -1, a.line)
-    ir_end(&a.f, a.line)
-    ir_end(&a.f, a.line)
+    following: ir_load_word(m, a, node, 8)
+    ir_closure_unref(m, a, boxed)
+    size: ir_word_const(m, a, 24)
+    ir_free(m, a, node, size)
+    ir_emit(a.f, IROp.Copy, node, following, -1, -1, a.line)
+    ir_emit(a.f, IROp.Br, -1, 0, -1, -1, a.line)
+    ir_end(a.f, a.line)
+    ir_end(a.f, a.line)
 }
 
 // Runs the callback `boxed` of hook `node`: through the node's result runner
 // when it has one, else directly with no result.
 ir_transaction_hook_call: fn(m: &IRModule, a: &IRBuilder, node: Int, boxed: Int) Never! {
-    runner: ir_load_word(&m, &a, node, 16)
-    zero: ir_word_const(&m, &a, 0)
-    has_runner: ir_bool_op(&m, &a, IROp.Ne, runner, zero)
-    ir_open_if(&a.f, has_runner, a.line)
-    start: ir_args(&a.f, [Int]{boxed})
-    ir_emit(&a.f, IROp.CallIndirect, -1, runner, start, 1, a.line)
-    ir_stop_check(&m, &a)
-    ir_else(&a.f, a.line)
-    _: ir_call_closure(&m, &a, boxed, [Int]{}, -1)
-    ir_end(&a.f, a.line)
+    runner: ir_load_word(m, a, node, 16)
+    zero: ir_word_const(m, a, 0)
+    has_runner: ir_bool_op(m, a, IROp.Ne, runner, zero)
+    ir_open_if(a.f, has_runner, a.line)
+    start: ir_args(a.f, [Int]{boxed})
+    ir_emit(a.f, IROp.CallIndirect, -1, runner, start, 1, a.line)
+    ir_stop_check(m, a)
+    ir_else(a.f, a.line)
+    _: ir_call_closure(m, a, boxed, [Int]{}, -1)
+    ir_end(a.f, a.line)
 }
 
 // The result runner of hook callbacks returning row `row` (a fallible
@@ -147,14 +147,14 @@ ir_transaction_hook_runner: fn(m: &IRModule, row: Int) -> Int Never! {
     known: name_rows_value(m.function_rows, key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
-    &m.functions.push(ir_hashed_function("transaction.hook.run", key, "jet_ir_transaction_hook_run_", "", 0))
-    name_rows_set(&m.function_rows, key, id)
+    m.functions.push(ir_hashed_function("transaction.hook.run", key, "jet_ir_transaction_hook_run_", "", 0))
+    name_rows_set(m.function_rows, key, id)
     a := ir_builder_new(m.functions[id].copy())
-    boxed: ir_new_slot(&a, ir_pointer_row(&m), IRSlotKind.Param, ir_intern_name(&m, "boxed"))
-    result: ir_call_closure(&m, &a, boxed, [Int]{}, row)
-    ir_emit(&a.f, IROp.Drop, -1, result, -1, -1, a.line)
-    ir_emit(&a.f, IROp.Return, -1, -1, -1, -1, a.line)
-    m.functions[id] = ^a.f
+    boxed: ir_new_slot(a, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "boxed"))
+    result: ir_call_closure(m, a, boxed, [Int]{}, row)
+    ir_emit(a.f, IROp.Drop, -1, result, -1, -1, a.line)
+    ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
+    m.functions[id] = a.f.move()
     id
 }
 
@@ -162,50 +162,50 @@ ir_transaction_hook_runner: fn(m: &IRModule, row: Int) -> Int Never! {
 // are taken, the body runs; its clean end commits the handle and the Stm,
 // and the scope's end drops them (the handle's drop runs the commit hooks).
 ir_transact: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snapshots: [TTransactionSnapshot], stm: TLocal?, body: [Int], span: Span) Never! {
-    ir_scope_open(&b)
+    ir_scope_open(b)
     handle_slot := -1
     if handle == .Val(local) {
-        row: ir_transaction_row(&m)
-        size: ir_word_const(&m, &b, 24)
-        align: ir_word_const(&m, &b, 8)
-        boxed: ir_runtime(&m, &b, "jet_rt_alloc", [Int]{size, align}, row)
-        zero: ir_word_const(&m, &b, 0)
-        ir_emit(&b.f, IROp.Store, -1, boxed, 0, zero, b.line)
-        ir_emit(&b.f, IROp.Store, -1, boxed, 8, zero, b.line)
-        ir_emit(&b.f, IROp.Store, -1, boxed, 16, zero, b.line)
-        ir_bind_local(&m, p, &b, local, boxed, span)
-        binding: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction {local.name} without its binding")
+        row: ir_transaction_row(m)
+        size: ir_word_const(m, b, 24)
+        align: ir_word_const(m, b, 8)
+        boxed: ir_runtime(m, b, "jet_rt_alloc", [Int]{size, align}, row)
+        zero: ir_word_const(m, b, 0)
+        ir_emit(b.f, IROp.Store, -1, boxed, 0, zero, b.line)
+        ir_emit(b.f, IROp.Store, -1, boxed, 8, zero, b.line)
+        ir_emit(b.f, IROp.Store, -1, boxed, 16, zero, b.line)
+        ir_bind_local(m, p, b, local, boxed, span)
+        binding: ir_lookup_local(b, local) ?? return ir_fail(b, span, "transaction {local.name} without its binding")
         handle_slot = binding.slot
     }
     stm_slot := -1
     if stm != None {
-        stm_row: ir_stm_row(&m)
-        state: ir_runtime(&m, &b, "jet_rt_native_stm_begin", [Int]{}, stm_row)
+        stm_row: ir_stm_row(m)
+        state: ir_runtime(m, b, "jet_rt_native_stm_begin", [Int]{}, stm_row)
         local: checked_generated_local("jet_stm_{b.f.slot_type.len()}", span, m.types[stm_row].ty.copy())
-        ir_bind_local(&m, p, &b, local, state, span)
-        binding: ir_lookup_local(b, local) ?? return ir_fail(&b, span, "transaction Stm without its binding")
+        ir_bind_local(m, p, b, local, state, span)
+        binding: ir_lookup_local(b, local) ?? return ir_fail(b, span, "transaction Stm without its binding")
         stm_slot = binding.slot
     }
     saved := [IRTxSnapshot]{}
     loop snapshot in snapshots {
-        taken: ir_tx_snapshot(&m, p, &b, snapshot, span) ?? return
-        &saved.push(taken)
+        taken: ir_tx_snapshot(m, p, b, snapshot, span) ?? return
+        saved.push(taken)
     }
     if saved.len() > 0 -> b.program = Val(p.copy())
-    &b.transactions.push(IRTxFrame{handle: handle_slot, stm: stm_slot, snapshots: saved, loops: b.loops.len(), shield: false, deadline: -1})
-    ir_stmts(&m, p, &b, body)
-    _: &b.transactions.pop()
+    b.transactions.push(IRTxFrame{handle: handle_slot, stm: stm_slot, snapshots: saved, loops: b.loops.len(), shield: false, deadline: -1})
+    ir_stmts(m, p, b, body)
+    _: b.transactions.pop()
     if ir_failed(b) -> return
     if handle_slot >= 0 {
-        one: ir_word_const(&m, &b, 1)
-        ir_emit(&b.f, IROp.Store, -1, handle_slot, 0, one, b.line)
+        one: ir_word_const(m, b, 1)
+        ir_emit(b.f, IROp.Store, -1, handle_slot, 0, one, b.line)
     }
     if stm_slot >= 0 {
-        _: ir_runtime(&m, &b, "jet_rt_native_stm_commit", [Int]{stm_slot}, -1)
+        _: ir_runtime(m, b, "jet_rt_native_stm_commit", [Int]{stm_slot}, -1)
         // The commit consumed the state: the scope-end drop sees null.
-        ir_emit(&b.f, IROp.Const, stm_slot, 0, -1, -1, b.line)
+        ir_emit(b.f, IROp.Const, stm_slot, 0, -1, -1, b.line)
     }
-    ir_scope_close(&m, &b)
+    ir_scope_close(m, b)
 }
 
 // `#Shield { .. }`: the body runs inside the session's nesting Shield depth,
@@ -213,14 +213,14 @@ ir_transact: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle: TLocal?, snap
 // (ir_tx_unwind); stop points inside it are masked and leaving it delivers
 // what arrived meanwhile.
 ir_shield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
-    _: ir_runtime(&m, &b, "jet_rt_session_shield_enter", [Int]{}, -1)
-    &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true, deadline: -1})
-    ir_scope_open(&b)
-    ir_stmts(&m, p, &b, body)
+    _: ir_runtime(m, b, "jet_rt_session_shield_enter", [Int]{}, -1)
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: true, deadline: -1})
+    ir_scope_open(b)
+    ir_stmts(m, p, b, body)
     if ir_failed(b) -> return
-    ir_scope_close(&m, &b)
-    _: &b.transactions.pop()
-    _: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+    ir_scope_close(m, b)
+    _: b.transactions.pop()
+    _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
 }
 
 // `#Live { .. }`: the body runs with stdin in unbuffered, no-echo mode
@@ -228,17 +228,17 @@ ir_shield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
 // its bindings drop, or by an early exit (ir_tx_unwind) or a stop edge
 // (ir_stop_return, ir_stop_catches).
 ir_live: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
-    raw: ir_temp(&m, &b, bool_row)
-    ir_emit(&b.f, IROp.Const, raw, 1, -1, -1, b.line)
-    _: ir_runtime(&m, &b, "jet_term_mode_enter", [Int]{raw}, bool_row)
-    &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, terminal: true})
-    ir_scope_open(&b)
-    ir_stmts(&m, p, &b, body)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    raw: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, raw, 1, -1, -1, b.line)
+    _: ir_runtime(m, b, "jet_term_mode_enter", [Int]{raw}, bool_row)
+    b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: -1, terminal: true})
+    ir_scope_open(b)
+    ir_stmts(m, p, b, body)
     if ir_failed(b) -> return
-    ir_scope_close(&m, &b)
-    _: &b.transactions.pop()
-    _: ir_runtime(&m, &b, "jet_term_mode_leave", [Int]{}, -1)
+    ir_scope_close(m, b)
+    _: b.transactions.pop()
+    _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
 }
 
 // `#Context(field: value, …) { .. }`: the guard values run in order; a
@@ -250,71 +250,71 @@ ir_live: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, body: [Int]) Never! {
 ir_context_block: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, guards: [BodyContextGuard], body: [Int]) Never! {
     save := -1
     loop guard in guards {
-        value: ir_expr(&m, p, &b, guard.value)
+        value: ir_expr(m, p, b, guard.value)
         if ir_failed(b) || value < 0 -> return
         if guard.field != "deadline" || save >= 0 {
-            ir_release(&m, &b, value)
+            ir_release(m, b, value)
             next
         }
-        word_row: ir_word_row(&m)
-        deadline: if m.types[b.f.slot_type[value]].kind == .Int -> ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row) else -> value
-        if deadline != value -> ir_release(&m, &b, value)
-        pointer_row: ir_pointer_row(&m)
-        save = ir_temp(&m, &b, pointer_row)
-        ir_emit(&b.f, IROp.StackAddress, save, 16, 8, -1, b.line)
-        _: ir_runtime(&m, &b, "jet_ctx_push_deadline", [Int]{deadline, save}, -1)
+        word_row: ir_word_row(m)
+        deadline: if m.types[b.f.slot_type[value]].kind == .Int -> ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row) else -> value
+        if deadline != value -> ir_release(m, b, value)
+        pointer_row: ir_pointer_row(m)
+        save = ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.StackAddress, save, 16, 8, -1, b.line)
+        _: ir_runtime(m, b, "jet_ctx_push_deadline", [Int]{deadline, save}, -1)
     }
-    if save >= 0 -> &b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save})
-    ir_scope_open(&b)
-    ir_stmts(&m, p, &b, body)
+    if save >= 0 -> b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: b.loops.len(), shield: false, deadline: save})
+    ir_scope_open(b)
+    ir_stmts(m, p, b, body)
     if ir_failed(b) -> return
-    ir_scope_close(&m, &b)
+    ir_scope_close(m, b)
     if save < 0 -> return
-    _: &b.transactions.pop()
-    _: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{save}, -1)
+    _: b.transactions.pop()
+    _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{save}, -1)
 }
 
 // Saves the entry value of `snapshot.local` in a generated variable: its
 // Rollback `snapshot` result, else an owned copy.
 ir_tx_snapshot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransactionSnapshot, span: Span) -> IRTxSnapshot? Never! {
     binding: ir_lookup_local(b, snapshot.local) ?? {
-        ir_fail(&b, span, "transaction snapshot of unknown local {snapshot.local.name}")
+        ir_fail(b, span, "transaction snapshot of unknown local {snapshot.local.name}")
         return None
     }
     value_row: if binding.indirect >= 0 -> binding.indirect else -> b.f.slot_type[binding.slot]
     ty: m.types[value_row].ty.copy()
     saved_ty := ty.copy()
     value := -1
-    rollback: if snapshot.rollback_type == .Val(written) -> Val(ir_fact(p, &b, written, span)) else -> Type?{None}
+    rollback: if snapshot.rollback_type == .Val(written) -> Val(ir_fact(p, b, written, span)) else -> Type?{None}
     if ir_failed(b) -> return None
     if rollback == .Val(owner) {
         method: snapshot.snapshot_method ?? {
-            ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
+            ir_fail(b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
             return None
         }
-        call: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [BodyCallArg]{}, span)
+        call: ir_tx_method_expr(p, b, snapshot.local, owner, method, [BodyCallArg]{}, span)
         if ir_untag(ir_ty(p, b, call)) == .Result(ok, error) {
             saved_ty = ok.copy()
             // A `Never` failure is uninhabited whatever the enclosing rail.
             conversion: if ir_never_type(ir_untag(error)) -> TTryConvert.Never else -> TTryConvert.NoConversion
             failure: b.failure.copy()
-            checked: ir_node(&b, ok, NodeKind.Try{value: call, conversion: conversion, failure: failure}, span)
-            value = ir_expr(&m, p, &b, checked)
+            checked: ir_node(b, ok, NodeKind.Try{value: call, conversion: conversion, failure: failure}, span)
+            value = ir_expr(m, p, b, checked)
         } else {
             saved_ty = ir_ty(p, b, call).copy()
-            value = ir_expr(&m, p, &b, call)
+            value = ir_expr(m, p, b, call)
         }
     } else {
-        current: ir_read_binding(&m, &b, binding)
-        value = ir_copy_value(&m, p, &b, current, span)
+        current: ir_read_binding(m, b, binding)
+        value = ir_copy_value(m, p, b, current, span)
     }
     if ir_failed(b) -> return None
     if value < 0 {
-        ir_fail(&b, span, "transaction snapshot of {snapshot.local.name} without a value")
+        ir_fail(b, span, "transaction snapshot of {snapshot.local.name} without a value")
         return None
     }
     saved: checked_generated_local("jet_txn_snapshot_{value}", span, m.types[b.f.slot_type[value]].ty.copy())
-    ir_bind_local(&m, p, &b, saved, value, span)
+    ir_bind_local(m, p, b, saved, value, span)
     Val(IRTxSnapshot{local: snapshot.local, ty: ty, saved: saved, saved_ty: saved_ty, rollback: rollback, restore: snapshot.restore_method})
 }
 
@@ -325,23 +325,23 @@ ir_tx_method_expr: fn(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, m
     if ir_function_row(p, method.symbol.key) == .Val(row) {
         ret = p.functions[row].ret ?? Type.Named{name: "Unit"}
     }
-    receiver: ir_node(&b, owner, NodeKind.Local{local: local}, span)
-    ir_node(&b, ret, NodeKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span)
+    receiver: ir_node(b, owner, NodeKind.Local{local: local}, span)
+    ir_node(b, ret, NodeKind.MethodCall{receiver: receiver, method: method, type_args: [Type]{}, args: args}, span)
 }
 
 // Puts the saved value back.
 ir_tx_restore: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: IRTxSnapshot, span: Span) Never! {
-    saved: ir_node(&b, snapshot.saved_ty, NodeKind.Local{local: snapshot.saved}, span)
+    saved: ir_node(b, snapshot.saved_ty, NodeKind.Local{local: snapshot.saved}, span)
     if snapshot.rollback == .Val(owner) {
-        method: snapshot.restore ?? return ir_fail(&b, span, "transaction rollback of {snapshot.local.name} without Rollback::restore")
+        method: snapshot.restore ?? return ir_fail(b, span, "transaction rollback of {snapshot.local.name} without Rollback::restore")
         argument: BodyCallArg{value: saved, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
-        call: ir_tx_method_expr(p, &b, snapshot.local, owner, method, [BodyCallArg]{argument}, span)
-        result: ir_expr(&m, p, &b, call)
-        ir_release(&m, &b, result)
+        call: ir_tx_method_expr(p, b, snapshot.local, owner, method, [BodyCallArg]{argument}, span)
+        result: ir_expr(m, p, b, call)
+        ir_release(m, b, result)
         return
     }
-    restore: ir_stmt_node(&b, StmtKind.Assign{place: BodyPlace.Local{local: snapshot.local}, op: None, value: saved, line: 0, span: span})
-    ir_stmt(&m, p, &b, restore)
+    restore: ir_stmt_node(b, StmtKind.Assign{place: BodyPlace.Local{local: snapshot.local}, op: None, value: saved, line: 0, span: span})
+    ir_stmt(m, p, b, restore)
 }
 
 // An early exit leaving the transactions opened inside `loops` open loops
@@ -359,18 +359,18 @@ ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Sp
         if frame.loops >= loops {
             position := frame.snapshots.len() - 1
             loop position >= 0 {
-                ir_tx_restore(&m, p, &b, frame.snapshots[position], span)
+                ir_tx_restore(m, p, b, frame.snapshots[position], span)
                 position -= 1
             }
             if frame.stm >= 0 {
-                ir_emit(&b.f, IROp.Drop, -1, frame.stm, -1, -1, b.line)
-                ir_emit(&b.f, IROp.Const, frame.stm, 0, -1, -1, b.line)
+                ir_emit(b.f, IROp.Drop, -1, frame.stm, -1, -1, b.line)
+                ir_emit(b.f, IROp.Const, frame.stm, 0, -1, -1, b.line)
             }
             if frame.handle >= 0 {
-                ir_emit(&b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
-                ir_emit(&b.f, IROp.Const, frame.handle, 0, -1, -1, b.line)
+                ir_emit(b.f, IROp.Drop, -1, frame.handle, -1, -1, b.line)
+                ir_emit(b.f, IROp.Const, frame.handle, 0, -1, -1, b.line)
             }
-            ir_tx_leave_scopes(&m, &b, frame)
+            ir_tx_leave_scopes(m, b, frame)
         }
         index -= 1
     }
@@ -382,19 +382,19 @@ ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Sp
 // stack frame and the replaced terminal mode.
 ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.shield {
-        _: ir_runtime(&m, &b, "jet_rt_session_shield_leave", [Int]{}, -1)
+        _: ir_runtime(m, b, "jet_rt_session_shield_leave", [Int]{}, -1)
     }
     if frame.deadline >= 0 {
-        _: ir_runtime(&m, &b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
+        _: ir_runtime(m, b, "jet_ctx_pop_deadline", [Int]{frame.deadline}, -1)
     }
     if frame.sentry >= 0 {
-        _: ir_runtime(&m, &b, "jet_rt_sentry_scope_leave", [Int]{frame.sentry}, -1)
+        _: ir_runtime(m, b, "jet_rt_sentry_scope_leave", [Int]{frame.sentry}, -1)
     }
     if frame.sentry_frame >= 0 {
-        _: ir_runtime(&m, &b, "jet_rt_sentry_frame_leave", [Int]{frame.sentry_frame}, -1)
+        _: ir_runtime(m, b, "jet_rt_sentry_frame_leave", [Int]{frame.sentry_frame}, -1)
     }
     if frame.terminal {
-        _: ir_runtime(&m, &b, "jet_term_mode_leave", [Int]{}, -1)
+        _: ir_runtime(m, b, "jet_term_mode_leave", [Int]{}, -1)
     }
 }
 
@@ -416,7 +416,7 @@ ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
     frames: b.transactions
     index := frames.len() - 1
     loop index >= base {
-        ir_tx_leave_scopes(&m, &b, frames[index])
+        ir_tx_leave_scopes(m, b, frames[index])
         index -= 1
     }
 }
@@ -425,23 +425,23 @@ ir_tx_leave_sentries: fn(m: &IRModule, b: &IRBuilder, base: Int) Never! {
 // check it, a memoized body files it (ir_memo_file), then it leaves the open
 // transactions, taken before their snapshots are restored.
 ir_return_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, span: Span) Never! {
-    ir_contract_return(&m, p, &b, slot, span)
+    ir_contract_return(m, p, b, slot, span)
     if ir_failed(b) -> return
-    ir_memo_file(&m, p, &b, slot, span)
+    ir_memo_file(m, p, b, slot, span)
     if ir_failed(b) -> return
     kept := slot
     if b.transactions.len() > 0 && slot >= 0 && !b.fresh[slot] && ir_kind_of(m, b, slot) != .Aggregate {
         if ir_box_row(m, b.f.slot_type[slot]) {
             // A box's copy is one more owner (its Copy only aliases).
             slot_row: b.f.slot_type[slot]
-            kept = ir_clone(&m, &b, slot, slot_row)
+            kept = ir_clone(m, b, slot, slot_row)
         } else {
-            kept = ir_temp_like(&m, &b, slot)
-            ir_emit(&b.f, IROp.Copy, kept, slot, -1, -1, b.line)
+            kept = ir_temp_like(m, b, slot)
+            ir_emit(b.f, IROp.Copy, kept, slot, -1, -1, b.line)
         }
     }
-    ir_tx_unwind(&m, p, &b, 0, span)
-    ir_emit_return(&m, &b, kept)
+    ir_tx_unwind(m, p, b, 0, span)
+    ir_emit_return(m, b, kept)
 }
 
 // A `break`/`next` to the loop whose exit Block is `exit`: the transactions
@@ -452,7 +452,7 @@ ir_tx_unwind_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span
     loop (index, frame) in b.loops {
         if frame.exit == exit -> depth = index + 1
     }
-    if depth > 0 -> ir_tx_unwind(&m, p, &b, depth, span)
+    if depth > 0 -> ir_tx_unwind(m, p, b, depth, span)
 }
 
 // `name.on_commit(f)` / `name.on_rollback(f)`: the callback's closure box
@@ -460,29 +460,29 @@ ir_tx_unwind_loop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, exit: Int, span
 // (ir_transaction_hook_runner) of a callback whose result has a drop, else
 // none.
 ir_transaction_hook: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, handle_name: String, executable: BodyLambda, commit: Bool, span: Span) -> Int Never! {
-    binding: ir_lookup_binding(b, handle_name) ?? return ir_fail_slot(&b, span, "transaction hook without the handle {handle_name}")
+    binding: ir_lookup_binding(b, handle_name) ?? return ir_fail_slot(b, span, "transaction hook without the handle {handle_name}")
     closure_ty: ir_lambda_function_type(executable)
-    env: ir_lambda(&m, p, &b, closure_ty, executable, span)
+    env: ir_lambda(m, p, b, closure_ty, executable, span)
     if ir_failed(b) || env < 0 -> return -1
-    pointer_row: ir_pointer_row(&m)
-    runner := ir_word_const(&m, &b, 0)
+    pointer_row: ir_pointer_row(m)
+    runner := ir_word_const(m, b, 0)
     if executable.ret == .Val(ret) {
         if !ir_unit_type(ret) && !ir_never_type(ret) {
-            result_row: ir_value_type(&m, p, ret) ?? return ir_type_fail(&b, span, ret)
+            result_row: ir_value_type(m, p, ret) ?? return ir_type_fail(b, span, ret)
             if m.types[result_row].drop != "" {
-                id: ir_transaction_hook_runner(&m, result_row)
-                runner = ir_temp(&m, &b, pointer_row)
-                ir_emit(&b.f, IROp.FunctionAddress, runner, id, -1, -1, b.line)
+                id: ir_transaction_hook_runner(m, result_row)
+                runner = ir_temp(m, b, pointer_row)
+                ir_emit(b.f, IROp.FunctionAddress, runner, id, -1, -1, b.line)
             }
         }
     }
     offset: if commit -> 8 else -> 16
-    node: ir_box_alloc(&m, &b, 24, pointer_row)
-    ir_emit(&b.f, IROp.Store, -1, node, 0, env, b.line)
-    head: ir_load_word(&m, &b, binding.slot, offset)
-    ir_emit(&b.f, IROp.Store, -1, node, 8, head, b.line)
-    ir_emit(&b.f, IROp.Store, -1, node, 16, runner, b.line)
-    ir_emit(&b.f, IROp.Store, -1, binding.slot, offset, node, b.line)
+    node: ir_box_alloc(m, b, 24, pointer_row)
+    ir_emit(b.f, IROp.Store, -1, node, 0, env, b.line)
+    head: ir_load_word(m, b, binding.slot, offset)
+    ir_emit(b.f, IROp.Store, -1, node, 8, head, b.line)
+    ir_emit(b.f, IROp.Store, -1, node, 16, runner, b.line)
+    ir_emit(b.f, IROp.Store, -1, binding.slot, offset, node, b.line)
     b.fresh[env] = false
     b.fresh[node] = false
     return -1

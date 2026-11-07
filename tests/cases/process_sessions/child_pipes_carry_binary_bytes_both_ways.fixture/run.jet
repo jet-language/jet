@@ -5,7 +5,7 @@ use process: core.process
 round_trip: fn() {
     child: process.cmd([String]{"cat"}).stdin(.Stream).stdout(.Stream).spawn() ?? panic("spawn failed")
     all := [U8]{}
-    loop value in 0..<256 { &all.push(U8{value}) }
+    loop value in 0..<256 { all.push(U8{value}) }
     taken: child.stdin.write([U8]{U8{0}, U8{255}}) ?? panic("write failed")
     print("write took {taken}")
     child.stdin.write_all(all) ?? panic("write_all failed")
@@ -16,11 +16,11 @@ round_trip: fn() {
     received := [U8]{}
     loop chunk in child.stdout.chunks(100) {
         if chunk.len() == 0 || chunk.len() > 100 -> print("bad chunk {chunk.len()}")
-        loop byte in chunk { &received.push(byte) }
+        loop byte in chunk { received.push(byte) }
     }
     expected := [U8]{U8{255}}
-    loop byte in all { &expected.push(byte) }
-    loop byte in "é\n".bytes() { &expected.push(byte) }
+    loop byte in all { expected.push(byte) }
+    loop byte in "é\n".bytes() { expected.push(byte) }
     print("received {received.len()} bytes, equal: {received == expected}")
     print("after end {child.stdout.read(8) ?? panic("read after end failed")}")
     receipt: child.wait() ?? panic("wait failed")

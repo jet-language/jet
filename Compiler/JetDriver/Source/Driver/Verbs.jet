@@ -24,8 +24,8 @@ JET_DRIVER_EXIT_USER_ERROR: 1
 JET_DRIVER_EXIT_USAGE: 2
 
 // A failed verb's typed reports, kept beside the text its stderr renders, so
-// a `--json` run answers with them in the `jet.status/v1` envelope instead
-// (D-REPORT-MACHINE1). `notice` is the stderr text that comes before them.
+// a `--json` run answers with them in the `jet.status/v1` envelope instead.
+// `notice` is the stderr text that comes before them.
 JetDriverFailure: struct {
     reports: [Diagnostic]
     notice: String
@@ -121,7 +121,7 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
     presented := diagnostic.copy()
     path: diagnostic.source_path ?? return presented
     if presented.origin == None {
-        presented.origin = jet_driver_present_origin_once(path, snapshot, generated, &origins)
+        presented.origin = jet_driver_present_origin_once(path, snapshot, generated, origins)
         if presented.origin == None -> return presented
     }
     shift: (diagnostic.source_start ?? 0) - (diagnostic.source_offset ?? 0)
@@ -146,7 +146,7 @@ jet_driver_present_diagnostic: fn(diagnostic: Diagnostic, snapshot: JetDriverAut
 
 jet_driver_present_diagnostics: fn(diagnostics: [Diagnostic], snapshot: JetDriverAuthorizedSourceSnapshot, generated: [SourceFile]) -> [Diagnostic] Never! {
     origins := [String:DiagnosticOrigin]{}
-    presented: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, &origins)
+    presented: loop diagnostic in diagnostics -> jet_driver_present_diagnostic(diagnostic, snapshot, generated, origins)
     presented
 }
 
@@ -169,7 +169,7 @@ jet_driver_plural: fn(count: Int) -> String Never! {
 jet_driver_report_problems: fn(file: String, source: String, diagnostics: [Diagnostic], color: Bool, show_advisories: Bool) -> String Never! {
     shown := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
+        if show_advisories || diagnostic.severity != DIAGNOSTIC_LINT -> shown.push(diagnostic.copy())
     }
     count: shown.len()
     jet_driver_problem_report(file, source, shown, "{count} problem{jet_driver_plural(count)} found", color)
@@ -184,9 +184,9 @@ jet_driver_check_outcome: fn(file: String, source: String, diagnostics: [Diagnos
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
         if {
-            diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic)
+            diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.copy())
             jet_driver_is_a11y_lint(diagnostic.code) -> {}
-            else -> &lints.push(diagnostic)
+            else -> lints.push(diagnostic.copy())
         }
     }
     if errors.len() > 0 {

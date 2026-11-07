@@ -22,9 +22,9 @@
 
 #Test("fetch cached version retains the canonical conflict diagnostic") {
     resolver := PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
-    pkg_fetch_record_version(&resolver, "shared", "1.0.0", [String]{"root", "first"}) ?? panic("first version")
-    pkg_fetch_record_version(&resolver, "shared", "1.0.0", [String]{"root", "second"}) ?? panic("same version")
-    if pkg_fetch_record_version(&resolver, "shared", "2.0.0", [String]{"root", "third"}) == {
+    pkg_fetch_record_version(resolver, "shared", "1.0.0", [String]{"root", "first"}) ?? panic("first version")
+    pkg_fetch_record_version(resolver, "shared", "1.0.0", [String]{"root", "second"}) ?? panic("same version")
+    if pkg_fetch_record_version(resolver, "shared", "2.0.0", [String]{"root", "third"}) == {
         .Ok(_) -> panic("conflicting cached version must fail")
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1201")
@@ -89,13 +89,13 @@
     resolver := PackageFetchResolver{root: ".", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
     actual: PackageFetchNode{package: LockedPackage{name: "actual", version: "1.0.0", source: .Path(".")}, directory: "."}
     resolver.nodes["alias"] = actual
-    pkg_fetch_record_version(&resolver, "actual", "1.0.0", [String]{"root", "actual"}) ?? panic("first authored version")
-    pkg_fetch_resolve(&verification, roots, context, &resolver, "alias", .Path{path: "."}, ".", [String]{"root", "alias"}) ?? panic("cached alias")
+    pkg_fetch_record_version(resolver, "actual", "1.0.0", [String]{"root", "actual"}) ?? panic("first authored version")
+    pkg_fetch_resolve(verification, roots, context, resolver, "alias", .Path{path: "."}, ".", [String]{"root", "alias"}) ?? panic("cached alias")
     assert_eq(resolver.versions.len(), 1)
     assert(resolver.versions.get("alias") == None)
     assert_eq(resolver.versions["actual"].chain, [String]{"root", "actual"})
     resolver.versions["alias"] = PackageFetchVersion{version: "2.0.0", chain: [String]{"root", "previous-alias"}}
-    if pkg_fetch_resolve(&verification, roots, context, &resolver, "alias", .Path{path: "."}, ".", [String]{"root", "alias"}) == {
+    if pkg_fetch_resolve(verification, roots, context, resolver, "alias", .Path{path: "."}, ".", [String]{"root", "alias"}) == {
         .Ok(_) -> panic("cached conflicting alias must fail")
         .Err(error) -> {
             assert_eq(error.diagnostic.code, "E1201")

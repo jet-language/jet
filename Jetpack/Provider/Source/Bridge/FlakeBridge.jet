@@ -50,7 +50,7 @@ provider_read_devshell_output_facts: fn(flake_dir: String, fixtures: String?, ou
     source: files.read(flake_path) ?? return Err(ProviderError.Unsupported("couldn't read `{flake_path}`: {err}"))
     source_root: files.canonicalize(flake_dir) ?? return Err(ProviderError.Unsupported("couldn't resolve flake project root `{flake_dir}`: {err}"))
     authority: provider_native_authority(source_root)
-    evaluation: nix_evaluate_devshell_output_with_import_authority(source, provider_bridge_host_system(), output, ^Val(authority)) ?? return Err(provider_projection_error(err.message()))
+    evaluation: nix_evaluate_devshell_output_with_import_authority(source, provider_bridge_host_system(), output, Val(authority)) ?? return Err(provider_projection_error(err.message()))
     Ok(provider_devshell_facts_from(evaluation))
 }
 
@@ -66,7 +66,7 @@ provider_projection_error: fn(reason: String) -> ProviderError Never! {
 
 provider_devshell_facts_from: fn(evaluation: NixEvalDevShell) -> DevShellFacts Never! {
     unmapped := evaluation.unsupported
-    loop package in evaluation.cross_packages -> &unmapped.push("cross-package:{package}")
+    loop package in evaluation.cross_packages -> unmapped.push("cross-package:{package}")
     DevShellFacts{packages: evaluation.packages, unmapped}
 }
 
@@ -134,7 +134,7 @@ provider_normalize_authority_path: fn(raw: String) -> String NixEvalError! {
     loop part in raw.split("/") {
         if part == "" -> next
         if part == "." || part == ".." -> return Err(denied)
-        &parts.push(part)
+        parts.push(part)
     }
     Ok(parts.join("/"))
 }
@@ -199,17 +199,17 @@ provider_parse_facts_json: fn(text: String) -> DevShellFacts ProviderError! {
         items: provider_json_array(value) ?? return Err(parsed.bad_output(err.message))
         loop item in items {
             name: provider_json_string(item) ?? return Err(parsed.bad_output(err.message))
-            &packages.push(name)
+            packages.push(name)
         }
     }
     if !package_field_seen -> return Err(parsed.bad_output("missing one of `packages`, `buildInputs`, or `nativeBuildInputs`"))
     unmapped := [String]{}
     hook_value: object.get("shellHook") ?? return Err(parsed.bad_output("missing key `shellHook`"))
     hook: provider_json_string(hook_value) ?? return Err(parsed.bad_output(err.message))
-    if hook.trim() != "" -> &unmapped.push("shellHook")
+    if hook.trim() != "" -> unmapped.push("shellHook")
     known: [String]{"packages", "buildInputs", "nativeBuildInputs", "shellHook"}
     loop entry in object {
-        if !known.contains(entry.key) && !unmapped.contains(entry.key) -> &unmapped.push(entry.key)
+        if !known.contains(entry.key) && !unmapped.contains(entry.key) -> unmapped.push(entry.key)
     }
     Ok(DevShellFacts{packages: provider_sorted_unique(packages), unmapped})
 }
@@ -263,7 +263,7 @@ provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, E
             return 1
         }
     }
-    if provider_bridge_commit_graph(theme, dir, flake_path, &graph, &facts) == {
+    if provider_bridge_commit_graph(theme, dir, flake_path, graph, facts) == {
         .Val(code) -> return code
         .None -> {}
     }
@@ -272,7 +272,7 @@ provider_cmd_flake: fn(theme: Theme, dir: String, fixtures: String?) -[IO, FS, E
     file: files.basename(flake_path)
     loop field in unmapped {
         stderr_handle := term.stderr()
-        &stderr_handle.write(diagnostic_render_all(file, "", [Diagnostic]{provider_l0204_unmappable(field, file)}, false)).drop("warnings are best-effort output")
+        stderr_handle.write(diagnostic_render_all(file, "", [Diagnostic]{provider_l0204_unmappable(field, file)}, false)).drop("warnings are best-effort output")
     }
     facts.unmapped = unmapped
     print(provider_render_shim(facts))
@@ -313,12 +313,12 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
                 return Val(1)
             }
         }
-        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, ^Val(^authority)) == {
-            .Ok(derivation) -> &derivations.push((name: output.name, system: output.system, derivation: derivation))
+        if nix_evaluate_derivation_output_with_import_authority(source, output.system, output.attribute, Val(authority.move())) == {
+            .Ok(derivation) -> derivations.push((name: output.name, system: output.system, derivation: derivation))
             .Err(error) -> {
                 if output.system != system {
                     loss: "packages:{output.system}:{output.attribute}"
-                    if !facts.unmapped.contains(loss) -> &facts.unmapped.push(loss)
+                    if !facts.unmapped.contains(loss) -> facts.unmapped.push(loss)
                     next
                 }
                 theme.error_coded("E1256", "couldn't evaluate a package derivation", "{output.name}: {error.message()}", "use a supported pure derivation with explicit local authority, then run `jet os bridge flake` again.")
@@ -331,11 +331,11 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
     loop output in graph.named_dev_shells() {
         if output.system != system -> next
         if output.attribute == "default" {
-            &shells.push((name: output.name, facts: default_facts))
+            shells.push((name: output.name, facts: default_facts))
             next
         }
         if provider_read_devshell_output_facts(dir, None, output.attribute) == {
-            .Ok(named) -> &shells.push((name: output.name, facts: named))
+            .Ok(named) -> shells.push((name: output.name, facts: named))
             .Err(error) -> {
                 error.report(theme)
                 return Val(1)
@@ -343,17 +343,17 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
     }
     loop field in graph.unsupported {
-        if !facts.unmapped.contains(field) -> &facts.unmapped.push(field)
+        if !facts.unmapped.contains(field) -> facts.unmapped.push(field.copy())
     }
     loop output in graph.outputs {
         label: if output.system == "" -> "{output.kind.label()}:{output.attribute}" else -> "{output.kind.label()}:{output.system}:{output.attribute}"
         if output.kind == {
-            .Package -> provider_record_package_output_fact(&facts, output, system)
+            .Package -> provider_record_package_output_fact(facts, output, system)
             .DevShell -> {
-                if (output.system != system || output.attribute != "default") && !facts.unmapped.contains(label) -> &facts.unmapped.push(label)
+                if (output.system != system || output.attribute != "default") && !facts.unmapped.contains(label) -> facts.unmapped.push(label)
             }
             else -> {
-                if !facts.unmapped.contains(label) -> &facts.unmapped.push(label)
+                if !facts.unmapped.contains(label) -> facts.unmapped.push(label)
             }
         }
     }
@@ -372,29 +372,29 @@ provider_bridge_commit_graph: fn(theme: Theme, dir: String, flake_path: String, 
         }
     }
     loop field in facts.unmapped {
-        if !graph.unsupported.contains(field) -> &graph.unsupported.push(field)
+        if !graph.unsupported.contains(field) -> graph.unsupported.push(field.copy())
     }
     graph.unsupported = provider_sorted_unique(graph.unsupported)
     lock := graph.semantic_lock()
-    &lock.records.push(provider_evaluator_record("flake-evaluator", evaluator, system, flake_path, "bounded native devShell and derivation evaluation identity"))
+    lock.records.push(provider_evaluator_record("flake-evaluator", evaluator, system, flake_path, "bounded native devShell and derivation evaluation identity"))
     loop entry in inventory {
         exact: "status={entry.status.label()};class={entry.class.label()};reason={entry.reason}"
-        &lock.records.push(provider_evaluator_record("flake-evaluator-inventory:{entry.surface}", exact, system, flake_path, entry.reason))
+        lock.records.push(provider_evaluator_record("flake-evaluator-inventory:{entry.surface}", exact, system, flake_path, entry.reason))
     }
     loop built in derivations {
         outputs: built.derivation.output_paths()
         if outputs.get("out") == None {
             loss: "derivation output {built.name} has no out path"
-            if !facts.unmapped.contains(loss) -> &facts.unmapped.push(loss)
+            if !facts.unmapped.contains(loss) -> facts.unmapped.push(loss)
         }
         rendered := [String]{}
-        loop name in provider_sorted_keys(outputs) -> &rendered.push("{name}={outputs[name]}")
+        loop name in provider_sorted_keys(outputs) -> rendered.push("{name}={outputs[name]}")
         exact: "drvPath={built.derivation.drv_path};{rendered.join(";")}"
-        &lock.records.push(provider_evaluator_record("flake-derivation:{built.name}", exact, built.system, flake_path, "bounded package derivation identity"))
+        lock.records.push(provider_evaluator_record("flake-derivation:{built.name}", exact, built.system, flake_path, "bounded package derivation identity"))
     }
     loop shell in shells {
         exact: "packages={shell.facts.packages.join(",")};unsupported={shell.facts.unmapped.join(",")}"
-        &lock.records.push(provider_evaluator_record("flake-devshell:{shell.name}", exact, system, flake_path, "bounded named devShell package projection"))
+        lock.records.push(provider_evaluator_record("flake-devshell:{shell.name}", exact, system, flake_path, "bounded named devShell package projection"))
     }
     if trust_semantic_lock_atomic_commit(dir, lock) == {
         .Ok(_) -> return None
@@ -420,9 +420,9 @@ provider_evaluator_record: fn(key: String, exact: String, platform: String, flak
 // package is an unmapped fact.
 provider_record_package_output_fact: fn(facts: &DevShellFacts, output: FlakeOutput, system: String) Never! {
     if output.system == system {
-        if output.attribute != "default" && output.attribute != "" && !facts.packages.contains(output.attribute) -> &facts.packages.push(output.attribute)
+        if output.attribute != "default" && output.attribute != "" && !facts.packages.contains(output.attribute) -> facts.packages.push(output.attribute)
         return
     }
     label: if output.system == "" -> "packages:{output.attribute}" else -> "packages:{output.system}:{output.attribute}"
-    if !facts.unmapped.contains(label) -> &facts.unmapped.push(label)
+    if !facts.unmapped.contains(label) -> facts.unmapped.push(label)
 }

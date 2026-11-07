@@ -3,9 +3,9 @@
 //
 // Each case is a generated Jet program and the stdout a model evaluator
 // computes for it. prepareCorpus in safety-gate.mjs writes them in the
-// Examples/features layout:
-//   <out>/corpus/Examples/features/fuzz/s<seed>_<n>.jet
-//   <out>/corpus/Examples/features/expected/fuzz/s<seed>_<n>.out
+// Examples layout:
+//   <out>/corpus/Examples/fuzz/s<seed>_<n>.jet
+//   <out>/corpus/Examples/fuzz/s<seed>_<n>.out
 // and the standing native safety gate checks admitted native outputs of them.
 //
 // The generator draws from the syntax the feature goldens and the memory

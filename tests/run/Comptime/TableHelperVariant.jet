@@ -1,0 +1,50 @@
+// A literal `@` table may build rows through helpers that
+// assign the explicit named-payload form `Enum.Variant{...}` to a field. The
+// compile-time evaluator gives the literal its enum identity, exactly as the
+// compiled program does.
+Route: enum { Missing Add }
+
+Plan: enum {
+    Unplanned
+    Routed(route: Route)
+}
+
+Row: struct {
+    name: String
+    route: Route
+    plan: Plan
+}
+
+row: fn(name: String) -> Row Never! {
+    Row{name: name, route: Route.Missing, plan: Plan.Unplanned}
+}
+
+with_route: fn(value: &&Row, route: Route) -> Row Never! {
+    updated := value
+    updated.route = route
+    updated.plan = Plan.Routed{route: route}
+    updated
+}
+
+ROWS: comptime { [Row]{
+    row("plain"),
+    with_route(row("routed"), Route.Add)
+} }
+
+route_name: fn(route: Route) -> String {
+    if route == {
+        .Missing -> "missing"
+        .Add -> "add"
+    }
+}
+
+describe: fn(plan: Plan) -> String {
+    if plan == {
+        .Unplanned -> "unplanned"
+        .Routed(route) -> "routed {route_name(route)}"
+    }
+}
+
+run: fn() {
+    loop value in ROWS -> print("{value.name}: {route_name(value.route)}, {describe(value.plan)}")
+}

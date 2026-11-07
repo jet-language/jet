@@ -24,7 +24,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     verification := StoreVerification.new()
     previous: sys.get("JETPACK_FAKE_SANDBOX")
     sys.set("JETPACK_FAKE_SANDBOX", "unavailable")
-    refusal: if store_realize_verified(&verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec, table}) == {
+    refusal: if store_realize_verified(verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec, table}) == {
         .Ok(_) -> ""
         .Err(error) -> "{error}"
     }
@@ -32,7 +32,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     assert(refusal != "", "an unavailable build sandbox must refuse Core Cargo")
     assert(refusal.contains("SandboxUnavailable"))
     assert(!files.exists(marker))
-    assert(store_list(&verification, roots).is_empty())
+    assert(store_list(verification, roots).is_empty())
     files.remove_all(base).drop("test cleanup")
 }
 
@@ -53,7 +53,7 @@ recipe_sandbox_store_ctx: fn(roots: HangarRoots) -> ProviderCtx {
     roots: HangarRoots.at(files.join(base, "root"))
     store_bind_cache(roots, "public", [String]{mirror}, None, None, true) ?? panic("bind cache")
     verification := StoreVerification.new()
-    realized: store_realize_verified(&verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec, table}) ?? panic("native Core Cargo build should produce a private lease")
+    realized: store_realize_verified(verification, roots, recipe_sandbox_store_ctx(roots), RealizeRequest.Package{spec, table}) ?? panic("native Core Cargo build should produce a private lease")
     assert_eq(realized.source_state(), SourceState.Built)
     assert_eq(realized.consumption_status(), ConsumptionStatus.Consumable)
     producer: ProducerRecord.decode(realized.metadata().producer_record) ?? panic("producer")

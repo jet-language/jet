@@ -77,20 +77,20 @@ digest: fn(text: String) -> String Never! {
 // The hash of a file list: one `path<TAB>sha256` line per file, by path.
 files_hash: fn(files: [SnapshotFile]) -> String Never! {
     lines := [String]{}
-    loop file in files -> &lines.push("{file.path}\t{file.sha256}\n")
+    loop file in files -> lines.push("{file.path}\t{file.sha256}\n")
     digest(lines.join(""))
 }
 
 snapshot_entries: fn(files: [SourceFile]) -> [SnapshotFile] Never! {
     out := [SnapshotFile]{}
-    loop file in files -> &out.push(SnapshotFile{path: file.path.copy(), sha256: digest(file.text)})
-    &out.sort_by((left: SnapshotFile, right: SnapshotFile) -> left.path <=> right.path)
+    loop file in files -> out.push(SnapshotFile{path: file.path.copy(), sha256: digest(file.text)})
+    out.sort_by((left: SnapshotFile, right: SnapshotFile) -> left.path <=> right.path)
     out
 }
 
 build_snapshot: fn(inputs: Inputs) -> Snapshot Never! {
     specials := [SourceFile]{SourceFile{path: SPECIAL_ROUTES_PATH, text: inputs.specials_text.copy()}}
-    loop file in inputs.special_files -> &specials.push(file.copy())
+    loop file in inputs.special_files -> specials.push(file.copy())
     exclusions: [SourceFile]{SourceFile{path: EXCLUSIONS_PATH, text: inputs.exclusions_text.copy()}}
     parts: [SnapshotPart]{
         SnapshotPart{name: "core", hash: files_hash(snapshot_entries(inputs.core_sources))},
@@ -124,9 +124,9 @@ parse_exclusions: fn(text: String) -> [Exclusion] Err! {
         loop old in out {
             if old.key == key -> return Err("{EXCLUSIONS_PATH}:{index + 1}: duplicate exclusion `{key}`")
         }
-        &out.push(Exclusion{key: key.copy(), reason: reason.copy(), owner: owner.copy(), decision: decision.copy()})
+        out.push(Exclusion{key: key.copy(), reason: reason.copy(), owner: owner.copy(), decision: decision.copy()})
     }
-    &out.sort_by((left: Exclusion, right: Exclusion) -> left.key <=> right.key)
+    out.sort_by((left: Exclusion, right: Exclusion) -> left.key <=> right.key)
     Ok(out)
 }
 
@@ -169,7 +169,7 @@ build_manifest: fn(inputs: Inputs) -> Manifest Err! {
         key: witness_key(file.path)
         id: "module:{key}"
         if row_index.get(id) == None {
-            &orphans.push(Orphan{path: file.path.copy(), key: key})
+            orphans.push(Orphan{path: file.path.copy(), key: key})
             next
         }
         witness_index[id.copy()] = index
@@ -198,7 +198,7 @@ build_manifest: fn(inputs: Inputs) -> Manifest Err! {
             sink = None
             exclusion = Val(exclusions[at].copy())
         }
-        &rows.push(ManifestRow{surface: row.copy(), status: status, witness: witness, sink: sink, exclusion: exclusion})
+        rows.push(ManifestRow{surface: row.copy(), status: status, witness: witness, sink: sink, exclusion: exclusion})
     }
     Ok(Manifest{snapshot: build_snapshot(inputs), rows: rows, exclusions: exclusions, orphans: orphans})
 }
@@ -227,40 +227,40 @@ contains_text: fn(list: [String], value: String) -> Bool Never! {
 validate_manifest: fn(manifest: Manifest) -> [String] Never! {
     errors := [String]{}
     if manifest.snapshot.hash != files_hash(manifest.snapshot.files) {
-        &errors.push("source_snapshot.hash does not match its file list")
+        errors.push("source_snapshot.hash does not match its file list")
     }
     loop (index, row) in manifest.rows {
         id: row.surface.id
-        if index > 0 && manifest.rows[index - 1].surface.id >= id -> &errors.push("{id}: rows are not sorted by unique stable id")
+        if index > 0 && manifest.rows[index - 1].surface.id >= id -> errors.push("{id}: rows are not sorted by unique stable id")
         if !contains_text(STATUSES, row.status) {
-            &errors.push("{id}: unknown status `{row.status}`")
+            errors.push("{id}: unknown status `{row.status}`")
             next
         }
         if row.status == "covered" {
-            if row.surface.route == None -> &errors.push("{id}: covered row has no route")
-            if row.witness == None -> &errors.push("{id}: covered row has no witness")
+            if row.surface.route == None -> errors.push("{id}: covered row has no route")
+            if row.witness == None -> errors.push("{id}: covered row has no witness")
             if row.witness == .Val(facts) {
-                if facts.errors.len() > 0 -> &errors.push("{id}: covered row has a rejected witness")
+                if facts.errors.len() > 0 -> errors.push("{id}: covered row has a rejected witness")
             }
-            if row.sink == None -> &errors.push("{id}: covered row names no observable sink")
+            if row.sink == None -> errors.push("{id}: covered row names no observable sink")
             if row.sink == .Val(sink) {
-                if sink.result_class != witness_class(row.surface.result_class) -> &errors.push("{id}: sink result class `{sink.result_class}` is not the row's `{witness_class(row.surface.result_class)}`")
-                if witness_class(row.surface.result_class) == "opaque" && sink.follow_up == "" -> &errors.push("{id}: opaque result is observed with no follow-up operation")
-                if sink.kind == "unit-effect" && row.surface.result_class != "unit" -> &errors.push("{id}: only a unit result may be observed by a later effect")
-                if sink.kind == "never-effect" && row.surface.result_class != "never" -> &errors.push("{id}: only a never result may be its own observation")
-                if sink.operation == "" -> &errors.push("{id}: sink names no observer")
+                if sink.result_class != witness_class(row.surface.result_class) -> errors.push("{id}: sink result class `{sink.result_class}` is not the row's `{witness_class(row.surface.result_class)}`")
+                if witness_class(row.surface.result_class) == "opaque" && sink.follow_up == "" -> errors.push("{id}: opaque result is observed with no follow-up operation")
+                if sink.kind == "unit-effect" && row.surface.result_class != "unit" -> errors.push("{id}: only a unit result may be observed by a later effect")
+                if sink.kind == "never-effect" && row.surface.result_class != "never" -> errors.push("{id}: only a never result may be its own observation")
+                if sink.operation == "" -> errors.push("{id}: sink names no observer")
             }
         }
         if row.status == "invalid" {
             ok := false
             if row.witness == .Val(facts) -> ok = facts.errors.len() > 0
-            if !ok -> &errors.push("{id}: invalid row names no witness error")
+            if !ok -> errors.push("{id}: invalid row names no witness error")
         }
-        if row.status == "missing" && row.surface.route == None -> &errors.push("{id}: missing row has no route; it is unrouted")
-        if row.status == "unrouted" && (row.surface.route != None || row.surface.problem == "") -> &errors.push("{id}: unrouted row must have no route and a stated problem")
-        if row.status != "covered" && row.sink != None -> &errors.push("{id}: only a covered row names a sink")
-        if row.status != "excluded" && row.exclusion != None -> &errors.push("{id}: only an excluded row carries an exclusion")
-        if row.status == "excluded" && row.exclusion == None -> &errors.push("{id}: excluded row has no exclusion")
+        if row.status == "missing" && row.surface.route == None -> errors.push("{id}: missing row has no route; it is unrouted")
+        if row.status == "unrouted" && (row.surface.route != None || row.surface.problem == "") -> errors.push("{id}: unrouted row must have no route and a stated problem")
+        if row.status != "covered" && row.sink != None -> errors.push("{id}: only a covered row names a sink")
+        if row.status != "excluded" && row.exclusion != None -> errors.push("{id}: only an excluded row carries an exclusion")
+        if row.status == "excluded" && row.exclusion == None -> errors.push("{id}: excluded row has no exclusion")
         if row.status == "excluded" {
             if row.exclusion == .Val(claimed) {
                 found := false
@@ -268,7 +268,7 @@ validate_manifest: fn(manifest: Manifest) -> [String] Never! {
                     if exclusion_row_id(exclusion.key) != id -> next
                     found = exclusion.reason == claimed.reason && exclusion.owner == claimed.owner && exclusion.decision == claimed.decision && claimed.reason != "" && claimed.owner != "" && claimed.decision != ""
                 }
-                if !found -> &errors.push("{id}: exclusion does not match a ratified exclusions.tsv row")
+                if !found -> errors.push("{id}: exclusion does not match a ratified exclusions.tsv row")
             }
         }
     }
@@ -278,7 +278,7 @@ validate_manifest: fn(manifest: Manifest) -> [String] Never! {
         loop row in manifest.rows {
             if row.surface.id == id && row.status == "excluded" -> uses += 1
         }
-        if uses != 1 -> &errors.push("{id}: exclusion applies to {uses} rows")
+        if uses != 1 -> errors.push("{id}: exclusion applies to {uses} rows")
     }
     errors
 }
@@ -314,7 +314,7 @@ sink_dyn: fn(sink: Sink?) -> Dyn Never! {
 
 text_array: fn(values: [String]) -> Dyn Never! {
     out := [Dyn]{}
-    loop value in values -> &out.push(Dyn.Text(value.copy()))
+    loop value in values -> out.push(Dyn.Text(value.copy()))
     Dyn.Array(out)
 }
 
@@ -456,13 +456,13 @@ relation_dyn: fn(manifest: Manifest) -> Dyn Err! {
     counts := [String: Int]{}
     loop name in DISPOSITIONS -> counts[name.copy()] = 0
     loop row in manifest.rows {
-        &ids.push(row.surface.id.copy())
-        &identities.push(Dyn.Object([String: Dyn]{
+        ids.push(row.surface.id.copy())
+        identities.push(Dyn.Object([String: Dyn]{
             "applicable_modes": text_array([String]{MODE}),
             "capability_id": Dyn.Text(row.surface.id.copy()),
             "source_identity": source_identity(row, manifest.snapshot),
         }))
-        &rows.push(relation_row_dyn(row, manifest.snapshot))
+        rows.push(relation_row_dyn(row, manifest.snapshot))
         disposition: status_disposition(row.status)
         counts[disposition.copy()] = (counts.get(disposition) ?? 0) + 1
     }
@@ -505,8 +505,8 @@ manifest_dyn: fn(manifest: Manifest) -> Dyn Err! {
     rows := [Dyn]{}
     ids := [String]{}
     loop row in manifest.rows {
-        &rows.push(row_dyn(row))
-        &ids.push(row.surface.id.copy())
+        rows.push(row_dyn(row))
+        ids.push(row.surface.id.copy())
     }
     by_kind := [String: Dyn]{}
     kinds: [String]{"field", "module_call", "nominal_type", "receiver_method"}
@@ -515,7 +515,7 @@ manifest_dyn: fn(manifest: Manifest) -> Dyn Err! {
     loop status in STATUSES -> by_status[status.copy()] = Dyn.Int(count_where(manifest, "status", status))
     exclusions := [Dyn]{}
     loop exclusion in manifest.exclusions {
-        &exclusions.push(Dyn.Object([String: Dyn]{
+        exclusions.push(Dyn.Object([String: Dyn]{
             "decision": Dyn.Text(exclusion.decision.copy()),
             "owner": Dyn.Text(exclusion.owner.copy()),
             "reason": Dyn.Text(exclusion.reason.copy()),
@@ -523,11 +523,11 @@ manifest_dyn: fn(manifest: Manifest) -> Dyn Err! {
         }))
     }
     orphans := [Dyn]{}
-    loop orphan in manifest.orphans -> &orphans.push(Dyn.Object([String: Dyn]{"key": Dyn.Text(orphan.key.copy()), "path": Dyn.Text(orphan.path.copy())}))
+    loop orphan in manifest.orphans -> orphans.push(Dyn.Object([String: Dyn]{"key": Dyn.Text(orphan.key.copy()), "path": Dyn.Text(orphan.path.copy())}))
     parts := [String: Dyn]{}
     loop part in manifest.snapshot.parts -> parts[part.name.copy()] = Dyn.Text(part.hash.copy())
     files := [Dyn]{}
-    loop file in manifest.snapshot.files -> &files.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(file.path.copy()), "sha256": Dyn.Text(file.sha256.copy())}))
+    loop file in manifest.snapshot.files -> files.push(Dyn.Object([String: Dyn]{"path": Dyn.Text(file.path.copy()), "sha256": Dyn.Text(file.sha256.copy())}))
     relation: relation_dyn(manifest) ?? return Err(err)
     row_total: manifest.rows.len()
     file_total: manifest.snapshot.files.len()
@@ -578,27 +578,27 @@ check_manifest_text: fn(stored: String, fresh: Manifest, fresh_text: String) -> 
     errors := [String]{}
     stored_hash: dyn_text(tree, "/source_snapshot/hash")
     if stored_hash != fresh.snapshot.hash {
-        &errors.push("stale: stored source_snapshot.hash {stored_hash} is not the tree's {fresh.snapshot.hash}; evidence recorded under the old hash is stale")
+        errors.push("stale: stored source_snapshot.hash {stored_hash} is not the tree's {fresh.snapshot.hash}; evidence recorded under the old hash is stale")
         loop part in fresh.snapshot.parts {
             old: dyn_text(tree, "/source_snapshot/parts/{part.name}")
-            if old != part.hash -> &errors.push("stale: snapshot part `{part.name}` changed")
+            if old != part.hash -> errors.push("stale: snapshot part `{part.name}` changed")
         }
         return errors
     }
     stored_rows: json.pointer(tree, "/rows") ?? Dyn.Null
     if stored_rows == .Array(items) {
-        if items.len() != fresh.rows.len() -> &errors.push("stored manifest has {items.len()} rows; the tree has {fresh.rows.len()}")
+        if items.len() != fresh.rows.len() -> errors.push("stored manifest has {items.len()} rows; the tree has {fresh.rows.len()}")
         loop (index, row) in fresh.rows {
             if index >= items.len() -> break
             stored_id: dyn_text(items[index], "/stable_id")
             if stored_id != row.surface.id {
-                &errors.push("row {index}: stored `{stored_id}`, the tree derives `{row.surface.id}`")
+                errors.push("row {index}: stored `{stored_id}`, the tree derives `{row.surface.id}`")
                 break
             }
             stored_status: dyn_text(items[index], "/status")
-            if stored_status != row.status -> &errors.push("{row.surface.id}: stored status `{stored_status}`, the tree derives `{row.status}`")
+            if stored_status != row.status -> errors.push("{row.surface.id}: stored status `{stored_status}`, the tree derives `{row.status}`")
         }
     }
-    &errors.push("stored manifest bytes differ from a fresh generation of the same snapshot")
+    errors.push("stored manifest bytes differ from a fresh generation of the same snapshot")
     errors
 }

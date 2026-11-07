@@ -27,8 +27,8 @@ jet_driver_policy_ladder_diagnostic: fn(key: PolicyKey, error: PolicyError, path
         .Conflict(_, _, _, _, outer_site) | .Widening(_, _, _, _, outer_site) -> outer_site
     }
     rung: "the {policy_scope_name(outer.scope)} rung sets `{policy_key_name(key)}: {policy_value_display(outer.value)}`"
-    if outer.source == path && outer.span.end > outer.span.start -> return diagnostic_with_label(^diagnostic, outer.span, "{rung} here")
-    diagnostic_with_detail(^diagnostic, " Outer: {rung} in {outer.source}")
+    if outer.source == path && outer.span.end > outer.span.start -> return diagnostic_with_label(diagnostic, outer.span, "{rung} here")
+    diagnostic_with_detail(diagnostic, " Outer: {rung} in {outer.source}")
 }
 
 jet_driver_policy_error_span: fn(error: PolicyError) -> Span Never! {
@@ -51,15 +51,15 @@ jet_driver_load_policy: fn(program: &Program, package_policy: [PolicyDeclaration
     // declarations, so each program gets its own copy and the caller reuses the chain for the next
     // file.
     effective := package_policy.copy()
-    &effective.extend(program.policy_declarations)
-    program.policy_declarations = ^effective
+    effective.extend(program.policy_declarations)
+    program.policy_declarations = effective.move()
     outer := [PolicyDeclaration]{}
     loop declaration in program.policy_declarations {
-        if jet_driver_policy_outer(declaration.scope) -> &outer.push(declaration)
+        if jet_driver_policy_outer(declaration.scope) -> outer.push(declaration.copy())
     }
     loop rule in POLICY_RULES {
         if policy_resolve(rule.key, outer) == .Err(error) {
-            &diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
+            diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
             return false
         }
         // Match Rust's target-specific chains: include every declaration at
@@ -71,10 +71,10 @@ jet_driver_load_policy: fn(program: &Program, package_policy: [PolicyDeclaration
             // `outer` is reused for the next declaration and rule.
             chain := outer.copy()
             loop candidate in program.policy_declarations {
-                if !jet_driver_policy_outer(candidate.scope) && candidate.target == (Val(target)) -> &chain.push(candidate)
+                if !jet_driver_policy_outer(candidate.scope) && candidate.target == (Val(target)) -> chain.push(candidate.copy())
             }
             if policy_resolve(rule.key, chain) == .Err(error) {
-                &diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
+                diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
                 return false
             }
         }

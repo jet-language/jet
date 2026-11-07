@@ -1,0 +1,10 @@
+// D-DECL-COLON1=A: at file level a bodiless `name: fn(…)` names a function
+// type, so `Step<T>` below is an alias and `apply` takes any function of it.
+Step<T>: fn(T) -> T
+
+apply: fn(step: Step<Int>, value: Int) -> Int { step(step(value)) }
+
+run: fn() {
+    print(apply((x: Int) -> x + 1, 2))
+    print(apply((x: Int) -> x * 3, 2))
+}

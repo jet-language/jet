@@ -70,13 +70,13 @@ marker_source_split_top_level: fn(text: String) -> [String] Never! {
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     loop (index, byte) in text.bytes() {
         value: Int.from_u8(byte)
-        if marker_source_scan_step(&scan, value) && value == 44 {
-            &entries.push(marker_source_slice(text, start, index).trim())
+        if marker_source_scan_step(scan, value) && value == 44 {
+            entries.push(marker_source_slice(text, start, index).trim())
             start = index + 1
         }
     }
     last: marker_source_slice(text, start, text.len()).trim()
-    if last.len() > 0 -> &entries.push(last)
+    if last.len() > 0 -> entries.push(last)
     entries
 }
 
@@ -91,7 +91,7 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
             default_scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
             loop end in index..<bytes.len() {
                 inner: Int.from_u8(bytes[end])
-                marker_source_scan_step(&default_scan, inner)
+                marker_source_scan_step(default_scan, inner)
                 if inner == 125 && default_scan.depth == 0 && !default_scan.in_string {
                     if marker_source_slice(value, end + 1, bytes.len()).trim().len() == 0 {
                         return Val(MarkerSourceDefault{
@@ -104,7 +104,7 @@ marker_source_split_default: fn(value: String) -> MarkerSourceDefault? Never! {
             }
             break
         }
-        marker_source_scan_step(&scan, current)
+        marker_source_scan_step(scan, current)
     }
     None
 }
@@ -130,7 +130,7 @@ marker_source_unquote: fn(value: String, line: String) -> String Never! {
     escaped := false
     loop byte in inner {
         if escaped {
-            &out.push(byte)
+            out.push(byte)
             escaped = false
             next
         }
@@ -138,7 +138,7 @@ marker_source_unquote: fn(value: String, line: String) -> String Never! {
             escaped = true
             next
         }
-        &out.push(byte)
+        out.push(byte)
     }
     String.from_bytes(out) ?? panic("a marker fact quote is not UTF-8 in {line}")
 }
@@ -216,7 +216,7 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
                 byte == 34 -> in_string = false
                 else -> {}
             }
-            &out.push(bytes[index])
+            out.push(bytes[index])
             index += 1
             next
         }
@@ -231,7 +231,7 @@ marker_source_strip_comments: fn(source: String) -> String Never! {
             next
         }
         if byte == 34 -> in_string = true
-        &out.push(bytes[index])
+        out.push(bytes[index])
         index += 1
     }
     String.from_bytes(out) ?? panic("the marker source is not UTF-8 once its comments are removed")
@@ -245,14 +245,14 @@ marker_source_members: fn(text: String) -> [String] Never! {
     scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
     loop (index, byte) in text.bytes() {
         value: Int.from_u8(byte)
-        if marker_source_scan_step(&scan, value) && (value == 10 || value == 44 || value == 59) {
+        if marker_source_scan_step(scan, value) && (value == 10 || value == 44 || value == 59) {
             entry: marker_source_slice(text, start, index).trim()
-            if entry.len() > 0 -> &entries.push(entry)
+            if entry.len() > 0 -> entries.push(entry)
             start = index + 1
         }
     }
     last: marker_source_slice(text, start, text.len()).trim()
-    if last.len() > 0 -> &entries.push(last)
+    if last.len() > 0 -> entries.push(last)
     entries
 }
 
@@ -302,7 +302,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
             settings = Val(marker_source_block(member, "`impl Marker` in {context}"))
             next
         }
-        &fields.push(member)
+        fields.push(member)
     }
     block: settings ?? return None
     sites := [String]{}
@@ -358,7 +358,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
             variadic_name = Val(label)
             next
         }
-        &params.push(TAppliedRuleParameter{
+        params.push(TAppliedRuleParameter{
             name: label,
             kind: marker_source_arg_type(type_text),
             source_type: type_text,
@@ -384,7 +384,7 @@ marker_source_read: fn(source: String) -> [TAppliedRule] Never! {
     rows := [TAppliedRule]{}
     loop member in marker_source_members(marker_source_strip_comments(source)) {
         name: marker_source_struct_name(member) ?? next
-        if marker_source_declaration(name, marker_source_block(member, "{name}: struct")) == .Val(row) -> &rows.push(row)
+        if marker_source_declaration(name, marker_source_block(member, "{name}: struct")) == .Val(row) -> rows.push(row)
     }
     rows
 }
@@ -394,9 +394,9 @@ applied_rule_signature_render: fn(signature: TAppliedRuleSignature) -> String Ne
     parts := [String]{}
     loop param in signature.params {
         default: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
-        &parts.push("{param.name}: {param.source_type}{default}")
+        parts.push("{param.name}: {param.source_type}{default}")
     }
-    if signature.variadic_source_type == .Val(source_type) -> &parts.push("{source_type}...")
+    if signature.variadic_source_type == .Val(source_type) -> parts.push("{source_type}...")
     "({parts.join(", ")})"
 }
 
@@ -411,14 +411,14 @@ marker_decl_signature: fn(declaration: MarkerDecl, source: String) -> String Nev
         if parameter.ty == .Val(ty) {
             shown: if parameter.variadic -> "[{type_name(ty)}]" else -> type_name(ty)
             default: if parameter.value != None -> "{{{value}}}" else -> ""
-            &parts.push("{parameter.name}: {shown}{default}")
+            parts.push("{parameter.name}: {shown}{default}")
         } else {
             key: if parameter.name.starts_with("$") -> marker_source_slice(parameter.name, 1, parameter.name.len()) else -> parameter.name.copy()
-            &settings.push("{key}: {value}")
+            settings.push("{key}: {value}")
         }
     }
     block: if settings.len() == 0 -> "impl Marker {{}}" else -> "impl Marker {{ {settings.join("; ")} }}"
-    &parts.push(block)
+    parts.push(block)
     "{declaration.name}: struct {{ {parts.join(", ")} }}"
 }
 
@@ -457,7 +457,7 @@ marker_registered_site_bound: fn(name: String) -> Bool Never! {
     false
 }
 
-// `RuleSignature::accepts_arguments` (D-MARK-FORM1=A): whether the registered
+// `RuleSignature::accepts_arguments`: whether the registered
 // rule `name` may be written with parentheses at all. A row with no parameter
 // and no variadic list never takes arguments.
 marker_registered_accepts_arguments: fn(name: String) -> Bool Never! {

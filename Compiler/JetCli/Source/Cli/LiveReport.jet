@@ -1,7 +1,8 @@
 // run_inspect_live and LiveInspect::render. Every output comes from the
 // validated retained snapshot, never source guesses.
+use jet_foundation.[JetLiveSnapshot]
 
-jet_cli_live_text: fn(snapshot: JetCLILiveSnapshot) -> String Never! {
+jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     event_lines := snapshot.events
     if event_lines == None -> event_lines = Val(jet_cli_live_event_render(snapshot.event_records) ?? return "jet inspect live · invalid snapshot: {err.message}\n")
     out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\ntask tree\n"
@@ -36,7 +37,7 @@ jet_cli_live_text: fn(snapshot: JetCLILiveSnapshot) -> String Never! {
     }
     out
 }
-jet_cli_live_identity_fields: fn(snapshot: JetCLILiveSnapshot) -> [JetCLIStatusField] Never! {
+jet_cli_live_identity_fields: fn(snapshot: JetLiveSnapshot) -> [JetCLIStatusField] Never! {
     [JetCLIStatusField]{
         jet_cli_status_field("scope", jet_cli_status_text("live")), jet_cli_status_field("pid", jet_cli_status_int(snapshot.pid)),
         jet_cli_status_field("protocol", jet_cli_status_text(snapshot.protocol)), jet_cli_status_field("session_id", jet_cli_status_text(snapshot.session_id)),
@@ -44,30 +45,30 @@ jet_cli_live_identity_fields: fn(snapshot: JetCLILiveSnapshot) -> [JetCLIStatusF
         jet_cli_status_field("revision", jet_cli_status_text(snapshot.revision)), jet_cli_status_field("world_id", jet_cli_status_text(snapshot.world_id)),
     }
 }
-jet_cli_live_json_report: fn(snapshot: JetCLILiveSnapshot, plane: String) -> String Never! {
+jet_cli_live_json_report: fn(snapshot: JetLiveSnapshot, plane: String) -> String Never! {
     values := [JetCLIStatusValue]{}
     grouped := [String:[String]]{}
     names := [String]{}
     loop value in snapshot.values {
-        &values.push(jet_cli_status_object([
+        values.push(jet_cli_status_object([
             jet_cli_status_field("value_id", jet_cli_status_text(value.value_id)), jet_cli_status_field("type_identity", jet_cli_status_text(value.type_identity)),
             jet_cli_status_field("disposition", jet_cli_status_text(value.disposition)), jet_cli_status_field("reason", jet_cli_status_text(value.reason)),
             jet_cli_status_field("rendered_value", if value.rendered_value == .Val(shown) -> jet_cli_status_text(shown) else -> JetCLIStatusValue.Null),
         ]))
-        if !grouped.has_key(value.type_identity) -> &names.push(value.type_identity)
+        if !grouped.has_key(value.type_identity) -> names.push(value.type_identity)
         ids := grouped.get(value.type_identity) ?? [String]{}
-        &ids.push(value.value_id)
+        ids.push(value.value_id)
         grouped[value.type_identity] = ids
     }
-    &names.sort()
+    names.sort()
     shapes := [JetCLIStatusValue]{}
     loop name in names {
         ids: grouped.get(name) ?? [String]{}
-        &shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
+        shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
-    &fields.extend(jet_cli_live_identity_fields(snapshot))
-    &fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
-    &fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
+    fields.extend(jet_cli_live_identity_fields(snapshot))
+    fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
+    fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
     "{jet_cli_status_render("inspect.{plane}", true, fields)}\n"
 }

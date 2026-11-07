@@ -25,12 +25,12 @@ cli_run_job_with_access_trace: fn(env: &ShellEnv, argv: [String], project_dir: S
     }
     files.remove(trace_path).drop("a stale trace from an earlier run is replaced")
     traced := [String]{tracer, "-f", "-qq", "-e", "trace=%file", "-o", trace_path}
-    loop arg in argv -> &traced.push(arg)
+    loop arg in argv -> traced.push(arg.copy())
     code: if {
-        clean && silent -> &env.run_clean_command_in_silent(traced, Val(project_dir))
-        clean -> &env.run_clean_command_in(traced, Val(project_dir))
-        silent -> &env.run_command_in_silent(traced, Val(project_dir))
-        else -> &env.run_command_in(traced, Val(project_dir))
+        clean && silent -> env.run_clean_command_in_silent(traced, Val(project_dir))
+        clean -> env.run_clean_command_in(traced, Val(project_dir))
+        silent -> env.run_command_in_silent(traced, Val(project_dir))
+        else -> env.run_command_in(traced, Val(project_dir))
     }
     if !files.is_file(trace_path) -> return Err(CLIError.Other("file-access tracer completed without producing an access log"))
     Ok(code)
@@ -49,9 +49,9 @@ cli_task_undeclared_accesses: fn(project_dir: String, job_cwd: String, entry: St
     project_root: files.canonicalize(project_dir) ?? return Err(CLIError.Other("couldn't resolve project root for access proof: {err}"))
     entry_path: files.canonicalize(entry) ?? return Err(CLIError.Other("couldn't resolve job entry for access proof: {err}"))
     declared := [String]{}
-    loop input in metadata.inputs -> &declared.push(cli_job_path(project_dir, Val(input), "input", true))
+    loop input in metadata.inputs -> declared.push(cli_job_path(project_dir, Val(input), "input", true))
     outputs := [String]{}
-    loop output in metadata.outputs -> &outputs.push(cli_job_path(project_dir, Val(output), "output", true))
+    loop output in metadata.outputs -> outputs.push(cli_job_path(project_dir, Val(output), "output", true))
     git_dir: files.join(project_root, ".git")
     target_dir: files.join(project_root, "target")
     unexpected := [String]{}
@@ -60,17 +60,17 @@ cli_task_undeclared_accesses: fn(project_dir: String, job_cwd: String, entry: St
             joined: if files.is_abs(raw) -> raw else -> files.join(job_cwd, raw)
             normalized: cli_normalize_trace_path(joined) ?? {
                 shown: joined.replace("\\", "/")
-                if !unexpected.contains(shown) -> &unexpected.push(shown)
+                if !unexpected.contains(shown) -> unexpected.push(shown)
                 next
             }
             path: if files.exists(normalized) -> files.canonicalize(normalized) ?? normalized else -> normalized
             if !cli_path_starts_with(path, project_root) || cli_path_starts_with(path, git_dir) || cli_path_starts_with(path, target_dir) || path == entry_path -> next
             if cli_path_covered(path, declared) || cli_path_covered(path, outputs) -> next
             shown: path.replace("\\", "/")
-            if !unexpected.contains(shown) -> &unexpected.push(shown)
+            if !unexpected.contains(shown) -> unexpected.push(shown)
         }
     }
-    &unexpected.sort()
+    unexpected.sort()
     Ok(unexpected)
 }
 
@@ -91,10 +91,10 @@ cli_normalize_trace_path: fn(path: String) -> String? Never! {
         if part == "" || part == "." -> next
         if part == ".." {
             if parts.len() == 0 -> return None
-            _: &parts.pop()
+            _: parts.pop()
             next
         }
-        &parts.push(part)
+        parts.push(part)
     }
     if absolute -> return Val("/{parts.join("/")}")
     Val(parts.join("/"))
@@ -112,7 +112,7 @@ cli_strace_path_indices: fn(name: String, count: Int) -> [Int] Never! {
         "symlinkat" -> [Int]{0, 2}
         else -> {
             all := [Int]{}
-            loop index in 0..<count -> &all.push(index)
+            loop index in 0..<count -> all.push(index)
             all
         }
     }
@@ -131,7 +131,7 @@ cli_strace_paths: fn(line: String) -> [String] Never! {
         quoted: cli_strace_quoted_argument(args[index]) ?? next
         decoded: cli_decode_strace_string(quoted) ?? next
         if decoded.len() == 0 || decoded == "?".bytes() -> next
-        &paths.push(String.from_bytes(decoded) ?? next)
+        paths.push(String.from_bytes(decoded) ?? next)
     }
     paths
 }
@@ -163,11 +163,11 @@ cli_strace_argument_tokens: fn(text: String) -> [String] Never! {
                 if depth > 0 -> depth -= 1
             }
             code == 44 && depth == 0 -> {
-                &tokens.push(String.from_bytes(raw[start..<index]) ?? "")
+                tokens.push(String.from_bytes(raw[start..<index]) ?? "")
                 start = index + 1
             }
             code == 41 && depth == 0 -> {
-                &tokens.push(String.from_bytes(raw[start..<index]) ?? "")
+                tokens.push(String.from_bytes(raw[start..<index]) ?? "")
                 break
             }
             else -> {}
@@ -204,7 +204,7 @@ cli_decode_strace_string: fn(text: String) -> [U8]? Never! {
     index := 0
     loop index < raw.len() {
         if Int.from_u8(raw[index]) != 92 {
-            &decoded.push(raw[index])
+            decoded.push(raw[index])
             index += 1
             next
         }
@@ -212,18 +212,18 @@ cli_decode_strace_string: fn(text: String) -> [U8]? Never! {
         if index >= raw.len() -> return None
         escaped: Int.from_u8(raw[index])
         if {
-            escaped == 97 -> &decoded.push(U8{7})
-            escaped == 98 -> &decoded.push(U8{8})
-            escaped == 102 -> &decoded.push(U8{12})
-            escaped == 110 -> &decoded.push(U8{10})
-            escaped == 114 -> &decoded.push(U8{13})
-            escaped == 116 -> &decoded.push(U8{9})
-            escaped == 118 -> &decoded.push(U8{11})
+            escaped == 97 -> decoded.push(U8{7})
+            escaped == 98 -> decoded.push(U8{8})
+            escaped == 102 -> decoded.push(U8{12})
+            escaped == 110 -> decoded.push(U8{10})
+            escaped == 114 -> decoded.push(U8{13})
+            escaped == 116 -> decoded.push(U8{9})
+            escaped == 118 -> decoded.push(U8{11})
             escaped == 120 -> {
                 if index + 2 >= raw.len() -> return None
                 high: cli_hex_digit(Int.from_u8(raw[index + 1])) ?? return None
                 low: cli_hex_digit(Int.from_u8(raw[index + 2])) ?? return None
-                &decoded.push(U8{high * 16 + low})
+                decoded.push(U8{high * 16 + low})
                 index += 2
             }
             escaped >= 48 && escaped <= 55 -> {
@@ -235,12 +235,12 @@ cli_decode_strace_string: fn(text: String) -> [U8]? Never! {
                     value = (value * 8 + next_code - 48) %% 256
                     consumed += 1
                 }
-                &decoded.push(U8{value})
+                decoded.push(U8{value})
                 index += consumed - 1
             }
             // `\\`, `\"`, `\?`, and any other escaped byte stand for
             // themselves.
-            else -> &decoded.push(raw[index])
+            else -> decoded.push(raw[index])
         }
         index += 1
     }

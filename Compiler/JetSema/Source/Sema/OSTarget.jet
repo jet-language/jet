@@ -1,4 +1,4 @@
-// D-OSTARGET1=A (Docs/spec/syntax-decisions.md): `#Target(OS.Linux|MacOS|Windows)`
+// `#Target(OS.Linux|MacOS|Windows)`
 // gates one `impl` to one native OS, the second axis of the `#Target` family.
 // Two structural checks over the registered modules:
 // - E-OSTARGET-MIXED-AXIS: an OS-gated impl in a file that also carries a web
@@ -7,7 +7,7 @@
 //   takes or returns a value of a type whose impl is OS-gated. The check reads
 //   signatures only, as the web partition's ABI check does; a `$build.os`
 //   dispatch arm that constructs the type is folded before this runs.
-use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row]
+use jet_foundation.[Diagnostic, Func, Span, WebBucket, diagnostic_registry_row, target_os_name, target_os_parse]
 
 sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) {
     gate_of_type := [String:String]{}
@@ -19,52 +19,52 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic
                     os: implementation.os_target ?? next
                     gate_of_type[implementation.type_name] = os
                     label: if implementation.trait_name == .Val(trait_name) -> "{implementation.type_name}.{trait_name}" else -> implementation.type_name
-                    sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, label, implementation.type_span, &found)
+                    sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, label, implementation.type_span, found)
                 }
                 .Struct(definition) -> {
                     loop block in definition.trait_impls {
                         os: block.os_target ?? next
                         gate_of_type[definition.name] = os
-                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, &found)
+                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, found)
                     }
                 }
                 .Enum(definition) -> {
                     loop block in definition.trait_impls {
                         os: block.os_target ?? next
                         gate_of_type[definition.name] = os
-                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, &found)
+                        sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, found)
                     }
                 }
                 else -> {}
             }
         }
-        sema_effect_publish_diagnostics(&diagnostics, graph_module.source_segments, ^found)
+        sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, found)
     }
     if gate_of_type.len() == 0 -> return
     loop graph_module in graph.modules {
         found := [Diagnostic]{}
         loop item in graph_module.program.items {
             if item == {
-                .Func(function) -> sema_os_target_signature(function, None, gate_of_type, &found)
+                .Func(function) -> sema_os_target_signature(function, None, gate_of_type, found)
                 .Impl(implementation) -> {
-                    loop method in implementation.methods -> sema_os_target_signature(method, implementation.os_target, gate_of_type, &found)
+                    loop method in implementation.methods -> sema_os_target_signature(method, implementation.os_target, gate_of_type, found)
                 }
                 .Struct(definition) -> {
-                    loop method in definition.methods -> sema_os_target_signature(method, None, gate_of_type, &found)
+                    loop method in definition.methods -> sema_os_target_signature(method, None, gate_of_type, found)
                     loop block in definition.trait_impls {
-                        loop method in block.methods -> sema_os_target_signature(method, block.os_target, gate_of_type, &found)
+                        loop method in block.methods -> sema_os_target_signature(method, block.os_target, gate_of_type, found)
                     }
                 }
                 .Enum(definition) -> {
-                    loop method in definition.methods -> sema_os_target_signature(method, None, gate_of_type, &found)
+                    loop method in definition.methods -> sema_os_target_signature(method, None, gate_of_type, found)
                     loop block in definition.trait_impls {
-                        loop method in block.methods -> sema_os_target_signature(method, block.os_target, gate_of_type, &found)
+                        loop method in block.methods -> sema_os_target_signature(method, block.os_target, gate_of_type, found)
                     }
                 }
                 else -> {}
             }
         }
-        sema_effect_publish_diagnostics(&diagnostics, graph_module.source_segments, ^found)
+        sema_effect_publish_diagnostics(diagnostics, graph_module.source_segments, found)
     }
 }
 
@@ -73,7 +73,7 @@ sema_os_target_mixed_axis: fn(ceiling: WebBucket?, os: String, item: String, spa
     row: diagnostic_registry_row("E-OSTARGET-MIXED-AXIS") ?? panic("E-OSTARGET-MIXED-AXIS has no registry row")
     os_name: sema_os_target_name(os)
     web: sema_web_bucket_name(bucket)
-    &found.push(sema_error("E-OSTARGET-MIXED-AXIS", span,
+    found.push(sema_error("E-OSTARGET-MIXED-AXIS", span,
         row.what.replace("{{os}}", os_name).replace("{{web}}", web).replace("{{item}}", item),
         row.why,
         row.fix.replace("{{os}}", os_name)))
@@ -87,9 +87,9 @@ sema_os_target_signature: fn(function: Func, own_gate: String?, gate_of_type: [S
     if function.compiler_generated -> return
     loop param in function.params {
         if param.name == "self" -> next
-        if param.ty == .Named(name) -> sema_os_target_flag(function, own_gate, name, gate_of_type, &found)
+        if param.ty == .Named(name) -> sema_os_target_flag(function, own_gate, name, gate_of_type, found)
     }
-    if function.return_type == .Val(.Named(name)) -> sema_os_target_flag(function, own_gate, name, gate_of_type, &found)
+    if function.return_type == .Val(.Named(name)) -> sema_os_target_flag(function, own_gate, name, gate_of_type, found)
 }
 
 sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, gate_of_type: [String:String], found: &[Diagnostic]) {
@@ -98,7 +98,7 @@ sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, ga
     if own_gate == .Val(gate) && gate == os -> return
     row: diagnostic_registry_row("E-OSTARGET-UNMATCHED-CALL") ?? panic("E-OSTARGET-UNMATCHED-CALL has no registry row")
     os_name: sema_os_target_name(os)
-    &found.push(sema_error("E-OSTARGET-UNMATCHED-CALL", function.name_span,
+    found.push(sema_error("E-OSTARGET-UNMATCHED-CALL", function.name_span,
         row.what.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name),
         row.why,
         row.fix.replace("{{caller}}", function.name).replace("{{gated_type}}", type_name).replace("{{os}}", os_name)))
@@ -107,10 +107,6 @@ sema_os_target_flag: fn(function: Func, own_gate: String?, type_name: String, ga
 // The parser spells an impl's OS as sema reads it (`linux`, `macos`,
 // `windows`); diagnostics name the marker's variant.
 sema_os_target_name: fn(os: String) -> String Never! {
-    if os == {
-        "linux" -> "Linux"
-        "macos" | "mac_os" -> "MacOS"
-        "windows" -> "Windows"
-        else -> os
-    }
+    if target_os_parse(os) == .Val(target) -> return target_os_name(target)
+    os.copy()
 }

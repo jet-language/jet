@@ -7,11 +7,11 @@ use {
 
 orders_worker: fn() {}
 
-receipt_id: fn(receipt: ^Delivery) -> Delivery {
+receipt_id: fn(receipt: &&Delivery) -> Delivery {
     return receipt
 }
 
-receipt_kind: fn(receipt: ^Delivery) -> String {
+receipt_kind: fn(receipt: &&Delivery) -> String {
     state: receipt.status() ?? panic("status")
     if state == {
         .Pending -> { return "pending" }
@@ -30,21 +30,21 @@ run: fn() {
     retention: Duration.seconds(86400) ?? panic("retention")
     runtime := services.runtime(store, retention: retention)
     tree := services.tree("restart-orders")
-    endpoint: &tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
-    &tree.group("orders-supervisor", ["orders"]) ?? panic("group")
-    &tree.start() ?? panic("start")
+    endpoint: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
+    tree.group("orders-supervisor", ["orders"]) ?? panic("group")
+    tree.start() ?? panic("start")
     if phase == "send" {
         receipt: runtime.send(endpoint, "order", key: "order-restart") ?? panic("send")
         receipt.status() ?? panic("send status")
         print("accepted")
     } else {
-        &tree.fail_worker(endpoint) ?? panic("restart")
+        tree.fail_worker(endpoint) ?? panic("restart")
         print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
         receipt: runtime.send(endpoint, "order", key: "order-restart") ?? panic("recover")
         retry: runtime.retry(receipt) ?? panic("retry")
         retry_copy: retry.copy()
-        print(receipt_kind(^retry_copy))
-        message: &tree.receive(endpoint) ?? panic("receive")
+        print(receipt_kind(retry_copy))
+        message: tree.receive(endpoint) ?? panic("receive")
         print(message)
         runtime.commit(retry) ?? panic("commit")
     }

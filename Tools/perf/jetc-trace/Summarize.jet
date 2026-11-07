@@ -91,7 +91,7 @@ shortest: fn(value: Float) -> Shortest Never! {
             point_at = mantissa.len()
             next
         }
-        if code >= 48 && code <= 57 -> &mantissa.push(byte)
+        if code >= 48 && code <= 57 -> mantissa.push(byte)
     }
     if point_at < 0 -> point_at = mantissa.len()
     point := point_at + exponent_sign * exponent
@@ -351,7 +351,7 @@ js_string: fn(value: Dyn?) -> String Never! {
                 .Array(items) -> {
                     words := [String]{}
                     loop item in items {
-                        if item == .Null -> &words.push("") else -> &words.push(js_string(Val(item)))
+                        if item == .Null -> words.push("") else -> words.push(js_string(Val(item)))
                     }
                     words.join(",")
                 }
@@ -402,7 +402,7 @@ texts: fn(value: Dyn?) -> [String] Never! {
     out := [String]{}
     if value == .Val(inner) {
         if inner == .Array(items) {
-            loop item in items -> &out.push(js_string(Val(item)))
+            loop item in items -> out.push(js_string(Val(item)))
         }
     }
     out
@@ -458,7 +458,7 @@ read_events: fn(text: String) -> [Dyn] Never! {
         trimmed: js_trim(raw)
         line: if trimmed.ends_with(",") -> String.from_bytes_lossy(trimmed.bytes()[0..<trimmed.bytes().len() - 1]) else -> trimmed
         if line == "" || line == "[" || line == "]" -> next
-        if json.parse(line) == .Ok(event) -> &events.push(event)
+        if json.parse(line) == .Ok(event) -> events.push(event)
     }
     events
 }
@@ -527,7 +527,7 @@ kind_row: fn(kinds: &[KindRow], key: String, kind: String, ts: Float) -> Int Nev
     loop index in 0..<kinds.len() {
         if kinds[index].key == key -> return index
     }
-    &kinds.push(KindRow{key: key, kind: kind, first: ts, count: 0, open: 0, total_us: ZERO, max_us: ZERO, items: ZERO, has_items: false, peak_kb: ZERO})
+    kinds.push(KindRow{key: key, kind: kind, first: ts, count: 0, open: 0, total_us: ZERO, max_us: ZERO, items: ZERO, has_items: false, peak_kb: ZERO})
     kinds.len() - 1
 }
 
@@ -570,7 +570,7 @@ summarize: fn(events: [Dyn]) -> Summary Never! {
             if threads[index].key == tid_key -> at = index
         }
         if at < 0 {
-            &threads.push(Thread{key: tid_key, shown: js_string(tid), stack: [OpenSpan]{}})
+            threads.push(Thread{key: tid_key, shown: js_string(tid), stack: [OpenSpan]{}})
             at = threads.len() - 1
         }
         phase: text_of(field(event, "ph")) ?? ""
@@ -581,7 +581,7 @@ summarize: fn(events: [Dyn]) -> Summary Never! {
             kind_value: if present(category) -> category else -> field(event, "name")
             name_value: field(event, "name")
             kind_key: map_key(kind_value, position)
-            &threads[at].stack.push(OpenSpan{
+            threads[at].stack.push(OpenSpan{
                 kind: js_string(kind_value),
                 kind_key: kind_key,
                 label: js_string(name_value),
@@ -589,11 +589,11 @@ summarize: fn(events: [Dyn]) -> Summary Never! {
                 ts: ts,
                 args: if present(args) -> args ?? Dyn.Null else -> Dyn.Object([String:Dyn]{}),
             })
-            _ := kind_row(&kinds, kind_key, js_string(kind_value), ts)
+            _ := kind_row(kinds, kind_key, js_string(kind_value), ts)
         } else if phase == "E" {
             if threads[at].stack.len() == 0 -> next
-            open: &threads[at].stack.pop() ?? next
-            row: kind_row(&kinds, open.kind_key, open.kind, open.ts)
+            open: threads[at].stack.pop() ?? next
+            row: kind_row(kinds, open.kind_key, open.kind, open.ts)
             duration: ts - open.ts
             kinds[row].count += 1
             kinds[row].total_us = kinds[row].total_us + duration
@@ -624,13 +624,13 @@ summarize: fn(events: [Dyn]) -> Summary Never! {
                 first_ts = progress[previous].first_ts
             }
             entry: Progress{key: key, done: done, total: total, ts: ts, first_done: first_done, first_ts: first_ts}
-            if previous >= 0 -> progress[previous] = entry else -> &progress.push(entry)
+            if previous >= 0 -> progress[previous] = entry else -> progress.push(entry)
         }
     }
     // Spans still open count with their running time so far.
     loop thread in threads {
         loop open in thread.stack {
-            row: kind_row(&kinds, open.kind_key, open.kind, open.ts)
+            row: kind_row(kinds, open.kind_key, open.kind, open.ts)
             kinds[row].open += 1
             kinds[row].total_us = kinds[row].total_us + (last_ts - open.ts)
             kinds[row].max_us = js_max(kinds[row].max_us, last_ts - open.ts)
@@ -674,34 +674,34 @@ render: fn(text: String, now_ms: Int) -> String Never! {
     loop row in summary.kinds {
         if utf16_len(row.kind) > width -> width = utf16_len(row.kind)
     }
-    &lines.push("{pad_end("span", width)} {pad_start("count", 7)} {pad_start("total s", 9)} {pad_start("max s", 8)} {pad_start("items", 9)} {pad_start("peak MB", 8)}")
+    lines.push("{pad_end("span", width)} {pad_start("count", 7)} {pad_start("total s", 9)} {pad_start("max s", 8)} {pad_start("items", 9)} {pad_start("peak MB", 8)}")
     // Array.prototype.sort is stable: equal first times keep first-seen order.
     rows := [KindRow]{}
     loop row in summary.kinds {
         at := rows.len()
         loop at > 0 && float_sign(rows[at - 1].first - row.first) > 0 -> at -= 1
-        &rows.insert(at, row)
+        rows.insert(at, row)
     }
     loop row in rows {
         // `+N`: N spans of this kind are still open; their time so far is included.
         count: if row.open > 0 -> "{row.count}+{row.open}" else -> "{row.count}"
         items: if row.has_items -> js_number(row.items) else -> "-"
         peak: if row.peak_kb != ZERO && !math.is_nan(row.peak_kb) -> mb(Val(row.peak_kb)) else -> "-"
-        &lines.push("{pad_end(row.kind, width)} {pad_start(count, 7)} {pad_start(seconds(row.total_us), 9)} {pad_start(seconds(row.max_us), 8)} {pad_start(items, 9)} {pad_start(peak, 8)}")
+        lines.push("{pad_end(row.kind, width)} {pad_start(count, 7)} {pad_start(seconds(row.total_us), 9)} {pad_start(seconds(row.max_us), 8)} {pad_start(items, 9)} {pad_start(peak, 8)}")
     }
-    &lines.push("")
+    lines.push("")
     stale_text := ""
     if summary.start_unix_ms == .Val(start) {
         now: Float.parse("{now_ms}") ?? math.NAN
         stale: (now - (start + summary.last_ts / THOUSAND)) / THOUSAND
         stale_text = ", last event {js_fixed(stale, 0)} s ago"
     }
-    &lines.push("trace time {seconds(summary.last_ts)} s{stale_text}, rss {mb(summary.rss_kb)} MB, peak {mb(summary.peak_kb)} MB")
+    lines.push("trace time {seconds(summary.last_ts)} s{stale_text}, rss {mb(summary.rss_kb)} MB, peak {mb(summary.peak_kb)} MB")
     any_open := false
     loop thread in summary.threads {
         if thread.stack.len() == 0 -> next
         any_open = true
-        &lines.push("open on thread {thread.shown}:")
+        lines.push("open on thread {thread.shown}:")
         loop depth in 0..<thread.stack.len() {
             span: thread.stack[depth]
             index: number_field(span.args, "index")
@@ -727,10 +727,10 @@ render: fn(text: String, now_ms: Int) -> String Never! {
                     }
                 }
             }
-            &lines.push(line)
+            lines.push(line)
         }
     }
-    if !any_open -> &lines.push("no open spans (compile finished or not started)")
+    if !any_open -> lines.push("no open spans (compile finished or not started)")
     lines.join("\n")
 }
 

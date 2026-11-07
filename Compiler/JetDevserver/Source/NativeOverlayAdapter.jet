@@ -1,36 +1,25 @@
 // Typed resident-session/native-overlay bridge. Keeps canonical event identity and body
 // intact. Never parses devtools_json, selects panel policy or executes actions.
-use {
-    std.collections.[VecDeque]
-    fmt: std.fmt
-    jet_foundation.Devtools.[JetDevtoolsEvent]
-    jet_devserver.NativeOverlayHost.[NativeOverlayAction, NativeOverlayEvent, NativeOverlayGrant, NativeOverlayNode, NativeOverlayNodeKind, NativeOverlayPanelFact, JET_DEVTOOLS_PROTOCOL, MAX_OVERLAY_DEPTH, MAX_OVERLAY_NODES, MAX_OVERLAY_PANELS, MAX_OVERLAY_TEXT_BYTES]
-    jet_devserver.Session.[DevtoolsProjection, ResidentDevSession]
-    jet_devserver.TerminalHost.[JetDevtoolsHostKind, JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
-    project_panel_availability: jet_devserver.TerminalHost.panel_availability
-    jet_devserver.Devtools.catalog.[descriptors]
-    core.devtools.runtime.kernel_devtools_panel_catalog.[JetDevtoolsPanelAvailability, JetDevtoolsPanelCapability, JetDevtoolsPanelDescriptor]
-}
+use jet_foundation.[JetDevtoolsEvent]
 
-NATIVE_OVERLAY_EVENT_LOG_PANEL_ID: "event-log"
-NATIVE_OVERLAY_EVENT_LOG_TITLE: "Event Log"
-NATIVE_OVERLAY_EVENT_LOG_STATUS: "canonical events"
-MAX_NATIVE_OVERLAY_EVENTS: Usize{256}
-EVENT_LOG_NODES_PER_EVENT: Usize{7}
-NativeOverlayCursor: struct { sequence: U64 }
-impl NativeOverlayCursor {
-    new: fn(sequence: U64) -> Self { return Self { sequence } }
-}
+NATIVE_OVERLAY_EVENT_LOG_PANEL_ID: String{"event-log"}
+NATIVE_OVERLAY_EVENT_LOG_TITLE: String{"Event Log"}
+NATIVE_OVERLAY_EVENT_LOG_STATUS: String{"canonical events"}
+MAX_NATIVE_OVERLAY_EVENTS: Int{256}
+EVENT_LOG_NODES_PER_EVENT: Int{7}
+
+NativeOverlayCursor: struct { sequence: Int }
+
 NativeOverlayIdentity: struct {
-    protocol: String; session_id: String; revision: String
+    protocol: String
+    session_id: String
+    revision: String
     cursor: NativeOverlayCursor?
 }
-NativeOverlayUnavailableReason: enum {
-    EmptyStream; Reset; Truncated; EventLimit; NodeLimit; SelectionPanelUnavailable; NoCursor
-}
+
 impl NativeOverlayUnavailableReason {
-    as_str: fn(self: Self) -> String {
-        return if self == {
+    as_str: fn(self) -> String {
+        if self == {
             .EmptyStream -> "empty-stream"
             .Reset -> "reset"
             .Truncated -> "truncated"
@@ -41,351 +30,381 @@ impl NativeOverlayUnavailableReason {
         }
     }
 }
-NativeOverlayUnavailableFact: struct { subject: String; reason: NativeOverlayUnavailableReason }
+
+NativeOverlayUnavailableFact: struct { subject: String, reason: NativeOverlayUnavailableReason }
+
 NativeOverlayActionRequest: struct {
-    protocol: String; session_id: String; revision: String; sequence: U64
-    panel_id: String; node_id: String; action_id: String; required_grant: NativeOverlayGrant
+    protocol: String
+    session_id: String
+    revision: String
+    sequence: Int
+    panel_id: String
+    node_id: String
+    action_id: String
+    required_grant: NativeOverlayGrant
 }
 impl NativeOverlayActionRequest {
-    new: fn(protocol: String, session_id: String, revision: String, sequence: U64, panel_id: String, node_id: String, action_id: String, required_grant: NativeOverlayGrant) -> Self {
-        return Self { protocol, session_id, revision, sequence, panel_id, node_id, action_id, required_grant }
-    }
-    cursor: fn(self: Self) -> NativeOverlayCursor { return NativeOverlayCursor.new(self.sequence) }
+    cursor: fn(self) -> NativeOverlayCursor { NativeOverlayCursor{sequence: self.sequence} }
 }
+
 NativeOverlaySelectionRequest: struct {
-    protocol: String; session_id: String; revision: String; sequence: U64
-    panel_id: String; item_key: String
+    protocol: String
+    session_id: String
+    revision: String
+    sequence: Int
+    panel_id: String
+    item_key: String
 }
 impl NativeOverlaySelectionRequest {
-    new: fn(protocol: String, session_id: String, revision: String, sequence: U64, panel_id: String, item_key: String) -> Self {
-        return Self { protocol, session_id, revision, sequence, panel_id, item_key }
-    }
-    cursor: fn(self: Self) -> NativeOverlayCursor { return NativeOverlayCursor.new(self.sequence) }
+    cursor: fn(self) -> NativeOverlayCursor { NativeOverlayCursor{sequence: self.sequence} }
 }
+
 // Event is absent only for an empty canonical cursor; never synthesize a sequence.
 NativeOverlayUpdate: struct {
-    identity: NativeOverlayIdentity; event: NativeOverlayEvent?
-    reset: Bool; truncation: Bool; selection: NativeOverlaySelectionRequest?
+    identity: NativeOverlayIdentity
+    event: NativeOverlayEvent?
+    reset: Bool
+    truncation: Bool
+    selection: NativeOverlaySelectionRequest?
     unavailable: [NativeOverlayUnavailableFact]
 }
-// The Rust `NativeOverlayProjection` is `NativeOverlayUpdate`
+
 #Error
 NativeOverlayAdapterError: enum {
-    InvalidProtocol { expected: String, received: String }
-    SessionMismatch { expected: String, received: String }
+    InvalidProtocol(expected: String, received: String)
+    SessionMismatch(expected: String, received: String)
     InvalidRevision
-    InvalidSequence(U64)
-    StaleRevision { expected: String, received: String }
-    StaleSequence { expected: U64, received: U64 }
-    InvalidText { field: String }
-    DuplicatePanel(String); ReservedPanel(String); InvalidPanel(String); InvalidNode(String)
-    HostRejected(String); MissingProjection; UnknownPanel(String); UnknownNode(String)
-    ActionUnavailable(String); ActionMismatch(String)
-}
-impl NativeOverlayAdapterError.Display {
-    fmt: fn(self: Self, formatter: fmt.Formatter) -> fmt.Result {
-        message: if self == {
-            .InvalidProtocol { expected, received } -> "native overlay protocol `{received}` does not match `{expected}`"
-            .SessionMismatch { expected, received } -> "native overlay session `{received}` does not match `{expected}`"
+    InvalidSequence(sequence: Int)
+    StaleRevision(expected: String, received: String)
+    StaleSequence(expected: Int, received: Int)
+    InvalidText(field: String)
+    DuplicatePanel(panel_id: String)
+    ReservedPanel(panel_id: String)
+    InvalidPanel(message: String)
+    InvalidNode(message: String)
+    HostRejected(message: String)
+    MissingProjection
+    UnknownPanel(panel_id: String)
+    UnknownNode(node_id: String)
+    ActionUnavailable(node_id: String)
+    ActionMismatch(action_id: String)
+
+    message: fn(self) -> String {
+        if self == {
+            .InvalidProtocol(expected, received) -> "native overlay protocol `{received}` does not match `{expected}`"
+            .SessionMismatch(expected, received) -> "native overlay session `{received}` does not match `{expected}`"
             .InvalidRevision -> "native overlay revision is empty, too long, or contains control text"
             .InvalidSequence(sequence) -> "native overlay sequence {sequence} is invalid"
-            .StaleRevision { expected, received } -> "native overlay revision `{received}` is stale; current revision is `{expected}`"
-            .StaleSequence { expected, received } -> "native overlay sequence {received} is stale; current sequence is {expected}"
-            .InvalidText { field } -> "native overlay {field} is empty, too long, or contains control text"
+            .StaleRevision(expected, received) -> "native overlay revision `{received}` is stale; current revision is `{expected}`"
+            .StaleSequence(expected, received) -> "native overlay sequence {received} is stale; current sequence is {expected}"
+            .InvalidText(field) -> "native overlay {field} is empty, too long, or contains control text"
             .DuplicatePanel(panel_id) -> "native overlay panel `{panel_id}` is duplicated"
             .ReservedPanel(panel_id) -> "native overlay panel `{panel_id}` is reserved for the event log"
-            .InvalidPanel(error) | .InvalidNode(error) | .HostRejected(error) -> error
+            .InvalidPanel(message) | .InvalidNode(message) | .HostRejected(message) -> message
             .MissingProjection -> "native overlay has no current projection"
             .UnknownPanel(panel_id) -> "native overlay panel `{panel_id}` is unavailable"
             .UnknownNode(node_id) -> "native overlay node `{node_id}` is unavailable"
             .ActionUnavailable(node_id) -> "native overlay node `{node_id}` has no action"
             .ActionMismatch(action_id) -> "native overlay action `{action_id}` is stale or no longer matches the node"
         }
-        return formatter.write_str(message)
     }
 }
+impl NativeOverlayAdapterError.Display { display: fn(&&self) -> String { self.message() } }
+
+// The current request context: the revision and cursor a request must name.
+NativeOverlayContext: struct { revision: String, sequence: Int }
+NativeOverlayRenderedPanels: struct { panels: [NativeOverlayPanelFact], dropped_for_nodes: Bool }
+
 NativeOverlayAdapter: struct {
-    session_id: String; revision: String?; sequence: U64?; release_build: Bool
-    event_facts: VecDeque<JetDevtoolsEvent>; typed_panels: [String: NativeOverlayPanelFact]
-    history_truncated: Bool; last_update: NativeOverlayUpdate?
+    session_id: String
+    revision: String?
+    sequence: Int?
+    release_build: Bool
+    // Oldest first; bounded by MAX_NATIVE_OVERLAY_EVENTS.
+    event_facts: [JetDevtoolsEvent]
+    typed_panels: [String: NativeOverlayPanelFact]
+    history_truncated: Bool
+    last_update: NativeOverlayUpdate?
 }
 impl NativeOverlayAdapter {
-    new: fn(session_id: String) -> Self {
-        return Self { session_id, revision: .None, sequence: .None, release_build: false,
-            event_facts: VecDeque.new(), typed_panels: {}, history_truncated: false, last_update: .None }
+    new: fn(session_id: String) -> NativeOverlayAdapter {
+        NativeOverlayAdapter{session_id: session_id, revision: None, sequence: None, release_build: false,
+            event_facts: [JetDevtoolsEvent]{}, typed_panels: [String: NativeOverlayPanelFact]{}, history_truncated: false, last_update: None}
     }
     from_projection: fn(projection: DevtoolsProjection, typed_panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        return project_projection(projection, typed_panels)
+        adapter := NativeOverlayAdapter.new(projection.session_id)
+        adapter.apply_projection_with_panels(projection, typed_panels)
     }
-    for_session: fn(session: ResidentDevSession) -> Self { return Self.new(session.id()) }
-    with_release_build: fn(self: Self, release_build: Bool) -> Self { self.set_release_build(release_build); return self }
-    release_build: fn(self: Self) -> Bool { return self.release_build }
-    set_release_build: fn(self: Self, release_build: Bool) -> Unit {
+    for_session: fn(session: ResidentDevSession) -> NativeOverlayAdapter { NativeOverlayAdapter.new(session.id()) }
+    set_release_build: fn(&self, release_build: Bool) {
         self.release_build = release_build
         if release_build {
-            self.revision = .None
-            self.sequence = .None
-            self.event_facts.clear()
-            self.typed_panels.clear()
+            self.revision = None
+            self.sequence = None
+            self.event_facts = [JetDevtoolsEvent]{}
+            self.typed_panels = [String: NativeOverlayPanelFact]{}
             self.history_truncated = false
-            self.last_update = .None
+            self.last_update = None
         }
     }
-    panel_catalog: fn(self: Self) -> [JetDevtoolsPanelDescriptor] { return descriptors() }
-    panel_availability: fn(self: Self) -> [JetDevtoolsPanelAvailability] {
-        grants: if self.release_build -> &[] else -> &JetDevtoolsPanelCapability.ALL
-        return project_panel_availability(.NativeOverlay, grants)
+    panel_catalog: fn(self) -> [JetDevtoolsPanelDescriptor] { descriptors() }
+    available_panels: fn(self) -> [JetDevtoolsPanelAvailability] {
+        grants: if self.release_build -> [JetDevtoolsPanelCapability]{} else -> JetDevtoolsPanelCapability.ALL
+        panel_availability(.NativeOverlay, grants)
     }
-    session_id: fn(self: Self) -> String { return self.session_id }
-    sequence: fn(self: Self) -> U64? { return self.sequence }
-    revision: fn(self: Self) -> String? { return self.revision.as_deref() }
-    cursor: fn(self: Self) -> NativeOverlayCursor? { return self.sequence.map(NativeOverlayCursor.new) }
-    last_update: fn(self: Self) -> NativeOverlayUpdate? { return self.last_update.as_ref() }
+    cursor: fn(self) -> NativeOverlayCursor? {
+        if self.sequence == .Val(sequence) -> return Val(NativeOverlayCursor{sequence: sequence})
+        None
+    }
     // Retain already-typed nodes/actions without deriving semantics from names.
-    set_typed_panels: fn(self: &Self, panels: &[NativeOverlayPanelFact]) NativeOverlayAdapterError! {
-        if self.release_build -> return .Err(.HostRejected("native overlay is excluded from release builds"))
-        next: typed_panel_map(panels)
-        self.typed_panels = next
-        return ()
+    set_typed_panels: fn(&self, panels: [NativeOverlayPanelFact]) NativeOverlayAdapterError! {
+        if self.release_build -> return Err(NativeOverlayAdapterError.HostRejected(message: "native overlay is excluded from release builds"))
+        self.typed_panels = typed_panel_map(panels)
     }
-    apply_projection: fn(self: Self, projection: DevtoolsProjection) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        return self.apply_projection_internal(^projection, false)
+    apply_projection: fn(&self, projection: DevtoolsProjection) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        self.apply_projection_internal(projection, false)
     }
-    apply_projection_internal: fn(self: Self, projection: DevtoolsProjection, retain_typed_panels: Bool) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        if self.release_build -> return .Err(.HostRejected("native overlay is excluded from release builds"))
-        validate_projection_identity(&projection, self.session_id)
+    apply_projection_with_panels: fn(&self, projection: DevtoolsProjection, panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        self.set_typed_panels(panels)
+        self.apply_projection_internal(projection, true)
+    }
+    apply_projection_internal: fn(&self, projection: DevtoolsProjection, retain_typed_panels: Bool) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        if self.release_build -> return Err(NativeOverlayAdapterError.HostRejected(message: "native overlay is excluded from release builds"))
+        validate_projection_identity(projection, self.session_id)
         validate_revision(projection.revision, projection.sequence == 0)
-        self.check_projection_order(&projection)
-        revision_changed: self.revision.as_deref() != .Val(projection.revision)
+        self.check_projection_order(projection)
+        revision_changed: self.revision != Val(projection.revision)
         effective_reset: projection.reset || revision_changed
         if effective_reset {
-            self.event_facts.clear()
+            self.event_facts = [JetDevtoolsEvent]{}
             self.history_truncated = false
-            if !retain_typed_panels -> self.typed_panels.clear()
+            if !retain_typed_panels -> self.typed_panels = [String: NativeOverlayPanelFact]{}
         }
-        events := projection.panels.copy()
-        events.sort_by((left, right) -> left.sequence().cmp(right.sequence())
-            .then_with(() -> left.timestamp_ms.cmp(right.timestamp_ms))
-            .then_with(() -> left.source().cmp(right.source()))
-            .then_with(() -> left.kind().cmp(right.kind()))
-            .then_with(() -> left.entity().cmp(right.entity())))
-        previous_sequence := U64?{.None}
-        loop event in &events {
-            validate_event(event, &projection)
-            if previous_sequence == .Val(event.sequence()) -> return .Err(.InvalidSequence(event.sequence()))
+        events := projection.panels
+        events.sort_by((left, right) -> (left.sequence() <=> right.sequence()).then(left.timestamp_ms <=> right.timestamp_ms).then(left.source() <=> right.source()).then(left.kind() <=> right.kind()).then(left.entity() <=> right.entity()))
+        previous_sequence := Int?{None}
+        loop event in events {
+            validate_event(event, projection)
+            if previous_sequence == Val(event.sequence()) -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
             if !projection.reset && !revision_changed {
                 if self.sequence == .Val(current_sequence) {
-                    if event.sequence() <= current_sequence -> return .Err(.StaleSequence { expected: current_sequence, received: event.sequence() })
+                    if event.sequence() <= current_sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: current_sequence, received: event.sequence()))
                 }
             }
-            previous_sequence = .Val(event.sequence())
+            previous_sequence = Val(event.sequence())
         }
-        loop event in events -> self.event_facts.push_back(^event)
-        loop self.event_facts.len() > MAX_NATIVE_OVERLAY_EVENTS {
-            _: self.event_facts.pop_front()
+        loop event in events -> self.event_facts.push(event)
+        if self.event_facts.len() > MAX_NATIVE_OVERLAY_EVENTS {
+            first: self.event_facts.len() - MAX_NATIVE_OVERLAY_EVENTS
+            self.event_facts = loop index in first..<self.event_facts.len() -> self.event_facts[index]
             self.history_truncated = true
         }
-        self.revision = .Val(projection.revision.copy())
-        self.sequence = if projection.sequence != 0 -> .Val(projection.sequence) else -> .None
+        self.revision = Val(projection.revision)
+        self.sequence = if projection.sequence != 0 -> Val(projection.sequence) else -> None
         unavailable := [NativeOverlayUnavailableFact]{}
         if effective_reset -> unavailable.push(make_unavailable("session", .Reset))
         if projection.truncation -> unavailable.push(make_unavailable("session", .Truncated))
         if self.history_truncated -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .EventLimit))
-        event: if self.sequence == {
-            .Val(sequence) -> {
-                (panels, dropped_for_nodes): self.render_panels(sequence)
-                if dropped_for_nodes -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .NodeLimit))
-                event: NativeOverlayEvent.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), projection.revision.copy(), sequence, projection.observed_at, ^panels)
-                event.validate() ?? return .Err(.HostRejected(err))
-                .Val(event)
-            }
-            .None -> {
-                unavailable.push(make_unavailable("session", .EmptyStream))
-                .None
+        event := NativeOverlayEvent?{None}
+        if self.sequence == .Val(sequence) {
+            rendered: self.render_panels(sequence)
+            if rendered.dropped_for_nodes -> unavailable.push(make_unavailable(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, .NodeLimit))
+            current: NativeOverlayEvent.new(JET_DEVTOOLS_PROTOCOL, self.session_id, projection.revision, sequence, projection.observed_at, rendered.panels)
+            _: current.validate() ?? return Err(NativeOverlayAdapterError.HostRejected(message: err.message))
+            event = Val(current)
+        } else {
+            unavailable.push(make_unavailable("session", .EmptyStream))
+        }
+        selection := NativeOverlaySelectionRequest?{None}
+        if projection.selection == .Val(selected) {
+            if self.sequence == .Val(sequence) {
+                if self.typed_panels.get(selected.panel_id) == None && selected.panel_id != NATIVE_OVERLAY_EVENT_LOG_PANEL_ID {
+                    unavailable.push(make_unavailable(selected.panel_id, .SelectionPanelUnavailable))
+                }
+                selection = Val(NativeOverlaySelectionRequest{protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, revision: projection.revision, sequence: sequence, panel_id: selected.panel_id, item_key: selected.item_key})
+            } else {
+                unavailable.push(make_unavailable(selected.panel_id, .NoCursor))
             }
         }
-        selection: projection.selection.map((selection) -> {
-            sequence: self.sequence ?? {
-                unavailable.push(make_unavailable(selection.panel_id, .NoCursor))
-                return .None
-            }
-            if !self.typed_panels.contains_key(selection.panel_id) && selection.panel_id != NATIVE_OVERLAY_EVENT_LOG_PANEL_ID {
-                unavailable.push(make_unavailable(selection.panel_id, .SelectionPanelUnavailable))
-            }
-            return .Val(NativeOverlaySelectionRequest.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), projection.revision.copy(), sequence, ^selection.panel_id, ^selection.item_key))
-        }).flatten()
-        identity: NativeOverlayIdentity { protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: self.session_id.copy(), revision: ^projection.revision, cursor: self.cursor() }
-        update: NativeOverlayUpdate { identity, event, reset: effective_reset, truncation: projection.truncation, selection, unavailable }
-        self.last_update = .Val(update.copy())
-        return update
+        identity: NativeOverlayIdentity{protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, revision: projection.revision, cursor: self.cursor()}
+        update: NativeOverlayUpdate{identity: identity, event: event, reset: effective_reset, truncation: projection.truncation, selection: selection, unavailable: unavailable}
+        self.last_update = Val(update)
+        update
     }
-    apply_projection_with_panels: fn(self: Self, projection: DevtoolsProjection, panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        self.set_typed_panels(panels)
-        return self.apply_projection_internal(^projection, true)
+    sync_session: fn(&self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! {
+        if session.id() != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: self.session_id, received: session.id()))
+        self.apply_projection(session.devtools_events_since(self.sequence))
     }
-    sync_session: fn(self: Self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-        if session.id() != self.session_id -> return .Err(.SessionMismatch { expected: self.session_id.copy(), received: session.id().to_string() })
-        return self.apply_projection(session.devtools_events_since(self.sequence))
-    }
-    sync: fn(self: Self, session: ResidentDevSession) -> NativeOverlayUpdate NativeOverlayAdapterError! { return self.sync_session(session) }
-    action_request: fn(self: Self, panel_id: String, node_id: String) -> NativeOverlayActionRequest NativeOverlayAdapterError! {
-        (revision, sequence): self.current_context()
+    action_request: fn(self, panel_id: String, node_id: String) -> NativeOverlayActionRequest NativeOverlayAdapterError! {
+        context: self.current_context()
         node: self.find_node(panel_id, node_id)
-        action: node.action.as_ref() ?? return .Err(.ActionUnavailable(node_id.to_string()))
-        return NativeOverlayActionRequest.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), ^revision, sequence, panel_id, node_id, action.action_id.copy(), action.required_grant)
+        action: node.action ?? return Err(NativeOverlayAdapterError.ActionUnavailable(node_id: node_id))
+        NativeOverlayActionRequest{protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, revision: context.revision, sequence: context.sequence,
+            panel_id: panel_id, node_id: node_id, action_id: action.action_id, required_grant: action.required_grant}
     }
-    validate_action_request: fn(self: &Self, request: &NativeOverlayActionRequest) NativeOverlayAdapterError! {
+    validate_action_request: fn(self, request: NativeOverlayActionRequest) NativeOverlayAdapterError! {
         self.validate_request_identity(request.protocol, request.session_id, request.revision, request.sequence)
         node: self.find_node(request.panel_id, request.node_id)
-        action: node.action.as_ref() ?? return .Err(.ActionUnavailable(request.node_id.copy()))
-        if action.action_id != request.action_id || action.required_grant != request.required_grant -> return .Err(.ActionMismatch(request.action_id.copy()))
-        return ()
+        action: node.action ?? return Err(NativeOverlayAdapterError.ActionUnavailable(node_id: request.node_id))
+        if action.action_id != request.action_id || action.required_grant != request.required_grant -> return Err(NativeOverlayAdapterError.ActionMismatch(action_id: request.action_id))
     }
-    selection_request: fn(self: Self, panel_id: String, item_key: String) -> NativeOverlaySelectionRequest NativeOverlayAdapterError! {
+    selection_request: fn(self, panel_id: String, item_key: String) -> NativeOverlaySelectionRequest NativeOverlayAdapterError! {
         validate_text(panel_id, "selection panel id", false)
         validate_text(item_key, "selection item key", true)
-        (revision, sequence): self.current_context()
-        return NativeOverlaySelectionRequest.new(JET_DEVTOOLS_PROTOCOL, self.session_id.copy(), ^revision, sequence, panel_id, item_key)
+        context: self.current_context()
+        NativeOverlaySelectionRequest{protocol: JET_DEVTOOLS_PROTOCOL, session_id: self.session_id, revision: context.revision, sequence: context.sequence, panel_id: panel_id, item_key: item_key}
     }
-    current_context: fn(self: Self) -> (String, U64) NativeOverlayAdapterError! {
-        revision: self.revision.clone() ?? return .Err(.MissingProjection)
-        sequence: self.sequence ?? return .Err(.MissingProjection)
-        return (_0: revision, _1: sequence)
+    current_context: fn(self) -> NativeOverlayContext NativeOverlayAdapterError! {
+        revision: self.revision ?? return Err(NativeOverlayAdapterError.MissingProjection)
+        sequence: self.sequence ?? return Err(NativeOverlayAdapterError.MissingProjection)
+        NativeOverlayContext{revision: revision, sequence: sequence}
     }
-    validate_request_identity: fn(self: &Self, protocol: String, session_id: String, revision: String, sequence: U64) NativeOverlayAdapterError! {
-        if protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidProtocol { expected: JET_DEVTOOLS_PROTOCOL.to_string(), received: protocol.to_string() })
-        if session_id != self.session_id -> return .Err(.SessionMismatch { expected: self.session_id.copy(), received: session_id.to_string() })
-        (current_revision, current_sequence): self.current_context()
-        if revision != current_revision -> return .Err(.StaleRevision { expected: current_revision, received: revision.to_string() })
-        if sequence != current_sequence -> return .Err(.StaleSequence { expected: current_sequence, received: sequence })
-        return ()
+    validate_request_identity: fn(self, protocol: String, session_id: String, revision: String, sequence: Int) NativeOverlayAdapterError! {
+        if protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol(expected: JET_DEVTOOLS_PROTOCOL, received: protocol))
+        if session_id != self.session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: self.session_id, received: session_id))
+        context: self.current_context()
+        if revision != context.revision -> return Err(NativeOverlayAdapterError.StaleRevision(expected: context.revision, received: revision))
+        if sequence != context.sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: context.sequence, received: sequence))
     }
-    check_projection_order: fn(self: &Self, projection: &DevtoolsProjection) NativeOverlayAdapterError! {
-        current_sequence: self.sequence ?? return ()
-        if self.revision.as_deref() == .Val(current_revision) {
-            if projection.revision != current_revision && projection.sequence <= current_sequence -> return .Err(.StaleRevision { expected: current_revision.to_string(), received: projection.revision.copy() })
+    check_projection_order: fn(self, projection: DevtoolsProjection) NativeOverlayAdapterError! {
+        current_sequence: self.sequence ?? return Ok(())
+        if self.revision == .Val(current_revision) {
+            if projection.revision != current_revision && projection.sequence <= current_sequence -> return Err(NativeOverlayAdapterError.StaleRevision(expected: current_revision, received: projection.revision))
         }
-        if projection.sequence < current_sequence -> return .Err(.StaleSequence { expected: current_sequence, received: projection.sequence })
-        if projection.sequence == current_sequence && self.revision.as_deref() == .Val(projection.revision) && !projection.panels.is_empty() && !projection.reset {
-            return .Err(.StaleSequence { expected: current_sequence, received: projection.sequence })
+        if projection.sequence < current_sequence -> return Err(NativeOverlayAdapterError.StaleSequence(expected: current_sequence, received: projection.sequence))
+        if projection.sequence == current_sequence && self.revision == Val(projection.revision) && projection.panels.len() > 0 && !projection.reset {
+            return Err(NativeOverlayAdapterError.StaleSequence(expected: current_sequence, received: projection.sequence))
         }
-        return ()
     }
-    find_node: fn(self: Self, panel_id: String, node_id: String) -> NativeOverlayNode NativeOverlayAdapterError! {
-        panel: self.typed_panels.get(panel_id) ?? return .Err(.UnknownPanel(panel_id.to_string()))
-        return find_node_in(&panel.nodes, node_id) ?? return .Err(.UnknownNode(node_id.to_string()))
+    find_node: fn(self, panel_id: String, node_id: String) -> NativeOverlayNode NativeOverlayAdapterError! {
+        panel: self.typed_panels.get(panel_id) ?? return Err(NativeOverlayAdapterError.UnknownPanel(panel_id: panel_id))
+        find_overlay_node(panel.nodes, node_id) ?? Err(NativeOverlayAdapterError.UnknownNode(node_id: node_id))
     }
-    render_panels: fn(self: Self, sequence: U64) -> ([NativeOverlayPanelFact], Bool) NativeOverlayAdapterError! {
-        typed_node_count: self.typed_panels.values().map(panel_node_count).sum()
-        keys := self.typed_panels.keys().cloned().collect()
+    render_panels: fn(self, sequence: Int) -> NativeOverlayRenderedPanels NativeOverlayAdapterError! {
+        typed_node_count := 0
+        panels := [NativeOverlayPanelFact]{}
+        keys := self.typed_panels.keys().to_list()
         keys.sort()
-        panels := [NativeOverlayPanelFact]{keys.iter().map((key) -> self.typed_panels[key].clone()).collect()}
-        dropped_for_nodes := false
-        if !self.event_facts.is_empty() {
-            available: MAX_OVERLAY_NODES.saturating_sub(typed_node_count)
-            max_events: available / EVENT_LOG_NODES_PER_EVENT
-            skip: self.event_facts.len().saturating_sub(max_events)
-            if skip != 0 -> dropped_for_nodes = true
-            facts: self.event_facts.iter().skip(skip).collect()
-            if !facts.is_empty() -> panels.push(event_log_panel(&facts, sequence)?)
+        loop key in keys {
+            panel: self.typed_panels[key]
+            typed_node_count += panel_node_count(panel)
+            panels.push(panel)
         }
-        if panels.len() > MAX_OVERLAY_PANELS -> return .Err(.InvalidPanel("native overlay projection exceeds its panel budget"))
-        return (_0: panels, _1: dropped_for_nodes)
+        dropped_for_nodes := false
+        if self.event_facts.len() > 0 {
+            available: if typed_node_count >= MAX_OVERLAY_NODES -> 0 else -> MAX_OVERLAY_NODES - typed_node_count
+            max_events: available / EVENT_LOG_NODES_PER_EVENT
+            skip: if self.event_facts.len() > max_events -> self.event_facts.len() - max_events else -> 0
+            if skip != 0 -> dropped_for_nodes = true
+            facts: loop index in skip..<self.event_facts.len() -> self.event_facts[index]
+            if facts.len() > 0 -> panels.push(event_log_panel(facts, sequence))
+        }
+        if panels.len() > MAX_OVERLAY_PANELS -> return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay projection exceeds its panel budget"))
+        NativeOverlayRenderedPanels{panels: panels, dropped_for_nodes: dropped_for_nodes}
     }
 }
-project_projection: fn(projection: DevtoolsProjection, typed_panels: [NativeOverlayPanelFact]) -> NativeOverlayUpdate NativeOverlayAdapterError! {
-    adapter := NativeOverlayAdapter.new(projection.session_id.copy())
-    return adapter.apply_projection_with_panels(projection.copy(), typed_panels)
-}
+
 node_from_event: fn(event: JetDevtoolsEvent) -> NativeOverlayNode NativeOverlayAdapterError! {
-    if event.sequence() == 0 -> return .Err(.InvalidSequence(event.sequence()))
+    if event.sequence() == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
     validate_event_text(event)
-    children := [
-        NativeOverlayNode.text("source", "source").with_value(event.source().to_string()),
-        NativeOverlayNode.text("kind", "kind").with_value(event.kind().to_string()),
-        NativeOverlayNode.text("entity", "entity").with_value(event.entity().to_string()),
-        NativeOverlayNode.text("observed_at", "observed_at").with_value(event.timestamp_ms.to_string()),
-        NativeOverlayNode.text("fields", "fields").with_value(event.fields_json().to_string())
-    ]
-    if event.payload_json() == .Val(payload) -> children.push(NativeOverlayNode.text("payload", "payload").with_value(payload.to_string()))
-    return NativeOverlayNode.new("event-{event.sequence()}", .Status, "event").with_value(event.entity().to_string()).with_status(event.kind().to_string()).with_children(^children)
+    children := [NativeOverlayNode]{}
+    children.push(NativeOverlayNode.text("source", "source").with_value(event.source()))
+    children.push(NativeOverlayNode.text("kind", "kind").with_value(event.kind()))
+    children.push(NativeOverlayNode.text("entity", "entity").with_value(event.entity()))
+    children.push(NativeOverlayNode.text("observed_at", "observed_at").with_value("{event.timestamp_ms}"))
+    children.push(NativeOverlayNode.text("fields", "fields").with_value(event.fields_json()))
+    if event.payload_json() == .Val(payload) -> children.push(NativeOverlayNode.text("payload", "payload").with_value(payload))
+    NativeOverlayNode.new("event-{event.sequence()}", .Status, "event").with_value(event.entity()).with_status(event.kind()).with_children(children)
 }
-event_log_panel: fn(events: [&JetDevtoolsEvent], sequence: U64) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
-    if sequence == 0 -> return .Err(.InvalidSequence(sequence))
-    if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES / EVENT_LOG_NODES_PER_EVENT -> return .Err(.InvalidPanel("native overlay event log exceeds its event or node budget"))
-    nodes := [NativeOverlayNode]{[].with_capacity(events.len())}
-    loop event in events -> nodes.push(node_from_event(event)?)
-    return NativeOverlayPanelFact.new(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, NATIVE_OVERLAY_EVENT_LOG_TITLE, sequence, NATIVE_OVERLAY_EVENT_LOG_STATUS, ^nodes)
+event_log_panel: fn(events: [JetDevtoolsEvent], sequence: Int) -> NativeOverlayPanelFact NativeOverlayAdapterError! {
+    if sequence == 0 -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: sequence))
+    if events.len() > MAX_NATIVE_OVERLAY_EVENTS || events.len() > MAX_OVERLAY_NODES / EVENT_LOG_NODES_PER_EVENT {
+        return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay event log exceeds its event or node budget"))
+    }
+    nodes := [NativeOverlayNode]{}
+    loop event in events -> nodes.push(node_from_event(event))
+    NativeOverlayPanelFact.new(NATIVE_OVERLAY_EVENT_LOG_PANEL_ID, NATIVE_OVERLAY_EVENT_LOG_TITLE, sequence, NATIVE_OVERLAY_EVENT_LOG_STATUS, nodes)
 }
-validate_projection_identity: fn(projection: &DevtoolsProjection, session_id: String) NativeOverlayAdapterError! {
-    if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return .Err(.InvalidProtocol { expected: JET_DEVTOOLS_PROTOCOL.to_string(), received: projection.protocol.copy() })
-    if projection.session_id != session_id -> return .Err(.SessionMismatch { expected: session_id.to_string(), received: projection.session_id.copy() })
+validate_projection_identity: fn(projection: DevtoolsProjection, session_id: String) NativeOverlayAdapterError! {
+    if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err(NativeOverlayAdapterError.InvalidProtocol(expected: JET_DEVTOOLS_PROTOCOL, received: projection.protocol))
+    if projection.session_id != session_id -> return Err(NativeOverlayAdapterError.SessionMismatch(expected: session_id, received: projection.session_id))
     validate_text(projection.session_id, "session id", false)
-    return ()
 }
 validate_revision: fn(revision: String, allow_empty: Bool) NativeOverlayAdapterError! {
-    if !allow_empty && revision.is_empty() -> return .Err(.InvalidRevision)
-    return validate_text(revision, "revision", true)
+    if !allow_empty && revision == "" -> return Err(NativeOverlayAdapterError.InvalidRevision)
+    validate_text(revision, "revision", true)
 }
-validate_event: fn(event: &JetDevtoolsEvent, projection: &DevtoolsProjection) NativeOverlayAdapterError! {
-    if event.sequence() == 0 || event.sequence() > projection.sequence -> return .Err(.InvalidSequence(event.sequence()))
-    return validate_event_text(event)
+validate_event: fn(event: JetDevtoolsEvent, projection: DevtoolsProjection) NativeOverlayAdapterError! {
+    if event.sequence() == 0 || event.sequence() > projection.sequence -> return Err(NativeOverlayAdapterError.InvalidSequence(sequence: event.sequence()))
+    validate_event_text(event)
 }
-validate_event_text: fn(event: &JetDevtoolsEvent) NativeOverlayAdapterError! {
+validate_event_text: fn(event: JetDevtoolsEvent) NativeOverlayAdapterError! {
     validate_text(event.source(), "event source", false)
     validate_text(event.kind(), "event kind", false)
     validate_text(event.entity(), "event entity", false)
     validate_text(event.fields_json(), "event fields", true)
     if event.payload_json() == .Val(payload) -> validate_text(payload, "event payload", true)
-    return ()
 }
 typed_panel_map: fn(panels: [NativeOverlayPanelFact]) -> [String: NativeOverlayPanelFact] NativeOverlayAdapterError! {
-    if panels.len() > MAX_OVERLAY_PANELS -> return .Err(.InvalidPanel("native overlay typed panels exceed their panel budget"))
+    if panels.len() > MAX_OVERLAY_PANELS -> return Err(NativeOverlayAdapterError.InvalidPanel(message: "native overlay typed panels exceed their panel budget"))
     output := [String: NativeOverlayPanelFact]{}
-    count := Usize{0}
+    count := 0
     loop panel in panels {
-        if panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID -> return .Err(.ReservedPanel(panel.panel_id.copy()))
-        if output.contains_key(panel.panel_id) -> return .Err(.DuplicatePanel(panel.panel_id.copy()))
-        validate_panel(panel, &count)
-        output.insert(panel.panel_id.copy(), panel.copy())
+        if panel.panel_id == NATIVE_OVERLAY_EVENT_LOG_PANEL_ID -> return Err(NativeOverlayAdapterError.ReservedPanel(panel_id: panel.panel_id))
+        if output.get(panel.panel_id) != None -> return Err(NativeOverlayAdapterError.DuplicatePanel(panel_id: panel.panel_id))
+        validate_panel(panel, count)
+        output[panel.panel_id] = panel
     }
-    return output
+    output
 }
-validate_panel: fn(panel: &NativeOverlayPanelFact, count: &Usize) NativeOverlayAdapterError! {
+validate_panel: fn(panel: NativeOverlayPanelFact, count: &Int) NativeOverlayAdapterError! {
     validate_text(panel.panel_id, "panel id", false)
     validate_text(panel.title, "panel title", false)
     validate_text(panel.status, "panel status", true)
     ids := [String: Bool]{}
-    loop node in &panel.nodes -> validate_node(node, 0, count, &ids)
-    return ()
+    loop node in panel.nodes -> validate_node(node, 0, count, ids)
 }
-validate_node: fn(node: &NativeOverlayNode, depth: Usize, count: &Usize, ids: &[String: Bool]) NativeOverlayAdapterError! {
-    if depth > MAX_OVERLAY_DEPTH -> return .Err(.InvalidNode("native overlay node tree exceeds its depth budget"))
+validate_node: fn(node: NativeOverlayNode, depth: Int, count: &Int, ids: &[String: Bool]) NativeOverlayAdapterError! {
+    if depth > MAX_OVERLAY_DEPTH -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay node tree exceeds its depth budget"))
     validate_text(node.id, "node id", false)
     validate_text(node.label, "node label", false)
-    if ids.insert(node.id.copy(), true).is_some() -> return .Err(.InvalidNode("native overlay node id `{node.id}` is duplicated"))
-    count = count.saturating_add(1)
-    if count > MAX_OVERLAY_NODES -> return .Err(.InvalidNode("native overlay projection exceeds its node budget"))
-    if node.value.as_deref() == .Val(value) -> validate_text(value, "node value", true)
-    if node.status.as_deref() == .Val(status) -> validate_text(status, "node status", true)
-    if {
-        node.kind == .Action && node.action.as_ref() == .None -> return .Err(.InvalidNode("native overlay action node `{node.id}` has no typed action"))
-        node.kind == .Action && node.action.as_ref() == .Val(action) -> validate_action(action)
-        node.action.as_ref() == .Val(_) -> return .Err(.InvalidNode("native overlay node `{node.id}` carries an action but is not an action node"))
-        node.action.as_ref() == .None -> {}
+    if ids.get(node.id) != None -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay node id `{node.id}` is duplicated"))
+    ids[node.id] = true
+    count += 1
+    if count > MAX_OVERLAY_NODES -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay projection exceeds its node budget"))
+    if node.value == .Val(value) -> validate_text(value, "node value", true)
+    if node.status == .Val(status) -> validate_text(status, "node status", true)
+    if node.action == .Val(action) {
+        if node.kind != .Action -> return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay node `{node.id}` carries an action but is not an action node"))
+        validate_text(action.action_id, "action id", false)
+    } else if node.kind == .Action {
+        return Err(NativeOverlayAdapterError.InvalidNode(message: "native overlay action node `{node.id}` has no typed action"))
     }
-    loop child in &node.children -> validate_node(child, depth + 1, count, ids)
-    return ()
+    loop child in node.children -> validate_node(child, depth + 1, count, ids)
 }
-validate_action: fn(action: &NativeOverlayAction) NativeOverlayAdapterError! { return validate_text(action.action_id, "action id", false) }
 validate_text: fn(value: String, field: String, allow_empty: Bool) NativeOverlayAdapterError! {
-    if (!allow_empty && value.is_empty()) || value.len() > MAX_OVERLAY_TEXT_BYTES || value.chars().any((c) -> c.is_control()) -> return .Err(.InvalidText { field: field.to_string() })
-    return ()
+    if (!allow_empty && value == "") || value.bytes().len() > MAX_OVERLAY_TEXT_BYTES -> return Err(NativeOverlayAdapterError.InvalidText(field: field))
+    loop byte in value.bytes() {
+        if byte < 32 || byte == 127 -> return Err(NativeOverlayAdapterError.InvalidText(field: field))
+    }
 }
-panel_node_count: fn(panel: NativeOverlayPanelFact) -> Usize { return panel.nodes.iter().map(node_count).sum() }
-node_count: fn(node: NativeOverlayNode) -> Usize { return 1 + node.children.iter().map(node_count).sum() }
-find_node: fn(nodes: [NativeOverlayNode], node_id: String) -> NativeOverlayNode? {
-    return nodes.iter().find_map((node) -> if node.id == node_id -> .Val(node) else -> find_node(&node.children, node_id))
+panel_node_count: fn(panel: NativeOverlayPanelFact) -> Int {
+    total := 0
+    loop node in panel.nodes -> total += node_count(node)
+    total
 }
-find_node_in: fn(nodes: [NativeOverlayNode], node_id: String) -> NativeOverlayNode? { return find_node(nodes, node_id) }
-make_unavailable: fn(subject: String, reason: NativeOverlayUnavailableReason) -> NativeOverlayUnavailableFact { return NativeOverlayUnavailableFact { subject, reason } }
+node_count: fn(node: NativeOverlayNode) -> Int {
+    total := 1
+    loop child in node.children -> total += node_count(child)
+    total
+}
+find_overlay_node: fn(nodes: [NativeOverlayNode], node_id: String) -> NativeOverlayNode? {
+    loop node in nodes {
+        if node.id == node_id -> return Val(node)
+        if find_overlay_node(node.children, node_id) == .Val(found) -> return Val(found)
+    }
+    None
+}
+make_unavailable: fn(subject: String, reason: NativeOverlayUnavailableReason) -> NativeOverlayUnavailableFact {
+    NativeOverlayUnavailableFact{subject: subject, reason: reason}
+}

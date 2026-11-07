@@ -48,10 +48,10 @@ jet_cli_gate_trust_entries: fn(path: String, records: [TrustRecord]) -> [GateEnt
     rows := [GateEntry]{}
     loop record in records {
         if record == {
-            .Hash(hash) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, hash, "trusted project hash", [path]))
-            .Pattern(pattern) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, pattern, "trusted project pattern", [path]))
-            .Grant(grant) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, grant.scope, path, "{grant.authority}:{grant.subject}", "trusted authority grant", [path]))
-            .Raw(line) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, line, "raw trust record", [path]))
+            .Hash(hash) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, hash, "trusted project hash", [path]))
+            .Pattern(pattern) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, pattern, "trusted project pattern", [path]))
+            .Grant(grant) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, grant.scope, path, "{grant.authority}:{grant.subject}", "trusted authority grant", [path]))
+            .Raw(line) -> rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, line, "raw trust record", [path]))
         }
     }
     rows
@@ -72,13 +72,13 @@ jet_cli_gate_append_invocation: fn(ledger: &GateLedger, args: [String]) Never! {
         separate: argument == "--gate" || argument == "--allow" || argument == "--deny" || argument == "--target" || argument == "--profile"
         if separate && index + 1 < args.len() -> subject = "{argument} {args[index + 1]}"
         scope: if kind == GateKind.SessionFlag -> "session" else -> "build"
-        gate_ledger_push(&ledger, jet_cli_gate_external(kind, scope, "command line", subject, "written invocation choice", ["command line"]))
-        if argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" -> gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
+        gate_ledger_push(ledger, jet_cli_gate_external(kind, scope, "command line", subject, "written invocation choice", ["command line"]))
+        if argument == "--allow" || argument.starts_with("--allow=") || argument == "--allow-all" || argument == "-A" -> gate_ledger_push(ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
     }
     if build_option_flags(args) == .Resolved(flags, _) {
         loop choice in flags.written {
-            if build_option_removes_check(choice) -> gate_ledger_push(&ledger, jet_cli_build_option_gate(GateKind.CheckRemoval, choice, "build option that removes a runtime check"))
-            if choice.name == "link_args" -> gate_ledger_push(&ledger, jet_cli_build_option_gate(GateKind.LinkOverride, choice, "build option that adds native link inputs"))
+            if build_option_removes_check(choice) -> gate_ledger_push(ledger, jet_cli_build_option_gate(GateKind.CheckRemoval, choice, "build option that removes a runtime check"))
+            if choice.name == "link_args" -> gate_ledger_push(ledger, jet_cli_build_option_gate(GateKind.LinkOverride, choice, "build option that adds native link inputs"))
         }
     }
 }
@@ -150,11 +150,11 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
         loop index in selected {
             entry: ledger.rows[index]
             name: gate_kind_name(entry.kind)
-            if !names.contains(name) -> &names.push(name)
+            if !names.contains(name) -> names.push(name.copy())
             counts[name] = (counts.get(name) ?? 0) + 1
-            &entries.push(jet_cli_gates_entry_json(entry, modules))
+            entries.push(jet_cli_gates_entry_json(entry, modules))
         }
-        &names.sort()
+        names.sort()
         fields: loop name in names -> jet_cli_status_field(name, jet_cli_status_int(counts.get(name) ?? 0))
         gates: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("entries", jet_cli_status_array(entries)), jet_cli_status_field("counts", jet_cli_status_object(fields))})
         return "{jet_cli_status_render("inspect.gates", true, [JetCLIStatusField]{jet_cli_status_field("gates", gates)})}\n"
@@ -199,7 +199,7 @@ jet_cli_gates_diagnostics: fn(result: JetDriverGateQueryResult, snapshot: JetDri
         path: if diagnostic.origin == .Val(origin) -> origin.display else -> file
         source: if diagnostic.origin == .Val(origin) -> origin.source else -> jet_cli_gates_source(result.source.modules, path)
         if json {
-            loop report in jet_cli_reports_json(base, path, source, [Diagnostic]{diagnostic}) -> &reports.push(report)
+            loop report in jet_cli_reports_json(base, path, source, [Diagnostic]{diagnostic}) -> reports.push(report)
         } else {
             if index > 0 -> stderr = "{stderr}\n"
             stderr = "{stderr}{diagnostic_render_all(path, source, [Diagnostic]{diagnostic}, color)}"

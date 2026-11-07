@@ -12,7 +12,7 @@ notebook_interop_test_cell: fn(id: String, source: String) -> NotebookCell Never
 }
 notebook_interop_test_document: fn() -> JetNotebook Never! {
     nb := JetNotebook.new("env-doc")
-    &nb.cells.push(notebook_interop_test_cell("one", "answer: 42"))
+    nb.cells.push(notebook_interop_test_cell("one", "answer: 42"))
     nb
 }
 notebook_interop_test_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Never! {
@@ -31,20 +31,20 @@ notebook_interop_test_import_error: fn(text: String) -[Rand]> String Never! {
 // consumer uses actual codec persistence before exporting the loaded document.
 #Test("jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss") {
     nb := notebook_interop_test_document()
-    &nb.store_output("one", notebook_plain_bundle("answer : Int: 42"), 1, None) ?? panic("store output")
+    nb.store_output("one", notebook_plain_bundle("answer : Int: 42"), 1, None) ?? panic("store output")
     assert(nb.visible_output("one") != None)
     nb.cells[0].source = "answer: 7"
     assert(nb.visible_output("one") == None)
     theirs := JetNotebook.new("env-doc")
-    &theirs.cells.push(notebook_interop_test_cell("one", "answer: 7"))
-    &theirs.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# hi", output: None, depends_on: [String]{}})
+    theirs.cells.push(notebook_interop_test_cell("one", "answer: 7"))
+    theirs.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# hi", output: None, depends_on: [String]{}})
     merged: notebook_merge_by_id(nb, theirs)
     markdown := false
     loop cell in merged.cells { if cell.kind == .Markdown -> markdown = true }
     assert(markdown)
     assert_eq(merged.cells[merged.cell_index("one") ?? panic("shared id")].source, "answer: 7")
     nb.cells[0].source = "answer: 42"
-    &nb.store_output("one", notebook_plain_bundle("42"), 2, None) ?? panic("restore output")
+    nb.store_output("one", notebook_plain_bundle("42"), 2, None) ?? panic("restore output")
     directory: notebook_interop_test_testing.temp_dir("jetnb-interop")
     path: notebook_interop_test_files.join(directory, "demo.jetnb")
     notebook_save_jetnb(nb, path) ?? panic("save notebook")
@@ -87,13 +87,13 @@ notebook_interop_test_import_error: fn(text: String) -[Rand]> String Never! {
 #Test("notebook_merge_preserves_source_conflicts_last_theirs_and_cache_union") {
     base := notebook_interop_test_document()
     base.schema = 2
-    &base.store_output("one", notebook_plain_bundle("42"), 1, None) ?? panic("base output")
+    base.store_output("one", notebook_plain_bundle("42"), 1, None) ?? panic("base output")
     theirs := notebook_interop_test_document()
-    &theirs.store_output("one", notebook_plain_bundle("other"), 2, None) ?? panic("other output")
+    theirs.store_output("one", notebook_plain_bundle("other"), 2, None) ?? panic("other output")
     their_key: (theirs.cells[0].output ?? panic("other output")).cache_key ?? panic("other key")
     theirs.output_cache[their_key].bundle.text_plain = "cache must not replace base"
-    &theirs.cells.push(notebook_interop_test_cell("append", "1"))
-    &theirs.cells.push(notebook_interop_test_cell("append", "2"))
+    theirs.cells.push(notebook_interop_test_cell("append", "1"))
+    theirs.cells.push(notebook_interop_test_cell("append", "2"))
     union: notebook_merge_by_id(base, theirs)
     assert_eq(union.schema, 2)
     assert_eq(union.cells.len(), 2)
@@ -101,12 +101,12 @@ notebook_interop_test_import_error: fn(text: String) -[Rand]> String Never! {
     assert_eq(union.output_cache[their_key].bundle.text_plain, "42")
     assert_eq((union.cells[0].output ?? panic("prefer ours")).bundle.text_plain, "42")
     // Last same-ID row in theirs drives matching, not the first one.
-    &theirs.cells.push(notebook_interop_test_cell("one", "answer: 7"))
+    theirs.cells.push(notebook_interop_test_cell("one", "answer: 7"))
     conflict: notebook_merge_by_id(base, theirs)
     assert_eq(conflict.cells[0].source, "answer: 42")
     assert_eq(conflict.cells[0].output, None)
     assert_eq(conflict.merge_conflicts[0].theirs_source, "answer: 7")
-    &base.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "first ours", theirs_source: "first theirs"})
+    base.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "first ours", theirs_source: "first theirs"})
     retained: notebook_merge_by_id(base, theirs)
     assert_eq(retained.merge_conflicts.len(), 1)
     assert_eq(retained.merge_conflicts[0].ours_source, "first ours")
@@ -153,7 +153,7 @@ notebook_interop_test_import_error: fn(text: String) -[Rand]> String Never! {
     nb := notebook_interop_test_document()
     bundle := notebook_plain_bundle("42")
     bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/plain", payload: "ignored duplicate plain"}, NotebookMIMEEntry{media_type: "text/html", payload: "<b>42</b>"}}
-    &nb.store_output("one", bundle, 2, None) ?? panic("live output")
+    nb.store_output("one", bundle, 2, None) ?? panic("live output")
     live: notebook_export_ipynb(nb) ?? panic("live export")
     assert(live.text.contains("execute_result"))
     assert(live.text.contains("<b>42</b>"))
@@ -165,15 +165,15 @@ notebook_interop_test_import_error: fn(text: String) -[Rand]> String Never! {
     assert(stale.loss.items.contains("cell `one`: stale output omitted (closure key mismatch)"))
     if nb.cells[0].output == .Val(output) {
         quarantined := output.copy()
-        notebook_quarantine_outputs(&quarantined.bundle)
-        nb.cells[0].output = Val(^quarantined)
+        notebook_quarantine_outputs(quarantined.bundle)
+        nb.cells[0].output = Val(quarantined.move())
     }
     quarantine: notebook_export_ipynb(nb) ?? panic("quarantined export")
     assert(quarantine.text.contains("display_data"))
     assert(!quarantine.text.contains("<b>42</b>"))
     assert(quarantine.loss.items.contains("cell `one`: quarantined output exported as text/plain"))
-    notebook_quarantine_outputs(&bundle)
-    &nb.store_output("one", bundle, 3, None) ?? panic("live quarantined output")
+    notebook_quarantine_outputs(bundle)
+    nb.store_output("one", bundle, 3, None) ?? panic("live quarantined output")
     live_quarantine: notebook_export_ipynb(nb) ?? panic("live quarantined export")
     assert(live_quarantine.text.contains("execute_result"))
     assert(!live_quarantine.text.contains("<b>42</b>"))
@@ -181,16 +181,16 @@ notebook_interop_test_import_error: fn(text: String) -[Rand]> String Never! {
     assert(live_quarantine.loss.items.contains("cell `one`: quarantined output exported as text only"))
     bundle.mime = [NotebookMIMEEntry]{NotebookMIMEEntry{media_type: "text/html", payload: "first"}, NotebookMIMEEntry{media_type: "text/html", payload: "second"}}
     bundle.quarantined = false
-    &nb.store_output("one", bundle, 4, None) ?? panic("duplicate rich output")
+    nb.store_output("one", bundle, 4, None) ?? panic("duplicate rich output")
     assert(notebook_export_ipynb(nb) == .Err(_))
 }
 
 // Independent real projection/conversion helpers: no graph/window gates.
 #Test("notebook_jet_projection_reports_loss_and_preserves_source_newlines") {
     nb := notebook_interop_test_document()
-    &nb.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# omitted", output: None, depends_on: [String]{}})
-    &nb.cells.push(notebook_interop_test_cell("two", "next: 7\n"))
-    &nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer: 42", theirs_source: "answer: 7"})
+    nb.cells.push(NotebookCell{id: "markdown", kind: .Markdown, source: "# omitted", output: None, depends_on: [String]{}})
+    nb.cells.push(notebook_interop_test_cell("two", "next: 7\n"))
+    nb.merge_conflicts.push(NotebookMergeConflict{cell_id: "one", ours_source: "answer: 42", theirs_source: "answer: 7"})
     result: notebook_export_jet(nb)
     assert_eq(result.text, "// generated from .jetnb — stated-loss projection\nanswer: 42\n\nnext: 7\n\n")
     assert_eq(result.loss.items, [String]{"markdown cells omitted", "outputs / trust / cell ids omitted", "notebook environment identity omitted", "1 unresolved merge conflict(s) retained; execution is blocked"})

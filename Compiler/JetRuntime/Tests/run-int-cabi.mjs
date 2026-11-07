@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Jet-only direct ABI witness, independent BigInt oracle, and stopped reports.
-// The retired Rust-provider comparison is parked at Tower #4923.
+// The retired Rust-provider comparison is parked (owner #38/#59).
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const [output, jetObject, mode] = process.argv.slice(2);
 if (jetObject === "--rust-reference" || mode === "--rust-reference") {
-  console.log("int-cabi Rust provider: parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("int-cabi Rust provider: parked: Rust reference retired (owner #38/#59)");
   process.exit(0);
 }
 if (!output || !jetObject || process.argv.length > 5 || (mode && mode !== "--corpus-only")) {
@@ -104,7 +104,7 @@ if (mode !== "--corpus-only" && jetObject !== "--corpus-only") {
       if (result.error || result.signal || result.status !== (name === "values" ? 0 : 70)) failures.push(`${tier}: ${name}`);
     }
   }
-  console.log("int-cabi Rust provider: parked: Rust reference retired (owner #38/#59); Tower #4923");
+  console.log("int-cabi Rust provider: parked: Rust reference retired (owner #38/#59)");
   const undefinedSymbols = spawnSync("nm", ["-u", resolve(jetObject)], { encoding: "utf8" });
   const definitions = spawnSync("nm", ["--defined-only", resolve(jetObject)], { encoding: "utf8", maxBuffer: 1 << 27 });
   writeFileSync(join(out, "undefined-symbols.txt"), undefinedSymbols.stdout ?? "");
@@ -117,7 +117,7 @@ if (mode !== "--corpus-only" && jetObject !== "--corpus-only") {
   writeFileSync(join(out, "int-ownership.json"), JSON.stringify({
     provider: "Jet-only",
     observedExactIntImports: exactImports,
-    rustReference: "parked; Tower #4923",
+    rustReference: "parked",
   }, null, 2) + "\n");
   writeFileSync(join(out, "result.json"), JSON.stringify({ cases: count, stopCases: 6, concurrentHazardFixture: true, failures }, null, 2) + "\n");
   if (failures.length) throw Error(`exact Int ABI witness failed: ${failures.join(", ")}`);

@@ -15,14 +15,14 @@ Event: struct {
 
 write_fixture: fn(path: String) {
     output: files.create(path) ?? panic("create")
-    writer := csv.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
-    &writer.write(["service", "latency_ms"]) ?? panic("header")
-    &writer.write(["api", "10.0"]) ?? panic("r1")
-    &writer.write(["api", "20.0"]) ?? panic("r2")
-    &writer.write(["db", "5.0"]) ?? panic("r3")
-    &writer.write(["api", "30.0"]) ?? panic("r4")
-    &writer.flush() ?? panic("flush")
-    &writer.finish() ?? panic("finish")
+    writer := csv.writer(output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(["service", "latency_ms"]) ?? panic("header")
+    writer.write(["api", "10.0"]) ?? panic("r1")
+    writer.write(["api", "20.0"]) ?? panic("r2")
+    writer.write(["db", "5.0"]) ?? panic("r3")
+    writer.write(["api", "30.0"]) ?? panic("r4")
+    writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
 }
 
 run: fn() {
@@ -32,8 +32,8 @@ run: fn() {
     limits := data.DataLimits.safe()
     limits.max_groups = 1
     limits.max_output_rows = 10
-    reader := data.csv_reader<Event>(^input, limits) ?? panic("reader")
-    first: stream.next(&reader) ?? panic("next")
+    reader := data.csv_reader<Event>(input, limits) ?? panic("reader")
+    first: stream.next(reader) ?? panic("next")
     print("first:{first.service}:{first.latency_ms}")
     if data.query(reader)
         .group_by((e) -> e.service)

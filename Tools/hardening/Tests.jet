@@ -14,7 +14,7 @@ tree_inputs: fn(keep: [String]) -[FS]> Inputs Never! {
     inputs := load_inputs(".") ?? panic("the tree inputs did not load: {err}")
     kept := [SourceFile]{}
     loop file in inputs.witnesses {
-        if contains_text(keep, witness_key(file.path)) -> &kept.push(file.copy())
+        if contains_text(keep, witness_key(file.path)) -> kept.push(file.copy())
     }
     inputs.witnesses = kept
     inputs
@@ -27,9 +27,9 @@ edited: fn(list: [SourceFile], path: String, from: String, to: String) -> [Sourc
         if {
             file.path == path && file.text.contains(from) -> {
                 found = true
-                &out.push(SourceFile{path: file.path.copy(), text: file.text.replace(from, to)})
+                out.push(SourceFile{path: file.path.copy(), text: file.text.replace(from, to)})
             }
-            else -> &out.push(file.copy())
+            else -> out.push(file.copy())
         }
     }
     if !found -> panic("`{path}` does not contain `{from}`")
@@ -115,7 +115,7 @@ build_error: fn(inputs: Inputs) -> String Never! {
         forged.rows[excluded].exclusion = Val(changed)
     }
     // A ratified exclusion that applies to no excluded row.
-    &forged.exclusions.push(Exclusion{key: "core.text.casefold", reason: "r", owner: "o", decision: "d"})
+    forged.exclusions.push(Exclusion{key: "core.text.casefold", reason: "r", owner: "o", decision: "d"})
     errors: validate_manifest(forged).join("\n")
     assert(errors.contains("module:core.text.casefold: covered row has no witness"))
     assert(errors.contains("module:core.text.casefold: covered row names no observable sink"))
@@ -147,8 +147,8 @@ build_error: fn(inputs: Inputs) -> String Never! {
 fixture: fn(body: String, key: String) -> String Never! {
     module_name: key.rpartition(".").head
     lines := [String]{"// core-conformance: {key}", "use api: {module_name}", "", "run: fn() {{"}
-    loop line in body.split("\n") -> &lines.push("    {line}")
-    &lines.push("}}")
+    loop line in body.split("\n") -> lines.push("    {line}")
+    lines.push("}}")
     lines.join("\n")
 }
 
@@ -455,7 +455,7 @@ stored_finding: fn(findings: [Dyn], surface: String) -> Dyn Never! {
         assert_eq(rebuilt.source, seed.source)
         assert_eq(rebuilt.stdin, seed.stdin.bytes())
         assert_eq(rebuilt.stdout, seed.broken.bytes())
-        &found.push(seed.surface.copy())
+        found.push(seed.surface.copy())
     }
     assert_eq(found, [String]{"regression:semantic-equality", "regression:indexed-place", "regression:packed-int", "regression:release-emission", "regression:stdin-transport"})
     // stdin-transport is inverted for real: its empty line came from the run.
@@ -508,9 +508,9 @@ run_problem: fn(program: Generated, run: CaseRun) -> String Never! {
         assert_eq(validate_program(program).join("\n"), "")
         assert(program.source.len() <= GENERATOR_SOURCE_LIMIT)
         family: primary_instance(program).family
-        if !leading.contains(family) -> &leading.push(family.copy())
+        if !leading.contains(family) -> leading.push(family.copy())
         loop item in program.instances {
-            if !reached.contains(item.construct_id) -> &reached.push(item.construct_id.copy())
+            if !reached.contains(item.construct_id) -> reached.push(item.construct_id.copy())
         }
         sizes[program.instances.len() - 1] = sizes[program.instances.len() - 1] + 1
     }
@@ -550,7 +550,7 @@ forged: fn(decls: String, body: String) -> Generated Never! {
     rows: productions()
     no_places := [Production]{}
     loop row in rows {
-        if row.family != "nested-places" -> &no_places.push(row.copy())
+        if row.family != "nested-places" -> no_places.push(row.copy())
     }
     assert(validate_productions(no_places).contains("missing production: no template generates nested-places"))
     assert(generate_programs(GENERATOR_SEED, 0) == .Err(_))
@@ -562,14 +562,14 @@ forged: fn(decls: String, body: String) -> Generated Never! {
     assert(case_passes(program, clean))
     unlowered := clean.copy()
     unlowered.runs = [TierRun]{}
-    loop tier_run in clean.runs -> &unlowered.runs.push(planted(tier_run, program, UNLOWERED))
+    loop tier_run in clean.runs -> unlowered.runs.push(planted(tier_run, program, UNLOWERED))
     lowered: classify(program, unlowered)
     assert_eq(lowered.class, UNLOWERED)
     assert_eq(lowered.mismatch, "{UNLOWERED}|{AOT_RELEASE}|exit 1 planted: {AOT_RELEASE} did not lower {primary_instance(program).construct_id}")
     assert_eq(generated_severity(lowered.class), "P1")
     optimizer := clean.copy()
     optimizer.runs = [TierRun]{}
-    loop tier_run in clean.runs -> &optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
+    loop tier_run in clean.runs -> optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
     changed: classify(program, optimizer)
     assert_eq(changed.class, OPTIMIZER_ONLY)
     assert_eq(changed.mismatch, "{OPTIMIZER_ONLY}|{AOT_RELEASE}|`value_{program.primary} 1` became `value_{program.primary} 1~`")
@@ -593,7 +593,7 @@ forged: fn(decls: String, body: String) -> Generated Never! {
 
 fingerprint: fn(programs: [Generated]) -> [String] Never! {
     out := [String]{}
-    loop program in programs -> &out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
+    loop program in programs -> out.push("{program.case_id} {program.seed} {primary_instance(program).construct_id} {digest(program.source)}")
     out
 }
 

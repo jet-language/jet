@@ -24,27 +24,27 @@ impl NixEvaluator {
     resolve_shell: fn(&self, root: NixEvalValue, output: String) -> NixEvalValue NixEvalError! {
         if root == {
             .Function(lambda, _) -> {
-                argument: &self.direct_shell_argument(lambda)
+                argument: self.direct_shell_argument(lambda)
                 if argument == .Val(value) {
-                    thunk: &self.value_thunk(value)
-                    direct: &self.apply(root, thunk)
-                    if &self.is_direct_shell(direct) -> return Ok(direct)
+                    thunk: self.value_thunk(value)
+                    direct: self.apply(root, thunk)
+                    if self.is_direct_shell(direct) -> return Ok(direct)
                 }
             }
             else -> {
-                if &self.is_direct_shell(root) -> return Ok(root)
+                if self.is_direct_shell(root) -> return Ok(root)
             }
         }
         output_path := [String]{}
         loop segment in output.split(".") {
             if segment == "" -> return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
-            &output_path.push(segment)
+            output_path.push(segment)
         }
         loop prefix in nixeval_shell_output_prefixes(self.system) {
             path := [String]{}
-            loop segment in prefix -> &path.push(segment)
-            loop segment in output_path -> &path.push(segment)
-            if &self.resolve_path(root, path) == {
+            loop segment in prefix -> path.push(segment)
+            loop segment in output_path -> path.push(segment)
+            if self.resolve_path(root, path) == {
                 .Ok(value) -> return Ok(value)
                 .Err(error) -> {
                     if !error.is_missing() -> return Err(error)
@@ -71,7 +71,7 @@ impl NixEvaluator {
                                 else -> return None
                             }
                         }
-                        Val(&self.flake_arguments())
+                        Val(self.flake_arguments())
                     }
                 }
             }
@@ -84,7 +84,7 @@ impl NixEvaluator {
         if fields.get("shellHook") != None -> return Ok(true)
         loop field in nixeval_shell_package_fields() {
             binding: fields.get(field) ?? next
-            forced: &self.force(binding)
+            forced: self.force(binding)
             if forced == {
                 .List(_) -> return Ok(true)
                 else -> {}
@@ -96,9 +96,9 @@ impl NixEvaluator {
     resolve_path: fn(&self, start: NixEvalValue, path: [String]) -> NixEvalValue NixEvalError! {
         value := start
         loop field in path {
-            if value.is_function() -> value = &self.apply_flake_arguments(value)
-            selected: &self.select(value, field)
-            value = &self.force(selected)
+            if value.is_function() -> value = self.apply_flake_arguments(value)
+            selected: self.select(value, field)
+            value = self.force(selected)
         }
         Ok(value)
     }
@@ -109,18 +109,18 @@ impl NixEvaluator {
         packages := [String]{}
         cross_packages := [String]{}
         loop field in nixeval_shell_package_fields() {
-            found: &self.try_select(shell, field)
+            found: self.try_select(shell, field)
             binding: found ?? next
-            items: &self.package_list(binding, field)
+            items: self.package_list(binding, field)
             loop item in items {
                 if packages.len() + cross_packages.len() >= NIXEVAL_MAX_DEV_SHELL_PACKAGES {
                     return Err(NixEvalError.ResourceLimit("devShell has more than {NIXEVAL_MAX_DEV_SHELL_PACKAGES} packages"))
                 }
-                forced: &self.force(item)
+                forced: self.force(item)
                 raw: forced.package_text()
                 if nixeval_cross_package_name(raw) == {
-                    .Val(cross) -> &cross_packages.push(cross)
-                    else -> &packages.push(nixeval_package_name(raw))
+                    .Val(cross) -> cross_packages.push(cross)
+                    else -> packages.push(nixeval_package_name(raw))
                 }
             }
         }
@@ -130,19 +130,19 @@ impl NixEvaluator {
             if head == {
                 "packages" | "buildInputs" | "nativeBuildInputs" | "shellHook" -> {}
                 else -> {
-                    if !nixeval_contains_text(unsupported, head) -> &unsupported.push(head)
+                    if !nixeval_contains_text(unsupported, head) -> unsupported.push(head)
                 }
             }
         }
-        hook_binding: &self.try_select(shell, "shellHook")
+        hook_binding: self.try_select(shell, "shellHook")
         if hook_binding == {
             .Val(hook) -> {
-                hook_value: &self.force(hook)
+                hook_value: self.force(hook)
                 if hook_value == {
                     .Str(value) | .Contextual(value, _) -> {
-                        if !nixeval_is_blank(value) -> &unsupported.push("shellHook")
+                        if !nixeval_is_blank(value) -> unsupported.push("shellHook")
                     }
-                    else -> &unsupported.push("shellHook")
+                    else -> unsupported.push("shellHook")
                 }
             }
             else -> {}
@@ -157,7 +157,7 @@ impl NixEvaluator {
 
     // The items of a devShell package field, which must be a literal list.
     package_list: fn(&self, binding: Int, field: String) -> [Int] NixEvalError! {
-        if &self.force(binding) == {
+        if self.force(binding) == {
             .Ok(value) -> {
                 items: value.list_items() ?? return Err(NixEvalError.Unsupported("`{field}` must be a literal package list"))
                 return Ok(items)

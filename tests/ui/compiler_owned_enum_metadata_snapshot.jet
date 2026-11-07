@@ -19,7 +19,7 @@ render_metadata: fn(emitter: &MetadataEmitter) -> [String] Never! {
     if definition.kind == .Enum(variants) {
         loop variant in variants {
             if variant.payload == .Named(fields) {
-                loop field in fields -> &names.push(metadata_field_name(&emitter, field.name))
+                loop field in fields -> names.push(metadata_field_name(emitter, field.name))
             }
         }
     }
@@ -37,7 +37,7 @@ run: fn() Never! {
         }},
         rendered: 0
     }
-    names := render_metadata(&emitter)
+    names := render_metadata(emitter)
     assert(names == [String]{"first", "second"})
     assert(emitter.rendered == 2)
     assert(emitter.definitions.len() == 1)

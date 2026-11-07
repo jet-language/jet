@@ -86,13 +86,13 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     archive: provider_cc_pack_test_archive()
     asset: provider_cc_pack_test_asset(archive)
     beside: provider_cc_pack_test_beside(base, "seed", asset, Val(archive))
-    first: provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) ?? panic("install the beside pack: {err.message()}")
+    first: provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) ?? panic("install the beside pack: {err.message()}")
     assert_eq(first.manifest.llvm, "21.1.8")
     assert_eq(first.clang_sha256, pkg_sha256_hex("stub clang".bytes()))
     assert(first.root.starts_with(files.join(roots.hangar_dir(), "objects")))
     // A Hangar hit needs neither the beside copy nor the network.
     empty: provider_cc_pack_test_beside(base, "empty", asset, None)
-    second: provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(empty), url: None, release_base: "https://invalid.invalid"}, true) ?? panic("the Hangar pack is reused offline: {err.message()}")
+    second: provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(empty), url: None, release_base: "https://invalid.invalid"}, true) ?? panic("the Hangar pack is reused offline: {err.message()}")
     assert_eq(second.digest, first.digest)
     files.remove_all(base).drop("best-effort test cleanup")
 }
@@ -106,7 +106,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     expected: pkg_sha256_hex("another pack".bytes())
     asset.sha256 = expected
     beside: provider_cc_pack_test_beside(base, "seed", asset, Val(archive))
-    if provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) == {
+    if provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, false) == {
         .Ok(_) -> panic("a wrong-hash pack must be refused")
         .Err(error) -> {
             message: error.message()
@@ -129,7 +129,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     asset: provider_cc_pack_test_asset(provider_cc_pack_test_archive())
     beside: provider_cc_pack_test_beside(base, "seed", asset, None)
     files.write(files.join(beside, CC_PACK_RELEASE_FILE), "0.4.2\n") ?? panic("write RELEASE")
-    if provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, true) == {
+    if provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "https://invalid.invalid"}, true) == {
         .Ok(_) -> panic("an offline miss must fail")
         .Err(error) -> {
             assert(error == .Offline(_))
@@ -150,7 +150,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     beside: provider_cc_pack_test_beside(base, "seed", asset, None)
     files.write(files.join(beside, CC_PACK_RELEASE_FILE), "0.4.2\n") ?? panic("write RELEASE")
     release: provider_cc_pack_test_beside(base, "releases/0.4.2", asset, Val(archive))
-    tools: provider_cc_pack_ensure(&verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "file://{files.join(base, "releases")}"}, false) ?? panic("fetch the release pack: {err.message()}")
+    tools: provider_cc_pack_ensure(verification, roots, asset, CcPackSources{beside: Val(beside), url: None, release_base: "file://{files.join(base, "releases")}"}, false) ?? panic("fetch the release pack: {err.message()}")
     assert_eq(tools.manifest.glibc, "2.42")
     assert(provider_cc_is_regular_file(files.join(release, asset.file)))
     files.remove_all(base).drop("best-effort test cleanup")
@@ -175,7 +175,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
     wrong := provider_cc_pack_test_asset(archive)
     expected: pkg_sha256_hex("another pack".bytes())
     wrong.sha256 = expected
-    if provider_cc_pack_ensure(&verification, roots, wrong, sources, true) == {
+    if provider_cc_pack_ensure(verification, roots, wrong, sources, true) == {
         .Ok(_) -> panic("a wrong-hash pack must be refused")
         .Err(error) -> {
             message: error.message()
@@ -183,7 +183,7 @@ provider_cc_pack_test_beside: fn(base: String, label: String, asset: CcPackAsset
             assert(message.contains(pkg_sha256_hex(archive)))
         }
     }
-    tools: provider_cc_pack_ensure(&verification, roots, asset, sources, true) ?? panic("the file:// pack is fetched offline: {err.message()}")
+    tools: provider_cc_pack_ensure(verification, roots, asset, sources, true) ?? panic("the file:// pack is fetched offline: {err.message()}")
     assert_eq(tools.manifest.llvm, "21.1.8")
     assert(provider_cc_is_regular_file(files.join(double, asset.file)))
     files.remove_all(base).drop("best-effort test cleanup")

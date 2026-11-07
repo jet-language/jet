@@ -6,7 +6,7 @@ use {
 }
 run: fn() {
     input: files.open("{work}/upload.fifo") ?? panic("open")
-    body: message.Body.reader(^input, 98304) ?? panic("reader")
+    body: message.Body.reader(input, 98304) ?? panic("reader")
     // Default redirect_limit (>0) must tee POST so 307 can replay the body.
     req: http.request("POST", "http://{cap:addr}/from").body(body)
     resp: req.send() ?? panic("send")

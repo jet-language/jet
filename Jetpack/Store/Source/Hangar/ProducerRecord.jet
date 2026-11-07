@@ -149,7 +149,7 @@ store_is_private_untrusted_build: fn(producer: ProducerRecord) -> Bool Never! {
 // The signed SLSA-style action identity of one cache admission.
 store_cache_action_identity: fn(producer: ProducerRecord, reference: String, identity: CacheIdentity, references: [String]) -> String Never! {
     canonical := "jet-slsa-action-v2".bytes()
-    &canonical.push(U8{0})
+    canonical.push(U8{0})
     plan: producer.plan.render()
     values: [String]{
         reference,
@@ -162,12 +162,12 @@ store_cache_action_identity: fn(producer: ProducerRecord, reference: String, ide
         producer.toolchain_facts,
         plan,
     }
-    loop value in values -> store_push_frame(&canonical, value.bytes())
+    loop value in values -> store_push_frame(canonical, value.bytes())
     // A sorted set keeps the signed action independent of dependency order
     // and duplicate input edges.
     closure: store_sorted_unique(references)
-    store_push_u64_be(&canonical, closure.len())
-    loop member in closure -> store_push_frame(&canonical, member.bytes())
+    store_push_u64_be(canonical, closure.len())
+    loop member in closure -> store_push_frame(canonical, member.bytes())
     "sha256:{store_sha256_hex(canonical)}"
 }
 
@@ -195,22 +195,22 @@ store_refresh_lock_digest: fn(verification: &StoreVerification, roots: HangarRoo
     }
     replay_facts["nix.lock.digest"] = lock_digest
     producer.plan = ProviderPlanFacts.from_facts(replay_facts)
-    &producer.bind_cache_provenance(entry.reference, entry.envelope.output_hash, entry.cache_identity, entry.references)
-    provider_refresh_provider_facts(&producer, entry.reference) ?? return Err(StoreError.Other("{err}"))
+    producer.bind_cache_provenance(entry.reference, entry.envelope.output_hash, entry.cache_identity, entry.references)
+    provider_refresh_provider_facts(producer, entry.reference) ?? return Err(StoreError.Other("{err}"))
 
     refreshed := entry.copy()
     refreshed.producer_record = producer.encode()
     hangar_lock: env_runtime_lock(roots.root, "hangar")
-    store_recover_closure_journal_unlocked(&verification, roots)
+    store_recover_closure_journal_unlocked(verification, roots)
     // Producer refresh changes the canonical receipt inputs. Return the
     // digest that the registration commits, so the subsequent project lock
     // projection cannot retain the pre-refresh receipt.
     refreshed.receipt = ""
     AdmissionTransaction.recover_unlocked(roots)
-    transaction := AdmissionTransaction.new(&verification, roots)
+    transaction := AdmissionTransaction.new(verification, roots)
     mode: if producer.provider == "nix" -> RegistrationMode.AdmittedNix else -> RegistrationMode.Native
     batch := [StoreEntry]{refreshed}
-    &transaction.commit(&batch, [AdmissionReceipt]{}, None, mode, None)
+    transaction.commit(batch, [AdmissionReceipt]{}, None, mode, None)
     Ok(batch[0])
 }
 

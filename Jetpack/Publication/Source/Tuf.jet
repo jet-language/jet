@@ -60,13 +60,13 @@ publication_refresh_registry_metadata: fn(repo: String, registry_name: String) -
     touched := [String]{publication_tuf_transparency_log_path(repo), publication_tuf_checkpoint_path(repo)}
     loop name in grouped.keys() {
         path: publication_registry_package_metadata_path(repo, name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
-        &touched.push(path)
+        touched.push(path)
     }
-    publication_tuf_sort_unique(&touched)
+    publication_tuf_sort_unique(touched)
     snapshots := [PublicationMetadataFileSnapshot]{}
     loop path in touched {
         snapshot: publication_tuf_snapshot_file(repo, path) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
-        &snapshots.push(snapshot)
+        snapshots.push(snapshot)
     }
     if publication_tuf_refresh_transaction(repo, registry_name, root_key, grouped) == {
         .Ok(files) -> return Ok(files)
@@ -84,15 +84,15 @@ publication_tuf_refresh_transaction: fn(repo: String, registry_name: String, roo
     loop record in records -> known[publication_index_to_jsonl(record.entry)] = true
     current := [PublicationIndexEntry]{}
     loop entries in grouped.values() {
-        loop entry in entries -> &current.push(entry.copy())
+        loop entry in entries -> current.push(entry.copy())
     }
-    &current.sort_by((left: PublicationIndexEntry, right: PublicationIndexEntry) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.yanked <=> right.yanked))
+    current.sort_by((left: PublicationIndexEntry, right: PublicationIndexEntry) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.yanked <=> right.yanked))
     loop entry in current {
         wire: publication_index_to_jsonl(entry)
         if !known.has_key(wire) {
             known[wire] = true
             record: publication_tuf_next_log_record(records, if entry.yanked -> "yank" else -> "publish", entry)
-            &records.push(record)
+            records.push(record)
         }
     }
     publication_tuf_validate_log(records)
@@ -100,14 +100,14 @@ publication_tuf_refresh_transaction: fn(repo: String, registry_name: String, roo
     checkpoint: publication_tuf_write_checkpoint(repo, registry_name, root_key, records)
     paths := [String]{publication_tuf_transparency_log_path(repo), publication_tuf_checkpoint_path(repo)}
     names := grouped.keys().to_list()
-    &names.sort()
+    names.sort()
     loop name in names {
         entries: grouped.get(name) ?? panic("grouped package exists")
         referrers: publication_tuf_referrer_digests(repo, entries)
         path: publication_tuf_write_sparse_metadata(repo, registry_name, root_key, name, entries, referrers, checkpoint)
-        &paths.push(path)
+        paths.push(path)
     }
-    publication_tuf_sort_unique(&paths)
+    publication_tuf_sort_unique(paths)
     Ok(PublicationRegistryMetadataFiles{paths: paths, checkpoint: checkpoint})
 }
 
@@ -120,7 +120,7 @@ publication_verify_registry_package: fn(repo: String, registry_name: String, nam
     publication_tuf_verify_checkpoint(repo, root_key, checkpoint) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     if metadata.checkpoint != checkpoint.root -> return Err(publication_tuf_metadata_diagnostic("sparse package metadata points at a different transparency checkpoint"))
     indexed := publication_read_entries(repo, name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
-    publication_tuf_validate_entries(name, &indexed) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
+    publication_tuf_validate_entries(name, indexed) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     if metadata.entries != indexed -> return Err(publication_tuf_metadata_diagnostic("sparse package metadata disagrees with its immutable index projection"))
     loop entry in metadata.entries {
         if publication_is_takeover(metadata.entries, entry) -> publication_require_takeover_review(repo, entry.name, entry.version)
@@ -151,7 +151,7 @@ publication_tuf_all_index_entries: fn(repo: String) -[FS]> [String: [Publication
     }
     if info.is_symlink || !info.is_dir -> return Err(publication_tuf_invalid("registry index root is not a real directory"))
     packages := files.list_dir(root)
-    &packages.sort_by(entry -> entry.name)
+    packages.sort_by(entry -> entry.name)
     grouped := [String: [PublicationIndexEntry]]{}
     loop package in packages {
         if package.name.starts_with(".") -> next
@@ -165,12 +165,12 @@ publication_tuf_all_index_entries: fn(repo: String) -[FS]> [String: [Publication
 publication_tuf_write_sparse_metadata: fn(repo: String, registry_name: String, root_key: String, name: String, entries: [PublicationIndexEntry], referrers: [String: String], checkpoint: String) -[FS, Env, Time]> String IOError! {
     paths: publication_key_paths(registry_name)
     sorted := entries.copy()
-    publication_tuf_validate_entries(name, &sorted)
+    publication_tuf_validate_entries(name, sorted)
     publication_tuf_validate_referrers(sorted, referrers)
     unsigned: publication_tuf_sparse_unsigned(name, sorted, referrers, checkpoint, root_key)
     signature: publication_tuf_sign_payload(paths.seed_path, unsigned)
     out := [String]{unsigned}
-    publication_tuf_line(&out, "signature", signature)
+    publication_tuf_line(out, "signature", signature)
     path: publication_registry_package_metadata_path(repo, name)
     publication_tuf_atomic_write(repo, path, out.join("").bytes())
     Ok(path)
@@ -190,7 +190,7 @@ publication_tuf_parse_sparse_metadata: fn(text: String, name: String) -> Publica
         if key != "name" && key != "entry" && key != "referrer" && key != "checkpoint" && key != "public_key" && key != "signature" -> return Err(publication_tuf_invalid("registry sparse metadata has an unknown field"))
         if key != "entry" && key != "referrer" && fields.has_key(key) -> return Err(publication_tuf_invalid("registry sparse metadata has a duplicate field"))
         if !fields.has_key(key) -> fields[key] = [String]{}
-        &fields[key].push(pair.after)
+        fields[key].push(pair.after)
     }
     parsed_name: publication_tuf_decode_text(publication_tuf_one_field(fields, "name"))
     if parsed_name != name -> return Err(publication_tuf_invalid("registry sparse metadata name disagrees with its path"))
@@ -198,9 +198,9 @@ publication_tuf_parse_sparse_metadata: fn(text: String, name: String) -> Publica
     loop encoded in (fields.get("entry") ?? [String]{}) {
         wire: publication_tuf_decode_text(encoded)
         entry: publication_index_parse_line(wire) ?? return Err(publication_tuf_invalid("registry sparse metadata contains a malformed entry"))
-        &entries.push(entry)
+        entries.push(entry)
     }
-    publication_tuf_validate_entries(name, &entries)
+    publication_tuf_validate_entries(name, entries)
     referrers := [String: String]{}
     loop encoded in (fields.get("referrer") ?? [String]{}) {
         binding: publication_tuf_decode_text(encoded)
@@ -212,7 +212,7 @@ publication_tuf_parse_sparse_metadata: fn(text: String, name: String) -> Publica
 }
 publication_tuf_verify_sparse_metadata: fn(metadata: PublicationSparseMetadata) IOError! {
     entries := metadata.entries.copy()
-    publication_tuf_validate_entries(metadata.name, &entries)
+    publication_tuf_validate_entries(metadata.name, entries)
     publication_tuf_validate_referrers(entries, metadata.referrers)
     if metadata.public_key.bytes().len() != 64 || !publication_tuf_hex.is_hex(metadata.public_key) || metadata.signature == "" -> return Err(publication_tuf_invalid("registry sparse metadata has no usable signature"))
     unsigned: publication_tuf_sparse_unsigned(metadata.name, entries, metadata.referrers, metadata.checkpoint, metadata.public_key)
@@ -220,12 +220,12 @@ publication_tuf_verify_sparse_metadata: fn(metadata: PublicationSparseMetadata) 
 }
 publication_tuf_sparse_unsigned: fn(name: String, entries: [PublicationIndexEntry], referrers: [String: String], checkpoint: String, public_key: String) -> String Never! {
     out := [String]{"{PUBLICATION_TUF_METADATA_MAGIC}\n"}
-    _: publication_tuf_append_line(&out, "name", publication_tuf_hex.encode(name.bytes()))
-    _: publication_tuf_append_line(&out, "checkpoint", publication_tuf_hex.encode(checkpoint.bytes()))
-    _: publication_tuf_append_line(&out, "public_key", publication_tuf_hex.encode(public_key.bytes()))
-    loop entry in entries -> _: publication_tuf_append_line(&out, "entry", publication_tuf_hex.encode(publication_index_to_jsonl(entry).bytes()))
+    _: publication_tuf_append_line(out, "name", publication_tuf_hex.encode(name.bytes()))
+    _: publication_tuf_append_line(out, "checkpoint", publication_tuf_hex.encode(checkpoint.bytes()))
+    _: publication_tuf_append_line(out, "public_key", publication_tuf_hex.encode(public_key.bytes()))
+    loop entry in entries -> _: publication_tuf_append_line(out, "entry", publication_tuf_hex.encode(publication_index_to_jsonl(entry).bytes()))
     loop entry in entries {
-        if referrers.get(entry.version) == Val(digest) -> _: publication_tuf_append_line(&out, "referrer", publication_tuf_hex.encode("{entry.version}\t{digest}".bytes()))
+        if referrers.get(entry.version) == Val(digest) -> _: publication_tuf_append_line(out, "referrer", publication_tuf_hex.encode("{entry.version}\t{digest}".bytes()))
     }
     out.join("")
 }
@@ -272,7 +272,7 @@ publication_tuf_parse_log: fn(text: String) -> [PublicationLogRecord] IOError! {
         if fields[1] != "publish" && fields[1] != "yank" && fields[1] != "migrate" -> return Err(publication_tuf_invalid("registry transparency log operation is invalid"))
         wire: publication_tuf_decode_text(fields[2])
         entry: publication_index_parse_line(wire) ?? return Err(publication_tuf_invalid("registry transparency log entry is malformed"))
-        &records.push(PublicationLogRecord{sequence: sequence, operation: fields[1], entry: entry, previous: fields[3], leaf: fields[4]})
+        records.push(PublicationLogRecord{sequence: sequence, operation: fields[1], entry: entry, previous: fields[3], leaf: fields[4]})
     }
     publication_tuf_validate_log(records)
     Ok(records)
@@ -327,7 +327,7 @@ publication_tuf_validate_log: fn(records: [PublicationLogRecord]) IOError! {
 }
 publication_tuf_log_text: fn(records: [PublicationLogRecord]) -> String Never! {
     out := [String]{"{PUBLICATION_TUF_LOG_MAGIC}\n"}
-    loop record in records -> &out.push("{record.sequence}\t{record.operation}\t{publication_tuf_hex.encode(publication_index_to_jsonl(record.entry).bytes())}\t{record.previous}\t{record.leaf}\n")
+    loop record in records -> out.push("{record.sequence}\t{record.operation}\t{publication_tuf_hex.encode(publication_index_to_jsonl(record.entry).bytes())}\t{record.previous}\t{record.leaf}\n")
     out.join("")
 }
 publication_tuf_write_log: fn(repo: String, records: [PublicationLogRecord]) IOError! -[FS, Env, Time]> {
@@ -345,7 +345,7 @@ publication_tuf_write_checkpoint: fn(repo: String, registry_name: String, root_k
     unsigned: publication_tuf_checkpoint_unsigned(sequence, root, root_key)
     signature: publication_tuf_sign_payload(paths.seed_path, unsigned)
     out := [String]{unsigned}
-    publication_tuf_line(&out, "signature", signature)
+    publication_tuf_line(out, "signature", signature)
     publication_tuf_atomic_write(repo, publication_tuf_checkpoint_path(repo), out.join("").bytes())
     Ok(root)
 }
@@ -441,13 +441,13 @@ publication_tuf_with_checkpoint_lock: fn(state: String, action: fn() IOError! -[
             next
         }
         if writer.fsync() == .Err(error) {
-            close(^writer)
+            close(writer)
             authority.remove(lock_name).drop("the unsynced lock is released; the fsync error is primary")
             return Err(error)
         }
         action_error := IOError?{None}
         if action() == .Err(error) -> action_error = Val(error)
-        close(^writer)
+        close(writer)
         authority.remove(lock_name).drop("release the owned checkpoint lock; the action result is primary")
         if action_error == Val(error) -> return Err(error)
         authority.revalidate()
@@ -461,9 +461,9 @@ publication_tuf_log_record_unsigned: fn(sequence: Int, operation: String, entry:
 }
 publication_tuf_checkpoint_unsigned: fn(sequence: Int, root: String, public_key: String) -> String Never! {
     out := [String]{"{PUBLICATION_TUF_CHECKPOINT_MAGIC}\n"}
-    _: publication_tuf_append_line(&out, "sequence", "{sequence}")
-    _: publication_tuf_append_line(&out, "root", root)
-    _: publication_tuf_append_line(&out, "public_key", publication_tuf_hex.encode(public_key.bytes()))
+    _: publication_tuf_append_line(out, "sequence", "{sequence}")
+    _: publication_tuf_append_line(out, "root", root)
+    _: publication_tuf_append_line(out, "public_key", publication_tuf_hex.encode(public_key.bytes()))
     out.join("")
 }
 publication_tuf_sign_payload: fn(seed: String, payload: String) -[FS, Env]> String IOError! {
@@ -480,7 +480,7 @@ publication_tuf_verify_payload: fn(public_key: String, payload: String, signatur
 }
 publication_tuf_validate_entries: fn(name: String, entries: &[PublicationIndexEntry]) IOError! {
     if name == "" -> return Err(publication_tuf_invalid("registry sparse metadata has an empty package name"))
-    &entries.sort_by(entry -> entry.version)
+    entries.sort_by(entry -> entry.version)
     prior := String?{None}
     loop entry in entries {
         if entry.name != name -> return Err(publication_tuf_invalid("registry sparse metadata contains another package"))
@@ -568,18 +568,18 @@ publication_tuf_append_line: fn(output: &[String], key: String, value: String) -
         code: Int.from_u8(byte)
         if code == 10 || code == 13 -> return false
     }
-    &output.push("{key}={value}\n")
+    output.push("{key}={value}\n")
     true
 }
 publication_tuf_line: fn(output: &[String], key: String, value: String) IOError! {
-    if !publication_tuf_append_line(&output, key, value) -> return Err(publication_tuf_invalid("registry metadata contains an unsafe field"))
+    if !publication_tuf_append_line(output, key, value) -> return Err(publication_tuf_invalid("registry metadata contains an unsafe field"))
 }
 // Rust `sort(); dedup();` over the transaction's touched paths.
 publication_tuf_sort_unique: fn(paths: &[String]) Never! {
-    &paths.sort()
+    paths.sort()
     unique := [String]{}
     loop path in paths {
-        if unique.len() == 0 || unique[unique.len() - 1] != path -> &unique.push(path)
+        if unique.len() == 0 || unique[unique.len() - 1] != path -> unique.push(path.copy())
     }
     paths = unique
 }

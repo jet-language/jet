@@ -331,7 +331,7 @@ index_body: fn() -> HTML {
           <div class="pillar">
             <h3>A documented form for each operation</h3>
             <p>The examples use one documented form for each operation, so the syntax stays visible.</p>
-            <div class="code"><div class="code-head"><span>Examples/features/basics/pattern_matching.jet</span></div><div class="code-body"><pre><code><span class="k">if</span> c == {{
+            <div class="code"><div class="code-head"><span>Examples/Basics/PatternMatching.jet</span></div><div class="code-body"><pre><code><span class="k">if</span> c == {{
         .Active(id) | .Reconnecting(id) <span class="g">-&gt;</span> {{ <span class="k">return</span> <span class="s">"live:{{id}}"</span> }}
         .Idle(_) <span class="g">-&gt;</span> {{ <span class="k">return</span> <span class="s">"idle"</span> }}
         .Closed <span class="g">-&gt;</span> <span class="k">return</span> <span class="s">"closed"</span>
@@ -361,7 +361,7 @@ index_body: fn() -> HTML {
           <div class="duo-item">
             <h3>Defaults ride the type</h3>
             <p>A default value lives on the type, and it may name an earlier parameter. Call <code>box_dims(4)</code> and get a cube.</p>
-            <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/features/basics/default_refs.jet</span></div><div class="code-body"><pre><code><span class="f">box_dims</span><span class="g">:</span> <span class="k">fn</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
+            <div class="code"><div class="code-head"><span>cube.jet</span><span>from Examples/Basics/DefaultRefs.jet</span></div><div class="code-body"><pre><code><span class="f">box_dims</span><span class="g">:</span> <span class="k">fn</span>(w: <span class="t">Int</span>, h: <span class="t">Int</span>{{w}}, d: <span class="t">Int</span>{{h}}) <span class="t">String</span> <span class="g">-&gt;</span> <span class="s">"{{w}}x{{h}}x{{d}}"</span>
 
     <span class="f">run</span><span class="g">:</span> <span class="k">fn</span>() {{
         <span class="f">print</span>(<span class="f">box_dims</span>(<span class="n">4</span>))
@@ -372,7 +372,7 @@ index_body: fn() -> HTML {
           <div class="duo-item">
             <h3>Explicit task lifetimes</h3>
             <p>The example shows explicit join, <code>all</code>, <code>race</code>, <code>any</code>, and detach handling for spawned tasks.</p>
-            <div class="code"><div class="code-head"><span>Examples/features/concurrency/tasks_join_all.jet</span></div><div class="code-body"><pre><code>joined<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
+            <div class="code"><div class="code-head"><span>Examples/Concurrency/TasksJoinAll.jet</span></div><div class="code-body"><pre><code>joined<span class="g">:</span> <span class="k">task</span> <span class="f">work</span>(<span class="n">5</span>)
     <span class="f">print</span>(joined.<span class="f">join</span>() <span class="g">??</span> <span class="f">panic</span>(<span class="s">"join failed"</span>))
 
     results<span class="g">:</span> <span class="k">task</span>.all {{<span class="f">work</span>(<span class="n">1</span>), <span class="f">work</span>(<span class="n">2</span>), <span class="f">work</span>(<span class="n">3</span>)}} <span class="g">??</span> <span class="f">panic</span>(<span class="s">"task.all failed"</span>)
@@ -449,15 +449,15 @@ index_body: fn() -> HTML {
 }
 
 tour_body: fn() -> HTML {
-    hello: code_card_out("Examples/features/basics/hello.jet", hello_code(), "Examples/features/basics/hello.jet", HTML{"hello, world"})
+    hello: code_card_out("Examples/Basics/Hello.jet", hello_code(), "Examples/Basics/Hello.jet", HTML{"hello, world"})
     values: code_card_out("run it", values_code(), "values.jet", HTML{"values: Jet 2026<br>count: 3"})
-    signature: code_card_out("Examples/features/basics/signature_shape.jet", signature_code(), "Examples/features/basics/signature_shape.jet", HTML{"40<br>41"})
-    matching: code_card("Examples/features/basics/pattern_matching.jet", pattern_code())
+    signature: code_card_out("Examples/Basics/BodyRules.jet", signature_code(), "Examples/Basics/BodyRules.jet", HTML{"40<br>41"})
+    matching: code_card("Examples/Basics/PatternMatching.jet", pattern_code())
     failure: code_card_out("run it", failure_code(), "failure.jet", HTML{"port 8080"})
-    defaults: code_card_out("Examples/features/basics/default_refs.jet", defaults_code(), "Examples/features/basics/default_refs.jet", HTML{"5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1"})
-    loops: code_card("Examples/features/basics/loop_values.jet", loops_code())
-    concurrency: code_card("Examples/features/concurrency/tasks_join_all.jet", concurrency_code())
-    files: code_card("Examples/features/io/files.jet", files_code())
+    defaults: code_card_out("Examples/Basics/DefaultRefs.jet", defaults_code(), "Examples/Basics/DefaultRefs.jet", HTML{"5x5<br>5x3<br>4x4x4<br>4x2x2<br>4x2x1"})
+    loops: code_card("Examples/Basics/ComprehensionForms.jet", loops_code())
+    concurrency: code_card("Examples/Concurrency/TasksJoinAll.jet", concurrency_code())
+    files: code_card("Examples/Systems/Files/Files.jet", files_code())
     HTML{"""
     <section class="wrap page">
       <div class="page-header">
@@ -496,13 +496,13 @@ tour_body: fn() -> HTML {
       </section>
 
       <section>
-        <h2 id="functions">Functions and effect rows<span class="sec-file">Examples/features/basics/signature_shape.jet</span></h2>
+        <h2 id="functions">Functions and effect rows<span class="sec-file">Examples/Basics/BodyRules.jet</span></h2>
         <p>A result type sits bare after the parameters; -&gt; starts the body. Effects split the arrow: -[IO]&gt; says this function touches the outside world, and the compiler checks it. Omit the row and Jet infers it; write it and Jet enforces it.</p>
         {signature}
       </section>
 
       <section>
-        <h2 id="matching">Pattern matching is a table<span class="sec-file">Examples/features/basics/pattern_matching.jet</span></h2>
+        <h2 id="matching">Pattern matching is a table<span class="sec-file">Examples/Basics/PatternMatching.jet</span></h2>
         <p>An arm table reads like the decision it makes. Or-patterns share a body, wildcards skip what does not matter, and else catches the rest.</p>
         {matching}
       </section>
@@ -514,25 +514,25 @@ tour_body: fn() -> HTML {
       </section>
 
       <section>
-        <h2 id="defaults">Defaults ride the type<span class="sec-file">Examples/features/basics/default_refs.jet</span></h2>
+        <h2 id="defaults">Defaults ride the type<span class="sec-file">Examples/Basics/DefaultRefs.jet</span></h2>
         <p>A default value lives on the parameter's type, and it may name an earlier parameter.</p>
         {defaults}
       </section>
 
       <section>
-        <h2 id="loops">Loops produce values<span class="sec-file">Examples/features/basics/loop_values.jet</span></h2>
+        <h2 id="loops">Loops produce values<span class="sec-file">Examples/Basics/ComprehensionForms.jet</span></h2>
         <p>This example uses the collection loop form to produce values, filter with a guard, and stop at a prefix.</p>
         {loops}
       </section>
 
       <section>
-        <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">Examples/features/concurrency/tasks_join_all.jet</span></h2>
+        <h2 id="concurrency">Explicit task lifetimes<span class="sec-file">Examples/Concurrency/TasksJoinAll.jet</span></h2>
         <p>This example shows explicit task joins, collection, racing, and detachment. Each operation is visible at its use site.</p>
         {concurrency}
       </section>
 
       <section>
-        <h2 id="files">Files, honestly<span class="sec-file">Examples/features/io/files.jet</span></h2>
+        <h2 id="files">Files, honestly<span class="sec-file">Examples/Systems/Files/Files.jet</span></h2>
         <p>File operations return real errors and carry the FS effect. The happy path stays short; the failure path is visible.</p>
         {files}
       </section>
@@ -543,7 +543,7 @@ tour_body: fn() -> HTML {
         <div class="term"><span class="ps">$</span> <span class="cmd">jet build --target web counter.jet</span> <span class="dim"># try the web target</span></div>
       </section>
 
-      <p>The corpus these samples come from lives in Examples/features in the repository, next to the golden outputs that keep them honest.</p>
+      <p>The corpus these samples come from lives in Examples in the repository, next to the golden outputs that keep them honest.</p>
       {cta_buttons("")}
     </article>
     """}

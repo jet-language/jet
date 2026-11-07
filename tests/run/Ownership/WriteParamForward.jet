@@ -1,0 +1,33 @@
+// A `&` parameter passes its write access onward with the same `&` mark: the
+// callee writes the caller's value, never a copy of it.
+Counter: struct {
+    count: Int
+}
+
+impl Counter {
+    add_to: fn(self, target: &Counter) {
+        target.count = target.count + self.count
+    }
+}
+
+bump: fn(counter: &Counter) {
+    counter.count = counter.count + 1
+}
+
+bump_twice: fn(counter: &Counter) {
+    bump(counter)
+    bump(counter)
+}
+
+add_ten: fn(target: &Counter) {
+    ten: Counter{count: 10}
+    ten.add_to(target)
+}
+
+run: fn() {
+    counter := Counter{count: 0}
+    bump_twice(counter)
+    print(counter.count)
+    add_ten(counter)
+    print(counter.count)
+}

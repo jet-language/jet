@@ -3,10 +3,10 @@
 fixture: outdated_reports_newer_channel_without_mutating_lock.fixture
 env: JETPACK_ROOT={work}/root
 mkdir: root
+copy: project/env.jet env.before
 step: jetpack outdated --no-color --fixtures {work}/fixtures
 cwd: project
 exit: 0
-stderr: ~ "v1.2.0" # original predicate
-stderr: ~ "v1.3.0" # original predicate
+stderr: ~ "github:acme/tools#v1.2.0 → github:acme/tools#v1.3.0" # the stale row names the locked version and the newer one
 file: project/.jet/lock ~ "exact = \"github:acme/tools#v1.2.0\"" # original predicate
-
+file: project/env.jet == env.before

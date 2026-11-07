@@ -15,7 +15,7 @@ Resource: struct {
 }
 
 impl Resource.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 run: fn() {
@@ -25,7 +25,7 @@ run: fn() {
     outer: scope.guard(() -> print("guard outer"))
     inner: scope.guard(() -> print("guard inner"))
     resource := Resource{name: "resource"}
-    defer close(^resource)
+    defer close(resource)
     print("body")
     process.exit(0)
 }

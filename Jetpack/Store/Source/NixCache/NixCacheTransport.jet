@@ -211,7 +211,7 @@ NixCacheEndpoint: struct {
         bytes := [U8]{}
         loop part in response.body().chunks(65536) {
             chunk: part ?? return Err(NixCacheError.new(.Transport, "{err}"))
-            &bytes.extend(chunk)
+            bytes.extend(chunk)
             if bytes.len() > limit {
                 return Err(NixCacheError.new(.Metadata, "Nix cache response exceeds its bound"))
             }
@@ -230,7 +230,7 @@ store_nix_download: fn(response: HTTPResponse, limit: Int, path: String, progres
         chunk: part ?? return Err(NixCacheError.new(.Transport, "{err}"))
         count += chunk.len()
         if count > limit -> return Err(NixCacheError.new(.CompressedCorruption, "Nix cache response exceeded its signed byte limit"))
-        &hasher.update(chunk)
+        hasher.update(chunk)
         output.write_all(chunk) ?? return Err(NixCacheError.new(.Admission, "could not stage the Nix cache object: {err}"))
         store_nix_progress_transferred(progress, chunk.len())
     }

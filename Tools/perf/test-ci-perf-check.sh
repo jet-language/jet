@@ -209,11 +209,11 @@ assert_checker_source() {
 
 assert_corpus_order() {
     expected=$(printf '%s\n' \
-        'Examples/features/basics/hello.jet' \
-        'Examples/features/collections/wordcount.jet' \
-        'Examples/features/serde/json.jet' \
-        'Examples/features/basics/pattern_matching.jet' \
-        'Examples/features/devloop/job_runner.jet')
+        'Examples/Basics/Hello.jet' \
+        'Examples/Collections/WordCount.jet' \
+        'Examples/Data/JSON/JSON.jet' \
+        'Examples/Basics/PatternMatching.jet' \
+        'Examples/Tooling/DevLoop/JobRunner.jet')
     actual=$(awk '
         $0 !~ /^[[:space:]]*(#|$)/ {
             sub(/[[:space:]].*/, "", $0)
@@ -260,7 +260,7 @@ assert_checker_source 'current_peer_keys'
 assert_dashboard_source "printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s:%s\\tphases=%s\\n'"
 assert_dashboard_source 'parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-run-representative-edit"'
 assert_dashboard_source 'job_argument_for_program()'
-assert_dashboard_source 'Examples/features/devloop/job_runner.jet|Tools/perf/edits/job_runner.jet'
+assert_dashboard_source 'Examples/Tooling/DevLoop/JobRunner.jet|Tools/perf/edits/job_runner.jet'
 assert_dashboard_source '"$JET_BIN" run run.jet -- seed_data'
 assert_dashboard_source '"$JET_BIN" jobs'
 assert_dashboard_source 'parity_check_job_runner_case edit Tools/perf/edits/job_runner.jet'

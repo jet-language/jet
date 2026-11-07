@@ -12,9 +12,9 @@
 // `parse`, `first`, and `count_rows` operate on text the caller already holds.
 // `parse` splits eagerly: it materializes every record before it returns, and
 // one bad record fails the whole call with no records. The bounded `reader`
-// consumes a `^files.FileReader` incrementally: it holds one buffer and one
+// consumes a `files.FileReader.move()` incrementally: it holds one buffer and one
 // record, yields the records before a bad one, and its first error is sticky.
-// (D-ENCSTREAM-SURFACE1=A)
+// 
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
@@ -29,31 +29,31 @@ use {
 /// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
 JSONLWriter: struct {
     output: stream.JSONLinesPush
-    write: fn(&self, value: ^Dyn) EncodingError! -[IO]> { &self.output.write(^value) }
-    flush: fn(&self) EncodingError! -[IO]> { &self.output.flush() }
-    finish: fn(&self) EncodingError! -[IO]> { &self.output.finish() }
+    write: fn(&self, value: &&Dyn) EncodingError! -[IO]> { self.output.write(value) }
+    flush: fn(&self) EncodingError! -[IO]> { self.output.flush() }
+    finish: fn(&self) EncodingError! -[IO]> { self.output.finish() }
 }
 
-writer: fn(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
-    output: stream.jsonl_writer(^target, limits) ?? return Err(err)
-    Ok(JSONLWriter{output: ^output})
+writer: fn(target: &&FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
+    output: stream.jsonl_writer(target, limits) ?? return Err(err)
+    Ok(JSONLWriter{output: output.move()})
 }
 
 /// A bounded pull reader over a consumed file: one nonblank record per `next()`.
 /// The source pull engine owns framing, limits and sticky errors.
-reader: fn(input: ^FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLReader EncodingError! {
-    source: stream.jsonl_reader(^input, limits, false) ?? {
+reader: fn(input: &&FileReader, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLReader EncodingError! {
+    source: stream.jsonl_reader(input, limits, false) ?? {
         error := err
         error.format = .JSONL
         return Err(error)
     }
-    Ok(JSONLReader{input: ^source})
+    Ok(JSONLReader{input: source.move()})
 }
 
 JSONLReader: struct {
     input: stream.JSONLinesPull
 
-    next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! { &self.input.next() }
+    next: fn(&self) -[IO, Time.Wait]> Dyn? EncodingError! { self.input.next() }
 }
 
 /// Parse every non-empty record as JSON. Allocates one `Dyn` per record.
@@ -61,9 +61,9 @@ parse: fn(text: String) -> [Dyn] EncodingError! {
     rows := [Dyn]{}
     cursor := records(text)
     loop {
-        row: &cursor.next()
+        row: cursor.next()
         if row == None -> break
-        &rows.push(row)
+        rows.push(row)
     }
     Ok(rows)
 }
@@ -74,11 +74,11 @@ to_string: fn(rows: [Dyn]) -> String EncodingError! {
     record_index := 0
     loop row in rows {
         text: json.to_string(row) ?? return Err(record_error(err, JSONLRecord{text: "", line: record_index + 1, offset: out.len()}, record_index))
-        loop index in 0..<text.count_bytes() -> &out.push(stream.byte_at(text, index))
-        &out.push(U8{10})
+        loop index in 0..<text.count_bytes() -> out.push(stream.byte_at(text, index))
+        out.push(U8{10})
         record_index += 1
     }
-    text: stream.text_from_bytes(^out) ?? return Err(EncodingError.new(EncodingFormat.JSONL, .State, 0, None, None, "", "JSONL renderer produced invalid UTF-8"))
+    text: stream.text_from_bytes(out) ?? return Err(EncodingError.new(EncodingFormat.JSONL, .State, 0, None, None, "", "JSONL renderer produced invalid UTF-8"))
     Ok(text)
 }
 
@@ -92,7 +92,7 @@ JSONLRecords: struct {
 
     next: fn(&self) -> Dyn? EncodingError! {
         loop {
-            record: &self.next_record() ?? return Ok(None)
+            record: self.next_record() ?? return Ok(None)
             if is_blank(record.text) -> next
             value: parse_record(record, self.records_read)
             self.records_read += 1
@@ -116,10 +116,10 @@ impl JSONLRecords {
                 terminated = true
                 break
             }
-            &bytes.push(byte)
+            bytes.push(byte)
         }
-        if terminated && bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _: &bytes.pop()
-        Val(JSONLRecord{text: stream.text_from_bytes(^bytes) ?? "", line: line, offset: start})
+        if terminated && bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _: bytes.pop()
+        Val(JSONLRecord{text: stream.text_from_bytes(bytes) ?? "", line: line, offset: start})
     }
 }
 
@@ -169,7 +169,7 @@ append_line: fn(text: String, value: Dyn) -> String EncodingError! {
 
 first: fn(text: String) -> Dyn? EncodingError! {
     cursor := records(text)
-    &cursor.next()
+    cursor.next()
 }
 
 // One line of the stream: its text without the line ending, its 1-based line
@@ -215,11 +215,11 @@ is_blank: fn(text: String) -> Bool Never! {
 #Test("JSONL text cursor skips blank records and retains record order") {
     cr: String.from_bytes([U8]{13}) ?? panic("CR text")
     cursor := reader("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
-    first: &cursor.next() ?? panic("first record")
+    first: cursor.next() ?? panic("first record")
     if first == .Val(row) -> assert_eq(json.to_string(row) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
-    second: &cursor.next() ?? panic("second record")
+    second: cursor.next() ?? panic("second record")
     assert_eq(second, Val(Dyn.Int(3)))
-    assert_eq(&cursor.next() ?? panic("EOF"), None)
+    assert_eq(cursor.next() ?? panic("EOF"), None)
     assert_eq(count_rows("\t{cr}\n{{\"z\":1}}{cr}\n \n3"), 2)
 }
 
@@ -241,8 +241,8 @@ is_blank: fn(text: String) -> Bool Never! {
     assert_eq(count_rows(" \t{cr}"), 1)
     assert_eq(count_rows("1\n{cr}"), 2)
     cursor := reader("1{cr}")
-    assert_eq(&cursor.next() ?? panic("JSON value with trailing whitespace"), Val(Dyn.Int(1)))
-    assert_eq(&cursor.next() ?? panic("EOF"), None)
+    assert_eq(cursor.next() ?? panic("JSON value with trailing whitespace"), Val(Dyn.Int(1)))
+    assert_eq(cursor.next() ?? panic("EOF"), None)
     if parse(cr) == .Err(error) {
         assert_eq(error.byte_offset, 1)
         assert_eq(error.line, Val(1))

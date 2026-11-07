@@ -1,0 +1,17 @@
+// `test: fn` owns command policy while the
+// compiler-owned Test remains an ordinary value. `jet test --show-default`
+// selects the stock harness instead.
+use testing: core.testing
+
+test: fn(suite: Test) {
+    print("test setup")
+    print("test suite {suite.iteration}:{suite.result}")
+    suite.run()
+    print("test teardown")
+}
+
+#Test("override body") {
+    print("test body")
+}
+
+run: fn() { test(testing.test_suite()) }

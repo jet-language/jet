@@ -1,4 +1,4 @@
-// `jet prove --lens solver` (D-PROVE-SOLVER1=A, proof-replay-decisions.md
+// `jet prove --lens solver` (proof-replay-decisions.md
 // "Solver proof boundary"): the native-presburger backend. It reads sema's
 // typed function bodies, never source text, and turns three kinds of claim
 // into obligations: fixed-list indexes sema proved, `#Pre` claims at calls,
@@ -84,15 +84,15 @@ jet_cli_solver_combine: fn(left: JetCLISolverAffine, factor: Int, right: JetCLIS
         take_left: j >= right.terms.len() || (i < left.terms.len() && left.terms[i].variable < right.terms[j].variable)
         take_right: i >= left.terms.len() || (j < right.terms.len() && right.terms[j].variable < left.terms[i].variable)
         if take_left {
-            &terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: left.terms[i].coefficient})
+            terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: left.terms[i].coefficient})
             i += 1
         } else if take_right {
             scaled: jet_cli_solver_checked(factor * right.terms[j].coefficient)
-            if scaled != 0 -> &terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
+            if scaled != 0 -> terms.push(JetCLISolverTerm{variable: right.terms[j].variable, coefficient: scaled})
             j += 1
         } else {
             sum: jet_cli_solver_checked(left.terms[i].coefficient + jet_cli_solver_checked(factor * right.terms[j].coefficient))
-            if sum != 0 -> &terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
+            if sum != 0 -> terms.push(JetCLISolverTerm{variable: left.terms[i].variable, coefficient: sum})
             i += 1
             j += 1
         }
@@ -133,7 +133,7 @@ jet_cli_solver_atom: fn(affine: JetCLISolverAffine, relation: String) -> JetCLIS
     reduced := affine.copy()
     if g > 1 {
         terms := [JetCLISolverTerm]{}
-        loop term in affine.terms -> &terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+        loop term in affine.terms -> terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
         constant: if relation == "le" -> -((-affine.constant) /% g) else -> affine.constant /% g
         if relation != "le" && constant * g != affine.constant -> return Ok(JetCLISolverBool.Constant(relation == "ne"))
         reduced = JetCLISolverAffine{constant: constant, terms: terms}
@@ -161,7 +161,7 @@ jet_cli_solver_compare: fn(lhs: JetCLISolverAffine, op: String, rhs: JetCLISolve
 
 jet_cli_solver_terms_json: fn(value: JetCLISolverAffine) -> String Never! {
     terms := [String]{}
-    loop term in value.terms -> &terms.push("{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}")
+    loop term in value.terms -> terms.push("{{\"coefficient\":\"{term.coefficient}\",\"variable\":{foundation_json_quote(term.variable)}}}")
     "[{terms.join(",")}]"
 }
 
@@ -180,7 +180,7 @@ jet_cli_solver_bool_json: fn(node: JetCLISolverBool) -> String Never! {
 
 jet_cli_solver_list_json: fn(op: String, children: [JetCLISolverBool]) -> String Never! {
     parts := [String]{}
-    loop child in children -> &parts.push(jet_cli_solver_bool_json(child))
+    loop child in children -> parts.push(jet_cli_solver_bool_json(child))
     "{{\"children\":[{parts.join(",")}],\"op\":\"{op}\"}}"
 }
 
@@ -241,25 +241,25 @@ jet_cli_solver_normalize_list: fn(conj: Bool, children: [JetCLISolverBool]) -> J
             .Constant(value) -> {
                 if value != conj -> return JetCLISolverBool.Constant(value)
             }
-            .And(inner) -> if conj -> flat = inner.copy() else -> &flat.push(normal.copy())
-            .Or(inner) -> if conj -> &flat.push(normal.copy()) else -> flat = inner.copy()
-            .Atom(_) -> &flat.push(normal.copy())
+            .And(inner) -> if conj -> flat = inner.copy() else -> flat.push(normal.copy())
+            .Or(inner) -> if conj -> flat.push(normal.copy()) else -> flat = inner.copy()
+            .Atom(_) -> flat.push(normal.copy())
         }
         loop item in flat {
             text: jet_cli_solver_bool_json(item)
             if item == {
-                .Atom(atom) -> &keyed.push(JetCLISolverKeyed{rank: 0, key: jet_cli_solver_terms_json(atom.affine), constant: atom.affine.constant, relation: atom.relation.copy(), text: text, node: nodes.len()})
-                else -> &keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
+                .Atom(atom) -> keyed.push(JetCLISolverKeyed{rank: 0, key: jet_cli_solver_terms_json(atom.affine), constant: atom.affine.constant, relation: atom.relation.copy(), text: text, node: nodes.len()})
+                else -> keyed.push(JetCLISolverKeyed{rank: 1, key: text.copy(), constant: 0, relation: "", text: text, node: nodes.len()})
             }
-            &nodes.push(item.copy())
+            nodes.push(item.copy())
         }
     }
     // A closure comparator: a compiler older than JetIR's named-comparator fix frees a named one's result twice.
-    &keyed.sort_by((left: JetCLISolverKeyed, right: JetCLISolverKeyed) -> jet_cli_solver_keyed_order(left, right))
+    keyed.sort_by((left: JetCLISolverKeyed, right: JetCLISolverKeyed) -> jet_cli_solver_keyed_order(left, right))
     out := [JetCLISolverBool]{}
     loop (index, item) in keyed {
         if index > 0 && keyed[index - 1].text == item.text -> next
-        &out.push(nodes[item.node].copy())
+        out.push(nodes[item.node].copy())
     }
     if conj -> JetCLISolverBool.And(out) else -> JetCLISolverBool.Or(out)
 }
@@ -274,12 +274,12 @@ jet_cli_solver_negate: fn(node: JetCLISolverBool) -> JetCLISolverBool JetCLISolv
         }
         .And(children) -> {
             out := [JetCLISolverBool]{}
-            loop child in children -> &out.push(jet_cli_solver_negate(child))
+            loop child in children -> out.push(jet_cli_solver_negate(child))
             Ok(JetCLISolverBool.Or(out))
         }
         .Or(children) -> {
             out := [JetCLISolverBool]{}
-            loop child in children -> &out.push(jet_cli_solver_negate(child))
+            loop child in children -> out.push(jet_cli_solver_negate(child))
             Ok(JetCLISolverBool.And(out))
         }
     }
@@ -324,9 +324,9 @@ jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: &JetCLISolverSteps) -
         .Or(children) -> {
             out := [[JetCLISolverAffine]]{}
             loop child in children {
-                loop branch in jet_cli_solver_branches(child, &steps) {
-                    _: jet_cli_solver_charge(&steps)
-                    &out.push(branch)
+                loop branch in jet_cli_solver_branches(child, steps) {
+                    _: jet_cli_solver_charge(steps)
+                    out.push(branch)
                 }
             }
             Ok(out)
@@ -334,14 +334,14 @@ jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: &JetCLISolverSteps) -
         .And(children) -> {
             out := [[JetCLISolverAffine]]{[JetCLISolverAffine]{}}
             loop child in children {
-                right: jet_cli_solver_branches(child, &steps)
+                right: jet_cli_solver_branches(child, steps)
                 next_out := [[JetCLISolverAffine]]{}
                 loop left in out {
                     loop extra in right {
-                        _: jet_cli_solver_charge(&steps)
+                        _: jet_cli_solver_charge(steps)
                         joined := left
-                        loop item in extra -> &joined.push(item)
-                        &next_out.push(joined)
+                        loop item in extra -> joined.push(item)
+                        next_out.push(joined)
                     }
                 }
                 out = next_out
@@ -354,7 +354,7 @@ jet_cli_solver_branches: fn(node: JetCLISolverBool, steps: &JetCLISolverSteps) -
 // The branches the search refutes: `assumptions && !claim`.
 jet_cli_solver_formula_branches: fn(formula: JetCLISolverFormula, steps: &JetCLISolverSteps) -> [[JetCLISolverAffine]] JetCLISolverUnknown! {
     negated: jet_cli_solver_negate(formula.claim)
-    jet_cli_solver_branches(JetCLISolverBool.And([JetCLISolverBool]{formula.assumptions, negated}), &steps)
+    jet_cli_solver_branches(JetCLISolverBool.And([JetCLISolverBool]{formula.assumptions, negated}), steps)
 }
 
 // One derived inequality and the nonnegative multipliers of the branch's
@@ -392,9 +392,9 @@ jet_cli_solver_reduce: fn(row: JetCLISolverDerived) -> JetCLISolverDerived Never
     loop m in row.multipliers -> g = jet_cli_solver_gcd(g, m)
     if g <= 1 -> return row.copy()
     terms := [JetCLISolverTerm]{}
-    loop term in row.affine.terms -> &terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
+    loop term in row.affine.terms -> terms.push(JetCLISolverTerm{variable: term.variable, coefficient: term.coefficient /% g})
     multipliers := [Int]{}
-    loop m in row.multipliers -> &multipliers.push(m /% g)
+    loop m in row.multipliers -> multipliers.push(m /% g)
     JetCLISolverDerived{affine: JetCLISolverAffine{constant: row.affine.constant /% g, terms: terms}, multipliers: multipliers}
 }
 
@@ -402,10 +402,10 @@ jet_cli_solver_variables: fn(ineqs: [JetCLISolverAffine]) -> [String] Never! {
     names := [String]{}
     loop ineq in ineqs {
         loop term in ineq.terms {
-            if !names.contains(term.variable) -> &names.push(term.variable)
+            if !names.contains(term.variable) -> names.push(term.variable)
         }
     }
-    &names.sort_by((left: String, right: String) -> left <=> right)
+    names.sort_by((left: String, right: String) -> left <=> right)
     names
 }
 
@@ -418,40 +418,40 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps
     rows := [JetCLISolverDerived]{}
     loop (index, ineq) in ineqs {
         multipliers: loop k in 0..<count -> if k == index -> 1 else -> 0
-        &rows.push(JetCLISolverDerived{affine: ineq, multipliers: multipliers})
+        rows.push(JetCLISolverDerived{affine: ineq, multipliers: multipliers})
     }
     loop row in rows {
         if row.affine.terms.len() == 0 {
-            _: jet_cli_solver_charge(&steps)
+            _: jet_cli_solver_charge(steps)
             if row.affine.constant > 0 -> return Ok(JetCLISolverSearch.Unsat(row.multipliers))
         }
     }
     vars: jet_cli_solver_variables(ineqs)
     stages := [[JetCLISolverDerived]]{}
     loop variable in vars {
-        &stages.push(rows)
+        stages.push(rows.copy())
         positive := [JetCLISolverDerived]{}
         negative := [JetCLISolverDerived]{}
         next_rows := [JetCLISolverDerived]{}
         loop row in rows {
             c: jet_cli_solver_coefficient(row.affine, variable)
-            if c > 0 -> &positive.push(row) else if c < 0 -> &negative.push(row) else -> &next_rows.push(row)
+            if c > 0 -> positive.push(row) else if c < 0 -> negative.push(row) else -> next_rows.push(row)
         }
         loop p in positive {
             loop q in negative {
-                _: jet_cli_solver_charge(&steps)
+                _: jet_cli_solver_charge(steps)
                 cp: jet_cli_solver_coefficient(p.affine, variable)
                 cq: -jet_cli_solver_coefficient(q.affine, variable)
                 combined: jet_cli_solver_combine(jet_cli_solver_scale(p.affine, cq), cp, q.affine)
                 multipliers := [Int]{}
-                loop k in 0..<count -> &multipliers.push(jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k]))
+                loop k in 0..<count -> multipliers.push(jet_cli_solver_checked(cq * p.multipliers[k] + cp * q.multipliers[k]))
                 row: jet_cli_solver_reduce(JetCLISolverDerived{affine: combined, multipliers: multipliers})
                 if row.affine.terms.len() == 0 {
-                    _: jet_cli_solver_charge(&steps)
+                    _: jet_cli_solver_charge(steps)
                     if row.affine.constant > 0 -> return Ok(JetCLISolverSearch.Unsat(row.multipliers))
                     next
                 }
-                &next_rows.push(row)
+                next_rows.push(row)
             }
         }
         rows = next_rows
@@ -481,7 +481,7 @@ jet_cli_solver_refute: fn(ineqs: [JetCLISolverAffine], steps: &JetCLISolverSteps
             }
         }
         value: jet_cli_solver_pick(lo, hi) ?? return Ok(JetCLISolverSearch.Split(JetCLISolverValue{name: variable, value: hi ?? 0}))
-        &values.push(JetCLISolverValue{name: variable, value: value})
+        values.push(JetCLISolverValue{name: variable, value: value})
         stage -= 1
     }
     Ok(JetCLISolverSearch.Sat(values))
@@ -545,7 +545,7 @@ jet_cli_solver_prove: fn(formula: JetCLISolverFormula) -> JetCLISolverOutcome Ne
         return JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: "structural_limit", steps: 0})
     }
     steps := JetCLISolverSteps{used: 0, limit: JET_CLI_SOLVER_MAX_STEPS}
-    jet_cli_solver_search(formula, &steps) ?? JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: err.reason, steps: steps.used})
+    jet_cli_solver_search(formula, steps) ?? JetCLISolverOutcome.Unknown(JetCLISolverUnknownAt{reason: err.reason, steps: steps.used})
 }
 
 // Canonical FIFO branch search over `assumptions && !claim`: every task is a
@@ -553,41 +553,41 @@ jet_cli_solver_prove: fn(formula: JetCLISolverFormula) -> JetCLISolverOutcome Ne
 // `pivot` adds `x - pivot <= 0` on the left and `pivot + 1 - x <= 0` on the
 // right, each as the branch's next inequality.
 jet_cli_solver_search: fn(formula: JetCLISolverFormula, steps: &JetCLISolverSteps) -> JetCLISolverOutcome JetCLISolverUnknown! {
-    branches: jet_cli_solver_formula_branches(formula, &steps)
+    branches: jet_cli_solver_formula_branches(formula, steps)
     proofs := [JetCLISolverProof]{}
     queue := [JetCLISolverTask]{}
     loop branch in branches {
-        &queue.push(JetCLISolverTask{node: proofs.len(), ineqs: branch})
-        &proofs.push(JetCLISolverProof.Pending)
+        queue.push(JetCLISolverTask{node: proofs.len(), ineqs: branch})
+        proofs.push(JetCLISolverProof.Pending)
     }
     head := 0
     loop head < queue.len() {
-        _: jet_cli_solver_charge(&steps)
+        _: jet_cli_solver_charge(steps)
         task: queue[head].copy()
         head += 1
-        found: jet_cli_solver_refute(task.ineqs, &steps)
+        found: jet_cli_solver_refute(task.ineqs, steps)
         if found == {
             .Unsat(multipliers) -> proofs[task.node] = JetCLISolverProof.Contradiction(multipliers.copy())
             .Sat(values) -> return Ok(JetCLISolverOutcome.Disproved(JetCLISolverDisproved{values: jet_cli_solver_complete(formula, values.copy()), steps: steps.used}))
             .Split(at) -> {
-                _: jet_cli_solver_charge(&steps)
+                _: jet_cli_solver_charge(steps)
                 left := task.ineqs.copy()
-                &left.push(jet_cli_solver_split_left(at.name, at.value))
+                left.push(jet_cli_solver_split_left(at.name, at.value))
                 left_node: proofs.len()
-                &proofs.push(JetCLISolverProof.Pending)
-                &queue.push(JetCLISolverTask{node: left_node, ineqs: left})
-                _: jet_cli_solver_charge(&steps)
+                proofs.push(JetCLISolverProof.Pending)
+                queue.push(JetCLISolverTask{node: left_node, ineqs: left})
+                _: jet_cli_solver_charge(steps)
                 right := task.ineqs.copy()
-                &right.push(jet_cli_solver_split_right(at.name, at.value))
+                right.push(jet_cli_solver_split_right(at.name, at.value))
                 right_node: proofs.len()
-                &proofs.push(JetCLISolverProof.Pending)
-                &queue.push(JetCLISolverTask{node: right_node, ineqs: right})
+                proofs.push(JetCLISolverProof.Pending)
+                queue.push(JetCLISolverTask{node: right_node, ineqs: right})
                 proofs[task.node] = JetCLISolverProof.Split(JetCLISolverSplit{variable: at.name, pivot: at.value, left: left_node, right: right_node})
             }
         }
     }
     parts := [String]{}
-    loop (index, _) in branches -> &parts.push("{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}")
+    loop (index, _) in branches -> parts.push("{{\"branchIndex\":{index},\"proof\":{jet_cli_solver_proof_json(proofs, index)}}}")
     Ok(JetCLISolverOutcome.Proved(JetCLISolverProved{certificate: "{{\"branches\":[{parts.join(",")}],\"kind\":\"branches\"}}", steps: steps.used}))
 }
 
@@ -604,7 +604,7 @@ jet_cli_solver_proof_json: fn(proofs: [JetCLISolverProof], node: Int) -> String 
         .Contradiction(multipliers) -> {
             terms := [String]{}
             loop (index, m) in multipliers {
-                if m != 0 -> &terms.push("{{\"inequalityIndex\":{index},\"multiplier\":\"{m}\"}}")
+                if m != 0 -> terms.push("{{\"inequalityIndex\":{index},\"multiplier\":\"{m}\"}}")
             }
             "{{\"kind\":\"linear_contradiction\",\"terms\":[{terms.join(",")}]}}"
         }
@@ -616,24 +616,24 @@ jet_cli_solver_proof_json: fn(proofs: [JetCLISolverProof], node: Int) -> String 
 // Every formula variable, its branch value or 1, in name order.
 jet_cli_solver_complete: fn(formula: JetCLISolverFormula, values: [JetCLISolverValue]) -> [JetCLISolverValue] Never! {
     affines := [JetCLISolverAffine]{}
-    jet_cli_solver_collect_affines(formula.assumptions, &affines)
-    jet_cli_solver_collect_affines(formula.claim, &affines)
+    jet_cli_solver_collect_affines(formula.assumptions, affines)
+    jet_cli_solver_collect_affines(formula.claim, affines)
     out := [JetCLISolverValue]{}
     loop name in jet_cli_solver_variables(affines) {
         value := 1
         loop known in values {
             if known.name == name -> value = known.value
         }
-        &out.push(JetCLISolverValue{name: name, value: value})
+        out.push(JetCLISolverValue{name: name, value: value})
     }
     out
 }
 
 jet_cli_solver_collect_affines: fn(node: JetCLISolverBool, out: &[JetCLISolverAffine]) Never! {
     if node == {
-        .Atom(atom) -> &out.push(atom.affine)
-        .And(children) -> loop child in children -> jet_cli_solver_collect_affines(child, &out)
-        .Or(children) -> loop child in children -> jet_cli_solver_collect_affines(child, &out)
+        .Atom(atom) -> out.push(atom.affine)
+        .And(children) -> loop child in children -> jet_cli_solver_collect_affines(child, out)
+        .Or(children) -> loop child in children -> jet_cli_solver_collect_affines(child, out)
         .Constant(_) -> {}
     }
 }
@@ -689,7 +689,7 @@ jet_cli_solver_certificate_valid: fn(formula: JetCLISolverFormula, certificate: 
     if !jet_cli_solver_json_text(top[1], "branches") -> return false
     items: jet_cli_solver_json_array(top[0]) ?? return false
     steps := JetCLISolverSteps{used: 0, limit: JET_CLI_SOLVER_I128_MAX}
-    branches: jet_cli_solver_formula_branches(formula, &steps) ?? return false
+    branches: jet_cli_solver_formula_branches(formula, steps) ?? return false
     if items.len() != branches.len() -> return false
     loop (index, item) in items {
         node: jet_cli_solver_fields(item, [String]{"branchIndex", "proof"}) ?? return false
@@ -723,9 +723,9 @@ jet_cli_solver_proof_valid: fn(proof: CanonicalJSON, ineqs: [JetCLISolverAffine]
     occurs: loop ineq in ineqs -> if jet_cli_solver_coefficient(ineq, variable) != 0 -> 1 else -> 0
     if occurs.sum() == 0 -> return false
     left := ineqs
-    &left.push(jet_cli_solver_split_left(variable, pivot) ?? return false)
+    left.push(jet_cli_solver_split_left(variable, pivot) ?? return false)
     right := ineqs
-    &right.push(jet_cli_solver_split_right(variable, pivot) ?? return false)
+    right.push(jet_cli_solver_split_right(variable, pivot) ?? return false)
     jet_cli_solver_proof_valid(fields[1], left) && jet_cli_solver_proof_valid(fields[3], right)
 }
 

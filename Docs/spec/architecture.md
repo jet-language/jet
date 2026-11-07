@@ -107,10 +107,11 @@ every block it hands out or takes back, the runtime's own included. A
 link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
 internal calls section-relative. `run-alloc-observer-witness.mjs` is the
 negative control: its leak mode keeps one buffer and must fail.
-Native scan proofs require the current native `scan.cases` receipt and the
-fresh Jet object/pack. Saved reference and evaluator TSVs are optional,
-explicitly named `--frozen-reference` and `--frozen-evaluator` inputs; a live
-retired tier is never a prerequisite for the raw ABI and Float-bit witnesses.
+Native scan proofs run the `scan.cases` programs with the native CLI against
+their goldens and require the fresh Jet object/pack. Saved reference and
+evaluator TSVs are optional, explicitly named `--frozen-reference` and
+`--frozen-evaluator` inputs; a live retired tier is never a prerequisite for
+the raw ABI and Float-bit witnesses.
 Official BLAKE3 fixtures regenerate from the team vectors alone, outside the
 immutable proof source, without reading a retired runtime implementation.
 Native runtime exit corpora accept `--results` pointing to the one Jet-front
@@ -469,11 +470,11 @@ Engines must not special-case these surface forms:
 | Surface | Core form | Authority |
 |---|---|---|
 | `freeze(x)` | A clone, view materialization or explicit copy, selected by the sema-approved source type; frozen provenance stays in capture metadata. | D-CONC-FREEZE1=A |
-| `^place` in a value position | A move of the checked place; a non-Copy field projection moves that field out, leaving it empty for remainder cleanup. The checker must not materialize a copy of the operand or erase its take provenance. | D-COPY-DEFAULT1=A |
+| `place.move()` in a value position | A move of the checked place; a non-Copy field projection moves that field out, leaving it empty for remainder cleanup. The checker must not materialize a copy of the operand or erase its take provenance. | D-COPY-DEFAULT1=A |
 | `task ^name { … }` | The existing task lambda with an explicit consuming capture; the task-crossing prover owns legality. | D-CONC-FREEZE1=A |
 
 The freeze form is a lowering rule, not an engine-side capture check; web has
-no separate freeze policy. [`freeze_capture.jet`](../../Examples/features/concurrency/freeze_capture.jet)
+no separate freeze policy. [`freeze_capture.jet`](../../Examples/Concurrency/FreezeCapture.jet)
 is its cross-lens fixture.
 
 Generic call evidence belongs to the caller's lexical scope, not the callee's
@@ -504,7 +505,7 @@ checked concrete signature and effective callable-return carrier, never an
 unspecialized `fn(T)` template or a raw source return type. A generic target
 without a complete checked instance is a lowering invariant failure;
 it cannot fall back to the template's ordinary function name. The executable
-example is [`package_members`](../../Examples/features/modules/package_members/run.jet).
+example is [`package_members`](../../Examples/Modules/PackageMembers/run.jet).
 
 Core runtime-carrier type imports follow the authoritative Core export ledger
 even when no source nominal declaration exists. Import aliases preserve the
@@ -696,12 +697,12 @@ Runtime representation is not the checked field type. In particular, default
 `Err.cause` value and place reads use the shared
 cause projection to expose
 `Err?`, not the runtime's boxed recursive storage. The
-[default error example](../../Examples/features/errors/default_err_value.jet)
+[default error example](../../Examples/ErrorsAndEffects/Errors/DefaultErrValue.jet)
 covers present, absent and repeated cause reads.
 Returned `View` and `ViewMut` signatures retain the checked owner provenance:
 both Rust emitters attach an explicit lifetime to the returned reference and
 its owner parameter, not to unrelated borrowed parameters. Static-only views
-use `'static`. The [borrowed view example](../../Examples/features/memory/borrowed_view_len.jet)
+use `'static`. The [borrowed view example](../../tests/run/Ownership/BorrowedViewLen.jet)
 covers a multi-parameter return, chained and stored length reads, indexing,
 and iteration without converting the borrowed slice to a list.
 
@@ -772,7 +773,7 @@ packages live under `Jetpack/`.
 | `JetDriver` | front-end orchestration and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
 | `JetBuildSession` | build sessions over the driver | no new diagnostics |
 | `JetQueries` | demand cache for incremental inputs and derived query values | no |
-| `JetSemIndex` | stable semantic index over checked programs for tooling | no new diagnostics |
+| `JetSemIndex` | the one stable semantic index over checked programs (`semindex_build`) and its symbol catalog (`semindex_build_symbols`), read by `JetCli`'s inspect, docs, codemod and review commands and by tooling | no new diagnostics |
 | `JetImpact` | blast-radius reports over `JetSemIndex` | no |
 | `JetRepl` | interactive shell and notebook over `JetDriver`, `JetSemIndex`, and leaf policy | no new diagnostics |
 | `JetDebug` | source debugger and DAP over `JetDriver` plus leaf JSON/exit policy | debugger diagnostics only |
@@ -1380,7 +1381,7 @@ hidden behind `jet dev`.
 
 Browser automation coverage includes provision, lifecycle, locators, network,
 artifacts, checked CDP, and privacy, with examples under
-`Examples/features/net/browser_*.jet` and hostile proofs in
+`Examples/Network/Browser/` and hostile proofs in
 `tests/cases/browser_bidi/` / `tests/cases/browser_lock/`. Live browser binaries remain
 host-supplied; the product path always speaks BiDi over the existing WebSocket
 transport.
@@ -1455,7 +1456,7 @@ Cargo runs, so helpers that share a target build at once. A helper with
 dependencies reads the host Cargo registry through a memory-backed bubblewrap
 overlay (`--overlay-src`/`--tmp-overlay`, bubblewrap 0.11 or newer, checked by
 the backend probe): Cargo's writes end with the sandbox and nothing is copied.
-A raw `extern rust` call whose parameter takes `&` or `^` is a sema error
+A raw `extern rust` call whose parameter takes `&` or `&&` is a sema error
 (`E0702`) outside `#Unsafe`, so it fails before any Cargo work.
 `check`, `run` and `build` share this realization and its
 `E0703`/`E0704`/`E0705` errors, including canonical declaration hints and separate
@@ -1563,7 +1564,7 @@ publishes the entry module's checked C surface, and `#Import(c)` names a C
 function that the library calls. This follows D-ADOPT-GUEST1=A: both directions
 use the same sema-owned C-safe type law. D-FFI-UNIFY1=A keeps the generated
 bridge, descriptor, and native symbol as one mechanism. Where a declaration
-uses D-FFI-CAP1=A, `&` is exclusive for that call and `^` transfers ownership;
+uses D-FFI-CAP1=A, `&` is exclusive for that call and `&&` transfers ownership;
 the host must obey that declaration rather than infer ownership from a header.
 
 The native Library surface maps each parameter and the result of an export,
@@ -1728,11 +1729,11 @@ parity. Its pinned baseline allows at most 15% latency or peak-RSS regression,
 an interquartile spread of 100% or less, and at most five Tukey-fence outliers;
 exact stdout/stderr hashes, phase totals, and workload identity remain part of
 each row. The five active corpus rows are ordered
-`Examples/features/basics/hello.jet`,
-`Examples/features/collections/wordcount.jet`,
-`Examples/features/serde/json.jet`,
-`Examples/features/basics/pattern_matching.jet`, and
-`Examples/features/devloop/job_runner.jet`; `job_runner` is fifth.
+`Examples/Basics/Hello.jet`,
+`Examples/Collections/WordCount.jet`,
+`Examples/Data/JSON/JSON.jet`,
+`Examples/Basics/PatternMatching.jet`, and
+`Examples/Tooling/DevLoop/JobRunner.jet`; `job_runner` is fifth.
 A baseline is valid only for its pinned machine and toolchain.
 
 The code-action engine uses the same semantic index. It ships unique workspace
@@ -2178,7 +2179,8 @@ and free memory (`--jobs`, `--memory`). Rows print as cases finish; each
 suite's report and failure list keep suite-then-path order, whatever the
 pool's size. Census and release tooling that shards or lists the corpus
 across processes passes `--shard`, `--list`, `--cases` and `--results` to the
-same command. Scratch stays disk-backed outside the checkout. O0, O1 and O2
+same command. Rows stage in memory outside the checkout, their files counted
+against the pool's memory budget; history stays on disk. O0, O1 and O2
 compare the real exit and exact streams; diagnostic text remains a product
 surface, not a blessable implementation accident.
 
@@ -2192,38 +2194,10 @@ owner directive #59, native cutover executes those runners directly and reports
 formal qualification/closeout separately as **NOT MET (deferred)**, never as a
 suite pass.
 
-Native cutover uses one outer process trace. Testkit's exec-only
-`native-command.mjs` labels each case without changing its command PID or streams;
-`native-trace.mjs` audits ancestry, cwd and successful executions after the trace
-closes. Rust/LLVM defaults to a violation. The committed
-`Tools/testkit/user-rust-ffi.allow` has four columns: case identity, exact reason,
-compiled source provenance and declared dependencies. A `.case` names precisely
-the fixture sources its commands compile; direct Jet cases name themselves.
-Receipts retain source hashes. Pure-Jet fixtures receive no Rust exception.
-Generated helper manifests must reside in the cache that the command actually
-uses: an explicit `JET_FFI_CACHE_DIR` is preserved verbatim, otherwise the
-external case/dependency-digest cache applies. Dependencies and admitted Jet
-foreign ancestry must match. Cargo metadata is restricted to
-`metadata --format-version 1 --manifest-path <generated helper manifest>`,
-under the same checks as builds. The immutable tracing wrapper enables retained
-private workspaces beneath `<cache>/<full-key>/.trace-workspaces/<pid>-<attempt>`;
-the source is mounted readonly at `/work/source`, output writable at
-`/work/output`. Audit maps those exact mounts back to retained manifests, rejects
-escapes and any mount or overlay that obscures them, admits only memory-backed
-`--tmp-overlay` layers (the registry overlay), and records the manifests' bytes
-and hashes. Case/tier scratch is retained
-only for the outer audit; ordinary runs keep their existing cleanup.
-The exact `rustc -vV` identity query is admitted only in an allowlisted case's
-Jet foreign branch, and is recorded separately. Extra query arguments or sysroot
-probes do not inherit that exception. Jet program compilation/linking/running
-never gets a Rust
-exception. Receipts distinguish zero-Rust cases, observed user-FFI builds and
-violations; performance peers remain separate product comparisons.
-
-UI `.fixed.jet` companions carry their own case marker and exact allowlist row,
-not the negative fixture's identity. A source-declared `extern rust "std"`
-uses the generated Cargo staticlib helper with an empty dependency set; it is
-not a zero-Rust case. Empty sets are admitted only for actual extern-Rust source.
+Testkit runs each case's commands directly, as the case wrote them; no
+wrapper or outer process trace stands between a row and the `jet` under test.
+The FFI helper cache is the kit state's `ffi` directory unless a case sets its
+own `JET_FFI_CACHE_DIR`, which is passed through verbatim.
 The missing-Cargo fixture always runs with a case-local PATH containing no
 Cargo or rustup shim and a cleared case-private foreign cache. Installed tools
 or a warmed helper cannot turn its E0703 contract into a skipped observation.
@@ -2234,6 +2208,12 @@ a runtime directive. Collection excludes these files while preserving their
 names and imports for the real parent fixtures. An absent expected-output file
 never causes exclusion: unmarked UI fixtures remain discovered and require an
 owner-reviewed snapshot.
+A UI fixture's `// @requires REQUIREMENT` lines take the host requirements of
+a case's `requires:` (`tool:cargo`, `os:linux`, `env:NAME=VALUE`, ...). On a
+host that lacks one the fixture reports SKIP-HOST and does not run, whatever
+its known-failing row. The lines in a `.fixed.jet` companion gate only the
+companion's rows. Every fixture that builds a Rust bridge declares
+`// @requires tool:cargo`; the missing-Cargo fixture never does.
 The runner stages the complete `tests/ui` and `tests/ui_lint` trees once per run
 in external scratch, where each project case compiles rooted at its own
 directory. A loose case's source root is its whole directory, and the compiler

@@ -1,4 +1,4 @@
-// D-FOUND-PLATFORM1 / #2815: the first-party GUI battery keeps editor state,
+// #2815: the first-party GUI battery keeps editor state,
 // Unicode-safe editing, persistence policy, and view composition in ordinary Jet
 // code. Host boundaries remain the canonical core.ui.host/core.font calls.
 use {
@@ -188,7 +188,7 @@ status_of: fn(state: EditorState) -> String { state.status.copy() }
 commit_edit: fn(state: EditorState, next: String, next_selection: TextSelection, status: String) -> EditorState {
     if state.body == next -> return state.copy()
     history := state.undo
-    &history.push(state.body)
+    history.push(state.body)
     EditorState{
         body: next.copy(),
         title: state.title.copy(),
@@ -278,9 +278,9 @@ drop_text: fn(state: EditorState, dropped: String) -> EditorState { apply_text(s
 
 undo: fn(state: EditorState) -> EditorState {
     history := state.undo
-    previous: &history.pop() ?? return state
+    previous: history.pop() ?? return state
     forward := state.redo
-    &forward.push(state.body)
+    forward.push(state.body)
     cursor: text.scalar_count(previous)
     EditorState{
         body: previous.copy(),
@@ -298,9 +298,9 @@ undo: fn(state: EditorState) -> EditorState {
 
 redo: fn(state: EditorState) -> EditorState {
     forward := state.redo
-    next: &forward.pop() ?? return state
+    next: forward.pop() ?? return state
     history := state.undo
-    &history.push(state.body)
+    history.push(state.body)
     cursor: text.scalar_count(next)
     EditorState{
         body: next.copy(),
@@ -549,10 +549,10 @@ attach_accessibility: fn(node: UINode, metadata: UIAccessibility) -> UINode UIHo
 
 future_commands: fn() -> [String] {
     [
-        "JET_UI_HEADLESS=1 Tools/agent/jet-env jet run Examples/features/ui/battery/run.jet",
-        "Tools/agent/jet-env jet run --target=native Examples/features/ui/battery/run.jet",
-        "Tools/agent/jet-env jet dev --target=web Examples/features/ui/battery/run.jet",
-        "Tools/agent/jet-env jet build Examples/features/ui/battery/run.jet",
+        "JET_UI_HEADLESS=1 Tools/agent/jet-env jet run tests/run/UI/Battery/run.jet",
+        "Tools/agent/jet-env jet run --target=native tests/run/UI/Battery/run.jet",
+        "Tools/agent/jet-env jet dev --target=web tests/run/UI/Battery/run.jet",
+        "Tools/agent/jet-env jet build tests/run/UI/Battery/run.jet",
         "Tools/agent/jet-env jet package --kind desktop --target linux-appimage --package gui-battery-example --name gui-battery-example --version 0.1.0 --executable build/run --output build/gui-battery-example.AppImage",
     ]
 }

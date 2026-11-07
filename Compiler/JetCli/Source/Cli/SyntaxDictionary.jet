@@ -10,9 +10,9 @@ jet_cli_ascii_lower: fn(value: String) -> String Never! {
     loop byte in value.bytes() {
         code: Int.from_u8(byte)
         if code >= 65 && code <= 90 {
-            &bytes.push(U8.from_int(code + 32) ?? byte)
+            bytes.push(U8.from_int(code + 32) ?? byte)
         } else {
-            &bytes.push(byte)
+            bytes.push(byte)
         }
     }
     String.from_bytes(bytes) ?? value
@@ -23,7 +23,7 @@ jet_cli_edit_distance: fn(left: String, right: String) -> Int Never! {
     a: left.chars()
     b: right.chars()
     previous := [Int]{}
-    loop index in 0..<b.len() + 1 -> &previous.push(index)
+    loop index in 0..<b.len() + 1 -> previous.push(index)
     loop i in 0..<a.len() {
         current := [Int]{i + 1}
         loop j in 0..<b.len() {
@@ -31,7 +31,7 @@ jet_cli_edit_distance: fn(left: String, right: String) -> Int Never! {
             best := previous[j] + cost
             if previous[j + 1] + 1 < best -> best = previous[j + 1] + 1
             if current[j] + 1 < best -> best = current[j] + 1
-            &current.push(best)
+            current.push(best)
         }
         previous = current
     }

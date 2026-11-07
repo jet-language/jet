@@ -2,9 +2,11 @@
 // publish-release.mjs: build a compiler release from a dev commit. Tools/release (Jet) gates,
 // records and publishes it as the next a0_NNN GitHub release.
 //
-//   node Tools/agent/publish-release.mjs build COMMIT --seed DIR --out DIR [--threads N]
+//   node Tools/agent/publish-release.mjs build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)
 //
-// build exports COMMIT (it must be on dev) and runs the bootstrap chain of
+// build starts only with COMMIT's collect-all preflight receipt for the seed DIR
+// (Tools/agent/land/preflight-receipt.mjs, written by census-snap.sh); --check-gate says whether it
+// would start and stops. It exports COMMIT (it must be on dev) and runs the bootstrap chain of
 // Docs/spec/contributing/bootstrap.md from the seed DIR, with no Rust on PATH: the seed builds
 // s1, s1 packs its runtime and builds s2, s2 packs its runtime and builds s3, and s2 and s3 must
 // be byte-identical. Every stage runs in the export as its working directory, so the images
@@ -30,10 +32,11 @@ import { machinePersonalInfo } from '../tower/app/personal-info.mjs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MUSL_DEFAULT, NORUST, SEED_FILES, STACK, fileHashes, linkCompilerAliases, sha256File, sumsOf } from './release-compiler.mjs';
+import { commitSourceIdentity, gate, refusal } from './land/preflight-receipt.mjs';
 
 const SCRIPT = fileURLToPath(import.meta.url);
 const REPO = resolve(dirname(SCRIPT), '../..');
-const USAGE = 'usage: publish-release.mjs build COMMIT --seed DIR --out DIR [--threads N]';
+const USAGE = 'usage: publish-release.mjs build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)';
 // Where the stages find their tools: the export's jet-env, under the stack, with no Rust on PATH.
 function stagedArgv(tree) {
     return [...STACK, join(tree, 'Tools/agent/jet-env'), 'bash', '-c', NORUST, 'norust'];
@@ -42,7 +45,7 @@ function stagedArgv(tree) {
 // ---- pure helpers (publish-release.test.mjs) ----
 
 export function parseArgs(argv) {
-    const options = { command: argv[0] ?? '', target: '', seed: '', out: '', threads: 8, errors: [] };
+    const options = { command: argv[0] ?? '', target: '', seed: '', out: '', threads: 8, checkGate: false, errors: [] };
     const values = new Map([['--seed', 'seed'], ['--out', 'out']]);
     for (let i = 1; i < argv.length; i++) {
         const flag = argv[i];
@@ -54,14 +57,15 @@ export function parseArgs(argv) {
             const value = argv[++i] ?? '';
             if (!/^[1-9]\d*$/.test(value)) options.errors.push(`--threads needs a positive whole number, not ${value || 'nothing'}`);
             else options.threads = Number(value);
-        } else if (flag.startsWith('-')) options.errors.push(`unknown option ${flag}`);
+        } else if (flag === '--check-gate') options.checkGate = true;
+        else if (flag.startsWith('-')) options.errors.push(`unknown option ${flag}`);
         else if (options.target) options.errors.push(`one commit, not ${options.target} and ${flag}`);
         else options.target = flag;
     }
     if (options.command !== 'build') { options.errors.push(`unknown command ${options.command || '(none)'}: want build (Tools/release/Main.jet gates and publishes)`); return options; }
     if (!options.target) options.errors.push('COMMIT is required');
     if (!options.seed) options.errors.push('--seed is required');
-    if (!options.out) options.errors.push('--out is required');
+    if (!options.out && !options.checkGate) options.errors.push('--out is required');
     return options;
 }
 
@@ -128,6 +132,15 @@ function build(options) {
     const seedIdentity = readFileSync(join(seed, 'IDENTITY'), 'utf8').trim();
     const [version, seedSha] = seedIdentity.split('#');
     if (!/^jet@\S+$/.test(version) || seedSha !== sha256File(join(seed, 'jet'))) return fail(2, `seed IDENTITY ${seedIdentity} does not name the seed's jet (sha256 ${sha256File(join(seed, 'jet')).slice(0, 16)})`);
+    const admission = gate(commitSourceIdentity(REPO, sha), seedIdentity);
+    if (!admission.admitted) {
+        process.stderr.write(`${refusal('publish-release', admission.reason, seed, sha)}\n`);
+        return 2;
+    }
+    if (options.checkGate) {
+        process.stdout.write(`publish-release: admitted by ${admission.reason}\n`);
+        return 0;
+    }
     const musl = process.env.JET_PACK_MUSL_LIB || MUSL_DEFAULT;
     if (!existsSync(join(musl, 'libc.a'))) return fail(2, `no musl libc.a in ${musl} (JET_PACK_MUSL_LIB)`);
     const out = resolve(options.out);

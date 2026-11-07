@@ -133,7 +133,7 @@ missing_primitive: fn(layout: Layout, launcher: String) Problem! -[Env, Exec, Ti
 
 launch_args: fn(layout: Layout, launcher: String, cwd: String, network: String, command: [String]) -> [String] Never! {
     argv := [String]{launcher.copy(), "--contract={CONTRACT}", "--task-id", "peer-launcher-self-test", "--root", layout.run_root.copy(), "--cwd", cwd.copy(), "--network", network.copy(), "--external-write", "disabled", "--host", "ambient", "--"}
-    loop part in command -> &argv.push(part.copy())
+    loop part in command -> argv.push(part.copy())
     argv
 }
 

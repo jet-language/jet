@@ -19,7 +19,7 @@ jet_cli_record_visit_cycle: fn(key: String, graph: [String:[String]], state: &[S
     state[key] = 1
     edges: graph.get(key) ?? [String]{}
     loop edge in edges {
-        if jet_cli_record_visit_cycle(edge, graph, &state) -> return true
+        if jet_cli_record_visit_cycle(edge, graph, state) -> return true
     }
     state[key] = 2
     false
@@ -48,8 +48,8 @@ jet_cli_record_snapshot_validate: fn(entries: [JetCLIRecordIndexEntry], budget: 
         }
         total_links += entry.consumed.len() + entry.produced.len()
         edges := [String]{}
-        loop link in entry.consumed -> &edges.push(jet_cli_record_key(link.kind, link.artifact_id))
-        loop link in entry.produced -> &edges.push(jet_cli_record_key(link.kind, link.artifact_id))
+        loop link in entry.consumed -> edges.push(jet_cli_record_key(link.kind, link.artifact_id))
+        loop link in entry.produced -> edges.push(jet_cli_record_key(link.kind, link.artifact_id))
         graph[key] = edges
     }
     if total > budget -> return Err(jet_cli_read_error("disposable record size {total} exceeds budget {budget}"))
@@ -72,10 +72,10 @@ jet_cli_record_snapshot_validate: fn(entries: [JetCLIRecordIndexEntry], budget: 
     // The comparator is a closure, not the named function. A compiler that
     // predates the named-comparator fix in JetIR's sort route frees a named
     // comparator's Ordering carrier twice, and this CLI may be built by one.
-    &ordered.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
+    ordered.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
     state := [String:Int]{}
     loop entry in ordered {
-        if jet_cli_record_visit_cycle(jet_cli_record_key(entry.kind, entry.artifact_id), graph, &state) {
+        if jet_cli_record_visit_cycle(jet_cli_record_key(entry.kind, entry.artifact_id), graph, state) {
             return Err(jet_cli_read_error("record links contain a cycle at `{entry.kind}/{entry.artifact_id}`"))
         }
     }
@@ -92,7 +92,7 @@ jet_cli_record_snapshot_parse: fn(bytes: [U8], budget: U64{268435456}) -> [JetCL
         if length > 1048576 -> return Err(jet_cli_read_error("record index line {index + 1} exceeds the 1 MiB limit"))
         parse_line: if length == raw.len() -> line else -> (String.from_bytes(raw.slice(0, length)) ?? panic("UTF-8 line without trailing CR"))
         entry: jet_cli_record_index_parse_line(parse_line) ?? return Err(jet_cli_read_error("record index line {index + 1} is invalid: {err.message}"))
-        &entries.push(entry)
+        entries.push(entry)
     }
     jet_cli_record_snapshot_validate(entries, budget)
     Ok(entries)
@@ -116,21 +116,21 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
             produced := [JetCLIRecordLink]{}
             loop link in entry.consumed {
                 if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
-                    &consumed.push(link)
+                    consumed.push(link.copy())
                 }
             }
             loop link in entry.produced {
                 if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
-                    &produced.push(link)
+                    produced.push(link.copy())
                 }
             }
             row.consumed = consumed
             row.produced = produced
         }
-        &rows.push(row)
+        rows.push(row)
     }
     // A closure comparator, for the reason in jet_cli_record_snapshot_validate.
-    &rows.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
+    rows.sort_by((left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> jet_cli_record_entry_order(left, right))
     rows
 }
 

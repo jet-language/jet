@@ -245,15 +245,15 @@ perf_test_policy: fn(count: Int, lower: Int, upper: Int) -> PerfMeasurementPolic
 }
 #Test("SHA stream rejection sampling empty population and resample") {
     stream := perf_sha_stream_new("e", "c", [String]{}, 0)
-    if perf_sha_stream_index(&stream, 0) == {
+    if perf_sha_stream_index(stream, 0) == {
         .Ok(_) -> panic("sampled empty population")
         .Err(error) -> assert_eq(error.message, "cannot sample an empty population")
     }
     stream.words = [Int]{18446744073709551615, 18446744073709551615}
     // 2^64-1 is rejected for a population of 3; the next SHA word must be used.
-    assert((perf_sha_stream_index(&stream, 3) ?? panic(err.message)) < 3)
+    assert((perf_sha_stream_index(stream, 3) ?? panic(err.message)) < 3)
     assert_eq(stream.words.len(), 3)
-    values: perf_resample([PerfRational]{perf_test_q(9)}, 5, &stream) ?? panic(err.message)
+    values: perf_resample([PerfRational]{perf_test_q(9)}, 5, stream) ?? panic(err.message)
     assert_eq(values.len(), 5)
     loop value in values -> assert_eq(value, perf_test_q(9))
 }
@@ -297,10 +297,10 @@ perf_test_policy: fn(count: Int, lower: Int, upper: Int) -> PerfMeasurementPolic
     // Node crypto SHA-256 oracle: domain+NUL+'e'+'c'+u64be(0)+u64be(block).
     stream := perf_sha_stream_new("e", "c", [String]{}, 0)
     expected: [Int]{12507569605881836145, 14331031805886600008, 3714902919731574179, 5608889793735127795, 18171700607084649799, 17766548609054757150, 1282493087975744721, 1148283196894625442}
-    loop word in expected -> assert_eq(perf_sha_stream_word(&stream), word)
+    loop word in expected -> assert_eq(perf_sha_stream_word(stream), word)
     assert_eq(stream.block, 2)
     salted := perf_sha_stream_new("e", "c", [String]{"k1", "k2"}, 7)
-    assert_eq(perf_sha_stream_word(&salted), 16819815628960581258)
+    assert_eq(perf_sha_stream_word(salted), 16819815628960581258)
 }
 
 #Test("relative bootstrap zero baseline estimator is an error") {

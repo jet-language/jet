@@ -42,11 +42,11 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 #Test("publication tuf safe field append has no partial mutation") {
     output := [String]{"prefix\n"}
-    assert(publication_tuf_append_line(&output, "key", "a=b"))
+    assert(publication_tuf_append_line(output, "key", "a=b"))
     assert_eq(output.join(""), "prefix\nkey=a=b\n")
     carriage: String.from_bytes([U8]{97, 13, 98}) ?? panic("CR fixture")
-    loop key in ([String]{"", "a=b", "a\nb", carriage}) -> assert(!publication_tuf_append_line(&output, key, "value"))
-    loop value in ([String]{"a\nb", carriage}) -> assert(!publication_tuf_append_line(&output, "key", value))
+    loop key in ([String]{"", "a=b", "a\nb", carriage}) -> assert(!publication_tuf_append_line(output, key, "value"))
+    loop value in ([String]{"a\nb", carriage}) -> assert(!publication_tuf_append_line(output, "key", value))
     assert_eq(output.join(""), "prefix\nkey=a=b\n")
 }
 #Test("publication tuf checkpoint exact unsigned wire") {
@@ -94,14 +94,14 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 
 #Test("publication tuf sparse entries sort lexically and refuse duplicates and other names") {
     entries := [PublicationIndexEntry]{publication_tuf_test_entry("p", "2", false), publication_tuf_test_entry("p", "10", false)}
-    publication_tuf_validate_entries("p", &entries) ?? panic("valid entries")
+    publication_tuf_validate_entries("p", entries) ?? panic("valid entries")
     assert_eq(entries[0].version, "10")
-    &entries.push(publication_tuf_test_entry("p", "10", true))
-    if publication_tuf_validate_entries("p", &entries) == .Ok(_) -> panic("duplicate version accepted")
+    entries.push(publication_tuf_test_entry("p", "10", true))
+    if publication_tuf_validate_entries("p", entries) == .Ok(_) -> panic("duplicate version accepted")
     other := [PublicationIndexEntry]{publication_tuf_test_entry("q", "1", false)}
-    if publication_tuf_validate_entries("p", &other) == .Ok(_) -> panic("another package accepted")
+    if publication_tuf_validate_entries("p", other) == .Ok(_) -> panic("another package accepted")
     empty := [PublicationIndexEntry]{}
-    if publication_tuf_validate_entries("", &empty) == .Ok(_) -> panic("empty name accepted")
+    if publication_tuf_validate_entries("", empty) == .Ok(_) -> panic("empty name accepted")
 }
 #Test("publication tuf exact signed referrer set is mandatory") {
     entries: [PublicationIndexEntry]{publication_tuf_test_entry("p", "1", false)}
@@ -145,11 +145,11 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
     yanked := entry.copy()
     yanked.yanked = true
     second: publication_tuf_next_log_record(records, "yank", yanked) ?? panic("yank record")
-    &records.push(second)
+    records.push(second)
     publication_tuf_validate_log(records) ?? panic("valid publish then yank")
     assert_eq(publication_tuf_parse_log(publication_tuf_log_text(records)) ?? panic("log roundtrip"), records)
     duplicate: publication_tuf_next_log_record(records, "yank", yanked) ?? panic("duplicate yank construction")
-    &records.push(duplicate)
+    records.push(duplicate)
     if publication_tuf_validate_log(records) == {
         .Ok(_) -> panic("second identical yank reused an immutable identity (Main Rust tandem)")
         .Err(error) -> assert("{error}".contains("registry transparency log reuses or changes an immutable package version"))
@@ -247,18 +247,18 @@ publication_tuf_test_root: fn(label: String) -[FS, Env]> String Never! {
 #Test("publication tuf actual 4MiB and 64MiB read bounds are inclusive") {
     root: publication_tuf_test_root("exact-bounds")
     chunk := [U8]{}
-    loop index in 0..<65536 -> &chunk.push(U8{97})
+    loop index in 0..<65536 -> chunk.push(U8{97})
     loop limit in ([Int]{PUBLICATION_TUF_MAX_METADATA_BYTES, PUBLICATION_TUF_MAX_LOG_BYTES}) {
         path: files.join(root, "bounded-{limit}")
         writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? panic("bounded fixture")
         loop index in 0..<(limit /% chunk.len()) -> writer.write_all(chunk) ?? panic("write bound fixture")
         writer.fsync() ?? panic("fsync bound")
-        close(^writer)
+        close(writer)
         text: publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") ?? panic("inclusive exact bound")
         assert_eq(text.bytes().len(), limit)
         extra: files.append(path) ?? panic("append excess byte")
         extra.write_all([U8]{97}) ?? panic("append excess")
-        close(^extra)
+        close(extra)
         if publication_tuf_read_bounded(root, path, limit, "registry metadata exceeds its size limit") == {
             .Ok(_) -> panic("one byte over bound accepted")
             .Err(error) -> assert("{error}".contains("registry metadata exceeds its size limit"))

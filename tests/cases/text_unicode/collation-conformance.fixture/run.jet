@@ -11,19 +11,19 @@ use {
 
 collation_scalar: fn(out: &[U8], cp: Int) Never! {
     if cp < 128 {
-        &out.push(U8{cp})
+        out.push(U8{cp})
     } else if cp < 2048 {
-        &out.push(U8{Int{192}.bit_or(cp >> 6)})
-        &out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
+        out.push(U8{Int{192}.bit_or(cp >> 6)})
+        out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
     } else if cp < 65536 {
-        &out.push(U8{Int{224}.bit_or(cp >> 12)})
-        &out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(Int{63}))})
-        &out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
+        out.push(U8{Int{224}.bit_or(cp >> 12)})
+        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(Int{63}))})
+        out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
     } else {
-        &out.push(U8{Int{240}.bit_or(cp >> 18)})
-        &out.push(U8{Int{128}.bit_or((cp >> 12).bit_and(Int{63}))})
-        &out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(Int{63}))})
-        &out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
+        out.push(U8{Int{240}.bit_or(cp >> 18)})
+        out.push(U8{Int{128}.bit_or((cp >> 12).bit_and(Int{63}))})
+        out.push(U8{Int{128}.bit_or((cp >> 6).bit_and(Int{63}))})
+        out.push(U8{Int{128}.bit_or(cp.bit_and(Int{63}))})
     }
 }
 
@@ -54,7 +54,7 @@ run: fn() {
             if word == "" -> next
             cp: collation_parse.parse_int_base(word, 16) ?? panic("bad code point `{word}`")
             if cp >= 0xd800 && cp <= 0xdfff -> surrogate = true
-            collation_scalar(&bytes, cp)
+            collation_scalar(bytes, cp)
         }
         if surrogate {
             surrogates += 1

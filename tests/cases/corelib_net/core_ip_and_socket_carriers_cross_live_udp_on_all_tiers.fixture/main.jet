@@ -1,4 +1,4 @@
-package: { authority: { allow: [Net, Time.Wait, IO, Mem.Alloc] } }
+package: { name: "run", authority: { allow: [Net, Time.Wait, IO, Mem.Alloc] } }
 use net: core.net
 
 carrier_observation: fn() -[Net, Time.Wait]> String Never! {
@@ -13,14 +13,12 @@ carrier_observation: fn() -[Net, Time.Wait]> String Never! {
     packet: net.udp_receive(receiver, 3) ?? panic("receive")
     packet_address: net.udp_packet_addr(packet)
     sender_address: net.udp_local_addr(sender) ?? panic("sender local address")
-    result: "{net.ip_to_string(ipv6)}\n{net.socket_to_string(scoped)}\n{sent}\n{net.socket_host(packet_address)}\n{net.ip_to_string(net.socket_ip(packet_address))}\n{net.socket_port(packet_address) == net.socket_port(sender_address)}\n{net.udp_packet_data(packet)}\n{net.udp_packet_original_len(packet)}\n{net.udp_packet_truncated(packet)}"
-    net.udp_close(sender) ?? panic("sender close")
-    net.udp_close(receiver) ?? panic("receiver close")
-    result
+    host: net.socket_host(packet_address)
+    // core.net exposes no `socket_ip` or `udp_close`: the IP carrier round-trips through `socket_host`.
+    "{net.ip_to_string(ipv6)}\n{net.socket_to_string(scoped)}\n{sent}\n{host}\n{net.ip_to_string(net.ip_addr(host) ?? panic("packet IP"))}\n{net.socket_port(packet_address) == net.socket_port(sender_address)}\n{net.udp_packet_data(packet)}\n{net.udp_packet_original_len(packet)}\n{net.udp_packet_truncated(packet)}"
 }
 
-#Test("Jet source addresses cross the live native UDP carrier unchanged")
-_: fn() {
+#Test("Jet source addresses cross the live native UDP carrier unchanged") {
     assert(carrier_observation() == "::ffff:192.0.2.1\n[fe80::1%4294967295]:65535\n4\n127.0.0.1\n127.0.0.1\ntrue\nA�B\n4\ntrue")
 }
 

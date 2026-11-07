@@ -110,7 +110,7 @@ NixFallbackIdentity: struct {
     // Machine-readable provenance stored with a Jetpack import and its lock.
     provenance: fn(self) -> String Never! {
         attrs := [Dyn]{}
-        loop segment in self.attr -> &attrs.push(Dyn.Text(segment))
+        loop segment in self.attr -> attrs.push(Dyn.Text(segment))
         pkg_json_render(Dyn.Object([
             "schema": Dyn.Text(NIX_FALLBACK_PROVENANCE_SCHEMA),
             "executable": Dyn.Text(self.executable.copy()),
@@ -219,7 +219,7 @@ nix_fallback_provenance_attr: fn(fields: [String: Dyn]) -> [String] NixError! {
         else -> return Err(NixError.Fallback("expected a Dyn array"))
     }
     attr := [String]{}
-    loop item in items -> &attr.push(nix_fallback_tree_text(item))
+    loop item in items -> attr.push(nix_fallback_tree_text(item))
     Ok(attr)
 }
 

@@ -66,23 +66,23 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
     loop line in syntax.split("\n") {
         row: SYNTAX_CONSTANT.match(line) ?? next
         values := constants.get(row.groups[0]) ?? [String]{}
-        &values.push(row.groups[1])
+        values.push(row.groups[1])
         constants[row.groups[0].copy()] = values
     }
     token_tags := [String]{}
     loop line in tokens.split("\n") {
         token: KEYWORD_TOKEN.match(line) ?? next
-        &token_tags.push("K_{token.groups[0].remove_prefix("KW_")}")
+        token_tags.push("K_{token.groups[0].remove_prefix("KW_")}")
     }
     distinct := [String]{}
     loop token_tag in token_tags {
-        if !distinct.contains(token_tag) -> &distinct.push(token_tag)
+        if !distinct.contains(token_tag) -> distinct.push(token_tag)
     }
     if token_tags.len() == 0 || distinct.len() != token_tags.len() -> return Err(rows_fail("unparsed/ambiguous keyword token kinds"))
     tag_names := [String]{}
     loop line in tags.split("\n") {
         tag_line: TOKEN_TAG.match(line) ?? next
-        &tag_names.push(tag_line.groups[0])
+        tag_names.push(tag_line.groups[0])
     }
     rows := [KeywordRow]{}
     spellings := [String]{}
@@ -105,11 +105,11 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
         }
         if kind_tag(kind) != token_tag || !token_tags.contains(token_tag) || tag_count != 1 -> return Err(rows_fail("unresolved token kind {kind}/{token_tag}"))
         if spellings.contains(spelling) || kinds.contains(kind) || mapped.contains(token_tag) -> return Err(rows_fail("duplicate keyword spelling/kind {constant}/{kind}"))
-        &spellings.push(spelling)
-        &kinds.push(kind)
-        &mapped.push(token_tag)
+        spellings.push(spelling.copy())
+        kinds.push(kind.copy())
+        mapped.push(token_tag.copy())
         bytes: loop byte in spelling.bytes() -> Int.from_u8(byte)
-        &rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes})
+        rows.push(KeywordRow{constant: constant, kind: kind, tag: token_tag, spelling: spelling, bytes: bytes})
     }
     if rows.len() == 0 -> return Err(rows_fail("incomplete keyword mapping/token coverage"))
     loop token_tag in token_tags {
@@ -124,12 +124,12 @@ read_keyword_rows: fn() -[FS]> [KeywordRow] KeywordRowsError! {
     names := [String]{}
     listed: files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
     loop entry in listed {
-        if entry.name.ends_with(".jet") -> &names.push(entry.name)
+        if entry.name.ends_with(".jet") -> names.push(entry.name)
     }
-    &names.sort()
+    names.sort()
     parts := [String]{}
     loop name in names {
-        &parts.push(files.read("{directory}/{name}") ?? return Err(rows_fail("cannot read {directory}/{name}: {err}")))
+        parts.push(files.read("{directory}/{name}") ?? return Err(rows_fail("cannot read {directory}/{name}: {err}")))
     }
     mapping: files.read("Compiler/JetLexer/Data/Lexer/Keywords.jet") ?? return Err(rows_fail("cannot read the keyword table: {err}"))
     tokens: files.read("Compiler/JetLexer/Source/Lexer/Tokens.jet") ?? return Err(rows_fail("cannot read the token kinds: {err}"))
@@ -141,7 +141,7 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     if rows.len() == 1 {
         row: rows[0]
         checks := [String]{}
-        loop index in offset..<row.bytes.len() -> &checks.push("byte_at(source, start + {index}) == {row.bytes[index]}")
+        loop index in offset..<row.bytes.len() -> checks.push("byte_at(source, start + {index}) == {row.bytes[index]}")
         return "{indent}if {checks.join(" && ")} -> {row.tag} else -> K_IDENT // Syntax::{row.constant}\n"
     }
     order := [Int]{}
@@ -149,11 +149,11 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
     loop row in rows {
         byte: row.bytes[offset]
         group := groups.get(byte) ?? [KeywordRow]{}
-        if group.len() == 0 -> &order.push(byte)
-        &group.push(row)
+        if group.len() == 0 -> order.push(byte)
+        group.push(row.copy())
         groups[byte] = group
     }
-    &order.sort()
+    order.sort()
     out := "{indent}if byte_at(source, start + {offset}) == {{\n"
     loop byte in order {
         group: groups.get(byte) ?? [KeywordRow]{}
@@ -174,11 +174,11 @@ render_keyword_spans: fn(rows: [KeywordRow]) -> String Never! {
     loop row in rows {
         length: row.bytes.len()
         group := lengths.get(length) ?? [KeywordRow]{}
-        if group.len() == 0 -> &order.push(length)
-        &group.push(row)
+        if group.len() == 0 -> order.push(length)
+        group.push(row.copy())
         lengths[length] = group
     }
-    &order.sort()
+    order.sort()
     out := "{OPEN}\n// Derived from Jet Lexer/Keywords and Syntax literals; do not hand edit.\n// No spelling ownership here: Payload still builds the exact token text.\nword_kind: fn(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {{\n    kind: if end - start == {{\n"
     loop length in order {
         group: lengths.get(length) ?? [KeywordRow]{}

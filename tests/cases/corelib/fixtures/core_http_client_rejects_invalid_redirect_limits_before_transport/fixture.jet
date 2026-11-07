@@ -9,13 +9,13 @@ use {
 
 http_crlf: fn() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
 http_read: fn(stream: &net.TCPStream) -> String {
-    net.set_read_timeout(&stream, 1000) ?? panic("read timeout")
-    String.from_bytes(net.tcp_read_bytes(&stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+    net.set_read_timeout(stream, 1000) ?? panic("read timeout")
+    String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
 }
 http_reply: fn(stream: &net.TCPStream, file: String) {
     bytes: files.read_bytes(file) ?? panic("response bytes")
-    net.tcp_write_all_bytes(&stream, bytes) ?? panic("write response")
-    net.tcp_close(&stream) ?? panic("drop peer stream")
+    net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
+    net.tcp_close(stream) ?? panic("drop peer stream")
 }
 require_redirect: fn(request: HTTPRequest) {
     if request.send() == {
@@ -35,7 +35,7 @@ check_redirect_limits: fn() {
         requests := [String]{}
         // Exact original stop-atomic nonblocking observer, no finite26 cap.
         loop stop_rx.try_receive() == None {
-            stream := if &listener.accept(deadline: 0s) == {
+            stream := if listener.accept(deadline: 0s) == {
                 .Ok(stream) -> stream
                 .Err(error) -> if error == {
                     .Timeout(_) -> {
@@ -45,27 +45,27 @@ check_redirect_limits: fn() {
                     else -> panic("accept failed")
                 }
             }
-            request: http_read(&stream)
+            request: http_read(stream)
             first: request.lines().to_list()[0]
             target: txt.split_ws(first)[1]
-            &requests.push(target)
+            requests.push(target)
             if target == "/redirect" {
-                http_reply(&stream, "redirect.response")
+                http_reply(stream, "redirect.response")
             } else if target == "/target" {
-                http_reply(&stream, "ok.response")
+                http_reply(stream, "ok.response")
             } else {
                 parts: txt.split(target, "/")
                 step: Int.parse(parts[parts.len() - 1]) ?? panic("chain step")
                 chain: parts[parts.len() - 2]
                 final_step: if chain == "within" -> 10 else if chain == "over" -> 11 else -> panic("unexpected target")
                 if step == final_step {
-                    http_reply(&stream, "ok.response")
+                    http_reply(stream, "ok.response")
                 } else {
                     crlf: http_crlf()
                     next: step + 1
                     response: "HTTP/1.1 302 Found{crlf}Location: /{chain}/{next}{crlf}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
                     net.tcp_write_all_bytes(stream, response.bytes()) ?? panic("redirect response")
-                    net.tcp_close(&stream) ?? panic("drop")
+                    net.tcp_close(stream) ?? panic("drop")
                 }
             }
         }
@@ -86,8 +86,8 @@ check_redirect_limits: fn() {
     requests: peer.join() ?? panic("peer")
     assert_eq(requests.len(), 26, "invalid redirect limit reached transport or redirect boundary behavior changed")
     expected := [String]{"/redirect", "/redirect", "/target", "/redirect"}
-    loop step in 0..10 -> &expected.push("/within/{step}")
-    loop step in 0..10 -> &expected.push("/over/{step}")
+    loop step in 0..10 -> expected.push("/within/{step}")
+    loop step in 0..10 -> expected.push("/over/{step}")
     assert_eq(requests, expected, "redirect boundaries sent an unexpected request sequence")
 }
 #Test("core_http_client_rejects_invalid_redirect_limits_before_transport") { check_redirect_limits() }

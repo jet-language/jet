@@ -49,7 +49,7 @@ notebook_protocol_test_error: fn(kernel: Kernel, line: String, expected: String)
     notebook_protocol_test_error(kernel, "rerun bad", "unknown client `bad`")
     notebook_protocol_test_error(kernel, "rerun jp -1", "bad turn id")
     notebook_protocol_test_error(kernel, "unknown", "unknown protocol command `unknown`")
-    id: &kernel.add_cell(NotebookCellKind.Jet, "1 + 2") ?? panic("add cell")
+    id: kernel.add_cell(NotebookCellKind.Jet, "1 + 2") ?? panic("add cell")
     assert_eq(notebook_parse_script_line(kernel, "exec") ?? panic("latest exec"), ProtocolMessage.Execute(ClientKind.FirstParty, id))
     assert_eq(notebook_parse_script_line(kernel, "profile canvas") ?? panic("latest profile"), ProtocolMessage.Profile(ClientKind.CanvasLens, id))
     assert_eq(notebook_parse_script_line(kernel, "visible jp") ?? panic("latest visible"), ProtocolMessage.VisibleOutput(ClientKind.JupyterAdapter, id))
@@ -95,7 +95,7 @@ notebook_protocol_test_error: fn(kernel: Kernel, line: String, expected: String)
 }
 #Test("notebook_protocol_headless_script_skips_comments_and_continues_after_errors") {
     kernel := notebook_protocol_test_kernel()
-    output: run_headless_script(&kernel, [String]{" ", " # comment", "unknown", "stdin a", "debug", "perf", "visible jp missing"})
+    output: run_headless_script(kernel, [String]{" ", " # comment", "unknown", "stdin a", "debug", "perf", "visible jp missing"})
     expected: ProtocolReply.err("unknown protocol command `unknown`").to_json_line() + ProtocolReply.ok("stdin_queued=1").to_json_line() + ProtocolReply.ok("debug_attached").to_json_line() + ProtocolReply.ok("perf_attached").to_json_line() + ProtocolReply.ok("").to_json_line()
     assert_eq(output, expected)
     assert_eq(kernel.stdin_queue, [String]{"a"})
@@ -103,25 +103,25 @@ notebook_protocol_test_error: fn(kernel: Kernel, line: String, expected: String)
 }
 #Test("notebook_protocol_handles_execute_inspect_delete_and_direct_only_variants") {
     kernel := notebook_protocol_test_kernel()
-    id: &kernel.add_cell(NotebookCellKind.Jet, "4 + 5") ?? panic("add cell")
-    result: handle_message(&kernel, ProtocolMessage.Execute(ClientKind.FirstParty, id))
+    id: kernel.add_cell(NotebookCellKind.Jet, "4 + 5") ?? panic("add cell")
+    result: handle_message(kernel, ProtocolMessage.Execute(ClientKind.FirstParty, id))
     if result == {
         .Ok(body) -> { assert(body.contains("status=ok")); assert(body.contains("count=1")); assert(body.contains("text=9\\n")) }
         else -> { panic("execute reply") }
     }
-    if handle_message(&kernel, ProtocolMessage.Inspect(id)) == {
+    if handle_message(kernel, ProtocolMessage.Inspect(id)) == {
         .Ok(body) -> assert(body.contains("kind=Jet; source_len=5; output=9\\n"))
         else -> { panic("inspect reply") }
     }
-    assert_eq(handle_message(&kernel, ProtocolMessage.Debug("missing")), ProtocolReply.err("unknown cell `missing`"))
+    assert_eq(handle_message(kernel, ProtocolMessage.Debug("missing")), ProtocolReply.err("unknown cell `missing`"))
     assert(kernel.debug_attached())
-    assert_eq(handle_message(&kernel, ProtocolMessage.Inspect("missing")), ProtocolReply.err("unknown cell `missing`"))
+    assert_eq(handle_message(kernel, ProtocolMessage.Inspect("missing")), ProtocolReply.err("unknown cell `missing`"))
     parse_error: if JetNotebook.from_canonical_bytes("not json".bytes()) == {
         .Err(error) -> error.message
         else -> { panic("invalid fixture must fail") }
     }
-    assert_eq(handle_message(&kernel, ProtocolMessage.Merge("not json")), ProtocolReply.err(parse_error))
-    if handle_message(&kernel, ProtocolMessage.Delete(id)) == {
+    assert_eq(handle_message(kernel, ProtocolMessage.Merge("not json")), ProtocolReply.err(parse_error))
+    if handle_message(kernel, ProtocolMessage.Delete(id)) == {
         .Ok(body) -> assert(body.starts_with("deleted={id}; scrubbed="))
         else -> { panic("delete reply") }
     }

@@ -90,7 +90,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     facts := PackageFacts.parse_uncomposed("name: \"demo\"\nconfigs: [first, second]\n", files.join(dir, "package.jet")) ?? panic("parses")
     pkg_facts_test_write(dir, "first.jet", "first: Config{{ version: \"1\" }}\n")
     pkg_facts_test_write(dir, "second.jet", "second: Config{{ version: \"2\" }}\n")
-    if &facts.compose_configs(dir) == {
+    if facts.compose_configs(dir) == {
         .Err(error) -> assert(error.message().contains("second.jet"))
         .Ok(_) -> panic("a malformed later Config must abort composition")
     }
@@ -142,7 +142,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     assert(facts.field_provenance("version").contains(files.join(dir, "one.jet")))
     resolver: AuthorityResolver.open(dir) ?? panic("resolver")
     names := [String]{}
-    loop file in facts.source_files_checked(resolver) ?? panic("source files") -> &names.push(pkg_path_file_name(file.path))
+    loop file in facts.source_files_checked(resolver) ?? panic("source files") -> names.push(pkg_path_file_name(file.path))
     assert(!names.contains("one.jet"))
     assert(names.contains("ordinary.jet"))
 }
@@ -169,7 +169,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     facts := PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
     first: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
     second: ConfigFacts.parse("Config{{ version: \"2\" }}", "configs/two.jet") ?? panic("second")
-    if &facts.compose([ConfigFacts]{first, second}) == {
+    if facts.compose([ConfigFacts]{first, second}) == {
         .Err(error) -> assert(error == ComposeError.Conflict{field: "version", left_origin: "configs/one.jet", right_origin: "configs/two.jet", left: "1", right: "2"})
         .Ok(_) -> panic("expected scalar conflict")
     }
@@ -181,7 +181,7 @@ pkg_facts_test_write: fn(dir: String, relative: String, text: String) Never! -[F
     facts := PackageFacts.parse_uncomposed("name: \"demo\"\n", "package.jet") ?? panic("parses")
     first: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/one.jet") ?? panic("first")
     second: ConfigFacts.parse("Config{{ version: \"1\" }}", "configs/two.jet") ?? panic("second")
-    &facts.compose([ConfigFacts]{first, second}) ?? panic("equal facts compose")
+    facts.compose([ConfigFacts]{first, second}) ?? panic("equal facts compose")
     assert_eq(facts.version, Val("1"))
     assert_eq(facts.field_provenance("version"), [String]{"configs/one.jet", "configs/two.jet"})
 }

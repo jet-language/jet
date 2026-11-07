@@ -6,7 +6,7 @@ use {
 }
 
 reader_io: fn(reader: &cbor.CBORReader) -[IO]> Bool {
-    if &reader.next() == {
+    if reader.next() == {
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Val(_) | .None -> return false
     }
@@ -14,7 +14,7 @@ reader_io: fn(reader: &cbor.CBORReader) -[IO]> Bool {
 }
 
 writer_io: fn(writer: &cbor.CBORWriter) -[IO]> Bool {
-    if &writer.flush() == {
+    if writer.flush() == {
         .Err(error) -> return error.kind == encoding.EncodingErrorKind.IO
         .Ok(_) -> return false
     }
@@ -23,16 +23,16 @@ writer_io: fn(writer: &cbor.CBORWriter) -[IO]> Bool {
 
 run: fn() {
     directory_input: files.open("{work}") ?? panic("open dir")
-    directory_reader := cbor.reader(^directory_input) ?? panic("reader")
-    print(reader_io(&directory_reader))
+    directory_reader := cbor.reader(directory_input) ?? panic("reader")
+    print(reader_io(directory_reader))
 
     full_output: files.create("/dev/full") ?? panic("full")
-    full_writer := cbor.writer(^full_output) ?? panic("writer")
-    if &full_writer.write(encoding.DataEvent.Null) == {
-        .Err(io_error) -> print(writer_io(&full_writer))
+    full_writer := cbor.writer(full_output) ?? panic("writer")
+    if full_writer.write(encoding.DataEvent.Null) == {
+        .Err(io_error) -> print(writer_io(full_writer))
         .Ok(wrote) -> {
-            if &full_writer.flush() == {
-                .Err(io_error) -> print(writer_io(&full_writer))
+            if full_writer.flush() == {
+                .Err(io_error) -> print(writer_io(full_writer))
                 .Ok(done) -> print(false)
             }
         }

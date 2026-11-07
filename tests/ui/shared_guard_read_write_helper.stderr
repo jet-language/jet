@@ -1,8 +1,8 @@
 Error [jet.FieldWriteWithoutMarker]: A read `SharedGuard` cannot enter a write helper
-  --> tests/ui/shared_guard_read_write_helper.jet:8:11
+  --> tests/ui/shared_guard_read_write_helper.jet:8:10
     |
-  8 |     bump(&guard)
-    |           ^^^^^
+  8 |     bump(guard)
+    |          ^^^^^
  Why: The helper can edit through this parameter, so its caller must hold an exclusive Shared guard
- Fix: Create the guard with `guard_edit()` before passing it with the write-access marker `&`
+ Fix: Create the guard with `guard_edit()` before passing it to the helper
 More: jet-lang.dev/e/E0205

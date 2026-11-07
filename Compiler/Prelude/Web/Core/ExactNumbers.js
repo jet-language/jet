@@ -1,4 +1,4 @@
-// D-NUMTYPE1 / I9: exact-number adapters for the JS tier.
+// I9: exact-number adapters for the JS tier.
 // The emitters only select these Prelude doors. Whole-number parts stay BigInt;
 // no operation crosses JavaScript Number unless the language asks for Float.
 
@@ -205,7 +205,7 @@ function jet_decimal_to_string(value) {
   return `${value.negative ? "-" : ""}${digits.slice(0, split)}.${digits.slice(split)}`;
 }
 
-// D-WRAP-SCOPE1=A / I9: the web fixed-width arithmetic rule lives in the
+// I9: the web fixed-width arithmetic rule lives in the
 // embedded numeric Prelude. The Web lowering only marshals checked operands to this door.
 function jet_fixed_policy_step(raw, bits, signed, mode, file, line) {
   const min = signed ? -(1n << BigInt(bits - 1)) : 0n;

@@ -24,7 +24,7 @@ use {
 }
 #Test("completion_dedups_shadowed_session_item") {
     session := Session.new()
-    &session.item_srcs.push("answer: fn() -> Int {{ return 1 }}")
+    session.item_srcs.push("answer: fn() -> Int {{ return 1 }}")
     session.scope["answer"] = CtValue.Int(42)
     candidates: completion_candidates(session, "ans", None)
     assert_eq(candidates.len(), 1)
@@ -54,21 +54,21 @@ use {
     assert(doc.contains("Source: core.math"))
 }
 #Test("syntax_docs_use_the_registry_dictionary") {
-    doc: lookup(Session.new(), "^") ?? panic("^ docs")
-    assert(doc.contains("Before a name (move)") && doc.contains("Before a parameter's type"))
+    doc: lookup(Session.new(), "&&") ?? panic("&& docs")
+    assert(doc.contains("Between two conditions") && doc.contains("Before a parameter's type"))
     assert(doc.contains("Afterwards:"))
-    assert(!doc.contains("SIGIL_MOVE") && !doc.contains("D-"))
+    assert(!doc.contains("OP_AND") && !doc.contains("D-"))
 }
 #Test("docs_temp_writer_rejects_existing_symlink") {
     if repl_docs_test_target.selected_family() == .Unix {
         root := repl_docs_test_files.temp_dir()
-        repl_docs_test_paths.push(&root, repl_docs_test_paths.from_text("jet-repl-docs-temp-symlink-{repl_docs_test_process.id()}", root.platform))
+        repl_docs_test_paths.push(root, repl_docs_test_paths.from_text("jet-repl-docs-temp-symlink-{repl_docs_test_process.id()}", root.platform))
         _: repl_docs_test_files.remove_dir_all(root)
         repl_docs_test_files.create_dir_all(root) ?? panic("create temp root")
         target := root.copy()
-        repl_docs_test_paths.push(&target, repl_docs_test_paths.from_text("outside.txt", root.platform))
+        repl_docs_test_paths.push(target, repl_docs_test_paths.from_text("outside.txt", root.platform))
         link := root.copy()
-        repl_docs_test_paths.push(&link, repl_docs_test_paths.from_text("docs.jet", root.platform))
+        repl_docs_test_paths.push(link, repl_docs_test_paths.from_text("docs.jet", root.platform))
         repl_docs_test_files.write(target, "must survive\n".bytes()) ?? panic("write target")
         symlink(target, link) ?? panic("create symlink")
         assert(write_temp_file_at(link, "attacker\n").is_err())

@@ -140,14 +140,6 @@ JET_KEYWORD_LIST: comptime { [String]{
     "Todo", "State", "Transition", "state", "protocol", "client", "server", "validate",
     "check", "true", "false", "None", "it"
 } }
-// Canonical list of built-in type names a user writes.
-JET_TYPE_LIST: comptime { [String]{
-    "Int", "Float", "Bool", "String", "()", "Char", "Err", "Shared", "SharedSnapshot",
-    "SharedRevisionError", "SharedGuard", "Shared.Weak", "Condition", "Task", "Receiver", "Sender",
-    "TaskFailure", "HashMap", "BTreeMap", "Map", "Queue", "Set", "Rank", "PriorityQueue", "Cache",
-    "Tally", "Bits", "Bytes", "ViewIter", "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64",
-    "F32", "F64"
-} }
 // The Prelude error type spelling a foreign name may still project to.
 TYPE_ERR: "Err"
 
@@ -622,8 +614,33 @@ BROWSER_DEFAULT_PROTOCOL: "bidi-2025.5"
 TRANSITION_SPLIT_VERB: "split"
 TRANSITION_FOLD_VERB: "fold"
 TRANSITION_FLAG_CHECK: "--check"
-// Every Jetpack verb, in dispatch order. JetOS's `os` verb is out of scope for
-// this port and is not listed.
+// `jet os <verb> <host>|<host>@<root>`: the jetos machine verbs.
+OS_SUBCOMMAND: "os"
+OS_VERB_CHECK: "check"
+OS_VERB_INIT: "init"
+OS_VERB_PLAN: "plan"
+OS_VERB_PROOF: "proof"
+OS_VERB_BUILD: "build"
+OS_VERB_SWITCH: "switch"
+OS_VERB_ROLLBACK: "rollback"
+OS_VERB_GENERATIONS: "generations"
+OS_VERB_LIFT: "lift"
+OS_VERB_IMPORT: "import"
+OS_VERB_MIGRATE: "migrate"
+OS_VERB_IMAGE: "image"
+OS_VERB_VM: "vm"
+OS_VERB_STUDIO: "studio"
+OS_VERB_PUSH: "push"
+// Every `jet os` verb: the jetos dispatcher's own verbs, then the actions the
+// CLI registry routes under `os`.
+OS_VERBS: comptime { [String]{OS_VERB_CHECK, OS_VERB_INIT, OS_VERB_PLAN, OS_VERB_PROOF, OS_VERB_BUILD, OS_VERB_SWITCH, OS_VERB_ROLLBACK, OS_VERB_GENERATIONS, OS_VERB_LIFT, OS_VERB_IMPORT, OS_VERB_MIGRATE, OS_VERB_IMAGE, OS_VERB_VM, OS_VERB_STUDIO, USER_SUBCOMMAND, OS_VERB_PUSH, BRIDGE_SUBCOMMAND, SERVICES_SUBCOMMAND, CONFIG_SUBCOMMAND} }
+// The jetos verbs this engine builds.
+OS_BUILT_VERBS: comptime { [String]{OS_VERB_CHECK, OS_VERB_PLAN} }
+// A bare host selects `system.<host>` in the current Package; `host@root`
+// selects an exact external Package root.
+OS_HOST_SELECTOR: "@"
+// Every Jetpack verb, in dispatch order. JetOS's `os` verb (OS_SUBCOMMAND)
+// routes through its own dispatcher and is not listed.
 JETPACK_VERBS: comptime { [String]{
     "doctor",
     "env",

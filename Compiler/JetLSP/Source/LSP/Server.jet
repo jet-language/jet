@@ -29,7 +29,7 @@ LSPServer: struct {
     editor_host: EditorHostAdapter
     shutdown: Bool
 
-    new: fn(snapshot: ^JetDriverQuerySnapshot, repository_root: ^OSPath) -> LSPServer Never! {
+    new: fn(snapshot: &&JetDriverQuerySnapshot, repository_root: &&OSPath) -> LSPServer Never! {
         LSPServer{
             diagnostic_state: LSPDiagnosticState.new(),
             queries: JetDriverCompilerQueries.new(),
@@ -43,7 +43,7 @@ LSPServer: struct {
     }
 
     check_with_bundle: fn(self, doc: LSPDocument) -[FS, Env]> LSPCheckedRequest Never! {
-        checked: lsp_check_with_bundle(self.diagnostic_state, &self.queries, self.snapshot, doc)
+        checked: lsp_check_with_bundle(self.diagnostic_state, self.queries, self.snapshot, doc)
         versions: (() -> {
             permit: checked.guard_read()
             lsp_checked_document_versions(self.diagnostic_state, permit.value.result, self.snapshot.cwd.platform)
@@ -52,7 +52,7 @@ LSPServer: struct {
     }
 
     lex: fn(self, doc: LSPDocument) -> Shared<[Token]> {
-        lsp_lex_document(&self.queries, self.snapshot.cwd, doc)
+        lsp_lex_document(self.queries, self.snapshot.cwd, doc)
     }
 }
 
@@ -62,7 +62,7 @@ lsp_lex_document: fn(queries: JetDriverCompilerQueries, cwd: OSPath, doc: LSPDoc
     if pkg_mask_inline_package_source(doc.text) == .Ok(masked) {
         if masked.block != None -> return shared lex(masked.source.bytes()).tokens
     }
-    &queries.lex_text(cwd, doc.path, doc.text)
+    queries.lex_text(cwd, doc.path, doc.text)
 }
 
 lsp_apply_content_change: fn(doc: LSPDocument, change: Dyn) -> Bool Never! {
@@ -77,11 +77,11 @@ lsp_apply_content_change: fn(doc: LSPDocument, change: Dyn) -> Bool Never! {
             if change.field("range") == {
                 .Val(value) -> {
                     range: lsp_range_from_json(value) ?? return false
-                    return &doc.apply_range_edit(range, length, replacement)
+                    return doc.apply_range_edit(range, length, replacement)
                 }
                 .None -> {
                     if length != None -> return false
-                    &doc.replace_text(replacement.copy())
+                    doc.replace_text(replacement.copy())
                     return true
                 }
             }
@@ -119,7 +119,7 @@ lsp_update_document: fn(state: LSPDiagnosticState, params: Dyn?, is_open: Bool, 
                         if version <= current.version -> return None
                         updated := LSPDocument.new(current.path.copy(), current.text.copy(), version)
                         loop change in rows {
-                            if !lsp_apply_content_change(&updated, change) -> return None
+                            if !lsp_apply_content_change(updated, change) -> return None
                         }
                         state.docs[uri] = updated
                         state.dirty[uri] = true
@@ -134,12 +134,12 @@ lsp_update_document: fn(state: LSPDiagnosticState, params: Dyn?, is_open: Bool, 
 }
 
 lsp_publish_after_open: fn(state: &LSPDiagnosticState, queries: &JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, params: Dyn?, stdout: &lsp_loop_term.Stdout) IOError! -[IO, Time.Wait, FS, Env]> {
-    uri: lsp_update_document(&state, params, true, snapshot.cwd.platform) ?? return
-    lsp_publish_document_diagnostics(&state, &queries, snapshot, uri, &stdout) ?? return Err(err)
+    uri: lsp_update_document(state, params, true, snapshot.cwd.platform) ?? return
+    lsp_publish_document_diagnostics(state, queries, snapshot, uri, stdout) ?? return Err(err)
     // A failed actual write leaves existing dirtiness intact, exactly Rust767.
-    _ := &state.dirty.remove(uri)
+    _ := state.dirty.remove(uri)
 }
 
 lsp_publish_after_change: fn(state: &LSPDiagnosticState, params: Dyn?, platform: core.files.runtime.kernel_path_components.PathPlatform) Never! {
-    _ := lsp_update_document(&state, params, false, platform)
+    _ := lsp_update_document(state, params, false, platform)
 }

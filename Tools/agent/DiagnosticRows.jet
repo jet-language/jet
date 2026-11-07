@@ -135,14 +135,14 @@ registry_text: fn(body: String, fields: [String], context: String) -> String Dia
         byte: Int.from_u8(bytes[index])
         // `\`, `{{` and `}}` copy two bytes as written.
         if byte == 92 || ((byte == 123 || byte == 125) && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == byte) {
-            &out.push(bytes[index])
-            if index + 1 < bytes.len() -> &out.push(bytes[index + 1])
+            out.push(bytes[index])
+            if index + 1 < bytes.len() -> out.push(bytes[index + 1])
             index += 2
             next
         }
         if byte == 125 -> return Err(rows_fail("{context}: a lone `}}` in a text"))
         if byte != 123 {
-            &out.push(bytes[index])
+            out.push(bytes[index])
             index += 1
             next
         }
@@ -153,7 +153,7 @@ registry_text: fn(body: String, fields: [String], context: String) -> String Dia
         if !hole.starts_with("self.") -> return Err(rows_fail("{context}: the hole `{{{hole}}}` reads something other than a `self` field"))
         field: hole.remove_prefix("self.")
         if !fields.contains(field) -> return Err(rows_fail("{context}: the hole `{{{hole}}}` reads no field of the struct"))
-        loop part in "{{{{{field}}}}}".bytes() -> &out.push(part)
+        loop part in "{{{{{field}}}}}".bytes() -> out.push(part)
         index = close + 1
     }
     Ok(String.from_bytes(out) ?? body.copy())
@@ -170,19 +170,19 @@ display_text: fn(text: String, context: String) -> String DiagnosticRowsError! {
         byte: Int.from_u8(bytes[index])
         paired: index + 1 < bytes.len() && (byte == 92 || ((byte == 123 || byte == 125) && Int.from_u8(bytes[index + 1]) == byte))
         if !paired {
-            &out.push(bytes[index])
+            out.push(bytes[index])
             index += 1
             next
         }
         after: Int.from_u8(bytes[index + 1])
         if byte != 92 || after == 34 || after == 92 {
-            &out.push(bytes[index + 1])
+            out.push(bytes[index + 1])
         } else if after == 110 {
-            &out.push((U8{10}))
+            out.push((U8{10}))
         } else if after == 116 {
-            &out.push((U8{9}))
+            out.push((U8{9}))
         } else if after == 114 {
-            &out.push((U8{13}))
+            out.push((U8{13}))
         } else {
             return Err(rows_fail("{context}: a backslash escape other than `\\\"`, `\\\\`, `\\n`, `\\t` or `\\r` (byte {after})"))
         }
@@ -204,7 +204,7 @@ read_sources: fn(source_text: String) -> [DiagnosticSource] DiagnosticRowsError!
             index += 1
             loop index < lines.len() {
                 if STRUCT_FIELD.match(lines[index]) == .Val(field) {
-                    &declared.push(field.groups[0].copy())
+                    declared.push(field.groups[0].copy())
                     index += 1
                     next
                 }
@@ -218,23 +218,23 @@ read_sources: fn(source_text: String) -> [DiagnosticSource] DiagnosticRowsError!
             loop index < lines.len() && lines[index] != IMPL_CLOSE {
                 body: lines[index]
                 if {
-                    TEXT_LINE.match(body) == .Val(one_line) -> &texts.push(DiagnosticEntry{name: one_line.groups[0].copy(), value: one_line.groups[1].copy()})
+                    TEXT_LINE.match(body) == .Val(one_line) -> texts.push(DiagnosticEntry{name: one_line.groups[0].copy(), value: one_line.groups[1].copy()})
                     TEXT_OPEN.match(body) == .Val(opened) -> {
                         literal: if index + 2 < lines.len() && lines[index + 2] == "        }}" -> TEXT_BODY.match(lines[index + 1]) else -> None
                         found: literal ?? return Err(rows_fail("{context}: `{opened.groups[0]}` must be one string literal"))
-                        &texts.push(DiagnosticEntry{name: opened.groups[0].copy(), value: found.groups[0].copy()})
+                        texts.push(DiagnosticEntry{name: opened.groups[0].copy(), value: found.groups[0].copy()})
                         index += 2
                     }
                     CONSTANT.match(body) == .Val(constant) -> {
                         if entry(constants, constant.groups[0]) != None -> return Err(rows_fail("{context}: `{constant.groups[0]}` is given twice"))
-                        &constants.push(DiagnosticEntry{name: constant.groups[0].copy(), value: constant.groups[1].copy()})
+                        constants.push(DiagnosticEntry{name: constant.groups[0].copy(), value: constant.groups[1].copy()})
                     }
                     body.trim() != "" -> return Err(rows_fail("{context}: unparsed line `{body}`"))
                 }
                 index += 1
             }
             if index + 1 >= lines.len() || lines[index + 1] != "}}" -> return Err(rows_fail("{context}: `impl Diagnostic` must be the struct's last member"))
-            &sources.push(DiagnosticSource{name: name, fields: declared, constants: constants, texts: texts})
+            sources.push(DiagnosticSource{name: name, fields: declared, constants: constants, texts: texts})
             index += 2
             next
         }
@@ -270,7 +270,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
     loop part in parts {
         literal: entry(source.texts, part) ?? return Err(rows_fail("{context}: `{part}: fn` is missing"))
         body: literal_body(literal, "{context}.{part}") ?? return Err(err)
-        &texts.push(registry_text(body, source.fields, "{context}.{part}") ?? return Err(err))
+        texts.push(registry_text(body, source.fields, "{context}.{part}") ?? return Err(err))
     }
     severity: constant_case(entry(source.constants, "severity") ?? ".Error", "{context}.severity") ?? return Err(err)
     has_lint: entry(source.constants, "lint_name") != None
@@ -346,7 +346,7 @@ render_row: fn(source: DiagnosticSource) -> RenderedRow DiagnosticRowsError! {
         "    }},",
     }.join("\n")
     shown := [String]{}
-    loop (index, part) in parts -> &shown.push(display_text(texts[index], "{context}.{part}") ?? return Err(err))
+    loop (index, part) in parts -> shown.push(display_text(texts[index], "{context}.{part}") ?? return Err(err))
     Ok(RenderedRow{text: text, facts: RowFacts{
         code: code_text,
         name: "{NAME_PATH}{source.name}",
@@ -368,9 +368,9 @@ render_rows: fn(source: String) -> RenderedRows DiagnosticRowsError! {
     loop row in rows {
         one: render_row(row) ?? return Err(err)
         if codes.contains(one.facts.code) -> return Err(rows_fail("code `{one.facts.code}` is used twice"))
-        &codes.push(one.facts.code)
-        &rendered.push(one.text)
-        &facts.push(one.facts)
+        codes.push(one.facts.code)
+        rendered.push(one.text)
+        facts.push(one.facts)
     }
     Ok(RenderedRows{text: "{GENERATED_BY}\nDIAGNOSTIC_ROWS: comptime {{ [DiagnosticRegistryRow]{{\n{rendered.join("\n")}\n}} }}\n", facts: facts})
 }
@@ -388,13 +388,13 @@ plane_counts: fn(facts: [RowFacts]) -> [PlaneCount] DiagnosticRowsError! {
             slot = found
         } else {
             slots[row.plane] = slot
-            &counts.push(PlaneCount{plane: row.plane, edits: 0, reasons: 0, total: 0})
+            counts.push(PlaneCount{plane: row.plane, edits: 0, reasons: 0, total: 0})
         }
         counts[slot].total += 1
         if row.edit -> counts[slot].edits += 1
         if row.reason -> counts[slot].reasons += 1
     }
-    &counts.sort_by(count -> count.plane)
+    counts.sort_by(count -> count.plane)
     Ok(counts)
 }
 
@@ -423,7 +423,7 @@ render_baseline: fn(facts: [RowFacts], committed: String) -> String DiagnosticRo
         now: count.total - count.edits - count.reasons
         floor: before.get(count.plane) ?? 0
         if now > floor -> return Err(rows_fail("plane `{count.plane}` would have {now} active rows with neither a structured `edit` nor a `no_fix` reason, up from {floor}; give the new row one"))
-        &lines.push("{count.plane} {count.edits} {count.reasons} {count.total}")
+        lines.push("{count.plane} {count.edits} {count.reasons} {count.total}")
     }
     Ok("{BASELINE_HEADER}{lines.join("\n")}\n")
 }
@@ -432,14 +432,14 @@ render_baseline: fn(facts: [RowFacts], committed: String) -> String DiagnosticRo
 // each directory's entries sorted by name, so `a/b` comes before `a.b`.
 snapshots_under: fn(directory: String) -[FS]> [TextFile] DiagnosticRowsError! {
     children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    &children.sort_by(child -> child.name)
+    children.sort_by(child -> child.name)
     found := [TextFile]{}
     loop child in children {
         if child.is_dir {
-            loop snapshot in (snapshots_under(child.path) ?? return Err(err)) -> &found.push(snapshot)
+            loop snapshot in (snapshots_under(child.path) ?? return Err(err)) -> found.push(snapshot)
         } else if child.name.ends_with(".stderr") || child.name.ends_with(".warn") {
             text: files.read(child.path) ?? return Err(rows_fail("cannot read {child.path}: {err}"))
-            &found.push(TextFile{path: child.path, text: text})
+            found.push(TextFile{path: child.path, text: text})
         }
     }
     Ok(found)
@@ -471,9 +471,9 @@ html_escape: fn(value: String) -> String Never! {
             else -> ""
         }
         if entity == "" {
-            &out.push(byte)
+            out.push(byte)
         } else {
-            loop part in entity.bytes() -> &out.push(part)
+            loop part in entity.bytes() -> out.push(part)
         }
     }
     String.from_bytes(out) ?? value.copy()
@@ -553,7 +553,7 @@ render_pages: fn(facts: [RowFacts], snapshots: [TextFile]) -> [TextFile] Never! 
     loop row in facts {
         example := TextFile?{None}
         if first.get(row.name) == .Val(at) -> example = Val(snapshots[at].copy())
-        &pages.push(TextFile{path: page_path(row.code), text: render_page(row, example)})
+        pages.push(TextFile{path: page_path(row.code), text: render_page(row, example)})
     }
     pages
 }
@@ -563,9 +563,9 @@ html_under: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
     found := [String]{}
     loop child in (files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))) {
         if child.is_dir {
-            loop path in (html_under(child.path) ?? return Err(err)) -> &found.push(path)
+            loop path in (html_under(child.path) ?? return Err(err)) -> found.push(path)
         } else if child.name.ends_with(".html") {
-            &found.push(child.path)
+            found.push(child.path)
         }
     }
     Ok(found)
@@ -578,9 +578,9 @@ stale_pages: fn(pages: [TextFile]) -[FS]> [String] DiagnosticRowsError! {
     owned := [String:Bool]{}
     loop page in pages -> owned[page.path] = true
     loop path in (html_under(PAGES_DIR) ?? return Err(err)) {
-        if path != "{PAGES_DIR}/index.html" && owned.get(path) == None -> &stale.push(path)
+        if path != "{PAGES_DIR}/index.html" && owned.get(path) == None -> stale.push(path)
     }
-    &stale.sort()
+    stale.sort()
     Ok(stale)
 }
 
@@ -591,10 +591,10 @@ generated_files: fn(rows: RenderedRows) -[FS]> [TextFile] DiagnosticRowsError! {
     baseline: render_baseline(rows.facts, committed) ?? return Err(err)
     snapshots := [TextFile]{}
     loop directory in SNAPSHOT_DIRS {
-        loop snapshot in (snapshots_under(directory) ?? return Err(err)) -> &snapshots.push(snapshot)
+        loop snapshot in (snapshots_under(directory) ?? return Err(err)) -> snapshots.push(snapshot)
     }
     generated := [TextFile]{TextFile{path: ROWS_PATH, text: rows.text}, TextFile{path: BASELINE_PATH, text: baseline}}
-    loop page in render_pages(rows.facts, snapshots) -> &generated.push(page)
+    loop page in render_pages(rows.facts, snapshots) -> generated.push(page)
     Ok(generated)
 }
 
@@ -625,12 +625,12 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
             byte: Int.from_u8(bytes[index])
             paired: index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == byte
             if jet && (byte == 123 || byte == 125) && paired {
-                &out.push(bytes[index])
+                out.push(bytes[index])
                 index += 2
                 next
             }
             if byte != 92 || index + 1 >= bytes.len() {
-                &out.push(bytes[index])
+                out.push(bytes[index])
                 index += 1
                 next
             }
@@ -658,14 +658,14 @@ line_literals: fn(line: String, jet: Bool) -> [String] Never! {
                 }
             }
             if value >= 0 && value <= 255 {
-                &out.push(U8.from_int(value) ?? bytes[index - 1])
+                out.push(U8.from_int(value) ?? bytes[index - 1])
             } else {
-                &out.push(bytes[index - 2])
-                &out.push(bytes[index - 1])
+                out.push(bytes[index - 2])
+                out.push(bytes[index - 1])
             }
         }
         index += 1
-        &found.push(String.from_bytes(out) ?? "")
+        found.push(String.from_bytes(out) ?? "")
     }
     found
 }
@@ -697,15 +697,15 @@ ReportSites: struct {
 // by name.
 report_sources: fn(directory: String) -[FS]> [String] DiagnosticRowsError! {
     children := files.list_dir(directory) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    &children.sort_by(child -> child.name)
+    children.sort_by(child -> child.name)
     found := [String]{}
     loop child in children {
         if child.is_dir {
             skipped: child.name.starts_with(".") || child.name == "Tests" || child.name == "tests" || child.name == "Fixtures" || child.name == "fixtures" || child.name.ends_with(".fixture") || child.name == "JetTestKit"
             if skipped -> next
-            loop path in (report_sources(child.path) ?? return Err(err)) -> &found.push(path)
+            loop path in (report_sources(child.path) ?? return Err(err)) -> found.push(path)
         } else if child.name.ends_with(".jet") || child.name.ends_with(".S") {
-            &found.push(child.path.copy())
+            found.push(child.path.copy())
         }
     }
     Ok(found)
@@ -741,33 +741,33 @@ copy_problems: fn(rows: [RowFacts], text: String, at: String) -> [String] Never!
     loop heading in COPY_HEADING.matches(text) {
         code: heading.groups[0]
         row: row_for(rows, code) ?? {
-            &problems.push("{at}: `[{code}]` names no diagnostic row")
+            problems.push("{at}: `[{code}]` names no diagnostic row")
             next
         }
         stem: text_before(row.what, "{{")
         // A What that writes its own heading (`Runtime fault [R0801]: …`) is
         // copied whole, heading and all.
         if stem.contains("[{code}]: ") {
-            if !text.contains(stem) -> &problems.push("{at}: the {code} What `{text.replace("\n", "\\n")}` is not its row's What `{row.what}`")
+            if !text.contains(stem) -> problems.push("{at}: the {code} What `{text.replace("\n", "\\n")}` is not its row's What `{row.what}`")
             next
         }
         shown: text_before(text_after(text, "[{code}]: "), "\n")
-        if !shown.starts_with(stem) && !stem.starts_with(shown) -> &problems.push("{at}: the {code} heading `{shown}` is not its row's What `{row.what}`")
+        if !shown.starts_with(stem) && !stem.starts_with(shown) -> problems.push("{at}: the {code} heading `{shown}` is not its row's What `{row.what}`")
     }
     loop link in COPY_LINK.matches(text) {
         code: link.groups[0]
         row: row_for(rows, code) ?? {
-            &problems.push("{at}: `More: {REPORT_LINK}{code}` names no diagnostic row")
+            problems.push("{at}: `More: {REPORT_LINK}{code}` names no diagnostic row")
             next
         }
         parts: text_before(text, link.text).split(" Fix: ").to_list()
         if parts.len() < 2 -> next
         fix: parts[parts.len() - 1].remove_suffix("\n")
-        if fix != row.fix -> &problems.push("{at}: the {code} Fix `{fix}` is not its row's Fix `{row.fix}`")
+        if fix != row.fix -> problems.push("{at}: the {code} Fix `{fix}` is not its row's Fix `{row.fix}`")
         if !parts[parts.len() - 2].contains(" Why: ") -> next
         whys: parts[parts.len() - 2].split(" Why: ").to_list()
         why: whys[whys.len() - 1].remove_suffix("\n")
-        if why != row.why -> &problems.push("{at}: the {code} Why `{why}` is not its row's Why `{row.why}`")
+        if why != row.why -> problems.push("{at}: the {code} Why `{why}` is not its row's Why `{row.why}`")
     }
     problems
 }
@@ -787,10 +787,10 @@ file_report_problems: fn(rows: [RowFacts], path: String, text: String) -> Report
                 if named -> found.copies += 1
                 // A copy is checked by its code, so a `generated by` line
                 // cannot excuse a heading or link that names none.
-                if !named && (REPORT_HEADING.is_match(literal) || literal.contains(REPORT_LINK)) -> &found.problems.push("{at}: generated report text `{literal.replace("\n", "\\n")}` names no code, so no row can check it; spell the row's code")
-                loop problem in copy_problems(rows, literal, at) -> &found.problems.push(problem)
+                if !named && (REPORT_HEADING.is_match(literal) || literal.contains(REPORT_LINK)) -> found.problems.push("{at}: generated report text `{literal.replace("\n", "\\n")}` names no code, so no row can check it; spell the row's code")
+                loop problem in copy_problems(rows, literal, at) -> found.problems.push(problem)
             } else if REPORT_HEADING.is_match(literal) || literal.contains(REPORT_LINK) {
-                &found.problems.push("{at}: hand-built report text `{literal.replace("\n", "\\n")}`; build its Diagnostic and render it with diagnostic_render")
+                found.problems.push("{at}: hand-built report text `{literal.replace("\n", "\\n")}`; build its Diagnostic and render it with diagnostic_render")
             }
         }
     }
@@ -807,7 +807,7 @@ report_sites: fn(rows: [RowFacts]) -[FS]> ReportSites DiagnosticRowsError! {
             one: file_report_problems(rows, path, text)
             sites.files += 1
             sites.copies += one.copies
-            loop problem in one.problems -> &sites.problems.push(problem)
+            loop problem in one.problems -> sites.problems.push(problem)
         }
     }
     Ok(sites)
@@ -826,7 +826,7 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
     loop file in generated {
         current: if files.exists(file.path) -> files.read(file.path) ?? return Err(rows_fail("cannot read {file.path}: {err}")) else -> ""
         if current == file.text -> next
-        &differing.push(file.path.copy())
+        differing.push(file.path.copy())
         if mode != "--write" -> next
         if file.path.starts_with("{PAGES_DIR}/") -> files.create_dir_all(file.path.remove_suffix("/index.html")) ?? return Err(rows_fail("cannot create the directory of {file.path}: {err}"))
         files.write(file.path, file.text) ?? return Err(rows_fail("cannot write {file.path}: {err}"))
@@ -836,17 +836,17 @@ diagnostic_rows_main: fn(args: [String]) -[FS]> String DiagnosticRowsError! {
         if sites.problems.len() > 0 -> return Err(rows_fail(sites_failure))
         return Ok("diagnostic copies written: {differing.len()} rewritten, {stale.len()} stale pages removed, {generated.len()} in all")
     }
-    loop path in stale -> &differing.push("{path} (no diagnostic row owns this page)")
+    loop path in stale -> differing.push("{path} (no diagnostic row owns this page)")
     failures := [String]{}
     if differing.len() > 0 {
         first := [String]{}
         loop path in differing {
             if first.len() == 10 -> break
-            &first.push(path.copy())
+            first.push(path.copy())
         }
-        &failures.push("{differing.len()} copies differ from {SOURCE_PATH}; run jet Tools/agent/DiagnosticRows.jet --write. First: {first.join(", ")}")
+        failures.push("{differing.len()} copies differ from {SOURCE_PATH}; run jet Tools/agent/DiagnosticRows.jet --write. First: {first.join(", ")}")
     }
-    if sites.problems.len() > 0 -> &failures.push(sites_failure)
+    if sites.problems.len() > 0 -> failures.push(sites_failure)
     if failures.len() > 0 -> return Err(rows_fail(failures.join("\n")))
     Ok("diagnostic rows check passed: {generated.len()} copies match; {sites.files} source files read, none builds a report by hand, and {sites.copies} runtime report copies match their rows")
 }

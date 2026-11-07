@@ -379,7 +379,7 @@ construct_id: fn(row: Production) -> String Never! {
 of_family: fn(rows: [Production], family: String) -> [Production] Never! {
     out := [Production]{}
     loop row in rows {
-        if row.family == family -> &out.push(row.copy())
+        if row.family == family -> out.push(row.copy())
     }
     out
 }
@@ -404,7 +404,7 @@ filled: fn(text: String, seed: String, index: Int, slot: Int) -> String Never! {
 
 instance: fn(row: Production, seed: String, index: Int, slot: Int) -> Instance Never! {
     markers := [String]{}
-    loop marker in row.markers -> &markers.push(filled(marker, seed, index, slot))
+    loop marker in row.markers -> markers.push(filled(marker, seed, index, slot))
     Instance{
         construct_id: construct_id(row),
         family: row.family.copy(),
@@ -459,7 +459,7 @@ generate_program: fn(rows: [Production], seed: String, index: Int) -> Generated 
     instances := [Instance]{}
     loop slot in 0..<count + 1 {
         row: if slot == position -> primary.copy() else -> rows[draw(seed, index, "context{slot}", rows.len())].copy()
-        &instances.push(instance(row, seed, index, slot))
+        instances.push(instance(row, seed, index, slot))
     }
     program_of(case_name(index), "{seed}:{index}", index, position, instances)
 }
@@ -468,7 +468,7 @@ generate_program: fn(rows: [Production], seed: String, index: Int) -> Generated 
 // every template is admitted and runs on every tier.
 coverage_program: fn(seed: String) -> Generated Never! {
     instances := [Instance]{}
-    loop (slot, row) in productions() -> &instances.push(instance(row, seed, GENERATOR_MAX_CASES, slot))
+    loop (slot, row) in productions() -> instances.push(instance(row, seed, GENERATOR_MAX_CASES, slot))
     program_of("coverage", "{seed}:coverage", GENERATOR_MAX_CASES, 0, instances)
 }
 
@@ -478,28 +478,28 @@ coverage_program: fn(seed: String) -> Generated Never! {
 validate_productions: fn(rows: [Production]) -> [String] Never! {
     problems := [String]{}
     loop family in CONSTRUCT_FAMILIES {
-        if of_family(rows, family).len() == 0 -> &problems.push("missing production: no template generates {family}")
+        if of_family(rows, family).len() == 0 -> problems.push("missing production: no template generates {family}")
     }
     seen := [String]{}
     sink: "print(\"value_$K {{value_$K}}\")"
     loop row in rows {
         id: construct_id(row)
-        if !CONSTRUCT_FAMILIES.contains(row.family) -> &problems.push("{id}: `{row.family}` is not a construct family")
-        if seen.contains(id) -> &problems.push("{id}: the production is listed twice")
-        &seen.push(id.copy())
-        if row.markers.len() == 0 -> &problems.push("{id}: the production names no construct marker")
+        if !CONSTRUCT_FAMILIES.contains(row.family) -> problems.push("{id}: `{row.family}` is not a construct family")
+        if seen.contains(id) -> problems.push("{id}: the production is listed twice")
+        seen.push(id.copy())
+        if row.markers.len() == 0 -> problems.push("{id}: the production names no construct marker")
         template: "{row.decls}\n{row.body}"
         loop marker in row.markers {
-            if !template.contains(marker) -> &problems.push("{id}: marker `{marker}` is not in the template")
+            if !template.contains(marker) -> problems.push("{id}: marker `{marker}` is not in the template")
         }
-        if !row.body.ends_with(sink) -> &problems.push("{id}: the template does not end by printing value_$K")
-        if filled(template, GENERATOR_SEED, 0, 0).contains("$") -> &problems.push("{id}: the template has a hole the generator does not fill")
+        if !row.body.ends_with(sink) -> problems.push("{id}: the template does not end by printing value_$K")
+        if filled(template, GENERATOR_SEED, 0, 0).contains("$") -> problems.push("{id}: the template has a hole the generator does not fill")
     }
     problems
 }
 
 note_call: fn(names: &[String], expression: Expr) Never! {
-    if expression == .Call(call, _) -> &names.push(call.name.copy())
+    if expression == .Call(call, _) -> names.push(call.name.copy())
 }
 
 // Typed holes, a parse with no error, `run: fn`, loops that only iterate,
@@ -509,12 +509,12 @@ validate_program: fn(program: Generated) -> [String] Never! {
     problems := [String]{}
     id: program.case_id
     source: program.source
-    if source.len() > GENERATOR_SOURCE_LIMIT -> &problems.push("{id}: {source.len()} bytes is over the {GENERATOR_SOURCE_LIMIT}-byte limit")
-    if source.contains("$") -> &problems.push("{id}: a hole is left unfilled")
+    if source.len() > GENERATOR_SOURCE_LIMIT -> problems.push("{id}: {source.len()} bytes is over the {GENERATOR_SOURCE_LIMIT}-byte limit")
+    if source.contains("$") -> problems.push("{id}: a hole is left unfilled")
     parsed: parse_source(source.bytes())
     loop diagnostic in parsed.diagnostics {
         if diagnostic.code.starts_with("E") {
-            &problems.push("{id}: does not parse: {diagnostic.code} {diagnostic.what}")
+            problems.push("{id}: does not parse: {diagnostic.code} {diagnostic.what}")
             return problems
         }
     }
@@ -524,21 +524,21 @@ validate_program: fn(program: Generated) -> [String] Never! {
         if item == .Func(function) {
             if function.name == "run" -> run_found = true
             calls := [String]{}
-            ast_visit_body(function.body, (expression: Expr) -> note_call(&calls, expression), true)
-            if calls.contains(function.name) -> &problems.push("{id}: `{function.name}` calls itself, so it may not end")
+            ast_visit_body(function.body, (expression: Expr) -> note_call(calls, expression), true)
+            if calls.contains(function.name) -> problems.push("{id}: `{function.name}` calls itself, so it may not end")
         }
     }
-    if !run_found -> &problems.push("{id}: no `run: fn()` executes the program")
+    if !run_found -> problems.push("{id}: no `run: fn()` executes the program")
     loop line in source.split("\n").to_list() {
         trimmed: line.trim()
-        if trimmed.starts_with("loop ") && !trimmed.contains(" in ") -> &problems.push("{id}: `{trimmed}` is not a bounded loop")
+        if trimmed.starts_with("loop ") && !trimmed.contains(" in ") -> problems.push("{id}: `{trimmed}` is not a bounded loop")
     }
     loop item in program.instances {
         loop marker in item.markers {
-            if !source.contains(marker) -> &problems.push("{id}: {item.construct_id} #{item.slot} lost its construct `{marker}`")
+            if !source.contains(marker) -> problems.push("{id}: {item.construct_id} #{item.slot} lost its construct `{marker}`")
         }
         name: "value_{item.slot}"
-        if trace(tree, name, "", "value", 0, name) == None -> &problems.push("{id}: {item.construct_id} #{item.slot}: `{name}` never reaches an observer")
+        if trace(tree, name, "", "value", 0, name) == None -> problems.push("{id}: {item.construct_id} #{item.slot}: `{name}` never reaches an observer")
     }
     problems
 }
@@ -554,7 +554,7 @@ generate_programs: fn(seed: String, cases: Int) -> [Generated] Err! {
         program: generate_program(rows, seed, index)
         problems: validate_program(program)
         if problems.len() > 0 -> return Err(problems.join("\n"))
-        &out.push(program)
+        out.push(program)
     }
     Ok(out)
 }
@@ -563,7 +563,7 @@ generate_programs: fn(seed: String, cases: Int) -> [Generated] Err! {
 without: fn(program: Generated, slot: Int) -> Generated Never! {
     kept := [Instance]{}
     loop item in program.instances {
-        if item.slot != slot -> &kept.push(item.copy())
+        if item.slot != slot -> kept.push(item.copy())
     }
     program_of(program.case_id, program.seed, program.index, program.primary, kept)
 }
@@ -583,7 +583,7 @@ planted: fn(run: TierRun, program: Generated, plant: String) -> TierRun Never! {
     }
     prefix: "value_{program.primary} "
     lines := [String]{}
-    loop line in run.stdout.split("\n").to_list() -> &lines.push(if line.starts_with(prefix) -> "{line}~" else -> line.copy())
+    loop line in run.stdout.split("\n").to_list() -> lines.push(if line.starts_with(prefix) -> "{line}~" else -> line.copy())
     out.stdout = lines.join("\n")
     out
 }
@@ -602,7 +602,7 @@ run_case: fn(program: Generated, jet: String, scratch: String, plant: String) -[
     check: run_tier(jet, CHECK_STAGE, path, "")
     runs := [TierRun]{}
     if check.exit == Val(0) && !check.timeout {
-        loop tier in regression_tiers() -> &runs.push(planted(run_tier(jet, tier, path, ""), program, plant))
+        loop tier in regression_tiers() -> runs.push(planted(run_tier(jet, tier, path, ""), program, plant))
     }
     Ok(CaseRun{check: check, runs: runs})
 }
@@ -697,7 +697,7 @@ minimize: fn(program: Generated, first: CaseRun, jet: String, scratch: String, p
         if classify(candidate, run).mismatch != target -> next
         kept = candidate.copy()
         kept_run = run.copy()
-        &dropped.push("{item.construct_id} #{item.slot}")
+        dropped.push("{item.construct_id} #{item.slot}")
     }
     Ok(Minimized{program: kept, run: kept_run, dropped: dropped})
 }
@@ -710,7 +710,7 @@ generated_severity: fn(class: String) -> String Never! {
 
 generator_commands: fn() -> [TierCommand] Never! {
     commands := [TierCommand]{TierCommand{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE)}}
-    loop tier in regression_tiers() -> &commands.push(TierCommand{tier: tier.copy(), command: tier_command(tier)})
+    loop tier in regression_tiers() -> commands.push(TierCommand{tier: tier.copy(), command: tier_command(tier)})
     commands
 }
 
@@ -728,9 +728,9 @@ production_dyn: fn(row: Production) -> Dyn Never! {
 // limits and every command.
 generator_config_hash: fn() -> String Never! {
     rows := [Dyn]{}
-    loop row in productions() -> &rows.push(production_dyn(row))
+    loop row in productions() -> rows.push(production_dyn(row))
     commands := [Dyn]{}
-    loop command in generator_commands() -> &commands.push(Dyn.Text("{command.tier}: {command.command}"))
+    loop command in generator_commands() -> commands.push(Dyn.Text("{command.tier}: {command.command}"))
     config: Dyn.Object([String: Dyn]{
         "commands": Dyn.Array(commands),
         "max_context": Dyn.Int(GENERATOR_MAX_CONTEXT),
@@ -742,7 +742,7 @@ generator_config_hash: fn() -> String Never! {
 
 instance_ids: fn(program: Generated) -> [String] Never! {
     out := [String]{}
-    loop item in program.instances -> &out.push("{item.construct_id} #{item.slot}")
+    loop item in program.instances -> out.push("{item.construct_id} #{item.slot}")
     out
 }
 
@@ -821,11 +821,11 @@ stable_digest: fn(bundle: Dyn) -> String Err! {
 
 clean_runs: fn(program: Generated) -> CaseRun Never! {
     lines := [String]{}
-    loop item in program.instances -> &lines.push("value_{item.slot} 1")
+    loop item in program.instances -> lines.push("value_{item.slot} 1")
     stdout: "{lines.join("\n")}\n"
     check: TierRun{tier: CHECK_STAGE, command: tier_command(CHECK_STAGE), stdout: "", stderr: "", exit: Val(0), signal: None, timeout: false}
     runs := [TierRun]{}
-    loop tier in regression_tiers() -> &runs.push(TierRun{tier: tier.copy(), command: tier_command(tier), stdout: stdout.copy(), stderr: "", exit: Val(0), signal: None, timeout: false})
+    loop tier in regression_tiers() -> runs.push(TierRun{tier: tier.copy(), command: tier_command(tier), stdout: stdout.copy(), stderr: "", exit: Val(0), signal: None, timeout: false})
     CaseRun{check: check, runs: runs}
 }
 
@@ -837,36 +837,36 @@ layer_controls: fn() -> [String] Never! {
     rows: productions()
     missing := [Production]{}
     loop row in rows {
-        if row.family != "views" -> &missing.push(row.copy())
+        if row.family != "views" -> missing.push(row.copy())
     }
-    if !validate_productions(missing).contains("missing production: no template generates views") -> &survived.push("missing-production")
+    if !validate_productions(missing).contains("missing production: no template generates views") -> survived.push("missing-production")
     program: generate_program(rows, GENERATOR_SEED, 0)
     clean: clean_runs(program)
-    if !case_passes(program, clean) -> &survived.push("clean-baseline")
+    if !case_passes(program, clean) -> survived.push("clean-baseline")
     unlowered := clean.copy()
     unlowered.runs = [TierRun]{}
-    loop tier_run in clean.runs -> &unlowered.runs.push(planted(tier_run, program, UNLOWERED))
-    if case_passes(program, unlowered) || classify(program, unlowered).class != UNLOWERED -> &survived.push("admitted-but-unlowered")
+    loop tier_run in clean.runs -> unlowered.runs.push(planted(tier_run, program, UNLOWERED))
+    if case_passes(program, unlowered) || classify(program, unlowered).class != UNLOWERED -> survived.push("admitted-but-unlowered")
     optimizer := clean.copy()
     optimizer.runs = [TierRun]{}
-    loop tier_run in clean.runs -> &optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
-    if case_passes(program, optimizer) || classify(program, optimizer).class != OPTIMIZER_ONLY -> &survived.push("optimizer-only-meaning-change")
+    loop tier_run in clean.runs -> optimizer.runs.push(planted(tier_run, program, OPTIMIZER_ONLY))
+    if case_passes(program, optimizer) || classify(program, optimizer).class != OPTIMIZER_ONLY -> survived.push("optimizer-only-meaning-change")
     primary: primary_instance(program)
     silent := [Instance]{}
     loop item in program.instances {
         quiet := item.copy()
         if item.slot == primary.slot -> quiet.body = item.body.replace("print(\"value_{item.slot} {{value_{item.slot}}}\")", "_: value_{item.slot}")
-        &silent.push(quiet)
+        silent.push(quiet)
     }
     observerless: program_of(program.case_id, program.seed, program.index, program.primary, silent)
-    if case_passes(observerless, clean_runs(observerless)) || !validate_program(observerless).join("\n").contains("never reaches an observer") -> &survived.push("observerless-generation")
+    if case_passes(observerless, clean_runs(observerless)) || !validate_program(observerless).join("\n").contains("never reaches an observer") -> survived.push("observerless-generation")
     quiet_run := clean.copy()
     quiet_run.runs = [TierRun]{}
     loop tier_run in clean.runs {
         out := tier_run.copy()
         out.stdout = ""
-        &quiet_run.runs.push(out)
+        quiet_run.runs.push(out)
     }
-    if case_passes(program, quiet_run) || classify(program, quiet_run).class != OBSERVERLESS -> &survived.push("observerless-output")
+    if case_passes(program, quiet_run) || classify(program, quiet_run).class != OBSERVERLESS -> survived.push("observerless-output")
     survived
 }

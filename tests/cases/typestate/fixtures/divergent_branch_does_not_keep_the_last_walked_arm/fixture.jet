@@ -6,18 +6,18 @@ Order: struct {
 
 impl Order {
     #Transition(_, Draft) start: fn(id: Int) -[]> Order { return Order{ id: id } }
-    #Transition(Draft, Confirmed) confirm: fn(self: ^Order) -[]> Order { return self }
-    #Transition(Draft, Cancelled) cancel: fn(self: ^Order) -[]> Order { return self }
-    #Transition(Confirmed, Closed) close: fn(self: ^Order) -[]> Order { return self }
-    #Transition(Cancelled, Closed) archive: fn(self: ^Order) -[]> Order { return self }
+    #Transition(Draft, Confirmed) confirm: fn(self: &&Order) -[]> Order { return self }
+    #Transition(Draft, Cancelled) cancel: fn(self: &&Order) -[]> Order { return self }
+    #Transition(Confirmed, Closed) close: fn(self: &&Order) -[]> Order { return self }
+    #Transition(Cancelled, Closed) archive: fn(self: &&Order) -[]> Order { return self }
     #State(Confirmed) ship: fn(self) -[]> Int { return self.id }
 }
 
 decide: fn(paid: Bool) {
   order := Order.start(1)
   if {
-    paid -> order = ^order.confirm()
-    else -> order = ^order.cancel()
+    paid -> order = order.confirm()
+    else -> order = order.cancel()
   }
   print(order.ship())
 }

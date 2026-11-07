@@ -9,7 +9,7 @@ the [syntax registry](../../Compiler/JetFoundation/Data/Syntax/). The
 [Core surface ledger test](../../tests/core_surface_ledger.rs) and its
 [checker](../../Tools/agent/check-core-surface-ledger.mjs) provide focused
 machine checks; runnable examples live under
-[`Examples/features/`](../../Examples/features/). API names follow the
+[`Examples/`](../../Examples/). API names follow the
 [Jet vocabulary](vocabulary.md) for streams, readers, and events.
 
 These are review laws, not a second API catalog. A new declaration must pass
@@ -105,7 +105,7 @@ Return a new allocation by value. Do not write into a caller-supplied buffer
 unless the API is explicitly a low-allocation path.
 
 Make mutation visible: a mutating function takes `&T`, while ownership
-transfer takes `^T`. Document the invariant enforced by every `#SingleUse`
+transfer takes `&&T`. Document the invariant enforced by every `#SingleUse`
 type.
 
 ### Internal Core Shared publication
@@ -173,7 +173,7 @@ diagnostic.
 
 ## Law 7 — Examples
 
-Give every new type a runnable example under `Examples/features/` with
+Give every new type a runnable example under `Examples/` with
 golden-tested expected output (I5). Use plausible domain names rather than
 `foo`, `bar`, or opaque placeholders. Show the successful path first and
 failure handling second.
@@ -194,7 +194,7 @@ spelling. Do not add a mode parameter or preserve an alias for the same
 operation.
 
 ```jet
-&text.replace("a", "b")
+text.replace("a", "b")
 text.replace_first("a", "b")
 ```
 
@@ -249,7 +249,7 @@ receipts.
 | L4 | All access markers and effects are declared. |
 | L5 | Non-obvious allocation is budgeted and the streaming form is present. |
 | L6 | Every error path has the required diagnostic copy and UI snapshot. |
-| L7 | A golden-tested example exists under `Examples/features/`. |
+| L7 | A golden-tested example exists under `Examples/`. |
 | L8 | No duplicate API or overload family remains. |
 | L9 | Same-subject variants with the same result and safety shape use one root method with a safe default and a label-only option enum. Keep a sibling only when the parameter list, result shape, fallibility, or safety differs; name that distinct job plainly. |
 | Weakest-guarantee parameters | The declaration asks for the weakest sufficient guarantee. |
@@ -548,7 +548,7 @@ other hosts. Neither bridge writes the operating-system environment.
 
 `RealtimeStream.cancel(&self)` forwards its write-borrowed stream to
 `core.rt.__cancel(&self)`. The public method and its provider call both retain
-the explicit write-access marker; cancellation does not consume the stream.
+the `&self` write receiver; cancellation does not consume the stream.
 
 ## Testing evidence source policy
 

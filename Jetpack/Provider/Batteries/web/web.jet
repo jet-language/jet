@@ -69,7 +69,7 @@ use {
     // navigation status and the cache entry it leaves behind.
     route_report: fn(url: String) -> String {
         routes := order_router() ?? return "router unavailable"
-        navigation: router.preload(&routes, url) ?? return "navigation failed"
+        navigation: router.preload(routes, url) ?? return "navigation failed"
         params: navigation.params.map(field -> "{field.name}={field.value}").join(",")
         return "route={navigation.name} params={params} status={router.current(routes).status} cache={router.cache_show(routes)}"
     }
@@ -99,16 +99,16 @@ use {
     form_field_errors: fn(form: WebForm) -> String {
         errors := [String]{}
         loop field in form.fields {
-            if field.errors.len() > 0 -> &errors.push("{field.name}: {field.errors[0]}")
+            if field.errors.len() > 0 -> errors.push("{field.name}: {field.errors[0]}")
         }
         return errors.join("; ")
     }
 
     validate_order_form: fn(item: String, quantity: String) -> FormView {
         form := order_form()
-        forms.set(&form, "item", item) ?? return FormView{valid: false, html: forms.html(form), errors: "item field unavailable"}
-        forms.set(&form, "quantity", quantity) ?? return FormView{valid: false, html: forms.html(form), errors: "quantity field unavailable"}
-        forms.validate(&form) ?? return FormView{valid: false, html: forms.html(form), errors: form_field_errors(form)}
+        forms.set(form, "item", item) ?? return FormView{valid: false, html: forms.html(form), errors: "item field unavailable"}
+        forms.set(form, "quantity", quantity) ?? return FormView{valid: false, html: forms.html(form), errors: "quantity field unavailable"}
+        forms.validate(form) ?? return FormView{valid: false, html: forms.html(form), errors: form_field_errors(form)}
         numeric: Int.parse(quantity) ?? return FormView{
             valid: false,
             html: forms.html(form),
@@ -192,13 +192,13 @@ use {
         return Val(query.new("orders.list", WebQuerySeed{data: "count={count}", generation: 1, subscribers: 1}))
     }
 
-    invalidate_orders: fn(orders: &WebQuery) -> Int { query.invalidate(&orders) }
+    invalidate_orders: fn(orders: &WebQuery) -> Int { query.invalidate(orders) }
 
     query_report: fn(path: String) -> String {
         orders := live_orders(path) ?? return "orders unavailable"
         before: query.state_signal(orders)
-        generation: invalidate_orders(&orders)
-        query.refresh(&orders) ?? return "refresh failed"
+        generation: invalidate_orders(orders)
+        query.refresh(orders) ?? return "refresh failed"
         after: query.state_signal(orders)
         return "before={before} invalidated={generation} after={after} data={query.show(orders)}"
     }

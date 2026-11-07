@@ -2,18 +2,20 @@
 // CLI + Core native FS provider; these tests make no hosted parity claim.
 use {
     jet_cli.[
-        JetCLILiveChannel, JetCLILiveEvent, JetCLILiveRuntime, JetCLILiveSnapshot, JetCLILiveTask,
-        JetCLILiveValue, JetCLIPerfObservation, jet_cli_perf_browser_decode, jet_cli_perf_capture_bytes,
+        JetCLIPerfObservation, jet_cli_perf_browser_decode, jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source, jet_cli_perf_live_from, jet_cli_perf_source,
         jet_cli_perf_source_position, jet_cli_perf_source_profile,
     ]
-    jet_foundation.[TraceHardware, TraceToolchain, sha256_hex, verify_jettrace]
+    jet_foundation.[
+        JetLiveChannel, JetLiveEvent, JetLiveRuntime, JetLiveSnapshot, JetLiveTask, JetLiveValue,
+        TraceHardware, TraceToolchain, sha256_hex, verify_jettrace,
+    ]
     perf_hex: core.encoding.hex
 }
 
-// A decoded, process-bound live snapshot (LiveSnapshot.jet's codec is
-// witnessed by Tests/LiveInspect.jet).
-jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetCLILiveSnapshot Never! {
+// A decoded, process-bound live snapshot (jet_foundation's LiveSnapshot.jet
+// codec is witnessed by Tests/LiveInspect.jet).
+jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     resources := [String:Int]{}
     resources["workers"] = 1
     resources["running"] = 0
@@ -22,15 +24,15 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetCLILiveSnapshot Never! {
     resources["arenas"] = 1
     resources["arena_allocations"] = 2
     resources["arena_bytes"] = 64
-    JetCLILiveSnapshot{
+    JetLiveSnapshot{
         protocol: "jet.live.v1", session_id: "session", source_id: "source", build_id: "build",
         revision: "revision", world_id: "world", pid: 12, start_id: "123", captured_ms: 100,
-        values: [JetCLILiveValue]{JetCLILiveValue{value_id: "app::secret", type_identity: "Int", disposition: "kept", reason: "", rendered_value: Val("7")}},
-        tasks: [JetCLILiveTask]{JetCLILiveTask{id: task_id, parent: 0, state: "blocked", wait: "tcp receive", deadline_ms: None, cancelled: false}},
-        channels: [JetCLILiveChannel]{JetCLILiveChannel{id: 2, depth: 0, capacity: Val(1), send_waiters: 0, recv_waiters: 1, closed: false}},
+        values: [JetLiveValue]{JetLiveValue{value_id: "app::secret", type_identity: "Int", disposition: "kept", reason: "", rendered_value: Val("7")}},
+        tasks: [JetLiveTask]{JetLiveTask{id: task_id, parent: 0, state: "blocked", wait: "tcp receive", deadline_ms: None, cancelled: false}},
+        channels: [JetLiveChannel]{JetLiveChannel{id: 2, depth: 0, capacity: Val(1), send_waiters: 0, recv_waiters: 1, closed: false}},
         effects: [String:Int]{}, resources: resources,
-        runtime: JetCLILiveRuntime{elapsed_ns: 50, cpu_ns: Val(25), exit: false},
-        event_records: [JetCLILiveEvent]{}, events: Val(""),
+        runtime: JetLiveRuntime{elapsed_ns: 50, cpu_ns: Val(25), exit: false},
+        event_records: [JetLiveEvent]{}, events: Val(""),
         boot_ns: U64{0}, start_ticks: U64{0}, clock_hz: 100,
     }
 }

@@ -15,7 +15,7 @@ new: fn() -> CountMinSketch Never! { CountMinSketch.new() }
 impl CountMinSketch {
     new: fn() -> CountMinSketch Never! {
         counters := [Int]{}
-        loop _ in 0..<1024 -> &counters.push(0)
+        loop _ in 0..<1024 -> counters.push(0)
         CountMinSketch{counters: counters}
     }
 
@@ -57,10 +57,10 @@ merge: fn(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
 
 #Test("CMS retains unit counts, independent clones and additive merge") {
     cms := new()
-    &cms.add("hello")
+    cms.add("hello")
     clone := cms.copy()
-    &clone.add("hello")
-    &clone.add("world")
+    clone.add("hello")
+    clone.add("world")
     assert_eq(cms.count("hello"), 1)
     assert_eq(cms.count("world"), 0)
     assert_eq(clone.count("hello"), 2)

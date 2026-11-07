@@ -38,14 +38,14 @@ kit_steps_inventory: fn(directory: String, root: String) -> [KitInventoryItem] E
             bytes: files.read_bytes(entry.path) ?? return Err("inventory read: {err}")
             digest = crypto.sha256(bytes).hex()
         }
-        &result.push(KitInventoryItem{path: files.relative(entry.path, root), kind: info.kind,
+        result.push(KitInventoryItem{path: files.relative(entry.path, root), kind: info.kind,
             size: info.size, modified_ms: info.modified.to_unix_ms(), digest: digest})
         if info.is_dir && !info.is_symlink {
             descendants: kit_steps_inventory(entry.path, root) ?? return Err(err)
-            loop child in descendants -> &result.push(child)
+            loop child in descendants -> result.push(child)
         }
     }
-    &result.sort_by(item -> item.path)
+    result.sort_by(item -> item.path)
     Ok(result)
 }
 
@@ -86,18 +86,18 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
                     found = true
                 }
             }
-            if !found -> &state.captures.push(KitCapture{name: words[0], value: captured.value, aggregate: true})
+            if !found -> state.captures.push(KitCapture{name: words[0], value: captured.value, aggregate: true})
             return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
         }
         if step.argv[1] == "=" && step.argv[2] == "opt-bytes" {
             path: kit_steps_work_path(step.argv[4], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "capture bytes path escapes work")
             bytes: if files.exists(path) -> Val(files.read_bytes(path) ?? return kit_steps_action_error(state, "capture bytes: {err}")) else -> None
-            &state.captures.push(KitCapture{name: step.argv[0], value: KitCapturedValue.Bytes(bytes)})
+            state.captures.push(KitCapture{name: step.argv[0], value: KitCapturedValue.Bytes(bytes)})
             state.last = kit_steps_action_run()
         } else {
             captured: kit_steps_capture_value(step.argv, context, state)
             if captured.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: captured.verdict}
-            &state.captures.push(KitCapture{name: step.argv[0], value: captured.value})
+            state.captures.push(KitCapture{name: step.argv[0], value: captured.value})
             selector: if step.argv[1] == "=" && (step.argv[2] == "text" || step.argv[2] == "lines") -> kit_steps_subject(step.argv[3]) else -> kit_steps_subject(step.argv[1])
             if selector == "file" || selector == "file?" || (step.argv[1] == "=" && step.argv[2] != "text" && step.argv[2] != "lines") -> state.last = kit_steps_action_run()
         }
@@ -116,7 +116,7 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
     if step.action == "inventory" {
         path: kit_steps_work_path(step.argv[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "inventory directory escapes work")
         items: kit_steps_inventory(path, path) ?? return kit_steps_action_error(state, "{err}")
-        if step.label != "" -> &state.inventories.push(KitInventory{label: step.label, items: items})
+        if step.label != "" -> state.inventories.push(KitInventory{label: step.label, items: items})
         else {
             found := false
             loop saved in state.inventories {
@@ -145,7 +145,7 @@ kit_steps_action: fn(step: KitStep, context: KitStepCtx, previous: KitStepState)
             }
         }
         child.stdin.close()
-        &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
+        state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
         return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
     }
     kit_steps_action_error(state, "unknown kit action: {step.action}")
@@ -156,17 +156,17 @@ kit_steps_finish: fn(state: KitStepState, verdict: KitVerdict) -> KitOutcome {
     loop pending in state.children {
         if pending.joined -> next
         exited: pending.child.exited() ?? {
-            &errors.push("cleanup status: {err}")
+            errors.push("cleanup status: {err}")
             false
         }
         if !exited {
             pending.child.kill() ?? {
-                &errors.push("cleanup kill: {err}")
+                errors.push("cleanup kill: {err}")
                 ()
             }
         }
         _: pending.child.wait() ?? {
-            &errors.push("cleanup wait: {err}")
+            errors.push("cleanup wait: {err}")
             next
         }
     }

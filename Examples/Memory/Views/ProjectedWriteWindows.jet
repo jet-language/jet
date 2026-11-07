@@ -1,0 +1,81 @@
+// `&place` is the exclusive write window for any place, a
+// name followed by field or index projections. The callee edits the owner's
+// storage directly; nothing is copied in or out.
+Node: struct {
+    direct: [String]
+    count: Int
+}
+
+Graph: struct {
+    nodes: [Node]
+    root: Node
+}
+
+Pair: struct {
+    left: Int
+    right: Int
+}
+
+add: fn(set: &[String], name: String) {
+    set.push(name.copy())
+}
+
+bump: fn(value: &Int) {
+    value += 1
+}
+
+swap: fn(a: &Int, b: &Int) {
+    held: a
+    a = b
+    b = held
+}
+
+run: fn() {
+    node := Node{direct: [String]{}, count: 0}
+    add(node.direct, "a")
+    bump(node.count)
+    print("field: {node.direct.len()} {node.count}")
+
+    values := [10, 20, 30]
+    bump(values[1])
+    print("index: {values[1]}")
+
+    graph := Graph{nodes: [Node{direct: [String]{}, count: 5}], root: Node{direct: [String]{}, count: 0}}
+    add(graph.nodes[0].direct, "x")
+    add(graph.root.direct, "y")
+    bump(graph.nodes[0].count)
+    print("nested: {graph.nodes[0].direct.len()} {graph.root.direct.len()} {graph.nodes[0].count}")
+
+    // Different known fields are disjoint, so both windows may be live.
+    pair := Pair{left: 1, right: 2}
+    swap(pair.left, pair.right)
+    print("disjoint: {pair.left} {pair.right}")
+    range_write_windows_lesson()
+}
+
+// A range write window has a fixed length. A callee that
+// keeps its list's length edits the window in place, so the owner sees every
+// change without a copy. A callee that may push, pop, or reassign the list
+// cannot take a window; pass the whole list instead.
+scale: fn(xs: &[Int], factor: Int) {
+    loop index in 0..<xs.len() {
+        xs[index] = xs[index] * factor
+    }
+}
+
+scale_and_sort: fn(xs: &[Int]) {
+    scale(xs, 10)
+    xs.sort()
+}
+
+range_write_windows_lesson: fn() {
+    values := [5, 4, 3, 2, 1]
+    values[1..3].sort()
+    print(values)
+    values[0..<2].reverse()
+    print(values)
+    scale(values[3..4], 100)
+    print(values)
+    scale_and_sort(values[0..<3])
+    print(values)
+}

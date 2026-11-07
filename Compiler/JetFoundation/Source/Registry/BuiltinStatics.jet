@@ -233,7 +233,7 @@ builtin_numeric_operation: fn(source: BuiltinNumericKind, target: BuiltinNumeric
     if !target.integer {
         if target.ty == Type.Float32 && source.ty == Type.Float -> return TNumericOp.FloatNarrow
         // A whole number crosses into Float or F32 by the one checked rule
-        // `T{n}` follows (D-NUMWIDEN-CROSS1): it stops with E3010 when it has
+        // `T{n}` follows: it stops with E3010 when it has
         // no exact value there, and `approx(n)` is the rounding spelling. A
         // fixed source narrower than the target's precision is always exact.
         if source.integer {
@@ -264,7 +264,7 @@ builtin_static_numeric_row: fn(owner: String, method: String) -> BuiltinStaticRo
 // whose module matches how the owner was named.
 builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := builtin_static_rows_in(BUILTIN_STATIC_ROWS, owner, method)
-    if builtin_static_numeric_row(owner, method) == .Val(row) -> &rows.push(row)
+    if builtin_static_numeric_row(owner, method) == .Val(row) -> rows.push(row)
     rows
 }
 
@@ -272,7 +272,7 @@ builtin_static_rows: fn(owner: String, method: String) -> [BuiltinStaticRow] Nev
 builtin_static_rows_in: fn(table: [BuiltinStaticRow], owner: String, method: String) -> [BuiltinStaticRow] Never! {
     rows := [BuiltinStaticRow]{}
     loop row in table {
-        if row.owner == owner && row.method == method -> &rows.push(row)
+        if row.owner == owner && row.method == method -> rows.push(row.copy())
     }
     rows
 }

@@ -98,7 +98,7 @@ parse_args: fn(args: [String]) -> Options Err! {
 
 summary: fn(manifest: Manifest) -> String Never! {
     counts := [String]{}
-    loop status in STATUSES -> &counts.push("{status} {count_where(manifest, "status", status)}")
+    loop status in STATUSES -> counts.push("{status} {count_where(manifest, "status", status)}")
     "{manifest.rows.len()} rows ({counts.join(", ")}), {manifest.orphans.len()} orphan witnesses, source snapshot {manifest.snapshot.hash}"
 }
 
@@ -226,7 +226,7 @@ generation: fn(options: Options) -[FS, IO, Env, Exec, Time, Time.Wait]> Bool Err
         bundle: finding_bundle(found, identity, arm) ?? return Err(err)
         path: files.join(options.path, "{program.case_id}.repro.json")
         write_bundle(bundle, path) ?? return Err(err)
-        &stable.push(stable_digest(bundle) ?? return Err(err))
+        stable.push(stable_digest(bundle) ?? return Err(err))
         print("finding {program.case_id} {verdict.class} {construct} ({found.dropped.len()} instances dropped): {path}")
     }
     print("generated {programs.len()} programs from seed {options.seed}: {stable.len()} findings, stable digest {digest(stable.join("\n"))}")

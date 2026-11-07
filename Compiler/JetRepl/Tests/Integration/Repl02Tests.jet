@@ -23,7 +23,7 @@ use {
     reader: thread.spawn(() -> {
         bytes := [U8].repeat(0, 4096)
         loop {
-            count: if stdout.read(&bytes) == {
+            count: if stdout.read(bytes) == {
                 .Ok(count) -> count
                 .Err(_) -> { break }
             }
@@ -59,7 +59,7 @@ use {
         _: child.kill()
         _: child.wait()
     }
-    drop(^rx)
+    drop(rx)
     _: reader.join().ok()
     assert(latency.is_some(), "prompt missed 100ms interrupt bound: {transcript}")
 }
@@ -330,7 +330,7 @@ use {
     assert(rendered.trim_end().ends_with("Apply? [y/N]"), "got: {rendered}")
     pure_only: RerunPlan.build_replay_plan(turns, 1, none).map(p -> {
         p.steps.truncate(2)
-        ^p
+        p.move()
     })
     assert(!RerunPlan.plan_needs_confirmation(pure_only.unwrap()))
 }
@@ -596,7 +596,7 @@ use {
         out: run_transcript_with_flags(["use random: core.math.random", call], none, ["rand"], [])
         assert(!out.contains("error ["), "authorized call failed: {call}: {out}")
     }
-    shuffle: run_transcript_with_flags(["use random: core.math.random", "ys := [1, 2, 3, 4, 5]", "#FX(authority: Rand) {{ random.shuffle(&ys) }}"], none, ["rand"], [])
+    shuffle: run_transcript_with_flags(["use random: core.math.random", "ys := [1, 2, 3, 4, 5]", "#FX(authority: Rand) {{ random.shuffle(ys) }}"], none, ["rand"], [])
     assert(!shuffle.contains("error ["), "authorized shuffle failed: {shuffle}")
 }
 #Test("repl_core_fmt_dispatch") {

@@ -1,349 +1,294 @@
-// Payload-free browser rows relayed by jet dev.
+// Payload-free browser rows relayed by jet dev. `jet perf` reads the relay
+// (JetCli's Perf/BrowserCapture); this side only produces it and consumes the
+// collection request.
 use {
-    fs: std.fs
-    std.fs.[File, OpenOptions]
-    std.sync.[Mutex]
-    std.time.[Instant, SystemTime, UNIX_EPOCH]
-    std.collections.hash_map.[RandomState]
-    core.files.[OSPath]
-    core.sys.target.[selected_os, selected_family]
-    jet_foundation.Dyn.[Dyn]
-    hex: jet_foundation.Hex.encode
-    jet_foundation.JSON.[json_int, json_str, json_u32, parse]
-    jet_foundation.Report.[StatusEnvelope, StatusFields, STATUS_SCHEMA]
-    jetpack_foundation.[STATUS_SCHEMA, StatusEnvelope, StatusFields]
-    core.encoding.[Dyn]
+    browser_trace_files: core.files
+    browser_trace_sys: core.sys
+    browser_trace_time: core.time
+    browser_trace_random: core.crypto.random
+    browser_trace_hex: core.encoding.hex
+    jet_foundation.[foundation_json_quote]
 }
 
-ROW_LIMIT: 4096
-ENVELOPE_LIMIT: 512
-REQUEST_SCHEMA: "jet.browser.request.v1"
-RELAY_ACTION: "browser.relay"
-Row: struct { class: String; duration_ns: U64; start_ns: U64; symbol: String }
-Capture: struct { rows: [Row]; sources: [Source]; source_map: String?; truncated: Bool }
-Source: struct { path: String; sha256: String; symbols: [(String, String)] }
-Relay: struct { file: Mutex<File>; nonce: String; path: OSPath; rows: Mutex<Usize>; started: Instant }
+BROWSER_TRACE_ROW_LIMIT: Int{4096}
+BROWSER_TRACE_ENVELOPE_LIMIT: Int{512}
+BROWSER_TRACE_REQUEST_SCHEMA: String{"jet.browser.request.v1"}
+BROWSER_TRACE_RELAY_ACTION: String{"browser.relay"}
+BROWSER_TRACE_STATUS_SCHEMA: String{"jet.status/v1"}
 
-impl Relay {
-    new: fn(manifest: String) -> Self Err! {
-        // GATE #4494: owner-only atomic file creation, native locks and clock.
-        supported()
-        (sources, source_map): identity_from_manifest(manifest)
-        path: relay_path(std.process.id())
-        _: fs.remove_file(path)
-        options := OpenOptions.new()
-        options.write(true).create_new(true)
-        if selected_family() == "unix" -> options.mode(0o600)
-        file := options.open(path) ?? return .Err("cannot create browser trace relay: {err}")
-        nonce: nonce()
-        pid: std.process.id()
-        started: process_start_marker(pid) ?? return .Err("browser trace process identity cannot be verified")
-        fields := StatusFields.new()
-        fields.insert("nonce", nonce.copy()).expect("relay nonce field is unique")
-        fields.insert("pid", pid).expect("relay pid field is unique")
-        fields.insert("started", started.copy()).expect("relay started field is unique")
-        fields.insert("sources", hex(encode_sources(sources).as_bytes())).expect("relay sources field is unique")
-        if source_map.as_ref() == .Val(map) -> fields.insert("source_map", hex(map.as_bytes())).expect("relay source_map field is unique")
-        header: StatusEnvelope.new(RELAY_ACTION, true).with_fields(^fields).json()
-        file.write_all("{header}\n".as_bytes()) ?? return .Err("cannot initialize browser trace relay: {err}")
-        file.flush() ?? return .Err("cannot flush browser trace relay: {err}")
-        return Self { file: Mutex.new(^file), nonce: ^nonce, path: ^path, rows: Mutex.new(0), started: Instant.now() }
-    }
-    nonce: fn(self: Self) -> String { return self.nonce }
-    record: fn(self: &Self, body: &[U8]) RecordError! {
-        if body.len() > ENVELOPE_LIMIT -> return .Err(.Oversized)
-        body: std.str.from_utf8(body) ?? return .Err(.Malformed)
-        keys := body.split('&').map((part) -> part.split_once('=').map(((_0: key, _1: _)) -> key).unwrap_or(part)).collect()
-        keys.sort_unstable()
-        if keys != ["class", "clock_ns", "duration_ns", "start_ns", "symbol"] -> return .Err(.Malformed)
-        param: (name) -> query_param("?{body}", name)
-        class: param("class") ?? return .Err(.Malformed)
-        symbol: param("symbol") ?? return .Err(.Malformed)
-        if (class != "event" && class != "wasm" && class != "dom") || symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all((b) -> b == 95 || b == 36 || b.is_ascii_alphanumeric()) -> return .Err(.Malformed)
-        start: number(param("start_ns"))
-        duration: number(param("duration_ns"))
-        clock: number(param("clock_ns"))
-        if start > clock || duration > clock - start -> return .Err(.Malformed)
-        host_now: U64{self.started.elapsed().as_nanos().min(U128{U64.MAX})}
-        mapped_start: host_now.saturating_sub(clock - start)
-        rows := self.rows.lock() ?? return .Err(.Unavailable)
-        file := self.file.lock() ?? return .Err(.Unavailable)
-        if rows >= ROW_LIMIT {
-            if rows == ROW_LIMIT {
-                truncated: StatusEnvelope.new("browser.relay.truncated", true).json()
-                file.write_all("{truncated}\n".as_bytes()) ?? return .Err(.Unavailable)
-                file.flush() ?? return .Err(.Unavailable)
-                rows += 1
-            }
-            return ()
-        }
-        fields := StatusFields.new()
-        fields.insert("start_ns", mapped_start).expect("relay start_ns field is unique")
-        fields.insert("duration_ns", duration).expect("relay duration_ns field is unique")
-        fields.insert("class", ^class).expect("relay class field is unique")
-        fields.insert("symbol", ^symbol).expect("relay symbol field is unique")
-        row: StatusEnvelope.new("browser.relay.row", true).with_fields(^fields).json()
-        file.write_all("{row}\n".as_bytes()) ?? return .Err(.Unavailable)
-        file.flush() ?? return .Err(.Unavailable)
-        rows += 1
-        return ()
-    }
-}
-impl Relay.Drop {
-    drop: fn(self: &Self) { _: fs.remove_file(self.path) }
-}
 #Error
-RecordError: enum { Malformed; Oversized; Unavailable }
-read: fn(pid: U32) -> Capture Err! { supported()?; return read_with_process_state(pid, process_state(pid)) }
- ProcessState: enum { Alive(String); Dead; Unknown }
-read_with_process_state: fn(pid: U32, process: ProcessState) -> Capture Err! {
-    // GATE #4494: descriptor-backed no-follow open and native metadata ownership.
-    path: relay_path(pid)
-    link_metadata: fs.symlink_metadata(path) ?? return .Err("process {pid} has no browser trace relay")
-    if !link_metadata.file_type().is_file() -> return .Err("browser trace relay is not a regular file")
-    options := OpenOptions.new()
-    options.read(true)
-    if selected_os() == "linux" || selected_os() == "android" -> options.custom_flags(0o400000)
-    file: options.open(path) ?? return .Err("cannot securely open browser trace relay")
-    metadata: file.metadata() ?? return .Err("cannot inspect browser trace relay")
-    if !metadata.file_type().is_file() || metadata.len() > 1024 * 1024 -> return .Err("browser trace relay is not a bounded regular file")
-    if selected_family() == "unix" {
-        if metadata.permissions().mode().bit_and(0o077) != 0 -> return .Err("browser trace relay permissions expose session rows")
-        if selected_os() == "linux" || selected_os() == "android" {
-            if fs.metadata("/proc/self") == .Ok(self_metadata) {
-                if metadata.uid() != self_metadata.uid() -> return .Err("browser trace relay belongs to another user")
+BrowserTraceError: struct { message: String }
+
+browser_trace_error: fn(message: String) -> BrowserTraceError { BrowserTraceError{message: message} }
+
+BrowserTraceSymbol: struct {
+    name: String
+    kind: String
+}
+
+// One compiler-identified browser source and the symbols it defines.
+BrowserTraceSource: struct {
+    path: String
+    sha256: String
+    symbols: [BrowserTraceSymbol]
+}
+
+// The compiler trace identity a web manifest carries.
+BrowserTraceIdentity: struct {
+    sources: [BrowserTraceSource]
+    source_map: String?
+}
+
+// The owner-only relay file of this process; rows past the bound are dropped
+// after one truncation marker.
+BrowserTraceRelay: struct {
+    writer: FileWriter
+    nonce: String
+    path: String
+    rows: Int
+    started: Instant
+}
+impl BrowserTraceRelay {
+    new: fn(manifest: String) -> BrowserTraceRelay BrowserTraceError! {
+        browser_trace_supported()
+        identity: browser_trace_identity_from_manifest(manifest)
+        pid: browser_trace_sys.pid()
+        path: browser_trace_relay_path(pid)
+        browser_trace_remove_quietly(path)
+        started: browser_trace_process_start(pid) ?? return Err(browser_trace_error("browser trace process identity cannot be verified"))
+        nonce: browser_trace_random.token_hex(16) ?? return Err(browser_trace_error("cannot generate a browser trace relay nonce"))
+        writer := browser_trace_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(browser_trace_error("cannot create browser trace relay: {err}"))
+        fields := [String]{"\"nonce\":{foundation_json_quote(nonce)}", "\"pid\":{pid}", "\"started\":{foundation_json_quote(started)}", "\"sources\":{foundation_json_quote(browser_trace_hex.encode(browser_trace_encode_sources(identity.sources).bytes()))}"}
+        if identity.source_map == .Val(map) -> fields.push("\"source_map\":{foundation_json_quote(browser_trace_hex.encode(map.bytes()))}")
+        header: browser_trace_status_line(BROWSER_TRACE_RELAY_ACTION, fields)
+        writer.write_all(header.bytes()) ?? return Err(browser_trace_error("cannot initialize browser trace relay: {err}"))
+        writer.flush() ?? return Err(browser_trace_error("cannot flush browser trace relay: {err}"))
+        BrowserTraceRelay{writer: writer, nonce: nonce, path: path, rows: 0, started: browser_trace_time.instant()}
+    }
+
+    // Appends one beacon envelope `class=…&symbol=…&start_ns=…&duration_ns=…&clock_ns=…`,
+    // rebasing the page clock onto the relay's monotonic clock.
+    record: fn(&self, body: [U8]) BrowserTraceRecordError! {
+        if body.len() > BROWSER_TRACE_ENVELOPE_LIMIT -> return Err(BrowserTraceRecordError.Oversized)
+        text: String.from_bytes(body) ?? return Err(BrowserTraceRecordError.Malformed)
+        keys := [String]{}
+        loop part in text.split("&") -> keys.push(part.split("=").to_list()[0])
+        keys.sort()
+        expected: [String]{"class", "clock_ns", "duration_ns", "start_ns", "symbol"}
+        if keys != expected -> return Err(BrowserTraceRecordError.Malformed)
+        query: "?{text}"
+        class: query_param(query, "class") ?? return Err(BrowserTraceRecordError.Malformed)
+        symbol: query_param(query, "symbol") ?? return Err(BrowserTraceRecordError.Malformed)
+        if (class != "event" && class != "wasm" && class != "dom") || !browser_trace_symbol_ok(symbol) -> return Err(BrowserTraceRecordError.Malformed)
+        start: browser_trace_number(query_param(query, "start_ns"))
+        duration: browser_trace_number(query_param(query, "duration_ns"))
+        clock: browser_trace_number(query_param(query, "clock_ns"))
+        if start > clock || duration > clock - start -> return Err(BrowserTraceRecordError.Malformed)
+        host_now: (browser_trace_time.instant() - self.started).ns
+        mapped_start: if host_now > clock - start -> host_now - (clock - start) else -> 0
+        if self.rows >= BROWSER_TRACE_ROW_LIMIT {
+            if self.rows == BROWSER_TRACE_ROW_LIMIT {
+                self.append(browser_trace_status_line("browser.relay.truncated", [String]{}))
+                self.rows += 1
             }
+            return
         }
+        fields: [String]{"\"start_ns\":{mapped_start}", "\"duration_ns\":{duration}", "\"class\":{foundation_json_quote(class)}", "\"symbol\":{foundation_json_quote(symbol)}"}
+        self.append(browser_trace_status_line("browser.relay.row", fields))
+        self.rows += 1
     }
-    raw := ""
-    file.take(1024 * 1024 + 1).read_to_string(&raw) ?? return .Err("cannot read browser trace relay")
-    if raw.len() > 1024 * 1024 -> return .Err("browser trace relay exceeds 1 MiB")
-    lines := raw.lines()
-    header: lines.next() ?? return .Err("browser trace relay is empty")
-    (recorded_pid, started, sources, source_map): relay_header(header)
-    if process == .Unknown -> return .Err("browser trace process identity cannot be verified")
-    stale_process: if process == {
-        .Alive(current) -> current != started
-        .Dead -> true
-        .Unknown -> false
+
+    append: fn(&self, line: String) BrowserTraceRecordError! {
+        self.writer.write_all(line.bytes()) ?? return Err(BrowserTraceRecordError.Unavailable)
+        self.writer.flush() ?? return Err(BrowserTraceRecordError.Unavailable)
     }
-    if recorded_pid != pid || stale_process {
-        _: fs.remove_file(path)
-        return .Err("browser trace relay belongs to a stale process session")
+
+    // Ends the relay: the file is removed so no reader sees a stale session.
+    close: fn(self) { browser_trace_remove_quietly(self.path) }
+}
+
+// One shared status line: `{"schema":"jet.status/v1","action":…,"ok":true,"reports":[],…fields}`.
+browser_trace_status_line: fn(action: String, fields: [String]) -> String {
+    rendered := "{{\"schema\":{foundation_json_quote(BROWSER_TRACE_STATUS_SCHEMA)},\"action\":{foundation_json_quote(action)},\"ok\":true,\"reports\":[]"
+    loop field in fields -> rendered = "{rendered},{field}"
+    "{rendered}}}\n"
+}
+
+browser_trace_relay_path: fn(pid: Int) -> String { browser_trace_files.join(browser_trace_sys.temp_dir(), "jet-browser-trace-{pid}.relay") }
+
+browser_trace_request_path: fn(pid: Int) -> String { browser_trace_files.join(browser_trace_sys.temp_dir(), "jet-browser-trace-{pid}.request") }
+
+browser_trace_remove_quietly: fn(path: String) {
+    if browser_trace_files.remove(path) == {
+        .Err(_) -> {}
+        else -> {}
     }
-    rows := [Row]{}
-    truncated := false
-    loop line in lines {
-        if relay_status(line, "browser.relay.truncated").is_ok() { truncated = true; next }
-        (start_ns, duration_ns, class, symbol): relay_row(line)
-        if rows.len() >= ROW_LIMIT -> return .Err("browser trace relay exceeds its closed row schema")
-        rows.push(Row { class: ^class, duration_ns: duration_ns, start_ns: start_ns, symbol: ^symbol })
+}
+
+// Consumes `jet perf`'s collection request for this process. The request
+// names this process's start marker, so a request left by an earlier process
+// with the same id is refused.
+browser_trace_take_request: fn() -> Bool BrowserTraceError! {
+    browser_trace_supported()
+    pid: browser_trace_sys.pid()
+    path: browser_trace_request_path(pid)
+    if !browser_trace_files.exists(path) -> return false
+    raw: browser_trace_secure_read(path, 256, "browser trace request")
+    parts: raw.trim().split("\t").to_list()
+    current: browser_trace_process_start(pid) ?? return Err(browser_trace_error("browser trace process identity cannot be verified"))
+    valid: parts.len() == 3 && parts[0] == BROWSER_TRACE_REQUEST_SCHEMA && parts[1] == "{pid}" && parts[2] == current
+    browser_trace_remove_quietly(path)
+    if !valid -> return Err(browser_trace_error("browser trace request belongs to a stale process session"))
+    true
+}
+
+browser_trace_supported: fn() BrowserTraceError! {
+    platform: browser_trace_sys.name()
+    if platform != "linux" && platform != "android" -> return Err(browser_trace_error("browser trace relay requires verified process and file ownership"))
+}
+
+// Reads a private regular file of this user without following a final link.
+browser_trace_secure_read: fn(path: String, limit: Int, label: String) -> String BrowserTraceError! {
+    entry: browser_trace_files.lstat(path) ?? return Err(browser_trace_error("{label} is unavailable"))
+    if !entry.is_file || entry.is_symlink -> return Err(browser_trace_error("{label} is not a regular file"))
+    reader := browser_trace_files.open(path, links: .Refuse) ?? return Err(browser_trace_error("cannot securely open {label}"))
+    metadata: reader.stat() ?? return Err(browser_trace_error("cannot inspect {label}"))
+    if browser_trace_sys.is_unix() {
+        if metadata.mode.bit_and(0o077) != 0 -> return Err(browser_trace_error("{label} permissions expose session data"))
+        if metadata.owner != Val(browser_trace_sys.getuid()) -> return Err(browser_trace_error("{label} belongs to another user"))
     }
-    return Capture { rows: ^rows, sources: ^sources, source_map: ^source_map, truncated: truncated }
-}
-relay_path: fn(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-browser-trace-{pid}.relay") }
-request_path: fn(pid: U32) -> OSPath { return std.env.temp_dir().join("jet-browser-trace-{pid}.request") }
-request: fn(pid: U32) Err! {
-    supported()
-    started: if process_state(pid) == {
-        .Alive(started) -> ^started
-        else -> { return .Err("process {pid} identity cannot be verified") }
+    if !metadata.is_file || metadata.size > limit -> return Err(browser_trace_error("{label} is not bounded"))
+    bytes := [U8]{}
+    loop {
+        chunk: reader.read(limit + 1 - bytes.len()) ?? return Err(browser_trace_error("cannot read {label}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> bytes.push(byte)
+        if bytes.len() > limit -> return Err(browser_trace_error("{label} exceeds its limit"))
     }
-    path: request_path(pid)
-    _: fs.remove_file(path)
-    options := OpenOptions.new()
-    options.write(true).create_new(true)
-    if selected_family() == "unix" -> options.mode(0o600)
-    file := options.open(path) ?? return .Err("cannot request browser trace collection: {err}")
-    file.write_all("{REQUEST_SCHEMA}\t{pid}\t{started}\n".as_bytes()) ?? return .Err("cannot write browser trace request: {err}")
-    file.flush() ?? return .Err("cannot flush browser trace request: {err}")
-    return ()
+    String.from_bytes(bytes) ?? Err(browser_trace_error("{label} is not UTF-8"))
 }
-take_request: fn() -> Bool Err! {
-    supported()
-    pid: std.process.id()
-    path: request_path(pid)
-    if !path.exists() -> return false
-    raw: secure_read(path, 256, "browser trace request")
-    parts := raw.trim_end().split('\t')
-    current: process_start_marker(pid) ?? return .Err("browser trace process identity cannot be verified")
-    pid_text: pid.to_string()
-    valid: parts.next() == .Val(REQUEST_SCHEMA) && parts.next() == Val((pid_text)) && parts.next() == Val((current)) && parts.next().is_none()
-    _: fs.remove_file(path)
-    if !valid -> return .Err("browser trace request belongs to a stale process session")
-    return true
-}
-cancel_request: fn(pid: U32) { _: fs.remove_file(request_path(pid)) }
-supported: fn() Err! {
-    if selected_os() == "linux" || selected_os() == "android" -> return ()
-    return .Err("browser trace relay requires verified process and file ownership")
-}
-secure_read: fn(path: OSPath, limit: U64, label: String) -> String Err! {
-    link: fs.symlink_metadata(path) ?? return .Err("{label} is unavailable")
-    if !link.file_type().is_file() -> return .Err("{label} is not a regular file")
-    options := OpenOptions.new()
-    options.read(true)
-    if selected_os() == "linux" || selected_os() == "android" -> options.custom_flags(0o400000)
-    file: options.open(path) ?? return .Err("cannot securely open {label}")
-    metadata: file.metadata() ?? return .Err("cannot inspect {label}")
-    if selected_family() == "unix" {
-        if metadata.permissions().mode().bit_and(0o077) != 0 -> return .Err("{label} permissions expose session data")
-        self_metadata: fs.metadata("/proc/self") ?? return .Err("cannot verify browser trace owner")
-        if metadata.uid() != self_metadata.uid() -> return .Err("{label} belongs to another user")
-    }
-    if !metadata.is_file() || metadata.len() > limit -> return .Err("{label} is not bounded")
-    raw := ""
-    file.take(limit + 1).read_to_string(&raw) ?? return .Err("cannot read {label}")
-    if (U64{raw.len()}) > limit -> return .Err("{label} exceeds its limit")
-    return ^raw
-}
-sources_from_manifest: fn(manifest: String) -> [Source] Err! { return identity_from_manifest(manifest)?._0 }
-identity_from_manifest: fn(manifest: String) -> ([Source], String?) Err! {
-    key: "\"traceMap\": \""
-    start: manifest.find(key).map((index) -> index + key.len()) ?? return .Err("web manifest has no compiler trace map")
-    end: manifest[start..<manifest.len()].find('"').map((index) -> start + index) ?? return .Err("web manifest trace map is malformed")
-    sources: decode_sources(unhex(manifest[start..end])?)
-    map_key: "\"sourceMap\": \""
-    source_map: if manifest.find(map_key) == {
-        .Val(index) -> {
-            start: index + map_key.len()
-            end: manifest[start..<manifest.len()].find('"').map((index) -> start + index) ?? return .Err("web manifest source map is malformed")
-            .Val(unhex(manifest[start..end])?)
-        }
-        .None -> None
-    }
-    return (_0: ^sources, _1: ^source_map)
-}
-encode_sources: fn(sources: [Source]) -> String {
-    lines := [String]{}
-    loop source in sources {
-        lines.push("source\t{hex(source.path.as_bytes())}\t{source.sha256}")
-        loop (name, kind) in source.symbols -> lines.push("symbol\t{hex(source.path.as_bytes())}\t{hex(name.as_bytes())}\t{kind}")
-    }
-    lines.sort()
-    return lines.join("\n")
-}
-decode_sources: fn(text: String) -> [Source] Err! {
-    sources := [Source]{}
-    symbols := [(String, String, String)]{}
-    loop line in text.lines() {
-        parts := line.split('\t')
-        if parts.next() == {
-            .Val(lit0) && lit0 == "source" -> {
-                path: unhex(parts.next() ?? return .Err("trace source path is missing"))
-                sha256: (parts.next() ?? return .Err("trace source hash is missing")).to_string()
-                if parts.next().is_some() || sha256.len() != 64 || !sha256.bytes().all((byte) -> byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()) -> return .Err("compiler trace source identity is malformed")
-                sources.push(Source { path: ^path, sha256: ^sha256, symbols: [] })
-            }
-            .Val(lit0) && lit0 == "symbol" -> {
-                path: unhex(parts.next() ?? return .Err("trace symbol path is missing"))
-                name: unhex(parts.next() ?? return .Err("trace symbol name is missing"))
-                kind: (parts.next() ?? return .Err("trace symbol kind is missing")).to_string()
-                if parts.next().is_some() || name.is_empty() || (kind != "fn" && kind != "handler") -> return .Err("compiler trace symbol identity is malformed")
-                symbols.push((_0: ^path, _1: ^name, _2: ^kind))
-            }
-            else -> { return .Err("compiler trace map row is malformed") }
-        }
-    }
-    if sources.is_empty() -> return .Err("compiler trace map has no sources")
-    // Index first occurrence exactly as Rust find(), without repeated source scans.
-    by_path := [String:Usize]{}
-    loop (i, source) in sources.iter().enumerate() {
-        if !by_path.contains_key(source.path) -> by_path[source.path.copy()] = i
-    }
-    names := [String:Bool]{}
-    for (path, name, kind) in symbols {
-        if names.contains_key(name) -> return .Err("compiler trace symbol `{name}` is ambiguous")
-        i: by_path.get(path) ?? return .Err("compiler trace symbol names an unknown source")
-        names[name.copy()] = true
-        sources[i].symbols.push((^name, ^kind))
-    }
-    return ^sources
-}
-number: fn(value: String?) -> U64 RecordError! {
-    value: value ?? return .Err(.Malformed)
-    return U64.parse(value) ?? return .Err(.Malformed)
-}
-relay_status: fn(line: String, action: String) -> Dyn Err! {
-    value: parse(line) ?? return .Err("browser trace relay record is malformed")
-    object: object_map(value)
-    if object.get("schema").and_then(json_str) != .Val(STATUS_SCHEMA) || object.get("action").and_then(json_str) != .Val(action) || object.get("ok") != .Val(.Bool(true)) || object.get("reports") != .Val(.Array(_)) || object.contains_key("status") -> return .Err("browser trace relay record is not a shared status")
-    return ^value
-}
-relay_row: fn(line: String) -> (U64, U64, String, String) Err! {
-    value: relay_status(line, "browser.relay.row")
-    object: object_map(value)
-    start_ns: object.get("start_ns").and_then(json_int).and_then((value) -> U64.try_from(value).ok()) ?? return .Err("browser trace relay start is malformed")
-    duration_ns: object.get("duration_ns").and_then(json_int).and_then((value) -> U64.try_from(value).ok()) ?? return .Err("browser trace relay duration is malformed")
-    class: (object.get("class").and_then(json_str) ?? return .Err("browser trace relay class is missing")).to_owned()
-    symbol: (object.get("symbol").and_then(json_str) ?? return .Err("browser trace relay symbol is missing")).to_owned()
-    if (class != "event" && class != "wasm" && class != "dom") || symbol.is_empty() || symbol.len() > 128 || !symbol.bytes().all((b) -> b == 95 || b == 36 || b.is_ascii_alphanumeric()) -> return .Err("browser trace relay row is malformed")
-    return (_0: start_ns, _1: duration_ns, _2: ^class, _3: ^symbol)
-}
-relay_header: fn(header: String) -> (U32, String, [Source], String?) Err! {
-    value: relay_status(header, RELAY_ACTION)
-    object: object_map(value)
-    _nonce: object.get("nonce").and_then(json_str).filter((value) -> !value.is_empty()) ?? return .Err("browser trace relay nonce is missing")
-    recorded_pid: object.get("pid").and_then(json_u32) ?? return .Err("browser trace relay process id is missing")
-    started: (object.get("started").and_then(json_str).filter((value) -> !value.is_empty()) ?? return .Err("browser trace relay process identity is missing")).to_owned()
-    sources: object.get("sources").and_then(json_str) ?? return .Err("browser trace relay source map is missing")
-    sources := decode_sources(unhex(sources)?)
-    source_map: object.get("source_map").map((value) -> {
-        text: json_str(value) ?? return .Err("browser trace relay source map is malformed")
-        unhex(text)
-    }).transpose()
-    return (_0: recorded_pid, _1: ^started, _2: ^sources, _3: ^source_map)
-}
-nonce: fn() -> String {
-    // GATE #4494: randomized native hash state, process ID and system clock.
-    state: RandomState.new()
-    seed: SystemTime.now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()
-    out := ""
-    loop domain in [(U64{0}), 1] {
-        hasher := state.build_hasher()
-        hasher.write_u128(seed)
-        hasher.write_u32(std.process.id())
-        hasher.write_u64(domain)
-        out.push_str(format("{{:016x}}", hasher.finish()))
-    }
-    return ^out
-}
-process_start_marker: fn(pid: U32) -> String? {
-    if selected_os() == "linux" || selected_os() == "android" {
-        stat: fs.read_to_string("/proc/{pid}/stat").ok()
-        (_, rest): stat.rsplit_once(") ")
-        fields: rest.split_whitespace().collect()
-        return fields.get(19).map((value) -> value.to_string())
-    }
-    return None
-}
-object_map: fn(value: Dyn) -> [String:Dyn] Err! {
-    fields: if value == {
-        .Object(fields) -> fields
-        else -> { return .Err("browser trace relay record must be an object") }
-    }
-    return fields.iter().map(((_0: key, _1: value)) -> (key.copy(), value.copy())).collect()
-}
-process_state: fn(pid: U32) -> ProcessState {
-    if selected_os() == "linux" || selected_os() == "android" {
-        path: OSPath.from("/proc/{pid}")
-        if !path.exists() -> return .Dead
-        return process_start_marker(pid).map((start) -> ProcessState.Alive(^start)).unwrap_or(.Unknown)
-    }
-    return .Unknown
-}
-unhex: fn(text: String) -> String Err! {
-    if text.len() % 2 != 0 -> return .Err("browser trace relay source encoding is malformed")
-    digit: (byte) -> {
-        if byte >= 48 && byte <= 57 -> .Val(byte - 48)
-        else if byte >= 97 && byte <= 102 -> .Val(byte - 97 + 10)
+
+// The compiler trace map and optional source map the web manifest carries,
+// both hex-encoded.
+browser_trace_identity_from_manifest: fn(manifest: String) -> BrowserTraceIdentity BrowserTraceError! {
+    trace_field: browser_trace_manifest_field(manifest, "\"traceMap\": \"", "trace map")
+    trace: trace_field ?? return Err(browser_trace_error("web manifest has no compiler trace map"))
+    sources: browser_trace_decode_sources(browser_trace_unhex(trace))
+    map_field: browser_trace_manifest_field(manifest, "\"sourceMap\": \"", "source map")
+    source_map: if map_field == {
+        .Val(map) -> Val(browser_trace_unhex(map))
         else -> None
     }
-    bytes := [U8].with_capacity(text.len() / 2)
-    loop pair in text.as_bytes().chunks_exact(2) {
-        a: digit(pair[0]) ?? return .Err("browser trace relay source encoding is malformed")
-        b: digit(pair[1]) ?? return .Err("browser trace relay source encoding is malformed")
-        bytes.push(a * 16 + b)
+    BrowserTraceIdentity{sources: sources, source_map: source_map}
+}
+
+// The quoted value after the first `key`: None when the key is absent, an
+// error when its closing quote is missing.
+browser_trace_manifest_field: fn(manifest: String, key: String, label: String) -> String? BrowserTraceError! {
+    after: manifest.split(key).to_list()
+    if after.len() < 2 -> return None
+    rest: after[1..after.len() - 1].join(key)
+    value: rest.split("\"").to_list()
+    if value.len() < 2 -> return Err(browser_trace_error("web manifest {label} is malformed"))
+    Val(value[0])
+}
+
+browser_trace_encode_sources: fn(sources: [BrowserTraceSource]) -> String {
+    lines := [String]{}
+    loop source in sources {
+        path: browser_trace_hex.encode(source.path.bytes())
+        lines.push("source\t{path}\t{source.sha256}")
+        loop symbol in source.symbols -> lines.push("symbol\t{path}\t{browser_trace_hex.encode(symbol.name.bytes())}\t{symbol.kind}")
     }
-    return String.from_utf8(^bytes) ?? return .Err("browser trace relay source is not UTF-8")
+    lines.sort()
+    lines.join("\n")
+}
+
+// Source rows `source\t<hex path>\t<sha256>` precede nothing in particular;
+// symbol rows `symbol\t<hex path>\t<hex name>\t<fn|handler>` attach to the
+// first source with that path, and a symbol name is unique across sources.
+browser_trace_decode_sources: fn(text: String) -> [BrowserTraceSource] BrowserTraceError! {
+    sources := [BrowserTraceSource]{}
+    pending := [(path: String, symbol: BrowserTraceSymbol)]{}
+    lines: text.split("\n").to_list()
+    loop index in 0..<lines.len() {
+        line: lines[index]
+        if line == "" && index == lines.len() - 1 -> break
+        parts: line.split("\t").to_list()
+        if parts.len() == 3 && parts[0] == "source" {
+            sha256: parts[2]
+            if !browser_trace_lower_hex(sha256) || sha256.bytes().len() != 64 -> return Err(browser_trace_error("compiler trace source identity is malformed"))
+            sources.push(BrowserTraceSource{path: browser_trace_unhex(parts[1]), sha256: sha256, symbols: [BrowserTraceSymbol]{}})
+        } else if parts.len() == 4 && parts[0] == "symbol" {
+            name: browser_trace_unhex(parts[2])
+            if name == "" || (parts[3] != "fn" && parts[3] != "handler") -> return Err(browser_trace_error("compiler trace symbol identity is malformed"))
+            pending.push((path: browser_trace_unhex(parts[1]), symbol: BrowserTraceSymbol{name: name, kind: parts[3]}))
+        } else {
+            return Err(browser_trace_error("compiler trace map row is malformed"))
+        }
+    }
+    if sources.len() == 0 -> return Err(browser_trace_error("compiler trace map has no sources"))
+    by_path := [String: Int]{}
+    loop index in 0..<sources.len() {
+        if !by_path.has_key(sources[index].path) -> by_path[sources[index].path] = index
+    }
+    names := [String: Bool]{}
+    loop row in pending {
+        if names.has_key(row.symbol.name) -> return Err(browser_trace_error("compiler trace symbol `{row.symbol.name}` is ambiguous"))
+        index: by_path.get(row.path) ?? return Err(browser_trace_error("compiler trace symbol names an unknown source"))
+        names[row.symbol.name] = true
+        sources[index].symbols.push(row.symbol)
+    }
+    sources
+}
+
+browser_trace_number: fn(value: String?) -> Int BrowserTraceRecordError! {
+    text: value ?? return Err(BrowserTraceRecordError.Malformed)
+    number: Int.parse(text) ?? return Err(BrowserTraceRecordError.Malformed)
+    if number < 0 -> return Err(BrowserTraceRecordError.Malformed)
+    number
+}
+
+// A browser symbol: 1 to 128 bytes of ASCII letters, digits, `_` or `$`.
+browser_trace_symbol_ok: fn(value: String) -> Bool {
+    bytes: value.bytes()
+    if bytes.len() == 0 || bytes.len() > 128 -> return false
+    loop byte in bytes {
+        digit: byte >= U8{48} && byte <= U8{57}
+        upper: byte >= U8{65} && byte <= U8{90}
+        lower: byte >= U8{97} && byte <= U8{122}
+        mark: byte == U8{95} || byte == U8{36}
+        if !digit && !upper && !lower && !mark -> return false
+    }
+    true
+}
+
+browser_trace_lower_hex: fn(value: String) -> Bool {
+    loop byte in value.bytes() {
+        digit: byte >= U8{48} && byte <= U8{57}
+        letter: byte >= U8{97} && byte <= U8{102}
+        if !digit && !letter -> return false
+    }
+    true
+}
+
+// Lowercase hexadecimal UTF-8 text; uppercase digits are refused.
+browser_trace_unhex: fn(text: String) -> String BrowserTraceError! {
+    if !browser_trace_lower_hex(text) -> return Err(browser_trace_error("browser trace relay source encoding is malformed"))
+    bytes: browser_trace_hex.decode(text) ?? return Err(browser_trace_error("browser trace relay source encoding is malformed"))
+    String.from_bytes(bytes) ?? Err(browser_trace_error("browser trace relay source is not UTF-8"))
+}
+
+// The start-time field of `/proc/<pid>/stat`: the 20th field after the
+// command name, whose last `) ` closes it.
+browser_trace_process_start: fn(pid: Int) -> String? {
+    stat: browser_trace_files.read("/proc/{pid}/stat") ?? return None
+    parts: stat.split(") ").to_list()
+    if parts.len() < 2 -> return None
+    fields := [String]{}
+    loop field in parts[parts.len() - 1].split(" ") {
+        if field != "" -> fields.push(field)
+    }
+    if fields.len() <= 19 -> return None
+    Val(fields[19])
 }

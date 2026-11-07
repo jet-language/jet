@@ -1,0 +1,15 @@
+# D-CHANNEL-AUTO2=A: when the freshness lookup fails, the row still names the locked exact version and says `unknown`, never `current`.
+# CI=1 forbids the network lookup and the fixture has no row for the channel, so resolution fails.
+fixture: outdated_labels_freshness_unknown_when_lookup_fails.fixture
+env: CI=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+copy: project/env.jet env.before
+copy: project/.jet/lock lock.before
+step: jetpack outdated --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 2
+stderr: ~ "github:acme/tools#v1.2.0  unknown" # the row names the locked version and an unknown freshness
+stderr: !~ "current" # a failed lookup is not evidence of freshness
+file: project/.jet/lock == lock.before
+file: project/env.jet == env.before

@@ -1,8 +1,8 @@
 Error [jet.ImmutableAssignment]: `tensor` was made with `:`, so it can't be changed
-  --> tests/ui/compute_set_immutable.jet:5:18
+  --> tests/ui/compute_set_immutable.jet:5:17
     |
-  5 |     compute.set(&tensor, [0, 1], 3.0) ?? panic("set")
-    |                  ^^^^^^
- Why: `set` will change this value, so it must be mutable (`:=`)
+  5 |     compute.set(tensor, [0, 1], 3.0) ?? panic("set")
+    |                 ^^^^^^
+ Why: `set: fn(tensor: &Tensor, index: [Int], value: Float)` changes this input, so `tensor` must be mutable (`:=`)
  Fix: Declare it with `tensor := ...`
 More: jet-lang.dev/e/E0111

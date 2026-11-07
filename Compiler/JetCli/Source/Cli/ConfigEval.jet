@@ -9,9 +9,9 @@
 // program in `JetDriverCompileMode.Comptime`, whose comptime stage lowers the
 // `comptime` value to IR and runs it natively in the sealed comptime child
 // (JetEval IR/Native.jet); the checked value is read
-// back as a `CtValue`. Inside `jet` the environment model evaluates through
-// `comptime_evaluate` below; `jetpack` reaches the same evaluator through
-// `jet __jetpack comptime-evaluate` (JetpackService.jet).
+// back as a `CtValue`. The environment model reaches this evaluator through
+// `jet __jetpack comptime-evaluate` (JetpackService.jet), in `jet` and in
+// `jetpack` alike.
 use {
     config_files: core.files
     jet_driver.[
@@ -24,36 +24,17 @@ use {
         jet_driver_compile,
     ]
     jet_foundation.[
-        ComptimeEvalError,
-        CtValue,
         DIAGNOSTIC_ERROR,
-        Expr,
-        Func,
         JET_CONFIG_VALUE_FILE,
         JET_CONFIG_VALUE_NAME,
         JetConfigOutcome,
         diagnostic_from_registry,
         jet_config_eval_diagnostic,
-        jet_config_eval_placed,
-        jet_config_plain_literal,
     ]
-    jet_parser.[jet_config_program]
     jet_sema.[
         SemaComptimeItemKind,
         sema_user_template_ct_value,
     ]
-}
-
-// Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
-// readable. A plain literal is already its value; every other expression
-// runs through the driver's comptime stage.
-comptime_evaluate: fn(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -> CtValue ComptimeEvalError! {
-    if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
-    program: jet_config_program(expr, source, funcs, globals) ?? return Err(err)
-    if jet_config_evaluate_program(program, base_dir) == {
-        .Value(value) -> Ok(value)
-        .Refused(diagnostic) -> Err(jet_config_eval_placed(expr, diagnostic))
-    }
 }
 
 jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigOutcome {
@@ -94,6 +75,6 @@ jet_config_compile: fn(program: String, core_sources: [JetDriverCoreSource], bas
         entry_path: path,
     }
     request := jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Comptime)
-    jet_driver_compile(^request)
+    jet_driver_compile(request)
 }
 

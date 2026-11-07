@@ -116,37 +116,37 @@ TargetSpec: struct {
 
     with_source: fn(self, path: String) -> TargetSpec Never! {
         updated := self
-        &updated.sources.push(path)
+        updated.sources.push(path.copy())
         updated
     }
 
     with_input: fn(self, path: String) -> TargetSpec Never! {
         updated := self
-        &updated.inputs.push(path)
+        updated.inputs.push(path.copy())
         updated
     }
 
     with_output: fn(self, path: String) -> TargetSpec Never! {
         updated := self
-        &updated.outputs.push(path)
+        updated.outputs.push(path.copy())
         updated
     }
 
     with_dep: fn(self, target: TargetRef) -> TargetSpec Never! {
         updated := self
-        &updated.deps.push(target)
+        updated.deps.push(target.copy())
         updated
     }
 
     with_action: fn(self, action: HermeticActionHandle) -> TargetSpec Never! {
         updated := self
-        &updated.actions.push(action)
+        updated.actions.push(action.copy())
         updated
     }
 
     with_probe: fn(self, probe: ProbeHandle) -> TargetSpec Never! {
         updated := self
-        &updated.probes.push(probe)
+        updated.probes.push(probe.copy())
         updated
     }
 
@@ -291,13 +291,13 @@ ActionSpec: struct {
 
     with_inputs: fn(self, paths: [String]) -> ActionSpec Never! {
         updated := self
-        loop path in paths -> &updated.inputs.push(path)
+        loop path in paths -> updated.inputs.push(path.copy())
         updated
     }
 
     with_outputs: fn(self, paths: [String]) -> ActionSpec Never! {
         updated := self
-        loop path in paths -> &updated.outputs.push(path)
+        loop path in paths -> updated.outputs.push(path.copy())
         updated
     }
 
@@ -309,7 +309,7 @@ ActionSpec: struct {
 
     with_env_allowlist: fn(self, keys: [String]) -> ActionSpec Never! {
         updated := self
-        loop key in keys -> build_insert_sorted_text(&updated.env_allowlist, key)
+        loop key in keys -> build_insert_sorted_text(updated.env_allowlist, key)
         updated
     }
 
@@ -327,7 +327,7 @@ ActionSpec: struct {
 
     with_cap: fn(self, cap: BuildEffect) -> ActionSpec Never! {
         updated := self
-        build_insert_effect(&updated.caps, cap)
+        build_insert_effect(updated.caps, cap)
         updated
     }
 
@@ -339,7 +339,7 @@ ActionSpec: struct {
 
     with_probe: fn(self, probe: ProbeHandle) -> ActionSpec Never! {
         updated := self
-        &updated.probes.push(probe)
+        updated.probes.push(probe.copy())
         updated
     }
 
@@ -357,7 +357,7 @@ ActionSpec: struct {
 
     with_pool: fn(self, pool: BuildResourcePool) -> ActionSpec Never! {
         updated := self
-        build_insert_pool(&updated.resource_pools, pool)
+        build_insert_pool(updated.resource_pools, pool)
         updated
     }
 
@@ -391,15 +391,15 @@ HermeticBuildAction: struct {
 // Rust `BTreeSet<String>::insert`.
 build_insert_sorted_text: fn(values: &[String], value: String) Never! {
     if values.contains(value) -> return
-    &values.push(value)
-    &values.sort()
+    values.push(value.copy())
+    values.sort()
 }
 
 // Rust `BTreeSet<BuildCapability>::insert`.
 build_insert_effect: fn(values: &[BuildEffect], ability: BuildEffect) Never! {
     if values.contains(ability) -> return
-    &values.push(ability)
-    &values.sort_by(written -> written.rank())
+    values.push(ability.copy())
+    values.sort_by(written -> written.rank())
 }
 
 // Rust `BTreeSet<BuildResourcePool>::insert`.
@@ -407,8 +407,8 @@ build_insert_pool: fn(values: &[BuildResourcePool], pool: BuildResourcePool) Nev
     loop existing in values {
         if existing == pool -> return
     }
-    &values.push(pool)
-    &values.sort_by((left: BuildResourcePool, right: BuildResourcePool) -> if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank())
+    values.push(pool.copy())
+    values.sort_by((left: BuildResourcePool, right: BuildResourcePool) -> if left.rank() == right.rank() -> left.as_str() <=> right.as_str() else -> left.rank() <=> right.rank())
 }
 
 LockRecord: struct {
@@ -582,7 +582,7 @@ ToolchainSpec: struct {
 
     with_read_only_mount_identity: fn(self, source: String, destination: String, identity: String) -> ToolchainSpec Never! {
         updated := self
-        &updated.mounts.push(BuildMount{source, destination, identity})
+        updated.mounts.push(BuildMount{source, destination, identity})
         updated
     }
 }

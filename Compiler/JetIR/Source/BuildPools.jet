@@ -46,58 +46,58 @@ ir_pool_id_carrier: fn() -> Type Never! {
 }
 
 ir_pool_shape: fn(m: &IRModule, p: IRProgram, inner: Type) -> IRPoolShape? Never! {
-    entry: ir_value_type(&m, p, ir_pool_entry_type(inner.copy())) ?? return None
-    generation: ir_member_of_row(&m, p, entry, "generation") ?? return None
-    value: ir_member_of_row(&m, p, entry, "value") ?? return None
-    element: ir_value_type(&m, p, inner) ?? return None
-    id: ir_value_type(&m, p, ir_pool_id_carrier()) ?? return None
-    id_index: ir_member_of_row(&m, p, id, "index") ?? return None
-    id_generation: ir_member_of_row(&m, p, id, "generation") ?? return None
+    entry: ir_value_type(m, p, ir_pool_entry_type(inner.copy())) ?? return None
+    generation: ir_member_of_row(m, p, entry, "generation") ?? return None
+    value: ir_member_of_row(m, p, entry, "value") ?? return None
+    element: ir_value_type(m, p, inner) ?? return None
+    id: ir_value_type(m, p, ir_pool_id_carrier()) ?? return None
+    id_index: ir_member_of_row(m, p, id, "index") ?? return None
+    id_generation: ir_member_of_row(m, p, id, "generation") ?? return None
     Val(IRPoolShape{entry: entry, generation: generation.offset, value: value.offset, option: value.ty, element: element, id: id, id_index: id_index.offset, id_generation: id_generation.offset})
 }
 
 // `Pool<T>.new()`: no entries.
 ir_pool_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    ir_list_empty(&m, &b, row)
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    ir_list_empty(m, b, row)
 }
 
 // `pool.add(value)`, `pool.remove(id)` and `pool.ids()`.
 ir_pool_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, method: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
-    inner: ir_pool_inner(receiver_ty) ?? return ir_fail_slot(&b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
-    shape: ir_pool_shape(&m, p, inner) ?? return ir_type_fail(&b, span, receiver_ty)
-    if method == "add" && args.len() == 1 -> return ir_pool_add(&m, p, &b, shape, receiver, args[0], span)
-    if method == "remove" && args.len() == 1 -> return ir_pool_remove(&m, p, &b, shape, receiver, args[0], span)
-    if method == "ids" && args.len() == 0 -> return ir_pool_ids(&m, p, &b, ty, shape, receiver, span)
-    ir_fail_slot(&b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
+    inner: ir_pool_inner(receiver_ty) ?? return ir_fail_slot(b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
+    shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, receiver_ty)
+    if method == "add" && args.len() == 1 -> return ir_pool_add(m, p, b, shape, receiver, args[0], span)
+    if method == "remove" && args.len() == 1 -> return ir_pool_remove(m, p, b, shape, receiver, args[0], span)
+    if method == "ids" && args.len() == 0 -> return ir_pool_ids(m, p, b, ty, shape, receiver, span)
+    ir_fail_slot(b, span, "Pool method {method} on {ir_type_name(receiver_ty)}")
 }
 
 // Fresh frame storage for a pool entry or an ID of type row `row`.
 ir_pool_record: fn(m: &IRModule, b: &IRBuilder, row: Int) -> Int Never! {
-    storage: ir_fresh_temp(&m, &b, row)
-    ir_emit(&b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
+    storage: ir_fresh_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, storage, m.types[row].size, 8, -1, b.line)
     storage
 }
 
 // A new entry of generation 0 holding the value; its ID names the slot.
 ir_pool_add: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRPoolShape, receiver: Int, argument: Int, span: Span) -> Int Never! {
-    pool: ir_expr(&m, p, &b, receiver)
+    pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
-    value: ir_value_as(&m, p, &b, argument, shape.element, span)
+    value: ir_value_as(m, p, b, argument, shape.element, span)
     if ir_failed(b) -> return -1
-    owned: ir_own(&m, p, &b, value)
+    owned: ir_own(m, p, b, value)
     element_size: m.types[shape.element].size
-    made: ir_option_make(&m, p, &b, shape.option, owned, element_size)
-    entry: ir_pool_record(&m, &b, shape.entry)
-    zero: ir_word_const(&m, &b, 0)
-    ir_emit(&b.f, IROp.Store, -1, entry, shape.generation, zero, b.line)
-    ir_store_at(&m, p, &b, entry, shape.value, made)
-    index: ir_load_word(&m, &b, pool, 0)
-    ir_list_push(&m, p, &b, pool, shape.entry, entry)
-    id: ir_pool_record(&m, &b, shape.id)
-    ir_emit(&b.f, IROp.Store, -1, id, shape.id_index, index, b.line)
-    ir_emit(&b.f, IROp.Store, -1, id, shape.id_generation, zero, b.line)
+    made: ir_option_make(m, p, b, shape.option, owned, element_size)
+    entry: ir_pool_record(m, b, shape.entry)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, entry, shape.generation, zero, b.line)
+    ir_store_at(m, p, b, entry, shape.value, made)
+    index: ir_load_word(m, b, pool, 0)
+    ir_list_push(m, p, b, pool, shape.entry, entry)
+    id: ir_pool_record(m, b, shape.id)
+    ir_emit(b.f, IROp.Store, -1, id, shape.id_index, index, b.line)
+    ir_emit(b.f, IROp.Store, -1, id, shape.id_generation, zero, b.line)
     id
 }
 
@@ -109,81 +109,81 @@ IRPoolEntry: struct {
 }
 
 ir_pool_find: fn(m: &IRModule, b: &IRBuilder, shape: IRPoolShape, pool: Int, id: Int) -> IRPoolEntry Never! {
-    word_row: ir_word_row(&m)
-    index: ir_load_at(&m, &b, id, shape.id_index, word_row)
-    generation: ir_load_at(&m, &b, id, shape.id_generation, word_row)
-    length: ir_load_word(&m, &b, pool, 0)
-    data: ir_load_word(&m, &b, pool, 16)
+    word_row: ir_word_row(m)
+    index: ir_load_at(m, b, id, shape.id_index, word_row)
+    generation: ir_load_at(m, b, id, shape.id_generation, word_row)
+    length: ir_load_word(m, b, pool, 0)
+    data: ir_load_word(m, b, pool, 16)
     stride: ir_list_stride(m, shape.entry)
-    entry: ir_element_address(&m, &b, data, index, stride)
-    bool_row: ir_type_row(&m, Type.Bool) ?? 0
-    live: ir_temp(&m, &b, bool_row)
-    ir_emit(&b.f, IROp.Const, live, 0, -1, -1, b.line)
-    inside: ir_index_order(&m, &b, IROp.Lt, index, length)
-    ir_open_if(&b.f, inside, b.line)
-    held: ir_load_at(&m, &b, entry, shape.generation, word_row)
-    same: ir_bool_op(&m, &b, IROp.Eq, held, generation)
-    ir_emit(&b.f, IROp.Copy, live, same, -1, -1, b.line)
-    ir_end(&b.f, b.line)
+    entry: ir_element_address(m, b, data, index, stride)
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    live: ir_temp(m, b, bool_row)
+    ir_emit(b.f, IROp.Const, live, 0, -1, -1, b.line)
+    inside: ir_index_order(m, b, IROp.Lt, index, length)
+    ir_open_if(b.f, inside, b.line)
+    held: ir_load_at(m, b, entry, shape.generation, word_row)
+    same: ir_bool_op(m, b, IROp.Eq, held, generation)
+    ir_emit(b.f, IROp.Copy, live, same, -1, -1, b.line)
+    ir_end(b.f, b.line)
     IRPoolEntry{live: live, entry: entry}
 }
 
 // `pool.remove(id)`: the live value `id` names, taken out of its slot (whose
 // generation moves on), or None for a stale ID.
 ir_pool_remove: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, shape: IRPoolShape, receiver: Int, argument: Int, span: Span) -> Int Never! {
-    pool: ir_expr(&m, p, &b, receiver)
+    pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
-    id: ir_expr(&m, p, &b, argument)
+    id: ir_expr(m, p, b, argument)
     if ir_failed(b) || id < 0 -> return -1
-    result: ir_fresh_temp(&m, &b, shape.option)
-    ir_option_none(&m, &b, result)
-    found: ir_pool_find(&m, &b, shape, pool, id)
-    ir_open_if(&b.f, found.live, b.line)
-    current: ir_load_at(&m, &b, found.entry, shape.value, shape.option)
-    ir_emit(&b.f, IROp.Copy, result, current, -1, -1, b.line)
-    absent: ir_temp(&m, &b, shape.option)
-    ir_option_none(&m, &b, absent)
-    ir_emit(&b.f, IROp.Store, -1, found.entry, shape.value, absent, b.line)
-    word_row: ir_word_row(&m)
-    held: ir_load_at(&m, &b, found.entry, shape.generation, word_row)
-    one: ir_word_const(&m, &b, 1)
-    bumped: ir_word_op(&m, &b, IROp.Add, held, one)
-    ir_emit(&b.f, IROp.Store, -1, found.entry, shape.generation, bumped, b.line)
-    ir_end(&b.f, b.line)
-    ir_release(&m, &b, id)
+    result: ir_fresh_temp(m, b, shape.option)
+    ir_option_none(m, b, result)
+    found: ir_pool_find(m, b, shape, pool, id)
+    ir_open_if(b.f, found.live, b.line)
+    current: ir_load_at(m, b, found.entry, shape.value, shape.option)
+    ir_emit(b.f, IROp.Copy, result, current, -1, -1, b.line)
+    absent: ir_temp(m, b, shape.option)
+    ir_option_none(m, b, absent)
+    ir_emit(b.f, IROp.Store, -1, found.entry, shape.value, absent, b.line)
+    word_row: ir_word_row(m)
+    held: ir_load_at(m, b, found.entry, shape.generation, word_row)
+    one: ir_word_const(m, b, 1)
+    bumped: ir_word_op(m, b, IROp.Add, held, one)
+    ir_emit(b.f, IROp.Store, -1, found.entry, shape.generation, bumped, b.line)
+    ir_end(b.f, b.line)
+    ir_release(m, b, id)
     result
 }
 
 // `pool.ids()`: the ID of every live entry, in slot order.
 ir_pool_ids: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRPoolShape, receiver: Int, span: Span) -> Int Never! {
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    pool: ir_expr(&m, p, &b, receiver)
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    pool: ir_expr(m, p, b, receiver)
     if ir_failed(b) || pool < 0 -> return -1
-    result: ir_list_empty(&m, &b, row)
-    word_row: ir_word_row(&m)
+    result: ir_list_empty(m, b, row)
+    word_row: ir_word_row(m)
     stride: ir_list_stride(m, shape.entry)
-    length: ir_load_word(&m, &b, pool, 0)
-    index: ir_word_const(&m, &b, 0)
-    exit: ir_open(&b.f, IROp.Block, b.line)
-    _: ir_open(&b.f, IROp.Loop, b.line)
-    more: ir_bool_op(&m, &b, IROp.Lt, index, length)
-    ir_exit_unless(&m, &b, more, exit)
-    data: ir_load_word(&m, &b, pool, 16)
-    entry: ir_element_address(&m, &b, data, index, stride)
-    current: ir_load_at(&m, &b, entry, shape.value, shape.option)
-    some: ir_option_is_some(&m, &b, current)
-    ir_open_if(&b.f, some, b.line)
-    id: ir_pool_record(&m, &b, shape.id)
-    ir_emit(&b.f, IROp.Store, -1, id, shape.id_index, index, b.line)
-    generation: ir_load_at(&m, &b, entry, shape.generation, word_row)
-    ir_emit(&b.f, IROp.Store, -1, id, shape.id_generation, generation, b.line)
-    ir_list_push(&m, p, &b, result, shape.id, id)
-    ir_end(&b.f, b.line)
-    one: ir_word_const(&m, &b, 1)
-    ir_emit(&b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
-    ir_emit(&b.f, IROp.Br, -1, 0, -1, -1, b.line)
-    ir_end(&b.f, b.line)
-    ir_end(&b.f, b.line)
+    length: ir_load_word(m, b, pool, 0)
+    index: ir_word_const(m, b, 0)
+    exit: ir_open(b.f, IROp.Block, b.line)
+    _: ir_open(b.f, IROp.Loop, b.line)
+    more: ir_bool_op(m, b, IROp.Lt, index, length)
+    ir_exit_unless(m, b, more, exit)
+    data: ir_load_word(m, b, pool, 16)
+    entry: ir_element_address(m, b, data, index, stride)
+    current: ir_load_at(m, b, entry, shape.value, shape.option)
+    some: ir_option_is_some(m, b, current)
+    ir_open_if(b.f, some, b.line)
+    id: ir_pool_record(m, b, shape.id)
+    ir_emit(b.f, IROp.Store, -1, id, shape.id_index, index, b.line)
+    generation: ir_load_at(m, b, entry, shape.generation, word_row)
+    ir_emit(b.f, IROp.Store, -1, id, shape.id_generation, generation, b.line)
+    ir_list_push(m, p, b, result, shape.id, id)
+    ir_end(b.f, b.line)
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
     result
 }
 
@@ -191,35 +191,35 @@ ir_pool_ids: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRPo
 // the indexing line.
 ir_pool_slot_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pool_node: Int, id_node: Int, line: Int, source_line: String, span: Span) -> Int Never! {
     pool_ty: ir_ty(p, b, pool_node)
-    inner: ir_pool_inner(pool_ty) ?? return ir_fail_slot(&b, span, "Pool slot of {ir_type_name(pool_ty)}")
-    shape: ir_pool_shape(&m, p, inner) ?? return ir_type_fail(&b, span, pool_ty)
-    pool: ir_expr(&m, p, &b, pool_node)
+    inner: ir_pool_inner(pool_ty) ?? return ir_fail_slot(b, span, "Pool slot of {ir_type_name(pool_ty)}")
+    shape: ir_pool_shape(m, p, inner) ?? return ir_type_fail(b, span, pool_ty)
+    pool: ir_expr(m, p, b, pool_node)
     if ir_failed(b) || pool < 0 -> return -1
-    id: ir_expr(&m, p, &b, id_node)
+    id: ir_expr(m, p, b, id_node)
     if ir_failed(b) || id < 0 -> return -1
-    found: ir_pool_find(&m, &b, shape, pool, id)
-    stale: ir_temp_like(&m, &b, found.live)
-    ir_emit(&b.f, IROp.Not, stale, found.live, -1, -1, b.line)
-    ir_open_if(&b.f, stale, b.line)
-    pointer_row: ir_pointer_row(&m)
-    builder: ir_runtime(&m, &b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
+    found: ir_pool_find(m, b, shape, pool, id)
+    stale: ir_temp_like(m, b, found.live)
+    ir_emit(b.f, IROp.Not, stale, found.live, -1, -1, b.line)
+    ir_open_if(b.f, stale, b.line)
+    pointer_row: ir_pointer_row(m)
+    builder: ir_runtime(m, b, "jet_rt_string_builder_new", [Int]{}, pointer_row)
     b.fresh[builder] = false
-    ir_push_static(&m, &b, builder, "this ID no longer refers to a live value — its pool slot was removed")
-    string_row: ir_string_row(&m)
-    message: ir_runtime(&m, &b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
-    null: ir_word_const(&m, &b, 0)
+    ir_push_static(m, b, builder, "this ID no longer refers to a live value — its pool slot was removed")
+    string_row: ir_string_row(m)
+    message: ir_runtime(m, b, "jet_rt_string_builder_finish", [Int]{builder}, string_row)
+    null: ir_word_const(m, b, 0)
     report: ir_report_location(p, TPanicLoc{file: b.f.source_file.copy(), source_line: source_line, line: line, column: 0, caret: 0, function: "", locals: [TPanicLocal]{}})
-    ir_stop(&m, p, &b, 2, message, null, null, report)
-    ir_end(&b.f, b.line)
-    ir_release(&m, &b, id)
-    if ir_option_inline(m, shape.option) -> return ir_address_at(&m, &b, found.entry, shape.value)
-    ir_load_at(&m, &b, found.entry, shape.value, pointer_row)
+    ir_stop(m, p, b, 2, message, null, null, report)
+    ir_end(b.f, b.line)
+    ir_release(m, b, id)
+    if ir_option_inline(m, shape.option) -> return ir_address_at(m, b, found.entry, shape.value)
+    ir_load_at(m, b, found.entry, shape.value, pointer_row)
 }
 
 // `pool[id]` read in place.
 ir_pool_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, pool: Int, id: Int, line: Int, source_line: String, span: Span) -> Int Never! {
-    row: ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-    address: ir_pool_slot_address(&m, p, &b, pool, id, line, source_line, span)
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    address: ir_pool_slot_address(m, p, b, pool, id, line, source_line, span)
     if ir_failed(b) || address < 0 -> return -1
-    ir_load_at(&m, &b, address, 0, row)
+    ir_load_at(m, b, address, 0, row)
 }

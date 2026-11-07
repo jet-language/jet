@@ -49,11 +49,11 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
         if item == {
             .Migration(migration) -> {
                 operations := migrations.get(migration.type_name) ?? [MigrationOp]{}
-                loop operation in migration.ops -> &operations.push(operation)
-                migrations[migration.type_name] = ^operations
+                loop operation in migration.ops -> operations.push(operation.copy())
+                migrations[migration.type_name] = operations.move()
             }
-            .ErrorConv(conversion) -> &conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
-            .Func(function) -> &functions.push(function.name)
+            .ErrorConv(conversion) -> conversions.push((from_ty: conversion.from_ty, to_ty: conversion.to_ty))
+            .Func(function) -> functions.push(function.name)
             else -> {}
         }
     }
@@ -72,25 +72,25 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                 if operation == {
                     .Remove(field, _) -> {
                         if {
-                            current.get(field) != None -> &diagnostics.push(sema_schema_remove_present(name, field, span))
-                            old.get(field) == None -> &diagnostics.push(sema_schema_unknown(name, field, "remove", span))
+                            current.get(field) != None -> diagnostics.push(sema_schema_remove_present(name, field, span))
+                            old.get(field) == None -> diagnostics.push(sema_schema_unknown(name, field, "remove", span))
                         }
                     }
                     .Add(field, _, ty, _, _, _, _) -> {
                         declared: type_name(ty)
                         if {
-                            old.get(field) != None -> &diagnostics.push(sema_schema_add_old(name, field, span))
+                            old.get(field) != None -> diagnostics.push(sema_schema_add_old(name, field, span))
                             current.get(field) == .Val(actual) -> {
                                 if {
-                                    actual != declared -> &diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
+                                    actual != declared -> diagnostics.push(sema_schema_add_mismatch(name, field, declared, actual, span))
                                     sema_schema_codec(definition, "Decode", environment, program) && !sema_schema_codec(definition, "Encode", environment, program) -> {
                                         loop added in definition.fields {
-                                            if added.name == field && !sema_schema_decodable(added.ty, environment, program) -> &diagnostics.push(sema_schema_add_decode(name, field, actual, span))
+                                            if added.name == field && !sema_schema_decodable(added.ty, environment, program) -> diagnostics.push(sema_schema_add_decode(name, field, actual, span))
                                         }
                                     }
                                 }
                             }
-                            else -> &diagnostics.push(sema_schema_unknown(name, field, "add", span))
+                            else -> diagnostics.push(sema_schema_unknown(name, field, "add", span))
                         }
                     }
                     .Change(field, _, from, _, to, _, _, _, _) -> {
@@ -102,12 +102,12 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                                     new_type == .Val(new_ty) -> {
                                         declared_from: type_name(from)
                                         declared_to: type_name(to)
-                                        if old_ty != declared_from || new_ty != declared_to -> &diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
+                                        if old_ty != declared_from || new_ty != declared_to -> diagnostics.push(sema_schema_change_mismatch(name, field, declared_from, declared_to, old_ty, new_ty, span))
                                     }
-                                    else -> &diagnostics.push(sema_schema_unknown(name, field, "change", span))
+                                    else -> diagnostics.push(sema_schema_unknown(name, field, "change", span))
                                 }
                             }
-                            else -> &diagnostics.push(sema_schema_unknown(name, field, "change", span))
+                            else -> diagnostics.push(sema_schema_unknown(name, field, "change", span))
                         }
                     }
                     .Rename(_, _, _, _) -> {}
@@ -129,7 +129,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                         else -> {}
                     }
                 }
-                if !bridged -> &diagnostics.push(sema_schema_dropped(name, field.name, baseline.published_version, span))
+                if !bridged -> diagnostics.push(sema_schema_dropped(name, field.name, baseline.published_version, span))
             }
             loop field in definition.fields {
                 old_ty: old.get(field.name) ?? next
@@ -149,10 +149,10 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                         if !has_converter {
                             has_impl := functions.contains(sema_failure_declared_conversion_name(sema_error_conversion_leaf(old_ty), sema_error_conversion_leaf(new_ty)))
                             loop conversion in conversions { if conversion.from_ty == old_ty && conversion.to_ty == new_ty -> has_impl = true }
-                            if !has_impl -> &diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
+                            if !has_impl -> diagnostics.push(sema_schema_no_converter(name, field.name, old_ty, new_ty, span))
                         }
                     }
-                    .None -> &diagnostics.push(sema_schema_changed(name, field.name, old_ty, new_ty, span))
+                    .None -> diagnostics.push(sema_schema_changed(name, field.name, old_ty, new_ty, span))
                 }
             }
             loop field in definition.fields {
@@ -169,7 +169,7 @@ check_schema_migrations: fn(items: [Item], snapshots: [String:SchemaSnapshot], e
                         else -> {}
                     }
                 }
-                if !supplied -> &diagnostics.push(sema_schema_added(name, field.name, span))
+                if !supplied -> diagnostics.push(sema_schema_added(name, field.name, span))
             }
         }
     }
@@ -209,7 +209,7 @@ sema_schema_unknown: fn(name: String, field: String, verb: String, span: Span) -
 
 sema_schema_enter_registered_module: fn(environment: &SemaScopeEnvironment?, program: SemaProgramTables, module_index: Int) Never! {
     if &environment == .Val(scope) {
-        sema_scope_environment_enter_module(&scope, program, module_index, SemaComptimeBodyValues{})
+        sema_scope_environment_enter_module(scope, program, module_index, SemaComptimeBodyValues{})
         return
     }
     panic("an owning schema pass lost its scope environment")
@@ -219,8 +219,8 @@ sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, prog
     if environment == .Val(scope) {
         if program.registration_graph == .Val(graph) {
             start: diagnostics.len()
-            loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) -> &diagnostics.push(diagnostic)
-            sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[module_index].source_segments)
+            loop diagnostic in check_schema_migrations(graph.modules[module_index].program.items, snapshots, environment, program) -> diagnostics.push(diagnostic)
+            sema_attach_diagnostic_source_locations(diagnostics, start, graph.modules[module_index].source_segments)
             return
         }
     }
@@ -229,22 +229,22 @@ sema_schema_check_registered_module: fn(environment: SemaScopeEnvironment?, prog
 
 // Module entry borrows the schema pass's one program graph; it only replaces
 // the selected scope facts and never takes fields from either borrowed owner.
-sema_check_schema_migration_graph: fn(registration: ^SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
-    if snapshots.len() == 0 -> return (diagnostics: [Diagnostic]{}, registration: ^registration)
+sema_check_schema_migration_graph: fn(registration: &&SemaRegistrationGraph, checked: SemaGraphResult, snapshots: [String:SchemaSnapshot]) -> (registration: SemaRegistrationGraph, diagnostics: [Diagnostic]) Never! {
+    if snapshots.len() == 0 -> return (diagnostics: [Diagnostic]{}, registration: registration.move())
     module_count: registration.modules.len()
     types := [TTypeDef]{}
     loop module_row in checked.modules {
-        loop definition in module_row.declarations.type_defs -> &types.push(definition)
+        loop definition in module_row.declarations.type_defs -> types.push(definition.copy())
     }
-    scope := sema_check_pass_environment(^registration, types, SemaComptimeBodyValues{})
+    scope := sema_check_pass_environment(registration, types, SemaComptimeBodyValues{})
     program := SemaProgramTables{
-        registration_graph: ^scope.registration_graph,
-        checked_types: ^scope.checked_types,
-        checked_type_rows: ^scope.checked_type_rows,
-        checked_type_name_slots: ^scope.checked_type_name_slots,
-        checked_type_name_rows: ^scope.checked_type_name_rows,
-        boxed_edges: ^scope.boxed_edges,
-        copy_facts: ^scope.copy_facts,
+        registration_graph: scope.registration_graph.move(),
+        checked_types: scope.checked_types.move(),
+        checked_type_rows: scope.checked_type_rows.move(),
+        checked_type_name_slots: scope.checked_type_name_slots.move(),
+        checked_type_name_rows: scope.checked_type_name_rows.move(),
+        boxed_edges: scope.boxed_edges.move(),
+        copy_facts: scope.copy_facts.move(),
     }
     scope.registration_graph = None
     scope.checked_types = [TTypeDef]{}
@@ -253,13 +253,13 @@ sema_check_schema_migration_graph: fn(registration: ^SemaRegistrationGraph, chec
     scope.checked_type_name_rows = [[Int]]{}
     scope.boxed_edges = [String:[String]]{}
     scope.copy_facts = sema_copy_facts_table_empty()
-    environment := Val(^scope)
+    environment := Val(scope.move())
     diagnostics := [Diagnostic]{}
     loop module_index in 0..<module_count {
-        sema_schema_enter_registered_module(&environment, program, module_index)
-        sema_schema_check_registered_module(environment, program, module_index, snapshots, &diagnostics)
+        sema_schema_enter_registered_module(environment, program, module_index)
+        sema_schema_check_registered_module(environment, program, module_index, snapshots, diagnostics)
     }
-    graph_out := ^program.registration_graph
-    restored: ^graph_out ?? panic("a completed schema pass lost its registration graph")
-    (diagnostics: ^diagnostics, registration: ^restored)
+    graph_out := program.registration_graph.move()
+    restored: graph_out.move() ?? panic("a completed schema pass lost its registration graph")
+    (diagnostics: diagnostics.move(), registration: restored.move())
 }

@@ -37,7 +37,7 @@ provider_cpan_parse_search: fn(repository: String, distribution: String, raw: St
     out := [RegistryPackage]{}
     loop hit in releases {
         release: provider_script_json_get(hit, "_source") ?? return Err(RegistryError.Reason("invalid MetaCPAN release hit: {err.message()}"))
-        &out.push(provider_cpan_parse_release(repository, release))
+        out.push(provider_cpan_parse_release(repository, release))
     }
     if out.len() == 0 -> return Err(RegistryError.Reason("MetaCPAN has no releases for distribution `{distribution}`"))
     Ok(out)
@@ -72,7 +72,7 @@ provider_cpan_parse_release: fn(repository: String, value: Dyn) -> RegistryPacka
                     }
                     .None -> {}
                 }
-                &dependencies.push(RegistryDependency{name: dependency_name, requirement: provider_script_cpan_requirement(minimum)})
+                dependencies.push(RegistryDependency{name: dependency_name, requirement: provider_script_cpan_requirement(minimum)})
             }
         }
         .None -> {}

@@ -96,7 +96,7 @@ join_summaries: fn(rows: [Summary], owners: [Owner]) -> [Joined] {
     loop row in rows {
         loop owner in owners {
             if row.team == owner.team {
-                &out.push(Joined{team: row.team, owner: owner.owner, mean: row.mean})
+                out.push(Joined{team: row.team, owner: owner.owner, mean: row.mean})
                 break
             }
         }
@@ -147,7 +147,7 @@ run: fn() {
     mark("aggregated")
     values := [Float]{}
     loop row in filtered {
-        &values.push(row.value)
+        values.push(row.value)
     }
     rolling: data.rolling_mean(values, 8) ?? panic("rolling mean")
     summary: data.describe(values) ?? panic("describe")
@@ -156,7 +156,7 @@ run: fn() {
 
     summaries := [Summary]{}
     loop group in groups {
-        &summaries.push(Summary{team: group.key, mean: group.value})
+        summaries.push(Summary{team: group.key, mean: group.value})
     }
     owners: [Owner]{{team: "team0", owner: "Ada"}, {team: "team1", owner: "Grace"}, {team: "team2", owner: "Lin"}, {team: "team3", owner: "Mina"}, {team: "team4", owner: "Noor"}, {team: "team5", owner: "Omar"}, {team: "team6", owner: "Priya"}, {team: "team7", owner: "Quinn"}, {team: "team8", owner: "Rae"}, {team: "team9", owner: "Sol"}}
     joined: join_summaries(summaries, owners)

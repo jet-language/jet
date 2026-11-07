@@ -1,7 +1,7 @@
-choose: fn<T>(value: ^T, ok: Bool) -> T { if ok -> Ok(value) else -> Err("bad") }
+choose: fn<T>(value: &&T, ok: Bool) -> T { if ok -> Ok(value) else -> Err("bad") }
 
-generic: fn<T>(value: ^T, ok: Bool) -> T {
-    return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
+generic: fn<T>(value: &&T, ok: Bool) -> T {
+    return choose<T>(value, ok) ? success -> success ! _failure -> return Err("bad")
 }
 
 run: fn() {

@@ -63,9 +63,9 @@ TrustKey: struct {
     // truncated to 32 bytes.
     generate: fn(label: String) -> TrustKey Never! {
         secret := [U8]{}
-        loop byte in TRUST_KEY_DOMAIN.bytes() -> &secret.push(byte)
-        loop byte in label.bytes() -> &secret.push(byte)
-        loop secret.len() < 32 -> &secret.push(U8{0})
+        loop byte in TRUST_KEY_DOMAIN.bytes() -> secret.push(byte)
+        loop byte in label.bytes() -> secret.push(byte)
+        loop secret.len() < 32 -> secret.push(U8{0})
         if secret.len() > 32 -> secret = secret[0..<32]
         TrustKey{key_id: trust_key_id_for(secret), algorithm: TRUST_ALG_HMAC_SHA256, secret}
     }
@@ -330,7 +330,7 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
     }
     lines := [String]{}
     loop line in trust_root_lines(files.read(path)) {
-        if line.trim() != "" -> &lines.push(line)
+        if line.trim() != "" -> lines.push(line)
     }
     Ok(Val(lines))
 }
@@ -338,10 +338,10 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
 // Sorted unique lines, each newline-terminated (Rust `BTreeSet` join).
 trust_state_body: fn(lines: [String]) -> String Never! {
     sorted := lines
-    &sorted.sort()
+    sorted.sort()
     unique := [String]{}
     loop line in sorted {
-        if unique.len() == 0 || unique[unique.len() - 1] != line -> &unique.push(line)
+        if unique.len() == 0 || unique[unique.len() - 1] != line -> unique.push(line)
     }
     "{unique.join("\n")}\n"
 }
@@ -352,7 +352,7 @@ trust_revoke_cache_builder: fn(roots_dir: String, builder: String) TrustRootErro
     dir: trust_ensure_trust_dir(roots_dir)
     path: trust_revoked_builders_path(roots_dir)
     builders := trust_read_state_lines(path, "revoked cache-builder list is not a regular file") ?? [String]{}
-    &builders.push(builder)
+    builders.push(builder.copy())
     trust_atomic_write(files.join(dir, "revoked-cache-builders"), trust_state_body(builders).bytes())
 }
 
@@ -372,7 +372,7 @@ trust_allow_cache_identity: fn(roots_dir: String, directory: String, role: Strin
     path: trust_cache_identity_allowlist_path(roots_dir, directory, role)
     files.create_dir_all(files.dirname(path))
     identities := trust_read_state_lines(path, "{label} allowlist is not a regular file") ?? [String]{}
-    &identities.push(identity)
+    identities.push(identity.copy())
     trust_atomic_write(path, trust_state_body(identities).bytes())
 }
 
@@ -443,7 +443,7 @@ trust_root_lines: fn(text: String) -> [String] Never! {
         raw: piece.bytes()
         carriage_return: raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == 13
         line: if carriage_return -> String.from_bytes(raw[0..<(raw.len() - 1)]) ?? piece else -> piece
-        &lines.push(line)
+        lines.push(line)
     }
     lines
 }

@@ -12,7 +12,7 @@ use {
     root: compiler_route_files.mktemp("compiler-route-fs")
     compiler_route_files.create_dir_all(root) ?? panic("create root: {err}")
     nested: compiler_route_files.join(root, "nested/again")
-    compiler_route_files.create_dir(nested) ?? panic("recursive create_dir: {err}")
+    compiler_route_files.create_dir_all(nested) ?? panic("recursive create_dir: {err}")
     path: compiler_route_files.join(nested, "bytes")
     compiler_route_files.write(path, "hello\n") ?? panic("write text: {err}")
     assert_eq(compiler_route_files.read(path) ?? panic("read text: {err}"), "hello\n")

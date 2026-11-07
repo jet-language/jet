@@ -63,7 +63,7 @@ ExecutableLeaseProtocol: struct {
         state: self.lease_state_lock()
         record: self.record_dir(lease_id)
         owner: env_acquire_lease_lock(record, LEASE_OWNER_LOCK_SCOPE)
-        close(^state)
+        close(state)
         Ok(owner)
     }
 
@@ -108,7 +108,7 @@ ExecutableLeaseProtocol: struct {
     accept_snapshot: fn(self, frame: [U8], locked_output_digest: String, snapshot_root: String) -[FS, Env, Rand, Time]> LeaseReceipt IOError! {
         state: self.lease_state_lock()
         receipt: self.accept_snapshot_unlocked(frame, locked_output_digest, snapshot_root)
-        close(^state)
+        close(state)
         Ok(receipt)
     }
 
@@ -174,7 +174,7 @@ ExecutableLeaseProtocol: struct {
     release: fn(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env, Time]> {
         state: self.lease_state_lock()
         self.release_unlocked(lease_id, generation, owner_scope)
-        close(^state)
+        close(state)
     }
 
     release_unlocked: fn(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env]> {
@@ -193,7 +193,7 @@ ExecutableLeaseProtocol: struct {
     reap_empty_record: fn(self, lease_id: String) -[FS, Env, Time]> Bool IOError! {
         state: self.lease_state_lock()
         reaped: self.reap_empty_record_unlocked(lease_id)
-        close(^state)
+        close(state)
         Ok(reaped)
     }
 
@@ -220,7 +220,7 @@ ExecutableLeaseProtocol: struct {
     recover_stale_leases: fn(self) -[FS, Env, Rand, Time]> Int IOError! {
         state: self.lease_state_lock()
         swept: self.recover_stale_leases_unlocked()
-        close(^state)
+        close(state)
         Ok(swept)
     }
 
@@ -235,8 +235,8 @@ ExecutableLeaseProtocol: struct {
                 // A rollback or interrupted upgrade may briefly have two
                 // receipts naming one snapshot; an in-order sweep must not let
                 // the first idle receipt delete bytes the other still holds.
-                self.recover_collect_live(records, &protected, &preserve_containers)
-                self.recover_reclaim_records(records, &protected, &preserve_containers)
+                self.recover_collect_live(records, protected, preserve_containers)
+                self.recover_reclaim_records(records, protected, preserve_containers)
             }
             .Err(error) -> {
                 if !store_io_is_not_found(error) -> return Err(error)
@@ -282,7 +282,7 @@ ExecutableLeaseProtocol: struct {
                 }
                 snapshot: self.snapshot_path(receipt.snapshot_rel)
                 if owner_state == RuntimeLockState.Held || !self.receipt_is_idle(receipt, snapshot) {
-                    if !protected.contains(snapshot) -> &protected.push(snapshot)
+                    if !protected.contains(snapshot) -> protected.push(snapshot)
                 }
             }
             if unknown_state -> preserve_containers = true
@@ -344,7 +344,7 @@ ExecutableLeaseProtocol: struct {
                             reclaimable = false
                             preserve_containers = true
                             if claimed == .Val(snapshot) {
-                                if !protected.contains(snapshot) -> &protected.push(snapshot)
+                                if !protected.contains(snapshot) -> protected.push(snapshot)
                             }
                         }
                         next
@@ -357,7 +357,7 @@ ExecutableLeaseProtocol: struct {
                 }
                 container: self.lease_container(snapshot)
                 live_lock: env_try_acquire_lock(container, "live") ?? {
-                    &protected.push(snapshot)
+                    protected.push(snapshot)
                     reclaimable = false
                     next
                 }
@@ -365,12 +365,12 @@ ExecutableLeaseProtocol: struct {
                 // interrupt the removal, the snapshot the last good receipt
                 // names stays.
                 if store_lease_remove_owned_tree(generation_path) == .Err(_) {
-                    &protected.push(snapshot)
+                    protected.push(snapshot)
                     reclaimable = false
                 }
-                close(^live_lock)
+                close(live_lock)
             }
-            close(^owner_lock)
+            close(owner_lock)
             if reclaimable && files.list_dir(generations_dir).len() == 0 {
                 store_lease_remove_owned_tree(record_dir).drop("an empty record is reclaimed on a later pass")
             }
@@ -416,7 +416,7 @@ ExecutableLeaseProtocol: struct {
             // container inode. The claim recreates only the marker and still
             // tests that inode.
             live_lock: env_try_acquire_lock(path, "live") ?? next
-            if store_lease_reclaim_container(path, leases, ^live_lock) -> swept += 1
+            if store_lease_reclaim_container(path, leases, live_lock) -> swept += 1
         }
         Ok(swept)
     }
@@ -440,7 +440,7 @@ ExecutableLeaseProtocol: struct {
         relative: store_lease_strip_prefix(snapshot, leases) ?? return Err(store_lease_invalid("executable lease snapshot is outside the lease root"))
         parts := [String]{}
         loop part in files.split_slash(relative) {
-            if part != "" && part != "." -> &parts.push(part)
+            if part != "" && part != "." -> parts.push(part)
         }
         if parts.len() == 0 -> return Err(store_lease_invalid("executable lease snapshot has no container"))
         if parts.len() != 2 || parts[1] != "snapshot" -> return Err(store_lease_invalid("executable lease snapshot is not a container snapshot"))
@@ -595,7 +595,7 @@ ExecutableLeaseProtocol: struct {
             }
             .Err(error) -> {
                 if !store_io_is_not_found(error) -> return Err(error)
-                if files.create_dir(record) == .Err(create_error) {
+                if files.create_dir_all(record) == .Err(create_error) {
                     if store_io_is_already_exists(create_error) -> return self.existing_record_dir(lease_id)
                     return Err(create_error)
                 }
@@ -662,7 +662,7 @@ store_lease_output_hash: fn(path: String) -[FS, Env]> String IOError! {
 }
 
 store_lease_publish_generation: fn(receipt: LeaseReceipt, partial: String, generation_dir: String, generations: String, record: String) IOError! -[FS]> {
-    files.create_dir(partial)
+    files.create_dir_all(partial)
     store_lease_write_new_synced(files.join(partial, LEASE_RECEIPT_FILE), store_lease_receipt_canonical(receipt, true).bytes())
     witness: store_lease_receipt_witness(receipt)
     store_lease_write_new_synced(files.join(partial, LEASE_COMPLETE_FILE), "{witness}\n".bytes())
@@ -773,7 +773,7 @@ store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
     loop {
         chunk: file.read(65536)
         if chunk.len() == 0 -> break
-        &bytes.extend(chunk)
+        bytes.extend(chunk)
         if bytes.len() > LEASE_RECEIPT_BYTE_BOUND -> return Err(store_lease_invalid("executable lease receipt exceeds the bound"))
     }
     text: String.from_bytes(bytes) ?? return Err(store_lease_invalid("executable lease receipt is not UTF-8"))
@@ -784,10 +784,10 @@ store_lease_read_bounded: fn(path: String) -[FS]> String IOError! {
 // then delete it. Unix keeps the kernel claim through the namespace move;
 // Windows denies replacing a directory while its lock marker is open, so the
 // claim ends first (the outer Hangar lock keeps producers out of that gap).
-store_lease_reclaim_container: fn(path: String, leases: String, live_lock: ^RuntimeLock) -[FS, Env, Rand]> Bool Never! {
+store_lease_reclaim_container: fn(path: String, leases: String, live_lock: &&RuntimeLock) -[FS, Env, Rand]> Bool Never! {
     token: store_lease_random_id(8) ?? return false
     quarantine: files.join(leases, ".reclaiming-{sys.pid()}-{token}")
-    if store_lease_quarantine(path, quarantine, leases, ^live_lock) == {
+    if store_lease_quarantine(path, quarantine, leases, live_lock) == {
         .NotMoved -> false
         .MovedUnpublished -> true
         .Published -> {
@@ -810,8 +810,8 @@ LeaseQuarantine: enum {
 
 // Rename `path` to `quarantine` and sync `leases` while the live claim is
 // held (released first on Windows); the claim ends when this returns.
-store_lease_quarantine: fn(path: String, quarantine: String, leases: String, live_lock: ^RuntimeLock) -[FS, Env]> LeaseQuarantine Never! {
-    if sys.is_windows() -> close(^live_lock)
+store_lease_quarantine: fn(path: String, quarantine: String, leases: String, live_lock: &&RuntimeLock) -[FS, Env]> LeaseQuarantine Never! {
+    if sys.is_windows() -> close(live_lock)
     if files.rename(path, quarantine) == .Err(_) -> return LeaseQuarantine.NotMoved
     // Publish the quarantine name before deleting anything: an interrupted
     // delete leaves the complete old tree recoverable outside the namespace.

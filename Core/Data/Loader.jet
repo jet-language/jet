@@ -52,7 +52,7 @@ bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
 }
 
 bind_text: fn<T>(loader: &DataLoader<T>, text: String) DataError! {
-    bind<T>(&loader, text.bytes())
+    bind<T>(loader, text.bytes())
 }
 
 authority: fn<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authority.copy() }
@@ -143,7 +143,7 @@ stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
     if rows.len() > loader.limits.max_output_rows {
         return Err(loader_error(DataErrorKind.Limit, "max_output_rows exceeded", "data.loader.stream"))
     }
-    core.data.stream.from_items<T>(&rows)
+    core.data.stream.from_items<T>(rows)
 }
 
 accepts_payload: fn<T>(loader: DataLoader<T>) -> Bool Never! {
@@ -166,7 +166,7 @@ decode_jsonl: fn<T: Decode>(text: String) -> [T] DataError! {
                 wrapped := "[{line}]"
                 row: core.data.json<T>(wrapped) ?? return Err(loader_error(DataErrorKind.Decode, "JSONL row decode failed", "data.loader.stream"))
                 if row.len() != 1 -> return Err(loader_error(DataErrorKind.Decode, "JSONL row did not decode to one value", "data.loader.stream"))
-                &out.push(row[0].copy())
+                out.push(row[0].copy())
             }
         }
         start = i + 1
@@ -186,6 +186,6 @@ source_path: fn<T>(loader: DataLoader<T>) -> String Never! { loader.source.locat
 
 copy_bytes: fn(bytes: [U8]) -> [U8] Never! {
     out := [U8]{}
-    loop byte in bytes -> &out.push(byte)
+    loop byte in bytes -> out.push(byte)
     out
 }

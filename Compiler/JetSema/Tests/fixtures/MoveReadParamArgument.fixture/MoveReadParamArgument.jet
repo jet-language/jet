@@ -1,12 +1,13 @@
-// `^` on a read parameter has no storage to give up: E0201, never a copy.
+// A read parameter passed to a take parameter has no storage to give up:
+// E0201, never a copy.
 Bag: struct {
     items: [String]
 }
 
-keep: fn(bag: ^Bag) -> Int { bag.items.len() }
+keep: fn(bag: &&Bag) -> Int { bag.items.len() }
 
 forward: fn(bag: Bag) -> Int {
-    keep(^bag)
+    keep(bag)
 }
 
 run: fn() { print(forward(Bag{items: [String]{"one"}})) }

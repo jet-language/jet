@@ -8,7 +8,7 @@
 // `to_string` emits a minimal table document; it does not preserve comments.
 
 use {
-    core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
+    core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat, EncodingLimits]
     json: core.encoding.json
     stream: __core_encoding_stream
 }
@@ -41,8 +41,8 @@ load: fn(text: String) -> Dyn EncodingError! { parse(text) }
 to_string: fn<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
 
 parse_toml: fn(text: String) -> Dyn EncodingError! {
-    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: Dyn.object()}
-    _: &p.document() ?? return Err(p.fail("TOML document could not be parsed"))
+    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: Dyn.object(), depth: 0}
+    _: p.document() ?? return Err(err)
     Ok(p.root)
 }
 
@@ -52,6 +52,9 @@ TOMLParser: struct {
     line: Int
     column: Int
     root: Dyn
+    // Open arrays and inline tables, bounded by `EncodingLimits.safe().max_depth`
+    // so hostile nesting cannot run the process out of stack.
+    depth: Int
 }
 
 impl TOMLParser {
@@ -120,7 +123,7 @@ impl TOMLParser {
     }
 
     skip_space: fn(&self) -> Bool EncodingError! {
-        &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         loop {
             if self.peek() == {
                 .None -> return true
@@ -130,7 +133,7 @@ impl TOMLParser {
                         self.index += 1
                         self.line += 1
                         self.column = 1
-                        &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+                        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
                         next
                     }
                     return true
@@ -142,51 +145,51 @@ impl TOMLParser {
 
     document: fn(&self) -> Bool EncodingError! {
         current := [String]{}
-        &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+        self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
         loop self.eof() == false {
-            &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
             if self.eof() -> return true
             b: self.peek() ?? return true
             if b == (U8{91}) {
-                header: &self.parse_header()
+                header: self.parse_header()
                 current = header
                 next
             }
-            keys: &self.parse_dotted_key()
-            &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
-            got: &self.bump() ?? return Err(self.fail("expected '=' after a key"))
+            keys: self.parse_dotted_key()
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+            got: self.bump() ?? return Err(self.fail("expected '=' after a key"))
             if got != (U8{61}) -> return Err(self.fail("expected '=' after a key"))
-            &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
-            value: &self.parse_value()
-            _: &self.assign(current, keys, value) ?? return Err(self.fail("TOML assignment failed"))
-            &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+            value: self.parse_value()
+            _: self.assign(current, keys, value) ?? return Err(self.fail("TOML assignment failed"))
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
         }
         true
     }
 
     parse_header: fn(&self) -> [String] EncodingError! {
-        _: &self.bump()
+        _: self.bump()
         array := false
         b0: self.peek() ?? (U8{0})
         if b0 == (U8{91}) {
             array = true
-            _: &self.bump()
+            _: self.bump()
         }
         keys := [String]{}
-        key: &self.parse_key()
-        &keys.push(key)
+        key: self.parse_key()
+        keys.push(key)
         loop {
             b: self.peek() ?? (U8{0})
             if b != (U8{46}) -> break
-            _: &self.bump()
-            key2: &self.parse_key()
-            &keys.push(key2)
+            _: self.bump()
+            key2: self.parse_key()
+            keys.push(key2)
         }
-        &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
-        close: &self.bump() ?? return Err(self.fail("unterminated TOML table header"))
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+        close: self.bump() ?? return Err(self.fail("unterminated TOML table header"))
         if close != (U8{93}) -> return Err(self.fail("expected ']' after a TOML table header"))
         if array {
-            close2: &self.bump() ?? return Err(self.fail("unterminated TOML array-of-tables header"))
+            close2: self.bump() ?? return Err(self.fail("unterminated TOML array-of-tables header"))
             if close2 != (U8{93}) -> return Err(self.fail("expected ']]' after a TOML array-of-tables header"))
         }
         if array {
@@ -198,17 +201,17 @@ impl TOMLParser {
     }
 
     parse_key: fn(&self) -> String EncodingError! {
-        &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b: self.peek() ?? return Err(self.fail("expected a key"))
-        if b == (U8{34}) -> return &self.parse_basic_string()
+        if b == (U8{34}) -> return self.parse_basic_string()
         out := [U8]{}
         loop {
             c: self.peek() ?? break
             n: c
             bare: (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45
             if bare == false -> break
-            &out.push(c)
-            _: &self.bump()
+            out.push(c)
+            _: self.bump()
         }
         if out.len() == 0 -> return Err(self.fail("expected a bare key or quoted key"))
         Ok(String.from_bytes(out) ?? "")
@@ -216,43 +219,43 @@ impl TOMLParser {
 
     parse_dotted_key: fn(&self) -> [String] EncodingError! {
         keys := [String]{}
-        key: &self.parse_key()
-        &keys.push(key)
+        key: self.parse_key()
+        keys.push(key)
         loop {
             b: self.peek() ?? (U8{0})
             if b != (U8{46}) -> break
-            _: &self.bump()
-            next_key: &self.parse_key()
-            &keys.push(next_key)
+            _: self.bump()
+            next_key: self.parse_key()
+            keys.push(next_key)
         }
         Ok(keys)
     }
 
     parse_value: fn(&self) -> Dyn EncodingError! {
-        &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+        self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b: self.peek() ?? return Err(self.fail("expected a value"))
         n: b
         if n == 10 || n == 13 -> return Err(self.fail("expected a value before the end of the TOML line"))
         if n == {
             34 -> {
-                s: &self.parse_basic_string()
+                s: self.parse_basic_string()
                 return Ok(Dyn.Text(s))
             }
             39 -> {
-                s: &self.parse_literal_string()
+                s: self.parse_literal_string()
                 return Ok(Dyn.Text(s))
             }
-            91 -> return &self.parse_array()
-            123 -> return &self.parse_inline_table()
-            116 -> return &self.parse_word("true", Dyn.Bool(true))
-            102 -> return &self.parse_word("false", Dyn.Bool(false))
-            else -> &self.parse_number_or_text()
+            91 -> return self.parse_array()
+            123 -> return self.parse_inline_table()
+            116 -> return self.parse_word("true", Dyn.Bool(true))
+            102 -> return self.parse_word("false", Dyn.Bool(false))
+            else -> self.parse_number_or_text()
         }
     }
 
     parse_word: fn(&self, spelling: String, value: Dyn) -> Dyn EncodingError! {
         loop b in spelling.bytes() {
-            got: &self.bump() ?? return Err(self.fail("expected `{spelling}`"))
+            got: self.bump() ?? return Err(self.fail("expected `{spelling}`"))
             if got != b -> return Err(self.fail("expected `{spelling}`"))
         }
         next: self.peek() ?? (U8{0})
@@ -264,92 +267,104 @@ impl TOMLParser {
     }
 
     parse_basic_string: fn(&self) -> String EncodingError! {
-        _: &self.bump()
+        _: self.bump()
         out := [U8]{}
         loop {
-            b: &self.bump() ?? return Err(self.fail("unterminated TOML string"))
+            b: self.bump() ?? return Err(self.fail("unterminated TOML string"))
             if b == (U8{34}) {
                 s: String.from_bytes(out) ?? return Err(self.fail("invalid UTF-8 in TOML string"))
                 return Ok(s)
             }
             if b == (U8{10}) || b == (U8{13}) -> return Err(self.fail("newline is not allowed in a basic TOML string"))
             if b == (U8{92}) {
-                esc: &self.bump() ?? return Err(self.fail("truncated escape"))
-                if esc == (U8{98}) -> &out.push(U8{8})
-                else if esc == (U8{116}) -> &out.push(U8{9})
-                else if esc == (U8{110}) -> &out.push(U8{10})
-                else if esc == (U8{102}) -> &out.push(U8{12})
-                else if esc == (U8{114}) -> &out.push(U8{13})
-                else if esc == (U8{34}) || esc == (U8{92}) -> &out.push(esc)
+                esc: self.bump() ?? return Err(self.fail("truncated escape"))
+                if esc == (U8{98}) -> out.push(U8{8})
+                else if esc == (U8{116}) -> out.push(U8{9})
+                else if esc == (U8{110}) -> out.push(U8{10})
+                else if esc == (U8{102}) -> out.push(U8{12})
+                else if esc == (U8{114}) -> out.push(U8{13})
+                else if esc == (U8{34}) || esc == (U8{92}) -> out.push(esc)
                 else -> return Err(self.fail("unknown TOML basic-string escape"))
                 next
             }
-            &out.push(b)
+            out.push(b)
         }
     }
 
     parse_literal_string: fn(&self) -> String EncodingError! {
-        _: &self.bump()
+        _: self.bump()
         out := [U8]{}
         loop {
-            b: &self.bump() ?? return Err(self.fail("unterminated literal string"))
+            b: self.bump() ?? return Err(self.fail("unterminated literal string"))
             if b == (U8{39}) {
                 s: String.from_bytes(out) ?? return Err(self.fail("invalid UTF-8 in TOML string"))
                 return Ok(s)
             }
-            &out.push(b)
+            out.push(b)
         }
     }
 
     parse_array: fn(&self) -> Dyn EncodingError! {
-        _: &self.bump()
+        _: self.bump()
+        self.enter() ?? return Err(err)
         items := [Dyn]{}
         loop {
-            &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0: self.peek() ?? (U8{0})
             if b0 == (U8{93}) {
-                _: &self.bump()
+                _: self.bump()
+                self.depth -= 1
                 return Ok(Dyn.Array(items))
             }
-            value: &self.parse_value()
-            &items.push(value)
-            &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
+            value: self.parse_value()
+            items.push(value)
+            self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
             b: self.peek() ?? return Err(self.fail("unterminated TOML array"))
             if b == (U8{93}) {
-                _: &self.bump()
+                _: self.bump()
+                self.depth -= 1
                 return Ok(Dyn.Array(items))
             }
             if b != (U8{44}) -> return Err(self.fail("expected ',' or ']' after a TOML array value"))
-            _: &self.bump()
+            _: self.bump()
         }
     }
 
     parse_inline_table: fn(&self) -> Dyn EncodingError! {
-        _: &self.bump()
+        _: self.bump()
+        self.enter() ?? return Err(err)
         // Dyn objects retain insertion order and reject repeated inline keys.
         entries := Dyn.object()
         loop {
-            &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0: self.peek() ?? (U8{0})
             if b0 == (U8{125}) {
-                _: &self.bump()
+                _: self.bump()
+                self.depth -= 1
                 return Ok(entries)
             }
-            key: &self.parse_key()
+            key: self.parse_key()
             if entries.has(key) -> return Err(self.fail("duplicate key in TOML inline table"))
-            eq: &self.bump() ?? return Err(self.fail("expected '='"))
+            eq: self.bump() ?? return Err(self.fail("expected '='"))
             if eq != (U8{61}) -> return Err(self.fail("expected '='"))
-            value: &self.parse_value()
+            value: self.parse_value()
             entries[key] = value
-            &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b: self.peek() ?? return Err(self.fail("unterminated TOML inline table"))
             if b == (U8{125}) {
-                _: &self.bump()
+                _: self.bump()
+                self.depth -= 1
                 return Ok(entries)
             }
             if b != (U8{44}) -> return Err(self.fail("expected ',' or '}}' after a TOML inline-table value"))
-            _: &self.bump()
+            _: self.bump()
         }
+    }
+
+    enter: fn(&self) EncodingError! {
+        self.depth += 1
+        max_depth: EncodingLimits.safe().max_depth
+        if self.depth > max_depth -> return Err(self.fail("nesting exceeds max_depth ({max_depth})"))
     }
 
     parse_number_or_text: fn(&self) -> Dyn EncodingError! {
@@ -358,12 +373,12 @@ impl TOMLParser {
             b: self.peek() ?? break
             n: b
             if n == 32 && self.index == start + 10 && self.index + 1 < self.bytes.len() && self.bytes[self.index + 1] >= (U8{48}) && self.bytes[self.index + 1] <= (U8{57}) && valid_toml_date(self.bytes, start, start + 10) {
-                _: &self.bump()
+                _: self.bump()
                 next
             }
             stop: n == 32 || n == 9 || n == 10 || n == 13 || n == 44 || n == 93 || n == 125 || n == 35
             if stop -> break
-            _: &self.bump()
+            _: self.bump()
         }
         if self.index <= start -> return Err(self.fail("expected a TOML value"))
         spelling: String.from_bytes(self.bytes[start..self.index - 1]) ?? ""
@@ -389,11 +404,11 @@ impl TOMLParser {
             else -> { _ := 0 }
         }
         if Float.parse(clean) == {
-            .Ok(n) -> return Ok(number_tree(^clean, n))
+            .Ok(n) -> return Ok(number_tree(clean, n))
             else -> { _ := 0 }
         }
         if looks_toml_datetime(token) {
-            stamp: Dyn.Text(^token)
+            stamp: Dyn.Text(token)
             if stamp.decode<ZonedDateTime>() == {
                 .Ok(z) -> return Ok(Dyn.DateTime(z))
                 .Err(_) -> { _ := 0 }
@@ -401,7 +416,7 @@ impl TOMLParser {
             if raw.len() > 19 && (raw[raw.len() - 1] == (U8{90}) || raw[raw.len() - 1] == (U8{122}) || (raw.len() >= 25 && raw[raw.len() - 3] == (U8{58}))) {
                 return Err(self.fail("invalid TOML offset date-time"))
             }
-            return Ok(^stamp)
+            return Ok(stamp)
         }
         return Err(self.fail("unsupported TOML bare value; quote text or use a TOML number, boolean, or datetime"))
     }
@@ -416,8 +431,8 @@ impl TOMLParser {
 
     assign: fn(&self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
         path := [String]{}
-        loop k in table -> &path.push(k)
-        loop k in key -> &path.push(k)
+        loop k in table -> path.push(k.copy())
+        loop k in key -> path.push(k.copy())
         if has_path(self.root, path, 0) -> return Err(self.fail("duplicate TOML key"))
         self.root = put_path(self.root, path, 0, value)
         true
@@ -427,7 +442,7 @@ impl TOMLParser {
 remove_underscores: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
-        if b != (U8{95}) -> &out.push(b)
+        if b != (U8{95}) -> out.push(b)
     }
     String.from_bytes(out) ?? text
 }
@@ -563,7 +578,7 @@ ensure_table_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
         .Array(items) -> {
             mutable := items.copy()
             if mutable.len() == 0 {
-                &mutable.push(ensure_table_path(Dyn.object(), path, i + 1))
+                mutable.push(ensure_table_path(Dyn.object(), path, i + 1))
             } else {
                 last: mutable.len() - 1
                 mutable[last] = ensure_table_path(mutable[last], path, i + 1)
@@ -587,7 +602,7 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
         if child == {
             .Array(items) -> {
                 mutable := items.copy()
-                &mutable.push(Dyn.object())
+                mutable.push(Dyn.object())
                 out[key] = Dyn.Array(mutable)
             }
             .Object(_) -> {
@@ -602,7 +617,7 @@ ensure_array_path: fn(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
         .Array(items) -> {
             mutable := items.copy()
             if mutable.len() == 0 {
-                &mutable.push(ensure_array_path(Dyn.object(), path, i + 1))
+                mutable.push(ensure_array_path(Dyn.object(), path, i + 1))
             } else {
                 last: mutable.len() - 1
                 mutable[last] = ensure_array_path(mutable[last], path, i + 1)
@@ -789,15 +804,15 @@ toml_leaf: fn(value: Dyn) -> String Never! {
 // A float keeps its own spelling when it is a JSON number token (`+` dropped),
 // else its shortest decimal spelling; `inf` and `nan` have no lexeme and stay
 // `Float`. Rust twin: jet-foundation.
-number_tree: fn(clean: ^String, value: Float) -> Dyn Never! {
-    unsigned := ^clean
+number_tree: fn(clean: &&String, value: Float) -> Dyn Never! {
+    unsigned := clean.move()
     raw: unsigned.bytes()
     if raw.len() > 0 && raw[0] == (U8{43}) {
         unsigned = String.from_bytes(raw[1..<raw.len()]) ?? panic("removing an ASCII prefix preserves UTF-8")
     }
-    if is_json_number_token(unsigned) -> return stream.typed_number(^unsigned)
+    if is_json_number_token(unsigned) -> return stream.typed_number(unsigned)
     shown := "{value}"
-    if is_json_number_token(shown) -> return stream.typed_number(^shown)
+    if is_json_number_token(shown) -> return stream.typed_number(shown)
     Dyn.Float(value)
 }
 

@@ -105,7 +105,7 @@ static void *new_event(void) {
     return event;
 }
 
-// Examples/features/concurrency/event_policy.jet and callback_output.jet.
+// Examples/Concurrency/EventLifecycle.jet and tests/run/Concurrency/CallbackOutput.jet.
 static void goldens(void) {
     void *events = new_event();
     assert(jet_event_listener_count(events) == 0);
@@ -132,7 +132,7 @@ static void goldens(void) {
     jet_rt_handle_drop_jet_event(saved);
 }
 
-// Examples/features/ui/events.jet's sync Event lines: on + once, unsubscribe.
+// Examples/Apps/UI/Events.jet's sync Event lines: on + once, unsubscribe.
 static void once_and_unsubscribe(void) {
     char log[256] = "";
     void *scope = jet_event_scope_new();

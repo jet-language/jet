@@ -42,7 +42,7 @@ TestProject: struct {
 }
 
 impl TestProject.Close {
-    close: fn(^self) Never! -[FS]> {
+    close: fn(&&self) Never! -[FS]> {
         // GATE #4494: best-effort native cleanup on every exit.
         _: entry_fs.remove_dir_all(self.root)
     }
@@ -355,13 +355,13 @@ check_test_document: fn(text: String) -[FS, Env]> (TestProject, [Diagnostic], Pr
     db: build_symbol_db(maybe_bundle ?? panic("bundle"), facts)
     marks := [Int]{}
     loop hint in db.inlay_hints_for(project.entry()) {
-        if hint[0].label == "?" -> &marks.push(hint[0].span.end)
+        if hint[0].label == "?" -> marks.push(hint[0].span.end)
     }
-    &marks.sort()
+    marks.sort()
     expected := [Int]{}
     loop call in ([String]{"parse(\"1\")", "parse(\"2\")", "parse(\"6\")", "parse(\"7\")"}) {
         start: src.find(call) ?? panic("fixture call {call}")
-        &expected.push(start + call.bytes().len())
+        expected.push(start + call.bytes().len())
     }
     assert_eq(marks, expected)
 }

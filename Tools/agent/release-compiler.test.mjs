@@ -53,6 +53,7 @@ test('options collect every problem at once', () => {
     const options = parseArgs(['--shards', 'x', '--bogus']);
     assert.deepEqual(options.errors, ['--shards needs a whole number, not x', 'unknown option --bogus', 'COMMIT is required']);
     assert.equal(parseArgs(['abc', '--min-gains', '0']).minGains, 0);
+    assert.deepEqual([parseArgs(['abc', '--check-gate']).checkGate, parseArgs(['abc', '--check-gate']).errors], [true, []]);
 });
 
 test('the shards split the slot memory cap instead of each claiming the whole room', () => {

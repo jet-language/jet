@@ -52,7 +52,7 @@ consumption remain identical to the native SplitMix64 seed.
 the public `numerator()` and `denominator()` accessors. Field and method names
 share one member namespace; the storage names are not a construction API.
 
-Manual Core `Debug` implementations use the Prelude's consuming `debug(^self)`
+Manual Core `Debug` implementations use the Prelude's consuming `debug(&&self)`
 contract; `Display` reads `self`. Neither formatting projection changes its text.
 Data errors provide their explicit `Display` and `Debug` implementations beside
 the error declaration; the `#Error` rule does not need a second formatting
@@ -170,7 +170,7 @@ The same direct-boundary rule applies to the held reader, directory, xattr,
 writer-stat and lock operations: canonical private names select the existing
 host kernels without source pass-through facades. Path permission and ownership
 policy uses the compile-target OS family, not a duplicate platform detector.
-`walk`, `walk_parallel`, and `walk_files` own traversal in Jet: depth starts at zero for root
+`walk` and `walk_files` own traversal in Jet: depth starts at zero for root
 entries, results sort by shown path, ancestor symlinks are refused, and each
 directory inherits the existing ignore matcher. The private context preserves
 native path identities (including non-Unicode names) until its scope guard
@@ -506,7 +506,7 @@ to the existing names under D-ITER-DECLINE1.
 
 `next()` is the one partial pull (D-ITER-RESUME1, which amends
 D-ITER-DECLINE1 for `next` only). It needs exclusive access to a writable
-binding, written `&items.next()`, pulls exactly one item, and leaves the
+binding, written `items.next()`, pulls exactly one item, and leaves the
 remainder in the same source: after two pulls from `[1, 2, 3].lazy()`,
 `to_list()` returns `[3]`. The end is `None`. A moved source cannot be pulled,
 and a loop that drives a source holds it for its whole body, so pulling from
@@ -532,11 +532,11 @@ loop row in left.zip_pad(right, fill: 0) {
 ```
 
 Examples covering the eager/lazy boundary and the adapter ledger are in
-[`iter_adapters.jet`](../../../Examples/features/collections/iter_adapters.jet),
-[`lazy_iter.jet`](../../../Examples/features/collections/lazy_iter.jet),
-[`list_surface.jet`](../../../Examples/features/collections/list_surface.jet),
-[`map_surface.jet`](../../../Examples/features/collections/map_surface.jet), and
-[`set.jet`](../../../Examples/features/collections/set.jet).
+[`iter_adapters.jet`](../../../Examples/Collections/Iterators/IterAdapters.jet),
+[`lazy_iter.jet`](../../../Examples/Collections/Iterators/IterAdapters.jet),
+[`list_surface.jet`](../../../tests/run/CollectionsAndMethods/ListSurface.jet),
+[`map_surface.jet`](../../../tests/run/CollectionsAndMethods/MapSurface.jet), and
+[`set.jet`](../../../Examples/Collections/Set.jet).
 
 ### Operation contract
 
@@ -559,7 +559,7 @@ success. `zip` rejects unequal lengths, `zip_short` stops at the shortest
 input, and `zip_pad` pads to the longest; the zip family and `para_*` keep
 their dedicated checkers. `min_by` and `max_by` keep the last item on ties
 (#2298), and list methods stay eager by default (D-CORE-EAGER1,
-D-CORE-EAGER2). [`operation_contract.jet`](../../../Examples/features/collections/operation_contract.jet)
+D-CORE-EAGER2). [`operation_contract.jet`](../../../Examples/Collections/OperationContract.jet)
 runs each of these cases.
 
 <!-- BEGIN GENERATED COLLECTION OPERATIONS -->
@@ -638,14 +638,14 @@ Whole-file and metadata functions. `read`, `read_bytes`, `write`,
 | `stat(path)` / `lstat(path)` | `Stat !IOError` | Describe the entry itself, never a final link's target. |
 | `set_mode(path, mode)` | `!IOError` | Set Unix mode bits; non-Unix providers use their documented readonly mapping. |
 | `list_dir(path)` | `[DirEntry] !IOError` | List entries in name order. |
-| `create_dir(path)` / `create_dir_all(path)` | `!IOError` | Both preserve the existing recursive directory-creation behavior, including missing parents. |
+| `create_dir_all(path)` | `!IOError` | Create a directory and any missing parents; an existing directory is success. |
 | `remove(path)` / `remove_dir(path)` / `remove_all(path)` | `!IOError` | Remove a file, empty directory, or tree. |
 | `copy(from, to)` / `copy_dir(from, to)` | `!IOError` | Copy one regular file or a directory tree. Directory copy does not dereference symlinks or special entries. |
 | `rename(from, to, if_exists:)` | `!IOError` | Rename or move a path; `.Replace` (default), `.Refuse`, or `.Swap`. |
 | `symlink(original, link)` / `hard_link(original, link)` | `!IOError` | Create symbolic or hard links. |
 | `read_link(path)` | `String !IOError` | Read a symbolic-link target. |
 | `canonicalize(path)` / `absolute(path)` | `String !IOError` | Resolve an existing path with symlinks, or make an absolute lexical path without requiring existence. |
-| `walk(root, ignore)` / `walk_parallel(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. The parallel spelling keeps the same ordering and no-follow policy. |
+| `walk(root, ignore)` | `[WalkEntry] !IOError` | Traverse recursively with an optional ignore-file name. |
 | `walk_files(root, ignore)` | `[WalkEntry] !IOError` | Traverse regular files only. |
 | `glob(pattern)` | `[String] !IOError` | Return sorted shown paths matching the native byte glob grammar. |
 | `temp_dir(prefix)` / `temp_file(prefix)` | `TempDir` / `TempFile !IOError` | Create temporary resources whose handles retain `.path`. |
@@ -688,13 +688,14 @@ and clock observation as well as the filesystem surface.
 false. Their false-on-host-error policy is Jet-owned; the host boundary
 supplies only the following-metadata fact or the host error.
 
-`walk`, `walk_parallel`, and `walk_files` accept the optional `ignore` value;
+`walk` and `walk_files` accept the optional `ignore` value;
 `fs.walk(root)` is the convenience form. `DirEntry` has `name`, `path`, and
 `is_dir`. `Stat` has `size`, `kind`, `mode`, `readonly`, `is_file`, `is_dir`,
 `is_symlink`, `id: FileID{device, inode}`, `links`, `owner: Int?` (None on
 Windows), `size_on_disk`, `modified` and `changed` (`DateTime`, nanosecond
 precision), and `created: DateTime?` (None where the file system keeps no
-birth time). `WalkEntry` exposes `path`,
+birth time). `mode` is the permission bits (0o0..0o7777, the domain
+`set_mode` takes); the file type is `kind`. `WalkEntry` exposes `path`,
 `relative`, `is_dir`, and `depth` through the checked type projection.
 The compiler-owned `IOOperation` enum describes the operation within this
 failure context. Its annotation is available to vetted Core source, not a new
@@ -715,7 +716,7 @@ D-CORE-FILELOCK1):
   and reports `IOError.TimedOut`; `files.try_lock(path)` returns None only
   for contention. After acquisition, Core revalidates the opened identity
   against the path and retries a replaced binding. `FileLock.path` remains
-  read-only. Consuming `close(^lock)`, scope exit, or process exit releases
+  read-only. Consuming `close(lock)`, scope exit, or process exit releases
   the kernel lock; release never removes the lock file. Unix uses `flock`;
   Windows uses `LockFileEx` and denies delete sharing. A directory is not a
   lock file; holding a directory and locking a regular file are distinct.
@@ -734,7 +735,7 @@ D-CORE-FILELOCK1):
   held directory itself. Its `AdvisoryLock` owns an independent close-on-exec
   descriptor, so renaming the directory or closing the original `Directory`
   does not release the lock. A contended lock is an `IOError`; explicit
-  `close(^lock)` or scope exit releases it, without deleting a name. Systems
+  `close(lock)` or scope exit releases it, without deleting a name. Systems
   without directory flock report `Unsupported`. This differs from locking
   the regular file named by `files.lock(path)`.
 - Publish through a held directory by exclusively creating a temporary sibling,
@@ -823,7 +824,7 @@ count_lines: fn(path: String) -> Int IOError! {
 | `writer.set_mode(mode)` | `!IOError` | Set the open file's permission bits; Windows keeps only read-only. |
 
 Readers, writers, temporary resources, and locks own their provider resource
-until lexical scope exit or an explicit `close(^handle)` consumes the handle.
+until lexical scope exit or an explicit `close(handle)` consumes the handle.
 A writer flush remains fallible, and early failure propagation closes the
 handle. `append_all` is deliberately distinct from the streaming `append`
 constructor (D-FILES-APPEND1). See the [bounded buffering law](../spec.md#bounded-buffering-law).
@@ -1233,7 +1234,7 @@ run: fn() {
 | `pbkdf2_hmac(password, salt, iterations, key_len)` | `[U8] !CryptoError` | Derive a bounded PBKDF2-HMAC-SHA256 byte sequence. |
 | `new()` / `update(hasher, bytes)` / `digest(hasher)` | hasher operations | Use the incremental SHA-256 hasher. |
 | `constant_time_equal(a, b)` / `constant_time_equal_bytes(a, b)` | `Bool` | Compare nominal secrets or byte lists without early equality branching. |
-| `wipe(&bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
+| `wipe(bytes)` | unit | Zero every element of a `[U8]` and its spare capacity with stores the optimizer cannot drop; the length is unchanged. |
 | `generatekey()` | `X25519SecretKey !CryptoError` | Generate an X25519 secret through the random provider. |
 | `x25519(secret, public)` / `x25519_shared(secret, public)` | `SharedSecret !CryptoError` | Perform typed X25519 agreement and reject invalid keys. |
 | `x25519_public(secret)` | `X25519PublicKey !CryptoError` | Derive the public key. |
@@ -1252,7 +1253,7 @@ only a text data-tree value is accepted, and its UTF-8 bytes become the secret.
 There is no corresponding `Encode` implementation. A user-defined type named
 `Secret` does not inherit this codec by name.
 
-`wipe(&bytes)` erases key bytes that must stay a plain `[U8]`, such as a seed
+`wipe(bytes)` erases key bytes that must stay a plain `[U8]`, such as a seed
 handed to a C library. A buffer the List alone owns is zeroed in place,
 including its spare capacity. A buffer another List still shares keeps its
 bytes for that List: the wiped List takes a fresh zeroed buffer of the same
@@ -1301,8 +1302,8 @@ the safe `core.crypto` functions remain the default.
 
 Raw callers own protocol selection, byte validation, and the `#Unsafe` audit;
 raw X25519 still rejects non-contributory peers. See
-[`crypto_suite.jet`](../../../Examples/features/crypto/crypto_suite.jet) and
-[`crypto_envelope.jet`](../../../Examples/features/crypto/crypto_envelope.jet).
+[`crypto_suite.jet`](../../../Examples/Crypto/CryptoSuite.jet) and
+[`crypto_envelope.jet`](../../../Examples/Crypto/CryptoEnvelope.jet).
 
 The expert secret-byte projections return owned copies, not transfers out of
 the original zeroizing owner. The private JETC v2 engine uses those projections
@@ -1369,7 +1370,7 @@ use {
 provision: fn() -[Secret, IO]> {
     plan: vault.prepare_generate<crypto.SigningKey>("release") ?? return
     write: vault.authorize_write(plan, "create release signer") ?? return
-    key_ref: vault.commit_generate(^write, ^plan) ?? return
+    key_ref: vault.commit_generate(write, plan) ?? return
     print("created {key_ref}")
 }
 ```
@@ -1379,15 +1380,15 @@ provision: fn() -[Secret, IO]> {
 | `get(name)` | `?String` | Read the separate untyped repository-secret value. |
 | `current<T>(name)` | `?KeyRef<T> !VaultError` | Return the active generation, if one exists. |
 | `versions<T>(name)` | `[KeyRef<T>] !VaultError` | Return generations in provider order. |
-| `load<T>(&key)` / `status<T>(&key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact Active or Retired key, or inspect `Active`, `Retired`, or `Revoked`. |
-| `prepare_generate<T>(name)` / `prepare_store<T>(name, ^key)` | `MutationPlan<T> !VaultError` | Prepare a typed mutation without publishing it. |
+| `load<T>(key)` / `status<T>(key)` | `T !VaultError` / `KeyStatus !VaultError` | Load an exact Active or Retired key, or inspect `Active`, `Retired`, or `Revoked`. |
+| `prepare_generate<T>(name)` / `prepare_store<T>(name, key)` | `MutationPlan<T> !VaultError` | Prepare a typed mutation without publishing it. |
 | `prepare_import_signing` / `prepare_import_x25519` | typed plan `!VaultError` | Prepare a checked 32-byte signing or X25519 secret import. |
 | `prepare_rotate<T>(name)` | `MutationPlan<T> !VaultError` | Prepare a rotation for a named generation. |
-| `prepare_retire<T>(&key, reason)` / `prepare_revoke<T>(&key, reason)` | `MutationPlan<T> !VaultError` | Bind a retirement or revocation to an exact key and reason. |
-| `authorize_write<T>(&plan, reason)` | `VaultWrite<T> !VaultError` | Request one provider-authorized write for the exact plan. |
-| `commit_generate/store/rotate/retire/revoke<T>(^write, ^plan)` | typed result `!VaultError` | Consume the write and plan in an atomic mutation. |
-| `export_to_recipients<T>(&key, recipients)` | `WrappedVaultKey !KeyWrapError` | Export a typed key for one to sixteen distinct X25519 recipients. |
-| `export_to_passphrase<T>(&key, &passphrase)` | `WrappedVaultKey !KeyWrapError` | Export a typed key under a bounded nominal Secret. |
+| `prepare_retire<T>(key, reason)` / `prepare_revoke<T>(key, reason)` | `MutationPlan<T> !VaultError` | Bind a retirement or revocation to an exact key and reason. |
+| `authorize_write<T>(plan, reason)` | `VaultWrite<T> !VaultError` | Request one provider-authorized write for the exact plan. |
+| `commit_generate/store/rotate/retire/revoke<T>(write, plan)` | typed result `!VaultError` | Consume the write and plan in an atomic mutation. |
+| `export_to_recipients<T>(key, recipients)` | `WrappedVaultKey !KeyWrapError` | Export a typed key for one to sixteen distinct X25519 recipients. |
+| `export_to_passphrase<T>(key, passphrase)` | `WrappedVaultKey !KeyWrapError` | Export a typed key under a bounded nominal Secret. |
 | `prepare_import_wrapped<T>` / `authorize_wrapped_import<T>` / `commit_import_wrapped<T>` | typed results | Bind, authorize, and commit a wrapped-key import. |
 
 `VaultError` is closed: `InvalidName`, `NotFound`, `WrongType`, `Revoked`,
@@ -1424,8 +1425,8 @@ destroys the owned credential through its zeroizing drop path. Expiry wipes the
 resident byte storage with the same volatile kernel used by explicit secret
 close, without a copied buffer or a replacement allocation. A system clock adds
 the `Time` effect. See
-[`vault_keys.jet`](../../../Examples/features/crypto/vault_keys.jet) and
-[`expiring_secret.jet`](../../../Examples/features/memory/expiring_secret.jet).
+[`vault_keys.jet`](../../../Examples/Crypto/VaultKeys.jet) and
+[`expiring_secret.jet`](../../../Examples/Memory/ExpiringSecret.jet).
 
 The wrapper stores its optional credential and original clock observer in Jet.
 It samples that observer under the storage guard, and expires only when
@@ -1470,8 +1471,8 @@ optional. `AuthError` retains `MalformedToken`, `UnsupportedToken`,
 Session cookies use the fixed `jet_session=` form with `HttpOnly`, `Secure`,
 `SameSite=Lax`, and `Path=/` attributes. Session helpers take explicit
 millisecond timestamps and lifetimes. See
-[`auth_tokens.jet`](../../../Examples/features/crypto/auth_tokens.jet) and
-[`auth_sessions.jet`](../../../Examples/features/crypto/auth_sessions.jet).
+[`auth_tokens.jet`](../../../Examples/Crypto/AuthSessions.jet) and
+[`auth_sessions.jet`](../../../Examples/Crypto/AuthSessions.jet).
 
 ### `core.sync` — replica-aware CRDT values
 
@@ -1577,7 +1578,7 @@ after the port was not ready.
 `Modified`, `Removed`, `Error`, `Exited`, or `Ready`. `WatchEvent` carries
 `domain`, `kind`, `path`, `detail`, `pid`, and `port`. Match all variants when
 handling a closed event enum. See
-[`watcher.jet`](../../../Examples/features/io/watcher.jet).
+[`watcher.jet`](../../../Examples/Systems/Files/Watcher.jet).
 
 The checked `WatchEvent.kind` field has type `WatchKind`, with the same six
 variant names; it is distinct from the independently exported `WatchEventKind`.
@@ -1601,8 +1602,8 @@ run: fn() {
     print("hi, {name}")
     term.eprint("(log) done")
     out := term.stdout()
-    &out.write("done") ?? return
-    &out.flush() ?? return
+    out.write("done") ?? return
+    out.flush() ?? return
 }
 ```
 
@@ -1631,14 +1632,14 @@ are `Enter`, `Escape`, `Backspace`, `Tab`, `Delete`, the four arrow keys, and
 `Unknown`. `confirm` treats a bare Enter as no; `choose` returns an input error
 after its finite retry budget or when stdin closes.
 
-Read a buffered handle with `&reader.read_line()`: each call mutably lends
+Read a buffered handle with `reader.read_line()`: each call mutably lends
 the reader and returns `String? !IOError`. Ordinary failure propagation
 preserves the optional line, so EOF remains `None` rather than an I/O error.
 
-The executable terminal-source examples cover binary-file composition, UTF-8
-stderr, CRLF line reads and EOF, plus confirmation with a closed-input default:
-[`terminal_source.jet`](../../../Examples/features/io/terminal_source.jet) and
-[`terminal_confirm.jet`](../../../Examples/features/io/terminal_confirm.jet).
+The executable terminal examples cover binary-file composition, UTF-8
+stderr, CRLF line reads and EOF, plus confirmation with an empty-answer default:
+[`TerminalSource.jet`](../../../tests/run/CoreIO/TerminalSource.jet) and
+[`TerminalParity.jet`](../../../Examples/Systems/Terminal/TerminalParity.jet).
 Their programs and transcripts are shared by the golden and native harnesses;
 they do not require a bespoke Rust test or direct `rustc` invocation.
 
@@ -1714,8 +1715,8 @@ The direct functions are useful when a typed builder is unnecessary:
 | `positionals(tree)` / `remainder(tree)` | `[String]` | Read positional values. |
 | `program(tree)` / `wants_help(tree)` | `String` / `Bool` | Read `argv[0]` or help intent. |
 
-See [`args_spec.jet`](../../../Examples/features/io/args_spec.jet) and
-[`args_audit.jet`](../../../Examples/features/io/args_audit.jet).
+See [`args_spec.jet`](../../../Examples/Systems/CLI/ArgsSpec.jet) and
+[`args_audit.jet`](../../../Examples/Systems/CLI/ArgsAudit.jet).
 
 ### `core.reflect` — runtime structural reflection (D-ANY-JAI1)
 
@@ -1907,7 +1908,7 @@ tests such as
 The export registry is
 [`Prelude/Core.jet`](../../../Compiler/Prelude/Core.jet); the
 data example used later is
-[`data_analysis.jet`](../../../Examples/features/tooling/data_analysis.jet).
+[`data_analysis.jet`](../../../Examples/Data/Analysis/DataAnalysis.jet).
 
 `core.process` represents a child process as an explicit argument vector and a
 policy-bearing `ProcessSpec`. `process.cmd` never invokes a shell: each
@@ -2175,7 +2176,6 @@ calling them. Source-owned Core wrappers preserve these same constraints.
 | `math.copysign(value, sign)` / `math.fma(a, b, c)` | `Float` | Copy a sign or perform fused multiply-add where supported by the numeric backend. |
 | `math.muladd(a, b, c)` | `Float` | Multiply and add through the math wrapper. |
 | `math.inv(x)` / `math.signum(x)` | `Float` | Reciprocal or floating-point signum. |
-| `math.float32(x)` / `math.float64(x)` | `Float` | Convert through the corresponding floating-point representation. |
 | `math.fabs(x)` / `math.real(x)` / `math.imag(x)` / `math.conj(x)` | `Float` | Absolute floating-point value and scalar component helpers. |
 | `math.is_nan(x)`, `is_inf(x)`, `is_finite(x)` | `Bool` | Test NaN, infinity, or finite status. `is_finite` accepts both `Float` and `F32`. `isnan`, `isinf`, and `isfinite` are aliases. |
 | `math.cmp(a, b)` | `Int` | Accept matching `Float` or `F32` operands and return `-1`, `0`, or `1`; NaN sorts after non-NaN values, two NaNs compare equal, and signed zeros compare equal. |
@@ -2263,7 +2263,7 @@ Reductions use a scalar left-to-right fold, so the reduction order is part of
 the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array bridge, D-FIXARR1).
 Arithmetic results are ordinary math values: lane reads, swizzles, and methods
 operate directly on them, including temporary receivers such as `(a + a).dot(a)`.
-See [`vector_result_values.jet`](../../../Examples/features/lowlevel/vector_result_values.jet).
+See [`vector_result_values.jet`](../../../tests/run/UnsafeAndRuntime/VectorResultValues.jet).
 
 Swizzles (D-SWIZZLE1) name lanes with `x`, `y`, `z`, and `w` on `Vec2`,
 `Vec3`, `Vec4`, `F32x4`, and `F64x2`. A read of one lane is `lane`; a read of
@@ -2274,7 +2274,7 @@ N lanes is the declaration's `__swizzleN` and yields `Vec2`/`Vec3`/`Vec4`
 `v.zx + e`. An `F32x4` write narrows each `Float` with `F32.from_float` and
 stops when a value is outside the F32 range. A lane the type does not have is
 E3110, and a write that names a lane twice (`v.xx = …`) is E3111. See
-[`swizzle.jet`](../../../Examples/features/lowlevel/swizzle.jet).
+[`swizzle.jet`](../../../Examples/LowLevel/Swizzle.jet).
 
 ```jet
 rotate: fn(v: Vec3, transform: Mat3) -> Vec3 {
@@ -2396,6 +2396,44 @@ The seeded integer kernel takes and returns native signed words. Exact Jet
 integers are range-checked once when entering that boundary and widened once
 on return; a native word is never reinterpreted as a numeric handle.
 
+### `core.math.combinatorics` — generation and counts
+
+`core.math.combinatorics` builds full collections over any element type. Each
+result is a fresh list that holds copies of the input items. The counts here
+are the ones `core.math` does not already own. Factorials, choose counts and
+arrangement counts live only in `core.math` (`math.factorial`,
+`math.binomial`, `math.perm`). Sequence work that a list already does stays
+a list method (`take_while`, `skip_while`, `filter`, `windows`, `chunks`,
+`chunk_while`, `scan`, `map`, `skip`, `take`, `step_by`, `flatten`, `cycle`,
+`repeat`, `reverse`).
+
+| Function | Returns | Description |
+| --- | --- | --- |
+| `permutations(items: [T], k)` | `[[T]]` | Every ordered pick of `k` distinct positions; `k` outside `0..=len` gives an empty list. |
+| `combinations(items: [T], k)` | `[[T]]` | Every unordered pick of `k` distinct positions, in input order. |
+| `combinations_with_replacement(items: [T], k)` | `[[T]]` | Unordered picks that may reuse a position; a negative `k` gives an empty list. |
+| `product(items: [T], repeat)` | `[[T]]` | The cartesian power; `repeat <= 0` gives one empty row. |
+| `cartesian(left: [T], right: [T])` | `[[T]]` | Every `[a, b]` pair, left-major. |
+| `powerset(items: [T])` | `[[T]]` | Every subset, starting with the empty one. |
+| `chain(left: [T], right: [T])` | `[T]` | `left` followed by `right`. |
+| `compress(items: [T], mask: [Bool])` | `[T]` | The items whose mask entry is `true`; a short mask drops the tail. |
+| `unique(items: [T])` | `[T]` | The first occurrence of each equal item, in order; `T` is `Equatable`. |
+| `tee(items: [T], copies)` | `[[T]]` | `copies` independent copies; a nonpositive count gives an empty list. |
+| `zip_longest(left: [T], right: [T], fill: T)` | `[[T]]` | Pairs to the longer length, padding the shorter side with `fill`. |
+| `count_from(start, step, n)` | `[Int]` | `n` values from `start` by `step`. |
+| `multinomial(parts: [Int])` | `?Int` | The multinomial coefficient; a negative part returns `None`. |
+| `rising_factorial(n, k)` | `?Int` | `n * (n + 1) * … * (n + k - 1)`; a negative `k` returns `None`. |
+
+```jet
+use combo: core.math.combinatorics
+
+run: fn() {
+    print(combo.permutations([String]{"a", "b", "c"}, 2))
+    print(combo.cartesian([String]{"a", "b"}, [String]{"x", "y"}))
+    print(combo.zip_longest([String]{"a", "b", "c"}, [String]{"x"}, "-"))
+}
+```
+
 ### `core.compute.solve` — dense linear solves
 
 `core.compute.solve` contains checked CPU linear solvers over
@@ -2413,7 +2451,7 @@ non-square, nonfinite, singular, unsupported-device, and limit failures are
 | `LinearSolver` | type | Stores solver kind, dimension, factors, pivots, and device. |
 
 The independent finite `Solver` counter is not an LU factorization:
-`Solver.new(seed)` starts with zero checks and failures, `&solver.require(ok)`
+`Solver.new(seed)` starts with zero checks and failures, `solver.require(ok)`
 counts every requirement and records failed ones, and `failure_count()` reads
 the failure count. `status()` returns `"ok"` until a failure, then `"failed"`.
 Copying this value copies its counters independently.
@@ -2512,13 +2550,13 @@ resource loading requires the corresponding file and GPU authority.
 | `raylib.get_collision_rec(rec1, rec2)` | `RaylibRectangle` | The overlap of two rectangles, or a zero rectangle when they do not overlap. |
 | `raylib.gen_image_color(width, height, color)` / `gen_image_checked(width, height, checks_x, checks_y, first, second)` | `RaylibImage` | A new RGBA image of one color, or of `checks_x` by `checks_y` pixel checks starting with `first` at the top left. A side below 1 or above 16384, or more than 2^24 pixels, gives an image with no pixels. |
 | `raylib.get_image_color(image, x, y)` | `RaylibColor` | The pixel at `(x, y)`, or a zero color outside the image. |
-| `raylib.image_clear_background(&image, color)` / `image_draw_pixel(&image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
-| `raylib.image_draw_rectangle(&image, x, y, width, height, color)` / `image_draw_rectangle_rec(&image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
-| `raylib.image_crop(&image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
-| `raylib.image_resize_nn(&image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
-| `raylib.image_flip_vertical(&image)` / `image_flip_horizontal(&image)` / `image_rotate_cw(&image)` / `image_rotate_ccw(&image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
-| `raylib.image_color_tint(&image, color)` / `image_color_invert(&image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
-| `raylib.image_color_brightness(&image, amount)` / `image_color_replace(&image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
+| `raylib.image_clear_background(image, color)` / `image_draw_pixel(image, x, y, color)` | `Unit` | Set every pixel, or one pixel inside the image, to `color`, alpha included. |
+| `raylib.image_draw_rectangle(image, x, y, width, height, color)` / `image_draw_rectangle_rec(image, rec, color)` | `Unit` | Set the rectangle's pixels, clipped to the image and truncated to whole pixels. As in raylib, less than one column still sets the first pixel unless the rectangle ends at the left edge, and less than one row still fills the first row. |
+| `raylib.image_crop(image, rec)` | `Unit` | Keep the rectangle's pixels, clipped to the image and truncated to whole pixels. A rectangle starting past the image leaves it unchanged. As in raylib, one with no whole column or row leaves no pixels, and the truncated sides (not below 0) become the image's size. |
+| `raylib.image_resize_nn(image, width, height)` | `Unit` | Nearest-neighbour resize with raylib's 16.16 fixed-point source index. A size outside `gen_image_color`'s limits leaves the image unchanged. |
+| `raylib.image_flip_vertical(image)` / `image_flip_horizontal(image)` / `image_rotate_cw(image)` / `image_rotate_ccw(image)` | `Unit` | Mirror the rows or columns, or turn the image a quarter turn; a turn swaps width and height. |
+| `raylib.image_color_tint(image, color)` / `image_color_invert(image)` | `Unit` | Scale each channel by `color`'s channel / 255, rounded down, alpha included; or replace red, green and blue with 255 minus themselves. |
+| `raylib.image_color_brightness(image, amount)` / `image_color_replace(image, color, replace)` | `Unit` | Add `amount`, clamped to -255..255, to red, green and blue, capped at 255; as in raylib, a sum below 0 becomes 1. Or replace every pixel equal to `color` in all four channels with `replace`. |
 | `raylib.load_texture_atlas(path)` | `RaylibTextureAtlas -[FS, GPU]>` | Load an atlas and decode its PNG texture (every color type, bit depth and Adam7; sixteen-bit samples keep their high byte). A missing or malformed PNG leaves the atlas without a texture. |
 | `raylib.load_sound(path)` | `RaylibSound -[FS, GPU]>` | Load a sound resource. |
 | `raylib.play_sound(sound)` | `Bool -[GPU]>` | Start playback and report whether it was accepted. |
@@ -2677,7 +2715,7 @@ run: fn() {
     stamp: time.parse_rfc3339("2025-01-02T03:04:05Z") ?? return
     print(time.isoformat(stamp))
     clock: time.Clock.new(0)
-    &clock.tick(1000)
+    clock.tick(1000)
     print(clock.now())
 }
 ```
@@ -2895,8 +2933,8 @@ The reader enforces depth `256` and a maximum item size of `16,777,216` bytes.
 | `json.pointer(tree, path)` | `Dyn !EncodingError` | Select by RFC 6901 JSON Pointer; a missing member or bad step is a located error, JSON `null` is a value. |
 | `json.patch(doc, ops)` / `patch_with_limits(doc, ops, limits)` | `Dyn !EncodingError` | Apply an RFC 6902 operation array atomically; `doc` is unchanged on failure. |
 | `json.events(value)` | `[DataEvent]` | Produce the canonical event sequence for a tree. |
-| `json.reader(^input, limits)` / `reader_allow_duplicates(^input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
-| `json.writer(^output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
+| `json.reader(input, limits)` / `reader_allow_duplicates(input, limits)` | `JSONReader !EncodingError` | Construct a bounded file-backed event stream. `reader` fails with a sticky `Syntax` error at a repeated object name; `reader_allow_duplicates` reports each occurrence as its own `Key` event. |
+| `json.writer(output, limits, canonical)` | `JSONWriter !EncodingError` | Construct a bounded file-backed event writer. |
 | `JSONReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `JSONWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
@@ -2920,7 +2958,7 @@ is retained and counts as nonblank (only spaces and tabs make a blank record).
 | `jsonl.count_rows(text)` | `Int` | Count nonblank rows. |
 | `jsonl.append_line(text, value)` | `String` | Append one encoded row. |
 | `jsonl.first(text)` | `?Dyn !EncodingError` | Return the first nonblank row. |
-| `jsonl.reader(^input, limits)` / `jsonl.writer(^output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
+| `jsonl.reader(input, limits)` / `jsonl.writer(output, limits)` | `JSONLReader !EncodingError` / `JSONLWriter !EncodingError` | Construct bounded file-backed line streams. |
 | `JSONLReader.next()` | `?Dyn !EncodingError` | Return the next row or stable end-of-input. |
 | `JSONLWriter.write(value)` / `flush()` / `finish()` | `Unit !EncodingError` | Write records, flush output, or finish the stream. |
 
@@ -2944,9 +2982,9 @@ header on the first pull) and decodes it, so rows stream one at a time.
 | `csv.rows(text, delimiter, header, skip_blank)` | `[CSVRow] !EncodingError` | Parse physical rows with explicit delimiter, header and blank-line policy. |
 | `csv.parse(text, delimiter, header, skip_blank)` / `decode(text)` | `Dyn !EncodingError` | Parse rows as an array of arrays through the same engine and options as `csv.rows`. |
 | `csv.to_string<T: Encode>(rows)` | `String` | Encode explicit row arrays, typed records, or the array-of-arrays `Dyn` that `csv.parse` returns, so parsed rows round-trip; records use the first record's field order as the header. Rows are separated by LF, with no trailing LF. |
-| `csv.reader(^source, limits, delimiter, header, skip_blank)` / `csv.writer(^target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
+| `csv.reader(source, limits, delimiter, header, skip_blank)` / `csv.writer(target, limits)` | `CSVReader !EncodingError -[FS]>` / `CSVWriter !EncodingError -[FS]>` | Construct incremental file-backed CSV objects. Reader defaults retain the header and blank records. |
 | `CSVReader.next()` | `?CSVRow !EncodingError -[IO]>` | Return the next physical row or stable end-of-input; errors retain their byte offset, physical location, and record/field path. |
-| `CSVWriter.write(^fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
+| `CSVWriter.write(fields)` / `flush()` / `finish()` | `Unit !EncodingError -[IO]>` | Write comma-delimited string fields; CRLF is deferred until the next record or finish. Flush does not finish a record. |
 | `csv.query<T>(path, sql)` | `Query<T> ![FieldError] -[FS]>` | Decode typed header-named records and apply the bounded query plan. |
 | `CSVRow` | type | Physical line number and parsed string fields. |
 
@@ -2991,7 +3029,7 @@ codec must not remove its native options or located error payloads.
 | `xml.parse(text)` / `parse_with(text, options)` / `parse_bytes(bytes, options)` | `Dyn !XMLError` | Parse Unicode text or supported byte encodings with bounded, non-I/O entity policy. |
 | `xml.to_string(tree)` / `to_bytes(tree, options)` | `String !XMLError` / `[U8] !XMLError` | Render a validated XML document with lexical and encoding options. |
 | `xml.canonical(tree, options)` | `String !XMLError` | Apply Inclusive 1.1 or Exclusive 1.0 canonicalization. |
-| `xml.reader(^input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
+| `xml.reader(input, limits, options)` | `XMLReader !EncodingError` | Construct a bounded file-backed XML event reader. |
 | `xml.attribute(element, name)` / `content(element)` / `expanded_name(node)` / `root(document)` | varies `!XMLError` | Inspect attributes, content, expanded names, and the document root. |
 | `XMLWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write XML events, flush output, or validate and finish the stream. |
 
@@ -3016,7 +3054,7 @@ part; its helper functions are not exports of the public CBOR module.
 | --- | --- | --- |
 | `cbor.parse(bytes, options)` | `Dyn !CBORError` | Parse a whole value under depth, item, allocation, and canonical limits. |
 | `cbor.to_bytes<T: Encode>(value)` / `to_bytes_canonical(value)` | `[U8] !CBORError` | Encode ordinary or canonical CBOR. |
-| `cbor.reader(^input, limits)` / `writer(^output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
+| `cbor.reader(input, limits)` / `writer(output, limits)` | `CBORReader !EncodingError` / `CBORWriter !EncodingError` | Construct bounded file-backed event streams. |
 | `CBORReader.next()` | `?DataEvent !EncodingError` | Return the next event or stable end-of-input. |
 | `CBORWriter.write(event)` / `flush()` / `finish()` | `Unit !EncodingError` | Write events, flush output, or validate and finish the stream. |
 
@@ -3177,9 +3215,10 @@ run: fn() {
 | `sum(values)` / `mean(values)` | `Float !DataError` | Reduce finite numeric values. |
 | `min(values)` / `max(values)` | `Float !DataError` | Select finite numeric extrema. |
 | `variance(values)` / `stddev(values)` | `Float !DataError` | Compute finite numeric dispersion. |
-| `median(values)` / `quantile(values, q)` | `Float !DataError` | Compute bounded order statistics by worst-case linear rank selection on a copy; the caller's list is unchanged. |
+| `quantile(values, q)` | `Float !DataError` | Compute a bounded order statistic by worst-case linear rank selection on a copy; the caller's list is unchanged. `quantile(values, 0.5)` is the median with this error contract; `core.math.stats.median` returns `Float?`. |
 | `rolling_mean(values, window)` | `[Float] !DataError` | Compute a bounded rolling mean. |
-| `query(rows)` | `Query<T>` | Start a deterministic query plan. |
+| `query(rows)` | `Query<T>` | Start a deterministic query plan under `DataLimits.safe()`. |
+| `query(stream)` | `Query<T>` | Start a one-shot query over a stream's remaining rows, under the `DataLimits` of the reader that made the stream. |
 | `inner_join(left, right, left -> key, right -> key)` | `[DataJoin<T, U>] !DataError` | Preserve duplicate matches. |
 | `left_join(left, right, left -> key, right -> key)` | `[DataJoin<T, ?U>] !DataError` | Retain unmatched left rows as `?U`. |
 | `pivot_sum(rows, row -> key, row -> column, row -> value)` | `[DataPivotCell] !DataError` | Group and sum by a row and column key. |
@@ -3198,7 +3237,10 @@ deterministic operation names; `collect()` materializes `[T] !DataError`.
 The source `query(rows)` facade constructs the shared deferred carrier through
 the data provider, rather than rebuilding its private storage as a source
 record. Filter, sort, and grouping selectors receive an owned row value at
-the provider callback boundary.
+the provider callback boundary. A query's limits bound its sorts, groups, and
+collected rows, and every query derived from it keeps them: grouping a
+`csv_reader` stream with `max_groups = 1` into two groups fails with
+`Limit query.group_by.mean: max_groups 1 exceeded`.
 Grouped `count`, `sum`, and `mean` return `Query<Group<K, V>>`, and `mean`
 requires a floating numeric selector. `DataTracked<T, K>` supports `query`,
 `insert`, `replace`, and `remove`; `DataWatch<T>` supports `get`, `status`, and
@@ -3478,7 +3520,7 @@ constant evaluation; they are not alternate syntax for bindings. See
 | Signature | Result | Description |
 |---|---|---|
 | `keep<T>(value: T) -> T` | `T` | Preserve a value at an explicit use site. |
-| `identity(value: ^String) -> String` | text | Return a borrowed string unchanged. |
+| `identity(value: &&String) -> String` | text | Return a borrowed string unchanged. |
 | `always(value: Bool) -> Bool` | Boolean | Return a Boolean unchanged. |
 | `identity_int(value: Int) -> Int`, `identity_float(value: Float) -> Float`, `identity_bool(value: Bool) -> Bool` | same type | Typed identity helpers for primitive values. |
 | `const_int(value: Int, ignored: Int) -> Int` | integer | Select the first integer in a constant-evaluation expression. |
@@ -3650,7 +3692,7 @@ The IME capability is spelled `UI.IME`, alongside `UI.Keyboard` and
 | `text(value: String) -> UINode` | node | Construct a text node. |
 | `preview(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named preview; `viewport:` defaults to `desktop()`. |
 | `playground(name: String, body: fn() -> UINode, *, viewport: UIPreviewViewport?) -> UIPreview` | preview | Describe a named interactive playground; `viewport:` defaults to `desktop()`. |
-| `previews(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!`, `playgrounds(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!` | registry | Register at most 64 previews, each with a non-empty unique name. |
+| `previews(entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!` | registry | Register at most 64 previews and playgrounds, each with a non-empty unique name. |
 | `UIPreviewRegistry.render(name: String) -> UINode UIPreviewError!` | node | Call the named preview's body. |
 | `desktop() -> UIPreviewViewport`, `phone() -> UIPreviewViewport`, `tablet() -> UIPreviewViewport` | viewport | Select standard preview dimensions: 1280×800 at scale 1, 390×844 at scale 2, 834×1119 at scale 2. |
 | `key_event(code: String) -> InputEvent` | event | Create `InputEvent.Key{code: code}`. |
@@ -3669,8 +3711,8 @@ scale: Int}` and `UIPreview` is `{kind: UIPreviewKind, name: String, viewport:
 UIPreviewViewport, body: fn() -> UINode}`; both are plain Jet values on every
 tier. Registration fails with `UIPreviewError.EmptyName`, `.TooManyPreviews`,
 or `.DuplicatePreview(name)`; rendering an unregistered name fails with
-`.UnknownPreview(name)`. Preview and playground registries can be imported
-directly as `core.ui.[previews, playgrounds]`.
+`.UnknownPreview(name)`. The registry function can be imported directly as
+`core.ui.[previews]`.
 Host file-dialog, clipboard, shortcut, accessibility, and IME consumers declare
 their corresponding `UI.*` authority needs and use the current failure carrier;
 IME polling yields an optional event after host failure propagation.
@@ -3928,7 +3970,7 @@ Outside a browser (`jet run`, a native build), each of `local` and `session`
 is one process-wide in-memory store, and the two stay separate: `set`
 replaces a key's value, `remove` and `clear` touch only their own store,
 and the empty key is an ordinary key. The golden
-`Examples/features/web/storage_local_session.jet` shows this on O0, O1 and O2.
+`Examples/Apps/Web/StorageLocalSession.jet` shows this on O0, O1 and O2.
 
 ### `Cell<T>` — local interior mutability
 
@@ -4005,10 +4047,10 @@ run: fn() {
 | `Bump.new(capacity: Int)` | allocator | Create a contiguous monotonic allocator. |
 | `Pool.new<T>(slots: Int)` | pool | Reuse fixed-size slots by alignment class. |
 | `Fixed.new(size: Int)` | allocator | Create positive-comptime inline backing storage. |
-| `Fixed.over(&bytes)` | allocator | Borrow one mutable byte buffer for the handle's scope. |
+| `Fixed.over(bytes)` | allocator | Borrow one mutable byte buffer for the handle's scope. |
 | `allocator.alloc(value)` | view | Store a value and return a scope-bound view. |
 | `allocator.reset()` | — | Drop values while retaining reusable storage. |
-| `close(^allocator)` | — | Release the allocator resource permanently. |
+| `close(allocator)` | — | Release the allocator resource permanently. |
 | `address_of<T>(value: T) -> Int` | address | Return an inert address value. |
 | `from_addr<T>(address: Int) -> *T` | pointer | `#Unsafe` function: reconstitute a pointer; every call sits in an audited `#Unsafe` region. |
 | `volatile_read<T>(pointer: *T) -> T` | value | `#Unsafe` function: perform a volatile read; every call sits in an audited `#Unsafe` region. |
@@ -4083,7 +4125,7 @@ including for empty text. This is a separate operation from the module function
 reports a base outside `2..=36` as a parse error. `Cursor.over(text)` is the consuming scanner for
 structured text: `skip_ws`, `take_pattern`, and `take_until` advance the cursor
 and return an ordinary error value on a miss. The scanner example is
-[`Examples/features/parsing/text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet).
+[`Examples/Text/TextCursor.jet`](../../../Examples/Text/TextCursor.jet).
 
 ### `Cursor` — consuming text scanner
 
@@ -4134,8 +4176,8 @@ panic or silent truncation.
 | `reader.take_pattern(pattern) -> (holes…) !String` | tuple | Match and consume a literal binary prefix. |
 
 Use `fs.read_bytes` and `fs.write_bytes` for raw file bytes. The complete
-scanner examples are [`binary-reader.jet`](../../../Examples/features/parsing/binary-reader.jet)
-and [`text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet).
+scanner examples are [`binary-reader.jet`](../../../Examples/Data/Binary/BinaryReader.jet)
+and [`text-cursor.jet`](../../../Examples/Text/TextCursor.jet).
 
 ## Numeric surface
 
@@ -4196,6 +4238,22 @@ left operand's width, and its count may be any integer width (`U64{byte} << n`
 with `n: U8`); a count past the value's width traps rather than leaking a
 host-language panic.
 
+`wrapping(T{x})` is the truncating conversion from `Int` for every
+fixed-width integer type: it keeps the low bits of `x` in `T`'s width, two's
+complement for a signed `T`.
+
+```jet
+low_bits: fn(wide: Int, deep: Int) {
+    print(wrapping(U8{wide}))   // 112
+    print(wrapping(U16{wide}))  // 4464
+    print(wrapping(I32{deep}))  // -705032704
+}
+
+run: fn() {
+    low_bits(70000, -5000000000)
+}
+```
+
 Explicit narrowing is destination-owned and fallible. `U8.from_int`,
 `I16.from_int`, `F32.from_float`, `Int.from_float`, and the corresponding
 fixed-width conversions reject values outside the target's finite range;
@@ -4247,22 +4305,22 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `tcp_connect_timeout(addr: SocketAddr, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect with a nonnegative timeout. |
 | `tcp_connect_happy(host: String, port: Int, timeout_ms: Int) -[Net, Time.Wait]> TCPStream !NetError` | stream | Connect through the address-family race. |
 | `create_connection(host: String, port: Int) -[Net, Time.Wait]> TCPStream !NetError` / `create_server(host, port) -[Net]> TCPListener !NetError` | endpoint | Build host/port TCP endpoints. |
-| `send(&stream: TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
-| `tcp_read(&stream: TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
-| `tcp_read_text(&stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
-| `tcp_write(&stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(&stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
-| `tcp_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(&stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
-| `tcp_shutdown(&stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(&stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
-| `tcp_reply(^stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
-| `tcp_ready(&stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
+| `send(stream: &TCPStream, text: String) -[Net, Time.Wait]> Int !NetError` | count | Write text through the caller's exclusive stream window. |
+| `tcp_read(stream: &TCPStream) -[Net, Time.Wait]> String !NetError` / `tcp_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | text/bytes | Read from a TCP stream. |
+| `tcp_read_text(stream, n) -[Net, Time.Wait]> String !NetError` | text | Read and decode up to `n` bytes. |
+| `tcp_write(stream, text: String) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_bytes(stream, bytes) -[Net, Time.Wait]> Int !NetError` | unit/count | Write text or bytes. |
+| `tcp_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `tcp_write_text(stream, text) -[Net, Time.Wait]> Unit !NetError` | unit | Write all bytes or text. |
+| `tcp_shutdown(stream, how: NetShutdown) -[Net]> Unit !NetError` / `tcp_close(stream) -[Net]> Unit !NetError` | — | Shut down or close a stream. |
+| `tcp_reply(stream, status: String, body: String) -[Net, Time.Wait]> Unit !NetError` | — | Consume a stream, write one checked reply with a three-digit status, and close it. |
+| `tcp_ready(stream, interest: NetReadyInterest, deadline_ms: Int) -[Net, Time.Wait]> NetReady !NetError` | readiness | Wait for a readiness interest until a deadline. |
 | `ready_readable(ready: NetReady) -> Bool` / `ready_writable(ready) -> Bool` | Boolean | Inspect readiness. |
 | `tcp_local_addr(stream) -[Net]> String !NetError`, `tcp_peer_addr(stream) -[Net]> String !NetError` | text | Read rendered stream endpoints. |
 | `tcp_local_socket_addr(stream) -[Net]> SocketAddr !NetError`, `tcp_peer_socket_addr(stream) -[Net]> SocketAddr !NetError`, `listener_local_socket_addr(listener) -[Net]> SocketAddr !NetError` | address | Read typed stream/listener endpoints. |
-| `set_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
-| `set_read_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(&stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
-| `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(&stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
-| `ttl(stream) -[Net]> Int !NetError` / `set_ttl(&stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
-| `sendfile(&stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
+| `set_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set a nonnegative timeout on the caller's stream, without copying the handle. |
+| `set_read_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` / `set_write_timeout(stream, timeout_ms: Int) -[Net]> Unit !NetError` | — | Set read or write timeouts in milliseconds. |
+| `nodelay(stream) -[Net]> Bool !NetError` / `set_nodelay(stream, on: Bool) -[Net]> Unit !NetError` | option | Read or set TCP no-delay. |
+| `ttl(stream) -[Net]> Int !NetError` / `set_ttl(stream, hops: Int) -[Net]> Unit !NetError` | option | Read or set the TTL. |
+| `sendfile(stream, path: String) -[Net, Time.Wait]> Int !NetError` | count | Send file bytes through a TCP stream. |
 | `udp_bind(addr: String) -[Net]> UDPSocket !NetError` / `udp_bind_addr(addr: SocketAddr) -[Net]> UDPSocket !NetError` | socket | Bind a UDP socket. |
 | `udp_local_addr(socket: UDPSocket) -[Net]> SocketAddr !NetError` / `udp_set_timeout(socket, timeout_ms: Int) -[Net]> Unit !NetError` | address/— | Inspect a UDP endpoint or set its timeout. |
 | `udp_send_to(socket, text, addr) -[Net, Time.Wait]> Int !NetError` / `udp_send_bytes_to(socket, bytes, addr) -[Net, Time.Wait]> Int !NetError` | count | Send text or bytes to a datagram address. |
@@ -4270,9 +4328,9 @@ empty. `socket_addr` is the first element of `socket_addrs`. Explicit
 | `udp_packet_data(packet)`, `udp_packet_bytes(packet)`, `udp_packet_addr(packet)` | scalar | Read packet text, bytes, or address. |
 | `udp_packet_original_len(packet) -> Int` / `udp_packet_truncated(packet) -> Bool` | scalar | Inspect datagram length and truncation. |
 | `unix_listen(path: String) -[Net]> UnixListener !NetError` / `unix_connect(path) -[Net, Time.Wait]> UnixStream !NetError` | endpoint | Use Unix-domain sockets. |
-| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(&stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
-| `unix_write(&stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(&stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
-| `unix_write_all_bytes(&stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(&stream, how) -[Net]> Unit !NetError` / `unix_close(&stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
+| `unix_accept(listener) -[Net, Time.Wait]> UnixStream !NetError` / `unix_read(stream) -[Net, Time.Wait]> String !NetError` | stream/text | Accept or read a Unix stream. |
+| `unix_write(stream, text) -[Net, Time.Wait]> Unit !NetError` / `unix_read_bytes(stream, n) -[Net, Time.Wait]> [U8] !NetError` | unit/bytes | Write text or read bytes through the caller's exclusive stream window. |
+| `unix_write_all_bytes(stream, bytes) -[Net, Time.Wait]> Unit !NetError` / `unix_shutdown(stream, how) -[Net]> Unit !NetError` / `unix_close(stream) -[Net]> Unit !NetError` | — | Write all bytes or close the same Unix stream. |
 | `dns_a(name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa(name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve IPv4 or IPv6 records. |
 | `dns_a_at(server: String, name: String, ms: Int) -[Net, Time.Wait]> [IPAddr] !NetError` / `dns_aaaa_at(server, name, ms) -[Net, Time.Wait]> [IPAddr] !NetError` | addresses | Resolve A or AAAA records through an explicit server. |
 | `dns_txt(name: String, ms: Int) -[Net, Time.Wait]> [String] !NetError` / `dns_ptr(addr, ms) -[Net, Time.Wait]> [String] !NetError` | records | Resolve TXT or PTR records. |
@@ -4381,11 +4439,11 @@ carriers are validated before network use. See [`Core/Net/Tls.jet`](../../../Cor
 | `ClientConfig.default().with_trust(policy)` | `ClientConfig !IOError` | Select `.System`, `.SystemPlus(roots)`, or `.CustomOnly(roots)` trust. |
 | `ClientConfig.default().with_client_identity(identity)` | `ClientConfig !IOError` | Add a validated mTLS client identity to an immutable configuration. |
 | `ClientConfig.default().with_version_bounds(min: version, max: version)` | `ClientConfig !IOError` | Select inclusive `.TLS12` / `.TLS13` bounds; reversed bounds fail before network use. |
-| `tls.client(^tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
+| `tls.client(tcp, server_name:, config:, deadline:)` | `TLSStream !NetError` | Consume the connected TCP stream, verify the server name, apply configuration, and use the earliest handshake deadline. |
 | `client(host: String, port: Int)` | `TLSStream !IOError` | Convenience form that connects and verifies a host and port. |
-| `read(&stream: TLSStream, n: Int)` / `read_text(&stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
-| `write(&stream: TLSStream, bytes: [U8])` / `write_all(&stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
-| `write_text(&stream: TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
+| `read(stream: &TLSStream, n: Int)` / `read_text(stream, n)` | `[U8] !IOError` / `String !IOError` | Read bounded TLS bytes or checked UTF-8 text. |
+| `write(stream: &TLSStream, bytes: [U8])` / `write_all(stream, bytes)` | `Int !IOError` / `!IOError` | Write application bytes, partially or completely. |
+| `write_text(stream: &TLSStream, text)` / `close(stream)` | `!IOError` | Write text or send close-notify on the same handle; repeated close is harmless. |
 | `stream.peer_identity()` | `TLSPeerIdentity` | Read the verified server name, certificate chain, cipher suite, and negotiated TLS version. |
 | `stream.read(limit, deadline:)` / `stream.write_all(bytes, deadline:)` | matching results | Apply explicit per-call deadlines on the same TLS handle. |
 | `stream.close_write(deadline:)` | `!IOError` | Flush close-notify and close only writes while reads continue. |
@@ -4402,7 +4460,7 @@ DNS subjectAltNames, validity in Unix milliseconds, and RFC 4514-style subject
 and issuer names.
 
 The consumed-stream overload is distinct from `client(host, port)`: using
-`tls.client(^tcp, server_name:, config:, deadline:)` keeps the immutable
+`tls.client(tcp, server_name:, config:, deadline:)` keeps the immutable
 configuration and returns `NetError`. System trust reads `SSL_CERT_FILE` /
 `SSL_CERT_DIR` when set and otherwise the first distribution bundle that loads.
 `RootCertificates.from_pem` and `ClientIdentity.from_pem` validate through the
@@ -4527,7 +4585,7 @@ helpers, value-based differentiation, linear algebra, FFT, and serialization.
 `Auto` selects the CPU reference path; an explicit unsupported device returns a
 typed capability error rather than silently falling back. The source is
 [`Core/Compute/Compute.jet`](../../../Core/Compute/Compute.jet), with executable
-examples under [`Examples/features/tooling/`](../../../Examples/features/tooling/).
+examples under [`Examples/Tooling/`](../../../Examples/Tooling/).
 This is one ranked Tensor operation family with an explicit placement contract (`D-COMPUTE1=D`; `D-COMPUTE-TYPE1=D`; `D-COMPUTE-PLACE1=D`). Gradient and value-and-gradient calls remain explicit, checked value-based transforms (`D-COMPUTE-GRAD1=E`).
 The registered compute vocabulary is the sole nominal owner of tensors,
 devices, streams, and transform receipts. Core source imports that vocabulary;
@@ -4733,7 +4791,7 @@ limits are part of the safety boundary. Every decoder bounds its decoded
 output, never only its compressed input, so a small input that expands still
 stops at the 64 MiB cap with `Unsupported`. Encoders and writers never signal
 failure with an empty or unchanged buffer; they return the typed error.
-`Examples/features/io/archive_hostile.jet` exercises truncated, bad-checksum,
+`tests/run/CoreIO/ArchiveHostile.jet` exercises truncated, bad-checksum,
 output-bomb, 4,097-entry, and traversal-name inputs for every codec.
 
 ### `core.archive.gzip` — bounded gzip files
@@ -5009,16 +5067,16 @@ conventions remain in force.
 Executable examples are organized by capability. Useful entry points for this
 part include:
 
-- [`Examples/features/parsing/text-cursor.jet`](../../../Examples/features/parsing/text-cursor.jet)
-  and [`binary-reader.jet`](../../../Examples/features/parsing/binary-reader.jet)
+- [`Examples/Text/TextCursor.jet`](../../../Examples/Text/TextCursor.jet)
+  and [`binary-reader.jet`](../../../Examples/Data/Binary/BinaryReader.jet)
   for consuming scanners;
-- [`Examples/features/io/files.jet`](../../../Examples/features/io/files.jet)
-  and [`Examples/features/io/cli.jet`](../../../Examples/features/io/cli.jet)
+- [`Examples/Systems/Files/Files.jet`](../../../Examples/Systems/Files/Files.jet)
+  and [`Examples/Systems/CLI/CLIArgs.jet`](../../../Examples/Systems/CLI/CLIArgs.jet)
   for capability-bound I/O;
-- [`Examples/features/serde/json_integer_fidelity.jet`](../../../Examples/features/serde/json_integer_fidelity.jet)
+- [`Examples/Data/JSON/JSONIntegerFidelity.jet`](../../../Examples/Data/JSON/JSONIntegerFidelity.jet)
   for typed encoding behavior;
-- [`Examples/features/tooling/compute_tensor.jet`](../../../Examples/features/tooling/compute_tensor.jet)
-  and [`app_live.jet`](../../../Examples/features/tooling/app_live.jet)
+- [`Examples/Math/Compute/ComputeTensor.jet`](../../../Examples/Math/Compute/ComputeTensor.jet)
+  and [`app_live.jet`](../../../Examples/Tooling/DevLoop/AppLive.jet)
   for compute and web surfaces;
 - [`tests/conformance/corpus/core/`](../../../tests/conformance/corpus/core/)
   for small, checked examples of the exported Core contracts.

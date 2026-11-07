@@ -119,7 +119,7 @@ Always pass `--by <your-agent-name>`.
   tower card claim '#12' --by me                # renewable lease vs double work
 tower card update '#12' --phase building --log "started X" --by me
 tower card update '#12' --plan "1. ... 2. ..." --by me
-tower card update '#12' --refs "Docs/spec/foo.md,Examples/features/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
+tower card update '#12' --refs "Docs/spec/foo.md,Examples/bar.jet"  # explicit doc pointers (also auto-harvested from body/plan into `tower brief`)
 tower question answer <qid> --text "..." --by me
 tower message add '#12' --text "..." --by me
 tower message done <id> --by owner
@@ -414,7 +414,7 @@ GET  /api/brief?card=&agent=&claim=0|1   one-shot work packet (#462); no
 GET  /api/events?limit=50           audit trail
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add|criteria-meet|criteria-verify|criteria-reopen
+POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
@@ -428,7 +428,7 @@ POST /api/papercut/resolve {id}                (owner-only)
 POST /api/done/clear                           (owner-only; clears completed cards, not messages)
 POST /api/idea/add|update|delete|promote
 POST /api/epoch/add|update|current
-POST /api/milestone/add|update|criteria-add|criteria-meet|criteria-verify|criteria-reopen|verify|delete
+POST /api/milestone/add|update|criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen|verify|delete
 ```
 
 POST bodies are JSON; include `by`, optionally `expectRev`. Errors are

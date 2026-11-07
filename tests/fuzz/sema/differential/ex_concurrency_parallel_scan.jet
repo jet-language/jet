@@ -1,13 +1,13 @@
 // 34 — Parallel file scan: tasks + channels for real I/O-bound work.
 //
 // Default demo (no extra args):
-//   nix develop -c jet run Examples/features/concurrency/parallel_scan.jet
+//   nix develop -c jet run Examples/Concurrency/Parallel/ParallelScan.jet
 //
 // Pick your own files:
-//   nix develop -c jet run Examples/features/concurrency/parallel_scan.jet Examples/features/serde/json.jet Examples/features/io/cli.jet
+//   nix develop -c jet run Examples/Concurrency/Parallel/ParallelScan.jet Examples/Data/JSON/JSON.jet Examples/Systems/CLI/CLIArgs.jet
 //
 // Interactive prompts:
-//   INTERACTIVE=1 nix develop -c jet run Examples/features/concurrency/parallel_scan.jet
+//   INTERACTIVE=1 nix develop -c jet run Examples/Concurrency/Parallel/ParallelScan.jet
 use {
     tasks: core.tasks
     fs: core.files
@@ -26,10 +26,10 @@ scan_one: fn(path: String) -> String {
 
 default_paths: fn() -> [String] {
     return [
-        "Examples/features/concurrency/tasks.jet",
-        "Examples/features/concurrency/pipeline.jet",
-        "Examples/features/collections/wordcount.jet",
-        "Examples/features/serde/json.jet"
+        "Examples/Concurrency/Tasks.jet",
+        "Examples/Concurrency/Parallel/Pipeline.jet",
+        "Examples/Collections/WordCount.jet",
+        "Examples/Data/JSON/JSON.jet"
     ]
 }
 
@@ -43,7 +43,7 @@ paths_from_prompt: fn() -> [String] {
     loop true {
         raw: io.input("> ") ?? return out.copy()
         if raw == "" { break }
-        &out.push(raw)
+        out.push(raw)
     }
     return out
 }
@@ -61,18 +61,18 @@ scan_parallel: fn(paths: [String]) -> [String] {
     loop path in paths {
         tx: sender.copy()
         file: path.copy()
-        &workers.push(task {
+        workers.push(task {
             tx.send(scan_one(file))
         })
     }
     loop workers.len() > 0 {
-        worker: &workers.pop() ?? panic("missing worker")
+        worker: workers.pop() ?? panic("missing worker")
         worker.join() ?? panic("worker failed")
     }
     sender.close()
     results := [String]{}
-    loop value in ch -> &results.push(value)
-    &results.sort()
+    loop value in ch -> results.push(value)
+    results.sort()
     return results
 }
 

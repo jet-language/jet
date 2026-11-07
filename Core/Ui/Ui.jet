@@ -166,15 +166,15 @@ phone: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Phone, widt
 tablet: fn() -> UIPreviewViewport Never! { UIPreviewViewport{device: .Tablet, width: 834, height: 1119, scale: 2} }
 
 // A preview renders in the desktop viewport unless `viewport:` names another.
-preview: fn(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+preview: fn(name: String, &&body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Preview, name: name, viewport: viewport ?? desktop(), body: body}
 }
-playground: fn(name: String, ^body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
+playground: fn(name: String, &&body: fn() -> UINode, *, viewport: UIPreviewViewport?{None}) -> UIPreview Never! {
     UIPreview{kind: .Playground, name: name, viewport: viewport ?? desktop(), body: body}
 }
 
-previews: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
-playgrounds: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(^entries) }
+// Registers previews and playgrounds alike; each entry's `kind` tells them apart.
+previews: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! { preview_registry(entries) }
 
 impl UIPreviewRegistry {
     // Builds the node tree of the preview named `name`.
@@ -263,7 +263,7 @@ transfer_node: fn(label: String, width: Float, height: Float, role: UIAriaRole?,
     }
 }
 
-preview_registry: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
+preview_registry: fn(&&entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError! {
     if entries.len() > 64 -> return Err(UIPreviewError.TooManyPreviews)
     loop (index, entry) in entries {
         if entry.name == "" -> return Err(UIPreviewError.EmptyName)
@@ -295,7 +295,7 @@ preview_registry: fn(^entries: [UIPreview]) -> UIPreviewRegistry UIPreviewError!
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error == UIPreviewError.DuplicatePreview("card"))
     }
-    if playgrounds([playground("", () -> text("blank"))]) == {
+    if previews([playground("", () -> text("blank"))]) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert(error == UIPreviewError.EmptyName)
     }

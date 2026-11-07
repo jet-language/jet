@@ -31,11 +31,11 @@ lsp_completion_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String?
             .Ok(result) -> { if result == .Val(json) -> return Val(lsp_response(id, json)) }
         }
         db := lsp_build_symbol_db(result)
-        lsp_merge_workspace_defs(server, doc, &db)
+        lsp_merge_workspace_defs(server, doc, db)
         discovery: lsp_load_discovery_index(lsp_completion_path.display(doc.path), doc.path.platform)
         items: lsp_compute_completions(db, doc.text, offset, current_path, doc.path, root, discovery, result)
         rows := [String]{}
-        loop item in items -> &rows.push(item.to_json())
+        loop item in items -> rows.push(item.to_json())
         return Val(lsp_response(id, "{{\"isIncomplete\":false,\"items\":[{rows.join(",")}]}}"))
     }
     None
@@ -71,7 +71,7 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
                         if effects == {
                             .Val(row) -> {
                                 names := [String]{}
-                                loop entry in row -> &names.push(entry.name)
+                                loop entry in row -> names.push(entry.name)
                                 label += " -[{names.join(", ")}]>"
                             }
                             .None -> label += "\neffects: unavailable"
@@ -85,7 +85,7 @@ lsp_signature_help_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> Str
                 }
                 rows := [String]{}
                 loop part in parts {
-                    if part != "/" && part != "*" -> &rows.push("{{\"label\":{foundation_json_quote(part)}}}")
+                    if part != "/" && part != "*" -> rows.push("{{\"label\":{foundation_json_quote(part)}}}")
                 }
                 active: binder_active_parameter(call.active_label, call.active_param, call.consumed_labels, contract, rows.len())
                 result: "{{\"signatures\":[{{\"label\":{foundation_json_quote(label)},\"parameters\":[{rows.join(",")}]}}],\"activeSignature\":0,\"activeParameter\":{active}}}"

@@ -773,7 +773,7 @@ RetiredEffectResultArrow: struct {
     impl Diagnostic {
         code: "E0071"
         status: .Retired
-        meaning: "Retired effect-only result-arrow teaching (D-ONELINE-BODY1=B; was D-ARROW-CONTROL1)"
+        meaning: "Retired effect-only result-arrow teaching"
         no_fix: None
         what: fn(self) -> String { "This retired effect-only result-arrow diagnostic is no longer emitted." }
         why: fn(self) -> String { "Effect-only one-line bodies use `->` for one statement; braces hold multiple statements or a scope." }
@@ -1403,7 +1403,7 @@ ReadOnlyValueNotOwned: struct {
         fix_safety: .NeedsReview
         what: fn(self) -> String { "`name` was not moved here, so it cannot fill this owning destination" }
         why: fn(self) -> String { "Read access does not transfer ownership; cloneable values copy automatically at ordinary owning destinations, but this value needs an explicit ownership decision" }
-        fix: fn(self) -> String { "Write `name.copy()` for an owning copy, add `^` to the parameter when it should take ownership, or return borrowed data as `-> View<T> from name` with a view derived from `name`" }
+        fix: fn(self) -> String { "Write `name.copy()` for an owning copy, declare the parameter `name: &&T` when it should take ownership, or return borrowed data as `-> View<T> from name` with a view derived from `name`" }
     }
 }
 
@@ -2163,27 +2163,9 @@ UnreachableState: struct {
 MissingMoveMarker: struct {
     impl Diagnostic {
         code: "E0201"
-        what: fn(self) -> String { "The move marker `^` is required; value can't be copied" }
+        what: fn(self) -> String { "This use needs to own a value that can't be copied" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Add the move marker `^` at the consuming call site." }
-    }
-}
-
-MissingWriteMarker: struct {
-    impl Diagnostic {
-        code: "E0202"
-        what: fn(self) -> String { "The write-access marker `&` is required at call site — write access not granted" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Add the write-access marker `&` at the call site." }
-    }
-}
-
-MoveMarkerNotAllowed: struct {
-    impl Diagnostic {
-        code: "E0203"
-        what: fn(self) -> String { "Move marker `^` used on a non-consuming parameter" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Use `^` only for a consuming parameter." }
+        fix: fn(self) -> String { "Declare the parameter or receiver with the take mark `&&`, or call `.move()` where the value is given away." }
     }
 }
 
@@ -2199,9 +2181,9 @@ UseWhileWriteActive: struct {
 FieldWriteWithoutMarker: struct {
     impl Diagnostic {
         code: "E0205"
-        what: fn(self) -> String { "`self.field = v` without the write-access marker `&` on the receiver" }
+        what: fn(self) -> String { "`self.field = v` in a method whose receiver is read-only" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Add `&` to the receiver before assigning to `self.field`." }
+        fix: fn(self) -> String { "Write the receiver as `&self` before assigning to `self.field`." }
     }
 }
 
@@ -2265,7 +2247,7 @@ CopyNotSupported: struct {
         no_fix: .Ambiguous
         what: fn(self) -> String { "`x.copy()` on a value that can't be copied — a function, a trait value, or a type Jet doesn't know how to duplicate" }
         why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Call `.copy()` only on a copyable value, or move the value with `^` instead." }
+        fix: fn(self) -> String { "Call `.copy()` only on a copyable value, or take the value with `.move()` instead." }
     }
 }
 
@@ -2283,7 +2265,7 @@ OwnerMovedWhileViewed: struct {
 WriteMarkerNotOnPlace: struct {
     impl Diagnostic {
         code: "E0213"
-        meaning: "The write-access marker `&` is not on a place — a name plus maximal field/index/range projections"
+        meaning: "A window does not start from a place — a name plus maximal field/index/range projections"
         detail: true
         what: fn(self) -> String { "A read or write window starts from something that is not a place." }
         why: fn(self) -> String { "Only a name followed by fields, indexes, or one range has stable storage that can be accessed without copying." }
@@ -2340,11 +2322,11 @@ CellGuardEscapes: struct {
 PinWithoutWriteWindow: struct {
     impl Diagnostic {
         code: "E0218"
-        meaning: "`mem.pin` was given a value instead of a write window made with the write-access marker `&`"
+        meaning: "`mem.pin` was given a temporary value instead of a named place"
         detail: true
-        what: fn(self) -> String { "`mem.pin` needs a write window made with the write-access marker `&` into the place being pinned." }
-        why: fn(self) -> String { "A pin promises one storage location will not move, so it has to name that location with the write-access marker; see the sigil reading rule above." }
-        fix: fn(self) -> String { "Write `mem.pin(&place)` with the write-access marker `&`." }
+        what: fn(self) -> String { "`mem.pin` needs a named place to pin." }
+        why: fn(self) -> String { "A pin promises one storage location will not move, so it has to name that location instead of a temporary value." }
+        fix: fn(self) -> String { "Bind the value to a `:=` name, then write `mem.pin(place)`." }
     }
 }
 
@@ -2405,18 +2387,7 @@ PersistentMutableBorrow: struct {
         fix_next: "Compute an owned replacement and assign the persistent or static binding as a whole."
         what: fn(self) -> String { "A mutable borrow of `{self.name}` cannot escape its persistent or static storage cell" }
         why: fn(self) -> String { "Persistent and static state must be changed by computing a replacement and assigning the whole binding. A mutable borrow or mutating receiver would let access escape the cell." }
-        fix: fn(self) -> String { "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{self.name}` with `&` or using a mutating receiver." }
-    }
-}
-
-RetiredMissingReceiverMark: struct {
-    impl Diagnostic {
-        code: "E0224"
-        status: .Retired
-        no_fix: None
-        what: fn(self) -> String { "*Retired* (was: a writing or taking call without its receiver mark; D-CALLSITE-MARK2=A writes calls plain)" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Follow the guidance for E0224" }
+        fix: fn(self) -> String { "Compute an owned replacement, then assign the persistent or static binding as a whole instead of passing `{self.name}` to a `&` parameter or using a mutating receiver." }
     }
 }
 
@@ -2435,29 +2406,15 @@ UnusedPlaceMark: struct {
     }
 }
 
-ReceiverMarkMismatch: struct {
-    impl Diagnostic {
-        code: "E0226"
-        meaning: "A receiver mark names the wrong permission for its call"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "This receiver mark names the other permission than the call uses." }
-        why: fn(self) -> String { "The resolved method's signature declares whether a call writes (`&self`) or takes (`&&self`) its receiver, and the call is written plain." }
-        fix: fn(self) -> String { "Remove the mark." }
-    }
-}
-
 MarkedFunctionValue: struct {
     impl Diagnostic {
         code: "E0227"
-        meaning: "A named function with a `&` or `^` parameter is used as a function value"
+        meaning: "A named function with a `&` or `&&` parameter is used as a function value"
         detail: true
         no_fix: .Ambiguous
-        what: fn(self) -> String { "A function whose parameter is marked `&` or `^` is used as a value instead of being called." }
-        why: fn(self) -> String { "A function type gives each parameter plain read access. A value of this function would drop the `&` or `^` mark its callers must write, so the function can only be called directly." }
-        fix: fn(self) -> String { "Call the function directly with the mark, or pass a lambda that makes that call." }
+        what: fn(self) -> String { "A function whose parameter is marked `&` or `&&` is used as a value instead of being called." }
+        why: fn(self) -> String { "A function type gives each parameter plain read access, so a value of this function would lose the write or take its parameter declares; the function can only be called directly." }
+        fix: fn(self) -> String { "Call the function directly, or pass a lambda that makes that call." }
     }
 }
 
@@ -2944,9 +2901,9 @@ RetiredForeignNamespaceKeyword: struct {
 AliasWithoutParameters: struct {
     impl Diagnostic {
         code: "E0324"
-        what: fn(self) -> String { "Type alias without type parameters — use `struct` for a distinct primitive name" }
-        why: fn(self) -> String { "The registered sema rule applies here" }
-        fix: fn(self) -> String { "Use `struct` for a distinct primitive name, or add type parameters to the alias." }
+        what: fn(self) -> String { "Type alias without type parameters — use `struct` for a distinct primitive name, or give a number its value" }
+        why: fn(self) -> String { "At file level `name: Type` with no value names a type, and a transparent alias is only for shortening generic spellings" }
+        fix: fn(self) -> String { "Use `struct` for a distinct primitive name, add type parameters to the alias, or give a number constant its value (`LIMIT: Int{{0}}`)." }
     }
 }
 
@@ -4216,7 +4173,7 @@ RetiredVoid: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "`` `Void` is retired ``." }
-        why: fn(self) -> String { "`()` is the one public no-information result type; non-returning paths are compiler facts under D-NEVER1." }
+        why: fn(self) -> String { "`()` is the one public no-information result type; non-returning paths are compiler facts." }
         fix: fn(self) -> String { "Replace `Void` with `()`." }
     }
 }
@@ -4526,7 +4483,7 @@ SameSubjectDispatch: struct {
         fix_safety: .NeedsReview
         what: fn(self) -> String { "Adjacent categorical guards over `{self.subject}` can be one ordered subject table" }
         why: fn(self) -> String { "Exclusive guards repeat one stable subject; an ordered table keeps the categories together" }
-        fix: fn(self) -> String { "Rewrite as `if {self.subject} == {{ … }}` and group aliases with `|`; see `Examples/suites/dispatch.jet`" }
+        fix: fn(self) -> String { "Rewrite as `if {self.subject} == {{ … }}` and group aliases with `|`; see `Examples/Apps/Programs/Dispatch.jet`" }
     }
 }
 
@@ -4825,7 +4782,7 @@ TailCallBlocked: struct {
         fix_next: "Close the open value before the call, or open it in a smaller block that ends before the call"
         what: fn(self) -> String { "This tail call can't reuse the frame because `{self.name}` closes after it returns" }
         why: fn(self) -> String { "`{self.name}` is still open at the call, and its Close cleanup runs when its scope ends, after the call returns; the call keeps its frame, so a chain of such calls grows the stack" }
-        fix: fn(self) -> String { "Close `{self.name}` before the call with `close(^{self.name})`, or open it in a smaller block that ends before the call" }
+        fix: fn(self) -> String { "Close `{self.name}` before the call with `close({self.name})`, or open it in a smaller block that ends before the call" }
     }
 }
 
@@ -5294,9 +5251,9 @@ SuiteNameNotLiteral: struct {
         code: "E0635"
         meaning: "A `Test.suite` name is computed instead of written as a string literal"
         detail: true
-        what: fn(self) -> String { "the suite name passed to `Test.suite` is computed" }
+        what: fn(self) -> String { "The suite name passed to `Test.suite` is computed" }
         why: fn(self) -> String { "`jet test --profile` lists a package's code suites by reading their names, without running `test: fn`" }
-        fix: fn(self) -> String { "write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`" }
+        fix: fn(self) -> String { "Write the suite name as a string literal, as in `t.suite(\"perf\", perf_rows)`" }
     }
 }
 
@@ -6185,7 +6142,7 @@ RetiredAllocatorUseAfterFree: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "Retired allocator-specific use-after-free diagnostic." }
-        why: fn(self) -> String { "Terminal release now uses ordinary consuming `close(^allocator)` through the move marker `^`." }
+        why: fn(self) -> String { "Terminal release now uses the ordinary consuming `close(allocator)`, whose parameter takes the allocator with `&&`." }
         fix: fn(self) -> String { "Follow E0121 and acquire a new allocator after close." }
     }
 }
@@ -7234,7 +7191,7 @@ UnknownModuleAlias: struct {
 ModuleAliasArgumentCount: struct {
     impl Diagnostic {
         code: "E0851"
-        meaning: "wrong number of type/value arguments to module alias"
+        meaning: "Wrong number of type/value arguments to module alias"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Wrong number of type/value arguments to module alias" }
         why: fn(self) -> String { "The registered sema rule applies here" }
@@ -7245,7 +7202,7 @@ ModuleAliasArgumentCount: struct {
 ModuleAliasBoundMismatch: struct {
     impl Diagnostic {
         code: "E0852"
-        meaning: "type argument does not satisfy bound"
+        meaning: "Type argument does not satisfy bound"
         what: fn(self) -> String { "Type argument does not satisfy bound" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Pass a type argument that satisfies the module alias bound." }
@@ -7255,7 +7212,7 @@ ModuleAliasBoundMismatch: struct {
 ModuleAliasValueMismatch: struct {
     impl Diagnostic {
         code: "E0853"
-        meaning: "value argument has wrong type"
+        meaning: "Value argument has wrong type"
         what: fn(self) -> String { "Value argument has wrong type" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Pass a value argument with the expected type." }
@@ -7265,7 +7222,7 @@ ModuleAliasValueMismatch: struct {
 ModuleAliasCycle: struct {
     impl Diagnostic {
         code: "E0855"
-        meaning: "circular module alias instantiation"
+        meaning: "Circular module alias instantiation"
         no_fix: .Ambiguous
         what: fn(self) -> String { "Circular module alias instantiation" }
         why: fn(self) -> String { "The registered sema rule applies here" }
@@ -7276,7 +7233,7 @@ ModuleAliasCycle: struct {
 ModuleValueParameterType: struct {
     impl Diagnostic {
         code: "E0856"
-        meaning: "generic-module value parameter uses a non-Tier-0 type"
+        meaning: "Generic-module value parameter uses a non-Tier-0 type"
         what: fn(self) -> String { "Generic-module value parameter uses a non-Tier-0 type" }
         why: fn(self) -> String { "The registered sema rule applies here. During `jet check`, Jet reports this diagnostic." }
         fix: fn(self) -> String { "Use a Tier-0 type for the generic-module value parameter." }
@@ -7286,7 +7243,7 @@ ModuleValueParameterType: struct {
 ModuleValueNotConstant: struct {
     impl Diagnostic {
         code: "E0857"
-        meaning: "generic-module value argument is not a closed compile-time value"
+        meaning: "Generic-module value argument is not a closed compile-time value"
         what: fn(self) -> String { "Generic-module value argument is not a closed compile-time value" }
         why: fn(self) -> String { "The registered sema rule applies here" }
         fix: fn(self) -> String { "Pass a closed compile-time value as the generic-module argument." }
@@ -7585,7 +7542,7 @@ MarkerArgumentMismatch: struct {
     impl Diagnostic {
         code: "E0930"
         stage: [.Parse]
-        meaning: "marker arguments do not match the typed signature in the shared marker registry"
+        meaning: "Marker arguments do not match the typed signature in the shared marker registry"
         what: fn(self) -> String { "Marker arguments do not match the typed signature in the shared marker registry" }
         why: fn(self) -> String { "The registered parse rule applies here" }
         fix: fn(self) -> String { "Pass marker arguments matching the shared typed marker signature." }
@@ -8647,7 +8604,7 @@ ConcurrentCaptureNotOwned: struct {
         detail: true
         what: fn(self) -> String { "`{self.value}` cannot cross the `{self.boundary}` boundary: the value writes shared state" }
         why: fn(self) -> String { "The `{self.boundary}` boundary can run concurrently with its owner; {self.reason}" }
-        fix: fn(self) -> String { "Give it with `^`, freeze it with `freeze`, or share it with `shared`" }
+        fix: fn(self) -> String { "Give it away with `.move()`, freeze it with `freeze`, or share it with `shared`" }
     }
 }
 
@@ -8916,8 +8873,8 @@ ViewOutlivesOwner: struct {
         detail: true
         no_fix: .Ambiguous
         what: fn(self) -> String { "A declared `View<T>` would outlive an owner, or sema cannot stabilize a public owner set for each declared view slot. Read-only views entering non-view owning slots materialize by default; `copies: .Explicit` restores the refusal." }
-        why: fn(self) -> String { "Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live; a consumed (`^`) parameter or receiver is freed when the function returns, so it never owns a returned view." }
-        fix: fn(self) -> String { "Keep every possible owner alive (take a returned view's source as a read or `&` parameter, not `^`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended." }
+        why: fn(self) -> String { "Each declared view slot keeps a bounded set of possible receiver, parameter, or static sources through every return path, call, generic instantiation, aggregate projection, function value, lambda, and trait implementation. Every possible owner must stay live; a consumed (`&&`) parameter or receiver is freed when the function returns, so it never owns a returned view." }
+        fix: fn(self) -> String { "Keep every possible owner alive (take a returned view's source as a read or `&` parameter, not `&&`), preserve the declared view boundary, or remove `copies: .Explicit` / write `view.copy()` when an owning destination is intended." }
     }
 }
 
@@ -10260,7 +10217,7 @@ RetiredJetosNamespace: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "A jetos option key uses a retired namespace." }
-        why: fn(self) -> String { "D-JPK-OSNS1=B and D-JOS-SYSTEMTREE1=A: jetos option keys start with full-word namespaces: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`." }
+        why: fn(self) -> String { "A jetos option key starts with a full-word namespace: `filesystem`, `network`, `packages`, `services`, `users`, `groups`, `secrets`, `boot`, `kernel`, `init`, or `health`." }
         fix: fn(self) -> String { "Rename the option namespace, for example `net.hostName` becomes `network.hostName`." }
     }
 }
@@ -10802,7 +10759,7 @@ PinnedBuildOption: struct {
     impl Diagnostic {
         code: "E2113"
         stage: [.Jet]
-        meaning: "A build-option flag tries to change a value `build: fn` pinned (#5005, D-SETTING-ORDER1)"
+        meaning: "A build-option flag tries to change a value `build: fn` pinned (#5005)"
         detail: true
         what: fn(self) -> String { "`{self.option}` is pinned to `{self.value}`, so the flag can't change it." }
         why: fn(self) -> String { "`b.pin(.option, .Value)` in `build: fn` fixes a build option for every build; a flag may only change values that aren't pinned." }
@@ -10814,7 +10771,7 @@ CrashReportWithoutBuild: struct {
     impl Diagnostic {
         code: "E2114"
         stage: [.Jet]
-        meaning: "`jet crash` read a report with no `Build <id>` line to find its debug info by (#6035, D-RT-DEFECT-REPORT1)"
+        meaning: "`jet crash` read a report with no `Build <id>` line to find its debug info by (#6035)"
         detail: true
         what: fn(self) -> String { "This crash report has no `Build <id> (names and lines: jet crash)` line." }
         why: fn(self) -> String { "`jet crash` names a release program's frames from the debug info its build saved under the build id the report gives; without that line it can't tell which build crashed." }
@@ -10828,7 +10785,7 @@ CrashSymbolsMissing: struct {
     impl Diagnostic {
         code: "E2115"
         stage: [.Jet]
-        meaning: "`jet crash` found no debug info for the report's build id under `.jet/symbols` (#6035, D-RT-DEFECT-REPORT1)"
+        meaning: "`jet crash` found no debug info for the report's build id under `.jet/symbols` (#6035)"
         detail: true
         what: fn(self) -> String { "No debug info for build `{self.build}` is in `.jet/symbols` here or in a directory above." }
         why: fn(self) -> String { "A release build saves its function names and lines under `.jet/symbols/.build-id/` in the project that built it; any other build, even of the same source, has another id." }
@@ -12116,7 +12073,7 @@ RetiredDeriveTraitSpelling: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "A user derive is written `derive T.{self.trait_name}`." }
-        why: fn(self) -> String { "The type parameter comes first, joined to the trait name with a dot (D-METADERIVE1, amended 2026-07-01); the `derive {self.trait_name} for T` spelling was retired." }
+        why: fn(self) -> String { "The type parameter comes first, joined to the trait name with a dot; the `derive {self.trait_name} for T` spelling was retired." }
         fix: fn(self) -> String { "Write `derive T.{self.trait_name} {{ … }}`." }
     }
 }
@@ -12387,9 +12344,9 @@ CorruptProofArtifact: struct {
         code: "E3611"
         stage: [.Compile]
         detail: true
-        what: fn(self) -> String { "proof artifact is corrupt" }
-        why: fn(self) -> String { "report hash or canonical bytes do not match" }
-        fix: fn(self) -> String { "move the corrupt artifact aside and run `jet prove TARGET` again" }
+        what: fn(self) -> String { "Proof artifact is corrupt" }
+        why: fn(self) -> String { "Report hash or canonical bytes do not match" }
+        fix: fn(self) -> String { "Move the corrupt artifact aside and run `jet prove TARGET` again" }
     }
 }
 
@@ -12398,9 +12355,9 @@ UnsafeProofArtifactPath: struct {
         code: "E3614"
         stage: [.Compile]
         detail: true
-        what: fn(self) -> String { "proof artifact path is unsafe" }
-        why: fn(self) -> String { "a parent or final path is a symlink or otherwise unsafe" }
-        fix: fn(self) -> String { "replace it with a regular project directory or file" }
+        what: fn(self) -> String { "Proof artifact path is unsafe" }
+        why: fn(self) -> String { "A parent or final path is a symlink or otherwise unsafe" }
+        fix: fn(self) -> String { "Replace it with a regular project directory or file" }
     }
 }
 
@@ -12624,7 +12581,7 @@ FreezeNotSnapshotable: struct {
         detail: true
         what: fn(self) -> String { "`freeze` cannot snapshot `{self.ty}`: {self.reason}" }
         why: fn(self) -> String { "A frozen value must be an owned cloneable value with no shared handle, resource, function, trait value, or mutable view inside it." }
-        fix: fn(self) -> String { "Use `^` to give the owned value to the task, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value" }
+        fix: fn(self) -> String { "Give the owned value to the task with `task &&name`, use `Shared`/`Cell` for deliberate shared state, or rebuild a plain owned value" }
     }
 }
 
@@ -12636,7 +12593,7 @@ RetiredSharedNew: struct {
         detail: true
         no_fix: None
         what: fn(self) -> String { "`Shared.new(…)` is the retired shared-cell constructor." }
-        why: fn(self) -> String { "D-CONC-SHARE1=A gives shared state one construction word, so every shared cell reads the same on the page." }
+        why: fn(self) -> String { "Shared state has one construction word, so every shared cell reads the same on the page." }
         fix: fn(self) -> String { "Write `shared <value>` instead of `Shared.new(<value>)`." }
     }
 }
@@ -12760,64 +12717,6 @@ LogicalNotOnNonBool: struct {
     }
 }
 
-RetiredDeclarationSpelling: struct {
-    old: String
-    new: String
-
-    impl Diagnostic {
-        code: "E0397"
-        stage: [.Parse]
-        meaning: "A declaration uses a retired spelling; every declaration is written `name: value`"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.old}` is a retired declaration spelling; write `{self.new}`." }
-        why: fn(self) -> String { "Every declaration is written `name: value`: a binding `limit: 100`, a function `area: fn(r: Float) -> Float`, a type `Point: struct`; `:=` stays the mutable binding." }
-        fix: fn(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
-    }
-}
-
-RetiredCallMark: struct {
-    written: String
-    declarer: String
-    repair: String
-
-    impl Diagnostic {
-        code: "E0434"
-        severity: .Lint
-        lint_name: "retired_call_mark"
-        meaning: "A call writes a memory mark its signature already states; calls are written plain"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.written}` repeats what {self.declarer} declares; a call is written plain." }
-        why: fn(self) -> String { "A signature says what a function does to each input (`c: &Counter` edits it, `c: &&Counter` takes it), so the call reads `bump(score)`. A mark stays only on a write window bound to a name, a match that writes into its subject, and `task &&name`." }
-        fix: fn(self) -> String { "{self.repair}; `jet fix` applies this fix." }
-    }
-}
-
-RetiredTakeMark: struct {
-    old: String
-    new: String
-
-    impl Diagnostic {
-        code: "E0435"
-        severity: .Lint
-        lint_name: "retired_take_mark"
-        stage: [.Parse]
-        meaning: "A take uses the retired `^` mark; a signature writes `&&` and a value writes `x.move()`"
-        detail: true
-        edit: .SourceEdit
-        no_fix: None
-        fix_safety: .BehaviorPreserving
-        what: fn(self) -> String { "`{self.old}` is a retired take spelling; write `{self.new}`." }
-        why: fn(self) -> String { "A take is written `&&` in a signature (`seal: fn(&&self)`, `c: &&Counter`) and a task capture (`task &&name`), and `x.move()` in a value; `^` is no longer a mark." }
-        fix: fn(self) -> String { "Write `{self.new}`; `jet fix` applies this fix." }
-    }
-}
-
 MethodNamedCopyOrMove: struct {
     name: String
     verb: String
@@ -12829,9 +12728,9 @@ MethodNamedCopyOrMove: struct {
         detail: true
         no_fix: .Behavior
         fix_next: "Rename the method and its calls."
-        what: fn(self) -> String { "a method can't be named `{self.name}`" }
+        what: fn(self) -> String { "A method can't be named `{self.name}`" }
         why: fn(self) -> String { "`x.{self.name}()` is the compiler's own {self.verb} of a named value, so a method with that name would be shadowed at every call" }
-        fix: fn(self) -> String { "rename the method and its calls, for example to `emit_{self.name}`" }
+        fix: fn(self) -> String { "Rename the method and its calls, for example to `emit_{self.name}`" }
     }
 }
 

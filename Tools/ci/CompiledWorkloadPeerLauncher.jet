@@ -114,7 +114,7 @@ parse_invocation: fn(args: [String]) -[FS]> Invocation LaunchError! {
     loop index < args.len() {
         arg: args[index]
         if separator {
-            if command == None -> command = Val(arg.copy()) else -> &command_args.push(arg.copy())
+            if command == None -> command = Val(arg.copy()) else -> command_args.push(arg.copy())
             index += 1
             next
         }
@@ -255,7 +255,7 @@ path_entries: fn(value: String) -> [String] Never! {
     raw: value.bytes()
     loop index in 0..<raw.len() + 1 {
         if index == raw.len() || Int.from_u8(raw[index]) == 58 {
-            &entries.push(text_range(value, start, index))
+            entries.push(text_range(value, start, index))
             start = index + 1
         }
     }
@@ -311,7 +311,7 @@ clean_probe_stderr: fn(text: String) -> String Never! {
     out := [U8]{}
     loop byte in text.bytes() {
         code: Int.from_u8(byte)
-        if code == 13 || code == 10 || code == 9 -> &out.push(U8{32}) else -> &out.push(byte)
+        if code == 13 || code == 10 || code == 9 -> out.push(U8{32}) else -> out.push(byte)
     }
     cleaned: String.from_bytes_lossy(out).trim()
     if cleaned == "" -> return ""
@@ -349,10 +349,10 @@ probe_policies: fn(bwrap: String, shell: String, ip: String, launcher: String, f
     loop choice in ([NetworkPolicy]{NetworkPolicy.Disabled, NetworkPolicy.LoopbackOnly}) {
         mode: if choice == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled"
         inner := [String]{launcher.copy(), mode}
-        if choice == .LoopbackOnly -> &inner.push(ip.copy())
-        &inner.push(shell.copy())
-        &inner.push("-c")
-        &inner.push("exit 0")
+        if choice == .LoopbackOnly -> inner.push(ip.copy())
+        inner.push(shell.copy())
+        inner.push("-c")
+        inner.push("exit 0")
         argv: sandbox_argv(bwrap, shell, filter_path, root, root, choice, inner)
         named: if choice == .LoopbackOnly -> "LoopbackOnly" else -> "Disabled"
         receipt: process.cmd(argv).stdin(.Capture).stdout(.Capture).stderr(.Capture).run() ?? return Err(launch_error("Linux peer isolation unavailable: bubblewrap {named} probe failed: {err}"))
@@ -377,7 +377,7 @@ probe_root: fn() -[FS, Env, Time]> String LaunchError! {
     files.create_dir_all(base) ?? return Err(launch_error("capability probe root `{base}` cannot be created: {err}"))
     root: "{base}/compiled-workload-peer-probe-{sys.pid()}-{time.unix_ns()}"
     if files.exists(root) -> return Err(launch_error("capability probe root `{root}` cannot be created: it already exists"))
-    files.create_dir(root) ?? return Err(launch_error("capability probe root `{root}` cannot be created: {err}"))
+    files.create_dir_all(root) ?? return Err(launch_error("capability probe root `{root}` cannot be created: {err}"))
     Ok(root)
 }
 
@@ -419,7 +419,7 @@ linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [Strin
         // CAP_NET_ADMIN exists only inside bwrap's fresh user and network
         // namespaces and is used solely to bring up the private loopback
         // interface. Disabled networking receives no extra capability.
-        loop extra in ([String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}) -> &args.push(extra)
+        loop extra in ([String]{"--uid", "0", "--gid", "0", "--cap-add", "CAP_NET_ADMIN"}) -> args.push(extra)
     }
     args
 }
@@ -431,16 +431,16 @@ linux_base_args: fn(root: String, cwd: String, network: NetworkPolicy) -> [Strin
 sandbox_argv: fn(bwrap: String, shell: String, filter_path: String, root: String, cwd: String, network: NetworkPolicy, inner: [String]) -> [String] Never! {
     argv := [String]{}
     if network == .Disabled {
-        loop word in ([String]{shell.copy(), "-c", "exec 3<\"$1\" || exit {EXIT_UNSUPPORTED}; shift; exec \"$@\"", LAUNCHER_NAME, filter_path.copy()}) -> &argv.push(word)
+        loop word in ([String]{shell.copy(), "-c", "exec 3<\"$1\" || exit {EXIT_UNSUPPORTED}; shift; exec \"$@\"", LAUNCHER_NAME, filter_path.copy()}) -> argv.push(word)
     }
-    &argv.push(bwrap.copy())
-    loop word in linux_base_args(root, cwd, network) -> &argv.push(word)
+    argv.push(bwrap.copy())
+    loop word in linux_base_args(root, cwd, network) -> argv.push(word)
     if network == .Disabled {
-        &argv.push("--seccomp")
-        &argv.push("3")
+        argv.push("--seccomp")
+        argv.push("3")
     }
-    &argv.push("--")
-    loop word in inner -> &argv.push(word)
+    argv.push("--")
+    loop word in inner -> argv.push(word.copy())
     argv
 }
 
@@ -470,12 +470,12 @@ run_linux: fn(invocation: Invocation) -[FS, Env, Exec, IO, Time, Time.Wait]> Chi
         }
     }
     inner := [String]{launcher.copy()}
-    &inner.push(if invocation.network == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled")
-    &inner.push("--status-file")
-    &inner.push(status_file.copy())
-    if invocation.network == .LoopbackOnly -> &inner.push(ip.copy())
-    &inner.push(command.copy())
-    loop item in invocation.args -> &inner.push(item.copy())
+    inner.push(if invocation.network == .LoopbackOnly -> "--internal-loopback" else -> "--internal-disabled")
+    inner.push("--status-file")
+    inner.push(status_file.copy())
+    if invocation.network == .LoopbackOnly -> inner.push(ip.copy())
+    inner.push(command.copy())
+    loop item in invocation.args -> inner.push(item.copy())
     result := ChildEnd{code: 0, signal: 0}
     failure := ""
     if run_child(sandbox_argv(bwrap, shell, filter_path, invocation.root, invocation.cwd, invocation.network, inner)) == {

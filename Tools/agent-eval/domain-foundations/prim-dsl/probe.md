@@ -8,13 +8,13 @@ I built four small embedded-language packages: a symbolic expression builder/sim
 - Finite enum/struct pattern matching, typed records, ordered rule declaration, and visible write access work. Native `jet build .../prim_dsl_rules_demo.jet` succeeded; the executable printed `[bonus:score=10, cap:skip, award:score=11]`.
 - Dynamic JSON values and safe optional access work. Native `jet build .../prim_dsl_filter_demo.jet` succeeded; the executable printed `[3, 8]`.
 - A library author can implement dependency tracking and incremental recomputation with maps/lists. Native `jet build .../prim_dsl_formula_demo.jet` succeeded; the executable printed `first total=5 touched=[a, b, total]` and `second total=11 touched=[a, b, total]`.
-- Operator overloading works through an existing trait: `jet run Examples/features/operators/user_defined.jet` printed `4,6 4,6 true true false`.
-- Comptime evaluation works for pure closed code: `jet run Examples/features/comptime/comptime_core.jet` printed `2.0`, `256.0`, `3.0`, `3.0`, `20.0`, `-7 + 24i`, `5.0`.
-- Compile-time reflection/derive generation works: `jet run Examples/features/reflection/derive_loop.jet` printed `x`, `y`, `x`, `y`, `generated`.
+- Operator overloading works through an existing trait: `jet run Examples/Types/Traits/UserDefined.jet` printed `4,6 4,6 true true false`.
+- Comptime evaluation works for pure closed code: `jet run Examples/Metaprogramming/Comptime/ComptimeTiers.jet` printed `2.0`, `256.0`, `3.0`, `3.0`, `20.0`, `-7 + 24i`, `5.0`.
+- Compile-time reflection/derive generation works: `jet run Examples/Metaprogramming/Comptime/PrepLoop.jet` printed `x`, `y`, `x`, `y`, `generated`.
 
 # Gaps
 
-1. **defect + impossible (G1, blocks): recursive algebraic data types.** The shipped recursive enum example cannot run: `jet run Examples/features/types/recursive_enum.jet` reports E0112 (`_jet_derive_equal_Expr` wants `Expr` but got `Expr<>`) and E0401 for fallible `Bool`/`Ordering`. Symbolic code therefore uses a flat postfix `[Node]` instead of a natural recursive AST. Shared by data, backend, and science libraries.
+1. **defect + impossible (G1, blocks): recursive algebraic data types.** The shipped recursive enum example cannot run: `jet run Examples/Types/RecursiveEnum.jet` reports E0112 (`_jet_derive_equal_Expr` wants `Expr` but got `Expr<>`) and E0401 for fallible `Bool`/`Ordering`. Symbolic code therefore uses a flat postfix `[Node]` instead of a natural recursive AST. Shared by data, backend, and science libraries.
 2. **defect + impossible (G2, hurts): named-payload enum pattern lowering.** `jet build .../pkg/symbolic2_demo.jet` reports an internal compiler error: typed IR does not cover statement `if` at `symbolic2.jet:9:5` (I2/R7), `crates/jet-codegen/src/Codegen/Items.rs:3409:5`. A one-struct payload wrapper works around it.
 3. **call-site + boilerplate (G3, hurts): value-producing dynamic-tree filter pipelines.** The jq-shaped projection takes a 28-line `filter.jet` walker with explicit `Dyn.Object`/`Array` matches, lookups, option handling, and loops; `jet run .../prim_dsl_filter_demo.jet` returns `[3, 8]`. A jq user writes a short `.items[] | .price` pipeline. This is shared by data and backend code.
 4. **boilerplate + call-site (G4, hurts): compiler-owned formula dependency graphs and dirty recomputation.** The 58-line `formula.jet` implementation repeats dependency lists, a fixed evaluation order, dirty propagation, and touched-cell tracking. It works, but every spreadsheet-like library must implement this machinery itself. Shared by data, backend, and science code.
@@ -28,11 +28,11 @@ The four clients are 12, 6, 6, and 6 lines, but the library implementations are 
 
 # Defects
 
-- Recursive `Expr` (`Examples/features/types/recursive_enum.jet`) fails in both `jet run` and `jet build` with E0112/E0401.
+- Recursive `Expr` (`Examples/Types/RecursiveEnum.jet`) fails in both `jet run` and `jet build` with E0112/E0401.
 - Named-payload enum pattern (`pkg/symbolic2.jet:9`) fails native code generation with I2/R7; wrapping the payload in a struct avoids the ICE.
 - `pkg/prim_dsl_formula_demo.jet` fails default evaluation with E0956 but succeeds in the native tier.
 - `pkg/prim_dsl_symbolic_demo.jet` default-runs but native build reports generated Rust compilation failure without a rustc diagnostic.
-- `Examples/features/comptime/comptime_parse.jet` was not usable as a comptime proof because the shipped example has stale E2417 (`String` is not an error type); `comptime_core.jet` was used instead.
+- `Examples/Metaprogramming/Comptime/ComptimeParse.jet` was not usable as a comptime proof because the shipped example has stale E2417 (`String` is not an error type); `comptime_core.jet` was used instead.
 
 # Battery notes
 

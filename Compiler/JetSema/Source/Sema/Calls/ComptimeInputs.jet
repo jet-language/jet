@@ -45,28 +45,28 @@ sema_call_check_comptime_input: fn(call: Call, expected: Type?, environment: Sem
     builtin: call.name
     failed: SemaDirectSpecialCheck{handled: true, value: None}
     if call.args.len() != 1 {
-        &diagnostics.push(sema_error("E0104", call.name_span, "`{builtin}` expects 1 argument, got {call.args.len()}", "a comptime input names exactly one path", "pass one string literal"))
+        diagnostics.push(sema_error("E0104", call.name_span, "`{builtin}` expects 1 argument, got {call.args.len()}", "a comptime input names exactly one path", "pass one string literal"))
         return failed
     }
     if scopes.comptime_execution_depth == 0 {
-        &diagnostics.push(sema_error("E0956", call.name_span, "`{builtin}` is compile-time only", "the compiler reads the file while building, so it is a value in the program, not a runtime read", "use it in a `comptime` binding, e.g. `TEXT: comptime {{ {builtin}(\"file\") }}`"))
+        diagnostics.push(sema_error("E0956", call.name_span, "`{builtin}` is compile-time only", "the compiler reads the file while building, so it is a value in the program, not a runtime read", "use it in a `comptime` binding, e.g. `TEXT: comptime {{ {builtin}(\"file\") }}`"))
         return failed
     }
     path: sema_comptime_input_literal(call.args[0].expr) ?? {
-        &diagnostics.push(sema_comptime_input_path_error(builtin, "literal", call))
+        diagnostics.push(sema_comptime_input_path_error(builtin, "literal", call))
         return failed
     }
     normalized: path.replace("\\", "/")
     if normalized.starts_with("/") {
-        &diagnostics.push(sema_comptime_input_path_error(builtin, "absolute", call))
+        diagnostics.push(sema_comptime_input_path_error(builtin, "absolute", call))
         return failed
     }
     loop part in normalized.split("/") {
         if part == ".." {
-            &diagnostics.push(sema_comptime_input_path_error(builtin, "parent", call))
+            diagnostics.push(sema_comptime_input_path_error(builtin, "parent", call))
             return failed
         }
     }
     node: sema_tree_node(sema_comptime_input_type(builtin), TExprKind.HostCall{call: THostCall.ComptimeInput{builtin: builtin, path: normalized}}, call.name_span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, &diagnostics)}
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(node, expected, environment, program, diagnostics)}
 }

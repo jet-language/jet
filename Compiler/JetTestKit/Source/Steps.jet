@@ -10,7 +10,7 @@ use {
 kit_steps_words: fn(text: String) -> [String]? {
     tokens: kit_steps_tokens(text) ?? return None
     result := [String]{}
-    loop token in tokens -> &result.push(token.text)
+    loop token in tokens -> result.push(token.text)
     Val(result)
 }
 
@@ -48,18 +48,18 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.steps[scope.start].aggregate_names = scope.aggregates
                 captures = scope.names
                 loop name in scope.aggregates {
-                    if !kit_expect_named(captures, name) -> &captures.push(name)
+                    if !kit_expect_named(captures, name) -> captures.push(name.copy())
                 }
                 capture_scopes = capture_scopes.slice(0, capture_scopes.len() - 1)
             }
-            &plan.steps.push(KitStep{argv: [line], stdin: "", exit: "0", assertions: [], action: line})
-            &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
+            plan.steps.push(KitStep{argv: [line], stdin: "", exit: "0", assertions: [], action: line})
+            plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             modifier_adjacent = false
             next
         }
         if line == "parallel" {
-            &blocks.push("parallel")
-            &plan.steps.push(KitStep{argv: [], stdin: "", exit: "0", assertions: [], action: "parallel"})
+            blocks.push("parallel")
+            plan.steps.push(KitStep{argv: [], stdin: "", exit: "0", assertions: [], action: "parallel"})
             modifier_adjacent = false
             next
         }
@@ -71,9 +71,9 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             kind: words[0]
-            &blocks.push(kind)
-            &capture_scopes.push(KitCaptureScope{start: plan.steps.len(), names: captures, aggregates: []})
-            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: kind})
+            blocks.push(kind.copy())
+            capture_scopes.push(KitCaptureScope{start: plan.steps.len(), names: captures, aggregates: []})
+            plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: kind})
             modifier_adjacent = false
             next
         }
@@ -83,8 +83,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             blocks = blocks.slice(0, blocks.len() - 1)
-            &plan.steps.push(KitStep{argv: ["end when"], stdin: "", exit: "0", assertions: [], action: "end when"})
-            &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
+            plan.steps.push(KitStep{argv: ["end when"], stdin: "", exit: "0", assertions: [], action: "end when"})
+            plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             modifier_adjacent = false
             next
         }
@@ -97,13 +97,13 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             if delimiter == None {
-                &blocks.push("when")
-                &plan.steps.push(KitStep{argv: [condition], stdin: "", exit: "0", assertions: [], action: "when"})
+                blocks.push("when")
+                plan.steps.push(KitStep{argv: [condition], stdin: "", exit: "0", assertions: [], action: "when"})
                 modifier_adjacent = false
                 line = ""
                 break
             }
-            &conditions.push(condition)
+            conditions.push(condition)
             line = kit_steps_byte_slice(line, end + 1, line.count_bytes()).trim().copy()
         }
         if line == "" -> next
@@ -119,7 +119,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid recv or unavailable session"
                 return plan
             }
-            &plan.steps.push(KitStep{argv: words.slice(2, words.len()), stdin: "", exit: "0", assertions: [], action: "recv", label: words[1], instruction: line})
+            plan.steps.push(KitStep{argv: words.slice(2, words.len()), stdin: "", exit: "0", assertions: [], action: "recv", label: words[1], instruction: line})
             modifier_adjacent = false
             next
         }
@@ -141,7 +141,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             return plan
         }
         loop name in port_names {
-            if !kit_expect_named(plan.free_ports, name) -> &plan.free_ports.push(name)
+            if !kit_expect_named(plan.free_ports, name) -> plan.free_ports.push(name)
         }
         modifier: kit_expect_named(["env", "unset", "env-clear", "isolate", "pty", "pty-send", "pty-resize", "pty-close", "stderr-to-stdout", "timeout", "cwd", "limit", "stdin"], key) || (key == "normalize" && (value.starts_with("json ") || value.starts_with("replace "))) || (kit_expect_named(["stdout", "stderr"], key) && (value == "null" || value.starts_with("file ")))
         process_line: key == "step" || key.starts_with("step ") || key.starts_with("spawn ") || key.starts_with("session ") || key.starts_with("poll ")
@@ -183,7 +183,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid bounded poll"
                 return plan
             }
-            &plan.steps.push(step)
+            plan.steps.push(step)
             next
         }
         if key == "opt-in" {
@@ -212,7 +212,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             next
         }
         if key == "tools-any" || key == "probes-any" {
-            &plan.requires.push("{key} {value}")
+            plan.requires.push("{key} {value}")
             next
         }
         if key == "requires" {
@@ -226,9 +226,9 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid first-existing requirement"
                     return plan
                 }
-                &captures.push(words[1])
+                captures.push(words[1])
             }
-            &plan.requires.push(value)
+            plan.requires.push(value)
             next
         }
         if key == "fixture" {
@@ -250,11 +250,11 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             } else -> raw_value
             assignment: "{kit_steps_byte_slice(value, 0, equals)}={decoded}"
-            if !process_seen -> &plan.environment.push(assignment)
+            if !process_seen -> plan.environment.push(assignment)
             else {
                 owner_conditions: plan.steps[plan.steps.len() - 1].conditions
                 selected: if conditions == owner_conditions -> [String]{} else -> conditions
-                &plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: kit_steps_byte_slice(value, 0, equals), value: Val(decoded), conditions: selected})
+                plan.steps[plan.steps.len() - 1].environment.push(KitEnvVar{name: kit_steps_byte_slice(value, 0, equals), value: Val(decoded), conditions: selected})
             }
             next
         }
@@ -266,7 +266,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             if conditions.len() > 0 || kit_expect_named(blocks, "when") {
-                &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert", refused_capability: value})
+                plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert", refused_capability: value})
             } else {
                 plan.refused = value
             }
@@ -294,8 +294,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
                 rule: KitReplacement{from: words[1].text, to: words[2].text, literal_from: quoted}
-                if !process_seen -> &plan.replacements.push(rule)
-                else -> &plan.steps[plan.steps.len() - 1].replacements.push(rule)
+                if !process_seen -> plan.replacements.push(rule)
+                else -> plan.steps[plan.steps.len() - 1].replacements.push(rule)
                 next
             }
             if value.starts_with("json ") {
@@ -303,15 +303,15 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid JSON normalizer (same-line reason required)"
                     return plan
                 }
-                if !process_seen -> &plan.json_normalize.push(rule)
-                else -> &plan.steps[plan.steps.len() - 1].json_normalize.push(rule)
+                if !process_seen -> plan.json_normalize.push(rule)
+                else -> plan.steps[plan.steps.len() - 1].json_normalize.push(rule)
                 next
             }
             if value != "paths" && value != "argv0" && value != "version" {
                 plan.error = "line {line_number}: unknown normalizer"
                 return plan
             }
-            &plan.normalize.push(value)
+            plan.normalize.push(value)
             next
         }
         if key == "run" {
@@ -338,11 +338,11 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                         plan.error = "line {line_number}: duplicate await capture"
                         return plan
                     }
-                    &captures.push(name)
+                    captures.push(name.copy())
                 }
                 cursor += 2
             }
-            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "await", instruction: original})
+            plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "await", instruction: original})
             next
         }
         if kit_steps_setup_kind(key) {
@@ -359,8 +359,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             argv := [String]{key}
-            loop word in words -> &argv.push(word)
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
+            loop word in words -> argv.push(word)
+            plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
             next
         }
         if key == "copy" || key == "remove" || key == "concat" || key == "write" {
@@ -369,7 +369,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             paths := [String]{}
-            loop token in tokens -> &paths.push(token.text)
+            loop token in tokens -> paths.push(token.text)
             literal := false
             if key == "write" {
                 if paths.len() == 3 && paths[1] == "=" {
@@ -402,9 +402,9 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: {key} path escapes work directory"
                     return plan
                 }
-                &argv.push(path)
+                argv.push(path)
             }
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key, literal_input: literal})
+            plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key, literal_input: literal})
             next
         }
         if key == "apply-edits" {
@@ -413,7 +413,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: apply-edits needs <selector> doc <path>"
                 return plan
             }
-            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "apply-edits"})
+            plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "apply-edits"})
             next
         }
         if key == "capture" {
@@ -441,14 +441,14 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: stream capture without step"
                 return plan
             }
-            if !kit_expect_named(captures, words[0]) -> &captures.push(words[0])
+            if !kit_expect_named(captures, words[0]) -> captures.push(words[0])
             if accumulating {
                 loop index in 0..<capture_scopes.len() {
-                    if !kit_expect_named(capture_scopes[index].aggregates, words[0]) -> &capture_scopes[index].aggregates.push(words[0])
+                    if !kit_expect_named(capture_scopes[index].aggregates, words[0]) -> capture_scopes[index].aggregates.push(words[0])
                 }
             }
             if accumulating -> words[1] = "+="
-            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "capture"})
+            plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], action: "capture"})
             next
         }
         if key == "inventory" || key.starts_with("inventory ") {
@@ -463,12 +463,12 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid duplicate inventory label"
                     return plan
                 }
-                &inventories.push(label)
+                inventories.push(label.copy())
             } else if words.len() != 3 || words[1] != "==" || !kit_expect_named(inventories, words[2]) {
                 plan.error = "line {line_number}: inventory comparison needs a known label"
                 return plan
             }
-            &plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], label: label, action: "inventory"})
+            plan.steps.push(KitStep{argv: words, stdin: "", exit: "0", assertions: [], label: label, action: "inventory"})
             next
         }
         if key == "wait" || key == "close" {
@@ -490,8 +490,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 }
                 duration = kit_steps_duration_ns(words[2]) ?? 0
             }
-            &joined.push(label)
-            &plan.steps.push(KitStep{argv: ["wait", label], stdin: "", exit: "0", assertions: [], label: label, action: if key == "close" -> "close" else -> "wait", duration: duration})
+            joined.push(label.copy())
+            plan.steps.push(KitStep{argv: ["wait", label], stdin: "", exit: "0", assertions: [], label: label, action: if key == "close" -> "close" else -> "wait", duration: duration})
             next
         }
         if key.starts_with("send ") || key.starts_with("signal ") {
@@ -513,7 +513,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
             }
-            &plan.steps.push(KitStep{argv: [tokens[0].text], stdin: "", exit: "0", assertions: [], label: label, action: if sending -> "send" else -> "signal", literal_input: literal})
+            plan.steps.push(KitStep{argv: [tokens[0].text], stdin: "", exit: "0", assertions: [], label: label, action: if sending -> "send" else -> "signal", literal_input: literal})
             next
         }
         if key.starts_with("session ") {
@@ -530,8 +530,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
             }
-            &pending.push(header[1])
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: header[1], action: "session", session_mode: mode})
+            pending.push(header[1])
+            plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: header[1], action: "session", session_mode: mode})
             next
         }
         if key == "step" || key.starts_with("step ") || key.starts_with("spawn ") {
@@ -561,8 +561,8 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
             }
-            if spawning -> &pending.push(label)
-            &plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: label, action: if spawning -> "spawn" else -> ""})
+            if spawning -> pending.push(label.copy())
+            plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], label: label, action: if spawning -> "spawn" else -> ""})
             next
         }
         independent: kit_steps_independent_assertion(key, original)
@@ -572,11 +572,11 @@ kit_steps_parse: fn(source: String) -> KitPlan {
         }
         if independent {
             if plan.steps.len() == 0 {
-                &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
+                plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             } else {
                 owner: plan.steps[plan.steps.len() - 1]
                 if kit_expect_named(["when", "end when", "for", "repeat", "end for", "end repeat", "parallel", "end parallel"], owner.action) || owner.conditions.len() > 0 {
-                    &plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
+                    plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
                 }
             }
         }
@@ -661,7 +661,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: unset needs one environment name"
                 return plan
             }
-            &plan.steps[i].unset.push(value)
+            plan.steps[i].unset.push(value)
             next
         }
         if key == "limit" {
@@ -718,7 +718,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid entries filters or comparison"
                 return plan
             }
-            &plan.steps[i].assertions.push(assertion)
+            plan.steps[i].assertions.push(assertion)
             next
         }
         if key == "tree" {
@@ -726,7 +726,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid tree filters or predicate"
                 return plan
             }
-            &plan.steps[i].assertions.push(assertion)
+            plan.steps[i].assertions.push(assertion)
             next
         }
         if key == "elapsed" {
@@ -735,7 +735,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid absolute elapsed bound"
                     return plan
                 }
-                &plan.steps[i].assertions.push(assertion)
+                plan.steps[i].assertions.push(assertion)
                 next
             }
             if value.starts_with("median ") {
@@ -743,7 +743,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     plan.error = "line {line_number}: invalid elapsed median relation"
                     return plan
                 }
-                &plan.steps[i].assertions.push(assertion)
+                plan.steps[i].assertions.push(assertion)
                 next
             }
             relation: kit_steps_words(value) ?? []
@@ -756,7 +756,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid elapsed factor or label"
                 return plan
             }
-            &plan.steps[i].assertions.push(KitAssertion{stream: "elapsed", path: relation[0], mode: "ratio", value: relation[4], ratio: factor})
+            plan.steps[i].assertions.push(KitAssertion{stream: "elapsed", path: relation[0], mode: "ratio", value: relation[4], ratio: factor})
             next
         }
         if key.starts_with("process ") {
@@ -765,7 +765,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 return plan
             }
             assertion.path = kit_steps_byte_slice(key, 8, key.count_bytes()).trim().copy()
-            &plan.steps[i].assertions.push(assertion)
+            plan.steps[i].assertions.push(assertion)
             next
         }
         if key == "json" {
@@ -779,7 +779,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: JSON relation needs a known prior label"
                 return plan
             }
-            &plan.steps[i].assertions.push(assertion)
+            plan.steps[i].assertions.push(assertion)
             next
         }
         if key == "stdin" {
@@ -797,7 +797,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
                 if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
-                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "==", value: words[1]})
+                plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "==", value: words[1]})
                 next
             }
             if value.starts_with("in ") {
@@ -810,7 +810,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                     return plan
                 }
                 if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
-                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "in", value: "", alternatives: codes})
+                plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "in", value: "", alternatives: codes})
                 next
             }
             not_equal: words.len() == 2 && words[0] == "!=" && kit_steps_integer(words[1]) != None && kit_steps_reason(original)
@@ -823,7 +823,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             // so the guard selects it; the step's own status stays unconditional.
             if conditions.len() > 0 && plan.steps[i].conditions != conditions {
                 if !plan.steps[i].exit_explicit -> plan.steps[i].exit = "any"
-                &plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "status", value: value})
+                plan.steps[i].assertions.push(KitAssertion{stream: "exit", path: "", mode: "status", value: value})
                 next
             }
             plan.steps[i].exit = value
@@ -848,7 +848,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
             plan.error = "line {line_number}: relation needs a known prior step label"
             return plan
         }
-        &plan.steps[i].assertions.push(assertion)
+        plan.steps[i].assertions.push(assertion)
     }
     plan = kit_steps_attach_conditions(plan, before_steps, before_assertions, conditions)
     if blocks.len() != 0 {
@@ -941,7 +941,7 @@ kit_steps_environment: fn(plan: KitPlan, env: KitEnv, work: String, scratch: Str
         if equals <= 0 -> panic("env requires NAME=VALUE")
         name: kit_steps_byte_slice(assignment, 0, equals)
         value: kit_steps_argv_env(kit_steps_expand(kit_steps_byte_slice(assignment, equals + 1, assignment.count_bytes()), env, work, scratch, built), env, scratch, overlay)
-        &overlay.push(KitEnvVar{name: name, value: Val(value)})
+        overlay.push(KitEnvVar{name: name, value: Val(value)})
     }
     overlay
 }
@@ -953,9 +953,9 @@ kit_steps_step_environment: fn(step: KitStep, env: KitEnv, work: String, scratch
             .Val(text) -> Val(kit_steps_argv_env(kit_steps_expand(text, env, work, scratch, built), env, scratch, result))
             .None -> None
         }
-        &result.push(KitEnvVar{name: variable.name, value: value})
+        result.push(KitEnvVar{name: variable.name, value: value})
     }
-    loop name in step.unset -> &result.push(KitEnvVar{name: name, value: None})
+    loop name in step.unset -> result.push(KitEnvVar{name: name, value: None})
     result
 }
 
@@ -977,9 +977,9 @@ kit_steps_prepare: fn(step: KitStep, env: KitEnv, work: String, scratch: String,
         expanded: kit_steps_expand(argument, env, work, scratch, built)
         if expanded.starts_with("{{env-words:") {
             words: kit_steps_env_words(expanded, policy, scratch, environment) ?? return Err("env-words token must occupy the entire argv word")
-            loop word in words -> &argv.push(word)
+            loop word in words -> argv.push(word)
         } else {
-            &argv.push(kit_steps_argv_env(expanded, policy, scratch, environment))
+            argv.push(kit_steps_argv_env(expanded, policy, scratch, environment))
         }
     }
     if argv.len() == 0 -> return Err("empty expanded argv")
@@ -998,6 +998,7 @@ kit_steps_prepare: fn(step: KitStep, env: KitEnv, work: String, scratch: String,
         bootstrap: if step.action == "spawn" -> files.join(scratch, "child-{step.label}") else -> scratch
         argv = kit_no_nix_argv(policy, argv, bootstrap, step.isolate_network) ?? return Err("{err}")
     }
+    if step.isolate == "netns" -> argv = kit_netns_argv(argv) ?? return Err("{err}")
     Ok(KitProcessInput{argv: argv, cwd: cwd, stdin: stdin, env: policy, overlay: environment})
 }
 
@@ -1070,7 +1071,7 @@ kit_steps_one_of: fn(id: String, directory: String, snapshots: String, actual: S
 
 
 // A failed step carries its command's streams as the row's diff, so a suite report shows why it failed.
-kit_steps_streams_verdict: fn(verdict: ^KitVerdict, context: KitStepCtx, step: KitStep, result: KitRun) -> KitVerdict {
+kit_steps_streams_verdict: fn(verdict: &&KitVerdict, context: KitStepCtx, step: KitStep, result: KitRun) -> KitVerdict {
     if (verdict.status != "FAIL" && verdict.status != "ERROR") || verdict.diff != "" || (result.stderr == "" && result.stdout == "") -> return verdict
     out := "--- streams/{context.id}: `{step.argv.join(" ")}` exit {result.code}\n"
     count := 0
@@ -1100,17 +1101,17 @@ kit_steps_check: fn(step: KitStep, context: KitStepCtx, state: KitStepState, sou
     if process {
         failure: kit_steps_failure(step, result)
         if failure == {
-            .Val(value) -> return kit_steps_streams_verdict(^value, context, step, result)
+            .Val(value) -> return kit_steps_streams_verdict(value, context, step, result)
             .None -> {}
         }
     }
     if process || step.exit_explicit {
         verdict: kit_steps_exit_status(step.exit, result.code)
-        if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
+        if verdict.status != "PASS" -> return kit_steps_streams_verdict(verdict, context, step, result)
     }
     loop assertion in step.assertions {
         verdict: kit_steps_check_assertion(assertion, context, state, source_name, true)
-        if verdict.status != "PASS" -> return kit_steps_streams_verdict(^verdict, context, step, result)
+        if verdict.status != "PASS" -> return kit_steps_streams_verdict(verdict, context, step, result)
     }
     kit_expect_verdict("PASS", "")
 }
@@ -1155,10 +1156,10 @@ kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> Strin
     if artifact != "" -> return files.join(files.join(root, ".jet/build"), artifact)
     sources := [String]{}
     if packaged {
-        kit_steps_package_sources(root, &sources)
-        &sources.push(files.join(root, "package.jet"))
+        kit_steps_package_sources(root, sources)
+        sources.push(files.join(root, "package.jet"))
     } else {
-        &sources.push(files.join(source, entry))
+        sources.push(files.join(source, entry))
     }
     loop path in sources {
         text: files.read(path) ?? next
@@ -1174,13 +1175,13 @@ kit_steps_artifact: fn(entry: String, source: String, artifact: String) -> Strin
 // packages stay out, as the package source walk skips them.
 kit_steps_package_sources: fn(directory: String, sources: &[String]) {
     entries := files.list_dir(directory) ?? return
-    &entries.sort_by(entry -> entry.name)
+    entries.sort_by(entry -> entry.name)
     loop entry in entries {
         if entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) -> next
         if entry.is_dir {
-            if !files.exists(files.join(entry.path, "package.jet")) -> kit_steps_package_sources(entry.path, &sources)
+            if !files.exists(files.join(entry.path, "package.jet")) -> kit_steps_package_sources(entry.path, sources)
         } else if entry.name.ends_with(".jet") && entry.name != "package.jet" {
-            &sources.push(entry.path.copy())
+            sources.push(entry.path.copy())
         }
     }
 }
@@ -1225,8 +1226,8 @@ kit_steps_build_entry_executable: fn(text: String) -> String? {
         }
         quoted: rest.split_once("\"") ?? next
         name: quoted.after.split_once("\"") ?? next
-        &handles.push(handle)
-        &names.push(name.before.copy())
+        handles.push(handle)
+        names.push(name.before.copy())
     }
     if selected != "" {
         loop position in 0..<handles.len() {
@@ -1268,7 +1269,7 @@ kit_steps_manifest_tokens: fn(text: String) -> [String] {
             next
         }
         if c == 123 || c == 125 || c == 91 || c == 93 || c == 58 || c == 44 || c == 46 {
-            &tokens.push(kit_steps_byte_slice(text, i, i + 1))
+            tokens.push(kit_steps_byte_slice(text, i, i + 1))
             i += 1
             next
         }
@@ -1280,7 +1281,7 @@ kit_steps_manifest_tokens: fn(text: String) -> [String] {
                 i += 1
             }
             i = if i < bytes.len() -> i + 1 else -> bytes.len()
-            &tokens.push(kit_steps_byte_slice(text, start, i))
+            tokens.push(kit_steps_byte_slice(text, start, i))
             next
         }
         loop i < bytes.len() && kit_steps_manifest_word_byte(Int.from_u8(bytes[i])) {
@@ -1290,7 +1291,7 @@ kit_steps_manifest_tokens: fn(text: String) -> [String] {
             i += 1
             next
         }
-        &tokens.push(kit_steps_byte_slice(text, start, i))
+        tokens.push(kit_steps_byte_slice(text, start, i))
     }
     tokens
 }
@@ -1314,9 +1315,10 @@ kit_steps_manifest_close: fn(tokens: [String], open: Int) -> Int {
     tokens.len()
 }
 
-// The `file` stem of the run output's `entry: file.callable` in the package
-// manifest at `root`: the output `defaults.run` names, else the one
-// Executable output. None for a package that declares no such output.
+// The file stem of the run output's entry in the package manifest at `root`:
+// `file` of `entry: file.callable`, or of the package source declaring a bare
+// `entry: callable`. The output `defaults.run` names, else the one Executable
+// output. None for a package that declares no such output.
 kit_steps_manifest_entry_stem: fn(root: String) -> String? {
     text: kit_exec_optional(files.join(root, "package.jet")) ?? return None
     tokens: kit_steps_manifest_tokens(text)
@@ -1350,9 +1352,14 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
                 record_close: kit_steps_manifest_close(tokens, kind_at + 1)
                 if tokens[kind_at] == "Executable" {
                     loop k in (kind_at + 2)..<record_close {
-                        if tokens[k] == "entry" && k + 3 < record_close && tokens[k + 1] == ":" && tokens[k + 3] == "." {
-                            &names.push(tokens[j].copy())
-                            &stems.push(tokens[k + 2].copy())
+                        if tokens[k] == "entry" && k + 2 < record_close && tokens[k + 1] == ":" {
+                            // `entry: file.callable`, or a bare `entry: callable`
+                            // built under the stem of the file declaring it.
+                            stem: if k + 3 < record_close && tokens[k + 3] == "." -> Val(tokens[k + 2].copy()) else -> kit_steps_callable_stem(root, tokens[k + 2])
+                            if stem == .Val(found) {
+                                names.push(tokens[j].copy())
+                                stems.push(found.copy())
+                            }
                         }
                     }
                 }
@@ -1368,6 +1375,50 @@ kit_steps_manifest_entry_stem: fn(root: String) -> String? {
         return None
     }
     if stems.len() == 1 -> return Val(stems[0].copy())
+    None
+}
+
+// The stem of the package source under `root` that declares the top-level
+// `callable: fn`, None when none does.
+kit_steps_callable_stem: fn(root: String, callable: String) -> String? {
+    sources := [String]{}
+    kit_steps_package_sources(root, sources)
+    loop path in sources {
+        text: files.read(path) ?? next
+        loop line in text.split("\n").to_list() {
+            if line.starts_with("{callable}: fn") {
+                name: files.basename(path)
+                return Val(kit_steps_byte_slice(name, 0, name.count_bytes() - 4))
+            }
+        }
+    }
+    None
+}
+
+// The workspace member a `jet build -p NAME` step selects, "" for none.
+kit_steps_build_member: fn(step: KitStep) -> String {
+    loop i in 2..<step.argv.len() {
+        argument: step.argv[i]
+        if argument == "--" -> return ""
+        if argument == "-p" && i + 1 < step.argv.len() -> return step.argv[i + 1].copy()
+    }
+    ""
+}
+
+// The directory under `root` whose `package.jet` declares `name: "NAME"`,
+// walked as kit_steps_package_sources walks; None when no package does.
+kit_steps_member_dir: fn(root: String, name: String) -> String? {
+    entries := files.list_dir(root) ?? return None
+    entries.sort_by(entry -> entry.name)
+    loop entry in entries {
+        if !entry.is_dir || entry.name.starts_with(".") || kit_expect_named(["target", "build", "node_modules", "bin"], entry.name) -> next
+        if kit_exec_optional(files.join(entry.path, "package.jet")) == .Val(text) {
+            tokens: kit_steps_manifest_tokens(text)
+            quoted: "\"{name}\""
+            if tokens.len() > 2 && tokens[0] == "name" && tokens[1] == ":" && tokens[2] == quoted -> return Val(entry.path.copy())
+        }
+        if kit_steps_member_dir(entry.path, name) == .Val(found) -> return Val(found.copy())
+    }
     None
 }
 
@@ -1400,7 +1451,11 @@ kit_steps_invoke: fn(step: KitStep, index: Int, context: KitStepCtx, previous: K
     overlay: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
     state.last = kit_steps_invoke_step(step, context.env, context.work, context.scratch, context.snapshots, context.plan.fixture, state.built, overlay)
     if step.argv.len() > 1 && step.argv[0] == "jet" && step.argv[1] == "build" && !kit_steps_help_request(step) && state.last.code == 0 && kit_exec_process_failure(state.last) == None {
-        cwd: if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
+        cwd := if step.cwd == "" -> context.work else -> files.join(context.work, kit_steps_expand(step.cwd, context.env, context.work, context.scratch, state.built))
+        // `jet build -p NAME` builds the workspace member named NAME, whose
+        // artifacts land under that member's root.
+        member: kit_steps_build_member(step)
+        if member != "" -> cwd = kit_steps_member_dir(cwd, member) ?? cwd
         entry := kit_steps_build_entry(step)
         if entry == "" {
             // A bare `jet build` names its artifact for the package's run

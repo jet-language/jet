@@ -8,14 +8,14 @@
 
 acquire: fn(resource: String) -> Lock { return Lock{resource: resource.copy()} }
 
-release: fn(lock: ^Lock) { print("unlocked {lock.resource}") }
+release: fn(lock: &&Lock) { print("unlocked {lock.resource}") }
 
 run: fn() {
     db: acquire("db")
     flag: true
     x: if {
         flag -> {
-            release(^db)
+            release(db)
             1
         }
         else -> 2

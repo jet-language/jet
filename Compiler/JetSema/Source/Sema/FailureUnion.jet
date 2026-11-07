@@ -92,7 +92,7 @@ sema_failure_union_typed: fn(ty: Type) -> Bool Never! {
 sema_failure_union_add_member: fn(context: &SemaCheckContext, ty: Type) Never! {
     if ty == {
         .Union(members) -> {
-            loop member in members -> sema_failure_union_add_member(&context, member)
+            loop member in members -> sema_failure_union_add_member(context, member)
             return
         }
         .String -> {
@@ -111,7 +111,7 @@ sema_failure_union_add_member: fn(context: &SemaCheckContext, ty: Type) Never! {
     loop existing in context.failure_union_members {
         if type_identity_equal(existing, ty) -> return
     }
-    &context.failure_union_members.push(ty)
+    context.failure_union_members.push(ty.copy())
 }
 
 sema_failure_union_unparen: fn(value: Expr) -> Expr Never! {
@@ -125,7 +125,7 @@ sema_failure_union_unparen: fn(value: Expr) -> Expr Never! {
 // so the ordinary check that follows sees the body unchanged.
 sema_failure_union_probe_type: fn(value: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Type? {
     probe_diagnostics := [Diagnostic]{}
-    checked: sema_probe_expression(value, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return None
+    checked: sema_probe_expression(value, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return None
     Val(checked.ty)
 }
 
@@ -145,11 +145,11 @@ sema_failure_union_record_err: fn(call: Call, environment: SemaScopeEnvironment,
             payload := [SemaFailureCaseField]{}
             loop argument in args {
                 if argument == {
-                    .Positional(inner) -> &payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, program, &scopes, &state, &tail_store, &context) ?? Type.Named{name: "_"}})
-                    .Named(label, inner) -> &payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, program, &scopes, &state, &tail_store, &context) ?? Type.Named{name: "_"}})
+                    .Positional(inner) -> payload.push(SemaFailureCaseField{label: None, ty: sema_failure_union_probe_type(inner, environment, program, scopes, state, tail_store, context) ?? Type.Named{name: "_"}})
+                    .Named(label, inner) -> payload.push(SemaFailureCaseField{label: Val(label), ty: sema_failure_union_probe_type(inner, environment, program, scopes, state, tail_store, context) ?? Type.Named{name: "_"}})
                 }
             }
-            &context.failure_union_cases.push(SemaFailureCase{name: variant, payload: payload, span: span})
+            context.failure_union_cases.push(SemaFailureCase{name: variant, payload: payload, span: span})
             return
         }
     }
@@ -157,11 +157,11 @@ sema_failure_union_record_err: fn(call: Call, environment: SemaScopeEnvironment,
         context.failure_union_general = true
         return
     }
-    ty: sema_failure_union_probe_type(value, environment, program, &scopes, &state, &tail_store, &context) ?? {
+    ty: sema_failure_union_probe_type(value, environment, program, scopes, state, tail_store, context) ?? {
         context.failure_union_general = true
         return
     }
-    sema_failure_union_add_member(&context, ty)
+    sema_failure_union_add_member(context, ty)
 }
 
 // `find` gives `FindError`; `parse_age` gives `ParseAgeError`; known
@@ -175,7 +175,7 @@ sema_failure_union_case_payload: fn(case_row: SemaFailureCase) -> VariantPayload
     if case_row.payload.len() == 1 && case_row.payload[0].label == None -> return VariantPayload.Single{ty: case_row.payload[0].ty, span: case_row.span}
     fields := [VariantField]{}
     loop (index, field) in case_row.payload {
-        &fields.push(VariantField{name: field.label ?? "value{index + 1}", name_span: case_row.span, ty: field.ty, ty_span: case_row.span})
+        fields.push(VariantField{name: field.label ?? "value{index + 1}", name_span: case_row.span, ty: field.ty, ty_span: case_row.span})
     }
     VariantPayload.Named{fields: fields}
 }
@@ -237,8 +237,8 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     clash := sema_registration_module_has_name(graph.modules[row.module_index], owned) || sema_registration_module_has_import_name(graph.modules[row.module_index], owned) || sema_registration_namespace_owner(graph, row.module_index, owned) != None
     start: diagnostics.len()
     if clash {
-        &diagnostics.push(sema_error("E0105", row.cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))
-        sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
+        diagnostics.push(sema_error("E0105", row.cases[0].span, "`{name}` creates error cases, but the type `{owned}` already exists", "cases written as `Err(.Case(…))` in `{name}` form its own error type, named `{owned}` after the function", "write the failure contract of `{name}` (for example `-> T {owned}!`), or rename the declared `{owned}`"))
+        sema_attach_diagnostic_source_locations(diagnostics, start, segments)
         return None
     }
     variants := [Variant]{}
@@ -250,11 +250,11 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
         }
         if existing_index >= 0 {
             if !sema_failure_union_same_payload(variants[existing_index].payload, payload) {
-                &diagnostics.push(sema_error("E0105", case_row.span, "case `.{case_row.name}` of `{owned}` is created with two different payloads", "every `Err(.{case_row.name}(…))` in `{name}` adds to the one type `{owned}`, so each case has one payload", "give the two failures different case names, or pass the same payload types to `.{case_row.name}`"))
+                diagnostics.push(sema_error("E0105", case_row.span, "case `.{case_row.name}` of `{owned}` is created with two different payloads", "every `Err(.{case_row.name}(…))` in `{name}` adds to the one type `{owned}`, so each case has one payload", "give the two failures different case names, or pass the same payload types to `.{case_row.name}`"))
             }
             next
         }
-        &variants.push(Variant{name: case_row.name, name_span: case_row.span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
+        variants.push(Variant{name: case_row.name, name_span: case_row.span, payload: payload, discriminant: None, discriminant_expr: None, serde_markers: [Marker]{}})
     }
     definition: sema_failure_union_enum(owned, graph.modules[row.module_index].functions[row.function_row].declaration, variants)
     item: Item.Enum{value: definition}
@@ -267,39 +267,39 @@ sema_failure_union_mint: fn(graph: &SemaRegistrationGraph, row: SemaFailureUnion
     source_file: graph.modules[module_index].source_file.copy()
     source_origin: graph.modules[module_index].source_origin.copy()
     register_diagnostics := [Diagnostic]{}
-    if !sema_registration_add_root(&graph.modules[module_index], item, source_file, source_origin, segments, &register_diagnostics) || register_diagnostics.len() > 0 {
-        sema_graph_module_rollback(&graph.modules[module_index], mark, owned)
-        loop diagnostic in register_diagnostics -> &diagnostics.push(diagnostic)
-        sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
+    if !sema_registration_add_root(graph.modules[module_index], item, source_file, source_origin, segments, register_diagnostics) || register_diagnostics.len() > 0 {
+        sema_graph_module_rollback(graph.modules[module_index], mark, owned)
+        loop diagnostic in register_diagnostics -> diagnostics.push(diagnostic)
+        sema_attach_diagnostic_source_locations(diagnostics, start, segments)
         return None
     }
     // copy: the minted enum is stored twice in the graph: as a program item here and as the
     // export's declaration below (`declaration: Val(item)`).
-    &graph.modules[module_index].program.items.push(item.copy())
+    graph.modules[module_index].program.items.push(item.copy())
     // copy: the export row stores its own symbol, while the registered symbol row stays in the
     // module, and `graph` is written (exports.push) while it is live.
     symbol: graph.modules[module_index].symbols[graph.modules[module_index].symbols.len() - 1].copy()
     module_identity: graph.modules[module_index].module_identity.copy()
-    if symbol.visibility > 0 -> &graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
-    &trail.entries.push(SemaGraphUndo.ModuleAppend{module_index: module_index, mark: mark, name: owned})
+    if symbol.visibility > 0 -> graph.modules[module_index].exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration: Val(item), source_module_identity: module_identity, visibility: symbol.visibility})
+    trail.entries.push(SemaGraphUndo.ModuleAppend{module_index: module_index, mark: mark, name: owned})
     if !trail.nominal_indexes_saved {
-        &trail.entries.push(SemaGraphUndo.NominalIndexes{symbol_rows: graph.nominal_symbol_rows, slots: graph.nominal_row_slots, buckets: graph.nominal_row_buckets})
+        trail.entries.push(SemaGraphUndo.NominalIndexes{symbol_rows: graph.nominal_symbol_rows, slots: graph.nominal_row_slots, buckets: graph.nominal_row_buckets})
         trail.nominal_indexes_saved = true
     }
-    sema_registration_index_nominal_rows(&graph, module_index, first_nominal)
-    sema_attach_diagnostic_source_locations(&diagnostics, start, segments)
+    sema_registration_index_nominal_rows(graph, module_index, first_nominal)
+    sema_attach_diagnostic_source_locations(diagnostics, start, segments)
     Val(Type.Named{name: owned})
 }
 
 sema_failure_union_flatten: fn(ty: Type, flat: &[Type]) Never! {
     if ty == .Union(members) {
-        loop member in members -> sema_failure_union_flatten(member, &flat)
+        loop member in members -> sema_failure_union_flatten(member, flat)
         return
     }
     loop existing in flat {
         if type_identity_equal(existing, ty) -> return
     }
-    &flat.push(ty)
+    flat.push(ty.copy())
 }
 
 // Flatten nested unions, drop exact duplicates, sort by the
@@ -307,7 +307,7 @@ sema_failure_union_flatten: fn(ty: Type, flat: &[Type]) Never! {
 // `union_member_order_key`); one surviving member is that member.
 sema_failure_union_canonical: fn(members: [Type]) -> Type Never! {
     flat := [Type]{}
-    loop member in members -> sema_failure_union_flatten(member, &flat)
+    loop member in members -> sema_failure_union_flatten(member, flat)
     index := 1
     loop index < flat.len() {
         current := flat[index]
@@ -396,7 +396,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
     slot_names := [[String:String]]{}
     declaring := [Int]{}
     declaring_slot := [Int]{}
-    loop _ in 0..<graph.modules.len() -> &declaring_slot.push(-1)
+    loop _ in 0..<graph.modules.len() -> declaring_slot.push(-1)
     unused_diagnostics := [Diagnostic]{}
     loop projection in projections {
         module_index: projection.module_index
@@ -404,26 +404,26 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
         updated := graph.modules[module_index].functions[projection.row].declaration.copy()
         updated.return_type = Val(projection.return_type)
         updated.return_type_span = None
-        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, &unused_diagnostics)
+        row: sema_registration_function(updated, graph.modules[module_index].functions[projection.row].raw_protocol_return, graph.modules[module_index].module_identity, None, graph.modules[module_index].source_file, graph.modules[module_index].source_origin, graph.modules[module_index].source_segments, unused_diagnostics)
         if declaring_slot[module_index] < 0 {
             declaring_slot[module_index] = declaring.len()
-            &declaring.push(module_index)
-            &slot_keys.push([String:Bool]{})
-            &slot_names.push([String:String]{})
+            declaring.push(module_index)
+            slot_keys.push([String:Bool]{})
+            slot_names.push([String:String]{})
         }
         slot: declaring_slot[module_index]
         symbols[projection.key] = row.symbol
         slot_keys[slot][projection.key] = true
         slot_names[slot][updated.name] = projection.key
-        items[projection.key] = Item.Func{value: ^updated}
-        &trail.entries.push(SemaGraphUndo.FunctionRow{module_index: module_index, row: projection.row, old: graph.modules[module_index].functions[projection.row]})
-        graph.modules[module_index].functions[projection.row] = ^row
+        items[projection.key] = Item.Func{value: updated.move()}
+        trail.entries.push(SemaGraphUndo.FunctionRow{module_index: module_index, row: projection.row, old: graph.modules[module_index].functions[projection.row]})
+        graph.modules[module_index].functions[projection.row] = row.move()
     }
     loop (slot, module_index) in declaring {
         loop index in 0..<graph.modules[module_index].symbols.len() {
             if slot_keys[slot].get(graph.modules[module_index].symbols[index].id.key) == None -> next
             symbol: symbols.get(graph.modules[module_index].symbols[index].id.key) ?? next
-            &trail.entries.push(SemaGraphUndo.SymbolRow{module_index: module_index, position: index, old: graph.modules[module_index].symbols[index]})
+            trail.entries.push(SemaGraphUndo.SymbolRow{module_index: module_index, position: index, old: graph.modules[module_index].symbols[index]})
             graph.modules[module_index].symbols[index] = symbol
         }
         loop index in 0..<graph.modules[module_index].declarations.len() {
@@ -431,7 +431,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             if graph.modules[module_index].declarations[index] == .Func(declared) -> found = slot_names[slot].get(declared.name)
             key: found ?? next
             item: items.get(key) ?? next
-            &trail.entries.push(SemaGraphUndo.DeclarationRow{module_index: module_index, position: index, old: graph.modules[module_index].declarations[index]})
+            trail.entries.push(SemaGraphUndo.DeclarationRow{module_index: module_index, position: index, old: graph.modules[module_index].declarations[index]})
             graph.modules[module_index].declarations[index] = item
         }
         loop index in 0..<graph.modules[module_index].program.items.len() {
@@ -439,14 +439,14 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             if graph.modules[module_index].program.items[index] == .Func(declared) -> found = slot_names[slot].get(declared.name)
             key: found ?? next
             item: items.get(key) ?? next
-            &trail.entries.push(SemaGraphUndo.ProgramItemRow{module_index: module_index, position: index, old: graph.modules[module_index].program.items[index]})
+            trail.entries.push(SemaGraphUndo.ProgramItemRow{module_index: module_index, position: index, old: graph.modules[module_index].program.items[index]})
             graph.modules[module_index].program.items[index] = item
         }
         loop index in 0..<graph.modules[module_index].exports.len() {
             if slot_keys[slot].get(graph.modules[module_index].exports[index].symbol.id.key) == None -> next
             symbol: symbols.get(graph.modules[module_index].exports[index].symbol.id.key) ?? next
             item: items.get(graph.modules[module_index].exports[index].symbol.id.key) ?? next
-            &trail.entries.push(SemaGraphUndo.ExportRow{module_index: module_index, position: index, old: graph.modules[module_index].exports[index]})
+            trail.entries.push(SemaGraphUndo.ExportRow{module_index: module_index, position: index, old: graph.modules[module_index].exports[index]})
             graph.modules[module_index].exports[index].symbol = symbol
             graph.modules[module_index].exports[index].declaration = Val(item)
         }
@@ -456,7 +456,7 @@ sema_failure_project_returns: fn(graph: &SemaRegistrationGraph, projections: [Se
             loop binding_index in 0..<graph.modules[importer_index].imports[import_index].bindings.len() {
                 symbol: symbols.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key) ?? next
                 item: items.get(graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol.id.key) ?? next
-                &trail.entries.push(SemaGraphUndo.ImportBindingRow{module_index: importer_index, import_index: import_index, binding: binding_index, old: graph.modules[importer_index].imports[import_index].bindings[binding_index]})
+                trail.entries.push(SemaGraphUndo.ImportBindingRow{module_index: importer_index, import_index: import_index, binding: binding_index, old: graph.modules[importer_index].imports[import_index].bindings[binding_index]})
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].symbol = symbol
                 graph.modules[importer_index].imports[import_index].bindings[binding_index].declaration = Val(item)
             }
@@ -489,14 +489,14 @@ sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphM
             // contract (Rust `default_entry_return`), so its failures meet
             // `Err` instead of joining an inferred union.
             if module_index == entry_index && graph.modules[module_index].functions[function_row].declaration.name == "run" -> next
-            &rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
+            rows.push(SemaFailureUnionRow{key: facts.function_key.copy(), name: graph.modules[module_index].functions[function_row].declaration.name.copy(), module_index: module_index, members: facts.union_members.copy(), general: facts.union_general, edges: facts.union_edges.copy(), cases: facts.union_cases.copy(), function_row: function_row})
         }
     }
     if rows.len() == 0 -> return projected
     loop row_index in 0..<rows.len() {
-        minted: sema_failure_union_mint(&graph, rows[row_index], &diagnostics, &trail) ?? next
-        &rows[row_index].members.push(minted)
-        &projected.modules.push(rows[row_index].module_index)
+        minted: sema_failure_union_mint(graph, rows[row_index], diagnostics, trail) ?? next
+        rows[row_index].members.push(minted)
+        projected.modules.push(rows[row_index].module_index)
         projected.minted = true
     }
     // Edge targets resolve through one key -> row map (the last row of a key,
@@ -524,7 +524,7 @@ sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphM
                         if type_identity_equal(existing, member) -> known = true
                     }
                     if !known {
-                        &rows[row_index].members.push(member)
+                        rows[row_index].members.push(member)
                         changed = true
                     }
                 }
@@ -549,13 +549,13 @@ sema_failure_union_infer: fn(graph: &SemaRegistrationGraph, modules: [SemaGraphM
         function_row: sema_failure_function_row(graph, row.module_index, row.key)
         if function_row < 0 -> next
         members := row.members.copy()
-        if row.general || !settled -> &members.push(Type.Named{name: "Err"})
+        if row.general || !settled -> members.push(Type.Named{name: "Err"})
         contract: Type.Result{ok: sema_failure_union_success(graph.modules[row.module_index].functions[row.function_row].declaration), err: sema_failure_union_canonical(members)}
-        &projections.push(SemaFailureProjection{key: row.key, module_index: row.module_index, row: function_row, return_type: contract})
-        &projected.keys.push(row.key)
-        &projected.modules.push(row.module_index)
+        projections.push(SemaFailureProjection{key: row.key, module_index: row.module_index, row: function_row, return_type: contract})
+        projected.keys.push(row.key)
+        projected.modules.push(row.module_index)
     }
-    sema_failure_project_returns(&graph, projections, &trail)
+    sema_failure_project_returns(graph, projections, trail)
     projected
 }
 
@@ -577,18 +577,18 @@ sema_failure_project_infallible: fn(graph: &SemaRegistrationGraph, solved: [Stri
         if row == {
             .Function(module_index, index) -> {
                 contract: Type.Result{ok: sema_failure_union_success(graph.modules[module_index].functions[index].declaration), err: Type.Named{name: "Never"}}
-                &projections.push(SemaFailureProjection{key: key, module_index: module_index, row: index, return_type: contract})
+                projections.push(SemaFailureProjection{key: key, module_index: module_index, row: index, return_type: contract})
             }
             .Foreign(_, _) -> {}
             else -> {
-                loop site in sema_failure_method_rows(graph, row) -> sema_failure_project_method_site(&graph, site, &trail)
-                &methods.push(key)
+                loop site in sema_failure_method_rows(graph, row) -> sema_failure_project_method_site(graph, site, trail)
+                methods.push(key.copy())
             }
         }
     }
-    sema_failure_project_returns(&graph, projections, &trail)
+    sema_failure_project_returns(graph, projections, trail)
     projected := loop projection in projections -> projection.key
-    loop key in methods -> &projected.push(key)
+    loop key in methods -> projected.push(key)
     projected
 }
 
@@ -597,13 +597,13 @@ sema_failure_project_method_site: fn(graph: &SemaRegistrationGraph, site: SemaRe
     if site == {
         .NominalMethod(module_index, owner, index) -> {
             projected: sema_failure_infallible_method_row(graph.modules[module_index].nominals[owner].methods[index], graph.modules[module_index])
-            &trail.entries.push(SemaGraphUndo.NominalMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].nominals[owner].methods[index]})
-            graph.modules[module_index].nominals[owner].methods[index] = ^projected
+            trail.entries.push(SemaGraphUndo.NominalMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].nominals[owner].methods[index]})
+            graph.modules[module_index].nominals[owner].methods[index] = projected.move()
         }
         .ImplMethod(module_index, owner, index) -> {
             projected: sema_failure_infallible_method_row(graph.modules[module_index].impls[owner].methods[index], graph.modules[module_index])
-            &trail.entries.push(SemaGraphUndo.ImplMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].impls[owner].methods[index]})
-            graph.modules[module_index].impls[owner].methods[index] = ^projected
+            trail.entries.push(SemaGraphUndo.ImplMethodRow{module_index: module_index, owner: owner, row: index, old: graph.modules[module_index].impls[owner].methods[index]})
+            graph.modules[module_index].impls[owner].methods[index] = projected.move()
         }
         else -> {}
     }

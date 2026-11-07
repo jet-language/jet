@@ -1,0 +1,89 @@
+// A read of an owned binding that nothing reads afterwards hands the value
+// over instead of copying it, and a match arm that binds every payload of a
+// value nobody reads again takes the payloads out instead of copying them.
+// A loop over an owned list that nothing reads afterwards hands each item
+// out by value, so storing it moves it.
+// Value semantics stay exact: a binding still read later is copied, so
+// editing it never shows through the copy.
+
+Link: enum {
+    Node(c: Int, t: [Int], e: [Link]?)
+    End
+}
+
+build: fn(n: Int) -> [Link] {
+    holder := [[Link]]{[Link]{}}
+    i := n
+    loop i > 0 {
+        i -= 1
+        body := [Int]{i, i + 1}
+        tail := holder.pop() ?? [Link]{}
+        holder.push([Link]{Link.Node{c: i, t: body.move(), e: Val(tail.move())}})
+    }
+    holder.pop() ?? [Link]{}
+}
+
+walk: fn(chain: &&[Link]) -> Int {
+    total := 0
+    rest := chain.move()
+    loop rest.len() == 1 {
+        link := rest.pop() ?? break
+        if link == {
+            .Node(c, t, e) -> {
+                total += c + t.len()
+                rest = e.move() ?? [Link]{}
+            }
+            .End -> break
+        }
+    }
+    total
+}
+
+Named: struct {
+    name: String
+}
+
+// The list is dead after the loop: its items move into the records.
+wrap_all: fn(count: Int) -> [Named] {
+    names := [String]{}
+    loop index in 0..<count -> names.push("n{index}")
+    out := [Named]{}
+    loop name in names {
+        out.push(Named{name: name})
+    }
+    out
+}
+
+// Still read after the loop: every stored item is a copy.
+wrap_kept: fn(count: Int) -> Int {
+    names := [String]{}
+    loop index in 0..<count -> names.push("k{index}")
+    out := [Named]{}
+    loop name in names -> out.push(Named{name: name})
+    out.len() * 10 + names.len()
+}
+
+run: fn() {
+    chain := build(5)
+    print("walk {walk(chain)}")
+
+    kept := [Int]{1, 2, 3}
+    duplicate := kept
+    kept.push(4)
+    print("duplicate {duplicate.len()} kept {kept.len()}")
+
+    source := [Int]{7}
+    moved := source
+    moved.push(8)
+    print("moved {moved.len()}")
+
+    shared := [Int]{1}
+    first := shared
+    first.push(2)
+    second := shared
+    print("first {first.len()} second {second.len()} shared {shared.len()}")
+
+    wrapped: wrap_all(3)
+    print("wrapped {wrapped.len()} {wrapped[2].name}")
+    print("kept {wrap_kept(2)}")
+}

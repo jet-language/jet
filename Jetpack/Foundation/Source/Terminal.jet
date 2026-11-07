@@ -175,7 +175,7 @@ DiagnosticCollector: struct {
                 return
             }
         }
-        &self.groups.push(DiagnosticGroup{code, root_cause_key, what, why, fix, count: 1, color})
+        self.groups.push(DiagnosticGroup{code, root_cause_key, what, why, fix, count: 1, color})
     }
 
     render: fn(self) -> String Never! {
@@ -198,7 +198,7 @@ DiagnosticInvocation: struct {
 }
 
 impl DiagnosticInvocation.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         collector: self.collector
         permit: collector.guard_read()
         rendered: permit.value.render()
@@ -235,7 +235,7 @@ terminal_columns: fn() -[Env]> Int Never! {
 // Every Jetpack stderr transition is one complete write, which may wait for IO.
 terminal_write_output: fn(text: String) Never! -[IO, Time.Wait]> {
     stderr_handle := term.stderr()
-    &stderr_handle.write(text).drop("terminal output is best-effort")
+    stderr_handle.write(text).drop("terminal output is best-effort")
 }
 
 // The indent under the gutter that detail and ledger rows share.
@@ -323,14 +323,14 @@ terminal_fit_line: fn(input: String, width: Int) -> String Never! {
     loop index < raw.len() {
         if Int.from_u8(raw[index]) == 0x1B {
             end: terminal_ansi_sequence_end(raw, index)
-            loop byte in raw[index..<end] -> &output.push(byte)
+            loop byte in raw[index..<end] -> output.push(byte)
             index = end
             next
         }
         end: index + terminal_utf8_length(Int.from_u8(raw[index]))
         character_width: core_text.display_width(terminal_bytes_text(raw, index, end))
         if visible + character_width > content_width -> break
-        loop byte in raw[index..<end] -> &output.push(byte)
+        loop byte in raw[index..<end] -> output.push(byte)
         visible += character_width
         index = end
     }
@@ -708,7 +708,7 @@ Theme: struct {
             }
             terminal_write_output("{carriage_return}{esc}[2K")
         }
-        Spinner{stop: Val(stop), running: Val(^running)}
+        Spinner{stop: Val(stop), running: Val(running.move())}
     }
 
     // An operational Jet failure through the registered E1340 row.
@@ -745,7 +745,7 @@ Theme: struct {
     error_coded_with_root_cause: fn(self, code: String, root_cause_key: String, headline: String, why: String, fix: String) Never! -[IO, Time.Wait]> {
         if self.invocation == .Val(collector) {
             permit: collector.guard_edit()
-            &permit.value.record(self.color, code, root_cause_key, headline, why, fix)
+            permit.value.record(self.color, code, root_cause_key, headline, why, fix)
             return
         }
         terminal_write_output(self.render_error_coded(code, headline, why, fix))
@@ -771,12 +771,12 @@ Spinner: struct {
 }
 
 impl Spinner.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         if self.stop == .Val(flag) {
             permit: flag.guard_edit()
             permit.value.stop = true
         }
-        if self.running == .Val(running) -> ^running.join().drop("the spinner stops with its owner")
+        if self.running == .Val(running) -> running.join().drop("the spinner stops with its owner")
     }
 }
 
@@ -1027,21 +1027,21 @@ LiveRegion: struct {
     // Erase the drawn status lines, so no stale progress text sits beside
     // a diagnostic.
     clear: fn(&self) Never! -[IO, Time.Wait]> {
-        erase: &self.clear_control()
+        erase: self.clear_control()
         if erase != "" -> terminal_write_output(erase)
     }
 
     // Promote one finished row: erase the region, then print the row
     // permanently. On non-TTY this is the whole deterministic ledger.
     finish: fn(&self, line: String) Never! -[IO, Env, Time.Wait]> {
-        erase: &self.clear_control()
+        erase: self.clear_control()
         terminal_write_output("{erase}{terminal_pad()}{terminal_fit_live_line(line, terminal_columns())}\n")
     }
 
     // Redraw the status lines in place; inert on non-TTY.
     set_status: fn(&self, lines: [String]) Never! -[IO, Env, Time.Wait]> {
         if !self.tty -> return
-        output := &self.clear_control()
+        output := self.clear_control()
         columns: terminal_columns()
         loop line in lines -> output = "{output}{terminal_pad()}{terminal_fit_live_line(line, columns)}\n"
         terminal_write_output(output)
@@ -1065,12 +1065,12 @@ LiveRegion: struct {
             terminal_write_output("{terminal_pad()}{line}\n")
             return
         }
-        &self.set_status([String]{line, "{Theme.render_progress_bar(completed, total, 14)}  {self.theme.gray(state)}"})
+        self.set_status([String]{line, "{Theme.render_progress_bar(completed, total, 14)}  {self.theme.gray(state)}"})
     }
 
     // Close the region into one final summary line.
     collapse: fn(&self, summary: String) Never! -[IO, Env, Time.Wait]> {
-        erase: &self.clear_control()
+        erase: self.clear_control()
         line: terminal_fit_line("  {self.theme.gutter()}  {summary}", terminal_columns())
         terminal_write_output("{erase}{line}\n")
     }

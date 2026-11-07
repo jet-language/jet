@@ -1,0 +1,27 @@
+
+spawn_one: fn(group: Group, value: Int) {
+    handle: task value + 1
+    print(handle.join() ?? 0)
+}
+
+spawn_owned: fn(group: Group, values: &&[Int]) {
+    handle: task values[0]
+    print(handle.join() ?? 0)
+}
+
+spawn_both: fn(group: Group) {
+    left: task 20
+    right: task 22
+    print((left.join() ?? 0) + (right.join() ?? 0))
+}
+
+run: fn() {
+    task.group group {
+        spawn_one(group, 41)
+        values: [7, 8, 9]
+        spawn_owned(group, values)
+        task.group inner {
+            spawn_both(inner)
+        }
+    }
+}

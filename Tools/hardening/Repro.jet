@@ -135,7 +135,7 @@ field_int: fn(tree: Dyn, name: String) -> Int? Never! {
 
 text_list: fn(values: [String]) -> Dyn Never! {
     out := [Dyn]{}
-    loop value in values -> &out.push(Dyn.Text(value.copy()))
+    loop value in values -> out.push(Dyn.Text(value.copy()))
     Dyn.Array(out)
 }
 
@@ -154,14 +154,14 @@ repro_digest: fn(tree: Dyn) -> String Err! {
 
 sorted_commands: fn(commands: [TierCommand]) -> [TierCommand] Never! {
     out := commands.copy()
-    &out.sort_by((left: TierCommand, right: TierCommand) -> left.tier <=> right.tier)
+    out.sort_by((left: TierCommand, right: TierCommand) -> left.tier <=> right.tier)
     out
 }
 
 commands_dyn: fn(commands: [TierCommand]) -> Dyn Never! {
     out := [Dyn]{}
     loop row in sorted_commands(commands) {
-        &out.push(Dyn.Object([String: Dyn]{"command": Dyn.Text(row.command.copy()), "tier": Dyn.Text(row.tier.copy())}))
+        out.push(Dyn.Object([String: Dyn]{"command": Dyn.Text(row.command.copy()), "tier": Dyn.Text(row.tier.copy())}))
     }
     Dyn.Array(out)
 }
@@ -219,41 +219,41 @@ make_repro: fn(input: ReproInput) -> Dyn Err! {
 // so one byte string has exactly one recorded form.
 channel_bytes: fn(tree: Dyn, name: String, errors: &[String]) -> [U8] Never! {
     encoding: field_text(tree, "{name}_encoding") ?? ""
-    if encoding != "base64" -> &errors.push("repro {name}_encoding must be base64")
+    if encoding != "base64" -> errors.push("repro {name}_encoding must be base64")
     text: field_text(tree, "{name}_bytes") ?? {
-        &errors.push("repro {name}_bytes is missing")
+        errors.push("repro {name}_bytes is missing")
         return [U8]{}
     }
     bytes: base64.decode(text) ?? {
-        &errors.push("repro {name}_bytes is not valid base64")
+        errors.push("repro {name}_bytes is not valid base64")
         return [U8]{}
     }
-    if base64.encode(bytes) != text -> &errors.push("repro {name}_bytes is not canonical base64")
+    if base64.encode(bytes) != text -> errors.push("repro {name}_bytes is not canonical base64")
     bytes
 }
 
 read_commands: fn(tree: Dyn, errors: &[String]) -> [TierCommand] Never! {
     out := [TierCommand]{}
     value: field(tree, "tier_commands") ?? Dyn.Null
-    if shape(value) != "array" -> &errors.push("repro tier_commands must be an array")
+    if shape(value) != "array" -> errors.push("repro tier_commands must be an array")
     if value == .Array(items) {
         loop item in items {
             tier: field_text(item, "tier") ?? ""
             command: field_text(item, "command") ?? ""
             if tier == "" || command == "" {
-                &errors.push("repro tier command needs a tier and a command")
+                errors.push("repro tier command needs a tier and a command")
                 next
             }
-            if !command.contains(SOURCE_SLOT) -> &errors.push("repro {tier} command does not run the recorded source through {SOURCE_SLOT}")
+            if !command.contains(SOURCE_SLOT) -> errors.push("repro {tier} command does not run the recorded source through {SOURCE_SLOT}")
             loop old in out {
-                if old.tier == tier -> &errors.push("repro has duplicate tier command: {tier}")
+                if old.tier == tier -> errors.push("repro has duplicate tier command: {tier}")
             }
-            &out.push(TierCommand{tier: tier.copy(), command: command.copy()})
+            out.push(TierCommand{tier: tier.copy(), command: command.copy()})
         }
     }
-    if out.len() == 0 -> &errors.push("repro tier commands are required")
+    if out.len() == 0 -> errors.push("repro tier commands are required")
     loop index in 1..<out.len() {
-        if out[index - 1].tier > out[index].tier -> &errors.push("repro tier commands are not sorted by tier")
+        if out[index - 1].tier > out[index].tier -> errors.push("repro tier commands are not sorted by tier")
     }
     out
 }
@@ -266,8 +266,8 @@ read_oracle: fn(tree: Dyn, errors: &[String]) -> Oracle Never! {
         input_digest: field_text(value, "input_digest") ?? "",
         independence_class: field_text(value, "independence_class") ?? "",
     }
-    if oracle.name == "" || oracle.version == "" || oracle.independence_class == "" -> &errors.push("repro oracle needs a name, version and independence class")
-    if !is_sha256(oracle.input_digest) -> &errors.push("repro oracle input_digest must be sha256:<64 hex>")
+    if oracle.name == "" || oracle.version == "" || oracle.independence_class == "" -> errors.push("repro oracle needs a name, version and independence class")
+    if !is_sha256(oracle.input_digest) -> errors.push("repro oracle input_digest must be sha256:<64 hex>")
     oracle
 }
 
@@ -276,48 +276,48 @@ read_oracle: fn(tree: Dyn, errors: &[String]) -> Oracle Never! {
 validate_repro: fn(tree: Dyn, current_snapshot: String) -> ReproCheck Never! {
     errors := [String]{}
     if shape(tree) != "object" -> return ReproCheck{errors: [String]{"repro bundle is not an object"}, stale: false}
-    if field_text(tree, "schema") != Val(REPRO_SCHEMA) -> &errors.push("repro schema must be {REPRO_SCHEMA}")
-    if field_int(tree, "schema_version") != Val(1) -> &errors.push("repro schema_version must be 1")
+    if field_text(tree, "schema") != Val(REPRO_SCHEMA) -> errors.push("repro schema must be {REPRO_SCHEMA}")
+    if field_int(tree, "schema_version") != Val(1) -> errors.push("repro schema_version must be 1")
     claimed: field_text(tree, "content_digest") ?? ""
     if {
-        !is_sha256(claimed) -> &errors.push("repro content digest is missing or invalid")
+        !is_sha256(claimed) -> errors.push("repro content digest is missing or invalid")
         repro_digest(tree) == .Ok(expected) -> {
-            if expected != claimed -> &errors.push("repro content digest does not match bundle")
+            if expected != claimed -> errors.push("repro content digest does not match bundle")
         }
-        else -> &errors.push("repro bundle has no canonical form")
+        else -> errors.push("repro bundle has no canonical form")
     }
     required: [String]{"run_id", "started", "finished", "host", "target", "stable_surface_id", "seed", "mutation_arm", "mutator_version", "source", "classification"}
     loop name in required {
-        if (field_text(tree, name) ?? "") == "" -> &errors.push("repro {name} is missing or not a string")
+        if (field_text(tree, name) ?? "") == "" -> errors.push("repro {name} is missing or not a string")
     }
-    if !is_commit(field_text(tree, "commit") ?? "") -> &errors.push("repro commit must be a full 40-hex commit id")
+    if !is_commit(field_text(tree, "commit") ?? "") -> errors.push("repro commit must be a full 40-hex commit id")
     hashes: [String]{"binary_sha256", "registry_snapshot_hash", "config_hash", "source_sha256"}
     loop name in hashes {
-        if !is_sha256(field_text(tree, name) ?? "") -> &errors.push("repro {name} must be sha256:<64 hex>")
+        if !is_sha256(field_text(tree, name) ?? "") -> errors.push("repro {name} must be sha256:<64 hex>")
     }
     source: field_text(tree, "source") ?? ""
-    if field_text(tree, "source_sha256") != Val(digest(source)) -> &errors.push("repro source hash does not match source")
-    _: channel_bytes(tree, "stdin", &errors)
-    _: channel_bytes(tree, "stdout", &errors)
-    _: channel_bytes(tree, "stderr", &errors)
-    _: read_commands(tree, &errors)
-    _: read_oracle(tree, &errors)
+    if field_text(tree, "source_sha256") != Val(digest(source)) -> errors.push("repro source hash does not match source")
+    _: channel_bytes(tree, "stdin", errors)
+    _: channel_bytes(tree, "stdout", errors)
+    _: channel_bytes(tree, "stderr", errors)
+    _: read_commands(tree, errors)
+    _: read_oracle(tree, errors)
     relations: [String]{"expected_relation", "actual_relation"}
     loop name in relations {
-        if field(tree, name) == None -> &errors.push("repro {name} is missing")
+        if field(tree, name) == None -> errors.push("repro {name} is missing")
     }
-    if shape(field(tree, "normalization") ?? Dyn.Null) != "array" -> &errors.push("repro normalization must be an array")
-    if shape(field(tree, "tower_action") ?? Dyn.Null) != "object" -> &errors.push("repro Tower action is required")
+    if shape(field(tree, "normalization") ?? Dyn.Null) != "array" -> errors.push("repro normalization must be an array")
+    if shape(field(tree, "tower_action") ?? Dyn.Null) != "object" -> errors.push("repro Tower action is required")
     exit_shape: shape(field(tree, "exit") ?? Dyn.Bool(false))
     if exit_shape != "null" {
         code: field_int(tree, "exit") ?? -1
-        if code < 0 -> &errors.push("repro exit must be a non-negative integer or null")
+        if code < 0 -> errors.push("repro exit must be a non-negative integer or null")
     }
     signal_shape: shape(field(tree, "signal") ?? Dyn.Bool(false))
-    if signal_shape != "null" && signal_shape != "text" -> &errors.push("repro signal must be a string or null")
-    if shape(field(tree, "timeout") ?? Dyn.Null) != "bool" -> &errors.push("repro timeout must be true or false")
+    if signal_shape != "null" && signal_shape != "text" -> errors.push("repro signal must be a string or null")
+    if shape(field(tree, "timeout") ?? Dyn.Null) != "bool" -> errors.push("repro timeout must be true or false")
     stale: current_snapshot != "" && field_text(tree, "registry_snapshot_hash") != Val(current_snapshot)
-    if stale -> &errors.push("repro registry snapshot is stale")
+    if stale -> errors.push("repro registry snapshot is stale")
     ReproCheck{errors: errors, stale: stale}
 }
 
@@ -327,10 +327,10 @@ reconstruct_repro: fn(tree: Dyn, tier: String) -> Reconstructed Err! {
     check: validate_repro(tree, "")
     if check.errors.len() > 0 -> return Err(check.errors.join("\n"))
     errors := [String]{}
-    commands: read_commands(tree, &errors)
+    commands: read_commands(tree, errors)
     selected := [TierCommand]{}
     loop row in commands {
-        if tier == "" || row.tier == tier -> &selected.push(row.copy())
+        if tier == "" || row.tier == tier -> selected.push(row.copy())
     }
     if tier != "" && selected.len() != 1 -> return Err("repro has no unique command for tier {tier}")
     exit: field_int(tree, "exit")
@@ -340,9 +340,9 @@ reconstruct_repro: fn(tree: Dyn, tier: String) -> Reconstructed Err! {
         source: field_text(tree, "source") ?? "",
         source_sha256: field_text(tree, "source_sha256") ?? "",
         tier_commands: selected,
-        stdin: channel_bytes(tree, "stdin", &errors),
-        stdout: channel_bytes(tree, "stdout", &errors),
-        stderr: channel_bytes(tree, "stderr", &errors),
+        stdin: channel_bytes(tree, "stdin", errors),
+        stdout: channel_bytes(tree, "stdout", errors),
+        stderr: channel_bytes(tree, "stderr", errors),
         exit: exit,
         signal: signal,
         timeout: timeout,
@@ -351,7 +351,7 @@ reconstruct_repro: fn(tree: Dyn, tier: String) -> Reconstructed Err! {
         mutator_version: field_text(tree, "mutator_version") ?? "",
         commit: field_text(tree, "commit") ?? "",
         binary_sha256: field_text(tree, "binary_sha256") ?? "",
-        oracle: read_oracle(tree, &errors),
+        oracle: read_oracle(tree, errors),
     })
 }
 

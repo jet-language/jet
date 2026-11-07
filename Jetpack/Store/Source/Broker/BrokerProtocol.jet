@@ -152,20 +152,20 @@ BrokerWireReader: struct {
         BrokerWireReader{stream: None, bytes: bytes, position: 0}
     }
 
-    socket: fn(^stream: UnixStream) -> BrokerWireReader Never! {
-        BrokerWireReader{stream: Val(^stream), bytes: [U8]{}, position: 0}
+    socket: fn(&&stream: UnixStream) -> BrokerWireReader Never! {
+        BrokerWireReader{stream: Val(stream.move()), bytes: [U8]{}, position: 0}
     }
 
     // Write `bytes` back over this exchange's stream.
     reply: fn(&self, bytes: [U8]) StoreError! {
-        if &self.stream == .Val(stream) -> return store_broker_send(&stream, bytes)
+        if &self.stream == .Val(stream) -> return store_broker_send(stream, bytes)
         Err(StoreError.Other("an in-memory broker exchange has no stream to reply on"))
     }
 
     // Up to `limit` bytes; an empty list is end of input.
     read_some: fn(&self, limit: Int) -> [U8] StoreError! {
         if &self.stream == {
-            .Val(stream) -> Ok(net.unix_read_bytes(&stream, limit) ?? return Err(store_broker_net_error(err)))
+            .Val(stream) -> Ok(net.unix_read_bytes(stream, limit) ?? return Err(store_broker_net_error(err)))
             .None -> {
                 end: if self.position + limit < self.bytes.len() -> self.position + limit else -> self.bytes.len()
                 chunk: self.bytes[self.position..<end]
@@ -179,9 +179,9 @@ BrokerWireReader: struct {
     read_exact: fn(&self, count: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < count {
-            chunk: &self.read_some(count - out.len())
+            chunk: self.read_some(count - out.len())
             if chunk.len() == 0 -> return Err(StoreError.Other("failed to fill whole buffer"))
-            loop byte in chunk -> &out.push(byte)
+            loop byte in chunk -> out.push(byte)
         }
         Ok(out)
     }
@@ -190,8 +190,8 @@ BrokerWireReader: struct {
     read_header: fn(&self, label: String) -> [U8] StoreError! {
         header := [U8]{}
         loop {
-            byte: &self.read_exact(1)
-            &header.push(byte[0])
+            byte: self.read_exact(1)
+            header.push(byte[0])
             count: header.len()
             if count >= 2 && Int.from_u8(header[count - 1]) == 10 && Int.from_u8(header[count - 2]) == 10 -> break
             if count > STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("{label} header is too large"))
@@ -203,16 +203,16 @@ BrokerWireReader: struct {
     read_bounded: fn(&self, limit: Int) -> [U8] StoreError! {
         out := [U8]{}
         loop out.len() < limit {
-            chunk: &self.read_some(limit - out.len())
+            chunk: self.read_some(limit - out.len())
             if chunk.len() == 0 -> break
-            loop byte in chunk -> &out.push(byte)
+            loop byte in chunk -> out.push(byte)
         }
         Ok(out)
     }
 }
 
 store_broker_append: fn(out: &[U8], bytes: [U8]) Never! {
-    loop byte in bytes -> &out.push(byte)
+    loop byte in bytes -> out.push(byte)
 }
 
 // Rust `write_request`: a provenance-bound write of one unsigned archive.
@@ -224,7 +224,7 @@ store_broker_encode_write_request: fn(binding: ProvenanceBinding, credential: St
     loop field in binding.fields() -> header = "{header}{field.key}={store_hex_bytes(field.value.bytes())}\n"
     header = "{header}credential={store_hex_bytes(credential.bytes())}\nbytes={archive.len()}\n\n"
     out := header.bytes()
-    store_broker_append(&out, archive)
+    store_broker_append(out, archive)
     Ok(out)
 }
 
@@ -255,7 +255,7 @@ store_broker_header_fields: fn(header: [U8], label: String, magic: String, allow
 
 // Rust `read_request_header`.
 store_broker_read_request_header: fn(reader: &BrokerWireReader) -> BrokerHeader StoreError! {
-    header: &reader.read_header("shared-store request")
+    header: reader.read_header("shared-store request")
     fields: store_broker_header_fields(header, "shared-store request", STORE_BROKER_REQUEST_MAGIC, [String]{"op", "bytes", "reference", "source", "builder", "action", "output", "platform", "sandbox", "policy", "credential"})
     op: fields.get("op") ?? return Err(store_broker_invalid("shared-store request has no operation"))
     if op == {
@@ -297,9 +297,9 @@ store_broker_write_field: fn(fields: [String: String], key: String) -> String St
 
 // Rust `read_request` (the test-facing whole request).
 store_broker_read_request: fn(reader: &BrokerWireReader) -> BrokerRequest StoreError! {
-    if store_broker_read_request_header(&reader) == {
+    if store_broker_read_request_header(reader) == {
         .Write(header) -> {
-            archive: &reader.read_exact(header.length)
+            archive: reader.read_exact(header.length)
             Ok(BrokerRequest.Write(BrokerWriteRequest{archive: archive, binding: header.binding, credential: header.credential}))
         }
         .Read(reference) -> Ok(BrokerRequest.Read(reference))
@@ -315,14 +315,14 @@ store_broker_encode_response: fn(status: String) -> [U8] Never! {
 store_broker_encode_archive_response: fn(archive: [U8]) -> [U8] StoreError! {
     if archive.len() > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
     out := "{STORE_BROKER_RESPONSE_MAGIC}\nstatus=ok\nbytes={archive.len()}\n\n".bytes()
-    store_broker_append(&out, archive)
+    store_broker_append(out, archive)
     Ok(out)
 }
 
 // Rust `read_response`: a status-only response to a write. `ok` is true,
 // `missing` false.
 store_broker_read_response: fn(reader: &BrokerWireReader) -> Bool StoreError! {
-    bytes: &reader.read_bounded(STORE_BROKER_MAX_HEADER_BYTES + 1)
+    bytes: reader.read_bounded(STORE_BROKER_MAX_HEADER_BYTES + 1)
     if bytes.len() > STORE_BROKER_MAX_HEADER_BYTES -> return Err(store_broker_invalid("shared-store response is too large"))
     text: String.from_bytes(bytes) ?? return Err(store_broker_invalid("shared-store response is not UTF-8"))
     lines: store_text_lines(text)
@@ -345,7 +345,7 @@ store_broker_read_response: fn(reader: &BrokerWireReader) -> Bool StoreError! {
 
 // Rust `read_archive_response`: the archive of a read, or None for missing.
 store_broker_read_archive_response: fn(reader: &BrokerWireReader) -> [U8]? StoreError! {
-    header: &reader.read_header("shared-store response")
+    header: reader.read_header("shared-store response")
     fields: store_broker_header_fields(header, "shared-store response", STORE_BROKER_RESPONSE_MAGIC, [String]{"status", "bytes"})
     status: fields.get("status") ?? return Err(store_broker_invalid("shared-store response has no status"))
     if status == {
@@ -357,7 +357,7 @@ store_broker_read_archive_response: fn(reader: &BrokerWireReader) -> [U8]? Store
             raw_length: fields.get("bytes") ?? return Err(store_broker_invalid("shared-store response has no archive length"))
             length: store_broker_parse_unsigned(raw_length) ?? return Err(store_broker_invalid("shared-store response archive length is invalid"))
             if length > STORE_BROKER_MAX_REQUEST_BYTES -> return Err(store_broker_invalid("shared-store archive exceeds the response limit"))
-            Ok(Val(&reader.read_exact(length)))
+            Ok(Val(reader.read_exact(length)))
         }
         else -> Err(store_broker_invalid("shared-store response has an unknown status"))
     }
@@ -407,25 +407,25 @@ WriterGrant: struct {
         if repeated -> return Err(store_broker_invalid("shared-store peer enrollment repeats `{key}`"))
         if key == {
             "source" -> {
-                &self.sources.push(value)
+                self.sources.push(value.copy())
             }
             "builder" -> {
-                &self.builders.push(value)
+                self.builders.push(value.copy())
             }
             "action" -> {
-                &self.actions.push(value)
+                self.actions.push(value.copy())
             }
             "output" -> {
-                &self.outputs.push(value)
+                self.outputs.push(value.copy())
             }
             "platform" -> {
-                &self.platforms.push(value)
+                self.platforms.push(value.copy())
             }
             "sandbox" -> {
-                &self.sandboxes.push(value)
+                self.sandboxes.push(value.copy())
             }
             else -> {
-                &self.policies.push(value)
+                self.policies.push(value.copy())
             }
         }
     }
@@ -461,7 +461,7 @@ store_broker_parse_writer_grant: fn(text: String) -> WriterGrant StoreError! {
         if line == {
             "read" | "write" -> {
                 if seen.contains(line) -> return Err(store_broker_invalid("shared-store peer enrollment repeats `{line}`"))
-                &seen.push(line)
+                seen.push(line.copy())
                 if line == "read" {
                     grant.read = true
                 } else {
@@ -473,17 +473,17 @@ store_broker_parse_writer_grant: fn(text: String) -> WriterGrant StoreError! {
                 if pair.before == {
                     "expires" -> {
                         if seen.contains("expires") -> return Err(store_broker_invalid("shared-store peer enrollment repeats `expires`"))
-                        &seen.push("expires")
+                        seen.push("expires")
                         grant.expires = Val(store_broker_parse_unsigned(pair.after) ?? return Err(store_broker_invalid("shared-store peer enrollment expiry is invalid")))
                     }
                     "credential" -> {
                         if seen.contains("credential") -> return Err(store_broker_invalid("shared-store peer enrollment repeats `credential`"))
-                        &seen.push("credential")
+                        seen.push("credential")
                         store_broker_validate_text_field(pair.after, "shared-store writer credential")
                         grant.credential = Val(pair.after)
                     }
                     "source" | "builder" | "action" | "output" | "platform" | "sandbox" | "policy" -> {
-                        &grant.allow(pair.before, pair.after)
+                        grant.allow(pair.before, pair.after)
                     }
                     else -> return Err(store_broker_invalid("shared-store peer enrollment has an unknown field"))
                 }

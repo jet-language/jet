@@ -402,7 +402,7 @@ BundleSpec: struct {
                 loop asset in game.assets {
                     pkg_bundle_validate_asset_path(asset.path)
                     if asset_paths.contains(asset.path) -> return Err(BundleError.DuplicatePath(asset.path))
-                    &asset_paths.push(asset.path)
+                    asset_paths.push(asset.path)
                 }
             }
             .None -> {
@@ -533,8 +533,8 @@ pkg_bundle_windows_version: fn(version: String) -> String BundleError! {
             value = value * 10 + code - 48
             if value > 65535 -> return Err(BundleError.InvalidWindowsVersion(version))
         }
-        &normalized.push("{value}")
+        normalized.push("{value}")
     }
-    loop normalized.len() < 4 -> &normalized.push("0")
+    loop normalized.len() < 4 -> normalized.push("0")
     Ok(normalized.join("."))
 }

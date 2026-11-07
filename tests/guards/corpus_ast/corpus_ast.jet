@@ -24,7 +24,7 @@ policy_parse_program: fn(source_label: String, source: String) -> Program Policy
     parsed: parse_source(stripped.bytes())
     errors := [String]{}
     loop diagnostic in parsed.diagnostics {
-        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic.code)
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors.push(diagnostic.code)
     }
     if errors.len() > 0 -> return Err(PolicyError{message: "Jet parser rejected corpus source `{source_label}`: {errors.join(",")}"})
     Ok(parsed.program)
@@ -78,13 +78,13 @@ PolicyWalkNode: enum {
 policy_push_body: fn(stack: &[PolicyWalkNode], body: [Stmt]) {
     index := body.len()
     loop index > 0 { index -= 1
-        &stack.push(PolicyWalkNode.Statement{value: body[index]})
+        stack.push(PolicyWalkNode.Statement{value: body[index]})
     }
 }
 policy_push_args: fn(stack: &[PolicyWalkNode], args: [CallArg]) {
     index := args.len()
     loop index > 0 { index -= 1
-        &stack.push(PolicyWalkNode.Expression{value: args[index].expr})
+        stack.push(PolicyWalkNode.Expression{value: args[index].expr})
     }
 }
 // `visited` receives every expression in walk preorder. Callers loop over the
@@ -92,160 +92,160 @@ policy_push_args: fn(stack: &[PolicyWalkNode], args: [CallArg]) {
 // consumes that list (E0121), so accumulating callers could not use it after.
 policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
     loop stack.len() > 0 {
-        node: &stack.pop() ?? panic("corpus walk node")
+        node: stack.pop() ?? panic("corpus walk node")
         if node == {
             .Statement(statement) -> {
                 if statement == {
                     .Expr(value) | .DeferClose(value, _) | .BreakValue(value, _) |
-                    .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                    .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> stack.push(PolicyWalkNode.Expression{value: value})
                     .Val(binding) -> {
                         if binding.pattern == .Val(.Refutable(pattern, fallback, _, _)) {
-                            &stack.push(PolicyWalkNode.Fallback{value: fallback})
-                            &stack.push(PolicyWalkNode.MatchPattern{value: pattern})
+                            stack.push(PolicyWalkNode.Fallback{value: fallback})
+                            stack.push(PolicyWalkNode.MatchPattern{value: pattern})
                         }
-                        &stack.push(PolicyWalkNode.Expression{value: binding.init})
+                        stack.push(PolicyWalkNode.Expression{value: binding.init})
                     }
                     .Assign(target, _, _, value) -> {
-                        &stack.push(PolicyWalkNode.Expression{value: value})
+                        stack.push(PolicyWalkNode.Expression{value: value})
                         if target == {
                             .Index(base, index, _, _) -> {
-                                &stack.push(PolicyWalkNode.Expression{value: index})
-                                &stack.push(PolicyWalkNode.Expression{value: base})
+                                stack.push(PolicyWalkNode.Expression{value: index})
+                                stack.push(PolicyWalkNode.Expression{value: base})
                             }
-                            .Field(base, _, _) -> &stack.push(PolicyWalkNode.Expression{value: base})
+                            .Field(base, _, _) -> stack.push(PolicyWalkNode.Expression{value: base})
                             else -> {}
                         }
                     }
-                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner}) }
+                    .Return(value, _) -> { if value == .Val(inner) -> stack.push(PolicyWalkNode.Expression{value: inner}) }
                     .While(condition, body, _, _, _) -> {
-                        policy_push_body(&stack, body)
-                        &stack.push(PolicyWalkNode.Expression{value: condition})
+                        policy_push_body(stack, body)
+                        stack.push(PolicyWalkNode.Expression{value: condition})
                     }
                     .For(_, _, _, kind, body, _, _, _, _) -> {
-                        policy_push_body(&stack, body)
+                        policy_push_body(stack, body)
                         if kind == {
                             .Range(start, end, step, _) -> {
-                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
-                                &stack.push(PolicyWalkNode.Expression{value: end})
-                                &stack.push(PolicyWalkNode.Expression{value: start})
+                                if step == .Val(value) -> stack.push(PolicyWalkNode.Expression{value: value})
+                                stack.push(PolicyWalkNode.Expression{value: end})
+                                stack.push(PolicyWalkNode.Expression{value: start})
                             }
                             .In(collection, step) -> {
-                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
-                                &stack.push(PolicyWalkNode.Expression{value: collection})
+                                if step == .Val(value) -> stack.push(PolicyWalkNode.Expression{value: value})
+                                stack.push(PolicyWalkNode.Expression{value: collection})
                             }
                         }
                     }
                     .Switch(subject, arms, other, _) | .ComptimeSwitch(subject, arms, other, _) -> {
-                        if other == .Val(body) -> policy_push_body(&stack, body)
+                        if other == .Val(body) -> policy_push_body(stack, body)
                         index := arms.len()
                         loop index > 0 { index -= 1
-                            policy_push_body(&stack, arms[index].body)
-                            &stack.push(PolicyWalkNode.Expression{value: arms[index].cond})
+                            policy_push_body(stack, arms[index].body)
+                            stack.push(PolicyWalkNode.Expression{value: arms[index].cond})
                         }
-                        &stack.push(PolicyWalkNode.Expression{value: subject})
+                        stack.push(PolicyWalkNode.Expression{value: subject})
                     }
                     .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) |
                     .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) |
                     .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) |
-                    .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> policy_push_body(&stack, body)
+                    .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> policy_push_body(stack, body)
                     .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
-                        policy_push_body(&stack, body)
-                        if reason == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                        policy_push_body(stack, body)
+                        if reason == .Val(value) -> stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .CountedLoop(init, condition, step, body, _, _, _) -> {
-                        policy_push_body(&stack, body)
-                        if step == .Val(value) -> &stack.push(PolicyWalkNode.Statement{value: value})
-                        &stack.push(PolicyWalkNode.Expression{value: condition})
-                        &stack.push(PolicyWalkNode.Expression{value: init.init})
+                        policy_push_body(stack, body)
+                        if step == .Val(value) -> stack.push(PolicyWalkNode.Statement{value: value})
+                        stack.push(PolicyWalkNode.Expression{value: condition})
+                        stack.push(PolicyWalkNode.Expression{value: init.init})
                     }
                     .TaskGroup(_, _, limit, body, _) -> {
-                        policy_push_body(&stack, body)
-                        if limit == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                        policy_push_body(stack, body)
+                        if limit == .Val(value) -> stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .ContextBlock(fields, body, _) -> {
-                        policy_push_body(&stack, body)
+                        policy_push_body(stack, body)
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
+                            stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
                     .AssumeDet(_, reason, body, _) -> {
-                        policy_push_body(&stack, body)
-                        &stack.push(PolicyWalkNode.Expression{value: reason})
+                        policy_push_body(stack, body)
+                        stack.push(PolicyWalkNode.Expression{value: reason})
                     }
                     .ComptimeIf(condition, _, then_body, other, _, _) -> {
-                        if other == .Val(body) -> policy_push_body(&stack, body)
-                        policy_push_body(&stack, then_body)
-                        &stack.push(PolicyWalkNode.Expression{value: condition})
+                        if other == .Val(body) -> policy_push_body(stack, body)
+                        policy_push_body(stack, then_body)
+                        stack.push(PolicyWalkNode.Expression{value: condition})
                     }
                     .ScopeMember(_, _, args, _, body, _, _, _) -> {
-                        policy_push_body(&stack, body)
+                        policy_push_body(stack, body)
                         index := args.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression{value: args[index]})
+                            stack.push(PolicyWalkNode.Expression{value: args[index]})
                         }
                     }
                     else -> {}
                 }
             }
             .Expression(expression) -> {
-                &visited.push(expression)
+                visited.push(expression.copy())
                 if expression == {
                     .Str(parts, _, _) -> {
                         index := parts.len()
                         loop index > 0 { index -= 1
-                            if parts[index] == .Interp(value, _) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                            if parts[index] == .Interp(value, _) -> stack.push(PolicyWalkNode.Expression{value: value})
                         }
                     }
                     .ListLit(values, _, _) | .CompareChain(values, _, _, _, _) -> {
                         index := values.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression{value: values[index]})
+                            stack.push(PolicyWalkNode.Expression{value: values[index]})
                         }
                     }
                     .MemberSpread(value, _, _, _) | .Spread(value, _, _) | .Deref(value, _, _) |
                     .RawOf(value, _, _) | .Copy(value, _, _) | .Place(value, _, _, _) | .Field(value, _, _, _) |
                     .OptField(value, _, _, _, _, _) | .Present(value, _, _) | .Ok(value, _, _) | .Err(value, _, _) |
                     .Paren(value, _, _) | .Unary(_, value, _, _) | .Tainted(value, _, _, _) |
-                    .PtrFromAddr(_, _, _, value, _, _) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                    .PtrFromAddr(_, _, _, value, _, _) -> stack.push(PolicyWalkNode.Expression{value: value})
                     .Try(value, _, _, note, _) -> {
-                        if note == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner})
-                        &stack.push(PolicyWalkNode.Expression{value: value})
+                        if note == .Val(inner) -> stack.push(PolicyWalkNode.Expression{value: inner})
+                        stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .MapLit(entries, _, _) -> {
                         index := entries.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression{value: entries[index].value})
-                            &stack.push(PolicyWalkNode.Expression{value: entries[index].key})
+                            stack.push(PolicyWalkNode.Expression{value: entries[index].value})
+                            stack.push(PolicyWalkNode.Expression{value: entries[index].key})
                         }
                     }
                     .Index(base, index, _, _, _) | .Binary(_, base, index, _, _) |
                     .Range(base, index, _, _, _) -> {
-                        &stack.push(PolicyWalkNode.Expression{value: index})
-                        &stack.push(PolicyWalkNode.Expression{value: base})
+                        stack.push(PolicyWalkNode.Expression{value: index})
+                        stack.push(PolicyWalkNode.Expression{value: base})
                     }
                     .Slice(base, start, end, range, _, _) -> {
-                        if range == .Val(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
-                        &stack.push(PolicyWalkNode.Expression{value: end})
-                        &stack.push(PolicyWalkNode.Expression{value: start})
-                        &stack.push(PolicyWalkNode.Expression{value: base})
+                        if range == .Val(value) -> stack.push(PolicyWalkNode.Expression{value: value})
+                        stack.push(PolicyWalkNode.Expression{value: end})
+                        stack.push(PolicyWalkNode.Expression{value: start})
+                        stack.push(PolicyWalkNode.Expression{value: base})
                     }
-                    .Call(call, _) -> policy_push_args(&stack, call.args)
+                    .Call(call, _) -> policy_push_args(stack, call.args)
                     .MethodCall(receiver, _, _, _, _, args, _) |
                     .OptMethodCall(receiver, _, _, _, args, _, _) | .CallValue(receiver, args, _, _) -> {
-                        policy_push_args(&stack, args)
-                        &stack.push(PolicyWalkNode.Expression{value: receiver})
+                        policy_push_args(stack, args)
+                        stack.push(PolicyWalkNode.Expression{value: receiver})
                     }
                     .StructLit(_, _, _, _, fields, _, _, _) -> {
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
+                            stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
                     .TupleLit(fields, _, _, _) -> {
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
+                            stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                         }
                     }
                     .TypedLit(_, body, _, _) -> {
@@ -253,51 +253,51 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
                             .Fields(fields) -> {
                                 index := fields.len()
                                 loop index > 0 { index -= 1
-                                    &stack.push(PolicyWalkNode.Expression{value: fields[index].value})
+                                    stack.push(PolicyWalkNode.Expression{value: fields[index].value})
                                 }
                             }
                             .Elements(values) -> {
                                 index := values.len()
                                 loop index > 0 { index -= 1
-                                    &stack.push(PolicyWalkNode.Expression{value: values[index]})
+                                    stack.push(PolicyWalkNode.Expression{value: values[index]})
                                 }
                             }
                             .Entries(entries) -> {
                                 index := entries.len()
                                 loop index > 0 { index -= 1
-                                    &stack.push(PolicyWalkNode.Expression{value: entries[index].value})
-                                    &stack.push(PolicyWalkNode.Expression{value: entries[index].key})
+                                    stack.push(PolicyWalkNode.Expression{value: entries[index].value})
+                                    stack.push(PolicyWalkNode.Expression{value: entries[index].key})
                                 }
                             }
-                            .Value(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                            .Value(value) -> stack.push(PolicyWalkNode.Expression{value: value})
                             else -> {}
                         }
                     }
                     .EnumLit(_, _, _, args, _, _, _) -> {
                         index := args.len()
                         loop index > 0 { index -= 1
-                            if args[index] == { .Positional(value) | .Named(_, value) -> &stack.push(PolicyWalkNode.Expression{value: value}) }
+                            if args[index] == { .Positional(value) | .Named(_, value) -> stack.push(PolicyWalkNode.Expression{value: value}) }
                         }
                     }
                     .PatternTest(subject, pattern, _, _) -> {
-                        &stack.push(PolicyWalkNode.MatchPattern{value: pattern})
-                        &stack.push(PolicyWalkNode.Expression{value: subject})
+                        stack.push(PolicyWalkNode.MatchPattern{value: pattern})
+                        stack.push(PolicyWalkNode.Expression{value: subject})
                     }
                     .OrFallback(value, fallback, _, _, _) -> {
-                        &stack.push(PolicyWalkNode.Fallback{value: fallback})
-                        &stack.push(PolicyWalkNode.Expression{value: value})
+                        stack.push(PolicyWalkNode.Fallback{value: fallback})
+                        stack.push(PolicyWalkNode.Expression{value: value})
                     }
                     .If(condition, then_body, then_value, else_body, else_value, _, _) -> {
-                        &stack.push(PolicyWalkNode.Expression{value: else_value})
-                        policy_push_body(&stack, else_body)
-                        &stack.push(PolicyWalkNode.Expression{value: then_value})
-                        policy_push_body(&stack, then_body)
-                        &stack.push(PolicyWalkNode.Expression{value: condition})
+                        stack.push(PolicyWalkNode.Expression{value: else_value})
+                        policy_push_body(stack, else_body)
+                        stack.push(PolicyWalkNode.Expression{value: then_value})
+                        policy_push_body(stack, then_body)
+                        stack.push(PolicyWalkNode.Expression{value: condition})
                     }
                     .Lambda(lambda, _) -> {
                         if lambda.body == {
-                            .Expr(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
-                            .Block(body) -> policy_push_body(&stack, body)
+                            .Expr(value) -> stack.push(PolicyWalkNode.Expression{value: value})
+                            .Block(body) -> policy_push_body(stack, body)
                         }
                     }
                     else -> {}
@@ -308,13 +308,13 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
                     .Or(alternatives, _) -> {
                         index := alternatives.len()
                         loop index > 0 { index -= 1
-                            &stack.push(PolicyWalkNode.MatchPattern{value: alternatives[index]})
+                            stack.push(PolicyWalkNode.MatchPattern{value: alternatives[index]})
                         }
                     }
                     .Struct(fields, _, _, _) -> {
                         index := fields.len()
                         loop index > 0 { index -= 1
-                            if fields[index] == .Value(_, _, value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                            if fields[index] == .Value(_, _, value) -> stack.push(PolicyWalkNode.Expression{value: value})
                         }
                     }
                     else -> {}
@@ -322,13 +322,13 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
             }
             .Fallback(fallback) -> {
                 if fallback == {
-                    .Value(value) -> &stack.push(PolicyWalkNode.Expression{value: value})
+                    .Value(value) -> stack.push(PolicyWalkNode.Expression{value: value})
                     .Block(body, value, _) -> {
-                        if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner})
-                        policy_push_body(&stack, body)
+                        if value == .Val(inner) -> stack.push(PolicyWalkNode.Expression{value: inner})
+                        policy_push_body(stack, body)
                     }
-                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression{value: inner}) }
-                    .Panic(_, args) -> policy_push_args(&stack, args)
+                    .Return(value, _) -> { if value == .Val(inner) -> stack.push(PolicyWalkNode.Expression{value: inner}) }
+                    .Panic(_, args) -> policy_push_args(stack, args)
                     else -> {}
                 }
             }
@@ -337,19 +337,19 @@ policy_walk: fn(stack: &[PolicyWalkNode], visited: &[Expr]) Never! {
 }
 policy_body_expressions: fn(body: [Stmt]) -> [Expr] {
     stack := [PolicyWalkNode]{}
-    policy_push_body(&stack, body)
+    policy_push_body(stack, body)
     visited := [Expr]{}
-    policy_walk(&stack, &visited)
+    policy_walk(stack, visited)
     visited
 }
 policy_program_expressions: fn(program: Program) -> [Expr] {
     visited := policy_body_expressions(program.script_body)
     loop item in program.items {
         if item == {
-            .Func(function) -> { loop expression in policy_body_expressions(function.body) -> &visited.push(expression) }
+            .Func(function) -> { loop expression in policy_body_expressions(function.body) -> visited.push(expression) }
             .Struct(structure) -> {
                 loop method in structure.methods {
-                    loop expression in policy_body_expressions(method.body) -> &visited.push(expression)
+                    loop expression in policy_body_expressions(method.body) -> visited.push(expression)
                 }
             }
             else -> {}
@@ -363,7 +363,7 @@ policy_visit_body: fn(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.
 policy_visit_expression: fn(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
     stack := [PolicyWalkNode]{PolicyWalkNode.Expression{value: expression}}
     visited := [Expr]{}
-    policy_walk(&stack, &visited)
+    policy_walk(stack, visited)
     loop child in visited -> visitor(child)
 }
 policy_visit_program: fn(program: Program, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
@@ -727,7 +727,7 @@ policy_redundant_effect_row: fn(function: Func, aliases: [String: String]) -> Bo
     inferred := [String]{}
     loop expression in policy_body_expressions(function.body) {
         if policy_expression_effect(expression, aliases) == .Val(effect_name) {
-            if !inferred.contains(effect_name) -> &inferred.push(effect_name)
+            if !inferred.contains(effect_name) -> inferred.push(effect_name)
         }
     }
     if inferred.len() == 0 || inferred.len() != declared.len() -> return false
@@ -814,7 +814,7 @@ policy_data_tree_violations: fn(path: String, program: Program) -> [PolicyOccurr
             constant: policy_constant_bool_body(function.body)
             if (pair && (constant || policy_compares_parameter_pair(function))) ||
                 (function.params.len() == 1 && policy_named_type(function.params[0].ty, "Dyn") && constant) {
-                &violations.push(PolicyOccurrence{file: path, rule: "dyn-domain-policy", site: policy_site("fn:{function.name}", function.span)})
+                violations.push(PolicyOccurrence{file: path, rule: "dyn-domain-policy", site: policy_site("fn:{function.name}", function.span)})
             }
         }
     }
@@ -860,15 +860,15 @@ policy_evaluate_generated: fn(manifest: PolicyManifest, producer: String, source
             if !policy_response_decoder(function) -> next
             count += 1
             if count == 1 -> first = Val(function)
-            else -> &violations.push(PolicyOccurrence{file: producer, rule: "bindgen-one-decoder", site: "producer:{producer}#response-decoder@{function.span.start}..{function.span.end}"})
+            else -> violations.push(PolicyOccurrence{file: producer, rule: "bindgen-one-decoder", site: "producer:{producer}#response-decoder@{function.span.start}..{function.span.end}"})
         }
     }
-    if count == 0 -> &violations.push(PolicyOccurrence{file: producer, rule: "bindgen-one-decoder", site: "producer:{producer}#decode_response@0..0"})
+    if count == 0 -> violations.push(PolicyOccurrence{file: producer, rule: "bindgen-one-decoder", site: "producer:{producer}#decode_response@0..0"})
     if count == 1 && selected.starts_with("override:") {
         parts: policy_slice_bytes(selected, 9, selected.bytes().len()).split(":").to_list()
         if parts.len() >= 2 {
             decoder: first ?? panic("one decoder is present")
-            if policy_ordinary_envelope_decoder(decoder) -> &violations.push(PolicyOccurrence{file: producer, rule: "generated-protocol-override", site: "producer:{producer}#protocol:{parts[0]}@{decoder.span.start}..{decoder.span.end}"})
+            if policy_ordinary_envelope_decoder(decoder) -> violations.push(PolicyOccurrence{file: producer, rule: "generated-protocol-override", site: "producer:{producer}#protocol:{parts[0]}@{decoder.span.start}..{decoder.span.end}"})
         }
     }
     Ok(violations)
@@ -976,13 +976,13 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String: String], facts: 
                 if policy_is_task_statement(child, false) -> combinators += 1
                 if policy_is_task_statement(child, true) -> has_all = true
             }
-            &facts.task_groups.push(PolicySpanFact{span: span, matches: combinators == 1 && !has_all})
-            &pending.push(PolicyPendingBody.Body{body: nested})
+            facts.task_groups.push(PolicySpanFact{span: span, matches: combinators == 1 && !has_all})
+            pending.push(PolicyPendingBody.Body{body: nested})
         }
         .CountedLoop(init, _, step, nested, span, _, _) -> {
-            &facts.counted_loops.push(PolicySpanFact{span: span, matches: policy_indexes_sequence(init, nested)})
-            &pending.push(PolicyPendingBody.Body{body: nested})
-            if step == .Val(child) -> &pending.push(PolicyPendingBody.Single{statement: child})
+            facts.counted_loops.push(PolicySpanFact{span: span, matches: policy_indexes_sequence(init, nested)})
+            pending.push(PolicyPendingBody.Body{body: nested})
+            if step == .Val(child) -> pending.push(PolicyPendingBody.Single{statement: child})
         }
         .While(_, nested, _, _, _) | .For(_, _, _, _, nested, _, _, _, _) |
         .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) |
@@ -990,18 +990,18 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String: String], facts: 
         .Region(_, _, nested, _) | .Policy(_, nested, _) | .Layout(_, _, nested, _) |
         .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) |
         .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) |
-        .Transact(_, _, nested, _, _) | .ScopeMember(_, _, _, _, nested, _, _, _) -> &pending.push(PolicyPendingBody.Body{body: nested})
+        .Transact(_, _, nested, _, _) | .ScopeMember(_, _, _, _, nested, _, _, _) -> pending.push(PolicyPendingBody.Body{body: nested})
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
-            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body{body: other})
+            if else_body == .Val(other) -> pending.push(PolicyPendingBody.Body{body: other})
             index := arms.len()
             loop index > 0 {
                 index -= 1
-                &pending.push(PolicyPendingBody.Body{body: arms[index].body})
+                pending.push(PolicyPendingBody.Body{body: arms[index].body})
             }
         }
         .ComptimeIf(_, _, then_body, else_body, _, _) -> {
-            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body{body: other})
-            &pending.push(PolicyPendingBody.Body{body: then_body})
+            if else_body == .Val(other) -> pending.push(PolicyPendingBody.Body{body: other})
+            pending.push(PolicyPendingBody.Body{body: then_body})
         }
         else -> {}
     }
@@ -1009,11 +1009,11 @@ policy_collect_statement: fn(statement: Stmt, aliases: [String: String], facts: 
 policy_collect_body_facts: fn(root: [Stmt], aliases: [String: String], facts: &PolicyStatementFacts) {
     pending := [PolicyPendingBody]{PolicyPendingBody.Body{body: root}}
     loop pending.len() > 0 {
-        selected: &pending.pop() ?? panic("pending statement body")
+        selected: pending.pop() ?? panic("pending statement body")
         if selected == {
             .Single(statement) -> {
-                if policy_statement_walk_filter(statement, aliases) == .Val(span) -> &facts.file_walks.push(span)
-                policy_collect_statement(statement, aliases, &facts, &pending)
+                if policy_statement_walk_filter(statement, aliases) == .Val(span) -> facts.file_walks.push(span)
+                policy_collect_statement(statement, aliases, facts, pending)
             }
             .Body(body) -> {
                 if body.len() > 1 {
@@ -1021,17 +1021,17 @@ policy_collect_body_facts: fn(root: [Stmt], aliases: [String: String], facts: &P
                         if body[index] == .Val(binding) && binding.mutable {
                             if policy_without_parens(binding.init) == .Int(number, _, _, _, _) && number == 0 {
                                 if body[index + 1] == .For(_, _, _, kind, nested, span, _, _, _) {
-                                    if kind == .In(_, _) && policy_manual_counter_body(binding.name, nested) -> &facts.manual_counter_loops.push(span)
+                                    if kind == .In(_, _) && policy_manual_counter_body(binding.name, nested) -> facts.manual_counter_loops.push(span.copy())
                                 }
                             }
                         }
                     }
                 }
-                if policy_body_walk_filter(body, aliases) == .Val(span) -> &facts.file_walks.push(span)
+                if policy_body_walk_filter(body, aliases) == .Val(span) -> facts.file_walks.push(span)
                 index := body.len()
                 loop index > 0 {
                     index -= 1
-                    policy_collect_statement(body[index], aliases, &facts, &pending)
+                    policy_collect_statement(body[index], aliases, facts, pending)
                 }
             }
         }
@@ -1039,11 +1039,11 @@ policy_collect_body_facts: fn(root: [Stmt], aliases: [String: String], facts: &P
 }
 policy_statement_facts: fn(program: Program, aliases: [String: String]) -> PolicyStatementFacts {
     facts := PolicyStatementFacts{task_groups: [PolicySpanFact]{}, counted_loops: [PolicySpanFact]{}, manual_counter_loops: [Span]{}, file_walks: [Span]{}}
-    policy_collect_body_facts(program.script_body, aliases, &facts)
+    policy_collect_body_facts(program.script_body, aliases, facts)
     loop item in program.items {
         if item == {
-            .Func(function) -> policy_collect_body_facts(function.body, aliases, &facts)
-            .Struct(structure) -> { loop method in structure.methods -> policy_collect_body_facts(method.body, aliases, &facts) }
+            .Func(function) -> policy_collect_body_facts(function.body, aliases, facts)
+            .Struct(structure) -> { loop method in structure.methods -> policy_collect_body_facts(method.body, aliases, facts) }
             else -> {}
         }
     }
@@ -1280,17 +1280,17 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
             "call:path.starts_with", "literal:json-wire", "call:url.query.split", "fn:same_strings",
             "call:fs.create_dir", "call:String.replace", "call:crypto.sha256_bytes"}
     first_build := Span?{None}
-    if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/features/types/typed_literal_forms.jet" {
+    if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/Types/TypedLiteralForms.jet" {
         policy_visit_program(program, (expression) -> {
             if first_build == None && policy_is_build_command_literal(expression) -> first_build = Val(expr_span(expression))
         })
-        if first_build == .Val(span) -> &violations.push(policy_occurrence(path, "first-hour-doc-recipe", "literal:jet-build", span))
+        if first_build == .Val(span) -> violations.push(policy_occurrence(path, "first-hour-doc-recipe", "literal:jet-build", span))
     }
     enabled := [Bool]{}
-    loop rule in rules -> &enabled.push(policy_applies(manifest, path, row, rule))
+    loop rule in rules -> enabled.push(policy_applies(manifest, path, row, rule))
     loop expression in policy_program_expressions(program) {
         span: expr_span(expression)
-        if policy_is_process_input(expression, aliases) -> &argv_sites.push(span)
+        if policy_is_process_input(expression, aliases) -> argv_sites.push(span.copy())
         loop index in 0..<rules.len() {
             rule: rules[index]
             if !enabled[index] -> next
@@ -1313,40 +1313,40 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
                 "crypto-naming-fact" -> policy_is_legacy_digest_call(expression, aliases)
                 else -> false
             }
-            if matches -> &violations.push(policy_occurrence(path, rule, kinds[index], span))
+            if matches -> violations.push(policy_occurrence(path, rule, kinds[index], span))
         }
     }
     if policy_applies(manifest, path, row, "raw-cli-process-boundary") && argv_sites.len() > 1 {
-        loop index in 1..<argv_sites.len() -> &violations.push(policy_occurrence(path, "raw-cli-process-boundary", "call:process.args", argv_sites[index]))
+        loop index in 1..<argv_sites.len() -> violations.push(policy_occurrence(path, "raw-cli-process-boundary", "call:process.args", argv_sites[index]))
     }
     if policy_applies(manifest, path, row, "entry-explicit") {
-        loop statement in program.script_body -> &violations.push(policy_occurrence(path, "entry-explicit", "stmt:top-level", jfmt_stmt_span(statement)))
+        loop statement in program.script_body -> violations.push(policy_occurrence(path, "entry-explicit", "stmt:top-level", jfmt_stmt_span(statement)))
     }
     if policy_applies(manifest, path, row, "codable-structural") {
         loop item in program.items {
-            if item == .Struct(structure) && policy_bare_structural_codable(structure) -> &violations.push(policy_occurrence(path, "codable-structural", "type:{structure.name}", structure.name_span))
+            if item == .Struct(structure) && policy_bare_structural_codable(structure) -> violations.push(policy_occurrence(path, "codable-structural", "type:{structure.name}", structure.name_span))
         }
     }
     if policy_applies(manifest, path, row, "effect-row-inference") {
         loop item in program.items {
-            if item == .Func(function) && function.name == "run" && policy_redundant_effect_row(function, aliases) -> &violations.push(policy_occurrence(path, "effect-row-inference", "fn:{function.name}", function.span))
+            if item == .Func(function) && function.name == "run" && policy_redundant_effect_row(function, aliases) -> violations.push(policy_occurrence(path, "effect-row-inference", "fn:{function.name}", function.span))
         }
     }
     if policy_applies(manifest, path, row, "task-one-child") {
         loop fact in facts.task_groups {
-            if fact.matches -> &violations.push(policy_occurrence(path, "task-one-child", "stmt:task.group", fact.span))
+            if fact.matches -> violations.push(policy_occurrence(path, "task-one-child", "stmt:task.group", fact.span))
         }
     }
     if policy_applies(manifest, path, row, "indexed-sequence") {
-        loop span in facts.manual_counter_loops -> &violations.push(policy_occurrence(path, "indexed-sequence", "loop:manual-counter", span))
+        loop span in facts.manual_counter_loops -> violations.push(policy_occurrence(path, "indexed-sequence", "loop:manual-counter", span))
         loop fact in facts.counted_loops {
-            if fact.matches -> &violations.push(policy_occurrence(path, "indexed-sequence", "loop:counted-sequence", fact.span))
+            if fact.matches -> violations.push(policy_occurrence(path, "indexed-sequence", "loop:counted-sequence", fact.span))
         }
     }
     if policy_applies(manifest, path, row, "dyn-domain-policy") {
-        loop violation in policy_data_tree_violations(path, program) -> &violations.push(violation)
+        loop violation in policy_data_tree_violations(path, program) -> violations.push(violation)
     }
-    if policy_applies(manifest, path, row, "walk-files-filter") && facts.file_walks.len() > 0 -> &violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
+    if policy_applies(manifest, path, row, "walk-files-filter") && facts.file_walks.len() > 0 -> violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
     if policy_applies(manifest, path, row, "regex-capture-recipe") && !policy_has_anchored_regex_capture(program, aliases) {
         span := Span{start: 0, end: 0}
         loop item in program.items {
@@ -1354,14 +1354,14 @@ policy_evaluate_program: fn(manifest: PolicyManifest, path: String, row: PolicyS
                 break
             }
         }
-        &violations.push(policy_occurrence(path, "regex-capture-recipe", "recipe:regex-capture", span))
+        violations.push(policy_occurrence(path, "regex-capture-recipe", "recipe:regex-capture", span))
     }
     if policy_applies(manifest, path, row, "http-unused-request") {
         loop item in program.items {
             if item == .Func(function) {
                 loop parameter in function.params {
                     if policy_named_type(parameter.ty, "HTTPRequest") && policy_unused_parameter(function, parameter.name) {
-                        &violations.push(policy_occurrence(path, "http-unused-request", "param:req", function.span))
+                        violations.push(policy_occurrence(path, "http-unused-request", "param:req", function.span))
                         break
                     }
                 }
@@ -1381,7 +1381,7 @@ policy_markdown_fences: fn(source: String, language: String) -> [String] {
                 current = ""
             }
         } else if trimmed == "```" {
-            &fences.push(current)
+            fences.push(current.copy())
             inside = false
         } else {
             current += "{line}\n"
@@ -1426,19 +1426,19 @@ policy_evaluate_source: fn(manifest: PolicyManifest, path: String, source: Strin
         program: policy_parse_program(path, program_source)
         policy_validate_lint_allows(path, row, program)
         if policy_has_typed_cli_entry(program) -> typed = true
-        loop violation in policy_evaluate_program(manifest, path, row, program) -> &all.push(violation)
+        loop violation in policy_evaluate_program(manifest, path, row, program) -> all.push(violation)
     }
     if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Docs/spec/guides/first-hour.md" {
         if !typed || !policy_has_jet_run_command(source) {
             kind: if typed -> "document:jet-run" else -> "document:typed-cli"
-            &all.push(policy_occurrence(path, "first-hour-doc-recipe", kind, Span{start: 0, end: 0}))
+            all.push(policy_occurrence(path, "first-hour-doc-recipe", kind, Span{start: 0, end: 0}))
         }
     }
     policy_apply_exceptions(manifest, path, all)
 }
 policy_occurrence_messages: fn(violations: [PolicyOccurrence]) -> String {
     messages := [String]{}
-    loop violation in violations -> &messages.push(policy_violation(violation.file, violation.rule, violation.site))
+    loop violation in violations -> messages.push(policy_violation(violation.file, violation.rule, violation.site))
     messages.join("\n")
 }
 policy_proof_matches: fn(proof: String, gate: String) -> Bool {
@@ -1471,7 +1471,7 @@ policy_ast_inventory: fn(manifest: PolicyManifest, root: String) -> PolicyInvent
     discovery: policy_discover_manifest_files(manifest, root)
     declared := [String]{}
     loop candidate in discovery.config_candidates {
-        if policy_declared_config(root, candidate) -> &declared.push(candidate)
+        if policy_declared_config(root, candidate) -> declared.push(candidate)
     }
     policy_inventory(manifest, root, discovery, declared)
 }
@@ -1484,7 +1484,7 @@ policy_check_fixture_inventory: fn(manifest: PolicyManifest, root: String) Polic
             entry.path.starts_with("tests/fuzz/") || entry.path.starts_with("tests/conformance/corpus/") || entry.path.starts_with("Tools/adoption/fixtures/") -> "fixture-harness-boundary"
             else -> ""
         }
-        if !expected.is_empty() && entry.role != expected -> &errors.push(policy_violation(entry.path, "fixture-role-classification", "inventory:fixture-role@0..0"))
+        if !expected.is_empty() && entry.role != expected -> errors.push(policy_violation(entry.path, "fixture-role-classification", "inventory:fixture-role@0..0"))
     }
     loop row in manifest.sources {
         expected: if {
@@ -1496,7 +1496,7 @@ policy_check_fixture_inventory: fn(manifest: PolicyManifest, root: String) Polic
         compatible: if row.profile == "generated" -> row.role == "raw-protocol" || row.role == "generated-output" else -> expected.is_empty() || expected == row.role
         if !compatible {
             path: if row.selector.starts_with("file:") || row.selector.starts_with("root:") -> policy_slice_bytes(row.selector, 5, row.selector.bytes().len()) else -> row.selector
-            &errors.push(policy_violation(path, "fixture-cli-role", "manifest:fixture-profile@0..0"))
+            errors.push(policy_violation(path, "fixture-cli-role", "manifest:fixture-profile@0..0"))
         }
     }
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
@@ -1534,10 +1534,10 @@ policy_check_cli_recipe_inventory: fn(manifest: PolicyManifest, root: String) Po
             profile == "builder-cli" -> builder
             else -> raw
         }
-        if !valid -> &errors.push("CLI recipe profile `{profile}` is not proved by the AST for {entry.path}")
+        if !valid -> errors.push("CLI recipe profile `{profile}` is not proved by the AST for {entry.path}")
         checked = true
     }
-    if !checked -> &errors.push("manifest has no checked CLI recipe profiles")
+    if !checked -> errors.push("manifest has no checked CLI recipe profiles")
     if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
     Ok()
 }
@@ -1554,10 +1554,10 @@ policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) Poli
         if entry.path == "package.jet" || entry.path.ends_with("/package.jet") -> next
         source: policy_read_source(root, entry.path)
         found: policy_evaluate_source(manifest, entry.path, source) ?? {
-            &rejected.push(err.message)
+            rejected.push(err.message)
             next
         }
-        loop violation in found -> &violations.push(violation)
+        loop violation in found -> violations.push(violation)
     }
     if gate == "all" || gate == "bindgen" {
         loop artifact in manifest.artifacts {
@@ -1567,14 +1567,14 @@ policy_check_gate: fn(manifest: PolicyManifest, root: String, gate: String) Poli
                 if producer.selector != artifact.producer -> next
                 if producer.protocol == "no-response-protocol" || !path.ends_with(".jet") -> break
                 source: policy_ast_files.read(policy_join(root, path)) ?? return Err(PolicyError{message: "read generated artifact {path}: {err}"})
-                loop violation in policy_evaluate_generated(manifest, producer.selector, source) -> &violations.push(violation)
+                loop violation in policy_evaluate_generated(manifest, producer.selector, source) -> violations.push(violation)
                 break
             }
         }
     }
     if violations.len() > 0 || rejected.len() > 0 {
         messages := rejected.copy()
-        if violations.len() > 0 -> &messages.push(policy_occurrence_messages(violations))
+        if violations.len() > 0 -> messages.push(policy_occurrence_messages(violations))
         return Err(PolicyError{message: messages.join("\n")})
     }
     Ok()
@@ -1601,7 +1601,7 @@ policy_has_rule: fn(violations: [PolicyOccurrence], rule: String) -> Bool {
 }
 policy_ast_test_semantic_shapes: fn() PolicyError! {
     manifest: policy_manifest()
-    path: "Examples/features/basics/first_hour.jet"
+    path: "Examples/Basics/FirstHour.jet"
     positive: policy_evaluate_source(manifest, path, "run: fn() {{ args: process.args() }}")
     assert(policy_has_rule(positive, "raw-cli-fixed-shape"))
     loop violation in positive -> assert_eq(violation.file, path)
@@ -1612,7 +1612,7 @@ policy_ast_test_semantic_shapes: fn() PolicyError! {
 #Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() ?? panic("{err.message}") }
 policy_ast_test_cli_boundaries: fn() PolicyError! {
     manifest: policy_manifest()
-    path: "Examples/features/basics/first_hour.jet"
+    path: "Examples/Basics/FirstHour.jet"
     repeated: policy_evaluate_source(manifest, path, "run: fn() {{\n    first: process.args()\n    second: process.args()\n}}")
     assert(policy_has_rule(repeated, "raw-cli-process-boundary"))
     single: policy_evaluate_source(manifest, path, "run: fn() {{ args: process.args() }}")
@@ -1623,12 +1623,12 @@ policy_ast_test_cli_boundaries: fn() PolicyError! {
 policy_ast_test_allow_source_reason: fn() PolicyError! {
     manifest: policy_manifest()
     error := ""
-    if policy_evaluate_source(manifest, "Examples/features/text/unreviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap) print(\"kept\") }}") == {
+    if policy_evaluate_source(manifest, "Examples/Text/unreviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap) print(\"kept\") }}") == {
         .Err(failure) -> error = failure.message
         .Ok(_) -> panic("maintained guidance allowance must explain itself")
     }
     assert(error.contains("reason at its source site"), error)
-    policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
+    policy_evaluate_source(manifest, "Examples/Text/reviewed_allow.jet", "run: fn() {{ #Allow(jet.UnitScalarRewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
     Ok()
 }
 #Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() ?? panic("{err.message}") }
@@ -1685,16 +1685,16 @@ policy_check_shapes: fn(cases: [PolicyShapeCase]) PolicyError! {
 }
 policy_ast_test_reintroduced_ceremony: fn() PolicyError! {
     cases: [PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/basics/hello.jet", source: "print(\"hello\")", rule: "entry-explicit", present: true},
-        PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/features/basics/first_hour.jet", rule: "first-hour-doc-recipe", present: true},
-        PolicyShapeCase{path: "Examples/features/types/typed_literal_forms.jet", source: "run: fn() {{ print(\"jet build Examples/features/types/typed_literal_forms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
-        PolicyShapeCase{path: "Examples/features/serde/reintroduced.jet", source: "#Codable\nSample: struct {{\n    value: Int\n}}\nrun: fn() {{}}", rule: "codable-structural", present: true},
-        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "run: fn() {{\n    delay: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
-        PolicyShapeCase{path: "Examples/features/basics/reintroduced_effect.jet", source: "use fs: core.files\nrun: fn() -[FS, IO]> {{\n    path: \"input.txt\"\n    text: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
-        PolicyShapeCase{path: "Examples/features/io/reintroduced.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
-        PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
+        PolicyShapeCase{path: "Examples/Basics/Hello.jet", source: "print(\"hello\")", rule: "entry-explicit", present: true},
+        PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/Basics/FirstHour.jet", rule: "first-hour-doc-recipe", present: true},
+        PolicyShapeCase{path: "Examples/Types/TypedLiteralForms.jet", source: "run: fn() {{ print(\"jet build Examples/Types/TypedLiteralForms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
+        PolicyShapeCase{path: "Examples/Data/reintroduced.jet", source: "#Codable\nSample: struct {{\n    value: Int\n}}\nrun: fn() {{}}", rule: "codable-structural", present: true},
+        PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn() {{\n    delay: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
+        PolicyShapeCase{path: "Examples/Basics/reintroduced_effect.jet", source: "use fs: core.files\nrun: fn() -[FS, IO]> {{\n    path: \"input.txt\"\n    text: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
+        PolicyShapeCase{path: "Examples/Concurrency/Parallel/ParallelScan.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path.copy())\n}}", rule: "readonly-copy", present: true},
+        PolicyShapeCase{path: "Examples/Systems/reintroduced.jet", source: "use fs: core.files\nrun: fn() {{\n    path: \"input.txt\"\n    text: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
+        PolicyShapeCase{path: "Examples/Concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
+        PolicyShapeCase{path: "Examples/Concurrency/reintroduced.jet", source: "run: fn() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
         PolicyShapeCase{path: "tests/agent_workloads/adapters/reintroduced.jet", source: "run: fn() {{\n    line_number := 0\n    loop item in items {{\n        line_number += 1\n        seen: line_number\n    }}\n}}", rule: "indexed-sequence", present: true},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{\n    value: Regex{{\"IMG\"}}\n}}", rule: "regex-capture-recipe", present: true},
     }
@@ -1728,24 +1728,24 @@ policy_ast_test_walk_shapes: fn() PolicyError! {
 #Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() ?? panic("{err.message}") }
 policy_ast_test_crypto_module: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
-        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "run: fn() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
+        PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
+        PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "use crypto: core.crypto\nrun: fn() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
+        PolicyShapeCase{path: "Examples/Crypto/reintroduced.jet", source: "run: fn() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
     })
     Ok()
 }
 #Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() ?? panic("{err.message}") }
 policy_ast_test_migration_shapes: fn() PolicyError! {
     policy_check_shapes([PolicyShapeCase]{
-        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "run: fn() {{ delay: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
-        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "run: fn(seconds: Float) {{ delay: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
-        PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * 2) }}", rule: "unit-scalar-rewrap", present: true},
-        // The Rust case named Examples/features/types/unit_family.jet. Its scope row
+        PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn() {{ delay: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
+        PolicyShapeCase{path: "Examples/Memory/reintroduced.jet", source: "run: fn(seconds: Float) {{ delay: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
+        PolicyShapeCase{path: "Examples/Text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * 2) }}", rule: "unit-scalar-rewrap", present: true},
+        // The Rust case named Examples/Types/Units/UnitFamily.jet. Its scope row
         // is retired: Currency is nominal (D-QUAL3, D-DIST1), `Usd * Int` is E0127,
         // so the example's rewrap is the language's own conversion. The shape keeps
         // its proof under the time examples' scope.
-        PolicyShapeCase{path: "Examples/features/time/reintroduced.jet", source: "subtotal: fn(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
-        PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
+        PolicyShapeCase{path: "Examples/Systems/Time/reintroduced.jet", source: "subtotal: fn(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
+        PolicyShapeCase{path: "Examples/Text/reintroduced.jet", source: "run: fn() {{ value: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{ print(\"{{value:Fixed(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: true},
         PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "run: fn() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
         PolicyShapeCase{path: "Docs/site/generate.jet", source: "run: fn() {{ files.create_dir(\"dist\") }}", rule: "dogfood-directory-setup", present: true},
@@ -1825,7 +1825,7 @@ policy_ast_test_engine_entry_protocol: fn() PolicyError! {
 policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     manifest: policy_manifest()
     policy_check_cli_recipe_inventory(manifest, ".")
-    typed_selectors: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet"}
+    typed_selectors: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/Basics/FirstHour.jet", "file:Examples/Basics/Onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet"}
     loop selector in typed_selectors {
         found := false
         loop row in manifest.sources {
@@ -1835,7 +1835,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
         }
         assert(found, "missing CLI recipe source row: {selector}")
     }
-    expert_selectors: [String]{"file:Examples/features/io/args_spec.jet", "file:Examples/features/io/args_audit.jet", "file:Examples/features/io/cli_args.jet", "file:Examples/features/io/watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
+    expert_selectors: [String]{"file:Examples/Systems/CLI/ArgsSpec.jet", "file:Examples/Systems/CLI/ArgsAudit.jet", "file:Examples/Systems/CLI/CLIArgs.jet", "file:Examples/Systems/Files/Watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
     loop selector in expert_selectors {
         found := false
         expected: if selector.contains("args_spec.jet") || selector.contains("args_audit.jet") -> "builder-cli" else -> "raw-cli"
@@ -1863,7 +1863,7 @@ policy_ast_test_core_reference: fn() {
     missing := [String]{}
     loop module_entry in CORE_MODULE_EXPORTS {
         if module_entry.module_name == "core" -> next
-        if !docs.contains("`{module_entry.module_name}`") -> &missing.push(module_entry.module_name)
+        if !docs.contains("`{module_entry.module_name}`") -> missing.push(module_entry.module_name)
     }
     assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing}")
 }
@@ -1927,7 +1927,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
         // A closed synthetic manifest makes one rule active, independently of
         // real corpus exceptions or scope changes. Checked-manifest tests above
         // still require every original source/provenance/classification.
-        path: if pair.rule == "first-hour-doc-recipe" -> "Examples/features/types/typed_literal_forms.jet" else -> "planted/{pair.rule}.jet"
+        path: if pair.rule == "first-hour-doc-recipe" -> "Examples/Types/TypedLiteralForms.jet" else -> "planted/{pair.rule}.jet"
         manifest := PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
         bad: policy_evaluate_source(manifest, path, pair.rejected)
         assert(bad.len() == 1, "{pair.rule}: exactly one planted violation")
@@ -1947,7 +1947,7 @@ policy_ast_test_planted_rule_pairs: fn() PolicyError! {
 policy_ast_test_explicit_entry: fn() PolicyError! {
     manifest: policy_manifest()
     // The Rust original also named Examples/learn/entry_law.jet; Examples/learn left the corpus with `jet learn` (09473f1db5).
-    paths: [String]{"Examples/features/types/entry_law.jet", "tests/agent_workloads/llm_digest/first_program.jet"}
+    paths: [String]{"Examples/Types/entry_law.jet", "tests/agent_workloads/llm_digest/first_program.jet"}
     accepted: [String]{"run: fn() {{ print(\"hello\") }}", "VALUE: 1\nhelper: fn() -> Int {{ VALUE }}\nrun: fn() {{ print(helper()) }}", "helper: fn() -> Int {{ 1 }}"}
     rejected: [String]{"print(\"hello\")", "print(\"before\")\nrun: fn() {{ print(\"inside\") }}\nprint(\"after\")"}
     loop path in paths {
@@ -1990,11 +1990,11 @@ policy_ast_test_manifest_scoped_inventory: fn() PolicyError! {
 // `package.jet` declares under `configs:` leaves the corpus.
 policy_ast_test_declared_config_exclusion: fn() PolicyError! {
     manifest: policy_manifest()
-    declared: "Examples/features/tooling/compiler_api_package/config"
+    declared: "Examples/Metaprogramming/BuildTime/CompilerAPIPackage/config"
     discovery: policy_discover_manifest_files(manifest, ".")
     assert(discovery.config_candidates.contains(declared), "the package config directory is a discovery candidate")
     assert(policy_declared_config(".", declared), "compiler_api_package declares configs: [\"config/release.jet\"]")
-    assert(!policy_declared_config(".", "Examples/features/tooling/missing_package/config"), "a config directory without a parsable package.jet stays in the corpus")
+    assert(!policy_declared_config(".", "Examples/Tooling/missing_package/config"), "a config directory without a parsable package.jet stays in the corpus")
     inventory: policy_ast_inventory(manifest, ".")
     loop entry in inventory.files -> assert(!entry.path.starts_with("{declared}/"), "declared package config left in the corpus: {entry.path}")
     Ok()

@@ -1,0 +1,20 @@
+package: {
+    name: "file_scope"
+    authority: { allow: [FS.Read, IO] }
+}
+
+// A file scope narrows file access once. Every read through the scope carries
+// the same grant, and a path outside it is refused.
+use fs: core.files
+
+run: fn() {
+    #FX(FS.Read, IO) {
+        here: fs.scope(Authority.from_rights(["FS.Read:."]))
+        source: here.read("FileScope.jet") ?? panic("read inside the scope")
+        print("inside: {source.starts_with("// A file scope")}")
+        _: here.read("/etc/hostname") ?? {
+            print("outside: refused")
+            ""
+        }
+    }
+}

@@ -2,7 +2,7 @@ use json: core.encoding.json
 
 price: fn(item: Dyn) -> Int? {
     if item == .Object(_) {
-        price_tree: &item.field("price") ?? return None
+        price_tree: item.field("price") ?? return None
         return Val(price_tree.int() ?? 0)
     }
     return None
@@ -11,11 +11,11 @@ price: fn(item: Dyn) -> Int? {
 select_prices: fn(data: Dyn) -> [Int] {
     prices := [Int]{}
     if data == .Object(_) {
-        rows: &data.field("items") ?? Dyn.Null
+        rows: data.field("items") ?? Dyn.Null
         if rows == .Array(items) {
             loop item in items {
                 p: price(item)
-                if p != None -> &prices.push(p)
+                if p != None -> prices.push(p)
             }
         }
     }

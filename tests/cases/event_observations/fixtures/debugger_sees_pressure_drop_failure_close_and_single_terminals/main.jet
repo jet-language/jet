@@ -1,0 +1,60 @@
+use {
+    event: core.event
+    term: core.term
+    time: core.time
+}
+
+fail_async: fn(n: Int) Err! {
+    return Err("ASYNC_FAILURE_SECRET")
+}
+
+run: fn() {
+    print("READY")
+    // A pipe stdout is written when its buffer fills (spec.md print); flush so
+    // the debugger session sees READY before it reads the snapshot.
+    ready_out := term.stdout()
+    ready_out.flush() ?? panic("flush")
+    drop_scope: event.scope()
+    dropped: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    { sender: started_tx, receiver: started_rx }: channel<Int>()
+    { sender: release_tx, receiver: release_rx }: channel<Int>()
+    dropped.on_priority(drop_scope, 23, (n: Int) -> {
+        started_tx.send(n.copy())
+        released: release_rx.receive() ?? panic("release")
+    })
+    first: dropped.emit_async(1)
+    started: started_rx.receive() ?? panic("started")
+    second: dropped.emit_async(2)
+    newest: dropped.emit_async(3)
+    release_tx.send(1)
+    started_second: started_rx.receive() ?? panic("started second")
+    release_tx.send(2)
+    first.join() ?? panic("first")
+    second.join() ?? panic("second")
+    newest.join() ?? panic("newest")
+
+    fail_scope: event.scope()
+    failing: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    failing.on(fail_scope, (n: Int) -> fail_async(n))
+    failing.emit_async(4).join() ?? panic("failing")
+
+    close_scope: event.scope()
+    closing: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    { sender: close_started_tx, receiver: close_started_rx }: channel<Int>()
+    { sender: close_release_tx, receiver: close_release_rx }: channel<Int>()
+    closing.on(close_scope, (n: Int) -> {
+        close_started_tx.send(n.copy())
+        released: close_release_rx.receive() ?? panic("release")
+    })
+    close_running: closing.emit_async(5)
+    close_started: close_started_rx.receive() ?? panic("started")
+    close_queued: closing.emit_async(6)
+    close_blocked: closing.emit_async(7)
+    closing.close()
+    close_scope.cancel()
+    close_running.join() ?? panic("close running")
+    close_queued.join() ?? panic("close queued")
+    close_blocked.join() ?? panic("close blocked")
+
+    time.sleep(30000ms)
+}

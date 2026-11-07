@@ -29,7 +29,7 @@ definitions: fn(path: String) -> [String] {
         name: hit.group(1) ?? panic("unreachable: name group")
         if seen.get(name) != None -> next
         seen[name.copy()] = true
-        &names.push(name)
+        names.push(name)
     }
     names
 }
@@ -45,13 +45,13 @@ run: fn() {
     }
     duplicates := [String]{}
     loop name in jet {
-        if rust_set.get(name) != None -> &duplicates.push(name.copy())
+        if rust_set.get(name) != None -> duplicates.push(name.copy())
     }
     if duplicates.len() == 0 -> return
-    &duplicates.sort()
+    duplicates.sort()
     listed := [String]{}
     loop name in duplicates {
-        &listed.push("  {name}")
+        listed.push("  {name}")
     }
     fail("prebuild-runtime: replaced runtime exports still defined in Rust:\n{listed.join("\n")}\nDelete these Rust definitions in the same cutover as their Jet runtime layer; duplicate definitions are not permitted.")
 }

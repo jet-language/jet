@@ -9,7 +9,7 @@ cli_test_jetpack_bin: fn() -[Env]> String {
 // A `jetpack` process spec with captured output and `args`.
 cli_test_jetpack: fn(args: [String]) -[Env, Exec]> ProcessSpec {
     argv := [String]{cli_test_jetpack_bin()}
-    &argv.extend(args)
+    argv.extend(args.copy())
     process.cmd(argv).stdout(.Capture).stderr(.Capture)
 }
 

@@ -1,29 +1,30 @@
-// `^` on an owned parameter, a local and a field of one moves: no diagnostic.
+// An owned parameter, a local or a field of one (`.move()`) passed to a take
+// parameter moves: no diagnostic.
 Bag: struct {
     items: [String]
 }
 
-keep: fn(bag: ^Bag) -> Int { bag.items.len() }
+keep: fn(bag: &&Bag) -> Int { bag.items.len() }
 
-count: fn(items: ^[String]) -> Int { items.len() }
+count: fn(items: &&[String]) -> Int { items.len() }
 
-forward: fn(bag: ^Bag) -> Int {
-    keep(^bag)
+forward: fn(bag: &&Bag) -> Int {
+    keep(bag)
 }
 
-fields: fn(bag: ^Bag) -> Int {
-    count(^bag.items)
+fields: fn(bag: &&Bag) -> Int {
+    count(bag.items.move())
 }
 
-collect: fn(item: ^[Int]) -> Int {
+collect: fn(item: &&[Int]) -> Int {
     rows := [[Int]]{}
-    &rows.push(^item)
+    rows.push(item)
     rows.len()
 }
 
 run: fn() {
     local: Bag{items: [String]{"one"}}
-    print(forward(^local))
+    print(forward(local))
     print(fields(Bag{items: [String]{"two"}}))
     print(collect([Int]{1}))
 }

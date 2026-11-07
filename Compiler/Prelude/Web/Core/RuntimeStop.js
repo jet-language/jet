@@ -1,4 +1,4 @@
-// D-FAIL-ERRWIRE1=D: Rust owns the error carrier, journey, and report edge.
+// Rust owns the error carrier, journey, and report edge.
 // This file only marshals UTF-8 bytes through the compiled Prelude ABI and
 // adapts the resulting carrier to JavaScript's native Error protocol.
 

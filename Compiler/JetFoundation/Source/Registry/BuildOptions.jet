@@ -1,4 +1,4 @@
-// D-JAI-BUILDOPT1=A and D-SETTING-ORDER1=A (#5005, #4913): the one build-option
+// The one build-option
 // table. By one naming rule a row is the field of a `package.jet` build profile
 // (`build: { fast: Build{ optimize: full } }`), the flag `--optimize=full` (`_`
 // is `-` in a flag), the `build: fn` method `b.optimize(.Full)` and the pin
@@ -93,12 +93,13 @@ JET_BUILD_OPTIONS: comptime { [BuildOptionRow]{
     // are found in first), `-l<name>` (a library, as in `libs`) or the path
     // of a static `.a` archive. The native linker takes no flags and reads
     // archives only, so any other word is refused (E2104). A non-empty value
-    // is a `link_override` gate (D-TARGET-LINKER1) the owning policy can
+    // is a `link_override` gate the owning policy can
     // refuse (E3415).
     {name: "link_args", kind: BuildOptionKind.List, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "More native link inputs: -L<dir>, -l<name> or a .a archive path"},
-    // The operating system the image runs on. The native backend writes Linux
-    // x86-64 ELF images, and `jet build` also writes web builds
-    // (`--target web`), so every other value is refused (E2104).
+    // The operating system the image runs on: the key of each TARGET_OS_ALL
+    // OS, in that order, then the OS-less `web` and `freestanding` targets. The
+    // native backend writes Linux x86-64 ELF images, and `jet build` also writes
+    // web builds (`--target web`), so every other value is refused (E2104).
     {name: "os", kind: BuildOptionKind.Choice, values: [String]{"linux", "macos", "windows", "web", "freestanding"}, stock_build: "linux", stock_run: "linux", removes_check: [String]{}, help: "The operating system the image runs on: linux, macos, windows, web or freestanding"},
     // The oldest OS version the image runs on (a Mach-O image's minimum
     // version). A Linux ELF image has no versioned ABI floor, so a non-empty
@@ -123,7 +124,7 @@ BuildOptionRefusal: struct {
 
 JET_BUILD_OPTION_REFUSALS: comptime { [BuildOptionRefusal]{
     {name: "null", law: "Jet has no null check to switch: a reference is never null, and a raw pointer's validity is the obligation of the `#Unsafe` code that uses it (I1)"},
-    {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional (D-SHAPE-CONVERT1)"},
+    {name: "casts", law: "Jet has no unchecked conversion to switch: a conversion is total or returns an Optional"},
 } }
 
 build_option_refusal: fn(name: String) -> BuildOptionRefusal? {
@@ -142,7 +143,7 @@ build_option_flag_refusal: fn(argument: String) -> BuildOptionRefusal? {
     None
 }
 
-// The layer a value came from, in D-SETTING-ORDER1 order.
+// The layer a value came from, in setting order.
 BuildOptionLayer: enum {
     Stock
     Profile
@@ -220,7 +221,7 @@ build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
         .Text -> "\"{value}\""
         .List -> {
             items := [String]{}
-            loop item in build_option_items(value) -> &items.push("\"{item}\"")
+            loop item in build_option_items(value) -> items.push("\"{item}\"")
             "[{items.join(", ")}]"
         }
         .Choice -> ".{sema_casing_pascal_words(value)}"
@@ -289,7 +290,7 @@ build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
     if row.kind == BuildOptionKind.List -> return "a list literal of strings"
     words := [String]{}
-    loop value in build_option_method_values(row) -> &words.push(build_option_argument(row, value))
+    loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
 }
 
@@ -300,7 +301,7 @@ build_option_method_values: fn(row: BuildOptionRow) -> [String] Never! {
     if row.kind != BuildOptionKind.Bool -> return row.values.copy()
     out := [String]{}
     loop value in row.values {
-        if value == "true" || value == "false" -> &out.push(value.copy())
+        if value == "true" || value == "false" -> out.push(value.copy())
     }
     out
 }
@@ -353,7 +354,7 @@ build_options_list: fn(options: BuildOptions, name: String) -> [String] Never! {
 }
 
 // The resolved `link_args`, when there are any: the `link_override` gate
-// (D-TARGET-LINKER1) of the package being built.
+// of the package being built.
 build_options_link_override: fn(options: BuildOptions) -> BuildOptionChoice? Never! {
     loop choice in options.values {
         if choice.name == "link_args" && choice.value != "" -> return Val(choice.copy())
@@ -371,7 +372,7 @@ build_option_removes_check: fn(choice: BuildOptionChoice) -> Bool Never! {
 build_options_check_removals: fn(options: BuildOptions) -> [BuildOptionChoice] Never! {
     out := [BuildOptionChoice]{}
     loop choice in options.values {
-        if build_option_removes_check(choice) -> &out.push(choice.copy())
+        if build_option_removes_check(choice) -> out.push(choice.copy())
     }
     out
 }
@@ -409,7 +410,7 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
         loop earlier in flags {
             if earlier.name == row.name && earlier.value != value -> return BuildOptionsResolved.Refused{code: "E2104", what: "`{earlier.written}` and `{argument}` disagree", fix: "pass `{flag}` once"}
         }
-        &flags.push(BuildOptionChoice{name: row.name.copy(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
+        flags.push(BuildOptionChoice{name: row.name.copy(), value: value, layer: BuildOptionLayer.Flag, written: argument.copy(), site: "", pinned: false})
     }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: "", profile: "", written: flags, values: [BuildOptionChoice]{}}, notes: [String]{}}
 }
@@ -430,12 +431,12 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
                     return BuildOptionsResolved.Refused{code: "E2113", what: "`{row.name}` is pinned to `{current.value}` {current.site}, so `{choice.written}` can't change it", fix: "remove the flag, or remove the pin {current.site}"}
                 }
                 if current.layer == BuildOptionLayer.Profile || current.layer == BuildOptionLayer.Code {
-                    if current.value != choice.value -> &notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
+                    if current.value != choice.value -> notes.push("note: {choice.written} replaces {current.written} {current.site} for this run")
                 }
             }
             current = choice.copy()
         }
-        &values.push(current)
+        values.push(current)
     }
     // A full backtrace names frames from the DWARF that `debug_info: false`
     // leaves out; the stock `full` degrades to addresses, a written one is
@@ -501,11 +502,11 @@ build_option_index: fn(name: String) -> Int Never! {
 build_options_with_code: fn(options: BuildOptions, code: [BuildOptionChoice]) -> BuildOptionsResolved Never! {
     written := [BuildOptionChoice]{}
     loop choice in options.written {
-        if choice.layer == BuildOptionLayer.Profile -> &written.push(choice.copy())
+        if choice.layer == BuildOptionLayer.Profile -> written.push(choice.copy())
     }
-    loop choice in code -> &written.push(choice.copy())
+    loop choice in code -> written.push(choice.copy())
     loop choice in options.written {
-        if choice.layer == BuildOptionLayer.Flag -> &written.push(choice.copy())
+        if choice.layer == BuildOptionLayer.Flag -> written.push(choice.copy())
     }
     build_options_resolve(options.command, options.profile, written)
 }

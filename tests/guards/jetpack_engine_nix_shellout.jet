@@ -43,11 +43,11 @@ jens_walk: fn(path: String, out: &[String]) {
         return
     }
     if !jens_files.is_dir(path) {
-        if path.ends_with(".jet") -> &out.push(path)
+        if path.ends_with(".jet") -> out.push(path.copy())
         return
     }
     loop child in (jens_files.list_dir(path) ?? panic("list {path}: {err}")) {
-        jens_walk(child.path, &out)
+        jens_walk(child.path, out)
     }
 }
 
@@ -56,7 +56,7 @@ jens_offenders: fn(path: String, source: String, offenders: &[String]) {
         needles: [String]{"cmd([String]{{\"{tool}\"", "which(\"{tool}\")"}
         loop needle in needles {
             if source.contains(needle) {
-                &offenders.push("{path} must not shell out to installed {tool} via {needle}")
+                offenders.push("{path} must not shell out to installed {tool} via {needle}")
             }
         }
     }
@@ -67,17 +67,17 @@ jens_offenders: fn(path: String, source: String, offenders: &[String]) {
     loop root in JENS_ROOTS {
         assert(jens_files.exists(root), "the scanned successor {root} must exist")
         before: sources.len()
-        jens_walk(root, &sources)
+        jens_walk(root, sources)
         assert(sources.len() > before, "{root} holds no Jet source to scan")
     }
     offenders := [String]{}
     loop path in sources {
-        jens_offenders(path, jens_files.read(path) ?? panic("read {path}: {err}"), &offenders)
+        jens_offenders(path, jens_files.read(path) ?? panic("read {path}: {err}"), offenders)
     }
     assert_eq(offenders.join("\n"), "")
     // The needles see the Jet spellings: a seeded spawn and a seeded PATH lookup
     // each report once.
     seeded := [String]{}
-    jens_offenders("synthetic.jet", "receipt: process.cmd([String]{{\"nix\", \"build\"}}).run()\nfound: files.which(\"wget\")\n", &seeded)
+    jens_offenders("synthetic.jet", "receipt: process.cmd([String]{{\"nix\", \"build\"}}).run()\nfound: files.which(\"wget\")\n", seeded)
     assert_eq(seeded.len(), 2)
 }

@@ -37,11 +37,11 @@ evidence_get_number: fn(cursor: &EvidenceCursor, width: Int) -> U64 EvidenceCode
 }
 
 evidence_get_byte: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
-    Ok(Int.from_u64(evidence_get_number(&cursor, 1)))
+    Ok(Int.from_u64(evidence_get_number(cursor, 1)))
 }
 
 evidence_get_string: fn(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
-    length: evidence_get_number(&cursor, 8)
+    length: evidence_get_number(cursor, 8)
     if length > cursor.usize_max {
         return Err(evidence_codec_error("evidence report field length is too large"))
     }
@@ -60,7 +60,7 @@ evidence_get_string: fn(cursor: &EvidenceCursor) -> String EvidenceCodecError! {
 }
 
 evidence_get_len: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
-    raw_length: evidence_get_number(&cursor, 4)
+    raw_length: evidence_get_number(cursor, 4)
     if raw_length > cursor.usize_max {
         return Err(evidence_codec_error("evidence report collection length is too large"))
     }
@@ -71,45 +71,45 @@ evidence_get_len: fn(cursor: &EvidenceCursor) -> Int EvidenceCodecError! {
 }
 
 evidence_get_optional: fn(cursor: &EvidenceCursor) -> String? EvidenceCodecError! {
-    marker: evidence_get_byte(&cursor)
+    marker: evidence_get_byte(cursor)
     if marker == {
         0 -> Ok(None)
-        1 -> Ok(Val(evidence_get_string(&cursor)))
+        1 -> Ok(Val(evidence_get_string(cursor)))
         else -> Err(evidence_codec_error("unknown optional string marker {marker}"))
     }
 }
 
 evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord EvidenceCodecError! {
-    id: evidence_get_string(&cursor)
-    subject: evidence_get_string(&cursor)
-    claim: evidence_get_string(&cursor)
-    producer: evidence_get_string(&cursor)
-    method: evidence_derivation_method_from_code(evidence_get_byte(&cursor))
-    rule: evidence_get_string(&cursor)
+    id: evidence_get_string(cursor)
+    subject: evidence_get_string(cursor)
+    claim: evidence_get_string(cursor)
+    producer: evidence_get_string(cursor)
+    method: evidence_derivation_method_from_code(evidence_get_byte(cursor))
+    rule: evidence_get_string(cursor)
     premises := [String]{}
-    premise_count: evidence_get_len(&cursor)
-    loop _ in 0..<premise_count -> &premises.push(evidence_get_string(&cursor))
-    source: evidence_get_string(&cursor)
-    build: evidence_get_string(&cursor)
-    run: evidence_get_string(&cursor)
-    target: evidence_get_string(&cursor)
+    premise_count: evidence_get_len(cursor)
+    loop _ in 0..<premise_count -> premises.push(evidence_get_string(cursor))
+    source: evidence_get_string(cursor)
+    build: evidence_get_string(cursor)
+    run: evidence_get_string(cursor)
+    target: evidence_get_string(cursor)
     assumptions := [String]{}
-    assumption_count: evidence_get_len(&cursor)
-    loop _ in 0..<assumption_count -> &assumptions.push(evidence_get_string(&cursor))
-    disposition: evidence_derivation_disposition_from_code(evidence_get_byte(&cursor))
-    observation_marker: evidence_get_byte(&cursor)
+    assumption_count: evidence_get_len(cursor)
+    loop _ in 0..<assumption_count -> assumptions.push(evidence_get_string(cursor))
+    disposition: evidence_derivation_disposition_from_code(evidence_get_byte(cursor))
+    observation_marker: evidence_get_byte(cursor)
     observation: if observation_marker == {
         0 -> None
-        1 -> Val(DerivationObservation{event_id: evidence_get_optional(&cursor), counterexample_id: evidence_get_optional(&cursor)})
+        1 -> Val(DerivationObservation{event_id: evidence_get_optional(cursor), counterexample_id: evidence_get_optional(cursor)})
         else -> {
             return Err(evidence_codec_error("unknown derivation observation marker {observation_marker}"))
 
         }
     }
-    payload_marker: evidence_get_byte(&cursor)
+    payload_marker: evidence_get_byte(cursor)
     payload: if payload_marker == {
         0 -> None
-        1 -> Val(DerivationPayload.FrameSchedule{schedule: evidence_decode_frame_schedule(evidence_get_string(&cursor))})
+        1 -> Val(DerivationPayload.FrameSchedule{schedule: evidence_decode_frame_schedule(evidence_get_string(cursor))})
         else -> {
             return Err(evidence_codec_error("unknown derivation payload marker {payload_marker}"))
 
@@ -120,7 +120,7 @@ evidence_decode_derivation: fn(cursor: &EvidenceCursor) -> DerivationRecord Evid
     value.disposition = disposition
     value.observation = observation
     if payload == {
-        .Val(item) -> { value = derivation_record_with_payload(^value, item) }
+        .Val(item) -> { value = derivation_record_with_payload(value, item) }
         .None -> {}
     }
     if value.id != id {
@@ -135,11 +135,11 @@ EvidenceDecodedRecord: struct {
 }
 
 evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord EvidenceCodecError! {
-    kind_code: evidence_get_byte(&cursor)
-    producer_code: evidence_get_byte(&cursor)
-    facet_code: evidence_get_byte(&cursor)
-    encoded_outcome: evidence_get_byte(&cursor)
-    completeness: evidence_get_byte(&cursor)
+    kind_code: evidence_get_byte(cursor)
+    producer_code: evidence_get_byte(cursor)
+    facet_code: evidence_get_byte(cursor)
+    encoded_outcome: evidence_get_byte(cursor)
+    completeness: evidence_get_byte(cursor)
     if completeness > 2 {
         return Err(evidence_codec_error("unknown evidence completeness {completeness}"))
     }
@@ -153,50 +153,50 @@ evidence_decode_record: fn(cursor: &EvidenceCursor) -> EvidenceDecodedRecord Evi
         .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
         .Ok(_) -> {}
     }
-    count: evidence_get_number(&cursor, 8)
-    line: U32{Int.from_u64(evidence_get_number(&cursor, 4))}
-    column: U32{Int.from_u64(evidence_get_number(&cursor, 4))}
-    report_id: evidence_get_string(&cursor)
-    claim_id: evidence_get_string(&cursor)
-    evidence_id: evidence_get_string(&cursor)
-    source: EvidenceSource{path: evidence_get_string(&cursor), line: line, column: column}
-    build: EvidenceBuild{toolchain: evidence_get_string(&cursor), target: evidence_get_string(&cursor), profile: evidence_get_string(&cursor)}
-    revision: EvidenceRevision{source: evidence_get_string(&cursor), build: evidence_get_string(&cursor), revision: evidence_get_string(&cursor)}
-    detail: evidence_get_string(&cursor)
+    count: evidence_get_number(cursor, 8)
+    line: U32{Int.from_u64(evidence_get_number(cursor, 4))}
+    column: U32{Int.from_u64(evidence_get_number(cursor, 4))}
+    report_id: evidence_get_string(cursor)
+    claim_id: evidence_get_string(cursor)
+    evidence_id: evidence_get_string(cursor)
+    source: EvidenceSource{path: evidence_get_string(cursor), line: line, column: column}
+    build: EvidenceBuild{toolchain: evidence_get_string(cursor), target: evidence_get_string(cursor), profile: evidence_get_string(cursor)}
+    revision: EvidenceRevision{source: evidence_get_string(cursor), build: evidence_get_string(cursor), revision: evidence_get_string(cursor)}
+    detail: evidence_get_string(cursor)
     attachments := [EvidenceAttachment]{}
-    attachment_count: evidence_get_len(&cursor)
+    attachment_count: evidence_get_len(cursor)
     loop _ in 0..<attachment_count {
-        &attachments.push(EvidenceAttachment{name: evidence_get_string(&cursor), value: evidence_get_string(&cursor)})
+        attachments.push(EvidenceAttachment{name: evidence_get_string(cursor), value: evidence_get_string(cursor)})
     }
     diagnostics := [EvidenceDiagnostic]{}
-    diagnostic_count: evidence_get_len(&cursor)
+    diagnostic_count: evidence_get_len(cursor)
     loop _ in 0..<diagnostic_count {
-        code: evidence_get_string(&cursor)
-        message: evidence_get_string(&cursor)
-        marker: evidence_get_byte(&cursor)
+        code: evidence_get_string(cursor)
+        message: evidence_get_string(cursor)
+        marker: evidence_get_byte(cursor)
         // Main-ratified strict marker admission; deferred Rust tandem at 1865–1872.
         if marker > 1 {
             return Err(evidence_codec_error("unknown evidence diagnostic source marker {marker}"))
         }
         diagnostic_source: if marker == 1 -> {
-            diagnostic_line: U32{Int.from_u64(evidence_get_number(&cursor, 4))}
-            diagnostic_column: U32{Int.from_u64(evidence_get_number(&cursor, 4))}
-            Val(EvidenceSource{path: evidence_get_string(&cursor), line: diagnostic_line, column: diagnostic_column})
+            diagnostic_line: U32{Int.from_u64(evidence_get_number(cursor, 4))}
+            diagnostic_column: U32{Int.from_u64(evidence_get_number(cursor, 4))}
+            Val(EvidenceSource{path: evidence_get_string(cursor), line: diagnostic_line, column: diagnostic_column})
         } else -> None
-        &diagnostics.push(EvidenceDiagnostic{code: code, message: message, source: diagnostic_source})
+        diagnostics.push(EvidenceDiagnostic{code: code, message: message, source: diagnostic_source})
     }
     chain := [EvidenceChainLink]{}
-    chain_count: evidence_get_len(&cursor)
+    chain_count: evidence_get_len(cursor)
     loop _ in 0..<chain_count {
-        &chain.push(EvidenceChainLink{evidence_id: evidence_get_string(&cursor), relation: evidence_get_string(&cursor)})
+        chain.push(EvidenceChainLink{evidence_id: evidence_get_string(cursor), relation: evidence_get_string(cursor)})
     }
-    reason: evidence_get_string(&cursor)
-    derivation_id: evidence_get_string(&cursor)
+    reason: evidence_get_string(cursor)
+    derivation_id: evidence_get_string(cursor)
     reference: if derivation_id == "" -> None else -> Val(DerivationRef{id: derivation_id})
-    definition_marker: evidence_get_byte(&cursor)
+    definition_marker: evidence_get_byte(cursor)
     definition: if definition_marker == {
         0 -> None
-        1 -> Val(evidence_decode_derivation(&cursor))
+        1 -> Val(evidence_decode_derivation(cursor))
         else -> {
             return Err(evidence_codec_error("unknown derivation definition marker {definition_marker}"))
 
@@ -223,7 +223,7 @@ evidence_decode_report_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceDecoded
         }
     }
     cursor := evidence_cursor(bytes, 8, usize_max)
-    version: U16{Int.from_u64(evidence_get_number(&cursor, 2))}
+    version: U16{Int.from_u64(evidence_get_number(cursor, 2))}
     if version != EVIDENCE_REPORT_VERSION {
         return Err(evidence_codec_error("unsupported evidence report schema version {version}"))
     }
@@ -234,7 +234,7 @@ evidence_decode_report_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceDecoded
         if records.len() >= 10000 {
             return Err(evidence_codec_error("too many evidence report records"))
         }
-        decoded: evidence_decode_record(&cursor)
+        decoded: evidence_decode_record(cursor)
         if decoded.derivation == {
             .Val(derivation) -> {
                 if decoded.record.derivation != Val(derivation_record_reference(derivation)) {
@@ -248,7 +248,7 @@ evidence_decode_report_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceDecoded
                     }
                     .None -> {
                         definitions[derivation.id] = derivations.len()
-                        &derivations.push(derivation)
+                        derivations.push(derivation)
                     }
                 }
             }
@@ -258,7 +258,7 @@ evidence_decode_report_bytes: fn(bytes: [U8], usize_max: U64) -> EvidenceDecoded
                 }
             }
         }
-        &records.push(decoded.record)
+        records.push(decoded.record)
     }
     Ok(EvidenceDecoded{records: records, derivations: derivations})
 }

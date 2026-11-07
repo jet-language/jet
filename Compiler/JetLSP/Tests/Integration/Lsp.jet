@@ -27,22 +27,22 @@ read_msg: fn(stdout: Read) -> String {
     header := String.new()
     buf := [0u8]
     loop {
-        stdout.read_exact(&buf).unwrap()
+        stdout.read_exact(buf).unwrap()
         header.push(Char{buf[0]})
         if header.ends_with("{Char{13}}\n{Char{13}}\n") -> break
     }
     len: header.lines().find_map(line -> line.strip_prefix("Content-Length:").map(n -> n.trim()))
         .expect("Content-Length").parse<USize>().unwrap()
     body := [U8].repeat(0, len)
-    stdout.read_exact(&body).unwrap()
-    String.from_utf8(^body).unwrap()
+    stdout.read_exact(body).unwrap()
+    String.from_utf8(body).unwrap()
 }
 request_lsp: fn(stdin: Write, stdout: Read, id: I64, method: String, params: String) -> String {
     send_msg(stdin, "{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"{method}\",\"params\":{params}}}")
     loop {
         body: read_msg(stdout)
         parsed: parse_json(body).expect("valid LSP response")
-        if json_get(parsed, "id") == Dyn.Int(id) -> return ^body
+        if json_get(parsed, "id") == Dyn.Int(id) -> return body.move()
     }
 }
 // Keep every message preceding the matching response, preserving arrival order.
@@ -51,8 +51,8 @@ request_lsp_collect: fn(stdin: Write, stdout: Read, id: I64, method: String, par
     before := [Dyn]()
     loop {
         parsed: parse_json(read_msg(stdout)).expect("valid LSP message")
-        if json_get(parsed, "id") == Dyn.Int(id) -> return (_0: ^parsed, _1: ^before)
-        before.push(^parsed)
+        if json_get(parsed, "id") == Dyn.Int(id) -> return (_0: parsed, _1: before)
+        before.push(parsed)
     }
 }
 published_diagnostics_for: fn(messages: [Dyn], uri: String) -> [&Dyn] {
@@ -76,7 +76,7 @@ json_string: fn(s: String) -> String {
         }
     }
     out.push('"')
-    ^out
+    out.move()
 }
 json_object_field: fn(value: Dyn, key: String) -> Dyn {
     json_get(value, key).unwrap_or_else(() -> panic("missing JSON field `{key}`"))
@@ -130,9 +130,9 @@ decode_semantic_tokens: fn(src: String, resp: String) -> [DecodedSemanticToken] 
             e: s + USize{len}
             line_text.get(s..e)
         }).unwrap_or("").to_string()
-        out.push(DecodedSemanticToken{text: ^text, token_type: chunk[3], modifiers: chunk[4]})
+        out.push(DecodedSemanticToken{text: text.move(), token_type: chunk[3], modifiers: chunk[4]})
     }
-    ^out
+    out.move()
 }
 assert_semantic_token: fn(tokens: &[DecodedSemanticToken], text: &String, token_type: U32, modifier: U32) {
     assert(tokens.iter().any(t -> t.text == text && t.token_type == token_type && (t.modifiers.bit_and(modifier)) != 0), "missing semantic token `{text}` type {token_type} modifier {modifier}; got {tokens}")
@@ -197,7 +197,7 @@ advertised_capabilities: fn(init: String) -> [String] {
             34 -> { in_string = true; string_start = i + 1 }
             123 -> depth += 1
             125 -> { depth = depth.saturating_sub(1); if depth == 0 -> break }
-            58 -> if depth == 1 { key: last_string.take(); if key != none -> out.push(^key.unwrap()) } else -> {}
+            58 -> if depth == 1 { key: last_string.take(); if key != none -> out.push(key.unwrap()) } else -> {}
         }
         i += 1
     }
@@ -209,7 +209,7 @@ advertised_capabilities: fn(init: String) -> [String] {
     }
     out.sort()
     out.dedup()
-    ^out
+    out.move()
 }
 
 // Minimal transcript JSON extractor; all byte offsets and original malformed-input behavior retained.
@@ -243,7 +243,7 @@ transcript_parser: module {
                 none -> break
             }
         }
-        ^out
+        out.move()
     }
     extract_string_field: fn(json: String, key: String) -> String? {
         needle: "\"{key}\""
@@ -312,7 +312,7 @@ transcript_parser: module {
             } else { break }
             remaining = skip_ws(remaining.trim_start_matches(','))
         }
-        ^result
+        result.move()
     }
     extract_object: fn(s: String) -> (String, String)? {
         s := skip_ws(s) // #4303
@@ -340,7 +340,7 @@ transcript_parser: module {
             remaining = skip_ws(rest.trim_start_matches(','))
             steps.push(parse_step(step_obj))
         }
-        Transcript{description: ^description, source: ^source, steps: ^steps}
+        Transcript{description: description.move(), source: source, steps: steps.move()}
     }
     parse_step: fn(obj: String) -> Step {
         send_needle: "\"send\""
@@ -351,7 +351,7 @@ transcript_parser: module {
         send_raw: if send_pos != none {
             after := skip_ws(obj[send_pos.unwrap() + send_needle.len()..<obj.len()]) // #4303
             after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
-            extract_object(after).map((o, _) -> ^o)
+            extract_object(after).map((o, _) -> o.move())
         } else -> none
         open_uri: if send_raw == none {
             open_pos: obj.find(open_needle)
@@ -373,7 +373,7 @@ transcript_parser: module {
             after := after.strip_prefix(':').unwrap_or(after).trim_start() // #4303
             !after.starts_with("null")
         } else -> false
-        Step{send_raw: ^send_raw, open_uri: ^open_uri, expect_contains: ^expect_contains, expect_notification: expect_notification}
+        Step{send_raw: send_raw.move(), open_uri: open_uri, expect_contains: expect_contains, expect_notification: expect_notification}
     }
 }
 run_json_transcript_file: fn(jet: &OSPath, path: &OSPath) {
@@ -387,20 +387,20 @@ run_json_transcript_file: fn(jet: &OSPath, path: &OSPath) {
         if step.open_uri != none {
             uri: step.open_uri.unwrap()
             open: "{{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{{\"textDocument\":{{\"uri\":\"{uri}\",\"languageId\":\"jet\",\"version\":1,\"text\":{json_string(transcript.source)}}}}}}}"
-            send_msg(&stdin, open)
+            send_msg(stdin, open)
             if step.expect_notification {
-                notif: read_msg(&stdout)
+                notif: read_msg(stdout)
                 assert(notif.contains("publishDiagnostics"), "[{path.display()}] open step: expected publishDiagnostics, got: {notif}")
                 loop expect in step.expect_contains -> assert(notif.contains(expect.as_str()), "[{path.display()}] expected {expect} in notification, got:\n{notif}")
             }
         } else if step.send_raw != none {
-            send_msg(&stdin, step.send_raw.unwrap())
+            send_msg(stdin, step.send_raw.unwrap())
             if !step.expect_contains.is_empty() {
-                resp: read_msg(&stdout)
+                resp: read_msg(stdout)
                 loop expect in step.expect_contains -> assert(resp.contains(expect.as_str()), "[{path.display()}] expected {expect} in response, got:\n{resp}")
             }
         }
     }
-    drop(^stdin)
+    drop(stdin)
     _: child.wait()
 }

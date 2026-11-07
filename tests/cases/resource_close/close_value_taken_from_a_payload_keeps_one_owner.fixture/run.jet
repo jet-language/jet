@@ -5,7 +5,7 @@ use files: core.files
 
 Res: struct { name: String }
 impl Res.Close {
-    close: fn(^self) { print("close {self.name}") }
+    close: fn(&&self) { print("close {self.name}") }
 }
 
 Held: struct {
@@ -48,7 +48,7 @@ held_at: fn(name: String) -> Held? {
 
 wrappers_at: fn(name: String) -> Wrappers? {
     held: held_at(name) ?? return None
-    Val(Wrappers{root: ".", held: ^held})
+    Val(Wrappers{root: ".", held: held.move()})
 }
 
 // The Store shape: the payload's field moves out of the owned carrier with a
@@ -60,7 +60,7 @@ lease_from_payload: fn() -> Lease {
     if wrappers == {
         .Val(found) -> {
             root = Val(found.root)
-            handle = Val(^found.held)
+            handle = Val(found.held.move())
         }
         .None -> {}
     }
@@ -71,17 +71,17 @@ lease_from_payload: fn() -> Lease {
 held_from_unwrap: fn() -> Held? {
     carrier: held_at("unwrap")
     found: carrier ?? return None
-    Val(^found)
+    Val(found.move())
 }
 
 // A match arm tail on an owned carrier moves its payload out with `^`.
 held_from_arm: fn() -> Held? {
     carrier: held_at("arm")
     found: if carrier == {
-        .Val(held) -> ^held
+        .Val(held) -> held.move()
         .None -> panic("no held directory")
     }
-    Val(^found)
+    Val(found.move())
 }
 
 check_lease: fn() {
@@ -116,8 +116,8 @@ check_arm: fn() {
 check_loop: fn() {
     list: [Res{name: "loop a"}, Res{name: "loop b"}]
     out := [Res]{}
-    loop item in ^list {
-        &out.push(item)
+    loop item in list.move() {
+        out.push(item)
     }
     print("loop moved {out.len()}")
 }

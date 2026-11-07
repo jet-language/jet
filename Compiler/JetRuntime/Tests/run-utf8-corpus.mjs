@@ -25,7 +25,7 @@ for (const [label, path] of [['object', object], ['pack', pack]]) {
   const count = definitions.filter(([name, kind]) => name === 'jet_string_validate_utf8' && kind === 'T').length;
   if (count !== 1) failures.push(`${label}: validator has ${count} strong definitions`);
 }
-const reason = 'The Rust utf8-corpus acceptance witness retired (owner #38/#59; Tower #4923): exact UTF-8 acceptance and error run not executed; no rustc invoked';
+const reason = 'The Rust utf8-corpus acceptance witness retired (owner #38/#59): exact UTF-8 acceptance and error run not executed; no rustc invoked';
 const receipt = { status: 'UNCOVERED', cardRequired: true, reason, object, pack, symbolFailures: failures };
 writeFileSync(join(out, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`);
 console.log(JSON.stringify(receipt));

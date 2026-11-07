@@ -56,7 +56,7 @@ jet_cli_emit_ast: fn(file: String, source: String, color: Bool, json: Bool, func
 // the checked functions (every checked function for a program without an
 // entry), one `fn` node per function of the entry package, or the functions
 // `--fn` names.
-jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool, function: String?, result: JetDriverCompileResult, inputs: ^JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
+jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool, function: String?, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -> JetDriverVerbOutput {
     // Sema reports a program that selects no entry (E0101) among them.
     diagnostics: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
     errors: jet_cli_errors(diagnostics)
@@ -65,15 +65,15 @@ jet_cli_emit_ir_result: fn(file: String, source: String, color: Bool, json: Bool
     if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
     lints := [Diagnostic]{}
     loop diagnostic in diagnostics {
-        if !jet_driver_is_a11y_lint(diagnostic.code) -> &lints.push(diagnostic)
+        if !jet_driver_is_a11y_lint(diagnostic.code) -> lints.push(diagnostic)
     }
     stderr: if lints.len() > 0 -> diagnostic_render_all(file, source, lints, color) else -> ""
-    checked := ^inputs ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
-    declarations := jet_driver_checked_declarations(&checked)
-    built: if checked.entry_key == .Val(entry_key) -> ir_build_program(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(^checked.functions, checked.decls, ^declarations.type_defs, ^declarations.impls, ^checked.sources, ^declarations.constants, ^declarations.foreign, result.compiler_threads)
+    checked := inputs.move() ?? return jet_cli_ice("the Jet compiler finished `{file}` without its checked functions")
+    declarations := jet_driver_checked_declarations(checked)
+    built: if checked.entry_key == .Val(entry_key) -> ir_build_program(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), entry_key, ir_checks_stock(), result.compiler_threads) else -> ir_build_all(checked.functions.move(), checked.decls, declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), result.compiler_threads)
     if built.failures.len() > 0 {
         census := [JetDriverIceRow]{}
-        loop failure in built.failures -> jet_driver_ice_record(&census, "{failure.name} [{failure.key}]", "ir.build", "unlowered", "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
+        loop failure in built.failures -> jet_driver_ice_record(census, "{failure.name} [{failure.key}]", "ir.build", "unlowered", "{failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
         return jet_cli_ice("the Jet backend failed on `{file}`: {jet_driver_ice_text(census)}")
     }
     selected: jet_cli_emit_ir_selected(built, result.package_identity, function)
@@ -99,7 +99,7 @@ jet_cli_emit_ir_selected: fn(built: IRBuildResult, package: String, function: St
             // (`Type:method`, `module::function`).
             if candidate.name != name && !candidate.key.ends_with("::{name}") && !candidate.key.ends_with(":{name}") -> next
         }
-        if candidate.key.starts_with(prefix) -> &selected.push(row) else -> &others.push(row)
+        if candidate.key.starts_with(prefix) -> selected.push(row) else -> others.push(row)
     }
     if function != None && selected.len() == 0 -> return others
     selected
@@ -112,7 +112,7 @@ jet_cli_emit_ir_function: fn(built: IRBuildResult, ir_function: IRFunction) -> J
     children := [JetCLIEmitNode]{}
     loop index in 1..<lines.len() {
         line: lines[index]
-        &children.push(jet_cli_emit_leaf("ir", if line.starts_with("  ") -> String.from_bytes_lossy(line.bytes()[2..<line.bytes().len()]) else -> line))
+        children.push(jet_cli_emit_leaf("ir", if line.starts_with("  ") -> String.from_bytes_lossy(line.bytes()[2..<line.bytes().len()]) else -> line))
     }
     jet_cli_emit_node("fn", if lines.len() > 0 -> lines[0] else -> "", children)
 }

@@ -1,53 +1,165 @@
 // Calls of checked foreign functions: a direct C function is called by its
 // checked symbol, which the program's C closure defines (an `#FFI(c)` body's
-// `jet_inline_jet_ffi_<name>` wrapper); an `#FFI(asm)` function is a leaf
-// whose code is its assembled template.
+// `jet_inline_jet_ffi_<name>` wrapper) or a C link unit provides; an
+// `extern rust` function through the slot descriptor its helper crate
+// exports (jet_ffi_<name>_cabi); an `#FFI(asm)` function is a leaf whose code
+// is its assembled template.
 
 use {
     jet_backend.[x64_assemble_template]
-    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, decl_table_find, name_rows_set, name_rows_value]
-    jet_sema.[SemaCheckedForeignFunction]
+    jet_foundation.[AccessConvention, DeclTable, Span, BodyCallArg, Type, decl_table_find, name_rows_set, name_rows_value, type_carrier_identity]
+    jet_sema.[SemaCheckedForeignFunction, sema_checked_foreign_array_length_name]
+}
+
+// A C handle type a foreign function names (IRProgram.foreign_handles): the
+// foreign close its constructors' `#Close` names, or the Jet close adapter
+// that calls it (None: the handle is never closed by Jet).
+IRForeignHandle: struct {
+    close_foreign: String?{None}
+    close_function: String?{None}
 }
 
 // Indexes the checked foreign functions by the function key their calls
-// name (the first row of a key), and by DeclID row over `decls`.
-ir_foreign_index: fn(p: &IRProgram, foreign: ^[SemaCheckedForeignFunction], decls: DeclTable) Never! {
+// name (the first row of a key), and by DeclID row over `decls`; and each C
+// handle type they name, with its close.
+ir_foreign_index: fn(p: &IRProgram, foreign: &&[SemaCheckedForeignFunction], decls: DeclTable) Never! {
     p.decl_foreign = (loop _ in 0..<decls.rows.len() -> -1)
-    loop row in ^foreign {
+    loop row in foreign -> ir_foreign_handle_note(p, row)
+    loop row in foreign.move() {
         if p.foreign.get(row.symbol_id.key) != None -> next
         if decl_table_find(decls, row.symbol_id.key) == .Val(id) {
             p.decl_foreign[id.row.index()] = p.foreign_rows.len()
-            &p.foreign_rows.push(row.copy())
+            p.foreign_rows.push(row.copy())
         }
         p.foreign[row.symbol_id.key.copy()] = row
     }
 }
 
-// A call of the foreign function `foreign`: a direct C function (C language
-// and ABI, no callback, close or undo adapter) whose arguments cross as C
-// scalars, an exact Int as its I64 (jet_int_owned_to_i64), a String as a
-// packed NUL-terminated copy freed after the call, a written machine scalar
-// (`&U64`, `&I32`, `&F64`) as the address of its place, read back after the
-// call, and a written struct of machine scalars (`&Pair`) as the address of
-// its own bytes, which the C function reads and writes in place; the C result
-// converts back.
-ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
-    if foreign.language == "asm" -> return ir_asm_call(&m, p, &b, foreign, args, span)
-    if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.close_function_key != None || foreign.close_foreign_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
-        return ir_fail_slot(&b, span, "foreign import requires a checked direct C scalar signature")
+// The C handle a foreign row names (its handle_key `c::<library>::<Name>`):
+// each parameter or result type named `Name`, closed by the row's `#Close`
+// when the row returns it.
+ir_foreign_handle_note: fn(p: &IRProgram, row: SemaCheckedForeignFunction) Never! {
+    if row.language != "c" -> return
+    key: row.handle_key ?? return
+    leaf: ir_short_name(key)
+    loop param in row.params -> ir_foreign_handle_add(p, param.ty, leaf, None, None)
+    if row.return_type == .Val(ty) -> ir_foreign_handle_add(p, ty, leaf, row.close_foreign_key, row.close_function_key)
+}
+
+// Registers `ty` as the C handle `leaf` when it names it, by its bare name:
+// the checked signature spells it module-qualified, a body by its bare name.
+ir_foreign_handle_add: fn(p: &IRProgram, ty: Type, leaf: String, close_foreign: String?, close_function: String?) Never! {
+    name: ir_nominal_name(ir_untag(ty)) ?? return
+    if ir_short_name(name) != leaf -> return
+    handle := p.foreign_handles.get(leaf) ?? IRForeignHandle{}
+    if close_foreign != None -> handle.close_foreign = close_foreign.copy()
+    if close_function != None -> handle.close_function = close_function.copy()
+    p.foreign_handles[leaf.copy()] = handle
+}
+
+// Whether `ty` is a List `[T]` (a C array of T at the boundary).
+ir_foreign_list: fn(ty: Type) -> Bool Never! {
+    if ir_untag(ty) == .List(_) -> return true
+    false
+}
+
+// The C handle `ty` names (IRProgram.foreign_handles), if it is one: a
+// nominal with no Jet definition whose bare name a foreign function names.
+ir_foreign_handle_of: fn(p: IRProgram, ty: Type) -> IRForeignHandle? Never! {
+    name: ir_nominal_name(ir_untag(ty)) ?? return None
+    if ir_type_args(ty).len() != 0 || ir_type_def(p, name) != None -> return None
+    p.foreign_handles.get(ir_short_name(name))
+}
+
+// Whether `ty` is a C handle type (IRProgram.foreign_handles).
+ir_foreign_handle_type: fn(p: IRProgram, ty: Type) -> Bool Never! {
+    ir_foreign_handle_of(p, ty) != None
+}
+
+// The row of the C handle type `ty`: the C pointer, which only moves. With a
+// close its drop is a generated jet_ir_ffi_close_<target> that closes a
+// non-null handle through the raw C close or the Jet close adapter. Every
+// spelling of the handle (qualified or bare) shares the one row.
+ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeignHandle) -> Int Never! {
+    bare: Type.Named{name: ir_short_name(ir_nominal_name(ir_untag(ty)) ?? "")}
+    identity: type_carrier_identity(bare)
+    c_symbol := ""
+    if handle.close_foreign == .Val(key) {
+        if p.foreign.get(key) == .Val(close) -> c_symbol = close.symbol.copy()
     }
-    if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "foreign import argument count differs from its checked signature")
-    word_row: ir_word_row(&m)
-    pointer_row: ir_pointer_row(&m)
+    callee := -1
+    if c_symbol == "" && handle.close_function == .Val(key) {
+        row: ir_function_row(p, key) ?? -1
+        if row >= 0 -> callee = ir_function_row_id(m, p, row, [Type]{}) ?? -1
+    }
+    if c_symbol == "" && callee < 0 -> return ir_intern_type(m, identity, ir_layout(IRTypeKind.Pointer, bare, 8, 8, IRClass.Pointer, false, 64, ""))
+    symbol: if c_symbol != "" -> "jet_ir_ffi_close_{c_symbol}" else -> "jet_ir_ffi_close_fn{callee}"
+    if name_rows_value(m.function_rows, symbol) == None {
+        // The function key is its symbol, so x64 resolves the row's drop
+        // symbol to this module function (as ir_scope_guard_row).
+        id: m.functions.len()
+        m.functions.push(ir_function_new("ffi.handle.close", symbol, symbol, "", 0))
+        name_rows_set(m.function_rows, symbol, id)
+        a := ir_builder_new(m.functions[id].copy())
+        pointer_row: ir_pointer_row(m)
+        held: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "handle"))
+        none: ir_word_const(m, a, 0)
+        present: ir_bool_op(m, a, IROp.Ne, held, none)
+        ir_open_if(a.f, present, a.line)
+        if c_symbol != "" {
+            _: ir_runtime(m, a, c_symbol, [Int]{held}, -1)
+        } else {
+            start: ir_args(a.f, [Int]{held})
+            ir_emit(a.f, IROp.Call, -1, callee, start, 1, a.line)
+        }
+        ir_end(a.f, a.line)
+        ir_emit(a.f, IROp.Return, -1, -1, -1, -1, a.line)
+        m.functions[id] = a.f.move()
+    }
+    ir_intern_type(m, identity, ir_owned_layout(IRTypeKind.Pointer, bare, symbol, ""))
+}
+
+// A call of the foreign function `foreign`: a direct C function (C language
+// and ABI, no callback or undo adapter) whose arguments cross as C scalars,
+// an exact Int as its I64 (jet_int_owned_to_i64), a String as a packed
+// NUL-terminated copy freed after the call, a C handle as its pointer (a
+// moved one is the C function's to close), a read List as the address of its
+// elements (a copy at the C stride when the strides differ), a written
+// machine scalar (`&U64`, `&I32`, `&F64`) as the address of its place, read
+// back after the call, a written List (`&[I8]`) as the address of its own
+// elements, and a written struct of machine scalars (`&Pair`) as the address
+// of its own bytes, which the C function reads and writes in place; the C
+// result converts back: a handle is owned, and a List result is the C array's
+// elements, as many as its written length parameter holds, copied into a new
+// List (the array stays the C library's).
+ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if foreign.language == "asm" -> return ir_asm_call(m, p, b, foreign, args, span)
+    if foreign.language.starts_with("rust:") -> return ir_rust_foreign_call(m, p, b, foreign, args, span)
+    if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
+        return ir_fail_slot(b, span, "foreign import requires a checked direct C scalar signature")
+    }
+    if args.len() != foreign.params.len() -> return ir_fail_slot(b, span, "foreign import argument count differs from its checked signature")
+    word_row: ir_word_row(m)
+    pointer_row: ir_pointer_row(m)
     result_row := -1
+    result_element := -1
+    result_width := 0
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
-            result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
+            result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
             // An inline Option word (IR_OPTION_INT_NONE) never crosses as its payload.
-            if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+            if ir_option_inline(m, result_row) -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
             if m.types[result_row].kind == {
                 .Int | .Word | .Bool | .Float | .String -> {}
-                else -> return ir_fail_slot(&b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                .Pointer -> {
+                    if !ir_foreign_handle_type(p, ty) -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                }
+                .Aggregate -> {
+                    if !ir_foreign_list(ty) -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                    result_element = ir_list_element_of(m, p, result_row) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
+                    result_width = ir_foreign_c_width(m, p, result_element) ?? return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no C array layout")
+                }
+                else -> return ir_fail_slot(b, span, "foreign C result {ir_type_name(ty)} has no native C ABI marshalling")
             }
         }
     }
@@ -55,78 +167,340 @@ ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaChec
     lowered := [Int]{}
     strings := [Int]{}
     sizes := [Int]{}
+    staged := [Int]{}
+    staged_sizes := [Int]{}
+    moved := [Int]{}
     backs := [IRWriteBack]{}
+    length_address := -1
+    length_row := -1
     loop (index, arg) in args {
         param: foreign.params[index]
         written: param.convention == AccessConvention.Write
-        if param.variadic || written != arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "foreign C import has a variadic or mismatched access convention")
-        row: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
-        if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshalling")
+        if param.variadic || written != arg.mut_borrow || arg.spread -> return ir_fail_slot(b, span, "foreign C import has a variadic or mismatched access convention")
+        row: ir_value_type(m, p, param.ty) ?? return ir_type_fail(b, span, param.ty)
+        if ir_option_inline(m, row) -> return ir_fail_slot(b, span, "foreign C parameter {ir_type_name(param.ty)} has no native C ABI marshalling")
         if written {
             if m.types[row].kind == {
                 .Word | .Float -> {}
-                .Aggregate -> {
-                    if !ir_foreign_plain_struct(&m, p, row) -> return ir_fail_slot(&b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                .Pointer -> {
+                    // A borrowed handle crosses as its pointer; it stays the caller's.
+                    if !ir_foreign_handle_type(p, param.ty) -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                    handle: ir_write_base(m, p, b, arg.value, span)
+                    if ir_failed(b) -> return -1
+                    lowered.push(handle)
+                    next
                 }
-                else -> return ir_fail_slot(&b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                .Aggregate -> {
+                    if ir_foreign_list(param.ty) {
+                        // The C function fills the List's own elements.
+                        element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no native C ABI marshalling")
+                        width: ir_foreign_c_width(m, p, element) ?? return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no C array layout")
+                        if width != ir_list_stride(m, element) -> return ir_fail_slot(b, span, "foreign C out-buffer {param.name} has no C array layout")
+                        list: ir_write_base(m, p, b, arg.value, span)
+                        if ir_failed(b) -> return -1
+                        ir_make_unique(m, p, b, list)
+                        lowered.push(ir_list_data(m, b, list))
+                        next
+                    }
+                    if !ir_foreign_plain_struct(m, p, row) -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
+                }
+                else -> return ir_fail_slot(b, span, "foreign C out-parameter {param.name} has no native C ABI marshalling")
             }
-            address: ir_place_address(&m, p, &b, arg.value, &backs, span)
+            address: ir_place_address(m, p, b, arg.value, backs, span)
             if ir_failed(b) -> return -1
-            &lowered.push(address)
+            if result_element >= 0 && length_address < 0 && m.types[row].kind == .Word && sema_checked_foreign_array_length_name(param.name) {
+                length_address = address
+                length_row = row
+            }
+            lowered.push(address)
             next
         }
-        value: ir_value_as(&m, p, &b, arg.value, row, span)
+        value: ir_value_as(m, p, b, arg.value, row, span)
         if ir_failed(b) -> return -1
-        if value < 0 -> return ir_fail_slot(&b, span, "Unit foreign C argument")
-        &values.push(value)
+        if value < 0 -> return ir_fail_slot(b, span, "Unit foreign C argument")
         if m.types[row].kind == {
-            .Int -> &lowered.push(ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row))
-            .Word | .Bool | .Float | .Char -> &lowered.push(value)
-            .String -> {
-                pointer: ir_runtime(&m, &b, "jet_rt_c_string_pack", [Int]{value}, pointer_row)
-                length: ir_runtime(&m, &b, "jet_rt_string_byte_len", [Int]{value}, word_row)
-                one: ir_word_const(&m, &b, 1)
-                size: ir_temp(&m, &b, word_row)
-                ir_emit(&b.f, IROp.Add, size, length, one, IR_OVERFLOW_WRAP, b.line)
-                &strings.push(pointer)
-                &sizes.push(size)
-                &lowered.push(pointer)
+            .Int -> {
+                values.push(value)
+                lowered.push(ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row))
             }
-            else -> return ir_fail_slot(&b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+            .Word | .Bool | .Float | .Char -> {
+                values.push(value)
+                lowered.push(value)
+            }
+            .String -> {
+                values.push(value)
+                pointer: ir_runtime(m, b, "jet_rt_c_string_pack", [Int]{value}, pointer_row)
+                length: ir_runtime(m, b, "jet_rt_string_byte_len", [Int]{value}, word_row)
+                one: ir_word_const(m, b, 1)
+                size: ir_temp(m, b, word_row)
+                ir_emit(b.f, IROp.Add, size, length, one, IR_OVERFLOW_WRAP, b.line)
+                strings.push(pointer)
+                sizes.push(size)
+                lowered.push(pointer)
+            }
+            .Pointer -> {
+                if !ir_foreign_handle_type(p, param.ty) -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+                if param.convention == AccessConvention.Move {
+                    // The C function takes the handle: Jet no longer closes it.
+                    ir_close_disarm(b, value)
+                    owned: ir_own(m, p, b, value)
+                    moved.push(owned)
+                    lowered.push(owned)
+                } else {
+                    values.push(value)
+                    lowered.push(value)
+                }
+            }
+            .Aggregate -> {
+                if !ir_foreign_list(param.ty) -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+                element: ir_list_element_of(m, p, row) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
+                width: ir_foreign_c_width(m, p, element) ?? return ir_fail_slot(b, span, "foreign C parameter {param.name} has no C array layout")
+                values.push(value)
+                stride: ir_list_stride(m, element)
+                data: ir_list_data(m, b, value)
+                if width == stride {
+                    lowered.push(data)
+                    next
+                }
+                // Padded Jet elements cross as a packed C array, freed after the call.
+                count: ir_list_length(m, b, value)
+                width_slot: ir_word_const(m, b, width)
+                packed: ir_word_op(m, b, IROp.Mul, count, width_slot)
+                eight: ir_word_const(m, b, 8)
+                bytes: ir_word_op(m, b, IROp.Add, packed, eight)
+                buffer: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+                ir_foreign_restride(m, b, buffer, width, data, stride, count, width)
+                staged.push(buffer)
+                staged_sizes.push(bytes)
+                lowered.push(buffer)
+            }
+            else -> return ir_fail_slot(b, span, "foreign C parameter {param.name} has no native C ABI marshalling")
         }
     }
+    if result_element >= 0 && length_address < 0 -> return ir_fail_slot(b, span, "foreign C result {foreign.name} has no written length parameter")
     dst := -1
     kind: if result_row < 0 -> IRTypeKind.Unit else -> m.types[result_row].kind
     if kind == {
         .Unit -> {
-            _: ir_runtime(&m, &b, foreign.symbol, lowered, -1)
+            _: ir_runtime(m, b, foreign.symbol, lowered, -1)
         }
         .Int -> {
-            raw: ir_runtime(&m, &b, foreign.symbol, lowered, word_row)
-            dst = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
+            raw: ir_runtime(m, b, foreign.symbol, lowered, word_row)
+            dst = ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
         }
         .Bool -> {
-            raw: ir_runtime(&m, &b, foreign.symbol, lowered, word_row)
-            mask: ir_word_const(&m, &b, 255)
-            low: ir_temp(&m, &b, word_row)
-            ir_emit(&b.f, IROp.BitAnd, low, raw, mask, IR_OVERFLOW_WRAP, b.line)
-            zero: ir_word_const(&m, &b, 0)
-            dst = ir_bool_op(&m, &b, IROp.Ne, low, zero)
+            raw: ir_runtime(m, b, foreign.symbol, lowered, word_row)
+            mask: ir_word_const(m, b, 255)
+            low: ir_temp(m, b, word_row)
+            ir_emit(b.f, IROp.BitAnd, low, raw, mask, IR_OVERFLOW_WRAP, b.line)
+            zero: ir_word_const(m, b, 0)
+            dst = ir_bool_op(m, b, IROp.Ne, low, zero)
         }
         .String -> {
             // Own the String before freeing the arguments: a C function may
             // return a pointer into one of its CString arguments.
-            raw: ir_runtime(&m, &b, foreign.symbol, lowered, pointer_row)
-            dst = ir_runtime(&m, &b, "jet_rt_c_string_unpack", [Int]{raw}, result_row)
+            raw: ir_runtime(m, b, foreign.symbol, lowered, pointer_row)
+            dst = ir_runtime(m, b, "jet_rt_c_string_unpack", [Int]{raw}, result_row)
         }
-        else -> dst = ir_runtime(&m, &b, foreign.symbol, lowered, result_row)
+        .Aggregate -> {
+            raw: ir_runtime(m, b, foreign.symbol, lowered, word_row)
+            length: ir_load_at(m, b, length_address, 0, length_row)
+            dst = ir_foreign_list_result(m, b, result_row, result_element, result_width, raw, length)
+        }
+        else -> dst = ir_runtime(m, b, foreign.symbol, lowered, result_row)
     }
-    loop back in backs -> ir_emit(&b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
+    loop back in backs -> ir_emit(b.f, IROp.Load, back.slot, back.cell, 0, -1, b.line)
     loop (index, pointer) in strings {
-        _: ir_runtime(&m, &b, "jet_rt_c_string_free", [Int]{pointer, sizes[index]}, -1)
+        _: ir_runtime(m, b, "jet_rt_c_string_free", [Int]{pointer, sizes[index]}, -1)
     }
-    loop value in values -> ir_release(&m, &b, value)
+    loop (index, buffer) in staged {
+        eight: ir_word_const(m, b, 8)
+        _: ir_runtime(m, b, "jet_rt_free", [Int]{buffer, staged_sizes[index], eight}, -1)
+    }
+    loop owned in moved -> b.fresh[owned] = false
+    loop value in values {
+        ir_close_temporary(m, p, b, value, span)
+        ir_release(m, b, value)
+    }
+
     dst
+}
+
+// The bytes one element of type row `row` takes in a C array: a machine
+// scalar's own size, or a `#Layout(c)` struct of machine scalars (laid out
+// in declaration order, as C does) rounded up to its widest member's
+// alignment; None for any other element.
+ir_foreign_c_width: fn(m: &IRModule, p: IRProgram, row: Int) -> Int? Never! {
+    if m.types[row].drop != "" || ir_enum_def(m, p, row) != None -> return None
+    if m.types[row].kind == {
+        .Word | .Float | .Float32 | .Bool -> return Val(m.types[row].size)
+        .Aggregate -> {}
+        else -> return None
+    }
+    ty: ir_untag(m.types[row].ty)
+    nominal: ir_nominal_name(ty) ?? return None
+    definition: ir_type_def(p, nominal) ?? return None
+    if p.types[definition].layout == None -> return None
+    members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return None
+    end := 0
+    align := 1
+    loop member in members {
+        if member.boxed || ir_enum_def(m, p, member.ty) != None -> return None
+        if m.types[member.ty].kind == {
+            .Word | .Float | .Float32 | .Bool -> {}
+            else -> return None
+        }
+        reach: member.offset + m.types[member.ty].size
+        if reach > end -> end = reach
+        if m.types[member.ty].align > align -> align = m.types[member.ty].align
+    }
+    if end % align != 0 -> end += align - end % align
+    Val(end)
+}
+
+// Copies `count` elements of `width` bytes from the buffer `from`, one each
+// `from_stride` bytes, into the buffer `to`, one each `to_stride` bytes.
+ir_foreign_restride: fn(m: &IRModule, b: &IRBuilder, to: Int, to_stride: Int, from: Int, from_stride: Int, count: Int, width: Int) Never! {
+    index: ir_word_const(m, b, 0)
+    bytes: ir_word_const(m, b, width)
+    exit: ir_open(b.f, IROp.Block, b.line)
+    _: ir_open(b.f, IROp.Loop, b.line)
+    more: ir_bool_op(m, b, IROp.Lt, index, count)
+    ir_exit_unless(m, b, more, exit)
+    target: ir_element_address(m, b, to, index, to_stride)
+    source: ir_element_address(m, b, from, index, from_stride)
+    _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{target, source, bytes}, -1)
+    one: ir_word_const(m, b, 1)
+    ir_emit(b.f, IROp.Add, index, index, one, IR_OVERFLOW_WRAP, b.line)
+    ir_emit(b.f, IROp.Br, -1, 0, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+}
+
+// A new List of type row `row` holding the `length` elements of the C array
+// at `raw` (`width` bytes each), copied at the List's stride; empty when the
+// array is null or empty. The C array stays its library's.
+ir_foreign_list_result: fn(m: &IRModule, b: &IRBuilder, row: Int, element: Int, width: Int, raw: Int, length: Int) -> Int Never! {
+    stride: ir_list_stride(m, element)
+    word_row: ir_word_row(m)
+    storage: ir_fresh_temp(m, b, row)
+    ir_emit(b.f, IROp.StackAddress, storage, 24, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    loop offset in ([Int]{0, 8, 16}) -> ir_emit(b.f, IROp.Store, -1, storage, offset, zero, b.line)
+    count: ir_temp(m, b, word_row)
+    ir_emit(b.f, IROp.Copy, count, length, -1, -1, b.line)
+    present: ir_bool_op(m, b, IROp.Ne, raw, zero)
+    ir_open_if(b.f, present, b.line)
+    filled: ir_bool_op(m, b, IROp.Ne, count, zero)
+    ir_open_if(b.f, filled, b.line)
+    stride_slot: ir_word_const(m, b, stride)
+    bytes: ir_word_op(m, b, IROp.Mul, count, stride_slot)
+    eight: ir_word_const(m, b, 8)
+    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    if width == stride {
+        _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, raw, bytes}, -1)
+    } else {
+        ir_foreign_restride(m, b, data, stride, raw, width, count, width)
+    }
+    ir_emit(b.f, IROp.Store, -1, storage, 0, count, b.line)
+    ir_emit(b.f, IROp.Store, -1, storage, 8, count, b.line)
+    ir_emit(b.f, IROp.Store, -1, storage, 16, data, b.line)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    storage
+}
+
+// A call of the `extern rust` function `foreign` through the slot descriptor
+// its helper crate exports (RustForeignSource.jet
+// jet_driver_rust_foreign_trampoline): `jet_ffi_<name>_cabi(args, argc, out)`
+// over 24-byte slots {value, ptr, len}. A read scalar crosses in `value` (an
+// exact Int as its I64), a read String as its bytes' address and length; the
+// result comes back the same way, a String as a buffer the crate frees
+// (jet_ffi_cabi_free) once copied. A nonzero status is the Rust function's
+// panic, which stops the program.
+ir_rust_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if args.len() != foreign.params.len() -> return ir_fail_slot(b, span, "foreign import argument count differs from its checked signature")
+    word_row: ir_word_row(m)
+    pointer_row: ir_pointer_row(m)
+    result_row := -1
+    if foreign.return_type == .Val(ty) {
+        if !ir_unit_type(ty) {
+            result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+            if !ir_rust_slot_crosses(m, result_row) -> return ir_fail_slot(b, span, "extern rust result {ir_type_name(ty)} has no native slot descriptor")
+        }
+    }
+    slots: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, slots, if args.len() == 0 -> 24 else -> args.len() * 24, 8, -1, b.line)
+    out: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, out, 24, 8, -1, b.line)
+    zero: ir_word_const(m, b, 0)
+    loop offset in ([Int]{0, 8, 16}) -> ir_emit(b.f, IROp.Store, -1, out, offset, zero, b.line)
+    values := [Int]{}
+    loop (index, arg) in args {
+        param: foreign.params[index]
+        if param.convention != AccessConvention.Read || param.variadic || arg.mut_borrow || arg.spread -> return ir_fail_slot(b, span, "extern rust parameter {param.name} has no native slot descriptor: only read Strings and scalars cross")
+        row: ir_value_type(m, p, param.ty) ?? return ir_type_fail(b, span, param.ty)
+        if !ir_rust_slot_crosses(m, row) -> return ir_fail_slot(b, span, "extern rust parameter {param.name} has no native slot descriptor: only read Strings and scalars cross")
+        value: ir_value_as(m, p, b, arg.value, row, span)
+        if ir_failed(b) -> return -1
+        if value < 0 -> return ir_fail_slot(b, span, "Unit extern rust argument")
+        values.push(value)
+        base: index * 24
+        loop offset in ([Int]{0, 8, 16}) -> ir_emit(b.f, IROp.Store, -1, slots, base + offset, zero, b.line)
+        if m.types[row].kind == {
+            .Int -> {
+                wide: ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)
+                ir_emit(b.f, IROp.Store, -1, slots, base, wide, b.line)
+            }
+            .String -> {
+                data: ir_runtime(m, b, "jet_rt_string_data", [Int]{value}, pointer_row)
+                length: ir_runtime(m, b, "jet_rt_string_byte_len", [Int]{value}, word_row)
+                ir_emit(b.f, IROp.Store, -1, slots, base + 8, data, b.line)
+                ir_emit(b.f, IROp.Store, -1, slots, base + 16, length, b.line)
+            }
+            else -> ir_emit(b.f, IROp.Store, -1, slots, base, value, b.line)
+        }
+    }
+    argc: ir_word_const(m, b, args.len())
+    status: ir_runtime(m, b, "jet_ffi_{foreign.name}_cabi", [Int]{slots, argc, out}, word_row)
+    mask: ir_word_const(m, b, 4294967295)
+    code: ir_word_op(m, b, IROp.BitAnd, status, mask)
+    failed: ir_bool_op(m, b, IROp.Ne, code, zero)
+    ir_open_if(b.f, failed, b.line)
+    message: ir_static_text(m, b, "a foreign function panicked")
+    _: ir_runtime(m, b, "jet_rt_panic_message", message, -1)
+    ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+    ir_end(b.f, b.line)
+    dst := -1
+    if result_row >= 0 {
+        if m.types[result_row].kind == {
+            .Int -> {
+                wide: ir_load_word(m, b, out, 0)
+                dst = ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{wide}, result_row)
+            }
+            .String -> {
+                data: ir_load_word(m, b, out, 8)
+                length: ir_load_word(m, b, out, 16)
+                dst = ir_runtime(m, b, "jet_rt_string_from_static", [Int]{data, length}, result_row)
+                _: ir_runtime(m, b, "jet_ffi_cabi_free", [Int]{data, length}, -1)
+            }
+            else -> dst = ir_load_at(m, b, out, 0, result_row)
+        }
+    }
+    loop value in values -> ir_release(m, b, value)
+    dst
+}
+
+// Whether a value of type row `row` crosses a Rust slot descriptor: a String
+// as its bytes, or in the value word an exact Int, a machine integer, a
+// float, a Bool or a Char.
+ir_rust_slot_crosses: fn(m: &IRModule, row: Int) -> Bool Never! {
+    if ir_option_inline(m, row) -> return false
+    if m.types[row].kind == {
+        .Int | .Bool | .Float | .Float32 | .Char | .String -> true
+        .Word -> ir_untag(m.types[row].ty) == .IntN(_, _)
+        else -> false
+    }
 }
 
 // Whether type row `row` is a struct whose bytes hold only machine scalars:
@@ -135,13 +509,13 @@ ir_foreign_plain_struct: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never!
     ty: ir_untag(m.types[row].ty)
     nominal: ir_nominal_name(ty) ?? return false
     definition: ir_type_def(p, nominal) ?? return false
-    members: ir_struct_members(&m, p, definition, ir_type_args(ty)) ?? return false
+    members: ir_struct_members(m, p, definition, ir_type_args(ty)) ?? return false
     loop member in members {
         if member.boxed || m.types[member.ty].drop != "" -> return false
         if m.types[member.ty].kind == {
             .Word | .Float | .Float32 | .Bool -> {}
             .Aggregate -> {
-                if !ir_foreign_plain_struct(&m, p, member.ty) -> return false
+                if !ir_foreign_plain_struct(m, p, member.ty) -> return false
             }
             else -> return false
         }
@@ -154,53 +528,53 @@ ir_foreign_plain_struct: fn(m: &IRModule, p: IRProgram, row: Int) -> Bool Never!
 // (jet_int_owned_to_i64) and an Int result converts back
 // (jet_int_owned_from_i64), as for a C function.
 ir_asm_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
-    if args.len() != foreign.params.len() -> return ir_fail_slot(&b, span, "inline asm argument count differs from its checked signature")
-    word_row: ir_word_row(&m)
+    if args.len() != foreign.params.len() -> return ir_fail_slot(b, span, "inline asm argument count differs from its checked signature")
+    word_row: ir_word_row(m)
     rows := [Int]{}
     leaf_params := [Int]{}
     loop param in foreign.params {
-        row: ir_value_type(&m, p, param.ty) ?? return ir_type_fail(&b, span, param.ty)
-        if ir_option_inline(m, row) -> return ir_fail_slot(&b, span, "inline asm: parameter {param.name} is not a machine word")
+        row: ir_value_type(m, p, param.ty) ?? return ir_type_fail(b, span, param.ty)
+        if ir_option_inline(m, row) -> return ir_fail_slot(b, span, "inline asm: parameter {param.name} is not a machine word")
         if m.types[row].kind == {
-            .Int -> &leaf_params.push(word_row)
-            .Word | .Pointer -> &leaf_params.push(row)
-            else -> return ir_fail_slot(&b, span, "inline asm: parameter {param.name} is not a machine word")
+            .Int -> leaf_params.push(word_row)
+            .Word | .Pointer -> leaf_params.push(row)
+            else -> return ir_fail_slot(b, span, "inline asm: parameter {param.name} is not a machine word")
         }
-        if param.convention == AccessConvention.Write -> return ir_fail_slot(&b, span, "inline asm: write parameters are unsupported")
-        &rows.push(row)
+        if param.convention == AccessConvention.Write -> return ir_fail_slot(b, span, "inline asm: write parameters are unsupported")
+        rows.push(row)
     }
     result_row := -1
     leaf_result := -1
     if foreign.return_type == .Val(ty) {
         if !ir_unit_type(ty) {
-            result_row = ir_value_type(&m, p, ty) ?? return ir_type_fail(&b, span, ty)
-            if ir_option_inline(m, result_row) -> return ir_fail_slot(&b, span, "inline asm: result is not a machine word")
+            result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+            if ir_option_inline(m, result_row) -> return ir_fail_slot(b, span, "inline asm: result is not a machine word")
             if m.types[result_row].kind == {
                 .Int -> leaf_result = word_row
                 .Word | .Pointer -> leaf_result = result_row
-                else -> return ir_fail_slot(&b, span, "inline asm: result is not a machine word")
+                else -> return ir_fail_slot(b, span, "inline asm: result is not a machine word")
             }
         }
     }
-    problem: ir_asm_leaf(&m, p, foreign, leaf_params, leaf_result)
-    if problem != "" -> return ir_fail_slot(&b, span, problem)
-    leaf: name_rows_value(m.function_rows, "{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(&b, span, "inline asm leaf of {foreign.name} was not built")
+    problem: ir_asm_leaf(m, p, foreign, leaf_params, leaf_result)
+    if problem != "" -> return ir_fail_slot(b, span, problem)
+    leaf: name_rows_value(m.function_rows, "{foreign.symbol_id.key}#asm") ?? return ir_fail_slot(b, span, "inline asm leaf of {foreign.name} was not built")
     values := [Int]{}
     lowered := [Int]{}
     loop (index, arg) in args {
-        if arg.mut_borrow || arg.spread -> return ir_fail_slot(&b, span, "inline asm has a mismatched access convention")
-        value: ir_value_as(&m, p, &b, arg.value, rows[index], span)
+        if arg.mut_borrow || arg.spread -> return ir_fail_slot(b, span, "inline asm has a mismatched access convention")
+        value: ir_value_as(m, p, b, arg.value, rows[index], span)
         if ir_failed(b) -> return -1
-        if value < 0 -> return ir_fail_slot(&b, span, "Unit inline asm argument")
-        &values.push(value)
-        if m.types[rows[index]].kind == .Int -> &lowered.push(ir_runtime(&m, &b, "jet_int_owned_to_i64", [Int]{value}, word_row)) else -> &lowered.push(value)
+        if value < 0 -> return ir_fail_slot(b, span, "Unit inline asm argument")
+        values.push(value)
+        if m.types[rows[index]].kind == .Int -> lowered.push(ir_runtime(m, b, "jet_int_owned_to_i64", [Int]{value}, word_row)) else -> lowered.push(value)
     }
-    raw: if leaf_result >= 0 -> ir_temp(&m, &b, leaf_result) else -> -1
-    start: ir_args(&b.f, lowered)
-    ir_emit(&b.f, IROp.Call, raw, leaf, start, lowered.len(), b.line)
+    raw: if leaf_result >= 0 -> ir_temp(m, b, leaf_result) else -> -1
+    start: ir_args(b.f, lowered)
+    ir_emit(b.f, IROp.Call, raw, leaf, start, lowered.len(), b.line)
     dst := raw
-    if result_row >= 0 && m.types[result_row].kind == .Int -> dst = ir_runtime(&m, &b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
-    loop value in values -> ir_release(&m, &b, value)
+    if result_row >= 0 && m.types[result_row].kind == .Int -> dst = ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{raw}, result_row)
+    loop value in values -> ir_release(m, b, value)
     dst
 }
 
@@ -220,16 +594,16 @@ ir_asm_leaf: fn(m: &IRModule, p: IRProgram, foreign: SemaCheckedForeignFunction,
     bytes := [U8]{}
     loop byte in "{foreign.module_name}.{foreign.name}".bytes() {
         alphanumeric: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
-        &bytes.push(if alphanumeric -> byte else -> U8{95})
+        bytes.push(if alphanumeric -> byte else -> U8{95})
     }
     symbol: String.from_bytes(bytes) ?? foreign.name.copy()
     f := ir_function_new(foreign.name, key, "{symbol}__asm", foreign.source_file, line)
-    loop (index, param) in foreign.params -> _ := ir_slot(&f, params[index], IRSlotKind.Param, ir_intern_name(&m, param.name), line)
+    loop (index, param) in foreign.params -> _ := ir_slot(f, params[index], IRSlotKind.Param, ir_intern_name(m, param.name), line)
     f.result = result
     f.asm = Val(IRAsmLeaf{code: assembled.code, regs: assembled.regs, result: assembled.result})
     id: m.functions.len()
-    &m.functions.push(^f)
-    name_rows_set(&m.function_rows, key, id)
+    m.functions.push(f)
+    name_rows_set(m.function_rows, key, id)
     ""
 }
 

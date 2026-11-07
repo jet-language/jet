@@ -200,17 +200,17 @@ nixeval_evaluate_devshell_output: fn(source: String, system: String, output: Str
 }
 
 // Evaluate the devShell surface with explicit, read-only project-root authority.
-nixeval_evaluate_devshell_with_import_authority: fn(source: String, system: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
-    nixeval_evaluate_devshell_output_with_import_authority(source, system, "default", ^authority)
+nixeval_evaluate_devshell_with_import_authority: fn(source: String, system: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+    nixeval_evaluate_devshell_output_with_import_authority(source, system, "default", authority)
 }
 
-nixeval_evaluate_devshell_output_with_import_authority: fn(source: String, system: String, output: String, authority: ^NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
+nixeval_evaluate_devshell_output_with_import_authority: fn(source: String, system: String, output: String, authority: &&NixEvalAuthority?) -> NixEvalDevShell NixEvalError! {
     nixeval_check_request(source, system)
     if output == "" || nixeval_has_empty_segment(output) {
         return Err(NixEvalError.Invalid("devShell output selector must be a non-empty attribute path"))
     }
-    evaluator := NixEvaluator.new(system, ^authority)
-    &evaluator.devshell(source, output)
+    evaluator := NixEvaluator.new(system, authority)
+    evaluator.devshell(source, output)
 }
 
 // Evaluate the bounded pure `builtins.derivation` surface. It never executes
@@ -219,10 +219,10 @@ nixeval_evaluate_derivation: fn(source: String, system: String) -> NixEvalDeriva
     nixeval_evaluate_derivation_with_import_authority(source, system, None)
 }
 
-nixeval_evaluate_derivation_with_import_authority: fn(source: String, system: String, authority: ^NixEvalAuthority?) -> NixEvalDerivation NixEvalError! {
+nixeval_evaluate_derivation_with_import_authority: fn(source: String, system: String, authority: &&NixEvalAuthority?) -> NixEvalDerivation NixEvalError! {
     nixeval_check_request(source, system)
-    evaluator := NixEvaluator.new(system, ^authority)
-    &evaluator.derivation(source)
+    evaluator := NixEvaluator.new(system, authority)
+    evaluator.derivation(source)
 }
 
 // Evaluate one bounded packages.<system>.<attribute> derivation output.
@@ -230,10 +230,10 @@ nixeval_evaluate_derivation_output: fn(source: String, system: String, attribute
     nixeval_evaluate_derivation_output_with_import_authority(source, system, attribute, None)
 }
 
-nixeval_evaluate_derivation_output_with_import_authority: fn(source: String, system: String, attribute: String, authority: ^NixEvalAuthority?) -> NixEvalDerivation NixEvalError! {
+nixeval_evaluate_derivation_output_with_import_authority: fn(source: String, system: String, attribute: String, authority: &&NixEvalAuthority?) -> NixEvalDerivation NixEvalError! {
     nixeval_check_request(source, system)
-    evaluator := NixEvaluator.new(system, ^authority)
-    &evaluator.derivation_output(source, attribute)
+    evaluator := NixEvaluator.new(system, authority)
+    evaluator.derivation_output(source, attribute)
 }
 
 nixeval_has_empty_segment: fn(path: String) -> Bool Never! {

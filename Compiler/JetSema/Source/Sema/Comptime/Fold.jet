@@ -96,7 +96,7 @@ sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, exp
         .StructLit(fields) -> {
             type_name: sema_comptime_fold_type_name(expression_ty) ?? return None
             folded := [TComptimeField]{}
-            loop field in fields -> &folded.push(TComptimeField{name: field.field.name, value: sema_comptime_fold(tree, field.value, values) ?? return None})
+            loop field in fields -> folded.push(TComptimeField{name: field.field.name, value: sema_comptime_fold(tree, field.value, values) ?? return None})
             return Val(TComptimeValue.Struct{type_name: type_name, fields: folded})
         }
         .EnumCtor(_, variant, payload) -> {
@@ -282,7 +282,7 @@ sema_comptime_fold_from_bytes: fn(tree: BodyTree, value: Int, values: [SemaCompt
             // copy: `values_bytes` is a payload of `folded`, which keeps the original
             .Bytes(values_bytes) -> bytes = values_bytes.copy()
             .List(items) -> loop item in items {
-                if item == .Int(number) -> &bytes.push(U8.from_int(number) ?? return None)
+                if item == .Int(number) -> bytes.push(U8.from_int(number) ?? return None)
                 else -> return None
             }
             else -> return None
@@ -295,7 +295,7 @@ sema_comptime_fold_from_bytes: fn(tree: BodyTree, value: Int, values: [SemaCompt
 
 sema_comptime_fold_list: fn(tree: BodyTree, elements: [Int], values: [SemaComptimeItemValue]) -> TComptimeValue? Never! {
     folded := [TComptimeValue]{}
-    loop element in elements -> &folded.push(sema_comptime_fold(tree, element, values) ?? return None)
+    loop element in elements -> folded.push(sema_comptime_fold(tree, element, values) ?? return None)
     Val(TComptimeValue.List{values: folded})
 }
 
@@ -303,8 +303,8 @@ sema_comptime_fold_enum: fn(tree: BodyTree, type_name: String, variant: String, 
     args := [TComptimeEnumArg]{}
     if payload == {
         .Unit -> {}
-        .Positional(positional) -> loop argument in positional -> &args.push(TComptimeEnumArg{name: None, value: sema_comptime_fold(tree, argument.value, values) ?? return None})
-        .Named(named) -> loop argument in named -> &args.push(TComptimeEnumArg{name: Val(argument.name), value: sema_comptime_fold(tree, argument.value.value, values) ?? return None})
+        .Positional(positional) -> loop argument in positional -> args.push(TComptimeEnumArg{name: None, value: sema_comptime_fold(tree, argument.value, values) ?? return None})
+        .Named(named) -> loop argument in named -> args.push(TComptimeEnumArg{name: Val(argument.name), value: sema_comptime_fold(tree, argument.value.value, values) ?? return None})
     }
     Val(TComptimeValue.Enum{type_name: type_name, variant: variant, args: args})
 }

@@ -1,5 +1,5 @@
 add_through_param: fn(values: &Rank<Int>, value: Int) -> Bool {
-    return &values.add(value)
+    return values.add(value)
 }
 rank_view: fn() -> String {
     values := Rank.from([3, 1, 2, 3])
@@ -9,9 +9,9 @@ rank_view: fn() -> String {
     first: values.first() ?? -1
     last: values.last() ?? -1
     had_two: values.has(2)
-    added_four: &values.add(4)
-    duplicate_two: &values.add(2)
-    &values.remove(2)
+    added_four: values.add(4)
+    duplicate_two: values.add(2)
+    values.remove(2)
     has_two: values.has(2)
     current: values.to_list()
     other := Rank.from([5, 4, 0])
@@ -19,8 +19,8 @@ rank_view: fn() -> String {
     after_union: values.to_list()
     words := Rank.from(["z", "a", "m", "a"])
     through_param := Rank.from([9, 7])
-    param_added: add_through_param(&through_param, 8)
-    &values.clear()
+    param_added: add_through_param(through_param, 8)
+    values.clear()
     empty := Rank.new()
     return "{initial}|{initial_len}|{initial_empty}|{first}|{last}|{had_two}|{added_four}|{duplicate_two}|{has_two}|{current}|{combined}|{after_union}|{words.to_list()}|{param_added}|{through_param.to_list()}|{values.is_empty()}|{values.len()}|{values.first() ?? -1}|{empty.is_empty()}"
 }

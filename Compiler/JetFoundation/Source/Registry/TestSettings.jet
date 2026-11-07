@@ -1,8 +1,8 @@
-// D-TEST-INVOKE1=A: the one `jet test` settings table. By one naming rule a
+// The one `jet test` settings table. By one naming rule a
 // row is the flag `--shard=3/8` (`_` is `-` in a flag), the TestProfile field
 // `shard: 3/8` in package.jet and the call `t.shard(3, 8)` on the `Test` value
-// of test.jet's `test: fn`. One order holds, as for build options
-// (D-SETTING-ORDER1=A): the selected test profile, then `test: fn`, then the
+// of test.jet's `test: fn`. One order holds, as for build options:
+// the selected test profile, then `test: fn`, then the
 // flag, each later layer replacing the earlier. `jet test` runs `test: fn` once
 // in a plan step to collect its calls before any test runs. A row that is
 // not `ported` is refused in all three places (E2104 for the field and the
@@ -103,14 +103,18 @@ JET_TEST_SETTINGS: comptime { [TestSettingRow]{
     // (exported to each case as JETPACK_BIN).
     {name: "jetpack", kind: TestSettingKind.Path, ported: true, help: "Run the corpora's jetpack steps and engine verbs with the named jetpack"},
     {name: "where", kind: TestSettingKind.Text, ported: false, help: "Filter recorded package, dependency, path, tag, or status facts"},
-    {name: "coverage", kind: TestSettingKind.Switch, ported: false, help: "Show function or diagnostic coverage"},
-    {name: "grade", kind: TestSettingKind.Text, ported: false, help: "Select the generated property-test grade: generated"},
-    {name: "iterations", kind: TestSettingKind.Count, ported: false, help: "Generated-grade case budget (default 1000)"},
+    // A run with a corpus suite refuses it: no corpus row is instrumented.
+    {name: "coverage", kind: TestSettingKind.Switch, ported: true, help: "Show function or diagnostic coverage"},
+    // The generated grade: each property test runs `iterations` generated
+    // cases instead of its default budget, from the base `seed` (a fixed 0
+    // unless set, or named by JET_PROP_SEED). `generated` is the one grade.
+    {name: "grade", kind: TestSettingKind.Text, ported: true, help: "Select the generated property-test grade: generated"},
+    {name: "iterations", kind: TestSettingKind.Count, ported: true, help: "Generated-grade case budget (default 1000)"},
     {name: "time", kind: TestSettingKind.Count, ported: false, help: "Generated-grade wall-clock budget in seconds"},
-    {name: "seed", kind: TestSettingKind.Seed, ported: false, help: "Generated-grade base PRNG seed (default: fixed, reproducible)"},
+    {name: "seed", kind: TestSettingKind.Seed, ported: true, help: "Generated-grade base PRNG seed (default: fixed 0, reproducible)"},
     {name: "corpus", kind: TestSettingKind.Path, ported: false, help: "Generated-grade corpus directory (default: .jet/fuzz/<test>)"},
     {name: "watch", kind: TestSettingKind.Switch, ported: false, help: "Re-run on dependency changes"},
-    {name: "record", kind: TestSettingKind.Text, ported: false, help: "Record a named replay"},
+    {name: "record", kind: TestSettingKind.Text, ported: true, help: "Record a named replay"},
     {name: "browser", kind: TestSettingKind.Text, ported: false, help: "Select browser engines for tests"},
     {name: "browser_retries", kind: TestSettingKind.Count, ported: false, help: "Retry each browser attempt up to five times"},
     {name: "browser_reporter", kind: TestSettingKind.Text, ported: false, help: "Browser report format: text, json, or html"},
@@ -162,7 +166,7 @@ test_setting_hint: fn(row: TestSettingRow) -> String Never! {
         .Switch -> "true or false"
         .Count -> "a whole number of at least 1"
         .Seed -> "a whole number of at least 0"
-        .Text -> "nonempty text"
+        .Text -> if row.name == "grade" -> "`generated`" else -> "nonempty text"
         .Path -> "a nonempty path"
         .Capture -> "failed, all or none"
         .Shard -> "I/N with 1 <= I <= N, such as `2/4`"
@@ -192,6 +196,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
         }
         .Text | .Path -> {
             if trimmed == "" || trimmed.contains("\n") || trimmed.contains("\t") -> return None
+            if row.name == "grade" && trimmed != "generated" -> return None
             Val(trimmed.copy())
         }
         .Capture -> {
@@ -218,7 +223,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
                 level: part.trim().replace("\"", "")
                 if level != "none" && level != "basic" && level != "full" -> return None
                 if levels.contains(level) -> return None
-                &levels.push(level)
+                levels.push(level)
             }
             Val(levels.join(","))
         }
@@ -288,14 +293,14 @@ test_settings_put: fn(settings: &[TestSetting], setting: TestSetting) Never! {
             return
         }
     }
-    &settings.push(setting)
+    settings.push(setting.copy())
 }
 
 // `later` over `earlier`: every row `later` writes replaces the earlier value.
 test_settings_layered: fn(earlier: [TestSetting], later: [TestSetting]) -> [TestSetting] Never! {
     // copy: `earlier` stays with the caller; the layered list owns its rows.
     merged := earlier.copy()
-    loop setting in later -> test_settings_put(&merged, setting.copy())
+    loop setting in later -> test_settings_put(merged, setting.copy())
     merged
 }
 
@@ -370,7 +375,7 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
         value: test_setting_value(row, raw) ?? return Err(TestSettingError{message: "`t.{row.name}(…)` needs {test_setting_hint(row)}, not `{raw}`"})
         if !row.ported -> return Err(TestSettingError{message: "`t.{row.name}(…)` is not ported to the Jet test runner yet"})
         from: if parts.len() > 2 -> parts[2].copy() else -> source.copy()
-        test_settings_put(&settings, TestSetting{name: row.name.copy(), value: value, source: from})
+        test_settings_put(settings, TestSetting{name: row.name.copy(), value: value, source: from})
     }
     Ok(settings)
 }
@@ -408,6 +413,9 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
     assert_eq(test_setting_value(memory, "512mib") ?? "", "536870912")
     assert_eq(test_setting_value(memory, "lots") ?? "refused", "refused")
     assert_eq(test_setting_value(memory, "0gib") ?? "refused", "refused")
+    grade: test_setting_row("grade") ?? panic("grade row")
+    assert_eq(test_setting_value(grade, " generated ") ?? "", "generated")
+    assert_eq(test_setting_value(grade, "fast") ?? "refused", "refused")
 }
 
 #Test("later test setting layers replace earlier values") {
@@ -424,6 +432,7 @@ test_settings_parse_lines: fn(text: String, source: String) -> [TestSetting] Tes
     assert_eq((test_settings_parse_lines("optimize\t[\"none\", \"full\"]\n", "fn test") ?? panic(err.message))[0].value, "none,full")
     assert_eq(test_settings_refusal("coverage\ttrue\n"), "`t.coverage(…)` is not ported to the Jet test runner yet")
     assert_eq(test_settings_refusal("shard\t9/8\n"), "`t.shard(…)` needs I/N with 1 <= I <= N, such as `2/4`, not `9/8`")
+    assert_eq(test_settings_refusal("grade\tfast\n"), "`t.grade(…)` needs `generated`, not `fast`")
     assert_eq(test_settings_refusal("serial\ttrue\n!shard\t3/8\n"), "`t.shard(…)` comes after `t.run()`, whose tests already ran without it")
 }
 

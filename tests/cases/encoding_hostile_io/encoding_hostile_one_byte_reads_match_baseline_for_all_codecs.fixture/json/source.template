@@ -7,14 +7,14 @@ use {
 
 run: fn() {
     input: files.open("{work}/json/input.data") ?? panic("open")
-    reader := json.reader(^input) ?? panic("reader")
+    reader := json.reader(input) ?? panic("reader")
     count := 0
     loop count < 32 {
-        if &reader.next() == {
+        if reader.next() == {
             .None -> { break }
             .Val(_) -> { count += 1 }
             .Err(first) -> {
-                if &reader.next() == {
+                if reader.next() == {
                     .Val(_) | .None -> { print("not-latched") }
                     .Err(second) -> {
                         print(first.byte_offset == second.byte_offset && first.reason == second.reason)

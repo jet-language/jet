@@ -30,7 +30,7 @@ pkg_discover_module_in: fn(root: String, name: String) -[FS, Env]> String Discov
         text: file.text() ?? next
         if pkg_file_declares_module(text, name) {
             if resolver.revalidate_file(file) == .Err(_) -> return Err(DiscoveryError.NotFound{name: name})
-            &matches.push(file.path)
+            matches.push(file.path)
         }
     }
     if resolver.revalidate_root() == .Err(_) -> return Err(DiscoveryError.NotFound{name: name})
@@ -43,7 +43,7 @@ pkg_discover_module_in: fn(root: String, name: String) -[FS, Env]> String Discov
         else -> {
             prefix: "{resolver.root}/"
             relative := [String]{}
-            loop path in matches -> &relative.push(if path.starts_with(prefix) -> path.removeprefix(prefix) else -> path)
+            loop path in matches -> relative.push(if path.starts_with(prefix) -> path.removeprefix(prefix) else -> path)
             Err(DiscoveryError.Ambiguous{name: name, paths: relative})
         }
     }
@@ -88,11 +88,11 @@ pkg_discover_jobs_in: fn(root: String) -[FS, Env]> JobRegistry JobDiscoveryError
         }
         lexed: lex(masked.bytes())
         if lexed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: lexer diagnostics: {pkg_diagnostic_codes(lexed.diagnostics)}"})
-        parsed: parse_lexed(^lexed)
+        parsed: parse_lexed(lexed)
         if parsed.diagnostics.len() > 0 -> return Err(JobDiscoveryError{message: "{file.path}: parser diagnostics: {pkg_diagnostic_codes(parsed.diagnostics)}"})
         loop item in parsed.program.items {
             if item == .Func(function) {
-                if function.is_job -> &job_items.push(item)
+                if function.is_job -> job_items.push(item)
             }
         }
         if resolver.revalidate_file(file) == .Err(error) -> return Err(JobDiscoveryError{message: error.message()})
@@ -104,7 +104,7 @@ pkg_discover_jobs_in: fn(root: String) -[FS, Env]> JobRegistry JobDiscoveryError
 // `code: what` of each diagnostic, one per line.
 pkg_diagnostic_codes: fn(diagnostics: [Diagnostic]) -> String Never! {
     lines := [String]{}
-    loop diagnostic in diagnostics -> &lines.push("{diagnostic.code}: {diagnostic.what}")
+    loop diagnostic in diagnostics -> lines.push("{diagnostic.code}: {diagnostic.what}")
     lines.join("\n")
 }
 

@@ -8,31 +8,33 @@ import crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {phase, W} from './s5-lib.mjs';
 import {readSharedPack} from './shared-publications.mjs';
+import {faultReportObject} from '../../packaging/fault-report-object.mjs';
 
 const P = phase('fixtures'), {D, start, blocked} = P;
 const node = process.execPath, T = 'Compiler/JetRuntime/Tests';
 const build = process.env.S5_BUILD, RT = process.env.S5_RUNTIME;
 const jetc0 = path.join(build, 'jetc0'), jet = path.join(build, 'jet');
 const object = path.join(RT, 'runtime', 'jet_runtime_jet.o');
-let pack;
+let pack, runtimeDir;
 if (P.ready) {
-  try { pack = readSharedPack({directory: process.env.S5_SHARED_PACK_DIRECTORY, head: P.head, source: W}).pack; }
+  try { ({pack, runtimeDir} = readSharedPack({directory: process.env.S5_SHARED_PACK_DIRECTORY, head: P.head, source: W})); }
   catch (error) { blocked('shared-runtime-publication', error.message); P.ready = false; }
 }
 const provenance = path.join(RT, 'provenance.json');
 const inputs = process.env.S5_INPUTS;
 const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 const sys = ['-lpthread', '-ldl', '-lm'];
-const env = {JET: jet, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
+// Front runners lower fixtures with the candidate native CLI (jet-front.mjs).
+const env = {JET: jet, JET_FRONT_JETC0: jetc0, JET_RUNTIME_JET_OBJECT: object, JET_RUNTIME_PACK: pack,
   JET_CHECKER: jet, CC: 'cc', NM: 'nm', LD: 'ld', COMPOSED_SHA: P.head};
 const out = name => path.join(D, name), r = (file, ...args) => [node, `${T}/${file}.mjs`, ...args];
 const registry = new Map(), executed = new Map();
 const parked = new Map();
 const driverDirectory = path.dirname(fileURLToPath(import.meta.url));
 for (const line of fs.readFileSync(path.join(driverDirectory, 'parked-modes.tsv'), 'utf8').trim().split('\n').slice(1)) {
-  const [runner, mode, lastReceipt, receiptScope, because, tower] = line.split('\t');
+  const [runner, mode, lastReceipt, receiptScope, because] = line.split('\t');
   if (!parked.has(runner)) parked.set(runner, []);
-  parked.get(runner).push({mode, verdict: 'UNCOVERED', because, tower, lastReceipt, receiptScope});
+  parked.get(runner).push({mode, verdict: 'UNCOVERED', because, lastReceipt, receiptScope});
 }
 if (!P.ready) {
   blocked('fixtures-prerequisites', 'successful same-pin build/runtime receipts are required');
@@ -76,7 +78,8 @@ add('run-native-layout', [r('run-native-layout', '--native', out('native-layout'
 const nfc = out('nfc-expected.scalars');
 const normalization = path.join(W, 'tests/data/unicode/NormalizationTest.txt');
 if (fs.existsSync(normalization)) {
-  const rows = fs.readFileSync(normalization, 'utf8').split('\n').filter(line => /^[0-9A-F]+;/.test(line));
+  // A data row's source column is one or more space-separated code points.
+  const rows = fs.readFileSync(normalization, 'utf8').split('\n').filter(line => /^[0-9A-F]+(?: [0-9A-F]+)*;/.test(line));
   if (hash(normalization) !== '5019ffd530751a741900c849c0e010332f142a3612234639bd200b82138a87db' || rows.length !== 20034) throw Error('official Unicode17 normalization input drift');
   const expected = rows.flatMap(line => {const columns = line.split(';').slice(0,5).map(col => col.trim().split(/\s+/).map(cp => Number.parseInt(cp,16).toString(16).toUpperCase()).join(' ')); return columns.map((_,index) => columns[index < 3 ? 1 : 3]);});
   fs.writeFileSync(nfc, expected.join('\n') + '\n');
@@ -94,6 +97,17 @@ for (const [runner,witness] of [['run-root-cleanup','RootCleanupWitness'],['run-
 add('run-record-variant-panic',[r('run-record-variant-panic',out('record-variant-panic'),...['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary))],['DataTreeWitness','DataEventWitness','TaskVariantPanicWitness'].map(binary));
 add('run-io-witness',[r('run-io-witness',binary('IOWitness'))],[binary('IOWitness')]);
 add('run-execution-fixtures',[r('run-execution-fixtures',binary('execution-fixture'))],[binary('execution-fixture')]);
+modes('run-alloc-cache-witness', ['assemble','lower','audit','link','run'], front);
+add('run-tdigest-witness',[r('run-tdigest-witness',out('tdigest-witness'),object)],runtime);
+add('run-alloc-observer-witness',[r('run-alloc-observer-witness',out('alloc-observer'),object)],runtime);
+for (const runner of ['run-files-walk-fixtures','run-host-parallelism-fixtures']) modes(runner, ['assemble','lower','audit','link','run'], front);
+// Pack-route runners link with the shared native CLI and its runtime directory.
+const packRoute = (runner, tests) => add(runner, [undefined, ...tests].map((test, index) => r(runner, out(`${runner}-${index}`), jet, runtimeDir, ...(test ? ['--test', test] : []))), [jet, runtimeDir]);
+packRoute('run-native-codec-file-leaves', ['CodecCSV','CodecEnv','DynCodec','CompilerFileLeaves']);
+packRoute('run-native-tcp-routes', []);
+packRoute('run-process-witnesses', ['ProcessExecution','TerminalProcess']);
+add('run-scan-goldens',[r('run-scan-goldens',out('scan-goldens'))],[...front,pack]);
+add('test-runtime-abi-symbols',[r('test-runtime-abi-symbols')]);
 
 // Generator runners operate only in fresh writable data copies outside W.
 for (const runner of ['generate-ed25519-headers','generate-rfc8032-fixtures']) {
@@ -118,13 +132,19 @@ async function pool(tasks,width) {const queue=[...tasks];await Promise.all(Array
 const width=Number(process.env.S5_FIXTURE_WIDTH??6);
 if(!Number.isInteger(width)||width<2||width>6)throw Error('fixture width must be2..6 within declared20G');
 const cryptoWitnesses=['Sha256','CryptoX25519','CryptoEd25519','CryptoChaCha','CryptoAead','CryptoHkdf','AgeCodec','AgeV1','CryptoEntropy','CryptoHash','CryptoEd25519Signature','CryptoWipe','CryptoOsEntropy'].map(name=>`${name}Witness`);
-const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses]);
+// Witnesses that need a fixture object, arguments or an RC-pinned layout are
+// built and run by their own runners (s5 or the compiler registry), not here.
+const runnerWitness=['AllocCache','FilesWalk','HostBuildHTTP','HostParallelism','NativeCodecFileLeaves','NativeLayout','NativeTextNormalize','TCPRoutes','TDigest','VaultHooks','VaultProvider'].map(name=>`${name}Witness`);
+const ownedWitness=new Set(['CAbiDriver','DisplayWitness','RootStdioWitness','HostFilesTests','HostSpawnTests',...cryptoWitnesses,...runnerWitness]);
 const dedicated=new Set([...Object.values(ui),'RootCleanupWitness','DataTreeWitness','ScalarReflectWitness','DataEventWitness','TaskVariantPanicWitness','IOWitness']);
 const witnesses=fs.readdirSync(path.join(W,T)).filter(file=>/Witness\.c$/.test(file)).map(file=>file.slice(0,-2)).filter(name=>!ownedWitness.has(name));
 witnesses.push('execution-fixture');
+// The runtime object imports jet_rt_fault_report, which Jet's linker writes
+// into each image; these platform links take it from the shared report source.
+const faultReport=faultReportObject(witnessDir);
 await pool(witnesses.map(name=>async()=>{
   if(!fs.existsSync(object)||!fs.existsSync(provenance))return blocked(`witness-build-${name}`,'no sealed Jet-only runtime object');
-  const built=await start(`witness-build-${name}`,['cc','-std=c11','-O1','-no-pie','-pthread',`${T}/${name}.c`,object,...sys,'-o',binary(name)],env);
+  const built=await start(`witness-build-${name}`,['cc','-std=c11','-O1','-no-pie','-pthread',`${T}/${name}.c`,object,faultReport,...sys,'-o',binary(name)],env);
   const golden=path.join(W,T,`${name}.stdout`);
   if(built&&!dedicated.has(name))await start(`witness-run-${name}`,[binary(name)],env,(code,row)=>code===0&&!row.signal&&(!fs.existsSync(golden)||fs.readFileSync(row.stdout).equals(fs.readFileSync(golden)))&&fs.readFileSync(row.stderr).length===0);
 }),Math.min(16,os.availableParallelism()));

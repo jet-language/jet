@@ -78,13 +78,13 @@ NativeRuntimeIdentityCache: struct {
     // Queried once per distinct rustc, environment and tuning.
     rustc_identity: fn(&self, rustc: String, rustc_env: [NativeRuntimeEnvVar], native_cpu: Bool) -[Exec, Time]> String NativeRuntimeError! {
         framed := [U8]{}
-        store_runtime_push_bytes(&framed, rustc.bytes())
-        store_runtime_push_bytes(&framed, store_runtime_be64(rustc_env.len()))
+        store_runtime_push_bytes(framed, rustc.bytes())
+        store_runtime_push_bytes(framed, store_runtime_be64(rustc_env.len()))
         loop variable in rustc_env {
-            store_runtime_push_bytes(&framed, variable.name.bytes())
-            store_runtime_push_bytes(&framed, variable.value.bytes())
+            store_runtime_push_bytes(framed, variable.name.bytes())
+            store_runtime_push_bytes(framed, variable.value.bytes())
         }
-        if native_cpu -> store_runtime_push_bytes(&framed, STORE_RUNTIME_NATIVE_CPU_IDENTITY.bytes())
+        if native_cpu -> store_runtime_push_bytes(framed, STORE_RUNTIME_NATIVE_CPU_IDENTITY.bytes())
         identity_key: pkg_sha256_hex(framed)
         if self.identities.get(identity_key) == {
             .Val(identity) -> return Ok(identity)
@@ -104,7 +104,7 @@ NativeRuntimeIdentityCache: struct {
 // The standard output of `rustc <args>` under `rustc_env`.
 store_runtime_rustc_query: fn(rustc: String, rustc_env: [NativeRuntimeEnvVar], args: [String]) -[Exec, Time]> String NativeRuntimeError! {
     argv := [String]{rustc}
-    loop arg in args -> &argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     rendered: args.join(" ")
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture)
     loop variable in rustc_env -> spec = spec.env(variable.name, variable.value)
@@ -133,7 +133,7 @@ NativeRuntimeMaterializedRoot: struct {
 }
 
 impl NativeRuntimeMaterializedRoot.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         files.remove_all(self.path).drop("the staging directory is scratch; a leftover is harmless")
     }
 }
@@ -187,13 +187,13 @@ PreparedRuntime: struct {
 }
 
 impl PreparedRuntime.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         if self.lease == {
-            .Val(lease) -> close(^lease)
+            .Val(lease) -> close(lease)
             else -> {}
         }
         if self.materialized_root == {
-            .Val(root) -> close(^root)
+            .Val(root) -> close(root)
             else -> {}
         }
     }
@@ -206,7 +206,7 @@ store_runtime_prepare: fn(store: ArtifactStore, identities: &NativeRuntimeIdenti
     // A program with no runtime block, or with malformed markers, is returned whole.
     split: store_runtime_split_generated(generated) ?? return Ok(PreparedRuntime.inline(generated))
     compile_flags: store_runtime_compile_flags(rustc_flags)
-    rustc_version: &identities.rustc_identity(rustc, rustc_env, store_runtime_targets_native_cpu(compile_flags))
+    rustc_version: identities.rustc_identity(rustc, rustc_env, store_runtime_targets_native_cpu(compile_flags))
     exported_runtime: store_runtime_export_source(split.runtime)
     runtime_key: store_runtime_cache_key(split.runtime, exported_runtime, rustc, rustc_version, compile_flags, rustc_env)
     if store_runtime_prebuilt_rlib(runtime_key) == {
@@ -235,7 +235,7 @@ store_runtime_prepare: fn(store: ArtifactStore, identities: &NativeRuntimeIdenti
         cache_hit: compiled.cache_hit,
         repaired: compiled.repaired,
         prebuilt: false,
-        lease: Val(^compiled.lease),
+        lease: Val(compiled.lease.move()),
         materialized_root: Val(materialized_root),
     })
 }
@@ -299,7 +299,7 @@ store_runtime_compile_flags: fn(flags: [String]) -> [String] Never! {
             flag != "-C" && store_runtime_is_link_only_flag(flag) -> 1
             else -> 0
         }
-        if skip == 0 -> &compile_flags.push(flag)
+        if skip == 0 -> compile_flags.push(flag.copy())
         index += if skip == 0 -> 1 else -> skip
     }
     compile_flags
@@ -349,19 +349,19 @@ store_runtime_compile_artifact: fn(store: ArtifactStore, key: String, exported: 
     }
 
     argv := [String]{rustc, "--edition", "2021", "--crate-name", STORE_RUNTIME_CRATE_NAME, "--crate-type", "rlib"}
-    loop flag in rustc_flags -> &argv.push(flag)
-    &argv.push("-C")
-    &argv.push("metadata={key}")
+    loop flag in rustc_flags -> argv.push(flag.copy())
+    argv.push("-C")
+    argv.push("metadata={key}")
     if files.canonicalize(staging) == {
         .Ok(prefix) -> {
-            &argv.push("--remap-path-prefix")
-            &argv.push("{prefix}=/jet/build")
+            argv.push("--remap-path-prefix")
+            argv.push("{prefix}=/jet/build")
         }
         else -> {}
     }
-    &argv.push(source)
-    &argv.push("-o")
-    &argv.push(staged_rlib)
+    argv.push(source.copy())
+    argv.push("-o")
+    argv.push(staged_rlib.copy())
     spec := process.cmd(argv).stdout(.Capture).stderr(.Capture)
     loop variable in rustc_env -> spec = spec.env(variable.name, variable.value)
     receipt: if process.run_spec(spec) == {
@@ -478,29 +478,29 @@ store_runtime_count: fn(haystack: [U8], needle: [U8]) -> Int Never! {
 // version, flags, and environment.
 store_runtime_cache_key: fn(source: String, exported_source: String, rustc: String, rustc_version: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -> String Never! {
     data := [U8]{}
-    store_runtime_push_bytes(&data, STORE_RUNTIME_CACHE_SCHEMA.bytes())
-    store_runtime_push_bytes(&data, STORE_RUNTIME_CRATE_NAME.bytes())
-    store_runtime_push_bytes(&data, source.bytes())
-    store_runtime_push_bytes(&data, STORE_RUNTIME_CRATE_PREFIX.bytes())
-    store_runtime_push_bytes(&data, exported_source.bytes())
-    store_runtime_push_bytes(&data, rustc.bytes())
-    store_runtime_push_bytes(&data, rustc_version.bytes())
-    store_runtime_push_bytes(&data, "flags".bytes())
-    store_runtime_push_bytes(&data, store_runtime_be64(rustc_flags.len()))
-    loop flag in rustc_flags -> store_runtime_push_bytes(&data, flag.bytes())
-    store_runtime_push_bytes(&data, "env".bytes())
-    store_runtime_push_bytes(&data, store_runtime_be64(rustc_env.len()))
+    store_runtime_push_bytes(data, STORE_RUNTIME_CACHE_SCHEMA.bytes())
+    store_runtime_push_bytes(data, STORE_RUNTIME_CRATE_NAME.bytes())
+    store_runtime_push_bytes(data, source.bytes())
+    store_runtime_push_bytes(data, STORE_RUNTIME_CRATE_PREFIX.bytes())
+    store_runtime_push_bytes(data, exported_source.bytes())
+    store_runtime_push_bytes(data, rustc.bytes())
+    store_runtime_push_bytes(data, rustc_version.bytes())
+    store_runtime_push_bytes(data, "flags".bytes())
+    store_runtime_push_bytes(data, store_runtime_be64(rustc_flags.len()))
+    loop flag in rustc_flags -> store_runtime_push_bytes(data, flag.bytes())
+    store_runtime_push_bytes(data, "env".bytes())
+    store_runtime_push_bytes(data, store_runtime_be64(rustc_env.len()))
     loop variable in rustc_env {
-        store_runtime_push_bytes(&data, variable.name.bytes())
-        store_runtime_push_bytes(&data, variable.value.bytes())
+        store_runtime_push_bytes(data, variable.name.bytes())
+        store_runtime_push_bytes(data, variable.value.bytes())
     }
     pkg_sha256_hex(data)
 }
 
 // `value` framed by its length as eight big-endian bytes.
 store_runtime_push_bytes: fn(out: &[U8], value: [U8]) Never! {
-    &out.extend(store_runtime_be64(value.len()))
-    &out.extend(value)
+    out.extend(store_runtime_be64(value.len()))
+    out.extend(value.copy())
 }
 
 // `u64::to_be_bytes`.
@@ -508,7 +508,7 @@ store_runtime_be64: fn(value: Int) -> [U8] Never! {
     out := [U8]{}
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{((value >> shift)).bit_and(255)})
+        out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
     out

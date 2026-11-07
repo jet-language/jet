@@ -39,8 +39,8 @@ encode_upper: fn(data: [U8]) -> String Never! {
     out := [U8]{}
     loop b in data {
         n: u8_int(b)
-        &out.push(nibble_upper(n >> 4))
-        &out.push(nibble_upper(n.bit_and(15)))
+        out.push(nibble_upper(n >> 4))
+        out.push(nibble_upper(n.bit_and(15)))
     }
     String.from_bytes(out) ?? ""
 }
@@ -125,46 +125,49 @@ a2b_qp: fn(text: String) -> [U8] Never! {
                 next
             }
             hi: digit(raw[i + 1]) ?? {
-                &out.push(raw[i])
+                out.push(raw[i])
                 i = i + 1
                 next
             }
             lo: digit(raw[i + 2]) ?? {
-                &out.push(raw[i])
+                out.push(raw[i])
                 i = i + 1
                 next
             }
-            &out.push(U8{hi * 16 + lo})
+            out.push(U8{hi * 16 + lo})
             i = i + 3
             next
         }
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
     out
 }
 
 b2a_uu: fn(data: [U8]) -> String Never! {
-    out := ""
+    out := [U8]{}
     i := 0
-    if data.len() == 0 -> return "{uu_char(0)}\n"
+    if data.len() == 0 -> return "`\n"
     loop i < data.len() {
         count := data.len() - i
         if count > 45 -> count = 45
-        out = "{out}{uu_char(count)}"
+        out.push(uu_char(count))
         j := 0
         loop j < count {
             pos: i + j
             a: u8_int(data[pos])
             b: if j + 1 < count -> u8_int(data[pos + 1]) else -> 0
             c: if j + 2 < count -> u8_int(data[pos + 2]) else -> 0
-            out = "{out}{uu_char(a >> 2)}{uu_char(((((a << 4)).bit_xor((b >> 4)))).bit_and(63))}{uu_char(((((b << 2)).bit_xor((c >> 6)))).bit_and(63))}{uu_char((c).bit_and(63))}"
+            out.push(uu_char(a >> 2))
+            out.push(uu_char(((a << 4).bit_xor(b >> 4)).bit_and(63)))
+            out.push(uu_char(((b << 2).bit_xor(c >> 6)).bit_and(63)))
+            out.push(uu_char(c.bit_and(63)))
             j += 3
         }
-        out = "{out}\n"
+        out.push(U8{10})
         i += count
     }
-    out
+    String.from_bytes(out) ?? ""
 }
 
 a2b_uu: fn(text: String) -> [U8] Never! {
@@ -188,14 +191,14 @@ a2b_uu: fn(text: String) -> [U8] Never! {
             b: uu_value(raw[i + 1])
             c: uu_value(raw[i + 2])
             d: uu_value(raw[i + 3])
-            &out.push(to_u8(((a << 2)).bit_xor((b >> 4))))
+            out.push(wrapping(U8{((a << 2)).bit_xor((b >> 4))}))
             produced += 1
             if produced < count {
-                &out.push(to_u8(((b << 4)).bit_xor((c >> 2))))
+                out.push(wrapping(U8{((b << 4)).bit_xor((c >> 2))}))
                 produced += 1
             }
             if produced < count {
-                &out.push(to_u8(((c << 6)).bit_xor(d)))
+                out.push(wrapping(U8{((c << 6)).bit_xor(d)}))
                 produced += 1
             }
             i += 4
@@ -222,11 +225,11 @@ encode_sep: fn(data: [U8], sep: String) -> String Never! {
     separator: sep.bytes()
     loop i in 0..<data.len() {
         if i > 0 {
-            loop b in separator -> &out.push(b)
+            loop b in separator -> out.push(b)
         }
         n: u8_int(data[i])
-        &out.push(encoding.hex_nibble(n >> 4))
-        &out.push(encoding.hex_nibble(n.bit_and(15)))
+        out.push(encoding.hex_nibble(n >> 4))
+        out.push(encoding.hex_nibble(n.bit_and(15)))
     }
     String.from_bytes(out) ?? ""
 }
@@ -238,41 +241,34 @@ dump: fn(data: [U8]) -> String Never! {
     shifts: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
     loop offset < data.len() {
         loop shift in shifts {
-            &out.push(encoding.hex_nibble((offset >> shift).bit_and(15)))
+            out.push(encoding.hex_nibble((offset >> shift).bit_and(15)))
         }
-        &out.push(U8{32})
-        &out.push(U8{32})
+        out.push(U8{32})
+        out.push(U8{32})
         loop i in 0..<16 {
-            if i > 0 -> &out.push(U8{32})
+            if i > 0 -> out.push(U8{32})
             if offset + i < data.len() {
                 n: u8_int(data[offset + i])
-                &out.push(encoding.hex_nibble(n >> 4))
-                &out.push(encoding.hex_nibble(n.bit_and(15)))
+                out.push(encoding.hex_nibble(n >> 4))
+                out.push(encoding.hex_nibble(n.bit_and(15)))
             } else {
-                &out.push(U8{32})
-                &out.push(U8{32})
+                out.push(U8{32})
+                out.push(U8{32})
             }
         }
-        &out.push(U8{32})
-        &out.push(U8{32})
+        out.push(U8{32})
+        out.push(U8{32})
         end := offset + 16
         if end > data.len() -> end = data.len()
         loop i in offset..<end {
             n: u8_int(data[i])
-            if n >= 32 && n <= 126 -> &out.push(data[i])
-            else -> &out.push(U8{46})
+            if n >= 32 && n <= 126 -> out.push(data[i])
+            else -> out.push(U8{46})
         }
-        &out.push(U8{10})
+        out.push(U8{10})
         offset += 16
     }
     String.from_bytes(out) ?? ""
-}
-
-/// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
-/// checked `U8{}` conversion.
-to_u8: fn(n: Int) -> U8 Never! {
-    v: (n).bit_and(255)
-    (U8{v})
 }
 
 #Test("hex kernel vectors") {

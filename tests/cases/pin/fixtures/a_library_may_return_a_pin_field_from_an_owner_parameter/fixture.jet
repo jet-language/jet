@@ -12,12 +12,12 @@ PinQueue: struct {
 }
 
 attach: fn(label: String, node: &Node) -> PinQueue from node {
-    return PinQueue{label: label.copy(), head: mem.pin(&node)}
+    return PinQueue{label: label.copy(), head: mem.pin(node)}
 }
 
 run: fn() {
     node := Node{payload: 41, hops: 0}
-    queue: attach("ready", &node)
+    queue: attach("ready", node)
     queue.head.hops += 1
     queue.head.payload += 1
     print("{(queue.label)} {(queue.head.payload)} {(queue.head.hops)}")

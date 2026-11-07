@@ -223,7 +223,7 @@ use {
     assert(out.contains("hello, world"), "got: {out}")
 }
 #Test("repl_stream_break_runs_deferred_close") {
-    declarations: "\nMarker: struct {{\n    name: String\n}}\n\nimpl Marker.Close {{\n    close: fn(^self) {{\n        print(\"closed: {{self.name}}\")\n    }}\n}}\n\nvalues: fn() -[]> Stream<Int> {{\n    marker := Marker{{name: \"stream\"}}\n    defer close(^marker)\n    print(\"before\")\n    yield 1\n    print(\"after\")\n    yield 2\n}}\n\nrun: fn() {{\n    loop value in values() {{\n        print(\"value: {{value}}\")\n        break\n    }}\n}}\n"
+    declarations: "\nMarker: struct {{\n    name: String\n}}\n\nimpl Marker.Close {{\n    close: fn(&&self) {{\n        print(\"closed: {{self.name}}\")\n    }}\n}}\n\nvalues: fn() -[]> Stream<Int> {{\n    marker := Marker{{name: \"stream\"}}\n    defer close(marker)\n    print(\"before\")\n    yield 1\n    print(\"after\")\n    yield 2\n}}\n\nrun: fn() {{\n    loop value in values() {{\n        print(\"value: {{value}}\")\n        break\n    }}\n}}\n"
     out: run_transcript([declarations, ":run"], none)
     assert(out.contains("before"), "got: {out}")
     assert(out.contains("value: 1"), "got: {out}")
@@ -293,7 +293,7 @@ use {
     child.stdin.as_mut().expect("piped stdin").write_all(":help\n:quit\n".as_bytes()).expect("write transcript")
     output: child.wait_with_output().expect("finish jet repl")
     assert(output.status.success(), "status: {output.status}")
-    out: String.from_utf8(^output.stdout).expect("utf-8 help")
+    out: String.from_utf8(output.stdout.move()).expect("utf-8 help")
     banner: out.find("Jet 0.1.0 — Interactive REPL").expect("banner")
     cooked_hint: out.find("Try: ?name docs · :pin/:fold/:rerun <id> · interactive keys require a TTY").expect("cooked discovery hint from stderr")
     assert(banner < cooked_hint, "banner must precede hint: {out}")
@@ -323,7 +323,7 @@ use {
     assert(!out.contains(Char{14}), "control byte leaked into transcript: {out}")
 }
 #Test("repl_load_hello") {
-    out: run_transcript([":load Examples/features/basics/hello.jet"], none)
+    out: run_transcript([":load Examples/Basics/Hello.jet"], none)
     assert(out.contains("hello, world"), "load should run entry, got: {out}")
 }
 #Test("repl_basics_transcript") {
@@ -426,7 +426,7 @@ use {
     fs.write(hostile_path, "run: fn() {{ print(\"replaced\") }}\n").unwrap()
     stdin := child.stdin.take().unwrap()
     stdin.write_all("answer: fn() -[]> Int {{ return 41 }}\nprint(\"authoritative\")\nprint(answer())\n:run\n:quit\n".as_bytes()).unwrap()
-    drop(^stdin)
+    drop(stdin)
     output: child.wait_with_output().expect("finish native REPL")
     _: fs.remove_file(hostile_path).ok()
     _: fs.remove_dir_all(state).ok()
@@ -558,7 +558,7 @@ use {
     assert(!out.contains("E1803") && !out.contains("E3410") && !out.contains("E0956"), "got: {out}")
 }
 #Test("repl_deny_rand_blocks_draw_and_mutating_shuffle") {
-    out: run_transcript_with_flags(["use random: core.math.random", "xs := [1, 2, 3]", "#FX(authority: Rand) {{ random.int(1, 10) }}", "#FX(authority: Rand) {{ random.shuffle(&xs) }}", "xs"], none, ["rand"], ["rand"])
+    out: run_transcript_with_flags(["use random: core.math.random", "xs := [1, 2, 3]", "#FX(authority: Rand) {{ random.int(1, 10) }}", "#FX(authority: Rand) {{ random.shuffle(xs) }}", "xs"], none, ["rand"], ["rand"])
     assert(out.matches("E1803").count() >= 2 && out.contains("Rand.Draw"), "ambient random calls escaped deny policy: {out}")
     assert(out.contains("[1, 2, 3]"), "denied shuffle mutated its binding: {out}")
 }

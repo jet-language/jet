@@ -84,7 +84,7 @@ pkg_retired_record_head_spans: fn(text: String) -> [Span] Never! {
     tokens: lexed.tokens
     spans := [Span]{}
     loop index in 1..<tokens.len() {
-        if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE -> &spans.push(tokens[index - 1].span)
+        if tokens[index - 1].kind == TOKEN_DOT && tokens[index].kind == TOKEN_LBRACE -> spans.push(tokens[index - 1].span)
     }
     spans
 }
@@ -97,10 +97,10 @@ pkg_manifest_lexed: fn(text: String) -> Lexed? Never! {
     tokens := [Token]{}
     loop token in lexed.tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
-        &tokens.push(token)
+        tokens.push(token)
     }
-    lexed.tokens = ^tokens
-    Val(^lexed)
+    lexed.tokens = tokens.move()
+    Val(lexed.move())
 }
 
 // Parse the shared Package/Config field vocabulary. `config` rejects the
@@ -116,42 +116,36 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
         if !config {
             if pkg_config_wrapper(entry) == .Val(wrapper) {
                 if inline_names.contains(wrapper.key) -> return Err(PackageParseError.Composition("inline Config `{wrapper.key}` is declared more than once"))
-                &inline_names.push(wrapper.key)
+                inline_names.push(wrapper.key)
                 contribution: ConfigFacts.parse(entry, "{facts.origin}::{wrapper.key}")
-                &inline.push(InlineConfigDecl{name: wrapper.key, facts: contribution})
+                inline.push(InlineConfigDecl{name: wrapper.key, facts: contribution})
                 next
             }
         }
-        binding := ManifestEntry?{None}
-        if pkg_split_package_binding(entry) == .Val(split) {
-            if split.operator == "::" -> binding = Val(ManifestEntry{key: split.left.trim(), value: split.right.trim()})
-        }
-        if binding == None -> binding = pkg_split_field(entry)
-        found: binding ?? {
-            // The package's single `build: fn` may live here.
-            if pkg_is_build_entry_decl(entry) -> next
-            return Err(PackageParseError.MalformedField(entry))
-        }
+        // The package's single `build: fn` may live here; only a record
+        // value of `build:` names build profiles.
+        if pkg_is_build_entry_decl(entry) -> next
+        found: pkg_split_field(entry) ?? return Err(PackageParseError.MalformedField(entry))
         field: found.key
         value: found.value
         if seen.contains(field) {
             if field == MANIFEST_BLOCK_AUTHORITY -> return Err(PackageParseError.BadEffectsBlock("malformed `authority:` block: declared more than once"))
             return Err(PackageParseError.Composition("`{field}` is declared more than once"))
         }
-        &seen.push(field)
+        seen.push(field.copy())
         if value.starts_with("Output.") {
             output: pkg_parse_output_value(field, value.removeprefix("Output.").trim())
             if facts.outputs.has_key(field) -> return Err(PackageParseError.Composition("output `{field}` is declared more than once"))
             facts.outputs[field] = output
-            pkg_record_output_provenance(&facts.provenance, "outputs.{field}", facts.origin, output)
+            pkg_record_output_provenance(facts.provenance, "outputs.{field}", facts.origin, output)
             next
         }
-        &facts.apply_field(field, value, config)
+        facts.apply_field(field, value, config)
         declared_origin: facts.origin.copy()
-        pkg_record_declared_provenance(&facts, field, declared_origin)
+        pkg_record_declared_provenance(facts, field, declared_origin)
     }
     loop declared in inline {
-        if pkg_merge_config(&facts, declared.facts) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
+        if pkg_merge_config(facts, declared.facts) == .Err(error) -> return Err(PackageParseError.Composition(error.message()))
         facts.inline_configs[declared.name] = declared.facts
     }
     if !config -> facts.validate_test_profiles()
@@ -211,7 +205,7 @@ impl PackageFacts {
             "environments" -> self.environments = pkg_parse_environments(value)
             "defaults" -> self.defaults = pkg_parse_string_map("defaults", value)
             "grants" -> return Err(PackageParseError.RetiredAuthorityField{field: field, replacement: "authority.grants"})
-            "authority" -> &self.apply_authority(pkg_parse_authority_value(value))
+            "authority" -> self.apply_authority(pkg_parse_authority_value(value))
             "policy" -> self.policy = pkg_parse_package_policy(pkg_record_body(value, "policy"))
             MANIFEST_BLOCK_MEMBERS -> self.members = pkg_parse_members(value)
             "configs" -> self.configs = pkg_parse_list(value)
@@ -324,7 +318,7 @@ pkg_parse_output_payload: fn(input: String) -> OutputPayload PackageParseError! 
     if value.starts_with("\"") && value.ends_with("\"") -> return Ok(OutputPayload.String(pkg_scalar(value)))
     if value.starts_with("[") && value.ends_with("]") {
         items := [OutputPayload]{}
-        loop item in pkg_top_level_entries(pkg_binder_slice(value, 1, value.bytes().len() - 1)) -> &items.push(pkg_parse_output_payload(item))
+        loop item in pkg_top_level_entries(pkg_binder_slice(value, 1, value.bytes().len() - 1)) -> items.push(pkg_parse_output_payload(item))
         return Ok(OutputPayload.Array(items))
     }
     if value.starts_with("{{") {
@@ -423,7 +417,7 @@ pkg_parse_services: fn(value: String) -> [String: ServiceFact] PackageParseError
         ports := [Int]{}
         if fields.get("ports") == .Val(raw) {
             loop port in pkg_parse_list(raw) {
-                &ports.push(pkg_parse_i64(port) ?? return Err(PackageParseError.InvalidValue{field: "services.{key}.ports", value: port}))
+                ports.push(pkg_parse_i64(port) ?? return Err(PackageParseError.InvalidValue{field: "services.{key}.ports", value: port}))
             }
         }
         ready: if fields.get("ready") == {
@@ -444,7 +438,7 @@ pkg_parse_members: fn(input: String) -> [MemberRef] PackageParseError! {
     }
     if !value.starts_with("[") -> return Err(PackageParseError.InvalidValue{field: "members", value: value})
     members := [MemberRef]{}
-    loop path in pkg_parse_list(value) -> &members.push(MemberRef.Path(path))
+    loop path in pkg_parse_list(value) -> members.push(MemberRef.Path(path))
     Ok(members)
 }
 
@@ -510,28 +504,14 @@ pkg_config_wrapper: fn(text: String) -> ManifestEntry? PackageParseError! {
 }
 
 // Whether a top-level manifest entry is the package's build function,
-// `build: fn(…)`. The retired `fn build(…)` is skipped here too; the parser
-// reports it as E0397.
+// `build: fn(…)`.
 pkg_is_build_entry_decl: fn(entry: String) -> Bool Never! {
     rest: entry.trim_start()
-    if rest.starts_with(BUILD_ENTRY_FN) {
-        after: rest.removeprefix(BUILD_ENTRY_FN).trim_start()
-        if after.starts_with(":") && !after.starts_with("::") && !after.starts_with(":=") {
-            value: after.removeprefix(":").trim_start()
-            if value.starts_with("fn") {
-                first: pkg_bytes_code(value.removeprefix("fn").bytes(), 0)
-                return !(pkg_bytes_is_word(first) || first >= 128)
-            }
-        }
-        return false
-    }
-    if !rest.starts_with("fn") -> return false
-    after_fn: rest.removeprefix("fn")
-    if pkg_bytes_space_width(after_fn.bytes(), 0) == 0 -> return false
-    name: after_fn.trim_start()
-    if !name.starts_with(BUILD_ENTRY_FN) -> return false
-    tail: name.removeprefix(BUILD_ENTRY_FN)
-    if tail == "" -> return true
-    first: pkg_bytes_code(tail.bytes(), 0)
+    if !rest.starts_with(BUILD_ENTRY_FN) -> return false
+    after: rest.removeprefix(BUILD_ENTRY_FN).trim_start()
+    if !after.starts_with(":") || after.starts_with("::") || after.starts_with(":=") -> return false
+    value: after.removeprefix(":").trim_start()
+    if !value.starts_with("fn") -> return false
+    first: pkg_bytes_code(value.removeprefix("fn").bytes(), 0)
     !(pkg_bytes_is_word(first) || first >= 128)
 }

@@ -22,24 +22,24 @@ use {
 compute_fixture_modules: fn(label: String, source: String, failures: &[String]) -> [SemaGraphModuleResult]? {
     parsed := parse_source(source.bytes())
     if sema_has_error_since(parsed.diagnostics, 0) {
-        &failures.push("{label}: real parsing failed {parsed.diagnostics:Debug}")
+        failures.push("{label}: real parsing failed {parsed.diagnostics:Debug}")
         return None
     }
     effects: jet_driver_canonical_effect_module("IO: effect\nPanic: effect\n") ?? {
-        &failures.push("{label}: canonical effect source did not parse")
+        failures.push("{label}: canonical effect source did not parse")
         return None
     }
     facts: SemaBuildFacts{package_name: "compute-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    input: SemaRegistrationModuleInput{package_identity: "compute-fixture", module_identity: "compute-fixture::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: ^parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
+    input: SemaRegistrationModuleInput{package_identity: "compute-fixture", module_identity: "compute-fixture::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()}
     graph: sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, effects}, [SemaRegistrationImportEdge]{}, "compute-fixture", "compute-fixture::main", effects.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}
     stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, compiler_threads_single(), None)
-    checked := sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
+    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
     if !checked.complete {
-        &failures.push("{label}: real body/effect check failed; dependent validator cases BLOCKED {checked.diagnostics:Debug}")
+        failures.push("{label}: real body/effect check failed; dependent validator cases BLOCKED {checked.diagnostics:Debug}")
         return None
     }
-    Val(^checked.modules)
+    Val(checked.modules.move())
 }
 
 compute_fixture_key: fn(name: String) -> String Never! {
@@ -49,8 +49,8 @@ compute_fixture_key: fn(name: String) -> String Never! {
 compute_fixture_fact: fn(modules: &[SemaGraphModuleResult], name: String, safe_panic: Bool, unsafe_panic: Bool) {
     key: compute_fixture_key(name)
     context := sema_check_context_init()
-    if safe_panic -> sema_compute_note_panic(&context, true)
-    if unsafe_panic -> sema_compute_note_panic(&context, false)
+    if safe_panic -> sema_compute_note_panic(context, true)
+    if unsafe_panic -> sema_compute_note_panic(context, false)
     fact: sema_function_compute_facts(key, context)
     loop row in 0..<modules[0].compute_facts.len() {
         if modules[0].compute_facts[row].function_key == key {
@@ -58,13 +58,13 @@ compute_fixture_fact: fn(modules: &[SemaGraphModuleResult], name: String, safe_p
             return
         }
     }
-    &modules[0].compute_facts.push(fact)
+    modules[0].compute_facts.push(fact)
 }
 
 compute_fixture_obligation: fn(modules: &[SemaGraphModuleResult], target: String) {
     context := sema_check_context_init()
-    sema_compute_record_autodiff_obligation("grad", target, Span{start: 17, end: 23}, &context)
-    &modules[0].compute_facts.push(sema_function_compute_facts("compute-fixture::proof", context))
+    sema_compute_record_autodiff_obligation("grad", target, Span{start: 17, end: 23}, context)
+    modules[0].compute_facts.push(sema_function_compute_facts("compute-fixture::proof", context))
 }
 
 compute_fixture_forbidden: fn(target: String, effect_name: String) -> Diagnostic {
@@ -78,9 +78,9 @@ compute_fixture_trace_error: fn() -> Diagnostic {
 compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], expected: [Diagnostic], expected_index: Bool, failures: &[String]) {
     before: "{modules:Debug}"
     work := SemaComputeValidationWork{counting: true}
-    indexed: sema_compute_validate_autodiff_purity(modules, &work)
-    if "{indexed:Debug}" != "{expected:Debug}" -> &failures.push("{label}: exact ordered diagnostic/span/text differs: {indexed:Debug}, expected {expected:Debug}")
-    if "{modules:Debug}" != before -> &failures.push("{label}: borrowed validation changed the original solved products")
+    indexed: sema_compute_validate_autodiff_purity(modules, work)
+    if "{indexed:Debug}" != "{expected:Debug}" -> failures.push("{label}: exact ordered diagnostic/span/text differs: {indexed:Debug}, expected {expected:Debug}")
+    if "{modules:Debug}" != before -> failures.push("{label}: borrowed validation changed the original solved products")
     function_count := 0
     fact_count := 0
     loop module_row in modules {
@@ -88,77 +88,77 @@ compute_fixture_compare: fn(label: String, modules: [SemaGraphModuleResult], exp
         fact_count += module_row.compute_facts.len()
     }
     if expected_index {
-        if work.indexed_functions != function_count || work.indexed_facts != fact_count -> &failures.push("{label}: actual index row visits are not one per original row")
+        if work.indexed_functions != function_count || work.indexed_facts != fact_count -> failures.push("{label}: actual index row visits are not one per original row")
     } else if work.indexed_functions != 0 || work.indexed_facts != 0 || work.function_queries != 0 || work.fact_queries != 0 {
-        &failures.push("{label}: zero actual obligations still indexed or queried functions")
+        failures.push("{label}: zero actual obligations still indexed or queried functions")
     }
 }
 
 compute_fixture_cases: fn(failures: &[String]) {
     source: "pure: fn() {{}}\nio: fn() {{ print(\"effect\") }}\nlocal_panic: fn() {{ panic(\"local\") }}\ntransitive: fn() {{ local_panic() }}\ncycle_a: fn() {{ cycle_b() }}\ncycle_b: fn() {{ cycle_a()\nlocal_panic() }}\n"
-    original := compute_fixture_modules("boundary semantic cases", source, &failures) ?? return
-    compute_fixture_compare("zero obligations", original, [Diagnostic]{}, false, &failures)
+    original := compute_fixture_modules("boundary semantic cases", source, failures) ?? return
+    compute_fixture_compare("zero obligations", original, [Diagnostic]{}, false, failures)
     pure := original.copy()
-    compute_fixture_obligation(&pure, compute_fixture_key("pure"))
-    compute_fixture_compare("pure target", pure, [Diagnostic]{}, true, &failures)
+    compute_fixture_obligation(pure, compute_fixture_key("pure"))
+    compute_fixture_compare("pure target", pure, [Diagnostic]{}, true, failures)
     effectful := original.copy()
-    compute_fixture_obligation(&effectful, compute_fixture_key("io"))
-    compute_fixture_compare("forbidden IO", effectful, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("io"), "IO")}, true, &failures)
+    compute_fixture_obligation(effectful, compute_fixture_key("io"))
+    compute_fixture_compare("forbidden IO", effectful, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("io"), "IO")}, true, failures)
     safe := original.copy()
-    compute_fixture_fact(&safe, "local_panic", true, false)
-    compute_fixture_obligation(&safe, compute_fixture_key("local_panic"))
-    compute_fixture_compare("explicit safe local panic proof", safe, [Diagnostic]{}, true, &failures)
+    compute_fixture_fact(safe, "local_panic", true, false)
+    compute_fixture_obligation(safe, compute_fixture_key("local_panic"))
+    compute_fixture_compare("explicit safe local panic proof", safe, [Diagnostic]{}, true, failures)
     unsafe_case := original.copy()
-    compute_fixture_fact(&unsafe_case, "local_panic", true, true)
-    compute_fixture_obligation(&unsafe_case, compute_fixture_key("local_panic"))
-    compute_fixture_compare("unsafe local panic proof", unsafe_case, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("local_panic"), "Panic")}, true, &failures)
+    compute_fixture_fact(unsafe_case, "local_panic", true, true)
+    compute_fixture_obligation(unsafe_case, compute_fixture_key("local_panic"))
+    compute_fixture_compare("unsafe local panic proof", unsafe_case, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("local_panic"), "Panic")}, true, failures)
     transitive := safe.copy()
-    compute_fixture_obligation(&transitive, compute_fixture_key("transitive"))
-    compute_fixture_compare("transitive safe panic", transitive, [Diagnostic]{}, true, &failures)
+    compute_fixture_obligation(transitive, compute_fixture_key("transitive"))
+    compute_fixture_compare("transitive safe panic", transitive, [Diagnostic]{}, true, failures)
     cycle := safe.copy()
-    compute_fixture_obligation(&cycle, compute_fixture_key("cycle_a"))
-    compute_fixture_compare("panic recursion cycle remains false", cycle, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("cycle_a"), "Panic")}, true, &failures)
+    compute_fixture_obligation(cycle, compute_fixture_key("cycle_a"))
+    compute_fixture_compare("panic recursion cycle remains false", cycle, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("cycle_a"), "Panic")}, true, failures)
     missing := original.copy()
-    compute_fixture_obligation(&missing, "compute-fixture::missing-target")
-    compute_fixture_compare("missing target remains skipped", missing, [Diagnostic]{}, true, &failures)
+    compute_fixture_obligation(missing, "compute-fixture::missing-target")
+    compute_fixture_compare("missing target remains skipped", missing, [Diagnostic]{}, true, failures)
     duplicate := original.copy()
     duplicate_position: duplicate.len()
-    &duplicate.push(original[0].copy())
+    duplicate.push(original[0].copy())
     duplicate[duplicate_position].functions[0].effects.solved = [String]{"IO"}
-    compute_fixture_obligation(&duplicate, compute_fixture_key("pure"))
-    compute_fixture_compare("duplicate function first wins", duplicate, [Diagnostic]{}, true, &failures)
+    compute_fixture_obligation(duplicate, compute_fixture_key("pure"))
+    compute_fixture_compare("duplicate function first wins", duplicate, [Diagnostic]{}, true, failures)
     trace := original.copy()
     context := sema_check_context_init()
-    &context.compute_calls.push(SemaComputeCallFact{method: "det", span: Span{start: 31, end: 34}})
+    context.compute_calls.push(SemaComputeCallFact{method: "det", span: Span{start: 31, end: 34}})
     fact: sema_function_compute_facts(compute_fixture_key("pure"), context)
     trace[0].compute_facts[0] = fact
-    &trace[0].compute_facts.push(sema_function_compute_facts(compute_fixture_key("pure"), sema_check_context_init()))
-    compute_fixture_compare("compute calls without obligations still skip indexing", trace, [Diagnostic]{}, false, &failures)
-    compute_fixture_obligation(&trace, compute_fixture_key("pure"))
-    compute_fixture_compare("forbidden trace and duplicate fact first wins", trace, [Diagnostic]{compute_fixture_trace_error()}, true, &failures)
+    trace[0].compute_facts.push(sema_function_compute_facts(compute_fixture_key("pure"), sema_check_context_init()))
+    compute_fixture_compare("compute calls without obligations still skip indexing", trace, [Diagnostic]{}, false, failures)
+    compute_fixture_obligation(trace, compute_fixture_key("pure"))
+    compute_fixture_compare("forbidden trace and duplicate fact first wins", trace, [Diagnostic]{compute_fixture_trace_error()}, true, failures)
     ordered := original.copy()
-    compute_fixture_obligation(&ordered, compute_fixture_key("io"))
-    compute_fixture_obligation(&ordered, compute_fixture_key("local_panic"))
-    compute_fixture_compare("multiple diagnostics preserve fact/obligation order", ordered, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("io"), "IO"), compute_fixture_forbidden(compute_fixture_key("local_panic"), "Panic")}, true, &failures)
+    compute_fixture_obligation(ordered, compute_fixture_key("io"))
+    compute_fixture_obligation(ordered, compute_fixture_key("local_panic"))
+    compute_fixture_compare("multiple diagnostics preserve fact/obligation order", ordered, [Diagnostic]{compute_fixture_forbidden(compute_fixture_key("io"), "IO"), compute_fixture_forbidden(compute_fixture_key("local_panic"), "Panic")}, true, failures)
 }
 
 compute_fixture_size: fn(size: Int, failures: &[String]) {
     parts := [String]{}
-    loop index in 0..<size -> &parts.push("f_{index}: fn() {{}}\n")
-    modules := compute_fixture_modules("{size} functions", parts.join(""), &failures) ?? return
-    compute_fixture_compare("{size} zero-obligation functions", modules, [Diagnostic]{}, false, &failures)
-    compute_fixture_obligation(&modules, compute_fixture_key("f_0"))
+    loop index in 0..<size -> parts.push("f_{index}: fn() {{}}\n")
+    modules := compute_fixture_modules("{size} functions", parts.join(""), failures) ?? return
+    compute_fixture_compare("{size} zero-obligation functions", modules, [Diagnostic]{}, false, failures)
+    compute_fixture_obligation(modules, compute_fixture_key("f_0"))
     work := SemaComputeValidationWork{counting: true}
-    diagnostics: sema_compute_validate_autodiff_purity(modules, &work)
-    if diagnostics.len() != 0 || work.indexed_functions != size || work.function_queries != 1 || work.fact_queries != 1 -> &failures.push("{size}: actual indexed row/query work is not N/1/1")
-    compute_fixture_compare("{size} indexed functions", modules, [Diagnostic]{}, true, &failures)
+    diagnostics: sema_compute_validate_autodiff_purity(modules, work)
+    if diagnostics.len() != 0 || work.indexed_functions != size || work.function_queries != 1 || work.fact_queries != 1 -> failures.push("{size}: actual indexed row/query work is not N/1/1")
+    compute_fixture_compare("{size} indexed functions", modules, [Diagnostic]{}, true, failures)
 }
 
 #Test("compute_validation_fixtures") {
     failures := [String]{}
-    compute_fixture_cases(&failures)
-    compute_fixture_size(64, &failures)
-    compute_fixture_size(128, &failures)
-    compute_fixture_size(256, &failures)
+    compute_fixture_cases(failures)
+    compute_fixture_size(64, failures)
+    compute_fixture_size(128, failures)
+    compute_fixture_size(256, failures)
     if failures.len() > 0 -> panic("ComputeValidationFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
 }

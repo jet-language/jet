@@ -236,13 +236,13 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
 // Known failing: #5454 owns this port (the Rust strict reader, as above).
 #Test("error report protocol depth64 strict syntax and no protocol byte ceiling", expected_fail: true) {
     nested := [U8]{}
-    loop _ in 0..<65 -> &nested.push(U8{91})
-    &nested.push(U8{48})
-    loop _ in 0..<65 -> &nested.push(U8{93})
+    loop _ in 0..<65 -> nested.push(U8{91})
+    nested.push(U8{48})
+    loop _ in 0..<65 -> nested.push(U8{93})
     hostile: String.from_bytes(nested) ?? panic("bad depth fixture")
     outcome_test_wire_refusal(hostile, "invalid error report: JSON value is nested too deeply")
     text := [U8]{}
-    loop _ in 0..<1048577 -> &text.push(U8{120})
+    loop _ in 0..<1048577 -> text.push(U8{120})
     message: String.from_bytes(text) ?? panic("bad long fixture")
     report: JetErrorReport{message: message}
     wire: report.to_json()

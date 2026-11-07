@@ -39,7 +39,7 @@ PresetSet: struct {
     presets: [String: PresetSpec]{[String: PresetSpec]{}}
 
     insert: fn(&self, preset: PresetSpec) PresetError! {
-        &self.insert_checked(preset)
+        self.insert_checked(preset)
     }
 
     // An equal re-declaration is accepted; a different one under the same
@@ -59,11 +59,11 @@ PresetSet: struct {
     resolve_many: fn(self, names: [String]) -> ResolvedPreset PresetError! {
         selected := [String]{}
         loop name in names {
-            if !selected.contains(name) -> &selected.push(name)
+            if !selected.contains(name) -> selected.push(name.copy())
         }
         resolved := ResolvedPreset{name: selected.join("+"), selected_presets: selected}
         stack := [String]{}
-        loop name in selected -> self.resolve_into(name, &stack, &resolved)
+        loop name in selected -> self.resolve_into(name, stack, resolved)
         Ok(resolved)
     }
 
@@ -79,10 +79,10 @@ PresetSet: struct {
         names: envmodel_sorted_keys(self.presets)
         selected := [String]{}
         loop name in names {
-            if envmodel_optional_is(self.presets[name].hostname, hostname) -> &selected.push(name)
+            if envmodel_optional_is(self.presets[name].hostname, hostname) -> selected.push(name)
         }
         loop name in names {
-            if envmodel_optional_is(self.presets[name].user, user) && !selected.contains(name) -> &selected.push(name)
+            if envmodel_optional_is(self.presets[name].user, user) && !selected.contains(name) -> selected.push(name)
         }
         if selected.len() > 0 -> return selected
         if self.presets.get("default") != None -> return [String]{"default"}
@@ -95,17 +95,17 @@ PresetSet: struct {
             started := false
             loop item in stack {
                 if item == name -> started = true
-                if started -> &cycle.push(item)
+                if started -> cycle.push(item.copy())
             }
-            &cycle.push(name)
+            cycle.push(name.copy())
             return Err(PresetError.Cycle(cycle))
         }
         preset: self.presets.get(name) ?? return Err(PresetError.Missing(name))
-        &stack.push(name)
-        loop parent in preset.extends -> self.resolve_into(parent, &stack, &resolved)
-        if !resolved.applied.contains(name) -> &resolved.applied.push(name)
+        stack.push(name.copy())
+        loop parent in preset.extends -> self.resolve_into(parent, stack, resolved)
+        if !resolved.applied.contains(name) -> resolved.applied.push(name.copy())
         loop package in preset.packages {
-            if !resolved.packages.contains(package) -> &resolved.packages.push(package)
+            if !resolved.packages.contains(package) -> resolved.packages.push(package)
         }
         loop key in envmodel_sorted_keys(preset.variables) {
             value: preset.variables[key]
@@ -116,6 +116,6 @@ PresetSet: struct {
                 .None -> resolved.variables[key] = value
             }
         }
-        _ := &stack.pop()
+        _ := stack.pop()
     }
 }

@@ -7,7 +7,7 @@ import { scratchRoot } from "../agent/roots.mjs";
 
 const repo = process.cwd();
 const jet = process.env.JET_BIN;
-const source = process.env.JET_SOURCE || "Examples/features/tooling/canvas_blueprint_demo.jet";
+const source = process.env.JET_SOURCE || "Examples/Tooling/CanvasBlueprintDemo.jet";
 const tmpdir = process.env.TMPDIR || scratchRoot();
 const chromium = process.env.CHROMIUM || "chromium";
 

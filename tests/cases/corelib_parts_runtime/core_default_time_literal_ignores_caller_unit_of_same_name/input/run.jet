@@ -3,10 +3,9 @@ use auth: core.auth
 
 #UnitFamily(Lag) { ms }
 
-run: fn() -[Time]> {
+run: fn() -[IO, Time]> {
     local: 5ms
     print(local.to_float())
     key: "0123456789abcdef0123456789abcdef".bytes()
-    verified: auth.verify_jwt("a.b.c", key: key, audience: "api")
-    print(verified == .Err(_))
+    print(auth.verify_jwt("a.b.c", key: key, audience: "api") == .Err(_))
 }

@@ -36,7 +36,7 @@ ast_enum_variants: fn(path: String, enum_name: String) -> [String] {
             next
         }
         if depth == 1 {
-            if variant_name(code) == .Val(name) -> &variants.push(name)
+            if variant_name(code) == .Val(name) -> variants.push(name)
         }
         loop ch in code.chars() {
             if ch == {
@@ -87,7 +87,7 @@ CANVAS_RAILS_FIXTURE: comptime { String{"use mem: core.mem\n\nmaybe: fn() -> Int
 CANVAS_SHIELD_FIXTURE: comptime { String{"run: fn() {{\n    #Shield {{\n        print(\"before\")\n    }}\n}}\n"} }
 CANVAS_POLICY_FIXTURE: comptime { String{"run: fn() {{\n    #Policy(copies: .Explicit) {{\n        print(\"bounded\")\n    }}\n}}\n"} }
 CANVAS_TASK_RAIL_FIXTURE: comptime { String{"worker: fn() -> Int {{\n    return 1\n}}\n\nrun: fn() {{\n    task.group g {{\n        t: task {{\n            worker()\n        }}\n        result: (task.all {{ worker() }}) ?? panic(\"task.all failed\")\n        print(result[0])\n    }}\n}}\n"} }
-CANVAS_EVENT_DISPATCHER_FIXTURE: comptime { String{"use event: core.event\n\nResource: struct {{\n    id: Int\n\n    on: fn(&self) {{}}\n    close: fn(&self) {{}}\n    cancel: fn(&self) {{}}\n}}\n\nrun: fn() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope: event.scope()\n    clicked: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(&clicked.emit(1).summary())\n    before_save: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nshow_publish: fn(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
+CANVAS_EVENT_DISPATCHER_FIXTURE: comptime { String{"use event: core.event\n\nResource: struct {{\n    id: Int\n\n    on: fn(&self) {{}}\n    close: fn(&self) {{}}\n    cancel: fn(&self) {{}}\n}}\n\nrun: fn() {{\n    resource := Resource{{ id: 1 }}\n    resource.on()\n    resource.close()\n    resource.cancel()\n    scope: event.scope()\n    clicked: event.new<Int>()\n    clicked.on(scope, (n) -> {{ print(\"clicked {{n}}\") }})\n    clicked.once(scope, (n) -> {{ print(\"once {{n}}\") }})\n    clicked.on_priority(scope, 10, (n) -> {{ print(\"priority {{n}}\") }})\n    print(clicked.emit(1).summary())\n    before_save: event.hook<Int, String>(\"allow\")\n    before_save.on(scope, n -> \"seen {{n}}\")\n    print(before_save.run(5, \"fallback\"))\n    before_publish: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)\n    before_publish.on(scope, n -> HookDecision.Continue)\n    show_publish(before_publish.run(7))\n    jobs: event.async_result<Int, String>(AsyncPolicy{{ capacity: 2, overflow: .Block }}, .Collect) ?? panic(\"policy\")\n    jobs.on(scope, (n) -> {{ print(\"job {{n}}\") }})\n    report: jobs.emit_async(2).join() ?? panic(\"report\")\n    print(jobs.queued_count())\n    jobs.close()\n    scope.cancel()\n}}\n\nshow_publish: fn(outcome: HookOutcome<Int, String>) {{\n    if outcome == {{\n        .Continue(value) -> print(\"continue {{value}}\")\n        .Cancel -> print(\"cancel\")\n        .Fail(error) -> print(\"fail {{error}}\")\n    }}\n}}\n"} }
 CANVAS_TRAIT_INTERFACE_FIXTURE: comptime { String{"Drawable: trait {{\n    render: fn(self) -[IO]> String\n    label: fn(self) -> String {{\n        return \"drawable\"\n    }}\n}}\n\nBadge: struct {{\n    text: String\n}}\n\nrun: fn() {{\n    print(\"ready\")\n}}\n"} }
 CANVAS_NESTED_TRAIT_INTERFACE_FIXTURE: comptime { String{"ui: module {{\n    Drawable: trait {{\n        render: fn(self) -[IO]> String\n        label: fn(self) -> String {{\n            return \"drawable\"\n        }}\n    }}\n\n    Badge: struct {{\n        text: String\n    }}\n}}\n\nrun: fn() {{\n    print(\"ready\")\n}}\n"} }
 CANVAS_TRAIT_ASSOC_TYPE_FIXTURE: comptime { String{"Indexed: trait {{\n    Elem: type\n    at: fn(self, i: Int) -> Elem\n}}\n\nNums: struct {{\n    values: [Int]\n}}\n\nrun: fn() {{\n    print(\"ready\")\n}}\n"} }
@@ -185,7 +185,7 @@ json_top_level_objects: fn(array: String) -> [String] {
                 if depth == 0 {
                     object_start: start ?? panic("top-level JSON object start")
                     start = None
-                    &objects.push(array.slice(object_start, offset + 1))
+                    objects.push(array.slice(object_start, offset + 1))
                 }
             }
             else -> {}
@@ -231,7 +231,7 @@ name_span: fn(src: String, name: String) -> (Int, Int) {
 }
 source_order: fn(src: String, names: [String]) -> [Int] {
     out := [Int]{}
-    loop name in names -> &out.push(src.find("{name} ::") ?? panic("source name"))
+    loop name in names -> out.push(src.find("{name} ::") ?? panic("source name"))
     out
 }
 
@@ -317,7 +317,7 @@ source_order: fn(src: String, names: [String]) -> [Int] {
     loop field in [diagnostic.code, diagnostic.what, diagnostic.why, diagnostic.fix] -> assert(project.contains(field), "project omitted diagnostic field: {field}\n{project}")
 }
 #Test("canvas_node_descriptor_catalog_is_complete_and_transaction_matched") {
-    projection_fixtures: [(_0: "node_descriptor_coverage", _1: CANVAS_COVERAGE_FIXTURE), (_0: "node_descriptor_data", _1: CANVAS_DATA_FIXTURE), (_0: "node_descriptor_patterns", _1: CANVAS_PATTERN_MULTI_FIXTURE), (_0: "node_descriptor_fallible", _1: CANVAS_RAILS_FIXTURE), (_0: "node_descriptor_yield", _1: fs.read_to_string(OSPath("Examples/features/streams/generators.jet")).unwrap()), (_0: "node_descriptor_scope", _1: fs.read_to_string(OSPath("Examples/features/tooling/test_members.jet")).unwrap())]
+    projection_fixtures: [(_0: "node_descriptor_coverage", _1: CANVAS_COVERAGE_FIXTURE), (_0: "node_descriptor_data", _1: CANVAS_DATA_FIXTURE), (_0: "node_descriptor_patterns", _1: CANVAS_PATTERN_MULTI_FIXTURE), (_0: "node_descriptor_fallible", _1: CANVAS_RAILS_FIXTURE), (_0: "node_descriptor_yield", _1: fs.read_to_string(OSPath("Examples/Collections/Iterators/Generators.jet")).unwrap()), (_0: "node_descriptor_scope", _1: fs.read_to_string(OSPath("Examples/Tooling/Testing/TestMembers.jet")).unwrap())]
     path: write_fixture(projection_fixtures[0]._0, projection_fixtures[0]._1)
     json: graph_json_for_file(path).expect("canvas graph")
     catalog: json_array_field(json, "node_descriptors")
@@ -359,7 +359,7 @@ source_order: fn(src: String, names: [String]) -> [Int] {
     actions: query_json_for_file(path, actions_request).expect("Canvas actions")
     action_objects := json_top_level_objects(json_array_field(actions, "project_functions"))
     loop action in json_top_level_objects(json_array_field(actions, "actions")) {
-        if !action.contains("\"kind\":\"canvas.command\"") -> &action_objects.push(action)
+        if !action.contains("\"kind\":\"canvas.command\"") -> action_objects.push(action)
     }
     assert(!action_objects.is_empty(), "insertable actions need descriptors: {actions}")
     exported_insertable_ids := [String:Bool]{}

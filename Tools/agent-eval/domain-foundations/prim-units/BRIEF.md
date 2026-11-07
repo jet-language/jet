@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Find what Jet ships for units today (search spec, Prelude, Examples/features/types/**, and `jet inspect facts`). Then build, as library Jet, a units layer: meters, seconds, Hz, derived units through multiplication/division, checked addition, formatting, conversion; use it in a 20-line control-loop program. Record where the type system stops you (type-level arithmetic, phantom parameters, const generics, trait coherence).
+Find what Jet ships for units today (search spec, Prelude, Examples/Types/**, and `jet inspect facts`). Then build, as library Jet, a units layer: meters, seconds, Hz, derived units through multiplication/division, checked addition, formatting, conversion; use it in a 20-line control-loop program. Record where the type system stops you (type-level arithmetic, phantom parameters, const generics, trait coherence).
 
 ## Answer these
 

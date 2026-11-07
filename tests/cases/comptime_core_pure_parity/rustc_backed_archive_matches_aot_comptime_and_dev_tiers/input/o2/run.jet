@@ -4,9 +4,10 @@ archive_view: fn() -> String {
     zipped: archive.create("hello.txt", bytes) ?? [U8]{}
     empty: [U8]{}
     tarred := archive.tar_add(empty, "hello.txt", bytes) ?? [U8]{}
-    tarred = archive.tar_add(tarred, "quote\"slash\\.txt", [74, 101, 116]) ?? [U8]{}
+    // `tar_add` refuses a backslash-bearing name, so the escaped name carries only a quote.
+    tarred = archive.tar_add(tarred, "quote\"mark.txt", [74, 101, 116]) ?? [U8]{}
     zip_bytes: archive.zip_decompress(zipped) ?? [U8]{}
-    tar_bytes: archive.tar_get(tarred, "quote\"slash\\.txt") ?? [U8]{}
+    tar_bytes: archive.tar_get(tarred, "quote\"mark.txt") ?? [U8]{}
     names_json: archive.tar_names_json(tarred) ?? ""
     missing: archive.tar_get(tarred, "missing") ?? [U8]{}
     return "{zip_bytes}|{tar_bytes}|{names_json}|{missing.len()}"

@@ -15,13 +15,13 @@ run: fn() {
     lines := 0
     loop line in child.stdout.lines() {
         if line != "ready" -> print("stdout line {lines}: {line}")
-        &kept.push(Holder{name: Val("value {lines}")})
+        kept.push(Holder{name: Val("value {lines}")})
         lines += 1
     }
     errors := 0
     loop line in child.stderr.lines() {
         if line != "ready" -> print("stderr line {errors}: {line}")
-        &kept.push(Holder{name: Val("value {lines + errors}")})
+        kept.push(Holder{name: Val("value {lines + errors}")})
         errors += 1
     }
     receipt: child.wait()

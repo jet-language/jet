@@ -1,4 +1,4 @@
-// D-CALLDUAL1=E (`root_call_candidates`, `select_root_call`,
+// Rust (`root_call_candidates`, `select_root_call`,
 // `infer_root_call`): a free function whose first bare-read parameter is marked
 // `#Root` also takes the receiver-first spelling `value.f(args)`. Sema selects
 // the one visible function that accepts the receiver and checks the call as
@@ -75,15 +75,15 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
     loop import_row in graph.modules[module_index].imports {
         loop binding in import_row.bindings {
             if binding.symbol.kind != SymbolKind.Import || binding.declaration != None -> next
-            &aliases.push(binding.local)
+            aliases.push(binding.local)
         }
     }
-    &aliases.sort()
+    aliases.sort()
     seen := [String]{}
     loop alias in aliases {
         imported: sema_call_source_import_target(environment, program, alias) ?? next
         if seen.contains(imported.module_identity) -> next
-        &seen.push(imported.module_identity)
+        seen.push(imported.module_identity)
         target_index: sema_registration_module_index(graph, imported.module_identity) ?? next
         export: sema_registration_resolve_export(graph, target_index, method, environment.module_identity, environment.package_identity, [String]{}) ?? next
         row: sema_call_export_function_row(environment, program, export) ?? next
@@ -94,7 +94,7 @@ sema_root_call_imported: fn(method: String, receiver: Type?, environment: SemaSc
             signature: sema_type_resolve_declared_with_generics(graph, registered.signature, export.source_module_identity, loop param in registered.generic_params -> TGenericParam{name: param.name, bounds: [SymbolID]{}})
             if !sema_root_call_param_accepts(signature, generic_names, receiver_type, environment, program) -> next
         }
-        &targets.push(SemaRootCallTarget{alias: Val(alias), shown: "{alias}.{method}"})
+        targets.push(SemaRootCallTarget{alias: Val(alias), shown: "{alias}.{method}"})
     }
     targets
 }
@@ -108,7 +108,7 @@ sema_root_call_owner_declares: fn(receiver_type: Type, method: String, method_sp
     receiver_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
     if graph.source_impl_owner_modules.get(receiver_name) == None && sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(receiver_name)).len() == 0 -> return false
     probe := [Diagnostic]{}
-    sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_type, method, [Type]{}, [Type]{}, method_span, environment, program, &probe).len() > 0
+    sema_expr_registration_method_candidates(graph, environment.module_identity, receiver_type, method, [Type]{}, [Type]{}, method_span, environment, program, probe).len() > 0
 }
 
 // The receiver-first call `receiver.method(args)` when `method` names a
@@ -117,31 +117,31 @@ sema_root_call_try: fn(receiver: Expr, method: String, method_span: Span, type_a
     unhandled: SemaMethodSpecialCheck{handled: false, value: None}
     if !sema_root_call_named(method, environment, program, scopes) -> return unhandled
     probe_diagnostics := [Diagnostic]{}
-    probed: sema_probe_expression(receiver, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return unhandled
+    probed: sema_probe_expression(receiver, None, environment, program, scopes, state, tail_store, context, probe_diagnostics) ?? return unhandled
     receiver_type: sema_call_resolved_type(probed.ty, environment, program)
     candidates := [SemaRootCallTarget]{}
     local: sema_root_call_local(method, receiver_type, environment, program, scopes)
-    if local -> &candidates.push(SemaRootCallTarget{alias: None, shown: method})
+    if local -> candidates.push(SemaRootCallTarget{alias: None, shown: method})
     if method == "print" && !local && sema_call_gate_is_unshadowed(method, scopes) && sema_call_ambient_printable(receiver_type, environment, program) {
-        &candidates.push(SemaRootCallTarget{alias: None, shown: "core.term.print"})
+        candidates.push(SemaRootCallTarget{alias: None, shown: "core.term.print"})
     }
-    loop imported in sema_root_call_imported(method, Val(receiver_type), environment, program) -> &candidates.push(imported)
+    loop imported in sema_root_call_imported(method, Val(receiver_type), environment, program) -> candidates.push(imported)
     if candidates.len() == 0 -> return unhandled
     failed: SemaMethodSpecialCheck{handled: true, value: None}
     if sema_root_call_owner_declares(receiver_type, method, method_span, environment, program) {
-        &diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` conflicts with a method on `{type_name(receiver_type)}`", "a `#Root` function cannot silently compete with a real instance method", "rename the `#Root` function or call it as `{method}(value, …)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` conflicts with a method on `{type_name(receiver_type)}`", "a `#Root` function cannot silently compete with a real instance method", "rename the `#Root` function or call it as `{method}(value, …)`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return failed
     }
     if candidates.len() > 1 {
         names: loop candidate in candidates -> candidate.shown
-        &diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` is ambiguous", "more than one imported `#Root` function accepts this receiver: {names.join(", ")}", "call one function explicitly: `{method}(value, …)`"))
-        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        diagnostics.push(sema_error("E0105", method_span, "dot call `.{method}()` is ambiguous", "more than one imported `#Root` function accepts this receiver: {names.join(", ")}", "call one function explicitly: `{method}(value, …)`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return failed
     }
     call_args := [CallArg]{CallArg{convention: AccessConvention.Read, expr: receiver, span: method_span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
-    loop argument in args -> &call_args.push(argument)
+    loop argument in args -> call_args.push(argument.copy())
     call: Call{name: method, name_span: method_span, type_args: type_args, args: call_args}
     rewritten: if candidates[0].alias == .Val(alias) -> Expr.MethodCall{receiver: Expr.Ident{name: alias, span: method_span, id: AST_NODE_GENERATED}, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: call_args, id: AST_NODE_GENERATED} else -> Expr.Call{call: call, id: AST_NODE_GENERATED}
-    SemaMethodSpecialCheck{handled: true, value: sema_check_expression(rewritten, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)}
+    SemaMethodSpecialCheck{handled: true, value: sema_check_expression(rewritten, expected, environment, program, scopes, state, tail_store, context, diagnostics)}
 }

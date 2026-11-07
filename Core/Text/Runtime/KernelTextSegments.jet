@@ -78,7 +78,7 @@ word_reduce: fn(raw: [U8]) -> [WordUnit] Never! {
                 next
             }
         }
-        &units.push(WordUnit{class: class, first: cp, last: class, end: at})
+        units.push(WordUnit{class: class, first: cp, last: class, end: at})
     }
     units
 }
@@ -136,17 +136,17 @@ word_boundaries: fn(raw: [U8]) -> [Int] Never! {
         ri_run = if class == WB_RI -> ri_run + 1 else -> 0
         if i + 1 < n {
             split: if class == WB_RI && units[i + 1].class == WB_RI -> ri_run % 2 == 0 else -> word_break_at(units, i, pictographic)
-            if split -> &out.push(units[i].end)
+            if split -> out.push(units[i].end)
         }
     }
-    &out.push(raw.len())
+    out.push(raw.len())
     out
 }
 
 // Owned copy of one segment's validated UTF-8 byte range.
 owned_segment: fn(raw: [U8], start: Int, end: Int) -> String Never! {
     out := [U8]{}
-    loop at in start..<end -> &out.push(raw[at])
+    loop at in start..<end -> out.push(raw[at])
     String.from_bytes(out) ?? panic("Unicode segment split a UTF-8 scalar")
 }
 
@@ -156,7 +156,7 @@ word_segments: fn(text: String) -> [String] Never! {
     out := [String]{}
     start := 0
     loop end in word_boundaries(raw) {
-        &out.push(owned_segment(raw, start, end))
+        out.push(owned_segment(raw, start, end))
         start = end
     }
     out
@@ -175,7 +175,7 @@ words: fn(text: String) -> [String] Never! {
         loop at < end {
             cp: text_string.scalar_at(raw, at)
             if text_asset.asset_contains(alphabetic, cp) || text_asset.asset_contains(numeric, cp) {
-                &out.push(owned_segment(raw, start, end))
+                out.push(owned_segment(raw, start, end))
                 break
             }
             at = at + text_string.utf8_width_at(raw, at)
@@ -199,7 +199,7 @@ SentenceUnit: struct {
 sentence_breaks: fn(units: [SentenceUnit]) -> [Bool] Never! {
     n: units.len()
     breaks := [Bool]{}
-    loop _ in 1..<n -> &breaks.push(false)
+    loop _ in 1..<n -> breaks.push(false)
     i := 0
     loop i + 1 < n {
         current: units[i].class
@@ -271,13 +271,13 @@ sentence_boundaries: fn(raw: [U8]) -> [Int] Never! {
                 next
             }
         }
-        &units.push(SentenceUnit{class: class, end: at})
+        units.push(SentenceUnit{class: class, end: at})
     }
     breaks: sentence_breaks(units)
     loop i in 0..<breaks.len() {
-        if breaks[i] -> &out.push(units[i].end)
+        if breaks[i] -> out.push(units[i].end)
     }
-    &out.push(raw.len())
+    out.push(raw.len())
     out
 }
 
@@ -287,7 +287,7 @@ sentence_segments: fn(text: String) -> [String] Never! {
     out := [String]{}
     start := 0
     loop end in sentence_boundaries(raw) {
-        &out.push(owned_segment(raw, start, end))
+        out.push(owned_segment(raw, start, end))
         start = end
     }
     out
@@ -302,7 +302,7 @@ sentences: fn(text: String) -> [String] Never! {
     loop end in sentence_boundaries(raw) {
         segment := owned_segment(raw, start, end)
         trimmed := text_string.trim(segment) // #4303: slice view flows into String list
-        if trimmed != "" -> &out.push(trimmed)
+        if trimmed != "" -> out.push(trimmed)
         start = end
     }
     out

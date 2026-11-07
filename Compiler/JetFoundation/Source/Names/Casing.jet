@@ -154,17 +154,17 @@ sema_casing_split_words: fn(name: String) -> [String] {
                     if {
                         index < scalars.len() && sema_casing_is_lower(scalars[index]) && index - run_start > 1 -> {
                             last_capital: index - 1
-                            if last_capital > start -> &words.push(sema_casing_join(scalars, start, last_capital))
+                            if last_capital > start -> words.push(sema_casing_join(scalars, start, last_capital))
                             start = last_capital
                             loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
-                            &words.push(sema_casing_join(scalars, start, index))
+                            words.push(sema_casing_join(scalars, start, index))
                             start = index
                         }
                         index < scalars.len() && sema_casing_is_lower(scalars[index]) -> {
-                            if run_start > start -> &words.push(sema_casing_join(scalars, start, run_start))
+                            if run_start > start -> words.push(sema_casing_join(scalars, start, run_start))
                             start = run_start
                             loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
-                            &words.push(sema_casing_join(scalars, start, index))
+                            words.push(sema_casing_join(scalars, start, index))
                             start = index
                         }
                     }
@@ -172,13 +172,13 @@ sema_casing_split_words: fn(name: String) -> [String] {
                 else -> {
                     loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
                     if index > start {
-                        &words.push(sema_casing_join(scalars, start, index))
+                        words.push(sema_casing_join(scalars, start, index))
                         start = index
                     }
                 }
             }
         }
-        if start < scalars.len() -> &words.push(sema_casing_join(scalars, start, scalars.len()))
+        if start < scalars.len() -> words.push(sema_casing_join(scalars, start, scalars.len()))
     }
     words
 }
@@ -192,7 +192,7 @@ sema_casing_snake_words: fn(name: String) -> String {
         if already_lower -> return name.copy()
     }
     words := [String]{}
-    loop word in sema_casing_split_words(name) -> &words.push(unicode.lower(word))
+    loop word in sema_casing_split_words(name) -> words.push(unicode.lower(word))
     words.join("_")
 }
 
@@ -218,8 +218,9 @@ sema_casing_canonical: fn(name: String, case: SemaNameCase) -> String {
 }
 
 // The applied acronym lexicon: every initials-formed word in current
-// Jet names, in canonical caps. Mirrors `ACRONYMS` in
-// Compiler/JetFoundation/Data/Syntax/Acronyms.jet.
+// Jet names, in canonical caps. A copy of `ACRONYMS` in
+// Compiler/JetFoundation/Data/Syntax/Acronyms.jet, its one home: edit the
+// home, then copy it here (tests/guards/closed_lists/mirrors.tsv fails on drift).
 SEMA_CASING_ACRONYMS: comptime { [String]{
     "AABB", "ABI", "AES", "ALPN", "ANSI", "AOT", "API", "ASCII", "AST", "BPE", "CAS", "CBOR",
     "CDP", "CFG", "CI", "CLI", "CMS", "CPU", "CSR", "CSS", "CSV", "DB", "DMA", "DNS",
@@ -290,16 +291,16 @@ sema_casing_acronym_name: fn(name: String) -> String {
     loop segment in name.split("_") {
         out := ""
         loop word in sema_casing_split_words(segment) -> out = "{out}{sema_casing_acronym_word(word)}"
-        &segments.push(out)
+        segments.push(out)
     }
     segments.join("_")
 }
 
-// D-MARKER-CASE1=A: a marker's library part is PascalCase. Each segment of
+// A marker's library part is PascalCase. Each segment of
 // an import alias or module path is written as its PascalCase spelling with
 // acronyms in caps (`server` -> `Server`, `http_client` -> `HTTPClient`).
 sema_casing_marker_qualifier: fn(path: String) -> String {
     segments := [String]{}
-    loop segment in path.split(".") -> &segments.push(sema_casing_acronym_name(sema_casing_canonical(segment, SemaNameCase.Pascal)))
+    loop segment in path.split(".") -> segments.push(sema_casing_acronym_name(sema_casing_canonical(segment, SemaNameCase.Pascal)))
     segments.join(".")
 }

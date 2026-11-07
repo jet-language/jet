@@ -20,7 +20,7 @@ RSP_TERMINAL: [U8]{U8{48}, U8{48}, U8{48}}
 
 RspFixtureRoot: struct { path: String }
 impl RspFixtureRoot.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         rsp_files.remove_all(self.path).drop("test root cleanup")
     }
 }
@@ -75,7 +75,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
 #Test("content_keys_reuse_without_timestamps_and_invalidate_only_dependents") {
     root: rsp_root("identity")
     owner: RspFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     source: "{root}/source.jet"
     unrelated: "{root}/unrelated.jet"
     rsp_write(source, "run: fn() {{}}\n")
@@ -105,7 +105,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
 #Test("explicit_check_receipt_tracks_package_workspace_and_generated_authorities") {
     root: rsp_root("project-authorities")
     owner: RspFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     package: "{root}/packages/app"
     source: "{package}/src/main.jet"
     package_manifest: "{package}/package.jet"
@@ -125,7 +125,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
 
     argv: [String]{"check", "packages/app/src/main.jet"}
     cache := WorkspaceDeclarationCache.new()
-    inputs: jet_cli_comparison_input_paths(&cache, source) ?? panic("input paths: {err.message}")
+    inputs: jet_cli_comparison_input_paths(cache, source) ?? panic("input paths: {err.message}")
     loop expected in ([String]{workspace, package_manifest, workspace_lock, package_lock, generated}) {
         assert(inputs.contains(expected), "explicit check omitted authority input {expected}: {inputs.join(", ")}")
     }
@@ -152,7 +152,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
 #Test("result_payloads_share_one_receipt_codec_and_store") {
     root: rsp_root("kinds")
     owner: RspFixtureRoot{path: root}
-    defer close(^owner)
+    defer close(owner)
     source: "{root}/main.jet"
     rsp_write(source, "run: fn() {{}}\n")
     store: "{root}/store"
@@ -160,14 +160,14 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     kinds: [String]{"test", "golden", "budget", "api"}
     claims := [JetCLIReceiptClaim]{}
     magic := "jet-receipt-v2".bytes()
-    &magic.push(U8{0})
+    magic.push(U8{0})
 
     loop kind in kinds {
         claim: rsp_claim(kind, args, [String]{source})
         rsp_publish(store, claim, kind)
         bytes: rsp_files.read_bytes("{store}/.jet/receipts/objects/{claim.key}") ?? panic("read receipt object {kind}")
         assert(bytes.len() >= magic.len() && bytes.slice(0, magic.len()) == magic, "{kind} receipt uses the shared receipt codec")
-        &claims.push(claim)
+        claims.push(claim)
     }
 
     assert_eq(rsp_list(store).len(), kinds.len())

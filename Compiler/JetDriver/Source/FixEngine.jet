@@ -11,7 +11,7 @@ JetDriverApplyError: enum {
 jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverApplyError! {
     if edits.len() == 0 -> return Ok(src)
     order := [Int]{}
-    loop index in 0..<edits.len() -> &order.push(index)
+    loop index in 0..<edits.len() -> order.push(index)
     width := 1
     loop width < order.len() {
         merged := [Int]{}
@@ -29,10 +29,10 @@ jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverAp
                     take_left = a.start < b.start || (a.start == b.start && a.end <= b.end)
                 }
                 if take_left {
-                    &merged.push(order[left])
+                    merged.push(order[left])
                     left += 1
                 } else {
-                    &merged.push(order[right])
+                    merged.push(order[right])
                     right += 1
                 }
             }
@@ -62,10 +62,10 @@ jet_driver_apply_edits: fn(src: String, edits: [TextEdit]) -> String JetDriverAp
         if end < bytes.len() && (Int.from_u8(bytes[end]).bit_and(192)) == 128 {
             panic("edit spans must be UTF-8 character boundaries")
         }
-        loop position in cursor..<start -> &out.push(bytes[position])
-        loop byte in edit.new_text.bytes() -> &out.push(byte)
+        loop position in cursor..<start -> out.push(bytes[position])
+        loop byte in edit.new_text.bytes() -> out.push(byte)
         cursor = end
     }
-    loop position in cursor..<bytes.len() -> &out.push(bytes[position])
+    loop position in cursor..<bytes.len() -> out.push(bytes[position])
     Ok(String.from_bytes(out) ?? panic("edit spans must be UTF-8 character boundaries"))
 }

@@ -45,8 +45,8 @@ store_nix_take_wave: fn(queue: &Rank<String>, limit: Int) -> [String] Never! {
     wave := [String]{}
     loop wave.len() < limit {
         store_path: queue.first() ?? break
-        &queue.remove(store_path)
-        &wave.push(store_path)
+        queue.remove(store_path)
+        wave.push(store_path)
     }
     wave
 }
@@ -58,11 +58,11 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
     endpoint: NixCacheEndpoint.from_roots(roots)
     store_dir := "/nix/store"
     cache_info_loaded := offline
-    existing_entries: store_nix_entries_by_store_path(store_list_checked(&verification, roots) ?? return Err(store_nix_store_error(err)))
+    existing_entries: store_nix_entries_by_store_path(store_list_checked(verification, roots) ?? return Err(store_nix_store_error(err)))
     queue := Rank<String>.new()
     loop store_path in store_paths {
         store_nix_validate_store_path(store_path, store_dir)
-        &queue.add(store_path)
+        queue.add(store_path.copy())
     }
     scheduled := queue.copy()
     checked := 0
@@ -72,24 +72,24 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
     store_nix_progress_objects(progress, 0, scheduled.len())
 
     loop queue.len() > 0 {
-        wave: store_nix_take_wave(&queue, STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
+        wave: store_nix_take_wave(queue, STORE_NIX_MAX_PARALLEL_METADATA_FETCHES)
         pending := [String]{}
         loop store_path in wave {
-            if store_nix_existing_object(&verification, roots, existing_entries, store_path, store_dir) == {
+            if store_nix_existing_object(verification, roots, existing_entries, store_path, store_dir) == {
                 .Val(existing) -> {
                     plan.cached = store_nix_checked_add(plan.cached, 1, "Nix closure cached package count overflowed")
                     plan.disk_bytes = store_nix_checked_add(plan.disk_bytes, existing.unpacked_bytes, "Nix closure on-disk size overflowed")
-                    &plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state: .Cached, download_bytes: 0, disk_bytes: existing.unpacked_bytes})
+                    plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state: .Cached, download_bytes: 0, disk_bytes: existing.unpacked_bytes})
                     loop reference in existing.references {
                         if !scheduled.has(reference) {
-                            &scheduled.add(reference)
-                            &queue.add(reference)
+                            scheduled.add(reference.copy())
+                            queue.add(reference)
                         }
                     }
                     checked += 1
                     store_nix_progress_objects(progress, checked, scheduled.len())
                 }
-                else -> &pending.push(store_path)
+                else -> pending.push(store_path)
             }
         }
         if pending.len() == 0 -> next
@@ -115,7 +115,7 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
             }
         }
         names := fetched.keys().to_list()
-        &names.sort()
+        names.sort()
         loop store_path in names {
             info: fetched[store_path]
             planned[store_path] = info.copy()
@@ -128,13 +128,13 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
                 else -> plan.new = store_nix_checked_add(plan.new, 1, "Nix closure new package count overflowed")
             }
             state: if repaired -> NixPlanState.Repaired else -> NixPlanState.New
-            &plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state, download_bytes: file_size, disk_bytes: info.info.nar_size})
+            plan.items.push(NixPlanItem{package: store_nix_store_name(store_path), state, download_bytes: file_size, disk_bytes: info.info.nar_size})
             loop name in info.info.references {
                 reference: "{store_dir}/{name}"
                 store_nix_validate_store_path(reference, store_dir)
                 if !scheduled.has(reference) {
-                    &scheduled.add(reference)
-                    &queue.add(reference)
+                    scheduled.add(reference.copy())
+                    queue.add(reference)
                 }
             }
             checked += 1
@@ -142,9 +142,9 @@ store_plan_nix_downloads: fn(verification: &StoreVerification, roots: HangarRoot
         }
         if first_error == .Val(error) -> return Err(error)
     }
-    &plan.items.sort_by((item: NixPlanItem) -> item.package)
+    plan.items.sort_by((item: NixPlanItem) -> item.package)
     plan.estimated_seconds = store_nix_estimated_seconds(plan.download_bytes, store_nix_recent_throughput(roots))
-    store_nix_remember_planned_narinfos(&verification, roots, endpoint, planned)
+    store_nix_remember_planned_narinfos(verification, roots, endpoint, planned)
     Ok(plan)
 }
 
@@ -176,15 +176,15 @@ store_nix_planned_narinfos: fn(verification: &StoreVerification, roots: HangarRo
 store_nix_expand_planned_closure: fn(queue: &Rank<String>, scheduled: &Rank<String>, infos: [String: FetchedInfo], store_dir: String) NixCacheError! {
     frontier := queue.to_list()
     loop frontier.len() > 0 {
-        store_path: &frontier.pop() ?? break
+        store_path: frontier.pop() ?? break
         info: infos.get(store_path) ?? next
         loop name in info.info.references {
             reference: "{store_dir}/{name}"
             store_nix_validate_store_path(reference, store_dir)
             if !scheduled.has(reference) {
-                &scheduled.add(reference)
-                &queue.add(reference)
-                &frontier.push(reference)
+                scheduled.add(reference.copy())
+                queue.add(reference.copy())
+                frontier.push(reference)
             }
         }
     }

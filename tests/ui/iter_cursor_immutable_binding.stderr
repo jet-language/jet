@@ -1,8 +1,8 @@
-Error [jet.MissingWriteMarker]: Cannot write to `cur` — it does not have the write-access marker `&`; required before calling `.next()`
-  --> tests/ui/iter_cursor_immutable_binding.jet:20:13
+Error [jet.ImmutableAssignment]: `cur` was made with `:`, so it can't be changed
+  --> tests/ui/iter_cursor_immutable_binding.jet:20:12
     |
- 20 |     a: &cur.next()
-    |             ^^^^
- Why: This method edits the value it's called on; the write-access marker `&` is required
- Fix: Declare `cur := ...`
-More: jet-lang.dev/e/E0202
+ 20 |     a: cur.next()
+    |            ^^^^
+ Why: `next: fn(&self)` changes the value it's called on, so `cur` must be mutable (`:=`)
+ Fix: Declare it with `cur := ...`
+More: jet-lang.dev/e/E0111

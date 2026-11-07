@@ -2,18 +2,19 @@
 use {
     jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit, authority_inline_package_block, authority_inline_package_fix]
     jet_cli.[
-        JetCLIFix, JetCLISemDefinitionFact, jet_cli_fix_apply_non_overlapping,
+        JetCLIFix, jet_cli_fix_apply_non_overlapping,
         jet_cli_fix_inline_insertion, jet_cli_safe_fixes,
         jet_cli_semantic_rename_ops,
     ]
+    jet_semindex.[SemDefinitionFact]
 }
 
 cli_fix_fixture_edit: fn(start: Int, end: Int, text: String, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> JetCLIFix Never! {
     JetCLIFix{title: "fixture edit", edit: TextEdit{span: Span{start: start, end: end}, new_text: text}, applicability: applicability, safety: safety}
 }
 
-cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -> JetCLISemDefinitionFact Never! {
-    JetCLISemDefinitionFact{stable_id: "def:{name}", signature_id: signature, content_id: "content:{name}", human_identity: "{module_path}::{name}", name: name, kind: "function", module_path: module_path, span: Span{start: 0, end: 1}}
+cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -> SemDefinitionFact Never! {
+    SemDefinitionFact{stable_id: "def:{name}", signature_id: signature, content_id: "content:{name}", human_identity: "{module_path}::{name}", name: name, kind: "function", module_path: module_path, span: Span{start: 0, end: 1}}
 }
 
 #Test("fix_commands") {
@@ -42,12 +43,12 @@ cli_fix_fixture_fact: fn(name: String, signature: String, module_path: String) -
 
     old: cli_fix_fixture_fact("report", "sig1", "run.jet")
     renamed: cli_fix_fixture_fact("summarize", "sig1", "run.jet")
-    operations: jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old}, [JetCLISemDefinitionFact]{renamed})
+    operations: jet_cli_semantic_rename_ops([SemDefinitionFact]{old}, [SemDefinitionFact]{renamed})
     if operations.len() != 1 || operations[0].kind != "rename" || operations[0].rule_id != Val("jet-fix") || operations[0].from != Val("report") || operations[0].to != Val("summarize") -> panic("checked rename provenance")
     if operations[0].targets[0].stable_id != old.stable_id || operations[0].targets[0].after != renamed.human_identity -> panic("rename retains original stable identity")
     ambiguous: cli_fix_fixture_fact("other", "sig1", "run.jet")
-    if jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old}, [JetCLISemDefinitionFact]{renamed, ambiguous}).len() != 0 -> panic("ambiguous forward rename refused")
-    if jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old, ambiguous}, [JetCLISemDefinitionFact]{renamed}).len() != 0 -> panic("ambiguous reverse rename refused")
+    if jet_cli_semantic_rename_ops([SemDefinitionFact]{old}, [SemDefinitionFact]{renamed, ambiguous}).len() != 0 -> panic("ambiguous forward rename refused")
+    if jet_cli_semantic_rename_ops([SemDefinitionFact]{old, ambiguous}, [SemDefinitionFact]{renamed}).len() != 0 -> panic("ambiguous reverse rename refused")
     different: cli_fix_fixture_fact("summarize", "sig2", "run.jet")
-    if jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old}, [JetCLISemDefinitionFact]{different}).len() != 0 -> panic("signature change is not a rename")
+    if jet_cli_semantic_rename_ops([SemDefinitionFact]{old}, [SemDefinitionFact]{different}).len() != 0 -> panic("signature change is not a rename")
 }

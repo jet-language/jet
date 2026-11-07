@@ -65,10 +65,10 @@ s6_retirement_reviewed_contains_word: fn(text: String, word: String) -> Bool {
 s6_retirement_reviewed_collect: fn(tables: TokenTables, tokens: [Token], out: &[Token]) {
     loop token in tokens {
         if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
-        &out.push(token)
+        out.push(token.copy())
         if (token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING) && token.literal >= 0 {
             loop part in tables.literals[token.literal].string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> s6_retirement_reviewed_collect(tables, part.tokens, &out)
+                if part.kind == STRING_PART_INTERPOLATION -> s6_retirement_reviewed_collect(tables, part.tokens, out)
             }
         }
     }
@@ -139,8 +139,8 @@ s6_retirement_reviewed_value_end: fn(token: Token) -> Bool {
 s6_retirement_reviewed_candidates: fn(source: String) -> [S6RetirementReviewedCandidate] {
     lexed: lex(source.bytes())
     tokens := [Token]{}
-    s6_retirement_reviewed_collect(lexed.tables, lexed.tokens, &tokens)
-    &tokens.sort_by(token -> token.span.start)
+    s6_retirement_reviewed_collect(lexed.tables, lexed.tokens, tokens)
+    tokens.sort_by(token -> token.span.start)
     candidates := [S6RetirementReviewedCandidate]{}
     loop index in 0..<tokens.len() {
         token: tokens[index]
@@ -165,7 +165,7 @@ s6_retirement_reviewed_candidates: fn(source: String) -> [S6RetirementReviewedCa
         if proposed == "" -> next
         before: if index > 0 -> tokens[index - 1].span.end else -> -1
         after: if index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT -> tokens[index + 1].span.end else -> -1
-        &candidates.push(S6RetirementReviewedCandidate{line: s6_retirement_reviewed_line(source, token.span.start), spelling: proposed, question: token.kind == TOKEN_QUESTION, after_value: index > 0 && s6_retirement_reviewed_value_end(tokens[index - 1]), start: token.span.start, end: token.span.end, before: before, after: after})
+        candidates.push(S6RetirementReviewedCandidate{line: s6_retirement_reviewed_line(source, token.span.start), spelling: proposed, question: token.kind == TOKEN_QUESTION, after_value: index > 0 && s6_retirement_reviewed_value_end(tokens[index - 1]), start: token.span.start, end: token.span.end, before: before, after: after})
     }
     candidates
 }
@@ -200,17 +200,17 @@ s6_retirement_reviewed_unescape: fn(source: String) -> String {
         byte: bytes[cursor]
         if Int.from_u8(byte) == 92 && cursor + 1 < bytes.len() {
             escaped: Int.from_u8(bytes[cursor + 1])
-            if escaped == 110 -> &out.push(U8{10})
-            else if escaped == 116 -> &out.push(U8{9})
-            else if escaped == 34 || escaped == 92 || escaped == 39 -> &out.push(bytes[cursor + 1])
+            if escaped == 110 -> out.push(U8{10})
+            else if escaped == 116 -> out.push(U8{9})
+            else if escaped == 34 || escaped == 92 || escaped == 39 -> out.push(bytes[cursor + 1])
             else {
-                &out.push(byte)
-                &out.push(bytes[cursor + 1])
+                out.push(byte)
+                out.push(bytes[cursor + 1])
             }
             cursor += 2
             next
         }
-        &out.push(byte)
+        out.push(byte)
         cursor += 1
     }
     String.from_bytes(out) ?? source.copy()
@@ -249,15 +249,15 @@ s6_retirement_reviewed_rewrites_current: fn(bytes: [U8], from: Int, to: Int, can
     head: s6_retirement_reviewed_slice_bytes(bytes, from, candidate.start)
     tail: s6_retirement_reviewed_slice_bytes(bytes, candidate.end, to)
     rewrites := [String]{}
-    if !candidate.question || candidate.after_value -> &rewrites.push("{head}{tail}")
+    if !candidate.question || candidate.after_value -> rewrites.push("{head}{tail}")
     if candidate.after >= candidate.end && candidate.after <= to {
         between: s6_retirement_reviewed_slice_bytes(bytes, candidate.end, candidate.after)
         rest: s6_retirement_reviewed_slice_bytes(bytes, candidate.after, to)
-        &rewrites.push("{head}{between}!{rest}")
+        rewrites.push("{head}{between}!{rest}")
         if candidate.question && candidate.before >= from && candidate.before <= candidate.start {
             left: s6_retirement_reviewed_slice_bytes(bytes, from, candidate.before)
             gap: s6_retirement_reviewed_slice_bytes(bytes, candidate.before, candidate.start)
-            &rewrites.push("{left}?{gap}{between}!{rest}")
+            rewrites.push("{left}?{gap}{between}!{rest}")
         }
     }
     loop rewrite in rewrites {
@@ -287,7 +287,7 @@ s6_retirement_reviewed_hits: fn(source: String) -> [S6RetirementReviewedHit] {
         loop to < bytes.len() && Int.from_u8(bytes[to]) != 10 -> to += 1
         line_rejected: rejected.get(from) ?? !s6_retirement_reviewed_line_current(s6_retirement_reviewed_slice_bytes(bytes, from, to).trim().copy())
         rejected[from] = line_rejected
-        if line_rejected && s6_retirement_reviewed_rewrites_current(bytes, from, to, candidate) -> &hits.push(S6RetirementReviewedHit{line: candidate.line, spelling: candidate.spelling})
+        if line_rejected && s6_retirement_reviewed_rewrites_current(bytes, from, to, candidate) -> hits.push(S6RetirementReviewedHit{line: candidate.line, spelling: candidate.spelling})
     }
     hits
 }
@@ -345,7 +345,7 @@ s6_retirement_reviewed_inline: fn(line: String) -> [String] {
             close_length := 0
             loop close + close_length < bytes.len() && Int.from_u8(bytes[close + close_length]) == 96 -> close_length += 1
             if close_length == length {
-                &fragments.push(s6_retirement_reviewed_slice(line, start, close))
+                fragments.push(s6_retirement_reviewed_slice(line, start, close))
                 cursor = close + close_length
                 break
             }
@@ -409,7 +409,7 @@ s6_retirement_reviewed_embedded: fn(text: String) -> [S6RetirementReviewedFragme
                     next
                 }
                 source: s6_retirement_reviewed_slice_bytes(bytes, start, end)
-                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: line, source: source})
+                if s6_retirement_reviewed_looks_jet(source) -> fragments.push(S6RetirementReviewedFragment{first_line: line, source: source})
                 cursor = end + close.bytes().len()
                 next
             }
@@ -424,7 +424,7 @@ s6_retirement_reviewed_embedded: fn(text: String) -> [S6RetirementReviewedFragme
             }
             if end < bytes.len() {
                 source: s6_retirement_reviewed_slice_bytes(bytes, start, end)
-                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: line, source: source})
+                if s6_retirement_reviewed_looks_jet(source) -> fragments.push(S6RetirementReviewedFragment{first_line: line, source: source})
                 cursor = end + 1
                 next
             }
@@ -464,7 +464,7 @@ s6_retirement_reviewed_fragments: fn(path: String, text: String) -> [S6Retiremen
             closing := false
             if fence == .Val(found) -> closing = found.marker == marker && found.length >= length && found.rest.trim() == ""
             if closing {
-                if active -> &fragments.push(S6RetirementReviewedFragment{first_line: first_line, source: source})
+                if active -> fragments.push(S6RetirementReviewedFragment{first_line: first_line, source: source})
                 opened = false
             } else if active -> source = "{source}{line}\n"
         } else if fence == .Val(found) {
@@ -478,11 +478,11 @@ s6_retirement_reviewed_fragments: fn(path: String, text: String) -> [S6Retiremen
             opened = true
         } else {
             snippets: s6_retirement_reviewed_inline(line)
-            loop snippet in snippets -> &fragments.push(S6RetirementReviewedFragment{first_line: index + 1, source: snippet})
+            loop snippet in snippets -> fragments.push(S6RetirementReviewedFragment{first_line: index + 1, source: snippet})
         }
         index += 1
     }
-    if opened && active -> &fragments.push(S6RetirementReviewedFragment{first_line: first_line, source: source})
+    if opened && active -> fragments.push(S6RetirementReviewedFragment{first_line: first_line, source: source})
     fragments
 }
 
@@ -507,7 +507,7 @@ s6_retirement_reviewed_scan_file: fn(path: String, offenders: &[String]) {
     fragments: s6_retirement_reviewed_fragments(path, text)
     loop fragment in fragments {
         hits: s6_retirement_reviewed_hits(fragment.source)
-        loop hit in hits -> &offenders.push("{path}:{fragment.first_line + hit.line - 1}: {hit.spelling}")
+        loop hit in hits -> offenders.push("{path}:{fragment.first_line + hit.line - 1}: {hit.spelling}")
     }
 }
 
@@ -519,8 +519,8 @@ s6_retirement_reviewed_walk: fn(path: String, offenders: &[String]) {
         if kind.is_symlink -> next
         relative: "{path}/{entry.name}"
         if kind.is_dir {
-            if !s6_retirement_reviewed_failure_skip(relative) -> s6_retirement_reviewed_walk(relative, &offenders)
-        } else if extensions.contains(s6_retirement_reviewed_extension(relative)) -> s6_retirement_reviewed_scan_file(relative, &offenders)
+            if !s6_retirement_reviewed_failure_skip(relative) -> s6_retirement_reviewed_walk(relative, offenders)
+        } else if extensions.contains(s6_retirement_reviewed_extension(relative)) -> s6_retirement_reviewed_scan_file(relative, offenders)
     }
 }
 
@@ -529,14 +529,14 @@ s6_retirement_reviewed_surface_law: fn() {
     // The live tree: the Rust law walked crates, Source and corelib, which the
     // compiler, Core and Jetpack trees replaced.
     roots: [String]{"Compiler", "Core", "Jetpack", "Examples", "tests", "Docs", "Tools"}
-    loop root in roots -> s6_retirement_reviewed_walk(root, &offenders)
+    loop root in roots -> s6_retirement_reviewed_walk(root, offenders)
     entries: s6_retirement_reviewed_files.list_dir(".") ?? [s6_retirement_reviewed_files.DirEntry]{}
     loop entry in entries {
         if s6_retirement_reviewed_extension(entry.name) != "jet" -> next
         kind: s6_retirement_reviewed_files.stat(entry.path) ?? next
-        if kind.is_file -> s6_retirement_reviewed_scan_file(entry.name, &offenders)
+        if kind.is_file -> s6_retirement_reviewed_scan_file(entry.name, offenders)
     }
-    if s6_retirement_reviewed_files.is_file("README.md") -> s6_retirement_reviewed_scan_file("README.md", &offenders)
+    if s6_retirement_reviewed_files.is_file("README.md") -> s6_retirement_reviewed_scan_file("README.md", offenders)
     assert(offenders.len() == 0, "retired failure syntax escaped the diagnostic/history allowlist: {offenders}")
 }
 

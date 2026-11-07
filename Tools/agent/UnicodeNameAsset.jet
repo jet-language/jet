@@ -45,40 +45,40 @@ asset_failures: fn(source: String) -> [String] Never! {
     bytes: literal_bytes(source) ?? return [String]{"UNICODE_NAME_INDEX byte literal is missing"}
     if bytes.len() < 40 -> return [String]{"UNICODE_NAME_INDEX header is truncated ({bytes.len()} bytes)"}
     magic: String.from_bytes_lossy(bytes[0..<4])
-    if magic != "JUCD" -> &failures.push("magic is {magic}, expected JUCD")
-    if word(bytes, 12, 4) != 8 -> &failures.push("kind {word(bytes, 12, 4)}, expected 8 (UTF-8 names)")
-    if word(bytes, 20, 4) != RECORD_STRIDE -> &failures.push("stride {word(bytes, 20, 4)}, expected {RECORD_STRIDE}")
-    if word(bytes, 36, 4) != bytes.len() -> &failures.push("extent {word(bytes, 36, 4)}, expected {bytes.len()}")
+    if magic != "JUCD" -> failures.push("magic is {magic}, expected JUCD")
+    if word(bytes, 12, 4) != 8 -> failures.push("kind {word(bytes, 12, 4)}, expected 8 (UTF-8 names)")
+    if word(bytes, 20, 4) != RECORD_STRIDE -> failures.push("stride {word(bytes, 20, 4)}, expected {RECORD_STRIDE}")
+    if word(bytes, 36, 4) != bytes.len() -> failures.push("extent {word(bytes, 36, 4)}, expected {bytes.len()}")
     if failures.len() > 0 -> return failures
     count: word(bytes, 16, 4)
     records: word(bytes, 24, 4)
     pool: word(bytes, 28, 4)
-    if count != TREE_ROWS -> &failures.push("{count} rows, expected {TREE_ROWS}")
+    if count != TREE_ROWS -> failures.push("{count} rows, expected {TREE_ROWS}")
     rows := [String]{}
     previous := -1
     loop row in 0..<count {
         at: records + row * RECORD_STRIDE
         if at + RECORD_STRIDE > bytes.len() {
-            &failures.push("row {row} record extent")
+            failures.push("row {row} record extent")
             return failures
         }
         scalar: word(bytes, at, 3)
         start: pool + word(bytes, at + 3, 4)
         end: start + word(bytes, at + 7, 4)
         if end > bytes.len() {
-            &failures.push("row {row} name extent")
+            failures.push("row {row} name extent")
             return failures
         }
-        if scalar <= previous -> &failures.push("not sorted at row {row}")
+        if scalar <= previous -> failures.push("not sorted at row {row}")
         previous = scalar
-        &rows.push("{scalar}\t{String.from_bytes_lossy(bytes[start..<end])}\n")
+        rows.push("{scalar}\t{String.from_bytes_lossy(bytes[start..<end])}\n")
     }
     expected_first: "0\tNULL\n"
     expected_last: "917999\tVARIATION SELECTOR-256\n"
-    if rows.len() > 0 && rows[0] != expected_first -> &failures.push("first row is {rows[0].trim_end()}, expected {expected_first.trim_end()}")
-    if rows.len() > 0 && rows[rows.len() - 1] != expected_last -> &failures.push("last row is {rows[rows.len() - 1].trim_end()}, expected {expected_last.trim_end()}")
+    if rows.len() > 0 && rows[0] != expected_first -> failures.push("first row is {rows[0].trim_end()}, expected {expected_first.trim_end()}")
+    if rows.len() > 0 && rows[rows.len() - 1] != expected_last -> failures.push("last row is {rows[rows.len() - 1].trim_end()}, expected {expected_last.trim_end()}")
     digest: crypto.sha256(rows.join("").bytes()).hex()
-    if digest != TREE_SHA256 -> &failures.push("row digest {digest}, expected {TREE_SHA256}")
+    if digest != TREE_SHA256 -> failures.push("row digest {digest}, expected {TREE_SHA256}")
     failures
 }
 

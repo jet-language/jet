@@ -1,4 +1,4 @@
-// D-TEST-HISTORY1=A: Web marshals history callbacks through the canonical
+// Web marshals history callbacks through the canonical
 // Foundation runner embedded in app.wasm. JavaScript owns transport only;
 // generation, replay, comparison, and shrinking stay in Rust.
 

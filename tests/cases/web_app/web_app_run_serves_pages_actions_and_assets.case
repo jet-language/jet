@@ -2,14 +2,14 @@
 # PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no run/reference proof.
 mkdir: client
 copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
-copy: {root}/Examples/features/expected/web/web_app.harness.out expected-harness.out
+copy: {root}/Examples/Apps/Web/WebApp.harness.out expected-harness.out
 # The app's assets root is relative to the server's working directory; the
 # original ran from the repository root.
-mkdir: Examples/features/web/public
-copy: {root}/Examples/features/web/public/app.css Examples/features/web/public/app.css
+mkdir: Examples/Apps/Web/public
+copy: {root}/Examples/Apps/Web/public/app.css Examples/Apps/Web/public/app.css
 capture: expectedPage = text file.split("\n\n--- facts_json ---\n", 0) expected-harness.out
 capture: expectedFacts = text file.split("\n\n--- facts_json ---\n", 1) expected-harness.out
-spawn server: jet run {root}/Examples/features/web/web_app.jet
+spawn server: jet run {root}/Examples/Apps/Web/WebApp.jet
 env: JET_APP_PORT={free-port:app}
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
@@ -22,9 +22,9 @@ file: page.http ~ "<title>Home</title>" # Original contains predicate.
 file: page.http ~ "hello from csr" # Original contains predicate.
 file: page.http !~ "jet-dev-server-functions" # Original negative predicate.
 file.after_first("\r\n\r\n"): page.http = "{cap:expectedPage}" # original request helper compares the body after the header block
-step: jet explain --web-graph --json {root}/Examples/features/web/web_app.jet
+step: jet explain --web-graph --json {root}/Examples/Apps/Web/WebApp.jet
 exit: 0
-stdout.replace("{root}/Examples/features/web/web_app.jet", "Examples/features/web/web_app.jet"): = "{cap:expectedFacts}" # original replaces the absolute fixture path
+stdout.replace("{root}/Examples/Apps/Web/WebApp.jet", "Examples/Apps/Web/WebApp.jet"): = "{cap:expectedFacts}" # original replaces the absolute fixture path
 step: jet run client/request.jet
 env: S6_WEB_PORT={free-port:app}
 env: S6_WEB_METHOD=POST

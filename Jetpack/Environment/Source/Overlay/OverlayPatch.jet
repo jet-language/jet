@@ -77,8 +77,8 @@ OverlayStage: struct {
     // Keys in path order (Rust `BTreeMap` order).
     sorted_keys: fn(self) -> [String] Never! {
         keys := [String]{}
-        loop entry in self.entries -> &keys.push(entry.key)
-        &keys.sort()
+        loop entry in self.entries -> keys.push(entry.key)
+        keys.sort()
         keys
     }
 }
@@ -89,7 +89,7 @@ OverlayAuthority: struct {
 
     open: fn(path: String, label: String) -[FS, Env]> OverlayAuthority OverlayError! {
         resolver: AuthorityResolver.open(path) ?? return Err(OverlayError.IO("could not open {label} authority `{path}`: {err.message()}"))
-        Ok(OverlayAuthority{resolver: ^resolver})
+        Ok(OverlayAuthority{resolver: resolver.move()})
     }
 
     open_file: fn(self, raw: String, label: String) -[FS, Env]> OverlayHeldFile OverlayError! {
@@ -119,7 +119,7 @@ OverlayAuthority: struct {
         loop {
             chunk: handle.read(65536) ?? return Err(OverlayError.IO("could not read {label} `{path}`: {err}"))
             if chunk.len() == 0 -> break
-            &bytes.extend(chunk)
+            bytes.extend(chunk)
         }
         after: handle.stat() ?? return Err(OverlayError.IO("could not revalidate {label} `{path}`: {err}"))
         unchanged: after.is_file && if env_overlay_identity(after) == {
@@ -127,7 +127,7 @@ OverlayAuthority: struct {
             .None -> false
         }
         if !unchanged -> return Err(OverlayError.IO("{label} `{path}` changed while it was read"))
-        Ok(OverlayHeldFile{path, parent: ^parent, name, handle: ^handle, identity, mode: (info.mode).bit_and(0o7777), bytes})
+        Ok(OverlayHeldFile{path, parent: parent.move(), name, handle: handle.move(), identity, mode: (info.mode).bit_and(0o7777), bytes})
     }
 }
 
@@ -147,10 +147,10 @@ env_apply_overlay_patches: fn(workspace_root: String, source_root: String, packa
     loop patch in package.patches {
         patch_file: workspace.open_file(patch, "patch")
         text: String.from_bytes(patch_file.bytes) ?? return Err(OverlayError.IO("could not read patch `{patch_file.path}`: patch is not valid UTF-8"))
-        applications: env_overlay_apply_unified_patch_staged(source, text, &stage)
-        loop application in applications -> &applied.push(application)
+        applications: env_overlay_apply_unified_patch_staged(source, text, stage)
+        loop application in applications -> applied.push(application)
     }
-    env_overlay_commit_staged(source, &stage, (path: String) -[FS]> {})
+    env_overlay_commit_staged(source, stage, (path: String) -[FS]> {})
     Ok(applied)
 }
 
@@ -161,7 +161,7 @@ env_overlay_lines: fn(text: String) -> [String] Never! {
     parts: text.split("\n").to_list()
     loop index in 0..<parts.len() {
         if index == parts.len() - 1 && parts[index] == "" -> break
-        &lines.push(env_overlay_strip_carriage_return(parts[index]))
+        lines.push(env_overlay_strip_carriage_return(parts[index]))
     }
     lines
 }
@@ -189,9 +189,9 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
             opened: source.open_relative_file(relative, "patched file")
             stage.entries[relative] = OverlayStagedFile{
                 path: opened.path,
-                parent: ^opened.parent,
+                parent: opened.parent.move(),
                 name: opened.name,
-                input: ^opened.handle,
+                input: opened.handle.move(),
                 identity: opened.identity,
                 mode: opened.mode,
                 original: opened.bytes,
@@ -228,13 +228,13 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
                     }
                     hunk_line.starts_with("-") -> {
                         if index >= file_lines.len() || file_lines[index] != body -> return Err(OverlayError.Patch("patch removal did not match `{target}`"))
-                        _: &file_lines.remove(index, .Slot)
+                        _: file_lines.remove(index, .Slot)
                         removed += 1
                         old_seen += 1
                     }
                     hunk_line.starts_with("+") -> {
                         if index > file_lines.len() -> return Err(OverlayError.Patch("patch insertion is outside `{target}`"))
-                        &file_lines.insert(index, body)
+                        file_lines.insert(index, body)
                         index += 1
                         added += 1
                         new_seen += 1
@@ -247,7 +247,7 @@ env_overlay_apply_unified_patch_staged: fn(source: OverlayAuthority, patch_text:
         output := file_lines.join("\n")
         if trailing_newline -> output = "{output}\n"
         stage.entries[relative].output = output.bytes()
-        &applications.push(PatchApplication{path: target, added, removed})
+        applications.push(PatchApplication{path: target, added, removed})
     }
     if applications.len() == 0 -> return Err(OverlayError.Patch("patch contains no file hunks"))
     Ok(applications)
@@ -264,7 +264,7 @@ env_overlay_safe_relative_path: fn(raw: String, label: String) -> String Overlay
         part: parts[index]
         if part == ".." || (index == 0 && part == ".") -> return Err(refusal)
         if part == "" || part == "." -> next
-        &names.push(part)
+        names.push(part.copy())
     }
     if names.len() == 0 -> return Err(refusal)
     Ok(names.join("/"))
@@ -302,14 +302,14 @@ env_overlay_commit_staged: fn(source: OverlayAuthority, stage: &OverlayStage, af
                 done_key: committed[at]
                 rollback_parent: source.resolver.directory_handle(stage.entries[done_key].parent)
                 if env_overlay_write_atomically(stage.entries[done_key], root_handle, rollback_parent, stage.entries[done_key].original, false) == .Err(rollback) {
-                    &rollback_errors.push("{stage.entries[done_key].path}: {rollback}")
+                    rollback_errors.push("{stage.entries[done_key].path}: {rollback}")
                 }
                 at -= 1
             }
             suffix: if rollback_errors.len() == 0 -> "" else -> "; rollback failed: {rollback_errors.join("; ")}"
             return Err(OverlayError.IO("could not commit patched file `{stage.entries[key].path}`: {error}{suffix}"))
         }
-        &committed.push(key)
+        committed.push(key.copy())
         after_commit(stage.entries[key].path)
     }
 }

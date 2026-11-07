@@ -81,7 +81,7 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
         if words.len() != at + 4 || !kit_expect_named(["^=", "~", "="], words[at].text) || words[at + 2].text != "=" -> return None
         assertion.extra = words[at].text
         assertion.value = words[at + 1].text
-        &assertion.alternatives.push(words[at + 3].text)
+        assertion.alternatives.push(words[at + 3].text)
         if !kit_steps_count_target_valid(words[at + 3].text) -> return None
         return Val(assertion)
     }
@@ -111,7 +111,7 @@ kit_steps_batch_assertion: fn(stream: String, path: String, transform: String, o
         loop raw in kit_steps_byte_slice(assertion.value, 1, assertion.value.count_bytes() - 1).split(",") {
             name: raw.trim().copy()
             if !kit_expect_named(["status", "report", "browser-relay"], name) -> return None
-            &assertion.alternatives.push(name)
+            assertion.alternatives.push(name)
         }
         return Val(assertion)
     }
@@ -159,7 +159,7 @@ kit_steps_i64: fn(text: String) -> Bool {
 
 kit_steps_float_lines: fn(text: String) -> [Float]? {
     result := [Float]{}
-    loop line in kit_steps_rust_lines(text) -> &result.push(Float.parse(line.trim().copy()) ?? return None)
+    loop line in kit_steps_rust_lines(text) -> result.push(Float.parse(line.trim().copy()) ?? return None)
     Val(result)
 }
 
@@ -197,7 +197,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
                 .Array(items) -> {
                     loop item in items {
                         number: kit_steps_json_number(item) ?? return Val(kit_expect_verdict("ERROR", "expected numeric list"))
-                        &right.push(number)
+                        right.push(number)
                     }
                 }
                 else -> return Val(kit_expect_verdict("ERROR", "expected numeric list"))
@@ -207,7 +207,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
     } else if mode == "sorted-lines" {
         expected: files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return Val(kit_expect_verdict("ERROR", "sorted-lines snapshot: {err}"))
         lines := kit_steps_rust_lines(actual)
-        &lines.sort()
+        lines.sort()
         matches = lines == kit_steps_rust_lines(expected)
     } else if mode == "$=" {
         expected: if extra == "file" -> files.read(kit_steps_snapshot_path(context.snapshots, context.plan.fixture, value)) ?? return Val(kit_expect_verdict("ERROR", "suffix snapshot: {err}")) else -> value
@@ -254,7 +254,7 @@ kit_steps_batch_test: fn(actual: String, assertion: KitAssertion, value: String,
             at: kit_steps_byte_index(line, value) ?? return Val(kit_expect_verdict("FAIL", "line lacks unique-after marker"))
             suffix: kit_steps_byte_slice(line, at + value.count_bytes(), line.count_bytes())
             if kit_expect_named(seen, suffix) -> matches = false
-            &seen.push(suffix)
+            seen.push(suffix)
         }
     } else if mode == "word" || mode == "has-line" || mode == "any-line" {
         expected := [String]{}

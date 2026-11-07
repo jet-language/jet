@@ -9,9 +9,13 @@
 // The default run checks the whole compiler project (Compiler/, the unit the
 // native self-host builds) with JET_KEEP_GOING=1, so every error in every item
 // is reported at once. A path argument checks that file or project instead.
-// Every mode first runs the personal-information guard (#6564 c5) and
+// Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap's assembly check, which refuses an unlisted Jetpack source
-// or a drifted compiler slice.
+// or a drifted compiler slice, the unsafe-region ratchet in --check mode
+// (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
+// record, and any recorded row the checkout no longer has, and the vocabulary
+// rows in --check mode, which refuse a package Source/Vocabulary.jet that
+// differs from the package's Vocabulary.tsv.
 //
 // It does not run tests or formatters, regenerate artifacts, or build a
 // compiler. Those stay with the orchestrator.
@@ -71,6 +75,8 @@ run: fn() {
     }
     assembly: process.cmd([String]{"node", "Jetpack/Bootstrap/assemble.mjs", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("node Jetpack/Bootstrap/assemble.mjs could not start: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
+    unsafe_ratchet(repo)
+    vocabulary_rows(repo)
     if args.len() > 0 && args[0] == "--runtime-generators" {
         if args.len() != 1 -> usage("jet Tools/agent/LaneCheck.jet --runtime-generators")
         process.exit(runtime_generators(repo))
@@ -82,6 +88,28 @@ run: fn() {
 assembly_refused: fn(output: String) -[Exec, IO]> () {
     print(output)
     print("CHECK FAILED — the Jetpack assembly check refused the sources (unlisted file or compiler-slice drift, see above)")
+    process.exit(1)
+}
+
+// The unsafe-region ratchet with $JET, else the `jet` on PATH; it never writes.
+unsafe_ratchet: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    ratchet: process.cmd([String]{jet, "Tools/agent/UnsafeRatchet.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/UnsafeRatchet.jet: {err}")
+    if ratchet.code == 0 && ratchet.signal == None -> return
+    check_refused(process.combined_output(ratchet).trim_end(), "the unsafe-region ratchet differs from Docs/spec/safety.md (see above; record an audited row with jet Tools/agent/UnsafeRatchet.jet --update)")
+}
+
+// The vocabulary rows check with $JET, else the `jet` on PATH; it never writes.
+vocabulary_rows: fn(repo: String) -[Env, Exec, FS, IO]> () {
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    rows: process.cmd([String]{jet, "Tools/agent/VocabularyRows.jet", "--check"}).cwd(repo).run() ?? return check_refused("", "{jet} could not run Tools/agent/VocabularyRows.jet: {err}")
+    if rows.code == 0 && rows.signal == None -> return
+    check_refused(process.combined_output(rows).trim_end(), "a generated Source/Vocabulary.jet differs from its Vocabulary.tsv (see above; regenerate with jet Tools/agent/VocabularyRows.jet --write)")
+}
+
+check_refused: fn(output: String, reason: String) -[Exec, IO]> () {
+    if output != "" -> print(output)
+    print("CHECK FAILED — {reason}")
     process.exit(1)
 }
 
@@ -170,7 +198,7 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     held := [FileLock]{}
     loop slot in 1..<(if slots < 1 -> 2 else -> slots + 1) {
         lock: files.try_lock("{lockdir}/{slot}") ?? next
-        &held.push(lock)
+        held.push(lock)
         break
     }
     if held.len() == 0 {
@@ -179,13 +207,13 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
             term.eprint("lane-check: cannot lock {lockdir}/1: {err}")
             return 1
         }
-        &held.push(lock)
+        held.push(lock)
     }
     // The log exists from the start and its .rc only once the check ends, so a
     // killed check leaves a log without a status: incomplete, never success.
     files.write(log, "") ?? term.eprint("lane-check: cannot write {log}: {err}")
     ran: run_check(repo, jet, target, scratch)
-    &held.clear()
+    held.clear()
     files.write(log, ran.text) ?? term.eprint("lane-check: cannot write {log}: {err}")
     files.write("{log}.rc", "{ran.code}\n") ?? term.eprint("lane-check: cannot write {log}.rc: {err}")
     term.eprint("lane-check: complete compiler log: {log}")
@@ -227,7 +255,7 @@ run_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env,
     }
     memory: env_or("JET_CHECK_MEM", "20G")
     argv := if memory == "off" -> [String]{} else -> [String]{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0"}
-    &argv.extend([String]{jet, "check", target})
+    argv.extend([String]{jet, "check", target})
     spec: process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).timeout(1800s).output_limit(1073741824)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
@@ -267,7 +295,7 @@ report: fn(text: String, code: Int) -> String Never! {
                 break
             }
         }
-        &found.push(Located{head: lines[index].copy(), location: location})
+        found.push(Located{head: lines[index].copy(), location: location})
     }
     if found.len() == 0 && code == 0 -> return "CHECK OK"
     if found.len() == 0 -> return "CHECK FAILED — jet check exited {code} without a compiler diagnostic\n{text}"
@@ -276,8 +304,8 @@ report: fn(text: String, code: Int) -> String Never! {
     loop entry in found {
         key := file_of(entry.location)
         if key == "" -> key = "(no location)"
-        if !order.contains(key) -> &order.push(key.copy())
-        &keys.push(key)
+        if !order.contains(key) -> order.push(key.copy())
+        keys.push(key)
     }
     out := "CHECK FAILED — {found.len()} error(s) in {order.len()} file(s)\n"
     loop key in order {
@@ -346,11 +374,11 @@ unescape_mount: fn(text: String) -> String Never! {
     index := 0
     loop index < bytes.len() {
         if Int.from_u8(bytes[index]) == 92 && octal3(bytes, index + 1) >= 0 {
-            &out.push(U8.from_int(octal3(bytes, index + 1)) ?? U8{63})
+            out.push(U8.from_int(octal3(bytes, index + 1)) ?? U8{63})
             index += 4
             next
         }
-        &out.push(bytes[index])
+        out.push(bytes[index])
         index += 1
     }
     String.from_bytes_lossy(out)
@@ -374,7 +402,7 @@ machine_mounts: fn() -[FS]> [String] Never! {
         fields: line.split(" ").to_list()
         if fields.len() < 2 -> next
         mount: unescape_mount(fields[1])
-        if (mount.starts_with("/mnt/") && mount.len() > 5) || (mount.starts_with("/media/") && mount.len() > 7) || (mount.starts_with("/run/media/") && mount.len() > 11) -> &out.push(mount)
+        if (mount.starts_with("/mnt/") && mount.len() > 5) || (mount.starts_with("/media/") && mount.len() > 7) || (mount.starts_with("/run/media/") && mount.len() > 11) -> out.push(mount)
     }
     out
 }
@@ -405,16 +433,16 @@ RuleSet: struct {
 add_path: fn(set: &RuleSet, raw: String) Never! {
     find: trim_slashes(raw)
     if find.len() < 2 || set.seen.contains(find) -> return
-    &set.seen.push(find.copy())
-    &set.rules.push(Rule{kind: "path", find: find.copy(), source: "{escape_pcre(find)}(?![\\w-])"})
+    set.seen.push(find.copy())
+    set.rules.push(Rule{kind: "path", find: find.copy(), source: "{escape_pcre(find)}(?![\\w-])"})
 }
 
 add_word: fn(set: &RuleSet, raw: String) Never! {
     find: raw.trim()
     lower: find.lower()
     if find.len() < 3 || GENERIC_NAMES.contains(lower) || set.seen.contains(lower) -> return
-    &set.seen.push(lower)
-    &set.rules.push(Rule{kind: "word", find: find.copy(), source: "\\b{escape_pcre(find)}\\b"})
+    set.seen.push(lower)
+    set.rules.push(Rule{kind: "word", find: find.copy(), source: "\\b{escape_pcre(find)}\\b"})
 }
 
 // The GitHub handle in a `<digits>+<handle>@users.noreply.github.com` address.
@@ -434,49 +462,49 @@ personal_info_rules: fn(identity: Identity) -> [Rule] Never! {
     home: identity.home
     login: if identity.user != "root" -> identity.user else -> ""
     scratch: if identity.scratch_root != "" && !within(identity.scratch_root, home) && !within(identity.scratch_root, "/tmp") -> trim_slashes(identity.scratch_root) else -> ""
-    if login != "" -> add_path(&set, "/etc/profiles/per-user/{login}")
-    if scratch != "" -> add_path(&set, scratch)
-    loop mount in identity.mounts -> add_path(&set, mount)
-    if home != "" && home != "/" -> add_path(&set, home)
+    if login != "" -> add_path(set, "/etc/profiles/per-user/{login}")
+    if scratch != "" -> add_path(set, scratch)
+    loop mount in identity.mounts -> add_path(set, mount)
+    if home != "" && home != "/" -> add_path(set, home)
     if login != "" {
-        add_path(&set, "/home/{login}")
-        add_path(&set, "/Users/{login}")
+        add_path(set, "/home/{login}")
+        add_path(set, "/Users/{login}")
     }
-    if identity.email != "" -> add_path(&set, identity.email)
-    if identity.name != "" -> add_word(&set, identity.name)
+    if identity.email != "" -> add_path(set, identity.email)
+    if identity.name != "" -> add_word(set, identity.name)
     handle: noreply_handle(identity.email)
-    if handle != "" -> add_word(&set, handle)
-    if login != "" -> add_word(&set, login)
-    if identity.host != "" -> add_word(&set, identity.host)
+    if handle != "" -> add_word(set, handle)
+    if login != "" -> add_word(set, login)
+    if identity.host != "" -> add_word(set, identity.host)
     // Every spelling of the state root, the machine's home first, then the
     // bare cache-relative form. Both roots are joined from parts so this file
     // does not match its own rules.
     state_root: [String]{".cache", "jet-dev"}.join("/")
     prefixes := [String]{}
-    if home != "" && home != "/" -> &prefixes.push(home.copy())
+    if home != "" && home != "/" -> prefixes.push(home.copy())
     if login != "" {
-        &prefixes.push("/home/{login}")
-        &prefixes.push("/Users/{login}")
+        prefixes.push("/home/{login}")
+        prefixes.push("/Users/{login}")
     }
-    &prefixes.extend([String]{"${{HOME}}", "$HOME", "~"})
+    prefixes.extend([String]{"${{HOME}}", "$HOME", "~"})
     forms := [String]{}
     loop prefix in prefixes {
         form: "{prefix}/{state_root}"
-        if !forms.contains(form) -> &forms.push(form)
+        if !forms.contains(form) -> forms.push(form)
     }
-    &forms.push(state_root.copy())
+    forms.push(state_root.copy())
     escaped := [String]{}
-    loop form in forms -> &escaped.push(escape_pcre(form))
-    &set.rules.push(Rule{kind: "path", find: forms[0].copy(), source: "(?:{escaped.join("|")})(?![\\w-])"})
+    loop form in forms -> escaped.push(escape_pcre(form))
+    set.rules.push(Rule{kind: "path", find: forms[0].copy(), source: "(?:{escaped.join("|")})(?![\\w-])"})
     run_root: [String]{"", "tmp", "tdev"}.join("/")
-    &set.rules.push(Rule{kind: "path", find: run_root.copy(), source: "(?:{escape_pcre(run_root)})(?![\\w-])"})
+    set.rules.push(Rule{kind: "path", find: run_root.copy(), source: "(?:{escape_pcre(run_root)})(?![\\w-])"})
     set.rules
 }
 
 grep_args: fn(rules: [Rule], kind: String) -> [String] Never! {
     out := [String]{}
     loop rule in rules {
-        if rule.kind == kind -> &out.extend([String]{"-e", rule.source.copy()})
+        if rule.kind == kind -> out.extend([String]{"-e", rule.source.copy()})
     }
     out
 }
@@ -501,9 +529,9 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     loop pass in passes {
         if pass.args.len() == 0 -> next
         argv := [String]{"git", "grep", "--no-index", "--exclude-standard", "-I", "-P"}
-        &argv.extend(pass.flags)
-        &argv.extend(pass.args)
-        &argv.extend(GREP_EXCLUDES)
+        argv.extend(pass.flags)
+        argv.extend(pass.args)
+        argv.extend(GREP_EXCLUDES)
         receipt: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? {
             term.eprint("personal-info-guard: git grep could not start: {err}")
             return 64
@@ -513,7 +541,7 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
             return 64
         }
         loop name in receipt.output.lines() {
-            if name != "" && !found.contains(name) -> &found.push(name.copy())
+            if name != "" && !found.contains(name) -> found.push(name.copy())
         }
     }
     if found.len() == 0 -> return 0
@@ -533,9 +561,9 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
 first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
     if args.len() == 0 -> return ""
     argv := [String]{"git", "grep", "--no-index", "-I", "-P", "-n", "-m", "1"}
-    &argv.extend(flags)
-    &argv.extend(args)
-    &argv.extend([String]{"--", file})
+    argv.extend(flags.copy())
+    argv.extend(args.copy())
+    argv.extend([String]{"--", file})
     receipt: process.cmd(argv).cwd(dir).output_limit(268435456).run() ?? return ""
     receipt.output.partition("\n").head
 }
@@ -559,7 +587,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     identity: Identity{home: "/home/ada", user: "ada", host: "lovelace", scratch_root: "/mnt/big", mounts: [String]{"/mnt/big", "/media/usb"}, email: "12+adagh@users.noreply.github.com", name: "Ada King"}
     rules: personal_info_rules(identity)
     finds := [String]{}
-    loop rule in rules -> &finds.push("{rule.kind}:{rule.find}")
+    loop rule in rules -> finds.push("{rule.kind}:{rule.find}")
     assert(finds.contains("path:/etc/profiles/per-user/ada"))
     assert(finds.contains("path:/mnt/big"))
     assert(finds.contains("path:/media/usb"))

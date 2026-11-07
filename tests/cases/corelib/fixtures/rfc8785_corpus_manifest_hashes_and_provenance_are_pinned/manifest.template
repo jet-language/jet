@@ -8,7 +8,7 @@ use {
     count := 0
     loop row in rows {
         if row == "" || row.starts_with("#") -> next
-        fields: row.split("\t")
+        fields: row.split("\t").to_list()
         assert_eq(fields.len(), 4)
         bytes: files.read_bytes("{root}/tests/fixtures/encoding/rfc8785/{fields[0]}") ?? panic("corpus member")
         assert_eq(crypto.sha256(bytes).hex(), fields[1])

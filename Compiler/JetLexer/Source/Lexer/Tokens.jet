@@ -64,8 +64,8 @@ TOKEN_KIND_SLOTS: 108
 
 token_tables: fn() -> TokenTables Never! {
     spellings := [Int]{}
-    loop _ in 0..<TOKEN_KIND_SLOTS -> &spellings.push(-1)
-    TokenTables{names: name_table(), literals: [TokenLiteral]{}, spellings: ^spellings}
+    loop _ in 0..<TOKEN_KIND_SLOTS -> spellings.push(-1)
+    TokenTables{names: name_table(), literals: [TokenLiteral]{}, spellings: spellings.move()}
 }
 
 // A token with no spelling and no literal facts.
@@ -124,7 +124,7 @@ token_shift_spans: fn(token: &Token, offset: Int, literals: &[TokenLiteral]) Nev
         literals[row].string_parts[part_index].span = shifted_token_span(literals[row].string_parts[part_index].span, offset)
         loop nested_index in 0..<literals[row].string_parts[part_index].tokens.len() {
             nested := literals[row].string_parts[part_index].tokens[nested_index]
-            token_shift_spans(&nested, offset, &literals)
+            token_shift_spans(nested, offset, literals)
             literals[row].string_parts[part_index].tokens[nested_index] = nested
         }
     }
@@ -245,7 +245,7 @@ TOKEN_DOLLAR: 107
 lexer_without_comments: fn(tokens: [Token]) -> [Token] Never! {
     kept := [Token]{}
     loop token in tokens {
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &kept.push(token)
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> kept.push(token.copy())
     }
     kept
 }

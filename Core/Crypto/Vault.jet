@@ -26,7 +26,7 @@ KeyRef: struct<T> {
     }
     // Debug shows the public fields only; the identity stays private.
     impl Debug {
-        debug: fn(^self) -> String { "KeyRef {{ name: {self.name.debug()}, version: {self.version} }}" }
+        debug: fn(&&self) -> String { "KeyRef {{ name: {self.name.debug()}, version: {self.version} }}" }
     }
 }
 
@@ -46,10 +46,10 @@ ExpiringSecret: struct<T> {
 }
 
 impl ExpiringSecret {
-    new: fn<T>(value: ^T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
+    new: fn<T>(value: &&T, ttl: time.Duration, clock: time.Clock) -> ExpiringSecret<T> Never! {
         observer: clock.__observer()
         deadline: time.__expiry_deadline(observer.now(), ttl)
-        ExpiringSecret<T>{value: shared (T?{Val(^value)}), deadline_ms: deadline, observer: observer}
+        ExpiringSecret<T>{value: shared (T?{Val(value)}), deadline_ms: deadline, observer: observer}
     }
 
     expires_at_ms: fn(self) -> Int Never! { self.deadline_ms }
@@ -62,21 +62,21 @@ impl ExpiringSecret {
 }
 
 impl ExpiringSecret.Close {
-    close: fn(^self) {
-        __close_secret_storage<T>(^self.value)
+    close: fn(&&self) {
+        __close_secret_storage<T>(self.value.move())
     }
 }
 
 // A Shared provider only releases its storage handle. Source takes the live
 // credential first, so provider cleanup never needs a source Close callback.
-__close_secret_storage: fn<T>(value: ^Shared<T?>) Never! {
-    owner: ^value
+__close_secret_storage: fn<T>(value: &&Shared<T?>) Never! {
+    owner: value.move()
     __take_expired<T>(owner)
 }
 
 // Acquire the guard here: removal edits an owned guard, never a borrowed
 // guard parameter. Assigning `None` through the guard drops the stored
-// payload in place; a `^` cannot take it out of the guard (E0120, #6450).
+// payload in place; a `.move()` cannot take it out of the guard (E0120, #6450).
 // The approved general mono-time Close drop glue (#4792) owns cleanup.
 __take_expired: fn<T>(storage: Shared<T?>) Never! {
     guard := storage.guard_edit()
@@ -95,7 +95,7 @@ __loan_secret: fn<T, R>(value: T?, callback: fn(T) -> R Never!) -> R Expired! {
 ExpiryCloseCount: struct { count: Int }
 ExpiryCloseProbe: struct { count: Shared<ExpiryCloseCount> }
 impl ExpiryCloseProbe.Close {
-    close: fn(^self) {
+    close: fn(&&self) {
         guard := self.count.guard_edit()
         guard.value.count += 1
     }
@@ -105,8 +105,8 @@ impl ExpiryCloseProbe.Close {
 // counted probe because the public wrapper's closed crypto family rejects it.
 ExpiryCloseOwner: struct { value: Shared<ExpiryCloseProbe?> }
 impl ExpiryCloseOwner.Close {
-    close: fn(^self) {
-        __close_secret_storage<ExpiryCloseProbe>(^self.value)
+    close: fn(&&self) {
+        __close_secret_storage<ExpiryCloseProbe>(self.value.move())
     }
 }
 
@@ -129,10 +129,10 @@ impl ExpiryCloseOwner.Close {
 
 #Test("ExpiringSecret loans live at equality and expires on its original source clock") {
     clock := time.Clock.new(100)
-    wrapped: ExpiringSecret.new(^Secret.from_text("credential"), time.Duration{ns: 0}, clock)
+    wrapped: ExpiringSecret.new(Secret.from_text("credential"), time.Duration{ns: 0}, clock)
     assert_eq(wrapped.expires_at_ms(), 100)
     assert_eq(wrapped.with(secret -> 7) ?? panic("equality must remain live"), 7)
-    &clock.tick(1)
+    clock.tick(1)
     if wrapped.with(secret -> 7) == {
         .Err(_) -> {}
         .Ok(_) -> assert(false)
@@ -185,14 +185,14 @@ WrappedVaultKey: struct {
     origin_generation: Int
     header_len: Int
 
-    from_bytes: fn(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(^bytes) }
+    from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! { __wrapped_from_bytes(bytes) }
     bytes: fn(self) -> [U8] Never! { __wrapped_bytes(self) }
 }
 
-__wrapped_from_bytes: fn(bytes: ^[U8]) -> WrappedVaultKey KeyWrapError! {
+__wrapped_from_bytes: fn(bytes: &&[U8]) -> WrappedVaultKey KeyWrapError! {
     meta: wrapped_metadata(bytes) ?? return Err(err)
-    Ok(WrappedVaultKey{encoded: ^bytes, mode: meta.mode, key_type: meta.key_type,
-        origin_name: ^meta.name, origin_generation: meta.generation, header_len: meta.header_len})
+    Ok(WrappedVaultKey{encoded: bytes.move(), mode: meta.mode, key_type: meta.key_type,
+        origin_name: meta.name.move(), origin_generation: meta.generation, header_len: meta.header_len})
 }
 __wrapped_bytes: fn(wrapped: WrappedVaultKey) -> [U8] Never! { wrapped.encoded.copy() }
 
@@ -203,7 +203,7 @@ impl WrappedVaultKey.Display {
         "WrappedVaultKey(mode:{mode},type:{key_type},origin:{self.origin_name}@v{self.origin_generation})"
     }
 }
-impl WrappedVaultKey.Debug { debug: fn(^self) -> String { self.display() } }
+impl WrappedVaultKey.Debug { debug: fn(&&self) -> String { self.display() } }
 
 KeyUnlock: struct {
     kind: Int
@@ -259,26 +259,26 @@ prepare_generate: fn<T>(name: String) -[Secret]> MutationPlan<T> VaultError! {
     }
 }
 
-prepare_store: fn<T>(name: String, key: ^T) -[Secret]> MutationPlan<T> VaultError! {
+prepare_store: fn<T>(name: String, key: &&T) -[Secret]> MutationPlan<T> VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
     #Unsafe("vault typed store provider boundary") {
-        return vault.prepare_store<T>(name, ^key)
+        return vault.prepare_store<T>(name, key)
     }
 }
 
-prepare_import_signing: fn(name: String, bytes: ^[U8]) -[Secret]> MutationPlan<SigningKey> VaultError! {
+prepare_import_signing: fn(name: String, bytes: &&[U8]) -[Secret]> MutationPlan<SigningKey> VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
     if bytes.len() != 32 -> return Err(VaultError.InvalidEncoding)
     #Unsafe("vault key import: signing key material") {
-        return vault.prepare_import_signing(name, ^bytes)
+        return vault.prepare_import_signing(name, bytes)
     }
 }
 
-prepare_import_x25519: fn(name: String, bytes: ^[U8]) -[Secret]> MutationPlan<X25519SecretKey> VaultError! {
+prepare_import_x25519: fn(name: String, bytes: &&[U8]) -[Secret]> MutationPlan<X25519SecretKey> VaultError! {
     validate_name(name) ?? return Err(VaultError.InvalidName)
     if bytes.len() != 32 -> return Err(VaultError.InvalidEncoding)
     #Unsafe("vault key import: X25519 secret material") {
-        return vault.prepare_import_x25519(name, ^bytes)
+        return vault.prepare_import_x25519(name, bytes)
     }
 }
 
@@ -325,51 +325,51 @@ authorize_wrapped_import: fn<T>(plan: WrappedImportPlan<T>, reason: String) -[Se
     }
 }
 
-commit_generate: fn<T>(write: ^VaultWrite<T>, plan: ^MutationPlan<T>) -[Secret]> KeyRef<T> VaultError! {
+commit_generate: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) -[Secret]> KeyRef<T> VaultError! {
     #Unsafe("vault typed generation commit provider boundary") {
-        return vault.commit_generate<T>(^write, ^plan)
+        return vault.commit_generate<T>(write.move(), plan)
     }
 }
 
-commit_store: fn<T>(write: ^VaultWrite<T>, plan: ^MutationPlan<T>) -[Secret]> KeyRef<T> VaultError! {
+commit_store: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) -[Secret]> KeyRef<T> VaultError! {
     #Unsafe("vault typed store commit provider boundary") {
-        return vault.commit_store<T>(^write, ^plan)
+        return vault.commit_store<T>(write.move(), plan)
     }
 }
 
-commit_import_signing: fn(write: ^VaultWrite<SigningKey>, plan: ^MutationPlan<SigningKey>) -[Secret]> KeyRef<SigningKey> VaultError! {
+commit_import_signing: fn(write: &&VaultWrite<SigningKey>, plan: &&MutationPlan<SigningKey>) -[Secret]> KeyRef<SigningKey> VaultError! {
     #Unsafe("vault key import commit: signing key material") {
-        return vault.commit_import_signing(^write, ^plan)
+        return vault.commit_import_signing(write, plan)
     }
 }
 
-commit_import_x25519: fn(write: ^VaultWrite<X25519SecretKey>, plan: ^MutationPlan<X25519SecretKey>) -[Secret]> KeyRef<X25519SecretKey> VaultError! {
+commit_import_x25519: fn(write: &&VaultWrite<X25519SecretKey>, plan: &&MutationPlan<X25519SecretKey>) -[Secret]> KeyRef<X25519SecretKey> VaultError! {
     #Unsafe("vault key import commit: X25519 secret material") {
-        return vault.commit_import_x25519(^write, ^plan)
+        return vault.commit_import_x25519(write, plan)
     }
 }
 
-commit_import_wrapped: fn<T>(write: ^VaultWrite<T>, plan: ^WrappedImportPlan<T>) -[Secret]> KeyRef<T> KeyWrapError! {
+commit_import_wrapped: fn<T>(write: &&VaultWrite<T>, plan: &&WrappedImportPlan<T>) -[Secret]> KeyRef<T> KeyWrapError! {
     #Unsafe("vault wrapped import commit provider boundary") {
-        return vault.commit_import_wrapped<T>(^write, ^plan)
+        return vault.commit_import_wrapped<T>(write.move(), plan)
     }
 }
 
-commit_rotate: fn<T>(write: ^VaultWrite<T>, plan: ^MutationPlan<T>) -[Secret]> Rotation<T> VaultError! {
+commit_rotate: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) -[Secret]> Rotation<T> VaultError! {
     #Unsafe("vault typed rotation commit provider boundary") {
-        return vault.commit_rotate<T>(^write, ^plan)
+        return vault.commit_rotate<T>(write.move(), plan)
     }
 }
 
-commit_retire: fn<T>(write: ^VaultWrite<T>, plan: ^MutationPlan<T>) VaultError! -[Secret]> {
+commit_retire: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) VaultError! -[Secret]> {
     #Unsafe("vault typed retirement commit provider boundary") {
-        return vault.commit_retire<T>(^write, ^plan)
+        return vault.commit_retire<T>(write.move(), plan)
     }
 }
 
-commit_revoke: fn<T>(write: ^VaultWrite<T>, plan: ^MutationPlan<T>) VaultError! -[Secret]> {
+commit_revoke: fn<T>(write: &&VaultWrite<T>, plan: &&MutationPlan<T>) VaultError! -[Secret]> {
     #Unsafe("vault typed revocation commit provider boundary") {
-        return vault.commit_revoke<T>(^write, ^plan)
+        return vault.commit_revoke<T>(write.move(), plan)
     }
 }
 
@@ -475,7 +475,7 @@ wrapped_take: fn(bytes: [U8], at: &Int, count: Int) -> Int KeyWrapError! {
 }
 
 wrapped_uint: fn(bytes: [U8], at: &Int, width: Int) -> Int KeyWrapError! {
-    start: wrapped_take(bytes, &at, width) ?? return Err(err)
+    start: wrapped_take(bytes, at, width) ?? return Err(err)
     value := 0
     shift := 0
     loop i in 0..<width {
@@ -486,7 +486,7 @@ wrapped_uint: fn(bytes: [U8], at: &Int, width: Int) -> Int KeyWrapError! {
 }
 
 wrapped_nonzero: fn(bytes: [U8], at: &Int, count: Int) -> Bool KeyWrapError! {
-    start: wrapped_take(bytes, &at, count) ?? return Err(err)
+    start: wrapped_take(bytes, at, count) ?? return Err(err)
     nonzero := false
     loop i in 0..<count {
         if bytes[start + i] != (U8{0}) -> nonzero = true
@@ -506,36 +506,36 @@ wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
     if key_type != 1 && key_type != 2 -> return Err(wrap_error("unsupported wrapped vault key type"))
     if bytes[7] != (U8{0}) -> return Err(wrap_error("invalid wrapped vault key encoding"))
     fixed := 8
-    header_len: wrapped_uint(bytes, &fixed, 4) ?? return Err(err)
-    ciphertext_len: wrapped_uint(bytes, &fixed, 4) ?? return Err(err)
+    header_len: wrapped_uint(bytes, fixed, 4) ?? return Err(err)
+    ciphertext_len: wrapped_uint(bytes, fixed, 4) ?? return Err(err)
     header_end: 16 + header_len
     if ciphertext_len != 64 || header_end + 80 != bytes.len() -> return Err(wrap_error("invalid wrapped vault key length"))
     at := 16
-    repo_nonzero: wrapped_nonzero(bytes, &at, 16) ?? return Err(err)
-    name_len: wrapped_uint(bytes, &at, 2) ?? return Err(err)
+    repo_nonzero: wrapped_nonzero(bytes, at, 16) ?? return Err(err)
+    name_len: wrapped_uint(bytes, at, 2) ?? return Err(err)
     if name_len < 1 || name_len > 128 -> return Err(wrap_error("invalid wrapped vault key length"))
-    name_at: wrapped_take(bytes, &at, name_len) ?? return Err(err)
+    name_at: wrapped_take(bytes, at, name_len) ?? return Err(err)
     name_bytes := [U8]{}
-    loop i in 0..<name_len -> &name_bytes.push(bytes[name_at + i])
-    name: String.from_bytes(^name_bytes) ?? return Err(wrap_error("invalid wrapped vault key encoding"))
+    loop i in 0..<name_len -> name_bytes.push(bytes[name_at + i])
+    name: String.from_bytes(name_bytes) ?? return Err(wrap_error("invalid wrapped vault key encoding"))
     validate_name(name) ?? return Err(wrap_error("invalid wrapped vault key encoding"))
-    generation: wrapped_uint(bytes, &at, 8) ?? return Err(err)
-    opaque_nonzero: wrapped_nonzero(bytes, &at, 16) ?? return Err(err)
-    hash_nonzero: wrapped_nonzero(bytes, &at, 32) ?? return Err(err)
-    wrapped_take(bytes, &at, 8) ?? return Err(err)
-    export_nonzero: wrapped_nonzero(bytes, &at, 16) ?? return Err(err)
-    wrapped_take(bytes, &at, 24) ?? return Err(err)
+    generation: wrapped_uint(bytes, at, 8) ?? return Err(err)
+    opaque_nonzero: wrapped_nonzero(bytes, at, 16) ?? return Err(err)
+    hash_nonzero: wrapped_nonzero(bytes, at, 32) ?? return Err(err)
+    wrapped_take(bytes, at, 8) ?? return Err(err)
+    export_nonzero: wrapped_nonzero(bytes, at, 16) ?? return Err(err)
+    wrapped_take(bytes, at, 24) ?? return Err(err)
     if !repo_nonzero || generation == 0 || !opaque_nonzero || !hash_nonzero || !export_nonzero {
         return Err(wrap_error("invalid wrapped vault key encoding"))
     }
     if mode == 1 {
-        count: wrapped_uint(bytes, &at, 2) ?? return Err(err)
+        count: wrapped_uint(bytes, at, 2) ?? return Err(err)
         if count < 1 || count > 16 -> return Err(wrap_error("invalid wrapped vault key length"))
-        wrapped_take(bytes, &at, 48) ?? return Err(err)
+        wrapped_take(bytes, at, 48) ?? return Err(err)
         previous := -1
         loop _ in 0..<count {
-            recipient: wrapped_take(bytes, &at, 32) ?? return Err(err)
-            wrapped_take(bytes, &at, 48) ?? return Err(err)
+            recipient: wrapped_take(bytes, at, 32) ?? return Err(err)
+            wrapped_take(bytes, at, 48) ?? return Err(err)
             if previous >= 0 {
                 order := 0
                 loop i in 0..<32 {
@@ -555,17 +555,17 @@ wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
             previous = recipient
         }
     } else {
-        wrapped_take(bytes, &at, 16) ?? return Err(err)
-        memory: wrapped_uint(bytes, &at, 4) ?? return Err(err)
-        iterations: wrapped_uint(bytes, &at, 4) ?? return Err(err)
-        lanes: wrapped_uint(bytes, &at, 1) ?? return Err(err)
-        reserved: wrapped_uint(bytes, &at, 3) ?? return Err(err)
+        wrapped_take(bytes, at, 16) ?? return Err(err)
+        memory: wrapped_uint(bytes, at, 4) ?? return Err(err)
+        iterations: wrapped_uint(bytes, at, 4) ?? return Err(err)
+        lanes: wrapped_uint(bytes, at, 1) ?? return Err(err)
+        reserved: wrapped_uint(bytes, at, 3) ?? return Err(err)
         if memory != 65536 || iterations != 3 || lanes != 1 || reserved != 0 {
             return Err(wrap_error("invalid wrapped vault key encoding"))
         }
     }
     if at != header_end -> return Err(wrap_error("invalid wrapped vault key length"))
-    Ok(WrappedMetadata{mode: mode, key_type: key_type, name: ^name, generation: generation, header_len: header_len})
+    Ok(WrappedMetadata{mode: mode, key_type: key_type, name: name, generation: generation, header_len: header_len})
 }
 
 #Test("Vault names and reasons use UTF-8 byte bounds and Unicode control rules") {
@@ -585,20 +585,20 @@ wrapped_metadata: fn(bytes: [U8]) -> WrappedMetadata KeyWrapError! {
 #Test("JVKW passphrase header preserves public metadata without copying key material") {
     // Exact JVKW/v1: 154-byte header, 64-byte ciphertext, 16-byte tag.
     bytes := [U8]{74, 86, 75, 87, 1, 2, 1, 0, 154, 0, 0, 0, 64, 0, 0, 0}
-    loop _ in 0..<16 -> &bytes.push(U8{1})
-    &bytes.push(U8{4})
-    &bytes.push(U8{0})
-    loop b in "name".bytes() -> &bytes.push(b)
-    &bytes.push(U8{1})
-    loop _ in 0..<7 -> &bytes.push(U8{0})
-    loop _ in 0..<16 -> &bytes.push(U8{1})
-    loop _ in 0..<32 -> &bytes.push(U8{1})
-    loop _ in 0..<8 -> &bytes.push(U8{0})
-    loop _ in 0..<16 -> &bytes.push(U8{1})
-    loop _ in 0..<24 -> &bytes.push(U8{0})
-    loop _ in 0..<16 -> &bytes.push(U8{0})
-    loop b in ([U8]{0, 0, 1, 0, 3, 0, 0, 0, 1, 0, 0, 0}) -> &bytes.push(b)
-    loop _ in 0..<80 -> &bytes.push(U8{0})
+    loop _ in 0..<16 -> bytes.push(U8{1})
+    bytes.push(U8{4})
+    bytes.push(U8{0})
+    loop b in "name".bytes() -> bytes.push(b)
+    bytes.push(U8{1})
+    loop _ in 0..<7 -> bytes.push(U8{0})
+    loop _ in 0..<16 -> bytes.push(U8{1})
+    loop _ in 0..<32 -> bytes.push(U8{1})
+    loop _ in 0..<8 -> bytes.push(U8{0})
+    loop _ in 0..<16 -> bytes.push(U8{1})
+    loop _ in 0..<24 -> bytes.push(U8{0})
+    loop _ in 0..<16 -> bytes.push(U8{0})
+    loop b in ([U8]{0, 0, 1, 0, 3, 0, 0, 0, 1, 0, 0, 0}) -> bytes.push(b)
+    loop _ in 0..<80 -> bytes.push(U8{0})
     meta: wrapped_metadata(bytes) ?? panic("valid JVKW fixture rejected")
     assert_eq(meta.mode, 2)
     assert_eq(meta.key_type, 1)

@@ -15,10 +15,10 @@ empty: fn() -> [Float] {
     return []
 }
 
-EXPECTED_EMPTY: comptime { show(data.median(empty())) }
+EXPECTED_EMPTY: comptime { show(data.quantile(empty(), Float{0.5})) }
 
 run: fn() {
-    actual_empty: show(data.median(empty()))
+    actual_empty: show(data.quantile(empty(), Float{0.5}))
     comptime_diff_frame("{EXPECTED_EMPTY}", "{actual_empty}")
 
 }

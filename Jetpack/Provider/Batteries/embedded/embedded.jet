@@ -4,532 +4,527 @@ use mem: core.mem
 // consumes. The host path uses the same records and state transitions as a
 // target build; only the MMIO/vector/DMA/flash providers are not available.
 embedded: module {
-    MemoryRegion: struct {
-        name: String
-        origin: Int
-        bytes: Int
-        kind: String
-        access: String
-    }
+}
 
-    PeripheralBase: struct {
-        name: String
-        address: Int
-        bytes: Int
-        access: String
-    }
+MemoryRegion: struct {
+    name: String
+    origin: Int
+    bytes: Int
+    kind: String
+    access: String
+}
 
-    BoardDescription: struct {
-        name: String
-        mcu: String
-        triple: String
-        environment: String
-        flash: MemoryRegion
-        ram: MemoryRegion
-        peripherals: MemoryRegion
-        uart: PeripheralBase
-        dma: PeripheralBase?
-        uart_interrupt: Int?
-        dma_channel: Int?
-        linker: String
-        startup: String
-        allocator: String
-        panic: String
-        mmio: String
-        monotonic: String
-        byte_sink: String
-        host_replay: String
-    }
+PeripheralBase: struct {
+    name: String
+    address: Int
+    bytes: Int
+    access: String
+}
 
-    TargetDossier: struct {
-        target: String
-        mcu: String
-        toolchain: String
-        svd: String?
-        svd_hash: String?
-        linker: String
-        allocator: String
-        panic: String
-        mmio: String
-        monotonic: String
-        entropy: String
-        scheduler: String
-        byte_sink: String
-        startup: String
-        host_replay: String
-    }
+BoardDescription: struct {
+    name: String
+    mcu: String
+    triple: String
+    environment: String
+    flash: MemoryRegion
+    ram: MemoryRegion
+    peripherals: MemoryRegion
+    uart: PeripheralBase
+    dma: PeripheralBase?
+    uart_interrupt: Int?
+    dma_channel: Int?
+    linker: String
+    startup: String
+    allocator: String
+    panic: String
+    mmio: String
+    monotonic: String
+    byte_sink: String
+    host_replay: String
+}
 
-    // The proof profile uses QEMU MPS2 AN386: 4 MiB image memory and
-    // SSRAM, 64 KiB APB space, and the CMSDK UART0. DMA is not provided.
-    board: fn() -> BoardDescription {
-        return BoardDescription{
-            name: "board.sensor_v1",
-            mcu: "MPS2 AN386 Cortex-M4",
-            triple: "thumbv7em-none-eabihf",
-            environment: "no-os",
-            flash: MemoryRegion{
-                name: "flash",
-                origin: 0x0,
-                bytes: 4 * 1024 * 1024,
-                kind: "Flash",
-                access: "Rx",
-            },
-            ram: MemoryRegion{
-                name: "ram",
-                origin: 0x20000000,
-                bytes: 4 * 1024 * 1024,
-                kind: "Ram",
-                access: "Rw",
-            },
-            peripherals: MemoryRegion{
-                name: "peripherals",
-                origin: 0x40000000,
-                bytes: 64 * 1024,
-                kind: "Mmio",
-                access: "Rw",
-            },
-            uart: PeripheralBase{
-                name: "UART0",
-                address: 0x40004000,
-                bytes: 0x14,
-                access: "data:U32/RW, state:U32/RW, ctrl:U32/RW, bauddiv:U32/RW",
-            },
-            dma: None,
-            uart_interrupt: None,
-            dma_channel: None,
-            linker: "generated linker input",
-            startup: "generated board.sensor_v1.startup provider",
-            allocator: "none",
-            panic: "abort",
-            mmio: "board.sensor_v1.mmio provider",
-            monotonic: "board.sensor_v1.systick provider",
-            byte_sink: "board.sensor_v1.uart_rx / uart_tx / report_uart",
-            host_replay: "stack-backed register cells; no hardware claims",
-        }
-    }
+TargetDossier: struct {
+    target: String
+    mcu: String
+    toolchain: String
+    svd: String?
+    svd_hash: String?
+    linker: String
+    allocator: String
+    panic: String
+    mmio: String
+    monotonic: String
+    entropy: String
+    scheduler: String
+    byte_sink: String
+    startup: String
+    host_replay: String
+}
 
-    target_dossier: fn() -> TargetDossier {
-        return TargetDossier{
-            target: "board.sensor_v1",
-            mcu: "MPS2 AN386 Cortex-M4",
-            toolchain: "thumbv7em-none-eabihf",
-            svd: None,
-            svd_hash: None,
-            linker: "generated linker input",
-            allocator: "none",
-            panic: "abort",
-            mmio: "board.sensor_v1.mmio provider",
-            monotonic: "board.sensor_v1.systick provider",
-            entropy: "none",
-            scheduler: "board.sensor_v1.cooperative provider",
-            byte_sink: "board.sensor_v1.uart_rx / uart_tx / report_uart",
-            startup: "board.sensor_v1.startup provider",
-            host_replay: "stack-backed register cells; no hardware claims",
-        }
+// The proof profile uses QEMU MPS2 AN386: 4 MiB image memory and
+// SSRAM, 64 KiB APB space, and the CMSDK UART0. DMA is not provided.
+board: fn() -> BoardDescription {
+    return BoardDescription{
+        name: "board.sensor_v1",
+        mcu: "MPS2 AN386 Cortex-M4",
+        triple: "thumbv7em-none-eabihf",
+        environment: "no-os",
+        flash: MemoryRegion{
+            name: "flash",
+            origin: 0x0,
+            bytes: 4 * 1024 * 1024,
+            kind: "Flash",
+            access: "Rx",
+        },
+        ram: MemoryRegion{
+            name: "ram",
+            origin: 0x20000000,
+            bytes: 4 * 1024 * 1024,
+            kind: "Ram",
+            access: "Rw",
+        },
+        peripherals: MemoryRegion{
+            name: "peripherals",
+            origin: 0x40000000,
+            bytes: 64 * 1024,
+            kind: "Mmio",
+            access: "Rw",
+        },
+        uart: PeripheralBase{
+            name: "UART0",
+            address: 0x40004000,
+            bytes: 0x14,
+            access: "data:U32/RW, state:U32/RW, ctrl:U32/RW, bauddiv:U32/RW",
+        },
+        dma: None,
+        uart_interrupt: None,
+        dma_channel: None,
+        linker: "generated linker input",
+        startup: "generated board.sensor_v1.startup provider",
+        allocator: "none",
+        panic: "abort",
+        mmio: "board.sensor_v1.mmio provider",
+        monotonic: "board.sensor_v1.systick provider",
+        byte_sink: "board.sensor_v1.uart_rx / uart_tx / report_uart",
+        host_replay: "stack-backed register cells; no hardware claims",
     }
+}
 
-    // C-layout records for host replay. The UART fields match CMSDK offsets;
-    // GPIO, timer, and DMA records are driver state, not target MMIO claims.
-    #Layout(c) GpioRegisters: struct {
-        mode: U32
-        output: U32
-        input: U32
+target_dossier: fn() -> TargetDossier {
+    return TargetDossier{
+        target: "board.sensor_v1",
+        mcu: "MPS2 AN386 Cortex-M4",
+        toolchain: "thumbv7em-none-eabihf",
+        svd: None,
+        svd_hash: None,
+        linker: "generated linker input",
+        allocator: "none",
+        panic: "abort",
+        mmio: "board.sensor_v1.mmio provider",
+        monotonic: "board.sensor_v1.systick provider",
+        entropy: "none",
+        scheduler: "board.sensor_v1.cooperative provider",
+        byte_sink: "board.sensor_v1.uart_rx / uart_tx / report_uart",
+        startup: "board.sensor_v1.startup provider",
+        host_replay: "stack-backed register cells; no hardware claims",
     }
+}
 
-    #Layout(c) TimerRegisters: struct {
-        counter: U32
-        compare: U32
-        status: U32
+// C-layout records for host replay. The UART fields match CMSDK offsets;
+// GPIO, timer, and DMA records are driver state, not target MMIO claims.
+#Layout(c) GPIORegisters: struct {
+    mode: U32
+    output: U32
+    input: U32
+}
+
+#Layout(c) TimerRegisters: struct {
+    counter: U32
+    compare: U32
+    status: U32
+}
+
+#Layout(c) UARTRegisters: struct {
+    data: U32
+    state: U32
+    control: U32
+    interrupt_status: U32
+    bauddiv: U32
+}
+
+#Layout(c) DMARegisters: struct {
+    status: U32
+    clear: U32
+}
+
+RegisterBlock: struct {
+    gpio: GPIORegisters
+    timer: TimerRegisters
+    uart: UARTRegisters
+    dma: DMARegisters
+    mmio_echo: Int
+}
+
+registers: fn() -> RegisterBlock {
+    return RegisterBlock{
+        gpio: GPIORegisters{mode: U32{0}, output: U32{0}, input: U32{0}},
+        timer: TimerRegisters{counter: U32{0}, compare: U32{0}, status: U32{0}},
+        uart: UARTRegisters{data: U32{0}, state: U32{0}, control: U32{0}, interrupt_status: U32{0}, bauddiv: U32{0}},
+        dma: DMARegisters{status: U32{0}, clear: U32{0}},
+        mmio_echo: 0,
     }
+}
 
-    #Layout(c) UartRegisters: struct {
-        data: U32
-        state: U32
-        control: U32
-        interrupt_status: U32
-        bauddiv: U32
+// The address is documented and passed by the caller, but host replay must
+// not dereference it. The single unsafe audit writes a stack cell instead;
+// a target MMIO provider will replace this boundary.
+mmio_replay: fn(_documented_address: Int, value: Int) -> Int {
+    cell := 0
+    #Unsafe("host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address") {
+        pointer: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        mem.volatile_write(pointer, value)
+        return mem.volatile_read(pointer)
     }
+}
 
-    #Layout(c) DmaRegisters: struct {
-        status: U32
-        clear: U32
-    }
+gpio_init: fn(registers: &RegisterBlock) {
+    registers.gpio.mode = U32{1}
+    registers.gpio.output = U32{0}
+    registers.gpio.input = U32{0}
+}
 
-    RegisterBlock: struct {
-        gpio: GpioRegisters
-        timer: TimerRegisters
-        uart: UartRegisters
-        dma: DmaRegisters
-        mmio_echo: Int
-    }
+gpio_write: fn(registers: &RegisterBlock, high: Bool) {
+    if high -> registers.gpio.output = U32{1} else { registers.gpio.output = U32{0} }
+}
 
-    registers: fn() -> RegisterBlock {
-        return RegisterBlock{
-            gpio: GpioRegisters{mode: U32{0}, output: U32{0}, input: U32{0}},
-            timer: TimerRegisters{counter: U32{0}, compare: U32{0}, status: U32{0}},
-            uart: UartRegisters{data: U32{0}, state: U32{0}, control: U32{0}, interrupt_status: U32{0}, bauddiv: U32{0}},
-            dma: DmaRegisters{status: U32{0}, clear: U32{0}},
-            mmio_echo: 0,
-        }
-    }
+timer_init: fn(registers: &RegisterBlock, period: Int) {
+    registers.timer.counter = U32{0}
+    registers.timer.compare = U32{period}
+    registers.timer.status = U32{0}
+}
 
-    // The address is documented and passed by the caller, but host replay must
-    // not dereference it. The single unsafe audit writes a stack cell instead;
-    // a target MMIO provider will replace this boundary under D-FOUND-BOARD1.
-    mmio_replay: fn(_documented_address: Int, value: Int) -> Int {
-        cell := 0
-        #Unsafe("host replay uses a stack cell for the CMSDK UART0 control register and never dereferences the target address") {
-            pointer: mem.Ptr<Int>.from_addr(mem.address_of(cell))
-            mem.volatile_write(pointer, value)
-            return mem.volatile_read(pointer)
-        }
-    }
-
-    gpio_init: fn(registers: &RegisterBlock) {
-        registers.gpio.mode = U32{1}
-        registers.gpio.output = U32{0}
-        registers.gpio.input = U32{0}
-    }
-
-    gpio_write: fn(registers: &RegisterBlock, high: Bool) {
-        if high {
-            registers.gpio.output = U32{1}
-        } else {
-            registers.gpio.output = U32{0}
-        }
-    }
-
-    timer_init: fn(registers: &RegisterBlock, period: Int) {
+timer_advance: fn(registers: &RegisterBlock) -> Bool {
+    counter := registers.timer.counter
+    counter += U32{1}
+    registers.timer.counter = counter
+    if registers.timer.counter >= registers.timer.compare {
         registers.timer.counter = U32{0}
-        registers.timer.compare = U32{period}
-        registers.timer.status = U32{0}
+        registers.timer.status = U32{1}
+        return true
     }
+    registers.timer.status = U32{0}
+    return false
+}
 
-    timer_advance: fn(registers: &RegisterBlock) -> Bool {
-        counter := registers.timer.counter
-        counter += U32{1}
-        registers.timer.counter = counter
-        if registers.timer.counter >= registers.timer.compare {
-            registers.timer.counter = U32{0}
-            registers.timer.status = U32{1}
-            return true
-        }
-        registers.timer.status = U32{0}
+uart_init: fn(registers: &RegisterBlock) {
+    registers.uart.control = U32{1}
+    registers.uart.data = U32{0}
+}
+
+uart_control_write: fn(registers: &RegisterBlock, value: Int) -> Int {
+    registers.uart.control = U32{value}
+    registers.mmio_echo = mmio_replay(0x40004008, value)
+    return registers.mmio_echo
+}
+
+dma_init: fn(registers: &RegisterBlock) {
+    registers.dma.status = U32{0}
+    registers.dma.clear = U32{0}
+}
+
+InterruptQueue: struct {
+    slots: [Int#4]
+    head: Int
+    tail: Int
+    count: Int
+    dropped: Int
+}
+
+interrupt_queue: fn() -> InterruptQueue {
+    return InterruptQueue{
+        slots: [Int#4]{0, 0, 0, 0},
+        head: 0,
+        tail: 0,
+        count: 0,
+        dropped: 0,
+    }
+}
+
+// The bounded handoff is reusable queue policy. The board surface still has
+// no vector-table/ISR registration seam, so this function is not claimed
+// to be a hardware interrupt handler.
+interrupt_enqueue: fn(queue: &InterruptQueue, event: Int) -> Bool {
+    if queue.count >= queue.slots.len() {
+        queue.dropped += 1
         return false
     }
+    queue.slots[queue.tail] = event
+    queue.tail = (queue.tail + 1) % queue.slots.len()
+    queue.count += 1
+    return true
+}
 
-    uart_init: fn(registers: &RegisterBlock) {
-        registers.uart.control = U32{1}
-        registers.uart.data = U32{0}
+task_drain: fn(queue: &InterruptQueue) -> Int? {
+    if queue.count == 0 -> return None
+    event: queue.slots[queue.head]
+    queue.head = (queue.head + 1) % queue.slots.len()
+    queue.count -= 1
+    return Val(event)
+}
+
+DMABuffer: struct {
+    words: [Int#4]
+    checksum: Int
+    owner: Int
+    submitted: Bool
+    completed: Bool
+}
+
+dma_buffer: fn(words: [Int#4]) -> DMABuffer {
+    return DMABuffer{
+        words: words,
+        checksum: 0,
+        owner: 0,
+        submitted: false,
+        completed: false,
     }
+}
 
-    uart_control_write: fn(registers: &RegisterBlock, value: Int) -> Int {
-        registers.uart.control = U32{value}
-        registers.mmio_echo = mmio_replay(0x40004008, value)
-        return registers.mmio_echo
+// Pin establishes address stability for this read. It does not map memory
+// for a device and it does not complete a transfer.
+dma_checksum: fn(buffer: &DMABuffer) -> Int {
+    pinned: mem.pin(buffer)
+    return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
+}
+
+// Host replay uses the same ownership transitions that a target provider
+// must drive. Source/destination remain unmapped until the board surface
+// supplies the target DMA mapping boundary.
+dma_submit: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Bool {
+    if buffer.owner != 0 || buffer.submitted -> return false
+    buffer.checksum = dma_checksum(buffer)
+    registers.dma.status = U32{0}
+    registers.dma.clear = U32{0}
+    buffer.owner = 1
+    buffer.submitted = true
+    buffer.completed = false
+    return true
+}
+
+dma_complete: fn(buffer: &DMABuffer, registers: &RegisterBlock) -> Bool {
+    if buffer.owner != 1 || !buffer.submitted -> return false
+    registers.dma.status = U32{1}
+    buffer.completed = true
+    buffer.owner = 0
+    return true
+}
+
+// A completed CPU-owned buffer may be reused. Reuse clears the transfer
+// markers; submitting while the device owns it is rejected above.
+dma_reuse: fn(buffer: &DMABuffer) -> Bool {
+    if buffer.owner != 0 || !buffer.submitted || !buffer.completed -> return false
+    buffer.checksum = 0
+    buffer.submitted = false
+    buffer.completed = false
+    return true
+}
+
+dma_mapping_status: fn() -> String { return "target DMA mapping/provider boundary open" }
+
+UARTRing: struct {
+    bytes: [U8#8]
+    head: Int
+    tail: Int
+    count: Int
+    dropped: Int
+}
+
+uart_ring: fn() -> UARTRing {
+    return UARTRing{
+        bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0},
+        head: 0,
+        tail: 0,
+        count: 0,
+        dropped: 0,
     }
+}
 
-    dma_init: fn(registers: &RegisterBlock) {
-        registers.dma.status = U32{0}
-        registers.dma.clear = U32{0}
+// RX and TX use the same bounded ring policy. Enqueue reports full without
+// overwriting old bytes; dequeue returns None for empty, never a sentinel.
+uart_enqueue: fn(ring: &UARTRing, byte: U8) -> Bool {
+    if ring.count >= ring.bytes.len() {
+        ring.dropped += 1
+        return false
     }
+    ring.bytes[ring.tail] = byte
+    ring.tail = (ring.tail + 1) % ring.bytes.len()
+    ring.count += 1
+    return true
+}
 
-    InterruptQueue: struct {
-        slots: [Int#4]
-        head: Int
-        tail: Int
-        count: Int
-        dropped: Int
+uart_dequeue: fn(ring: &UARTRing) -> U8? {
+    if ring.count == 0 -> return None
+    byte: ring.bytes[ring.head]
+    ring.head = (ring.head + 1) % ring.bytes.len()
+    ring.count -= 1
+    return Val(byte)
+}
+
+ControlState: struct {
+    setpoint: Int
+    integrator: Int
+    actuator: Int
+    ticks: Int
+    deadline_misses: Int
+    wcet_estimate_us: Int
+    deadline_us: Int
+}
+
+control_state: fn(setpoint: Int, deadline_us: Int) -> ControlState {
+    return ControlState{
+        setpoint: setpoint,
+        integrator: 0,
+        actuator: 0,
+        ticks: 0,
+        deadline_misses: 0,
+        wcet_estimate_us: 12,
+        deadline_us: deadline_us,
     }
+}
 
-    interrupt_queue: fn() -> InterruptQueue {
-        return InterruptQueue{
-            slots: [Int#4]{0, 0, 0, 0},
-            head: 0,
-            tail: 0,
-            count: 0,
-            dropped: 0,
+// Deterministic fixed-point control tick. The returned work value is a
+// measured/maintained library estimate, not compiler WCET proof.
+control_tick: fn(state: &ControlState, sample: Int) -> Int {
+    error: state.setpoint - sample
+    state.integrator += error
+    if state.integrator > 8192 -> state.integrator = 8192
+    if state.integrator < -8192 -> state.integrator = -8192
+    state.actuator = error * 4 + state.integrator /% 8
+    if state.actuator > 4095 -> state.actuator = 4095
+    if state.actuator < -4095 -> state.actuator = -4095
+    state.ticks += 1
+    return state.wcet_estimate_us
+}
+
+control_account: fn(state: &ControlState, work_us: Int) -> Bool {
+    if work_us > state.deadline_us {
+        state.deadline_misses += 1
+        return false
+    }
+    return true
+}
+
+control_timing_status: fn() -> String { return "deadline comparison is accounting, not WCET proof" }
+
+SlotState: enum {
+    Empty
+    Pending(Int)
+    Confirmed(Int)
+    Rejected(Int)
+}
+
+SlotPolicy: struct {
+    active: Int
+    trial: SlotState
+    rollback_count: Int
+}
+
+slot_policy: fn(active: Int) -> SlotPolicy {
+    return SlotPolicy{active: active, trial: SlotState.Empty, rollback_count: 0}
+}
+
+// Authentication is an input from the image verifier. Keeping this policy
+// separate from flash persistence avoids claiming a signer or bootloader
+// that the current Core API does not provide.
+stage_image: fn(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
+    if !authenticated {
+        slots.trial = SlotState.Rejected(image_digest)
+        return false
+    }
+    slots.trial = SlotState.Pending(image_digest)
+    return true
+}
+
+confirm_trial: fn(slots: &SlotPolicy) -> Bool {
+    if slots.trial == {
+        .Pending(digest) -> {
+            slots.trial = SlotState.Confirmed(digest)
+            return true
         }
+        else -> return false
     }
+}
 
-    // The bounded handoff is reusable queue policy. D-FOUND-BOARD1 still has
-    // no vector-table/ISR registration seam, so this function is not claimed
-    // to be a hardware interrupt handler.
-    interrupt_enqueue: fn(queue: &InterruptQueue, event: Int) -> Bool {
-        if queue.count >= queue.slots.len() {
-            queue.dropped += 1
-            return false
+activate_confirmed: fn(slots: &SlotPolicy) -> Bool {
+    if slots.trial == {
+        .Confirmed(digest) -> {
+            slots.active = digest
+            slots.trial = SlotState.Empty
+            return true
         }
-        queue.slots[queue.tail] = event
-        queue.tail = (queue.tail + 1) % queue.slots.len()
-        queue.count += 1
-        return true
+        else -> return false
     }
+}
 
-    task_drain: fn(queue: &InterruptQueue) -> Int? {
-        if queue.count == 0 -> return None
-        event: queue.slots[queue.head]
-        queue.head = (queue.head + 1) % queue.slots.len()
-        queue.count -= 1
-        return Val(event)
-    }
-
-    DmaBuffer: struct {
-        words: [Int#4]
-        checksum: Int
-        owner: Int
-        submitted: Bool
-        completed: Bool
-    }
-
-    dma_buffer: fn(words: [Int#4]) -> DmaBuffer {
-        return DmaBuffer{
-            words: words,
-            checksum: 0,
-            owner: 0,
-            submitted: false,
-            completed: false,
+rollback_trial: fn(slots: &SlotPolicy) -> Bool {
+    if slots.trial == {
+        .Pending(_) -> {
+            slots.trial = SlotState.Empty
+            slots.rollback_count += 1
+            return true
         }
-    }
-
-    // Pin establishes address stability for this read. It does not map memory
-    // for a device and it does not complete a transfer (D-PIN3).
-    dma_checksum: fn(buffer: &DmaBuffer) -> Int {
-        pinned: mem.pin(&buffer)
-        return pinned.words[0] + pinned.words[1] + pinned.words[2] + pinned.words[3]
-    }
-
-    // Host replay uses the same ownership transitions that a target provider
-    // must drive. Source/destination remain unmapped until D-FOUND-BOARD1
-    // supplies the target DMA mapping boundary.
-    dma_submit: fn(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
-        if buffer.owner != 0 || buffer.submitted -> return false
-        buffer.checksum = dma_checksum(buffer)
-        registers.dma.status = U32{0}
-        registers.dma.clear = U32{0}
-        buffer.owner = 1
-        buffer.submitted = true
-        buffer.completed = false
-        return true
-    }
-
-    dma_complete: fn(buffer: &DmaBuffer, registers: &RegisterBlock) -> Bool {
-        if buffer.owner != 1 || !buffer.submitted -> return false
-        registers.dma.status = U32{1}
-        buffer.completed = true
-        buffer.owner = 0
-        return true
-    }
-
-    // A completed CPU-owned buffer may be reused. Reuse clears the transfer
-    // markers; submitting while the device owns it is rejected above.
-    dma_reuse: fn(buffer: &DmaBuffer) -> Bool {
-        if buffer.owner != 0 || !buffer.submitted || !buffer.completed -> return false
-        buffer.checksum = 0
-        buffer.submitted = false
-        buffer.completed = false
-        return true
-    }
-
-    dma_mapping_status: fn() -> String {
-        return "D-FOUND-BOARD1: target DMA mapping/provider boundary open"
-    }
-
-    UartRing: struct {
-        bytes: [U8#8]
-        head: Int
-        tail: Int
-        count: Int
-        dropped: Int
-    }
-
-    uart_ring: fn() -> UartRing {
-        return UartRing{
-            bytes: [U8#8]{0, 0, 0, 0, 0, 0, 0, 0},
-            head: 0,
-            tail: 0,
-            count: 0,
-            dropped: 0,
+        .Rejected(_) -> {
+            slots.trial = SlotState.Empty
+            slots.rollback_count += 1
+            return true
         }
+        else -> return false
     }
+}
 
-    // RX and TX use the same bounded ring policy. Enqueue reports full without
-    // overwriting old bytes; dequeue returns None for empty, never a sentinel.
-    uart_enqueue: fn(ring: &UartRing, byte: U8) -> Bool {
-        if ring.count >= ring.bytes.len() {
-            ring.dropped += 1
-            return false
-        }
-        ring.bytes[ring.tail] = byte
-        ring.tail = (ring.tail + 1) % ring.bytes.len()
-        ring.count += 1
-        return true
+slot_state: fn(slots: &SlotPolicy) -> String {
+    if slots.trial == {
+        .Empty -> return "empty"
+        .Pending(_) -> return "pending"
+        .Confirmed(_) -> return "confirmed"
+        .Rejected(_) -> return "rejected"
     }
+}
 
-    uart_dequeue: fn(ring: &UartRing) -> U8? {
-        if ring.count == 0 -> return None
-        byte: ring.bytes[ring.head]
-        ring.head = (ring.head + 1) % ring.bytes.len()
-        ring.count -= 1
-        return Val(byte)
+// A receipt is only reproducible after real build, programmer, and debug
+// output are supplied. Empty captures remain visibly incomplete; no device
+// output is fabricated by the host replay.
+ReleaseReceipt: struct {
+    target: String
+    image: String
+    build_command: String
+    build_output: String
+    flash_output: String
+    debug_output: String
+    captured: Bool
+}
+
+release_receipt: fn(target: String, image: String, build_output: String, flash_output: String, debug_output: String) -> ReleaseReceipt {
+    captured := build_output != "" && flash_output != "" && debug_output != ""
+    return ReleaseReceipt{
+        target: target,
+        image: image,
+        build_command: "jet build --target=board.sensor_v1 Examples/LowLevel/Embedded/Battery/run.jet --release",
+        build_output: build_output,
+        flash_output: flash_output,
+        debug_output: debug_output,
+        captured: captured,
     }
+}
 
-    ControlState: struct {
-        setpoint: Int
-        integrator: Int
-        actuator: Int
-        ticks: Int
-        deadline_misses: Int
-        wcet_estimate_us: Int
-        deadline_us: Int
-    }
-
-    control_state: fn(setpoint: Int, deadline_us: Int) -> ControlState {
-        return ControlState{
-            setpoint: setpoint,
-            integrator: 0,
-            actuator: 0,
-            ticks: 0,
-            deadline_misses: 0,
-            wcet_estimate_us: 12,
-            deadline_us: deadline_us,
-        }
-    }
-
-    // Deterministic fixed-point control tick. The returned work value is a
-    // measured/maintained library estimate, not compiler WCET proof.
-    control_tick: fn(state: &ControlState, sample: Int) -> Int {
-        error: state.setpoint - sample
-        state.integrator += error
-        if state.integrator > 8192 -> state.integrator = 8192
-        if state.integrator < -8192 -> state.integrator = -8192
-        state.actuator = error * 4 + state.integrator /% 8
-        if state.actuator > 4095 -> state.actuator = 4095
-        if state.actuator < -4095 -> state.actuator = -4095
-        state.ticks += 1
-        return state.wcet_estimate_us
-    }
-
-    control_account: fn(state: &ControlState, work_us: Int) -> Bool {
-        if work_us > state.deadline_us {
-            state.deadline_misses += 1
-            return false
-        }
-        return true
-    }
-
-    control_timing_status: fn() -> String {
-        return "D-FOUND-REALTIME1: deadline comparison is accounting, not WCET proof"
-    }
-
-    SlotState: enum {
-        Empty
-        Pending(Int)
-        Confirmed(Int)
-        Rejected(Int)
-    }
-
-    SlotPolicy: struct {
-        active: Int
-        trial: SlotState
-        rollback_count: Int
-    }
-
-    slot_policy: fn(active: Int) -> SlotPolicy {
-        return SlotPolicy{active: active, trial: SlotState.Empty, rollback_count: 0}
-    }
-
-    // Authentication is an input from the image verifier. Keeping this policy
-    // separate from flash persistence avoids claiming a signer or bootloader
-    // that the current Core API does not provide.
-    stage_image: fn(slots: &SlotPolicy, image_digest: Int, authenticated: Bool) -> Bool {
-        if !authenticated {
-            slots.trial = SlotState.Rejected(image_digest)
-            return false
-        }
-        slots.trial = SlotState.Pending(image_digest)
-        return true
-    }
-
-    confirm_trial: fn(slots: &SlotPolicy) -> Bool {
-        if slots.trial == {
-            .Pending(digest) -> {
-                slots.trial = SlotState.Confirmed(digest)
-                return true
-            }
-            else -> return false
-        }
-    }
-
-    activate_confirmed: fn(slots: &SlotPolicy) -> Bool {
-        if slots.trial == {
-            .Confirmed(digest) -> {
-                slots.active = digest
-                slots.trial = SlotState.Empty
-                return true
-            }
-            else -> return false
-        }
-    }
-
-    rollback_trial: fn(slots: &SlotPolicy) -> Bool {
-        if slots.trial == {
-            .Pending(_) -> {
-                slots.trial = SlotState.Empty
-                slots.rollback_count += 1
-                return true
-            }
-            .Rejected(_) -> {
-                slots.trial = SlotState.Empty
-                slots.rollback_count += 1
-                return true
-            }
-            else -> return false
-        }
-    }
-
-    slot_state: fn(slots: &SlotPolicy) -> String {
-        if slots.trial == {
-            .Empty -> return "empty"
-            .Pending(_) -> return "pending"
-            .Confirmed(_) -> return "confirmed"
-            .Rejected(_) -> return "rejected"
-        }
-    }
-
-    // A receipt is only reproducible after real build, programmer, and debug
-    // output are supplied. Empty captures remain visibly incomplete; no device
-    // output is fabricated by the host replay.
-    ReleaseReceipt: struct {
-        target: String
-        image: String
-        build_command: String
-        build_output: String
-        flash_output: String
-        debug_output: String
-        captured: Bool
-    }
-
-    release_receipt: fn(target: String, image: String, build_output: String, flash_output: String, debug_output: String) -> ReleaseReceipt {
-        captured := build_output != "" && flash_output != "" && debug_output != ""
-        return ReleaseReceipt{
-            target: target,
-            image: image,
-            build_command: "jet build --target=board.sensor_v1 Examples/embedded/battery/run.jet --release",
-            build_output: build_output,
-            flash_output: flash_output,
-            debug_output: debug_output,
-            captured: captured,
-        }
-    }
-
-    open_core_gates: fn() -> [String] { [
-        "D-FOUND-BOARD1 (G2): vector-table to bounded ISR provider is not exposed",
-        "D-FOUND-BOARD1 (G3): target DMA mapping and ownership provider is not exposed",
-        "D-FOUND-BOARD1 (G7): target-backed typed MMIO bindings are not exposed",
-        "D-FOUND-REALTIME1 (G4): call-site WCET and hard-deadline proof is not exposed",
-        "D-FOUND-COREAPI1 (G5): persistent flash/authenticated A-B updater is not exposed",
-        "D-FOUND-COREAPI1 (G6): hardware programmer/debug receipt transport is not exposed",
+open_core_gates: fn() -> [String] {
+    [
+        "G2: vector-table to bounded ISR provider is not exposed",
+        "G3: target DMA mapping and ownership provider is not exposed",
+        "G7: target-backed typed MMIO bindings are not exposed",
+        "G4: call-site WCET and hard-deadline proof is not exposed",
+        "G5: persistent flash/authenticated A-B updater is not exposed",
+        "G6: hardware programmer/debug receipt transport is not exposed",
         "E3302: thumbv7em-none-eabihf toolchain component is unavailable",
-    ] }
+    ]
 }

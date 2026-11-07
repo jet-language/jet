@@ -1,4 +1,4 @@
-// Generators (D-CONC-STREAM1=A): a function declared `Stream<T>` builds as
+// Generators: a function declared `Stream<T>` builds as
 // a factory returning a native generator iterator (JetRuntime Generator.jet).
 // The factory moves its parameters (a read parameter: a copy of it) into an
 // env and hands the runtime two helpers built here: the producer, the body
@@ -21,7 +21,7 @@ IR_GENERATOR_ENV_HEADER: 16
 // Result carrier whose success is one.
 ir_generator_element: fn(p: IRProgram, b: &IRBuilder, function: FnBody) -> Type? Never! {
     written: function.ret ?? return None
-    declared: ir_untag(ir_fact(p, &b, written, function.source_span))
+    declared: ir_untag(ir_fact(p, b, written, function.source_span))
     stream := declared.copy()
     if declared == .Result(ok, _) -> stream = ir_untag(ok)
     if stream == .Apply(name, args) {
@@ -36,109 +36,109 @@ ir_generator_element: fn(p: IRProgram, b: &IRBuilder, function: FnBody) -> Type?
 ir_build_generator: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody, element: Type) Never! {
     span: function.source_span
     moves := [Bool]{}
-    if ir_receiver_access(function.kind) != "static" -> &moves.push(ir_receiver_access(function.kind) == "move")
-    loop param in function.params -> &moves.push(param.convention == .Move)
+    if ir_receiver_access(function.kind) != "static" -> moves.push(ir_receiver_access(function.kind) == "move")
+    loop param in function.params -> moves.push(param.convention == .Move)
     captures := [IRGeneratorCapture]{}
     offset := IR_GENERATOR_ENV_HEADER
     loop (index, binding) in b.bindings {
-        if binding.write || binding.indirect >= 0 -> return ir_fail(&b, span, "generator `{function.name}` with a write parameter `{binding.name}`")
+        if binding.write || binding.indirect >= 0 -> return ir_fail(b, span, "generator `{function.name}` with a write parameter `{binding.name}`")
         row: b.f.slot_type[binding.slot]
         if !binding.owned && m.types[row].drop != "" && m.types[row].kind != .Aggregate && m.types[row].clone == "" {
-            return ir_fail(&b, span, "generator `{function.name}` reads parameter `{binding.name}` of {ir_type_name(m.types[row].ty)}, which has no copy; take it by move (`^`)")
+            return ir_fail(b, span, "generator `{function.name}` reads parameter `{binding.name}` of {ir_type_name(m.types[row].ty)}, which has no copy; take it by move (`&&`)")
         }
-        &captures.push(IRGeneratorCapture{name: binding.name.copy(), row: row, offset: offset, moved: index < moves.len() && moves[index]})
+        captures.push(IRGeneratorCapture{name: binding.name.copy(), row: row, offset: offset, moved: index < moves.len() && moves[index]})
         size: m.types[row].size
         if size > 0 -> offset += ir_align8(size)
     }
-    pointer_row: ir_pointer_row(&m)
-    env: ir_box_alloc(&m, &b, offset, pointer_row)
-    zero: ir_word_const(&m, &b, 0)
-    ir_emit(&b.f, IROp.Store, -1, env, 0, zero, b.line)
-    ir_emit(&b.f, IROp.Store, -1, env, 8, zero, b.line)
+    pointer_row: ir_pointer_row(m)
+    env: ir_box_alloc(m, b, offset, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    ir_emit(b.f, IROp.Store, -1, env, 0, zero, b.line)
+    ir_emit(b.f, IROp.Store, -1, env, 8, zero, b.line)
     // A move parameter moves into the env; any other is copied there, the
     // caller keeping its own.
     loop (index, capture) in captures {
         slot: b.bindings[index].slot
         owned: b.bindings[index].owned
         if owned -> b.fresh[slot] = true
-        ir_store_at(&m, p, &b, env, capture.offset, slot)
-        if owned -> ir_disown(&b, slot)
+        ir_store_at(m, p, b, env, capture.offset, slot)
+        if owned -> ir_disown(b, slot)
     }
     if ir_failed(b) -> return
-    producer: ir_generator_producer(&m, p, &b, function, captures)
+    producer: ir_generator_producer(m, p, b, function, captures)
     if producer < 0 -> return
-    release: ir_generator_release(&m, p, &b, function, captures, offset)
+    release: ir_generator_release(m, p, b, function, captures, offset)
     if release < 0 -> return
-    invoke_slot: ir_lazy_address(&m, &b, producer)
-    release_slot: ir_lazy_address(&m, &b, release)
-    meta: ir_lazy_meta(&m, p, &b, element, span)
+    invoke_slot: ir_lazy_address(m, b, producer)
+    release_slot: ir_lazy_address(m, b, release)
+    meta: ir_lazy_meta(m, p, b, element, span)
     if meta < 0 -> return
-    string_row: ir_string_row(&m)
-    label: ir_temp(&m, &b, string_row)
-    ir_emit(&b.f, IROp.ConstText, label, ir_intern_text(&m, function.name), -1, -1, b.line)
+    string_row: ir_string_row(m)
+    label: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, label, ir_intern_text(m, function.name), -1, -1, b.line)
     stream_ty: Type.Apply{name: "Stream", args: [Type]{element.copy()}}
-    stream_row: ir_value_type(&m, p, stream_ty) ?? return ir_fail(&b, span, "type {ir_type_name(stream_ty)}")
-    iter: ir_runtime(&m, &b, "jet_rt_native_generator", [Int]{env, invoke_slot, release_slot, meta, label}, stream_row)
+    stream_row: ir_value_type(m, p, stream_ty) ?? return ir_fail(b, span, "type {ir_type_name(stream_ty)}")
+    iter: ir_runtime(m, b, "jet_rt_native_generator", [Int]{env, invoke_slot, release_slot, meta, label}, stream_row)
     b.plain = ir_plain_return(function) != None
-    written: function.ret ?? return ir_fail(&b, span, "generator `{function.name}` without a return type")
-    declared: ir_fact(p, &b, written, span)
+    written: function.ret ?? return ir_fail(b, span, "generator `{function.name}` without a return type")
+    declared: ir_fact(p, b, written, span)
     if ir_failed(b) -> return
     executable: ir_executable_return_in(function, Val(declared))
-    ret: executable ?? return ir_fail(&b, span, "generator `{function.name}` without a result")
-    result_row: ir_value_type(&m, p, ret) ?? return ir_fail(&b, span, "result type {ir_type_name(ret)}")
+    ret: executable ?? return ir_fail(b, span, "generator `{function.name}` without a result")
+    result_row: ir_value_type(m, p, ret) ?? return ir_fail(b, span, "result type {ir_type_name(ret)}")
     b.f.result = result_row
     b.ret = executable
-    returned: ir_adapt(&m, p, &b, iter, result_row, span)
+    returned: ir_adapt(m, p, b, iter, result_row, span)
     if ir_failed(b) -> return
-    ir_return_slot(&m, p, &b, returned, span)
+    ir_return_slot(m, p, b, returned, span)
 }
 
 // The producer(env, result) of generator `function`: the body, run as the
 // generator's child task over the parameters it takes from the env.
 ir_generator_producer: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: FnBody, captures: [IRGeneratorCapture]) -> Int Never! {
     id: m.functions.len()
-    &m.functions.push(ir_hashed_function("{b.f.name}.generator", "{b.f.key}#generator", "jet_ir_generator_", b.f.source_file, function.line))
+    m.functions.push(ir_hashed_function("{b.f.name}.generator", "{b.f.key}#generator", "jet_ir_generator_", b.f.source_file, function.line))
     a := ir_builder_new(m.functions[id].copy())
     a.instance = b.instance.copy()
     a.row = b.row
     a.bounds = b.bounds
     a.line = function.line
-    pointer_row: ir_pointer_row(&m)
-    env: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "env"))
-    _: ir_new_slot(&a, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "result"))
-    state: ir_temp(&m, &a, pointer_row)
-    ir_emit(&a.f, IROp.Load, state, env, 0, -1, a.line)
+    pointer_row: ir_pointer_row(m)
+    env: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    _: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "result"))
+    state: ir_temp(m, a, pointer_row)
+    ir_emit(a.f, IROp.Load, state, env, 0, -1, a.line)
     a.generator = state
-    started: ir_word_const(&m, &a, 1)
-    ir_emit(&a.f, IROp.Store, -1, env, 8, started, a.line)
+    started: ir_word_const(m, a, 1)
+    ir_emit(a.f, IROp.Store, -1, env, 8, started, a.line)
     // Each parameter moves out of the env into the body's own variable.
     loop capture in captures {
-        slot: ir_new_slot(&a, capture.row, IRSlotKind.Local, ir_intern_name(&m, capture.name))
+        slot: ir_new_slot(a, capture.row, IRSlotKind.Local, ir_intern_name(m, capture.name))
         layout: m.types[capture.row]
         if {
             layout.kind == .Aggregate -> {
-                source: ir_load_at(&m, &a, env, capture.offset, capture.row)
-                ir_emit(&a.f, IROp.StackAddress, slot, layout.size, layout.align, -1, a.line)
-                ir_emit(&a.f, IROp.CopyBytes, -1, slot, source, layout.size, a.line)
+                source: ir_load_at(m, a, env, capture.offset, capture.row)
+                ir_emit(a.f, IROp.StackAddress, slot, layout.size, layout.align, -1, a.line)
+                ir_emit(a.f, IROp.CopyBytes, -1, slot, source, layout.size, a.line)
             }
-            layout.kind != .Unit -> ir_emit(&a.f, IROp.Load, slot, env, capture.offset, -1, a.line)
+            layout.kind != .Unit -> ir_emit(a.f, IROp.Load, slot, env, capture.offset, -1, a.line)
         }
-        &a.bindings.push(IRBinding{name: capture.name.copy(), slot: slot, owned: layout.drop != ""})
+        a.bindings.push(IRBinding{name: capture.name.copy(), slot: slot, owned: layout.drop != ""})
     }
-    ir_arm_params(&m, p, &a, function)
+    ir_arm_params(m, p, a, function)
     captured: ir_mutable_captures(p, a, function.body)
-    a.cells = ir_window_cells(&m, p, a, captured)
-    ir_cell_params(&m, &a)
-    ir_sentry_frame(&m, p, &a)
+    a.cells = ir_window_cells(m, p, a, captured)
+    ir_cell_params(m, a)
+    ir_sentry_frame(m, p, a)
     if !ir_failed(a) {
-        ir_stmts(&m, p, &a, function.body)
-        if !ir_failed(a) && a.failures.len() == 0 -> ir_return_fallthrough(&m, p, &a)
+        ir_stmts(m, p, a, function.body)
+        if !ir_failed(a) && a.failures.len() == 0 -> ir_return_fallthrough(m, p, a)
     }
     failed: ir_failed(a) || a.failures.len() > 0
-    loop row in a.failures -> &b.failures.push(IRFailureRow{message: row.message.copy(), span: row.span})
-    if a.error != "" -> ir_fail(&b, a.error_span, a.error.copy())
-    ir_resolve_deferred(&m, p, &a)
-    m.functions[id] = ^a.f
+    loop row in a.failures -> b.failures.push(IRFailureRow{message: row.message.copy(), span: row.span})
+    if a.error != "" -> ir_fail(b, a.error_span, a.error.copy())
+    ir_resolve_deferred(m, p, a)
+    m.functions[id] = a.f.move()
     if failed -> return -1
     id
 }
@@ -151,36 +151,36 @@ ir_generator_release: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: Fn
     known: name_rows_value(m.function_rows, key) ?? -1
     if known >= 0 -> return known
     id: m.functions.len()
-    &m.functions.push(ir_hashed_function("{b.f.name}.generator.release", key, "jet_ir_generator_release_", b.f.source_file, function.line))
-    name_rows_set(&m.function_rows, key, id)
+    m.functions.push(ir_hashed_function("{b.f.name}.generator.release", key, "jet_ir_generator_release_", b.f.source_file, function.line))
+    name_rows_set(m.function_rows, key, id)
     r := ir_builder_new(m.functions[id].copy())
     r.instance = b.instance.copy()
     r.line = function.line
-    pointer_row: ir_pointer_row(&m)
-    env: ir_new_slot(&r, pointer_row, IRSlotKind.Param, ir_intern_name(&m, "env"))
-    word_row: ir_word_row(&m)
-    started: ir_temp(&m, &r, word_row)
-    ir_emit(&r.f, IROp.Load, started, env, 8, -1, r.line)
-    zero: ir_word_const(&m, &r, 0)
-    unstarted: ir_bool_op(&m, &r, IROp.Eq, started, zero)
-    ir_open_if(&r.f, unstarted, r.line)
+    pointer_row: ir_pointer_row(m)
+    env: ir_new_slot(r, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))
+    word_row: ir_word_row(m)
+    started: ir_temp(m, r, word_row)
+    ir_emit(r.f, IROp.Load, started, env, 8, -1, r.line)
+    zero: ir_word_const(m, r, 0)
+    unstarted: ir_bool_op(m, r, IROp.Eq, started, zero)
+    ir_open_if(r.f, unstarted, r.line)
     loop capture in captures {
         layout: m.types[capture.row]
         if layout.kind == .Unit -> next
-        value: ir_load_at(&m, &r, env, capture.offset, capture.row)
+        value: ir_load_at(m, r, env, capture.offset, capture.row)
         if capture.moved {
-            glue: ir_close_glue(&m, p, &r, capture.row, false, function.source_span)
-            if glue >= 0 -> ir_close_call(&r, glue, value)
+            glue: ir_close_glue(m, p, r, capture.row, false, function.source_span)
+            if glue >= 0 -> ir_close_call(r, glue, value)
         }
-        if layout.drop != "" -> ir_emit(&r.f, IROp.Drop, -1, value, -1, -1, r.line)
+        if layout.drop != "" -> ir_emit(r.f, IROp.Drop, -1, value, -1, -1, r.line)
     }
-    ir_end(&r.f, r.line)
-    size: ir_word_const(&m, &r, ir_align8(bytes))
-    ir_free(&m, &r, env, size)
-    ir_emit(&r.f, IROp.Return, -1, -1, -1, -1, r.line)
-    if r.error != "" -> ir_fail(&b, r.error_span, r.error.copy())
-    ir_resolve_deferred(&m, p, &r)
-    m.functions[id] = ^r.f
+    ir_end(r.f, r.line)
+    size: ir_word_const(m, r, ir_align8(bytes))
+    ir_free(m, r, env, size)
+    ir_emit(r.f, IROp.Return, -1, -1, -1, -1, r.line)
+    if r.error != "" -> ir_fail(b, r.error_span, r.error.copy())
+    ir_resolve_deferred(m, p, r)
+    m.functions[id] = r.f.move()
     if ir_failed(b) -> return -1
     id
 }
@@ -189,19 +189,19 @@ ir_generator_release: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, function: Fn
 // the runtime, which returns at the next pull, or delivers the cancel of a
 // dropped stream (the stop check after the call unwinds the body).
 ir_generator_yield: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, span: Span) -> Int Never! {
-    if b.generator < 0 -> return ir_fail_slot(&b, span, "`yield` outside a generator body")
-    slot: ir_expr(&m, p, &b, value)
+    if b.generator < 0 -> return ir_fail_slot(b, span, "`yield` outside a generator body")
+    slot: ir_expr(m, p, b, value)
     if ir_failed(b) -> return -1
     size := 8
     if slot >= 0 {
         row: b.f.slot_type[slot]
         size = ir_align8(m.types[row].size)
     }
-    pointer_row: ir_pointer_row(&m)
-    storage: ir_temp(&m, &b, pointer_row)
-    ir_emit(&b.f, IROp.StackAddress, storage, size, 8, -1, b.line)
-    ir_store_at(&m, p, &b, storage, 0, slot)
+    pointer_row: ir_pointer_row(m)
+    storage: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, storage, size, 8, -1, b.line)
+    ir_store_at(m, p, b, storage, 0, slot)
     state: b.generator
-    _: ir_runtime(&m, &b, "jet_rt_native_generator_yield", [Int]{state, storage}, -1)
+    _: ir_runtime(m, b, "jet_rt_native_generator_yield", [Int]{state, storage}, -1)
     return -1
 }

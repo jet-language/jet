@@ -12,7 +12,7 @@ use {
 // This is not `core.math.random`. Math RNG is deterministic and seedable.
 // Crypto RNG is neither. The only host step is `__os_entropy` (one OS CSPRNG
 // fill); bounds, the exact-length check and the error meaning are Jet. A test
-// that names `#Test(faults: [Rand])` fails that one fill (D-TESTFAULT1), so
+// that names `#Test(faults: [Rand])` fails that one fill, so
 // every consumer's `Unavailable` rail runs on every host and tier.
 /// `n` random bytes from the OS CSPRNG. `n` must be 0..=1048576.
 bytes: fn(n: Int) -[Rand]> [U8] CryptoError! {
@@ -90,23 +90,23 @@ token_urlsafe: fn(n: Int) -[Rand]> String CryptoError! {
     i := 0
     loop i + 3 <= b.len() {
         v: (((Int.from_u8(b[i]) << 16)).bit_or((Int.from_u8(b[i + 1]) << 8))).bit_or(Int.from_u8(b[i + 2]))
-        &out.push(raw[((v >> 18)).bit_and(63)])
-        &out.push(raw[((v >> 12)).bit_and(63)])
-        &out.push(raw[((v >> 6)).bit_and(63)])
-        &out.push(raw[(v).bit_and(63)])
+        out.push(raw[((v >> 18)).bit_and(63)])
+        out.push(raw[((v >> 12)).bit_and(63)])
+        out.push(raw[((v >> 6)).bit_and(63)])
+        out.push(raw[(v).bit_and(63)])
         i += 3
     }
     rest: b.len() - i
     if rest == 1 {
         v: Int.from_u8(b[i]) << 16
-        &out.push(raw[((v >> 18)).bit_and(63)])
-        &out.push(raw[((v >> 12)).bit_and(63)])
+        out.push(raw[((v >> 18)).bit_and(63)])
+        out.push(raw[((v >> 12)).bit_and(63)])
     }
     if rest == 2 {
         v: ((Int.from_u8(b[i]) << 16)).bit_or((Int.from_u8(b[i + 1]) << 8))
-        &out.push(raw[((v >> 18)).bit_and(63)])
-        &out.push(raw[((v >> 12)).bit_and(63)])
-        &out.push(raw[((v >> 6)).bit_and(63)])
+        out.push(raw[((v >> 18)).bit_and(63)])
+        out.push(raw[((v >> 12)).bit_and(63)])
+        out.push(raw[((v >> 6)).bit_and(63)])
     }
     text: String.from_bytes(out) ?? panic("invalid URL-safe token encoding")
     Ok(text)
@@ -174,7 +174,7 @@ choice_int: fn(items: [Int]) -[Rand]> Int CryptoError! {
 
 shuffle_ints: fn(items: [Int]) -[Rand]> [Int] CryptoError! {
     out := [Int]{}
-    loop x in items -> &out.push(x)
+    loop x in items -> out.push(x)
     i := out.len()
     loop i > 1 {
         i = i - 1
@@ -185,9 +185,9 @@ shuffle_ints: fn(items: [Int]) -[Rand]> [Int] CryptoError! {
         k := 0
         loop k < out.len() {
             if {
-                k == i -> { &tmp.push(b) }
-                k == j -> { &tmp.push(a) }
-                else -> { &tmp.push(out[k]) }
+                k == i -> { tmp.push(b) }
+                k == j -> { tmp.push(a) }
+                else -> { tmp.push(out[k]) }
             }
             k = k + 1
         }

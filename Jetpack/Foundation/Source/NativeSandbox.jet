@@ -92,9 +92,9 @@ foundation_linux_sandbox_status: fn() -[FS, Env, Exec, Time.Wait]> NativeSandbox
     bwrap: foundation_sandbox_program("bwrap") ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap (`bwrap`) is not available on PATH")
     probe: foundation_sandbox_program("sh") ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap is present but no immutable shell probe is available")
     argv := foundation_linux_sandbox_argv(bwrap, None, None, [String: String]{}, false, false, false, [NativeSandboxMount]{}, None)
-    &argv.push(probe)
-    &argv.push("-c")
-    &argv.push("exit 0")
+    argv.push(probe)
+    argv.push("-c")
+    argv.push("exit 0")
     receipt: process.cmd(argv).env_clear().stdout(.Capture).stderr(.Capture).timeout(time.duration_ms(NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS)).run() ?? return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe failed: {err}")
     if receipt.timed_out -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe timed out after {NATIVE_SANDBOX_STATUS_PROBE_TIMEOUT_MS}ms")
     if !receipt.success -> return NativeSandboxStatus.unavailable("linux-bwrap-unavailable", "bubblewrap backend probe exited with exit status: {receipt.code}")
@@ -175,8 +175,8 @@ foundation_run_native_sandboxed_with_timeout_and_mounts: fn(executable: String, 
 foundation_linux_sandbox_spec: fn(source: String, output: String?, env: [String: String], share_network: Bool, source_writable: Bool, mounts: [NativeSandboxMount], program: String, args: [String]) -[FS, Env, Exec]> ProcessSpec NativeSandboxError! {
     bwrap: foundation_sandbox_program("bwrap") ?? return Err(NativeSandboxError.Unsupported("bubblewrap (`bwrap`) is not available on PATH"))
     argv := foundation_linux_sandbox_argv(bwrap, Val(source), output, env, share_network, true, source_writable, mounts, Val(files.basename(program)))
-    &argv.push(foundation_mounted_executable_path(program, mounts))
-    loop arg in args -> &argv.push(arg)
+    argv.push(foundation_mounted_executable_path(program, mounts))
+    loop arg in args -> argv.push(arg.copy())
     Ok(process.cmd(argv).env_clear())
 }
 
@@ -187,7 +187,7 @@ foundation_macos_sandbox_spec: fn(source: String, output: String?, env: [String:
     // The profile is passed inline: a temporary `-f` profile could be
     // replaced between spawn and Seatbelt reading it.
     argv := [String]{NATIVE_SANDBOX_MACOS_EXEC, "-p", profile, program}
-    loop arg in args -> &argv.push(arg)
+    loop arg in args -> argv.push(arg.copy())
     spec := process.cmd(argv).env_clear().cwd(source)
     if output == {
         .Val(path) -> spec = spec.env("JET_BUILD_OUTPUT", path)
@@ -215,30 +215,30 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
         .Val(source_path) -> {
             if output == {
                 .Val(output_path) -> {
-                    &argv.push("--dir")
-                    &argv.push("/work")
+                    argv.push("--dir")
+                    argv.push("/work")
                     if source_bind == "" {
-                        &argv.push("--dir")
-                        &argv.push("/work/source")
+                        argv.push("--dir")
+                        argv.push("/work/source")
                     } else {
-                        &argv.push(source_bind)
-                        &argv.push(source_path)
-                        &argv.push("/work/source")
+                        argv.push(source_bind)
+                        argv.push(source_path.copy())
+                        argv.push("/work/source")
                     }
                     output_args: [String]{"--bind", output_path, "/work/output", "--chdir", "/work/source", "--setenv", "JET_BUILD_OUTPUT", "/work/output"}
-                    loop part in output_args -> &argv.push(part)
+                    loop part in output_args -> argv.push(part)
                 }
                 else -> {
                     if source_bind == "" {
-                        &argv.push("--dir")
-                        &argv.push("/work")
+                        argv.push("--dir")
+                        argv.push("/work")
                     } else {
-                        &argv.push(source_bind)
-                        &argv.push(source_path)
-                        &argv.push("/work")
+                        argv.push(source_bind)
+                        argv.push(source_path.copy())
+                        argv.push("/work")
                     }
-                    &argv.push("--chdir")
-                    &argv.push("/work")
+                    argv.push("--chdir")
+                    argv.push("/work")
                 }
             }
         }
@@ -246,11 +246,11 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
             if output == {
                 .Val(output_path) -> {
                     output_args: [String]{"--bind", output_path, "/work", "--chdir", "/work"}
-                    loop part in output_args -> &argv.push(part)
+                    loop part in output_args -> argv.push(part)
                 }
                 else -> {
                     work_args: [String]{"--dir", "/work", "--chdir", "/work"}
-                    loop part in work_args -> &argv.push(part)
+                    loop part in work_args -> argv.push(part)
                 }
             }
         }
@@ -262,29 +262,29 @@ foundation_linux_sandbox_argv: fn(bwrap: String, source: String?, output: String
         loop segment in segments {
             if segment == "" -> next
             destination = "{destination}/{segment}"
-            &argv.push("--dir")
-            &argv.push(destination)
+            argv.push("--dir")
+            argv.push(destination.copy())
         }
-        &argv.push("--ro-bind")
-        &argv.push(mount.source)
-        &argv.push(mount.destination)
+        argv.push("--ro-bind")
+        argv.push(mount.source)
+        argv.push(mount.destination)
     }
-    if share_network -> &argv.push("--share-net")
+    if share_network -> argv.push("--share-net")
     loop name in foundation_sandbox_sorted_names(env) {
-        &argv.push("--setenv")
-        &argv.push(name)
-        &argv.push(env[name])
+        argv.push("--setenv")
+        argv.push(name.copy())
+        argv.push(env[name])
     }
     if argv0 == {
         .Val(name) -> {
-            &argv.push("--argv0")
-            &argv.push(name)
+            argv.push("--argv0")
+            argv.push(name.copy())
         }
         else -> {}
     }
     // Options end here, so an executable or argument starting with a dash
     // stays in the command position.
-    &argv.push("--")
+    argv.push("--")
     argv
 }
 
@@ -298,20 +298,20 @@ foundation_seatbelt_profile: fn(executable: String, source: String, output: Stri
         else -> {}
     }
     lines := [String]{"(version 1)", "(deny default)", "(import \"system.sb\")", "(allow process-fork)", "(allow process-exec", "  (literal \"{program}\")"}
-    loop mount in mounts -> &lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")
-    &lines.push(")")
-    &lines.push("(allow file-read*")
-    if source_readable -> &lines.push("  (subpath \"{source_path}\")")
+    loop mount in mounts -> lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")
+    lines.push(")")
+    lines.push("(allow file-read*")
+    if source_readable -> lines.push("  (subpath \"{source_path}\")")
     if output_path == {
-        .Val(path) -> &lines.push("  (subpath \"{path}\")")
+        .Val(path) -> lines.push("  (subpath \"{path}\")")
         else -> {}
     }
     read_paths: [String]{"  (literal \"{program}\")", "  (subpath \"/System\")", "  (subpath \"/usr/lib\")", "  (subpath \"/usr/bin\")", "  (subpath \"/bin\")", "  (subpath \"/sbin\")"}
-    loop line in read_paths -> &lines.push(line)
-    &lines.push("  (subpath \"/nix/store\")")
+    loop line in read_paths -> lines.push(line)
+    lines.push("  (subpath \"/nix/store\")")
     loop mount in mounts {
-        &lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")
-        if mount.destination != mount.source -> &lines.push("  (subpath \"{foundation_sbpl_path(mount.destination)}\")")
+        lines.push("  (subpath \"{foundation_sbpl_path(mount.source)}\")")
+        if mount.destination != mount.source -> lines.push("  (subpath \"{foundation_sbpl_path(mount.destination)}\")")
     }
     profile := "{lines.join("\n")}\n)"
     if output_path == {
@@ -351,7 +351,7 @@ foundation_sandbox_program: fn(program: String) -[FS, Env]> String? Never! {
 // Environment names in key order, the order Rust's `BTreeMap` iterates.
 foundation_sandbox_sorted_names: fn(env: [String: String]) -> [String] Never! {
     names := env.keys().to_list()
-    &names.sort()
+    names.sort()
     names
 }
 
@@ -377,7 +377,7 @@ foundation_validate_read_only_mounts: fn(mounts: [NativeSandboxMount]) -[FS, Env
         if !foundation_is_normalized_mount_destination(mount.destination) {
             return Err(NativeSandboxError.Unsupported("sandbox mount destination `{mount.destination}` is not an absolute, normalized directory"))
         }
-        &checked.push(NativeSandboxMount{source, destination: mount.destination})
+        checked.push(NativeSandboxMount{source, destination: mount.destination})
     }
     Ok(checked)
 }

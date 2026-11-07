@@ -43,12 +43,12 @@ span.
 `jet self devtools new-ui <name>` writes `tests/ui/<name>.jet` and its
 diagnostic snapshot using the same compiler and renderer as the UI harness.
 Only the source-file collision is refused; an existing `.stderr` is replaced.
-`jet self devtools check-fixture-paths` checks literal fixture paths in
-`tests/**/*.rs`, excluding diagnostic display labels and dynamic templates.
-Both commands retain their direct confirmation output under `--json` and
-`--quiet`; these flags do not hide generated artifacts.
-Missing-path diagnostics use deterministic directory order; Rust's OS directory
-order is unspecified. Path occurrences, including duplicates, remain counted.
+`jet self devtools check-fixture-paths`, run from the repo root, checks that
+every `fixture:` directive in `tests/cases/**/*.case` names a directory beside
+its case; templated words such as `{work}` exist only at run time and are
+skipped. Both commands retain their direct confirmation output under `--json`
+and `--quiet`; these flags do not hide generated artifacts. Missing paths are
+listed in sorted directory order.
 
 `jet inspect schema status` reads published snapshots and runs the canonical
 load-only E0910 advisory diff; an unavailable source bundle does not prevent
@@ -266,7 +266,6 @@ jet find [--effect <effect>] [--example <input -> output>] [<query>] [<file.jet|
 jet remove [args]                    Remove a dependency
 jet fill <file.jet[:line]>           Propose checked code for typed goals
 jet generate <GeneratorJob> [--apply|--dry-run] [--entry <file.jet>] [--json] Run an explicit source generator with authority and a receipt
-jet shared-store <command>           Manage the optional shared package broker
 jet try <plan.json>                  Speculatively apply a plan and re-check its claims
 jet fold [args]                      Reverse a recorded Package source transition
 jet crash < <report.txt>             Name the functions and lines of a release crash report
@@ -466,8 +465,8 @@ The generated help groups subcommands as follows:
 - **Project:** `parts`.
 - **Self:** `toolchain`, `update`, `doctor`, `completions`, `man`, `devtools`,
   `lsp`, and authority-bound `exec`.
-- **Environment and stores:** `env test|hook|sync|info`, `shared-store
-  install|enroll|status|broker`, and `cache status|prune|limit`.
+- **Environment and stores:** `env test|hook|sync|info` and
+  `cache status|prune|limit`.
 - **Jetos and performance:** `os push|bridge|services|config`, `gc report`,
   and `perf run|test|attach|view|compare|export`.
 
@@ -1064,8 +1063,8 @@ an out-of-range line selects the end of the source. Their source prerequisite
 is the authorized load-only query, not a full semantic check: an undefined
 function in an otherwise parseable file does not prevent a policy essay.
 
-`jet self devtools new-example <topic>/<name>` writes the feature example and
-its expected output using the golden harness's existing directory layout.
+`jet self devtools new-example <area>/<name>` writes `Examples/<area>/<name>.jet`
+and its expected output `Examples/<area>/<name>.out` beside it.
 Existing example source is an error; existing expected output is replaced.
 The two writes are sequential.
 Its write confirmations are emitted even under `--json` or `--quiet`.

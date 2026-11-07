@@ -72,24 +72,24 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
             if jet_cli_memory_repair_path(root, row.source) == .Val(candidate_path) {
                 previous: candidates.get(candidate_path) ?? [JetCLIMemoryRow]{}
                 edits := previous
-                &edits.push(row)
+                edits.push(row)
                 candidates[candidate_path] = edits
-            } else { &options.push(row) }
-        } else { &options.push(row) }
+            } else { options.push(row) }
+        } else { options.push(row) }
     }
     paths := [String]{}
-    loop entry in candidates -> &paths.push(entry.key)
-    &paths.sort()
+    loop entry in candidates -> paths.push(entry.key)
+    paths.sort()
     applied := [JetCLIMemoryApplied]{}
     loop path in paths {
         edits: candidates.get(path) ?? panic("candidate path is present")
         source := jet_cli_memory_read_source(path) ?? {
-            loop row in edits -> &options.push(row)
+            loop row in edits -> options.push(row)
             next
         }
         // Stable descending (start,end) order, as Rust's sort_by_key(Reverse).
         order := [Int]{}
-        loop index in 0..<edits.len() -> &order.push(index)
+        loop index in 0..<edits.len() -> order.push(index)
         width := 1
         loop width < order.len() {
             merged := [Int]{}
@@ -107,10 +107,10 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
                         take_left = a.span_start > b.span_start || (a.span_start == b.span_start && a.span_end >= b.span_end)
                     }
                     if take_left {
-                        &merged.push(order[left])
+                        merged.push(order[left])
                         left += 1
                     } else {
-                        &merged.push(order[right])
+                        merged.push(order[right])
                         right += 1
                     }
                 }
@@ -129,7 +129,7 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
             replacement: row.repairs[0]
             if last_start == .Val(last) {
                 if end > last {
-                    &options.push(row)
+                    options.push(row.copy())
                     next
                 }
             }
@@ -137,22 +137,22 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
             replacement_bytes: replacement.bytes()
             replacement_end: start + replacement_bytes.len()
             if jet_cli_memory_boundary(bytes, start) && jet_cli_memory_boundary(bytes, replacement_end) && jet_cli_memory_matches(bytes, replacement_bytes, start) {
-                &applied.push(JetCLIMemoryApplied{row: row, changed: false})
+                applied.push(JetCLIMemoryApplied{row: row, changed: false})
                 last_start = Val(start)
                 next
             }
             expected_bytes: expected.bytes()
             if start > end || !jet_cli_memory_boundary(bytes, start) || !jet_cli_memory_boundary(bytes, end) || end - start != expected_bytes.len() || !jet_cli_memory_matches(bytes, expected_bytes, start) {
-                &options.push(row)
+                options.push(row.copy())
                 next
             }
             updated := [U8]{}
-            loop offset in 0..<start -> &updated.push(bytes[offset])
-            loop byte in replacement_bytes -> &updated.push(byte)
-            loop offset in end..<bytes.len() -> &updated.push(bytes[offset])
+            loop offset in 0..<start -> updated.push(bytes[offset])
+            loop byte in replacement_bytes -> updated.push(byte)
+            loop offset in end..<bytes.len() -> updated.push(bytes[offset])
             source = String.from_bytes(updated) ?? panic("validated UTF-8 repair boundaries")
             changed = true
-            &applied.push(JetCLIMemoryApplied{row: row, changed: true})
+            applied.push(JetCLIMemoryApplied{row: row, changed: true})
             last_start = Val(start)
         }
         if changed && !dry_run {
@@ -162,7 +162,7 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
     if json {
         values := [JetCLIStatusValue]{}
         loop entry in applied {
-            &values.push(
+            values.push(
             jet_cli_status_object(
             [JetCLIStatusField]{
                 jet_cli_status_field("source", jet_cli_status_text(entry.row.source)),

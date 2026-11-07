@@ -18,17 +18,17 @@ use {
 lsp_canonical_path: fn(cwd: OSPath, path: OSPath) -> OSPath Never! {
     if lsp_check_path.is_absolute(path) -> return names_normalize_path(path)
     joined := cwd.copy()
-    lsp_check_path.push(&joined, path)
+    lsp_check_path.push(joined, path)
     names_normalize_path(joined)
 }
 
 lsp_check_document_with_bundle: fn(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> Shared<JetDriverCheckedQuery> {
     canonical: lsp_canonical_path(snapshot.cwd, path)
-    &queries.check_text_lsp(snapshot, canonical, text)
+    queries.check_text_lsp(snapshot, canonical, text)
 }
 
 lsp_check_document: fn(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String) -> [Diagnostic] {
-    checked: lsp_check_document_with_bundle(&queries, snapshot, path, text)
+    checked: lsp_check_document_with_bundle(queries, snapshot, path, text)
     permit: checked.guard_read()
     jet_driver_present_checked_diagnostics(permit.value.result)
 }
@@ -57,11 +57,11 @@ lsp_script_authority_repair: fn(path: OSPath, text: String, checked: JetDriverCo
 }
 
 lsp_collect_fixes: fn(queries: JetDriverCompilerQueries, snapshot: JetDriverQuerySnapshot, path: OSPath, text: String, authority: ApplicationAuthority) -> [Fix] {
-    checked: lsp_check_document_with_bundle(&queries, snapshot, path, text)
+    checked: lsp_check_document_with_bundle(queries, snapshot, path, text)
     permit: checked.guard_read()
     diagnostics := lsp_retain_document_diagnostics(jet_driver_present_checked_diagnostics(permit.value.result), snapshot.cwd, path, text)
-    if lsp_script_authority_repair(path, text, permit.value.result, authority) == .Val(repair) -> &diagnostics.push(repair)
-    lsp_collect_fixes_from_diagnostics(^diagnostics, text)
+    if lsp_script_authority_repair(path, text, permit.value.result, authority) == .Val(repair) -> diagnostics.push(repair)
+    lsp_collect_fixes_from_diagnostics(diagnostics, text)
 }
 
 Fix: struct {
@@ -79,29 +79,29 @@ lsp_apply_fix_edit: fn(source: String, edit: TextEdit) -> String Never! {
 lsp_safe_fixes: fn(fixes: [Fix]) -> [Fix] Never! {
     kept := [Fix]{}
     loop fix in fixes {
-        if fix.applicability == FixApplicability.Safe && fix.safety.auto_apply() -> &kept.push(fix.copy())
+        if fix.applicability == FixApplicability.Safe && fix.safety.auto_apply() -> kept.push(fix.copy())
     }
     kept
 }
 
-lsp_fixes_from_diagnostics: fn(diagnostics: ^[Diagnostic]) -> [Fix] Never! {
+lsp_fixes_from_diagnostics: fn(diagnostics: &&[Diagnostic]) -> [Fix] Never! {
     fixes := [Fix]{}
     loop diagnostic in diagnostics {
         applicability: diagnostic.applicability ?? next
         safety: diagnostic.safety ?? next
         // Rust Diagnostic::all_edits order, without an intermediate edit vector.
-        if diagnostic.edit == .Val(edit) -> &fixes.push(Fix{title: diagnostic.fix.copy(), edit: edit.copy(), applicability: applicability, safety: safety})
+        if diagnostic.edit == .Val(edit) -> fixes.push(Fix{title: diagnostic.fix.copy(), edit: edit.copy(), applicability: applicability, safety: safety})
         if diagnostic.structured == .Val(structured) {
             if structured == .SuggestedEdits(alternatives) {
-                loop edit in alternatives -> &fixes.push(Fix{title: diagnostic.fix.copy(), edit: edit.copy(), applicability: applicability, safety: safety})
+                loop edit in alternatives -> fixes.push(Fix{title: diagnostic.fix.copy(), edit: edit.copy(), applicability: applicability, safety: safety})
             }
         }
     }
     fixes
 }
 
-lsp_collect_fixes_from_diagnostics: fn(diagnostics: ^[Diagnostic], text: String) -> [Fix] Never! {
-    fixes := lsp_fixes_from_diagnostics(^diagnostics)
+lsp_collect_fixes_from_diagnostics: fn(diagnostics: &&[Diagnostic], text: String) -> [Fix] Never! {
+    fixes := lsp_fixes_from_diagnostics(diagnostics)
     fixes
 }
 
@@ -113,8 +113,8 @@ lsp_apply_non_overlapping: fn(source: String, fixes: [Fix]) -> (String, Int, Int
     // Sort indices, not owned replacement text. Explicit original-index ties
     // retain Rust stable sort ordering for distinct same-span replacements.
     order := [Int]{}
-    loop index in 0..<fixes.len() -> &order.push(index)
-    &order.sort_by((left: Int, right: Int) -> {
+    loop index in 0..<fixes.len() -> order.push(index)
+    order.sort_by((left: Int, right: Int) -> {
         a: fixes[left].edit.span
         b: fixes[right].edit.span
         if a.start != b.start -> return a.start <=> b.start
@@ -137,7 +137,7 @@ lsp_apply_non_overlapping: fn(source: String, fixes: [Fix]) -> (String, Int, Int
             deferred += 1
             next
         }
-        &kept.push(edit.copy())
+        kept.push(edit.copy())
     }
     applied: kept.len()
     text: apply_edits(source, kept.view(0..<kept.len())) ?? source.copy()

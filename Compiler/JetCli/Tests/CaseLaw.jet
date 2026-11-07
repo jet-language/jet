@@ -1,0 +1,170 @@
+// Port of the case-law gate of tests/diagnostics_format.rs:184-218 and its
+// checker tests/support/case_law.rs: labels take title case, prose takes sentence case. The
+// strings come from their live producers: the diagnostic rows, and the CLI
+// registry that feeds help, man and completions. The Rust REPL and hybrid-help
+// renderers have no Jet producer, so their sources retire with them.
+use {
+    jet_cli.[JET_CLI_PALETTE_CATEGORIES, jet_cli_action_help_summary, jet_cli_group_label, jet_cli_usage_page]
+    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_FLAGS, diagnostic_registry_rows]
+    jetpack_foundation.[JET_KEYWORD_LIST]
+}
+
+// The one closed list of title-case minor words (case_law.rs:687-690).
+CASE_LAW_MINOR_WORDS: [String]{"a", "an", "the", "and", "but", "or", "nor", "for", "as", "at", "by", "in", "of", "on", "to", "via"}
+
+// The binary names a user types; a line that IS a command keeps them lowercase.
+CASE_LAW_COMMAND_WORDS: [String]{"jet", "jetpack", "cargo", "nix", "git", "rustc"}
+
+CaseLawSource: struct {
+    name: String
+    value: String
+    // "sentence" or "title".
+    kind: String
+}
+
+case_law_slice: fn(bytes: [U8], start: Int, end: Int) -> String {
+    if start >= end -> return ""
+    String.from_bytes(bytes[start..(end - 1)]) ?? panic("case-law slice must end on UTF-8 boundaries")
+}
+
+case_law_is_lower: fn(byte: U8) -> Bool { byte >= (U8{97}) && byte <= (U8{122}) }
+
+case_law_is_alnum: fn(byte: U8) -> Bool {
+    case_law_is_lower(byte) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{48}) && byte <= (U8{57}))
+}
+
+case_law_is_space: fn(byte: U8) -> Bool { byte == (U8{32}) || byte == (U8{9}) || byte == (U8{10}) || byte == (U8{13}) }
+
+// Whether a lowercase-led token keeps its own case (case_law.rs:762-804): a
+// keyword, a flag or ref, a typed command word, or a token carrying a digit or
+// structural punctuation. The uppercase-led exclusions there (types, Core
+// names, codes, CamelCase) never reach this check: an uppercase start is
+// already sentence case.
+case_law_keeps_case: fn(token: String) -> Bool {
+    if JET_KEYWORD_LIST.contains(token) || CASE_LAW_COMMAND_WORDS.contains(token) -> return true
+    if token.starts_with("-") || token.starts_with("#") || token.starts_with("@") -> return true
+    token.bytes().any(byte -> (byte >= (U8{48}) && byte <= (U8{57})) || byte == (U8{95}) || byte == (U8{47}) || byte == (U8{92}) || byte == (U8{64}) || byte == (U8{35}) || byte == (U8{46}))
+}
+
+// case_law.rs:620-651: the FIRST thing on the line opens in sentence case. A
+// line that opens with code, a quote or a `{placeholder}` keeps its case.
+// "" when the line conforms.
+case_law_sentence_violation: fn(value: String) -> String {
+    bytes: value.bytes()
+    offset := 0
+    loop offset < bytes.len() && (case_law_is_space(bytes[offset]) || bytes[offset] == (U8{42}) || bytes[offset] == (U8{126}) || bytes[offset] == (U8{95})) {
+        offset += 1
+    }
+    if offset >= bytes.len() -> return ""
+    first: bytes[offset]
+    if first == (U8{96}) || first == (U8{34}) || first == (U8{39}) || first == (U8{123}) -> return ""
+    end := offset
+    loop end < bytes.len() && !case_law_is_space(bytes[end]) && !(",;:()[]!".bytes().contains(bytes[end])) {
+        end += 1
+    }
+    token: case_law_slice(bytes, offset, end)
+    if token == "" || !case_law_is_lower(first) || case_law_keeps_case(token) -> return ""
+    "sentence prose starts with lowercase `{token}` at byte {offset} in \"{value}\""
+}
+
+// case_law.rs:653-682: every word starts uppercase, except a minor word that
+// is neither first nor last, which stays lowercase. A `<metavariable>` keeps
+// the spelling the user types. "" when the label conforms.
+case_law_title_violation: fn(value: String) -> String {
+    if value.starts_with("<") && value.ends_with(">") -> return ""
+    words := [String]{}
+    bytes: value.bytes()
+    start := 0
+    loop index in 0..<(bytes.len() + 1) {
+        if index < bytes.len() && case_law_is_alnum(bytes[index]) -> next
+        if index > start -> words.push(case_law_slice(bytes, start, index))
+        start = index + 1
+    }
+    loop (index, word) in words {
+        lower: word.lower()
+        edge: index == 0 || index + 1 == words.len()
+        if CASE_LAW_MINOR_WORDS.contains(lower) && !edge {
+            if word != lower -> return "minor word `{word}` must stay lowercase in \"{value}\""
+        } else if case_law_is_lower(word.bytes()[0]) {
+            return "word `{word}` must start uppercase in \"{value}\""
+        }
+    }
+    ""
+}
+
+case_law_push: fn(sources: &[CaseLawSource], name: String, value: String, kind: String) {
+    sources.push(CaseLawSource{name: name.copy(), value: value.copy(), kind: kind.copy()})
+}
+
+// case_law.rs:44-137: the strings each live producer shows a user.
+case_law_sources: fn() -> [CaseLawSource] {
+    sources := [CaseLawSource]{}
+    loop row in diagnostic_registry_rows() {
+        case_law_push(sources, "Diagnostics.jet {row.code} meaning", row.meaning, "sentence")
+        case_law_push(sources, "Diagnostics.jet {row.code} What", row.what, "sentence")
+        case_law_push(sources, "Diagnostics.jet {row.code} Why", row.why, "sentence")
+        case_law_push(sources, "Diagnostics.jet {row.code} Fix", row.fix, "sentence")
+    }
+    loop command in JET_CLI_COMMANDS {
+        case_law_push(sources, "CLI command {command.name} summary", command.summary, "sentence")
+        loop action in command.actions -> case_law_push(sources, "CLI {command.name} {action.name} summary", jet_cli_action_help_summary(command.name, action), "sentence")
+        if command.actions.len() > 0 -> case_law_push(sources, "CLI {command.name} group label", jet_cli_group_label(command.name), "title")
+    }
+    loop flag in JET_CLI_FLAGS -> case_law_push(sources, "CLI {flag.long} help", flag.help, "sentence")
+    loop (index, raw) in jet_cli_usage_page("frequency").split("\n").to_list() {
+        line: raw.trim().copy()
+        if index == 0 {
+            case_law_push(sources, "CLI usage greeting", line, "sentence")
+        } else if line == "Usage:" || line == "Flags:" {
+            case_law_push(sources, "CLI usage header {line}", line.replace(":", ""), "title")
+        } else if line.ends_with(" Commands:") {
+            case_law_push(sources, "CLI usage group header {line}", line.replace(" Commands:", ""), "title")
+        }
+    }
+    loop category in JET_CLI_PALETTE_CATEGORIES -> case_law_push(sources, "CLI palette category {category}", category, "title")
+    sources
+}
+
+case_law_violations: fn(sources: [CaseLawSource]) -> [String] {
+    violations := [String]{}
+    loop source in sources {
+        violation: if source.kind == "title" -> case_law_title_violation(source.value) else -> case_law_sentence_violation(source.value)
+        if violation != "" -> violations.push("{source.name}: {violation}")
+    }
+    violations
+}
+
+#Test("every_user_facing_case_source_is_checked") {
+    sources: case_law_sources()
+    loop prefix in ["Diagnostics.jet ", "CLI command ", "CLI usage greeting", "CLI usage header Usage:", "CLI usage header Flags:", "CLI usage group header ", "CLI palette category "] {
+        wanted: prefix.copy()
+        assert(sources.any(source -> source.name.starts_with(wanted)), "case-law sources lost `{prefix}`")
+    }
+    assert(sources.any(source -> source.name.ends_with(" group label")), "case-law sources lost the CLI group labels")
+    assert(sources.any(source -> source.name.starts_with("CLI --")), "case-law sources lost the CLI flag help")
+    assert_eq("ratified UI case-law violations:\n{case_law_violations(sources).join("\n")}", "ratified UI case-law violations:\n")
+}
+
+#Test("adding_a_new_title_case_violation_fails_case_check") {
+    sources := case_law_sources()
+    assert_eq(case_law_violations(sources).len(), 0)
+    case_law_push(sources, "temporary violating label", "Ready And Safe", "title")
+    violations: case_law_violations(sources)
+    assert(violations.any(violation -> violation.contains("temporary violating label") && violation.contains("And")), "adding a new violating string must fail the case check: {violations.join("; ")}")
+}
+
+#Test("title_case_minor_words_follow_ratified_per_word_rule") {
+    assert_eq(CASE_LAW_MINOR_WORDS.len(), 16)
+    assert_eq(case_law_title_violation("Read a Book"), "")
+    assert(case_law_title_violation("Read A Book") != "", "a capitalised inner minor word is a title-case violation")
+    assert_eq(case_law_title_violation("A Book"), "")
+}
+
+#Test("sentence_case_keeps_code_flags_and_command_words") {
+    assert_eq(case_law_sentence_violation("`--offline` forbids network access"), "")
+    assert_eq(case_law_sentence_violation("--offline forbids network access"), "")
+    assert_eq(case_law_sentence_violation("fn is the only declaration form"), "")
+    assert_eq(case_law_sentence_violation("jet build compiles the package"), "")
+    assert_eq(case_law_sentence_violation("src/Main.jet is not reachable"), "")
+    assert(case_law_sentence_violation("the comma is missing") != "", "lowercase prose is a sentence-case violation")
+}

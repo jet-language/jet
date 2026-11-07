@@ -39,7 +39,7 @@ seams_package_request: fn(version: String?) -> JetDriverCompileRequest {
     request := seams_request("serve: fn() {{ undefined_call() }}", JetDriverCompileMode.Doc)
     manifest := "name: \"seams_package\"\n"
     if version == .Val(value) -> manifest = "{manifest}version: \"{value}\"\n"
-    &request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: "/seams-fixture/package.jet", relative_path: "package.jet", identity: "seams-manifest", source: manifest})
+    request.authorized_sources.roots[0].files.push(JetDriverAuthorizedSourceFile{path: "/seams-fixture/package.jet", relative_path: "package.jet", identity: "seams-manifest", source: manifest})
     request
 }
 
@@ -60,7 +60,7 @@ seams_registration_inputs: fn(request: JetDriverCompileRequest, expected_source_
     load: jet_driver_load(request)
     seams_require(load.complete && !jet_driver_has_errors(load.diagnostics), "registration fixture uses the real completed loader")
     diagnostics := [Diagnostic]{}
-    inputs: jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, [SemaForeignProviderInput]{}, &diagnostics) ?? panic("canonical registration inputs missing")
+    inputs: jet_driver_registration_module_inputs(load.modules, load.source_units, load.source_files, [SemaForeignProviderInput]{}, diagnostics) ?? panic("canonical registration inputs missing")
     seams_require(diagnostics.len() == 0 && inputs.len() == load.modules.len(), "one canonical registration input per loaded module")
     source_rows := 0
     loop position in 0..<inputs.len() {
@@ -146,7 +146,7 @@ seams_checked_projection: fn() {
     inline_loaded: jet_driver_source_query(seams_request("package: {{ name: \"inline_seams\", version: \"4.5.6\" }}\nserve: fn() {{ undefined_call() }}", JetDriverCompileMode.Doc))
     seams_require(inline_loaded.complete && inline_loaded.entry_package_version == (Val("4.5.6")), "inline Package version comes from the same loader")
     entry_version := seams_package_request(Val("7.8.9"))
-    &entry_version.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{canonical_path: "/seams-other", identity: "seams-other-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/seams-other/package.jet", relative_path: "package.jet", identity: "seams-other-manifest", source: "name: \"other\"\nversion: \"1.1.1\"\n"}}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}})
+    entry_version.authorized_sources.roots.push(JetDriverAuthorizedSourceRoot{canonical_path: "/seams-other", identity: "seams-other-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/seams-other/package.jet", relative_path: "package.jet", identity: "seams-other-manifest", source: "name: \"other\"\nversion: \"1.1.1\"\n"}}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}})
     selected_version: jet_driver_source_query(entry_version)
     seams_require(selected_version.complete && selected_version.entry_package_version == (Val("7.8.9")), "version is selected by entry package identity, not root order")
     malformed: jet_driver_source_query(seams_request("serve: fn( {{", JetDriverCompileMode.Doc))
@@ -158,21 +158,21 @@ seams_checked_projection: fn() {
     loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Program, JetDriverCompileMode.Doc}) {
         request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
-        front: jet_driver_lowering_inputs(^request, None)
+        front: jet_driver_lowering_inputs(request, None)
         seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job check")
         seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
     }
     loop mode in ([JetDriverCompileMode]{JetDriverCompileMode.Eval, JetDriverCompileMode.RootRun}) {
         request := seams_request(job_source, mode)
         request.selected_entry = Val("serve")
-        front := jet_driver_lowering_inputs(^request, None)
+        front := jet_driver_lowering_inputs(request, None)
         seams_require(front.compile.complete && front.compile.internal_problem == None && !jet_driver_has_errors(front.compile.diagnostics), "named job compile")
         seams_require(seams_entry_name(front) == Val("serve"), "entry is the declared function, not a run wrapper")
-        inputs := ^front.inputs ?? panic("selected checked inputs missing")
+        inputs := front.inputs.move() ?? panic("selected checked inputs missing")
         // The entry builds and loads; with no runtime image (a test has no
         // toolchain) it can't run, and says so rather than guessing a value.
         // Its native execution is the feature examples' (`jet eval`).
-        run: jet_driver_invocation_run(^inputs, [TComptimeValue]{}, jet_eval_default_config(), Span{start: 0, end: 0})
+        run: jet_driver_invocation_run(inputs, [TComptimeValue]{}, jet_eval_default_config(), Span{start: 0, end: 0})
         evaluated: run.result ?? panic(run.problem ?? "selected entry did not build")
         refused: evaluated.error ?? panic("an entry without the runtime image ran")
         seams_require(evaluated.value == None && refused.diagnostic.what.contains("jet_runtime.image"), "selected declared body needs the runtime image")
@@ -180,7 +180,7 @@ seams_checked_projection: fn() {
     // A named generator does not need a synthetic or pre-existing run body.
     generate := seams_request("#Job generate_files: fn() -> Int {{ 3 }}", JetDriverCompileMode.Program)
     generate.selected_entry = Val("generate_files")
-    generated: jet_driver_lowering_inputs(^generate, None)
+    generated: jet_driver_lowering_inputs(generate, None)
     seams_require(generated.compile.complete && generated.compile.internal_problem == None && seams_entry_name(generated) == Val("generate_files"), "generate selects declared Job without fn run")
     // `lower_entry`: with no selected Output and no manifest entry, the
     // executable entry is the entry module's `run: fn`; without one the package
@@ -196,7 +196,7 @@ seams_checked_projection: fn() {
     // through checked calls, including calls nested in a conditional.
     pure := seams_request("leaf: fn() {{ print(\"effect\") }}\nhelper: fn() {{ if true {{ leaf() }} }}\nevaluate: fn() {{ helper() }}\nrun: fn() {{ }}", JetDriverCompileMode.Eval)
     pure.selected_entry = Val("evaluate")
-    impure: jet_driver_compile(^pure)
+    impure: jet_driver_compile(pure)
     chain := false
     loop diagnostic in impure.diagnostics {
         if diagnostic.code == "E3401" {
@@ -209,7 +209,7 @@ seams_checked_projection: fn() {
     schema := seams_request("#PublishedSchema Account: struct {{\n    name: String\n    verified: Bool\n}}\nrun: fn() {{ }}", JetDriverCompileMode.Doc)
     baseline: SchemaSnapshot{schema_version: U32{1}, type_name: "Account", published_version: "1.0.0", squashed_before: None, fields: [SnapshotField]{SnapshotField{name: "name", ty: "String"}}}
     schema.schema_snapshots = Val([String:SchemaSnapshot]{"Account": baseline})
-    breaking: jet_driver_compile(^schema)
+    breaking: jet_driver_compile(schema)
     schema_error := false
     loop diagnostic in breaking.diagnostics { if diagnostic.code == "E0910" -> schema_error = true }
     seams_require(schema_error && !breaking.complete, "schema fails in the checker")

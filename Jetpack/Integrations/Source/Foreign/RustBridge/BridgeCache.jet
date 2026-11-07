@@ -51,61 +51,61 @@ RustBridgeKeyInputs: struct {
     // crate, its dependency graph, or the toolchain that builds it.
     cache_key: fn(self) -[FS]> String Never! {
         identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-        &identity.field("descriptor_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
-        &identity.field("c-record-source", self.record_source.bytes())
-        &identity.field("selected_target", self.selected_target.bytes())
-        &identity.field("rust_toolchain", self.rust_toolchain.bytes())
+        identity.field("descriptor_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
+        identity.field("c-record-source", self.record_source.bytes())
+        identity.field("selected_target", self.selected_target.bytes())
+        identity.field("rust_toolchain", self.rust_toolchain.bytes())
         if self.native_toolchain == .Val(toolchain) {
-            &identity.field("inline_toolchain", pkg_ffi_inline_toolchain_identity(toolchain).bytes())
-            &identity.field("inline_build_script", pkg_ffi_emit_inline_build_rs(self.entries, toolchain).bytes())
+            identity.field("inline_toolchain", pkg_ffi_inline_toolchain_identity(toolchain).bytes())
+            identity.field("inline_build_script", pkg_ffi_emit_inline_build_rs(self.entries, toolchain).bytes())
         }
-        loop argument in self.native_link_args -> &identity.field("rustflag", argument.bytes())
-        pkg_ffi_identity_static_link_inputs(&identity, self.native_link_args)
+        loop argument in self.native_link_args -> identity.field("rustflag", argument.bytes())
+        pkg_ffi_identity_static_link_inputs(identity, self.native_link_args)
         loop name in pkg_ffi_sorted_keys(self.deps) {
-            &identity.field("dependency", name.bytes())
-            &identity.field("dependency_version", self.deps[name].bytes())
+            identity.field("dependency", name.bytes())
+            identity.field("dependency_version", self.deps[name].bytes())
         }
-        loop entry in self.entries -> pkg_ffi_identity_entry(&identity, entry)
+        loop entry in self.entries -> pkg_ffi_identity_entry(identity, entry)
         handle_keys := [String]{}
-        loop fact in self.handle_facts -> &handle_keys.push(fact.stable_key())
-        loop key in pkg_ffi_sorted_unique(handle_keys) -> &identity.field("handle_fact", key.bytes())
-        &identity.field("link_closure", self.link_closure.stable_key().bytes())
+        loop fact in self.handle_facts -> handle_keys.push(fact.stable_key())
+        loop key in pkg_ffi_sorted_unique(handle_keys) -> identity.field("handle_fact", key.bytes())
+        identity.field("link_closure", self.link_closure.stable_key().bytes())
         identity.finish()
     }
 }
 
 pkg_ffi_identity_entry: fn(identity: &ForeignIdentityBuilder, entry: ExternEntry) Never! {
-    if pkg_ffi_foreign_language_for_entry(entry) == .Val(language) -> &identity.field("foreign_descriptor", pkg_ffi_foreign_descriptor_stamp(language).bytes())
-    &identity.field("jet_name", entry.jet_name.bytes())
-    &identity.field("rust_path", entry.rust_path.bytes())
-    &identity.field("wrapper_name", entry.wrapper_name.bytes())
-    &identity.field("crate_spec", entry.crate_spec.bytes())
-    &identity.field("c_abi", pkg_bridge_flag(entry.c_abi))
-    &identity.field("generated", pkg_bridge_flag(entry.generated))
-    &identity.field("c_module", pkg_bridge_flag(entry.c_module))
-    if entry.inline == .Val(inline) -> pkg_ffi_identity_inline(&identity, inline)
+    if pkg_ffi_foreign_language_for_entry(entry) == .Val(language) -> identity.field("foreign_descriptor", pkg_ffi_foreign_descriptor_stamp(language).bytes())
+    identity.field("jet_name", entry.jet_name.bytes())
+    identity.field("rust_path", entry.rust_path.bytes())
+    identity.field("wrapper_name", entry.wrapper_name.bytes())
+    identity.field("crate_spec", entry.crate_spec.bytes())
+    identity.field("c_abi", pkg_bridge_flag(entry.c_abi))
+    identity.field("generated", pkg_bridge_flag(entry.generated))
+    identity.field("c_module", pkg_bridge_flag(entry.c_module))
+    if entry.inline == .Val(inline) -> pkg_ffi_identity_inline(identity, inline)
     loop param in entry.params {
-        &identity.field("parameter_convention", pkg_ffi_convention_debug(param.convention).bytes())
-        &identity.field("parameter_type", pkg_ffi_type_key(param.ty).bytes())
+        identity.field("parameter_convention", pkg_ffi_convention_debug(param.convention).bytes())
+        identity.field("parameter_type", pkg_ffi_type_key(param.ty).bytes())
     }
     // Generated CBind list returns use the parameter name to identify their
     // native count slot; it is part of the bridge input.
-    loop name in entry.param_names -> &identity.field("parameter_name", name.bytes())
-    if entry.return_type == .Val(ret) -> &identity.field("return_type", pkg_ffi_type_key(ret).bytes())
-    if entry.close == .Val(close) -> &identity.field("close_function", close.bytes())
+    loop name in entry.param_names -> identity.field("parameter_name", name.bytes())
+    if entry.return_type == .Val(ret) -> identity.field("return_type", pkg_ffi_type_key(ret).bytes())
+    if entry.close == .Val(close) -> identity.field("close_function", close.bytes())
 }
 
 pkg_ffi_identity_inline: fn(identity: &ForeignIdentityBuilder, inline: InlineEntry) Never! {
-    if inline.lang == "asm" -> &identity.field("asm_lowering", "out-early-clobber-v2-exported-symbol".bytes())
-    &identity.field("inline_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
-    &identity.field("inline_language", inline.lang.bytes())
-    &identity.field("inline_source", inline.source.bytes())
-    loop name in inline.param_names -> &identity.field("inline_parameter", name.bytes())
+    if inline.lang == "asm" -> identity.field("asm_lowering", "out-early-clobber-v2-exported-symbol".bytes())
+    identity.field("inline_schema", FFI_INLINE_BRIDGE_SCHEMA.bytes())
+    identity.field("inline_language", inline.lang.bytes())
+    identity.field("inline_source", inline.source.bytes())
+    loop name in inline.param_names -> identity.field("inline_parameter", name.bytes())
     contract: inline.asm_contract ?? return
-    &identity.field("asm_target", contract.target.bytes())
-    &identity.field("asm_output", pkg_ffi_asm_output_key(contract.output).bytes())
+    identity.field("asm_target", contract.target.bytes())
+    identity.field("asm_output", pkg_ffi_asm_output_key(contract.output).bytes())
     clobbers: contract.clobbers
-    loop register in clobbers -> &identity.field("asm_clobber", pkg_ffi_normalize_register(register).bytes())
+    loop register in clobbers -> identity.field("asm_clobber", pkg_ffi_normalize_register(register).bytes())
 }
 
 pkg_ffi_asm_output_key: fn(output: InlineAsmOutput?) -> String Never! {
@@ -120,9 +120,9 @@ pkg_ffi_asm_output_key: fn(output: InlineAsmOutput?) -> String Never! {
 pkg_ffi_sorted_unique: fn(values: [String]) -> [String] Never! {
     out := [String]{}
     loop value in values {
-        if !out.contains(value) -> &out.push(value)
+        if !out.contains(value) -> out.push(value.copy())
     }
-    &out.sort()
+    out.sort()
     out
 }
 
@@ -134,8 +134,8 @@ pkg_ffi_identity_static_link_inputs: fn(identity: &ForeignIdentityBuilder, args:
     loop index in 1..<args.len() {
         flag: args[index - 1]
         value: args[index]
-        if flag == "-L" && value.starts_with("native=") -> &dirs.push(value.removeprefix("native="))
-        if flag == "-l" && value.starts_with("static=") -> &static_libs.push(value.removeprefix("static="))
+        if flag == "-L" && value.starts_with("native=") -> dirs.push(value.removeprefix("native="))
+        if flag == "-l" && value.starts_with("static=") -> static_libs.push(value.removeprefix("static="))
     }
     loop name in static_libs {
         found := String?{None}
@@ -147,16 +147,16 @@ pkg_ffi_identity_static_link_inputs: fn(identity: &ForeignIdentityBuilder, args:
             }
         }
         path: found ?? {
-            &identity.field("static_library_missing", name.bytes())
+            identity.field("static_library_missing", name.bytes())
             next
         }
-        &identity.field("static_library_path", path.bytes())
+        identity.field("static_library_path", path.bytes())
         if files.read_bytes(path) == {
             .Ok(bytes) -> {
-                &identity.field("static_library_bytes", bytes)
+                identity.field("static_library_bytes", bytes)
             }
             .Err(_) -> {
-                &identity.field("static_library_unreadable", "true".bytes())
+                identity.field("static_library_unreadable", "true".bytes())
             }
         }
     }
@@ -206,10 +206,10 @@ pkg_ffi_bridge_paths: fn(key: String, selected_target: String, native_link_args:
 // Cargo. The profile is the `release` segment Cargo appends itself.
 pkg_ffi_shared_target_dir: fn(selected_target: String, native_link_args: [String], rust_toolchain: String) -[Env]> String Never! {
     identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &identity.field("descriptor_schema", FFI_SHARED_DEPS_SCHEMA.bytes())
-    &identity.field("selected_target", selected_target.bytes())
-    &identity.field("rust_toolchain", rust_toolchain.bytes())
-    loop argument in native_link_args -> &identity.field("rustflag", argument.bytes())
+    identity.field("descriptor_schema", FFI_SHARED_DEPS_SCHEMA.bytes())
+    identity.field("selected_target", selected_target.bytes())
+    identity.field("rust_toolchain", rust_toolchain.bytes())
+    loop argument in native_link_args -> identity.field("rustflag", argument.bytes())
     files.join(files.join(pkg_ffi_cache_dir(), "deps"), identity.finish())
 }
 
@@ -315,8 +315,8 @@ pkg_ffi_bridge_cache_verified: fn(target: String, crate_name: String, cache_iden
     expected_descriptors: pkg_ffi_foreign_descriptor_stamps(entries)
     if pkg_ffi_sorted_unique(provenance.fields.get("descriptor") ?? [String]{}) != expected_descriptors -> return false
     expected_languages := [String]{}
-    loop language in pkg_ffi_entry_languages(entries) -> &expected_languages.push(language.root())
-    &expected_languages.sort()
+    loop language in pkg_ffi_entry_languages(entries) -> expected_languages.push(language.root())
+    expected_languages.sort()
     actual_languages: provenance.fields.get("boundary-language") ?? [String]{}
     if pkg_ffi_sorted_unique(actual_languages) != expected_languages || actual_languages.len() != expected_languages.len() -> return false
     actual_boundary_descriptors: provenance.fields.get("boundary-descriptor") ?? [String]{}
@@ -374,14 +374,14 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
     source_digest: pkg_bridge_sha_file(source)
     artifact_identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
     loop artifact in artifact_digests {
-        &artifact_identity.field("artifact-path", artifact.name.bytes())
-        &artifact_identity.field("artifact-digest", artifact.digest.bytes())
+        artifact_identity.field("artifact-path", artifact.name.bytes())
+        artifact_identity.field("artifact-digest", artifact.digest.bytes())
     }
     artifact_set: artifact_identity.finish()
     if artifact_digests.len() == 0 -> return Err(pkg_bridge_error("inline FFI bridge produced no artifacts for boundary coverage"))
     loaded_artifact: "{artifact_digests[0].name}:sha256-{artifact_digests[0].digest}"
     transitive := [String]{}
-    loop index in 1..<artifact_digests.len() -> &transitive.push("{artifact_digests[index].name}:sha256-{artifact_digests[index].digest}")
+    loop index in 1..<artifact_digests.len() -> transitive.push("{artifact_digests[index].name}:sha256-{artifact_digests[index].digest}")
     rows := [(name: String, value: String)]{}
     loop language in pkg_ffi_entry_languages(entries) {
         descriptor: pkg_binder_descriptor(language) ?? return Err(pkg_bridge_error("missing binder descriptor for {language.debug_name()}"))
@@ -391,12 +391,12 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
         identity: ForeignBoundaryIdentity.new("source:{source}:sha256-{source_digest}", "overlay:inline-{language.root()}:sha256-{entry_identity}", descriptor_stamp, "artifact-set:sha256-{artifact_set}", "cargo:{toolchain_digest}", selected_target)
         boundary: ForeignBoundaryContract.new(descriptor, "{crate_name}:{language.root()}", identity).with_artifact_coverage(coverage)
         boundary.validate()
-        loop field in boundary.provenance_fields() -> &rows.push(field)
+        loop field in boundary.provenance_fields() -> rows.push(field)
         capability: pkg_foreign_boundary_capability(language)
-        &rows.push((name: "boundary-mixed-debug", value: pkg_bridge_bool_text(capability.mixed_debug)))
-        &rows.push((name: "boundary-native-export", value: pkg_bridge_bool_text(capability.native_export)))
-        &rows.push((name: "boundary-build-host", value: pkg_bridge_bool_text(capability.build_host)))
-        &rows.push((name: "boundary-reason", value: capability.reason))
+        rows.push((name: "boundary-mixed-debug", value: pkg_bridge_bool_text(capability.mixed_debug)))
+        rows.push((name: "boundary-native-export", value: pkg_bridge_bool_text(capability.native_export)))
+        rows.push((name: "boundary-build-host", value: pkg_bridge_bool_text(capability.build_host)))
+        rows.push((name: "boundary-reason", value: capability.reason))
     }
     Ok(rows)
 }
@@ -404,29 +404,29 @@ pkg_ffi_inline_boundary_rows: fn(entries: [ExternEntry], cache_identity: String,
 // The digest of every entry one language contributes to the bridge.
 pkg_ffi_boundary_entry_identity: fn(entries: [ExternEntry], language: ForeignLanguage, cache_identity: String, descriptor_stamp: String) -> String Never! {
     identity := ForeignIdentityBuilder.new(FOREIGN_BOUNDARY_SCHEMA)
-    &identity.field("cache-identity", cache_identity.bytes())
-    &identity.field("language", language.root().bytes())
-    &identity.field("descriptor", descriptor_stamp.bytes())
+    identity.field("cache-identity", cache_identity.bytes())
+    identity.field("language", language.root().bytes())
+    identity.field("descriptor", descriptor_stamp.bytes())
     loop entry in entries {
         if pkg_ffi_foreign_language_for_entry(entry) != Val(language) -> next
-        &identity.field("jet-name", entry.jet_name.bytes())
-        &identity.field("rust-path", entry.rust_path.bytes())
-        &identity.field("wrapper-name", entry.wrapper_name.bytes())
-        &identity.field("crate-spec", entry.crate_spec.bytes())
-        &identity.field("c-abi", pkg_bridge_flag(entry.c_abi))
-        &identity.field("generated", pkg_bridge_flag(entry.generated))
-        &identity.field("c-module", pkg_bridge_flag(entry.c_module))
+        identity.field("jet-name", entry.jet_name.bytes())
+        identity.field("rust-path", entry.rust_path.bytes())
+        identity.field("wrapper-name", entry.wrapper_name.bytes())
+        identity.field("crate-spec", entry.crate_spec.bytes())
+        identity.field("c-abi", pkg_bridge_flag(entry.c_abi))
+        identity.field("generated", pkg_bridge_flag(entry.generated))
+        identity.field("c-module", pkg_bridge_flag(entry.c_module))
         loop param in entry.params {
-            &identity.field("parameter-convention", pkg_ffi_convention_debug(param.convention).bytes())
-            &identity.field("parameter-type", pkg_ffi_type_key(param.ty).bytes())
+            identity.field("parameter-convention", pkg_ffi_convention_debug(param.convention).bytes())
+            identity.field("parameter-type", pkg_ffi_type_key(param.ty).bytes())
         }
-        loop name in entry.param_names -> &identity.field("parameter-name", name.bytes())
-        if entry.return_type == .Val(ret) -> &identity.field("return-type", pkg_ffi_type_key(ret).bytes())
-        if entry.close == .Val(close) -> &identity.field("close-function", close.bytes())
+        loop name in entry.param_names -> identity.field("parameter-name", name.bytes())
+        if entry.return_type == .Val(ret) -> identity.field("return-type", pkg_ffi_type_key(ret).bytes())
+        if entry.close == .Val(close) -> identity.field("close-function", close.bytes())
         if entry.inline == .Val(inline) {
-            &identity.field("inline-language", inline.lang.bytes())
-            &identity.field("inline-source", inline.source.bytes())
-            loop name in inline.param_names -> &identity.field("inline-parameter", name.bytes())
+            identity.field("inline-language", inline.lang.bytes())
+            identity.field("inline-source", inline.source.bytes())
+            loop name in inline.param_names -> identity.field("inline-parameter", name.bytes())
         }
     }
     identity.finish()
@@ -439,7 +439,7 @@ pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, sele
     loop artifact in artifacts {
         relative: pkg_ffi_artifact_relative_path(target, artifact) ?? return Err(pkg_bridge_error("FFI artifact escapes the shared target dir: {artifact}"))
         bytes: files.read_bytes(artifact) ?? return Err(pkg_bridge_error("could not read FFI artifact {artifact}: {err}"))
-        &artifact_digests.push((name: relative, digest: pkg_sha256_hex(bytes)))
+        artifact_digests.push((name: relative, digest: pkg_sha256_hex(bytes)))
     }
     toolchain_digest: pkg_sha256_hex(rust_toolchain.bytes())
     boundary_rows: pkg_ffi_inline_boundary_rows(entries, cache_identity, selected_target, crate_name, source, toolchain_digest, artifact_digests)
@@ -456,12 +456,12 @@ pkg_ffi_publish_bridge_provenance: fn(path: String, cache_identity: String, sele
         (name: "bridge-descriptor", value: FFI_INLINE_BRIDGE_SCHEMA),
         (name: "toolchain", value: toolchain_digest)
     }
-    loop stamp in pkg_ffi_foreign_descriptor_stamps(entries) -> &fields.push((name: "descriptor", value: stamp))
-    loop row in boundary_rows -> &fields.push(row)
+    loop stamp in pkg_ffi_foreign_descriptor_stamps(entries) -> fields.push((name: "descriptor", value: stamp))
+    loop row in boundary_rows -> fields.push(row)
     handle_keys := [String]{}
-    loop fact in handle_facts -> &handle_keys.push(fact.stable_key())
-    loop key in pkg_ffi_sorted_unique(handle_keys) -> &fields.push((name: "handle-fact", value: key))
-    &fields.push((name: "link-closure", value: link_closure.stable_key()))
+    loop fact in handle_facts -> handle_keys.push(fact.stable_key())
+    loop key in pkg_ffi_sorted_unique(handle_keys) -> fields.push((name: "handle-fact", value: key))
+    fields.push((name: "link-closure", value: link_closure.stable_key()))
     pkg_bridge_write_provenance(path, cache_identity, fields, artifact_digests)
 }
 
@@ -534,7 +534,7 @@ pkg_ffi_cargo_lock_bridge_packages: fn(raw: String, bridge_identity: String, out
         version: package.version ?? next
         content_hash := String?{None}
         if package.checksum == .Val(checksum) -> content_hash = Val("sha256-{checksum}")
-        &packages.push(LockedPackage{
+        packages.push(LockedPackage{
             name: name,
             version: version,
             source: LockSource.Foreign{language: ForeignLanguage.Rust, reference: "{name}@{version}", output: output},
@@ -554,13 +554,13 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
     loop raw_line in pkg_bridge_text_lines(raw) {
         line: raw_line.trim()
         if line == "[[package]]" {
-            pkg_ffi_finish_cargo_lock_package(current, &packages)
+            pkg_ffi_finish_cargo_lock_package(current, packages)
             current = Val(CargoLockPackage.empty())
             in_dependencies = false
             next
         }
         if line.starts_with("[") {
-            pkg_ffi_finish_cargo_lock_package(current, &packages)
+            pkg_ffi_finish_cargo_lock_package(current, packages)
             current = None
             in_dependencies = false
             next
@@ -574,7 +574,7 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
                     .Val(parts) -> parts.before
                     .None -> dependency
                 }
-                &package.dependencies.push(name)
+                package.dependencies.push(name)
             } else if line != "" {
                 return Err(pkg_bridge_error("invalid Cargo lock dependency line `{line}`"))
             }
@@ -596,7 +596,7 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
         }
         current = Val(package)
     }
-    pkg_ffi_finish_cargo_lock_package(current, &packages)
+    pkg_ffi_finish_cargo_lock_package(current, packages)
     Ok(packages)
 }
 
@@ -610,7 +610,7 @@ pkg_ffi_finish_cargo_lock_package: fn(current: CargoLockPackage?, packages: &[Ca
     if package.checksum == .Val(checksum) {
         if !pkg_bridge_is_lower_hex64(checksum) -> return Err(pkg_bridge_error("Cargo lock package `{name}` {version} has an invalid checksum"))
     }
-    &packages.push(package)
+    packages.push(package)
 }
 
 // `key = "value"` with a JSON string value.

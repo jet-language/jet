@@ -1,0 +1,14 @@
+name: "opaque_handles"
+version: "0.1.0"
+description: "Generated C handles for zlib and the Expat XML parser"
+edition: "2026"
+authority: {
+    allow: [Exec, FFI, IO, Mem.Alloc],
+}
+license: "MIT OR Apache-2.0"
+deps: {
+    // `z` is the native linker name; nixpkgs calls the provider `zlib`. A
+    // native link takes static archives, which nixpkgs' musl set provides.
+    z: c@nixpkgs:pkgsStatic.zlib,
+    expat: c@nixpkgs:pkgsStatic.expat,
+}

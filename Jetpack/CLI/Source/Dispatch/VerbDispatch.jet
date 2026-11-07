@@ -1,7 +1,7 @@
 // The jetpack verb dispatcher, ported from jetpack::CLI::parse::main. It
 // refuses any flag the verb does not take, runs the user-tools drift check
-// before mutating commands, and routes one typed verb to its command. JetOS
-// verbs (`os`, `user`, `studio`, `push`) are not part of this port.
+// before mutating commands, and routes one typed verb to its command. The
+// JetOS verbs `user`, `studio` and `push` are not part of this port.
 
 // Every verb this dispatcher routes.
 JetpackVerb: enum {
@@ -34,6 +34,7 @@ JetpackVerb: enum {
     Browser
     Split
     Fold
+    OS
     Help
 
     parse: fn(text: String) -> JetpackVerb? Never! {
@@ -67,6 +68,7 @@ JetpackVerb: enum {
             BROWSER_SUBCOMMAND -> Val(JetpackVerb.Browser)
             TRANSITION_SPLIT_VERB -> Val(JetpackVerb.Split)
             TRANSITION_FOLD_VERB -> Val(JetpackVerb.Fold)
+            OS_SUBCOMMAND -> Val(JetpackVerb.OS)
             "help" | "--help" | "-h" -> Val(JetpackVerb.Help)
             else -> None
         }
@@ -90,9 +92,9 @@ cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Ex
     verification := StoreVerification.new()
     // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
     // the status-summary floor for pipes, CI, and redirected output.
-    verb: args.get(0) ?? return cli_run_dashboard(&verification)
+    verb: args.get(0) ?? return cli_run_dashboard(verification)
     rest: cli_tail(args, 1)
-    if verb == "cc" || verb == "c++" -> return cli_cc_main(&verification, verb, rest)
+    if verb == "cc" || verb == "c++" -> return cli_cc_main(verification, verb, rest)
     // GateWriters.rs:266 / Source/main.rs:1537: invocation choices must
     // be refused before migration, profile drift repair, or any command.
     if pkg_check_invocation_flags(cli_current_dir(), cli_before_argument_separator(args)) == .Err(error) {
@@ -112,58 +114,59 @@ cli_main: fn(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Ex
     if checks_flags {
         if cli_unknown_flag(verb, rest) == .Val(flag) {
             legal := [String]{}
-            loop spelling in cli_verb_flags(verb) -> &legal.push("`{spelling}`")
+            loop spelling in cli_verb_flags(verb) -> legal.push("`{spelling}`")
             theme.error_coded("E2102", "`{flag}` isn't a flag `{verb}` understands.", "Jet ignores no flags silently, so a typo cannot quietly change a command.", "`{verb}` takes {legal.join(", ")}.")
             return EXIT_USAGE
         }
     }
     read_only: cli_read_only_command(verb, parsed)
     if !read_only {
-        drift_code: cli_check_user_tools_drift(&verification, theme, parsed)
+        drift_code: cli_check_user_tools_drift(verification, theme, parsed)
         if drift_code != 0 -> return drift_code
     }
     code: if known_verb == {
-        .Val(known) -> cli_dispatch_verb(&verification, known, theme, color, parsed)
+        .Val(known) -> cli_dispatch_verb(verification, known, theme, color, parsed)
         .None -> {
             theme.error("`{verb}` is not a jetpack command", "Phase 1 commands are: {JETPACK_VERBS.join(", ")}.", "run `jetpack help` to see them.")
             EXIT_USAGE
         }
     }
-    if store_seal_census_report(&verification) == .Val(report) -> terminal_write_output(report)
+    if store_seal_census_report(verification) == .Val(report) -> terminal_write_output(report)
     code
 }
 
 cli_dispatch_verb: fn(verification: &StoreVerification, verb: JetpackVerb, theme: Theme, color: ColorChoice, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if verb == {
-        .Doctor -> cli_cmd_doctor(&verification, theme, parsed)
-        .Env -> cli_cmd_env(&verification, theme, parsed)
-        .Use -> cli_cmd_use(&verification, theme, parsed)
+        .Doctor -> cli_cmd_doctor(verification, theme, parsed)
+        .Env -> cli_cmd_env(verification, theme, parsed)
+        .Use -> cli_cmd_use(verification, theme, parsed)
         .Config -> cli_cmd_config(theme, parsed)
         .Trust -> cli_cmd_trust(theme, parsed)
-        .Hangar -> cli_cmd_hangar(&verification, theme, parsed)
-        .Audit -> cli_cmd_audit(&verification, theme)
+        .Hangar -> cli_cmd_hangar(verification, theme, parsed)
+        .Audit -> cli_cmd_audit(verification, theme)
         .Import -> cli_cmd_import(theme, parsed)
-        .Add -> cli_cmd_add(&verification, theme, parsed)
+        .Add -> cli_cmd_add(verification, theme, parsed)
         .Remove -> cli_cmd_remove(theme, parsed)
-        .Update -> cli_cmd_update(&verification, theme, parsed)
+        .Update -> cli_cmd_update(verification, theme, parsed)
         .Lock -> cli_cmd_lock(theme, parsed)
         .Outdated -> cli_cmd_outdated(theme, parsed)
-        .Search -> cli_cmd_search(&verification, theme, parsed)
-        .Info -> cli_cmd_info(&verification, theme, parsed)
-        .Explain -> cli_cmd_explain(&verification, theme, parsed)
-        .Why -> cli_cmd_why(&verification, theme, parsed)
+        .Search -> cli_cmd_search(verification, theme, parsed)
+        .Info -> cli_cmd_info(verification, theme, parsed)
+        .Explain -> cli_cmd_explain(verification, theme, parsed)
+        .Why -> cli_cmd_why(verification, theme, parsed)
         .Logs -> cli_cmd_logs(theme, parsed)
-        .ServiceProbe -> cli_cmd_service_probe(&verification, theme, parsed)
+        .ServiceProbe -> cli_cmd_service_probe(verification, theme, parsed)
         .Override -> cli_cmd_override(theme, parsed)
-        .Image -> cli_cmd_image(&verification, theme, parsed)
+        .Image -> cli_cmd_image(verification, theme, parsed)
         .Bridge -> cli_cmd_bridge(theme, parsed)
-        .Services -> cli_cmd_services(&verification, theme, parsed)
+        .Services -> cli_cmd_services(verification, theme, parsed)
         .Secrets -> cli_cmd_secrets(theme, parsed)
-        .Tool -> cli_cmd_tool(&verification, theme, parsed)
-        .Profile -> cli_cmd_profile(&verification, theme, parsed)
-        .Browser -> cli_cmd_browser(&verification, theme, parsed)
+        .Tool -> cli_cmd_tool(verification, theme, parsed)
+        .Profile -> cli_cmd_profile(verification, theme, parsed)
+        .Browser -> cli_cmd_browser(verification, theme, parsed)
         .Split -> cli_cmd_split(theme, parsed)
         .Fold -> cli_cmd_fold(theme, parsed)
+        .OS -> cli_cmd_os(theme, parsed)
         .Help -> {
             help_theme: Theme.resolve_for(color, term.stdout().is_tty())
             print(cli_usage_with_color(help_theme.color))

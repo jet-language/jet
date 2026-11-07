@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Write, as plain library Jet (no core changes): a radix-2 FFT (complex, 4096 and 65536 points), a dense 512x512 matmul, a sparse CSR matrix-vector product (1e6 nonzeros), and a 5-point stencil over a 1024x1024 grid. Time each at `jet run` default tier and `jet build` release, and time numpy/scipy (or Rust if present) on the same inputs. Use Examples/features/lowlevel/simd_*.jet, linalg_simd.jet, layout_columnar.jet, Examples/features/performance and Examples/performance/**, and the deleted ballots D-M-SIGNAL1, D-M-LINALG1, D-M-SOLVERS1.
+Write, as plain library Jet (no core changes): a radix-2 FFT (complex, 4096 and 65536 points), a dense 512x512 matmul, a sparse CSR matrix-vector product (1e6 nonzeros), and a 5-point stencil over a 1024x1024 grid. Time each at `jet run` default tier and `jet build` release, and time numpy/scipy (or Rust if present) on the same inputs. Use Examples/LowLevel/SimdWide.jet, LinalgSimd.jet, layout_columnar.jet, Examples/Tooling/Performance/**, and the deleted ballots D-M-SIGNAL1, D-M-LINALG1, D-M-SOLVERS1.
 
 ## Answer these
 

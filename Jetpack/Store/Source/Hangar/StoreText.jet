@@ -13,8 +13,8 @@ store_hex_bytes: fn(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop byte in bytes {
         code: Int.from_u8(byte)
-        &out.push(digits[code >> 4])
-        &out.push(digits[(code).bit_and(15)])
+        out.push(digits[code >> 4])
+        out.push(digits[(code).bit_and(15)])
     }
     pkg_bytes_text(out, 0, out.len())
 }
@@ -65,7 +65,7 @@ store_unhex_text: fn(value: String) -> StoreUnhex Never! {
         high: store_lower_hex_value(Int.from_u8(raw[index]))
         low: store_lower_hex_value(Int.from_u8(raw[index + 1]))
         if high < 0 || low < 0 -> return StoreUnhex.NotLowerHex
-        &bytes.push(U8{high * 16 + low})
+        bytes.push(U8{high * 16 + low})
         index += 2
     }
     text: String.from_bytes(bytes) ?? return StoreUnhex.NotUTF8
@@ -83,10 +83,10 @@ store_text_lines: fn(raw: String) -> [String] Never! {
         segment: segments[index]
         bytes: segment.bytes()
         if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 {
-            &lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
+            lines.push(pkg_bytes_text(bytes, 0, bytes.len() - 1))
             next
         }
-        &lines.push(segment)
+        lines.push(segment.copy())
     }
     lines
 }
@@ -110,42 +110,42 @@ store_text_split_last: fn(text: String, needle: String) -> (before: String, afte
 store_push_u64_be: fn(out: &[U8], value: Int) Never! {
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{((value >> shift)).bit_and(255)})
+        out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
 }
 
 // Append `value` as 8 little-endian bytes.
 store_push_u64_le: fn(out: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> &out.push(U8{((value >> (shift * 8))).bit_and(255)})
+    loop shift in 0..<8 -> out.push(U8{((value >> (shift * 8))).bit_and(255)})
 }
 
 // Append `value` as 16 little-endian bytes (Rust `i128::to_le_bytes`).
 store_push_i128_le: fn(out: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> &out.push(U8{((value >> (shift * 8))).bit_and(255)})
+    loop shift in 0..<8 -> out.push(U8{((value >> (shift * 8))).bit_and(255)})
     fill: if value < 0 -> 255 else -> 0
-    loop _ in 0..<8 -> &out.push(U8{fill})
+    loop _ in 0..<8 -> out.push(U8{fill})
 }
 
 // Append every byte of `bytes`.
 store_push_bytes: fn(out: &[U8], bytes: [U8]) Never! {
-    loop byte in bytes -> &out.push(byte)
+    loop byte in bytes -> out.push(byte)
 }
 
 // A big-endian length frame followed by the bytes.
 store_push_frame: fn(out: &[U8], field: [U8]) Never! {
-    store_push_u64_be(&out, field.len())
-    store_push_bytes(&out, field)
+    store_push_u64_be(out, field.len())
+    store_push_bytes(out, field)
 }
 
 // Sorted, de-duplicated copy of `values` (Rust `BTreeSet<String>`).
 store_sorted_unique: fn(values: [String]) -> [String] Never! {
     sorted := values.copy()
-    &sorted.sort()
+    sorted.sort()
     out := [String]{}
     loop value in sorted {
         if out.len() > 0 && out[out.len() - 1] == value -> next
-        &out.push(value)
+        out.push(value)
     }
     out
 }
@@ -153,7 +153,7 @@ store_sorted_unique: fn(values: [String]) -> [String] Never! {
 // The keys of `map` in Rust `BTreeMap` order.
 store_sorted_keys: fn(map: [String: String]) -> [String] Never! {
     keys := map.keys().to_list()
-    &keys.sort()
+    keys.sort()
     keys
 }
 
@@ -176,7 +176,7 @@ store_path_components: fn(path: String) -> [String] Never! {
     out := [String]{}
     loop part in path.split("/") {
         if part == "" || part == "." -> next
-        &out.push(part)
+        out.push(part)
     }
     out
 }
@@ -187,7 +187,7 @@ store_path_strip_prefix: fn(path: String, prefix: String) -> String? Never! {
     left: store_path_components(path)
     right: store_path_components(prefix)
     rest := [String]{}
-    loop index in right.len()..<left.len() -> &rest.push(left[index])
+    loop index in right.len()..<left.len() -> rest.push(left[index])
     Val(rest.join("/"))
 }
 

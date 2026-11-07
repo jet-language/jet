@@ -154,7 +154,7 @@ shared_output_grids: fn() Never! {
     padding: [String]{"x   ", "   x", " x  "}
     loop (index, alignment) in ([JetCLITableAlignment]{.Left, .Right, .Center}) {
         out := [U8]{}
-        jet_cli_table_append_pad(&out, "x".bytes(), 4, alignment)
+        jet_cli_table_append_pad(out, "x".bytes(), 4, alignment)
         shared_output_bytes(out, padding[index], "literal alignment including odd center gap")
     }
     one: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("N".bytes(), .Text)}, [JetCLITableRow]{jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("abcde".bytes())})})
@@ -180,7 +180,7 @@ shared_output_grids: fn() Never! {
 }
 shared_output_text: fn() Never! {
     ansi: [U8]{27, 91, 51, 49, 109, 114, 101, 100, 27, 91, 48, 109, 32, 27, 93, 116, 105, 116, 108, 101, 7, 120, 32, 27, 93, 111, 116, 104, 101, 114, 27, 92, 121}
-    clean: jet_cli_table_bound_text(^ansi)
+    clean: jet_cli_table_bound_text(ansi)
     shared_output_bytes(clean, "red x y", "CSI/OSC BEL/OSC ST exact removal")
     non_ascii_escape: jet_cli_table_bound_text([U8]{27, 206, 177, 122})
     shared_output_bytes(non_ascii_escape, "z", "ESC consumes a whole non-ASCII scalar")
@@ -212,28 +212,28 @@ shared_output_text: fn() Never! {
     unicode_bound: jet_cli_table_bound_text("界".repeat(1366).bytes())
     shared_output_require(unicode_bound.len() == 4095 && unicode_bound == "界".repeat(1365).bytes(), "multibyte bound respects cluster")
     huge_cluster: "a{"́".repeat(2048)}z".bytes()
-    shared_output_bytes(jet_cli_table_bound_text(^huge_cluster), "z", "skip oversized cluster then retain later fitting cluster")
+    shared_output_bytes(jet_cli_table_bound_text(huge_cluster), "z", "skip oversized cluster then retain later fitting cluster")
     shared_output_require(jet_cli_table_extend(0x1dc00) && jet_cli_table_extend(0x1dfff) && !jet_cli_table_extend(0x1dbff) && !jet_cli_table_extend(0x1e000), "reference supplementary Extend boundaries")
     shared_output_require(jet_cli_table_wide(0x3000) && jet_cli_table_wide(0x303e) && !jet_cli_table_wide(0x303f) && !jet_cli_table_wide(0x3040) && jet_cli_table_wide(0x3041), "reference wide gap boundaries")
 }
 shared_output_bounds: fn() Never! {
     columns := [JetCLITableColumn]{}
-    loop _ in 0..<65 -> &columns.push(jet_cli_table_column("c".bytes(), .Text))
+    loop _ in 0..<65 -> columns.push(jet_cli_table_column("c".bytes(), .Text))
     cells := [JetCLITableCell]{}
-    loop _ in 0..<65 -> &cells.push(.Empty)
-    row: jet_cli_table_row(^cells)
+    loop _ in 0..<65 -> cells.push(.Empty)
+    row: jet_cli_table_row(cells)
     shared_output_require(row.cells.len() == 64, "row constructor cap")
-    table: jet_cli_table(^columns, [JetCLITableRow]{row})
+    table: jet_cli_table(columns, [JetCLITableRow]{row})
     shared_output_require(table.columns.len() == 64 && table.rows[0].cells.len() == 64 && table.truncated, "column cap flags truncation")
     source_columns := [JetCLITableColumn]{}
-    loop _ in 0..<64 -> &source_columns.push(jet_cli_table_column("c".bytes(), .Text))
+    loop _ in 0..<64 -> source_columns.push(jet_cli_table_column("c".bytes(), .Text))
     source_cells := [JetCLITableCell]{}
-    loop _ in 0..<65 -> &source_cells.push(.Empty)
-    prebounded: jet_cli_table(^source_columns, [JetCLITableRow]{jet_cli_table_row(^source_cells)})
+    loop _ in 0..<65 -> source_cells.push(.Empty)
+    prebounded: jet_cli_table(source_columns, [JetCLITableRow]{jet_cli_table_row(source_cells)})
     shared_output_require(!prebounded.truncated, "row pre-truncation is not detected again")
     rows := [JetCLITableRow]{}
-    loop _ in 0..<4097 -> &rows.push(JetCLITableRow{cells: [JetCLITableCell]{}})
-    row_bound: jet_cli_table([JetCLITableColumn]{}, ^rows)
+    loop _ in 0..<4097 -> rows.push(JetCLITableRow{cells: [JetCLITableCell]{}})
+    row_bound: jet_cli_table([JetCLITableColumn]{}, rows)
     shared_output_require(row_bound.rows.len() == 4096 && row_bound.truncated, "row cap")
     extra: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("c".bytes(), .Text)}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Empty, .Boolean{value: true}}}})
     shared_output_require(extra.rows[0].cells.len() == 1 && extra.truncated, "extra cells ignored and flagged")

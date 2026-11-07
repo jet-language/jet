@@ -46,7 +46,7 @@ debug_event_test_render: fn(snapshot: String) -> String Never! {
 
 debug_event_test_padded: fn(total_bytes: Int) -> String Never! {
     bytes := "{{\"event_observations\":[]}}".bytes()
-    loop bytes.len() < total_bytes -> &bytes.push(U8{32})
+    loop bytes.len() < total_bytes -> bytes.push(U8{32})
     String.from_bytes(bytes) ?? panic("padding is UTF-8")
 }
 
@@ -59,14 +59,14 @@ debug_event_test_padded: fn(total_bytes: Int) -> String Never! {
     unsafe_record: debug_event_test_record().replace("\"terminal\":\"None\"", "\"terminal\":\"None\",\"payload\":\"secret\"")
     assert(debug_event_test_error(debug_event_test_snapshot(unsafe_record)).contains("unsafe or unknown"))
     rows := [String]{}
-    loop _ in 0..<257 -> &rows.push(debug_event_test_record())
+    loop _ in 0..<257 -> rows.push(debug_event_test_record())
     assert(debug_event_test_error(debug_event_test_snapshot(rows.join(","))).contains("256-record"))
 }
 
 #Test("event_observations_render_ordered_lines_up_to_the_record_bound") {
     assert_eq(debug_event_test_render(debug_event_test_snapshot("")), "")
     rows := [String]{}
-    loop index in 1..<257 -> &rows.push(debug_event_test_with("sequence", "\"sequence\":{index * 3}"))
+    loop index in 1..<257 -> rows.push(debug_event_test_with("sequence", "\"sequence\":{index * 3}"))
     rendered: debug_event_test_render(debug_event_test_snapshot(rows.join(",")))
     lines: rendered.split("\n").to_list()
     assert_eq(lines.len(), 256)

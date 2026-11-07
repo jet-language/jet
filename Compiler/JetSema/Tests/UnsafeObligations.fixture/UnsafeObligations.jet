@@ -5,7 +5,7 @@ unsafe_test_require: fn(ok: Bool, message: String) Never! {
 
 unsafe_test_inspect: fn(source: String, policy: PolicyValue) -> UnsafeInspection Never! {
     parsed: parse_source(source.bytes())
-    unsafe_test_require(parsed.diagnostics.len() == 0, "fixture parse")
+    unsafe_test_require(parsed.diagnostics.len() == 0, "fixture parse: {parsed.diagnostics:Debug}")
     declaration: PolicyDeclaration{key: PolicyKey.Unsafe, value: policy, scope: PolicyScope.Package, span: Span{start: 0, end: 0}, target: None, source: "package.jet"}
     sema_unsafe_inspect([SemaGateModule{source: "app.jet", program: parsed.program, declarations: [declaration]}], GateSet{})
 }
@@ -44,10 +44,10 @@ run: fn() Never! {
     span: Span{start: 10, end: 20}
     pointer: Expr.Ident{name: "pointer", span: span, id: AST_NODE_GENERATED}
     operations := [SemaUnsafeOperation]{}
-    sema_unsafe_expr_operations(Expr.PtrFromAddr{alias: "mem", alias_span: span, elem: Type.Int, addr: pointer, span: span, id: AST_NODE_GENERATED}, &operations)
+    sema_unsafe_expr_operations(Expr.PtrFromAddr{alias: "mem", alias_span: span, elem: Type.Int, addr: pointer, span: span, id: AST_NODE_GENERATED}, operations)
     methods: [String]{"volatile_read", "volatile_write", "cast_ptr"}
     loop method in methods {
-        sema_unsafe_expr_operations(Expr.MethodCall{receiver: pointer, method: method, method_span: span, owner_type_args: [], type_args: [], args: [], id: AST_NODE_GENERATED}, &operations)
+        sema_unsafe_expr_operations(Expr.MethodCall{receiver: pointer, method: method, method_span: span, owner_type_args: [], type_args: [], args: [], id: AST_NODE_GENERATED}, operations)
     }
     unsafe_test_require(operations.len() == 4, "pointer, volatile reads/writes, cast collection")
     unsafe_test_require(operations[0].kind == "pointer_from_address" && operations[3].kind == "pointer_cast", "pointer operation names")

@@ -1,5 +1,5 @@
 Error [jet.RedundantDestructureRest]: This `..` is redundant
-  --> pattern_value_tests_and_reactive_clones_use_runtime_capture_places.jet:14:43
+  --> tests/ui/ownership/pattern_value_tests_and_reactive_clones_use_runtime_capture_places.jet:14:43
     |
  14 |             { count: values.len(), label, .. } -> print(label)
     |                                           ^^
@@ -8,10 +8,10 @@ Error [jet.RedundantDestructureRest]: This `..` is redundant
 More: jet-lang.dev/e/E0327
 
 Error [jet.UseWhileWriteActive]: `values` is being changed in this call, so it can't be used again here
-  --> pattern_value_tests_and_reactive_clones_use_runtime_capture_places.jet:14:22
+  --> tests/ui/ownership/pattern_value_tests_and_reactive_clones_use_runtime_capture_places.jet:14:22
     |
  14 |             { count: values.len(), label, .. } -> print(label)
     |                      ^^^^^^
- Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
- Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `values.copy()`
+ Why: While something is being changed through a write parameter, nobody else may be looking at it
+ Fix: Pass `values` only once, or copy first with `values.copy()`
 More: jet-lang.dev/e/E0204

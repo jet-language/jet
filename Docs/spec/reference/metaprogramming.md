@@ -6,8 +6,8 @@ examples from metadata and diagnostic contracts defined by the compiler.
 The executable surface is registered in the
 [syntax registry](../../../Compiler/JetFoundation/Data/Syntax/).
 The runnable examples are the best guide to accepted source forms:
-[`Examples/features/comptime`](../../../Examples/features/comptime) and
-[`Examples/features/reflection`](../../../Examples/features/reflection).
+[`Examples/Metaprogramming/Comptime`](../../../Examples/Metaprogramming/Comptime) and
+[`Examples/Metaprogramming/Reflection`](../../../Examples/Metaprogramming/Reflection).
 
 ## The authority model
 
@@ -32,7 +32,7 @@ become part of a program. The boundary is visible in source:
   string macro language.
 
 The feature examples exercise these forms directly. For example, the block in
-[`prep_block.jet`](../../../Examples/features/comptime/prep_block.jet)
+[`prep_block.jet`](../../../Examples/Metaprogramming/Comptime/PrepBlock.jet)
 checks `@cells` while compiling and then uses the resulting value in an
 ordinary runtime expression:
 
@@ -58,16 +58,16 @@ introduce a second type-position syntax or a runtime reflection object.
 
 Pure expressions are evaluated without a host authority grant. The examples
 cover literal and arithmetic constants, Core math, parsing, and collection
-construction. [`comptime_table.jet`](../../../Examples/features/comptime/comptime_table.jet)
+construction. [`comptime_table.jet`](../../../Examples/Metaprogramming/Comptime/ComptimeTable.jet)
 computes a list once and prints the baked value from `run: fn()`.
 
 `@if` performs compile-time selection. The selected arm is type-checked and
 emitted; the other arm is name-resolved so misspelled names are still found.
 Nested `@if` forms use the same rule. See
-[`comptime_if.jet`](../../../Examples/features/comptime/comptime_if.jet).
+[`comptime_if.jet`](../../../Examples/Metaprogramming/Comptime/ComptimeIf.jet).
 
 `comptime loop` is the one typed compile-time repetition mechanism used by derive
-and marker bodies. [`derive_loop.jet`](../../../Examples/features/reflection/derive_loop.jet)
+and marker bodies. [`derive_loop.jet`](../../../Examples/Metaprogramming/Comptime/PrepLoop.jet)
 uses it to create methods from `T.$fields`, to emit an `impl` for each type,
 and to create measured test declarations from `CASES`.
 
@@ -90,12 +90,13 @@ Compile-time effects are classified by what they can observe:
 | 1 | `embed_file`, `embed_bytes`, `find(glob)`, and pinned `fetch(url, sha256:)` | Inputs and hashes are recorded in `.jet/lock`; equal inputs produce equal values. |
 | 2 | Ambient filesystem, environment, process, clock, random, or unpinned network access | The source uses `#Impure("reason")`, and the build invocation grants `impure`. |
 
-The examples show the Tier 1 boundary: [`embed.jet`](../../../Examples/features/comptime/embed.jet)
-and [`embed_bytes.jet`](../../../Examples/features/comptime/embed_bytes.jet) bake
+The examples show the Tier 1 boundary: [`embed.jet`](../../../Examples/Metaprogramming/Comptime/Embed.jet)
+and [`embed_bytes.jet`](../../../Examples/Metaprogramming/Comptime/Embed.jet) bake
 text or raw `[U8]` data into the program, while
-[`find.jet`](../../../Examples/features/comptime/find.jet) returns sorted
+[`find.jet`](../../../Examples/Metaprogramming/Comptime/Find.jet) returns sorted
 relative paths with their input identity. An empty `find` result is still a
-typed empty `[String]`; see [`find_empty.jet`](../../../Examples/features/comptime/find_empty.jet).
+typed empty `[String]`; the comptime tier-parity case
+[`find_empty.jet`](../../../tests/cases/comptime_cli_parity/fixtures/tier_parity_examples_run_through_aot_jit_and_interpreter/comptime_find_empty/find_empty.jet) proves it.
 
 `core.net.fetch(url, sha256:)` is the only Tier 1 network operation. Other
 `core.net` methods are unavailable at compile time (E3412), and a content-hash
@@ -141,7 +142,7 @@ Jet source; and `b.find_program`, `b.pkg_config`, `b.header_check`, and
 `b.compile_check` register typed probes. `b.plan()` hands the graph to the
 driver.
 
-The checked example in [`distinct_reflect.jet`](../../../Examples/features/comptime/distinct_reflect.jet)
+The checked example in [`distinct_reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet)
 uses the current return-arrow form:
 
 ```jet
@@ -192,8 +193,8 @@ Jet has two related reflection paths:
 2. `T.reflect()` returns aggregate type information for a derive body, while
    `reflect.of(value)` returns the runtime reflection floor for a value.
 
-[`reflect.jet`](../../../Examples/features/comptime/reflect.jet) combines typed
-fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/features/reflection/reflect-value.jet)
+[`reflect.jet`](../../../Examples/Metaprogramming/Reflection/Reflect.jet) combines typed
+fact reads with `T.reflect()`. [`reflect-value.jet`](../../../Examples/Metaprogramming/Reflection/ReflectValue.jet)
 shows the runtime floor:
 
 ```jet

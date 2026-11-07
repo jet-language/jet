@@ -1,4 +1,4 @@
-// D-MEM-COPYSEM1=A: shared read-view materialization adapter for the web tier.
+// Shared read-view materialization adapter for the web tier.
 function jet_view_copy(view) {
   return view.slice();
 }

@@ -15,8 +15,8 @@ FoundationFactReadRow: struct {
     planes: [String]
 }
 
-foundation_fact_read_row: fn(read: ^FactRead, member: ^String, reflection: ^String, detail: ^String?, planes: ^[String]) -> FoundationFactReadRow Never! {
-    FoundationFactReadRow{read: ^read, member: Val(^member), reflection: Val(^reflection), detail: ^detail, planes: ^planes}
+foundation_fact_read_row: fn(read: &&FactRead, member: &&String, reflection: &&String, detail: &&String?, planes: &&[String]) -> FoundationFactReadRow Never! {
+    FoundationFactReadRow{read: read.move(), member: Val(member.move()), reflection: Val(reflection.move()), detail: detail.move(), planes: planes.move()}
 }
 
 // Typed reads in registry order, then the build profile, then the registered
@@ -50,7 +50,7 @@ FOUNDATION_FACT_READ_ROWS: comptime { [FoundationFactReadRow]{
 fact_read_members: fn() -> [String] Never! {
     members := [String]{}
     loop row in FOUNDATION_FACT_READ_ROWS {
-        if row.member == .Val(member) -> &members.push(member.copy())
+        if row.member == .Val(member) -> members.push(member.copy())
     }
     members
 }

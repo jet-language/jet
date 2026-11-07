@@ -89,7 +89,7 @@ ToolchainChannelManifest: struct {
         recipe_update_reject_unknown(fields, [String]{"schema", "channel", "version", "sequence", "published_at", "expires_at", "min_version", "artifacts"})
         artifact_values: recipe_update_array(recipe_update_field(fields, "artifacts"), "manifest artifacts")
         artifacts := [ToolchainArtifact]{}
-        loop value in artifact_values -> &artifacts.push(ToolchainArtifact.parse(value))
+        loop value in artifact_values -> artifacts.push(ToolchainArtifact.parse(value))
         manifest: ToolchainChannelManifest{
             schema: recipe_update_integer(recipe_update_field(fields, "schema"), "manifest schema"),
             channel: recipe_update_text(recipe_update_field(fields, "channel"), "manifest channel"),
@@ -116,7 +116,7 @@ ToolchainChannelManifest: struct {
         loop artifact in manifest.artifacts {
             recipe_update_validate_component(artifact.target, "artifact target")
             if targets.contains(artifact.target) -> return Err(RecipeError.Update("toolchain channel manifest repeats an artifact target"))
-            &targets.push(artifact.target)
+            targets.push(artifact.target)
             expected_path: "v1/{manifest.channel}/{manifest.version}/jet-{manifest.version}-{artifact.target}"
             if artifact.path != expected_path || artifact.signature != "{expected_path}.sig.json" {
                 return Err(RecipeError.Update("toolchain artifact naming does not match the channel contract"))
@@ -135,7 +135,7 @@ ToolchainChannelManifest: struct {
     // The one canonical encoding, fields in contract order, newline-terminated.
     canonical: fn(self) -> String Never! {
         artifacts := [Dyn]{}
-        loop artifact in self.artifacts -> &artifacts.push(artifact.to_tree())
+        loop artifact in self.artifacts -> artifacts.push(artifact.to_tree())
         fields := [String: Dyn]{}
         fields["schema"] = Dyn.Int(self.schema)
         fields["channel"] = Dyn.Text(self.channel.copy())
@@ -294,7 +294,7 @@ SemanticVersion: struct {
         components := [Int]{}
         loop index in 0..<3 {
             if index >= numbers.len() -> return Err(RecipeError.Update("{label} must use major.minor.patch"))
-            &components.push(recipe_update_version_number(numbers[index], label))
+            components.push(recipe_update_version_number(numbers[index], label))
         }
         if numbers.len() > 3 -> return Err(RecipeError.Update("{label} must use major.minor.patch"))
         pre := [PreIdentifier]{}
@@ -364,9 +364,9 @@ recipe_update_parse_pre: fn(value: String, label: String) -> [PreIdentifier] Rec
         if recipe_update_all_digits(identifier) {
             if identifier.bytes().len() > 1 && identifier.starts_with("0") -> return Err(RecipeError.Update("{label} has a leading-zero prerelease number"))
             number: Int.parse(identifier) ?? return Err(RecipeError.Update("{label} has an invalid prerelease"))
-            &identifiers.push(PreIdentifier.Numeric(number))
+            identifiers.push(PreIdentifier.Numeric(number))
         } else {
-            &identifiers.push(PreIdentifier.Text(identifier))
+            identifiers.push(PreIdentifier.Text(identifier))
         }
     }
     Ok(identifiers)
@@ -453,7 +453,7 @@ recipe_update_verify_signature: fn(trusted: ToolchainTrustedKey, domain: String,
     if decoded.len() != 64 -> return Err(RecipeError.Update("{label} signature must be 64 bytes"))
     signature: crypto.Signature.from_bytes(decoded) ?? return Err(RecipeError.Update("{label} signature must be 64 bytes"))
     message := domain.bytes()
-    loop byte in bytes -> &message.push(byte)
+    loop byte in bytes -> message.push(byte)
     if !(crypto.verify(trusted.key, message, signature) ?? false) {
         return Err(RecipeError.Update("{label} signature verification failed"))
     }

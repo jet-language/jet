@@ -11,9 +11,9 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     assert(lexed.diagnostics.is_empty())
     expected := [Token]{}
     loop token in lexed.tokens {
-        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> &expected.push(token)
+        if token.kind != TOKEN_LINE_COMMENT && token.kind != TOKEN_BLOCK_COMMENT -> expected.push(token)
     }
-    prepared: parser_prepare_tokens(^lexed.tokens, &lexed.tables)
+    prepared: parser_prepare_tokens(lexed.tokens.move(), lexed.tables)
     assert(prepared.fenced_statements.is_empty())
     assert(prepared.tokens == expected)
     // Token value equality is observable; Rust Cow pointer identity is not a Jet API.
@@ -79,7 +79,7 @@ program: fn(source: String) -> Program { parser_test_program(source) }
 }
 
 #Test("missing_function_body_is_e0081_and_recovers_for_check") {
-    source: "host_open: fn(path: String) -[FS]> Int\nrun: fn() {{}}\n"
+    source: "Host: struct {{}}\nimpl Host {{\n    open: fn(self, path: String) -[FS]> Int\n}}\nrun: fn() {{}}\n"
     lexed: lex(source.bytes())
     assert(lexed.diagnostics.is_empty())
     // Rust `parse(&tokens).is_err()`: the ordinary parse reports an error. The check
@@ -88,9 +88,9 @@ program: fn(source: String) -> Program { parser_test_program(source) }
     checked: parser_test_result(source)
     assert(loop d in checked.diagnostics { if d.code == "E0081" -> break true } ?? false)
     names := [String]{}
-    loop item in checked.program.items { if item == .Func(func) -> &names.push(func.name) }
-    assert(names.contains("host_open") && names.contains("run"))
-    second: lex("foo: fn() -> Int\nbar: fn() {{}}\n".bytes())
+    loop item in checked.program.items { if item == .Func(func) -> names.push(func.name) }
+    assert(names.contains("run"))
+    second: lex("Host: struct {{}}\nimpl Host {{ foo: fn(self) -> Int }}\nbar: fn() {{}}\n".bytes())
     assert(second.diagnostics.is_empty())
     recovered: parse_tokens(second.tokens, second.tables)
     assert(loop d in recovered.diagnostics { if d.code == "E0081" -> break true } ?? false)

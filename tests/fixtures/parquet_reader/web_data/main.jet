@@ -24,7 +24,7 @@ BAD_PARQUET: comptime { embed_bytes("../ARROW-RS-GH-6229-DICTHEADER.parquet") }
 typed_success: fn() -> String {
     loader: data.url<[IntCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("typed loader")
     loader.bind(GOOD_PARQUET) ?? panic("typed bind")
-    snapshot: data.snapshot<[IntCell]>(&loader) ?? panic("typed snapshot")
+    snapshot: data.snapshot<[IntCell]>(loader) ?? panic("typed snapshot")
     row: snapshot.value.at(200) ?? panic("null-page row")
     return "good rows={snapshot.value.len()} null_page={row.int32_field == None}"
 }
@@ -32,7 +32,7 @@ typed_success: fn() -> String {
 typed_decode_failure: fn() -> Bool {
     loader: data.url<[WrongCell]>("https://typed-data.invalid/embedded.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("malformed typed loader")
     loader.bind(GOOD_PARQUET) ?? panic("malformed typed bind")
-    snapshot: data.snapshot<[WrongCell]>(&loader)
+    snapshot: data.snapshot<[WrongCell]>(loader)
     return if snapshot == {
         .Err(_) -> true
         .Ok(_) -> false
@@ -42,7 +42,7 @@ typed_decode_failure: fn() -> Bool {
 provider_failure: fn() -> Bool {
     loader: data.url<[IntCell]>("https://typed-data.invalid/malformed.parquet", "parquet", "typed-data.invalid", data.DataLimits.safe()) ?? panic("provider loader")
     loader.bind(BAD_PARQUET) ?? panic("provider bind")
-    snapshot: data.snapshot<[IntCell]>(&loader)
+    snapshot: data.snapshot<[IntCell]>(loader)
     return if snapshot == {
         .Err(_) -> true
         .Ok(_) -> false

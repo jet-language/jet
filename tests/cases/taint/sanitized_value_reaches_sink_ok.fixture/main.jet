@@ -4,5 +4,6 @@ use process: core.process
 run: fn() {
     name: #Input "world; rm -rf /"
     safe := clean(name)
-    process.run(["echo", safe]) ?? return Err("test")
+    receipt: process.cmd(["echo", safe]).run() ?? return Err("test")
+    receipt.drop("only the argument flow matters here")
 }

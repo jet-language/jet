@@ -1,12 +1,12 @@
-Error [jet.UseAfterMove]: `value` was consumed by `consume`, so it can't be used here
-  --> tests/ui/ownership_loop_reconsume_provenance.jet:9:18
+Error [jet.MoveWithoutMarker]: `consume` takes `value`, but `value` is used again later
+  --> tests/ui/ownership_loop_reconsume_provenance.jet:7:13
     |
-  9 |         consume(^value)
-    |                  ^^^^^
-  --> tests/ui/ownership_loop_reconsume_provenance.jet:7:14
+  7 |     consume(value)
+    |             ^^^^^
+  --> tests/ui/ownership_loop_reconsume_provenance.jet:9:17
     |
-  7 |     consume(^value)
-    |              ^^^^^ `value` moved to `consume` here
- Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `value` after the move, or give `consume` a copy with `value.copy()` where it moved.
-More: jet-lang.dev/e/E0121
+  9 |         consume(value)
+    |                 ^^^^^ `value` is used again here
+ Why: `consume` takes ownership of this argument, and a call never copies on its own, so `value` has no value after this call
+ Fix: Write `value.copy()` to pass a copy and keep `value`, or reorder so this call is the last use of `value`
+More: jet-lang.dev/e/E0209

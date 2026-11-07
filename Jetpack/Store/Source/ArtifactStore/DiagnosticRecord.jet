@@ -51,11 +51,11 @@ StoreDiagnosticSections: struct {
 store_encode_diagnostics: fn(diagnostics: [Diagnostic], closure_revisions: [String]) -> StoreDiagnosticSections StoreDiagnosticRecordError! {
     table := [DiagnosticOrigin]{}
     encoded := [RecordValue]{}
-    loop diagnostic in diagnostics -> &encoded.push(store_diagnostic_encode(diagnostic, &table))
+    loop diagnostic in diagnostics -> encoded.push(store_diagnostic_encode(diagnostic, table))
     origins := [RecordValue]{}
     loop origin in table {
         source: if closure_revisions.contains(origin.revision) -> RecordValue.Null else -> RecordValue.Str{value: origin.source}
-        &origins.push(RecordValue.Map{fields: [RecordField]{
+        origins.push(RecordValue.Map{fields: [RecordField]{
             {name: "display", value: RecordValue.Str{value: origin.display}},
             {name: "path", value: RecordValue.Str{value: origin.path}},
             {name: "revision", value: RecordValue.Str{value: origin.revision}},
@@ -81,10 +81,10 @@ store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue],
         }
         decoded: DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
         if decoded.revision != revision -> return Err(store_diagnostic_error("diagnostic origin `{decoded.path}` revision mismatch"))
-        &table.push(decoded)
+        table.push(decoded)
     }
     out := [Diagnostic]{}
-    loop diagnostic in diagnostics -> &out.push(store_diagnostic_decode(diagnostic, table))
+    loop diagnostic in diagnostics -> out.push(store_diagnostic_decode(diagnostic, table))
     Ok(out)
 }
 
@@ -95,7 +95,7 @@ store_diagnostic_origin_index: fn(origin: DiagnosticOrigin?, table: &[Diagnostic
     loop (index, existing) in table {
         if existing == value -> return RecordValue.Int{value: index}
     }
-    &table.push(value)
+    table.push(value)
     RecordValue.Int{value: table.len() - 1}
 }
 
@@ -230,16 +230,16 @@ store_diagnostic_edit: fn(edit: TextEdit) -> RecordValue Never! {
 // recorded"), as the bootstrap host codec maps it.
 store_diagnostic_build_report: fn(report: DiagnosticBuildError) -> JetErrorReport Never! {
     causes := [JetErrorReport]{}
-    loop cause in report.causes -> &causes.push(store_diagnostic_build_report(cause))
+    loop cause in report.causes -> causes.push(store_diagnostic_build_report(cause))
     frames := [JetErrorContextFrame]{}
-    loop frame in report.context_frames -> &frames.push(JetErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
+    loop frame in report.context_frames -> frames.push(JetErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
     journey := [JetErrorJourneyFrame]{}
-    loop frame in report.source_journey -> &journey.push(JetErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, column: 0, note: frame.note, hops: frame.hops})
+    loop frame in report.source_journey -> journey.push(JetErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, column: 0, note: frame.note, hops: frame.hops})
     conversions := [JetErrorConversion]{}
-    loop conversion in report.conversion_history -> &conversions.push(JetErrorConversion{source: conversion.source, target: conversion.target})
+    loop conversion in report.conversion_history -> conversions.push(JetErrorConversion{source: conversion.source, target: conversion.target})
     details: if report.details == .Val(value) -> {
         fields := [JetErrorField]{}
-        loop field in value.fields -> &fields.push(JetErrorField{name: field.name, value: field.value})
+        loop field in value.fields -> fields.push(JetErrorField{name: field.name, value: field.value})
         span: if value.source_span == .Val(found) -> Val(JetErrorSpan{start: found.start, end: found.end}) else -> None
         Val(JetErrorDetails{variant: value.variant, fields: fields, source_span: span})
     } else -> None
@@ -248,16 +248,16 @@ store_diagnostic_build_report: fn(report: DiagnosticBuildError) -> JetErrorRepor
 
 store_diagnostic_build_error: fn(report: JetErrorReport) -> DiagnosticBuildError Never! {
     causes := [DiagnosticBuildError]{}
-    loop cause in report.causes -> &causes.push(store_diagnostic_build_error(cause))
+    loop cause in report.causes -> causes.push(store_diagnostic_build_error(cause))
     frames := [DiagnosticErrorContextFrame]{}
-    loop frame in report.context_frames -> &frames.push(DiagnosticErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
+    loop frame in report.context_frames -> frames.push(DiagnosticErrorContextFrame{text: frame.text, file: frame.file, line: frame.line})
     journey := [DiagnosticErrorJourneyFrame]{}
-    loop frame in report.source_journey -> &journey.push(DiagnosticErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, note: frame.note, hops: frame.hops})
+    loop frame in report.source_journey -> journey.push(DiagnosticErrorJourneyFrame{fn_name: frame.fn_name, file: frame.file, line: frame.line, note: frame.note, hops: frame.hops})
     conversions := [DiagnosticErrorConversion]{}
-    loop conversion in report.conversion_history -> &conversions.push(DiagnosticErrorConversion{source: conversion.source, target: conversion.target})
+    loop conversion in report.conversion_history -> conversions.push(DiagnosticErrorConversion{source: conversion.source, target: conversion.target})
     details: if report.details == .Val(value) -> {
         fields := [DiagnosticErrorField]{}
-        loop field in value.fields -> &fields.push(DiagnosticErrorField{name: field.name, value: field.value})
+        loop field in value.fields -> fields.push(DiagnosticErrorField{name: field.name, value: field.value})
         span: if value.source_span == .Val(found) -> Val(DiagnosticErrorSpan{start: found.start, end: found.end}) else -> None
         Val(DiagnosticErrorDetails{variant: value.variant, fields: fields, source_span: span})
     } else -> None
@@ -269,7 +269,7 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
     if structured == {
         .SuggestedEdits(edits) -> {
             encoded := [RecordValue]{}
-            loop edit in edits -> &encoded.push(store_diagnostic_edit(edit))
+            loop edit in edits -> encoded.push(store_diagnostic_edit(edit))
             RecordValue.Map{fields: [RecordField]{
                 {name: "kind", value: RecordValue.Str{value: "suggested_edits"}},
                 {name: "edits", value: RecordValue.List{values: encoded}},
@@ -301,14 +301,14 @@ store_diagnostic_structured: fn(structured: DiagnosticStructured) -> RecordValue
 store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]) -> RecordValue StoreDiagnosticRecordError! {
     labels := [RecordValue]{}
     loop label in diagnostic.labels {
-        &labels.push(RecordValue.List{values: [RecordValue]{RecordValue.Int{value: label.span.start}, RecordValue.Int{value: label.span.end}, RecordValue.Str{value: label.message}}})
+        labels.push(RecordValue.List{values: [RecordValue]{RecordValue.Int{value: label.span.start}, RecordValue.Int{value: label.span.end}, RecordValue.Str{value: label.message}}})
     }
     causes := [RecordValue]{}
     loop cause in diagnostic.cause {
-        &causes.push(RecordValue.Map{fields: [RecordField]{
+        causes.push(RecordValue.Map{fields: [RecordField]{
             {name: "code", value: RecordValue.Str{value: cause.code}},
             {name: "span", value: store_diagnostic_optional_span(cause.span)},
-            {name: "origin", value: store_diagnostic_origin_index(cause.origin, &origins)},
+            {name: "origin", value: store_diagnostic_origin_index(cause.origin, origins)},
         }})
     }
     no_fix: if diagnostic.no_fix_reason == .Val(reason) -> RecordValue.Map{fields: [RecordField]{
@@ -319,7 +319,7 @@ store_diagnostic_encode: fn(diagnostic: Diagnostic, origins: &[DiagnosticOrigin]
     applicability: if diagnostic.applicability == .Val(value) -> RecordValue.Str{value: store_diagnostic_applicability_name(value)} else -> RecordValue.Null
     safety: if diagnostic.safety == .Val(value) -> RecordValue.Str{value: store_diagnostic_safety_name(value)} else -> RecordValue.Null
     structured: if diagnostic.structured == .Val(value) -> store_diagnostic_structured(value) else -> RecordValue.Null
-    origin: store_diagnostic_origin_index(diagnostic.origin, &origins)
+    origin: store_diagnostic_origin_index(diagnostic.origin, origins)
     Ok(RecordValue.Map{fields: [RecordField]{
         {name: "moment", value: RecordValue.Str{value: store_diagnostic_moment_name(diagnostic.moment)}},
         {name: "severity", value: RecordValue.Str{value: store_diagnostic_severity_name(diagnostic.severity)}},
@@ -406,7 +406,7 @@ store_diagnostic_decode_structured: fn(value: RecordValue) -> DiagnosticStructur
     if kind == {
         "suggested_edits" -> {
             edits := [TextEdit]{}
-            loop edit in store_diagnostic_list(value, "edits") -> &edits.push(store_diagnostic_decode_edit(edit))
+            loop edit in store_diagnostic_list(value, "edits") -> edits.push(store_diagnostic_decode_edit(edit))
             Ok(DiagnosticStructured.SuggestedEdits{edits: edits})
         }
         "crypto_misuse" -> {
@@ -438,14 +438,14 @@ store_diagnostic_decode: fn(value: RecordValue, origins: [DiagnosticOrigin]) -> 
         parts: decoded.value ?? return Err(store_diagnostic_error(decoded.problem ?? "diagnostic label must be [start, end, message]"))
         if parts.len() != 3 -> return Err(store_diagnostic_error("diagnostic label must be [start, end, message]"))
         message: record_value_as_str(parts[2])
-        &labels.push(DiagnosticLabel{
+        labels.push(DiagnosticLabel{
             span: Span{start: store_diagnostic_offset(parts[0]), end: store_diagnostic_offset(parts[1])},
             message: message.value ?? return Err(store_diagnostic_error(message.problem ?? "diagnostic label message is not a string")),
         })
     }
     causes := [DiagnosticCause]{}
     loop cause in store_diagnostic_list(value, "cause") {
-        &causes.push(DiagnosticCause{
+        causes.push(DiagnosticCause{
             code: store_diagnostic_text(cause, "code"),
             span: store_diagnostic_decode_optional_span(store_diagnostic_field(cause, "span")),
             origin: store_diagnostic_decode_origin(store_diagnostic_field(cause, "origin"), origins),

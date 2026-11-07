@@ -93,7 +93,7 @@ use {
     import: fact("import:test::api.answer::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session)
     item: fact("fn:session::answer", "answer", "answer", SemanticSymbolKind.Function, SemanticProvenance.Session)
     assert_eq(SemanticSymbolIndex.new([builtin.clone(), import.clone()]).resolve_visible("answer").unwrap().identity, import.identity)
-    assert_eq(SemanticSymbolIndex.new([^builtin, ^import, item.clone()]).resolve_visible("answer").unwrap().identity, item.identity)
+    assert_eq(SemanticSymbolIndex.new([builtin.move(), import, item.clone()]).resolve_visible("answer").unwrap().identity, item.identity)
 }
 
 #Test("semantic_visibility_uses_current_module_context") {
@@ -101,7 +101,7 @@ use {
     current.module_path = "current.jet"
     foreign_local := fact("local:other::answer", "answer", "answer", SemanticSymbolKind.Local, SemanticProvenance.Source { module_path: "other.jet" })
     foreign_local.module_path = "other.jet"
-    index: SemanticSymbolIndex.new([current.clone(), ^foreign_local])
+    index: SemanticSymbolIndex.new([current.clone(), foreign_local.move()])
     assert_eq(index.resolve_visible_in("answer", "current.jet").unwrap().identity, current.identity)
     assert_eq(index.complete_visible_in("ans", none, "current.jet").len(), 1)
 }
@@ -142,7 +142,7 @@ use {
 }
 
 #Test("semindex_projects_terminal_and_reachability_graph") {
-    path: temp_fixture("terminal_state_graph.jet", "\nDoor: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -> Door {{ Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: ^Door) -> Door {{ self }}\n    #Transition(Closed, Closed) hold: fn(self: ^Door) -> Door {{ self }}\n}}\nrun: fn() {{}}\n")
+    path: temp_fixture("terminal_state_graph.jet", "\nDoor: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) close: fn() -> Door {{ Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: &&Door) -> Door {{ self }}\n    #Transition(Closed, Closed) hold: fn(self: &&Door) -> Door {{ self }}\n}}\nrun: fn() {{}}\n")
     index: open(path).expect("state graph indexes")
     graph: index.state_graphs().iter().find(graph -> graph.owner == "Door").expect("Door graph")
     closed: graph.states.iter().find(state -> state.name == "Closed").unwrap()
@@ -161,7 +161,7 @@ use {
 }
 
 #Test("semindex_hover_projects_terminal_and_reachability_facts") {
-    path: temp_fixture("terminal_state_hover.jet", "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n")
+    path: temp_fixture("terminal_state_hover.jet", "Door: struct {{\n    state {{ Closed, Open, Orphan }}\n}}\nimpl Door {{\n    #Transition(_, Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Closed, Open) open: fn(self: &&Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n")
     (diagnostics, bundle, facts): check_file_with_effect_facts(path.to_str().unwrap(), none, false)
     assert(diagnostics.is_empty(), "{diagnostics}")
     checked: bundle.expect("checked bundle")
@@ -173,7 +173,7 @@ use {
 }
 
 #Test("semindex_state_symbols_keep_their_struct_owner") {
-    path: temp_fixture("state_owner_symbols.jet", "\nDoor: struct {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: ^Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n")
+    path: temp_fixture("state_owner_symbols.jet", "\nDoor: struct {{\n    state {{ Closed, Open }}\n}}\nimpl Door {{\n    #Transition(_, Door.State.Closed) new: fn() -[]> Door {{ return Door{{}} }}\n    #Transition(Door.State.Closed, Door.State.Open) open: fn(self: &&Door) -[]> Door {{ return self }}\n}}\nrun: fn() {{}}\n")
     index: open(path).expect("state symbols index")
     closed: index.definitions().iter().find(definition -> definition.qualified_name.ends_with("Door.State.Closed")).expect("owning struct state definition")
     assert(if closed.kind == {
@@ -487,7 +487,7 @@ use {
 }
 
 #Test("semindex_effect_provenance_covers_open_and_trait_dispatch") {
-    path: temp_fixture("effect_provenance_origins.jet", "Shape: trait {{ area: fn(self) -[IO]> Int }}\ndynamic: fn(shape: Shape) -> Int {{ return shape.area() }}\napply: fn(f: fn() -> Int) -> Int {{ return f() }}\nstored: fn(f: ^fn() -> Int) -> Int {{\n    g: f\n    return g()\n}}\nrun: fn() {{}}\n")
+    path: temp_fixture("effect_provenance_origins.jet", "Shape: trait {{ area: fn(self) -[IO]> Int }}\ndynamic: fn(shape: Shape) -> Int {{ return shape.area() }}\napply: fn(f: fn() -> Int) -> Int {{ return f() }}\nstored: fn(f: &&fn() -> Int) -> Int {{\n    g: f\n    return g()\n}}\nrun: fn() {{}}\n")
     index: open(path).expect("effect provenance index")
     apply: index.effect_of("apply").expect("open callback effects")
     assert(!apply.maximal)
@@ -627,7 +627,7 @@ use {
     bin: OSPath.from(env.binary_path("jet"))
     help_output: Command.new(bin).arg("help").output().unwrap()
     assert(help_output.status.success())
-    help: String.from_utf8(^help_output.stdout).unwrap()
+    help: String.from_utf8(help_output.stdout.move()).unwrap()
     loop group_name in ["inspect", "registry"] {
         group: CLI.command_group(group_name).unwrap()
         group_label: CLI.command_group_label(group_name)
@@ -635,7 +635,7 @@ use {
         assert(help.contains("{group_label} Commands:\n{expected_usage}"), "jet help did not render exact {group_name} usage")
         group_help: Command.new(bin).args([group_name, "help"]).output().unwrap()
         assert(group_help.status.success())
-        assert_eq(String.from_utf8(^group_help.stdout).unwrap(), "jet {group_name} — {group.summary}\n{expected_usage}")
+        assert_eq(String.from_utf8(group_help.stdout.move()).unwrap(), "jet {group_name} — {group.summary}\n{expected_usage}")
         loop action in group.actions {
             loop usage in action.usage.lines() {
                 command: "jet {group.name} {usage}"
@@ -655,10 +655,10 @@ use {
     ] {
         grouped: Command.new(bin).args(["inspect", verb]).output().unwrap()
         assert(!grouped.status.success(), "jet inspect {verb} needs test input")
-        stderr: String.from_utf8(^grouped.stderr).unwrap()
+        stderr: String.from_utf8(grouped.stderr.move()).unwrap()
         assert(stderr.contains(handler_text), "jet inspect {verb}: {stderr}")
         bare: Command.new(bin).args([verb, "sentinel"]).output().unwrap()
         assert_eq(bare.status.code(), 2, "bare jet {verb}")
-        assert_eq(String.from_utf8(^bare.stderr).unwrap(), "Error [jet.UnknownCommand]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n")
+        assert_eq(String.from_utf8(bare.stderr.move()).unwrap(), "Error [jet.UnknownCommand]: `{verb}` moved under `jet inspect`.\n Why: infrequent commands live in a named area so daily Jet commands stay easy to scan.\n Fix: run `jet inspect {verb} sentinel`.\n")
     }
 }

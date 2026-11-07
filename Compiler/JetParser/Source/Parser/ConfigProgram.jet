@@ -23,13 +23,13 @@ jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], global
         if site.span.start < span.start || site.span.end > span.end -> return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
         index := sites.len()
         loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
-        &sites.insert(index, site)
+        sites.insert(index, site)
     }
     constants := [String: String]{}
     lines := [String]{}
     loop name in funcs.keys() {
         if funcs[name].span.start < 0 || funcs[name].span.end > bytes.len() -> next
-        &lines.push(String.from_bytes(bytes.slice(funcs[name].span.start, funcs[name].span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
+        lines.push(String.from_bytes(bytes.slice(funcs[name].span.start, funcs[name].span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
     }
     text := [String]{}
     cursor := span.start
@@ -41,16 +41,16 @@ jet_config_program: fn(expr: Expr, source: String, funcs: [String: Func], global
             value: globals[site.name]
             literal: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
             constants[site.name] = constant
-            &lines.push("{constant}: {literal}")
+            lines.push("{constant}: {literal}")
         }
-        &text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
-        &text.push(constant)
+        text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
+        text.push(constant)
         cursor = site.span.end
     }
-    &text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
+    text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
     body: text.join("")
-    &lines.push("{JET_CONFIG_VALUE_NAME}: comptime {{ {body} }}")
-    &lines.push("")
+    lines.push("{JET_CONFIG_VALUE_NAME}: comptime {{ {body} }}")
+    lines.push("")
     Ok(lines.join("\n"))
 }
 

@@ -1,0 +1,13 @@
+// Equal finite samples are an honest matched result,
+// not a universal proof.
+use testing: core.testing
+
+reference: fn(value: Dyn) -> Dyn { value.copy() }
+candidate: fn(value: Dyn) -> Dyn { value.copy() }
+
+run: fn() {
+    cases: [Dyn]{Dyn.Int(1), Dyn.Int(2)}
+    comparison: testing.compare(cases, reference, candidate, "typed_equality")
+    print(testing.status(comparison))
+    print(testing.assert_equal(comparison))
+}

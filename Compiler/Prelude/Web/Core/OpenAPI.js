@@ -1,4 +1,4 @@
-// D-WEBOPENAPI1=A: OpenAPI consumes the checked HTTPRouter route carrier.
+// OpenAPI consumes the checked HTTPRouter route carrier.
 // Visual WebRouter routes have no HTTP contract and are not accepted here.
 function jet_web_openapi_contract_fail(message) {
   jet_runtime_stop("E2805", "", 0, message);

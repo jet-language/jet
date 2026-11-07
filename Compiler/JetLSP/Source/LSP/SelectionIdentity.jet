@@ -75,9 +75,9 @@ lsp_semantic_symbol_metadata_json: fn(db: SymbolDB, symbol: SemanticSymbol) -> S
                 .Val(value) -> foundation_json_quote(value)
                 .None -> "null"
             }
-            &associated.push("{{\"name\":{foundation_json_quote(fact.name)},\"type\":{ty}}}")
+            associated.push("{{\"name\":{foundation_json_quote(fact.name)},\"type\":{ty}}}")
         }
-        &contracts.push("{{\"name\":{foundation_json_quote(contract.trait_name)},\"associated_types\":[{associated.join(",")}],\"methods\":[{lsp_json_string_array(contract.methods)}]}}")
+        contracts.push("{{\"name\":{foundation_json_quote(contract.trait_name)},\"associated_types\":[{associated.join(",")}],\"methods\":[{lsp_json_string_array(contract.methods)}]}}")
     }
     base: if def.nominal_base == {
         .Val(value) -> foundation_json_quote(value)
@@ -362,12 +362,12 @@ lsp_dotted_receiver: fn(tokens: [Token], index: Int) -> String? Never! {
     cursor := index
     loop {
         if cursor >= tokens.len() || tokens[cursor].kind != TOKEN_IDENT -> return None
-        &names.push(tokens[cursor].payload.text.copy())
+        names.push(tokens[cursor].payload.text.copy())
         dot: lsp_previous_code_token(tokens, cursor) ?? break
         if tokens[dot].kind != TOKEN_DOT -> break
         cursor = lsp_previous_code_token(tokens, dot) ?? return None
     }
-    &names.reverse()
+    names.reverse()
     Val(names.join("."))
 }
 

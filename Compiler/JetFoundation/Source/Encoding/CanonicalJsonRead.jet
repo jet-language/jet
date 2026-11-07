@@ -52,7 +52,7 @@ canonical_json_parse: fn(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
         return Err(canonical_json_error("canonical JSON must end in exactly one LF"))
     }
     parser := CanonicalJSONParser{bytes: bytes.slice(0, bytes.len() - 1), at: 0}
-    value: canonical_json_value(&parser)
+    value: canonical_json_value(parser)
     if parser.at != parser.bytes.len() {
         return Err(canonical_json_error("trailing bytes after canonical JSON value"))
     }
@@ -65,9 +65,9 @@ canonical_json_parse: fn(bytes: [U8]) -> CanonicalJSON CanonicalJSONError! {
 canonical_json_value: fn(parser: &CanonicalJSONParser) -> CanonicalJSON CanonicalJSONError! {
     byte: canonical_json_peek(parser)
     if byte == -1 -> return Err(canonical_json_error("unexpected end of JSON"))
-    if byte == 34 -> return Ok(CanonicalJSON.String(canonical_json_string(&parser)))
-    if byte == 91 -> return canonical_json_array(&parser)
-    if byte == 123 -> return canonical_json_parse_object(&parser)
+    if byte == 34 -> return Ok(CanonicalJSON.String(canonical_json_string(parser)))
+    if byte == 91 -> return canonical_json_array(parser)
+    if byte == 123 -> return canonical_json_parse_object(parser)
     if byte == 110 || byte == 116 || byte == 102 {
         word: if {
             byte == 110 -> "null"
@@ -107,18 +107,16 @@ canonical_json_value: fn(parser: &CanonicalJSONParser) -> CanonicalJSON Canonica
 }
 
 canonical_json_string: fn(parser: &CanonicalJSONParser) -> String CanonicalJSONError! {
-    if canonical_json_take(&parser) != 34 {
-        return Err(canonical_json_error("expected JSON string"))
-    }
+    if canonical_json_take(parser) != 34 -> return Err(canonical_json_error("expected JSON string"))
     out := [U8]{}
     loop {
-        byte: canonical_json_take(&parser)
+        byte: canonical_json_take(parser)
         if byte == 34 {
             return Ok(String.from_bytes(out) ?? return Err(canonical_json_error("JSON string is not UTF-8")))
         }
         if byte == -1 -> return Err(canonical_json_error("unterminated JSON string"))
         if byte == 92 {
-            escape: canonical_json_take(&parser)
+            escape: canonical_json_take(parser)
             if escape == 117 {
                 if parser.at + 4 > parser.bytes.len() {
                     return Err(canonical_json_error("short Unicode escape"))
@@ -143,15 +141,15 @@ canonical_json_string: fn(parser: &CanonicalJSONParser) -> String CanonicalJSONE
                     return Err(canonical_json_error("unpaired surrogate in JSON string"))
                 }
                 if {
-                    scalar < 128 -> &out.push(U8{scalar})
+                    scalar < 128 -> out.push(U8{scalar})
                     scalar < 2048 -> {
-                        &out.push(U8{192 + scalar /% 64})
-                        &out.push(U8{128 + scalar % 64})
+                        out.push(U8{192 + scalar /% 64})
+                        out.push(U8{128 + scalar % 64})
                     }
                     else -> {
-                        &out.push(U8{224 + scalar /% 4096})
-                        &out.push(U8{128 + (scalar /% 64) % 64})
-                        &out.push(U8{128 + scalar % 64})
+                        out.push(U8{224 + scalar /% 4096})
+                        out.push(U8{128 + (scalar /% 64) % 64})
+                        out.push(U8{128 + scalar % 64})
                     }
                 }
                 next
@@ -167,11 +165,11 @@ canonical_json_string: fn(parser: &CanonicalJSONParser) -> String CanonicalJSONE
                 else -> -1
             }
             if decoded < 0 -> return Err(canonical_json_error("invalid JSON string escape"))
-            &out.push(U8{decoded})
+            out.push(U8{decoded})
             next
         }
         if byte < 32 -> return Err(canonical_json_error("unescaped control in JSON string"))
-        &out.push(U8{byte})
+        out.push(U8{byte})
     }
 }
 
@@ -183,8 +181,8 @@ canonical_json_array: fn(parser: &CanonicalJSONParser) -> CanonicalJSON Canonica
         return Ok(CanonicalJSON.Array(values))
     }
     loop {
-        &values.push(canonical_json_value(&parser))
-        separator: canonical_json_take(&parser)
+        values.push(canonical_json_value(parser))
+        separator: canonical_json_take(parser)
         if separator == 93 -> return Ok(CanonicalJSON.Array(values))
         if separator != 44 -> return Err(canonical_json_error("invalid JSON array"))
     }
@@ -199,15 +197,15 @@ canonical_json_parse_object: fn(parser: &CanonicalJSONParser) -> CanonicalJSON C
         return Ok(CanonicalJSON.Object(values))
     }
     loop {
-        key: canonical_json_string(&parser)
-        if canonical_json_take(&parser) != 58 {
+        key: canonical_json_string(parser)
+        if canonical_json_take(parser) != 58 {
             return Err(canonical_json_error("missing JSON object colon"))
         }
-        value: canonical_json_value(&parser)
+        value: canonical_json_value(parser)
         if seen.get(key) != None -> return Err(canonical_json_error("duplicate JSON key `{key}`"))
         seen[key] = true
-        &values.push(CanonicalJSONField{key: key, value: value})
-        separator: canonical_json_take(&parser)
+        values.push(CanonicalJSONField{key: key, value: value})
+        separator: canonical_json_take(parser)
         if separator == 125 -> return canonical_json_object(values)
         if separator != 44 -> return Err(canonical_json_error("invalid JSON object"))
     }

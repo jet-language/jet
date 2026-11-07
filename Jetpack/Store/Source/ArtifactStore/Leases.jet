@@ -109,7 +109,7 @@ ArtifactLease: struct {
 }
 
 impl ArtifactLease.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         expected: self.owner_value.owner_line("lease").bytes()
         bytes: files.read_bytes(self.path_value) ?? return
         if !pkg_bytes_starts_with(bytes, 0, expected) -> return
@@ -126,7 +126,7 @@ ArtifactStoreLock: struct {
 }
 
 impl ArtifactStoreLock.Close {
-    close: fn(^self) -[FS]> {
+    close: fn(&&self) -[FS]> {
         bytes: files.read_bytes(self.path) ?? return
         if bytes != self.owner_line -> return
         files.remove(self.path) ?? return
@@ -155,7 +155,7 @@ store_artifact_parse_lease: fn(bytes: [U8]) -> ArtifactLeaseRecord? Never! {
     loop index in 1..<lines.len() {
         fields: lines[index].split("|").to_list()
         if fields.len() != 2 -> return None
-        &targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
+        targets.push(ArtifactEntryKey.parse_wire(fields[0], fields[1]) ?? return None)
     }
     Val(ArtifactLeaseRecord{owner, targets: store_artifact_unique_keys(targets)})
 }
@@ -189,12 +189,12 @@ store_artifact_lines: fn(text: String) -> [String] Never! {
     loop index in 0..<raw.len() {
         if Int.from_u8(raw[index]) != 10 -> next
         end: if index > start && Int.from_u8(raw[index - 1]) == 13 -> index - 1 else -> index
-        &lines.push(pkg_bytes_text(raw, start, end))
+        lines.push(pkg_bytes_text(raw, start, end))
         start = index + 1
     }
     if start < raw.len() {
         end: if Int.from_u8(raw[raw.len() - 1]) == 13 -> raw.len() - 1 else -> raw.len()
-        &lines.push(pkg_bytes_text(raw, start, end))
+        lines.push(pkg_bytes_text(raw, start, end))
     }
     lines
 }
@@ -239,7 +239,7 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
             .Val(record) -> {
                 if record.sequence > state.last_sequence -> state.last_sequence = record.sequence
                 if record.operation == "remove" {
-                    &state.last_use.remove(record.key.identity()).drop("a remove of an unknown key is a no-op")
+                    state.last_use.remove(record.key.identity()).drop("a remove of an unknown key is a no-op")
                 } else {
                     state.last_use[record.key.identity()] = record.sequence
                 }

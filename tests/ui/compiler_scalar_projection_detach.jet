@@ -8,16 +8,16 @@ consume_id: fn(owner: &ScalarOwner, id: Int) {
 }
 consume_parameter: fn(owner: &ScalarOwner) {
     parameter: owner.parameter.copy()
-    if parameter == .Val(id) -> consume_id(&owner, id)
+    if parameter == .Val(id) -> consume_id(owner, id)
     indexed: owner.parameters[0].copy()
-    if indexed == .Val(id) -> consume_id(&owner, id)
+    if indexed == .Val(id) -> consume_id(owner, id)
 }
 byte_count: fn(bytes: View<U8>) -> Int {
     bytes.len()
 }
 run: fn() {
     owner := ScalarOwner{parameter: Val(3), parameters: [Int?]{Val(4)}, changes: 0}
-    consume_parameter(&owner)
+    consume_parameter(owner)
     if owner.changes != 7 -> panic("detached scalar IDs changed")
     expected: Int?{Val(3)}
     if expected != (Val(3)) -> panic("optional ID comparison changed")

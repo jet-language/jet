@@ -152,48 +152,48 @@ jet_cli_bundle_parse_args: fn(args: [String]) -> JetCLIBundleOptions JetCLIBundl
         inline: if parts.sep == "" -> String?{None} else -> Val(parts.tail)
         if flag == {
             "--target" -> {
-                value: jet_cli_bundle_option_value(args, &index, flag, inline)
+                value: jet_cli_bundle_option_value(args, index, flag, inline)
                 options.target = BundleTarget.parse(value)
                 if options.target == None -> return Err(jet_cli_bundle_error("unknown package target `{value}`"))
             }
             "--kind" -> {
-                value: jet_cli_bundle_option_value(args, &index, flag, inline)
+                value: jet_cli_bundle_option_value(args, index, flag, inline)
                 options.kind = if value == {
                     "desktop" -> BundleKind.Desktop
                     "game" -> BundleKind.Game
                     else -> { return Err(jet_cli_bundle_error("unknown package kind `{value}`")) }
                 }
             }
-            "--package" -> options.package = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--name" -> options.name = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--version" -> options.version = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--executable" -> options.executable = Val(bundle_paths.of(jet_cli_bundle_option_value(args, &index, flag, inline)))
-            "--output" -> options.output = Val(bundle_paths.of(jet_cli_bundle_option_value(args, &index, flag, inline)))
-            "--icon" -> options.icon = Val(bundle_paths.of(jet_cli_bundle_option_value(args, &index, flag, inline)))
+            "--package" -> options.package = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--name" -> options.name = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--version" -> options.version = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--executable" -> options.executable = Val(bundle_paths.of(jet_cli_bundle_option_value(args, index, flag, inline)))
+            "--output" -> options.output = Val(bundle_paths.of(jet_cli_bundle_option_value(args, index, flag, inline)))
+            "--icon" -> options.icon = Val(bundle_paths.of(jet_cli_bundle_option_value(args, index, flag, inline)))
             "--icon-format" -> {
-                value: jet_cli_bundle_option_value(args, &index, flag, inline)
+                value: jet_cli_bundle_option_value(args, index, flag, inline)
                 options.icon_format = IconFormat.parse(value)
                 if options.icon_format == None -> return Err(jet_cli_bundle_error("unknown icon format `{value}`"))
             }
-            "--icon-size" -> options.icon_size = jet_cli_bundle_icon_size(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--publisher" -> options.publisher = jet_cli_bundle_option_value(args, &index, flag, inline)
-            "--description" -> options.description = jet_cli_bundle_option_value(args, &index, flag, inline)
-            "--update-channel" -> options.update_channel = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--update-url" -> options.update_url = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--source" -> options.source = Val(bundle_paths.of(jet_cli_bundle_option_value(args, &index, flag, inline)))
-            "--profile" -> options.profile = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--phase" -> options.phase = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--backend" -> options.backend = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--renderer" -> options.renderer = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--cook" | "--cook-mode" -> options.cook_mode = Val(jet_cli_bundle_option_value(args, &index, "--cook-mode", inline))
+            "--icon-size" -> options.icon_size = jet_cli_bundle_icon_size(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--publisher" -> options.publisher = jet_cli_bundle_option_value(args, index, flag, inline)
+            "--description" -> options.description = jet_cli_bundle_option_value(args, index, flag, inline)
+            "--update-channel" -> options.update_channel = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--update-url" -> options.update_url = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--source" -> options.source = Val(bundle_paths.of(jet_cli_bundle_option_value(args, index, flag, inline)))
+            "--profile" -> options.profile = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--phase" -> options.phase = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--backend" -> options.backend = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--renderer" -> options.renderer = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--cook" | "--cook-mode" -> options.cook_mode = Val(jet_cli_bundle_option_value(args, index, "--cook-mode", inline))
             "--export" -> {
-                if inline != None -> options.export_preset = Val(jet_cli_bundle_option_value(args, &index, "--export-preset", inline))
+                if inline != None -> options.export_preset = Val(jet_cli_bundle_option_value(args, index, "--export-preset", inline))
                 else -> options.phase = Val(jet_cli_bundle_append_phase(options.phase, "export"))
             }
-            "--export-preset" -> options.export_preset = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--deploy-to" -> options.deploy_to = Val(bundle_paths.of(jet_cli_bundle_option_value(args, &index, flag, inline)))
-            "--crash-reporter" -> options.crash_reporter = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
-            "--crash-consent" -> options.crash_consent = Val(jet_cli_bundle_option_value(args, &index, flag, inline))
+            "--export-preset" -> options.export_preset = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--deploy-to" -> options.deploy_to = Val(bundle_paths.of(jet_cli_bundle_option_value(args, index, flag, inline)))
+            "--crash-reporter" -> options.crash_reporter = Val(jet_cli_bundle_option_value(args, index, flag, inline))
+            "--crash-consent" -> options.crash_consent = Val(jet_cli_bundle_option_value(args, index, flag, inline))
             "--dry-run" -> options.dry_run = true
             "--explain" -> options.explain = true
             "--cancel" -> options.cancel = true
@@ -222,9 +222,9 @@ jet_cli_bundle_help: fn() -> String Never! {
 
 // Rust ensure_regular_game_file.
 jet_cli_bundle_read_regular: fn<H: JetCLIBundleHost>(host: &H, path: bundle_paths.Path, label: String) -> [U8] JetCLIBundleError! {
-    metadata: &host.metadata_no_follow(path) ?? return Err(jet_cli_bundle_error("could not inspect {label} `{path.raw}`: {err.message}"))
+    metadata: host.metadata_no_follow(path) ?? return Err(jet_cli_bundle_error("could not inspect {label} `{path.raw}`: {err.message}"))
     if metadata.symlink || !metadata.regular -> return Err(jet_cli_bundle_error("{label} `{path.raw}` is not a regular file"))
-    &host.read_bytes(path) ?? return Err(jet_cli_bundle_error("could not read {label} `{path.raw}`: {err.message}"))
+    host.read_bytes(path) ?? return Err(jet_cli_bundle_error("could not read {label} `{path.raw}`: {err.message}"))
 }
 // Rust resolve_output_path. No path canonicalization: output spelling and
 // unresolved '..' remain observable in the report.
@@ -265,7 +265,7 @@ jet_cli_bundle_build: fn<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host
     }
     target: options.target ?? return Err(jet_cli_bundle_error("`jet package` needs an explicit `--target`"))
     executable_path: options.executable ?? return Err(jet_cli_bundle_error("`jet package` needs `--executable <path>`"))
-    executable_bytes: jet_cli_bundle_read_regular<H>(&host, executable_path, "executable")
+    executable_bytes: jet_cli_bundle_read_regular<H>(host, executable_path, "executable")
     executable_name: options.name ?? bundle_paths.stem(executable_path)
     if options.name == None && executable_name == "" -> return Err(jet_cli_bundle_error("`jet package` needs a non-empty executable name"))
     package: options.package ?? executable_name
@@ -277,14 +277,14 @@ jet_cli_bundle_build: fn<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host
     spec := BundleSpec.new(options.kind, target, package, version, executable, metadata)
     input_paths := [bundle_paths.Path]{executable_path}
     if options.icon == .Val(icon_path) {
-        icon_bytes: jet_cli_bundle_read_regular<H>(&host, icon_path, "icon")
+        icon_bytes: jet_cli_bundle_read_regular<H>(host, icon_path, "icon")
         chosen: if options.icon_format == {
             .Val(declared_format) -> Val(declared_format)
             .None -> IconFormat.parse(bundle_paths.suffix(icon_path))
         }
         format: chosen ?? return Err(jet_cli_bundle_error("`jet package --icon` needs `--icon-format` when the extension is unknown"))
-        &spec.icons.push(BundleIcon.new(package, format, options.icon_size, icon_bytes).with_source(icon_path.raw))
-        &input_paths.push(icon_path)
+        spec.icons.push(BundleIcon.new(package, format, options.icon_size, icon_bytes).with_source(icon_path.raw))
+        input_paths.push(icon_path.copy())
     }
     if (options.update_channel != None) != (options.update_url != None) -> return Err(jet_cli_bundle_error("`--update-channel` and `--update-url` must be supplied together"))
     if options.update_channel == .Val(channel) {
@@ -294,12 +294,12 @@ jet_cli_bundle_build: fn<H: JetCLIBundleHost>(options: JetCLIBundleOptions, host
     plan := BundlePlan.from_spec(spec) ?? return Err(jet_cli_bundle_error(err.message()))
     // Resolve current directory only for a relative output, matching Rust.
     requested: options.output ?? bundle_paths.of(plan.artifact_name)
-    cwd: if bundle_paths.is_absolute(requested) -> bundle_paths.of("") else -> &host.current_dir() ?? return Err(jet_cli_bundle_error("could not read current directory: {err.message}"))
+    cwd: if bundle_paths.is_absolute(requested) -> bundle_paths.of("") else -> host.current_dir() ?? return Err(jet_cli_bundle_error("could not read current directory: {err.message}"))
     output: jet_cli_bundle_resolve_output(Val(requested), plan.artifact_name, cwd)
-    facts: &host.materialize(&plan, output)
+    facts: host.materialize(plan, output)
     artifact := plan.materialized_artifact(facts.sha256, facts.bytes)
-    &artifact.receipt.record_materializer(facts.materializer)
-    if facts.signing == .Val(signing) -> &artifact.receipt.record_signing(signing)
+    artifact.receipt.record_materializer(facts.materializer)
+    if facts.signing == .Val(signing) -> artifact.receipt.record_signing(signing)
     Ok(JetCLIBuiltBundle{artifact: artifact, plan: plan, input_paths: input_paths, output: output})
 }
 
@@ -324,12 +324,12 @@ jet_cli_bundle_status: fn(value: CanonicalJSON) -> JetCLIStatusValue Never! {
         .String(text) -> jet_cli_status_text(text)
         .Array(values) -> {
             rows := [JetCLIStatusValue]{}
-            loop child in values -> &rows.push(jet_cli_bundle_status(child))
+            loop child in values -> rows.push(jet_cli_bundle_status(child))
             jet_cli_status_array(rows)
         }
         .Object(values) -> {
             fields := [JetCLIStatusField]{}
-            loop field in values -> &fields.push(jet_cli_status_field(field.key, jet_cli_bundle_status(field.value)))
+            loop field in values -> fields.push(jet_cli_status_field(field.key, jet_cli_bundle_status(field.value)))
             jet_cli_status_object(fields)
         }
     }
@@ -365,7 +365,7 @@ jet_cli_bundle_report: fn(artifact: &BundleArtifact, plan: &BundlePlan, output: 
             jet_cli_status_field("plan_identity", jet_cli_status_text(plan.identity)),
             jet_cli_status_field("receipt", jet_cli_bundle_status(receipt_tree)),
             jet_cli_status_field("receipt_digest", jet_cli_status_text(receipt_digest))}
-        if explain -> &fields.push(jet_cli_status_field("explain", jet_cli_status_object([JetCLIStatusField]{
+        if explain -> fields.push(jet_cli_status_field("explain", jet_cli_status_object([JetCLIStatusField]{
             jet_cli_status_field("authority", jet_cli_status_text("checked package inputs")),
             jet_cli_status_field("cache", jet_cli_status_text("shared bundle plan identity")),
             jet_cli_status_field("execution", jet_cli_status_text(execution)),
@@ -377,8 +377,8 @@ jet_cli_bundle_report: fn(artifact: &BundleArtifact, plan: &BundlePlan, output: 
         return "{jet_cli_status_render("package", true, fields)}\n"
     }
     lines := [String]{"package plan: {plan.identity}\n", "target: {plan.target.as_str()}\n", "artifact: {artifact.artifact_name}\n", "output: {output.raw}\n", "execution: {execution}\n", "materialization: {execution}\n", "files: {artifact.files.len()}\n"}
-    if explain -> &lines.push("explain: {plan.inputs.len()} inputs, {plan.files.len()} files, checked plan\n")
-    &lines.push("receipt: {receipt_digest}\n")
+    if explain -> lines.push("explain: {plan.inputs.len()} inputs, {plan.files.len()} files, checked plan\n")
+    lines.push("receipt: {receipt_digest}\n")
     lines.join("")
 }
 // Rust run_package's parse/build/store error branches.
@@ -392,8 +392,8 @@ jet_cli_bundle_error_output: fn(message: String, machine: Bool) -> JetDriverVerb
 // intentionally handled only as a parser-global flag.
 jet_cli_bundle_run_desktop: fn<H: JetCLIBundleHost>(args: [String], options: JetCLIBundleOptions, machine: Bool, host: &H) -> JetDriverVerbOutput Never! {
     explain: options.explain
-    built := jet_cli_bundle_build<H>(options, &host) ?? return jet_cli_bundle_error_output(err.message, machine)
-    cwd: &host.current_dir() ?? return jet_cli_bundle_error_output("could not read current directory: {err.message}", machine)
-    receipt_digest: &host.record(JetCLIBundleStoreRequest{command: "package", args: args, cwd: cwd, input_paths: built.input_paths, receipt: built.artifact.receipt}) ?? return jet_cli_bundle_error_output(err.message, machine)
-    JetDriverVerbOutput{stdout: jet_cli_bundle_report(&built.artifact, &built.plan, built.output, receipt_digest, explain, machine), stderr: "", exit_code: 0}
+    built := jet_cli_bundle_build<H>(options, host) ?? return jet_cli_bundle_error_output(err.message, machine)
+    cwd: host.current_dir() ?? return jet_cli_bundle_error_output("could not read current directory: {err.message}", machine)
+    receipt_digest: host.record(JetCLIBundleStoreRequest{command: "package", args: args, cwd: cwd, input_paths: built.input_paths, receipt: built.artifact.receipt}) ?? return jet_cli_bundle_error_output(err.message, machine)
+    JetDriverVerbOutput{stdout: jet_cli_bundle_report(built.artifact, built.plan, built.output, receipt_digest, explain, machine), stderr: "", exit_code: 0}
 }

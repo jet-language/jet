@@ -1,0 +1,29 @@
+// A C library binds through `#Import c.<lib>`: each symbol gets a Jet
+// signature, so signed, unsigned, float, Bool, String and write-back `&`
+// arguments cross the C ABI as checked Jet values, with no unsafe block.
+use c: c.nativeffi
+
+#Import c.nativeffi: module {
+    negate: fn(value: I32) -> I32 = "jet_fixture_negate"
+    high_bits: fn() -> U32 = "jet_fixture_high_bits"
+    scale: fn(value: Float) -> Float = "jet_fixture_scale"
+    write: fn(value: &I32) = "jet_fixture_write"
+    float_write: fn(value: &Float) = "jet_fixture_float_write"
+    boolean: fn() -> Bool = "jet_fixture_bool"
+    text: fn(value: String) -> String = "jet_fixture_text"
+}
+
+run: fn() {
+    if (c.negate(I32{7}) != I32{-7}) -> panic("signed C result was not normalized")
+    if (c.high_bits() != U32{4275878552}) -> panic("unsigned C result was not normalized")
+    if c.scale(1.25) != 2.5 -> panic("C double did not cross xmm registers")
+    signed := I32{55}
+    c.write(signed)
+    if (signed != I32{-1234567}) -> panic("C narrow out-slot did not write back")
+    floating := Float{0.0}
+    c.float_write(floating)
+    if floating != 3.5 -> panic("C double out-slot did not write back")
+    if !c.boolean() -> panic("C bool did not cross the ABI")
+    if c.text("native C") != "native C" -> panic("C String result outlived its borrowed input")
+    print("native-c-ok")
+}

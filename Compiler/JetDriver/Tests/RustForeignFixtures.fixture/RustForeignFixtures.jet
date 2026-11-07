@@ -7,14 +7,14 @@ rust_foreign_fixture_scalar: fn(name: String, ty: Type) -> JetDriverRustForeignE
 }
 rust_foreign_fixture_facts: fn(name: String) -> JetDriverRustForeignFacts Never! {
     entries := [JetDriverRustForeignEntry]{JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "base64@0.22", declaration: rust_foreign_fixture_function(name, "base64::encode")}}
-    &entries.push(rust_foreign_fixture_scalar("identity_bool", Type.Bool))
-    &entries.push(rust_foreign_fixture_scalar("identity_char", Type.Char))
-    &entries.push(rust_foreign_fixture_scalar("identity_u32", Type.IntN{signed: false, bits: 32}))
-    &entries.push(rust_foreign_fixture_scalar("identity_f64", Type.Float))
-    &entries.push(rust_foreign_fixture_scalar("identity_f32", Type.Float32))
-    &entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "maximum", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "a", ty: Type.Int}, JetDriverRustForeignParam{convention: AccessConvention.Read, name: "b", ty: Type.Int}}, return_type: Val(Type.Int), rust_path: "std::cmp::max", generated: false, close: None}})
-    &entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "spin", params: [], return_type: None, rust_path: "std::hint::spin_loop", generated: false, close: None}})
-    &entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "panic_foreign", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "message", ty: Type.String}}, return_type: None, rust_path: "std::panic::panic_any", generated: false, close: None}})
+    entries.push(rust_foreign_fixture_scalar("identity_bool", Type.Bool))
+    entries.push(rust_foreign_fixture_scalar("identity_char", Type.Char))
+    entries.push(rust_foreign_fixture_scalar("identity_u32", Type.IntN{signed: false, bits: 32}))
+    entries.push(rust_foreign_fixture_scalar("identity_f64", Type.Float))
+    entries.push(rust_foreign_fixture_scalar("identity_f32", Type.Float32))
+    entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "maximum", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "a", ty: Type.Int}, JetDriverRustForeignParam{convention: AccessConvention.Read, name: "b", ty: Type.Int}}, return_type: Val(Type.Int), rust_path: "std::cmp::max", generated: false, close: None}})
+    entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "spin", params: [], return_type: None, rust_path: "std::hint::spin_loop", generated: false, close: None}})
+    entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "panic_foreign", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "message", ty: Type.String}}, return_type: None, rust_path: "std::panic::panic_any", generated: false, close: None}})
     JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: [String:String]{}}
 }
 run: fn() {

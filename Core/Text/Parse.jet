@@ -27,14 +27,14 @@ split: fn(text: String, sep: String) -> [String] Never! {
     i := 0
     loop i + needle.len() <= raw.len() {
         if match_at(raw, i, needle) {
-            &out.push(slice_b(raw, start, i))
+            out.push(slice_b(raw, start, i))
             i = i + needle.len()
             start = i
             next
         }
         i = i + 1
     }
-    &out.push(slice_b(raw, start, raw.len()))
+    out.push(slice_b(raw, start, raw.len()))
     out
 }
 
@@ -51,7 +51,7 @@ rsplit: fn(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     out := [String]{head}
     i = keep
     loop i < parts.len() {
-        &out.push(parts[i])
+        out.push(parts[i])
         i = i + 1
     }
     out
@@ -298,7 +298,7 @@ slice_b: fn(raw: [U8], start: Int, end: Int) -> String {
     i := start
     loop {
         if i >= end || i >= raw.len() -> return String.from_bytes(out) ?? ""
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
 }
@@ -334,8 +334,8 @@ splitlines: fn(text: String, keepends: Bool) -> [String] Never! {
             end := i
             eat := 1
             if n == 13 && i + 1 < raw.len() && raw[i + 1] == (U8{10}) -> eat = 2
-            if keepends -> &out.push(slice_b(raw, start, i + eat)) else {
-                &out.push(slice_b(raw, start, end))
+            if keepends -> out.push(slice_b(raw, start, i + eat)) else {
+                out.push(slice_b(raw, start, end))
             }
             i = i + eat
             start = i
@@ -343,7 +343,7 @@ splitlines: fn(text: String, keepends: Bool) -> [String] Never! {
         }
         i = i + 1
     }
-    if start <= raw.len() -> &out.push(slice_b(raw, start, raw.len()))
+    if start <= raw.len() -> out.push(slice_b(raw, start, raw.len()))
     out
 }
 
@@ -413,7 +413,7 @@ capitalize: fn(text: String) -> String Never! {
     out := [U8]{first}
     i := 1
     loop i < raw.len() {
-        &out.push(ascii_case(raw[i], false))
+        out.push(ascii_case(raw[i], false))
         i = i + 1
     }
     String.from_bytes(out) ?? text
@@ -427,10 +427,10 @@ title: fn(text: String) -> String Never! {
         n: b
         letter := (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
         if letter {
-            &out.push(ascii_case(b, word))
+            out.push(ascii_case(b, word))
             word = false
         } else {
-            &out.push(b)
+            out.push(b)
             word = true
         }
     }
@@ -453,9 +453,9 @@ swapcase: fn(text: String) -> String Never! {
     loop b in text.bytes() {
         n: b
         if {
-            n >= 65 && n <= 90 -> { &out.push(U8{n + 32}) }
-            n >= 97 && n <= 122 -> { &out.push(U8{n - 32}) }
-            else -> { &out.push(b) }
+            n >= 65 && n <= 90 -> { out.push(U8{n + 32}) }
+            n >= 97 && n <= 122 -> { out.push(U8{n - 32}) }
+            else -> { out.push(b) }
         }
     }
     String.from_bytes(out) ?? text
@@ -465,7 +465,7 @@ lower: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: b
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(b)
+        if n >= 65 && n <= 90 -> out.push(U8{n + 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
 }
@@ -474,7 +474,7 @@ upper: fn(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n: b
-        if n >= 97 && n <= 122 -> &out.push(U8{n - 32}) else -> &out.push(b)
+        if n >= 97 && n <= 122 -> out.push(U8{n - 32}) else -> out.push(b)
     }
     String.from_bytes(out) ?? text
 }
@@ -665,7 +665,7 @@ split_ws: fn(text: String) -> [String] Never! {
         if {
             space -> {
                 if start >= 0 {
-                    &out.push(slice_b(raw, start, i))
+                    out.push(slice_b(raw, start, i))
                     start = -1
                 }
             }
@@ -684,17 +684,17 @@ unescape_c: fn(text: String) -> String Never! {
         if raw[i] == (U8{92}) && i + 1 < raw.len() {
             n: raw[i + 1]
             if {
-                n == 110 -> { &out.push(U8{10}) }
-                n == 116 -> { &out.push(U8{9}) }
-                n == 114 -> { &out.push(U8{13}) }
-                n == 92 -> { &out.push(U8{92}) }
-                n == 34 -> { &out.push(U8{34}) }
-                else -> { &out.push(raw[i + 1]) }
+                n == 110 -> { out.push(U8{10}) }
+                n == 116 -> { out.push(U8{9}) }
+                n == 114 -> { out.push(U8{13}) }
+                n == 92 -> { out.push(U8{92}) }
+                n == 34 -> { out.push(U8{34}) }
+                else -> { out.push(raw[i + 1]) }
             }
             i = i + 2
             next
         }
-        &out.push(raw[i])
+        out.push(raw[i])
         i = i + 1
     }
     String.from_bytes(out) ?? text

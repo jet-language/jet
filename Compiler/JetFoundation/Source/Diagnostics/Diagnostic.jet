@@ -137,7 +137,7 @@ Diagnostic: struct {
     nearest_granting_scope: String?{None}
 }
 
-diagnostic_with_source_path: fn(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
+diagnostic_with_source_path: fn(diagnostic: &&Diagnostic, source_path: String, aggregate_source_offset: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -145,7 +145,7 @@ diagnostic_with_source_path: fn(diagnostic: ^Diagnostic, source_path: String, ag
     updated
 }
 
-diagnostic_with_source_mapping: fn(diagnostic: ^Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
+diagnostic_with_source_mapping: fn(diagnostic: &&Diagnostic, source_path: String, aggregate_source_offset: Int, source_start: Int) -> Diagnostic Never! {
     updated := diagnostic
     updated.source_path = Val(source_path)
     updated.source_offset = Val(aggregate_source_offset)
@@ -158,25 +158,25 @@ diagnostic_with_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> Diagnostic N
     diagnostic_registry_with_edit(diagnostic.copy(), edit)
 }
 
-diagnostic_with_moment: fn(diagnostic: ^Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
+diagnostic_with_moment: fn(diagnostic: &&Diagnostic, moment: DiagnosticMoment) -> Diagnostic Never! {
     updated := diagnostic
     updated.moment = moment
     updated
 }
 
-diagnostic_with_origin: fn(diagnostic: ^Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
+diagnostic_with_origin: fn(diagnostic: &&Diagnostic, origin: DiagnosticOrigin) -> Diagnostic Never! {
     updated := diagnostic
     updated.origin = Val(origin)
     updated
 }
 
-diagnostic_with_cause: fn(diagnostic: ^Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
+diagnostic_with_cause: fn(diagnostic: &&Diagnostic, cause: DiagnosticCause) -> Diagnostic Never! {
     updated := diagnostic
-    &updated.cause.push(cause)
+    updated.cause.push(cause.copy())
     updated
 }
 
-diagnostic_with_causes: fn(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
+diagnostic_with_causes: fn(diagnostic: &&Diagnostic, causes: [DiagnosticCause]) -> Diagnostic Never! {
     updated := diagnostic
     updated.cause = causes
     updated
@@ -184,10 +184,10 @@ diagnostic_with_causes: fn(diagnostic: ^Diagnostic, causes: [DiagnosticCause]) -
 
 // Put the nearest wrapped report first, followed by its own causes in their
 // existing order.
-diagnostic_caused_by: fn(diagnostic: ^Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
+diagnostic_caused_by: fn(diagnostic: &&Diagnostic, cause: Diagnostic) -> Diagnostic Never! {
     updated := diagnostic
-    &updated.cause.push(DiagnosticCause{code: cause.code.copy(), span: cause.span, origin: cause.origin.copy()})
-    loop link in cause.cause -> &updated.cause.push(link.copy())
+    updated.cause.push(DiagnosticCause{code: cause.code.copy(), span: cause.span, origin: cause.origin.copy()})
+    loop link in cause.cause -> updated.cause.push(link.copy())
     updated
 }
 
@@ -208,7 +208,7 @@ diagnostic_cause_is_pending: fn(diagnostic: Diagnostic, pending: [Diagnostic]) -
 // Put root diagnostics before reports that name them as causes. The stable pass
 // keeps source order among independent reports and breaks a cycle by leaving
 // the remaining reports in their original order.
-diagnostic_order_root_first: fn(diagnostics: ^[Diagnostic]) -> [Diagnostic] Never! {
+diagnostic_order_root_first: fn(diagnostics: &&[Diagnostic]) -> [Diagnostic] Never! {
     pending := diagnostics
     ordered := [Diagnostic]{}
     loop pending.len() > 0 {
@@ -220,18 +220,18 @@ diagnostic_order_root_first: fn(diagnostics: ^[Diagnostic]) -> [Diagnostic] Neve
             }
         }
         if next < 0 {
-            loop rest in pending -> &ordered.push(rest.copy())
+            loop rest in pending -> ordered.push(rest.copy())
             break
         }
-        root: &pending.remove(next, .Slot) ?? panic("root-first ordering selected a pending diagnostic")
-        &ordered.push(root)
+        root: pending.remove(next, .Slot) ?? panic("root-first ordering selected a pending diagnostic")
+        ordered.push(root)
     }
     ordered
 }
 
-diagnostic_with_label: fn(diagnostic: ^Diagnostic, span: Span, message: String) -> Diagnostic Never! {
+diagnostic_with_label: fn(diagnostic: &&Diagnostic, span: Span, message: String) -> Diagnostic Never! {
     updated := diagnostic
-    &updated.labels.push(DiagnosticLabel{span: span, message: message})
+    updated.labels.push(DiagnosticLabel{span: span, message: message})
     updated
 }
 
@@ -261,25 +261,25 @@ diagnostic_with_alternative_edit: fn(diagnostic: Diagnostic, edit: TextEdit) -> 
     diagnostic_registry_with_alternative_edit(diagnostic.copy(), edit)
 }
 
-diagnostic_with_no_fix_reason: fn(diagnostic: ^Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
+diagnostic_with_no_fix_reason: fn(diagnostic: &&Diagnostic, reason: DiagnosticNoFixReason) -> Diagnostic Never! {
     updated := diagnostic
     updated.no_fix_reason = Val(reason)
     updated
 }
 
-diagnostic_with_detail: fn(diagnostic: ^Diagnostic, detail: String) -> Diagnostic Never! {
+diagnostic_with_detail: fn(diagnostic: &&Diagnostic, detail: String) -> Diagnostic Never! {
     updated := diagnostic
     updated.detail = Val(detail)
     updated
 }
 
-diagnostic_with_structured: fn(diagnostic: ^Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
+diagnostic_with_structured: fn(diagnostic: &&Diagnostic, structured: DiagnosticStructured) -> Diagnostic Never! {
     updated := diagnostic
     updated.structured = Val(structured)
     updated
 }
 
-diagnostic_with_rights: fn(diagnostic: ^Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
+diagnostic_with_rights: fn(diagnostic: &&Diagnostic, denial_kind: String, call_chain: [String], scope_chain: [String], nearest_granting_scope: String?) -> Diagnostic Never! {
     updated := diagnostic
     updated.denial_kind = Val(denial_kind)
     updated.call_chain = call_chain

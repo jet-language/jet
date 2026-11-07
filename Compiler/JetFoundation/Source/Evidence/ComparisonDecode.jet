@@ -118,7 +118,7 @@ comparison_json_strings: fn(value: CanonicalJSON, key: String) -> [String] Compa
     result := [String]{}
     loop child in comparison_json_array(value, key) {
         if child == {
-            .String(text) -> &result.push(text)
+            .String(text) -> result.push(text)
             else -> return Err(comparison_decode_error("comparison field `{key}` entries must be strings"))
         }
     }
@@ -173,7 +173,7 @@ comparison_record_from_json: fn(value: CanonicalJSON) -> ComparisonRecord Compar
     status: comparison_parse_status(comparison_json_text(value, "status"))
     relation: comparison_parse_relation(comparison_json_text(value, "relation"))
     samples := [ComparisonSample]{}
-    loop (index, child) in comparison_json_array(value, "samples") -> &samples.push(comparison_sample_from_json(child, index))
+    loop (index, child) in comparison_json_array(value, "samples") -> samples.push(comparison_sample_from_json(child, index))
     discarded: comparison_parse_unsigned(comparison_json_integer(value, "discarded_cases"), 18446744073709551615, "comparison discarded_cases is not a valid usize")
     first_difference := Int?{None}
     if comparison_json_optional_integer(value, "first_difference") == .Val(text) {

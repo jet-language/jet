@@ -8,7 +8,7 @@ Primitive probe: cross-cutting; you test whether library code can do this and wh
 
 ## Build this
 
-Build, as library Jet: a 48 kHz audio callback that must fill 256-sample buffers on time (use a real device if the host has one, else a timer-driven fake device), a 1 kHz control loop with a deadline check, and a report of missed deadlines and jitter over 10 seconds. Try to make the callback allocation-free and lock-free. Use Examples/features/time/**, concurrency/**, memory/**, lowlevel/**.
+Build, as library Jet: a 48 kHz audio callback that must fill 256-sample buffers on time (use a real device if the host has one, else a timer-driven fake device), a 1 kHz control loop with a deadline check, and a report of missed deadlines and jitter over 10 seconds. Try to make the callback allocation-free and lock-free. Use Examples/Systems/Time/**, concurrency/**, memory/**, lowlevel/**.
 
 ## Answer these
 

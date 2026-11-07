@@ -15,24 +15,24 @@ ImagePushDestination: enum {
 // out of the image.
 cli_record_omitted_secret_integration_projection: fn(projection: &ProjectionReport, integration: EnvironmentIntegration) Never! {
     prefix: "integration:{integration.kind.as_str()}"
-    &projection.omitted.push("{prefix}:activation")
-    loop task_name in integration.tasks -> &projection.omitted.push("{prefix}:task:{task_name}")
-    loop provider in integration.providers -> &projection.omitted.push("{prefix}:provider:{provider}")
-    loop grant in integration.grants -> &projection.omitted.push("{prefix}:grant:{grant}")
-    loop host_check in integration.host_checks -> &projection.omitted.push("{prefix}:host-check:{host_check}")
+    projection.omitted.push("{prefix}:activation")
+    loop task_name in integration.tasks -> projection.omitted.push("{prefix}:task:{task_name}")
+    loop provider in integration.providers -> projection.omitted.push("{prefix}:provider:{provider}")
+    loop grant in integration.grants -> projection.omitted.push("{prefix}:grant:{grant}")
+    loop host_check in integration.host_checks -> projection.omitted.push("{prefix}:host-check:{host_check}")
     if integration.options.len() > 0 {
         keys := integration.options.keys().to_list()
-        &keys.sort()
-        &projection.omitted.push("{prefix}:option-keys={keys.join(",")}")
+        keys.sort()
+        projection.omitted.push("{prefix}:option-keys={keys.join(",")}")
     }
-    if integration.secrets.len() > 0 -> &projection.omitted.push("{prefix}:secret-refs={integration.secrets.len()}")
+    if integration.secrets.len() > 0 -> projection.omitted.push("{prefix}:secret-refs={integration.secrets.len()}")
 }
 
 // The declared images, for a refusal's Why text.
 cli_declared_images: fn(plan: EnvPlan) -> String Never! {
     if plan.images.len() == 0 -> return "no `image.<name>` is declared in {ENV_FILE}."
     names := [String]{}
-    loop image in plan.images -> &names.push(image.name)
+    loop image in plan.images -> names.push(image.name)
     "declared images: {names.join(", ")}."
 }
 
@@ -83,7 +83,7 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
     // `.jet/build/<name>` output; environment images consume verified
     // Hangar package outputs instead.
     root_cache := WorkspaceDeclarationCache.new()
-    project_root: jet_cli_selected_project_root(&root_cache, dir) ?? {
+    project_root: jet_cli_selected_project_root(root_cache, dir) ?? {
         theme.error("couldn't resolve the image project root", "{err.diagnostic.what}: {err.diagnostic.why}", "repair the package/workspace authority and retry the image build")
         return EXIT_USAGE
     }
@@ -91,19 +91,19 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
     out_dir: files.join(files.join(files.join(project_root, ".jet"), "images"), name)
     projection := ProjectionReport.empty()
     if !image.from_environment && image.services.len() > 0 {
-        &projection.rejected.push("services")
+        projection.rejected.push("services")
         cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
         theme.error_coded("E1336", "package image {name} cannot project services", "services is an environment projection field, not a package-image input", "use `from: env.<name>` for a supervised environment image, or remove `services:`")
         return EXIT_USAGE
     }
     if image.from_environment && image.services.len() == 0 && plan.dev_services.len() > 0 {
-        &projection.rejected.push("services")
+        projection.rejected.push("services")
         if cli_write_rejected_projection(out_dir, projection) == {
             .Err(error) -> theme.error("couldn't write image {name} rejection projection", error.message(), "check that the image output directory is writable.")
             .Ok(_) -> {}
         }
         quoted := [String]{}
-        loop service in plan.dev_services -> &quoted.push("\"{service.name}\"")
+        loop service in plan.dev_services -> quoted.push("\"{service.name}\"")
         theme.error_coded("E1336", "environment image {name} cannot project services", "the environment declares services but the image does not select them; Jet will not silently omit supervised service facts", "add `services: [{quoted.join(", ")}]` to the image, or remove the service from the environment")
         return EXIT_USAGE
     }
@@ -112,7 +112,7 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         loop integration in plan.integrations {
             if integration.validate_target(image_platform) == {
                 .Err(error) -> {
-                    &projection.rejected.push("integration:{integration.kind.as_str()}:host")
+                    projection.rejected.push("integration:{integration.kind.as_str()}:host")
                     cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
                     theme.error_coded("E1333", "environment image {name} cannot project this integration", error.message, "choose a matching image target or remove the integration from the environment")
                     return EXIT_USAGE
@@ -129,7 +129,7 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
                 else -> None
             }
             if unsupported == .Val(error) {
-                &projection.rejected.push("language:{language.pack.name}:facts")
+                projection.rejected.push("language:{language.pack.name}:facts")
                 cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
                 theme.error_coded("E1333", "environment image {name} cannot project this language pack", error, "choose a supported language pack and image target with an admitted license and complete tool mapping")
                 return EXIT_USAGE
@@ -138,29 +138,29 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
     }
     layer_files := [LayerFile]{}
     if image.from_environment {
-        layer_files = cli_environment_image_files(&verification, theme, roots, plan, name, image_platform, &projection)
+        layer_files = cli_environment_image_files(verification, theme, roots, plan, name, image_platform, projection)
     } else {
         build_dir: files.join(files.join(project_root, ".jet"), "build")
         bin_data: cli_read_project_image_file(build_dir, image.from) ?? {
             theme.error("{image.from} isn't built yet", "jet image {name} needs {image.from} already built at {files.join(build_dir, image.from)}.", "run jet build first, then jet image {name}")
             return EXIT_USAGE
         }
-        &layer_files.push(LayerFile{path: "usr/local/bin/{image.from}", data: bin_data, mode: 493})
+        layer_files.push(LayerFile{path: "usr/local/bin/{image.from}", data: bin_data, mode: 493})
     }
     if image.from_environment {
-        cli_record_environment_projection(&projection, plan)
+        cli_record_environment_projection(projection, plan)
     } else {
-        &projection.included.push("package:{image.from}")
+        projection.included.push("package:{image.from}")
     }
-    loop env_var in image.env_vars -> &projection.changed.push("env:{env_var.key}")
-    if image.expose.len() > 0 -> &projection.changed.push("expose")
-    if image.target == .Val(target) -> &projection.changed.push("platform:{target}")
-    if image.base != None -> &projection.changed.push("base")
-    if image.user != None -> &projection.changed.push("user")
-    if image.health != None -> &projection.changed.push("health")
-    if image.entrypoint != None -> &projection.changed.push("entrypoint")
+    loop env_var in image.env_vars -> projection.changed.push("env:{env_var.key}")
+    if image.expose.len() > 0 -> projection.changed.push("expose")
+    if image.target == .Val(target) -> projection.changed.push("platform:{target}")
+    if image.base != None -> projection.changed.push("base")
+    if image.user != None -> projection.changed.push("user")
+    if image.health != None -> projection.changed.push("health")
+    if image.entrypoint != None -> projection.changed.push("entrypoint")
     if layer_files.len() == 0 {
-        &projection.rejected.push("environment.package-output")
+        projection.rejected.push("environment.package-output")
         if cli_write_rejected_projection(out_dir, projection) == {
             .Err(error) -> theme.error("couldn't write image {name} rejection projection", error.message(), "check that the image output directory is writable.")
             .Ok(_) -> {}
@@ -168,13 +168,13 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         return EXIT_USAGE
     }
     loop relative in image.files {
-        extra: cli_image_extra_file(theme, name, dir, plan, image.from_environment, relative, layer_files, &projection, out_dir) ?? return EXIT_USAGE
-        &layer_files.push(extra)
+        extra: cli_image_extra_file(theme, name, dir, plan, image.from_environment, relative, layer_files, projection, out_dir) ?? return EXIT_USAGE
+        layer_files.push(extra)
     }
     services := ImageServiceProjection{commands: [[String]]{}, names: [String]{}}
     if image.from_environment {
         services = cli_image_service_commands(plan, image, layer_files) ?? {
-            &projection.rejected.push("services")
+            projection.rejected.push("services")
             cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
             theme.error_coded("E1336", "environment image {name} cannot supervise its services", err.message(), "give each selected service a projected executable and a supported foreground run command")
             return EXIT_USAGE
@@ -191,28 +191,28 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
             }
             kept := [String]{}
             loop fact in projection.included {
-                if fact != "file:{conflicting_path}" -> &kept.push(fact)
+                if fact != "file:{conflicting_path}" -> kept.push(fact)
             }
             projection.included = kept
-            &projection.rejected.push("file:{conflicting_path}")
+            projection.rejected.push("file:{conflicting_path}")
             cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
             theme.error_coded("E1336", "environment image {name} cannot project extra file `{conflicting_path}`", "the extra file conflicts with the generated service supervisor", "choose an extra file path that does not replace a service projection")
             return EXIT_USAGE
         }
-        &layer_files.push(LayerFile{path: "jet/supervise", data: cli_supervisor_script(services.commands).bytes(), mode: 493})
-        &projection.included.push("services:jet/supervise")
-        &projection.changed.push("services:{services.names.join(",")}")
+        layer_files.push(LayerFile{path: "jet/supervise", data: cli_supervisor_script(services.commands).bytes(), mode: 493})
+        projection.included.push("services:jet/supervise")
+        projection.changed.push("services:{services.names.join(",")}")
         loop service in plan.dev_services {
             if !services.names.contains(service.name) {
-                &projection.omitted.push("service:{service.name}")
+                projection.omitted.push("service:{service.name}")
                 next
             }
-            &projection.included.push("service:{service.name}")
-            if service.after.len() > 0 -> &projection.changed.push("service:{service.name}:after={services_dependency_names(service).join(",")}")
+            projection.included.push("service:{service.name}")
+            if service.after.len() > 0 -> projection.changed.push("service:{service.name}:after={services_dependency_names(service).join(",")}")
             if service.ports.len() == 0 {
-                &projection.omitted.push("service:{service.name}:ports-default")
+                projection.omitted.push("service:{service.name}:ports-default")
             } else {
-                &projection.changed.push("service:{service.name}:ports")
+                projection.changed.push("service:{service.name}:ports")
             }
         }
     }
@@ -227,9 +227,9 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         healthcheck: image.health,
     }
     layer_paths := [String]{}
-    loop file in spec.files -> &layer_paths.push(file.path)
+    loop file in spec.files -> layer_paths.push(file.path)
     env_keys := [String]{}
-    loop env_var in image.env_vars -> &env_keys.push(env_var.key)
+    loop env_var in image.env_vars -> env_keys.push(env_var.key)
     projection_plan: ProjectionPlan{
         source: if image.from_environment -> "env:{image.from}" else -> "package:{image.from}",
         platform: spec.platform,
@@ -339,34 +339,34 @@ cli_image_base_directory: fn(theme: Theme, dir: String, base: String?) -[IO, FS,
 // The projection facts of an environment image: what the image includes,
 // changes, and omits relative to the environment.
 cli_record_environment_projection: fn(projection: &ProjectionReport, plan: EnvPlan) Never! {
-    loop value in plan.package_refs -> &projection.included.push("package:{value}")
-    &projection.included.push("environment:shell")
-    &projection.changed.push("from:environment")
-    if plan.secrets.len() > 0 -> &projection.omitted.push("environment.secrets")
-    if plan.source_files.len() > 0 -> &projection.omitted.push("environment.source-files")
-    if plan.environment_reads.len() > 0 -> &projection.omitted.push("environment.reads")
-    if plan.adapters.len() > 0 -> &projection.omitted.push("environment.adapters")
-    if plan.prompt != None -> &projection.omitted.push("environment.prompt")
-    if plan.package_profiles.len() > 0 -> &projection.omitted.push("environment.package-profiles")
+    loop value in plan.package_refs -> projection.included.push("package:{value}")
+    projection.included.push("environment:shell")
+    projection.changed.push("from:environment")
+    if plan.secrets.len() > 0 -> projection.omitted.push("environment.secrets")
+    if plan.source_files.len() > 0 -> projection.omitted.push("environment.source-files")
+    if plan.environment_reads.len() > 0 -> projection.omitted.push("environment.reads")
+    if plan.adapters.len() > 0 -> projection.omitted.push("environment.adapters")
+    if plan.prompt != None -> projection.omitted.push("environment.prompt")
+    if plan.package_profiles.len() > 0 -> projection.omitted.push("environment.package-profiles")
     lifecycle: plan.lifecycle
     if lifecycle.dotenv.len() > 0 || lifecycle.unset.len() > 0 || lifecycle.on_enter.len() > 0 || lifecycle.checks.len() > 0 || lifecycle.git_hooks_path != None || lifecycle.reload_explicit {
-        &projection.omitted.push("environment.lifecycle")
+        projection.omitted.push("environment.lifecycle")
     }
-    if plan.files.len() > 0 -> &projection.omitted.push("environment.managed-files")
-    if plan.integrations.len() > 0 -> &projection.omitted.push("environment.integrations")
+    if plan.files.len() > 0 -> projection.omitted.push("environment.managed-files")
+    if plan.integrations.len() > 0 -> projection.omitted.push("environment.integrations")
     loop integration in plan.integrations {
         if integration.kind == IntegrationKind.CloudCredentials || integration.kind == IntegrationKind.Vault {
-            cli_record_omitted_secret_integration_projection(&projection, integration)
+            cli_record_omitted_secret_integration_projection(projection, integration)
         }
     }
     loop language in plan.language_projections {
         prefix: "language:{language.selection.name}"
-        &projection.changed.push("{prefix}:pack={language.pack.fingerprint()}")
-        loop fact in language.included -> &projection.included.push("{prefix}:included:{fact}")
-        loop fact in language.changed -> &projection.changed.push("{prefix}:changed:{fact}")
-        loop fact in language.omitted -> &projection.omitted.push("{prefix}:omitted:{fact}")
+        projection.changed.push("{prefix}:pack={language.pack.fingerprint()}")
+        loop fact in language.included -> projection.included.push("{prefix}:included:{fact}")
+        loop fact in language.changed -> projection.changed.push("{prefix}:changed:{fact}")
+        loop fact in language.omitted -> projection.omitted.push("{prefix}:omitted:{fact}")
     }
-    if plan.presets.len() > 0 -> &projection.omitted.push("environment.presets")
+    if plan.presets.len() > 0 -> projection.omitted.push("environment.presets")
 }
 
 // One extra `files:` entry as a layer file; a refusal is recorded, rendered,
@@ -374,32 +374,32 @@ cli_record_environment_projection: fn(projection: &ProjectionReport, plan: EnvPl
 cli_image_extra_file: fn(theme: Theme, name: String, dir: String, plan: EnvPlan, from_environment: Bool, relative: String, layer_files: [LayerFile], projection: &ProjectionReport, out_dir: String) -[IO, FS, Env, Time.Wait, Rand]> LayerFile? Never! {
     if from_environment {
         if cli_environment_image_file_rejection(plan, relative) == .Val(error) {
-            &projection.rejected.push("file:{relative}")
+            projection.rejected.push("file:{relative}")
             cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
             theme.error_coded("E1336", "environment image {name} cannot project extra file `{relative}`", error, "choose a regular, project-relative, non-secret file that is not an environment input")
             return None
         }
     }
     layer_path: cli_normalize_project_relative_image_path(relative) ?? {
-        cli_reject_image_file(theme, name, from_environment, relative, err.message(), &projection, out_dir, "use a regular, project-relative, non-secret file that stays inside the project root", "use a regular project-relative file that stays inside the project root.")
+        cli_reject_image_file(theme, name, from_environment, relative, err.message(), projection, out_dir, "use a regular, project-relative, non-secret file that stays inside the project root", "use a regular project-relative file that stays inside the project root.")
         return None
     }
     data: cli_read_project_image_file(dir, layer_path) ?? {
-        cli_reject_image_file(theme, name, from_environment, relative, err.message(), &projection, out_dir, "use a regular project-relative, non-secret file that stays inside the project root", "use a regular project-relative file that stays inside the project root.")
+        cli_reject_image_file(theme, name, from_environment, relative, err.message(), projection, out_dir, "use a regular project-relative, non-secret file that stays inside the project root", "use a regular project-relative file that stays inside the project root.")
         return None
     }
     if from_environment && cli_image_layer_path_conflicts(layer_files, layer_path) {
-        &projection.rejected.push("file:{layer_path}")
+        projection.rejected.push("file:{layer_path}")
         cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
         theme.error_coded("E1336", "environment image {name} cannot project extra file `{relative}`", "the extra file conflicts with another projected image path", "choose an extra file path that does not replace a package, shell, or service projection")
         return None
     }
-    &projection.included.push("file:{layer_path}")
+    projection.included.push("file:{layer_path}")
     Val(LayerFile{path: layer_path, data: data, mode: 420})
 }
 
 cli_reject_image_file: fn(theme: Theme, name: String, from_environment: Bool, relative: String, error: String, projection: &ProjectionReport, out_dir: String, environment_fix: String, package_fix: String) Never! -[IO, FS, Env, Time.Wait, Rand]> {
-    &projection.rejected.push("file:{relative}")
+    projection.rejected.push("file:{relative}")
     cli_write_rejected_projection(out_dir, projection).drop("the rejection projection is best-effort")
     if from_environment {
         theme.error_coded("E1336", "environment image {name} cannot project extra file `{relative}`", error, environment_fix)
@@ -428,7 +428,7 @@ cli_normalize_project_relative_image_path: fn(relative: String) -> String CLIErr
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
         if part == ".." -> return Err(unsafe_path)
-        &components.push(part)
+        components.push(part)
     }
     if components.len() == 0 -> return Err(CLIError.InvalidData("image files must name a regular project file"))
     normalized: components.join("/")
@@ -468,7 +468,7 @@ cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [La
     selected := [DevServicePlan]{}
     names := [String]{}
     visiting := [String]{}
-    loop service_name in image.services -> cli_collect_image_service(service_name, plan.dev_services, &selected, &names, &visiting)
+    loop service_name in image.services -> cli_collect_image_service(service_name, plan.dev_services, selected, names, visiting)
     order: services_dependency_order(selected) ?? return Err(CLIError.InvalidData(err.message))
     commands := [[String]]{}
     loop index in order {
@@ -489,7 +489,7 @@ cli_image_service_commands: fn(plan: EnvPlan, image: ImagePlan, layer_files: [La
         }
         if !present -> return Err(CLIError.InvalidData("service {service.name} executable {executable} is not a projected package"))
         command[0] = path
-        &commands.push(command)
+        commands.push(command)
     }
     if commands.len() > 0 {
         has_sleep := false
@@ -519,18 +519,18 @@ cli_image_service_executable: fn(service: String, executable: String) -> String 
 cli_collect_image_service: fn(name: String, plans: [DevServicePlan], selected: &[DevServicePlan], names: &[String], visiting: &[String]) CLIError! {
     if names.contains(name) -> return
     if visiting.contains(name) -> return Err(CLIError.InvalidData("service dependency cycle includes `{name}`"))
-    &visiting.push(name)
+    visiting.push(name.copy())
     found := DevServicePlan?{None}
     loop candidate in plans {
         if candidate.name == name && found == None -> found = Val(candidate)
     }
     service: found ?? return Err(CLIError.InvalidData("service {name} is not declared by the environment"))
     if !service.enable -> return Err(CLIError.InvalidData("service {name} is disabled"))
-    loop dependency in services_dependency_names(service) -> cli_collect_image_service(dependency, plans, &selected, &names, &visiting)
+    loop dependency in services_dependency_names(service) -> cli_collect_image_service(dependency, plans, selected, names, visiting)
     // Depth-first: every dependency finished, so `name` is the newest visit.
-    _ := &visiting.pop()
-    &selected.push(service)
-    &names.push(name)
+    _ := visiting.pop()
+    selected.push(service)
+    names.push(name.copy())
 }
 
 // The `/jet/supervise` script: start every service, stop them all when one
@@ -554,15 +554,15 @@ cli_supervisor_script: fn(commands: [[String]]) -> String Never! {
     }
     loop command in commands {
         quoted := [String]{"start"}
-        loop argument in command -> &quoted.push(cli_shell_quote(argument))
-        &lines.push(quoted.join(" "))
+        loop argument in command -> quoted.push(cli_shell_quote(argument))
+        lines.push(quoted.join(" "))
     }
-    &lines.push("while :; do")
-    &lines.push("  for pid in $pids; do")
-    &lines.push("    kill -0 \"$pid\" 2>/dev/null || exit 1")
-    &lines.push("  done")
-    &lines.push("  /usr/local/bin/sleep 1")
-    &lines.push("done")
+    lines.push("while :; do")
+    lines.push("  for pid in $pids; do")
+    lines.push("    kill -0 \"$pid\" 2>/dev/null || exit 1")
+    lines.push("  done")
+    lines.push("  /usr/local/bin/sleep 1")
+    lines.push("done")
     "{lines.join("\n")}\n"
 }
 
@@ -576,31 +576,31 @@ cli_shell_quote: fn(value: String) -> String Never! {
 cli_environment_image_files: fn(verification: &StoreVerification, theme: Theme, roots: HangarRoots, plan: EnvPlan, name: String, target: String, projection: &ProjectionReport) -[IO, FS, Env, Time, Time.Wait]> [LayerFile] Never! {
     package_refs := [String]{}
     loop reference in plan.package_refs {
-        if !package_refs.contains(reference) -> &package_refs.push(reference)
+        if !package_refs.contains(reference) -> package_refs.push(reference.copy())
     }
-    &package_refs.sort()
+    package_refs.sort()
     layer_files := [LayerFile]{}
     shell_source := [U8]?{None}
     loop reference in package_refs {
-        entry: store_find_by_reference(&verification, roots, reference) ?? {
+        entry: store_find_by_reference(verification, roots, reference) ?? {
             theme.error_coded("E1336", "environment package `{reference}` is not realized", "environment images consume the verified Hangar package output; they do not read a project build scratch file", "run `jetpack use {reference} --prep`, then `jet image {name}`")
             return [LayerFile]{}
         }
-        if cli_verify_realized_hangar_package(&verification, roots, entry) == .Err(error) {
+        if cli_verify_realized_hangar_package(verification, roots, entry) == .Err(error) {
             theme.error_coded("E1336", "environment package `{reference}` failed Hangar verification", error.message(), "realize a verified executable package for `{reference}`, then run `jet image {name}`")
             return [LayerFile]{}
         }
-        &projection.included.push("hangar:content:{entry.envelope.output_hash}")
-        if entry.envelope.platform != "" -> &projection.included.push("hangar:platform:{entry.envelope.platform}")
+        projection.included.push("hangar:content:{entry.envelope.output_hash}")
+        if entry.envelope.platform != "" -> projection.included.push("hangar:platform:{entry.envelope.platform}")
         if !cli_hangar_platform_matches(target, entry.envelope.platform) {
-            &projection.rejected.push("package:{reference}:platform")
+            projection.rejected.push("package:{reference}:platform")
             realized_platform: if entry.envelope.platform == "" -> "no declared platform" else -> entry.envelope.platform
             theme.error_coded("E1336", "environment image `{name}` cannot project package `{reference}`", "the verified Hangar output platform is `{realized_platform}`, but the image platform is `{target}`", "realize the environment package for the image target, or choose a matching `target`")
             return [LayerFile]{}
         }
-        &projection.included.push("hangar:provenance")
-        &projection.changed.push("hangar:cache")
-        &projection.changed.push("hangar:signing:{if entry.envelope.signature == "" -> "unsigned" else -> "signed"}")
+        projection.included.push("hangar:provenance")
+        projection.changed.push("hangar:cache")
+        projection.changed.push("hangar:signing:{if entry.envelope.signature == "" -> "unsigned" else -> "signed"}")
         binaries: cli_read_realized_package_binaries(entry) ?? {
             theme.error_coded("E1336", "environment package `{reference}` has no usable binary output", err.message(), "realize an executable package for `{reference}`, then run `jet image {name}`")
             return [LayerFile]{}
@@ -619,14 +619,14 @@ cli_environment_image_files: fn(verification: &StoreVerification, theme: Theme, 
                 }
                 next
             }
-            &layer_files.push(LayerFile{path: layer_path, data: binary.data, mode: 493})
+            layer_files.push(LayerFile{path: layer_path, data: binary.data, mode: 493})
         }
     }
     shell: shell_source ?? {
         theme.error_coded("E1336", "environment image `{name}` has no shell", "The beginner image is a runnable shell image and cannot copy a host shell or invent one", "add `bash`, `busybox`, `dash`, or `sh` to the environment packages and build it first")
         return [LayerFile]{}
     }
-    &layer_files.push(LayerFile{path: "bin/sh", data: shell, mode: 493})
+    layer_files.push(LayerFile{path: "bin/sh", data: shell, mode: 493})
     layer_files
 }
 
@@ -688,7 +688,7 @@ cli_write_rejected_projection: fn(out_dir: String, projection: ProjectionReport)
 // The Hangar entry's output must be its verified content-addressed object,
 // with a real bin projection inside it.
 cli_verify_realized_hangar_package: fn(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) CLIError! -[FS, Env, Time]> {
-    store_verify_hangar_object(&verification, roots, entry) ?? return Err(CLIError.Other("{err}"))
+    store_verify_hangar_object(verification, roots, entry) ?? return Err(CLIError.Other("{err}"))
     if entry.envelope.output_hash == "" -> return Err(CLIError.Other("the Hangar entry has no canonical output digest"))
     expected: files.canonicalize(files.join(files.join(roots.hangar_dir(), "objects"), entry.envelope.output_hash)) ?? return Err(CLIError.Other("the Hangar object cannot be opened: {err}"))
     output_info: files.stat(entry.out) ?? return Err(CLIError.Other("the Hangar output cannot be opened: {err}"))
@@ -715,8 +715,8 @@ cli_read_realized_package_binaries: fn(entry: StoreEntry) -[FS, Env]> [RealizedB
     root: files.canonicalize(entry.bin) ?? return Err(CLIError.Other("{err}"))
     names := [String]{}
     listed: files.list_dir(root) ?? return Err(CLIError.Other("{err}"))
-    loop item in listed -> &names.push(item.name)
-    &names.sort()
+    loop item in listed -> names.push(item.name)
+    names.sort()
     binaries := [RealizedBinary]{}
     loop item_name in names {
         item_path: files.join(root, item_name)
@@ -727,7 +727,7 @@ cli_read_realized_package_binaries: fn(entry: StoreEntry) -[FS, Env]> [RealizedB
         if metadata.size > 536870912 -> return Err(CLIError.Other("a realized package binary exceeds the 512 MiB layer limit"))
         if item_name == "" || pkg_text_has_control(item_name) -> return Err(CLIError.Other("a realized package binary has an unsafe name"))
         data: files.read_bytes(resolved) ?? return Err(CLIError.Other("{err}"))
-        &binaries.push(RealizedBinary{name: item_name, data: data})
+        binaries.push(RealizedBinary{name: item_name, data: data})
     }
     if binaries.len() == 0 -> return Err(CLIError.Other("the Hangar bin projection is empty"))
     Ok(binaries)

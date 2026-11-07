@@ -63,6 +63,12 @@ host_i32: fn(value: I64) -> I64 {
     _ := host_call(I64{162}, I64{0}, I64{0}, I64{0})
 }
 
+// Status 101 is reserved for Jet defects, so a program's explicit exit with
+// it ends the process with the user-error status 1.
+std_process_user_exit_code: fn(native: I64) -> I64 {
+    if (native == I64{101}) -> I64{1} else -> native
+}
+
 // Under the process root (jet_rt_main) the exit is a root stop: every frame
 // cleans up on its stop edge, then the root runs the exit handlers and
 // exits with `code`. Elsewhere (a task's body, an exit handler) the exit
@@ -70,11 +76,12 @@ host_i32: fn(value: I64) -> I64 {
 #Export(c) jet_std_process_exit: fn(code: I64) {
     native: host_i32(code)
     if (jet_scheduler_native_propagate() != I64{0}) -> return
+    status: std_process_user_exit_code(native)
     if (jet_rt_stop_domain() == I64{1}) {
-        _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, native)
+        _ := jet_rt_root_publish_rendered(I64{0}, I64{0}, status)
         return
     }
-    jet_rt_process_exit(native)
+    jet_rt_process_exit(status)
 }
 
 // process.exit in a program that owns its main (JetIR EntryOwned.jet): it
@@ -82,7 +89,7 @@ host_i32: fn(value: I64) -> I64 {
 // and jet_std_process_exit would take its last step: the exit handlers run
 // and the process exits here. It links none of the root's stop publishing.
 #Export(c) jet_std_process_exit_owned: fn(code: I64) {
-    jet_rt_process_exit(host_i32(code))
+    jet_rt_process_exit(std_process_user_exit_code(host_i32(code)))
 }
 
 // Raw tuples marshal into the generator's separate out slots, never a boxed
@@ -165,7 +172,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     host_sample_out(host_call(I64{141}, I64{0}, native_who.bit_and(I64{4294967295}), native_priority), available, value, errno)
 }
 
-// prlimit64(0, resource, NULL, &old): this program's (soft, hard) limit.
+// prlimit64(0, resource, NULL, old): this program's (soft, hard) limit.
 // RLIM_INFINITY (all ones) reads as -1; core.sys maps a negative to None.
 #Export(c) jet_sys_rlimit_raw: fn(resource: I64, available: I64, soft: I64, hard: I64, errno: I64) {
     native: host_i32(resource)
@@ -182,7 +189,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     jet_rt_free(buffer, I64{16}, I64{8})
 }
 
-// prlimit64(0, resource, &new, NULL): -1 passes RLIM_INFINITY. Children
+// prlimit64(0, resource, new, NULL): -1 passes RLIM_INFINITY. Children
 // inherit the new limit; raising a hard limit needs privilege (EPERM).
 #Export(c) jet_sys_set_rlimit_raw: fn(resource: I64, soft: I64, hard: I64, available: I64, value: I64, errno: I64) {
     native: host_i32(resource)
@@ -200,7 +207,7 @@ host_sample_fields: fn(result: I64, error: I64, available: I64, value: I64, errn
     jet_rt_free(buffer, I64{16}, I64{8})
 }
 
-// getrusage(who, &usage): user and system time in microseconds, and the
+// getrusage(who, usage): user and system time in microseconds, and the
 // peak resident set, which Linux counts in KiB, in bytes.
 #Export(c) jet_sys_rusage_raw: fn(who: I64, available: I64, user: I64, system: I64, peak: I64, errno: I64) {
     native: host_i32(who)

@@ -1,4 +1,4 @@
-// D-TIMEDEPTH1 / I9: the web tier carries the same civil-time model as the
+// I9: the web tier carries the same civil-time model as the
 // Rust Prelude. JavaScript only supplies the ambient clock and stores the
 // already-resolved values in exact BigInt fields.
 const JET_TIME_EPOCH_MS = typeof performance === "undefined" ? 0 : performance.now();

@@ -46,12 +46,12 @@ s5_fleet_committed_claim: fn(root: String) {
     modules: envmodel_evaluate_source(source, base) ?? panic("committed fleet source evaluates")
     fleets := [FleetPlan]{}
     loop evaluated in modules {
-        loop group in evaluated.fleets -> &fleets.push(group)
+        loop group in evaluated.fleets -> fleets.push(group)
     }
     assert_eq(fleets.len(), 1)
     assert_eq(fleets[0].name, "prod")
     names := [String]{}
-    loop host in fleets[0].hosts -> &names.push(host.name)
+    loop host in fleets[0].hosts -> names.push(host.name)
     assert_eq(names, [String]{"web1", "web2", "web3"})
     loop host in fleets[0].hosts -> assert_eq(host.system, "web")
 }

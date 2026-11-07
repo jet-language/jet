@@ -230,7 +230,7 @@ remaining_span: fn(path: OSPath, original: Components) -> PathSpan Never! {
 }
 parent_span: fn(path: OSPath) -> PathSpan? Never! {
     cursor := components(path)
-    last: next_back(path, &cursor) ?? return None
+    last: next_back(path, cursor) ?? return None
     if last.kind == .Prefix || last.kind == .RootDir -> return None
     Val(remaining_span(path, cursor))
 }
@@ -252,50 +252,50 @@ strip_prefix_span: fn(path: OSPath, root: OSPath) -> PathSpan? Never! {
     cursor := components(path)
     base := components(root)
     loop {
-        b: next(root, &base) ?? return Val(remaining_span(path, cursor))
-        a: next(path, &cursor) ?? return None
+        b: next(root, base) ?? return Val(remaining_span(path, cursor))
+        a: next(path, cursor) ?? return None
         if !component_equal(path, a, root, b) -> return None
     }
 }
 owned_span: fn(path: OSPath, extent: PathSpan) -> OSPath Never! {
     out := [U8]{}
-    loop i in extent.start..<extent.end -> &out.push(path.encoded[i])
+    loop i in extent.start..<extent.end -> out.push(path.encoded[i])
     OSPath{encoded: out, platform: path.platform}
 }
 truncate: fn(out: &[U8], len: Int) Never! {
-    loop out.len() > len { _: &out.pop() }
+    loop out.len() > len { _: out.pop() }
 }
-append_span: fn(out: &[U8], path: OSPath, extent: PathSpan) Never! { loop i in extent.start..<extent.end -> &out.push(path.encoded[i]) }
+append_span: fn(out: &[U8], path: OSPath, extent: PathSpan) Never! { loop i in extent.start..<extent.end -> out.push(path.encoded[i]) }
 append_component: fn(out: &[U8], path: OSPath, value: PathComponent) Never! {
-    if value.kind == .RootDir -> &out.push(main_separator(path.platform)) else -> append_span(&out, path, value.span)
+    if value.kind == .RootDir -> out.push(main_separator(path.platform)) else -> append_span(out, path, value.span)
 }
 push_verbatim: fn(base: &OSPath, path: OSPath, extent: PathSpan) Never! {
     values := [PathComponent]{}
     owners := [Bool]{}
     cursor := components(base)
     loop {
-        value: next(base, &cursor) ?? break
-        &values.push(value)
-        &owners.push(false)
+        value: next(base, cursor) ?? break
+        values.push(value)
+        owners.push(false)
     }
     cursor = components_span(path, extent)
     loop {
-        value: next(path, &cursor) ?? break
+        value: next(path, cursor) ?? break
         if value.kind == .RootDir {
             loop values.len() > 1 {
-                _: &values.pop()
-                _: &owners.pop()
+                _: values.pop()
+                _: owners.pop()
             }
-            &values.push(value)
-            &owners.push(true)
+            values.push(value)
+            owners.push(true)
         } else if value.kind == .ParentDir {
             if values.len() > 0 && values[values.len() - 1].kind == .Normal {
-                _: &values.pop()
-                _: &owners.pop()
+                _: values.pop()
+                _: owners.pop()
             }
         } else if value.kind != .CurDir {
-            &values.push(value)
-            &owners.push(true)
+            values.push(value)
+            owners.push(true)
         }
     }
     out := [U8]{}
@@ -303,8 +303,8 @@ push_verbatim: fn(base: &OSPath, path: OSPath, extent: PathSpan) Never! {
     prefix: parse_prefix(base)
     loop i in 0..<values.len() {
         value: values[i]
-        if need_sep && value.kind != .RootDir -> &out.push(main_separator(base.platform))
-        if owners[i] -> append_component(&out, path, value) else -> append_component(&out, base, value)
+        if need_sep && value.kind != .RootDir -> out.push(main_separator(base.platform))
+        if owners[i] -> append_component(out, path, value) else -> append_component(out, base, value)
         need_sep = value.kind != .RootDir
         if value.kind == .Prefix -> need_sep = prefix.kind != .Disk && prefix.len > 0
     }
@@ -317,16 +317,16 @@ push: fn(base: &OSPath, path: OSPath) Never! {
     added: components(path)
     rooted: added.physical_root || implicit_root(added.prefix)
     absolute: rooted && (path.platform == .Unix || added.prefix.kind != .Absent)
-    if absolute || added.prefix.kind != .Absent -> truncate(&base.encoded, 0) else {
+    if absolute || added.prefix.kind != .Absent -> truncate(base.encoded, 0) else {
         if prefix_verbatim(prefix) && extent.end > 0 {
-            push_verbatim(&base, path, extent)
+            push_verbatim(base, path, extent)
             return
         }
-        if rooted -> truncate(&base.encoded, prefix.len) else {
+        if rooted -> truncate(base.encoded, prefix.len) else {
             size: base.encoded.len()
             need_sep: size > 0 && !is_separator(base.platform, base.encoded[size - 1], false) && !(prefix.kind == .Disk && prefix.len == size)
-            if need_sep -> &base.encoded.push(main_separator(base.platform))
+            if need_sep -> base.encoded.push(main_separator(base.platform))
         }
     }
-    append_span(&base.encoded, path, extent)
+    append_span(base.encoded, path, extent)
 }

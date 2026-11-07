@@ -8,11 +8,11 @@ use jet_foundation.[AccessConvention, Diagnostic, Func, NamedType, OwnedMethod, 
 // base of a `distinct` owner. Answers whether the impl meets the contract.
 sema_owned_check_impl: fn(owned: OwnedTrait, owner_type: Type, rhs: Type, methods: [Func], associated: [NamedType], sibling: [NamedType], distinct_base: Type?, span: Span, diagnostics: &[Diagnostic]) -> Bool {
     if owned.contract == {
-        .Methods(declared, names, _) -> sema_owned_check_methods(owned.name, declared, names, owner_type, methods, associated, sibling, span, &diagnostics)
-        .Operator(hook, result) -> sema_owned_check_operator(owned.name, hook, result, rhs, methods, span, &diagnostics)
-        .Codec(verb) -> sema_owned_check_codec(owned.name, verb, owner_type, methods, span, &diagnostics)
-        .Literal(source) -> sema_owned_check_literal(owned.name, source, owner_type, methods, span, &diagnostics)
-        .CheckedText -> sema_owned_check_checked_text(methods, associated, distinct_base, span, &diagnostics)
+        .Methods(declared, names, _) -> sema_owned_check_methods(owned.name, declared, names, owner_type, methods, associated, sibling, span, diagnostics)
+        .Operator(hook, result) -> sema_owned_check_operator(owned.name, hook, result, rhs, methods, span, diagnostics)
+        .Codec(verb) -> sema_owned_check_codec(owned.name, verb, owner_type, methods, span, diagnostics)
+        .Literal(source) -> sema_owned_check_literal(owned.name, source, owner_type, methods, span, diagnostics)
+        .CheckedText -> sema_owned_check_checked_text(methods, associated, distinct_base, span, diagnostics)
         .Derived -> true
     }
 }
@@ -48,10 +48,10 @@ sema_owned_render: fn(method: OwnedMethod, names: [String], types: [Type]) -> St
     parts := [String]{}
     if method.receiver == {
         .Static -> {}
-        .Any -> &parts.push("self")
-        .Fixed(access) -> &parts.push("{access_sigil(access)}self")
+        .Any -> parts.push("self")
+        .Fixed(access) -> parts.push("{access_sigil(access)}self")
     }
-    loop param in method.params -> &parts.push("{param.name}: {type_name(sema_inference_substitute_type(param.ty, names, types))}")
+    loop param in method.params -> parts.push("{param.name}: {type_name(sema_inference_substitute_type(param.ty, names, types))}")
     rendered: "{method.name}: fn({parts.join(", ")})"
     if method.returns == .Val(returned) -> return "`{rendered} -> {type_name(sema_inference_substitute_type(returned, names, types))}`"
     "`{rendered}`"
@@ -100,9 +100,9 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
         present: loop method in methods {
             if method.name == wanted.name -> break true
         } ?? false
-        if !present -> &missing.push(wanted.name)
+        if !present -> missing.push(wanted.name)
     }
-    if missing.len() > 0 -> &diagnostics.push(sema_owned_missing(trait_name, missing, span))
+    if missing.len() > 0 -> diagnostics.push(sema_owned_missing(trait_name, missing, span))
     names := [String]{"Self"}
     types := [Type]{owner_type.copy()}
     unbound := [String]{}
@@ -111,20 +111,20 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
             if binding.name == name -> break Val(binding.ty.copy())
         } ?? None
         if bound == .Val(ty) {
-            &names.push(name)
-            &types.push(ty)
+            names.push(name.copy())
+            types.push(ty)
         } else {
-            &unbound.push(name)
+            unbound.push(name.copy())
         }
     }
     if unbound.len() > 0 {
-        &diagnostics.push(sema_owned_unbound(trait_name, unbound, span))
+        diagnostics.push(sema_owned_unbound(trait_name, unbound, span))
         return false
     }
     loop binding in sibling {
         if !names.contains(binding.name) {
-            &names.push(binding.name)
-            &types.push(binding.ty.copy())
+            names.push(binding.name)
+            types.push(binding.ty.copy())
         }
     }
     valid := missing.len() == 0
@@ -135,7 +135,7 @@ sema_owned_check_methods: fn(trait_name: String, declared: [OwnedMethod], associ
         contract: wanted ?? next
         if !sema_owned_method_matches(contract, method, names, types) {
             valid = false
-            &diagnostics.push(sema_owned_mismatch(trait_name, method.name, sema_owned_render(contract, names, types), method.name_span))
+            diagnostics.push(sema_owned_mismatch(trait_name, method.name, sema_owned_render(contract, names, types), method.name_span))
         }
     }
     valid
@@ -166,14 +166,14 @@ sema_owned_check_operator: fn(trait_name: String, hook: String, result: Type?, r
         if methods[index].name == hook -> break Val(index)
     } ?? None
     found: hook_index ?? {
-        &diagnostics.push(sema_owned_missing(trait_name, [String]{hook}, span))
-        loop method in methods -> &diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, method.name_span))
+        diagnostics.push(sema_owned_missing(trait_name, [String]{hook}, span))
+        loop method in methods -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, method.name_span))
         return false
     }
     valid: sema_owned_operator_valid(hook, result, rhs, methods)
-    if !valid -> &diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[found].name_span))
+    if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[found].name_span))
     loop index in 0..<methods.len() {
-        if index != found -> &diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[index].name_span))
+        if index != found -> diagnostics.push(sema_owned_mismatch(trait_name, hook, expected, methods[index].name_span))
     }
     valid
 }
@@ -197,7 +197,7 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
     loop method in methods {
         if method.name != verb {
             valid = false
-            &diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `{verb}`", method.name_span))
+            diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `{verb}`", method.name_span))
             next
         }
         saw_verb = true
@@ -223,11 +223,11 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
         shaped: if encode -> has_self && values.len() == 0 && returns_data else -> !has_self && values.len() == 1 && sema_owned_codec_data(values[0]) && returns_owner
         if !shaped {
             valid = false
-            &diagnostics.push(sema_owned_mismatch(trait_name, method.name, expected, method.name_span))
+            diagnostics.push(sema_owned_mismatch(trait_name, method.name, expected, method.name_span))
         }
     }
     if !saw_verb {
-        &diagnostics.push(sema_owned_missing(trait_name, [String]{verb}, span))
+        diagnostics.push(sema_owned_missing(trait_name, [String]{verb}, span))
         return false
     }
     valid
@@ -238,7 +238,7 @@ sema_owned_check_codec: fn(trait_name: String, verb: String, owner_type: Type, m
 sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type, methods: [Func], span: Span, diagnostics: &[Diagnostic]) -> Bool {
     constructors: loop index in 0..<methods.len() if methods[index].name == "from_literal" -> index
     if constructors.len() == 0 {
-        &diagnostics.push(sema_owned_missing(trait_name, [String]{"from_literal"}, span))
+        diagnostics.push(sema_owned_missing(trait_name, [String]{"from_literal"}, span))
         return false
     }
     owner: sema_owned_owner_name(owner_type)
@@ -256,7 +256,7 @@ sema_owned_check_literal: fn(trait_name: String, source: Type, owner_type: Type,
             else -> false
         }
     }
-    if !valid -> &diagnostics.push(sema_owned_mismatch(trait_name, "from_literal", "`comptime from_literal: fn(value: {type_name(source)}) -> {owner}`", hook.name_span))
+    if !valid -> diagnostics.push(sema_owned_mismatch(trait_name, "from_literal", "`comptime from_literal: fn(value: {type_name(source)}) -> {owner}`", hook.name_span))
     valid
 }
 
@@ -286,21 +286,21 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
     hole_expected: "`encode_hole: fn<T: Printable>(value: T) -[]> String`"
     string_backed: if distinct_base == .Val(base) -> type_identity_equal(base, Type.String) else -> false
     if !string_backed {
-        &diagnostics.push(sema_owned_mismatch(trait_name, "check", "{check_expected} on a `distinct String` type", span))
+        diagnostics.push(sema_owned_mismatch(trait_name, "check", "{check_expected} on a `distinct String` type", span))
         return false
     }
     count: diagnostics.len()
-    if errors.len() == 0 -> &diagnostics.push(sema_owned_unbound(trait_name, [String]{"Error"}, span))
-    loop index in 1..<errors.len() -> &diagnostics.push(sema_owned_mismatch(trait_name, "type Error", "one `type Error = …` binding", associated[errors[index]].span))
+    if errors.len() == 0 -> diagnostics.push(sema_owned_unbound(trait_name, [String]{"Error"}, span))
+    loop index in 1..<errors.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "type Error", "one `type Error = …` binding", associated[errors[index]].span))
     loop binding in associated {
-        if binding.name != "Error" -> &diagnostics.push(sema_owned_mismatch(trait_name, "type {binding.name}", "only `type Error = …`", binding.span))
+        if binding.name != "Error" -> diagnostics.push(sema_owned_mismatch(trait_name, "type {binding.name}", "only `type Error = …`", binding.span))
     }
     checks: loop index in 0..<methods.len() if methods[index].name == "check" -> index
     holes: loop index in 0..<methods.len() if methods[index].name == "encode_hole" -> index
-    if checks.len() == 0 -> &diagnostics.push(sema_owned_missing(trait_name, [String]{"check"}, span))
-    if holes.len() == 0 -> &diagnostics.push(sema_owned_missing(trait_name, [String]{"encode_hole"}, span))
-    loop index in 1..<checks.len() -> &diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, methods[checks[index]].name_span))
-    loop index in 1..<holes.len() -> &diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, methods[holes[index]].name_span))
+    if checks.len() == 0 -> diagnostics.push(sema_owned_missing(trait_name, [String]{"check"}, span))
+    if holes.len() == 0 -> diagnostics.push(sema_owned_missing(trait_name, [String]{"encode_hole"}, span))
+    loop index in 1..<checks.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, methods[checks[index]].name_span))
+    loop index in 1..<holes.len() -> diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, methods[holes[index]].name_span))
     if checks.len() > 0 {
         check: methods[checks[0]]
         check_ok := check.type_params.len() == 0 && sema_owned_plain_param(check, Type.String) && sema_owned_pure(check) && errors.len() > 0
@@ -310,16 +310,16 @@ sema_owned_check_checked_text: fn(methods: [Func], associated: [NamedType], dist
                 if returned == .Result(ok, err) -> check_ok = ok == (Type.Named{name: "Unit"}) && type_identity_equal(err, error_type)
             }
         }
-        if !check_ok -> &diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, check.name_span))
+        if !check_ok -> diagnostics.push(sema_owned_mismatch(trait_name, "check", check_expected, check.name_span))
     }
     if holes.len() > 0 {
         hole: methods[holes[0]]
         hole_ok := sema_owned_plain_param(hole, Type.Named{name: "T"}) && hole.return_type == (Val(Type.String)) && sema_owned_pure(hole) && hole.type_params.len() == 1
         if hole_ok -> hole_ok = hole.type_params[0].name == "T" && hole.type_params[0].bounds == ([String]{"Printable"})
-        if !hole_ok -> &diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, hole.name_span))
+        if !hole_ok -> diagnostics.push(sema_owned_mismatch(trait_name, "encode_hole", hole_expected, hole.name_span))
     }
     loop method in methods {
-        if method.name != "check" && method.name != "encode_hole" -> &diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `check` and `encode_hole`", method.name_span))
+        if method.name != "check" && method.name != "encode_hole" -> diagnostics.push(sema_owned_mismatch(trait_name, method.name, "only `check` and `encode_hole`", method.name_span))
     }
     diagnostics.len() == count
 }
