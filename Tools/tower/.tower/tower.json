@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95888,
+    "rev": 95894,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47527,6 +47527,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "eb47eb7277 strftime parity: jet test --optimize=none|basic|full tests/conformance/corpus/core/time/strftime.jet gives 7 passed, 0 failed on each level. Compiler: the seed-built dev d405d4cb6c compiler with table-it (8405a508b0); toolchain root dev 8405a508b0."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "dev eb47eb7277 (Main, G3): Core/Time/Time.jet strftime now formats %S (zero-padded seconds), %p (AM/PM) and %z (+0000, UTC). Before this they printed literally, a defect in the existing API, so no ballot was needed. tests/conformance/corpus/core/time/strftime.jet asserts the three, and its unsupported-directive row now covers only %Q %n %t. Seed a0_034 jet test of the corpus file: 7/7. CoreSourceRows and CoreCoverage --check OK. The O0/O1/O2 parity rerun is queued for the dev s1 batch."
         },
         {
@@ -47675,7 +47680,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-07T22:27:38.677Z",
+      "updated": "2026-11-07T22:38:33.884Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -90650,6 +90655,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "b75e525782 repro half: cases --filter borrowed_list_of_optional_handles PASS 1/1 (seed-built d405d4cb6c + 8405a508b0). The Engine-unit claim (store broker realize verified round trips) still waits on a locked jetpack source (E1271)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "a0_034: minimal repro of the faulting pattern (a [SnapshotFile] with FileReader? handles passed by value to a loop, then twice through '&executables[i].file == .Val(input)' seek+read) prints names 3 / bytes 12 / again 12 on O0, O1 and O2: no fault, handles stay open. The Engine-unit claim still needs its jetpack env run."
         },
         {
@@ -90687,7 +90697,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T10:39:48.294Z",
-      "updated": "2026-11-07T21:16:29.961Z",
+      "updated": "2026-11-07T22:41:16.681Z",
       "updatedBy": "Main"
     },
     {
@@ -97218,7 +97228,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -97226,16 +97236,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Closed: c1 met (dev e60c38e3b8 + 92eb32cf62; case PASS on O0/O1/O2)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A case under tests/cases/comptime_sequence_parity evaluates a pure yield-only generator at compile time and at run time; both print the same values on O0, O1 and O2, and no E3410 is reported.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T05:00:22.756Z"
+          "evidence": "dev e60c38e3b8 and 92eb32cf62 (the comptime pool size needs no host probe; membarrier admitted; no getrlimit in the comptime child). Case tests/cases/comptime_sequence_parity/pure_yield_only_generator_folds_at_compile_time.case prints 10 and 10 (compile-time and run-time) from jet run (O0), jet build (O1) and jet build --release (O2), with empty stderr and no E3410. jet test Compiler --profile cases --filter pure_yield_only_generator: PASS 1, FAIL 0. Compiler: the seed built dev d405d4cb6c with the table-it patch (8405a508b0).",
+          "at": "2026-11-07T22:41:12.527Z"
         }
       ],
       "refs": [],
@@ -97246,9 +97262,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:00:21.888Z",
-      "updated": "2026-11-07T05:00:22.756Z",
+      "updated": "2026-11-07T22:41:14.661Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T22:41:14.661Z"
     },
     {
       "id": "c0txcsfz",
@@ -98897,6 +98914,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "d4c27c8d33 batch row (seed-built d405d4cb6c + 8405a508b0): cases --filter nested_import_aliases_bind_groups PASS 1/1 (q1 checks clean; q2 gives E0927, the alias doesn't fall through). Regression sweep: --filter marker_groups_modules PASS 15, KNOWN-FAILING 3 (#6004); --filter inline_module PASS 8, KNOWN-FAILING 3 (#5201/#5454 web #Target). c1 stays open: the case runs only jet check, so O0/O1/O2 lowering of an inline module's non-Core import and the golden example of an inline module importing a sibling module are not yet shown."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "d4c27c8d33 (dev): an inline module's own module or file import no longer keeps it unlowered. Lifted bodies read the import through a generated file-level alias that shares the scoped declaration's span (InlineModules.jet sema_inline_alias_imports, renaming in Ident, Type Named/Apply, StructLit import_ns and member-list imports). Registration binds the alias through that declaration's own edge, foreign edges included (Items.jet). Markers keep their lexical scope through the pre-lowering binding. Only a Core module in a member list still gives E2104. The tests/known-failing.tsv row for nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed is removed. Queued for batch: cases --filter nested_import_aliases_bind_groups, marker_groups_modules, inline_module."
         }
       ],
@@ -98919,7 +98941,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:54:34.017Z",
-      "updated": "2026-11-07T21:27:22.206Z",
+      "updated": "2026-11-07T22:41:15.679Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -99094,6 +99116,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 state at dev 8405a508b0. Done: the per-type core.files.__keep_open_{reader,writer,directory} bodies and every JetSema routing by handle type are gone; grep finds keep_open in no JetSema or JetIR lowering source. 94775580e5 and a5476b82af (#3594 c8 phases 1-2) leave one raw bridge, core.process.__keep_open_raw, plus core.files.__reader_fd and __writer_fd. Missing: the public PROCINHERIT1 method ProcessSpec.keep_open(^handle: KeepOpen, at: Int?{None}) over the union. Today only Directory.pass_to(spec, at) and compiler_with_process_directory reach the bridge, so a FileReader or FileWriter cannot be passed. c3 closes with #3594 c8 phase 3: one Core keep_open body over the union, which takes the handle's descriptor (__reader_fd, __writer_fd or __directory_fd) and calls __keep_open_raw. Directory.pass_to then becomes a caller or goes. Batch proofs at the same compiler (seed-built d405d4cb6c + table-it): golden --filter Systems/Process PASS 54/54; cases --filter held_directory is still KNOWN-FAILING under #6386 (jet debug DAP), unchanged."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3 landed in dev a5476b82af (Main): Core/Files/Files.jet calls core.process.__keep_open_raw; jet_process_spec_with_directory_raw (export, IR route, host signature, dispatcher row, surface inventory, generated rows) deleted, witness calls the one name. CoreSourceRows, RuntimeGenerators, CoreSurfaceLedger and UnsafeRatchet --check pass on the tree. Proof queued for the next dev-built batch."
         },
         {
@@ -99165,7 +99192,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-07T21:58:10.957Z",
+      "updated": "2026-11-07T22:40:30.341Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -186940,6 +186967,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T22:41:16.681Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a2monf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:41:15.679Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00emhw5",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:41:14.661Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x1npws",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-07T22:41:12.527Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x1npws",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T22:40:30.341Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fs42sy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:38:33.885Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rizte",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T22:37:37.051Z",
       "by": "Main",
