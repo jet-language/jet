@@ -3,7 +3,10 @@
 // command-scoped flags, retired spellings, and "did you mean" suggestions. Each
 // render returns the exact bytes the Rust host prints for the same request, so
 // both front doors mean one thing (I9).
-use jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
+use {
+    jet_foundation.[JET_CLI_COMMANDS, JET_CLI_HANDLERS, JET_CLI_FLAGS, JET_CLI_JOB_INVOCATION_HELP, JetCLIActionSpec, JetCLIFlagSpec]
+    jet_pkg_model.[pkg_version_line]
+}
 
 // jet-foundation Syntax `BINARY_NAME` and `LANG_NAME`; the `jet` package version.
 JET_CLI_BINARY: "jet"
@@ -378,10 +381,11 @@ jet_cli_palette_category: fn(name: String) -> String Never! {
     }
 }
 
-// Bare `jet`: the command palette, every canonical command under its
-// category. It prints the same static text with or without a terminal.
+// Bare `jet`: the command palette, then the `jet --version` line, then every
+// canonical command under its category. It prints the same static text with
+// or without a terminal.
 jet_cli_palette: fn() -> String Never! {
-    out := "{JET_CLI_LANG_NAME} command palette\n"
+    out := "{JET_CLI_LANG_NAME} command palette\n{pkg_version_line()}\n"
     commands: jet_cli_commands_in("frequency")
     loop category in JET_CLI_PALETTE_CATEGORIES {
         out = "{out}\n{category}\n"
