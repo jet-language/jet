@@ -1,6 +1,7 @@
 # Test profiles in package.jet: a bare `jet test` runs the `defaults.test` profile, each
 # run is a child `jet test` whose rows become its baseline under `.jet/test/<profile>/`,
-# and a later run fails only on a lost row (a baseline pass that now fails). `time_limit`
+# and a later run names its lost rows (a baseline pass that now fails); any failing row
+# fails the run, even one the baseline holds as failing. `time_limit`
 # stops a test that runs past it, `optimize:` runs the tests once per level, and a golden
 # corpus suite runs in process at the matching tiers. Each part has its negative control.
 fixture: fixtures/test_profiles
@@ -74,8 +75,9 @@ stderr: ~ "2 rows recorded as the baseline `.jet/test/quick/tests.rows`" # -u ma
 file: app/.jet/test/quick/tests.rows ~ "failed" # the accepted failure is in the baseline now
 step: jet test --capture=all
 cwd: {work}/app
-exit: 0
-stdout: ~ "1 passed, 1 failed" # the test still fails
+exit: 1
+stdout: ~ "1 passed, 1 failed" # the test still fails, and fails the run though the baseline holds it
+stderr: ~ "0 lost, 0 changed, 0 new" # the baseline already holds the failure
 copy: alt/unknown-suite.jet app/package.jet
 step: jet check
 cwd: {work}/app

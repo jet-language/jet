@@ -54,7 +54,8 @@ jet test Compiler                                           # quick: every membe
 jet test Compiler --profile golden                          # Examples and tests/run
 jet test Compiler --profile ui                              # tests/ui and tests/ui_lint
 jet test Compiler --profile cases                           # tests/cases
-jet test Compiler --profile full                            # the #Tests and all three corpora
+jet test Compiler --profile packages                        # the #Tests of every other package under Compiler/ and Jetpack/
+jet test Compiler --profile full                            # every package's #Tests, all three corpora, selfhost and perf
 jet test Compiler --profile corpora                         # all three corpora, no #Tests
 jet test Compiler --profile golden Basics/FizzBuzz          # rows whose ID contains the filter
 JET_CI_EVIDENCE_DIR=/disk/scratch jet test Compiler --profile golden  # writes golden.json

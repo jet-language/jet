@@ -3884,9 +3884,10 @@ defaults: { test: quick }
 `optimize:` runs the `tests` suite once per listed level, and runs a golden
 corpus at the matching tiers (none is `jet run`, basic `jet build`, full
 `jet build --release`). Each run's rows are its baseline in
-`.jet/test/<profile>/`. A later run fails when a test that passed in the
-baseline fails or is gone; a failure the baseline already holds does not fail
-it, and `-u` records the run as the new baseline. A suite with
+`.jet/test/<profile>/`. A failing test fails the run whatever the baseline
+holds; the baseline names the rows that moved, a test that passed in it and
+now fails or is gone is lost and also fails the run, and `-u` records the run
+as the new baseline. A suite with
 `golden_corpus:`, `ui_corpus:` or `cases_corpus:` runs in the `jet` process
 itself, every entry of the corpus a row; `jobs:`, `memory:`, `filter:`,
 `shard: I/N`, `opt_in:` and `baseline:` (a ledger of the rows accepted as

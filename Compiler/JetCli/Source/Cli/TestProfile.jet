@@ -298,7 +298,9 @@ jet_cli_test_common_dir: fn(a: String, b: String) -> String Never! {
 // profile's settings but those this run keeps (TEST_SETTINGS_ENV). A `tests`
 // child hands its evidence report to a scratch file, a code-suite child its
 // rows; then each run's rows are compared or recorded, and `results` gains
-// them. The summary goes to stderr after every run's own output.
+// them. A failing row fails the run whatever the baseline holds: the baseline
+// only names what moved, and a lost row fails the run too. The summary goes
+// to stderr after every run's own output.
 jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, results: &[KitCaseResult]) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     executable: test_settings_get(settings, "compiler") ?? cli_sys.executable()
@@ -363,10 +365,11 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             rows = jet_cli_test_profile_rows(report.records)
             loop result in jet_cli_test_record_results(report.records, TEST_SUITE_TESTS, run.label) -> results.push(result)
         }
+        // The run's own verdict stands with or without a baseline.
+        if status > exit_code -> exit_code = status
         shown: ".jet/test/{profile}/{run.rows_file}"
         stored: jet_cli_rooted_join(baselines, run.rows_file)
         if update || !cli_files.exists(stored) {
-            if status > exit_code -> exit_code = status
             if sharded {
                 if !quiet -> summary = "{summary}{site}: {rows.len()} rows, not recorded: a sharded run never writes the baseline `{shown}`\n"
                 next
