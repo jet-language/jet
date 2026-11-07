@@ -23,7 +23,7 @@ extern Spec *jet_process_spec_fields_raw(Text **,int64_t,bool,Text *,bool,Text *
 extern Spec *jet_rt_handle_clone_process_spec(Spec *);
 extern void jet_rt_handle_drop_process_spec(Spec *);
 extern bool jet_rt_handle_eq_process_spec(Spec *,Spec *);
-extern void jet_process_spec_with_directory_raw(Spec *,int64_t,int64_t,bool,Spec **,bool *,int64_t *,int64_t *);
+extern void jet_process_spec_keep_open_raw(Spec *,int64_t,int64_t,bool,Spec **,bool *,int64_t *,int64_t *);
 extern int64_t jet_std_env_try_set(Text *,Text *,void **);
 extern int64_t jet_std_env_unset(Text *,bool *,void **);
 extern void jet_rt_handle_drop_env_error(void *);
@@ -43,7 +43,7 @@ static void adapters(void){
  // passes a spec another holder keeps) and returns it with the new row.
  Spec *given=jet_rt_handle_clone_process_spec(s);
  Spec *attached=NULL;int64_t assigned=-2,error=-3;
- jet_process_spec_with_directory_raw(given,fd,100,true,&attached,&supported.value,&assigned,&error);
+ jet_process_spec_keep_open_raw(given,fd,100,true,&attached,&supported.value,&assigned,&error);
  assert(supported.before==0x5a&&supported.after==0xa5&&supported.value&&error==0&&assigned>=100);
  assert(attached==given&&!s->directories&&attached->directories->len==1);
  Directory *row=attached->directories->data;assert(row->owner&&row->child==100&&row->as_cwd==1);
@@ -51,18 +51,18 @@ static void adapters(void){
  // A second pass moves the first row into the returned spec: each passed
  // descriptor keeps one owner and closes once.
  Spec *chained=NULL;int64_t second=-2;
- jet_process_spec_with_directory_raw(attached,fd,101,false,&chained,&supported.value,&second,&error);
+ jet_process_spec_keep_open_raw(attached,fd,101,false,&chained,&supported.value,&second,&error);
  assert(chained==attached&&error==0&&second>=101&&chained->directories->len==2);
  // A slot the spec already passes is refused without a duplicate or a row.
  Spec *again=NULL;int64_t taken=-2;
- jet_process_spec_with_directory_raw(chained,fd,100,false,&again,&supported.value,&taken,&error);
+ jet_process_spec_keep_open_raw(chained,fd,100,false,&again,&supported.value,&taken,&error);
  assert(again==chained&&supported.value&&taken==-1&&error==0&&chained->directories->len==2);
  Spec *clone=jet_rt_handle_clone_process_spec(chained);assert(jet_rt_handle_eq_process_spec(chained,clone));
  jet_rt_handle_drop_process_spec(chained);assert(fcntl((int)assigned,F_GETFD)>=0&&fcntl((int)second,F_GETFD)>=0);
  jet_rt_handle_drop_process_spec(clone);
  errno=0;assert(fcntl((int)assigned,F_GETFD)==-1&&errno==EBADF);
  errno=0;assert(fcntl((int)second,F_GETFD)==-1&&errno==EBADF);
- Spec *failed=NULL;jet_process_spec_with_directory_raw(jet_rt_handle_clone_process_spec(s),-1,100,false,&failed,&supported.value,&assigned,&error);
+ Spec *failed=NULL;jet_process_spec_keep_open_raw(jet_rt_handle_clone_process_spec(s),-1,100,false,&failed,&supported.value,&assigned,&error);
  assert(supported.value&&assigned==-1&&error==EBADF&&!failed->directories&&jet_rt_handle_eq_process_spec(s,failed));
  jet_rt_handle_drop_process_spec(failed);jet_rt_handle_drop_process_spec(s);close(fd);
  jet_rt_string_drop(arg);jet_rt_string_drop(name);jet_rt_string_drop(ignored);jet_rt_string_drop(value);jet_rt_string_drop(wire);

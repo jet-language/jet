@@ -78,12 +78,6 @@ process_spec_directory_slot_taken: fn(spec: I64, target: I64) -> Bool {
     }
     false
 }
-// The a0_035 seed's second name for jet_process_spec_keep_open_raw: Core
-// source still calls `__with_directory_raw` until #3594 c8 phase 2 switches
-// it to `__keep_open_raw` and deletes this export and its rows.
-#Export(c) jet_process_spec_with_directory_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
-    jet_process_spec_keep_open_raw(value, source_fd, child_fd, as_cwd, spec_out, supported_out, assigned_out, errno_out)
-}
 #Export(c) jet_process_spec_keep_open_raw: fn(value: I64, source_fd: I64, child_fd: I64, as_cwd: Bool, spec_out: I64, supported_out: I64, assigned_out: I64, errno_out: I64) {
     // Duplicate its lent fd, never reopen a pathname. The spec is consumed:
     // its earlier rows move into the returned one, so each passed descriptor
