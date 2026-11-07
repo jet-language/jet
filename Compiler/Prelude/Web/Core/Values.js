@@ -649,7 +649,7 @@ function jet_decode_text_cells(decode) {
 
 function jet_dyn_kind(tree) {
   switch (tree?.tag) {
-    case "Null": return "null";
+    case "Null": return "Null";
     case "Bool": return "Bool";
     case "Int": return "Int";
     case "Float": return "Float";
