@@ -62,7 +62,8 @@
 // is a compiler input (or a runtime, backend, Core or Jetpack source or a
 // sources.list), with every pass, then, for every commit, the repository
 // ratchets `--check` in the worktree with the seed (RATCHETS: the unsafe-region
-// baseline in Docs/spec/safety.md and the Core coverage list). Every pass runs
+// baseline in Docs/spec/safety.md, the Core coverage list and the compiler's
+// copies of the Prelude sources). Every pass runs
 // and reports its rows; it prints PRECOMMIT OK or PRECOMMIT FAILED.
 //
 // `prescreen` is the lander's admission check of one job: PATCH, after the
@@ -112,7 +113,7 @@ HEAVY_MEMORY: "32G"
 HEAVY_CPUS: "16-27"
 HEAVY_STACK: "--stack=1073741824:1073741824"
 // The ratchets every commit keeps, each run as `jet TOOL --check`.
-RATCHETS: [String]{"Tools/agent/UnsafeRatchet.jet", "Tools/agent/CoreCoverage.jet"}
+RATCHETS: [String]{"Tools/agent/UnsafeRatchet.jet", "Tools/agent/CoreCoverage.jet", "Tools/agent/PreludeSources.jet"}
 
 run: fn() {
     args: process.args()
