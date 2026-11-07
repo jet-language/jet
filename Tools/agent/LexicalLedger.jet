@@ -1,0 +1,305 @@
+#!/usr/bin/env jet
+// Renders the owner-controlled lexical ledger into the syntax decisions spec.
+// Spellings.jet's LEXICAL_LEDGER table is the authority: this tool reads its
+// rows, resolving a constant spelling to its one quoted declaration in the
+// Syntax module, and replaces the spec's marked block. It keeps no second
+// spelling inventory.
+// Usage: jet Tools/agent/LexicalLedger.jet [--check|--write]
+//   --check  fail when the rendered block is absent or stale
+//   --write  render the block into Docs/spec/syntax-decisions.md
+// Run it from the repository root; every path is relative to it.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+SYNTAX: "Compiler/JetFoundation/Data/Syntax/Spellings.jet"
+SYNTAX_DIR: "Compiler/JetFoundation/Data/Syntax"
+SPEC: "Docs/spec/syntax-decisions.md"
+OPEN: "<!-- BEGIN GENERATED LEXICAL LEDGER -->"
+CLOSE: "<!-- END GENERATED LEXICAL LEDGER -->"
+TABLE_HEAD: "LEXICAL_LEDGER: [LexicalEntry]{{"
+USAGE: "usage: jet Tools/agent/LexicalLedger.jet [--check|--write]"
+
+#Error
+LedgerError: struct {
+    message: String
+}
+
+ledger_fail: fn(message: String) -> LedgerError Never! {
+    LedgerError{message: "lexical ledger: {message}"}
+}
+
+LedgerRow: struct {
+    spelling: String
+    meaning: String
+}
+
+// A quoted literal's value and the text after its closing quote.
+QuotedText: struct {
+    value: String
+    rest: String
+}
+
+byte_tail: fn(text: String, start: Int) -> String Never! {
+    bytes: text.bytes()
+    String.from_bytes_lossy(bytes[start..<bytes.len()])
+}
+
+// The Jet string literal that starts `text`: `\` escapes, and doubled braces
+// for literal braces. A single brace would interpolate, which no row does.
+quoted_text: fn(text: String, field: String) -> QuotedText LedgerError! {
+    bytes: text.bytes()
+    if bytes.len() == 0 || Int.from_u8(bytes[0]) != 34 -> return Err(ledger_fail("{field} is not a quoted string literal: {text}"))
+    out := [U8]{}
+    index := 1
+    loop index < bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if code == 34 -> return Ok(QuotedText{value: String.from_bytes_lossy(out), rest: byte_tail(text, index + 1)})
+        if code == 92 {
+            if index + 1 >= bytes.len() -> return Err(ledger_fail("{field} string literal ends inside an escape"))
+            escaped: Int.from_u8(bytes[index + 1])
+            decoded: if {
+                escaped == 110 -> 10
+                escaped == 116 -> 9
+                escaped == 114 -> 13
+                escaped == 48 -> 0
+                escaped == 92 || escaped == 34 -> escaped
+                else -> -1
+            }
+            if decoded < 0 -> return Err(ledger_fail("unsupported escape in {field} string literal {text}"))
+            out.push(U8.from_int(decoded) ?? return Err(ledger_fail("unsupported escape in {field} string literal {text}")))
+            index += 2
+            next
+        }
+        if code == 123 || code == 125 {
+            if index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == code {
+                out.push(bytes[index])
+                index += 2
+                next
+            }
+            return Err(ledger_fail("{field} string literal {text} interpolates; ledger rows must be literal text"))
+        }
+        out.push(bytes[index])
+        index += 1
+    }
+    Err(ledger_fail("{field} string literal is not closed: {text}"))
+}
+
+name_byte: fn(code: Int, at: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || (at > 0 && code >= 48 && code <= 57)
+}
+
+// The length of the identifier that starts `text`.
+name_len: fn(text: String) -> Int Never! {
+    bytes: text.bytes()
+    end := 0
+    loop end < bytes.len() && name_byte(Int.from_u8(bytes[end]), end) -> end += 1
+    end
+}
+
+// The name a line declares at its left margin (`NAME:`, not `NAME:=`), and the
+// text after the colon.
+Declaration: struct {
+    name: String
+    rest: String
+}
+
+declaration: fn(line: String) -> Declaration? Never! {
+    end: name_len(line)
+    bytes: line.bytes()
+    if end == 0 || end >= bytes.len() || Int.from_u8(bytes[end]) != 58 -> return None
+    if end + 1 < bytes.len() && Int.from_u8(bytes[end + 1]) == 61 -> return None
+    Val(Declaration{name: String.from_bytes_lossy(bytes[0..<end]), rest: byte_tail(line, end + 1)})
+}
+
+// The text of the constant `name`: exactly one declaration in the Syntax
+// module, with a quoted string literal initializer.
+resolve_constant: fn(lines: [String], name: String) -> String LedgerError! {
+    count := 0
+    values := [String]{}
+    loop line in lines {
+        if declaration(line) == .Val(found) {
+            if found.name != name -> next
+            count += 1
+            initializer: found.rest.trim()
+            if initializer.starts_with("\"") {
+                if quoted_text(initializer, "{name} spelling") == .Ok(literal) {
+                    if literal.rest.trim() == "" -> values.push(literal.value)
+                }
+            }
+        }
+    }
+    if count == 0 -> return Err(ledger_fail("unresolved LexicalEntry spelling constant {name} in {SYNTAX_DIR}"))
+    if count != 1 -> return Err(ledger_fail("ambiguous LexicalEntry spelling constant {name} in {SYNTAX_DIR} ({count} declarations)"))
+    if values.len() != 1 -> return Err(ledger_fail("LexicalEntry spelling constant {name} in {SYNTAX_DIR} must have a quoted string literal initializer"))
+    Ok(values[0].copy())
+}
+
+// One `{ spelling: S, meaning: "M" }` table line.
+parse_row: fn(line: String, constants: [String]) -> LedgerRow LedgerError! {
+    body: line.trim()
+    if !body.starts_with("{{") -> return Err(ledger_fail("unparsed LexicalEntry row in {SYNTAX}: {body}"))
+    head: body.removeprefix("{{").trim_start()
+    if !head.starts_with("spelling:") -> return Err(ledger_fail("unparsed LexicalEntry row in {SYNTAX}: {body}"))
+    value: head.removeprefix("spelling:").trim_start()
+    spelling := ""
+    after := ""
+    if value.starts_with("\"") {
+        literal: quoted_text(value, "spelling") ?? return Err(err)
+        spelling = literal.value
+        after = literal.rest
+    } else {
+        end: name_len(value)
+        if end == 0 -> return Err(ledger_fail("unparsed LexicalEntry row in {SYNTAX}: {body}"))
+        spelling = resolve_constant(constants, String.from_bytes_lossy(value.bytes()[0..<end])) ?? return Err(err)
+        after = byte_tail(value, end)
+    }
+    separator: after.trim_start()
+    if !separator.starts_with(",") -> return Err(ledger_fail("unparsed LexicalEntry row in {SYNTAX}: {body}"))
+    field: separator.removeprefix(",").trim_start()
+    if !field.starts_with("meaning:") -> return Err(ledger_fail("unparsed LexicalEntry row in {SYNTAX}: {body}"))
+    meaning: quoted_text(field.removeprefix("meaning:").trim_start(), "meaning") ?? return Err(err)
+    close: meaning.rest.trim()
+    if close != "}}" && close != "}}," -> return Err(ledger_fail("unparsed LexicalEntry row in {SYNTAX}: {body}"))
+    Ok(LedgerRow{spelling: spelling, meaning: meaning.value})
+}
+
+// The rows of `syntax`'s LEXICAL_LEDGER table, one per line; `constants` is
+// every line of the Syntax module.
+read_rows: fn(syntax: String, constants: [String]) -> [LedgerRow] LedgerError! {
+    rows := [LedgerRow]{}
+    inside := false
+    closed := false
+    loop line in syntax.lines() {
+        if !inside {
+            if line == TABLE_HEAD -> inside = true
+            next
+        }
+        if line == "}}" {
+            closed = true
+            break
+        }
+        if line.trim() == "" -> next
+        row: parse_row(line, constants) ?? return Err(err)
+        loop seen in rows {
+            if seen.spelling == row.spelling -> return Err(ledger_fail("duplicate LexicalEntry spelling `{row.spelling}` in {SYNTAX}"))
+        }
+        rows.push(row)
+    }
+    if !closed || rows.len() == 0 -> return Err(ledger_fail("missing {SYNTAX}::LEXICAL_LEDGER table"))
+    Ok(rows)
+}
+
+read_ledger: fn() -[FS]> [LedgerRow] LedgerError! {
+    syntax: files.read(SYNTAX) ?? return Err(ledger_fail("could not read {SYNTAX}: {err}"))
+    constants := [String]{}
+    module_files: files.glob("{SYNTAX_DIR}/*.jet") ?? return Err(ledger_fail("could not list {SYNTAX_DIR}: {err}"))
+    loop path in module_files {
+        text: files.read(path) ?? return Err(ledger_fail("could not read {path}: {err}"))
+        loop line in text.lines() -> constants.push(line)
+    }
+    read_rows(syntax, constants)
+}
+
+escape_html: fn(value: String) -> String Never! {
+    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+}
+
+// A spelling cell: a code span, or an inline code element when the spelling
+// holds a backtick (a one-backtick span cannot).
+cell: fn(value: String) -> String Never! {
+    flat: value.replace("|", "\\|").replace("\r\n", " ").replace("\n", " ")
+    if flat.contains("`") -> "<code>{escape_html(flat)}</code>" else -> "`{flat}`"
+}
+
+render_ledger: fn(rows: [LedgerRow]) -> String Never! {
+    lines := [String]{
+        OPEN,
+        "",
+        "Generated by `Tools/agent/LexicalLedger.jet` from `{SYNTAX}::LEXICAL_LEDGER`.",
+        "Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rerun the renderer.",
+        "",
+        "| Spelling | Meaning |",
+        "| --- | --- |",
+    }
+    loop row in rows -> lines.push("| {cell(row.spelling)} | {row.meaning.replace("|", "\\|")} |")
+    lines.push("")
+    lines.push(CLOSE)
+    lines.join("\n")
+}
+
+// `spec` with its marked block replaced by `body`, or `body` inserted after
+// the `## Ratified` heading when the spec has no block yet.
+replace_block: fn(spec: String, body: String) -> String LedgerError! {
+    start: spec.find(OPEN)
+    end: spec.find(CLOSE)
+    if (start < 0) != (end < 0) -> return Err(ledger_fail("spec has only one lexical-ledger marker"))
+    bytes: spec.bytes()
+    if start >= 0 {
+        if end < start -> return Err(ledger_fail("spec lexical-ledger markers are out of order"))
+        return Ok("{String.from_bytes_lossy(bytes[0..<start])}{body}{byte_tail(spec, end + CLOSE.bytes().len())}")
+    }
+    heading: "## Ratified\n"
+    anchor: spec.find(heading)
+    if anchor < 0 -> return Err(ledger_fail("spec is missing the `## Ratified` insertion heading"))
+    at: anchor + heading.bytes().len()
+    Ok("{String.from_bytes_lossy(bytes[0..<at])}\n{body}\n{byte_tail(spec, at)}")
+}
+
+lexical_ledger_main: fn(args: [String]) -[FS]> String LedgerError! {
+    check := false
+    write := false
+    loop arg in args {
+        if {
+            arg == "--check" -> check = true
+            arg == "--write" -> write = true
+            else -> return Err(ledger_fail("unknown option {arg}\n{USAGE}"))
+        }
+    }
+    if check && write -> return Err(ledger_fail("choose --check or --write"))
+    rows: read_ledger() ?? return Err(err)
+    spec: files.read(SPEC) ?? return Err(ledger_fail("could not read {SPEC}: {err}"))
+    next_spec: replace_block(spec, render_ledger(rows)) ?? return Err(err)
+    if next_spec == spec -> return Ok("lexical ledger up to date ({rows.len()} rows)")
+    if check -> return Err(LedgerError{message: "lexical ledger is stale; run: jet Tools/agent/LexicalLedger.jet --write"})
+    files.write(SPEC, next_spec) ?? return Err(ledger_fail("could not write {SPEC}: {err}"))
+    Ok("wrote lexical ledger: {rows.len()} rows")
+}
+
+run: fn() {
+    if lexical_ledger_main(process.args()) == {
+        .Ok(message) -> print(message)
+        .Err(error) -> {
+            term.eprint(error.message)
+            process.exit(1)
+        }
+    }
+}
+
+#Test("a row resolves a constant spelling and unescapes literal braces") {
+    constants: [String]{"KW_X: \"comptime\"", "OTHER: 1"}
+    row: parse_row("    {{ spelling: KW_X, meaning: \"a {{{{block}}}} \\\"quoted\\\"\" }},", constants) ?? panic("row: {err.message}")
+    assert_eq(row.spelling, "comptime")
+    assert_eq(row.meaning, "a {{block}} \"quoted\"")
+    literal: parse_row("{{ spelling: \"`\", meaning: \"a | b\" }}", constants) ?? panic("literal row: {err.message}")
+    assert_eq(render_ledger([LedgerRow]{literal}).lines()[7], "| <code>`</code> | a \\| b |")
+    if parse_row("{{ spelling: MISSING, meaning: \"m\" }}", constants) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "lexical ledger: unresolved LexicalEntry spelling constant MISSING in {SYNTAX_DIR}")
+    }
+    if quoted_text("\"a {{b}}\"", "meaning") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert(error.message.contains("interpolates"))
+    }
+}
+
+#Test("the block replaces the marked region") {
+    spec: "head\n{OPEN}\nstale\n{CLOSE}\ntail\n"
+    assert_eq(replace_block(spec, "NEW") ?? "", "head\nNEW\ntail\n")
+    if replace_block("head\n{OPEN}\n", "NEW") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "lexical ledger: spec has only one lexical-ledger marker")
+    }
+}

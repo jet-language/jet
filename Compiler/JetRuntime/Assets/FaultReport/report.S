@@ -1,6 +1,6 @@
 # The native fault report (Compiler/JetRuntime/Source/Fault.jet): the text
 # of a fatal signal, as one position-independent run of x86-64 code with its
-# texts. Tools/agent/gen-runtime-fault-report.mjs assembles it into
+# texts. Tools/agent/RuntimeGenerators.jet assembles it into
 # X64_FAULT_REPORT (Compiler/JetBackend/Source/X64/FaultReport.jet), which
 # the static linker writes as the function the runtime's rt_fault_print
 # intrinsic calls (JetIR BuildLibrary.jet; Image/StaticLink.jet

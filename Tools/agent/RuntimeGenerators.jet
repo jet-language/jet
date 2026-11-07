@@ -4,6 +4,7 @@
 // Usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only]
 //        jet Tools/agent/RuntimeGenerators.jet lifecycle FILE...
 //        jet Tools/agent/RuntimeGenerators.jet exports
+//        jet Tools/agent/RuntimeGenerators.jet fault-report [--check]
 //   (default)        rewrite every stale output
 //   --check          write nothing; report every stale output
 //   --defects-only   regenerate only the private trap defect rows, refusing
@@ -13,6 +14,10 @@
 //                    fixture's unit)
 //   exports          print `SYMBOL<TAB>FILE` for each #Export(c) function of
 //                    the runtime sources sources.list names, in its order
+//   fault-report     assemble the native fault reports (GNU as, which the
+//                    dev shell provides: run it as `jet Tools/agent/JetEnv.jet
+//                    jet Tools/agent/RuntimeGenerators.jet fault-report`)
+//                    into X64/FaultReport.jet; --check writes nothing
 // Run it from the repository root; every path is relative to it.
 use {
     crypto: core.crypto
@@ -48,11 +53,12 @@ write_output: fn(path: String, text: String) GeneratorError! {
     files.write(path, text) ?? return Err(generator_fail("cannot write {path}: {err}"))
 }
 
-USAGE: "usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only] | lifecycle FILE... | exports"
+USAGE: "usage: jet Tools/agent/RuntimeGenerators.jet [--check] [--defects-only] | lifecycle FILE... | exports | fault-report [--check]"
 
-runtime_generators_main: fn(args: [String]) -[FS, IO]> String GeneratorError! {
+runtime_generators_main: fn(args: [String]) -[Exec, FS, IO]> String GeneratorError! {
     if args.len() > 0 && args[0] == "lifecycle" -> return unit_lifecycle_list(args)
     if args.len() == 1 && args[0] == "exports" -> return runtime_export_files()
+    if args.len() > 0 && args[0] == "fault-report" -> return fault_report_main(args)
     check := false
     defects_only := false
     loop arg in args {
@@ -2930,5 +2936,133 @@ read_dyn_kinds: fn() -[FS]> [GeneratedFile] GeneratorError! {
     if dyn_kind_rows(source.replace("\"Bytes\"", "Bytes")) == {
         .Ok(_) -> assert(false)
         .Err(error) -> assert_eq(error.message, "unsupported __dyn_kind arm: .Bytes(_) -> Bytes")
+    }
+}
+
+// The native fault reports' machine code: report.S and addresses.S, assembled
+// with GNU as, become X64/FaultReport.jet's byte tables. The bytes must need
+// no relocation, and a report is code and texts only.
+
+FAULT_REPORT_TARGET_PATH: "Compiler/JetBackend/Source/X64/FaultReport.jet"
+
+FaultReportSource: struct {
+    path: String
+    name: String
+    doc: String
+}
+
+fault_report_sources: fn() -> [FaultReportSource] Never! {
+    [FaultReportSource]{
+        FaultReportSource{path: "Compiler/JetRuntime/Assets/FaultReport/report.S", name: "X64_FAULT_REPORT", doc: "// The full report, naming Jet frames from the image's location table."},
+        FaultReportSource{path: "Compiler/JetRuntime/Assets/FaultReport/addresses.S", name: "X64_FAULT_REPORT_ADDRESSES", doc: "// A split image's report: addresses under the build id, for `jet crash`."},
+    }
+}
+
+// The little-endian unsigned field of `count` bytes (at most 8) at `at`.
+le_field: fn(bytes: [U8], at: Int, count: Int) -> Int Never! {
+    value := 0
+    scale := 1
+    loop index in at..<at + count {
+        value += Int.from_u8(bytes[index]) * scale
+        if index - at < count - 1 -> scale *= 256
+    }
+    value
+}
+
+// The .text bytes of the ELF64 relocatable object assembled from `path`.
+fault_report_text: fn(path: String, object: [U8]) -> [U8] GeneratorError! {
+    if object.len() < 64 -> return Err(generator_fail("{path}: the assembler wrote no ELF64 object"))
+    shoff: le_field(object, 40, 8)
+    shentsize: le_field(object, 58, 2)
+    shnum: le_field(object, 60, 2)
+    if shentsize < 40 || shoff + shnum * shentsize > object.len() -> return Err(generator_fail("{path}: the object's section headers are truncated"))
+    names_at: le_field(object, shoff + le_field(object, 62, 2) * shentsize + 24, 8)
+    text := [U8]{}
+    found := false
+    loop index in 0..<shnum {
+        header: shoff + index * shentsize
+        name_at: names_at + le_field(object, header, 4)
+        name_end := name_at
+        loop name_end < object.len() && Int.from_u8(object[name_end]) != 0 -> name_end += 1
+        name: String.from_bytes_lossy(object[name_at..<name_end])
+        offset: le_field(object, header + 24, 8)
+        size: le_field(object, header + 32, 8)
+        if name.starts_with(".rela") || name.starts_with(".rel.") -> return Err(generator_fail("{path}: {name}: the report's bytes must need no relocation"))
+        data_section: name == ".data" || name == ".bss"
+        if data_section && size != 0 -> return Err(generator_fail("{path}: {name}: the report is code and texts only"))
+        if name == ".text" {
+            if offset + size > object.len() -> return Err(generator_fail("{path}: .text is truncated"))
+            loop at in offset..<offset + size -> text.push(object[at])
+            found = true
+        }
+    }
+    if !found || text.len() == 0 -> return Err(generator_fail("{path}: no .text"))
+    Ok(text)
+}
+
+// The table `name` of `bytes`, sixteen per row.
+render_fault_report_table: fn(report: FaultReportSource, bytes: [U8]) -> String Never! {
+    rows := [String]{}
+    at := 0
+    loop at < bytes.len() {
+        end: if at + 16 < bytes.len() -> at + 16 else -> bytes.len()
+        cells := [String]{}
+        loop index in at..<end -> cells.push("{Int.from_u8(bytes[index])}")
+        rows.push("    {cells.join(", ")},")
+        at += 16
+    }
+    "\n{report.doc}\n{report.name}: [U8]{{\n{rows.join("\n")}\n}}\n"
+}
+
+// `fault-report [--check]` (`args` with its mode word): FaultReport.jet is
+// current, or (without --check) rewritten.
+fault_report_main: fn(args: [String]) -[Exec, FS]> String GeneratorError! {
+    check: args.len() == 2 && args[1] == "--check"
+    if args.len() > 2 || (args.len() == 2 && !check) -> return Err(generator_fail(USAGE))
+    text: render_fault_reports() ?? return Err(err)
+    current: output_current(FAULT_REPORT_TARGET_PATH, text) ?? return Err(err)
+    if current -> return Ok("runtime fault reports are current")
+    if check -> return Err(generator_fail("{FAULT_REPORT_TARGET_PATH} is stale; run jet Tools/agent/JetEnv.jet jet Tools/agent/RuntimeGenerators.jet fault-report"))
+    write_output(FAULT_REPORT_TARGET_PATH, text) ?? return Err(err)
+    Ok("wrote {FAULT_REPORT_TARGET_PATH}")
+}
+
+render_fault_reports: fn() -[Exec, FS]> String GeneratorError! {
+    scratch: files.mkdtemp("fault-report") ?? return Err(generator_fail("a scratch directory cannot be made: {err}"))
+    source := "// Generated by Tools/agent/RuntimeGenerators.jet from\n// Compiler/JetRuntime/Assets/FaultReport/; do not hand-edit.\n// The native fault reports' x86-64 code and texts: each a whole C\n// function, which the static linker writes as the runtime's\n// jet_rt_fault_report (Image/StaticLink.jet link_fault_report). Its\n// source documents how the bytes run.\n"
+    problems := [String]{}
+    loop report in fault_report_sources() {
+        object: files.join(scratch, "report.o")
+        assembled: process.cmd([String]{"as", "--64", "-o", object, report.path}).run() ?? {
+            problems.push("{report.path}: `as` cannot start: {err}")
+            next
+        }
+        if !assembled.success {
+            problems.push("{report.path}: `as` exited {assembled.code}: {assembled.output.trim()}")
+            next
+        }
+        bytes: files.read_bytes(object) ?? {
+            problems.push("{report.path}: cannot read the object: {err}")
+            next
+        }
+        if fault_report_text(report.path, bytes) == {
+            .Ok(text) -> source = "{source}{render_fault_report_table(report, text)}"
+            .Err(error) -> problems.push(error.message)
+        }
+    }
+    files.remove_all(scratch) ?? ()
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    Ok(source)
+}
+
+#Test("a fault report table holds sixteen bytes per row") {
+    report: FaultReportSource{path: "r.S", name: "R", doc: "// Doc."}
+    bytes := [U8]{}
+    loop value in 0..<18 -> bytes.push(U8.from_int(value) ?? panic("byte"))
+    assert_eq(render_fault_report_table(report, bytes), "\n// Doc.\nR: [U8]{{\n    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,\n    16, 17,\n}}\n")
+    assert_eq(le_field([U8]{U8{1}, U8{2}, U8{0}}, 0, 3), 513)
+    if fault_report_text("r.S", [U8]{U8{0}}) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "r.S: the assembler wrote no ELF64 object")
     }
 }

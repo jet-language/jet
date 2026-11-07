@@ -81,7 +81,7 @@ Source kind: primary, audience, linked-source, local-evidence, or inference.
 
 Add `segment` (coverage segment ID), `lane`, `scale` (micro/macro), `workload`,
 `contribution`, coverage/measurement limits, `canonical_owner`, `jet_state`
-(digest identity and exact refs), independent `observed`, `intended`, `work`
+(checkout identity: HEAD, status hash and Tower revision; exact refs), independent `observed`, `intended`, `work`
 axes, reviewer disposition, and why the contribution is genuinely incremental.
 Each distinct contribution is its own claim; several ledger items share a claim
 only when they witness the same mechanism, never to summarize a segment.
@@ -199,7 +199,7 @@ clean cutovers. Evidence/research work does not imply implementation.
 After extraction/dedupe and a passing `check_coverage.mjs`, supply an independent
 reviewer with declared sources, raw captures, the run directory (coverage,
 ledger, claims, checker output), question matrix, direct authority and
-checkout/digest identities, duplicate search, proposed dispositions, and
+checkout identities, duplicate search, proposed dispositions, and
 short/technical payloads. Use existing review/tower-ballot skills as applicable;
 an orchestrator obtains the reviewer when workers cannot delegate. Without fresh
 review, do not publish new recommendations/cards/ballots.

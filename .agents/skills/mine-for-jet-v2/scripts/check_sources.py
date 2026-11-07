@@ -79,7 +79,6 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("urls", nargs="+")
     parser.add_argument("--registry", default="Docs/spec/reference/prior-art.md")
-    parser.add_argument("--evidence-index", help="optional jet-state:v1 JSON; report links are leads, not proof of review")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--allow-rerun", action="append", default=[], metavar="SOURCE", type=content_id)
     mode.add_argument("--verify-tracked", action="store_true")
@@ -88,12 +87,6 @@ def main() -> int:
     if not registry.is_file():
         parser.error(f"source registry does not exist: {registry}")
     lines = registry.read_text().splitlines()
-    evidence = []
-    if args.evidence_index:
-        packet = json.loads(Path(args.evidence_index).read_text())
-        if packet.get("schema") != "jet-state:v1":
-            parser.error("evidence index must be jet-state:v1")
-        evidence = packet.get("research", [])
     results = []
     approved = set(args.allow_rerun)
     tracked_ids = set()
@@ -104,24 +97,12 @@ def main() -> int:
         matches = [index for index, line in enumerate(lines, 1) if _line_matches(line, resource)]
         historical = [index for index, line in enumerate(lines, 1)
                       if identity != resource and _registry_pattern(identity).search(line)]
-        leads = []
-        for report in evidence:
-            matched = []
-            for url in report.get("source_urls", []):
-                try:
-                    if content_id(url) == resource:
-                        matched.append(url)
-                except ValueError:
-                    continue
-            if matched:
-                leads.append({"report": report.get("path"), "urls": matched,
-                              "coverage": report.get("coverage", "unknown"), "state": report.get("state", "unknown")})
         first_input = seen.get(resource)
         if first_input is not None:
             status = "duplicate-input"
             input_duplicate = True
         else:
-            status = "tracked" if matches or leads else "new"
+            status = "tracked" if matches else "new"
             if status == "tracked":
                 tracked_ids.add(resource)
                 unapproved_tracked |= resource not in approved
@@ -131,7 +112,7 @@ def main() -> int:
         results.append({"source_id": identity, "content_id": resource,
                         "canonical_url": _canonical_url(resource), "status": status,
                         "registry": str(registry), "matched_lines": matches,
-                        "historical_selector_unknown_lines": historical, "report_candidates": leads,
+                        "historical_selector_unknown_lines": historical,
                         "first_input": first_input, "rerun_approved": resource in approved,
                         "coverage": "unknown; URL occurrence is not full mining",
                         "revision": "unknown; specify pinned revision and subresource in capture"})

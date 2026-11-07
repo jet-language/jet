@@ -66,21 +66,6 @@ class SourceGuardTest(unittest.TestCase):
             self.assertEqual(self.run_guard(registry, "https://example.org/p")[0], 3)
             self.assertEqual(self.run_guard(registry, "https://github.com/org/repo")[0], 0)
 
-    def test_digest_report_links_absent_from_registry_are_candidates_not_proof_of_body_review(self):
-        with TemporaryDirectory() as root:
-            registry = Path(root) / "prior-art.md"
-            registry.write_text("")
-            evidence = Path(root) / "digest.json"
-            evidence.write_text(json.dumps({"schema": "jet-state:v1", "research": [{
-                "path": "Docs/research/example.md", "source_urls": ["https://example.org/p?edition=2"],
-                "coverage": "text indexed; body not technically reviewed", "state": "dated-research-not-current-law"
-            }]}))
-            code, rows = self.run_guard(registry, "https://example.org/p?edition=2", options=("--evidence-index", str(evidence)))
-            self.assertEqual(code, 3)
-            self.assertEqual(rows[0]["report_candidates"][0]["report"], "Docs/research/example.md")
-            self.assertIn("unknown", rows[0]["coverage"])
-            self.assertEqual(self.run_guard(registry, "https://example.org/p?edition=3", options=("--evidence-index", str(evidence)))[0], 0)
-
 
 if __name__ == "__main__":
     unittest.main()

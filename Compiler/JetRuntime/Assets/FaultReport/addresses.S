@@ -13,7 +13,7 @@
 # `backtrace: off` ends a stop at `Stop [E3012]: Stack overflow` and writes
 # no backtrace; brief only the faulting address; full, and every stack
 # overflow (whose innermost Jet function may be a caller), the return
-# addresses of up to 64 callers too. Tools/agent/gen-runtime-fault-report.mjs
+# addresses of up to 64 callers too. Tools/agent/RuntimeGenerators.jet
 # assembles it into X64_FAULT_REPORT_ADDRESSES (Compiler/JetBackend/Source/
 # X64/FaultReport.jet), which the static linker writes as a split image's
 # jet_rt_fault_report (Image/StaticLink.jet link_fault_report), with
