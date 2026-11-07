@@ -2,11 +2,10 @@
 fixture: web_test_static_server_rejects_symlink_escape.fixture
 copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
 env: S5_PORT={free-port:web}
-requires: tool:node
 requires: os:unix
 env: S5_OUTSIDE={work}/outside
 symlink: {work}/outside root/escape.js
-session app raw: node {root}/Tools/web-test/serve.mjs --port {free-port:web} --root {work}/root
+session app raw: jet run --allow=Env,FS,IO,Net,Time {root}/Tools/web-test/Serve.jet -- --port {free-port:web} --root {work}/root
 stdout: null
 stderr: null
 step: jet test claims

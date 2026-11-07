@@ -39,7 +39,7 @@ mkdir: {work}/lifecycle
 for file {work}/lifecycle_src/.jet/build as f
 copy: {f.path} {work}/lifecycle/{f.name}
 end for
-spawn server: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/serve.mjs --port {free-port:static} --root {work}
+spawn server: jet run --allow=Env,FS,IO,Net,Time {root}/Tools/web-test/Serve.jet -- --port {free-port:static} --root {work}
 stdout: null
 poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:static} /click/web.manifest.json - - until stdout: ~ "200 OK" timeout 10s every 50ms # the static server serves the manifest
 step: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/sourcemap.mjs --port {free-port:static} --prefix /click --wasm-prefix /compute

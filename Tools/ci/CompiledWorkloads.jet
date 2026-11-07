@@ -3756,16 +3756,18 @@ chromium_executable: fn() -[Env, Exec, FS, Time, Time.Wait]> String Problem! {
 
 json_text: fn(value: String) -> String Never! { json.to_string(Dyn.Text(value.copy())) ?? "\"\"" }
 
-// The Node harness serving `buildDir` and reading the page's console through
-// the CDP driver until it matches the expected output.
-web_harness: fn(driver_module: String, serve_script: String) -> String Never! {
+// The Node harness serving `buildDir` with Tools/web-test/Serve.jet and
+// reading the page's console through the CDP driver until it matches the
+// expected output.
+web_harness: fn(driver_module: String, jet: String, serve_source: String) -> String Never! {
     driver: json_text(driver_module)
     lines: [String]{
         "import fs from \"node:fs\";",
         "import net from \"node:net\";",
         "import {{ spawn }} from \"node:child_process\";",
         "const driverModule = {driver};",
-        "const serveScript = {json_text(serve_script)};",
+        "const jetPath = {json_text(jet)};",
+        "const serveSource = {json_text(serve_source)};",
         "const buildDir = process.argv[2];",
         "const expectedPath = process.argv[3];",
         "const expected = fs.readFileSync(expectedPath, \"utf8\");",
@@ -3774,12 +3776,12 @@ web_harness: fn(driver_module: String, serve_script: String) -> String Never! {
         "await new Promise((resolve, reject) => {{ reservation.once(\"error\", reject); reservation.listen(0, \"127.0.0.1\", resolve); }});",
         "const port = reservation.address().port;",
         "await new Promise(resolve => reservation.close(resolve));",
-        "const server = spawn(process.execPath, [serveScript, \"--port\", String(port), \"--root\", buildDir], {{ stdio: [\"ignore\", \"ignore\", \"pipe\"] }});",
+        "const server = spawn(jetPath, [\"run\", \"--allow=Env,FS,IO,Net,Time\", serveSource, \"--\", \"--port\", String(port), \"--root\", buildDir], {{ stdio: [\"ignore\", \"ignore\", \"pipe\"] }});",
         "let serverError = \"\";",
         "server.stderr.setEncoding(\"utf8\");",
         "server.stderr.on(\"data\", chunk => {{ serverError += chunk; }});",
         "let serving = false;",
-        "for (let attempt = 0; attempt < 200; attempt += 1) {{",
+        "for (let attempt = 0; attempt < 600; attempt += 1) {{",
         "  try {{ const response = await fetch(\"http://127.0.0.1:\" + port + \"/index.html\", {{ cache: \"no-store\" }}); if (response.ok) {{ serving = true; break; }} }} catch {{}}",
         "  await sleep(50);",
         "}}",
@@ -3815,10 +3817,8 @@ web_browser_run: fn(state: Producer, task: [String: String], build_dir: String, 
     chromium: chromium_executable() ?? return Err(err)
     harness: "{build_dir}/.compiled-workload-web-browser.mjs"
     driver_local: "{build_dir}/.compiled-workload-cdp-driver.mjs"
-    serve_local: "{build_dir}/.compiled-workload-serve.mjs"
     files.copy("{state.root}/Tools/canvas-test/driver.mjs", driver_local) ?? return Err(problem("the CDP driver cannot be copied: {err}"))
-    files.copy("{state.root}/Tools/web-test/serve.mjs", serve_local) ?? return Err(problem("the web server cannot be copied: {err}"))
-    files.write(harness, web_harness(file_url(driver_local), serve_local)) ?? return Err(problem("`{harness}` cannot be written: {err}"))
+    files.write(harness, web_harness(file_url(driver_local), state.jet, "{state.root}/Tools/web-test/Serve.jet")) ?? return Err(problem("`{harness}` cannot be written: {err}"))
     chrome_temp: "{build_dir}/.chrome-temp"
     node: node_path(state) ?? return Err(err)
     env: [EnvVar]{env_var("CHROMIUM", chromium), env_var("JET_WEB_CHROME_TEMP", chrome_temp)}
