@@ -18,6 +18,7 @@ typedef struct { Text *key; Tree *value; } Entry;
 _Static_assert(sizeof(Tree) == 16 && offsetof(Tree, payload) == 8, "DataABI Tree");
 _Static_assert(sizeof(Sequence) == 24 && offsetof(Sequence, data) == 16, "native List");
 _Static_assert(sizeof(Entry) == 16 && offsetof(Entry, value) == 8, "DataABI Entry");
+extern void jet_rt_host_arguments(int64_t, char **, char **);
 extern void jet_rt_alloc_init(void);
 extern void *jet_rt_alloc(int64_t, int64_t);
 extern int64_t jet_rt_alloc_check_observe(int64_t, int64_t);
@@ -219,9 +220,11 @@ static void sequence_cases(void) {
     expect(jet_rt_handle_show_dyn(a), "AH//");
     ((unsigned char *)((Sequence *)b->payload)->data)[0] = 1; assert(!jet_rt_handle_eq_dyn(a,b)); drop_pair(a,b);
 }
-int main(int argc, char **argv) {
+int main(int argc, char **argv, char **envp) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
+    // A stop's report reads the startup capture (HostStartup.jet).
+    jet_rt_host_arguments(argc, argv, envp);
     if (argc > 1 && (strcmp(argv[1], "list-capacity-negative") == 0 || strcmp(argv[1], "list-capacity-overflow") == 0)) {
         int64_t capacity = strcmp(argv[1], "list-capacity-negative") == 0 ? -1 : INT64_MAX / 8 + 1;
         (void)jet_rt_record_seq_list_rec_dyn_new(capacity);
