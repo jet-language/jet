@@ -665,18 +665,22 @@ specification: fn(id: String) -> Spec? Never! {
             found.crypto = true
             return Val(found)
         }
+        // A plain transport calls its entry from the generated driver, or
+        // runs the committed C host `witness` that drives the fragment.
         plain: if name == {
-            "Alloc" -> Val((call: Val("alloc_tests"), expected: "alloc tests: ok\n"))
-            "Collections" -> Val((call: Val("collections_tests"), expected: ""))
-            "Scan" -> Val((call: Val("scan_tests"), expected: ""))
-            "Text" -> Val((call: Val("text_tests"), expected: ""))
-            "Unicode" -> Val((call: Val("unicode_tests"), expected: ""))
-            "Secret" -> Val((call: Val("secret_tests"), expected: "secret tests: ok\n"))
+            "Alloc" -> Val((call: Val("alloc_tests"), witness: "", expected: "alloc tests: ok\n"))
+            "Collections" -> Val((call: Val("collections_tests"), witness: "", expected: ""))
+            "Scan" -> Val((call: Val("scan_tests"), witness: "", expected: ""))
+            "Text" -> Val((call: Val("text_tests"), witness: "", expected: ""))
+            "Unicode" -> Val((call: Val("unicode_tests"), witness: "", expected: ""))
+            "Secret" -> Val((call: Val("secret_tests"), witness: "", expected: "secret tests: ok\n"))
+            "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
             else -> None
         }
         if plain == .Val(table) {
             found := spec("plain", name, "Tools/agent/CompilerPackages.jet")
             found.call = table.call.copy()
+            found.witness = table.witness.copy()
             found.expected = table.expected.copy()
             return Val(found)
         }
@@ -703,7 +707,6 @@ specification: fn(id: String) -> Spec? Never! {
             "SharedThread" -> Val((runner: "run-thread-fixtures.mjs", modes: [String]{"assemble", "lower", "shared-link", "shared-run"}))
             "Parallel" -> Val((runner: "run-parallel-fixtures.mjs", modes: FOUR_MODES.copy()))
             "Scheduler" -> Val((runner: "run-scheduler-fixtures.mjs", modes: FOUR_MODES.copy()))
-            "TestSuite" -> Val((runner: "run-testsuite-fixtures.mjs", modes: FOUR_MODES.copy()))
             "CollectionsStop" -> Val((runner: "run-collections-stop.mjs", modes: [String]{"--assemble", "--lower", "--run"}))
             else -> None
         }
@@ -988,8 +991,9 @@ compile: fn(lane: &Lane, file: String, root: String, prefix: String) -[Env, Exec
     "{prefix}.exe"
 }
 
-// Lower `file` as a native library: the front-end hook writes its object,
-// exports, ABI, thread and issue files beside `prefix`.
+// Lower `file` as a native library through `jet doc`, the runtime-library
+// seam (`jet check` lowers no #Export(c) body): the front-end hook writes its
+// object, exports, ABI, thread and issue files beside `prefix`.
 library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, exports: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     if !files.exists(lifecycle) -> return Err(problem("native library lifecycle list `{lifecycle}` is missing"))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads", ".issues"}) {
@@ -997,7 +1001,7 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
     }
     hooks := [Setting]{Setting{name: "JET_FRONT_LIBRARY_OBJECT_OUTPUT", value: prefix.copy()}, Setting{name: "JET_FRONT_LIBRARY_LIFECYCLE", value: lifecycle.copy()}}
     if exports != "" -> hooks.push(Setting{name: "JET_FRONT_LIBRARY_EXPORTS", value: exports.copy()})
-    front(lane, [String]{"check", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
+    front(lane, [String]{"doc", file}, prefix, files.dirname(file), hooks) ?? return Err(err)
     if files.exists("{prefix}.issues") -> return Err(problem(files.read("{prefix}.issues") ?? ""))
     loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads"}) {
         if !files.exists("{prefix}{suffix}") -> return Err(problem("native library hook omitted {suffix}"))
@@ -1146,9 +1150,10 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
         jet_tool(lane, found.runner, [String]{"--root", repo, "runtime-unit", raw, "--test", found.name}) ?? return Err(err)
         unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
-        call: found.call ?? return Err(problem("plain transport {found.name} names no entry"))
+        entry: if found.call == .Val(call) -> "\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n" else -> ""
+        if entry == "" && found.witness == "" -> return Err(problem("plain transport {found.name} names no entry"))
         fixture: "{native}/Source/Fixture.jet"
-        files.write(fixture, "{unit}\n#Export(c) jet_rt_plain_fixture: fn() {{ {call}() }}\n") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
+        files.write(fixture, "{unit}{entry}") ?? return Err(problem("`{fixture}` cannot be written: {err}"))
         package: files.read("{repo}/Compiler/JetRuntime/package.jet") ?? return Err(problem("`Compiler/JetRuntime/package.jet` cannot be read: {err}"))
         files.write("{native}/package.jet", package) ?? return Err(problem("`{native}/package.jet` cannot be written: {err}"))
         // The fragments witness the allocator a program built without
@@ -1161,8 +1166,12 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         lifecycle: "{native}/lifecycle.list"
         files.write(lifecycle, kept.join("\n")) ?? return Err(problem("`{lifecycle}` cannot be written: {err}"))
         library(lane, fixture, "{native}/fixture", lifecycle, "") ?? return Err(err)
-        driver: "{native}/driver.c"
-        files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        driver := "{native}/driver.c"
+        if found.witness != "" {
+            driver = "{repo}/{found.witness}"
+        } else {
+            files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
+        }
         binary: "{native}/driver"
         link(lane, driver, "{native}/fixture.o", binary) ?? return Err(err)
         ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
@@ -1873,5 +1882,25 @@ shard_ids: fn(entries: [Dyn], shard: String) -> [String] Never! {
         assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
         found: specification(text_field(entry, "id")) ?? panic("{name}: no specification")
         assert_eq(found.modes, [String]{"assemble", "lower", "audit", "link", "run"})
+    }
+}
+
+#Test("a plain transport runs its generated entry driver or its committed C host") {
+    repo: test_repo()
+    loop name in ([String]{"Alloc", "TestSuite"}) {
+        row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/Fragments.fixture/{name}Tests.jet", sha256: "", names: [String]{}, entry: false, role: "registry"}
+        entry: prepare_transport(repo, row, "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
+        transport: field(entry, "transport")
+        assert_eq(text_field(transport, "type"), "plain")
+        assert_eq(text_field(transport, "runner"), "Tools/agent/CompilerPackages.jet")
+        if name == "Alloc" {
+            assert_eq(text_field(transport, "call"), "alloc_tests")
+            assert(field(transport, "witness") == Dyn.Null)
+            next
+        }
+        assert(field(transport, "call") == Dyn.Null)
+        assert_eq(text_field(transport, "witness"), "Compiler/JetRuntime/Tests/test-suite-fixture.c")
+        assert_eq(text_field(transport, "expected"), "test suite: ok\n")
+        assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/test-suite-fixture.c")))
     }
 }
