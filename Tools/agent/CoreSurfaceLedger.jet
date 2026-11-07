@@ -31,12 +31,12 @@ PYTHON_SURFACE_PATH: "Docs/spec/reference/python-surface.json"
 // Decisions and card owners come only from the board of the tree under check,
 // never from another checkout's live board, so the same tree checks the same
 // way in a git worktree and in a plain export. Read-only, through that tree's
-// Tower CLI, whose `show` reads the live board and then its archive: a ratified
-// decision or a done card retires to history.json, and a declined row or a
-// closed owner must still resolve once it has.
+// Tower board reader, whose `show` reads the live board and then its archive: a
+// ratified decision or a done card retires to history.json, and a declined row
+// or a closed owner must still resolve once it has.
 TOWER_DATA_DIR: "Tools/tower/.tower"
 TOWER_BOARD_PATH: "Tools/tower/.tower/tower.json"
-TOWER_CLI_PATH: "Tools/tower/tower.mjs"
+TOWER_BOARD_TOOL: "Tools/tower/Board.jet"
 CORE_SOURCE_PATH: "Compiler/Prelude/Core.jet"
 // The Core rows with no Core.jet declaration: typed fixed-signature members,
 // built-in receiver methods, and the lowering-owned extension calls.
@@ -2120,7 +2120,7 @@ BoardDecision: struct {
     status: String
 }
 
-// The cards and decisions this ledger names, as the tree's Tower CLI shows
+// The cards and decisions this ledger names, as the tree's Tower board shows
 // them. `readable` is false when the tree carries no board.
 Board: struct {
     readable: Bool
@@ -2128,8 +2128,8 @@ Board: struct {
     decisions: [BoardDecision]
 }
 
-tower_command: fn(root: String, args: [String]) -> ProcessSpec Never! {
-    argv := [String]{"node", TOWER_CLI_PATH}
+tower_command: fn(jet: String, root: String, args: [String]) -> ProcessSpec Never! {
+    argv := [String]{jet.copy(), TOWER_BOARD_TOOL}
     loop arg in args -> argv.push(arg.copy())
     argv.push("--json")
     argv.push("--data")
@@ -2161,8 +2161,9 @@ tower_board: fn(root: String) -[Env, Exec, FS, Time.Wait]> Board LedgerError! {
         if !ids.contains(entry.decision) -> ids.push(entry.decision.copy())
     }
     specs := [ProcessSpec]{}
-    loop num in nums -> specs.push(tower_command(root, [String]{"card", "show", "#{num}"}))
-    loop id in ids -> specs.push(tower_command(root, [String]{"decision", "show", id}))
+    jet: process.env_get_or("JET", "jet")
+    loop num in nums -> specs.push(tower_command(jet, root, [String]{"card", "show", "#{num}"}))
+    loop id in ids -> specs.push(tower_command(jet, root, [String]{"decision", "show", id}))
     ran: process.run_all(specs, 8) ?? return Err(fail("tower cannot run: {err}"))
     cards := [BoardCard]{}
     loop (at, num) in nums {

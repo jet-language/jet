@@ -23,9 +23,9 @@ use {
 TOOL: "/Tools/ci/CompiledWorkloads.jet"
 CORPUS: "tests/compiled_workloads"
 CORE_CHECKER: "Tools/agent/CoreSurfaceLedger.jet"
-TOWER_CLI: "Tools/tower/tower.mjs"
-// Owners are checked against this tree's own board. Without TOWER_DATA, Tower
-// follows a linked worktree to the main checkout's live board.
+TOWER_BOARD_TOOL: "Tools/tower/Board.jet"
+// Owners are checked against this tree's own board. Without TOWER_DATA, the
+// board reader follows a linked worktree to the main checkout's live board.
 TOWER_BOARD: "Tools/tower/.tower/tower.json"
 USAGE: "usage: jet Tools/ci/CompiledWorkloads.jet --contract|--check REPORT_DIR|review REPORT_DIR|self-check|run --platform PLATFORM --report-dir DIR|run --measurement-registry"
 REVIEW_WORKFLOW: "compiled-workload-review.yml"
@@ -525,7 +525,7 @@ hash_input_path: fn(input: String) -[FS]> String Problem! {
 // `board` is the Tower store the owners are read from: this tree's own board
 // for a real report, a fixture board for the self-check.
 tower: fn(root: String, board: String, args: [String]) -[Env, Exec, FS, Time, Time.Wait]> Dyn? {
-    argv := [String]{"node", "{root}/{TOWER_CLI}"}
+    argv := [String]{process.env_get_or("JET", "jet"), "{root}/{TOWER_BOARD_TOOL}"}
     loop arg in args -> argv.push(arg.copy())
     ran: process.cmd(argv).cwd(root).env("TOWER_DATA", board).run() ?? return None
     if ran.code != 0 || ran.signal != None -> return None
