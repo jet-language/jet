@@ -842,8 +842,9 @@ ir_assign_aggregate: fn(m: &IRModule, b: &IRBuilder, slot: Int, value: Int, owns
 
 // A pinned borrowed argument or receiver (`pin = &place`, sema's
 // evaluation-order pin): an alias of the place, which never owns the value. A
-// read aliases the place's value; a write aliases an aggregate's storage or a
-// scalar's address (ir_scalar_window).
+// read aliases the place's value; a write aliases an aggregate's storage or the
+// address of a scalar, or of a handle or box that lives in other storage (a
+// List element, a struct member) (ir_scalar_window).
 ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: Int, span: Span) Never! {
     init_ty: ir_ty(p, b, init)
     access: if ir_body_node(p, b, init).kind == .Borrow(_, borrowed) -> borrowed else -> AccessConvention.Read
@@ -854,6 +855,9 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
             return
         }
         if ir_scalar_row(m, row) && !ir_option_inline(m, row) -> return ir_scalar_window(m, p, b, local, place, row, span)
+        // A copy of the handle (a String, a Decimal, an enum box) would take
+        // the writes meant for the element or member.
+        if m.types[row].kind != .Aggregate && ir_pin_place_in_storage(p, b, place) -> return ir_scalar_window(m, p, b, local, place, row, span)
     }
     value: ir_expr(m, p, b, init)
     if ir_failed(b) || value < 0 -> return
@@ -883,10 +887,11 @@ ir_bind_pin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, init: 
     b.bindings.push(IRBinding{name: local.name, slot: value, symbol: symbol, write: access != .Read})
 }
 
-// `w := &place` over a scalar place: the binding is the place's address, so
-// a read of `w` loads through it and a write stores through it, as through a
-// scalar write parameter. A variable place lives in a frame cell
-// (ir_window_cells_named), whose address is its storage.
+// `w := &place` over a scalar place, or a handle or box element or member:
+// the binding is the place's address, so a read of `w` loads through it and a
+// write drops the old value and stores through it, as through a write
+// parameter. A variable place lives in a frame cell (ir_window_cells_named),
+// whose address is its storage.
 ir_scalar_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, place: Int, row: Int, span: Span) Never! {
     backs := [IRWriteBack]{}
     address: ir_place_address(m, p, b, place, backs, span)
@@ -894,6 +899,18 @@ ir_scalar_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, p
     if backs.len() > 0 -> return ir_fail(b, span, "write window into a {ir_type_name(m.types[row].ty)} place outside a frame cell")
     symbol: if local.symbol_id == .Val(id) -> id.key else -> ""
     b.bindings.push(IRBinding{name: local.name, slot: address, indirect: row, symbol: symbol})
+}
+
+// Whether `place` names storage inside another value, which ir_place_address
+// reaches: a List or Map element, a struct member of such a place or of a
+// variable, a pool slot or a Shared guard's value.
+ir_pin_place_in_storage: fn(p: IRProgram, b: IRBuilder, place: Int) -> Bool Never! {
+    if ir_body_node(p, b, place).kind == {
+        .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
+        .Field(receiver, _) -> return ir_body_node(p, b, receiver).kind == .Local(_) || ir_pin_place_in_storage(p, b, receiver)
+        .PoolSlot(_, _, _, _, _, _) | .SharedGuardValue(_) -> return true
+        else -> return false
+    }
 }
 
 // `task.group(group) { .. }`: `group` owns the runtime JetTaskGroup from

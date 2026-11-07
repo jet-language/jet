@@ -2231,6 +2231,14 @@ ir_binary: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, op: TBinaryOp, overflow
             if ir_word_record(m, p, b.f.slot_type[right]) == .Val(right_record) -> return ir_time_binary(m, p, b, op, site, left, left_record, right, right_record, span)
         }
     }
+    // A compound update of an exact number (`first += 1.25` on a Decimal
+    // place) reaches the builder as the operator itself: it calls the
+    // core.math helper the checked `+`, `-` and `*` call.
+    precise: ir_render_precise(p, left_ty)
+    if precise != "" && (op == .Add || op == .Sub || op == .Mul) {
+        function: if op == .Add -> "add" else if op == .Sub -> "sub" else -> "mul"
+        return ir_precise_values(m, p, b, left_ty, precise, function, [Int]{left, right}, span)
+    }
     if op == .Add || op == .Sub || op == .Mul || op == .Div {
         left_slot_ty: m.types[b.f.slot_type[left]].ty.copy()
         right_slot_ty: m.types[b.f.slot_type[right]].ty.copy()
