@@ -58,7 +58,8 @@ build_error: fn(inputs: Inputs) -> String Never! {
     }
 }
 
-// c28: membership comes from the registries and the route facts.
+// c28: membership comes from the registries, the route facts and the Core
+// parse; a receiver method Core source declares is its own registry row.
 
 #Test("a removed Core fn, dispatcher arm, receiver method or struct field unroutes its row") {
     inputs: tree_inputs([String]{"core.text.byte_count", "core.reflect.of"})
@@ -68,16 +69,17 @@ build_error: fn(inputs: Inputs) -> String Never! {
     assert_eq(row_of(clean, "module:core.reflect.of").status, "covered")
     assert(route_text(row_of(clean, "module:core.reflect.of").surface.route).starts_with("ir-core-call "))
     assert_eq(row_of(clean, "receiver:Condition.notify_all").status, "missing")
+    assert_eq(route_text(row_of(clean, "receiver:Query.filter").surface.route).starts_with("source "), true)
     assert_eq(row_of(clean, "field:BuildGraph.action_keys").status, "missing")
     broken := inputs.copy()
     broken.core_sources = edited(broken.core_sources, "Core/Text/Text.jet", "byte_count: fn(text: String)", "byte_count_gone: fn(text: String)")
-    broken.core_sources = edited(broken.core_sources, "Core/Tasks/Tasks.jet", "notify_all: fn(self)", "notify_all_gone: fn(self)")
+    broken.core_sources = edited(broken.core_sources, "Core/Data/Data.jet", "__query_filter: fn<T>(", "__query_filter_gone: fn<T>(")
     broken.core_sources = edited(broken.core_sources, "Core/Build/Build.jet", "    action_keys: [BuildGraphActionKey]\n", "    action_keys_gone: [BuildGraphActionKey]\n")
     broken.route_files = edited(broken.route_files, BUILD_ROUTES_PATH, "if symbol == \"jet_reflect_of\" -> return ir_reflect_of(", "if symbol == \"jet_reflect_gone\" -> return ir_reflect_of(")
     moved: built(broken)
     assert_eq(validate_manifest(moved).join("\n"), "")
     assert_eq(moved.rows.len(), clean.rows.len())
-    ids: [String]{"module:core.text.byte_count", "module:core.reflect.of", "receiver:Condition.notify_all", "field:BuildGraph.action_keys"}
+    ids: [String]{"module:core.text.byte_count", "module:core.reflect.of", "receiver:Query.filter", "field:BuildGraph.action_keys"}
     loop id in ids {
         row: row_of(moved, id)
         assert_eq("{id} {row.status}", "{id} unrouted")
@@ -127,10 +129,11 @@ build_error: fn(inputs: Inputs) -> String Never! {
 #Test("special routes and exclusions must name real rows and real source text") {
     inputs: tree_inputs([String]{})
     specials := inputs.copy()
-    specials.specials_text = inputs.specials_text.replace("return sema_data_args_decode(", "return sema_data_args_gone(")
+    specials.specials_text = inputs.specials_text.replace("member != \"decode\" -> return SemaDirectSpecialCheck{{", "member != \"decode\" -> return SemaDirectSpecialGone{{")
+    assert(specials.specials_text != inputs.specials_text)
     specials.specials_text = "{specials.specials_text}module:core.text.no_such\t{BUILD_ROUTES_PATH}\tir_host_method(\nmodule:core.text.byte_count\t{BUILD_ROUTES_PATH}\tir_host_method(\n"
     message: build_error(specials)
-    assert(message.contains("does not contain `if module_name == \"core.args\""))
+    assert(message.contains("does not contain `if module_name != \"core.args\" || member != \"decode\" -> return SemaDirectSpecialGone{{"))
     assert(message.contains("`module:core.text.no_such` is not a surface row"))
     assert(message.contains("`module:core.text.byte_count` already routes through source"))
     exclusions := inputs.copy()
