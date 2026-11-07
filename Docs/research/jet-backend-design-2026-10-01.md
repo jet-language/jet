@@ -3709,7 +3709,7 @@ the existing signed-decimal builder helper.
 derives compiled with pinned rustc 1.97.1
 (`8bab26f4f68e0e26f0bb7960be334d5b520ea452`): all variants, all Budget limits,
 empty/two-frame faults and text/control/Unicode escapes. The offline
-`Tools/agent/gen-plugin-debug-goldens.mjs` packages those oracle outputs for
+`Tools/agent/PluginDebugGoldens.jet` packages those oracle outputs for
 `PluginErrorWitness.c`. The C client uses valid native allocations, requires
 free interception, checks recursive clone independence, inactive-word
 behavior, derived equality and separately owned render results. Expected
