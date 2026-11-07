@@ -12,11 +12,13 @@ from `https://raw.githubusercontent.com/unicode-org/cldr/release-48/common/uca/`
 `CollationTest_CLDR_NON_IGNORABLE_SHORT.txt` (its UTS #10 conformance test,
 run by `tests/cases/text_unicode/collation-conformance.case`).
 
-`SHA256SUMS` records every vendored official input. The std-only generator
-verifies its required UCD inputs again before emitting either table copy:
+`SHA256SUMS` records every vendored official input. `Tools/agent/UnicodeTables.jet`
+verifies its required UCD inputs again before it emits the runtime tables and
+the Core text assets:
 
 ```sh
-node Tools/agent/gen-unicode-tables.mjs --check tests/data/unicode/ucd
+jet Tools/agent/UnicodeTables.jet          # rewrite every stale output
+jet Tools/agent/UnicodeTables.jet --check  # fail naming every stale output
 ```
 
 `Tools/agent/CollationTable.jet` verifies `uca/allkeys_CLDR.txt` and
@@ -28,5 +30,5 @@ jet Tools/agent/CollationTable.jet          # rewrite the table
 jet Tools/agent/CollationTable.jet --check  # fail when the table is stale
 ```
 
-Generated Rust is checked in. Jet programs never read these files or use the
+Generated Jet is checked in. Jet programs never read these files or use the
 network at build time or runtime.
