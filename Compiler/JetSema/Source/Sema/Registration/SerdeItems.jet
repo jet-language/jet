@@ -1442,6 +1442,30 @@ sema_codec_impl_pending: fn(implementation: SemaRegistrationImpl) -> Bool Never!
     true
 }
 
+// The body the codec waves would give generated codec impl `row` of module
+// `module_index` (sema_codec_fill_demanded), for a compile-time check that
+// reaches the codec before the body pass demands it; None once it has a body.
+sema_codec_pending_body: fn(graph: SemaRegistrationGraph, module_index: Int, row: Int) -> [Stmt]? Never! {
+    if !sema_codec_impl_pending(graph.modules[module_index].impls[row]) -> return None
+    trait_name: graph.modules[module_index].impls[row].trait_name ?? return None
+    positions := [String:Int]{}
+    sema_codec_index_module(graph.modules[module_index].program.items, module_index, positions)
+    position: positions.get("{module_index}|{graph.modules[module_index].impls[row].target_type_name}") ?? return None
+    generated: sema_serde_items_codec_body(graph.modules[module_index].program.items, position, trait_name, graph.modules[module_index].impls[row].declaration.span) ?? return None
+    Val(generated.body)
+}
+
+// sema_codec_pending_body of the impl of a nominal named `type_name` that
+// declares the method keyed `key`, which a nominal's method row shares.
+sema_codec_pending_method_body: fn(graph: SemaRegistrationGraph, type_name: String, key: String) -> [Stmt]? Never! {
+    loop reference in sema_registration_impl_rows_named(graph, type_name) {
+        loop method in graph.modules[reference.module_index].impls[reference.row].methods {
+            if method.symbol.id.key == key -> return sema_codec_pending_body(graph, reference.module_index, reference.row)
+        }
+    }
+    None
+}
+
 // Drains the recorded requirements into generated bodies, to a fixed point:
 // each demanded generated codec still without a body gets it (recorded on
 // `trail`), and the codecs of its wire types are demanded in turn. The filled
