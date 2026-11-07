@@ -511,13 +511,26 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         loop index < (I64{3}) {
             mode: fd_word(spec, wrapping(I64{64} + index * I64{8}))
             target: wrapping(plan + index * I64{16})
-            // Null=3 is private prepared transport data, not a public enum arm.
-            if ((index == I64{0} && fd_word(spec, I64{56}) == I64{0}) || mode == I64{3}) {
+            // PROCESS_STREAM_NULL is private prepared transport data, not a public enum arm.
+            if ((index == I64{0} && fd_word(spec, I64{56}) == I64{0}) || mode == PROCESS_STREAM_NULL) {
                 fd_put(scratch, I64{96}, I64{7815273878500238383})
                 fd_put(scratch, I64{104}, I64{108})
                 null_fd: host_call(I64{2}, wrapping(scratch + I64{96}), I64{524288}.bit_or((if (index == I64{0}) -> I64{0} else -> I64{1})), I64{0})
                 copied: if (null_fd < I64{0}) -> null_fd else -> host_call(I64{72}, null_fd, I64{1030}, minimum)
                 spawn_close(null_fd)
+                if (copied < I64{0}) {
+                    failure = copied
+                    break
+                }
+                fd_put(target, I64{0}, copied)
+                fd_put(target, I64{8}, index)
+            } else if (mode == PROCESS_STREAM_STDOUT) {
+                // Merged output (stderr only; launch refuses it elsewhere): the
+                // child's stderr is a copy of what its stdout became, the
+                // stdout plan entry's descriptor, else the inherited fd 1, so
+                // both streams share one file description in write order.
+                stdout_source: fd_word(plan, I64{16})
+                copied: host_call(I64{72}, if (stdout_source >= I64{0}) -> stdout_source else -> I64{1}, I64{1030}, minimum)
                 if (copied < I64{0}) {
                     failure = copied
                     break

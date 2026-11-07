@@ -15,7 +15,7 @@ process_route_optional_word: fn(present: Bool, value: I64) -> I64 {
     if present -> process_raw_box(value) else -> I64{0}
 }
 process_route_stream_mode: fn(mode: I64) {
-    if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE -> trap_native_index_range_stop()
+    if mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_STDOUT -> trap_native_index_range_stop()
 }
 #Export(c) jet_process_spec_fields_raw: fn(cmd: I64, cmd_length: I64, has_cwd: Bool, cwd: I64, env_clear: Bool, names: I64, names_length: I64, values: I64, values_length: I64, removals: I64, removals_length: I64, has_stdin: Bool, stdin: I64, stdout: I64, stderr: I64, has_timeout: Bool, timeout: I64, has_output: Bool, output: I64, has_cpu: Bool, cpu: I64, has_memory: Bool, memory: I64, has_files: Bool, files: I64, detached: Bool, has_terminal: Bool, terminal: I64, has_policy: Bool, policy: I64) -> I64 {
     process_route_stream_mode(stdin)

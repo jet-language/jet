@@ -161,7 +161,7 @@ process_execution_pack: fn(spec: I64) -> I64 {
     fd_put(mechanical, I64{8}, if (fd_word(spec, PROCESS_SPEC_CWD) == I64{0} || held_cwd) -> { I64{0} } else -> { I64{1} })
     fd_put(mechanical, I64{16}, fd_word(spec, PROCESS_SPEC_CWD))
     fd_put(mechanical, I64{56}, if (fd_word(spec, PROCESS_SPEC_STDIN) == I64{0}) -> { I64{0} } else -> { I64{1} })
-    fd_put(mechanical, I64{64}, if (fd_word(spec, PROCESS_SPEC_STDIN) == I64{0}) -> { I64{3} } else -> { fd_word(fd_word(spec, PROCESS_SPEC_STDIN), I64{0}) })
+    fd_put(mechanical, I64{64}, if (fd_word(spec, PROCESS_SPEC_STDIN) == I64{0}) -> { PROCESS_STREAM_NULL } else -> { fd_word(fd_word(spec, PROCESS_SPEC_STDIN), I64{0}) })
     fd_put(mechanical, I64{72}, fd_word(spec, PROCESS_SPEC_STDOUT))
     fd_put(mechanical, I64{80}, fd_word(spec, PROCESS_SPEC_STDERR))
     field := PROCESS_SPEC_TIMEOUT
@@ -184,8 +184,8 @@ process_execution_pack: fn(spec: I64) -> I64 {
     }
     if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
         fd_put(mechanical, I64{56}, I64{0})
-        fd_put(mechanical, I64{72}, I64{3})
-        fd_put(mechanical, I64{80}, I64{3})
+        fd_put(mechanical, I64{72}, PROCESS_STREAM_NULL)
+        fd_put(mechanical, I64{80}, PROCESS_STREAM_NULL)
     }
     mechanical
 }
@@ -251,6 +251,12 @@ process_execution_launch_native: fn(spec: I64, err: I64) -> I64 {
     }
     if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} && fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
         _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be detached")), err)
+        return I64{0}
+    }
+    // `.Stdout` names the child's stdout, so only stderr can take it.
+    stdin: fd_word(spec, PROCESS_SPEC_STDIN)
+    if (fd_word(spec, PROCESS_SPEC_STDOUT) == PROCESS_STREAM_STDOUT || (stdin != I64{0} && fd_word(stdin, I64{0}) == PROCESS_STREAM_STDOUT)) {
+        _ := process_execution_invalid(spec, rt_static_text("`.Stdout` is legal only on stderr: `.stdin(.Stdout)` and `.stdout(.Stdout)` name no stream"), err)
         return I64{0}
     }
     env: process_execution_environment(spec, err)

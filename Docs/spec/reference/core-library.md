@@ -2275,7 +2275,9 @@ the calling process (Linux `PR_SET_PDEATHSIG`, `SIGKILL`), except a
 and `.args_extend(values)` append arguments; `.cwd(path)` selects the working
 directory; `.env(name, value)`, `.env_remove(name)`, and `.env_clear()` control
 the child environment. `.stdin(mode)`, `.stdout(mode)`, and `.stderr(mode)`
-select one of `.Stream`, `.Inherit`, or `.Capture`. `.terminal()` requests a
+select one of `.Stream`, `.Inherit`, or `.Capture`; `.stderr(.Stdout)` merges
+the child's error output into its standard output (see merged output below).
+`.terminal()` requests a
 terminal session, while `.terminal(policy)` supplies an explicit
 `TerminalPolicy`. `.detached()` allows the child to outlive the caller.
 `.abilities()` returns the open `Set<String>` report of what a terminal-backed
@@ -2359,6 +2361,18 @@ The default standard input is closed/null. `.Stream` and `.Capture` both use a
 pipe that the parent must drain; `.Stream` exposes the stream interface,
 whereas `.Capture` stores bounded output in the receipt. `.Inherit` connects a
 child to the parent's corresponding stream.
+
+Merged output: `.stderr(.Stdout)` gives the child one descriptor for both
+streams, a copy of whatever `.stdout(mode)` selected, so the two arrive
+interleaved in the child's write order. With `.stdout(.Capture)` both land in
+`receipt.output`; with `.stdout(.Stream)` both arrive on `child.stdout`; with
+`.stdout(.Inherit)` both go to the parent's standard output. `receipt.errors`
+is `""` and `child.stderr` reaches end of input at once. `.Stdout` names the child's
+standard output, so `.stdin(.Stdout)` and `.stdout(.Stdout)` fail the launch
+with `IOError.InvalidInput`. A terminal session ignores the stream modes, and a
+detached child discards both streams. An authority-bound specification accepts
+`.stdout(.Capture).stderr(.Stdout)`: the merged output is still the captured,
+redacted receipt output.
 
 | ProcessChild operation | Returns | Description |
 | --- | --- | --- |

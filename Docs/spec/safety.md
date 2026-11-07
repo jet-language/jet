@@ -2871,35 +2871,35 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 800,
+      "line": 813,
       "column": 9,
       "reason": "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 815,
+      "line": 828,
       "column": 5,
       "reason": "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 826,
+      "line": 839,
       "column": 5,
       "reason": "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 831,
+      "line": 844,
       "column": 9,
       "reason": "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetRuntime/Source/HostSpawn.jet",
-      "line": 842,
+      "line": 855,
       "column": 5,
       "reason": "successful realpath NUL-terminates its result within the PATH_MAX byte buffer"
     },
@@ -10015,11 +10015,11 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 393:13 | "rt_sigaction writes the four-word old action into this spawn's block; no allocator, mutex or TLS is touched in the child" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 403:5 | "rt_sigprocmask reads the parent's saved mask word in this spawn's block" |
 | Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 447:5 | "mprotect makes the lowest page of this spawn's fresh mapping the guard; the masks are words of this spawn's block; the child runs only jet_rt_process_spawn_child on the mapped stack and leaves through execve or exit_group before the parent resumes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 800:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 815:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 826:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 831:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
-| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 842:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 813:9 | "ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 828:5 | "source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 839:5 | "the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 844:9 | "libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes" |
+| Compiler | Compiler/JetRuntime/Source/HostSpawn.jet | 855:5 | "successful realpath NUL-terminates its result within the PATH_MAX byte buffer" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 38:5 | "runtime-init runs before any other thread exists" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 52:5 | "bytes borrows one live NUL-terminated startup string" |
 | Compiler | Compiler/JetRuntime/Source/HostStartup.jet | 84:5 | "host argument registration is single-threaded and precedes user code" |
