@@ -301,9 +301,9 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         permit := cell.guard_edit()
         if held > permit.value.bytes -> permit.value.bytes = held
     }
-    errors_text: kit_steps_utf8_lossy(errors)
+    errors_text: kit_exec_redact(kit_steps_utf8_lossy(errors), overlay)
     run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, errors_text))
-    run.stdout = kit_steps_utf8_lossy(output)
+    run.stdout = kit_exec_redact(kit_steps_utf8_lossy(output), overlay)
     run.stderr = errors_text
     run.stdout_bytes = Val(output)
     run.stderr_bytes = Val(errors)
@@ -329,6 +329,38 @@ kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: &[U8]) -> String {
         bytes.extend(chunk)
     }
     ""
+}
+
+// The names Core's process receipt treats as secret (any of these, ASCII
+// case-insensitive, inside a variable's name).
+KIT_EXEC_SECRET_NAMES: [String]{"secret", "token", "password", "passwd", "credential", "key"}
+
+// The receipt's redaction of captured output: each nonempty value of a
+// secret-named variable the step sets reads `<redacted>`, longest value
+// first. Streamed output bypasses the receipt, so the kit applies it to the
+// text its predicates read; the exact bytes stay unredacted.
+kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
+    secrets := [String]{}
+    loop variable in overlay {
+        value: variable.value ?? next
+        name: variable.name.to_ascii_lower()
+        secret := false
+        loop marker in KIT_EXEC_SECRET_NAMES {
+            if name.contains(marker) -> secret = true
+        }
+        if !secret || value == "" -> next
+        secrets.push(value.copy())
+        position := secrets.len() - 1
+        loop position > 0 && secrets[position - 1].count_bytes() < secrets[position].count_bytes() {
+            longer: secrets[position]
+            secrets[position] = secrets[position - 1]
+            secrets[position - 1] = longer
+            position -= 1
+        }
+    }
+    redacted := text
+    loop secret in secrets -> redacted = redacted.replace(secret, "<redacted>")
+    redacted
 }
 
 // Waits on this task until the child exits or, when `until` is not negative,
