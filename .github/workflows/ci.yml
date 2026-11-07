@@ -1,8 +1,8 @@
-# Hosted CI runs the cheap source-coverage ratchet and the Core surface ledger
-# and CoreCall registry checks, which need the committed Tower board. The native compiler check
-# and the full gate suite run locally through Tools/agent/LaneCheck.jet and
-# Tools/agent/VerifyFull.jet until a pinned native seed release exists
-# (D-SEED-DIST1).
+# Hosted CI runs the Core surface ledger and CoreCall registry checks, which
+# need the committed Tower board. The native compiler check, the Core
+# source-coverage ratchet (Tools/agent/CoreCoverage.jet) and the full gate suite
+# run locally through Tools/agent/LaneCheck.jet and Tools/agent/VerifyFull.jet
+# until a pinned native seed release exists (D-SEED-DIST1).
 name: CI
 
 on:
@@ -12,7 +12,7 @@ on:
 
 jobs:
   check:
-    name: Core source coverage and surface ledger
+    name: Core surface ledger
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -23,11 +23,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Core source coverage ratchet
-        run: |
-          node --test Tools/agent/core-coverage-census.test.mjs
-          node Tools/agent/core-coverage-census.mjs --check
 
       - name: Core surface ledger and CoreCall registry are current
         run: |
