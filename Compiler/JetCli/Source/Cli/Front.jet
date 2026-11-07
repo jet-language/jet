@@ -1823,7 +1823,7 @@ jet_cli_explain: fn(jet_argv: [String], args: [String], color: Bool, json: Bool,
     JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: "explain", argv: jet_cli_command_words(jet_argv, "explain")}}
 }
 
-// `jet lint --a11y|--complexity|--cost <file>` (`"lint"`):
+// `jet lint --a11y|--complexity <file>` (`"lint"`; `--cost` is not built):
 // with no target the command's help is a usage error; exactly one category is
 // required (E2102). The target resolves as `resolve_source_path` does (a
 // directory is its project's stock entry; a file keeps its typed spelling, or
@@ -1838,7 +1838,7 @@ jet_cli_lint: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, j
     if complexity -> categories += 1
     if cost -> categories += 1
     if categories != 1 {
-        return jet_cli_fail("E2102", "usage: jet lint --a11y|--complexity|--cost <file.jet>", "`lint` needs exactly one category flag", "run `jet lint --a11y <file.jet>`, `jet lint --complexity <file.jet>`, or `jet lint --cost <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
+        return jet_cli_fail("E2102", "usage: jet lint --a11y|--complexity <file.jet>", "`lint` needs exactly one category flag", "run `jet lint --a11y <file.jet>` or `jet lint --complexity <file.jet>`", color, JET_DRIVER_EXIT_USAGE)
     }
     if cost -> return jet_cli_not_ported("lint --cost", color)
     target: args[1]
