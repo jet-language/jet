@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95868,
+    "rev": 95875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60006,6 +60006,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Conflict found 2026-11-07 (Main): c12-c15 keep a non-Jet original in the repository as each gauntlet entry's reference until its Jet twin wins the c14 bars. The owner's later ruling (Docs/spec/philosophy.md priority 6, dev acec3d1a06: Jet fills every role; a Core gap is fixed in Core, never with a fallback tool) and the #6035 c3 cutover delete those originals outright. Under the authority order the newer ruling wins, so c12-c15 are not built as written. A reference original may live only outside the repository (a pinned path in the entry manifest), and the bars in c14 stay as the comparison. Only this card's owner wording changes that."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner 2026-11-06 (later the same day): scripting performance and the full removal of non-Jet languages are G4 work, not G1/G2. #5072 returns to G4/e17 with criteria c12-c17 (pairing guard, AGENTS line, port bars, helper and runner pairs, Core API gaps from token losses) as its plan. Until then G1/G2 agents only prefer Jet for new tooling where practical; there is no guard and no pairing obligation."
@@ -60241,7 +60246,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-20T14:41:14.806Z",
-      "updated": "2026-11-07T02:55:07.871Z",
+      "updated": "2026-11-07T21:57:03.997Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -69967,6 +69972,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 items 9-11 landed in dev 86fb5e5b12 (PortsLead-2). Deleted chain.sh, build-slot.sh, clean-nix-tmp.sh and clean-nix-tmp.test.mjs; ported to Tools/agent/Chain.jet (TREE LEVEL, export, seed-published, slot, inroot). Callers migrated: Admit.jet (JET_RELEASE_CHAIN removed), Land.jet, the Suite.jet hint, flake.nix, AGENTS.md and the script-census rows. Proof on a0_034: jet check clean on Chain/Admit/Land/Suite/release Main. jet test: Chain.jet 6/6, release Tests.jet 32/32, Land.jet 16/16. Dry runs s1/full/check succeed. --check-gate with no receipt and a tree under r14 are both refused (rc 2). s1 stage key fc81d252164ed760 matches between chain.sh and Chain.jet. Leftover: Jetpack ComposeEnv.jet:213 JET_NIX_TMP_CLEANED is dead; it goes in PortsLead-2's Jetpack commit."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3 inventory on dev (git ls-files Tools/testkit Tools/agent Tools/ci, non-Jet): Tools/testkit and Tools/ci clean. Tools/agent holds 9 rows, all on PortsLead-2's list: chain/chain.sh, chain/build-slot.sh, clean-nix-tmp.sh plus clean-nix-tmp.test.mjs, gen-runtime-fault-report.mjs, gen-text-debug-tables.mjs, jet-state.mjs plus jet-state.test.mjs, lexical-ledger.mjs. Out of scope: roots.sh, roots.mjs (the root definitions) and cc-pack.nix. c73 JetRuntime Fragments: it is checked through a CompilerPackages runtime-unit --check row (it is a runtime-unit input, not a standalone package)."
         },
         {
@@ -71206,7 +71216,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T21:25:37.055Z",
+      "updated": "2026-11-07T22:07:53.811Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73283,6 +73293,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Finding for c2 (Main 2026-11-07): an unlimited para_map over fewer than 64 items is one chunk, so it runs on the caller thread (Parallel.jet:22-26 keeps 64 items per chunk when limit < 0). 16 items of a 20M-step kernel: built binary par (map+fold) real 0.893 s, user 0.992 s = serial x2. para_fold's 64-item grouping is its contract (BuildParallel.jet:570-573), but para_map, para_filter and para_partition could spread a short list over the pool the way the limited path does (parallel_chunk_size). w11 passes limit: 32, so it already takes the spreading path."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
@@ -73345,11 +73360,11 @@
         {
           "n": 3,
           "text": "(was #3672 c1) [retarget] On default jet run, para_map/para_fold over a CPU-bound kernel use more than one OS worker (observed via existing JET timing/trace), with results identical to serial and AOT [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:49:48.764Z"
+          "evidence": "Main 2026-11-07, a0_034 on dev 480891e86f (Compiler/JetRuntime/Source/Parallel.jet:97-136 jet_rt_native_para_walk; the pool is scheduler_available_parallelism). Probe $JET_SCRATCH_ROOT/lanes/Main/burn/para/para.jet: 1024 items of a 300k-step LCG kernel through para_map then para_fold, against a serial loop, inputs derived from process.args() so nothing folds at build time. Default jet run: par real 0.712 s / user 3.274 s (4.6x CPU over wall) against ser real 0.548 s / user 0.559 s, with the same compile in both, so the extra CPU is para workers. Built binary (jet build --release): par real 0.085 s / user 1.050 s against ser 0.397 s / 0.408 s. Every result is 508760: parallel = serial = AOT = jet run. OS rusage is the observation: wall/user from bash time.",
+          "at": "2026-11-07T21:54:58.488Z"
         },
         {
           "n": 5,
@@ -73372,7 +73387,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-07T02:55:13.316Z",
+      "updated": "2026-11-07T21:54:59.436Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73534,11 +73549,11 @@
         {
           "n": 7,
           "text": "(was #2864 c1) Sieve on `jet run` scales linearly: n=100,000 completes under 10x the n=10,000 time.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:55:11.547Z"
+          "evidence": "Main 2026-11-07, a0_034 on dev a5476b82af: Tools/gauntlet/entries/sieve/jet/run.jet under plain jet run (kept program, warm). n=10,000: count 1229, largest 9973, real 0.008 s; n=100,000: count 9592, largest 99991, real 0.007 s (0.9x the 10k time, bound 10x); n=1,000,000: 0.010 s; n=10,000,000: count 664579, real 0.037 s. Command: jet run run.jet -- --n N, timed with bash time.",
+          "at": "2026-11-07T22:01:25.241Z"
         },
         {
           "n": 8,
@@ -73578,7 +73593,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-07T19:08:45.750Z",
+      "updated": "2026-11-07T22:01:25.241Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73603,6 +73618,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Probe 2026-11-07 (Main, a0_034 on dev a5476b82af, built binary --release): $JET_SCRATCH_ROOT/lanes/Main/burn/grp/grp.jet, N rows into 10 String groups. get-push-store (group := m.get(k) ?? [String]{}; group.push(x); m[k] = group): N=20,000 0.095 s, N=200,000 9.887 s (10x rows, 104x time: quadratic). In place (has_key, then m[k].push(x)): 0.005 s and 0.050 s (linear). At 200k the idiom is 198x slower. Rewrite hazard for any fix that turns the get into a take: a statement between the get and the store-back that can exit early (?, return, break, panic) would leave the map missing key k where today it keeps the old group. So the rewrite must hold only when nothing in between exits early or reads or writes the map, or when the map is dead on every early exit."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -73649,7 +73669,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:27.084Z",
-      "updated": "2026-11-06T18:36:09.349Z",
+      "updated": "2026-11-07T22:05:38.272Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -99043,6 +99063,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 landed in dev a5476b82af (Main): Core/Files/Files.jet calls core.process.__keep_open_raw; jet_process_spec_with_directory_raw (export, IR route, host signature, dispatcher row, surface inventory, generated rows) deleted, witness calls the one name. CoreSourceRows, RuntimeGenerators, CoreSurfaceLedger and UnsafeRatchet --check pass on the tree. Proof queued for the next dev-built batch."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Owner cut the agent count to 2. CoreCliLead-2 stopped with c1, c2, c4 and c5 met (060bbcd0f1, 8ac163916e). c3 (keep_open on one Core body) waits for a seed that carries them; a0_034 is being cut from c639365c56."
         },
         {
@@ -99109,7 +99134,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-07T20:37:47.477Z",
+      "updated": "2026-11-07T21:58:10.957Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -186884,6 +186909,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T22:07:53.811Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:05:38.272Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0aqwnas",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:01:25.241Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a0gmpl",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-07T21:58:10.957Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fs42sy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T21:57:03.997Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0qe89cl",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T21:54:59.436Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T21:54:58.488Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02a1ynr",
+      "note": "#3"
+    },
     {
       "at": "2026-11-07T21:27:22.206Z",
       "by": "Main",
