@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95894,
+    "rev": 95900,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -34,7 +34,7 @@
         "radar:e17"
       ]
     },
-    "completionCursor": "2026-11-07T21:17:55.253Z"
+    "completionCursor": "2026-11-07T23:07:35.615Z"
   },
   "epochs": [
     {
@@ -69987,6 +69987,16 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 items 1-6 landed in 20e614404c (TestSystemLead-2): deleted JetBackend/Tests/{jet-front,run-runtime}.mjs, JetRuntime/Tests/run-{collections-stop,crypto-fixtures,native-codec-file-leaves,process-witnesses,thread-fixtures}.mjs, JetTestKit golden/{compiler,echo,notice,program,where,wrong}.sh and ui/compiler.sh, plus Tools/agent/NativeTransport.jet. CompilerRegistries run of the 39 ported rows: 35/39 PASS. Four registry-transport rows now fail at their fixtures; the old node runners stopped before reaching them, so they are not new: Fragments CompilerNeededURLTests (driver exit 1), IterChargeTests (exit 5), ProgressStateTests (exit 70, E3010 at Runtime.jet:61897) and TerminalProcessTests (TerminalProcessWitness.c:85 observe_free assert, signal 6). They are registries-profile rows, not full-profile rows. Left for c3: Compiler/JetTestKit/Assets/no-nix.sh, the cases gate's isolate:no-nix launcher, which TestSystemLead-2 is porting to a Jet helper now."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "L0601 garbled-leaf finding (from c73): taking the leaf source from the checked module's own registration row (graph.modules[module_index].source) and scanning only the pre-Prelude-injection references and calls does NOT fix it. With that change built (census rc=0 at 8405a508b0), jet check of JetCli/Tests/GateProjection.fixture still prints 16 L0601 warnings and JetSema/Tests/FrozenFixtures.fixture prints 1, with clipped leaves (_RUNTIME_PACK_OUTPU, _wr, _comptime_bod) at impossible spans (26:1, 44:1 past EOF). So the reference and call-fact spans in a dependency module's result index other text, or the report attributes a dependency module's diagnostics to the root file. Warning-only; it gates nothing. The attempt was not landed. Next: print module_identity with each L0601 at emission to tell which of the two it is."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Finding from the c73 census (warnings, not errors): L0601 SoftPublicUse in fixture packages names clipped identifiers at impossible spans. FrozenFixtures.jet has 43 lines but the warning names _comptime_bod at 44:1. GateProjection.jet gets _wr, _theme_ and _RUNTIME_PACK_OUTPU at blank line 26:1 and inside a string at 17:177. sema_check_soft_public_uses (JetSema CheckProgram.jet:5302) reads each reference's leaf from graph.modules[caller].source, which here is longer than the file the diagnostic renders against, so the leaf is sliced from other bytes. The root (which source that row holds for a test-fixture package) is not yet found. Repro: seed jet check in Compiler/JetSema/Tests/FrozenFixtures.fixture."
         },
         {
@@ -71236,7 +71246,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T22:34:19.632Z",
+      "updated": "2026-11-07T23:12:41.365Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -75678,8 +75688,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:53:42.058Z",
-      "updated": "2026-11-07T02:58:19.127Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-07T23:05:21.581Z",
+      "updatedBy": "owner",
       "criteriaLastN": 50
     },
     {
@@ -91443,6 +91453,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Regression from 8405a508b0: a value table over an &place subject lost its write window, because sema_expression_window_source only knew __jet_switch_subject_N names. Jetpack CacheLease.jet:470 gave FieldWriteWithoutMarker (it reproduces on the 8405 compiler with the extended case). Fixed in 15b9773dee: the generated it (AST_NODE_GENERATED) is a window source; a written it never is. Proof with the census-built compiler: case switch_on_listed_optional_reader_closes_it_once (extended: the payload passes on through a &FileReader parameter) PASS; core_files_opaque_handles 9 PASS, 1 known-failing; golden Basics/ValueDispatch 3/3; hosted Jetpack check OK."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Owner deconfliction 2026-11-06: respelled for D-DECL-COLON1=A."
@@ -91506,7 +91521,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T19:36:01.124Z",
-      "updated": "2026-11-07T22:37:37.051Z",
+      "updated": "2026-11-07T23:06:26.034Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -99041,8 +99056,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T16:22:00.126Z",
-      "updated": "2026-11-07T16:33:40.642Z",
-      "updatedBy": "Main",
+      "updated": "2026-11-07T23:07:28.638Z",
+      "updatedBy": "owner",
       "criteriaLastN": 6
     },
     {
@@ -186111,6 +186126,28 @@
       "created": "2026-11-06T21:20:11.941Z",
       "answeredAt": "2026-11-06",
       "answeredBy": "Main"
+    },
+    {
+      "id": "q0ay96ip",
+      "cardId": "c0w1wcfc",
+      "decisionId": "D-FLOAT-INT1",
+      "by": "owner",
+      "kind": "question",
+      "text": "what is considered best practice overall across all domains? we need the correct default with the ability to control exact behavior for experts where needed",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-07T23:05:21.581Z"
+    },
+    {
+      "id": "q1o8lb8m",
+      "cardId": "c0b4rnem",
+      "decisionId": "D-EXPORT-TARGET1",
+      "by": "owner",
+      "kind": "question",
+      "text": "this misses my original ask or twists my intent. the bootstrapped/seeded compiler for jet is secondary. my main question was about supporting transpilation from jet to a target language, where the implementation of a transpilation target can be implemented for any language using an implementable trait/library. please update accordingly. the seeding/compiler bootstrap is a separate question and that should be a card frozen for the future. the transpilation card should be separate and will occur earlier",
+      "status": "open",
+      "answer": "",
+      "created": "2026-11-07T23:07:28.638Z"
     }
   ],
   "ideas": [
@@ -186967,6 +187004,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T23:12:41.365Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T23:07:35.615Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-07T23:07:35.615Z"
+    },
+    {
+      "at": "2026-11-07T23:07:28.638Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q1o8lb8m",
+      "note": ""
+    },
+    {
+      "at": "2026-11-07T23:06:26.034Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09umw0r",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T23:05:21.581Z",
+      "by": "owner",
+      "action": "question.add",
+      "ref": "q0ay96ip",
+      "note": ""
+    },
+    {
+      "at": "2026-11-07T23:00:25.327Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T22:41:16.681Z",
       "by": "Main",
