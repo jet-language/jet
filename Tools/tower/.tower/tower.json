@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6678,
-    "rev": 95831,
+    "nextNum": 6679,
+    "rev": 95835,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99105,6 +99105,63 @@
       "updated": "2026-11-07T19:01:33.306Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
+    },
+    {
+      "id": "c08qqzef",
+      "num": 6678,
+      "title": "Web builds ship a 4.4 MB rt.wasm: the hello bundle grew 6.1x over its gate baseline",
+      "body": "Found by PortsLead-2 porting Tools/perf/WebBundleCheck.jet (#6035 c3) on seed a0_033 at dev 3e4998fcca. jet build --target=web now writes .jet/build/ with a second partition, rt.wasm (4,437,521 bytes), named in web.manifest.json. Bundle bytes (app.wasm + rt.wasm + app.js + jet_dom_runtime.js): hello 4,484,465 (baseline 729,206), counter 4,484,612 (baseline 798,637), todo 4,484,474 (baseline 729,395). The baseline's wasm was about 611 KB. The DOM runtime js also grew from 35,834 to 43,654 bytes. Every app pays the whole runtime partition whatever it uses.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root found: why rt.wasm carries 4.4 MB (whole-runtime partition, no dead-code removal, debug sections, or table literals), named with a size breakdown by section and by runtime module.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T19:26:12.911Z"
+        },
+        {
+          "n": 2,
+          "text": "The web bundles of hello, counter and todo are at or below their WebBundleCheck baseline (729,206 / 798,637 / 729,395 bytes total), measured by the gate with every file web.manifest.json names counted, and the gate passes on its unchanged byte budgets.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T19:26:13.956Z"
+        },
+        {
+          "n": 3,
+          "text": "The web tier keeps one meaning (I9): the same examples' goldens pass on web after the size fix.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T19:26:14.998Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T19:26:02.798Z",
+      "updated": "2026-11-07T19:26:14.998Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -186973,6 +187030,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T19:26:14.998Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08qqzef",
+      "note": "#3 The web tier keeps one meaning (I9): the same examples' gold"
+    },
+    {
+      "at": "2026-11-07T19:26:13.956Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08qqzef",
+      "note": "#2 The web bundles of hello, counter and todo are at or below t"
+    },
+    {
+      "at": "2026-11-07T19:26:12.911Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08qqzef",
+      "note": "#1 Root found: why rt.wasm carries 4.4 MB (whole-runtime partit"
+    },
+    {
+      "at": "2026-11-07T19:26:02.799Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c08qqzef",
+      "note": "Web builds ship a 4.4 MB rt.wasm: the hello bundle grew 6.1x over its gate baseline"
+    },
     {
       "at": "2026-11-07T19:13:07.645Z",
       "by": "Main",
