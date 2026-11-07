@@ -9,7 +9,7 @@ import {createHash} from 'node:crypto';
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
+import { runNativeLibrary } from '../../JetBackend/Tests/jet-front.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode, objectArg] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'link', 'run'].includes(mode)) throw Error('usage: run-closure-refs-shared.mjs OUT assemble|lower|link|run [JET_ONLY_RUNTIME_OBJECT_OR_ARCHIVE]');

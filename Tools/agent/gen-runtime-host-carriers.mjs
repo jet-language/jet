@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { staticText, staticTextWorthy } from "./runtime-static-text.mjs";
 // Host C carriers use the checked Core registry's declaration-order tags.
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
@@ -50,6 +49,18 @@ for (const [name, message] of [["host_stdout_name", "stdout"], ["host_stderr_nam
   if (staticTextWorthy(message)) jet.push(`    jet_rt_string_builder_push(text, ${staticText(message)})`);
   else words(message, "rt_text_push_word(text, ");
   jet.push("    jet_rt_string_builder_finish(text)", "}");
+}
+// Process-static text, as Tools/agent/RuntimeGenerators.jet static_text and
+// static_text_worthy write it: `rt_static_text("...")` for a literal longer
+// than two machine words, whose bytes the image holds once; up to two words,
+// the word constants cost less than a String header plus its padded bytes.
+function staticTextWorthy(text) {
+  return Buffer.byteLength(text) > 16;
+}
+function staticText(text) {
+  if (/[\x00-\x09\x0b-\x1f\x7f]/.test(text)) throw new Error(`control byte in runtime static text ${JSON.stringify(text)}`);
+  const body = text.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"").replaceAll("{", "{{").replaceAll("}", "}}").replaceAll("\n", "\\n");
+  return `rt_static_text("${body}")`;
 }
 // The internal C ABI atom of `name`: the acronym-aware snake projection
 // (D-ACRO-CASE1) that Compiler/JetIR/Source/RuntimeRoutes.jet runtime_abi_atom

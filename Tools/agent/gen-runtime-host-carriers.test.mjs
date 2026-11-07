@@ -13,8 +13,8 @@ const outputs = ['Compiler/JetRuntime/Source/HostEnums.jet'];
 function fixture(body) {
   const tree = mkdtempSync(join(tmpdir(), 'jet-host-carriers-'));
   try {
-    // Preserve the generator's real module boundary in the isolated tree.
-    for (const path of [script, 'Tools/agent/runtime-static-text.mjs', rows, ...outputs]) {
+    // The generator and the registry rows and outputs it reads.
+    for (const path of [script, rows, ...outputs]) {
       mkdirSync(dirname(join(tree, path)), { recursive: true });
       copyFileSync(join(root, path), join(tree, path));
     }

@@ -9,7 +9,7 @@ import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {readNativeRuntimePack,nativePackHash} from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import {fileObject} from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
-import {runNativeLibrary,runtimeLifecycleList} from '../../../Tools/agent/compiler-native-transport.mjs';
+import {runNativeLibrary,runtimeLifecycleList} from '../../JetBackend/Tests/jet-front.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const [output,jet,runtimeDirectory,...extra]=process.argv.slice(2);
 const test=extra.length===2&&extra[0]==='--test'?extra[1]:null;

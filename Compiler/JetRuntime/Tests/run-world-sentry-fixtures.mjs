@@ -6,8 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
-import { runNativeLibrary, runtimeLifecycleList } from '../../../Tools/agent/compiler-native-transport.mjs';
+import { candidateJetc0, runNativeLibrary, runtimeLifecycleList } from '../../JetBackend/Tests/jet-front.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (mode === 'reference') {

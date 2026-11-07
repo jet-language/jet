@@ -9,8 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { candidateJetc0 } from "../../JetBackend/Tests/jet-front.mjs";
-import { runNativeLibrary, runtimeLifecycleList } from "../../../Tools/agent/compiler-native-transport.mjs";
+import { candidateJetc0, runNativeLibrary, runtimeLifecycleList } from "../../JetBackend/Tests/jet-front.mjs";
 import { faultReportObject } from "../../../Tools/packaging/fault-report-object.mjs";
 import { nativeCCompiler } from "../../../Tools/packaging/native-c-compiler.mjs";
 

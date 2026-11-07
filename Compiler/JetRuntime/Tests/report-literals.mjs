@@ -6,7 +6,7 @@ const traps = readFileSync(new URL('../Source/TrapMessages.jet', import.meta.url
 const scheduler = readFileSync(new URL('../Source/SchedulerMessages.jet', import.meta.url), 'utf8');
 
 // The bytes of an `rt_static_text("...")` body, undoing the generators'
-// escapes (Tools/agent/runtime-static-text.mjs).
+// escapes (Tools/agent/RuntimeGenerators.jet static_text).
 const STATIC = /rt_static_text\("((?:[^"\\]|\\.)*)"\)/;
 function staticBytes(body) {
     return Buffer.from(body.replace(/\\(.)|\{\{|\}\}/g, (match, escape) => {

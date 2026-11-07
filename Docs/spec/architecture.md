@@ -120,11 +120,12 @@ Trap proofs compare the native status, signal and exact stdout/stderr against
 the committed golden, not a retired Rust execution. The freestanding
 display witness links the sealed C-client object and its provenance-listed C
 platform archives, rather than the program pack's startup.
-Native fixture and registry feeds share
-[`compiler-native-transport`](../../Tools/agent/compiler-native-transport.mjs):
-the production CLI's `check FILE` library-object seam and `build FILE` program
-path. Library feeds require fresh object, export and ABI files; command
-completion alone is not a native pass. Checked-program observers are explicit Jet
+Native fixture feeds run through
+[`NativeTransport`](../../Tools/agent/NativeTransport.jet), which the fixture
+runners reach through `Compiler/JetBackend/Tests/jet-front.mjs`: the production
+CLI's `doc FILE` library-object seam and `build FILE` program path. Library
+feeds require fresh object, export and ABI files; command completion alone is
+not a native pass. Checked-program observers are explicit Jet
 drivers compiled from the canonical compiler aggregate, cached per pinned
 toolchain, rather than a bootstrap factory or a retired Rust observer.
 
