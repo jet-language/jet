@@ -22,7 +22,7 @@ Programs: `bench300k` and `bench30k` come from
 (`Tools/perf/scaling/mixed.mjs`); `bench.json` pins their package digest,
 golden stdout and shape, and the harness fails closed when a regenerated
 program differs. `selfhost` is `jet build Compiler` over a copy of the
-compiler's packages of `--source-tree` (`Tools/agent/compiler-packages.mjs`),
+compiler's packages of `--source-tree` (`Tools/agent/CompilerPackages.jet`),
 with that tree's Core.
 
 Each sample: a fresh copy of the program at one fixed path, an empty

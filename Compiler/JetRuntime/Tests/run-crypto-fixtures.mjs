@@ -3,14 +3,14 @@
 // C files transport fixtures only. Explicit phases follow the runtime witness
 // harness convention; no fixture can fall back to a Rust crypto implementation.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0 } from '../../JetBackend/Tests/jet-front.mjs';
 import { runNativeLibrary } from '../../../Tools/agent/compiler-native-transport.mjs';
-import { unblockUses } from '../../../Tools/agent/compiler-packages.mjs';
+import { seedDir } from '../../../Tools/agent/roots.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-crypto-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -27,9 +27,11 @@ if (mode === 'assemble') {
     const paths = readFileSync(join(root, 'Compiler/JetRuntime/sources.list'), 'utf8').split('\n').map(x => x.trim()).filter(x => x && !x.startsWith('#'));
     paths.push(...fixtures.map(name => `Compiler/JetRuntime/Tests/Fragments.fixture/${name}Tests.jet`));
     const imports = new Set();
-    const bodies = paths.map(path => {
+    // Each source with its `use { … }` blocks as one `use` line per row (Tools/agent/CompilerPackages.jet unblock, run by the seed).
+    const unblocked = execFileSync(join(seedDir(), 'jet'), [join(root, 'Tools/agent/CompilerPackages.jet'), '--root', root, 'unblock', ...paths], { maxBuffer: 1 << 30 }).toString('utf8').split('\0');
+    const bodies = paths.map((path, index) => {
         let importing = false;
-        const lines = unblockUses(readFileSync(join(root, path), 'utf8')).split('\n').filter(line => {
+        const lines = unblocked[index].split('\n').filter(line => {
             if (line.startsWith('use ')) {
                 if (/^use (?:\w+: )?core\./u.test(line)) imports.add(line);
                 importing = line.includes('[') && !line.includes(']');

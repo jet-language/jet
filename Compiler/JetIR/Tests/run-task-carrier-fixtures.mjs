@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Production task routing with Jet sema's carrier helpers and the Foundation package.
 // Usage: node Compiler/JetIR/Tests/run-task-carrier-fixtures.mjs OUTDIR
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilerFixtureUnit } from "../../../Tools/agent/compiler-packages.mjs";
+import { seedDir } from "../../../Tools/agent/roots.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// The fixture unit of ENTRY... (Tools/agent/CompilerPackages.jet unit, run by the seed).
+const compilerFixtureUnit = (...entries) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unit", ...entries], { maxBuffer: 1 << 30 }).toString("utf8");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-task-carrier-fixtures.mjs OUTDIR");
 function item(path, head) {
@@ -24,7 +27,7 @@ const definitions = [
   item(taskgroups, "sema_taskgroup_failure_result: fn("),
   item(taskgroups, "sema_taskgroup_task_element: fn("),
 ];
-const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
+const foundation = compilerFixtureUnit("Compiler/JetFoundation");
 const fixtures = readFileSync(join(repo, "Compiler/JetIR/Tests/TaskCarrierFixtures.fixture/TaskCarrierFixtures.jet"), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), foundation + "\n" + definitions.join("\n") + "\n" + fixtures);

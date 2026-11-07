@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { seedDir } from "../roots.mjs";
 
 const [cmd, ...args] = process.argv.slice(2);
 const SKIPPED = new Set(["target", "build", "node_modules", "bin"]);
@@ -43,12 +44,9 @@ function contentHash(root, files, domain) {
   return h.digest("hex");
 }
 
-async function compilerModel(tree) {
-  const mod = join(tree, "Tools/agent/compiler-packages.mjs");
-  const m = await import(mod);
-  const packages = m.compilerPackages(tree);
-  const roots = m.compilerInputRoots(tree, packages);
-  return { m, packages, roots };
+// Tools/agent/CompilerPackages.jet of `tree`, run by the seed: its output rows.
+function compilerPackages(tree, ...args) {
+  return execFileSync(join(seedDir(), "jet"), [join(tree, "Tools/agent/CompilerPackages.jet"), "--root", tree, ...args], { maxBuffer: 1 << 28 }).toString("utf8").split("\n").filter(Boolean);
 }
 
 // The build stage reads the compiler's source identity inputs (workspace files, every package `jet build Compiler`
@@ -56,15 +54,14 @@ async function compilerModel(tree) {
 // the pack stage reads those plus the packaging recipe (the Tools/packaging modules prebuild-runtime.mjs loads:
 // every non-test .mjs there except prebuild-runtime-reuse.mjs, which the lander's scratch census still writes
 // into the r14 snapshot for its linger workaround and the chain never runs) and every runtime source sources.list names.
-async function stageInputs(tree) {
-  const { m, roots } = await compilerModel(tree);
-  const build = new Set(m.compilerInputs(tree, roots));
+function stageInputs(tree) {
+  const build = new Set(compilerPackages(tree, "inputs"));
   for (const extra of ["Compiler/Prelude", "Compiler/JetRuntime", "env.jet", "flake.nix", "flake.lock"]) walk(tree, extra, build);
   const pack = new Set(build);
   for (const f of walk(tree, "Tools/packaging", new Set())) if (f.endsWith(".mjs") && !f.endsWith(".test.mjs") && !f.endsWith("/prebuild-runtime-reuse.mjs")) pack.add(f);
   const list = join(tree, "Compiler/JetRuntime/sources.list");
   if (existsSync(list)) for (const row of readFileSync(list, "utf8").split("\n").map((r) => r.trim())) if (row && !row.startsWith("#") && existsSync(join(tree, row))) pack.add(row);
-  return { build, pack, roots, m };
+  return { build, pack };
 }
 
 function gitBlob(bytes) { return createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex"); }
@@ -156,11 +153,12 @@ function ownerPackage(tree, path) {
   return null;
 }
 
-async function plan(tree, diffPath) {
+function plan(tree, diffPath) {
   const d = JSON.parse(readFileSync(diffPath, "utf8"));
-  const inputs = await stageInputs(tree);
-  inputs.isInput = (p) => { try { return inputs.m.isCompilerInput(tree, p, inputs.roots); } catch { return false; } };
-  const compilerDirs = new Set([...(await compilerModel(tree)).packages.values()].map((dir) => dir.slice(resolve(tree).length + 1)));
+  const inputs = stageInputs(tree);
+  const selected = new Set(compilerPackages(tree, "select", ...d.changed.map((c) => c.path)));
+  inputs.isInput = (p) => selected.has(p);
+  const compilerDirs = new Set(compilerPackages(tree, "packages").map((row) => row.split("\t")[1]));
   let level = "check";
   const why = new Map();
   const members = new Set();
@@ -221,10 +219,10 @@ function evict(store, capGb) {
 }
 
 if (cmd === "diff") process.stdout.write(JSON.stringify(diff(resolve(args[0]), args[1], args[2])) + "\n");
-else if (cmd === "plan") process.stdout.write(JSON.stringify(await plan(resolve(args[0]), args[1])) + "\n");
+else if (cmd === "plan") process.stdout.write(JSON.stringify(plan(resolve(args[0]), args[1])) + "\n");
 else if (cmd === "inputs") {
   const tree = resolve(args[0]);
-  const { build, pack } = await stageInputs(tree);
+  const { build, pack } = stageInputs(tree);
   console.log(`${contentHash(tree, build, "chain-build-inputs-v1")} ${contentHash(tree, pack, "chain-pack-inputs-v1")} ${build.size} ${pack.size}`);
 } else if (cmd === "dirhash") console.log(dirhash(resolve(args[0])));
 else if (cmd === "evict") evict(args[0], args[1]);

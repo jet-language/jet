@@ -4,20 +4,24 @@
 // package the CLI depends on, without the CLI's own entry), with the files its
 // comptime inputs name copied beside the joined unit.
 // Usage: node Compiler/JetSema/Tests/run-gate-fixtures.mjs OUTDIR
-import { copyFileSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilerFixtureInputs, compilerFixtureUnit, compilerPackages, unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
+import { seedDir } from "../../../Tools/agent/roots.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
+// Tools/agent/CompilerPackages.jet, run by the seed.
+const compilerPackages = (...args) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, ...args], { maxBuffer: 1 << 30 }).toString("utf8");
+const rows = text => text.split("\n").filter(Boolean).map(row => row.split("\t"));
 // A fixture is part of the unit's namespace: its compiler package imports blank as production's do.
-const packageImport = new RegExp(`^use (?:${[...compilerPackages(repo).keys()].join("|")})\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)`, "gm");
+const packageImport = new RegExp(`^use (?:${rows(compilerPackages("packages")).map(([name]) => name).join("|")})\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)`, "gm");
 const blank = text => text.replace(/[^\n]/g, " ");
-const production = compilerFixtureUnit(repo);
-const productionInputs = compilerFixtureInputs(repo);
-const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
-const foundationInputs = compilerFixtureInputs(repo, ["Compiler/JetFoundation"]);
+const production = compilerPackages("unit");
+const productionInputs = rows(compilerPackages("unit-inputs"));
+const foundation = compilerPackages("unit", "Compiler/JetFoundation");
+const foundationInputs = rows(compilerPackages("unit-inputs", "Compiler/JetFoundation"));
 const fixtures = [
     ["unsafe-obligations", "Compiler/JetSema/Tests/UnsafeObligations.fixture/UnsafeObligations.jet"],
     ["gate-ledger", "Compiler/JetSema/Tests/GateLedger.fixture/GateLedger.jet"],
@@ -27,10 +31,11 @@ const fixtures = [
     ["recovered-frozen", "Compiler/JetSema/Tests/FrozenFixtures.fixture/FrozenFixtures.jet"],
     ["recovered-policy-guest", "Compiler/JetSema/Tests/BurnDownFixtures.fixture/BurnDownFixtures.jet"],
 ];
-for (const [name, path] of fixtures) {
+const unblocked = compilerPackages("unblock", ...fixtures.map(([, path]) => path)).split("\0");
+for (const [index, [name]] of fixtures.entries()) {
     const project = join(out, name);
     mkdirSync(join(project, "src"), { recursive: true });
-    const fixture = unblockUses(readFileSync(join(repo, path), "utf8")).replace(packageImport, blank);
+    const fixture = unblocked[index].replace(packageImport, blank);
     const entry = name === "named-tuple-identity" ? "\nrun: fn() { named_tuple_identity_fixture() }\n" : "";
     const implementation = name === "named-tuple-identity" ? foundation : production;
     writeFileSync(join(project, "src/compiler.jet"), implementation + "\n" + fixture + entry);

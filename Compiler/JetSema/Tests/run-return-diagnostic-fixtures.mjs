@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 // Production diagnostic builders/gates with the Foundation package.
 // Usage: node Compiler/JetSema/Tests/run-return-diagnostic-fixtures.mjs OUTDIR [--web-host]
+import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilerFixtureUnit } from "../../../Tools/agent/compiler-packages.mjs";
+import { seedDir } from "../../../Tools/agent/roots.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// The fixture unit of ENTRY... (Tools/agent/CompilerPackages.jet unit, run by the seed).
+const compilerFixtureUnit = (...entries) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unit", ...entries], { maxBuffer: 1 << 30 }).toString("utf8");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-return-diagnostic-fixtures.mjs OUTDIR");
 const webHost = process.argv[3] === "--web-host";
@@ -34,7 +37,7 @@ if (webHost) {
 } else {
   builders.push(item("Compiler/JetSema/Source/Sema/Expressions.jet", "sema_expr_unwrap_tag: fn("));
 }
-const foundation = compilerFixtureUnit(repo, ["Compiler/JetFoundation"]);
+const foundation = compilerFixtureUnit("Compiler/JetFoundation");
 const fixtureName = webHost ? "WebHostDiagnosticFixtures" : "ReturnDiagnosticFixtures";
 const fixtures = readFileSync(join(repo, `Compiler/JetSema/Tests/${fixtureName}.fixture/${fixtureName}.jet`), "utf8");
 mkdirSync(join(out, "project/src"), { recursive: true });

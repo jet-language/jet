@@ -9,15 +9,14 @@
 // `--help` prints the options; README.md explains the lanes.
 
 import fs from 'node:fs';
-import { scratchRoot } from '../../agent/roots.mjs';
+import { scratchRoot, seedDir } from '../../agent/roots.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { generateMixed } from '../scaling/generate.mjs';
 import { countLines } from '../scaling/mixed.mjs';
 import { parseCounters, phaseTable, readTrace, runMeasured } from './measure.mjs';
-import { WORKSPACE_FILES, compilerInputs, compilerPackages, compilerSources } from '../../agent/compiler-packages.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '../../..');
@@ -185,20 +184,22 @@ function prepareBench(id, dir) {
   };
 }
 
+// Tools/agent/CompilerPackages.jet of this checkout over `tree`, run by the seed: its output rows.
+const compilerPackages = (tree, ...args) => execFileSync(path.join(seedDir(), 'jet'), [path.join(REPO, 'Tools/agent/CompilerPackages.jet'), '--root', tree, ...args], { maxBuffer: 1 << 30 }).toString('utf8').split('\n').filter(Boolean);
+
 // The compiler in package form: the workspace files and every compiler package
 // of --source-tree, copied at their repository paths; the sample runs
 // `jet build Compiler` there with that tree's Core (JET_TOOLCHAIN_ROOT).
 function prepareSelfhost(config, dir) {
   fs.rmSync(dir, { recursive: true, force: true });
   const project = path.join(dir, 'project');
-  const roots = [...WORKSPACE_FILES, ...[...compilerPackages(config.sourceTree).values()].map(directory => path.relative(config.sourceTree, directory))];
-  for (const file of compilerInputs(config.sourceTree, roots)) {
+  for (const file of compilerPackages(config.sourceTree, 'inputs').filter(file => !file.startsWith('Core/'))) {
     fs.mkdirSync(path.dirname(path.join(project, file)), { recursive: true });
     fs.copyFileSync(path.join(config.sourceTree, file), path.join(project, file));
   }
   const hash = crypto.createHash('sha256');
   const shape = { physical_lines: 0, code_lines: 0, bytes: 0, functions: 0, files: 0 };
-  for (const file of compilerSources(config.sourceTree).flatMap(entry => entry.files)) {
+  for (const file of compilerPackages(config.sourceTree, 'sources').map(row => row.split('\t')[2])) {
     const text = fs.readFileSync(path.join(config.sourceTree, file), 'utf8');
     const lines = countLines(text);
     hash.update(`${file}\0${text.length}\0`).update(text);

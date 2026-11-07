@@ -8,10 +8,13 @@
 //
 //   node Jetpack/Bootstrap/compiler-slice.mjs          # report drift, exit 1 on any
 //   import { compilerSliceDrift } from "./compiler-slice.mjs"
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compilerSources } from "../../Tools/agent/compiler-packages.mjs";
+import { seedDir } from "../../Tools/agent/roots.mjs";
+
+const TOOL = resolve(dirname(fileURLToPath(import.meta.url)), "../../Tools/agent/CompilerPackages.jet");
 
 const DECLARATION = /^(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(fn|struct|enum|trait|type)\b|^([A-Z][A-Z0-9_]*)\s*:(?!=)/gm;
 
@@ -92,8 +95,10 @@ function referenced(text) {
 
 export function compilerSliceDrift(root) {
   const read = (path) => readFileSync(resolve(root, path), "utf8");
-  // Library members only: a package's entry (its root run.jet) is not part of a slice.
-  const compilerList = compilerSources(root).flatMap((entry) => entry.files.filter((path) => path !== `${entry.directory}/run.jet`)).filter((path) => path.startsWith("Compiler/"));
+  // Library members only: a package's entry (its root run.jet) is not part of a slice
+  // (Tools/agent/CompilerPackages.jet sources, run by the seed: `NAME<TAB>DIRECTORY<TAB>FILE`).
+  const compilerList = execFileSync(join(seedDir(), "jet"), [TOOL, "--root", root, "sources"], { maxBuffer: 1 << 30 }).toString("utf8").split("\n").filter(Boolean)
+    .map((row) => row.split("\t")).filter(([, directory, path]) => path !== `${directory}/run.jet`).map(([, , path]) => path).filter((path) => path.startsWith("Compiler/"));
   const jetpackList = [...listed(read("Jetpack/Bootstrap/sources.list")), ...listed(read("Jetpack/Bootstrap/tests.list"))];
   const slice = jetpackList.filter((path) => path.startsWith("Compiler/"));
   const problems = [];

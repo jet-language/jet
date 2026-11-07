@@ -6,19 +6,30 @@
 // --native-abi --cargo-target <diskdir> also builds only that emitted helper,
 // then links/runs the C descriptor witness with the opt-in musl toolchain.
 // --host-env executes the actual isolated-helper environment argument producer.
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compilerSources, unblockUses } from '../../../Tools/agent/compiler-packages.mjs';
+import { seedDir } from '../../../Tools/agent/roots.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const out = process.argv[2];
 if (!out) throw new Error('usage: run-rust-foreign-fixtures.mjs <outdir>');
-const read = path => readFileSync(resolve(repo, path), 'utf8');
+// Tools/agent/CompilerPackages.jet, run by the seed.
+const compilerPackages = (...args) => execFileSync(resolve(seedDir(), 'jet'), [resolve(repo, 'Tools/agent/CompilerPackages.jet'), '--root', repo, ...args], { maxBuffer: 1 << 30 }).toString('utf8');
+const environmentFixture = process.argv.includes('--host-env');
+const host = process.argv.includes('--host') || process.argv.includes('--host-full') || environmentFixture;
+// Declarations of the Foundation package and the CLI's Rust foreign host.
+const declaredIn = compilerPackages('sources').split('\n').filter(Boolean).map(row => row.split('\t')[2])
+  .filter(path => path.startsWith('Compiler/JetFoundation/') || path === 'Compiler/JetCli/Source/Cli/RustForeign.jet');
+// Every file this reads, with its `use { … }` blocks as one `use` line per row.
+const sources = [...new Set([...declaredIn, 'Compiler/JetDriver/Source/Driver/RustForeign.jet', 'Compiler/JetDriver/Source/Driver/RustForeignSource.jet', 'Compiler/JetDriver/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet',
+  ...(host ? ['Compiler/JetCli/Source/Cli/RustForeign.jet', environmentFixture ? 'Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet' : 'Compiler/JetCli/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet'] : [])])];
+const flat = new Map(compilerPackages('unblock', ...sources).split('\0').slice(0, sources.length).map((text, index) => [sources[index], text]));
+const read = path => flat.get(path);
 const core = new Set();
 function body(text) {
   const kept = []; let skipping = false;
-  for (const line of unblockUses(text).split('\n')) {
+  for (const line of text.split('\n')) {
     if (skipping) { if (line.trimStart().startsWith(']') || line === '}') skipping = false; continue; }
     if (/^use jet_\w+\.\[\s*$/.test(line)) { skipping = true; continue; }
     if (/^use jet_/.test(line)) continue;
@@ -28,9 +39,6 @@ function body(text) {
   return kept.join('\n');
 }
 const declarations = new Map();
-// Declarations of the Foundation package and the CLI's Rust foreign host.
-const declaredIn = compilerSources(repo).flatMap(entry => entry.files)
-  .filter(path => path.startsWith('Compiler/JetFoundation/') || path === 'Compiler/JetCli/Source/Cli/RustForeign.jet');
 for (const path of declaredIn) {
   const lines = read(path).split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -52,12 +60,10 @@ const planner = read('Compiler/JetDriver/Source/Driver/RustForeign.jet');
 const prefix = planner.indexOf('JetDriverRustForeignRecord: struct ');
 if (prefix < 0) throw new Error('missing planner/checked-graph boundary');
 const fixture = read('Compiler/JetDriver/Tests/RustForeignFixtures.fixture/RustForeignFixtures.jet');
-const environmentFixture = process.argv.includes('--host-env');
-const host = process.argv.includes('--host') || process.argv.includes('--host-full') || environmentFixture;
 const roots = [body(planner.slice(0, prefix)), body(read('Compiler/JetDriver/Source/Driver/RustForeignSource.jet')), body(host ? fixture.slice(0, fixture.indexOf('run: fn()')) : fixture)];
 if (host) {
   if (process.argv.includes('--host-full')) roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet')));
-  else roots.push(body(unblockUses(read('Compiler/JetCli/Source/Cli/RustForeign.jet')).split('\n').filter(line => /^use (?:\w+: )?core\./.test(line)).join('\n')));
+  else roots.push(body(read('Compiler/JetCli/Source/Cli/RustForeign.jet').split('\n').filter(line => /^use (?:\w+: )?core\./.test(line)).join('\n')));
   if (environmentFixture) {
     const tests = read('Compiler/JetCli/Tests/RustForeign.fixture/RustForeign.jet');
     const start = tests.indexOf('cli_rust_foreign_test_environment: fn()');

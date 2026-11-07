@@ -4,11 +4,10 @@
 // A default invocation runs the narrow jet check through the single cheap slot
 // ($JET_STATE_ROOT/cheap.sh), with $JET_CHECKER, else $JET, else `jet` on PATH.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
-import { stateRoot } from "../../../Tools/agent/roots.mjs";
+import { seedDir, stateRoot } from "../../../Tools/agent/roots.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const args = process.argv.slice(2);
@@ -27,8 +26,10 @@ const paths = readFileSync(join(root, "Compiler/JetRuntime/sources.list"), "utf8
 if (!paths.length || new Set(paths).size !== paths.length) throw new Error("empty or duplicate runtime source manifest");
 if (test !== null) paths.push(`Compiler/JetRuntime/Tests/Fragments.fixture/${test}Tests.jet`);
 const uses = new Set();
-const bodies = paths.map((path) => {
-  const lines = unblockUses(readFileSync(join(root, path), "utf8")).split("\n");
+// Each source with its `use { … }` blocks as one `use` line per row (Tools/agent/CompilerPackages.jet unblock, run by the seed).
+const unblocked = execFileSync(join(seedDir(), "jet"), [join(root, "Tools/agent/CompilerPackages.jet"), "--root", root, "unblock", ...paths], { maxBuffer: 1 << 30 }).toString("utf8").split("\0");
+const bodies = paths.map((path, index) => {
+  const lines = unblocked[index].split("\n");
   let importing = false;
   const body = lines.filter((line) => {
     if (line.startsWith("use ")) {

@@ -15,11 +15,10 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } from "node:fs/promises";
-import { stateRoot } from "../../Tools/agent/roots.mjs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { seedDir, stateRoot } from "../../Tools/agent/roots.mjs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilerSliceDrift } from "./compiler-slice.mjs";
-import { CORE_IMPORT_LINE, unblockUses } from "../../Tools/agent/compiler-packages.mjs";
 
 const mode = process.argv[2] ?? "check";
 if (!["check", "aot", "hosted", "publication"].includes(mode)) fail(`unknown mode ${mode}; expected check, aot, hosted, or internal publication`);
@@ -333,7 +332,8 @@ function append(text) {
 // occurrence is blanked the same way (a duplicate import name is E0105), and
 // grouped Core member imports are deduplicated per member.
 const PACKAGE_IMPORT = /^use (?:jet_foundation|jet_lexer|jet_parser|jet_sema|jet_eval|jet_repl|jet_driver|jet_backend|jet_cli|jet_testkit|compiler_bootstrap|jetpack_foundation|jetpack_trust_root|jet_pkg_model|jet_env_model|jetpack_trust|jetpack_artifact_store|jetpack_build|jetpack_nix_eval|jetpack_nix|jetpack_store|jetpack_publication|jetpack_environment|jetpack_secrets|jetpack_integrations)\.(?:\[[^\]]*\]|[A-Za-z_][A-Za-z0-9_]*[ \t]*$)/gm;
-const CORE_IMPORT = CORE_IMPORT_LINE;
+// A single-line Core import: `use core.x` or `use alias: core.x`.
+const CORE_IMPORT = /^use (?:[A-Za-z_][A-Za-z0-9_]*: )?core\.[^\[\n]*$/gm;
 const CORE_MEMBER_IMPORT = /^use (core(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\.\[([^\]]*)\]/gm;
 const seenCoreImports = new Set();
 const seenCoreMembers = new Set();
@@ -360,8 +360,13 @@ function blankRepeatedCoreMembers(importText, module, members) {
   ).join("");
   return importText.slice(0, importText.indexOf("[") + 1) + rewritten + "]";
 }
+// Each text with its `use { … }` blocks as one `use` line per row (Tools/agent/CompilerPackages.jet unblock, run by the seed).
+function unblockUses(texts) {
+  const framed = texts.map((text) => `${text}\0`).join("");
+  return execFileSync(join(seedDir(), "jet"), [join(repoRoot, "Tools/agent/CompilerPackages.jet"), "unblock", "-"], { input: framed, maxBuffer: 1 << 30 }).toString("utf8").split("\0").slice(0, texts.length);
+}
 function blankPackageImports(text) {
-  return unblockUses(text).replace(PACKAGE_IMPORT, blank)
+  return text.replace(PACKAGE_IMPORT, blank)
     .replace(CORE_MEMBER_IMPORT, blankRepeatedCoreMembers)
     .replace(CORE_IMPORT, (line) => {
     const key = line.trimEnd();
@@ -372,9 +377,10 @@ function blankPackageImports(text) {
     return blank(line);
   });
 }
-for (const entry of units) {
+const unblocked = unblockUses(units.map((entry) => entry.text));
+for (const [index, entry] of units.entries()) {
   append(`// [jet-bootstrap source: ${entry.sourcePath}]\n`);
-  const text = blankPackageImports(entry.text);
+  const text = blankPackageImports(unblocked[index]);
   const rendered = testPaths.has(entry.sourcePath) ? renderTests(text, entry.sourcePath, entry.section) : text;
   const body = rendered ?? text;
   const bytes = Buffer.from(body, "utf8");

@@ -13,10 +13,11 @@
 // then: cd <outdir> && jet run unit.jet (reserved-index round-trip tests).
 // Or: node Compiler/JetBackend/Tests/run-link.mjs <outdir> --pack-roots
 // then: run unit.jet beside the inputs from run-runtime-pack-roots.mjs.
+import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { unblockUses } from "../../../Tools/agent/compiler-packages.mjs";
+import { seedDir } from "../../../Tools/agent/roots.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const outDir = process.argv[2];
@@ -40,12 +41,16 @@ function item(path, head) {
   return lines.slice(start, end + 1).join("\n");
 }
 
+// Each file's text with its `use { … }` blocks as one `use` line per row
+// (Tools/agent/CompilerPackages.jet unblock, run by the seed).
+const unblocked = (paths) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unblock", ...paths], { maxBuffer: 1 << 30 }).toString("utf8").split("\0").slice(0, paths.length);
+
 // Units are single-package: drop `use jet_*` items; `use core.*` items are
 // collected for the head of the unit.
 const coreUses = new Set();
-function body(path) {
+function body(path, text) {
   const kept = [];
-  for (const line of unblockUses(read(path)).split("\n")) {
+  for (const line of text.split("\n")) {
     if (/^use jet_\w+/.test(line)) continue;
     if (/^use (?:\w+: )?core\./.test(line)) {
       coreUses.add(line);
@@ -61,6 +66,17 @@ const object = "Compiler/JetBackend/Source/Image/Object.jet";
 const threads = "Compiler/JetFoundation/Source/Threads.jet";
 const dwarf = "Compiler/JetBackend/Source/Image/Dwarf.jet";
 const buildOptions = "Compiler/JetFoundation/Source/Registry/BuildOptions.jet";
+const bodies = [
+  "Compiler/JetFoundation/Source/Hash/SHA256.jet",
+  "Compiler/JetBackend/Source/Image/Archive.jet",
+  "Compiler/JetBackend/Source/Image/StaticLink.jet",
+  "Compiler/JetBackend/Source/Image/RuntimePack.jet",
+  "Compiler/JetBackend/Source/Image/MemoryLink.jet",
+  "Compiler/JetBackend/Source/Image/DebugPrune.jet",
+  "Compiler/JetBackend/Source/X64/FaultReport.jet",
+  `Compiler/JetBackend/Tests/Fragments.fixture/${fixture}.jet`,
+];
+const bodyTexts = unblocked(bodies);
 const parts = [
   `// [unit source: ELF writer items of ${elf} and ${object}]`,
   item(elf, "X64ExecutableResult: struct {"),
@@ -83,14 +99,7 @@ const parts = [
   item(dwarf, "dwarf_patch_length: fn("),
   item(buildOptions, "CHECKED_ALLOC_RUNTIME_EXPORTS: "),
   "",
-  body("Compiler/JetFoundation/Source/Hash/SHA256.jet"),
-  body("Compiler/JetBackend/Source/Image/Archive.jet"),
-  body("Compiler/JetBackend/Source/Image/StaticLink.jet"),
-  body("Compiler/JetBackend/Source/Image/RuntimePack.jet"),
-  body("Compiler/JetBackend/Source/Image/MemoryLink.jet"),
-  body("Compiler/JetBackend/Source/Image/DebugPrune.jet"),
-  body("Compiler/JetBackend/Source/X64/FaultReport.jet"),
-  body(`Compiler/JetBackend/Tests/Fragments.fixture/${fixture}.jet`),
+  ...bodies.map((path, index) => body(path, bodyTexts[index])),
 ];
 mkdirSync(outDir, { recursive: true });
 writeFileSync(`${outDir}/unit.jet`, [...coreUses, "", ...parts].join("\n"));
