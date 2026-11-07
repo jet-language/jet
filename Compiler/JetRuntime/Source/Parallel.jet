@@ -99,7 +99,7 @@ parallel_raise: fn(record: I64) {
     if (length == I64{0}) {
         return
     }
-    cap: scheduler_available_parallelism(I64{1})
+    cap: if comptime_serving() -> I64{1} else -> scheduler_available_parallelism(I64{1})
     if (jet_rt_session_propagate() != I64{0}) -> return
     limited: parallel_limit(limit, cap)
     size: parallel_chunk_size(length, limit, limited)

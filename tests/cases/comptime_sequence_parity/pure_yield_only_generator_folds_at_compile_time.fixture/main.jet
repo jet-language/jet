@@ -1,0 +1,20 @@
+count: fn(n: Int) -> Stream<Int> {
+    i := 0
+    loop i < n {
+        yield i
+        i += 1
+    }
+}
+
+sum_to: fn(n: Int) -> Int {
+    total := 0
+    loop value in count(n) -> total += value
+    total
+}
+
+FOLDED: comptime { sum_to(5) }
+
+run: fn() {
+    print(FOLDED)
+    print(sum_to(5))
+}

@@ -1,0 +1,20 @@
+# Card #6643: a pure generator that only yields evaluates at compile time
+# with the run-time meaning. The comptime child doesn't probe the host's CPU
+# quota to size the task pool, so the fold sees no host effect.
+fixture: pure_yield_only_generator_folds_at_compile_time.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step run: jet run main.jet
+exit: 0
+stderr: empty
+stdout: = "10\n10\n"
+step: jet build main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "10\n10\n"
+step: jet build --release main.jet
+exit: 0
+step release: built
+exit: 0
+stdout: = "10\n10\n"
