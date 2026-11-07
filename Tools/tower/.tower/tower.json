@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6664,
-    "rev": 95644,
+    "nextNum": 6665,
+    "rev": 95650,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69770,6 +69770,16 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "f734592975 deletes 8 c68 group 5-7 scripts with no live caller: native-route-environment (+test), native-route-handles, native-route-records, classify-native-route-glue, and the JetRuntime test-native-route-{handles,records} and test-runtime-abi-symbols scripts. Still live: runtime-route-abi, compiler-native-transport and compiler-packages are imported by about 50 node fixture runners that CompilerRegistries.jet runs from VerifyFull. runtime-abi-symbols is imported by runtime-route-abi and gen-runtime-host-carriers. runtime-static-text is imported by the gen-runtime-*-messages generators. These port with their importers, which c3 also covers."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c68 group 4 landed in ca0a7d1fc8: core-coverage-census.mjs and its test became Tools/agent/CoreCoverage.jet (15 #Tests pass; output byte-identical to node). VerifyFull runs it; the ci.yml step was dropped and the AGENTS.md sentence updated. The coverage row is red on dev for both implementations, now tracked as #6664."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c69, c70 and c71 met: groups B, C and D are on dev (c515c4ea10, fab74a230c, f40bd500ae, 5889cdb664). c67 is met except for the baseline: entries on the packages, selfhost and perf profiles (CoreCliLead-2's pending commit). The jetpack profile was renamed packages in the cutover. c68 (15 Tools/agent gate scripts) is with TestSystemLead-2, briefed as one list in 7 groups; scripts with no live caller are deleted without porting."
         },
         {
@@ -70835,11 +70845,11 @@
         {
           "n": 67,
           "text": "Compiler/test.jet, beside Compiler/package.jet and build.jet, holds the code suites, and package.jet declares the quick, golden, ui, cases, jetpack, selfhost, perf and full profiles; from Compiler/, `jet test --profile <p>` (or `jet test Compiler --profile <p>` from the checkout) runs each one with per-row results and a baseline compare. Nothing test-related lives at the repository root.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T23:09:22.324Z"
+          "evidence": "Compiler/test.jet holds the code suites (packages, selfhost, perf) beside package.jet and build.jet. Compiler/package.jet declares quick, golden, ui, cases, packages (the jetpack profile renamed in the cutover), selfhost, perf, full, registries and corpora. 0b2a48df2c gives the code suites baseline compare (KNOWN-FAILING / UNEXPECTED-PASS from tests/known-failing.tsv). CoreCliLead-2 bare run (env -i, fresh HOME, PATH git+coreutils+s1): packages 2146 rows, 2113 passed, 22 known-failing, status 0; perf 16 rows, 6 passed, 10 known-failing, status 0. The repository root has no test.jet or package.jet.",
+          "at": "2026-11-07T09:04:12.556Z"
         },
         {
           "n": 68,
@@ -70900,7 +70910,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T08:42:51.768Z",
+      "updated": "2026-11-07T09:04:12.557Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -83368,11 +83378,11 @@
         {
           "n": 10,
           "text": "(was #5951) The command model has one `ported` field per command form; `jet help`, shell completions, man pages and `jet help --all` read it, and no form with `ported = false` appears in help, completions or man.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-31T01:28:12.336Z"
+          "evidence": "7fe60e94a9 drops the unported --cost form from lint help (owner answer q07mphiy wording). CoreCliLead-2 lane run on that commit: cases per_command_help, help_all, help_frequency, help_sort_az, man_page_golden and completions_generate_for_every_shell all PASS; Compiler/JetCli/Tests 99 passed, 0 failed.",
+          "at": "2026-11-07T09:04:11.502Z"
         },
         {
           "n": 11,
@@ -84410,7 +84420,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-07T03:48:01.354Z",
+      "updated": "2026-11-07T09:04:11.502Z",
       "updatedBy": "Main",
       "criteriaLastN": 143
     },
@@ -98169,6 +98179,47 @@
       "updated": "2026-11-07T08:39:14.125Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
+    },
+    {
+      "id": "c005c3wh",
+      "num": 6664,
+      "title": "Core coverage ratchet red on dev: 296 untested Core functions missing from core-coverage-ratchet.json",
+      "body": "TestSystemLead-2 found this while porting the coverage gate (ca0a7d1fc8). jet Tools/agent/CoreCoverage.jet --check exits 1 on dev, and so did the old node script: 296 Core functions have no test and are not listed in the committed ratchet, so VerifyFull's core-coverage row is red. Rewriting the ratchet to list them would bless a regression.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet Tools/agent/CoreCoverage.jet --check exits 0 on dev: each of the 296 functions either gains a #Test or golden that exercises it, or is removed as dead Core, and the ratchet file only shrinks (it is never rewritten upward).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T08:50:46.177Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T08:50:40.290Z",
+      "updated": "2026-11-07T08:50:46.177Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -186072,6 +186123,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T09:04:12.557Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#67"
+    },
+    {
+      "at": "2026-11-07T09:04:11.502Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hn7w1n",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-07T08:53:10.641Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T08:50:47.167Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T08:50:46.177Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c005c3wh",
+      "note": "#1 jet Tools/agent/CoreCoverage.jet --check exits 0 on dev: eac"
+    },
+    {
+      "at": "2026-11-07T08:50:40.290Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c005c3wh",
+      "note": "Core coverage ratchet red on dev: 296 untested Core functions missing from core-coverage-ratchet.json"
+    },
     {
       "at": "2026-11-07T08:48:43.492Z",
       "by": "Main",
