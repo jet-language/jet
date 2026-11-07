@@ -146,7 +146,7 @@ package_suite_rows: fn(rows: TestRows) {
     listing := ""
     if test_sources(setup) == {
         .Ok(found) -> { sources = found }
-        .Err(error) -> { listing = "{error}" }
+        .Err(error) -> { listing = error.message.copy() } // copy: the result is dropped
     }
     // A script (a `#!` file) is no package's source: `jet test <script>` runs
     // its #Tests, a run of its own beside the packages.
@@ -412,7 +412,7 @@ FROZEN_TREES: [String]{"Jetpack/JetOS"}
 
 COVERAGE_ROW: "#Test coverage"
 
-// A git-tracked .jet file under PACKAGE_TREES that declares #Tests: its path
+// A .jet file under PACKAGE_TREES that declares #Tests: its path
 // from the checkout, their names, and whether it is a script (a `#!` file),
 // whose #Tests only `jet test <script>` runs.
 TestSource: struct {
@@ -421,20 +421,30 @@ TestSource: struct {
     script: Bool
 }
 
-// Every TestSource outside test data.
+// Every TestSource outside test data. The trees are walked, not asked of
+// git: batches and releases run from an export with no repository.
 test_sources: fn(setup: SuiteSetup) -> [TestSource] Err! {
-    argv := [String]{"git", "ls-files", "--"}
-    loop tree in PACKAGE_TREES -> argv.push(tree.copy())
-    listed: process.cmd(argv).cwd(setup.checkout).output_limit(67108864).run() ?? return Err("couldn't run `git ls-files`: {err}")
-    if !listed.success -> return Err("`git ls-files` exited {listed.code}: {failure_line(listed.errors)}")
+    paths := [String]{}
+    loop tree in PACKAGE_TREES -> jet_sources(setup.checkout, tree, paths) ?? return Err(err.message)
+    paths.sort()
     sources := [TestSource]{}
-    loop path in listed.output.split("\n") {
-        if !path.ends_with(".jet") || test_data_path(path) -> next
+    loop path in paths {
         text: files.read(files.join(setup.checkout, path)) ?? return Err("couldn't read `{path}`: {err}")
         names: test_names(text)
         if names.len() > 0 -> sources.push(TestSource{path: path.copy(), names: names, script: text.starts_with("#!")})
     }
     Ok(sources)
+}
+
+// Adds every .jet file at or below `relative` (from `checkout`) to `found`,
+// outside the directories test_data_dir skips.
+jet_sources: fn(checkout: String, relative: String, found: &[String]) Err! {
+    listed: files.list_dir(files.join(checkout, relative)) ?? return Err("couldn't list `{relative}`: {err}")
+    loop entry in listed {
+        path: "{relative}/{entry.name}"
+        if entry.is_dir && !test_data_dir(entry.name) -> jet_sources(checkout, path, found) ?? return Err(err.message)
+        if !entry.is_dir && entry.name.ends_with(".jet") -> found.push(path)
+    }
 }
 
 // What the packages suite ran: the names each run (a package or a script)
@@ -491,15 +501,6 @@ test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sou
         if count > 0 -> rows.skip(tree, "owner-frozen: no gate runs its {count} #Test files")
     }
     if problems.len() == 0 -> rows.pass(COVERAGE_ROW) else -> rows.fail(COVERAGE_ROW, "{problems.len()} #Tests no suite runs: {problems.join("; ")}")
-}
-
-// Whether a checkout path lies in test data: a directory test_data_dir skips.
-test_data_path: fn(path: String) -> Bool {
-    parts: path.split("/").to_list()
-    loop (index, part) in parts {
-        if index + 1 < parts.len() && test_data_dir(part) -> return true
-    }
-    false
 }
 
 // The FROZEN_TREES entry holding a checkout path, else "".
