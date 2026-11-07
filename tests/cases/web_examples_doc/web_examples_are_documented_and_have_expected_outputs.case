@@ -1,3 +1,4 @@
 # Card #705: every Examples/Apps/Web/*.jet is named in Docs/spec/reference/web-backend-wasm.md and has a golden in Examples/Apps/Web/: a .out, .web.out or .harness.out stream, or a .case golden. Failure stops at the first missing item.
-step: bash -c 'cd "{root}" && n=0 && for f in Examples/Apps/Web/*.jet; do n=$((n+1)); b=$(basename "$f"); s=${b%.jet}; grep -qF -- "$b" Docs/spec/reference/web-backend-wasm.md || { echo "$b missing from Docs/spec/reference/web-backend-wasm.md"; exit 1; }; for g in out web.out harness.out case; do [ -f "Examples/Apps/Web/$s.$g" ] && continue 2; done; echo "$b has no golden under Examples/Apps/Web/"; exit 1; done; [ "$n" -gt 0 ] || { echo "expected at least one web example"; exit 1; }'
+fixture: web_examples_are_documented_and_have_expected_outputs.fixture
+step: jet run --allow=Exec,FS.Read check.jet {root}
 exit: 0

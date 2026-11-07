@@ -129,7 +129,7 @@ kit_golden_build: fn(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv,
     if step.isolate == "no-nix" {
         args = kit_no_nix_argv(policy, args, scratch, step.isolate_network) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}")}
     }
-    result: kit_exec_invoke_with_env(policy, args, cwd, scratch, "", overlay)
+    result: kit_exec_invoke_with_env(policy, args, cwd, scratch, [U8]{}, overlay)
     failure: kit_steps_failure(step, result)
     if failure == {
         .Val(value) -> return KitOutcome{verdict: value, run: result}
@@ -179,7 +179,7 @@ kit_golden_test_outcome: fn(context: KitStepCtx, entry: KitEntry, tier: KitTier,
     args := [String]{context.env.jet, "test"}
     loop flag in tier.test_flags -> args.push(flag.copy())
     args.push(if project -> context.work else -> files.join(source, entry.path))
-    result: kit_exec_invoke_with_env(context.env, args, context.work, context.scratch, "", kit_steps_environment(context.plan, context.env, context.work, context.scratch, ""))
+    result: kit_exec_invoke_with_env(context.env, args, context.work, context.scratch, [U8]{}, kit_steps_environment(context.plan, context.env, context.work, context.scratch, ""))
     failure: kit_exec_process_failure(result)
     if failure == {
         .Val(value) -> return Val(KitOutcome{verdict: value, run: result})

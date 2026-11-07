@@ -198,7 +198,7 @@ kit_test_core_scratch: fn(label: String) -> String {
     stray: ["/bin/sh", "-c", "set -m; sleep 60 2>/dev/null & exit 0"]
     started: time.instant()
     piped: kit_exec_invoke(env, stray, root, files.join(root, "piped"), "")
-    terminal: kit_exec_invoke_terminal(env, stray, root, files.join(root, "terminal"), "", [KitEnvVar]{}, KitTerminal{rows: 24, cols: 80})
+    terminal: kit_exec_invoke_terminal(env, stray, root, files.join(root, "terminal"), [U8]{}, [KitEnvVar]{}, KitTerminal{rows: 24, cols: 80})
     kit_exec_stop_strays(root)
     loop run in [piped, terminal] {
         assert(run.timed_out)
@@ -255,7 +255,7 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
         KitEnvVar{name: "API_Token", value: Val("{root}/keys/jet")},
         KitEnvVar{name: "PLAIN", value: Val("{root}")},
     }
-    run: kit_exec_invoke_with_env(env, ["/bin/sh", "-c", "printf '%s|%s|%s' \"$JET_KEYS_DIR/a\" \"$API_Token.pub\" \"$PLAIN\"; printf '%s' \"$JET_KEYS_DIR\" >&2"], root, root, "", overlay)
+    run: kit_exec_invoke_with_env(env, ["/bin/sh", "-c", "printf '%s|%s|%s' \"$JET_KEYS_DIR/a\" \"$API_Token.pub\" \"$PLAIN\"; printf '%s' \"$JET_KEYS_DIR\" >&2"], root, root, [U8]{}, overlay)
     assert_eq(run.stdout, "<redacted>/a|<redacted>.pub|{root}")
     assert_eq(run.stderr, "<redacted>")
     assert_eq(run.stdout_bytes ?? panic("bytes"), "{root}/keys/a|{root}/keys/jet.pub|{root}".bytes())

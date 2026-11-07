@@ -210,7 +210,7 @@ kit_exec_input_detail: fn(error: String, code: Int, errors: String) -> String {
     "{error}; child exited {code} without reading it: {first}"
 }
 
-kit_exec_invoke_with_env: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+kit_exec_invoke_with_env: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar]) -> KitRun {
     kit_exec_run(env, argv, cwd, scratch, stdin, overlay, None)
 }
 
@@ -218,7 +218,7 @@ kit_exec_invoke_with_env: fn(env: KitEnv, argv: [String], cwd: String, scratch: 
 // stdout is the terminal transcript. `stdin` is typed at spawn and each event
 // at its time from spawn. Input never closes the terminal, which would hang
 // up the child; a close event types the end-of-file character instead.
-kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal) -> KitRun {
+kit_exec_invoke_terminal: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar], terminal: KitTerminal) -> KitRun {
     kit_exec_run(env, argv, cwd, scratch, stdin, overlay, Val(terminal))
 }
 
@@ -238,7 +238,7 @@ kit_exec_terminal_order: fn(events: [KitTerminalEvent]) -> [KitTerminalEvent] {
     ordered
 }
 
-kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
+kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: [U8], overlay: [KitEnvVar], terminal: KitTerminal?) -> KitRun {
     if kit_exec_prepare(env, cwd, scratch, overlay) == .Val(stopped) -> return stopped
     started: time.instant()
     spec := kit_exec_spec(env, argv, cwd, scratch, overlay)
@@ -253,8 +253,8 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
     // Empty input writes nothing: a child that exits before the kit reaches its
     // stdin closed the pipe, which is no error when there was nothing to send.
     input_error := ""
-    if stdin != "" {
-        child.stdin.write_text(stdin) ?? {
+    if stdin.len() > 0 {
+        child.stdin.write_all(stdin) ?? {
             input_error = "stdin: {err}"
             ()
         }
@@ -552,8 +552,9 @@ kit_exec_host_room: fn(available: Int, total: Int) -> Int {
     available - headroom
 }
 
+// A run with no environment overlay whose stdin is `stdin`'s text.
 kit_exec_invoke: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
-    kit_exec_invoke_with_env(env, argv, cwd, scratch, stdin, [KitEnvVar]{})
+    kit_exec_invoke_with_env(env, argv, cwd, scratch, stdin.bytes(), [KitEnvVar]{})
 }
 
 kit_exec_process_failure: fn(run: KitRun) -> KitVerdict? {
