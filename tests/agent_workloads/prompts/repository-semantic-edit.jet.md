@@ -81,7 +81,7 @@ Write your solution in Jet, as a single file named `candidate.jet`.
 
 Check that it compiles or parses with:
 
-    Tools/agent/jet-env jet check candidate.jet
+    Tools/agent/JetEnv.jet jet check candidate.jet
 
 Fix every error the checker reports and check again. When the checker is
 clean, stop and report. Do not run the program against the expected output --

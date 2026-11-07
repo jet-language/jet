@@ -15,7 +15,7 @@ Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-disposit
 
 At activation, freeze a finite matrix with `persona × domain × job × window target`. Include fresh beginner-through-expert personas in distinct domains, plus an unattended coding agent. If the owner declares one domain, record that narrower scope. Do not add rows during the run; record a needed row as an explicit coverage gap for the owner.
 
-For every row, define a concrete project and core loop, run representative examples with `Tools/agent/jet-env`, and record evidence, push factors, pull factors, and one verdict. Keep the first useful visual check separate from the later project loop. Window checks are conditional on the row's declared window target; their exact gates are in [`references/first-session.md`](references/first-session.md).
+For every row, define a concrete project and core loop, run representative examples with `Tools/agent/JetEnv.jet`, and record evidence, push factors, pull factors, and one verdict. Keep the first useful visual check separate from the later project loop. Window checks are conditional on the row's declared window target; their exact gates are in [`references/first-session.md`](references/first-session.md).
 
 ## Coding-agent facet
 

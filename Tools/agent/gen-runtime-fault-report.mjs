@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The native fault reports' machine code: assemble
 // Compiler/JetRuntime/Assets/FaultReport/report.S and addresses.S (GNU as,
-// from Jet's core shell: Tools/agent/jet-env node
+// from Jet's core shell: Tools/agent/JetEnv.jet node
 // Tools/agent/gen-runtime-fault-report.mjs) and write their .text bytes as
 // Compiler/JetBackend/Source/X64/FaultReport.jet. The bytes must need no
 // relocation.

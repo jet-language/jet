@@ -67,10 +67,11 @@ golden_run() { # inside the slot: census the newest wanted commit
   n=$(wc -l < "$sel")
   s=$(date +%s)
   say "goldens ${sha:0:10}: $n examples with $d/jet"
-  # Golden examples run host tools (C compilers, interpreters) that only jet-env supplies until jet does.
+  # Golden examples run host tools (C compilers, interpreters) that only the dev shell
+  # (Tools/agent/JetEnv.jet) supplies until jet does.
   (cd "$t" && JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t JET_TEST_STATE_DIR=$w/state TMPDIR=$w/tmp \
     systemd-run --user --scope -q --expand-environment=no -p MemoryMax=24G -p MemorySwapMax=0 timeout 7200 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$t/Tools/agent/jet-env" \
+    prlimit --core=0 --stack=1073741824:1073741824 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$d/jet" "$t/Tools/agent/JetEnv.jet" \
     "$d/jet" test Compiler --profile golden --optimize=none "--cases=$sel" --jobs=6 --time-limit=120s "--results=$out" \
     > "$w/goldens.log" 2> "$w/goldens.err")
   rc=$?

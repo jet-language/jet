@@ -15,7 +15,7 @@ const scratchRoot = path.join(os.homedir(), ".cache", "jet-dev", "scratch");
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const parallelGrepDir = path.join(repoRoot, "Tools", "gauntlet", "entries", "parallel-grep", "jet");
-const envRunner = path.join(repoRoot, "Tools", "agent", "jet-env");
+const envRunner = path.join(repoRoot, "Tools", "agent", "JetEnv.jet");
 const stagedEntryTestOptions = { timeout: 120_000 };
 
 async function withScratch(name, callback) {

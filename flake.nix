@@ -74,9 +74,37 @@
         jetCargoLinker = pkgs.writeShellScript "jet-cargo-linker" ''
           exec ${pkgs.stdenv.cc}/bin/cc -B${pkgs.llvmPackages.bintools}/bin/ -fuse-ld=lld "$@"
         '';
-        jetCargoLinkerHook = pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-          export CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER="${jetCargoLinker}"
-        '';
+        # The dev shells' fixed variables. They are derivation attributes, not
+        # shell-hook exports, so Tools/agent/JetEnv.jet reads them from the
+        # cached shell environment without running a shell; the hooks keep only
+        # what needs a live shell. `libraries` go on the dynamic library path
+        # in front of HarfBuzz (and the Vulkan loader on Linux).
+        jetShellVariables =
+          libraries:
+          {
+            TZDIR = jetTzdb;
+            # Nix owns this shell; do not stack the global Jet env auto-hook.
+            JET_ENV_DISABLE = "1";
+          }
+          // (
+            if pkgs.stdenv.hostPlatform.isDarwin then
+              { DYLD_LIBRARY_PATH = jetRuntimeLibraryPath; }
+              // pkgs.lib.optionalAttrs (libraries != [ ]) { LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath libraries; }
+            else
+              {
+                LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+                  pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux pkgs.vulkan-loader ++ libraries ++ [ pkgs.harfbuzz ]
+                );
+              }
+          )
+          // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+            "CARGO_TARGET_${pkgs.stdenv.hostPlatform.rust.cargoEnvVarTarget}_LINKER" = "${jetCargoLinker}";
+          }
+          // pkgs.lib.optionalAttrs jetHasMuslHelpers {
+            JET_RUST_MUSL_TOOLCHAIN = "${jetRustToolchain}";
+            JET_RUST_MUSL_LINKER = jetMuslLinker;
+            JET_RUST_MUSL_AR = jetMuslAR;
+          };
         # pkgs.vitejs calls fetchPnpmDeps without pinning `pnpm`, defaulting
         # to pnpm_11 (fetcherVersion 3), which nixpkgs rejects; pin pnpm_10.
         jetVite = pkgs.vitejs.override {
@@ -111,7 +139,7 @@
 
         # Fast everyday shell. Keep normal compiler work independent from the
         # foreign-runtime, browser, graphics, and VM toolchain fleet below.
-        devShells.default = pkgs.mkShell {
+        devShells.default = pkgs.mkShell (jetShellVariables [ ] // {
           packages = [
             pkgs.cargo
             pkgs.rustc
@@ -167,26 +195,17 @@
             else
               export JET_ROOT="$PWD"
             fi
-            export TZDIR="${jetTzdb}"
-            ${jetRuntimeLibraryHook}
-            ${jetCargoLinkerHook}
-            ${jetRustHelperHook}
-            ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
-            ''}
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
               "$JET_ROOT/Tools/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
-            # Nix owns this shell; do not stack the global Jet env auto-hook.
-            export JET_ENV_DISABLE=1
           '';
-        };
+        });
 
         # Integration shell: full FFI matrix, Canvas, graphics, emulator, and
-        # OS-image work. Use `nix develop .#full` / `jet-env full …` explicitly.
-        devShells.full = pkgs.mkShell {
+        # OS-image work. Use `nix develop .#full` / `jet Tools/agent/JetEnv.jet full …` explicitly.
+        devShells.full = pkgs.mkShell (jetShellVariables [ pkgs.raylib ] // {
           packages = [
             pkgs.cargo
             pkgs.rustc
@@ -286,21 +305,11 @@
             else
               export JET_ROOT="$PWD"
             fi
-            export TZDIR="${jetTzdb}"
-            ${jetRuntimeLibraryHook}
-            ${jetCargoLinkerHook}
-            ${jetRustHelperHook}
-            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
-            ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-              export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
-            ''}
 
             if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
               "$JET_ROOT/Tools/agent/clean-nix-tmp.sh"
             fi
             export JET_NIX_TMP_CLEANED=1
-            # Nix owns this shell; do not stack the global Jet env auto-hook.
-            export JET_ENV_DISABLE=1
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
             # grepping/capture (agents misread results otherwise)
@@ -316,7 +325,7 @@
               echo "  debug:    jet debug <file.jet>  (native lldb backend)"
             } >&2
           '';
-        };
+        });
 
         formatter = pkgs.nixfmt;
       }

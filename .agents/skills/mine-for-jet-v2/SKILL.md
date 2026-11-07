@@ -74,10 +74,10 @@ supported CLI publication and readback. A recommendation does not authorize codi
 
 ## Establish Jet state before extraction
 
-Run in the exact checkout, through `Tools/agent/jet-env`:
+Run in the exact checkout, through `Tools/agent/JetEnv.jet`:
 
 ```sh
-Tools/agent/jet-env node Tools/agent/jet-state.mjs --subject 'SUBJECT' --format markdown
+Tools/agent/JetEnv.jet node Tools/agent/jet-state.mjs --subject 'SUBJECT' --format markdown
 ```
 
 Use JSON for complete candidate rows; the compact text view is a bounded preview.
@@ -104,7 +104,7 @@ supersede a decision.
 Check the source registry before costly retrieval:
 
 ```sh
-Tools/agent/jet-env python3 .agents/skills/mine-for-jet-v2/scripts/check_sources.py \
+Tools/agent/JetEnv.jet python3 .agents/skills/mine-for-jet-v2/scripts/check_sources.py \
   --registry Docs/spec/reference/prior-art.md 'SOURCE_URL'
 ```
 
@@ -135,7 +135,7 @@ reuse captures, and use repository scripts rather than per-run ad-hoc Python.
    only when the gate passes:
 
    ```sh
-   Tools/agent/jet-env node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+   Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
    ```
 
 2. Obtain the **required fresh-context reviewer** after extraction/dedupe and

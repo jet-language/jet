@@ -37,7 +37,7 @@ failure rows; typed traps are failure evidence, not a green compiler.
 
 Keep build output outside the repository on disk-backed storage. Give each
 checkout exclusive ownership of its Cargo target; shared binaries do not imply
-shared writable build targets. Configure external targets through `jet-env`.
+shared writable build targets. Configure external targets through `Tools/agent/JetEnv.jet`.
 Bound disk and memory use before starting work, account for peak allocations,
 and reclaim idle output promptly after integration. Never remove source,
 protected evidence, or artifacts still in use to make room for another job.
@@ -45,10 +45,8 @@ Forward a collected child's complete diagnostic buffer synchronously before
 throwing on failure. An asynchronous pipe write followed by an uncaught exception
 can truncate the last diagnostics; a partial log is not a collect-all census.
 
-`jet-env` preserves caller-selected Cargo wrappers; it does not select sccache
-based on whether a debug output directory exists. Set `JET_NO_SCCACHE=1` to
-clear both Rust wrapper variables after shell imports, including for release
-builds and immutable source exports. Generator freshness checks use `--check`
+`Tools/agent/JetEnv.jet` preserves caller-selected Cargo wrappers; it does not
+select sccache. Generator freshness checks use `--check`
 without rewriting their outputs; diagnostic row generation follows this same
 contract.
 

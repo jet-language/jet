@@ -4,7 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BASELINE="$ROOT/Tools/perf/web-bundle-baseline.tsv"
-JET_ENV="$ROOT/Tools/agent/jet-env"
+JET_ENV="$ROOT/Tools/agent/JetEnv.jet"
 . "$ROOT/Tools/agent/roots.sh"
 SCRATCH_ROOT="${TMPDIR:-$JET_SCRATCH_ROOT}"
 

@@ -13,7 +13,7 @@ Before running, read [`_shared/audit-dispositions.md`](../_shared/audit-disposit
 
 ## Evidence
 
-Apply only the standing-lens probe and honesty sections relevant to the selected ratified sections. Skip unrelated questions, quantities, micro-sweep, or competitive work. A spec paragraph, code path, or test name is not proof of executable behavior. Run the real surface through `Tools/agent/jet-env` and read its output, exit code, and emitted paths before assigning `shipped`.
+Apply only the standing-lens probe and honesty sections relevant to the selected ratified sections. Skip unrelated questions, quantities, micro-sweep, or competitive work. A spec paragraph, code path, or test name is not proof of executable behavior. Run the real surface through `Tools/agent/JetEnv.jet` and read its output, exit code, and emitted paths before assigning `shipped`.
 
 ## Repeat and counterexample method
 

@@ -9,7 +9,7 @@ Dependency-free Node; Linux `/proc`; GNU time for exact tree rusage.
 # quick lane: bench30k frontend, 3 samples, against quick-baseline.json
 node Tools/perf/throughput/harness.mjs --compiler jet=PATH --compiler-profile TEXT
 # full lane: bench300k + selfhost, 5 samples, golden run
-Tools/agent/jet-env node Tools/perf/throughput/harness.mjs --lane full --compiler jet=PATH --compiler-profile TEXT
+Tools/agent/JetEnv.jet node Tools/perf/throughput/harness.mjs --lane full --compiler jet=PATH --compiler-profile TEXT
 node --test Tools/perf/throughput/throughput.test.mjs
 ```
 

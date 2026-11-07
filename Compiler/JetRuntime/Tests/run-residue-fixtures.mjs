@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // One aggregate Jet object supplies actual comptime, numeric and U32 kernels.
 // Link fixture.o only plus platform libraries, never another runtime pack.
-// Each mode can run under cheap.sh + jet-env.
+// Each mode can run under cheap.sh + Tools/agent/JetEnv.jet.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

@@ -24,7 +24,7 @@ Its stage-2 compiler becomes the seed of the next release.
 ## From a fresh clone
 
 A clone and the latest published release are enough: no Nix, no
-`Tools/agent/jet-env`, nothing in `HOME` and no Jet environment variables, only
+`Tools/agent/JetEnv.jet`, nothing in `HOME` and no Jet environment variables, only
 `git`, `curl`, `jq` and OpenSSL 3. This fetches the latest release, checks its signed
 record, clones the release's tag, builds that compiler with the release's seed,
 gives it the seed's runtime pack, runs one row
@@ -98,7 +98,7 @@ payload, with the rules Tower applies when a ballot is posted
 Run it from a checkout of the commit you want to build. The compiler builds
 need nothing but `jet`; the runtime pack step compiles the runtime's vendored
 C, so run `PrebuildRuntime.jet` in the Nix development environment
-(`Tools/agent/jet-env` or `nix develop`), which supplies the host C toolchain.
+(`Tools/agent/JetEnv.jet` or `nix develop`), which supplies the host C toolchain.
 `SEED` is the seed directory, `WORK` a scratch directory outside the
 checkout, and `JET_PACK_MUSL_LIB` the `lib` directory of a static musl
 (`$(nix build --no-link --print-out-paths nixpkgs#pkgsStatic.musl)/lib`).

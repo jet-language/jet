@@ -15,7 +15,7 @@ const tasksDefault = path.join(repoDir, "Tools/agent-eval/tasks/tasks.json");
 const adaptersDefault = path.join(repoDir, "Tools/agent-eval/adapters.json");
 const baselineDefault = path.join(repoDir, "Docs/audits/cold-agent-jet-baseline.json");
 const scoreboardDefault = path.join(repoDir, "Docs/audits/cold-agent-jet-scoreboard.json");
-const jetEnvDefault = path.join(repoDir, "Tools/agent/jet-env");
+const jetEnvDefault = path.join(repoDir, "Tools/agent/JetEnv.jet");
 const capsuleLimitBytes = 32 * 1024;
 const modelOutputLimitBytes = 2 * 1024 * 1024;
 const processOutputLimitBytes = 2 * 1024 * 1024;
@@ -65,7 +65,7 @@ Options:
   --tasks PATH           Four-task fixture JSON
   --baseline PATH        Recorded capsule baseline JSON
   --output PATH          Deterministic scoreboard JSON
-  --jet-bin PATH         Direct Jet binary; default uses Tools/agent/jet-env
+  --jet-bin PATH         Direct Jet binary; default uses Tools/agent/JetEnv.jet
   --mode capsule|control|both
   --record-baseline      Write a capsule-only baseline after a complete run
   --check-baseline       Fail if the capsule result regresses below baseline

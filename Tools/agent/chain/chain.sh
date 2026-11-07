@@ -37,8 +37,8 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SELF=$HERE/chain.sh
 SLOT=$HERE/build-slot.sh
 # bash -c "$NORUST" norust CMD...: run CMD with every PATH directory that holds cargo, rustc or rustup
-# removed (jet-env keeps rustc for user `extern rust`/RustBridge builds; the compiler chain must not need
-# it). Refuses if any of them stays reachable. Tools/release/Seed.jet NORUST is the same filter.
+# removed (Tools/agent/JetEnv.jet keeps rustc for user `extern rust`/RustBridge builds; the compiler chain
+# must not need it). Refuses if any of them stays reachable. JetEnv.jet --norust is the same filter.
 NORUST='kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; if [ -n "$s" ]; then echo "norust: dropped PATH entry $d" >&2; else kept="$kept${kept:+:}$d"; fi; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"'
 TOOLS=$(cd "$HERE/../../.." && pwd)
 # tool FILE ARG...: the Jet tool Tools/agent/FILE of this checkout, run by the seed.
@@ -236,10 +236,11 @@ pack_stage() {
   say "$n: PrebuildRuntime.jet with $(basename "$cd")"
   rm -rf "$cd/jet-runtime"; mkdir -p "$WORK/tmp"
   # The seed runs the tool; the stage's compiler lowers the runtime under the stage identity. The pack compiles
-  # the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
+  # the runtime's vendored C with a host C toolchain, which only the dev shell (Tools/agent/JetEnv.jet) supplies
+  # until jet does.
   JET_COMPILER_IDENTITY=$CID JET=$SEED/jet JET_TOOLCHAIN_ROOT=$ROOT TMPDIR=$WORK/tmp \
     inroot systemd-run --user --scope -q --expand-environment=no -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1800 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash -c "$NORUST" norust "$SEED/jet" "$ROOT/Tools/packaging/PrebuildRuntime.jet" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" --identity "$id" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
+    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$SEED/jet" "$ROOT/Tools/agent/JetEnv.jet" --norust "$SEED/jet" "$ROOT/Tools/packaging/PrebuildRuntime.jet" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" --identity "$id" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
   if [ "$rc" != 0 ] || [ ! -f "$cd/jet-runtime/native.key" ]; then
     rec "$n" FAILED "$rc" "$w" "$r" - "$k" "no pack; $(errhead "$LOGS/$n.err")"

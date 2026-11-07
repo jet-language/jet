@@ -86,7 +86,7 @@ are all evidence that someone intended a thing. None is evidence that it works.
 The highest-value findings come from running Jet's version of the mechanism
 under study.
 
-- For a claim about current executable behavior, rebuild the relevant binary, construct the smallest representative input, and run the real command through `Tools/agent/jet-env`. Read its output, exit code, and emitted paths. Reuse evidence that already proves the same claim against the same source state; do not rerun unrelated checks.
+- For a claim about current executable behavior, rebuild the relevant binary, construct the smallest representative input, and run the real command through `Tools/agent/JetEnv.jet`. Read its output, exit code, and emitted paths. Reuse evidence that already proves the same claim against the same source state; do not rerun unrelated checks.
 - Follow the code path from the emitter back to where the value is set. Fields
   that are documented, always empty, hardcoded, or derived by parsing prose are
   invisible to everyone who trusts the spec, and they are common.

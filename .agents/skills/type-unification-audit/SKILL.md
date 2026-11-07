@@ -30,7 +30,7 @@ The probe and honesty sections of the standing lens apply to the declared target
 | Census, taxonomy, and report shape | [`references/taxonomy.md`](references/taxonomy.md) |
 | Ratification, soundness, I8 traps, and reviews | [`references/reviews.md`](references/reviews.md) |
 
-For the declared target: inventory relevant kind mechanisms and fields; census phantom names; run minimal `.jet` repros through `Tools/agent/jet-env`; classify with the exact taxonomy; and propose the smallest honest fix, preferring ratified enums, distincts, or markers over a new kind. A claim without a probe or `file:line` cite does not enter the report.
+For the declared target: inventory relevant kind mechanisms and fields; census phantom names; run minimal `.jet` repros through `Tools/agent/JetEnv.jet`; classify with the exact taxonomy; and propose the smallest honest fix, preferring ratified enums, distincts, or markers over a new kind. A claim without a probe or `file:line` cite does not enter the report.
 
 All three fresh-context reviews are mandatory on an authorized run: peer, adversarial, and pay-up-front. Record each material finding and resolution. Cards and ballots are created only when the owner explicitly asks; bugs map to cards, and syntax, surface, API, or feature changes map to `tower-ballot` decisions.
 

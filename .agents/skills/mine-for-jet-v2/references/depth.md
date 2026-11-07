@@ -5,7 +5,7 @@ root holds `coverage.json`, `ledger.json` and `claims.json` (and, after review,
 `recall-audit.json`). The gate is:
 
 ```sh
-Tools/agent/jet-env node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
+Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs "$CAPTURE_ROOT"
 ```
 
 Hand-in requires exit 0. Publication additionally requires `--audit` exit 0.
@@ -61,7 +61,7 @@ timestamps in claim `locator`s (a shard starting at 1:00:00 never writes
 stay unique across shards. Join and re-check before hand-in:
 
 ```sh
-Tools/agent/jet-env node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs \
+Tools/agent/JetEnv.jet node .agents/skills/mine-for-jet-v2/scripts/check_coverage.mjs \
   --merge "$CAPTURE_ROOT/shard-a" "$CAPTURE_ROOT/shard-b" --out "$CAPTURE_ROOT/merged"
 ```
 

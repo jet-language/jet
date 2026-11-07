@@ -2,7 +2,7 @@
 
 ## Evidence obligations
 
-Freeze the domain/workload rows before probing. For each row, name one concrete job, what done means, and the Jet surfaces it touches. Walk the happy path with real examples or a minimal repro under `Tools/agent/jet-env`. Record every token the user writes even though the compiler or stdlib already knows the answer.
+Freeze the domain/workload rows before probing. For each row, name one concrete job, what done means, and the Jet surfaces it touches. Walk the happy path with real examples or a minimal repro under `Tools/agent/JetEnv.jet`. Record every token the user writes even though the compiler or stdlib already knows the answer.
 
 Classify each friction with the taxonomy below. Propose the smallest complete fix as default magic → optional reject → optional override. Kill a slice that breaks invariants, duplicates a mechanism, or hides expert control. New syntax, a new external stdlib dependency, an invariant carve-out, or a taste choice becomes a ballot title only unless the owner changes the report-only boundary.
 

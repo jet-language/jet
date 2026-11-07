@@ -590,7 +590,7 @@ const clockRepresentationComparisons = accumulatorRuns.map(
 const output = {
   format: "research-demonstrator-v1",
   execution: {
-    command: `Tools/agent/jet-env full node ${DEMONSTRATOR_PATH}`,
+    command: `Tools/agent/JetEnv.jet full node ${DEMONSTRATOR_PATH}`,
     reportSeries: REPORT_SERIES_PATH,
     workerExecuted: false,
     note: "Worker wrote this file but did not execute it; Main must run the command above.",
@@ -753,7 +753,7 @@ const FRONTIER_STUDY_SCHEMA = "jet.frontier-study.v1";
 const FRONTIER_ARTIFACT_SCHEMA = "jet.frontier-study-artifact.v1";
 const FRONTIER_EVIDENCE_SCHEMA = "jet.frontier-evidence-class-validation.v1";
 const FRONTIER_STUDY_ROOT = path.join(path.dirname(DEMONSTRATOR_FILE), "fixtures");
-const FRONTIER_ENV_RUNNER = "Tools/agent/jet-env";
+const FRONTIER_ENV_RUNNER = "Tools/agent/JetEnv.jet";
 const FRONTIER_DEFAULT_TIMEOUT_MS = 30_000;
 const FRONTIER_MAX_BUFFER = 4 * 1024 * 1024;
 const FRONTIER_DISPOSITIONS = Object.freeze([
@@ -2144,7 +2144,7 @@ function frontierUsage() {
     "  --study <all|H1|H2|H3>       select one study or all (default: all)",
     "  --repeat <n>                  repeat each same-job route (default: 1)",
     "  --timeout-ms <n>              child timeout in milliseconds",
-    "  --runner <path|node>          runner (default: Tools/agent/jet-env)",
+    "  --runner <path|node>          runner (default: Tools/agent/JetEnv.jet)",
     "  --artifact <path>             retain raw execution artifact",
     "  --replay <artifact>            independently replay retained raw output",
     "  --help                         show this help",

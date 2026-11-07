@@ -16,7 +16,7 @@ const isObject = (value) => value !== null && typeof value === "object" && !Arra
 
 const harnessDir = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.resolve(harnessDir, "../../..");
-const envRunner = path.join(repoDir, "Tools/agent/jet-env");
+const envRunner = path.join(repoDir, "Tools/agent/JetEnv.jet");
 const timer = path.join(harnessDir, "timer.py");
 
 const TOOL_VERSION_COMMANDS = Object.freeze({
@@ -3819,7 +3819,7 @@ function publicationState({ fullScope, loaded, skipped, matrix, manifest, source
   };
 }
 
-// The compiler under measurement: --jet-bin, else $JET (what `Tools/agent/jet-env jet`
+// The compiler under measurement: --jet-bin, else $JET (what `Tools/agent/JetEnv.jet jet`
 // runs), else `jet` on PATH. It runs in place, never copied: a Jet-built compiler reads
 // its runtime pack beside itself (jet-runtime/), and the run records its SHA-256. A
 // missing compiler is an error.

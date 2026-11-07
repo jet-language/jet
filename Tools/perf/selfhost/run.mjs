@@ -10,7 +10,7 @@ const SELFHOST_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SELFHOST_DIR, "../../..");
 const MANIFEST_PATH = join(SELFHOST_DIR, "manifest.json");
 const MANIFEST = JSON.parse(readFileSync(MANIFEST_PATH, "utf8"));
-const JET_ENV = join(REPO_ROOT, "Tools/agent/jet-env");
+const JET_ENV = join(REPO_ROOT, "Tools/agent/JetEnv.jet");
 const TIME_BIN = "/usr/bin/time";
 const SCRATCH_ROOT = resolve(
   process.env.JET_SELFHOST_SCRATCH ?? join(stateRoot(), "selfhost"),

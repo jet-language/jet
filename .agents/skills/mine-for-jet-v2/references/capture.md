@@ -12,7 +12,7 @@ the others. Popularity is context, never truth.
 export JET_SCRATCH_ROOT="${JET_SCRATCH_ROOT:-$JET_STATE_ROOT/scratch}"
 ```
 
-Run commands through jet-env. Set and pass an explicit capture root:
+Run commands through `Tools/agent/JetEnv.jet`. Set and pass an explicit capture root:
 
 ```sh
 CAPTURE_ROOT="$JET_SCRATCH_ROOT/mine/$RUN_ID"

@@ -1,8 +1,8 @@
 # Read-only Jet state digest (v1)
 
 ```sh
-Tools/agent/jet-env node Tools/agent/jet-state.mjs --subject 'memory model' --format json
-Tools/agent/jet-env node Tools/agent/jet-state.mjs --subject 'build system' --format markdown
+Tools/agent/JetEnv.jet node Tools/agent/jet-state.mjs --subject 'memory model' --format json
+Tools/agent/JetEnv.jet node Tools/agent/jet-state.mjs --subject 'build system' --format markdown
 ```
 
 Default root is the tool's checkout. `--root PATH` selects another checkout;
@@ -94,8 +94,8 @@ known tracking parameters. Approval applies to that exact content identity;
 unknown historical selectors do not silently cover a new edition. Keep pinned
 repository revision and subresource separately in capture evidence.
 
-Focused fixture checks: `Tools/agent/jet-env node --test Tools/agent/jet-state.test.mjs`
-and `Tools/agent/jet-env node --test .agents/skills/mine-for-jet-v2/scripts/check_coverage.test.mjs`.
+Focused fixture checks: `Tools/agent/JetEnv.jet node --test Tools/agent/jet-state.test.mjs`
+and `Tools/agent/JetEnv.jet node --test .agents/skills/mine-for-jet-v2/scripts/check_coverage.test.mjs`.
 The source-registry checker tests can separately be run with unittest discovery
 in its scripts directory by the verification owner when Python use is authorized.
 These are fixture proofs of projection/capture/coverage helpers, not compiler or

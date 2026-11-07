@@ -4,7 +4,7 @@ Read hosted text first when sufficient; otherwise shallow/blobless clone to an
 explicit cache location, not the target Jet checkout:
 
 ```sh
-Tools/agent/jet-env git clone --depth 50 --filter=blob:none 'REPOSITORY_URL' "$CAPTURE_ROOT/source"
+Tools/agent/JetEnv.jet git clone --depth 50 --filter=blob:none 'REPOSITORY_URL' "$CAPTURE_ROOT/source"
 ```
 
 Pin commit/release and distinguish tagged behavior from current main. Record

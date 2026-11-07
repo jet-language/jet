@@ -14,7 +14,7 @@ if [ "${1:-}" = "--build" ]; then
   mkdir -p "$work"
   cp "$root/Tools/perf/enum_codec/adapter.jet" "$work/adapter.jet"
   cp "$root/Tools/perf/enum_codec/package.jet" "$work/package.jet"
-  cd "$work" && exec "$root/Tools/agent/jet-env" "$jet" build --release adapter.jet
+  cd "$work" && exec "$root/Tools/agent/JetEnv.jet" "$jet" build --release adapter.jet
 fi
 # Forms the canonical codec cannot build AOT today (internal/untagged: ICE at
 # MIRRust.rs:7150; adjacent: no ratified marker) exit 77 = unavailable, never a verdict.

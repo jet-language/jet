@@ -76,10 +76,10 @@ const fixtures=[['ProcessRoutesWitness','process routes: ok\n'],
 for(const [name,expected]of fixtures.filter(row=>!test||row[0]===test+'Witness')){
  const object=join(out,name+'.o'),binary=join(out,name);
  const source=join(root,'Compiler/JetRuntime/Tests',name+'.c'),sourceHandle=fileObject(source);
- command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror',...(test?['-DJET_PROCESS_JET_FIXTURES=1']:[]),'-c',source,'-o',object],name+'-compile');
+ command(join(root,'Tools/agent/JetEnv.jet'),[nativeCCompiler,'-std=c11','-O1','-fno-stack-protector','-fno-PIE','-fno-builtin','-Wall','-Wextra','-Werror',...(test?['-DJET_PROCESS_JET_FIXTURES=1']:[]),'-c',source,'-o',object],name+'-compile');
  const cObjectHandle=fileObject(object);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle}]);
- command(join(root,'Tools/agent/jet-env'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
+ command(join(root,'Tools/agent/JetEnv.jet'),[nativeCCompiler,'-nostdlib','-static','-no-pie',crt[0].path,crt[1].path,object,'-Wl,--start-group',pack,faultReport,...platform,'-Wl,--end-group',crt[2].path,'-o',binary],name+'-link');
  const executableHandle=fileObject(binary);
  unchanged([...sharedInputs,{path:source,handle:sourceHandle},{path:object,handle:cObjectHandle}]);
  const r=command(binary,[],name+'-execute');

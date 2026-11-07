@@ -41,7 +41,7 @@ Regression and crash-reproducer programs do not live here; they are in
 
 ## Run an example
 
-Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/jet-env jet`):
+Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/JetEnv.jet jet`):
 
 ```sh
 jet run Examples/Basics/Hello.jet
@@ -65,7 +65,7 @@ reports `KNOWN-FAILING`; an owned example that passes reports
 `UNEXPECTED-PASS` and fails the run until its row is removed.
 
 For the contributor workflow around the executable and its environment, see
-[`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
+[`AGENTS.md`](../AGENTS.md) and [`Tools/agent/JetEnv.jet`](../Tools/agent/JetEnv.jet).
 
 ## Layout and goldens
 

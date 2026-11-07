@@ -28,10 +28,10 @@ SCALE_CORPUS="$PERF_DIR/construct-scale.tsv"
 BASELINE="$PERF_DIR/baseline.json"
 . "$ROOT/Tools/agent/roots.sh"
 TMP_ROOT=${JET_PERF_SCRATCH_ROOT:-"$JET_STATE_ROOT/perf-bench"}
-JET_ENV="$ROOT/Tools/agent/jet-env"
+JET_ENV="$ROOT/Tools/agent/JetEnv.jet"
 JET_BIN="${JET:?JET must name the admitted native jet compiler}"
 
-# Materialize the core toolchain once. Re-entering `jet-env` for every AOT
+# Materialize the core toolchain once. Re-entering `JetEnv.jet` for every AOT
 # sample adds an environment-launch measurement to the compiler stage and
 # makes clean samples bimodal; the measured command must be the same production
 # compiler inside the already-materialized shell. Keep the caller's full CPU

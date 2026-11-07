@@ -30,7 +30,7 @@ chat or `/tmp`.
 RUN=.tmp/surface-frequency-audit/YYYY-MM-DD
 REPORT=Docs/audits/surface-frequency-audit-YYYY-MM-DD.md
 
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py init "$RUN" \
   --report "$REPORT" \
   --config AGENTS.md \
@@ -53,7 +53,7 @@ If the run directory exists, resume it. Do not reinitialize it. Inspect
 progress:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py status "$RUN"
 ```
 
@@ -99,7 +99,7 @@ Create `$RUN/inbox/units.json`. Each unit needs `id`, one `source_id`,
 from the frozen catalog. Use stable IDs. Plan once:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py plan "$RUN" \
   "$RUN/inbox/units.json" --catalog "$RUN/inbox/catalog.json"
 ```
@@ -110,7 +110,7 @@ unit IDs. One close owner alone changes the final report draft.
 Claim the next unit:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py next "$RUN" \
   --owner AGENT_ID --lease-hours 4
 ```
@@ -118,7 +118,7 @@ Tools/agent/jet-env python3 \
 Checkpoint after each bounded source slice and before a usage limit or handoff:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py checkpoint "$RUN" UNIT_ID \
   --owner AGENT_ID --cursor 'exact next source/file/range' \
   --note 'done / left / warnings' \
@@ -148,7 +148,7 @@ Each finished unit writes one JSON result under `$RUN/inbox/` with `schema`,
 `not-recorded` rows. See `method.md` for field meanings.
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py complete "$RUN" UNIT_ID \
   --owner AGENT_ID --result "$RUN/inbox/UNIT_ID.result.json"
 ```
@@ -157,7 +157,7 @@ If evidence cannot be collected, close the unit as a gap. Use the executable
 `block` command, not an invented status:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py block "$RUN" UNIT_ID \
   --owner AGENT_ID --reason 'exact blocking reason'
 ```
@@ -184,7 +184,7 @@ After every unit is terminal, generate the repeatable base aggregation inside
 the checkpoint directory:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/aggregate.py "$RUN" \
   --output "$RUN/analysis/aggregate.json"
 ```
@@ -243,7 +243,7 @@ clarity.
 Install the reviewed draft atomically:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py install "$RUN" \
   "$RUN/report.tmp.md"
 ```
@@ -251,7 +251,7 @@ Tools/agent/jet-env python3 \
 Then remove only the completed run directory:
 
 ```sh
-Tools/agent/jet-env python3 \
+Tools/agent/JetEnv.jet python3 \
   .agents/skills/surface-frequency-audit/scripts/checkpoint.py clean "$RUN"
 ```
 

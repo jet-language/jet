@@ -95,7 +95,7 @@ test('a cleaner inside a user namespace removes nothing', async (t) => {
     return;
   }
   const { root, env } = fixture(t);
-  // `jet-env CMD` shape: the command's own environ names TMPDIR.
+  // `nix develop -c CMD` shape: the command's own environ names TMPDIR.
   const named = mkdtempSync(join(root, 'nix-shell.'));
   await idleShell(t, { ...env, TMPDIR: named }, reportAndIdle);
   const exited = mkdtempSync(join(root, 'nix-shell.'));

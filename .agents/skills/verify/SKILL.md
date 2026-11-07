@@ -17,7 +17,7 @@ contract. Do not run a suite merely because this skill was loaded.
 | Diagnostic, UI snapshot, or executable golden | [`references/snapshots-goldens.md`](references/snapshots-goldens.md); `Compiler/Prelude/Diagnostics.jet`, matching `tests/ui/` or `tests/ui_lint/`, `Docs/spec/diagnostics.md`, and `Examples/` |
 | Syntax, grammar, or example change | [`references/syntax.md`](references/syntax.md); `Compiler/JetFoundation/Data/Syntax/`, `Docs/spec/syntax-decisions.md`, `Docs/spec/contributing/examples.md`, and `Examples/README.md` |
 | Linked-card milestone | [`../orchestration/references/closeout.md`](../orchestration/references/closeout.md) and `Tools/agent/CloseoutGate.jet` |
-| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `Tools/agent/jet-env` |
+| Scratch, target, memory, or process safety | [`../orchestration/references/resources.md`](../orchestration/references/resources.md) and `Tools/agent/JetEnv.jet` |
 
 ## Non-negotiable truth
 

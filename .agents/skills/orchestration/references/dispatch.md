@@ -13,7 +13,7 @@ the fields that the worker and artifact need:
 | Worker or artifact | Add to the brief |
 |---|---|
 | Source implementation | The dev worktree, the last dev commit, the paths the worker owns and commits on `dev`, applicable authority and invariants, complete consumer/caller cutover, and the exact criterion proof command with its expected observable result. |
-| `.jet` source writer | The source file's scoped checks: `Tools/agent/jet-env jet check path/to/file.jet` and `Tools/agent/jet-env jet fmt --check path/to/file.jet`. These are source checks, not runtime, tier, snapshot, golden, or generated-artifact proof. |
+| `.jet` source writer | The source file's scoped checks: `Tools/agent/JetEnv.jet jet check path/to/file.jet` and `Tools/agent/JetEnv.jet jet fmt --check path/to/file.jet`. These are source checks, not runtime, tier, snapshot, golden, or generated-artifact proof. |
 | Prose or static-data writer | The user-visible audience, source-of-truth paths, link/path consumers, and the expected `DOCS ONLY` receipt. Do not require compiler commands for prose-only work. |
 | Review worker | The exact bounded artifact, acceptance criteria, authority, invariants, and evidence to inspect. A review worker reports findings and does not repair the artifact. |
 | Recovery or long wave | The last integrated state, explicit timeout, resource/liveness boundary, salvage point, and rebrief condition. Load [`resources.md`](resources.md) or [`recovery.md`](recovery.md) rather than copying their controls. |
@@ -54,7 +54,7 @@ blanket worker requirement.
   and the same card is rebriefed with the exact error; the orchestrator does not
   repair the worker's implementation.
 - **`.jet` code:** include the `CHECK OK` line when the code lane ran, plus the
-  exact `Tools/agent/jet-env jet check …` and `jet fmt --check …` results.
+  exact `Tools/agent/JetEnv.jet jet check …` and `jet fmt --check …` results.
   These checks do not authorize runtime claims.
 - **Prose or static data:** the first line is exactly `DOCS ONLY`; then list
   changed paths, source references read, blockers, and the named implementer.
