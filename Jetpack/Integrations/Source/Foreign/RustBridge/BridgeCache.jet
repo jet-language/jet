@@ -55,10 +55,7 @@ RustBridgeKeyInputs: struct {
         identity.field("c-record-source", self.record_source.bytes())
         identity.field("selected_target", self.selected_target.bytes())
         identity.field("rust_toolchain", self.rust_toolchain.bytes())
-        if self.native_toolchain == .Val(toolchain) {
-            identity.field("inline_toolchain", pkg_ffi_inline_toolchain_identity(toolchain).bytes())
-            identity.field("inline_build_script", pkg_ffi_emit_inline_build_rs(self.entries, toolchain).bytes())
-        }
+        if self.native_toolchain == .Val(toolchain) -> identity.field("inline_toolchain", pkg_ffi_inline_toolchain_identity(toolchain).bytes())
         loop argument in self.native_link_args -> identity.field("rustflag", argument.bytes())
         pkg_ffi_identity_static_link_inputs(identity, self.native_link_args)
         loop name in pkg_ffi_sorted_keys(self.deps) {

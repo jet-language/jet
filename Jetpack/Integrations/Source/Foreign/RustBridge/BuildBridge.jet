@@ -155,7 +155,7 @@ pkg_ffi_build_bridge_full: fn(request: RustBridgeBuild) -[FS, Env, Exec, Time, T
 }
 
 // Rewrite the generated crate for this key: manifest, native inline sources
-// and build script, and wrapper library. Returns the manifest path.
+// and wrapper library. Returns the manifest path.
 pkg_ffi_write_bridge_sources: fn(request: RustBridgeBuild, deps: [String: String], paths: BridgePaths, native_toolchain: InlineNativeToolchain?) -[FS, Env]> String RustBridgeError! {
     entries: request.entries
     src_dir: files.join(paths.cache_root, "src")
@@ -166,10 +166,8 @@ pkg_ffi_write_bridge_sources: fn(request: RustBridgeBuild, deps: [String: String
         lang: entry.inline_lang() ?? next
         if lang == "c" || lang == "cpp" -> has_native = true
     }
-    files.write(manifest, pkg_ffi_emit_cargo_toml(paths.crate_name, deps, has_native)) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI manifest: {err}"))
+    files.write(manifest, pkg_ffi_emit_cargo_toml(paths.crate_name, deps)) ?? return Err(pkg_ffi_tool_error("couldn't write the FFI manifest: {err}"))
     if has_native {
-        toolchain: native_toolchain ?? panic("native entries resolve a native toolchain")
-        files.write(files.join(paths.cache_root, "build.rs"), pkg_ffi_emit_inline_build_rs(entries, toolchain)) ?? return Err(pkg_ffi_tool_error("couldn't write the inline FFI build script: {err}"))
         loop index in 0..<entries.len() {
             lang: entries[index].inline_lang() ?? next
             if lang != "c" && lang != "cpp" -> next

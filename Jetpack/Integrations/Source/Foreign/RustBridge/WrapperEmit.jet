@@ -113,9 +113,8 @@ fn ffi_panic() -> ! {
 
 ``` }
 
-pkg_ffi_emit_cargo_toml: fn(crate_name: String, deps: [String: String], has_native: Bool) -> String Never! {
-    build: if has_native -> "build = \"build.rs\"\n" else -> ""
-    s := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{build}\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n"
+pkg_ffi_emit_cargo_toml: fn(crate_name: String, deps: [String: String]) -> String Never! {
+    s := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n"
     if deps.len() == 0 -> return s
     s = "{s}[dependencies]\n"
     names: pkg_ffi_sorted_keys(deps)
@@ -485,91 +484,6 @@ pkg_ffi_emit_native_inline_source: fn(entry: ExternEntry, index: Int) -> String 
     declared: if types.len() == 0 -> "void" else -> types.join(", ")
     defined: if typed.len() == 0 -> "void" else -> typed.join(", ")
     "/* Jet #FFI provenance: entry {index}, language {inline.lang}. */\n#include <stdint.h>\n#include <stdbool.h>\n{ret} {entry.jet_name}({declared});\n{inline.source}\n{linkage}{ret} {symbol}({defined}) {{ {call} }}\n"
-}
-
-// The build script that compiles every inline C/C++ body with the selected
-// target's audited tools, proves the complete bridge has no undefined symbols,
-// and archives them into the static library the bridge links.
-pkg_ffi_emit_inline_build_rs: fn(entries: [ExternEntry], toolchain: InlineNativeToolchain) -> String Never! {
-    rows := [String]{}
-    has_cpp := false
-    loop index in 0..<entries.len() {
-        inline: entries[index].inline ?? next
-        if inline.lang == {
-            "c" -> {
-                tool: toolchain.cc ?? panic("C entry has a C compiler")
-                rows.push(pkg_ffi_build_rs_row("inline_{index}.c", tool, false))
-            }
-            "cpp" -> {
-                has_cpp = true
-                tool: toolchain.cxx ?? panic("C++ entry has a C++ compiler")
-                rows.push(pkg_ffi_build_rs_row("inline_{index}.cpp", tool, true))
-            }
-            else -> {}
-        }
-    }
-    target_debug: pkg_ffi_rust_debug_string(toolchain.target)
-    proof_suffix_debug: pkg_ffi_rust_debug_string(pkg_ffi_proof_suffix_for_target(toolchain.target))
-    undefined_debug: pkg_ffi_rust_debug_string(pkg_ffi_undefined_symbol_flag_for_target(toolchain.target))
-    archiver_debug: pkg_ffi_rust_debug_string(toolchain.ar.path)
-    file_rows: rows.join(", ")
-    runtime: if has_cpp -> "println!(\"cargo:rustc-link-lib=dylib={pkg_ffi_cxx_runtime_for_target(toolchain.target)}\");" else -> ""
-    """
-use std::{{env, path::PathBuf, process::Command}};
-
-fn checked(command: &mut Command) {{
-    let status = command.status().expect("foreign compiler is unavailable");
-    if !status.success() {{ panic!("foreign compiler rejected the declared Jet ABI"); }}
-}}
-
-fn main() {{
-    const TARGET: &str = {target_debug};
-    const PROOF_SUFFIX: &str = {proof_suffix_debug};
-    const UNDEFINED_SYMBOLS: &str = {undefined_debug};
-    const ARCHIVER: &str = {archiver_debug};
-    let cargo_target = env::var("TARGET").expect("Cargo omitted TARGET for a selected target");
-    assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
-    let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
-    let mut objects = Vec::new();
-    let files = [{file_rows}];
-    let mut linker = None;
-    for (index, (source, compiler, cpp, target_arg)) in files.iter().enumerate() {{
-        println!("cargo:rerun-if-changed={{source}}");
-        let object = out.join(format!("inline_{{index}}.o"));
-        let mut compile = Command::new(compiler);
-        if !target_arg.is_empty() {{ compile.arg(target_arg); }}
-        if *cpp {{ compile.arg("-std=c++17"); }}
-        compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
-        checked(&mut compile);
-        objects.push(object);
-        if linker.is_none() || *cpp {{ linker = Some((*compiler, *target_arg)); }}
-    }}
-    if let Some((compiler, target_arg)) = linker {{
-        let proof = out.join(format!("inline_bridge.{{PROOF_SUFFIX}}"));
-        let mut link = Command::new(compiler);
-        if !target_arg.is_empty() {{ link.arg(target_arg); }}
-        link.args(["-shared", UNDEFINED_SYMBOLS]);
-        for object in &objects {{ link.arg(object); }}
-        link.arg("-o").arg(&proof);
-        checked(&mut link);
-    }}
-    let archive = out.join("libjet_inline_native.a");
-    let mut ar = Command::new(ARCHIVER);
-    ar.arg("rcs").arg(&archive);
-    for object in &objects {{ ar.arg(object); }}
-    checked(&mut ar);
-    println!("cargo:rustc-link-search=native={{}}", out.display());
-    println!("cargo:rustc-link-lib=static=jet_inline_native");
-    {runtime}
-}}
-
-"""
-}
-
-// `("inline_0.c", "/path/clang", false, "--target=…")`.
-pkg_ffi_build_rs_row: fn(source: String, tool: NativeTool, cpp: Bool) -> String Never! {
-    flag: if cpp -> "true" else -> "false"
-    "({pkg_ffi_rust_debug_string(source)}, {pkg_ffi_rust_debug_string(tool.path)}, {flag}, {pkg_ffi_rust_debug_string(tool.target_arg ?? "")})"
 }
 
 pkg_ffi_emit_wrapper_fn: fn(entry: ExternEntry, user_types: [String]) -> String Never! {
