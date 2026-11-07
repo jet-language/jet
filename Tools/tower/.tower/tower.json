@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6628,
-    "rev": 93948,
+    "rev": 93950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97475,7 +97475,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "MechB-2 notes (2026-11-06): ComputeAutoDiff.jet fails because IR has no lowering for MathBuiltin(core.compute, gradient|value_and_gradient|vjp|jvp): Compiler/JetIR/Source/BuildExpr.jet:1896 sends it to ir_precise_builtin -> ir_precise_route -> 'unlowered: generic Core call core.compute.*'. Separate bug: Compiler/JetIR/Source/CompilerOwned.jet:254 declares VJPRun.grads as Fn() -> t while sema (Expressions/Places.jet:522) declares plain t. Planned design (unbuilt): runtime tracing inside Core (private Tensor fields ad_meta: [[Int]], ad_data: [[Float]]), private __ad_* helpers in Core/Compute/Compute.jet reached through CoreReach.jet, and a new Compiler/JetIR/Source/BuildAutodiff.jet lowering the curried and direct forms."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97494,6 +97500,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-06T23:25:44.967Z"
+        },
+        {
+          "n": 3,
+          "text": "Examples/features/tooling/compute_autodiff.jet passes on every tier with an unchanged golden, and Compiler/JetSema/Source/Sema/Calls/ComputeModels.jet keeps the differentiation checks. (moved from #3955 c3)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T01:03:36.651Z"
         }
       ],
       "refs": [],
@@ -97502,7 +97517,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T23:25:43.242Z",
-      "updated": "2026-11-06T23:25:44.967Z",
+      "updated": "2026-11-07T01:03:36.651Z",
       "updatedBy": "Main"
     }
   ],
@@ -186800,6 +186815,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T01:03:36.651Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0wyaelh",
+      "note": "#3 Examples/features/tooling/compute_autodiff.jet passes on eve"
+    },
+    {
+      "at": "2026-11-06T23:26:54.484Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wyaelh",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-06T23:25:52.820Z",
       "by": "Main",
