@@ -50,6 +50,20 @@ GH_SCRIPT: [String]{
     "",
 }
 
+// The fixture's `jet`: it answers `Tools/agent/LaneCheck.jet --patterns`
+// with one path rule and one word rule of its own, so the personal-information
+// search runs neither the `jet` on PATH nor this machine's rules.
+JET_SCRIPT: [String]{
+    "#!/bin/sh",
+    "if [ \"$2\" = --patterns ]; then",
+    "  printf 'path\\t/fixture-home/[a-z]+\\nword\\tfixture-secret-host\\n'",
+    "  exit 0",
+    "fi",
+    "echo \"the fixture jet only answers --patterns, not: $*\" >&2",
+    "exit 2",
+    "",
+}
+
 Fixture: struct {
     scratch: String
     dir: String
@@ -159,13 +173,16 @@ new_fixture: fn(label: String) -[FS, Env]> Fixture Never! {
     put(gh, GH_SCRIPT.join("\n"))
     files.set_mode(gh, 493) ?? panic("chmod gh: {err}")
     put(files.join(scratch, "gh/mode"), "complete\n")
+    jet: files.join(scratch, "bin/jet")
+    put(jet, JET_SCRIPT.join("\n"))
+    files.set_mode(jet, 493) ?? panic("chmod jet: {err}")
     Fixture{
         scratch: scratch,
         dir: dir,
         evidence: [String]{runner(scratch, "ev1", dir, 0, 1, "PASS", passing_rows())},
         signer: Signer{seed_path: seed_path, public_key: public_of(seed_bytes(7))},
         remote: Remote{slug: "example/jet", origin_tags: [Tag]{Tag{name: "a0_025", commit: OTHER_COMMIT}}, local_tags: [String]{"a0_025"}, released: [String]{"a0_025"}, on_origin_dev: true, tree: TREE, problems: [Problem]{}},
-        programs: Programs{gh: [String]{gh}, jet: [String]{"jet"}},
+        programs: Programs{gh: [String]{gh}, jet: [String]{jet}},
     }
 }
 
@@ -390,6 +407,21 @@ texts: fn(items: [Dyn]) -> [String] Never! {
         fixture.evidence = [String]{runner(fixture.scratch, "ev-skip", fixture.dir, 0, 1, "PASS", item.rows)}
         outcome: candidate(fixture)
         expect(outcome, "BLOCKED", SKIPPED, item.part)
+        assert(!files.exists(files.join(fixture.dir, CANDIDATE_FILE)))
+    }
+}
+
+#Test("a shipped file that names personal information blocks: a path rule, and a word rule in any case") {
+    leaks: [(label: String, jet: String)]{
+        (label: "path", jet: "#!/bin/sh\necho /fixture-home/ada\n"),
+        (label: "word", jet: "#!/bin/sh\necho built on Fixture-Secret-Host\n"),
+    }
+    loop leak in leaks {
+        fixture := new_fixture("leak-{leak.label}")
+        make_build(fixture.dir, leak.jet)
+        fixture.evidence = [String]{runner(fixture.scratch, "ev-leak", fixture.dir, 0, 1, "PASS", passing_rows())}
+        outcome: candidate(fixture)
+        expect(outcome, "BLOCKED", PERSONAL, "jet names personal information")
         assert(!files.exists(files.join(fixture.dir, CANDIDATE_FILE)))
     }
 }
