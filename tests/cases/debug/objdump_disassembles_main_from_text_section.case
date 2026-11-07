@@ -1,0 +1,18 @@
+# Card #6658: the native ELF writer emits a `.text` section header, so
+# objdump lists the section and disassembles `main` from the built binary.
+fixture: objdump_disassembles_main_from_text_section.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build main.jet
+exit: 0
+step native: built
+exit: 0
+stdout: = "hi\n"
+when tool objdump
+step: objdump -h .jet/build/main
+exit: 0
+stdout: ~ ".text" # the executable section has a header
+step: objdump -d --no-show-raw-insn --disassemble=main .jet/build/main
+exit: 0
+stdout: ~ "<main>:" # main disassembles from .text
+end when
