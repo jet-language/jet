@@ -265,7 +265,9 @@ process_execution_receipt: fn(child: I64, status: I64) -> I64 {
     // A run past its timeout is never a success, even when the child itself
     // exited 0 before a lingering descendant's output held it past the limit.
     timed_out: fd_word(child, I64{104}) != I64{0}
-    receipt: process_receipt_build(spec, fd_word(process_execution_native(child), I64{8}), code, status == I64{0} && !timed_out, signal, timed_out, output, errors, secrets)
+    native: process_execution_native(child)
+    receipt: process_receipt_build(spec, fd_word(native, I64{8}), code, status == I64{0} && !timed_out, signal, timed_out, output, errors, secrets)
+    process_receipt_usage(receipt, fd_word(native, I64{72}), fd_word(native, I64{80}), fd_word(native, I64{88}))
     jet_rt_string_drop(output)
     jet_rt_string_drop(errors)
     process_text_list_drop(secrets, false)
@@ -276,8 +278,8 @@ process_execution_receipt: fn(child: I64, status: I64) -> I64 {
 // environment secrets. An authority-bound receipt names the backend that ran it
 // and is always redacted. signal 0 is Absent.
 process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal: I64, timed_out: Bool, output: I64, errors: I64, secrets: I64) -> I64 {
-    receipt: jet_rt_alloc(I64{144}, I64{8})
-    coll_zero(receipt, I64{144})
+    receipt: jet_rt_alloc(PROCESS_RECEIPT_BYTES, I64{8})
+    coll_zero(receipt, PROCESS_RECEIPT_BYTES)
     fd_put(receipt, I64{0}, jet_int_owned_from_i64(code))
     fd_put(receipt, I64{24}, if success -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{32}, if (signal != I64{0}) -> jet_int_owned_from_i64(signal) else -> INT_OPTION_NONE)
@@ -316,7 +318,20 @@ process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal:
     fd_put(receipt, I64{120}, if (bound || fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
     fd_put(receipt, I64{128}, jet_int_owned_from_i64(pid))
     fd_put(receipt, I64{136}, if timed_out -> { PROCESS_RESOURCE_WALL_TIME } else -> { INT_OPTION_NONE })
+    fd_put(receipt, I64{144}, INT_OPTION_NONE)
+    fd_put(receipt, I64{152}, INT_OPTION_NONE)
+    fd_put(receipt, I64{160}, INT_OPTION_NONE)
     receipt
+}
+// A reap's rusage on the receipt: peak_memory_bytes from ru_maxrss (KiB, the
+// largest single process), user_cpu_ns and system_cpu_ns of the child and the
+// descendants it waited for. A negative word (not reaped here) leaves all
+// three absent.
+process_receipt_usage: fn(receipt: I64, peak_kib: I64, user_ns: I64, system_ns: I64) {
+    if (peak_kib < I64{0} || user_ns < I64{0} || system_ns < I64{0}) -> return
+    fd_put(receipt, I64{144}, jet_int_owned_from_i64(peak_kib * I64{1024}))
+    fd_put(receipt, I64{152}, jet_int_owned_from_i64(user_ns))
+    fd_put(receipt, I64{160}, jet_int_owned_from_i64(system_ns))
 }
 // String::from_utf8 is strict in both Rust collection lanes. The scanner's
 // negative width is Utf8Error.error_len; a truncated valid prefix has None.

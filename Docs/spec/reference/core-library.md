@@ -2248,7 +2248,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.signal_number(signal)` | `Int` | Convert a `ProcessSignal` value to its platform signal number where one exists. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
 | `ProcessSignal` | type | Closed variants: `Term`, `Hup`, and `Int`, matching the shared signal dispatcher. |
-| `ProcessReceipt` | type | The immutable result of a run, including status, output, policy digests, backend, authority, descendants, limits, and redaction facts. |
+| `ProcessReceipt` | type | The immutable result of a run, including status, output, policy digests, backend, authority, descendants, limits, redaction facts, and the child's resource usage (`peak_memory_bytes`, `user_cpu_ns`, `system_cpu_ns`). |
 | `ProcessSpec` | type | The executable, arguments, stream policy, authority, terminal policy, limits, and detachment policy for a child. |
 
 A child that cannot start is an `IOError`, never a receipt: its kind
@@ -2268,6 +2268,14 @@ timeout (the receipt reports `timed_out`). Every child is marked to die with
 the calling process (Linux `PR_SET_PDEATHSIG`, `SIGKILL`), except a
 `.detached()` spec, which is meant to outlive it. `jobs` below 1 is
 `InvalidInput`.
+
+A receipt reports what the child used, read from the kernel when the child is
+reaped (`wait4`'s `rusage`). `peak_memory_bytes` is the peak resident memory of
+the largest single process: the child or one descendant it waited for
+(`ru_maxrss`), never the sum of the tree. `user_cpu_ns` and `system_cpu_ns` are
+the CPU time of the child and every descendant it waited for. A pipeline
+receipt takes the largest step's peak and sums the steps' CPU time. All three
+are `None` when no usage was taken, such as a host without `wait4` usage.
 
 #### Building a process policy
 

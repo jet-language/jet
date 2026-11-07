@@ -58,6 +58,7 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessPassDirectory](Process/ProcessPassDirectory.jet)
 - [ProcessRunAll](Process/ProcessRunAll.jet) — process.run_all runs a list of specs through a bounded worker pool.
 - [ProcessStdinClose](Process/ProcessStdinClose.jet) — A spawned child owns an explicit closeable stdin pipe.
+- [ProcessUsage](Process/ProcessUsage.jet) — A finished child's receipt says what it used, read from the kernel when the child is reaped.
 - [ResourceLimits](Process/ResourceLimits.jet) — This program's resource limits and usage live in core.sys.
 - [SysExecutable](Process/SysExecutable.jet) — `os.executable()` names the running program: the script's absolute path under `jet run`, the built binary after `jet build`.
 - [SystemPrivilegedEntry](Process/SystemPrivilegedEntry.jet) — Audited identity/session controls for a disposable user namespace only.

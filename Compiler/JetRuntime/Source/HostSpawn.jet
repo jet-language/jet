@@ -12,8 +12,10 @@
 // scriptFallback I64@16, searched I64@24 (Linux ignores searched), and Core's
 // NUL argv/env pointer columns. Source alone computes PATH and fallback policy.
 // no PATH search, environment read/write, authority, digest, or error policy.
-// Child72 shared carrier: mutex0,pid8,reaped16,status24,stdin32,stdout40,
-// stderr48,pty56,refs64. A native descriptor of -1 is absent/closed.
+// Child96 shared carrier: mutex0,pid8,reaped16,status24,stdin32,stdout40,
+// stderr48,pty56,refs64, and the reap's rusage: peak_rss_kib72,
+// user_cpu_ns80, system_cpu_ns88 (-1 until reaped). A native descriptor of
+// -1 is absent/closed.
 // shared aliases; last release closes streams. Source owns kill/reap/drop
 // cleanup policy and calls the corresponding raw operations explicitly.
 // Launch stage facts: 0 success,1 prepare,2 fork,3 cwd,4 descriptor mapping,
@@ -168,8 +170,10 @@ spawn_close: fn(number: I64) {
     if (number >= I64{0}) { _ := host_call(I64{3}, number, I64{0}, I64{0}) }
 }
 
+SPAWN_CHILD_BYTES: I64{96}
+
 spawn_child_new: fn() -> I64 {
-    child: jet_rt_alloc(I64{72}, I64{8})
+    child: jet_rt_alloc(SPAWN_CHILD_BYTES, I64{8})
     fd_put(child, I64{0}, I64{0})
     fd_put(child, I64{8}, I64{0})
     fd_put(child, I64{16}, I64{0})
@@ -179,8 +183,14 @@ spawn_child_new: fn() -> I64 {
     fd_put(child, I64{48}, I64{-1})
     fd_put(child, I64{56}, I64{-1})
     fd_put(child, I64{64}, I64{1})
+    fd_put(child, I64{72}, I64{-1})
+    fd_put(child, I64{80}, I64{-1})
+    fd_put(child, I64{88}, I64{-1})
     child
 }
+
+// One struct timeval (seconds, microseconds) of a struct rusage, in ns.
+spawn_timeval_ns: fn(at: I64) -> I64 { fd_word(at, I64{0}) * I64{1000000000} + fd_word(at, I64{8}) * I64{1000} }
 
 spawn_plan_close: fn(plan: I64, count: I64) {
     at := I64{0}
@@ -657,7 +667,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         spawn_close(fd_word(child, I64{40}))
         spawn_close(fd_word(child, I64{48}))
         spawn_close(fd_word(child, I64{56}))
-        jet_rt_free(child, I64{72}, I64{8})
+        jet_rt_free(child, SPAWN_CHILD_BYTES, I64{8})
     }
     jet_rt_free(scratch, I64{128}, I64{8})
     host_error_out(failure, stage, error)
@@ -686,7 +696,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     spawn_close(fd_word(child, I64{40}))
     spawn_close(fd_word(child, I64{48}))
     spawn_close(fd_word(child, I64{56}))
-    jet_rt_free(child, I64{72}, I64{8})
+    jet_rt_free(child, SPAWN_CHILD_BYTES, I64{8})
 }
 
 #Export(c) jet_process_id_raw: fn(child: I64) -> I64 { fd_word(child, I64{8}) }
@@ -714,18 +724,23 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
         fd_put(child, I64{16}, I64{-1})
         sync_mutex_unlock(child)
         fd_put(status, I64{0}, I64{0})
+        usage: jet_rt_alloc(I64{144}, I64{8})
         result := I64{0}
         loop {
-            result = host_call(I64{61}, pid, status, if nohang -> I64{1} else -> I64{0})
+            result = host_call4(I64{61}, pid, status, if nohang -> I64{1} else -> I64{0}, usage)
             if (result != I64{-4}) { break }
         }
         sync_mutex_lock(child)
         if (result > I64{0}) {
             fd_put(child, I64{24}, fd_word(status, I64{0}).bit_and(I64{4294967295}))
             compiler_process_record_exit_status(pid, fd_word(child, I64{24}))
+            fd_put(child, I64{72}, fd_word(usage, I64{32}))
+            fd_put(child, I64{80}, spawn_timeval_ns(usage))
+            fd_put(child, I64{88}, spawn_timeval_ns(wrapping(usage + I64{16})))
             fd_put(child, I64{16}, I64{1})
         } else { fd_put(child, I64{16}, I64{0}) }
         sync_mutex_unlock(child)
+        jet_rt_free(usage, I64{144}, I64{8})
         sync_wake(wrapping(child + I64{16}), I64{2147483647})
         return fd_error(result, error)
     }

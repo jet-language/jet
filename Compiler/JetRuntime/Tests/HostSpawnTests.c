@@ -20,12 +20,12 @@ typedef int64_t W;
 typedef struct { unsigned char *data; W len, cap; } Text;
 typedef struct { uint32_t domain,stage; W code; uint32_t kind,pad; Text *message; } Error;
 typedef struct { W len,cap; void *data; } List;
-typedef struct { W lock,pid,reaped,status,in,out,err,pty,refs; } Child;
+typedef struct { W lock,pid,reaped,status,in,out,err,pty,refs,peak_kib,user_ns,system_ns; } Child;
 typedef struct { W lock,fd,closed; Text *path; void *buffer; W cap,filled,pos,refs; } FD;
 typedef struct { FD *fd; W target,cwd; } Dir;
 typedef struct { W cols,rows,mode; } Terminal;
 typedef struct { W count; char **column; W script_fallback,searched; } Candidates;
-_Static_assert(sizeof(Error)==32 && sizeof(Child)==72 && sizeof(Dir)==24 && sizeof(Candidates)==32,"host ABI");
+_Static_assert(sizeof(Error)==32 && sizeof(Child)==96 && sizeof(Dir)==24 && sizeof(Candidates)==32,"host ABI");
 extern void jet_rt_host_program_start(void);
 extern void *jet_rt_alloc(W,W);
 extern void jet_rt_free(void *,W,W);
@@ -74,7 +74,7 @@ static Child *launch(W *spec,char *exe,char **argv,char **env,Error *e) { char *
 static Child *spawn(W *spec,char *exe,char **argv,char **env) { Error e; Child *c=launch(spec,exe,argv,env,&e); good(&e); assert(c && c->refs==1 && jet_process_id_raw(c)>0); return c; }
 static void write_fixture(char *path,const char *bytes,int mode) { int fd=open(path,O_CREAT|O_TRUNC|O_WRONLY,mode);assert(fd>=0&&write(fd,bytes,strlen(bytes))==(ssize_t)strlen(bytes));assert(!close(fd)); }
 static int copy_fixture(char *source,char *target) { int in=open(source,O_RDONLY),out=open(target,O_CREAT|O_TRUNC|O_WRONLY,0700);assert(in>=0&&out>=0);char chunk[16384];ssize_t count;while((count=read(in,chunk,sizeof chunk))>0){ssize_t at=0;while(at<count){ssize_t written=write(out,chunk+at,(size_t)(count-at));assert(written>0);at+=written;}}assert(count==0&&!close(in)&&!close(out));return 0; }
-static void wait_code(Child *c,int code) { Error e; W status; assert(jet_process_wait_raw(c,false,&status,&e)==jet_process_id_raw(c)); good(&e); assert(WIFEXITED((int)status)&&WEXITSTATUS((int)status)==code); assert(jet_process_wait_raw(c,true,&status,&e)==jet_process_id_raw(c)); good(&e); jet_process_kill_raw(c,SIGKILL,false,&e); good(&e); }
+static void wait_code(Child *c,int code) { Error e; W status; assert(jet_process_wait_raw(c,false,&status,&e)==jet_process_id_raw(c)); good(&e); assert(WIFEXITED((int)status)&&WEXITSTATUS((int)status)==code); assert(c->peak_kib>0&&c->user_ns>=0&&c->system_ns>=0); assert(jet_process_wait_raw(c,true,&status,&e)==jet_process_id_raw(c)); good(&e); jet_process_kill_raw(c,SIGKILL,false,&e); good(&e); }
 static void *wait_thread(void *pointer) { Child *c=pointer; Error e; W status; assert(jet_process_wait_raw(c,false,&status,&e)==jet_process_id_raw(c)); good(&e); assert(WEXITSTATUS((int)status)==9); jet_process_drop_raw(c); return NULL; }
 int main(int argc,char **argv) {
     if(argc>1) return helper(argc,argv);

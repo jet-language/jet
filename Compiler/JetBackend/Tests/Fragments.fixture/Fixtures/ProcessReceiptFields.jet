@@ -1,4 +1,4 @@
-// Native ProcessReceipt144 field regression: Int, Option<Int>, List<Text>,
+// Native ProcessReceipt168 field regression: Int, Option<Int>, List<Text>,
 // and Option<ProcessResourceLimit> use borrowed typed glue, like Text/Bool.
 use process: core.process
 
@@ -6,6 +6,9 @@ receipt_fields: fn(receipt: ProcessReceipt) -> Int Never! {
     total := receipt.code + receipt.pid + receipt.argv.len() + receipt.authority.len() + receipt.limits.len() + receipt.outputs.len()
     if receipt.signal == .Val(signal) -> total += signal
     if receipt.limit_hit == .Val(_) -> total += 1
+    if (receipt.peak_memory_bytes ?? 0) > 0 -> total += 1
+    if (receipt.user_cpu_ns ?? -1) >= 0 -> total += 1
+    if (receipt.system_cpu_ns ?? -1) >= 0 -> total += 1
     if receipt.success -> total += receipt.output.len()
     if receipt.timed_out || receipt.redacted -> total += receipt.errors.len()
     total
@@ -17,7 +20,8 @@ plan_fields: fn(plan: ProcessPlan) -> Int Never! {
 
 run: fn() {
     receipt: process.cmd([String]{"/bin/sh", "-c", "printf 'fields'"}).run() ?? panic("plain process run failed")
-    assert(receipt_fields(receipt) >= 6)
+    assert(receipt_fields(receipt) >= 9)
     assert(receipt.code == 0 && receipt.signal == None && receipt.argv.len() == 3)
+    assert(receipt.peak_memory_bytes != None && receipt.user_cpu_ns != None && receipt.system_cpu_ns != None)
     print("native process receipt fields: ok")
 }

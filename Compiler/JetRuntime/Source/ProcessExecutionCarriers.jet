@@ -1,10 +1,12 @@
-// ProcessReceipt144 and ProcessPlan72 native carriers. Every slot is one physical
+// ProcessReceipt168 and ProcessPlan72 native carriers. Every slot is one physical
 // 8-byte C-ABI word: Text and List<Text> fields are owned pointers to 24-byte
-// headers, ExactInt fields are owned Int words, the signal option is an inline
-// Int? word (INT_OPTION_NONE when absent, else its owned ExactInt), and
+// headers, ExactInt fields are owned Int words, the signal option and the
+// usage options (peak_memory_bytes144, user_cpu_ns152, system_cpu_ns160) are
+// inline Int? words (INT_OPTION_NONE when absent, else an owned ExactInt), and
 // limit_hit is the IR's inline Option word of a payload-free enum
 // (INT_OPTION_NONE when absent, else the variant index), so it owns nothing.
 // Bool fields are normalized 0/1 words.
+PROCESS_RECEIPT_BYTES: I64{168}
 // Borrowed getters lend headers and never transfer ownership.
 process_flag_word: fn(address: I64) -> I64 {
     word: encoding_word(address)
@@ -73,8 +75,8 @@ process_optional_int_eq: fn(a: I64, b: I64) -> Bool {
     jet_rt_string_builder_finish(result)
 }
 #Export(c) jet_rt_handle_clone_process_receipt: fn(value: I64) -> I64 {
-    result: jet_rt_alloc(I64{144}, I64{8})
-    coll_copy(value, result, I64{144})
+    result: jet_rt_alloc(PROCESS_RECEIPT_BYTES, I64{8})
+    coll_copy(value, result, PROCESS_RECEIPT_BYTES)
     encoding_store(result, jet_rt_int_clone(encoding_word(value)))
     encoding_store(wrapping(result + I64{8}), jet_rt_string_clone(encoding_word(wrapping(value + I64{8}))))
     encoding_store(wrapping(result + I64{16}), jet_rt_string_clone(encoding_word(wrapping(value + I64{16}))))
@@ -92,6 +94,9 @@ process_optional_int_eq: fn(a: I64, b: I64) -> Bool {
     encoding_store(wrapping(result + I64{112}), process_text_list_clone(encoding_word(wrapping(value + I64{112})), false))
     encoding_store(wrapping(result + I64{120}), process_flag_word(wrapping(value + I64{120})))
     encoding_store(wrapping(result + I64{128}), jet_rt_int_clone(encoding_word(wrapping(value + I64{128}))))
+    encoding_store(wrapping(result + I64{144}), jet_rt_int_clone(encoding_word(wrapping(value + I64{144}))))
+    encoding_store(wrapping(result + I64{152}), jet_rt_int_clone(encoding_word(wrapping(value + I64{152}))))
+    encoding_store(wrapping(result + I64{160}), jet_rt_int_clone(encoding_word(wrapping(value + I64{160}))))
     result
 }
 #Export(c) jet_rt_handle_drop_process_receipt: fn(value: I64) {
@@ -110,7 +115,10 @@ process_optional_int_eq: fn(a: I64, b: I64) -> Bool {
     process_text_list_drop(encoding_word(wrapping(value + I64{104})), false)
     process_text_list_drop(encoding_word(wrapping(value + I64{112})), false)
     jet_rt_int_drop(encoding_word(wrapping(value + I64{128})))
-    jet_rt_free(value, I64{144}, I64{8})
+    jet_rt_int_drop(encoding_word(wrapping(value + I64{144})))
+    jet_rt_int_drop(encoding_word(wrapping(value + I64{152})))
+    jet_rt_int_drop(encoding_word(wrapping(value + I64{160})))
+    jet_rt_free(value, PROCESS_RECEIPT_BYTES, I64{8})
 }
 #Export(c) jet_rt_handle_eq_process_receipt: fn(a: I64, b: I64) -> Bool {
     if jet_int_compare(encoding_word(a), encoding_word(b)) != (I64{0}) -> return false
@@ -130,7 +138,10 @@ process_optional_int_eq: fn(a: I64, b: I64) -> Bool {
     if !process_text_list_eq(encoding_word(wrapping(a + I64{112})), encoding_word(wrapping(b + I64{112})), false) -> return false
     if process_flag_word(wrapping(a + I64{120})) != process_flag_word(wrapping(b + I64{120})) -> return false
     if jet_int_compare(encoding_word(wrapping(a + I64{128})), encoding_word(wrapping(b + I64{128}))) != (I64{0}) -> return false
-    encoding_word(wrapping(a + I64{136})) == encoding_word(wrapping(b + I64{136}))
+    if encoding_word(wrapping(a + I64{136})) != encoding_word(wrapping(b + I64{136})) -> return false
+    if !process_optional_int_eq(encoding_word(wrapping(a + I64{144})), encoding_word(wrapping(b + I64{144}))) -> return false
+    if !process_optional_int_eq(encoding_word(wrapping(a + I64{152})), encoding_word(wrapping(b + I64{152}))) -> return false
+    process_optional_int_eq(encoding_word(wrapping(a + I64{160})), encoding_word(wrapping(b + I64{160})))
 }
 #Export(c) jet_rt_handle_field_process_receipt_output: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{8})), out, I64{24}) }
 #Export(c) jet_rt_handle_field_process_receipt_errors: fn(value: I64, out: I64) { coll_copy(encoding_word(wrapping(value + I64{16})), out, I64{24}) }
