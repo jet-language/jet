@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6643,
-    "rev": 95230,
+    "rev": 95232,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -89210,11 +89210,11 @@
         {
           "n": 7,
           "text": "The teaching diagnostic and UI snapshot for the retired `use … as` and `.{…}` member list (c2) are removed: retired spellings are not Jet syntax (owner order; the removal is tracked with every other teaching row on #4148 c4).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T17:56:22.889Z"
+          "evidence": "a398337ff6: E0630 is status .Retired in Compiler/Prelude/Diagnostics.jet:5183-5190 (and its generated row in DiagnosticRows.jet), no parser, sema or CLI code emits it (grep for E0630 and RetiredImportAlias in JetParser, JetSema and JetCli finds nothing at dev 22c9a04985), and tests/ui has no E0630 snapshot. Retired spellings are ordinary parse errors.",
+          "at": "2026-11-07T03:33:38.028Z"
         }
       ],
       "refs": [],
@@ -89223,7 +89223,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-01T12:40:05.857Z",
-      "updated": "2026-11-06T17:56:23.788Z",
+      "updated": "2026-11-07T03:33:38.028Z",
       "updatedBy": "Main"
     },
     {
@@ -93894,11 +93894,11 @@
         {
           "n": 2,
           "text": "The 12 cases rows that hit the 60 s wall-clock limit on vb5 are root-caused and each passes, or fails for a recorded unrelated reason, in under 10 s.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-06T19:02:30.892Z"
+          "evidence": "85dea10ff4 (TestSystemLead-2). The 12 vb5 60 s rows, rerun at HEAD (release jetpack aaa6331fc067, cargo and bwrap on PATH). Root causes, from reproducing each on 7f0b3d03ed: cffi/concurrent_bridges was a jet check futex deadlock (PASS 3.0 s); ffi_rust/rust_extern_std was an ICE 101 (PASS 2.7 s); fixtures_crypto_bridge_entropy/jetc_v2 was an fsync stall in jbd2 on loaded ext4 scratch (PASS 3.1 s); fmt_project/top_level_jet_fmt was the old jetpack hanging in env -- nixfmt (PASS 0.26 s); jetpack_nix_index static_publication and index_backed_repairs were the old jetpack hanging in env --prep (PASS 4.4 s and 9.5 s); web_dev/embedded_devserver_rejects_hardlinked_source was jet dev watching until the limit (now KNOWN-FAILING #6386, 2.2 s). cffi/ffi_capability_boundary (1.4 s), unsafe_and_runtime/ffi_capability_edge (0.3 s) and ui_fixes/ownership_ui_fixes_compile_ffi_companions (2.6 s) pass; the first two now declare requires tool:cargo/rustc and report SKIP-HOST without cargo. jetpack_tool/use_ephemeral is KNOWN-FAILING #3594 (8.0 s); repl_tty_prompts is KNOWN-FAILING #5949 with its limit lowered to 6 s (6.1 s). Row lists: lanes/TestSystemLead/kf82.txt, kf84.txt, kf85.txt.",
+          "at": "2026-11-07T03:32:29.904Z"
         },
         {
           "n": 3,
@@ -93940,7 +93940,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:02:30.892Z",
-      "updated": "2026-11-06T19:02:30.892Z",
+      "updated": "2026-11-07T03:32:29.904Z",
       "updatedBy": "Main"
     },
     {
@@ -184726,6 +184726,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T03:33:38.028Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rodlty",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-07T03:32:29.905Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00ctwqw",
+      "note": "#2"
+    },
     {
       "at": "2026-11-07T03:30:52.390Z",
       "by": "Main",
