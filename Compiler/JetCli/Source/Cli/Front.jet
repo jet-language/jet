@@ -61,7 +61,7 @@ use {
         test_settings_levels,
         test_settings_put,
     ]
-    jet_pkg_model.[WorkspaceDeclarationCache]
+    jet_pkg_model.[WorkspaceDeclarationCache, pkg_discover_jobs_in]
 }
 
 JetCLIPlan: enum {
@@ -867,6 +867,40 @@ jet_cli_jobs: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, t
         .Refused(plan) -> return jet_cli_with_notices(notices, plan)
         .Absent -> return jet_cli_with_notices(notices, jet_cli_missing_bare_entry("run", directory, color))
     }
+}
+
+// `jet [jet flags] <name> [job args...]`: a word that is no
+// command runs the visible job of that name the project's parsed source
+// declares, as `jet run <entry> -- <name> [job args...]` with the jet flags
+// before the name. Every word after the name reaches the job unchanged; a `--`
+// right after it only separates. None outside a project, or when no visible
+// job has the name.
+jet_cli_project_job: fn(argv: [String], command: String, color: Bool, quiet: Bool, verbose: Bool) -[FS, Env, Exec]> JetCLIPlan? Never! {
+    at := -1
+    loop (index, word) in argv {
+        if word == command {
+            at = index
+            break
+        }
+    }
+    if at < 0 -> return None
+    flags: jet_cli_prefix(argv, at)
+    directory: cli_files.cwd() ?? return None
+    notices := [String]{}
+    if jet_cli_resolve_bare_entry("run", directory, jet_cli_option_value(flags, "-p"), false, color, notices) == .Entry(entry) {
+        registry: pkg_discover_jobs_in(jet_cli_parent(entry.path) ?? directory) ?? return None
+        if registry.find_visible(command) == None -> return None
+        job_args := [String]{command}
+        first: if at + 1 < argv.len() && argv[at + 1] == "--" -> at + 2 else -> at + 1
+        loop word in jet_cli_tail(argv, first) -> job_args.push(word)
+        threads := Int?{None}
+        if jet_cli_threads(flags, "run", color) == {
+            .Refused(refusal) -> return Val(refusal)
+            .Cap(cap) -> threads = cap
+        }
+        return Val(jet_cli_with_notices(notices, jet_cli_run(flags, [String]{"run", entry.path}, Val(job_args), false, false, color, quiet, verbose, threads)))
+    }
+    None
 }
 
 // A `jet check` aimed at a workspace root checks its code rather than
@@ -2040,6 +2074,9 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         return jet_cli_renderable(jet_cli_palette(), json)
     }
     command: args[0]
+    if !jet_cli_is_builtin(command) && !command.ends_with(".jet") {
+        if jet_cli_project_job(argv, command, color, quiet, verbose) == .Val(plan) -> return plan
+    }
 
     // `--lib` and `--output` belong to the commands that produce those artifacts.
     library: jet_argv.contains("--lib")
