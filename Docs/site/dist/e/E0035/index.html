@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use an integer literal, a `NAME: comptime { value }` constant, or another compile-time expression that produces an in-range integer.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0035</code>: <code>tests/ui/computed_enum_noninteger.stderr</code>.</p>
-<pre class="diag">Error [jet.InvalidEnumDiscriminant]: An enum discriminant must be an integer, got Decimal (an exact base-10 number)
-  --&gt; tests/ui/computed_enum_noninteger.jet:2:13
+<p>First UI snapshot mentioning <code>E0035</code>: <code>tests/ui/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary/stderr</code>.</p>
+<pre class="diag">Error [jet.InvalidEnumDiscriminant]: An enum discriminant is outside the signed integer range
+  --&gt; tests/ui/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary/run.jet:3:15
     |
-  2 |     First = 1.5
-    |             ^^^
- Why: Enum discriminants select a numeric variant value
- Fix: Use an integer literal or a compile-time expression that produces Int
+  3 |     TooWide = 9223372036854775808
+    |               ^^^^^^^^^^^^^^^^^^^
+ Why: Enum discriminants are stored as signed 64-bit values
+ Fix: Use a compile-time integer between -9223372036854775808 and 9223372036854775807
 More: jet-lang.dev/e/E0035
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

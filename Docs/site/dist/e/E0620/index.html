@@ -36,7 +36,25 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Move the statements into the entry file&#39;s `run: fn`, or import a declaration-only file.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E0620</code>: <code>tests/ui/script_imported/stderr</code>.</p>
+<pre class="diag">Error [jet.TopLevelStatementsWithoutRun]: Top-level executable statements require an explicit `run: fn`
+  --&gt; tests/ui/script_imported/run.jet:1:1
+    |
+  1 | print(&quot;dependency&quot;)
+    | ^^^^^
+ Why: Jet does not invent a runtime function for ordinary files; only `run: fn` executes code
+ Fix: Move the statements into `run: fn`
+More: jet-lang.dev/e/E0621
+
+Error [jet.ImportedScriptExecutes]: Imported script `helper.jet` has executable top-level statements
+  --&gt; helper.jet:1:1
+    |
+  1 | print(&quot;dependency&quot;)
+    | ^^^^^
+ Why: Imported files provide declarations; executable code belongs in an explicit `run: fn`, so an import never gains a hidden side effect.
+ Fix: Move the statements into the entry file&#39;s `run: fn`, or import a declaration-only file
+More: jet-lang.dev/e/E0620
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

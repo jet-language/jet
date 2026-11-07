@@ -36,7 +36,19 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Run jet check from the package or workspace, or replace the import with the canonical file-relative form when the dependency is local to this file.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E2393</code>: <code>tests/ui/check_scope_orphan/stderr</code>.</p>
+<pre class="diag">Error [jet.ImportWithoutProject]: Use project.&lt;module&gt; needs an owning project context.
+  --&gt; tests/ui/check_scope_orphan/run.jet:2:15
+    |
+  2 | use services: project.services
+    |               ^^^^^^^^^^^^^^^^
+ Why: Project-local imports are resolved from the nearest package or workspace graph; an isolated file has no declared project root to resolve them from.
+ Fix: Run jet check from the package or workspace, or replace the import with the canonical file-relative form when the dependency is local to this file.
+More: jet-lang.dev/e/E2393
+
+1 problem found
+run `jet explain E2393` to learn more
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

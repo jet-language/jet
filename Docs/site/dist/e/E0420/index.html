@@ -36,14 +36,23 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write to `{name}` on every path before reading it (e.g. fill it via `mut {name}`).</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0420</code>: <code>tests/ui/uninit_fixed/a_slot_written_on_one_path_only_stays_unwritten.stderr</code>.</p>
-<pre class="diag">Error [jet.UninitializedRead]: `bytes` may be read before it is given a value
-  --&gt; a_slot_written_on_one_path_only_stays_unwritten.jet:13:11
+<p>First UI snapshot mentioning <code>E0420</code>: <code>tests/ui/arena/erased_initialization_does_not_leak_past_scope/stderr</code>.</p>
+<pre class="diag">Error [jet.UninitializedRead]: `value` may be read before it is given a value
+  --&gt; run.jet:9:11
     |
- 13 |     print(bytes[1])
+  9 |     print(value)
     |           ^^^^^
- Why: `bytes` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage
- Fix: Write to `bytes` on every path before reading it (e.g. fill it via `mut bytes`)
+ Why: `value` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage
+ Fix: Write to `value` on every path before reading it (e.g. fill it via `mut value`)
+More: jet-lang.dev/e/E0420
+
+Error [jet.UninitializedRead]: `value` may be read before it is given a value
+  --&gt; run.jet:17:11
+    |
+ 17 |     print(value)
+    |           ^^^^^
+ Why: `value` was declared with `Type{ uninit }`, so no value is available until you write to it — this read could see garbage
+ Fix: Write to `value` on every path before reading it (e.g. fill it via `mut value`)
 More: jet-lang.dev/e/E0420
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

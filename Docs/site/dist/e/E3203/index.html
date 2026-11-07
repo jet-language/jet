@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3203</code>: <code>tests/ui/cffi_abi_function_value.stderr</code>.</p>
-<pre class="diag">Error [jet.NonCAbiType]: `fn(I32) -&gt; I32 Never!` is not a C-compatible type for a foreign function parameter or return.
-  --&gt; cffi_abi_function_value.jet:8:17
+<p>First UI snapshot mentioning <code>E3203</code>: <code>tests/ui/cffi/anonymous_union_is_rejected_before_c_ffi_codegen/stderr</code>.</p>
+<pre class="diag">Error [jet.NonCAbiType]: `Int | String` is not a C-compatible type for a foreign function parameter or return.
+  --&gt; tests/ui/cffi/anonymous_union_is_rejected_before_c_ffi_codegen/run.jet:4:24
     |
-  8 |     callback: c.ping
-    |                 ^^^^
+  4 |     consume: fn(value: Int | String) -&gt; Int = &quot;consume&quot;
+    |                        ^^^^^^^^^^^^
  Why: `#Import` / `#Export` functions must use types with a stable C ABI at the edge.
  Fix: Use scalars, `String`, or a struct with C layout; pointers only through the gated tier.
 More: jet-lang.dev/e/E3203
