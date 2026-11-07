@@ -83817,6 +83817,144 @@
       "completedAt": "2026-11-04T02:38:16.197Z",
       "questions": [],
       "retiredAt": "2026-11-07T02:39:57.184Z"
+    },
+    {
+      "id": "c0vmahwz",
+      "num": 6457,
+      "title": "core.data.plot.__plot_aggregate_none has no runtime export (jet_data_plot_aggregate_none missing from the pack)",
+      "body": "Found by TestGreen-3 route-gap census, 2026-10-31. A Core #Test at Core/Data/Data.jet:2786 and Docs/spec/reference/core-library.md:3238 use the plot aggregate-none path, but the runtime pack has no jet_data_plot_aggregate_none export. TestGreen3-22 lists the row as unbuilt (E2104 citing this card). Done when the export exists and the Core test passes on O0/O1/O2.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "GoldC-3 scoping 2026-11-01: not a route-row fix. core-library.md:3236 says None is the native absence value and no source variant is renamed, but None is a keyword, so Core/Data/Data.jet cannot declare it (E0003). Deleting the Core declaration lets the compiler-owned registry row (None, Count, ...) win, but then user == on JetDataPlotAggregate fails E0312 because compiler-owned leaf enums are not Equatable. Root: compiler-owned leaf enums need Equatable (a sema feature); then the Core declaration goes and the route resolves. Reverted; not in GoldC-63."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The jet_data_plot_aggregate_none runtime export exists and the Core/Data.jet plot-aggregate #Test passes on O0/O1/O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Superseded by c2; see commit 098ea833a6.",
+          "at": "2026-11-04T10:16:10.023Z"
+        },
+        {
+          "n": 2,
+          "text": "core.data.plot.__plot_aggregate_none, its #Test, signature, dispatcher row, IR route and spec paragraph are removed; the Core ledger is current and no reference remains.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Commit 098ea833a6 (Main-29) removes the member from Core/Data/Data.jet, CoreSignatures.jet, Prelude/Core.jet, CoreSurfaceInventory.jet, JetIR RuntimeRoutes.jet and core-library.md, and regenerates CoreCallRows/CoreEnumRows/CoreSourceOwned/CoreSources. lane-check on that exact tree: CHECK OK. UI suite: 0 diffs vs base. cases --filter data: clean; golden --filter data: only data_battery fails o0/o1/o2, identically on clean base 657d0c5553 (missing expected stream, card c0zn6gbs).",
+          "at": "2026-11-04T10:16:09.542Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T17:43:01.383Z",
+      "updated": "2026-11-04T10:16:10.976Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T10:16:10.976Z",
+      "questions": [],
+      "retiredAt": "2026-11-07T10:20:08.514Z"
+    },
+    {
+      "id": "c0d2njid",
+      "num": 6540,
+      "title": "para_filter/para_partition/para_fold with a named fn: E1102 today, ICE and wrong results once the sema gate opens (boxed callback not settled)",
+      "body": "Found by CardClose-1, 2026-11-01. Two layers. (1) Sema, JetSema Calls/Concurrency.jet:116, treats a callback as a module function only when sema_scope_resolve_index(scopes, name) == None. Module functions are bindings in scope (Items.jet:4543), so values.para_map(f) with a top-level fn always gets E1102 'callback isn't sendable'. That makes tests/cases/…/parallel_collection_adapters_report_lowest_input_failure FAIL on dev. The one-line fix also accepts sema_call_value_is_declaration (Values.jet:174), as commit d614619e0b on lane CardClose/tsd. (2) That fix alone is unsound. A named fn passed as a value has the fallible-boxed type fn(Int) => T ! E, and only para_map settles it (BuildParallel.jet ir_para_map_settle :259). para_filter/para_partition ICE at BuildParallel.jet:210 ('closure method ParaFilter through fn(Int) => Bool ! Never'). para_fold stores the Result box pointer as the accumulator (:105-131, :346 seed, :384 merge) and prints 129026066628504 instead of 7. use_stable_bounded_chunks (KF #5531) prints 140737353948312 instead of 201761130258. Fix both in one change: settle boxed callbacks in filter/partition/fold with lowest-index Err per D-PARCAPTURE1, then open the sema gate.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A named module fn passed to para_map, para_filter, para_partition and para_fold checks without E1102 and gives the same result as the sequential map/filter/partition/fold on o0/o1/o2, with lowest-index Err for fallible callbacks. parallel_collection_adapters_report_lowest_input_failure passes, and the #5531 stable_bounded_chunks case prints 201761130258.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Commit e49bd059c4 (Main-30). Sema accepts a module fn by symbol kind; fallible predicate/step/merge make the call a Result. IR settles filter/partition boxes in source order and carries fold chunk values in Result boxes with left-failure-wins merges. Probes r.jet/s.jet (implicit-Err, Never! and Bad! named fns, 256/400-item inputs, String payloads) print identical output on jet run, jet build and jet build --release, matching sequential map/filter/partition/fold and lowest-index Err. New case parallel_adapters_take_named_module_functions PASS (o0/o1/o2). cases --filter para: parallel_collection_adapters_report_lowest_input_failure PASS; use_stable_bounded_chunks (prints 201761130258) and select_across_runtime_failure_carriers now PASS, known-failing rows removed; remaining 4 FAILs identical on base c26. ui --filter para: 0 diffs vs base. golden --filter para: 126/126. lane-check on the exact tree: CHECK OK.",
+          "at": "2026-11-04T10:22:25.916Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T09:16:13.634Z",
+      "updated": "2026-11-04T10:22:26.863Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T10:22:26.863Z",
+      "questions": [],
+      "retiredAt": "2026-11-07T10:25:21.581Z"
+    },
+    {
+      "id": "c0tu4gvf",
+      "num": 6549,
+      "title": "RuntimeGenerators.jet --check reports every runtime generator output stale, even untouched ones",
+      "body": "Tools/agent/RuntimeGenerators.jet --check reports every output stale (including untouched SchedulerMessages and HostErrors), while the mjs generator check reports them fresh on the same tree. A freshness gate that flags everything cannot gate a commit. Reported by IrTypes-3 (forwarded from ToolsJet-2), 2026-11-01.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "On a clean checkout, Tools/agent/RuntimeGenerators.jet --check reports no stale output, matching the mjs check; editing one generator source makes exactly that output stale.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Commit 6dff7c1343 (Main-31). On a clean git-archive export of e49bd059c4 plus the patch, jet run Tools/agent/RuntimeGenerators.jet -- --check prints 'runtime generated tables are current' (was 18 stale), and every gen-runtime-*.mjs and gen-compiler-needed-text.mjs --check passes on the same tree. Changing one scheduler literal in the generator makes --check report only Compiler/JetRuntime/Source/SchedulerMessages.jet stale. jet test Tools/agent/RuntimeGenerators.jet: 21 passed, 0 failed. lane-check Tools/agent/RuntimeGenerators.jet: CHECK OK.",
+          "at": "2026-11-04T10:25:31.191Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-01T21:33:24.688Z",
+      "updated": "2026-11-04T10:25:32.334Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T10:25:32.334Z",
+      "questions": [],
+      "retiredAt": "2026-11-07T10:27:48.216Z"
     }
   ]
 }

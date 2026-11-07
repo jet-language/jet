@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6670,
-    "rev": 95686,
+    "nextNum": 6672,
+    "rev": 95697,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69772,6 +69772,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c3 group 2(a) landed in 332eb41d18: Tools/agent/CoreSourceRows.jet renders Core.jet's views (CoreCallRows, CoreEnumRows, CoreStructureRows, CoreEnumPayloadRows), including the Rust-row evaluator. The node generators and their flags are gone, and check-core-surface-ledger.mjs went from 5761 to 4752 lines. --check is current, with 2/2 #Tests; ledger --check rc 0; 39 hostile fixtures held. Next: 2(b), the competitor ledger, the core-API gate and the hostile fixtures, ported to CoreSurfaceLedger.jet."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3: 83859ebe1c cuts the runtime table generators over to Tools/agent/RuntimeGenerators.jet (--check current, 22/22 #Tests). The 11 gen-*.mjs are deleted and their 18 outputs regenerated; runtime-abi-symbols.mjs stays until runtime-route-abi.mjs goes. LaneCheck on Compiler/JetRuntime files fails on untouched files with UnknownFunction os_store_i64, the same root as #6649 c9's JetRuntime row (PortsLead-2). Next: group 2(a), the Core view generators."
         },
         {
@@ -70932,7 +70937,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T09:50:27.884Z",
+      "updated": "2026-11-07T10:28:03.261Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -83171,6 +83176,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "n3 slice 1 landed in f32e474d5d (CoreCliLead-2): jet budget check measures from CompilerFacts (new Compiler/JetCli/Source/Cli/BudgetMeasure.jet). Default-tier lane run: 8 PASS (the 7 cli_parts_budget proving rows plus the compile-time guard row), 2 KNOWN-FAILING, 0 unexpected pass; the other 13 budget rows have 0 FAIL and 4 REFUSED by the budget-verify seam (#6317). The lsp budget row moves to #6386. Ruling: the 2 json rows asserting the Rust-era moment/status envelope migrate to jet.status/v1 and jet.report/v3 (greenfield). Next: slice 2, jet budget update."
+        },
+        {
           "at": "2026-11-06",
           "by": "Main",
           "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c38: Examples/features/lowlevel/polyglot_go.jet -> Examples/LowLevel/PolyglotGo.jet [new path does not exist yet: the criterion still has to create it]."
@@ -84444,7 +84454,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-07T09:04:11.502Z",
+      "updated": "2026-11-07T10:20:08.383Z",
       "updatedBy": "Main",
       "criteriaLastN": 143
     },
@@ -86450,60 +86460,6 @@
       "created": "2026-10-31T16:40:33.121Z",
       "updated": "2026-11-07T04:02:44.328Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0vmahwz",
-      "num": 6457,
-      "title": "core.data.plot.__plot_aggregate_none has no runtime export (jet_data_plot_aggregate_none missing from the pack)",
-      "body": "Found by TestGreen-3 route-gap census, 2026-10-31. A Core #Test at Core/Data/Data.jet:2786 and Docs/spec/reference/core-library.md:3238 use the plot aggregate-none path, but the runtime pack has no jet_data_plot_aggregate_none export. TestGreen3-22 lists the row as unbuilt (E2104 citing this card). Done when the export exists and the Core test passes on O0/O1/O2.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "GoldC-3 scoping 2026-11-01: not a route-row fix. core-library.md:3236 says None is the native absence value and no source variant is renamed, but None is a keyword, so Core/Data/Data.jet cannot declare it (E0003). Deleting the Core declaration lets the compiler-owned registry row (None, Count, ...) win, but then user == on JetDataPlotAggregate fails E0312 because compiler-owned leaf enums are not Equatable. Root: compiler-owned leaf enums need Equatable (a sema feature); then the Core declaration goes and the route resolves. Reverted; not in GoldC-63."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The jet_data_plot_aggregate_none runtime export exists and the Core/Data.jet plot-aggregate #Test passes on O0/O1/O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Superseded by c2; see commit 098ea833a6.",
-          "at": "2026-11-04T10:16:10.023Z"
-        },
-        {
-          "n": 2,
-          "text": "core.data.plot.__plot_aggregate_none, its #Test, signature, dispatcher row, IR route and spec paragraph are removed; the Core ledger is current and no reference remains.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Commit 098ea833a6 (Main-29) removes the member from Core/Data/Data.jet, CoreSignatures.jet, Prelude/Core.jet, CoreSurfaceInventory.jet, JetIR RuntimeRoutes.jet and core-library.md, and regenerates CoreCallRows/CoreEnumRows/CoreSourceOwned/CoreSources. lane-check on that exact tree: CHECK OK. UI suite: 0 diffs vs base. cases --filter data: clean; golden --filter data: only data_battery fails o0/o1/o2, identically on clean base 657d0c5553 (missing expected stream, card c0zn6gbs).",
-          "at": "2026-11-04T10:16:09.542Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-31T17:43:01.383Z",
-      "updated": "2026-11-04T10:16:10.976Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T10:16:10.976Z"
     },
     {
       "id": "c0j6lwuh",
@@ -89248,45 +89204,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c0d2njid",
-      "num": 6540,
-      "title": "para_filter/para_partition/para_fold with a named fn: E1102 today, ICE and wrong results once the sema gate opens (boxed callback not settled)",
-      "body": "Found by CardClose-1, 2026-11-01. Two layers. (1) Sema, JetSema Calls/Concurrency.jet:116, treats a callback as a module function only when sema_scope_resolve_index(scopes, name) == None. Module functions are bindings in scope (Items.jet:4543), so values.para_map(f) with a top-level fn always gets E1102 'callback isn't sendable'. That makes tests/cases/…/parallel_collection_adapters_report_lowest_input_failure FAIL on dev. The one-line fix also accepts sema_call_value_is_declaration (Values.jet:174), as commit d614619e0b on lane CardClose/tsd. (2) That fix alone is unsound. A named fn passed as a value has the fallible-boxed type fn(Int) => T ! E, and only para_map settles it (BuildParallel.jet ir_para_map_settle :259). para_filter/para_partition ICE at BuildParallel.jet:210 ('closure method ParaFilter through fn(Int) => Bool ! Never'). para_fold stores the Result box pointer as the accumulator (:105-131, :346 seed, :384 merge) and prints 129026066628504 instead of 7. use_stable_bounded_chunks (KF #5531) prints 140737353948312 instead of 201761130258. Fix both in one change: settle boxed callbacks in filter/partition/fold with lowest-index Err per D-PARCAPTURE1, then open the sema gate.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A named module fn passed to para_map, para_filter, para_partition and para_fold checks without E1102 and gives the same result as the sequential map/filter/partition/fold on o0/o1/o2, with lowest-index Err for fallible callbacks. parallel_collection_adapters_report_lowest_input_failure passes, and the #5531 stable_bounded_chunks case prints 201761130258.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Commit e49bd059c4 (Main-30). Sema accepts a module fn by symbol kind; fallible predicate/step/merge make the call a Result. IR settles filter/partition boxes in source order and carries fold chunk values in Result boxes with left-failure-wins merges. Probes r.jet/s.jet (implicit-Err, Never! and Bad! named fns, 256/400-item inputs, String payloads) print identical output on jet run, jet build and jet build --release, matching sequential map/filter/partition/fold and lowest-index Err. New case parallel_adapters_take_named_module_functions PASS (o0/o1/o2). cases --filter para: parallel_collection_adapters_report_lowest_input_failure PASS; use_stable_bounded_chunks (prints 201761130258) and select_across_runtime_failure_carriers now PASS, known-failing rows removed; remaining 4 FAILs identical on base c26. ui --filter para: 0 diffs vs base. golden --filter para: 126/126. lane-check on the exact tree: CHECK OK.",
-          "at": "2026-11-04T10:22:25.916Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T09:16:13.634Z",
-      "updated": "2026-11-04T10:22:26.863Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T10:22:26.863Z"
-    },
-    {
       "id": "c0rodlty",
       "num": 6542,
       "title": "Imports: Go-style `use { … }` blocks with `alias: path` rows; retire `as` and member lists",
@@ -89622,45 +89539,6 @@
       "created": "2026-11-01T21:21:35.427Z",
       "updated": "2026-11-07T04:02:37.261Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c0tu4gvf",
-      "num": 6549,
-      "title": "RuntimeGenerators.jet --check reports every runtime generator output stale, even untouched ones",
-      "body": "Tools/agent/RuntimeGenerators.jet --check reports every output stale (including untouched SchedulerMessages and HostErrors), while the mjs generator check reports them fresh on the same tree. A freshness gate that flags everything cannot gate a commit. Reported by IrTypes-3 (forwarded from ToolsJet-2), 2026-11-01.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "On a clean checkout, Tools/agent/RuntimeGenerators.jet --check reports no stale output, matching the mjs check; editing one generator source makes exactly that output stale.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Commit 6dff7c1343 (Main-31). On a clean git-archive export of e49bd059c4 plus the patch, jet run Tools/agent/RuntimeGenerators.jet -- --check prints 'runtime generated tables are current' (was 18 stale), and every gen-runtime-*.mjs and gen-compiler-needed-text.mjs --check passes on the same tree. Changing one scheduler literal in the generator makes --check report only Compiler/JetRuntime/Source/SchedulerMessages.jet stale. jet test Tools/agent/RuntimeGenerators.jet: 21 passed, 0 failed. lane-check Tools/agent/RuntimeGenerators.jet: CHECK OK.",
-          "at": "2026-11-04T10:25:31.191Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-01T21:33:24.688Z",
-      "updated": "2026-11-04T10:25:32.334Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T10:25:32.334Z"
     },
     {
       "id": "c0e3wgi0",
@@ -97609,6 +97487,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "c1 groups A and B landed in 320598c665 (MechD-3). Sema now reports E2104, not exit 101, for jvp/vjp (#6627), files.scope (#6419) and unmarshalled C ABI calls (#6366: struct, pointer, payload enum, F32, #ABI(sysv64)). FileReader.path lowers (runtime export added), so core_files_opaque_handles/file_handle_paths passes and loses its KF line. file_manual_close's real failure is now a missing UseAfterMove at check, and BackendBattery gives E3001 (exit 70). MechD-3 cases run over cffi, compute_extended, core_files_opaque_handles and corelib unbuilt: FAIL 0. Group D (Partition, Set/Bits clear, Decimal compound) is in progress."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "vb13 at a1a6c69d62: c1's 4 named ICE rows are resolved. encoding_parity cbor_typed_schema… and whole_value_codecs… PASS; cost_cli_surfaces_hot_loop… now gives a registered E2104 under #6652, and foreign_callback_reenters… a registered E2104 under #6366. c1's headline (no exit-101 row in the kit) still fails: 38 KNOWN-FAILING rows exit 101 (23 under #5454, 4 under #6366, 1 under #3955, 1 under #6004, 9 unkeyed), listed in $JET_SCRATCH_ROOT/lanes/Main/ice-kf-vb13.tsv. I2 doesn't allow ledgering an ICE: each must pass or give a registered user diagnostic from sema. Assigned to MechD-3 after #6665. Also in vb13: packages profile OOM-killed under a 12G cap (24G next batch); 2 process timing cases slow under load, to be rerun; 10 golden/ui/cases regressions from one root in 8583f858a0 (multiline authority allow/needs misparsed), PortsLead-2 fixing."
         },
         {
@@ -97664,7 +97547,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:29:02.132Z",
-      "updated": "2026-11-07T09:54:38.386Z",
+      "updated": "2026-11-07T10:27:48.071Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98244,7 +98127,18 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "PortsLead-2 landings: d4534c678a (10 ui.host ime/drag_drop/shortcuts helpers made private, 88 to 78), e23b797ef8 (Ui/Host.jet helpers made private, and provider_record_fields tested through web_build/ui_host_provider_answers_are_core_owned, 78 to 74), 19875cde22 (13 core.compute ad_* helpers made private, 74 to 61). Queued in the lander: the user-callable rule in CoreCoverage.jet, under which reserved dunder hooks (789) and C externs (64) leave the denominator, with an excluded line in --check; the ratchet goes 4825 to 4002, never up, and untested 61 to 32. Also queued: core.data quantile_select and rank_order made private (32 to 20). Remaining: crypto helpers, then #Tests for 8 real API functions."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "763e3d3b74 (PortsLead-2): 208 ratchet entries re-keyed 1:1 after the ^ to && ownership respelling (192 respelled only; 16 had a changed signature, but the module holds one function of that name, and all 16 are listed in the commit). The total is 4825 before and after, and the module+name multiset is identical, so the ratchet was not raised. CoreCoverage --check now lists 88 untested. Those are new helpers split out of tested functions; next come private-only-when-no-outside-caller commits and #Tests by module. Keys stay signature text: name-based keys would be a design change."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98264,7 +98158,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:50:40.290Z",
-      "updated": "2026-11-07T08:50:46.177Z",
+      "updated": "2026-11-07T10:25:21.443Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -98480,6 +98374,106 @@
       "updated": "2026-11-07T10:02:26.801Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0lb1p4p",
+      "num": 6670,
+      "title": "LaneCheck cannot check Compiler/Prelude or Compiler/JetRuntime files: it checks them as standalone units",
+      "body": "Tools/agent/LaneCheck.jet checks a touched file's package as a normal unit. Compiler/Prelude is embedded, so checking it alone gives 1539 ReservedDunderName errors in Core.jet, including on untouched files such as CoreSurfaceInventory.jet. Compiler/JetRuntime is assembled by the chain, so checking it alone gives 2874 UnknownFunction os_store_i64 errors across 153 files. Workers editing either tree therefore get CHECK FAILED whether or not their change is good, which makes the receipt meaningless for the two most sensitive trees. Found by TestSystemLead-2 in 332eb41d18 and 83859ebe1c. d16f96e61e skips both in the packages suite for the same reason.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "LaneCheck checks a touched Compiler/Prelude file in its embedded mode: an untouched Prelude file gives CHECK OK on dev, and a seeded type error in a Prelude file gives CHECK FAILED naming it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:28:25.663Z"
+        },
+        {
+          "n": 2,
+          "text": "LaneCheck checks a touched Compiler/JetRuntime file in its assembled mode: an untouched runtime file gives CHECK OK on dev, and a seeded error gives CHECK FAILED.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:28:26.472Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:28:04.053Z",
+      "updated": "2026-11-07T10:28:26.472Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
+    },
+    {
+      "id": "c02188uw",
+      "num": 6671,
+      "title": "Use after a consuming close passes jet check: close(owner) then owner.path on a TempFile is not UseAfterMove",
+      "body": "Found by MechD-3 (320598c665 follow-up). In tests/cases/core_files_opaque_handles/file_manual_close_consumes_the_checked_provider_owner.case, close(owner) consumes the checked provider owner, yet a later owner.path on the TempFile passes jet check. Sema must report UseAfterMove (I1: memory-safe and type-safe by default). Separately, jet check on that case's after_close_reader program ran for more than 2 minutes in MechD-3's manual run and was killed: a hang in check is a defect of its own.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet check reports UseAfterMove at owner.path after close(owner) in file_manual_close_consumes_the_checked_provider_owner, which then passes; its KF line is removed. A UI snapshot covers a use after a consuming close.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:28:24.024Z"
+        },
+        {
+          "n": 2,
+          "text": "jet check on the case's after_close_reader program finishes, with a result, in under 10 s; a regression row pins the hang.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:28:24.828Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G10"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:28:11.595Z",
+      "updated": "2026-11-07T10:28:24.828Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     }
   ],
   "decisions": [
@@ -186383,6 +186377,83 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T10:28:26.472Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lb1p4p",
+      "note": "#2 LaneCheck checks a touched Compiler/JetRuntime file in its a"
+    },
+    {
+      "at": "2026-11-07T10:28:25.663Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lb1p4p",
+      "note": "#1 LaneCheck checks a touched Compiler/Prelude file in its embe"
+    },
+    {
+      "at": "2026-11-07T10:28:24.828Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02188uw",
+      "note": "#2 jet check on the case's after_close_reader program finishes,"
+    },
+    {
+      "at": "2026-11-07T10:28:24.024Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c02188uw",
+      "note": "#1 jet check reports UseAfterMove at owner.path after close(own"
+    },
+    {
+      "at": "2026-11-07T10:28:11.595Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c02188uw",
+      "note": "Use after a consuming close passes jet check: close(owner) then owner.path on a TempFile is not UseAfterMove"
+    },
+    {
+      "at": "2026-11-07T10:28:04.053Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0lb1p4p",
+      "note": "LaneCheck cannot check Compiler/Prelude or Compiler/JetRuntime files: it checks them as standalone units"
+    },
+    {
+      "at": "2026-11-07T10:28:03.261Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:27:48.071Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005fduo",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:25:21.443Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005c3wh",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:20:08.383Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:07:12.580Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c005c3wh",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T10:02:28.489Z",
       "by": "Main",
