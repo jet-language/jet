@@ -162,7 +162,9 @@ archive_problems: fn(first: [U8], second: [U8], name: String) -> [Problem] Never
 // Every listed path under `dir` that names this machine's home, user, host,
 // email or mounts (the rules of Tools/agent/LaneCheck.jet's personal-information
 // guard, `--patterns`) or one of `literals`. Binary files are searched too: a
-// path baked into jet is a leak.
+// path baked into jet is a leak. A compressed archive is searched as its
+// extracted files: its compressed bytes hide a real leak and can match a rule
+// by chance.
 personal_problems: fn(root: String, dir: String, paths: [String], literals: [String], programs: Programs) -[FS, Exec, Time.Wait]> [Problem] Never! {
     rules: run_argv(with_args(programs.jet, [String]{files.join(root, "Tools/agent/LaneCheck.jet"), "--patterns"}), dir)
     if rules.code != 0 -> return [Problem]{problem(PERSONAL, "cannot read the personal-information rules: {rules.errors.trim()}")}
@@ -189,6 +191,7 @@ personal_problems: fn(root: String, dir: String, paths: [String], literals: [Str
         argv.extend(pass.args)
         argv.push("--")
         argv.extend(paths.copy())
+        loop suffix in ARCHIVE_SUFFIXES -> argv.push(":(exclude,glob)**/*{suffix}")
         found: run_argv(argv, dir)
         if found.code > 1 {
             problems.push(problem(PERSONAL, "git grep failed (exit {found.code}): {found.errors.trim()}"))
@@ -198,7 +201,48 @@ personal_problems: fn(root: String, dir: String, paths: [String], literals: [Str
             if name.trim() != "" -> problems.push(problem(PERSONAL, "{name.trim()} names personal information or a build path"))
         }
     }
+    loop name in archive_names(dir, paths) -> problems.extend(archive_personal_problems(root, dir, name, literals, programs))
     problems
+}
+
+// personal_problems over the files of archive `name` in `dir`, unpacked
+// into a scratch directory beside it that is removed again.
+archive_personal_problems: fn(root: String, dir: String, name: String, literals: [String], programs: Programs) -[FS, Exec, Time.Wait]> [Problem] Never! {
+    scan: files.join(dir, ".scan-{name}")
+    if files.exists(scan) -> files.remove_all(scan) ?? return [Problem]{problem(PERSONAL, "cannot clear {scan}: {err}")}
+    files.create_dir_all(scan) ?? return [Problem]{problem(PERSONAL, "cannot create {scan} to search {name}: {err}")}
+    problems := [Problem]{}
+    unpacked: run_argv([String]{"tar", "-xf", name.copy(), "-C", scan.copy()}, dir)
+    if unpacked.code != 0 {
+        problems.push(problem(PERSONAL, "cannot unpack {name} to search it (exit {unpacked.code}): {unpacked.errors.trim()}"))
+    } else {
+        loop found in personal_problems(root, scan, [String]{"."}, literals, programs) -> problems.push(problem(found.class, "in {name}: {found.text}"))
+    }
+    files.remove_all(scan) ?? problems.push(problem(PERSONAL, "cannot remove {scan}: {err}"))
+    problems
+}
+
+ARCHIVE_SUFFIXES: [String]{".tar.gz", ".tar.zst"}
+
+// The compressed archives directly in `dir` that `paths` names ("." names
+// every entry).
+archive_names: fn(dir: String, paths: [String]) -[FS]> [String] Never! {
+    names := [String]{}
+    entries: files.list_dir(dir) ?? return names
+    loop entry in entries {
+        archive := false
+        loop suffix in ARCHIVE_SUFFIXES {
+            if entry.name.ends_with(suffix) -> archive = true
+        }
+        if !archive -> next
+        listed := false
+        loop path in paths {
+            if path == "." || path == entry.name -> listed = true
+        }
+        if listed -> names.push(entry.name.copy())
+    }
+    names.sort()
+    names
 }
 
 shipped_names: fn(dir: String) -[FS]> [String] Never! {
