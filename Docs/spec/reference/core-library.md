@@ -3837,9 +3837,10 @@ and `jet dev` (O0), `jet build` (O1) and `--release` (O2) all call the one
 runtime kernel, `jet_rt_native_para_walk` in
 [`Parallel.jet`](../../../Compiler/JetRuntime/Source/Parallel.jet). The pool
 is the host's available parallelism (cgroup quota, CPU affinity, online CPUs),
-bounded by `limit:` when a `para_map` passes one. Work is split into chunks of
-at most 64 items, and `para_map` with `limit: n` spreads its items over the `n`
-workers. `para_map` and `para_filter` keep source order, and `para_fold` folds
+bounded by `limit:` when a `para_map` passes one. `para_map`, `para_filter`
+and `para_partition` spread their items over the pool in chunks of at most 64
+items, so a short list of costly items still reaches every worker.
+`para_map` and `para_filter` keep source order, and `para_fold` folds
 each 64-item chunk from a fresh seed and then merges the chunk results up a
 fixed tree, so every tier and every worker count gives the same result.
 Compile-time code also runs natively at O0, but there the kernel uses one
