@@ -90,6 +90,21 @@ tests/ui/crypto_secret_nested_provenance	#6425	check not ported: E1004 and E0119
 tests/ui/generic_lambda_conflict	#6425	check not ported: E0904 inference conflict between argument 2 and the lambda return, with E0112 at the lambda (reports only E0112 at argument 2)
 tests/ui/reflect_name_ledger	#6425	check not ported: E0302 names an ambiguous imported owner by its module (`alpha.Point`; reports `Point`); the snapshot lines also predate the `use { "alpha" "beta" }` block (+2)
 tests/ui/taint/external_boundaries_seed_origin_facts_3	#6425	check not ported: E0433 after E1004 (the unresolved `process.run` call's value is not reported as thrown away)
+tests/ui/freestanding_e3301	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
+tests/ui/freestanding_e3303	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
+tests/ui/live_freestanding_e3301	#5201	E2104 `jet build --target=wasm.no-os` is not built yet
+tests/ui/wasip2_unsupported_socket_operation_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
+tests/ui/wasip2_unsupported_tls_surface_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
+tests/ui/wasip2_unsupported_websocket_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
+tests/ui/wasip2_unsupported_socket_surface_e3304	#5201	E2104 `jet build --target=wasm32-unknown-unknown` is not built yet
+tests/ui/wasip2_unsupported_surface_e3304	#5201	E2104 `jet build --target=wasm32-unknown-unknown` is not built yet
+tests/ui/library_invalid_binding/run	#6418	E2104 `jet build --lib` is not built yet, so no Library binding is validated (E1341)
+tests/ui/jetlib_version_mismatch	#6418	E2104 `jet build --lib` is not built yet, so no `.jetlib` exists for a `jet run` load site to refuse (E1338)
+tests/ui/jetlib_effect_refused	#6418	E2104 `jet build --lib` is not built yet, so no `.jetlib` exists for a `jet run` load site to refuse (E1339)
+tests/ui/fact_contribution_conflict/run	#5454	`jet build` exits 0 and prints only the effects summary: the build entry's `b.contribute` writes are not folded into build facts, so the same-layer conflict (E3521) is never reported
+tests/ui/fact_contribution_undeclared/run	#5454	`jet build` exits 0 and prints only the effects summary: the build entry's `b.contribute` writes are not folded into build facts, so the undeclared setting (E0302) is never reported
+tests/ui/workspace_lock_e1202/run	#3590	`jet env --trust` with a malformed workspace `.jet/lock` reports E1350 "Locked Nix closure could not be replayed" (Project lock is invalid: workspace member is missing `path`), not the E1202 malformed-workspace-lock diagnostic; the lock-write E1202 needs an unwritable `.jet` the fixture cannot stage
+tests/ui/hangar_verify_digest_mismatch	#625	`jetpack hangar verify` of the tampered object reports E1315 "closure record `ui-e1315-…` has no dependency references or store-validated closure proof", not the payload digest mismatch: `jetpack hangar ingest` records no dependency references, and full verification checks the closure proof first
 tests/cases/authority/authority_boundary_consumers_take_the_named_value.case	#5454	`jet check run.jet` E1004 `core.process` has no item `run`, then AuthorityHandleEscapes for passing `authority` to it from its `#FX` block; the original expects a clean check
 tests/cases/authority/authority_comptime_uses_the_same_value.case	#5454	`jet check run.jet` ComptimeConstructNotSupported: compile-time evaluation cannot materialize an `Authority` value (`comptime { Authority.from_rights([...]) }`); the original expects a clean check
 tests/cases/authority/authority_process_boundary_runs_on_all_hosted_tiers.case	#5454	verify-intent: ref build failed: E1004 `core.process` has no item `run`

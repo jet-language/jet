@@ -19,6 +19,25 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // `jet build --locked` of a project whose staged `state/lock` records
         // the generated-input hashes the build must match (E3512 on drift).
         {name: "build_locked", argv: ["build", "$file", "--locked"], parent: false, exit: "nonzero", streams: "both", capability: ""},
+        // A freestanding (`no-os`) or cross-target fixture is a `jet build` for
+        // that target: the surface where E3301-E3305 are reported.
+        {name: "no-os", argv: ["build", "$file", "--target=wasm.no-os"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        {name: "target", argv: ["build", "$file", "--target=$arg"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        // A Library output's bindings are validated when `jet build --lib`
+        // builds it (E1341); a loadable `.jetlib` that a later `jet run`
+        // refuses (E1338, E1339) comes from the same build.
+        {name: "library_invalid_binding", argv: ["build", "--lib"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
+        {name: "jetlib_version_mismatch", argv: ["build", "$file", "--lib"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        {name: "jetlib_effect_refused", argv: ["build", "$file", "--lib"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        // `jet env --env missing` in a project whose `env.jet` declares other
+        // environment modules (E1337).
+        {name: "env_facet_missing", argv: ["env", "--env", "missing"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
+        // `jet env --trust` in a project whose staged `state/lock` is a
+        // malformed workspace lock (E1202).
+        {name: "workspace_lock_e1202", argv: ["env", "--trust"], parent: true, exit: "nonzero", streams: "rendered", capability: ""},
+        // `jetpack hangar verify <digest>` of an object whose payload was
+        // rewritten after `jetpack hangar ingest` (kit_ui_hangar_tamper).
+        {name: "jetpack_hangar_digest_mismatch", argv: ["hangar", "verify", "--no-color"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
         {name: "jetpack_e1250", argv: ["build", "main.jet", "--offline"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "web_target", argv: ["build", "$file", "--target=web"], parent: false, exit: "any", streams: "rendered-both", capability: ""},
         {name: "web_run", argv: ["run", "$file"], parent: false, exit: "any", streams: "both", capability: ""},
@@ -36,7 +55,7 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // runs it, and one with none is refused (kit_ui_invocation).
         {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""}
     }
-    loop name in ["env_facet_missing", "workspace_lock_e1202", "jetlib_version_mismatch", "jetlib_effect_refused", "library_invalid_binding", "parent_control_cancel", "no-os", "jetpack_hangar_digest_mismatch", "jetpack_retired_store_verbs", "target", "cost_cli"] {
+    loop name in ["parent_control_cancel", "jetpack_retired_store_verbs", "cost_cli"] {
         rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -123,6 +142,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         call.exit = row.exit
         call.streams = if lint && row.name != "a11y_cli" -> "lint" else -> row.streams
         call.unlocked_toolchain = row.name == "jetpack_e1250"
+        call.hangar_tamper = row.name == "jetpack_hangar_digest_mismatch"
         if row.name == "repl_deny" {
             loop line in source.split("\n") {
                 trimmed: line.trim().copy()
@@ -404,8 +424,13 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         kit_exec_write(files.join(schema, "{name}.snapshot"), snapshot)
         overlay.push(KitEnvVar{name: "JET_SCHEMA_CACHE_DIR", value: Val(schema)})
     }
-    args := [String]{ctx.env.jet}
+    args := [String]{if call.hangar_tamper -> ctx.env.jetpack else -> ctx.env.jet}
     loop arg in call.argv -> args.push(arg)
+    if call.hangar_tamper {
+        if ctx.env.jetpack == "" -> return [KitOutcome{verdict: kit_expect_verdict("ERROR", "jetpack binary required"), run: kit_exec_failed("jetpack binary required"), tier: "-"}]
+        digest: kit_ui_hangar_tamper(ctx, source, overlay) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}"), tier: "-"}]
+        args.push(digest)
+    }
     result: kit_exec_invoke_with_env(ctx.env, args, if call.parent -> work else -> source, ctx.scratch, call.stdin, overlay)
     actual: kit_ui_normalize(entry.path, kit_ui_actual(call, result), source)
     verdict: kit_ui_snapshot(entry, call, result, actual, ctx)
@@ -414,6 +439,26 @@ kit_ui_outcomes: fn(entry: KitEntry, ctx: KitCtx) -> [KitOutcome] {
         loop outcome in kit_ui_fixed(entry, ctx, source, overlay) -> outcomes.push(outcome)
     }
     outcomes
+}
+
+// Ingests a one-file tree into the case's Hangar root with the real `jetpack
+// hangar ingest`, then rewrites the stored payload in place, as a damaged store
+// holds it. Returns the object's digest.
+kit_ui_hangar_tamper: fn(ctx: KitCtx, source: String, overlay: [KitEnvVar]) -> String Err! {
+    tree: files.join(source, "hangar-source")
+    kit_exec_write(files.join(tree, "payload"), "trusted bytes\n")
+    ingest: kit_exec_invoke_with_env(ctx.env, [ctx.env.jetpack, "hangar", "ingest", tree, "--name", "ui-e1315", "--version", "1.0.0", "--no-color"], source, ctx.scratch, "", overlay)
+    if ingest.code != 0 -> return Err("jetpack hangar ingest exited {ingest.code}: {ingest.stderr}")
+    digests: "{ingest.stdout}\n{ingest.stderr}".replace("\n", " ").split(" ").filter(word -> word.starts_with("sha256-")).to_list()
+    if digests.len() == 0 -> return Err("jetpack hangar ingest printed no digest: {ingest.stderr}")
+    digest: digests[digests.len() - 1]
+    // JETPACK_ROOT is the case scratch's `jetpack` (kit_exec_base_value).
+    object: files.join(files.join(ctx.scratch, "jetpack"), "hangar/objects/{digest}")
+    payload: files.join(object, "payload")
+    files.set_mode(object, 0o755) ?? return Err("unseal {object}: {err}")
+    files.set_mode(payload, 0o644) ?? return Err("unseal {payload}: {err}")
+    files.write(payload, "tampered bytes\n") ?? return Err("tamper {payload}: {err}")
+    Ok(digest)
 }
 
 
