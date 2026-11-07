@@ -60,7 +60,7 @@
 // CENSUS_BUILD=0 stops after the check, CENSUS_SELFCHECK=0 before the
 // self-check. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
 // census of every pass writes the snapshot's preflight receipt, which
-// `chain.sh full` and Tools/release `admit` and `build` require.
+// `Tools/agent/Chain.jet TREE full` and Tools/release `admit` and `build` require.
 // Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
 //
 // `precommit` runs the census for a commit touching FILE... when one of them
@@ -912,7 +912,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         return 2
     }
     // One census at a time owns the snapshot; `publish latest` and
-    // `chain.sh seed-published` read the census output beside it.
+    // `Tools/agent/Chain.jet seed-published` read the census output beside it.
     _held: files.lock("{r14}/census-snap.lock") ?? {
         print("census: the snapshot lock cannot be taken: {err}")
         return 2
@@ -2176,7 +2176,7 @@ publish_latest: fn(dir: String) -[Exec, Env, FS, Time.Wait]> Step Never! {
 // `publish base COMMIT`: keep install-latest, which must say COMMIT, as
 // $JET_BASE_ROOT/<sha>/{jet,jet-runtime/,IDENTITY,COMMIT,GENERATION} for
 // lanes (base/latest names the newest; the BASE_KEEP newest stay), seed it
-// into the chain stage store (`chain.sh seed-published`), copy a jetpack an
+// into the chain stage store (`Tools/agent/Chain.jet seed-published`), copy a jetpack an
 // input-identical published commit has, and want its golden census.
 publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Step Never! {
     latest: "{scratch_root()}/discovery/b2/install-latest"
@@ -2214,8 +2214,9 @@ publish_base: fn(tools: String, repo: String, commit: String) -[Exec, Env, FS, I
     files.symlink(sha, link) ?? ()
     files.rename(link, "{base}/latest") ?? ()
     prune_bases(base)
-    seeded_run: run_in(tools, [String]{"bash", "Tools/agent/chain/chain.sh", "seed-published", dir}, "")
-    seeded: last_lines(both(seeded_run), 1).join("")
+    seeding := process.cmd([String]{"{seed_dir()}/jet", "Tools/agent/Chain.jet", "seed-published", dir}).cwd(tools).output_limit(268435456)
+    loop setting in unit_env(tools) -> seeding = seeding.env(setting.name, setting.value)
+    seeded: if seeding.run() == .Ok(receipt) -> last_lines("{receipt.output}{receipt.errors}", 1).join("") else -> "seed-published: Tools/agent/Chain.jet could not start"
     // A jetpack whose inputs did not change is copied now; otherwise the golden run builds one after its census.
     jetpack: if jetpack_reuse(repo, base, sha) -> "jetpack ready" else -> "jetpack build follows the golden census"
     Step{ok: true, line: "publish-base: {state} {dir}; {seeded}; {jetpack}; {want_goldens(tools, base, sha)}"}
@@ -2295,7 +2296,7 @@ golden_worker_main: fn(tools: String) -[Exec, Env, FS, IO, Time, Time.Wait]> Int
         }
         close(want)
         print("{stamp()} worker: queueing a golden run (want {short_sha(first_line_of("{base}/.golden-want"))})")
-        argv := [String]{"bash", "Tools/agent/chain/build-slot.sh", "{seed_dir()}/jet", "Tools/agent/Land.jet", "publish", "golden-run"}
+        argv := [String]{"{seed_dir()}/jet", "Tools/agent/Chain.jet", "slot", "--", "{seed_dir()}/jet", "Tools/agent/Land.jet", "publish", "golden-run"}
         spec := process.cmd(argv).cwd(tools).env("SLOT_SMALL", "0").output_limit(268435456)
         loop setting in unit_env(tools) -> spec = spec.env(setting.name, setting.value)
         receipt: spec.run() ?? {
@@ -2819,7 +2820,7 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
 }
 
 #Test("a refusal names the census that would admit the launch") {
-    assert_eq(refusal("chain.sh", "no preflight receipt for source identity x", "/seeds/a0_032", "0123456789abcdef"), "chain.sh: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0_032 jet Tools/agent/Land.jet census")
+    assert_eq(refusal("Chain.jet", "no preflight receipt for source identity x", "/seeds/a0_032", "0123456789abcdef"), "Chain.jet: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0_032 jet Tools/agent/Land.jet census")
     assert(refusal("release", "r", "/s", "").contains("in the dev worktree (name each"))
 }
 

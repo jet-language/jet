@@ -186,20 +186,11 @@
           ];
 
           shellHook = ''
-            # nix develop exports TMPDIR after exec, so this shell's environ
-            # never names it: hold it open for the shell's lifetime (children
-            # inherit the descriptor) so clean-nix-tmp.sh sees it as live.
-            [ ! -d "''${TMPDIR:-}" ] || exec {jet_nix_tmp_fd}<"$TMPDIR"
             if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               export JET_ROOT="$repo_root"
             else
               export JET_ROOT="$PWD"
             fi
-
-            if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
-              "$JET_ROOT/Tools/agent/clean-nix-tmp.sh"
-            fi
-            export JET_NIX_TMP_CLEANED=1
           '';
         });
 
@@ -296,20 +287,11 @@
           ];
 
           shellHook = ''
-            # nix develop exports TMPDIR after exec, so this shell's environ
-            # never names it: hold it open for the shell's lifetime (children
-            # inherit the descriptor) so clean-nix-tmp.sh sees it as live.
-            [ ! -d "''${TMPDIR:-}" ] || exec {jet_nix_tmp_fd}<"$TMPDIR"
             if repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
               export JET_ROOT="$repo_root"
             else
               export JET_ROOT="$PWD"
             fi
-
-            if [ "''${JET_NIX_TMP_CLEANED:-}" != "1" ]; then
-              "$JET_ROOT/Tools/agent/clean-nix-tmp.sh"
-            fi
-            export JET_NIX_TMP_CLEANED=1
 
             # banner on stderr: `nix develop -c <cmd>` stdout stays clean for
             # grepping/capture (agents misread results otherwise)

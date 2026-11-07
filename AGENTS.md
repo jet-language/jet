@@ -333,15 +333,15 @@ in one pass:
   `jet Tools/agent/Land.jet census` (the seed's keep-going `jet check` and
   `jet build` of the compiler, the runtime pack and the self-check, every row
   of every phase in one report; the lander runs it through `Land.jet
-  precommit` before every compiler commit) and `Tools/agent/chain/chain.sh
+  precommit` before every compiler commit) and `jet Tools/agent/Chain.jet
   TREE LEVEL --dry-run`, which names every stage the launch would build. Every
   row is clean or carries a written disposition naming the commit in this
   launch that fixes it. Launching to "see what fails next" is forbidden. The
   launchers enforce it: a clean census writes the snapshot's receipt
   (`Land.jet receipt`, keyed on the compiler source identity and the seed),
-  and `chain.sh` full and `Tools/release/Main.jet` `admit` and `build` refuse
-  to start without the receipt for their tree and seed; `--check-gate`
-  gives the answer without launching.
+  and `Tools/agent/Chain.jet TREE full` and `Tools/release/Main.jet` `admit`
+  and `build` refuse to start without the receipt for their tree and seed;
+  `--check-gate` gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
@@ -408,7 +408,7 @@ proof the criteria name. Broad suites, unfiltered censuses, and
 required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
-Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
+Agent tooling lives in the repository: `Tools/agent/Chain.jet` (the self-host
 chain and the machine build slots), `Tools/agent/Land.jet` (`serve` is the
 lander, `batch` its batch landing, `census` the preflight, `publish` keeps
 landed compilers for lanes; `queue` adds a land job for the lander; `land`
