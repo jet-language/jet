@@ -1,6 +1,6 @@
 use {
     s6_retirement_reviewed_files: core.files
-    corpus_manifest.policy_split_whitespace
+    corpus_manifest.[policy_split_whitespace, guards_enter_root]
     jet_parser.[parse_generated_source]
     jet_foundation.[DIAGNOSTIC_ERROR]
     jet_lexer.[lex, lex_generated, Token, TokenTables, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL, TOKEN_KW_IT, TOKEN_SELF, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_PLUS_PLUS, TOKEN_MINUS_MINUS, TOKEN_GT, TOKEN_SHR, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_STAR, TOKEN_KW_FN, TOKEN_BANG, TOKEN_QUESTION, TOKEN_HASH, TOKEN_UNIFIED_ARROW, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_EOF]
@@ -541,13 +541,16 @@ s6_retirement_reviewed_surface_law: fn() {
 }
 
 #Test("retirement walk skips outputs and nested worktrees but keeps live source visible") {
+    guards_enter_root()
     s6_retirement_reviewed_walk_law()
 }
 #Test("failure syntax detector accepts current forms only") {
+    guards_enter_root()
     s6_retirement_reviewed_detector_law()
 }
 // Known failing: #6221 (retired `?` propagation in Compiler/JetDevserver and
 // Compiler/JetDebug, JetLSP Lsp.jet:279, and two docs).
 #Test("failure surface has no active retired spelling") {
+    guards_enter_root()
     s6_retirement_reviewed_surface_law()
 }

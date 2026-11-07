@@ -124,7 +124,10 @@ kit_no_nix_failure: fn(step: KitStep, run: KitRun) -> KitVerdict? {
 // A `host-port:` golden row runs its program in a network namespace of its
 // own, so the fixed port it binds is free whatever the host holds: a user
 // namespace that maps the caller to root holds a fresh network namespace,
-// whose loopback `ip` raises before the program starts.
+// whose loopback `ip` raises before the program starts. The `sh` that raises
+// it and then becomes the program is a named exclusion from the no-shell rule,
+// as Assets/no-nix.sh is: Core has no unshare or exec leaf, so no Jet process
+// can enter the namespace, raise its loopback and then run the program in it.
 KIT_NETNS_RAISE: "ip=\"$1\"; shift; \"$ip\" link set lo up || exit 125; exec \"$@\""
 
 // unshare, sh and ip, or why this host has no private network namespace.

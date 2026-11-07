@@ -62,6 +62,7 @@ s6_comptime_collapse_whitespace: fn(source: String) -> String {
 // Diagnostic-message entries above are what the original unfiltered extractor
 // actually finds; they are not reinterpreted as namespaces in the new table.
 #Test("architecture classifies every comptime Core namespace") {
+    guards_enter_root()
     source: files.read("Compiler/JetCli/Source/Cli/CoreSources.jet") ?? panic("read canonical Core sources")
     architecture: files.read("Docs/spec/architecture.md") ?? panic("read architecture classification")
     loop row in source.split("module_name: \"") {
@@ -75,6 +76,7 @@ s6_comptime_collapse_whitespace: fn(source: String) -> String {
 // Port of comptime_core_one_home.rs:228-268. Rust kernel include/fingerprint
 // scans retire; both reference documentation predicates remain unchanged.
 #Test("measurement has one semantic home") {
+    guards_enter_root()
     source: files.read("Docs/spec/reference/core-library.md") ?? panic("read Core reference")
     docs: s6_comptime_collapse_whitespace(source)
     statements: [String]{

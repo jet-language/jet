@@ -1,6 +1,7 @@
 use s1_trust_publication_files: core.files
 // tests/jetpack_trust_root.rs:20-47, exact on-disk manifest/doc contract.
 #Test("trust_publication_contract_is_owned_pending_and_has_no_fake_root") {
+    guards_enter_root()
     publication: "Docs/site/dist/keys"
     manifest: s1_trust_publication_files.read("{publication}/trust-manifest.json") ?? panic("manifest")
     assert_eq(manifest.trim(), "{{\"schema\":1,\"domain\":\"jet-lang.dev\",\"status\":\"awaiting-key-ceremony\",\"root\":null,\"keys\":[],\"rotation\":\"offline threshold root rotation; publish a new manifest only after the old root verifies the new root\"}}")

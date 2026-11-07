@@ -63,6 +63,7 @@ df_body_violations: fn(text: String) -> [String] {
 
 // tests/diagnostics_format.rs:221-233.
 #Test("diagnostic_body_validator_rejects_malformed_rows") {
+    guards_enter_root()
     malformed: "| Code | What | Why | Fix |\n| --- | --- | --- | --- |\n| E0001 | what | why | |\n| E0002 | what | why |\n| `E0003` | what | why | |\n"
     violations: df_body_violations(malformed)
     assert_eq(violations.len(), 3)

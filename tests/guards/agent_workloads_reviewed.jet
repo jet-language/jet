@@ -520,21 +520,26 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
 }
 
 #Test("policy_digest_covers_authority_and_receipt_contract") {
+    guards_enter_root()
     s4_review_policy_digest_covers_authority_and_receipt_contract()
 }
 #Test("recorded_baselines_cover_frozen_tasks") {
+    guards_enter_root()
     s4_review_recorded_baselines_cover_frozen_tasks()
 }
 #Test("manifest_is_complete_frozen_and_non_vacuous") {
+    guards_enter_root()
     s4_review_manifest_is_complete_frozen_and_non_vacuous()
 }
 #Test("compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows") {
+    guards_enter_root()
     s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows()
 }
 
 // Port of tests/agent_workloads.rs:1378-1395: the guards read each recorded
 // stdout/stderr artifact as baselines/<path> only after s4_review_path accepts it.
 #Test("receipt_artifact_paths_reject_escape_attempts") {
+    guards_enter_root()
     assert(s4_review_path("outputs/bash/task.stdout"))
     hostile: [String]{"/etc/passwd", "../outside", "outputs//task", "outputs/../task", "outputs/./task", "..\\outside", "C:\\outside"}
     loop path in hostile {
@@ -544,6 +549,7 @@ s4_review_compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows: 
 
 // Port of tests/agent_workloads.rs:1397-1414.
 #Test("corpus_fixture_paths_reject_escape_attempts") {
+    guards_enter_root()
     assert(s4_review_path("inputs/repository"))
     hostile: [String]{"", "/etc/passwd", "../outside", "inputs/../outside", "..\\outside", "C:\\outside", "inputs//repository", "inputs/./repository"}
     loop path in hostile {
@@ -560,6 +566,7 @@ s4_review_closure_error: fn(root: String, sums: String) -> String {
 
 // Port of tests/agent_workloads.rs:2340-2416.
 #Test("checksum_closure_rejects_drift_and_hostile_sums") {
+    guards_enter_root()
     home: s4_review_sys.get("HOME") ?? panic("HOME required")
     cache: s4_review_sys.get("XDG_CACHE_HOME") ?? "{home}/.cache"
     scratch: s4_review_sys.get("JET_SCRATCH_ROOT") ?? (s4_review_sys.get("JET_STATE_ROOT") ?? "{cache}/jet-dev")

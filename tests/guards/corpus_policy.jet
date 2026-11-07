@@ -483,13 +483,19 @@ policy_test_checked_findings_and_provenance: fn() {
     }
     assert(has_renderer, "Lua renderer is inventoried")
 }
-#Test("checked_manifest_has_all_audited_findings_and_provenance") { policy_test_checked_findings_and_provenance() }
+#Test("checked_manifest_has_all_audited_findings_and_provenance") {
+    guards_enter_root()
+    policy_test_checked_findings_and_provenance()
+}
 policy_test_uncovered_scope: fn() {
     manifest := policy_manifest()
     manifest.scopes.push(PolicyScopeRow{rule: "entry-explicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
     assert(policy_validate_manifest(manifest).join("\n").contains("unclassified source selector"), "uncovered scope must fail")
 }
-#Test("manifest_rejects_a_scope_without_source_coverage") { policy_test_uncovered_scope() }
+#Test("manifest_rejects_a_scope_without_source_coverage") {
+    guards_enter_root()
+    policy_test_uncovered_scope()
+}
 policy_test_unguarded_finding: fn() {
     manifest := policy_manifest()
     kept := [PolicyScopeRow]{}
@@ -497,7 +503,10 @@ policy_test_unguarded_finding: fn() {
     manifest.scopes = kept
     assert(policy_validate_manifest(manifest).join("\n").contains("entry-explicit has no executable corpus or domain guard"), "orphan finding must fail")
 }
-#Test("manifest_rejects_a_finding_without_an_executable_guard") { policy_test_unguarded_finding() }
+#Test("manifest_rejects_a_finding_without_an_executable_guard") {
+    guards_enter_root()
+    policy_test_unguarded_finding()
+}
 policy_test_invalid_manifest_rows: fn() {
     assert_eq(policy_manifest_failure("[unknown]\n"), "manifest line 1: unknown section [unknown]")
     assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:../escape.jet\twhy"), "manifest line 2: manifest path is not a normalized relative path (../escape.jet)")
@@ -505,7 +514,10 @@ policy_test_invalid_manifest_rows: fn() {
     assert_eq(policy_manifest_failure("[scope]\n2\tentry-explicit\tfile:ok.jet\twhy"), "manifest line 2: unsupported manifest version")
     assert_eq(policy_manifest_failure("[scope]\n1\tentry-explicit\tfile:ok.jet"), "manifest line 2: wrong field count or row outside a section")
 }
-#Test("corpus manifest parser planted invalid rows") { policy_test_invalid_manifest_rows() }
+#Test("corpus manifest parser planted invalid rows") {
+    guards_enter_root()
+    policy_test_invalid_manifest_rows()
+}
 policy_test_duplicate_and_provenance_violations: fn() {
     manifest := policy_manifest()
     manifest.sources.push(manifest.sources[0])
@@ -514,7 +526,10 @@ policy_test_duplicate_and_provenance_violations: fn() {
     assert(errors.contains("duplicate source selector {manifest.sources[0].selector}"), "duplicate source must fail")
     assert(errors.contains("artifact family:planted names unknown producer producer:new.rs#render"), "missing provenance must fail")
 }
-#Test("corpus manifest validation planted duplicate and provenance violations") { policy_test_duplicate_and_provenance_violations() }
+#Test("corpus manifest validation planted duplicate and provenance violations") {
+    guards_enter_root()
+    policy_test_duplicate_and_provenance_violations()
+}
 policy_test_exception_source_roles: fn() {
     manifest: policy_manifest()
     loop exception in manifest.exceptions {
@@ -523,14 +538,20 @@ policy_test_exception_source_roles: fn() {
         assert(source.role == "expert-lesson" || source.role == "negative-diagnostic", "exception requires expert or negative source")
     }
 }
-#Test("exceptions_are_limited_to_expert_or_negative_sources") { policy_test_exception_source_roles() }
+#Test("exceptions_are_limited_to_expert_or_negative_sources") {
+    guards_enter_root()
+    policy_test_exception_source_roles()
+}
 policy_test_canonical_source_exception: fn() {
     manifest := policy_manifest()
     manifest.exceptions.push(PolicyExceptionRow{rule: "entry-explicit", selector: "file:Examples/Basics/Hello.jet", site: "stmt:top-level@0..0", expected: "1", protocol: "fixture", reason: "planted"})
     error: "exception entry-explicit file:Examples/Basics/Hello.jet requires an expert-lesson or negative-diagnostic source, found CanonicalTeaching"
     assert(policy_validate_manifest(manifest).contains(error), "canonical source cannot absorb a violation")
 }
-#Test("corpus manifest planted canonical-source exception") { policy_test_canonical_source_exception() }
+#Test("corpus manifest planted canonical-source exception") {
+    guards_enter_root()
+    policy_test_canonical_source_exception()
+}
 
 policy_test_unclassified_inventory_entries: fn() {
     manifest: policy_manifest()
@@ -544,7 +565,10 @@ policy_test_unclassified_inventory_entries: fn() {
     assert(producer_error.contains("unclassified generated-source producer"), "a synthetic producer without provenance must fail")
     assert_eq(policy_audit_inventory(manifest, [String]{"Examples/Basics/Hello.jet"}, [String]{"producer:Jetpack/Integrations/Source/Foreign/Binders/Lua.jet#pkg_lua_render_jet"}), [String]{})
 }
-#Test("inventory_rejects_new_source_or_producer_without_a_row") { policy_test_unclassified_inventory_entries() }
+#Test("inventory_rejects_new_source_or_producer_without_a_row") {
+    guards_enter_root()
+    policy_test_unclassified_inventory_entries()
+}
 policy_test_occurrence_scoped_exceptions: fn() {
     manifest: policy_manifest()
     selector: "tests/ui/args_spec_bad_parse_arity.jet"
@@ -556,7 +580,10 @@ policy_test_occurrence_scoped_exceptions: fn() {
     applied: policy_apply_exceptions(manifest, selector, [PolicyOccurrence]{candidate}) ?? panic("recorded occurrence is accepted")
     assert_eq(applied, [PolicyOccurrence]{})
 }
-#Test("exception_matching_is_occurrence_scoped") { policy_test_occurrence_scoped_exceptions() }
+#Test("exception_matching_is_occurrence_scoped") {
+    guards_enter_root()
+    policy_test_occurrence_scoped_exceptions()
+}
 policy_test_missing_and_shifted_exception_sites: fn() {
     manifest: policy_manifest()
     selector: "tests/ui/args_spec_bad_parse_arity.jet"
@@ -565,7 +592,10 @@ policy_test_missing_and_shifted_exception_sites: fn() {
     assert_eq(policy_validate_occurrences(manifest, selector, [PolicyOccurrence]{}), Val("file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site"))
     assert_eq(policy_exception_failure(manifest, selector, [PolicyOccurrence]{}), "file=tests/ui/args_spec_bad_parse_arity.jet; rule=raw-cli-fixed-shape; site=call:process.args@0..0; why=expected 1 occurrence(s), found 0; replacement=remove the additional occurrence or update the exact reviewed site")
 }
-#Test("corpus occurrence exceptions reject missing and shifted sites") { policy_test_missing_and_shifted_exception_sites() }
+#Test("corpus occurrence exceptions reject missing and shifted sites") {
+    guards_enter_root()
+    policy_test_missing_and_shifted_exception_sites()
+}
 
 PolicyInventoryEntry: struct { path: String, role: String, producer: String? }
 PolicyProvenanceEntry: struct { producer: String, artifact: String, protocol: String }
@@ -705,7 +735,10 @@ policy_test_usize_domain: fn() {
     assert_eq(policy_site_error("fn:run@+0001..18446744073709551615"), None)
     assert_eq(policy_site_error("fn:run@18446744073709551615..1"), Val("site end precedes start (fn:run@18446744073709551615..1)"))
 }
-#Test("corpus manifest usize parsing retains the full x64 domain") { policy_test_usize_domain() }
+#Test("corpus manifest usize parsing retains the full x64 domain") {
+    guards_enter_root()
+    policy_test_usize_domain()
+}
 
 policy_test_unicode_manifest_fields: fn() {
     manifest: policy_parse_manifest("[source]\n1\tfile:案例.jet\tcanonical-teaching\troutine\tdecision\tproof\towner\treason é") ?? panic("Unicode manifest")
@@ -717,7 +750,10 @@ policy_test_unicode_manifest_fields: fn() {
     assert_eq(policy_manifest_failure("[未知]\n"), "manifest line 1: unknown section [未知]")
     assert_eq(policy_slice_bytes("é", 0, 0), "")
 }
-#Test("corpus manifest byte spans retain Unicode fields") { policy_test_unicode_manifest_fields() }
+#Test("corpus manifest byte spans retain Unicode fields") {
+    guards_enter_root()
+    policy_test_unicode_manifest_fields()
+}
 // Rust str::split_whitespace uses Unicode White_Space, not just ASCII space.
 // Scan byte spans directly; only the returned words allocate.
 policy_space_width: fn(bytes: [U8], index: Int) -> Int {
@@ -768,4 +804,7 @@ policy_test_unicode_word_splitting: fn() {
     assert_eq(policy_split_whitespace(" \t{carriage_return}\n"), [String]{})
     assert_eq(policy_split_whitespace("例{emspace}子"), [String]{"例", "子"})
 }
-#Test("corpus shared word splitting matches Unicode White_Space") { policy_test_unicode_word_splitting() }
+#Test("corpus shared word splitting matches Unicode White_Space") {
+    guards_enter_root()
+    policy_test_unicode_word_splitting()
+}

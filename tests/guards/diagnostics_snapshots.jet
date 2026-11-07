@@ -115,6 +115,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 // tests/diagnostics_coverage.rs:1092-1110: only column-0 report openers count;
 // prose, comments, quoted assertions and indented text never do.
 #Test("report_openers_ignore_prose_comments_and_rust_assertion_text") {
+    guards_enter_root()
     text: "Error [E0001]: what; Why: [E9998]; Fix: [E9997]\n// Error [E9996]\nassert!(stderr.contains(\"[E9995]\"));\n  Error [E9994]: indented\nWarning [L0001]: lint\nStop [E0002]: stop\nLint [L0002]: lint\nError [jet.UnknownCommand]: type path\n"
     assert_eq(dc_report_codes(text).join(" "), "E0001 L0001 E0002 L0002 jet.UnknownCommand")
 }
@@ -125,6 +126,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 // naming a user-declared diagnostic type (`app.UnservedRoute`) is not a
 // registry row.
 #Test("diagnostic_snapshots_keep_the_complete_registered_product") {
+    guards_enter_root()
     rows: dc_registered_rows()
     known: ds_known_failing()
     failures := [String]{}
@@ -166,6 +168,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 // tests/diagnostics_coverage.rs:1070-1081: every UI, lint and report fixture
 // keeps its expected snapshot, unless the accepted-failing ledger owns it.
 #Test("every_report_fixture_has_a_snapshot_file") {
+    guards_enter_root()
     known: ds_known_failing()
     missing := [String]{}
     loop path in ds_report_fixture_snapshot_paths() {
@@ -178,6 +181,7 @@ ds_part: fn(line: String, label: String) -> Bool {
 // `bench` routes through the active E2101 unknown-command row, which the
 // snapshot renders with its type path and link.
 #Test("retired_bench_command_snapshot_keeps_registered_teaching_code") {
+    guards_enter_root()
     rows: dc_registered_rows()
     row: ds_row(rows, "jet.UnknownCommand")
     assert(row >= 0, "the unknown-command route must stay registered")
@@ -207,6 +211,7 @@ ds_set_diff: fn(left: [String], right: [String]) -> (left_only: [String], right_
 // tests/diagnostics_coverage.rs:1114-1126: the reverse coverage diff names a
 // fixture code that is retired or no longer registered.
 #Test("reverse_coverage_diff_names_retired_and_unregistered_fixture_codes") {
+    guards_enter_root()
     diff: ds_set_diff([String]{}, dc_report_codes("Error [E0004]: retired\nError [E9999]: no longer registered\n"))
     assert_eq(diff.left_only.len(), 0)
     assert_eq(diff.right_only.join("\n  "), "E0004\n  E9999")
@@ -216,6 +221,7 @@ ds_set_diff: fn(left: [String], right: [String]) -> (left_only: [String], right_
 // runtime and CLI artifacts. tests/cli/repl_e1801.txt left the tree with the
 // Rust REPL fixture and is not required.
 #Test("diagnostic_voice_scope_includes_owned_runtime_artifacts") {
+    guards_enter_root()
     paths: dc_snapshot_texts().map(snapshot -> snapshot.path)
     loop expected in ["tests/fixtures/module-eval-diagnostics/E0970.stderr", "tests/fixtures/module-eval-diagnostics/E0971.stderr", "tests/cli/doctor_l2101.txt", "tests/cli/fetch_no_git_e1203.txt"] {
         assert(dc_has(paths, expected), "voice scan omitted {expected}")

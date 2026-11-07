@@ -441,6 +441,7 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
 
 // One scan of the roots feeds every check.
 #Test("every closed list is generated, kept closed by the kernel ledger, or in the shrinking baseline, and no two files duplicate one") {
+    guards_enter_root()
     findings: closed_list_findings()
     problems := [String]{}
     copies: closed_list_mirror_problems(findings, closed_list_rows(CLOSED_LIST_MIRRORS_PATH), problems)
@@ -450,6 +451,7 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
 }
 
 #Test("editing a mirror copy without its home fails the mirror ledger") {
+    guards_enter_root()
     home: ClosedListFinding{path: "h.jet", name: "HOME", members: [String]{"abi", "cli", "ffi"}}
     twin: ClosedListFinding{path: "c.jet", name: "COPY", members: [String]{"abi", "cli", "ffi"}}
     edited: ClosedListFinding{path: "c.jet", name: "COPY", members: [String]{"abi", "cli", "ffi", "gpu"}}
@@ -470,6 +472,7 @@ closed_list_duplicate_problems: fn(findings: [ClosedListFinding], copies: [Strin
 }
 
 #Test("the closed list scanner reads enums, string lists and generated headers") {
+    guards_enter_root()
     found := [ClosedListFinding]{}
     closed_list_findings_in("a.jet", "Color: enum {{\n    Red Green\n    Blue(Int)\n    Custom{{ name: String }}\n\n    name: fn(self) -> String {{ \"x\" }}\n}}\nNAMES: comptime {{ [String]{{\n    \"go\", \"Java\", // \"cobol\"\n    \"r\",\n}} }}\nSHORT: [String]{{\"a\", \"b\"}}\nInline: enum {{ A B C }}\nlocal: fn() {{ x: [String]{{\"p\", \"q\", \"r\"}} }}\n", found)
     assert_eq(found.len(), 3)
