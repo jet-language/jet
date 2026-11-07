@@ -1,0 +1,31 @@
+Person: struct {
+    name: String
+    dept: String
+}
+
+// Copies each department's group out of the Map and back: quadratic.
+by_dept_copied: fn(people: [Person]) -> [String: [Person]] {
+    groups := [String: [Person]]{}
+    loop p in people {
+        group := groups.get(p.dept) ?? [Person]{}
+        group.push(p.copy())
+        groups[p.dept] = group
+    }
+    groups
+}
+
+// Grows each department's group in place: no lint.
+by_dept_in_place: fn(people: [Person]) -> [String: [Person]] {
+    groups := [String: [Person]]{}
+    loop p in people {
+        if !groups.has_key(p.dept) -> groups[p.dept] = [Person]{}
+        groups[p.dept].push(p.copy())
+    }
+    groups
+}
+
+run: fn() {
+    people: [Person]{{name: "Ada", dept: "eng"}, {name: "Bo", dept: "ops"}, {name: "Cy", dept: "eng"}}
+    print(by_dept_copied(people).len())
+    print(by_dept_in_place(people).len())
+}
