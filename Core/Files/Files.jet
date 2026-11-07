@@ -847,6 +847,9 @@ exists_impl: fn(path: String) -> Bool Never! {
 }
 
 
+/// Whether something exists at `path`. A final symbolic link is followed, so a
+/// broken link is false (`lexists` sees the link itself), and a path that
+/// cannot be inspected is false too, never an error.
 exists: fn(path: String | Path) -[FS]> Bool Never! {
     if read_probe_fault() -> return false
     exists_impl(path_text(path))
@@ -2081,6 +2084,8 @@ getmtime: fn(path: String) -[FS]> Int IOError! {
 }
 
 
+/// Whether `path` names an entry, a symbolic link itself included: a broken
+/// link is true here, where `exists` follows it and is false.
 lexists: fn(path: String) -[FS]> Bool Never! { exists_impl(path) || is_symlink(path) }
 
 
