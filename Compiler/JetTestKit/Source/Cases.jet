@@ -115,7 +115,7 @@ kit_known_ledger: fn(known: [String: String], path: String) -> String {
 kit_cases_known_verdict: fn(outcome: KitOutcome, annotation: String) -> KitOutcome {
     result := outcome
     if annotation == "" -> return result
-    if kit_cases_owned_failure(result.verdict) {
+    if kit_cases_owned_failure(result.verdict) || kit_cases_owned_refusal(result.verdict, annotation) {
         result.verdict.status = "KNOWN-FAILING"
         result.verdict.detail = "{annotation}: {result.verdict.detail}"
     } else if result.verdict.status == "PASS" {
@@ -132,4 +132,11 @@ kit_cases_known_verdict: fn(outcome: KitOutcome, annotation: String) -> KitOutco
 kit_cases_owned_failure: fn(verdict: KitVerdict) -> Bool {
     if verdict.status == "FAIL" -> return true
     verdict.status == "ERROR" && (verdict.detail.contains("internal compiler error (exit 101)") || verdict.detail.contains("child terminated by signal") || verdict.detail.contains("without reading it"))
+}
+
+// A seam refusal a ledger row owns: its reason starts `REFUSED: <seam> ` with
+// the exact seam this run refused on, so a refusal for any other reason (a
+// grammar error, a different seam) stays REFUSED.
+kit_cases_owned_refusal: fn(verdict: KitVerdict, annotation: String) -> Bool {
+    verdict.status == "REFUSED" && verdict.detail != "" && annotation.contains(" REFUSED: {verdict.detail} ")
 }

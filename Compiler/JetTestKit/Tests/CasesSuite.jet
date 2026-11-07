@@ -211,6 +211,17 @@ cases_test_source: fn(root: String, name: String, text: String) {
     assert(!kit_cases_owned_failure(kit_expect_verdict("ERROR", "wait: interrupted")))
 }
 
+#Test("a ledger row owns a seam refusal only when its reason names that exact seam") {
+    refused: KitOutcome{verdict: kit_expect_verdict("REFUSED", "store-ingest"), run: kit_steps_action_run()}
+    owned: kit_cases_known_verdict(refused, "#3590 REFUSED: store-ingest Store is not a package")
+    assert_eq(owned.verdict.status, "KNOWN-FAILING")
+    assert(owned.verdict.detail.starts_with("#3590 REFUSED: store-ingest"))
+    assert_eq(kit_cases_known_verdict(refused, "#3590 REFUSED: lock-fixture Store is not a package").verdict.status, "REFUSED")
+    assert_eq(kit_cases_known_verdict(refused, "#3590 store-ingest without the refusal prefix").verdict.status, "REFUSED")
+    grammar: KitOutcome{verdict: kit_expect_verdict("REFUSED", "line 4: missing ':'"), run: kit_steps_action_run()}
+    assert_eq(kit_cases_known_verdict(grammar, "#3590 REFUSED: store-ingest Store is not a package").verdict.status, "REFUSED")
+}
+
 #Test("processes a case leaves running in its scratch are stopped before the scratch goes") {
     root: cases_test_root("strays")
     scratch: files.join(root, "scratch")
