@@ -409,10 +409,11 @@ required token. A worker's type-check is not proof of runtime behavior, tier
 parity, goldens, snapshots, or generated artifacts.
 
 Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
-chain and the machine build slots), `Tools/agent/land/` (the lander, batch
-landing, the census preflight and publishing), `Tools/agent/Land.jet` (`queue`
-adds a land job for the lander; `land` lands a patch stack directly, with
-`--scratch-copy` on a fresh clone), `Tools/agent/Suite.jet` (one `jet test
+chain and the machine build slots), `Tools/agent/Land.jet` (`serve` is the
+lander, `batch` its batch landing, `census` the preflight, `publish` keeps
+landed compilers for lanes; `queue` adds a land job for the lander; `land`
+lands a patch stack directly, with `--scratch-copy` on a fresh clone),
+`Tools/agent/Suite.jet` (one `jet test
 Compiler --profile` run on a compiler snapshot) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
 Tools find state, scratch, queues, published compilers and seeds only through
 the root variables of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs`

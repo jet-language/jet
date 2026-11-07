@@ -25,8 +25,8 @@
 # renamed in, and only clean stages (rc 0, no keep-going rows) are stored.
 # Canonical root: a built compiler embeds its build tree's path, so every build and pack runs with TREE
 # bind-mounted at $JET_SCRATCH_ROOT/discovery/r14/snap in a private mount namespace (same uid). That is the
-# lander's census root, so the compiler the lander publishes is the s1 of HEAD byte for byte and publish-base.sh
-# seeds the store with it. The real snap is never touched: the namespace mounts its own dir over r14.
+# lander's census root, so the compiler the lander publishes is the s1 of HEAD byte for byte and
+# `Land.jet publish base` seeds the store with it. The real snap is never touched: the namespace mounts its own dir over r14.
 # Slots: chain.sh queues itself in build-slot.sh once, for every stage the store does not hold (SLOT_SMALL=1 when
 # only runtime packs or the check remain); a fully reused chain takes no slot. Never wrap chain.sh in
 # build-slot.sh yourself (inside a slot, i.e. SLOT_CPUS set, it runs inline).
@@ -65,7 +65,7 @@ fi
 [ -n "${JET_PACK_MUSL_LIB:-}" ] || { echo "chain.sh: set JET_PACK_MUSL_LIB to the static musl lib dir (in the environment or the jet env file Tools/agent/roots.sh reads)"; exit 2; }
 export JET_PACK_MUSL_LIB
 
-# seed-published INSTALL_DIR (publish-base.sh): INSTALL_DIR holds the compiler the lander's census built at the
+# seed-published INSTALL_DIR (`Land.jet publish base`): INSTALL_DIR holds the compiler the lander's census built at the
 # canonical root; it is that tree's s1 (and its pack, pack1), so store both under the keys a chain computes.
 SEEDPUB=
 if [ "${1:-}" = seed-published ]; then

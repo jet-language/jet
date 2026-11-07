@@ -17,7 +17,7 @@
 // jetpack: the corpora use the jetpack beside the snapshot's jet. A snapshot
 // without one gets JETPACK when set, else base/SHA/jetpack, where SHA is
 // JETDIR/COMMIT, else TREE/.chain-base (a hosted engine built from the same
-// commit as the jet under test). Tools/agent/land/publish-base.sh gives every
+// commit as the jet under test). `Tools/agent/Land.jet publish` gives every
 // published base its jetpack; a cases or corpora run without one prints WARN
 // first and last.
 // SUITE_JOBS and SUITE_MEMORY (e.g. 8G) override the pool's entry count and
@@ -127,7 +127,7 @@ choose_jetpack: fn(jetdir: String, sha: String, base: String, profile: String) -
     // changes Jetpack must still be proved with its own jetpack.
     standin: newest_jetpack(base)
     if standin != "" -> return Pool{jetpack: standin.copy(), warn: "WARN: STAND-IN JETPACK for {commit}: no {base}/{shown}/jetpack, using {standin}; Jetpack source changes in this tree are NOT exercised"}
-    Pool{jetpack: "", warn: "WARN: NO JETPACK for {commit} (no {base}/{shown}/jetpack): ~156 jetpack cases rows will ERROR 'jetpack binary required'; build it with: SLOT_SMALL=0 Tools/agent/chain/build-slot.sh bash Tools/agent/land/publish-base.sh --jetpack-run {rerun}"}
+    Pool{jetpack: "", warn: "WARN: NO JETPACK for {commit} (no {base}/{shown}/jetpack): ~156 jetpack cases rows will ERROR 'jetpack binary required'; build it with: SLOT_SMALL=0 Tools/agent/chain/build-slot.sh jet Tools/agent/Land.jet publish jetpack {rerun}"}
 }
 
 // The resolved jetpack of the most recently modified published base that
