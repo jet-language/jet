@@ -1,0 +1,17 @@
+// A #Test claim that drives a host tool skips where the tool is absent, as a
+// case's `requires: tool:` row reports SKIP-HOST. Jetpack's bootstrap unit
+// lists this file for its own claims (Jetpack/Bootstrap/tests.list).
+use {
+    process: core.process
+}
+
+// The tool's path on PATH, or None once the running claim reports skip, so the
+// test ends there: `node: kit_require_tool("node") ?? return`.
+kit_require_tool: fn(name: String) -[FS, Env]> String? {
+    found: process.which(name)
+    if found == None -> kit_skip_claim(true)
+    found
+}
+
+// The runtime's whole-claim skip, which a first `.skip { }` member also takes.
+#Import(c) kit_skip_claim: fn(whole_test: Bool) = "jet_rt_test_skip_scope"

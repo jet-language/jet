@@ -330,18 +330,18 @@ in one pass:
 - **Expensive launches are gated, never bypassed.** A stage0, self-hosting
   chain, release build or any other run costing more than about 15 minutes
   starts only after a clean collect-all preflight of that exact commit:
-  `Tools/agent/land/census-snap.sh` (the seed's keep-going `jet check` and
+  `jet Tools/agent/Land.jet census` (the seed's keep-going `jet check` and
   `jet build` of the compiler, the runtime pack and the self-check, every row
-  of every phase in one report; the lander runs it through `precommit.sh`
-  before every compiler commit) and `Tools/agent/chain/chain.sh TREE LEVEL
-  --dry-run`, which names every stage the launch would build. Every row is
-  clean or carries a written disposition naming the commit in this launch that
-  fixes it. Launching to "see what fails next" is forbidden. The launchers
-  enforce it: a clean census writes the snapshot's receipt
-  (`Tools/agent/land/preflight-receipt.mjs`, keyed on the compiler source
-  identity and the seed), and `chain.sh` full, `release-compiler.mjs` and
-  `publish-release.mjs build` refuse to start without the receipt for their
-  tree and seed; `--check-gate` gives the answer without launching.
+  of every phase in one report; the lander runs it through `Land.jet
+  precommit` before every compiler commit) and `Tools/agent/chain/chain.sh
+  TREE LEVEL --dry-run`, which names every stage the launch would build. Every
+  row is clean or carries a written disposition naming the commit in this
+  launch that fixes it. Launching to "see what fails next" is forbidden. The
+  launchers enforce it: a clean census writes the snapshot's receipt
+  (`Land.jet receipt`, keyed on the compiler source identity and the seed),
+  and `chain.sh` full and `Tools/release/Main.jet` `admit` and `build` refuse
+  to start without the receipt for their tree and seed; `--check-gate`
+  gives the answer without launching.
 - **Every compiler phase has a collect-all mode, or that is the first defect.**
   Parse, imports, sema, comptime, codegen lowering, backend lowering, machine
   emission, object, link and run must each record a failing item as a census
@@ -412,8 +412,8 @@ Agent tooling lives in the repository: `Tools/agent/chain/` (the self-host
 chain and the machine build slots), `Tools/agent/land/` (the lander, batch
 landing, the census preflight and publishing), `Tools/agent/Land.jet` (`queue`
 adds a land job for the lander; `land` lands a patch stack directly, with
-`--scratch-copy` on a fresh clone), `Tools/agent/suite/` (suite runs through
-`jet test Compiler --profile`) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
+`--scratch-copy` on a fresh clone), `Tools/agent/Suite.jet` (one `jet test
+Compiler --profile` run on a compiler snapshot) and `Tools/agent/ballots/Validate.jet` (the ballot validator).
 Tools find state, scratch, queues, published compilers and seeds only through
 the root variables of `Tools/agent/roots.sh` (shell) and `Tools/agent/roots.mjs`
 (node). Their defaults derive from `$HOME` and the XDG directories; a machine
@@ -424,10 +424,12 @@ committed file spells one machine's home, user, mounts or tool roots:
 check runs first, refuses them, and
 `tower redact` cleans the board.
 
-Hosted CI runs only the Core source-coverage ratchet
+Hosted CI runs only the Core surface ledger check
 (`.github/workflows/ci.yml`); until a pinned native seed release exists
 (D-SEED-DIST1), `Tools/agent/LaneCheck.jet` and the full gate
-(`JET=<jet> jet Tools/agent/VerifyFull.jet`) run locally with the admitted `JET`.
+(`JET=<jet> jet Tools/agent/VerifyFull.jet`, which includes the Core
+source-coverage ratchet `Tools/agent/CoreCoverage.jet`) run locally with the
+admitted `JET`.
 
 ## References
 

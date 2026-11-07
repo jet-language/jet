@@ -205,6 +205,18 @@ ORDERING_VARIANTS: [String]{"Less", "Equal", "Greater"}
 
 INTERPOLATION_UNIT_STYLES: [String]{"name", "bare"}
 
+InterpolationSelectorKind: enum { Debug Pretty Fixed Grouped Hex Oct Bin Pad PadLeft Percent Sci Unit }
+
+/// The arguments a selector takes in its parentheses; `UnitStyle` carries the accepted styles.
+InterpolationSelectorArguments: enum { Precision Width WidthFill UnitStyle(styles: [String]) }
+
+/// `arguments` is None for a selector that takes none.
+InterpolationSelector: struct {
+    name: String
+    kind: InterpolationSelectorKind
+    arguments: InterpolationSelectorArguments?
+}
+
 /// The sole interpolation-selector registry.
 INTERPOLATION_SELECTORS: [InterpolationSelector]{
     {
@@ -265,7 +277,7 @@ INTERPOLATION_SELECTORS: [InterpolationSelector]{
     {
         name: "Unit",
         kind: InterpolationSelectorKind.Unit,
-        arguments: InterpolationSelectorArguments.UnitStyle(INTERPOLATION_UNIT_STYLES),
+        arguments: InterpolationSelectorArguments.UnitStyle{styles: INTERPOLATION_UNIT_STYLES},
     },
 }
 

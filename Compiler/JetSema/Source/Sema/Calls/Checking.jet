@@ -469,6 +469,9 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     take_keys := [String]{}
     // Every argument is checked, so each mismatched one is reported.
     complete := true
+    call_diagnostics_start: diagnostics.len()
+    // The first argument a C function receives as a callback pointer.
+    c_callback := Span?{None}
     loop index in 0..<args.len() {
         reference_starts.push(context.name_references.len())
         slot: sema_call_bound_slot(binding, binding.sources[index], args[index])
@@ -535,8 +538,9 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         // lambda whose body is safe on a foreign thread; anything else is
         // E3203, reported before the argument's own type check.
         if !default_in_owner && abi == .Val(callable_abi) {
-            if sema_registration_callback_boundary_param(callable_abi, required_declared) && sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) {
-                diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+            if sema_registration_callback_boundary_param(callable_abi, required_declared) {
+                if sema_call_c_callback_unsafe(args[index].expr, environment, program, scopes) -> diagnostics.push(sema_checked_foreign_type_error(required_declared, expr_span(args[index].expr), true))
+                if callable_abi.is_c_abi && c_callback == None -> c_callback = Val(expr_span(args[index].expr))
             }
         }
         diagnostic_start: diagnostics.len()
@@ -691,6 +695,13 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
     }
     if !complete -> return None
     sema_call_crypto_misuse(callee, params, args, values, slots, context, diagnostics)
+    // E2104: no `jet` marshals a Jet function into a C callback pointer yet
+    // (#6366), so a compile that lowers the call refuses it here instead of
+    // stopping inside the IR. A checker error on the call stands alone, and
+    // `jet check` (which lowers nothing) still reports only those.
+    if c_callback == .Val(callback_span) && !environment.module_identity.starts_with("<corelib>/") && sema_refuses_unbuilt(program) && !sema_has_error_since(diagnostics, call_diagnostics_start) {
+        diagnostics.push(sema_error("E2104", callback_span, "passing a Jet function to `{callee}` is not built yet", "This `jet` cannot yet hand a Jet function to C code as a callback pointer, and no other `jet` can build it.", "Remove the callback argument for now; C callbacks need their native trampoline first (card #6366)."))
+    }
     reference_starts.push(context.name_references.len())
     // A name two take slots of one call receive has no last use in either.
     loop position in 0..<take_indices.len() {

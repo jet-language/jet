@@ -522,7 +522,7 @@ function validateManifest(manifest) {
   }
   if (gate.schema !== gateSchema || gate.version !== 1) issues.push(`integrated_gate must declare ${gateSchema} version 1`);
   const inputs = gate.inputs;
-  for (const key of ["matrix", "status", "conformance_inventory", "conformance_summary", "tier_census", "compiler_speed", "entries_dir"]) {
+  for (const key of ["matrix", "status", "conformance_manifest", "tier_census", "compiler_speed", "entries_dir"]) {
     if (!nonEmpty(inputs?.[key])) issues.push(`integrated_gate.inputs.${key} is required`);
   }
   const freshness = gate.freshness;
@@ -567,18 +567,16 @@ async function loadInputs(options = {}) {
     manifest: manifestPath,
     matrix: pathFor("matrix"),
     status: pathFor("status"),
-    conformance_inventory: pathFor("conformance_inventory"),
-    conformance_summary: pathFor("conformance_summary"),
+    conformance_manifest: pathFor("conformance_manifest"),
     tier_census: pathFor("tier_census"),
     compiler_speed: pathFor("compiler_speed"),
     entries_dir: pathFor("entries_dir"),
     performance_surface_evidence: surfaceEvidencePath,
   };
-  const [matrix, status, conformanceInventory, conformanceSummary, tierCensus, compilerSpeed, performanceSurfaceEvidence] = await Promise.all([
+  const [matrix, status, conformanceManifest, tierCensus, compilerSpeed, performanceSurfaceEvidence] = await Promise.all([
     readFileValue(paths.matrix, true),
     readFileValue(paths.status, true),
-    readFileValue(paths.conformance_inventory, true),
-    readFileValue(paths.conformance_summary, false),
+    readFileValue(paths.conformance_manifest, true),
     readFileValue(paths.tier_census, true),
     readFileValue(paths.compiler_speed, true),
     surfaceSpec
@@ -598,16 +596,15 @@ async function loadInputs(options = {}) {
     paths,
     matrix: matrix.value,
     status: status.value,
-    conformanceInventory: conformanceInventory.value,
-    conformanceSummary: conformanceSummary.value,
+    conformanceManifest: conformanceManifest.value,
     tierCensus: tierCensus.value,
     compilerSpeed: compilerSpeed.value,
     performanceSurfaceEvidence: performanceSurfaceEvidence.value,
-    files: { matrix, status, conformanceInventory, conformanceSummary, tierCensus, compilerSpeed, performanceSurfaceEvidence },
+    files: { matrix, status, conformanceManifest, tierCensus, compilerSpeed, performanceSurfaceEvidence },
     entries,
     loadErrors: [
       ["manifest", manifestResult], ["matrix", matrix], ["status", status],
-      ["conformance_inventory", conformanceInventory], ["conformance_summary", conformanceSummary],
+      ["conformance_manifest", conformanceManifest],
       ["tier_census", tierCensus], ["compiler_speed", compilerSpeed],
       ...(surfaceSpec ? [["performance_surface_evidence", performanceSurfaceEvidence]] : []),
       ...[...entries].map(([name, result]) => [`entry:${name}`, result]),
@@ -901,23 +898,27 @@ function evaluateGate(inputs, options = {}) {
   checks.gauntlet.status = findings.length === gauntletStart ? "pass" : "fail";
   const conformanceStart = findings.length;
 
-  const conformanceFile = inputs?.paths?.conformance_inventory;
-  const summaryFile = inputs?.paths?.conformance_summary;
-  const inventory = inputs?.conformanceInventory;
-  const summary = typeof inputs?.conformanceSummary === "string" ? inputs.conformanceSummary : "";
-  checkFresh("conformance inventory", inventory, inputs?.files?.conformanceInventory?.stat, conformanceFile, true);
-  checkFresh("conformance summary", null, inputs?.files?.conformanceSummary?.stat, summaryFile, true);
-  if (!Array.isArray(inventory) || inventory.length === 0 || inventory.some((item) => !nonEmpty(item))) add("conformance", { evidence_file: conformanceFile, cause: "conformance inventory must be a non-empty array of public Core names" });
-  else if (new Set(inventory).size !== inventory.length) add("conformance", { evidence_file: conformanceFile, cause: "conformance inventory contains duplicate public Core names" });
-  const denominator = summary.match(/core conformance denominator:\s*(\d+) public function\(s\);\s*(\d+) program\(s\);\s*(\d+) carve-out\(s\);\s*(\d+) uncovered row\(s\)/i);
-  if (!denominator) add("summary-mismatch", { evidence_file: summaryFile, cause: "paired conformance summary has no denominator line" });
-  else {
-    const [, publicCount, programs, carveouts, uncovered] = denominator.map(Number);
-    if (Array.isArray(inventory) && publicCount !== inventory.length) add("summary-mismatch", { evidence_file: summaryFile, cause: `summary denominator ${publicCount} differs from inventory length ${inventory.length}` });
-    if (publicCount !== programs + carveouts) add("summary-mismatch", { evidence_file: summaryFile, cause: "program and carve-out counts do not cover the public denominator" });
-    if (uncovered !== 0) add("conformance", { evidence_file: summaryFile, cause: `conformance denominator reports ${uncovered} uncovered row(s)` });
+  // The Core conformance manifest Tools/hardening writes
+  // (`jet run Tools/hardening/Main.jet -- --write`). Every surface row must be
+  // covered by a valid witness or carry an owner exclusion.
+  const conformanceFile = inputs?.paths?.conformance_manifest;
+  const conformance = inputs?.conformanceManifest;
+  checkFresh("conformance manifest", conformance, inputs?.files?.conformanceManifest?.stat, conformanceFile, true);
+  const conformanceRows = Array.isArray(conformance?.rows) ? conformance.rows : [];
+  if (conformance?.schema !== "jet.hardening.surface.v1" || conformanceRows.length === 0) {
+    add("conformance", { evidence_file: conformanceFile, cause: "conformance manifest must be a non-empty jet.hardening.surface.v1 manifest" });
+  } else {
+    const ids = conformanceRows.map((row) => row?.stable_id);
+    if (ids.some((id) => !nonEmpty(id))) add("conformance", { evidence_file: conformanceFile, cause: "conformance manifest has a row without a stable_id" });
+    else if (new Set(ids).size !== ids.length) add("conformance", { evidence_file: conformanceFile, cause: "conformance manifest contains duplicate row ids" });
+    const byStatus = {};
+    for (const row of conformanceRows) byStatus[row?.status] = (byStatus[row?.status] ?? 0) + 1;
+    if (conformance.denominator?.rows !== conformanceRows.length || canonical(byStatus) !== canonical(conformance.denominator?.by_status ?? null)) {
+      add("summary-mismatch", { evidence_file: conformanceFile, cause: "conformance manifest denominator does not match its rows" });
+    }
+    const uncovered = conformanceRows.length - (byStatus.covered ?? 0) - (byStatus.excluded ?? 0);
+    if (uncovered !== 0) add("conformance", { evidence_file: conformanceFile, cause: `conformance manifest reports ${uncovered} uncovered row(s)` });
   }
-  if (/^\s*error:/mi.test(summary)) add("conformance", { evidence_file: summaryFile, cause: "conformance summary contains an error line" });
   checks.conformance.status = findings.length === conformanceStart ? "pass" : "fail";
   const conformanceBoundary = findings.length;
 

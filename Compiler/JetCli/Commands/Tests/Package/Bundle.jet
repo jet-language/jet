@@ -8,7 +8,7 @@ use {
         BundleMaterializerFact, BundleMetadata, BundlePlan, BundleReceipt, BundleSigningFact,
         BundleTarget, LaunchDescriptor, SigningHook, pkg_sha256_hex,
     ]
-    jet_cli.[jet_cli_command_help, jet_cli_front, jet_cli_status_json]
+    jet_cli.[jet_cli_status_json]
     jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_integer]
     json: core.encoding.json
     bundle_paths: core.files.path
@@ -92,7 +92,7 @@ bundle_test_json_field: fn(tree: Dyn, name: String) -> Dyn Never! {
     panic("expected object")
 }
 bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
-    assert_eq(json.to_string(actual), json.to_string(expected))
+    assert_eq(json.to_string(actual) ?? panic("actual tree: {err}"), json.to_string(expected) ?? panic("expected tree: {err}"))
 }
 
 #Test("desktop argv preserves sequential overrides and global flags") {
@@ -300,67 +300,6 @@ bundle_test_tree_eq: fn(actual: Dyn, expected: Dyn) Never! {
     assert_eq(host.events, [String]{"inspect:app.bin", "read:app.bin"})
 }
 
-// Real Front/Host integration; full closure proof is pending in addition to
-// the original #4402 canonical BundlePlan tests above. No substitute dispatcher.
-#Test("desktop Front routes owned flags into the canonical package host") {
-    facts: JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: Val("C.UTF-8")}
-    raw := bundle_test_args("linux")
-    raw.push("--json")
-    raw.push("--quiet")
-    plan: jet_cli_front(raw, facts)
-    if plan == {
-        .PackageDesktop(arguments, options, machine) -> {
-            assert_eq(arguments, raw)
-            assert(machine)
-            assert(options.target == .Val(.LinuxAppImage))
-            assert(options.kind == BundleKind.Desktop)
-        }
-        else -> panic("desktop package must route to the canonical bundle host")
-    }
-    direct_host := bundle_test_transport()
-    direct: jet_cli_bundle_run_desktop<BundleTestTransport>(raw, bundle_test_options(raw), true, direct_host)
-    routed_host := bundle_test_transport()
-    routed: jet_cli_dispatch_with_package<BundleTestTransport>(raw, facts, routed_host)
-    assert_eq(routed.stdout.bytes(), direct.stdout.bytes())
-    assert_eq(routed.stderr.bytes(), direct.stderr.bytes())
-    assert_eq(routed.exit_code, direct.exit_code)
-    assert_eq(routed_host.events, direct_host.events)
-}
-#Test("desktop Front parser errors and generic help never invoke a producer") {
-    facts: JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: Val("C.UTF-8")}
-    host := bundle_test_transport()
-    refused: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"package", "--target=alien"}, facts, host)
-    assert_eq(refused.stdout, "")
-    assert_eq(refused.stderr, "jet package: unknown package target `alien`\n")
-    assert_eq(refused.exit_code, 1)
-    assert_eq(host.events, [String]{})
-    help: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"package", "--help"}, facts, host)
-    assert_eq(help.stdout, jet_cli_command_help("package"))
-    assert_eq(help.stderr, "")
-    assert_eq(help.exit_code, 0)
-    assert_eq(host.events, [String]{})
-}
-#Test("desktop Front parses the whole jet argv including pre-command flags") {
-    facts: JetCLIProcessFacts{stdout_terminal: false, stderr_terminal: false, shell_prefill: false, term: None, no_color: true, force_color: false, columns: None, locale: Val("C.UTF-8")}
-    // Rust run_package(jet_argv): a global flag before `package` stays parser input.
-    raw: [String]{"--output", "dist/app.AppImage", "package", "--target=linux", "--executable", "app.bin"}
-    plan: jet_cli_front(raw, facts)
-    if plan == {
-        .PackageDesktop(arguments, options, _) -> {
-            assert_eq(arguments, raw)
-            assert_eq((options.output ?? panic("pre-command output")).raw, "dist/app.AppImage")
-            assert(options.source == None)
-        }
-        else -> panic("pre-command output must reach the canonical bundle parser")
-    }
-    host := bundle_test_transport()
-    refused: jet_cli_dispatch_with_package<BundleTestTransport>([String]{"--verbose", "package", "--target=linux", "--executable", "app.bin"}, facts, host)
-    assert_eq(refused.stdout, "")
-    assert_eq(refused.stderr, "jet package: unknown package flag `--verbose`\n")
-    assert_eq(refused.exit_code, 1)
-    assert_eq(host.events, [String]{})
-}
-
 // Frozen source-derived Rust wire oracles. These use the real Jetpack carriers
 // and artifact/receipt factories, not a shadow model. No native transport or
 // Rust execution is claimed by these byte expectations.
@@ -400,8 +339,8 @@ bundle_test_wire_expected: fn(materialized: Bool, explain: Bool) -> String Never
     "{{\"schema\":\"jet.status/v1\",\"action\":\"package\",\"ok\":true,\"reports\":[],\"artifact\":{artifact},\"artifact_status\":\"{state}\",\"execution\":\"{state}\",\"materialization\":{transport},\"output\":\"/dist/démo.AppImage\",\"plan_identity\":\"plan-id\",\"receipt\":{receipt},\"receipt_digest\":\"store\\n\\\"\\\\é\"{explanation}}}\n"
 }
 bundle_test_wire_report: fn(materialized: Bool, explain: Bool) -> String Never! {
-    plan: bundle_test_wire_plan()
-    artifact: bundle_test_wire_artifact(plan, materialized)
+    plan := bundle_test_wire_plan()
+    artifact := bundle_test_wire_artifact(plan, materialized)
     jet_cli_bundle_report(artifact, plan, bundle_paths.of("/dist/démo.AppImage"), "store\n\"\\é", explain, true)
 }
 

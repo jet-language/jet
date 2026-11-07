@@ -1,17 +1,11 @@
-Error [jet.BareQuestionMark]: A bare `?` has no meaning.
-  --> tests/ui/build_plan_invalid.jet:3:60
+Error [jet.BuildPlanFailed]: Build plan is invalid: action name `same` is registered twice
+  --> tests/ui/build_plan_invalid.jet:5:12
     |
-  3 |     b.action("same", [], ["one"], ["sh", "-c", "true"], [])?
-    |                                                            ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+  5 |     _ := b.action("same", [], ["two"], ["sh", "-c", "true"], [])
+    |            ^^^^^^
+ Why: `build: fn` must return one deterministic typed graph whose handles all belong to that build
+ Fix: Fix the named target/action/toolchain/probe and run `jet inspect explain-build` to inspect the graph
+More: jet-lang.dev/e/E3502
 
-Error [jet.BareQuestionMark]: A bare `?` has no meaning.
-  --> tests/ui/build_plan_invalid.jet:4:60
-    |
-  4 |     b.action("same", [], ["two"], ["sh", "-c", "true"], [])?
-    |                                                            ^
- Why: Fallible calls propagate automatically; `?(text)` is reserved for adding one failure-context frame.
- Fix: Remove the trailing `?`, or write `?(text)` to add one context frame.
-More: jet-lang.dev/e/E-ERR-PROPAGATE
+1 problem found
+run `jet explain E3502` to learn more

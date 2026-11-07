@@ -1,0 +1,235 @@
+#!/usr/bin/env jet
+// Checks Tools/agent/chain/chain.sh runs on the compilers it builds.
+//
+//   jet Tools/agent/Chain.jet trapscan ELF
+//
+// `trapscan` lists the functions of a built jet that carry a keep-going
+// `todo` trap (#5662): `lea "todo"(%rip)` .. `mov $4,%rsi; call
+// jet_rt_unreachable`. A sema keep-going stub lowers to exactly that; the
+// compiler source has no `todo` expression, so a clean compiler prints
+// nothing. Exit 1 when any is found, 2 when the binary has no symbol table or
+// no jet_rt_unreachable.
+use {
+    files: core.files
+    process: core.process
+    term: core.term
+}
+
+run: fn() {
+    args: process.args()
+    if args.len() != 2 || args[0] != "trapscan" -> usage()
+    process.exit(trapscan(args[1]))
+}
+
+usage: fn() -[Exec, IO]> Never {
+    term.eprint("usage: jet Tools/agent/Chain.jet trapscan ELF")
+    process.exit(64)
+}
+
+trapscan: fn(path: String) -[FS, IO]> Int Never! {
+    bytes: files.read_bytes(path) ?? {
+        term.eprint("trapscan: {path} cannot be read: {err}")
+        return 2
+    }
+    found: trap_owners(bytes) ?? {
+        term.eprint("trapscan: no symbol table or no jet_rt_unreachable in {path}")
+        return 2
+    }
+    loop name in found -> print(name)
+    if found.len() > 0 -> 1 else -> 0
+}
+
+// A PT_LOAD program header.
+Load: struct {
+    executable: Bool
+    off: Int
+    vaddr: Int
+    filesz: Int
+}
+
+// A function symbol, `order` its place in the symbol table.
+Symbol: struct {
+    value: Int
+    order: Int
+    name: String
+}
+
+// The sorted owners of the `todo` traps of an x86-64 ELF image, None when it
+// has no symbol table or no jet_rt_unreachable.
+trap_owners: fn(b: [U8]) -> [String]? Never! {
+    if b.len() < 64 -> return None
+    phoff: le(b, 32, 8)
+    phentsize: le(b, 54, 2)
+    phnum: le(b, 56, 2)
+    shoff: le(b, 40, 8)
+    shentsize: le(b, 58, 2)
+    shnum: le(b, 60, 2)
+    loads := [Load]{}
+    loop i in 0..<phnum {
+        p: phoff + i * phentsize
+        if le(b, p, 4) != 1 -> next
+        loads.push(Load{executable: le(b, p + 4, 4) % 2 == 1, off: le(b, p + 8, 8), vaddr: le(b, p + 16, 8), filesz: le(b, p + 32, 8)})
+    }
+    symbols := [Symbol]{}
+    unreachable := -1
+    loop i in 0..<shnum {
+        s: shoff + i * shentsize
+        // SHT_SYMTAB
+        if le(b, s + 4, 4) != 2 -> next
+        off: le(b, s + 24, 8)
+        size: le(b, s + 32, 8)
+        link: le(b, s + 40, 4)
+        ent: le(b, s + 56, 8)
+        if ent <= 0 -> next
+        strings: le(b, shoff + link * shentsize + 24, 8)
+        at := off
+        loop at + ent <= off + size {
+            // STT_FUNC
+            if Int.from_u8(b[at + 4]) % 16 == 2 {
+                name: c_string(b, strings + le(b, at, 4))
+                value: le(b, at + 8, 8)
+                if name == "jet_rt_unreachable" -> unreachable = value
+                symbols.push(Symbol{value: value, order: symbols.len(), name: name})
+            }
+            at += ent
+        }
+    }
+    if unreachable < 0 -> return None
+    symbols.sort_by((left: Symbol, right: Symbol) -> {
+        if left.value != right.value -> return if left.value < right.value -> Ordering.Less else -> Ordering.Greater
+        if left.order < right.order -> return Ordering.Less
+        if left.order > right.order -> return Ordering.Greater
+        Ordering.Equal
+    })
+    found := [String]{}
+    loop load in loads {
+        if !load.executable -> next
+        end: load.off + load.filesz
+        at := load.off
+        loop at + 12 <= end {
+            // mov $0x4,%rsi ; call rel32
+            if byte(b, at) == 72 && byte(b, at + 1) == 199 && byte(b, at + 2) == 198 && le(b, at + 3, 4) == 4 && byte(b, at + 7) == 232 {
+                call: load.vaddr + (at + 7 - load.off)
+                if call + 5 + signed32(le(b, at + 8, 4)) == unreachable {
+                    floor := at - 24
+                    if floor < load.off -> floor = load.off
+                    back := at - 7
+                    loop back >= floor {
+                        // lea rel32(%rip),%rax
+                        if byte(b, back) == 72 && byte(b, back + 1) == 141 && byte(b, back + 2) == 5 {
+                            target: file_offset(loads, load.vaddr + (back - load.off) + 7 + signed32(le(b, back + 3, 4)))
+                            if target >= 0 && target + 4 <= b.len() && byte(b, target) == 116 && byte(b, target + 1) == 111 && byte(b, target + 2) == 100 && byte(b, target + 3) == 111 {
+                                name: owner(symbols, call)
+                                if !found.contains(name) -> found.push(name)
+                            }
+                            break
+                        }
+                        back -= 1
+                    }
+                }
+            }
+            at += 1
+        }
+    }
+    found.sort()
+    Val(found)
+}
+
+byte: fn(b: [U8], at: Int) -> Int Never! { Int.from_u8(b[at]) }
+
+// The `width`-byte little-endian unsigned value at `at`.
+le: fn(b: [U8], at: Int, width: Int) -> Int Never! {
+    value := 0
+    loop k in 0..<width -> value = value * 256 + Int.from_u8(b[at + width - 1 - k])
+    value
+}
+
+signed32: fn(value: Int) -> Int Never! { if value >= 2147483648 -> value - 4294967296 else -> value }
+
+// The NUL-terminated name at `at`.
+c_string: fn(b: [U8], at: Int) -> String Never! {
+    end := at
+    loop end < b.len() && Int.from_u8(b[end]) != 0 -> end += 1
+    String.from_bytes_lossy(b.slice(at, end))
+}
+
+// The file offset of the virtual address `va`, -1 outside every load.
+file_offset: fn(loads: [Load], va: Int) -> Int Never! {
+    loop load in loads {
+        if va >= load.vaddr && va < load.vaddr + load.filesz -> return load.off + (va - load.vaddr)
+    }
+    -1
+}
+
+// The function whose start is the last at or before `va`.
+owner: fn(symbols: [Symbol], va: Int) -> String Never! {
+    lo := 0
+    hi := symbols.len() - 1
+    best := "?"
+    loop lo <= hi {
+        mid: (lo + hi) /% 2
+        if symbols[mid].value <= va {
+            best = symbols[mid].name.copy()
+            lo = mid + 1
+        } else {
+            hi = mid - 1
+        }
+    }
+    best
+}
+
+put: fn(b: &[U8], at: Int, width: Int, value: Int) {
+    rest := value
+    loop k in 0..<width {
+        b[at + k] = U8.from_int(rest % 256) ?? U8{0}
+        rest = rest /% 256
+    }
+}
+
+put_text: fn(b: &[U8], at: Int, text: String) {
+    place := at
+    loop letter in text.bytes() {
+        b[place] = letter
+        place += 1
+    }
+}
+
+#Test("a todo trap is listed under the function that holds it") {
+    image := [U8]{}
+    loop _ in 0..<544 -> image.push(U8{0})
+    // ELF header: one program header at 64, three section headers at 256.
+    put(image, 32, 8, 64)
+    put(image, 40, 8, 256)
+    put(image, 54, 2, 56)
+    put(image, 56, 2, 1)
+    put(image, 58, 2, 64)
+    put(image, 60, 2, 3)
+    // PT_LOAD, R+X, the whole image at address 0.
+    put(image, 64, 4, 1)
+    put(image, 68, 4, 5)
+    put(image, 96, 8, 544)
+    // lea "todo"(%rip),%rax at 128; mov $4,%rsi at 135; call jet_rt_unreachable at 142.
+    code: [Int]{72, 141, 5, 65, 0, 0, 0, 72, 199, 198, 4, 0, 0, 0, 232, 13, 0, 0, 0}
+    loop at in 0..<code.len() -> put(image, 128 + at, 1, code[at])
+    put_text(image, 200, "todo")
+    // Section 1: the symbol table at 448 (two entries), its strings in section 2 at 512.
+    put(image, 324, 4, 2)
+    put(image, 344, 8, 448)
+    put(image, 352, 8, 48)
+    put(image, 360, 4, 2)
+    put(image, 376, 8, 24)
+    put(image, 408, 8, 512)
+    put(image, 448, 4, 1)
+    put(image, 452, 1, 2)
+    put(image, 456, 8, 120)
+    put(image, 472, 4, 7)
+    put(image, 476, 1, 2)
+    put(image, 480, 8, 160)
+    put_text(image, 513, "owner")
+    put_text(image, 519, "jet_rt_unreachable")
+    assert_eq(trap_owners(image), Val([String]{"owner"}))
+    image[200] = U8{84}
+    assert_eq(trap_owners(image), Val([String]{}))
+    image[519] = U8{74}
+    assert_eq(trap_owners(image), None)
+}

@@ -2,7 +2,7 @@
 # fault, never a user diagnostic. Each faulty function is one census row
 # naming its pass, and one run reports every such function.
 # The fixture carries two independent open backend gaps, so one report counts
-# two fault rows: `nine` calls `compute.gradient` and `run` calls
+# two fault rows: `nine` calls `compute.vjp` and `run` calls
 # `compute.jvp`, both precise autodiff builtins with no IR lowering yet (#4599).
 # When either gap lands, replace it with another open gap in the same position.
 fixture: fixtures/backend_gap
@@ -12,7 +12,7 @@ stderr: ~ "internal compiler error: the Jet backend failed on `gap.jet`: 2 compi
 stderr: ~ "ir.build unlowered: run [function:" # the entry's gap row names its pass and function
 stderr: ~ "ir.build unlowered: nine [" # the callee's row comes from the same run
 stderr: ~ "precise builtin core.compute.jvp" # the builder's own message stays in the row
-stderr: ~ "precise builtin core.compute.gradient" # the builder's own message stays in the row
+stderr: ~ "precise builtin core.compute.vjp" # the builder's own message stays in the row
 stderr: !~ "E2104" # a backend gap is never a user diagnostic
 step: jet run gap.jet
 exit: 101

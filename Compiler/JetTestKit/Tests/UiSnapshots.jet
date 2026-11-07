@@ -87,6 +87,12 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(granted.refused, "")
     assert_eq(granted.argv, ["build", "tests/ui/b.jet", "--allow=Exec"])
     assert_eq(granted.streams, "stderr")
+    assert_eq(kit_ui_invocation("// @programmable_build\n// @build_locked\n", "tests/ui/b/run.jet", false).argv, ["build", "tests/ui/b/run.jet", "--locked"])
+    assert_eq(kit_ui_invocation("// @target wasm32-wasip2\n", "tests/ui/c.jet", false).argv, ["build", "tests/ui/c.jet", "--target=wasm32-wasip2"])
+    // The hangar row runs jetpack, with the tampered object's digest appended.
+    hangar: kit_ui_invocation("// @jetpack_hangar_digest_mismatch\n", "tests/ui/d.jet", false)
+    assert(hangar.hangar_tamper)
+    assert_eq(hangar.argv, ["hangar", "verify", "--no-color"])
     assert_eq(kit_ui_arg("// @check_cli\n// @check_cli ignored\n", "check_cli"), Val("ignored"))
 }
 

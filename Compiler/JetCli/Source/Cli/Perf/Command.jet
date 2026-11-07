@@ -1,0 +1,652 @@
+// `jet perf run|test|view|compare|export` (CmdPerf.rs `run`, `view`,
+// `compare`): every reader verifies the one `.jettrace` artifact before it
+// projects anything, and none of them measures or rewrites it. Export's
+// projections are Export.jet; the run/test session is Session.jet.
+use {
+    cli_files: core.files
+    jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+    jet_foundation.[
+        CanonicalJSON, CanonicalJSONField, JET_CLI_COMMANDS, JetTraceError, TRACE_SCHEMA, TRACE_VERSION,
+        artifact_extension, canonical_json_bytes, diagnostic_theme_paint, jettrace_array, jettrace_error,
+        jettrace_object_view, trace_id, trace_receipt_section_from_json, verify_jettrace,
+    ]
+}
+
+// `cli_diagnostic_copy("E2102")`'s fix line.
+JET_CLI_PERF_FIX: "correct the named flag, or run `jet help` to see the flags"
+
+// `jet perf <action> …`: `argv` starts at `perf`. The front door answers the
+// group's help and refuses an unknown or unbuilt action before this runs.
+jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
+    action: argv[1]
+    rest := [String]{}
+    help := false
+    quiet := false
+    passthrough := false
+    // The front door already read the output flags; words after `--` are the
+    // program's, never perf's.
+    loop word in jet_cli_tail(argv, 2) {
+        if !passthrough {
+            if word == "--" -> passthrough = true
+            if jet_cli_is_help_flag(word) -> help = true
+            if word == "--quiet" -> quiet = true
+            if word == "--quiet" || word == "--color" || word == "--no-color" || word.starts_with("--color=") -> next
+        }
+        rest.push(word)
+    }
+    if help && jet_cli_nested_command("perf", action) == .Val(found) {
+        spec: JET_CLI_COMMANDS[found.group].actions[found.action]
+        return JetDriverVerbOutput{stdout: "jet perf {spec.name} — {spec.summary}\nusage: {spec.usage}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    if action == {
+        "run" | "test" -> jet_cli_perf_session(action, rest, quiet, color)
+        "attach" -> jet_cli_perf_attach(rest, quiet, color)
+        "view" -> jet_cli_perf_view(rest, color)
+        "compare" -> jet_cli_perf_compare(rest, color)
+        "export" -> jet_cli_perf_export(rest, color)
+        else -> jet_cli_perf_error("unknown `jet perf` action `{action}`", "run `jet perf --help` to see its actions", color)
+    }
+}
+
+// `perf_error_with_fix`: one E2102 usage report.
+jet_cli_perf_error: fn(what: String, fix: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", what, jet_cli_why("E2102"), fix, color), exit_code: JET_DRIVER_EXIT_USAGE}
+}
+
+// `render_perf_json`: the status envelope with the projection as its `perf`
+// field. Canonical JSON escapes exactly what a status string escapes, so the
+// canonical bytes are the field's JSON text.
+jet_cli_perf_json: fn(action: String, value: CanonicalJSON) -> String Never! {
+    bytes: canonical_json_bytes(value)
+    text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? ""
+    "{jet_cli_status_render(action, true, [JetCLIStatusField]{jet_cli_status_field("perf", JetCLIStatusValue.Float{text: text})})}\n"
+}
+
+// `read_verified`: a `.jettrace` path, read and verified.
+jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
+    extension: artifact_extension()
+    if !path.ends_with(extension) -> return Err(jettrace_error("trace path must end with {extension}"))
+    bytes: cli_files.read_bytes(path) ?? return Err(jettrace_error("cannot read {path}: {jet_cli_io_error_text(err)}"))
+    // The report names the file: a verification failure alone does not say
+    // which trace it rejected.
+    trace: verify_jettrace(bytes) ?? return Err(jettrace_error("`{path}` is not a valid trace: {err.message}"))
+    Ok(trace)
+}
+
+// `view`: text, `--json` or `--html`, with `--frames=jet|all`.
+jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Never! {
+    extension: artifact_extension()
+    path := String?{None}
+    mode := "text"
+    frames := "jet"
+    skip := false
+    loop (index, arg) in args {
+        if skip {
+            skip = false
+            next
+        }
+        if arg == "--json" {
+            mode = "json"
+            next
+        }
+        if arg == "--html" {
+            mode = "html"
+            next
+        }
+        if arg.starts_with("--frames=") {
+            value: arg.slice(9..<arg.len())
+            if value != "jet" && value != "all" -> return jet_cli_perf_error("`--frames` accepts only `jet` or `all`", JET_CLI_PERF_FIX, color)
+            frames = value
+            next
+        }
+        if arg == "--frames" {
+            if index + 1 >= args.len() -> return jet_cli_perf_error("`--frames` needs `jet` or `all`", JET_CLI_PERF_FIX, color)
+            if args[index + 1] != "jet" && args[index + 1] != "all" -> return jet_cli_perf_error("`--frames` accepts only `jet` or `all`", JET_CLI_PERF_FIX, color)
+            frames = if args[index + 1] == "all" -> "all" else -> "jet"
+            skip = true
+            next
+        }
+        if arg.starts_with("-") -> return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{extension}> [--json|--html] [--frames=jet|all]`", color)
+        if path != None -> return jet_cli_perf_error("`jet perf view` takes one trace path", JET_CLI_PERF_FIX, color)
+        // copy: the argument list keeps its word; the trace path owns its own.
+        path = Val(arg.copy())
+    }
+    shown: path ?? return jet_cli_perf_error("`jet perf view` needs a {extension} path", JET_CLI_PERF_FIX, color)
+    trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    flame: jet_cli_perf_flame(trace)
+    timeline: jet_cli_perf_timeline(trace)
+    if mode == "html" -> return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if mode == "text" -> return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    view: CanonicalJSON.Object([CanonicalJSONField]{
+        {key: "flamegraph", value: jet_cli_perf_strings(flame)},
+        {key: "frames", value: CanonicalJSON.String(frames)},
+        {key: "kind", value: CanonicalJSON.String("jet.trace.view")},
+        {key: "schema", value: CanonicalJSON.String(TRACE_SCHEMA)},
+        {key: "timeline", value: jet_cli_perf_strings(timeline)},
+        {key: "trace", value: trace},
+        {key: "version", value: CanonicalJSON.Integer("{TRACE_VERSION}")},
+    })
+    JetDriverVerbOutput{stdout: jet_cli_perf_json("perf.view", view), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+jet_cli_perf_strings: fn(lines: [String]) -> CanonicalJSON Never! {
+    // copy: the rendered lines also feed the text and HTML views; the array owns its own.
+    CanonicalJSON.Array(loop line in lines -> CanonicalJSON.String(line.copy()))
+}
+
+// `render_view_text`.
+jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], color: Bool) -> String Never! {
+    out := "{diagnostic_theme_paint(color, "1", "schema")} {TRACE_SCHEMA} v{TRACE_VERSION}\n"
+    out = "{out}{diagnostic_theme_paint(color, "1", "trace")} {trace_id(trace) ?? "unknown"}\n"
+    out = "{out}{diagnostic_theme_paint(color, "1", "command")} {jet_cli_perf_content_text(trace, "command") ?? "unknown"}\n"
+    out = "{out}{diagnostic_theme_paint(color, "1", "frames")} {frames}\n"
+    if jet_cli_perf_first_sample(trace) == .Val(sample) -> out = "{out}sample {sample.domain} {sample.ns}ns · {sample.symbol}\n"
+    summaries: [String?]{
+        jet_cli_perf_profile_summary(trace),
+        jet_cli_perf_allocation_summary(trace),
+        jet_cli_perf_browser_line(trace),
+        jet_cli_perf_task_summary(trace),
+        jet_cli_perf_lock_summary(trace),
+        jet_cli_perf_io_summary(trace),
+        jet_cli_perf_native_summary(trace),
+        jet_cli_perf_span_summary(trace),
+    }
+    loop summary in summaries {
+        if summary == .Val(line) -> out = "{out}{line}\n"
+    }
+    if frames == "all" -> out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
+    if flame.len() > 0 {
+        out = "{out}{diagnostic_theme_paint(color, "1", "flamegraph")}\n"
+        loop line in flame -> out = "{out}{line}\n"
+    }
+    if timeline.len() > 0 {
+        out = "{out}{diagnostic_theme_paint(color, "1", "timeline")}\n"
+        loop line in timeline -> out = "{out}{line}\n"
+    }
+    out
+}
+
+// `view_html`: one self-contained page.
+jet_cli_perf_view_html: fn(id: String, frames: String, flame: [String], timeline: [String]) -> String Never! {
+    flame_items: loop line in flame -> "<li>{jet_cli_perf_html_escape(line)}</li>"
+    timeline_items: loop line in timeline -> "<li>{jet_cli_perf_html_escape(line)}</li>"
+    lines: [String]{
+        "<!doctype html>",
+        "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>jettrace {id}</title>",
+        "<style>",
+        "body{{font:14px/1.4 ui-monospace,monospace;margin:1.5rem;background:#111;color:#eee}}",
+        "h1,h2{{font-weight:600}}",
+        ".bar{{display:inline-block;height:10px;background:#6cf;margin-left:.5rem}}",
+        "section{{margin:1rem 0}}",
+        "</style></head><body>",
+        "<h1>jettrace {id}</h1>",
+        "<p>schema {TRACE_SCHEMA} v{TRACE_VERSION} · frames={frames}</p>",
+        "<section><h2>flamegraph</h2><ul id=\"flame\">{flame_items.join("")}</ul></section>",
+        "<section><h2>timeline</h2><ul id=\"timeline\">{timeline_items.join("")}</ul></section>",
+        "<script>",
+        "const flame=document.getElementById('flame');",
+        "for (const li of flame.querySelectorAll('li')) {{",
+        "  const m=li.textContent.match(/#+/);",
+        "  if(!m) continue;",
+        "  const bar=document.createElement('span');",
+        "  bar.className='bar';",
+        "  bar.style.width=(m[0].length*4)+'px';",
+        "  li.appendChild(bar);",
+        "}}",
+        "</script>",
+        "</body></html>",
+    }
+    "{lines.join("\n")}\n"
+}
+
+jet_cli_perf_html_escape: fn(text: String) -> String Never! {
+    text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+}
+
+// `compare`: two verified traces of one toolchain and machine.
+jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    extension: artifact_extension()
+    usage: "run `jet perf compare base{extension} head{extension} [--baseline <name>] [--override-identity]`"
+    paths := [String]{}
+    override_identity := false
+    baseline := String?{None}
+    skip := false
+    loop (index, arg) in args {
+        if skip {
+            skip = false
+            next
+        }
+        if arg == "--override-identity" {
+            override_identity = true
+            next
+        }
+        if arg.starts_with("--baseline=") {
+            baseline = Val(arg.slice(11..<arg.len()))
+            next
+        }
+        if arg == "--baseline" {
+            if index + 1 >= args.len() -> return jet_cli_perf_error("`--baseline` needs a pinned baseline name", JET_CLI_PERF_FIX, color)
+            // copy: the argument list keeps its word; the baseline name owns its own.
+            baseline = Val(args[index + 1].copy())
+            skip = true
+            next
+        }
+        if arg.starts_with("-") -> return jet_cli_perf_error("unknown `jet perf compare` flag `{arg}`", usage, color)
+        // copy: the argument list keeps its word; the path list owns its own.
+        paths.push(arg.copy())
+    }
+    if paths.len() != 2 -> return jet_cli_perf_error("`jet perf compare` needs two {extension} paths", usage, color)
+    base: jet_cli_perf_read(paths[0]) ?? return jet_cli_perf_error("base trace: {err.message}", JET_CLI_PERF_FIX, color)
+    head: jet_cli_perf_read(paths[1]) ?? return jet_cli_perf_error("head trace: {err.message}", JET_CLI_PERF_FIX, color)
+    same_tool: jet_cli_perf_same(jet_cli_perf_identity(base, "toolchain", "digest"), jet_cli_perf_identity(head, "toolchain", "digest"))
+    same_hardware: jet_cli_perf_same(jet_cli_perf_identity(base, "hardware", "fingerprint"), jet_cli_perf_identity(head, "hardware", "fingerprint"))
+    mismatch: !same_tool || !same_hardware
+    if mismatch && !override_identity {
+        part: if !same_tool -> "toolchain" else -> "hardware"
+        why: if !same_tool -> "compare requires matching toolchain digests" else -> "compare requires matching hardware fingerprints"
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "{part} identity mismatch between traces", why, "recapture both traces on the same machine/toolchain, or pass `--override-identity`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if baseline == .Val(name) {
+        if jet_cli_perf_baseline_refusal(name) == .Val(message) {
+            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", message, "`--baseline` selects a pinned baseline name", "create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+    }
+    base_wall: jet_cli_perf_sample_duration(base, "wall")
+    head_wall: jet_cli_perf_sample_duration(head, "wall")
+    deltas := [String]{}
+    if base_wall == .Val(before) && head_wall == .Val(after) -> deltas.push("wall {before}->{after} ns")
+    if jet_cli_perf_sample_duration(base, "cpu") == .Val(before) && jet_cli_perf_sample_duration(head, "cpu") == .Val(after) -> deltas.push("cpu {before}->{after} ns")
+    if jet_cli_perf_allocation_bytes(base) == .Val(before) && jet_cli_perf_allocation_bytes(head) == .Val(after) -> deltas.push("alloc {before}->{after} B")
+    receipt_deltas: jet_cli_perf_receipt_deltas(base, head) ?? return jet_cli_perf_error("receipt sections: {err.message}", JET_CLI_PERF_FIX, color)
+    // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
+    budget := "budgets: no comparable wall samples for #241 RelativeTo evaluation"
+    if base_wall == .Val(base_ns) && head_wall == .Val(head_ns) && base_ns > 0 {
+        regression: if head_ns > base_ns -> head_ns - base_ns else -> 0
+        named: if baseline == .Val(name) -> name else -> "trace-baseline"
+        budget = "budgets: wall RelativeTo({named}) regression={regression * 10000 /% base_ns}bp · base={base_ns}ns head={head_ns}ns"
+    }
+    override_note: if mismatch && override_identity -> " · identity override" else -> ""
+    baseline_note: if baseline == .Val(name) -> " · baseline {name}" else -> ""
+    out := "compare ok · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {trace_id(base) ?? "unknown"} · head {trace_id(head) ?? "unknown"}{override_note}{baseline_note}\n"
+    if deltas.len() > 0 -> out = "{out}deltas: {deltas.join(" · ")}\n"
+    if receipt_deltas.len() > 0 -> out = "{out}receipt deltas: {receipt_deltas.join(" · ")}\n"
+    JetDriverVerbOutput{stdout: "{out}{budget}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+jet_cli_perf_same: fn(left: String?, right: String?) -> Bool Never! {
+    if left == .Val(text) {
+        if right == .Val(other) -> return text == other
+        return false
+    }
+    right == None
+}
+
+// `require_pinned_baseline`: why `name` can't select a pinned baseline, if it can't.
+jet_cli_perf_baseline_refusal: fn(name: String) -[FS, Env]> String? Never! {
+    pinned := name != "" && !name.contains(".") && !name.contains("\\") && !name.starts_with("/")
+    loop part in name.split("/") {
+        if part == "" || part == "." || part == ".." -> pinned = false
+    }
+    loop byte in name.bytes() {
+        code: Int.from_u8(byte)
+        if !((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 45 || code == 47) -> pinned = false
+    }
+    if !pinned -> return Val("baseline name `{name}` is not a pinned BaselineName")
+    path: "{jet_cli_selected_root_or_cwd()}/.jet/perf/baselines/names/{name}.json"
+    if !cli_files.is_file(path) -> return Val("pinned baseline `{name}` is missing at {path}")
+    None
+}
+
+// `compare_receipt_sections`: the field changes between the traces' recorded
+// receipt sections.
+jet_cli_perf_receipt_deltas: fn(base: CanonicalJSON, head: CanonicalJSON) -> [String] JetCLIReadError! {
+    before: jet_cli_perf_receipt_sections(base)
+    after: jet_cli_perf_receipt_sections(head)
+    diffs: jet_cli_receipt_diff_sections(before, after)
+    Ok(loop diff in diffs -> jet_cli_receipt_field_diff_render(diff))
+}
+
+// `receipt_sections_for_compare`.
+jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetCLIReceiptSection] JetCLIReadError! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return Err(jet_cli_read_error("trace content.receipt_sections is missing or not an array"))
+    sections := [JetCLIReceiptSection]{}
+    loop index in 0..<items.len() {
+        section: trace_receipt_section_from_json(items[index]) ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
+        recorded: jet_cli_receipt_section_new(section.name, section.type_name, canonical_json_bytes(section.value)) ?? return Err(jet_cli_read_error("content.receipt_sections[{index}]: {err.message}"))
+        sections.push(recorded)
+    }
+    Ok(sections)
+}
+
+// `sample_duration`: the first `domain` sample's duration.
+jet_cli_perf_sample_duration: fn(trace: CanonicalJSON, domain: String) -> Int? Never! {
+    items: jet_cli_perf_rows(trace, "samples") ?? return None
+    loop item in items {
+        if (jet_cli_perf_member_text(item, "domain") ?? "") != domain -> next
+        digits: jet_cli_perf_member_integer(item, "duration_ns") ?? next
+        number: Int.parse(digits) ?? return None
+        return Val(number)
+    }
+    None
+}
+
+// `allocation_bytes`: the first allocation row's bytes.
+jet_cli_perf_allocation_bytes: fn(trace: CanonicalJSON) -> Int? Never! {
+    items: jet_cli_perf_rows(trace, "allocations") ?? return None
+    if items.len() == 0 -> return None
+    digits: jet_cli_perf_member_integer(items[0], "bytes") ?? return None
+    number: Int.parse(digits) ?? return None
+    Val(number)
+}
+
+// ---------------------------------------------------------------------------
+// Reading a verified trace: views into it, never copies of its rows.
+
+// The index of `key` among an object's fields.
+jet_cli_perf_key: fn(fields: View<CanonicalJSONField>, key: String) -> Int? Never! {
+    loop index in 0..<fields.len() {
+        if fields[index].key == key -> return Val(index)
+    }
+    None
+}
+
+// `content_object`.
+jet_cli_perf_content: fn(trace: CanonicalJSON) -> View<CanonicalJSONField> JetTraceError! from trace {
+    top: jettrace_object_view(trace, "jettrace")
+    at: jet_cli_perf_key(top, "content") ?? return Err(jettrace_error("jettrace has no content"))
+    jettrace_object_view(top[at].value, "content")
+}
+
+// `content_array`.
+jet_cli_perf_rows: fn(trace: CanonicalJSON, key: String) -> View<CanonicalJSON> JetTraceError! from trace {
+    content: jet_cli_perf_content(trace)
+    at: jet_cli_perf_key(content, key) ?? return Err(jettrace_error("content has no {key}"))
+    jettrace_array(content[at].value, "content.{key}")
+}
+
+// `content.profile`.
+jet_cli_perf_profile: fn(trace: CanonicalJSON) -> View<CanonicalJSONField> JetTraceError! from trace {
+    content: jet_cli_perf_content(trace)
+    at: jet_cli_perf_key(content, "profile") ?? return Err(jettrace_error("content has no profile"))
+    jettrace_object_view(content[at].value, "content.profile")
+}
+
+// `content.profile.rows`.
+jet_cli_perf_profile_rows: fn(trace: CanonicalJSON) -> View<CanonicalJSON> JetTraceError! from trace {
+    profile: jet_cli_perf_profile(trace)
+    at: jet_cli_perf_key(profile, "rows") ?? return Err(jettrace_error("content.profile has no rows"))
+    jettrace_array(profile[at].value, "content.profile.rows")
+}
+
+// The text field `key` of `fields`.
+jet_cli_perf_field_text: fn(fields: View<CanonicalJSONField>, key: String) -> String? Never! {
+    at: jet_cli_perf_key(fields, key) ?? return None
+    // copy: the text stays in the trace; the caller's line owns its own.
+    if fields[at].value == .String(text) -> return Val(text.copy())
+    None
+}
+
+// The integer field `key` of `fields`, as its canonical digits.
+jet_cli_perf_field_integer: fn(fields: View<CanonicalJSONField>, key: String) -> String? Never! {
+    at: jet_cli_perf_key(fields, key) ?? return None
+    // copy: the digits stay in the trace; the caller's line owns its own.
+    if fields[at].value == .Integer(digits) -> return Val(digits.copy())
+    None
+}
+
+// The text member `key` of the object `value`.
+jet_cli_perf_member_text: fn(value: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(value, "jettrace row") ?? return None
+    jet_cli_perf_field_text(fields, key)
+}
+
+// The integer member `key` of the object `value`, as its canonical digits.
+jet_cli_perf_member_integer: fn(value: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(value, "jettrace row") ?? return None
+    jet_cli_perf_field_integer(fields, key)
+}
+
+// The integer member `key` of the object `value`, as a number.
+jet_cli_perf_member_number: fn(value: CanonicalJSON, key: String) -> Int? Never! {
+    digits: jet_cli_perf_member_integer(value, key) ?? return None
+    number: Int.parse(digits) ?? return None
+    Val(number)
+}
+
+// `symbol_label` of the object `value`'s `symbol` member: `path#name`.
+jet_cli_perf_member_symbol: fn(value: CanonicalJSON) -> String? Never! {
+    fields: jettrace_object_view(value, "jettrace row") ?? return None
+    at: jet_cli_perf_key(fields, "symbol") ?? return None
+    jet_cli_perf_symbol(fields[at].value)
+}
+
+// `symbol_label`.
+jet_cli_perf_symbol: fn(value: CanonicalJSON) -> String? Never! {
+    fields: jettrace_object_view(value, "symbol") ?? return None
+    path: jet_cli_perf_field_text(fields, "path") ?? return None
+    name: jet_cli_perf_field_text(fields, "name") ?? return None
+    Val("{path}#{name}")
+}
+
+// The text `content.<key>`.
+jet_cli_perf_content_text: fn(trace: CanonicalJSON, key: String) -> String? Never! {
+    content: jet_cli_perf_content(trace) ?? return None
+    jet_cli_perf_field_text(content, key)
+}
+
+// `toolchain_digest` / `hardware_fingerprint`: the text `content.<object>.<key>`.
+jet_cli_perf_identity: fn(trace: CanonicalJSON, object: String, key: String) -> String? Never! {
+    content: jet_cli_perf_content(trace) ?? return None
+    at: jet_cli_perf_key(content, object) ?? return None
+    jet_cli_perf_member_text(content[at].value, key)
+}
+
+// ---------------------------------------------------------------------------
+// Summaries (`first_sample` … `span_summary`).
+
+JetCLIPerfSample: struct {
+    domain: String
+    ns: String
+    symbol: String
+}
+
+JetCLIPerfBrowserSummary: struct {
+    count: Int
+    symbol: String
+}
+
+jet_cli_perf_first_sample: fn(trace: CanonicalJSON) -> JetCLIPerfSample? Never! {
+    items: jet_cli_perf_rows(trace, "samples") ?? return None
+    if items.len() == 0 -> return None
+    domain: jet_cli_perf_member_text(items[0], "domain") ?? return None
+    ns: jet_cli_perf_member_integer(items[0], "duration_ns") ?? return None
+    symbol: jet_cli_perf_member_symbol(items[0]) ?? return None
+    Val(JetCLIPerfSample{domain: domain, ns: ns, symbol: symbol})
+}
+
+// `profile method=… status=… coverage=… rows=… clocks=… overhead=… window=… run_wall=… run_cpu=…`.
+jet_cli_perf_profile_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    profile: jet_cli_perf_profile(trace) ?? return None
+    status: jet_cli_perf_field_text(profile, "status") ?? return None
+    coverage: jet_cli_perf_field_text(profile, "coverage") ?? return None
+    method: jet_cli_perf_field_text(profile, "method") ?? return None
+    overhead: jet_cli_perf_field_text(profile, "overhead_status") ?? return None
+    rows: jet_cli_perf_profile_rows(trace) ?? return None
+    clocks := [String]{}
+    loop row in rows {
+        if jet_cli_perf_member_text(row, "clock") == .Val(clock) {
+            if !clocks.contains(clock) -> clocks.push(clock)
+        }
+    }
+    clocks.sort_by((left: String, right: String) -> left <=> right)
+    clock_list: if clocks.len() == 0 -> "none" else -> clocks.join(",")
+    window: jet_cli_perf_field_text(profile, "window_status") ?? return None
+    run_wall: if jet_cli_perf_field_integer(profile, "window_wall_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
+    run_cpu: if jet_cli_perf_field_integer(profile, "window_cpu_ns") == .Val(ns) -> "{ns}ns" else -> "unavailable"
+    Val("profile method={method} status={status} coverage={coverage} rows={rows.len()} clocks={clock_list} overhead={overhead} window={window} run_wall={run_wall} run_cpu={run_cpu}")
+}
+
+jet_cli_perf_allocation_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "allocations") ?? return None
+    if items.len() == 0 -> return None
+    count: jet_cli_perf_member_integer(items[0], "count") ?? return None
+    bytes: jet_cli_perf_member_integer(items[0], "bytes") ?? return None
+    symbol: jet_cli_perf_member_symbol(items[0]) ?? return None
+    Val("alloc count={count} bytes={bytes} · {symbol}")
+}
+
+jet_cli_perf_browser_summary: fn(trace: CanonicalJSON) -> JetCLIPerfBrowserSummary? Never! {
+    items: jet_cli_perf_rows(trace, "browser") ?? return None
+    if items.len() == 0 -> return None
+    symbol: jet_cli_perf_member_symbol(items[0]) ?? return None
+    Val(JetCLIPerfBrowserSummary{count: items.len(), symbol: symbol})
+}
+
+jet_cli_perf_browser_line: fn(trace: CanonicalJSON) -> String? Never! {
+    browser: jet_cli_perf_browser_summary(trace) ?? return None
+    Val("browser count={browser.count} · {browser.symbol}")
+}
+
+jet_cli_perf_task_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "tasks") ?? return None
+    if items.len() == 0 -> return None
+    children := 0
+    symbol := String?{None}
+    loop item in items {
+        if jet_cli_perf_member_integer(item, "parent") == .Val(parent) {
+            if parent != "0" -> children += 1
+        }
+        if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
+    }
+    Val("tasks count={items.len()} children={children} · {symbol ?? "?"}")
+}
+
+jet_cli_perf_lock_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "locks") ?? return None
+    if items.len() == 0 -> return None
+    waiters := 0
+    symbol := String?{None}
+    loop item in items {
+        if jet_cli_perf_member_integer(item, "send_waiters") != None -> waiters += jet_cli_perf_member_number(item, "send_waiters") ?? 0
+        if jet_cli_perf_member_integer(item, "recv_waiters") != None -> waiters += jet_cli_perf_member_number(item, "recv_waiters") ?? 0
+        if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
+    }
+    Val("locks count={items.len()} waiters={waiters} · {symbol ?? "?"}")
+}
+
+jet_cli_perf_io_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "io") ?? return None
+    if items.len() == 0 -> return None
+    symbol := String?{None}
+    loop item in items {
+        if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
+    }
+    Val("io count={items.len()} · {symbol ?? "?"}")
+}
+
+jet_cli_perf_native_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "native") ?? return None
+    if items.len() == 0 -> return None
+    first: items[0]
+    status: jet_cli_perf_member_text(first, "status") ?? return None
+    target: jet_cli_perf_member_text(first, "target") ?? return None
+    symbol: jet_cli_perf_member_symbol(first) ?? "?"
+    if status == "captured" {
+        duration: jet_cli_perf_member_integer(first, "duration_ns") ?? return None
+        observed: jet_cli_perf_member_integer(first, "observed_at_ns") ?? return None
+        task: jet_cli_perf_member_integer(first, "task_id") ?? return None
+        return Val("native process_cpu={duration}ns observed_at={observed}ns target={target} task={task} · {symbol}")
+    }
+    if status == "unavailable" {
+        reason: jet_cli_perf_member_text(first, "reason") ?? return None
+        return Val("native unavailable target={target} reason={reason} · {symbol}")
+    }
+    None
+}
+
+jet_cli_perf_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "spans") ?? return None
+    if items.len() == 0 -> return None
+    status: jet_cli_perf_member_text(items[0], "status") ?? return None
+    symbol: jet_cli_perf_member_symbol(items[0]) ?? "?"
+    if status == "unavailable" {
+        reason: jet_cli_perf_member_text(items[0], "reason") ?? return None
+        return Val("spans unavailable reason={reason} · {symbol}")
+    }
+    if status != "captured" -> return None
+    start := 0
+    end := 0
+    children := 0
+    loop (index, item) in items {
+        item_start: jet_cli_perf_member_number(item, "start_ns") ?? return None
+        item_end: jet_cli_perf_member_number(item, "end_ns") ?? return None
+        if index == 0 || item_start < start -> start = item_start
+        if item_end > end -> end = item_end
+        if !jet_cli_perf_member_is_null(item, "parent_task_id") -> children += 1
+    }
+    Val("spans count={items.len()} children={children} window={start}..{end}ns · {symbol}")
+}
+
+// Whether the object `value` has `key` set to null.
+jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never! {
+    fields: jettrace_object_view(value, "jettrace row") ?? return false
+    at: jet_cli_perf_key(fields, key) ?? return false
+    fields[at].value == .Null
+}
+
+// Whether the trace holds any typed evidence a summary reads.
+jet_cli_perf_has_evidence: fn(trace: CanonicalJSON) -> Bool Never! {
+    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None
+}
+
+// A bar of `count` marks, 1 to 40 wide.
+jet_cli_perf_bar: fn(count: Int) -> String Never! {
+    width: if count > 40 -> 40 else if count < 1 -> 1 else -> count
+    "#".repeat(width)
+}
+
+// `ascii_flame`.
+jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
+    rows := [String]{}
+    if jet_cli_perf_first_sample(trace) == .Val(sample) {
+        rows.push("{sample.symbol} {sample.domain} {jet_cli_perf_bar(Int.parse(sample.ns) ?? 1)}")
+    }
+    if jet_cli_perf_profile_rows(trace) == .Ok(items) {
+        limit: if items.len() > 8 -> 8 else -> items.len()
+        loop index in 0..<limit {
+            if jet_cli_perf_profile_line(items[index]) == .Val(line) -> rows.push(line)
+        }
+    }
+    if jet_cli_perf_browser_summary(trace) == .Val(browser) -> rows.push("{browser.symbol} browser {jet_cli_perf_bar(browser.count)}")
+    rows
+}
+
+jet_cli_perf_profile_line: fn(row: CanonicalJSON) -> String? Never! {
+    symbol: jet_cli_perf_member_symbol(row) ?? return None
+    clock: jet_cli_perf_member_text(row, "clock") ?? return None
+    weight: jet_cli_perf_member_integer(row, "sample_weight") ?? return None
+    Val("{symbol} profile:{clock} samples={weight}")
+}
+
+// `ascii_timeline`.
+jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
+    rows := [String]{}
+    if jet_cli_perf_rows(trace, "browser") == .Ok(items) {
+        limit: if items.len() > 8 -> 8 else -> items.len()
+        loop index in 0..<limit {
+            start: jet_cli_perf_member_integer(items[index], "start_ns") ?? next
+            duration: jet_cli_perf_member_integer(items[index], "duration_ns") ?? next
+            rows.push("[{start}+{duration}] {jet_cli_perf_member_symbol(items[index]) ?? "browser"}")
+        }
+    }
+    if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
+        limit: if items.len() > 8 -> 8 else -> items.len()
+        loop index in 0..<limit {
+            if (jet_cli_perf_member_text(items[index], "status") ?? "") != "captured" -> next
+            start: jet_cli_perf_member_integer(items[index], "start_ns") ?? next
+            end: jet_cli_perf_member_integer(items[index], "end_ns") ?? next
+            rows.push("[{start}..{end}] {jet_cli_perf_member_symbol(items[index]) ?? "span"}")
+        }
+    }
+    rows
+}

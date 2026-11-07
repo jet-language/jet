@@ -3,7 +3,8 @@
 # PENDING-GRAMMAR(batch-four): each-row binding, row-subject numeric relation, first matched task.
 # ORACLE-LITERAL echo-ping.out from original line48 trimmed equality (no newline).
 fixture: fixtures/socket-echo
-step: jet perf run socket_echo.jet --out {work}/socket-echo.jettrace
+# The program listens and connects, so it runs under `--allow=Net` (application authority, E1803).
+step: jet perf run socket_echo.jet --allow=Net --out {work}/socket-echo.jettrace
 exit: 0
 stdout.trim: = echo-ping.out # original predicate
 file: socket-echo.jettrace ~ "\"io\":[{" # original predicate: helper requires nonempty io array

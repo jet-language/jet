@@ -3,6 +3,7 @@
 use {
     process: core.process
     files: core.files
+    json: core.encoding.json
     sys: core.sys
     time: core.time
 }
@@ -32,6 +33,9 @@ KitEnv: struct {
     scratch_memory: Bool{false}
     // The FFI cache children share across runs; "" keeps one per run under `scratch`.
     ffi_cache: String{""}
+    // The unpacked C toolchain pack children compile C with
+    // (JET_CC_PACK_ROOT); "" leaves each child to its jetpack.
+    cc_pack: String{""}
     // A cap in nanoseconds on each wait for an answer (recv, poll, await, a
     // wait with a deadline, repeat while); 0 is none. A known-failing case sets it.
     answer_limit: Int{0}
@@ -67,6 +71,10 @@ KitRun: struct {
     limit_hit: String{""}
     // The kit refused to start the child (see kit_exec_home_refusal); `error` says why.
     refused: Bool{false}
+    // The child's exact output bytes when the kit read them; `stdout` and
+    // `stderr` are their lossy UTF-8 decoding.
+    stdout_bytes: [U8]?{None}
+    stderr_bytes: [U8]?{None}
 }
 KitOptions: struct {
     suite: String
@@ -447,8 +455,8 @@ kit_steps_hook_check: fn(hooks: KitStepHooks, step: KitStep, index: Int, context
 }
 
 // The host-wide lock file for a fixed TCP port. Ports are host-wide, so the
-// name is fixed instead of living under a run's scratch, and
-// Tools/agent/run-feature-examples.mjs takes the same flock.
+// name is fixed instead of living under a run's scratch, and every testkit run
+// on the host takes the same flock.
 kit_steps_host_port_path: fn(port: Int) -> String { "/tmp/jet-host-port-{port}.lock" }
 
 // All suites share this sequencing loop. Hooks supply only suite-specific
@@ -702,6 +710,8 @@ KitUICall: struct {
     extension: String
     refused: String
     unlocked_toolchain: Bool{false}
+    // `jetpack hangar verify` of a freshly ingested, then tampered object.
+    hangar_tamper: Bool{false}
 }
 
 KitUIRegistryRow: struct {
@@ -835,6 +845,9 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     scratch_memory: kit_exec_memory_backed(canonical)
     ffi_cache: if scratch_memory -> "" else -> files.join(state, "ffi")
     env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
+    // Golden C rows build on every tier, each with a fresh Hangar: the run
+    // takes the pack once, so no tier unpacks a copy of its own.
+    if jetpack != "" && kit_expect_named(selected_suites, "golden") -> env.cc_pack = kit_cc_pack_root(jetpack, state)
     if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch, entries.any(item -> item.suite == "ui" && item.entry.mode.ends_with("project")), options.ui_corpora)
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
@@ -862,6 +875,21 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
         false
     }
     kit_execute_finish(jet, results, ran_suites, selected_suites, reports, options.results)
+}
+
+// The root of the C toolchain pack `jetpack` puts in the Hangar under
+// `state` (unpacked on a run's first use, re-proved on later runs), or ""
+// when it can't, which leaves each row's jet to its jetpack.
+kit_cc_pack_root: fn(jetpack: String, state: String) -> String {
+    receipt: process.cmd([jetpack, "env", "fetch-toolchain", "--json"]).env("JETPACK_ROOT", files.join(state, "jetpack")).run() ?? return ""
+    if !receipt.success -> return ""
+    tree: json.parse(receipt.output) ?? return ""
+    if tree == .Object(fields) {
+        loop field in fields {
+            if field.key == "root" && field.value == .Text(text) -> return text.copy()
+        }
+    }
+    ""
 }
 
 // The run's failures and exit code once every row is in: one report of every row to

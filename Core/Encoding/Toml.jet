@@ -345,8 +345,10 @@ impl TOMLParser {
             }
             key: self.parse_key()
             if entries.has(key) -> return Err(self.fail("duplicate key in TOML inline table"))
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             eq: self.bump() ?? return Err(self.fail("expected '='"))
             if eq != (U8{61}) -> return Err(self.fail("expected '='"))
+            self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             value: self.parse_value()
             entries[key] = value
             self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))

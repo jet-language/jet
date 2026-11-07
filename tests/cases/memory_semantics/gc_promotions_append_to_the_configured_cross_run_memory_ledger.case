@@ -6,10 +6,10 @@ env: JET_MEMORY_LEDGER={work}/.jet/memory/ledger-v1.jsonl
 step first: jet run gc.jet
 exit: 0
 stdout: = gc.out
-capture: first_lines = lines file .jet/memory/ledger-v1.jsonl
 file: .jet/memory/ledger-v1.jsonl lines >= 1 # original predicate: first_rows > 0
 file: .jet/memory/ledger-v1.jsonl each-line ~ "\"kind\":\"gc\"" # original predicate
 file: .jet/memory/ledger-v1.jsonl each-line ~ "\"provenance\":\"" # original predicate
+capture: first_lines = lines file .jet/memory/ledger-v1.jsonl
 step: jet run gc.jet
 exit: 0
 stdout: = gc.out

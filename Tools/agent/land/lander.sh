@@ -12,6 +12,9 @@ set -uo pipefail
 M=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$M/../roots.sh"
 W=$JET_DEV_WORKTREE
+TOOLS=$(cd "$M/../../.." && pwd)
+# land_tool ARG...: Tools/agent/Land.jet of this checkout, run by the seed.
+land_tool() { local seed; seed=$(readlink -f "$JET_SEED"); (cd "$TOOLS" && JET_COMPILER_IDENTITY=$(<"$seed/IDENTITY") JET_TOOLCHAIN_ROOT=$TOOLS "$seed/jet" Tools/agent/Land.jet "$@"); }
 Q=$JET_RUN_ROOT/land-queue; RS=$JET_RUN_ROOT/land-results; LOG=$JET_RUN_ROOT/lander.log
 mkdir -p "$Q" "$RS" "$Q/taken"
 say() { echo "$(date +%T) $*" >> "$LOG"; }
@@ -67,7 +70,7 @@ while :; do
     mapfile -t qp < <(for j in "${jobs[@]}"; do head -1 "$j" | cut -f3; done)
     if [ ${#jobs[@]} -gt 1 ]; then
       nq=${#qp[@]}
-      if pre=$(bash "$M/prescreen.sh" "${qp[$((nq-1))]}" "${qp[@]:0:$((nq-1))}" 2>&1); then
+      if pre=$(land_tool prescreen "${qp[$((nq-1))]}" "${qp[@]:0:$((nq-1))}" 2>&1); then
         for j in "${jobs[@]}"; do name=$(basename "$j" .job); line=$(head -1 "$j"); mv "$j" "$Q/taken/"; printf '%s\t%s\n' "$line" "$name" >> "$L"; done
         say "prescreen clean (stacked) ${#jobs[@]} job(s)"; jobs=()
       else
@@ -79,7 +82,7 @@ while :; do
       # Admission: a job must check clean on its own before it may join a batch (no bisect rounds).
       # Jobs stack in queue order: earlier admitted patches of this batch apply first.
       mapfile -t prior < <(cut -f3 "$L" 2>/dev/null)
-      pre=$(bash "$M/prescreen.sh" "$patch" "${prior[@]}" 2>&1); prc=$?
+      pre=$(land_tool prescreen "$patch" "${prior[@]}" 2>&1); prc=$?
       mv "$j" "$Q/taken/"
       if [ $prc -ne 0 ]; then { [ $prc = 3 ] && echo "STALE does not apply to HEAD; rebase" || echo "REJECTED at prescreen (seed check of HEAD + this patch alone)"; printf '%s\n' "$pre"; } > "$RS/$name.result"; say "prescreen rejected $name"; continue; fi
       say "prescreen clean $name"

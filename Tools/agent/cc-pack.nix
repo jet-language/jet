@@ -1,5 +1,5 @@
 # The C toolchain pack `jet cc` fetches on first use
-# (Docs/spec/reference/cc-driver.md). release-compiler.mjs builds it with
+# (Docs/spec/reference/cc-driver.md). `Tools/release/Main.jet -- admit` builds it with
 #
 #   nix-build Tools/agent/cc-pack.nix
 #

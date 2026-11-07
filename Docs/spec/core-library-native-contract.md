@@ -869,7 +869,7 @@ plus `)`, with no debug escaping or additional fields.
 
 The generated musl error-text provider exposes `host_errno_append` and
 `host_errno_cause_append` for callers that already own a text builder.
-`gen-runtime-host-errors.mjs` single-sources the same pinned errno ladder;
+`Tools/agent/RuntimeGenerators.jet` single-sources the same pinned errno ladder;
 the existing owned `host_errno_text`/`host_errno_cause` entry points allocate
 one builder and delegate. Composite renderers can therefore append exact
 error text without allocating and copying an intermediate Text owner.

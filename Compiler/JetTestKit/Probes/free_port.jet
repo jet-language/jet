@@ -1,8 +1,3 @@
-package: {
-    name: "free_port"
-    authority: { allow: [Exec.Args, IO, Net] }
-}
-
 use {
     net: core.net
     process: core.process
@@ -15,10 +10,27 @@ run: fn() {
     args: process.args()
     count: if args.len() == 0 -> 1 else -> Int.parse(args[args.len() - 1]) ?? panic("free-port count is not an Int")
     listeners := [net.TCPListener]{}
+    loop port in free_port_reserve(count, listeners) -> print(port)
+}
+
+// Binds `count` loopback listeners on port 0 and returns their ports. Each
+// listener stays in `listeners`, so no port is reused before the caller drops them.
+free_port_reserve: fn(count: Int, listeners: &[net.TCPListener]) -[Net]> [Int] {
+    ports := [Int]{}
     loop _ in 0..<count {
         listener: net.tcp_listen("127.0.0.1:0") ?? panic("free-port bind failed")
         address: net.listener_local_socket_addr(listener) ?? panic("free-port local address failed")
-        print(net.socket_port(address))
+        ports.push(net.socket_port(address))
         listeners.push(listener)
     }
+    ports
+}
+
+#Test("free_port reserves distinct bound loopback ports") {
+    listeners := [net.TCPListener]{}
+    ports: free_port_reserve(3, listeners)
+    assert_eq(ports.len(), 3)
+    assert_eq(listeners.len(), 3)
+    loop port in ports -> assert(port > 0 && port < 65536)
+    assert(ports[0] != ports[1] && ports[0] != ports[2] && ports[1] != ports[2])
 }

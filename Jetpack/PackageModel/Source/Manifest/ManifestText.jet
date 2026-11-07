@@ -47,11 +47,12 @@ pkg_top_level_commas: fn(body: String) -> [String] Never! {
     out
 }
 
-// `Blocks::key_value_entries`: `key: value` pieces of a `{ … }` body split
-// at top-level commas and at each piece's first `:`.
+// `key: value` pieces of a `{ … }` body, split as package.jet's own fields
+// are (pkg_top_level_entries: commas, newlines and the implicit boundary
+// before the next `ident:`), each at its first `:`.
 pkg_key_value_entries: fn(body: String) -> [ManifestEntry] PackageParseError! {
     entries := [ManifestEntry]{}
-    loop piece in pkg_top_level_commas(body) {
+    loop piece in pkg_top_level_entries(body) {
         entry: piece.trim()
         if entry == "" -> next
         parts: entry.split_once(":") ?? return Err(PackageParseError.Composition("malformed metadata field `{entry}`"))

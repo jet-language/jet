@@ -1,0 +1,246 @@
+// What `admit` and `build` share: the seed layout a release ships, the
+// no-Rust stage environment, the preflight gate and the logged runs of the
+// stages.
+
+use {
+    files: core.files
+    process: core.process
+    sys: core.sys
+    term: core.term
+    time: core.time
+}
+
+// Every stage runs under this stack: no core files and a 1 GiB stack.
+STACK: [String]{"prlimit", "--core=0", "--stack=1073741824:1073741824", "--"}
+MUSL_DEFAULT: "/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x86_64-unknown-linux-musl-1.2.5/lib"
+// norust: drop every PATH directory holding cargo, rustc or rustup, refuse if
+// one stays reachable, then run the command.
+NORUST: "kept=; IFS=: read -r -a dirs <<< \"$PATH\"; for d in \"${{dirs[@]}}\"; do s=; for b in cargo rustc rustup; do [ -x \"$d/$b\" ] && s=1; done; [ -n \"$s\" ] || kept=\"$kept${{kept:+:}}$d\"; done; export PATH=\"$kept\"; for b in cargo rustc rustup; do if command -v \"$b\" >/dev/null 2>&1; then echo \"norust: REFUSE $b still on PATH\" >&2; exit 2; fi; done; exec \"$@\""
+// Docs/spec/reference/cc-driver.md: `jet-cc` runs `jet cc`, `jet-cxx` and
+// `jet-c++` run `jet c++`. They are hard links of `jet` (a real binary, not a
+// wrapper); the CLI reads argv[0] (JetCli Host.jet `jet_cli_alias_args`).
+COMPILER_ALIASES: [String]{"jet-cc", "jet-cxx", "jet-c++"}
+
+// What a seed directory needs to build or be released from.
+STAGE_FILES: [String]{"jet", "IDENTITY", "jet-runtime"}
+
+// One environment change of a child: set `name` to `value`, or remove it.
+Var: struct {
+    name: String
+    value: String
+    drop: Bool
+}
+
+set_var: fn(name: String, value: String) -> Var Never! { Var{name: name.copy(), value: value.copy(), drop: false} }
+
+drop_var: fn(name: String) -> Var Never! { Var{name: name.copy(), value: "", drop: true} }
+
+// A finished run: its exit status (124 or 137 when the time limit killed
+// it), whether it timed out, and its wall time in seconds.
+Finished: struct {
+    rc: Int
+    timed_out: Bool
+    wall: Int
+}
+
+// Whether the preflight gate admits the launch, and its line.
+Admission: struct {
+    admitted: Bool
+    text: String
+}
+
+env_or: fn(name: String, fallback: String) -[Env]> String Never! {
+    value: sys.get(name) ?? return fallback.copy()
+    if value == "" -> return fallback.copy()
+    value
+}
+
+// The dev tool roots (Tools/agent/roots.sh).
+home_dir: fn() -[Env]> String Never! { env_or("HOME", "") }
+
+state_root: fn() -[Env]> String Never! { env_or("JET_STATE_ROOT", files.join(env_or("XDG_CACHE_HOME", files.join(home_dir(), ".cache")), "jet-dev")) }
+
+seeds_root: fn() -[Env]> String Never! { env_or("JET_SEEDS", files.join(env_or("XDG_DATA_HOME", files.join(home_dir(), ".local/share")), "jet-seeds")) }
+
+// The runner target Tools/release/support-matrix.tsv names, in node's
+// `<platform>-<arch>` spelling (Tools/agent/VerifyFull.jet runner_target).
+host_target: fn() -[Env]> String Never! {
+    name: sys.name()
+    arch: sys.arch()
+    platform: if name == "macos" -> "darwin" else -> if name == "windows" -> "win32" else -> name
+    machine: if arch == "x86_64" -> "x64" else -> if arch == "aarch64" -> "arm64" else -> arch
+    "{platform}-{machine}"
+}
+
+clock: fn() -[Time]> String Never! {
+    stamp: time.isoformat(time.now_utc())
+    if stamp.len() >= 19 -> return stamp.slice(11..<19).copy()
+    stamp
+}
+
+// `[TOOL HH:MM:SS] message` on stderr, and in `log` when there is one.
+say: fn(tool: String, log: String, message: String) Never! -[FS, IO, Time]> {
+    line: "[{tool} {clock()}] {message}"
+    term.eprint(line)
+    if log != "" -> files.append_all(log, "{line}\n") ?? ()
+}
+
+short: fn(text: String, length: Int) -> String Never! {
+    if text.len() <= length -> return text.copy()
+    text.slice(0..<length).copy()
+}
+
+// The last `count` non-empty lines of `path`, joined, at most 600 bytes.
+tail_of: fn(path: String, count: Int) -[FS]> String Never! {
+    text: files.read(path) ?? return ""
+    lines := [String]{}
+    loop line in text.split("\n").to_list() {
+        if line != "" -> lines.push(line.copy())
+    }
+    start: if lines.len() > count -> lines.len() - count else -> 0
+    short(lines[start..<lines.len()].join(" | "), 600)
+}
+
+sha256_file: fn(path: String) -[FS]> String Never! {
+    bytes: files.read_bytes(path) ?? return ""
+    sha256_hex(bytes)
+}
+
+// Copies the file `from` to `to` and marks it executable (0755) or not (0644).
+copy_file: fn(from: String, to: String, executable: Bool) IOError! -[FS]> {
+    files.copy(from, to) ?? return Err(err)
+    files.set_mode(to, if executable -> 493 else -> 420) ?? return Err(err)
+    Ok()
+}
+
+link_compiler_aliases: fn(dir: String) IOError! -[FS]> {
+    loop alias in COMPILER_ALIASES {
+        files.hard_link(files.join(dir, "jet"), files.join(dir, alias)) ?? return Err(err)
+    }
+    Ok()
+}
+
+// A plain command to completion, its output discarded; the exit status.
+quiet: fn(argv: [String], cwd: String) -[Exec, Time.Wait]> Int Never! {
+    receipt: process.cmd(argv).cwd(cwd).output_limit(268435456).run() ?? return 127
+    if receipt.signal == .Val(_) -> 128 else -> receipt.code
+}
+
+// Copies the tree `from` to `to`, symbolic links as links.
+copy_tree: fn(from: String, to: String) -[Exec, Time.Wait]> Bool Never! {
+    quiet([String]{"cp", "-a", from.copy(), to.copy()}, ".") == 0
+}
+
+// Removes `dir`; test fixtures leave read-only directories behind, so the
+// tree is made writable first.
+remove_tree: fn(dir: String) Never! -[FS, Exec, Time.Wait]> {
+    if !files.exists(dir) -> return
+    _: quiet([String]{"chmod", "-R", "u+w", dir.copy()}, ".")
+    files.remove_all(dir) ?? ()
+}
+
+// COMMIT of the checkout `repo` unpacked into `dir`, which is emptied first.
+export_commit: fn(repo: String, commit: String, dir: String) -[FS, Exec, Time.Wait]> String? Never! {
+    remove_tree(dir)
+    files.create_dir_all(dir) ?? return Val("cannot create {dir}: {err}")
+    argv: [String]{"bash", "-c", "set -o pipefail; git -C \"$0\" archive \"$1\" | tar -x -C \"$2\"", repo.copy(), commit.copy(), dir.copy()}
+    receipt: process.cmd(argv).cwd(repo).output_limit(268435456).run() ?? return Val("git archive {commit} failed: {err}")
+    if receipt.code != 0 || receipt.signal != None -> return Val("git archive {commit} failed: {receipt.errors.trim()}")
+    None
+}
+
+// `git -C repo ARGS`: exit status and trimmed output.
+git_in: fn(repo: String, args: [String]) -[Exec, Time.Wait]> (rc: Int, out: String, err: String) Never! {
+    argv := [String]{"git", "-C", repo.copy()}
+    argv.extend(args.copy())
+    receipt: process.cmd(argv).cwd(repo).env_remove("GIT_INDEX_FILE").output_limit(268435456).run() ?? return (rc: 127, out: "", err: "git: {err}")
+    (rc: if receipt.signal == .Val(_) -> 128 else -> receipt.code, out: receipt.output.trim().copy(), err: receipt.errors.trim().copy())
+}
+
+// The command a logged run starts: its output in `log` (appended when
+// `append`), pinned to the build slot's CPUs when there is one, and killed
+// with its whole process group after `seconds` (then SIGKILL 30 s later).
+logged_argv: fn(argv: [String], log: String, seconds: Int, append: Bool) -[Env]> [String] Never! {
+    redirect: if append -> "exec \"$@\" >> \"$0\" 2>&1" else -> "exec \"$@\" > \"$0\" 2>&1"
+    out := [String]{"bash", "-c", redirect, log.copy()}
+    if seconds > 0 -> out.extend([String]{"timeout", "-k", "30", "{seconds}"})
+    if sys.get("SLOT_CPUS") == .Val(cpus) && cpus != "" -> out.extend([String]{"taskset", "-c", cpus.copy()})
+    out.extend(argv.copy())
+    out
+}
+
+logged_spec: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: Int, append: Bool) -[Env, Exec]> ProcessSpec Never! {
+    spec := process.cmd(logged_argv(argv, log, seconds, append)).cwd(cwd).output_limit(1048576)
+    loop change in vars {
+        spec = if change.drop -> spec.env_remove(change.name) else -> spec.env(change.name, change.value)
+    }
+    spec
+}
+
+finished_of: fn(code: Int, signalled: Bool, seconds: Int, wall: Int) -> Finished Never! {
+    rc: if signalled -> 128 else -> code
+    Finished{rc: rc, timed_out: seconds > 0 && (rc == 124 || rc == 137) && wall >= seconds, wall: wall}
+}
+
+// Runs `argv` in `cwd` with `vars` to completion, its output in `log`.
+run_logged: fn(argv: [String], cwd: String, vars: [Var], log: String, seconds: Int) -[Env, Exec, FS, Time, Time.Wait]> Finished Never! {
+    watch: time.start()
+    receipt: logged_spec(argv, cwd, vars, log, seconds, false).run() ?? {
+        files.append_all(log, "\n{argv[0]}: {err}\n") ?? ()
+        return Finished{rc: 127, timed_out: false, wall: 0}
+    }
+    finished_of(receipt.code, receipt.signal != None, seconds, time.elapsed(watch).ns /% 1000000000)
+}
+
+// One run of a parallel batch.
+Job: struct {
+    argv: [String]
+    cwd: String
+    vars: [Var]
+    log: String
+    seconds: Int
+}
+
+// Runs every job at once and returns their results in order.
+run_batch: fn(jobs: [Job]) -[Env, Exec, FS, Time, Time.Wait]> [Finished] Never! {
+    specs := [ProcessSpec]{}
+    loop job in jobs -> specs.push(logged_spec(job.argv, job.cwd, job.vars, job.log, job.seconds, false))
+    watch: time.start()
+    out := [Finished]{}
+    results: process.run_all(specs, if jobs.len() > 0 -> jobs.len() else -> 1) ?? {
+        loop job in jobs {
+            files.append_all(job.log, "\n{job.argv[0]}: {err}\n") ?? ()
+            out.push(Finished{rc: 127, timed_out: false, wall: 0})
+        }
+        return out
+    }
+    wall: time.elapsed(watch).ns /% 1000000000
+    loop (index, result) in results {
+        if result == {
+            .Ok(receipt) -> out.push(finished_of(receipt.code, receipt.signal != None, jobs[index].seconds, wall))
+            .Err(failed) -> {
+                files.append_all(jobs[index].log, "\n{jobs[index].argv[0]}: {failed}\n") ?? ()
+                out.push(Finished{rc: 127, timed_out: false, wall: wall})
+            }
+        }
+    }
+    out
+}
+
+// The preflight gate (`Tools/agent/Land.jet receipt commit`, run by the seed
+// in `seed_dir` from the checkout `repo`): is a launch of COMMIT `sha` by
+// that seed admitted by a receipt? `text` is the admission line, or the
+// refusal that names the census to run.
+preflight_gate: fn(launcher: String, repo: String, seed_dir: String, sha: String) -[Exec, FS, Time.Wait]> Admission Never! {
+    identity: read_text(files.join(seed_dir, "IDENTITY")) ?? return Admission{admitted: false, text: "{launcher}: seed {seed_dir} has no IDENTITY"}
+    argv: [String]{files.join(seed_dir, "jet"), "Tools/agent/Land.jet", "receipt", "commit", launcher.copy(), repo.copy(), sha.copy(), seed_dir.copy()}
+    receipt: process.cmd(argv).cwd(repo).env("JET_COMPILER_IDENTITY", identity.trim()).env("JET_TOOLCHAIN_ROOT", repo).output_limit(16777216).run() ?? return Admission{admitted: false, text: "{launcher}: the preflight gate did not run ({err})"}
+    text := "{receipt.output}{receipt.errors}".trim().copy()
+    if text == "" -> text = "{launcher}: the preflight gate did not run (exit {receipt.code})"
+    Admission{admitted: receipt.code == 0 && receipt.signal == None, text: text}
+}
+
+// Whether `path` is `root` or lies under it.
+inside: fn(root: String, path: String) -> Bool Never! {
+    path == root || path.starts_with("{root.removesuffix("/")}/")
+}

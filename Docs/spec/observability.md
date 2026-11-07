@@ -52,8 +52,14 @@ that the session `wall`/`cpu` samples include. `window_status` is `exit` when
 the runtime published the window at its shared exit seam, `live` for the last
 periodic publication of a run that had not exited, and `unavailable` when no
 window was published. On Linux, `jet perf run` reads the exit publication
-before it reaps the child, so a completed short run records the same profile
-rows, in the same order and with the same source ranges, on every capture.
+before it reaps the `jet` child, so a completed run that took jet's place
+records the same profile rows, in the same order and with the same source
+ranges, on every capture. The `jet` host's own publications describe its
+compile and are never attributed to the program. A program that `jet run`
+starts in a child process is reaped by jet first, so its window is the last
+periodic one (`live`). A program that links no task, channel, live value or
+event publishes nothing: its trace keeps the source identity and map, and its
+profile is `no_samples` with no window.
 Rows attribute to the parsed `run: fn` declaration (`fn` through its closing
 brace). The observe snapshot has no current-function or stack sample, so rows
 do not yet separate the functions that `run` calls.

@@ -2491,12 +2491,16 @@ sema_comptime_indexed_function_source: fn(graph: SemaRegistrationGraph, module_i
         .NominalMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
             // copy: the source is the caller's own; the row stays in the graph.
-            return Val(SemaComptimeFunctionSource{declaration: graph.modules[declaring].nominals[owner].methods[index].declaration.copy(), symbol: graph.modules[declaring].nominals[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].nominals[owner].methods[index].declaration, graph.modules[declaring].nominals[owner].ty, None), raw_protocol_return: graph.modules[declaring].nominals[owner].methods[index].raw_protocol_return})
+            declaration := graph.modules[declaring].nominals[owner].methods[index].declaration.copy()
+            if declaration.body.len() == 0 && sema_codec_pending_method_body(graph, graph.modules[declaring].nominals[owner].symbol.name, function_key) == .Val(body) -> declaration.body = body
+            return Val(SemaComptimeFunctionSource{declaration: declaration, symbol: graph.modules[declaring].nominals[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].nominals[owner].methods[index].declaration, graph.modules[declaring].nominals[owner].ty, None), raw_protocol_return: graph.modules[declaring].nominals[owner].methods[index].raw_protocol_return})
         }
         .ImplMethod(declaring, owner, index) -> {
             if module_index >= 0 && declaring != module_index -> return None
             // copy: the source is the caller's own; the row stays in the graph.
-            return Val(SemaComptimeFunctionSource{declaration: graph.modules[declaring].impls[owner].methods[index].declaration.copy(), symbol: graph.modules[declaring].impls[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].impls[owner].methods[index].declaration, graph.modules[declaring].impls[owner].target_type, graph.modules[declaring].impls[owner].trait_symbol), raw_protocol_return: graph.modules[declaring].impls[owner].methods[index].raw_protocol_return})
+            declaration := graph.modules[declaring].impls[owner].methods[index].declaration.copy()
+            if sema_codec_pending_body(graph, declaring, owner) == .Val(body) -> declaration.body = body
+            return Val(SemaComptimeFunctionSource{declaration: declaration, symbol: graph.modules[declaring].impls[owner].methods[index].symbol.copy(), kind: sema_comptime_method_kind(graph.modules[declaring].impls[owner].methods[index].declaration, graph.modules[declaring].impls[owner].target_type, graph.modules[declaring].impls[owner].trait_symbol), raw_protocol_return: graph.modules[declaring].impls[owner].methods[index].raw_protocol_return})
         }
         .Foreign(_, _) -> return None
     }
@@ -2577,7 +2581,9 @@ sema_check_comptime_function: fn(graph: SemaRegistrationGraph, environment: &Sem
     memory_complete := true
     if memory_row == {
         .Val(position) -> {
-            if memory_plan.functions[position].function == .Val(planned) -> memory_func = planned
+            // A pending codec's planned row is its header: the body the
+            // source carries (sema_codec_pending_body) stands.
+            if memory_plan.functions[position].function == .Val(planned) && (planned.body.len() > 0 || source.declaration.body.len() == 0) -> memory_func = planned
             loop diagnostic in memory_plan.functions[position].diagnostics -> diagnostics.push(diagnostic.copy())
             memory_complete = memory_plan.functions[position].complete
         }
@@ -7097,6 +7103,56 @@ sema_comptime_reachable_function_keys: fn(graph: SemaRegistrationGraph, call_fac
         keys.push(callee.key)
     }
     keys
+}
+
+// The `encode` (under `encode`) and `decode` (under `decode`) methods a codec
+// target `ty` reaches by owner type (JetIR ir_serde_encode and
+// ir_dyn_decode), which no call fact records, `ty` named from module
+// `module_identity`: the Encode and Decode implementations of each nominal
+// type `ty` holds, itself or as an element, member or argument. A generated
+// codec the body pass has not demanded yet is checked with the body its
+// demand would give it (sema_codec_pending_body).
+sema_comptime_codec_methods: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, encode: Bool, decode: Bool) -> [(module_identity: String, key: String)] {
+    found := [(module_identity: String, key: String)]{}
+    sema_comptime_codec_methods_add(graph, ty, module_identity, encode, decode, found)
+    found
+}
+
+sema_comptime_codec_methods_add: fn(graph: SemaRegistrationGraph, ty: Type, module_identity: String, encode: Bool, decode: Bool, found: &[(module_identity: String, key: String)]) {
+    if ty == {
+        .List(element) | .Option(element) | .Shared(element) | .Tagged(_, element) | .FixedList(element, _) -> sema_comptime_codec_methods_add(graph, element, module_identity, encode, decode, found)
+        .Map(key, _, value) -> {
+            sema_comptime_codec_methods_add(graph, key, module_identity, encode, decode, found)
+            sema_comptime_codec_methods_add(graph, value, module_identity, encode, decode, found)
+        }
+        .Result(ok, _) -> sema_comptime_codec_methods_add(graph, ok, module_identity, encode, decode, found)
+        .Tuple(fields) -> loop field in fields -> sema_comptime_codec_methods_add(graph, field.ty, module_identity, encode, decode, found)
+        .Union(members) -> loop member in members -> sema_comptime_codec_methods_add(graph, member, module_identity, encode, decode, found)
+        .Named(_) | .Apply(_, _) -> {
+            if ty == .Apply(_, args) {
+                loop arg in args -> sema_comptime_codec_methods_add(graph, arg, module_identity, encode, decode, found)
+            }
+            row: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return
+            nominal_name: graph.modules[row.module_index].nominals[row.row].symbol.name
+            nominal_key: graph.modules[row.module_index].nominals[row.row].symbol.id.key
+            loop reference in sema_registration_impl_rows_named(graph, nominal_name) {
+                implementation: graph.modules[reference.module_index].impls[reference.row]
+                symbol_name: if implementation.trait_symbol == .Val(trait_symbol) -> trait_symbol.name.copy() else -> ""
+                method_name: if {
+                    decode && (implementation.trait_name == Val("Decode") || symbol_name == "Decode") -> "decode"
+                    encode && (implementation.trait_name == Val("Encode") || symbol_name == "Encode") -> "encode"
+                    else -> ""
+                }
+                if method_name == "" -> next
+                if sema_codec_impl_pending(implementation) && sema_codec_pending_body(graph, reference.module_index, reference.row) == None -> next
+                if sema_type_graph_impl_target_nominal_key(graph, implementation) != Val(nominal_key) -> next
+                loop method in implementation.methods {
+                    if method.symbol.name == method_name -> found.push((module_identity: graph.modules[reference.module_index].module_identity.copy(), key: method.symbol.id.key.copy()))
+                }
+            }
+        }
+        else -> {}
+    }
 }
 
 // Whether the call sites `call_facts` keep an evaluation pure: no call reaches

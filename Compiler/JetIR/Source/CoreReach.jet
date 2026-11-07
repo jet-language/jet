@@ -485,6 +485,46 @@ ir_named_conversion_key: fn(conversion: TTryConvert, keys: &[String]) Never! {
     }
 }
 
+// A type whose Encode (`encode`) or Decode (`decode`) implementation a
+// checked body and its root expressions reach by owner type: every
+// `tree.decode<T>()` target decodes, every `value.encode()` receiver encodes,
+// and every type argument of a generic call does either (a codec such as
+// `cbor.to_bytes_canonical<T>` encodes its `T` inside the instance). Their
+// lowering calls the implementation by owner type and a container's
+// Core/Encoding/Encoding.jet helper by name (ir_dyn_decode, ir_serde_encode),
+// and Sema records no call fact for either, so a compile-time body queues
+// them itself (jet_driver_comptime_codec_refs).
+IRComptimeCodecTarget: struct {
+    ty: Type
+    encode: Bool
+    decode: Bool
+}
+
+ir_comptime_codec_targets: fn(tree: BodyTree, roots: [Int], body: [Int]) -> [IRComptimeCodecTarget] Never! {
+    targets := [IRComptimeCodecTarget]{}
+    loop root in roots -> ir_comptime_codec_tree(tree, root, targets)
+    loop statement in body {
+        body_each_stmt_child(tree, tree.stmts[statement], (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
+    }
+    targets
+}
+
+ir_comptime_codec_tree: fn(tree: BodyTree, expression: Int, targets: &[IRComptimeCodecTarget]) Never! {
+    node: body_node(tree, expression)
+    if node.kind == {
+        .HandleMethod(receiver, operation, _) -> {
+            if operation == .DynDecode(target) -> targets.push(IRComptimeCodecTarget{ty: target.copy(), encode: false, decode: true})
+            if operation == .SerdeEncode {
+                if checked_expr_type_id(tree.expr_types, receiver) == .Val(type_id) -> targets.push(IRComptimeCodecTarget{ty: tree.types.types[type_id].copy(), encode: true, decode: false})
+            }
+        }
+        .Call(_, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
+        .MethodCall(_, _, type_args, _) -> loop arg in type_args -> targets.push(IRComptimeCodecTarget{ty: arg.copy(), encode: true, decode: true})
+        else -> {}
+    }
+    body_each_expr_child(tree, node, (child: Int) -> ir_comptime_codec_tree(tree, child, targets))
+}
+
 // A Fraction division also tests its divisor (ir_precise_division). A value
 // of a precise type may render (an interpolation, `print`, a List's text),
 // and its rendering calls its owner's `to_string` helper by name

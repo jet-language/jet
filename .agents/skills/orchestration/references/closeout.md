@@ -27,7 +27,7 @@ patches do not substitute for milestone evidence.
 
 The a0_NNN releases in `~/.local/share/jet-seeds` carry a validated compiler
 from `dev` to `master`; `jet` on PATH runs `current`. After landings, run
-`node Tools/agent/release-compiler.mjs <dev HEAD>` on the newest HEAD, one run
+`jet run Tools/release/Main.jet -- admit <dev HEAD>` on the newest HEAD, one run
 at a time (it holds a lock and takes a build slot). It builds the self-host
 chain from `current` without Rust and requires the fixed point, checks that the
 runtime pack rebuilds byte for byte, runs the Jetpack census and the golden, ui

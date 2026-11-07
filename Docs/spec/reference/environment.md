@@ -26,6 +26,7 @@ one exists instead of adding another spelling for the same job.
 | `JETPACK_BIN` | executable path | Names the `jetpack` engine that `jet`'s engine verbs (`fetch`, `add`, `env`, `trust`, …) run. The lookup order is `JETPACK_BIN`, then the `jetpack` beside the running `jet`, then `PATH`; a `JETPACK_BIN` that names no executable file refuses with E1228 instead of falling through. `jet test --jetpack=<path>` (the `jetpack` test setting) sets it for every corpus row it runs, which otherwise get the engine this order finds for the jet under test. The name predates the `JET_<AREA>_<SETTING>` convention; it matches the `JETPACK_BIN` that Jetpack's process claims already use. |
 | `JET_CACHE_DIR` | path | Overrides the compiler build-cache directory. |
 | `JET_CC_PACK_URL` | `https://` or `file://` URL | Names where `jet cc` and `jet env fetch-toolchain` fetch this jet's C toolchain pack when it is neither in the Hangar nor beside jet, instead of the jet release. The pack must still hash to the SHA-256 jet embeds; a `file://` pack is a local copy and works offline. |
+| `JET_CC_PACK_ROOT` | directory | Names an unpacked C toolchain pack (a `jet env fetch-toolchain --json` root) whose clang and llvm-ar compile and archive a program's C dependencies on every tier, instead of the pack jet's `jetpack` fetches. `CC` or `AR` still win. A golden `jet test` run with a jetpack sets it for every row. |
 | `JET_FFI_CACHE_DIR` | path | Overrides the hidden Rust FFI bridge cache directory. |
 | `JET_ENV_DISABLE` | any non-empty value | D-ENVHOOK1 escape for `jet env hook`; suppresses automatic activation in the current shell and drops environment that hook already activated. |
 | `JET_FUZZ_CORPUS` | path | Overrides the fuzz corpus directory. |
@@ -55,13 +56,11 @@ one exists instead of adding another spelling for the same job.
 
 | Variable | Accepted value | Effect |
 | --- | --- | --- |
-| `JET_CANDIDATE_COMPILER` | executable path | Names the candidate compiler (for example the self-hosted `jetc0`) that `Tools/agent/compiler-diff.mjs` compares against the reference compiler (canary, then all corpora). |
 | `JET_CANVAS_PREREQUISITES` | `strict` | Makes Canvas scenario verification fail instead of skip when a prerequisite is absent. |
 | `JET_PERF_MAP` | `1` | **Internal** profiling aid for `jet run` and `jet dev`: before a program runs from memory, jet writes `/tmp/perf-<pid>.map` from its image's symbol table, so `perf report` shows its function names (`Compiler/JetBackend/Source/Image/Loader.jet`, `x64_image_perf_map`). Unset, nothing is written. |
 | `JET_CFFI_ABI` | ABI name | Selects the C-ABI matrix row. Companion `JET_CFFI_CC`, `JET_CFFI_AR`, `JET_CFFI_RUSTC`, `JET_CFFI_RUST_TARGET`, `JET_CFFI_RUST_LINKER`, and `JET_CFFI_RUNNER` name that row's tools and target. |
-| `JET_COMPILER_IDENTITY` | `name@version#build-id` | Names the running compiler's identity, which keys its receipts and versions its target layout. Unset, `jet` reads the one line of the `IDENTITY` file beside its executable; with neither, every compile refuses (E2105) and names both. |
+| `JET_COMPILER_IDENTITY` | `name@version#build-id` | Names the running compiler's identity, which keys its receipts and versions its target layout. Unset, `jet` reads the one line of the `IDENTITY` file beside its executable; with neither, every compile refuses (E2105) and names both. A code suite of `jet test` (the `packages`, `selfhost` and `perf` profiles of `Compiler`) gets the identity of the jet under test here, so it runs in a shell that sets none. |
 | `JET_GOLDEN_FILTER` | repository-relative example substring | Selects one golden example. |
-| `JET_REFERENCE_COMPILER` | executable path | Names the pinned reference compiler for `Tools/agent/compiler-diff.mjs`; defaults to `$JET`. |
 | `JET_REQUIRE_RUSTC` | `1` | Fails tests when rustc is unavailable instead of skipping rustc-backed proof. |
 | `JET_TEST_JOBS` | positive integer | Sets the repository test-process budget. |
 | `JET_TOOLCHAIN_ROOT` | path | Names the Jet toolchain source tree, the directory holding `Core/` and `Compiler/Prelude/`, that the Core library bodies are read from. Unset, `jet` uses the nearest directory at or above the input that holds both; with none, it compiles against the Core sources built into it. Checkout tools that read the tree's other files (`jet devtools grammars`, the diagnostic coverage report) refuse (E2105) and name both places. |

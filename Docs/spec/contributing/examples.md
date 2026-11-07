@@ -100,8 +100,7 @@ streams and sidecars live beside their source or project directory.
 Sidecars replace filename-specific harness rules. `requires:` declares GTK,
 foreign tools, or environment requirements; missing hosts report `SKIP-HOST`.
 `run: none` keeps a serves-until-stopped entry compile-only. `host-port: N`
-declares a fixed TCP port the program binds; the kit and
-`Tools/agent/run-feature-examples.mjs` hold the host-wide flock
+declares a fixed TCP port the program binds; the kit holds the host-wide flock
 `/tmp/jet-host-port-N.lock` while the case runs, waiting at most one step
 timeout, so concurrent runs on one host take turns. `normalize: argv0`
 pins CLI usage to the source name. Ordered `step:` commands accept quoted argv,
@@ -228,29 +227,29 @@ discrepancy merely because one compiler printed it.
 
 ## Collect-all closeout
 
-Run the complete census with an already-built compiler and a committed source
-tree:
+Run the complete census with an already-built compiler from the root of a
+committed source tree:
 
 ```sh
-JET=/path/to/jet JET_TOOLCHAIN_ROOT=/path/to/source \
-  Tools/agent/jet-env node Tools/agent/goldens-census.mjs \
-  --jobs 2 --timeout 90 --registry-timeout 600
+JET=/path/to/jet Tools/agent/jet-env jet Tools/agent/VerifyFull.jet
 ```
 
-The command exports that source commit into private disk-backed scratch. Tests
-and examples run from a separate mutable copy, never from the supplied checkout.
-It builds the native testkit once, runs its complete golden/UI/CLI-case corpus
-with deterministic shards and all three tiers, runs the compiler registries
-with independently sealed shard receipts, and runs Core's named `#Test`
-suites. The compiler itself is never rebuilt.
-
-All children share **one total memory scope**, not one allowance per shard.
-The default is 4 GiB; `JET_CENSUS_MEMORY=8G` selects 8 GiB when the coordinator
-permits it. Launch is refused below 12 GiB `MemAvailable`. `--runtime DIR`
-selects a matching Jet-native runtime directory for native registry transports;
-otherwise the compiler's adjacent `jet-runtime` is used. Missing prerequisites
-are recorded as blocked/skipped, never as passes, so native-only transports and
+It pins the source to the commit of an inherited `../source.manifest.json`, or
+else to HEAD exported through `Tools/agent/ProofSource.jet`, and checks its
+tracked bytes before and after the suites. It runs the closeout gate first,
+then the complete golden, UI, CLI-case and compiler-registry suites of its
+shard (`JET_TEST_SHARD` of `JET_TEST_SHARD_COUNT`, default 0 of 1) at every
+tier. The compiler itself is never rebuilt. Independent failures accumulate; a
+child that dies by a signal, times out or exits 124 or 128 and above is unsafe,
+and every later row is BLOCKED. Missing prerequisites are recorded as
+blocked or skipped, never as passes, so native-only transports and
 host-specific fixtures stay visible in the census.
+
+The corpus pass alone is the `corpora` test profile of the compiler workspace:
+
+```sh
+jet test Compiler --profile corpora --results=corpora.json
+```
 
 The codec/file runner's `--test CodecCSV|CodecEnv|DynCodec|CompilerFileLeaves`
 mode assembles the selected Jet test with the canonical runtime sources,
@@ -269,18 +268,12 @@ instead of the admitted-pack witness's local C helpers; exact witness output
 and zero exit remain required. The default pack witness and its typed-field
 case are unchanged. An unexecuted recipe or missing pack is never a pass.
 
-Evidence goes into a unique `census-*` directory below `--scratch DIR`, else
-`$JET_SCRATCH_ROOT/goldens-census`, else `~/.cache/jet/goldens-census`. `census.tsv` records
-the test, kind, pass/fail/skip, and first diff/error lines; JSON retains raw
-statuses, tiers, repro commands and complete log paths. Native testkit result
-records retain their diff alongside the existing detail and exit fields.
-`remaining-root-table.{json,tsv}` lists counts, complete affected-test lists,
-sample repros and owner proposals. `--roots JSON` carries an earlier root
-classification forward without blessing a failing output. `latest.json` points
-to the run, and the latest TSV/root tables are also published at the scratch
-base. Counts are verdict rows (including separate optimization tiers); compiler
-registry receipts and named compiler Tests are reported as separate kinds.
-An interrupted run is explicitly incomplete, and any non-pass exits nonzero.
+Evidence goes into `JET_CI_EVIDENCE_DIR` (default `<scratch>/evidence`):
+the logs, `verify-full-summary.tsv` and `verify-full.json`, the receipt
+`Tools/release` reads, with the source pin, the SHA-256 of the jet it ran, its
+target and shard, and one row per scope. A `--results` document holds one row
+per suite, case and tier with its status, detail, exit and diff. Any non-pass
+exits nonzero.
 
 Compiler fixture text follows the same language rules: escape literal braces
 in quoted parser input, and use explicit filesystem cleanup rather than an

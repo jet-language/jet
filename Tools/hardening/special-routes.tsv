@@ -3,7 +3,7 @@
 # not a surface row, when the row already has another route, or when the path
 # no longer contains the needle, so a stale row cannot survive a refactor.
 # key	path	needle
-module:core.args.decode	Compiler/JetSema/Source/Sema/Calls/Data.jet	if module_name == "core.args" && member == "decode" && type_args.len() == 1 -> return sema_data_args_decode(
+module:core.args.decode	Compiler/JetSema/Source/Sema/Calls/Data.jet	if module_name != "core.args" || member != "decode" -> return SemaDirectSpecialCheck{handled: false, value: None}
 module:core.compiler.check	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
 module:core.compiler.lex	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
 module:core.compiler.lock	Compiler/JetIR/Source/BuildRoutes.jet	if canonical.module_name == "core.compiler" -> return ir_host_method(
@@ -22,5 +22,3 @@ module:core.ui.reactive_render	Compiler/JetSema/Source/Sema/Calls/UiHandles.jet	
 module:core.web.form	Compiler/JetSema/Source/Sema/Calls/Http.jet	if module_name != "core.web" || member != "form" -> return SemaDirectSpecialCheck{handled: false, value: None}
 receiver:JobQueue.delay	Compiler/JetSema/Source/Sema/Calls/Services.jet	if method != "enqueue" && method != "delay" -> return unhandled
 receiver:JobQueue.enqueue	Compiler/JetSema/Source/Sema/Calls/Services.jet	if method != "enqueue" && method != "delay" -> return unhandled
-receiver:Measurement.uncertainty	Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet	if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}
-receiver:Measurement.value	Compiler/JetSema/Source/Sema/Expressions/LayoutValues.jet	if method != "value" && method != "uncertainty" -> return SemaMethodSpecialCheck{handled: false, value: None}

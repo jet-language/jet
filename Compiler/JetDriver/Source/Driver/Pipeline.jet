@@ -47,6 +47,7 @@ use {
         check_pure_program_root,
         sema_check_comptime_item,
         sema_comptime_call_facts_pure,
+        sema_comptime_codec_methods,
         SemaCallSiteFact,
         sema_collect_comptime_declarations,
         sema_checked_shape_defaults,
@@ -182,7 +183,7 @@ use {
         pkg_lint_e1293,
         pkg_lint_policy_is_denied,
     ]
-    jet_ir.[IRProgram, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
+    jet_ir.[IRProgram, ir_codec_decode_helpers, ir_comptime_codec_targets, ir_core_lowered_by_name, ir_core_method_lowered_by_owner, ir_first_function_rows, ir_precise_helper_names, ir_named_function_keys, ir_reachable_core_rows]
     jet_eval.[
         JetEvalConfig,
         JetEvalCompilerQueryHost,
@@ -892,6 +893,28 @@ jet_driver_comptime_precise_refs: fn(graph: SemaRegistrationGraph, index: &JetDr
     }
 }
 
+// What each codec target in `tree` calls with no call fact
+// (ir_comptime_codec_targets): every Encode or Decode implementation, as the
+// target encodes or decodes, that it reaches by owner type, named from
+// `module_identity` (sema_comptime_codec_methods), and the
+// Core/Encoding/Encoding.jet decode helpers a container target is decoded
+// through, queued like the precise helpers.
+jet_driver_comptime_codec_refs: fn(graph: SemaRegistrationGraph, index: &JetDriverComptimeRunIndex, module_identity: String, tree: BodyTree, roots: [Int], body: [Int], queue: &[JetDriverComptimeFunctionRef], queued: &[String:Bool]) {
+    targets: ir_comptime_codec_targets(tree, roots, body)
+    if targets.len() == 0 -> return
+    loop target in targets {
+        loop method in sema_comptime_codec_methods(graph, target.ty, module_identity, target.encode, target.decode) -> jet_driver_comptime_function_ref_add(queue, queued, method.module_identity, method.key)
+    }
+    if !index.owners_built -> jet_driver_comptime_owners_build(graph, index)
+    loop module_row in graph.modules {
+        if !module_row.module_identity.starts_with("<corelib>/") || !module_row.source_file.ends_with("Core/Encoding/Encoding.jet") -> next
+        loop name in ir_codec_decode_helpers() {
+            key: symbol_id(SymbolKind.Function, module_row.module_identity, "", name).key
+            if jet_driver_comptime_function_owner(index, key) == .Val(owner) -> jet_driver_comptime_function_ref_add(queue, queued, owner, key)
+        }
+    }
+}
+
 // `environment` is the run's sema_comptime_environment, `program` its tables
 // (sema_comptime_program) and `available` its constant keys: every function
 // check re-targets the environment instead of copying the graph per function.
@@ -934,6 +957,7 @@ jet_driver_comptime_function_closure: fn(
         jet_driver_comptime_function_ref_add(queue, queued, owner_identity, function_key)
     }
     jet_driver_comptime_precise_refs(graph, index, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
+    jet_driver_comptime_codec_refs(graph, index, request.module_identity, request.expression.tree, [Int]{request.expression.root}, [Int]{}, queue, queued)
     functions := [FnBody]{}
     foreign := [SemaCheckedForeignFunction]{}
     waiting := [String]{}
@@ -981,6 +1005,7 @@ jet_driver_comptime_function_closure: fn(
                     if parameter.default == Val(value) -> defaults.push(value)
                 }
                 jet_driver_comptime_precise_refs(graph, index, function.tree, defaults, function.body, queue, queued)
+                jet_driver_comptime_codec_refs(graph, index, current.module_identity, function.tree, defaults, function.body, queue, queued)
                 functions.push(function)
                 sema_comptime_failure_closure_add(graph, failure_closure, checked)
                 if index.checked_rows.get(checked_key) == None {

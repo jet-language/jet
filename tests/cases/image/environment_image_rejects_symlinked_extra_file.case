@@ -1,13 +1,21 @@
-# Port of tests/image.rs:964-1005; PENDING-SEAM(store-ingest), approved by TestLead1.
-# Store is not a consumable library; native hangar ingest has no CacheIdentity/platform/provenance options.
-# Exact original setup and ALL assertions follow. No fake records or substitute references.
-refused: store-ingest
+# Port of tests/image.rs:964-1005. The original Store::ingest_tree setup runs through
+# Jetpack/Store/Tests/PkgIntegrationImageSetup.jet (a real Store ingest, no fake records).
+# The original's outside scratch is the work directory's `outside/`, which the image never names.
 fixture: environment_image_rejects_symlinked_extra_file.fixture
-# Intended command (AFTER original Store::ingest_tree setup):
-# step: jetpack image server
-# env: NO_COLOR=1
-# env: JETPACK_ROOT={work}/hangar-root (project path for supervised services)
-# Do not execute against an unpopulated Hangar or treat REFUSED as PASS.
+write: outside/payload.bin = "must not be read\n"
+symlink: outside/payload.bin payload.bin
+mkdir: hangar-root
+step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationImageSetup.jet --filter "S3 image authentic fixture setup"
+env: JET_TEST_IMAGE_SETUP={work}/hangar-root
+env: JET_TEST_IMAGE_EXECUTABLES=bash bash@nixpkgs bash
+exit: 0
+step: jetpack image server
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/hangar-root
+exit: 2
+stderr: ~ symlink # original predicate: "not a symlink" || "symlink"
+file: outside/payload.bin ~ "must not be read" # original outside payload predicate
+# Original test (setup and assertions):
 # fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
 #     ingest_executable_for_platform(
 #         root,

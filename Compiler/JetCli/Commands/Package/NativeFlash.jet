@@ -6,6 +6,7 @@ use {
     flash_paths: core.files.path
     core.files.path.[Path]
     cli_files: core.files
+    cli_sys: core.sys
     receipt_crypto: core.crypto
     jet_cli.[
         jet_cli_read_error, jet_cli_receipt_claim, jet_cli_receipt_prepare, jet_cli_receipt_publish,
@@ -52,22 +53,23 @@ jet_cli_flash_execute: fn(plan: JetCLIFlashPlan) -[FS, Env, Exec, Time.Wait]> Je
     // copy: `plan.argv[index]` stays with the caller (`plan` is a read parameter: no move out of
     // it, E0201) and the pushed row owns its own.
     loop index in 1..<plan.argv.len() -> args.push(plan.argv[index].copy())
-    executed: foundation_run_native_sandboxed(plan.executable.raw, args, source, Val(output), [String:String]{}, false)
-    cli_files.remove_all(output) ?? ()
-    if executed == {
+    executed: if foundation_run_native_sandboxed(plan.executable.raw, args, source, Val(output), [String:String]{}, false) == {
+        .Ok(value) -> value
         .Err(error) -> {
+            cli_files.remove_all(output) ?? ()
             detail: if error == {
                 .Unsupported(text) -> text
                 .IO(text) -> text
             }
-            jet_cli_flash_execution_failed("authority_spawn", detail, status.mechanism, status.policy)
-        }
-        .Ok(result) -> {
-            code: if result.receipt.code == .Val(value) -> "Some({value})" else -> "None"
-            failure: if result.receipt.success -> JetCLIFlashFailure?{None} else -> Val(JetCLIFlashFailure{kind: if result.receipt.code == None -> "tool_signal" else -> "tool_exit", detail: "declared flash tool exited with status {code}"})
-            JetCLIFlashExecution{status: result.receipt.code, stdout: result.receipt.stdout, stderr: result.receipt.stderr, mechanism: result.mechanism, policy: result.policy, failure: failure}
+            return jet_cli_flash_execution_failed("authority_spawn", detail, status.mechanism, status.policy)
         }
     }
+    cli_files.remove_all(output) ?? ()
+    // A signal-terminated tool has no exit status.
+    exit_status: if executed.receipt.signal == None -> Int?{Val(executed.receipt.code)} else -> Int?{None}
+    code: if exit_status == .Val(value) -> "Some({value})" else -> "None"
+    failure: if executed.receipt.success -> JetCLIFlashFailure?{None} else -> Val(JetCLIFlashFailure{kind: if exit_status == None -> "tool_signal" else -> "tool_exit", detail: "declared flash tool exited with status {code}"})
+    JetCLIFlashExecution{status: exit_status, stdout: executed.receipt.output.bytes(), stderr: executed.receipt.errors.bytes(), mechanism: executed.mechanism, policy: executed.policy, failure: failure}
 }
 jet_cli_flash_publish: fn(receipt_root: String, args: [String], terminal: [U8], receipt: JetCLIFlashReceipt, secret_values: [String]) -[FS, Env, Time.Wait]> String JetCLIReadError! {
     claim: jet_cli_receipt_claim("flash", [String]{receipt.plan.image.raw, receipt.plan.audit.raw}, args, terminal)

@@ -37,7 +37,7 @@ Usage:
   jet status [<file.jet|dir>]          Show what the project has proved
   jet doc [--json|--check] [<file.jet|dir>] Generate reference documentation
   jet emit [args]                      Print generated build output
-  jet lint --a11y|--complexity|--cost <file.jet> Run optional code-quality checks
+  jet lint --a11y|--complexity <file.jet> Run optional code-quality checks
   jet version [args]                   Show the Jet version
   jet bind <header.h> --pkg <lib>      Resolve and record a checked foreign binding plan
   jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
@@ -116,6 +116,14 @@ Env Commands:
   jet env sync                                             Apply typed managed environment files
   jet env info                                             Show the typed environment plan
   jet env fetch-toolchain                                  Download this jet's C toolchain pack for offline C builds
+
+Perf Commands:
+  jet perf run                                              Run a program and write a .jettrace
+  jet perf test                                             Run tests and write a .jettrace
+  jet perf attach                                           Attach to a running process and write a .jettrace
+  jet perf view                                             Show a .jettrace summary
+  jet perf compare                                          Compare two .jettrace artifacts
+  jet perf export                                           Export a loss-declared projection of a .jettrace
 
 Gc Commands:
   jet gc report                                           Show values moved into automatic memory management
@@ -282,7 +290,6 @@ Flags:
   --builder                    With jobs: Select a previously bound remote builder
   --a11y                       With lint: Check roles, labels, and other accessibility basics
   --complexity                 With lint: Report per-function cognitive complexity
-  --cost                       With lint: Show typed hidden-copy and fallback costs
   --max                        With lint --complexity: Fail when a function exceeds this score
   --scope                      With inspect: Choose a ledger or trust scope
   --core                       With inspect structure: Show the canonical core module export facts
@@ -300,12 +307,6 @@ Not built yet:
   jet package                                      #6418
   jet flash                                        #6418
   jet notebook                                     #6418
-  jet perf run                                     #6418
-  jet perf test                                    #6418
-  jet perf attach                                  #6418
-  jet perf view                                    #6418
-  jet perf compare                                 #6418
-  jet perf export                                  #6418
   jet self update                                  #6418
   jet self lsp                                     #6386
   jet self exec                                    #6418
@@ -329,7 +330,8 @@ Not built yet:
   jet inspect expand <all lenses>                  #6418
   jet inspect <plane> --profile <name>             #6418
   jet explain --reload                             #6418
-  jet explain --cost                               #6418
+  jet explain --cost                               #6652
+  jet lint --cost                                  #6652
   jet prove --save                                 #6418
   jet prove --unsave                               #6418
   jet repl --console                               #6418

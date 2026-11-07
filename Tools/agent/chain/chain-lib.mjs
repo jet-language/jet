@@ -54,8 +54,8 @@ async function compilerModel(tree) {
 // The build stage reads the compiler's source identity inputs (workspace files, every package `jet build Compiler`
 // compiles, Core) plus the Prelude and runtime trees the toolchain root serves and the dev-shell definition;
 // the pack stage reads those plus the packaging recipe (the Tools/packaging modules prebuild-runtime.mjs loads:
-// every non-test .mjs there except prebuild-runtime-reuse.mjs, which runtime-pack-check.sh generates for its own
-// linger workaround and the chain never runs) and every runtime source sources.list names.
+// every non-test .mjs there except prebuild-runtime-reuse.mjs, which the lander's scratch census still writes
+// into the r14 snapshot for its linger workaround and the chain never runs) and every runtime source sources.list names.
 async function stageInputs(tree) {
   const { m, roots } = await compilerModel(tree);
   const build = new Set(m.compilerInputs(tree, roots));

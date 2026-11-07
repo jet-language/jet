@@ -4,9 +4,8 @@
 # JET names the admitted native jet compiler; every stage uses it.
 #
 #   JET=<native jet> bash Jetpack/Bootstrap/check.sh            # jet check, one unit of every area
-#   JET=<native jet> bash Jetpack/Bootstrap/check.sh --tests    # + AOT and default-tier tests
-#   JETPACK_WORKER=<name> ... check.sh --area PackageModel [--tests]       # one area + its declared deps
-#   ... check.sh --each [--tests]                                          # every area as its own unit
+#   JETPACK_WORKER=<name> ... check.sh --area PackageModel                # one area + its declared deps
+#   ... check.sh --each                                                   # every area as its own unit
 #   JETPACK_WORKER=<name> ... check.sh --areas Foundation,PackageModel     # an explicit section list
 #   ... check.sh --hosted                                                  # native `jetpack` engine binary
 #
@@ -19,8 +18,12 @@
 # (`node Jetpack/Bootstrap/assemble.mjs hosted`) and builds the standalone
 # engine with `jet build`; the receipt records the binary's path and sha256.
 #
+# The claims run in `jet test Compiler --profile packages`: each area with a
+# package.jet as that package, the engine areas without one as a unit this
+# directory's assemble.mjs assembles (Compiler/test.jet, jetpack_engine_rows).
+#
 # Every jet command runs in its own cgroup scope with a hard memory cap and no
-# swap, under a wall-clock timeout; AOT builds take one of a few shared slots.
+# swap, under a wall-clock timeout; type checks take one of a few shared slots.
 # Assembled units, logs and receipts stay under $JET_STATE_ROOT/jetpack-bootstrap
 # (Tools/agent/roots.sh), never /tmp.
 set -euo pipefail
@@ -41,7 +44,6 @@ trap 'rm -f "$JETPACK_CHECK_SNAPSHOT"' EXIT
 unset JETPACK_BOOTSTRAP_DIR
 repo="$(cd "$bootstrap/../.." && pwd)"
 source_root="${JETPACK_BOOTSTRAP_SOURCE_ROOT:-$repo}"
-with_tests=0
 areas=""
 own_area=""
 each=0
@@ -50,7 +52,6 @@ syntax_only=0
 hosted=0
 while (( $# > 0 )); do
   case "$1" in
-    --tests) with_tests=1 ;;
     --syntax) syntax_only=1 ;;
     --hosted) hosted=1 ;;
     --areas) areas="${2:?--areas needs a comma-separated list}"; shift ;;
@@ -59,12 +60,12 @@ while (( $# > 0 )); do
     --area=*) own_area="${1#--area=}"; areas="$(node "$bootstrap/areas.mjs" closure "$own_area")" ;;
     --each) each=1 ;;
     --deps-from-head) deps_from_head=1 ;;
-    *) echo "usage: check.sh [--syntax | --tests | --hosted] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
+    *) echo "usage: check.sh [--syntax | --hosted] [--area Area [--deps-from-head] | --areas Area,Area | --each]" >&2; exit 64 ;;
   esac
   shift
 done
-if (( hosted == 1 )) && [[ -n "$areas" || $each == 1 || $with_tests == 1 || $syntax_only == 1 ]]; then
-  echo "jetpack-bootstrap: --hosted builds the whole engine; it takes no area selection, --each, --tests or --syntax" >&2
+if (( hosted == 1 )) && [[ -n "$areas" || $each == 1 || $syntax_only == 1 ]]; then
+  echo "jetpack-bootstrap: --hosted builds the whole engine; it takes no area selection, --each or --syntax" >&2
   exit 64
 fi
 if (( each == 1 )); then
@@ -79,7 +80,7 @@ if (( each == 1 )); then
     while (( $(jobs -rp | wc -l) >= parallel )); do wait -n || true; done
     (
       status=0
-      JETPACK_WORKER="$base_worker-each-$area" env -u JETPACK_CHECK_SNAPSHOT bash "$bootstrap/check.sh" --area "$area" $([[ $with_tests == 1 ]] && echo --tests) \
+      JETPACK_WORKER="$base_worker-each-$area" env -u JETPACK_CHECK_SNAPSHOT bash "$bootstrap/check.sh" --area "$area" \
         > "$state/$base_worker-each-$area.log" 2>&1 || status=$?
       printf '%s %d\n' "$area" "$status" >> "$summary"
     ) &
@@ -90,7 +91,7 @@ if (( each == 1 )); then
     printf 'area %-14s %s (log %s/%s-each-%s.log)\n' "$area" "$([[ $status == 0 ]] && echo OK || echo "FAILED exit $status")" "$state" "$base_worker" "$area"
     [[ "$status" == 0 ]] || failed=1
   done < <(sort "$summary")
-  (( failed == 0 )) && echo "JETPACK EACH OK$([[ $with_tests == 1 ]] && echo ' (check, default run, AOT test)')"
+  (( failed == 0 )) && echo "JETPACK EACH OK"
   exit "$failed"
 fi
 worker="${JETPACK_WORKER:-lead}"
@@ -143,7 +144,6 @@ mkdir -p "$scratch" "$state/slots"
 trap 'rm -f "$JETPACK_CHECK_SNAPSHOT"' EXIT
 
 check_mem="${JETPACK_CHECK_MEM:-6G}"
-aot_mem="${JETPACK_AOT_MEM:-10G}"
 floor_mb="${JETPACK_MIN_FREE_MB:-16000}"
 
 available_mb() { awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo; }
@@ -206,7 +206,7 @@ unit_record() {
   elif [[ -n "$sorted_areas" ]]; then
     selection=" --areas $sorted_areas"
   fi
-  printf 'entry-command: JETPACK_WORKER=%s JET=%s bash Jetpack/Bootstrap/check.sh%s%s%s\n' "$worker" "$jet" "$([[ $with_tests == 1 ]] && echo ' --tests')" "$([[ $hosted == 1 ]] && echo ' --hosted')" "$selection"
+  printf 'entry-command: JETPACK_WORKER=%s JET=%s bash Jetpack/Bootstrap/check.sh%s%s\n' "$worker" "$jet" "$([[ $hosted == 1 ]] && echo ' --hosted')" "$selection"
   printf 'worker: %s\n' "$worker"
   printf 'areas: %s\n' "${sorted_areas:-all}"
   printf 'proved-area: %s\n' "${own_area:-all selected}"
@@ -282,126 +282,9 @@ flock -u 8; exec 8>&-
 node "$bootstrap/locate.mjs" check "$scratch/check/jetpack.map.json" "$scratch/check.log" > "$scratch/check-errors.txt" || true
 if (( overall != 0 )); then echo "--- errors by source file ($scratch/check-errors.txt)"; grep -A200 '^errors per file:' "$scratch/check-errors.txt" || true; fi
 
-if (( with_tests == 1 && overall == 0 )); then
-  node "$bootstrap/assemble.mjs" run
-  unit_record run
-  # Process claims that drive the jet CLI run the admitted compiler this check
-  # pins (JET_BIN, the analog of Cargo's CARGO_BIN_EXE_jet); a caller's own
-  # JET_BIN wins. Absolute, because claims spawn it from their own cwd.
-  if [[ -z "${JET_BIN:-}" ]]; then
-    JET_BIN="$(cd "$(dirname "$jet")" && pwd)/$(basename "$jet")"
-    export JET_BIN
-  fi
-  printf 'jet-bin: %s\njet-bin-sha256: %s\n' "$JET_BIN" "$(sha256sum "$JET_BIN" | cut -d' ' -f1)" >> "$receipt"
-  # Process claims (Jetpack/CLI/Tests/JetpackBinSupport.jet) run the hosted
-  # engine named by JETPACK_BIN, the analog of Cargo's CARGO_BIN_EXE_jetpack.
-  # When the unit has such claims and the caller named no binary, the engine
-  # is built once per source state: the cache key covers the hosted unit, the
-  # compiler, its identity and the Core tree it compiles against.
-  if [[ -z "${JETPACK_BIN:-}" ]] && grep -q 'JETPACK_BIN' "$scratch/run/project/src/jetpack.jet"; then
-    # The engine is every area whatever this run selected (assemble.mjs refuses
-    # a hosted unit with an area selection).
-    env -u JETPACK_BOOTSTRAP_AREAS -u JETPACK_BOOTSTRAP_OWN_AREA -u JETPACK_BOOTSTRAP_DEPS_FROM_HEAD node "$bootstrap/assemble.mjs" hosted
-    core_sha="$(cd "$JET_TOOLCHAIN_ROOT" && find Core -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)"
-    hosted_key="$(printf '%s\0%s\0%s\0%s' "$(sha256sum "$scratch/hosted/project/src/jetpack.jet" | cut -d' ' -f1)" "$(sha256sum "$jet" | cut -d' ' -f1)" "$JET_COMPILER_IDENTITY" "$core_sha" | sha256sum | cut -c1-16)"
-    hosted_cached="$state/hosted-bin/$hosted_key/jetpack"
-    if [[ ! -x "$hosted_cached" ]]; then
-      # A multi-GiB native build: it takes the AOT slot, and a concurrent run
-      # that built the same key while this one waited is reused.
-      exec 9>"$state/slots/aot"
-      flock 9
-      if [[ ! -x "$hosted_cached" ]] && build_hosted; then
-        mkdir -p "$(dirname "$hosted_cached")"
-        cp "$hosted_binary" "$hosted_cached.tmp.$$" && mv -f "$hosted_cached.tmp.$$" "$hosted_cached"
-      fi
-      flock -u 9
-      rm -rf "$scratch/hosted/project/.jet/build"
-    fi
-    if [[ -x "$hosted_cached" ]]; then
-      export JETPACK_BIN="$hosted_cached"
-    else
-      echo "jetpack-bootstrap: the hosted engine did not build, so JETPACK_BIN process claims cannot run" >&2
-      overall=1
-    fi
-  fi
-  if [[ -n "${JETPACK_BIN:-}" ]]; then
-    printf 'jetpack-bin: %s\njetpack-bin-sha256: %s\n' "$JETPACK_BIN" "$(sha256sum "$JETPACK_BIN" | cut -d' ' -f1)" >> "$receipt"
-  fi
-  # Collect-all: a failing claim stops the driver with E3001 (exit 70) right
-  # after its predecessors' `pass` lines; it is recorded as failed and the
-  # driver resumes at the next claim (JETPACK_CLAIM_FROM). A fault (signal
-  # exit) whose backtrace names that claim's frame is attributed the same way.
-  # Any other stop (ICE, timeout, memory cap) can't be attributed to a claim
-  # and ends the tier.
-  # The default-tier image (`jet run`'s options: `--optimize=none`) is built
-  # once and every segment runs it, so a failing claim costs one restart, not
-  # one recompile (#6293).
-  # Both tiers' claim results are classified by known-claims.mjs against the
-  # `jetpack-claim:<Area>/<claim>` rows of tests/known-failing.tsv: a
-  # listed failure is KNOWN-FAILING, a listed pass is UNEXPECTED-PASS (fails).
-  expected="$(node -e 'console.log(require(process.argv[1]).tests.length)' "$scratch/run/jetpack.map.json")"
-  from=0 label=run run_failed=0 run_passed=0 run_complete=1
-  run_results="$scratch/run-results.txt"
-  : > "$run_results"
-  run_binary="$scratch/run/project/.jet/build/jetpack" run_built=0
-  if bounded run-build "$check_mem" 1800 "$scratch/run/project" "$jet" build --optimize=none src/jetpack.jet && [[ -x "$run_binary" ]]; then
-    run_built=1
-  else
-    echo "jetpack-bootstrap: default tier stopped: the default-tier image did not build" >&2
-    run_complete=0
-  fi
-  while (( run_built == 1 )); do
-    run_status=0
-    JETPACK_CLAIM_FROM="$from" bounded "$label" "$check_mem" 1800 "$scratch/run/project" "$run_binary" || run_status=$?
-    grep '^pass ' "$scratch/$label.log" >> "$run_results" || true
-    segment="$(grep -c '^pass ' "$scratch/$label.log" || true)"
-    run_passed=$(( run_passed + segment ))
-    if (( run_status == 0 )) && grep -qx 'jetpack-bootstrap: claims done' "$scratch/$label.log"; then break; fi
-    stopped=$(( from + segment ))
-    if (( run_status != 70 )) && (( stopped < expected )) && grep -q "^  jetpack_test_claim_${stopped} at " "$scratch/$label.log"; then
-      echo "jetpack-bootstrap: claim $stopped faulted (exit $run_status); see $scratch/$label.log" >&2
-    elif (( run_status != 70 || stopped >= expected )); then
-      echo "jetpack-bootstrap: default tier stopped (exit $run_status) without a claim to attribute it to" >&2
-      run_complete=0
-      break
-    fi
-    echo "fail $(node -e 'console.log(require(process.argv[1]).tests[Number(process.argv[2])])' "$scratch/run/jetpack.map.json" "$stopped")" | tee -a "$run_results"
-    run_failed=$(( run_failed + 1 ))
-    from=$(( stopped + 1 ))
-    (( from < expected )) || break
-    label="run-from-$from"
-  done
-  echo "jetpack-bootstrap: default tier: $run_passed of $expected claims passed, $run_failed failed"
-  (( run_complete == 1 && run_passed + run_failed == expected )) || overall=1
-  node "$bootstrap/known-claims.mjs" run "$scratch/run/jetpack.map.json" "$run_results" || overall=1
-  rm -rf "$scratch/run/project/.jet/build"
-
-  node "$bootstrap/assemble.mjs" aot
-  unit_record aot
-  # One AOT build at a time machine-wide for this stream (~1 GiB+ per build).
-  exec 9>"$state/slots/aot"
-  flock 9
-  aot_status=0
-  # Serial: claims set process-wide state (environment variables, the working
-  # directory), so one process can't run them concurrently; an unserial batch
-  # dies without a claim to attribute it to ("no individually selected child
-  # reproduced the failure").
-  bounded aot "$aot_mem" 1800 "$scratch/aot/project" "$jet" test src/jetpack.jet --serial || aot_status=$?
-  flock -u 9
-  rm -rf "$scratch/aot/project/.jet/build"
-  # `jet test` exits 1 when a claim fails; any other stop, or no summary line,
-  # is not a claim result.
-  if (( aot_status <= 1 )) && grep -Eq '^[0-9]+ passed, [0-9]+ failed' "$scratch/aot.log"; then
-    node "$bootstrap/known-claims.mjs" aot "$scratch/aot/jetpack.map.json" "$scratch/aot.log" || overall=1
-  else
-    echo "jetpack-bootstrap: AOT tier stopped (exit $aot_status) before its claim summary" >&2
-    overall=1
-  fi
-fi
-
 printf 'exit: %d\n' "$overall" >> "$receipt"
 echo "jetpack-bootstrap receipt: $receipt"
 if (( overall == 0 )); then
-  echo "JETPACK CHECK OK$([[ $with_tests == 1 ]] && echo ' (check, default run, AOT test)')"
+  echo "JETPACK CHECK OK"
 fi
 exit "$overall"

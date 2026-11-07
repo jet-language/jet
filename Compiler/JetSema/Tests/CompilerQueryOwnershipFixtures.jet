@@ -7,11 +7,9 @@ use {
         JetDriverCompilerQueries, JetDriverCoreSource, JetDriverHostFacts,
         JetDriverStage, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text,
         jet_driver_compiler_queries_documents, jet_driver_compiler_queries_new,
-        jet_driver_compiler_queries_stats,
+        jet_driver_compiler_queries_stats, jet_driver_compiler_source_input,
     ]
-    jet_eval.[
-        JetCompilerServicesSourceInput, jet_eval_compiler_services_parse, jet_eval_default_config,
-    ]
+    jet_eval.[jet_eval_compiler_services_parse, jet_eval_default_config]
     jet_foundation.[compiler_threads_single]
     jet_sema.[sema_has_error_since]
 }
@@ -19,7 +17,7 @@ use {
 query_ownership_request: fn() -> JetDriverCompileRequest Never! {
     JetDriverCompileRequest{
         authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "query-ownership", entry_path: "main.jet"},
-        canonical_effect_source: "IO: effect\n",
+        canonical_effect_source: "IO: struct {{\n    impl Effect {{}}\n}}\n",
         core_sources: [JetDriverCoreSource]{},
         host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: None},
         eval_config: jet_eval_default_config(),
@@ -30,7 +28,7 @@ query_ownership_request: fn() -> JetDriverCompileRequest Never! {
 }
 
 query_ownership_case: fn(label: String, source: String, disk: Bool, parse_error: Bool, queries: &JetDriverCompilerQueries, failures: &[String]) {
-    parsed: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source.copy(), preparation: None}) ?? {
+    parsed: jet_eval_compiler_services_parse(jet_driver_compiler_source_input(source.copy())) ?? {
         failures.push("{label}: genuine parser did not return facts")
         return
     }

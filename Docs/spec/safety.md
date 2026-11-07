@@ -60,7 +60,7 @@ the source-level authority.
 
 ## Standing native safety gate
 
-`Tools/agent/safety-gate.mjs OUT ARTIFACTS_JSON [SEED COUNT]` runs the
+`jet Tools/agent/SafetyGate.jet OUT ARTIFACTS_JSON [SEED COUNT]` runs the
 Core unsafe-region/safe-abstraction audit and the two unsafe-wrapper diagnostic
 fixtures, generates independent-model programs plus stateful Core API programs,
 and checks admitted native **O0, O1 and O2** outputs. The Core programs exercise
@@ -107,23 +107,20 @@ native `memory/last_use_moves` golden. The ordinary tier golden slice also
 includes `memory/last_use_moves` and `memory/last_use_field_moves`. A golden
 pass alone is not a substitute for the whole-class receipt.
 
-The single local proofq definition is `Tools/agent/safety-gate-job.sh`.
-`Tools/agent/safety-schedule.mjs --watch` polls admitted artifacts every minute
-and schedules it on each changed admission, and every **six hours** with a
-rotating seed. Only one safety job may be queued/running. It snapshots the
-artifacts JSON, pins the tooling tree, runs exact-tree pre-verification through
-`cheap.sh`, and passes `pq-preflight` before enqueueing. Do not start the
-watcher on a mutable private branch; the integrator starts it from the landed
-dev tooling. It uses the existing proof queue, respects `PAUSE`, and does not
-create hosted CI or a nightly job. Paths can be set with `SAFETY_ARTIFACTS`,
-`SAFETY_STATE`, `SAFETY_SCRATCH`, `PQ_ROOT`; `SAFETY_COUNT` controls each of the
-two generated case families (default 50).
+The caller is `Tools/agent/VerifyFull.jet`: its `safety-gate` row runs the
+full gate into its scratch directory when `JET_SAFETY_ARTIFACTS` names the
+admitted artifacts JSON. Without it, the row runs
+`SafetyGate.jet --source OUT JET [SEED COUNT]`: the two unsafe-wrapper
+fixtures against the exact-head compiler VerifyFull has pinned, plus the
+generated corpus checked against its model. That source leg covers no native
+tier, so it never stands in for the full gate. VerifyFull pins the source tree;
+there is no hosted CI, nightly job or watcher. `COUNT` sets each of the two
+generated case families (default 50; `SEED` defaults to 4).
 
 The gate records `PASS` (exit 0), findings `FAIL` (1), infrastructure error
-(2), or unavailable coverage `GAP` (3). Pre-verification findings block
-enqueueing; an owner-authorized gap receipt remains non-green in the queued
-run. It is never converted to a success. Receipts bind artifact hash, source
-head, seed, corpus hash, all findings and every coverage gap.
+(2), or unavailable coverage `GAP` (3). An owner-authorized gap receipt
+remains non-green; it is never converted to a success. Receipts bind artifact
+hash, source head, seed, corpus hash, all findings and every coverage gap.
 
 The checker is the registry's current-head debug compiler while a stale
 release entry remains; a native producer can instead bind
@@ -214,7 +211,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1340,
+  "total": 1342,
   "counts": {
     "Compiler": 679,
     "Core": 186,
@@ -222,7 +219,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 35,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 416
+    "tests": 418
   },
   "regions": [
     {
@@ -4953,14 +4950,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 356,
+      "line": 424,
       "column": 5,
       "reason": "the testkit stops its own step child at the resident-memory guard"
     },
     {
       "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
-      "line": 541,
+      "line": 609,
       "column": 9,
       "reason": "the testkit stops a process its own case left running in the case scratch"
     },
@@ -7189,6 +7186,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
       "line": 15,
       "column": 5,
       "reason": "done with it"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "this address is intentionally outside the board MMIO region"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "timer register is mapped by board.sensor_v1"
     },
     {
       "package": "tests",
@@ -9619,8 +9630,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 416 |
-| **total** | **1340** |
+| tests | 418 |
+| **total** | **1342** |
 
 ### Regions
 
@@ -10301,8 +10312,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 356:5 | "the testkit stops its own step child at the resident-memory guard" |
-| Compiler | Compiler/JetTestKit/Source/Exec.jet | 541:9 | "the testkit stops a process its own case left running in the case scratch" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 424:5 | "the testkit stops its own step child at the resident-memory guard" |
+| Compiler | Compiler/JetTestKit/Source/Exec.jet | 609:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |
 | Compiler | Compiler/JetTestKit/Source/StepsSessions.jet | 363:5 | "the case explicitly authorizes signalling its own spawned child" |
 | Core | Core/Auth/Auth.jet | 113:5 | "auth PASETO v4.public verification uses the fixed Ed25519 primitive" |
@@ -10621,6 +10632,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 13:1 | "voids a freshly-acquired lock whose resource is already gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 19:5 | "calling the audited voider" |
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
+| tests | tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
+| tests | tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 9:5 | "call the gated reader" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 15:5 | "test region calls the gated reader" |

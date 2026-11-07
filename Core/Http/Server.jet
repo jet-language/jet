@@ -189,27 +189,19 @@ impl HTTPMux {
     // `mux.get(pattern, handler)` and its sibling verbs land here with the
     // route's checked contract when the pattern is a literal. The compiler
     // wrote that contract complete, and `web.openapi(mux)` checks it against
-    // the route when it renders, so registration parses no JSON. Sema passes
-    // `at`, the place of the registering call, so a refused route names the
-    // user's line (sema sema_call_try_http_router).
-    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation) Never! -[Net]> {
-        __route_add(self, method, pattern, __handler(handler), contract, Val(at))
+    // the route when it renders, so registration parses no JSON. `at` is the
+    // place of the registering call, so a refused route names its line.
+    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{$caller}) Never! -[Net]> {
+        __route_add(self, method, pattern, __handler(handler), contract, at)
     }
 
     // A route whose pattern is a run-time value: its contract
     // (`"pattern":""`) gets its path inputs from the pattern registered.
-    __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation) Never! -[Net]> {
+    __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{$caller}) Never! -[Net]> {
         parsed: __route_parse(pattern)
-        site: Val(at)
-        if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", site)
-        checked: __route_contract(method, pattern, parsed.segments, contract, site)
-        __mux_register(self, method, pattern, parsed.segments, __handler(handler), checked, site)
-    }
-
-    // A route Core registers for itself (`static_files`, a web app's pages):
-    // no user call names it, so a refusal carries no place.
-    __route_core: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
-        __route_add(self, method, pattern, __handler(handler), contract, None)
+        if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
+        checked: __route_contract(method, pattern, parsed.segments, contract, at)
+        __mux_register(self, method, pattern, parsed.segments, __handler(handler), checked, at)
     }
 
     // `mux.middleware(layer)`: the first registered layer is the outermost.
@@ -219,13 +211,13 @@ impl HTTPMux {
     }
 }
 
-__route_add: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation?) Never! {
+__route_add: fn(mux: HTTPMux, method: String, pattern: String, handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     parsed: __route_parse(pattern)
     if parsed.problem != "" -> __route_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.", at)
     __mux_register(mux, method, pattern, parsed.segments, handler, contract, at)
 }
 
-__mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation?) Never! {
+__mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     shape: __route_shape(segments)
     loop existing in __mux_routes(mux) {
         if existing.method == method && __route_shape(existing.segments) == shape -> __route_stop("E2804", "Two routes both match `{method} {pattern}`.", at)
@@ -234,12 +226,11 @@ __mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__H
     guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract})
 }
 
-// A refused registration, reported at the registering call when there is one,
-// in the stop report's own `  --> file:line in function` form
-// (core.rt.__coded_stop adds the registry row's Why/Fix).
-__route_stop: fn(code: String, message: String, at: SourceLocation?) -> Never {
-    site: at ?? core.rt.__coded_stop(code, message)
-    core.rt.__coded_stop(code, "{message}\n  --> {site.file}:{site.line} in {site.function}")
+// A refused registration, reported at the registering call in the stop
+// report's own `  --> file:line in function` form (core.rt.__coded_stop adds
+// the registry row's Why/Fix).
+__route_stop: fn(code: String, message: String, at: SourceLocation) -> Never {
+    core.rt.__coded_stop(code, "{message}\n  --> {at.file}:{at.line} in {at.function}")
 }
 
 __HTTPServerState: struct {
@@ -408,7 +399,7 @@ __http_serve_entry: fn(mux: HTTPMux, deadline: Duration) -[Net]> HTTPServer Neve
 __static_files_entry: fn(mux: HTTPMux, prefix: String, root: String, index: Bool?, dotfiles: Bool?, follow_links: Bool?) Never! -[Net, FS.Read]> {
     mount: __HTTPStaticMount{root: root, index: index ?? true, dotfiles: dotfiles ?? false, follow_links: follow_links ?? false}
     base: __trim_trailing_slashes(prefix)
-    mux.__route_core("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)), "")
+    mux.__route("GET", "{base}/*jet_static_path", (request: HTTPRequest) -> Ok(__static_serve(mount, request)), "")
 }
 
 response: fn(status: Int, body: String) -> HTTPResponse Never! {
@@ -881,7 +872,7 @@ __route_openapi_path: fn(segments: [__HTTPSegment]) -> String Never! {
 // A registration's checked contract, completed and checked once
 // (jet_http_mux_register): a dynamic pattern's contract (`"pattern":""`) gets
 // its path inputs from the pattern registered.
-__route_contract: fn(method: String, pattern: String, segments: [__HTTPSegment], contract: String, at: SourceLocation?) -> String Never! {
+__route_contract: fn(method: String, pattern: String, segments: [__HTTPSegment], contract: String, at: SourceLocation) -> String Never! {
     completed: if contract.contains("\"pattern\":\"\"") -> __route_complete_contract(method, pattern, segments, contract) else -> contract
     __route_require_contract(method, pattern, completed, at)
     completed
@@ -975,7 +966,7 @@ __route_complete_contract: fn(method: String, pattern: String, segments: [__HTTP
 
 // jet_http_require_route_contract, for a mux route: its responses may be empty
 // at registration; `web.openapi` refuses that later.
-__route_require_contract: fn(method: String, pattern: String, contract: String, at: SourceLocation?) Never! {
+__route_require_contract: fn(method: String, pattern: String, contract: String, at: SourceLocation) Never! {
     // E2805 in the registry row's words (core.rt.__coded_stop adds its Why/Fix).
     invalid: "Invalid HTTP route `{pattern}`: its checked `{method}` endpoint contract"
     parsed: json_codec.parse(contract) ?? __route_stop("E2805", "{invalid} is not valid JSON.", at)

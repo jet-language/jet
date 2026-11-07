@@ -1,6 +1,6 @@
 // Test receipts and the support matrix. A receipt is one runner's report: a
 // verify-full.json written by Tools/agent/VerifyFull.jet, or the RELEASE.json
-// Tools/agent/release-compiler.mjs admits a release with. Each names the
+// `admit` (Admit.jet) admits a release with. Each names the
 // target it ran on and its shard of the suite inventory, so a runner that
 // never reported shows up as a gap in the matrix.
 
@@ -72,7 +72,7 @@ parse_verify_full: fn(file: String, bytes: [U8]) -> Receipt Never! {
 }
 
 // The RELEASE.json of an admitted release, read as the one receipt of its
-// runner: release-compiler.mjs runs every suite itself, so it is shard 0 of 1.
+// runner: `admit` runs every suite itself, so it is shard 0 of 1.
 parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt := empty_receipt("release-compiler", file, bytes)
     tree: json.parse(String.from_bytes_lossy(bytes)) ?? {
@@ -86,7 +86,7 @@ parse_admission_receipt: fn(file: String, bytes: [U8]) -> Receipt Never! {
     receipt.rows = receipt_rows(array_field(tree, "checks"), "check")
     receipt.shard = 0
     receipt.shards = 1
-    if receipt.target == "" -> receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so admit the release again with Tools/agent/release-compiler.mjs"))
+    if receipt.target == "" -> receipt.problems.push(problem(MISSING_RUNNER, "{file} names no target: it predates runner targets, so admit the release again with `jet run Tools/release/Main.jet -- admit`"))
     receipt
 }
 

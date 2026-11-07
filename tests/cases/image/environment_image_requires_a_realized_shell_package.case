@@ -1,13 +1,18 @@
-# Port of tests/image.rs:736-758; PENDING-SEAM(store-ingest), approved by TestLead1.
-# Store is not a consumable library; native hangar ingest has no CacheIdentity/platform/provenance options.
-# Exact original setup and ALL assertions follow. No fake records or substitute references.
-refused: store-ingest
+# Port of tests/image.rs:736-758. The original Store::ingest_tree setup runs through
+# Jetpack/Store/Tests/PkgIntegrationImageSetup.jet (a real Store ingest, no fake records).
 fixture: environment_image_requires_a_realized_shell_package.fixture
-# Intended command (AFTER original Store::ingest_tree setup):
-# step: jetpack image server
-# env: NO_COLOR=1
-# env: JETPACK_ROOT={work}/hangar-root (project path for supervised services)
-# Do not execute against an unpopulated Hangar or treat REFUSED as PASS.
+mkdir: hangar-root
+step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationImageSetup.jet --filter "S3 image authentic fixture setup"
+env: JET_TEST_IMAGE_SETUP={work}/hangar-root
+env: JET_TEST_IMAGE_EXECUTABLES=tool tool@nixpkgs tool
+exit: 0
+step: jetpack image server
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/hangar-root
+exit: 2
+stderr: ~ E1336 # original predicate
+stderr: ~ "no shell" # original predicate
+# Original test (setup and assertions):
 # fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
 #     ingest_executable_for_platform(
 #         root,

@@ -3,6 +3,7 @@
 use jet_foundation.[
     AST_NODE_GENERATED,
     AccessConvention,
+    Call,
     CallArg,
     CallContractRow,
     Diagnostic,
@@ -10,19 +11,31 @@ use jet_foundation.[
     Expr,
     FunctionCallMetadata,
     FunctionDefaultRef,
+    Lambda,
+    LambdaBody,
+    LambdaParam,
+    NamedSpan,
+    OrFallback,
     ParamZone,
     Span,
+    Stmt,
+    StrPart,
     SymbolKind,
     TFailureCarrier,
     TFieldRef,
+    TupleField,
     Type,
     TypeTupleField,
     UnOp,
+    ast_binding,
+    ast_empty_call_arg_flags,
+    ast_empty_lambda_meta,
     compute_shape_type,
     core_record_field,
     expr_span,
     is_compute_tensor_family,
     symbol_id,
+    type_tuple_fields_canonical,
 ]
 
 SemaComputeModelsSpecialCheck: struct {
@@ -240,7 +253,7 @@ sema_call_compute_tensor_value: fn(argument: CallArg, environment: SemaScopeEnvi
     Val(value)
 }
 
-sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
+sema_call_compute_transform: fn(member: String, alias: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaComputeModelsSpecialCheck {
     if args.len() == 0 {
         sema_call_compute_arity_error(member, 1, 0, span, diagnostics)
         return SemaComputeModelsSpecialCheck{handled: true, value: None}
@@ -296,7 +309,7 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
     }
     target_identity := sema_call_compute_function_identity(args[0].expr, scopes)
     if target_identity == .Val(target) -> sema_compute_record_autodiff_obligation(member, target, span, context)
-    if effect_bound == .Val(effects) && effects.len() > 0 {
+    if effect_bound == .Val(effects) && sema_call_compute_effectful(effects) {
         diagnostics.push(sema_error("E0112", span, "`compute.{member}` needs a pure Tensor function", "autodiff records only pure Tensor operations and cannot carry an effectful callable", "remove the effect row from the differentiated function or differentiate a pure Tensor function"))
         valid = false
     }
@@ -382,13 +395,17 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
     gradient_value: gradient_value_type ?? Type.Named{name: "Tensor"}
     gradient_fields := [TypeTupleField]{}
     loop name in gradient_names -> gradient_fields.push(TypeTupleField{name: name, ty: gradient_value})
-    gradient_type := Type.Tuple{fields: gradient_fields}
+    // Named tuple types are canonical (S73: fields by name), as the tuple
+    // literals the expanded transforms return are.
+    gradient_type := Type.Tuple{fields: type_tuple_fields_canonical(gradient_fields)}
+    value_and_gradient_type: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}})}
+    jvp_type: Type.Tuple{fields: type_tuple_fields_canonical([TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "tangent", ty: Type.Named{name: "Tensor"}}})}
     run_type := Type.Apply{name: "VJPRun", args: [Type]{gradient_type}}
     direct_return := if {
         member == "gradient" -> gradient_type
-        member == "value_and_gradient" -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}}}
+        member == "value_and_gradient" -> value_and_gradient_type
         member == "vjp" -> run_type
-        else -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "tangent", ty: Type.Named{name: "Tensor"}}}}
+        else -> jvp_type
     }
     result_type := direct_return
     if !direct {
@@ -421,11 +438,25 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
         }
         transform_return := if {
             member == "gradient" -> gradient_type
-            member == "value_and_gradient" -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "gradients", ty: gradient_type}}}
+            member == "value_and_gradient" -> value_and_gradient_type
             member == "vjp" -> run_type
-            else -> Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "value", ty: Type.Named{name: "Tensor"}}, TypeTupleField{name: "tangent", ty: Type.Named{name: "Tensor"}}}}
+            else -> jvp_type
         }
         result_type = Type.Fn{params: transform_params, ret: Val(transform_return), effect_bound: effect_bound, param_contract: transform_contract, call_metadata: transform_metadata, return_view_provenance: None}
+    }
+    if member == "gradient" || member == "value_and_gradient" {
+        fallible: if ret == .Val(.Result(_, _)) -> true else -> false
+        output_fields := [String]{}
+        if gradient_output && output == .Tuple(fields) -> loop field in fields -> output_fields.push(field.name)
+        values := [CallArg]{}
+        loop index in value_indexes -> values.push(args[index])
+        tape: sema_call_compute_tape(member, alias, args[0].expr, params, names, selected, output_fields, fallible, values, span)
+        // The callable is checked against the transform's signature, so it
+        // keeps the differentiated function's parameter names (they name the
+        // gradients of a transform over it) and calling conventions.
+        tape_expected: if direct -> Type?{None} else -> Val(result_type)
+        checked: sema_check_expression_with_lambda_escapes(tape, tape_expected, environment, program, scopes, state, tail_store, context, Val(!direct), diagnostics) ?? return SemaComputeModelsSpecialCheck{handled: true, value: None}
+        return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(checked, expected, environment, program, diagnostics)}
     }
     runtime_args := [TExpr]{function_value}
     loop value in typed_values -> runtime_args.push(value)
@@ -434,7 +465,9 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
     runtime_args.push(sema_tree_node(Type.List{element: Type.Int}, TExprKind.ListLit{values: target_values}, span))
     effects: effect_bound ?? [EffectRowEntry]{}
     transform_effects := [EffectRowEntry]{EffectRowEntry{name: "GPU", span: span}}
-    loop entry in effects -> transform_effects.push(entry)
+    loop entry in effects {
+        if entry.name != "GPU" -> transform_effects.push(entry)
+    }
     facts := SemaCallFacts{return_type: result_type, failure_carrier: TFailureCarrier.Infallible, effect_bound: Val(transform_effects), type_args: [Type]{function_value.ty}, default_refs: [FunctionDefaultRef]{}}
     values_args := [CallArg]{args[0]}
     loop index in value_indexes -> values_args.push(args[index])
@@ -444,9 +477,10 @@ sema_call_compute_transform: fn(member: String, args: [CallArg], span: Span, exp
     ownership := sema_ownership_check_call_arguments(state, "core.compute.{member}", sema_call_compute_owned_params(ownership_types, accesses), values_args, scopes, diagnostics)
     if !ownership.accepted || !ownership.complete -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
     if !sema_effect_record_intrinsic_fact(environment, program, scopes, context, "core.compute.{member}", span, facts, diagnostics) -> return SemaComputeModelsSpecialCheck{handled: true, value: None}
-    // Autodiff is a code transform the compiler emits (inventory: emission),
-    // not a Core semantic row: the named compiler builtin carries the function
-    // value, the Tensor values and the selected parameter indexes.
+    // `vjp` and `jvp` are a code transform the compiler emits (inventory:
+    // emission), not a Core semantic row: the named compiler builtin carries
+    // the function value, the Tensor values and the selected parameter
+    // indexes.
     value: sema_tree_node(result_type, TExprKind.MathBuiltin{type_name: "core.compute", function: member, args: runtime_args}, span)
     return SemaComputeModelsSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }
@@ -460,6 +494,106 @@ sema_call_try_compute_transform: fn(module_name: String, member: String, alias: 
     if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, context) -> return SemaDirectSpecialCheck{handled: false, value: None}
     context.compute_calls.push(SemaComputeCallFact{method: member, span: span})
     if !sema_call_core_check_type_args("core.compute", member, 0, false, type_args, span, diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    checked: sema_call_compute_transform(member, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    checked: sema_call_compute_transform(member, alias, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked.value}
+}
+
+// Autodiff runs on the Core tape (Core/Compute/Compute.jet `__ad_*`). The
+// transform checks as the callable
+//     (__ad_p0: P0, ...) -> {
+//         alias.__ad_enter()
+//         __ad_l0: alias.__ad_leaf(__ad_p0)        // each selected parameter
+//         __ad_out: f(__ad_l0, __ad_p1, ...)       // `?? panic(...)` when `f` fails
+//         __ad_g0: alias.__ad_gradient(__ad_out, __ad_l0)
+//         alias.__ad_exit()
+//         (p0: __ad_g0, ...)                       // `(value:, gradients:)`
+//     }
+// over the import `alias`, and the direct form calls it with `values`. Under
+// a Tensor-tuple output (`output_fields`) each parameter's gradient holds one
+// gradient per output field.
+sema_call_compute_tape: fn(member: String, alias: String, function: Expr, params: [Type], names: [String], selected: [Int], output_fields: [String], fallible: Bool, values: [CallArg], span: Span) -> Expr Never! {
+    body := [Stmt]{Stmt.Expr{expr: sema_call_compute_tape_member(alias, "__ad_enter", [Expr]{}, span)}}
+    loop index in selected {
+        leaf: sema_call_compute_tape_member(alias, "__ad_leaf", [Expr]{sema_call_compute_tape_ident("__ad_p{index}", span)}, span)
+        body.push(Stmt.Val{binding: ast_binding("__ad_l{index}", span, false, leaf, None)})
+    }
+    inputs := [CallArg]{}
+    loop index in 0..<params.len() {
+        name: if selected.contains(index) -> "__ad_l{index}" else -> "__ad_p{index}"
+        inputs.push(sema_call_compute_tape_arg(sema_call_compute_tape_ident(name, span), span))
+    }
+    called := sema_call_compute_tape_call(function, inputs, span)
+    if fallible {
+        message: Expr.Str{parts: [StrPart]{StrPart.Lit{text: "compute.{member}: the differentiated function failed"}}, span: span, id: AST_NODE_GENERATED}
+        stop: Expr.Call{call: Call{name: "panic", name_span: span, type_args: [Type]{}, args: [CallArg]{sema_call_compute_tape_arg(message, span)}}, id: AST_NODE_GENERATED}
+        called = Expr.OrFallback{value: called, fallback: OrFallback.Value{value: stop}, is_option: false, span: span, id: AST_NODE_GENERATED}
+    }
+    body.push(Stmt.Val{binding: ast_binding("__ad_out", span, false, called, None)})
+    gradients := [TupleField]{}
+    loop index in selected {
+        gradient: sema_call_compute_tape_gradient(alias, "__ad_l{index}", output_fields, span)
+        body.push(Stmt.Val{binding: ast_binding("__ad_g{index}", span, false, gradient, None)})
+        gradients.push(TupleField{name: names[index], value: sema_call_compute_tape_ident("__ad_g{index}", span)})
+    }
+    gradient_tuple: Expr.TupleLit{fields: gradients, span: span, ty: None, id: AST_NODE_GENERATED}
+    if member == "value_and_gradient" {
+        value: sema_call_compute_tape_member(alias, "__ad_value", [Expr]{sema_call_compute_tape_ident("__ad_out", span)}, span)
+        body.push(Stmt.Val{binding: ast_binding("__ad_value", span, false, value, None)})
+    }
+    result: if member == "value_and_gradient" -> Expr.TupleLit{fields: [TupleField]{TupleField{name: "value", value: sema_call_compute_tape_ident("__ad_value", span)}, TupleField{name: "gradients", value: gradient_tuple}}, span: span, ty: None, id: AST_NODE_GENERATED} else -> gradient_tuple
+    // The gradients and the value are read before the tape is left: leaving
+    // the outermost transform clears it.
+    body.push(Stmt.Expr{expr: sema_call_compute_tape_member(alias, "__ad_exit", [Expr]{}, span)})
+    body.push(Stmt.Expr{expr: result})
+    lambda_params := [LambdaParam]{}
+    loop (index, ty) in params -> lambda_params.push(LambdaParam{name: "__ad_p{index}", name_span: span, ty: Val(ty), ty_span: None})
+    transform: Expr.Lambda{lambda: Lambda{take_names: [NamedSpan]{}, params: lambda_params, effects: None, body: LambdaBody.Block{body: body}, span: span, meta: ast_empty_lambda_meta()}, id: AST_NODE_GENERATED}
+    if values.len() == 0 -> return transform
+    Expr.CallValue{callee: Expr.Paren{value: transform, span: span, id: AST_NODE_GENERATED}, args: values, span: span, id: AST_NODE_GENERATED}
+}
+
+// The gradient of `__ad_out` (each field of it under a tuple output) with
+// respect to leaf `leaf`.
+sema_call_compute_tape_gradient: fn(alias: String, leaf: String, output_fields: [String], span: Span) -> Expr Never! {
+    if output_fields.len() == 0 -> return sema_call_compute_tape_member(alias, "__ad_gradient", [Expr]{sema_call_compute_tape_ident("__ad_out", span), sema_call_compute_tape_ident(leaf, span)}, span)
+    fields := [TupleField]{}
+    loop field in output_fields {
+        part: Expr.Field{base: sema_call_compute_tape_ident("__ad_out", span), member: field, span: span, id: AST_NODE_GENERATED}
+        fields.push(TupleField{name: field, value: sema_call_compute_tape_member(alias, "__ad_gradient", [Expr]{part, sema_call_compute_tape_ident(leaf, span)}, span)})
+    }
+    Expr.TupleLit{fields: fields, span: span, ty: None, id: AST_NODE_GENERATED}
+}
+
+// `function(inputs)`: a named function or local by name, any other function
+// value through a value call.
+sema_call_compute_tape_call: fn(function: Expr, inputs: [CallArg], span: Span) -> Expr Never! {
+    if function == {
+        .Paren(inner, _, _) -> return sema_call_compute_tape_call(inner, inputs, span)
+        .Ident(name, name_span, _) -> return Expr.Call{call: Call{name: name, name_span: name_span, type_args: [Type]{}, args: inputs}, id: AST_NODE_GENERATED}
+        else -> {}
+    }
+    Expr.CallValue{callee: function, args: inputs, span: span, id: AST_NODE_GENERATED}
+}
+
+sema_call_compute_tape_member: fn(alias: String, member: String, args: [Expr], span: Span) -> Expr Never! {
+    call_args := [CallArg]{}
+    loop argument in args -> call_args.push(sema_call_compute_tape_arg(argument, span))
+    Expr.MethodCall{receiver: sema_call_compute_tape_ident(alias, span), method: member, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: call_args, id: AST_NODE_GENERATED}
+}
+
+sema_call_compute_tape_ident: fn(name: String, span: Span) -> Expr Never! {
+    Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+}
+
+sema_call_compute_tape_arg: fn(value: Expr, span: Span) -> CallArg Never! {
+    CallArg{convention: AccessConvention.Read, expr: value, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}
+}
+
+// An effect row other than the transforms' own `GPU`: autodiff records only
+// pure Tensor operations.
+sema_call_compute_effectful: fn(effects: [EffectRowEntry]) -> Bool Never! {
+    loop entry in effects {
+        if entry.name != "GPU" -> return true
+    }
+    false
 }

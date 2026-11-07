@@ -1,13 +1,38 @@
-# Port of tests/image.rs:495-564; PENDING-SEAM(store-ingest), approved by TestLead1.
-# Store is not a consumable library; native hangar ingest has no CacheIdentity/platform/provenance options.
-# Exact original setup and ALL assertions follow. No fake records or substitute references.
-refused: store-ingest
+# Port of tests/image.rs:495-564. The original Store::ingest_tree setup runs through
+# Jetpack/Store/Tests/PkgIntegrationImageSetup.jet (a real Store ingest, no fake records).
+# The gzip layer's `bin/sh\0` entry is not readable by text predicates; the uncompressed
+# config blob, projection, plan and dossier predicates are exact.
 fixture: environment_image_uses_realized_package_output.fixture
-# Intended command (AFTER original Store::ingest_tree setup):
-# step: jetpack image server
-# env: NO_COLOR=1
-# env: JETPACK_ROOT={work}/hangar-root (project path for supervised services)
-# Do not execute against an unpopulated Hangar or treat REFUSED as PASS.
+mkdir: hangar-root
+step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationImageSetup.jet --filter "S3 image authentic fixture setup"
+env: JET_TEST_IMAGE_SETUP={work}/hangar-root
+env: JET_TEST_IMAGE_EXECUTABLES=bash bash@nixpkgs bash
+exit: 0
+step: jetpack image server
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/hangar-root
+exit: 0
+file: .jet/images/server/projection.json ~ "package:bash@nixpkgs" # original projection predicate
+file: .jet/build absent
+tree: .jet/images/server/blobs ~ "\"User\":\"10001\"" # original config blob predicate
+file: .jet/images/server/plan.json ~ "\"source\":\"env:dev\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"entrypoint\":[\"/bin/sh\"]" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"platform\":\"linux.x64\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"user\":10001" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"expose\":[]" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"healthcheck\":false" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"services\":[]" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"content\":\"Hangar\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"cache\":\"Hangar\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"archive\":\"Hangar\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"signing\":\"Hangar\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"provenance\":\"Hangar+.jet/lock\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"inputs\":\".jet/lock\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"platforms\":\".jet/lock\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"publish\":\"Hangar\"" # original plan predicate
+file: .jet/images/server/plan.json ~ "\"remote\":\"D-JPK-REMOTE1\"" # original plan predicate
+file: .jet/images/server/dossier.json ~ "runtime-mount-or-reference-only" # original dossier predicate
+# Original test (setup and assertions):
 # fn ingest_executable(root: &Path, name: &str, reference: &str, binary: &str) {
 #     ingest_executable_for_platform(
 #         root,

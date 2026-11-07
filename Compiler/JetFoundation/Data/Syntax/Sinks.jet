@@ -1,6 +1,23 @@
 // Canonical owner-controlled syntax registry (I7).
 // The reference comparison is temporary and is not a generator dependency.
 
+use {
+    jet_foundation.[SinkClass]
+}
+
+/// One credential sink: a call of `function` in `module_path` (`*` for every function).
+SinkRow: struct {
+    module_path: String
+    function: String
+    class: SinkClass
+}
+
+impl SinkRow {
+    call: fn(module_path: String, function: String, class: SinkClass) -> SinkRow {
+        SinkRow{module_path: module_path, function: function, class: class}
+    }
+}
+
 /// One home for credential sinks.
 SINK_ROWS: [SinkRow]{
     SinkRow.call("core.term", "print", SinkClass.Credential),

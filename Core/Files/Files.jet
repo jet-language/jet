@@ -840,8 +840,10 @@ fsync: fn(path: String | Path) IOError! -[FS.Write]> {
 }
 
 
+// A final link is followed, so a broken link does not exist; `lexists` sees the link itself.
 exists_impl: fn(path: String) -> Bool Never! {
-    (core.files.__stat_mode_raw(path) ?? -1) >= 0
+    row: core.files.__stat_at(-1, path, true) ?? return false
+    row[0] >= 0
 }
 
 

@@ -47,10 +47,11 @@ use files: core.files
 // (hard links beside `jet`) and the CLI's argv[0] dispatch. The executable
 // check is tests/cases/cli/compiler_aliases_run_the_compiler_verbs.case.
 #Test("aliases_are_real_installed_bins_and_docs_cover_the_driver_matrix") {
-    release: files.read("Tools/agent/release-compiler.mjs") ?? panic("read release assembly")
-    assert(release.contains("export const COMPILER_ALIASES = ['jet-cc', 'jet-cxx', 'jet-c++'];"), "the release does not ship every compiler alias")
-    assert(release.contains("linkSync(join(dir, 'jet'), join(dir, alias))"), "the release aliases are not hard links of jet")
-    assert(release.contains("linkCompilerAliases(temp);"), "the release assembly does not link the compiler aliases")
+    seed: files.read("Tools/release/Seed.jet") ?? panic("read release seed helpers")
+    assert(seed.contains("COMPILER_ALIASES: [String]{{\"jet-cc\", \"jet-cxx\", \"jet-c++\"}}"), "the release does not ship every compiler alias")
+    assert(seed.contains("files.hard_link(files.join(dir, \"jet\"), files.join(dir, alias))"), "the release aliases are not hard links of jet")
+    assembly: files.read("Tools/release/Admit.jet") ?? panic("read release assembly")
+    assert(assembly.contains("link_compiler_aliases(temp)"), "the release assembly does not link the compiler aliases")
     entry: files.read("Compiler/JetCli/run.jet") ?? panic("read CLI entry")
     assert(entry.contains("jet_cli_main(jet_cli_alias_args(words))"), "the CLI entry ignores argv[0]")
     host: files.read("Compiler/JetCli/Source/Cli/Host.jet") ?? panic("read CLI alias dispatch")

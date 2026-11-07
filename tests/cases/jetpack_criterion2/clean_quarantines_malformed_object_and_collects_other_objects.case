@@ -10,19 +10,22 @@
 # Via authenticated closure-journal backdater set stale last_used_at=1 and fresh
 # last_used_at=now_secs(), remove input sources. Bind actual entry IDs as stale_id/fresh_id.
 # Create root/hangar/nix-index/payload with exact bytes "metadata missing" and no meta.json.
-# This recipe must be supplied by the owning package fixture seam, NOT a Jet CLI driver.
+# This recipe must be supplied by the owning package fixture seam, NOT a Jet CLI driver;
+# the seam names the entry IDs in fixture-stale-id and fixture-fresh-id.
 refused: hangar-fixture-backdate
 mkdir: root
 mkdir: shared
 env: JETPACK_ROOT={work}/root
 env: JETPACK_SHARED_CAS={work}/shared
+capture: stale_id = text file fixture-stale-id
+capture: fresh_id = text file fixture-fresh-id
 step: jetpack hangar clean --no-color --yes
 exit: 0
-file: root/hangar/{cap:stale_id} !exists
+file: root/hangar/{cap:stale_id} absent
 file: root/hangar/{cap:fresh_id} exists
-file: root/hangar/nix-index !exists
+file: root/hangar/nix-index absent
 # Original read_dir result must contain ONE filename with BOTH substrings;
 # two unrelated filename matches must never satisfy this assertion.
-file: root/hangar-quarantine entries any ~ "nix-index" and ~ "missing-metadata" # original compound predicate, pending seam/grammar
+entries: root/hangar-quarantine name ~ nix-index name ~ missing-metadata >= 1 # original compound predicate: one entry names both
 stderr: ~ "quarantined 1 invalid object" # original predicate
 stderr: ~ "clean" # original predicate

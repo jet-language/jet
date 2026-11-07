@@ -121,6 +121,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
         // The `jet` under test runs its engine verbs with the run's jetpack.
         name == "JETPACK_BIN" -> if env.jetpack != "" -> Val(env.jetpack) else -> sys.get(name)
+        name == "JET_CC_PACK_ROOT" -> if env.cc_pack != "" -> Val(env.cc_pack) else -> sys.get(name)
         name == "JET_SCHEMA_CACHE_DIR" -> Val(files.join(scratch, "schema"))
         else -> sys.get(name)
     }
@@ -128,9 +129,11 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
 
 // Inherit the caller's environment, removing only the compiler-extension hook.
 // Cache roots are run-wide; temporary, schema, jetpack and home roots are
-// case-local. Callers check kit_exec_home_refusal before spawning.
+// case-local. Callers check kit_exec_home_refusal before spawning. Output is
+// streamed, not text-captured: a child may write any bytes, so the kit reads
+// them as bytes and its receipt text is lossy instead of a failed wait.
 kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
-    spec := process.cmd(argv).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
+    spec := process.cmd(argv).cwd(cwd).stdout(.Stream).stderr(.Stream).stdin(.Stream).timeout(env.timeout)
     if env.env_clear -> spec = spec.env_clear()
     else {
         spec = spec.env_remove("JET_COMPILER_EXTENSION")
@@ -154,6 +157,7 @@ kit_exec_spec: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, ove
             .env("XDG_STATE_HOME", kit_exec_base_value("XDG_STATE_HOME", env, scratch) ?? "")
             .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
             .env("JETPACK_BIN", kit_exec_base_value("JETPACK_BIN", env, scratch) ?? "")
+            .env("JET_CC_PACK_ROOT", kit_exec_base_value("JET_CC_PACK_ROOT", env, scratch) ?? "")
             .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
             .env("JET_TOOLCHAIN_ROOT", kit_exec_base_value("JET_TOOLCHAIN_ROOT", env, scratch) ?? "")
     }
@@ -284,7 +288,14 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         .None -> child.stdin.close()
     }
     kit_exec_wait(child, watched, started, -1)
+    // Every output byte, read before the wait detaches the readers.
+    output := [U8]{}
+    errors := [U8]{}
+    read_error := kit_exec_read_stdout(child.stdout, output)
+    errors_read: kit_exec_read_stderr(child.stderr, errors)
+    if read_error == "" -> read_error = errors_read
     receipt: child.wait() ?? return kit_exec_failed("wait: {err}")
+    if read_error != "" -> return kit_exec_failed(read_error)
     // The entry's claim: the child's resident peak and, on a memory-backed
     // scratch, the files the row holds once it is done.
     if env.peak == .Val(cell) {
@@ -292,9 +303,66 @@ kit_exec_run: fn(env: KitEnv, argv: [String], cwd: String, scratch: String, stdi
         permit := cell.guard_edit()
         if held > permit.value.bytes -> permit.value.bytes = held
     }
-    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, receipt.errors))
+    errors_text: kit_exec_redact(kit_steps_utf8_lossy(errors), overlay)
+    run := kit_exec_receipt(receipt, started.elapsed().ns, if input_error == "" -> "" else -> kit_exec_input_detail(input_error, receipt.code, errors_text))
+    run.stdout = kit_exec_redact(kit_steps_utf8_lossy(output), overlay)
+    run.stderr = errors_text
+    run.stdout_bytes = Val(output)
+    run.stderr_bytes = Val(errors)
     if watched.killed -> run.limit_hit = "memory"
     run
+}
+
+// The collector holds each output whole, so reading one to its end before the
+// other cannot stall the child.
+kit_exec_read_stdout: fn(stream: ProcessStdoutStream, bytes: &[U8]) -> String {
+    loop {
+        chunk: stream.read(1048576) ?? return "read stdout: {err}"
+        if chunk.len() == 0 -> return ""
+        bytes.extend(chunk)
+    }
+    ""
+}
+
+kit_exec_read_stderr: fn(stream: ProcessStderrStream, bytes: &[U8]) -> String {
+    loop {
+        chunk: stream.read(1048576) ?? return "read stderr: {err}"
+        if chunk.len() == 0 -> return ""
+        bytes.extend(chunk)
+    }
+    ""
+}
+
+// The names Core's process receipt treats as secret (any of these, ASCII
+// case-insensitive, inside a variable's name).
+KIT_EXEC_SECRET_NAMES: [String]{"secret", "token", "password", "passwd", "credential", "key"}
+
+// The receipt's redaction of captured output: each nonempty value of a
+// secret-named variable the step sets reads `<redacted>`, longest value
+// first. Streamed output bypasses the receipt, so the kit applies it to the
+// text its predicates read; the exact bytes stay unredacted.
+kit_exec_redact: fn(text: String, overlay: [KitEnvVar]) -> String {
+    secrets := [String]{}
+    loop variable in overlay {
+        value: variable.value ?? next
+        name: variable.name.to_ascii_lower()
+        secret := false
+        loop marker in KIT_EXEC_SECRET_NAMES {
+            if name.contains(marker) -> secret = true
+        }
+        if !secret || value == "" -> next
+        secrets.push(value.copy())
+        position := secrets.len() - 1
+        loop position > 0 && secrets[position - 1].count_bytes() < secrets[position].count_bytes() {
+            longer: secrets[position]
+            secrets[position] = secrets[position - 1]
+            secrets[position - 1] = longer
+            position -= 1
+        }
+    }
+    redacted := text
+    loop secret in secrets -> redacted = redacted.replace(secret, "<redacted>")
+    redacted
 }
 
 // Waits on this task until the child exits or, when `until` is not negative,

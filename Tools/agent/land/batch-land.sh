@@ -2,7 +2,7 @@
 # batch-land.sh <list file>: land many lane patches with ONE verification (collect-all).
 # List lines: <lane>\t<abs msg file>\t<abs patch file>, in dependency order.
 # Under the commit lock: apply each patch that still applies (cumulative), regenerate the runtime stop
-# exports, run precommit.sh once on every touched path, then commit each patch as its own commit (plus
+# exports, run `Land.jet precommit` once on every touched path, then commit each patch as its own commit (plus
 # one commit for regenerated files). On precommit failure: revert exactly what was applied. Report:
 # $JET_RUN_ROOT/batch-land.log. Roots: Tools/agent/roots.sh; the batch lands on $JET_DEV_WORKTREE.
 # Stacks: a lane's patches in one list are a stack (each may build on the ones before it). Once one of them
@@ -64,22 +64,21 @@ revert_all() {
   for f in "${all[@]}"; do [ -e "$f" ] && ! git ls-files --error-unmatch -- "$f" >/dev/null 2>&1 && rm -rf -- "$f"; done
   if [ -n "$(git status --porcelain --untracked-files=no)" ]; then say "REVERT LEFT THE WORKTREE DIRTY"; git status --porcelain | head -20 | tee -a "$LOG"; touch "$JET_RUN_ROOT/lander.stop"; fi
 }
-# Regenerate the runtime generators' outputs (stop exports, lifecycle) for the combined runtime sources.
-# The runtime generators: the Jet package while it is the in-service form, else the node originals (in service until
-# their Jet candidate passes the cutover gate).
+# Regenerate the runtime generators' outputs (stop exports, lifecycle) for the combined runtime sources,
+# from their one generator, Tools/agent/RuntimeGenerators.jet.
 if [ $rowregen = 1 ]; then
   rr=$(JET_COMPILER_IDENTITY="$(awk 1 "$JET_SEED/IDENTITY")" JET_TOOLCHAIN_ROOT="$PWD" timeout 900 "$JET_BASE_ROOT/latest/jet" run Tools/agent/CoreSourceRows.jet 2>&1); rrc=$?
   say "CoreSourceRows regeneration rc=$rrc $(printf '%s' "$rr" | tail -1)"
   [ $rrc -eq 0 ] || { say "CoreSourceRows regeneration FAILED; reverting"; revert_all; exit 5; }
 fi
-gen=$( if git ls-files --error-unmatch Tools/agent/RuntimeGenerators >/dev/null 2>&1; then timeout 900 "$JET_SEEDS/bin/jet" run Tools/agent/RuntimeGenerators; else for g in gen-runtime-trap-messages gen-runtime-lifecycle gen-runtime-stop-exports gen-runtime-host-errors gen-runtime-scheduler-messages gen-runtime-services-messages gen-runtime-test-messages gen-runtime-observe-messages gen-compiler-needed-text; do node Tools/agent/$g.mjs || exit 1; done; fi 2>&1); grc=$?
+gen=$(JET_COMPILER_IDENTITY="$(awk 1 "$JET_SEED/IDENTITY")" JET_TOOLCHAIN_ROOT="$PWD" timeout 900 "$JET_SEED/jet" Tools/agent/RuntimeGenerators.jet 2>&1); grc=$?
 say "RuntimeGenerators rc=$grc $(printf '%s' "$gen" | tail -2 | tr '\n' ' ')"
 # A set lookup, not `printf … | grep -q`: under pipefail, grep -q exiting early SIGPIPEs printf once the
 # path list passes the pipe buffer, which miscounted a large patch's own files as regenerated.
 declare -A inbatch=(); for f in "${all[@]}"; do [ -n "$f" ] && inbatch[$f]=1; done
 mapfile -t genfiles < <(git status --porcelain --untracked-files=no | awk '{print $2}' | while read -r f; do [ -n "${inbatch[$f]+x}" ] || echo "$f"; done)
 say "regenerated: ${genfiles[*]:-none}"
-res=$(bash "$M/precommit.sh" "${all[@]}" "${genfiles[@]}" 2>&1); prc=$?
+res=$(JET_COMPILER_IDENTITY="$(awk 1 "$JET_SEED/IDENTITY")" JET_TOOLCHAIN_ROOT="$PWD" "$JET_SEED/jet" Tools/agent/Land.jet precommit "${all[@]}" "${genfiles[@]}" 2>&1); prc=$?
 printf '%s\n' "$res" | grep -vE '^nm: |^skip ' | tail -25 | tee -a "$LOG"
 if [ $prc -ne 0 ]; then say "PRECOMMIT FAILED for the batch; reverting"; revert_all; exit 5; fi
 # Jobs whose patches share a file cannot be committed separately (staging a whole file takes the other job's

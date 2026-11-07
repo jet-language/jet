@@ -1,12 +1,16 @@
 // The one route to an a0_NNN GitHub release. Run from the checkout root:
 //
+//   jet run Tools/release/Main.jet -- admit COMMIT [--summary TEXT] ... [--check-gate]
+//   jet run Tools/release/Main.jet -- build COMMIT --seed DIR (--out DIR [--threads N] | --check-gate)
 //   jet run Tools/release/Main.jet -- candidate DIR [--evidence EVDIR]... [--key REGISTRY]
 //   jet run Tools/release/Main.jet -- publish DIR [--key REGISTRY] [--dry-run]
 //
-// DIR is a build of Tools/agent/publish-release.mjs, gated by one
-// Tools/agent/VerifyFull.jet run per runner (--evidence EVDIR, once per
-// shard and target), or a release Tools/agent/release-compiler.mjs admitted,
-// gated by its own RELEASE.json. `candidate` stages DIR/release/, checks
+// `admit` is the release gate of the train (Admit.jet): it builds, checks,
+// assembles and publishes the next release from the current one. `build`
+// (Build.jet) builds a release directory from a seed. DIR is a build,
+// gated by one Tools/agent/VerifyFull.jet run per runner (--evidence EVDIR,
+// once per shard and target), or a release `admit` admitted, gated by its
+// own RELEASE.json. `candidate` stages DIR/release/, checks
 // every gate and, when nothing blocks, writes DIR/CANDIDATE.json: the record
 // that binds the source, toolchain, artifacts, signer, test receipts, support
 // matrix (Tools/release/support-matrix.tsv), provenance and release
@@ -43,14 +47,14 @@ Options: struct {
 }
 
 usage: fn() -> String Never! {
-    "usage: jet run Tools/release/Main.jet -- candidate DIR [--evidence EVDIR]... [--key REGISTRY]\n       jet run Tools/release/Main.jet -- publish DIR [--key REGISTRY] [--dry-run]"
+    "{ADMIT_USAGE}\n{BUILD_USAGE}\nusage: jet run Tools/release/Main.jet -- candidate DIR [--evidence EVDIR]... [--key REGISTRY]\n       jet run Tools/release/Main.jet -- publish DIR [--key REGISTRY] [--dry-run]"
 }
 
 parse_args: fn(args: [String]) -> Options Problem! {
     options := Options{command: "", dir: "", evidence: [String]{}, key: RELEASE_KEY, dry_run: false}
     if args.len() == 0 -> return Err(problem(INPUT, usage()))
     options.command = args[0].copy()
-    if options.command != "candidate" && options.command != "publish" -> return Err(problem(INPUT, "unknown command {options.command}: want candidate or publish\n{usage()}"))
+    if options.command != "candidate" && options.command != "publish" -> return Err(problem(INPUT, "unknown command {options.command}: want admit, build, candidate or publish\n{usage()}"))
     index := 1
     loop index < args.len() {
         arg: args[index]
@@ -99,16 +103,19 @@ gather_remote: fn(root: String, commit: String, programs: Programs) -[Exec, Time
 }
 
 release_main: fn(args: [String]) -[FS, Env, Exec, IO, Time, Time.Wait]> Int Never! {
-    options: parse_args(args) ?? {
-        term.eprint("release: {err.text}")
-        return 2
-    }
     root: files.absolute(".") ?? {
         term.eprint("release: cannot resolve the checkout: {err}")
         return 2
     }
     if !files.exists(files.join(root, SUPPORT_MATRIX_PATH)) {
         term.eprint("release: run from the checkout root: {SUPPORT_MATRIX_PATH} is not here")
+        return 2
+    }
+    command: if args.len() > 0 -> args[0].copy() else -> ""
+    if command == "admit" -> return admit_main(args[1..<args.len()], root)
+    if command == "build" -> return build_main(args[1..<args.len()], root)
+    options: parse_args(args) ?? {
+        term.eprint("release: {err.text}")
         return 2
     }
     dir: files.absolute(options.dir) ?? {

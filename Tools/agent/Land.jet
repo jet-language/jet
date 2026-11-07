@@ -1,8 +1,15 @@
 #!/usr/bin/env jet
-// Land patches on a checkout, or queue them for the landing service.
+// Land patches on a checkout, queue them for the landing service, and run the
+// collect-all census that admits compiler commits and expensive launches.
 //
 //   jet Tools/agent/Land.jet land [--scratch-copy DIR] PATCH MSG [PATCH MSG]...
 //   jet Tools/agent/Land.jet queue LANE BASE...
+//   jet Tools/agent/Land.jet census [FILE]...
+//   jet Tools/agent/Land.jet precommit FILE...
+//   jet Tools/agent/Land.jet prescreen PATCH [EARLIER_PATCH]...
+//   jet Tools/agent/Land.jet receipt identity TREE
+//   jet Tools/agent/Land.jet receipt check LAUNCHER TREE SEED_DIR
+//   jet Tools/agent/Land.jet receipt commit LAUNCHER REPO COMMIT SEED_DIR
 //
 // `land` commits a stack of patches on the checkout it runs in, one commit
 // per patch, with the message in the MSG file after it. The checkout must
@@ -33,8 +40,43 @@
 //                                  ($PARETO_APPROVED, else
 //                                  $JET_SCRATCH_ROOT/lanes/Main/pareto-approved.txt).
 // Jobs go to $JET_RUN_ROOT/land-queue/<epoch>-<lane>[n].job.
+//
+// `census` is the collect-all preflight (AGENTS.md) of a snapshot: HEAD of
+// $JET_DEV_WORKTREE (CENSUS_COMMIT names another commit) plus the named
+// worktree files, so other lanes' uncommitted work never enters it; a named
+// file the worktree no longer has is deleted from the snapshot. In package
+// form in the snapshot, with the seed ($JET_SEED, else CENSUS_JET_DIR):
+// `jet check Compiler/JetCli` (sema of the CLI and every package it depends
+// on), then `jet build Compiler` (optimize, lowering, object and link rows),
+// then the runtime pack lowered by the compiler just built (as chain s1's
+// pack step does), then that compiler's own `jet check Compiler/JetCli` (as
+// chain s2 does), each with keep-going and every row of its report listed at
+// its file:line. Each pass runs in its own memory-capped systemd scope.
+// CENSUS_BUILD=0 stops after the check, CENSUS_SELFCHECK=0 before the
+// self-check. Output: $JET_SCRATCH_ROOT/discovery/r14/{snap,census}. A clean
+// census of every pass writes the snapshot's preflight receipt, which
+// `chain.sh full` and Tools/release `admit` and `build` require.
+// Exit: 0 clean; 1 rows or a failed pass; 2 setup failure.
+//
+// `precommit` runs the census for a commit touching FILE... when one of them
+// is a compiler input (or a runtime, backend, Core or Jetpack source or a
+// sources.list), with every pass, and prints PRECOMMIT OK or PRECOMMIT FAILED.
+//
+// `prescreen` is the lander's admission check of one job: PATCH, after the
+// EARLIER_PATCHes already admitted, applied to an export of HEAD, then the
+// seed's keep-going `jet check Compiler/JetCli` when the patches touch a
+// compiler input. Exit: 0 clean; 1 check rows (printed); 3 does not apply.
+//
+// `receipt` reads preflight receipts ($JET_STATE_ROOT/preflight/<sha256 of
+// the source identity>.json). `identity` prints TREE's compiler source
+// identity; `check` admits a launch of TREE by the seed SEED_DIR, and
+// `commit` one of COMMIT of the checkout REPO (from an export of it). Each
+// prints `LAUNCHER: admitted by ...` (exit 0) or the refusal, which names the
+// census to run (exit 1); exit 2 is a setup failure.
 use {
+    crypto: core.crypto
     files: core.files
+    json: core.encoding.json
     process: core.process
     sys: core.sys
     term: core.term
@@ -45,6 +87,27 @@ SPEED_LANES: [String]{"O0Speed", "RustOut"}
 COMPILER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/"}
 IDENTITY_KEYS: [String]{"user.name", "user.email"}
 JOB_FILES: [String]{".patch", ".msg"}
+// The compiler in package form: its entry package, the workspace files
+// `jet build Compiler` reads beside the packages, and the walk's exclusions.
+ENTRY_PACKAGE: "Compiler/JetCli"
+WORKSPACE_FILES: [String]{"Compiler/package.jet", "Compiler/build.jet"}
+SKIPPED_NAMES: [String]{"target", "build", "node_modules", "bin"}
+PROJECT_MARKERS: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
+SOURCE_DOMAIN: "jet.compiler-source.v2"
+// The preflight receipt: its schema, the census passes it vouches for, and
+// the trees an export needs for the source identity.
+RECEIPT_SCHEMA: "jet.preflight-receipt.v1"
+RECEIPT_PASSES: [String]{"check", "build", "runtime-pack", "selfcheck"}
+IDENTITY_TREES: [String]{"Compiler", "Core", "Jetpack"}
+// The generated CoreSourceRows views: a patch whose only conflict is in them
+// is admitted around them (the batch regenerates them from its sources).
+GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreSources.jet", "Compiler/JetFoundation/Source/Registry/CoreCallRows.jet", "Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet", "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet", "Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet"}
+// Every heavy pass: its own transient systemd scope with a hard memory cap
+// and no swap (a runaway job is killed alone), low priority, pinned CPUs and
+// the compiler's 1 GiB stack.
+HEAVY_MEMORY: "32G"
+HEAVY_CPUS: "16-27"
+HEAVY_STACK: "--stack=1073741824:1073741824"
 
 run: fn() {
     args: process.args()
@@ -56,6 +119,10 @@ run: fn() {
     code: if args[0] == {
         "land" -> land_main(rest)
         "queue" -> queue_main(rest)
+        "census" -> census_main(rest)
+        "precommit" -> precommit_main(rest)
+        "prescreen" -> prescreen_main(rest)
+        "receipt" -> receipt_main(rest)
         else -> usage()
     }
     process.exit(code)
@@ -64,6 +131,12 @@ run: fn() {
 usage: fn() -[Exec, IO]> Never {
     term.eprint("usage: jet Tools/agent/Land.jet land [--scratch-copy DIR] PATCH MSG [PATCH MSG]...")
     term.eprint("       jet Tools/agent/Land.jet queue LANE BASE...")
+    term.eprint("       jet Tools/agent/Land.jet census [FILE]...")
+    term.eprint("       jet Tools/agent/Land.jet precommit FILE...")
+    term.eprint("       jet Tools/agent/Land.jet prescreen PATCH [EARLIER_PATCH]...")
+    term.eprint("       jet Tools/agent/Land.jet receipt identity TREE")
+    term.eprint("       jet Tools/agent/Land.jet receipt check LAUNCHER TREE SEED_DIR")
+    term.eprint("       jet Tools/agent/Land.jet receipt commit LAUNCHER REPO COMMIT SEED_DIR")
     process.exit(64)
 }
 
@@ -556,6 +629,936 @@ stack_applies: fn(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.W
     clean
 }
 
+// --- the compiler in package form -------------------------------------------
+// The packages `jet build Compiler` compiles (Compiler/JetCli and every
+// package its package.jet path dependencies reach) and the files that make up
+// the compiler's source identity. Membership follows the driver's source walk
+// (JetCli Request.jet `jet_cli_walk_held_sources`): every file under the
+// package directory, recursively, except dot names, the skipped build names,
+// symlinks, and directories that are projects of their own.
+
+Package: struct {
+    name: String
+    // Repo-relative.
+    directory: String
+}
+
+is_project: fn(directory: String) -[FS]> Bool Never! {
+    loop marker in PROJECT_MARKERS {
+        if files.exists(files.join(directory, marker)) -> return true
+    }
+    false
+}
+
+// Every file of the package tree at the repo-relative `directory`, of any
+// extension, repo-relative: the driver's walk before its `.jet` filter.
+package_tree: fn(repo: String, directory: String) -[FS]> [String] LandError! {
+    found := [String]{}
+    walk_tree(repo, directory, found) ?? return Err(err)
+    found
+}
+
+walk_tree: fn(repo: String, directory: String, found: &[String]) LandError! -[FS]> {
+    listed: files.list_dir(files.join(repo, directory)) ?? return Err(LandError{message: "`{directory}` cannot be listed: {err}"})
+    names := [String]{}
+    loop entry in listed -> names.push(entry.name.copy())
+    names.sort()
+    loop name in names {
+        if name.starts_with(".") || SKIPPED_NAMES.contains(name) -> next
+        child: "{directory}/{name}"
+        path: files.join(repo, child)
+        if files.is_symlink(path) -> next
+        if files.is_dir(path) {
+            if !is_project(path) -> walk_tree(repo, child, found) ?? return Err(err)
+            next
+        }
+        if files.is_file(path) -> found.push(child)
+    }
+    Ok(())
+}
+
+// The value of the first `KEY: "VALUE"` line of `text`, "" when there is none.
+quoted_line: fn(text: String, key: String) -> String Never! {
+    loop line in text.lines() {
+        if !line.starts_with("{key}:") -> next
+        rest: line.removeprefix("{key}:").trim()
+        if !rest.starts_with("\"") -> next
+        value: rest.removeprefix("\"").partition("\"")
+        if value.sep != "" && value.head != "" -> return value.head.copy()
+    }
+    ""
+}
+
+// The relative paths of a package.jet's `deps: { ... }` block: each row
+// `name: ./Dir` or `name: ../Dir` (a registry version is no path).
+manifest_deps: fn(text: String) -> [String] Never! {
+    rows := [String]{}
+    inside := false
+    closed := false
+    loop line in text.lines() {
+        current := line.copy()
+        if !inside {
+            if !line.starts_with("deps:") -> next
+            rest: line.removeprefix("deps:").trim()
+            if !rest.starts_with("{{") -> next
+            inside = true
+            current = rest.removeprefix("{{")
+        }
+        cut: current.partition("}}")
+        rows.push(cut.head.copy())
+        if cut.sep != "" {
+            closed = true
+            break
+        }
+    }
+    paths := [String]{}
+    if !closed -> return paths
+    loop row in rows {
+        path: dep_path(row)
+        if path != "" -> paths.push(path)
+    }
+    paths
+}
+
+// The path of one `deps` row, "" when the row names no path.
+dep_path: fn(row: String) -> String Never! {
+    line: row.trim()
+    entry: if line.ends_with(",") -> line.removesuffix(",").trim() else -> line.copy()
+    parts: entry.partition(":")
+    if parts.sep == "" || !is_word(parts.head) -> return ""
+    value: parts.tail.trim()
+    if value == "." || value == ".." -> return value.copy()
+    if !value.starts_with("./") && !value.starts_with("../") -> return ""
+    if value.contains(",") || value.contains(" ") || value.contains("\t") -> return ""
+    value.copy()
+}
+
+is_word: fn(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        code: Int.from_u8(byte)
+        word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+        if !word -> return false
+    }
+    true
+}
+
+// The relative `path` from the repo-relative `directory`, normalized; ""
+// when it leaves the repository.
+repo_join: fn(directory: String, path: String) -> String Never! {
+    parts := [String]{}
+    loop part in "{directory}/{path}".split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if parts.len() == 0 -> return ""
+            _ := parts.pop()
+            next
+        }
+        parts.push(part.copy())
+    }
+    parts.join("/")
+}
+
+// The compiler's packages in dependency order (a package after the ones it
+// depends on), from Compiler/JetCli through package.jet path dependencies.
+compiler_packages: fn(repo: String) -[FS]> [Package] LandError! {
+    packages := [Package]{}
+    visiting := [String]{}
+    visit_package(repo, ENTRY_PACKAGE, packages, visiting) ?? return Err(err)
+    packages
+}
+
+visit_package: fn(repo: String, directory: String, packages: &[Package], visiting: &[String]) LandError! -[FS]> {
+    manifest: files.read(files.join(repo, "{directory}/package.jet")) ?? return Err(LandError{message: "{directory}/package.jet cannot be read: {err}"})
+    name: quoted_line(manifest, "name")
+    if name == "" -> return Err(LandError{message: "{directory}/package.jet names no package"})
+    loop known in packages {
+        if known.name == name -> return Ok(())
+    }
+    if visiting.contains(name) -> return Err(LandError{message: "package dependency cycle through {name}"})
+    visiting.push(name.copy())
+    loop path in manifest_deps(manifest) {
+        target: repo_join(directory, path)
+        if target == "" -> return Err(LandError{message: "{directory}/package.jet names a dependency outside the repository: {path}"})
+        visit_package(repo, target, packages, visiting) ?? return Err(err)
+    }
+    packages.push(Package{name: name.copy(), directory: directory.copy()})
+    Ok(())
+}
+
+// The roots of the compiler's inputs: the workspace files, every package
+// directory, and Core (the tree JET_TOOLCHAIN_ROOT serves to the compile).
+compiler_input_roots: fn(packages: [Package]) -> [String] Never! {
+    roots := WORKSPACE_FILES.copy()
+    loop found in packages -> roots.push(found.directory.copy())
+    roots.push("Core")
+    roots
+}
+
+// Every file under the roots, repo-relative, deduplicated and byte-sorted.
+compiler_inputs: fn(repo: String, roots: [String]) -[FS]> [String] LandError! {
+    found := [String]{}
+    loop path in roots {
+        whole: files.join(repo, path)
+        if !files.exists(whole) -> next
+        if files.is_file(whole) {
+            found.push(path.copy())
+            next
+        }
+        found.extend(package_tree(repo, path) ?? return Err(err))
+    }
+    found.sort()
+    unique := [String]{}
+    loop path in found {
+        if unique.len() > 0 && unique[unique.len() - 1] == path -> next
+        unique.push(path.copy())
+    }
+    unique
+}
+
+push_u64: fn(out: &[U8], value: Int) {
+    digits := [U8]{}
+    rest := value
+    loop _ in 0..<8 {
+        digits.push(U8.from_int(rest % 256) ?? U8{0})
+        rest = rest /% 256
+    }
+    loop at in 0..<8 -> out.push(digits[7 - at])
+}
+
+// The compiler's source identity of `repo`:
+// `<binary>@<version>#<sha256>` over the domain, a NUL, then each input in
+// byte order as its path and its bytes, each after its 8-byte big-endian length.
+compiler_source_identity: fn(repo: String) -[FS]> String LandError! {
+    packages: compiler_packages(repo) ?? return Err(err)
+    inputs: compiler_inputs(repo, compiler_input_roots(packages)) ?? return Err(err)
+    message := [U8]{}
+    message.extend(SOURCE_DOMAIN.bytes())
+    message.push(U8{0})
+    loop path in inputs {
+        bytes: files.read_bytes(files.join(repo, path)) ?? return Err(LandError{message: "`{path}` cannot be read: {err}"})
+        key: path.bytes()
+        push_u64(message, key.len())
+        message.extend(key)
+        push_u64(message, bytes.len())
+        message.extend(bytes)
+    }
+    registry: "Compiler/JetCli/Source/Cli/Registry.jet"
+    manifest: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+    binary: quoted_line(files.read(files.join(repo, registry)) ?? "", "JET_CLI_BINARY")
+    version: quoted_line(files.read(files.join(repo, manifest)) ?? "", "COMPILER_VERSION")
+    if binary == "" -> return Err(LandError{message: "{registry} declares no JET_CLI_BINARY"})
+    if version == "" -> return Err(LandError{message: "{manifest} declares no COMPILER_VERSION"})
+    "{binary}@{version}#{crypto.sha256(message).hex()}"
+}
+
+// Is `path` (repo-relative) a compiler input under `roots`: a root, or a file
+// the walk of one reaches?
+package_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool Never! {
+    loop input in roots {
+        if path == input -> return true
+        if !path.starts_with("{input}/") -> next
+        parts := [String]{}
+        loop part in path.removeprefix("{input}/").split("/") -> parts.push(part.copy())
+        skipped := false
+        loop part in parts {
+            if part.starts_with(".") || SKIPPED_NAMES.contains(part) -> skipped = true
+        }
+        if skipped -> next
+        directory := files.join(repo, input)
+        project := false
+        loop at in 0..<(parts.len() - 1) {
+            directory = files.join(directory, parts[at])
+            if is_project(directory) -> project = true
+        }
+        if !project -> return true
+    }
+    false
+}
+
+// Does a commit touching `path` need the census: a compiler input, or a
+// runtime, backend, Core or Jetpack source or a sources.list?
+census_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool Never! {
+    if path.starts_with("Compiler/JetRuntime/Source/") || path.starts_with("Compiler/JetBackend/Source/") || path.starts_with("Core/") -> return true
+    if path == "Compiler/JetRuntime/sources.list" || path.ends_with("/sources.list") -> return true
+    if path.starts_with("Jetpack/") && path.removeprefix("Jetpack/").contains("/Source/") -> return true
+    package_input(repo, path, roots)
+}
+
+// --- heavy passes -----------------------------------------------------------
+
+Setting: struct {
+    name: String
+    value: String
+}
+
+// `argv` as a heavy pass, killed after `seconds` (0: no limit).
+heavy: fn(seconds: Int, argv: [String]) -> [String] Never! {
+    out := [String]{}
+    if seconds > 0 -> out.extend([String]{"timeout", "{seconds}"})
+    out.extend([String]{"systemd-run", "--user", "--scope", "--quiet", "--collect", "-p", "MemoryMax={HEAVY_MEMORY}", "-p", "MemorySwapMax=0", "-p", "CPUWeight=1", "-p", "IOWeight=1", "--"})
+    out.extend([String]{"nice", "-n", "19", "ionice", "-c3", "taskset", "-c", HEAVY_CPUS, "prlimit", HEAVY_STACK, "--"})
+    out.extend(argv.copy())
+    out
+}
+
+// `argv` run in `dir` with `env` added, its output in LOG.out and LOG.err;
+// the exit code, 128 + the signal on a signal, 127 when it cannot start.
+run_logged: fn(dir: String, argv: [String], env: [Setting], log: String) -[Exec, FS, Time.Wait]> Int Never! {
+    spec := process.cmd(argv).cwd(dir).output_limit(1073741824)
+    loop setting in env -> spec = spec.env(setting.name, setting.value)
+    receipt: spec.run() ?? {
+        files.write("{log}.out", "") ?? ()
+        files.write("{log}.err", "{argv[0]} cannot start: {err}\n") ?? ()
+        return 127
+    }
+    files.write("{log}.out", receipt.output) ?? ()
+    files.write("{log}.err", receipt.errors) ?? ()
+    if receipt.signal == .Val(number) -> return 128 + number
+    receipt.code
+}
+
+// The environment of a compile of `tree` by a compiler of `identity`, its
+// keep-going report in `report` ("" for none).
+compile_env: fn(identity: String, tree: String, report: String) -> [Setting] Never! {
+    env := [Setting]{Setting{name: "JET_COMPILER_IDENTITY", value: identity.copy()}, Setting{name: "JET_TOOLCHAIN_ROOT", value: tree.copy()}, Setting{name: "JET_KEEP_GOING", value: "1"}}
+    if report != "" -> env.push(Setting{name: "JET_KEEP_GOING_REPORT", value: report.copy()})
+    env
+}
+
+// COMMIT of the checkout `repo` (only `paths` when there are any) unpacked into `dir`.
+export_tree: fn(repo: String, commit: String, dir: String, paths: [String]) LandError! -[Exec, FS, Time.Wait]> {
+    files.create_dir_all(dir) ?? return Err(LandError{message: "`{dir}` cannot be created: {err}"})
+    archive: "{dir}.tar"
+    argv := [String]{"archive", "--format=tar", "-o", archive, commit}
+    if paths.len() > 0 {
+        argv.push("--")
+        argv.extend(paths.copy())
+    }
+    made: git(repo, argv)
+    if made.code != 0 {
+        files.remove(archive) ?? ()
+        return Err(LandError{message: "git archive {commit} failed: {first_line(made)}"})
+    }
+    unpacked: run_in(dir, [String]{"tar", "-x", "-f", archive, "-C", dir}, "")
+    files.remove(archive) ?? ()
+    if unpacked.code != 0 -> return Err(LandError{message: "unpacking {commit} failed: {first_line(unpacked)}"})
+    Ok(())
+}
+
+dev_worktree: fn() -[Exec, Env, FS, Time.Wait]> String Never! { root("JET_DEV_WORKTREE", checkout_top()) }
+
+// The seed compiler's directory: $JET_SEED, else the current seed.
+seed_dir: fn() -[Env, FS]> String Never! {
+    seeds: root("JET_SEEDS", "{env_or("XDG_DATA_HOME", "{env_or("HOME", "")}/.local/share")}/jet-seeds")
+    named: root("JET_SEED", "{seeds}/current")
+    files.canonicalize(named) ?? named.copy()
+}
+
+read_identity: fn(dir: String) -[FS]> String Never! { (files.read("{dir}/IDENTITY") ?? "").trim() }
+
+// At most `limit` characters of `text`.
+clip: fn(text: String, limit: Int) -> String Never! {
+    if text.count_bytes() <= limit -> return text.copy()
+    out := ""
+    taken := 0
+    loop scalar in text.chars() {
+        if taken >= limit -> break
+        out = "{out}{scalar}"
+        taken += 1
+    }
+    out
+}
+
+// The last `limit` bytes of `text`.
+tail_text: fn(text: String, limit: Int) -> String Never! {
+    raw: text.bytes()
+    if raw.len() <= limit -> return text.copy()
+    String.from_bytes_lossy(raw.slice(raw.len() - limit, raw.len()))
+}
+
+show: fn(lines: [String], limit: Int) -[IO]> {
+    loop at in 0..<lines.len() {
+        if at >= limit -> break
+        print(clip(lines[at], 200))
+    }
+}
+
+// --- census -----------------------------------------------------------------
+
+// The passes after the check (the check always runs).
+Passes: struct {
+    build: Bool
+    selfcheck: Bool
+}
+
+census_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    census(args, Passes{build: env_or("CENSUS_BUILD", "1") != "0", selfcheck: env_or("CENSUS_SELFCHECK", "1") != "0"})
+}
+
+census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    worktree: dev_worktree()
+    if worktree == "" {
+        print("census: no dev worktree (set JET_DEV_WORKTREE or run in the checkout)")
+        return 2
+    }
+    r14: "{scratch_root()}/discovery/r14"
+    files.create_dir_all(r14) ?? {
+        print("census: `{r14}` cannot be created: {err}")
+        return 2
+    }
+    // One census at a time owns the snapshot; publish-latest.sh and
+    // `chain.sh seed-published` read the census output beside it.
+    _held: files.lock("{r14}/census-snap.lock") ?? {
+        print("census: the snapshot lock cannot be taken: {err}")
+        return 2
+    }
+    snap: "{r14}/snap"
+    out: "{r14}/census"
+    files.remove_all(snap) ?? ()
+    files.remove_all(out) ?? ()
+    files.create_dir_all(out) ?? {
+        print("census: `{out}` cannot be created: {err}")
+        return 2
+    }
+    compiler_dir: env_or("CENSUS_JET_DIR", seed_dir())
+    identity: env_or("CENSUS_JET_IDENTITY", read_identity(compiler_dir))
+    if identity == "" {
+        print("census: {compiler_dir} has no IDENTITY")
+        return 2
+    }
+    parsed: git(worktree, [String]{"rev-parse", "--verify", "{env_or("CENSUS_COMMIT", "HEAD")}^{{commit}}"})
+    if parsed.code != 0 {
+        print("EXPORT FAILED: {first_line(parsed)}")
+        return 2
+    }
+    head: parsed.output.trim()
+    export_tree(worktree, head, snap, [String]{}) ?? {
+        print("EXPORT FAILED: {err.message}")
+        return 2
+    }
+    loop path in named {
+        source: files.join(worktree, path)
+        target: files.join(snap, path)
+        if !files.exists(source) {
+            files.remove(target) ?? ()
+            next
+        }
+        files.create_dir_all(files.dirname(target)) ?? ()
+        files.copy(source, target) ?? {
+            print("EXPORT FAILED: {path}: {err}")
+            return 2
+        }
+    }
+    // The receipt's key: the snapshot's source identity before any pass writes into it.
+    source_identity: compiler_source_identity(snap) ?? {
+        print("SOURCE IDENTITY FAILED: {err.message}")
+        return 2
+    }
+    package_dirs := [String]{}
+    if compiler_packages(snap) == .Ok(found) {
+        loop entry in found -> package_dirs.push(entry.directory.copy())
+    }
+    seed_jet: "{compiler_dir}/jet"
+    check_report: "{out}/check-keep-going.tsv"
+    checked: run_logged(snap, heavy(0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}), compile_env(identity, snap, check_report), "{out}/check")
+    check_rows: report_rows(check_report)
+    print("check rc={checked} rows={check_rows}")
+    show(census_rows(check_report, snap, package_dirs), 21)
+    if checked != 0 || check_rows != 0 -> return 1
+    if !passes.build -> return 0
+
+    files.remove_all("{snap}/Compiler/JetCli/.jet/build") ?? ()
+    build_report: "{out}/build-keep-going.tsv"
+    built: run_logged(snap, heavy(1800, [String]{seed_jet, "build", "--threads", "12", "Compiler"}), compile_env(identity, snap, build_report), "{out}/build")
+    build_rows: report_rows(build_report)
+    print("build rc={built} rows={build_rows}")
+    show(census_rows(build_report, snap, package_dirs), 21)
+    if built != 0 || build_rows != 0 {
+        print(clip(files.read("{out}/build.err") ?? "", 600))
+        return 1
+    }
+
+    // The runtime pack, lowered by the compiler just built, beside it (as
+    // chain s1's pack step places it).
+    self_jet: "{snap}/Compiler/JetCli/.jet/build/jet"
+    if !runtime_pack(self_jet, snap, "{out}/runtime", identity) -> return 1
+    home: files.dirname(files.canonicalize(self_jet) ?? self_jet.copy())
+    files.remove("{home}/jet-runtime") ?? ()
+    files.symlink("{out}/runtime/out", "{home}/jet-runtime") ?? {
+        print("census: the runtime pack cannot be linked beside {self_jet}: {err}")
+        return 1
+    }
+    if !passes.selfcheck -> return 0
+
+    self_report: "{out}/selfcheck-keep-going.tsv"
+    selfchecked: run_logged(snap, heavy(1200, [String]{self_jet, "check", "--threads", "12", "Compiler/JetCli"}), compile_env(identity, snap, self_report), "{out}/selfcheck")
+    self_rows: report_rows(self_report)
+    print("selfcheck rc={selfchecked} rows={self_rows}")
+    show(census_rows(self_report, snap, package_dirs), 11)
+    if selfchecked != 0 || self_rows != 0 -> return 1
+
+    written: write_receipt(source_identity, read_identity(compiler_dir), head, named, receipt_dir()) ?? {
+        print("census: the preflight receipt cannot be written: {err.message}")
+        return 2
+    }
+    print("preflight receipt {written}")
+    0
+}
+
+// The runtime pack of `tree`, lowered by `compiler`, in WORK/out; prints
+// `runtime rc=N issues=K`. The pack builds the runtime's vendored C with a
+// host C toolchain, which jet-env supplies.
+runtime_pack: fn(compiler: String, tree: String, work: String, identity: String) -[Exec, Env, FS, IO, Time.Wait]> Bool Never! {
+    musl: root("JET_PACK_MUSL_LIB", "")
+    if musl == "" {
+        print("runtime rc=2 issues=0 (set JET_PACK_MUSL_LIB to the static musl lib dir)")
+        return false
+    }
+    files.remove_all(work) ?? ()
+    files.create_dir_all("{work}/tmp") ?? ()
+    pack: "{work}/out"
+    env := compile_env(identity, tree, "")
+    env.push(Setting{name: "TMPDIR", value: "{work}/tmp"})
+    env.push(Setting{name: "JET_PACK_MUSL_LIB", value: musl.copy()})
+    code: run_logged(tree, heavy(1800, [String]{"{tree}/Tools/agent/jet-env", "node", "{tree}/Tools/packaging/prebuild-runtime.mjs", compiler, pack, "--repo", tree}), env, "{work}/pack")
+    issues: issue_rows(pack)
+    if files.exists("{pack}/native.key") {
+        print("runtime rc=0 issues={issues.len()}")
+        return true
+    }
+    print("runtime rc=1 issues={issues.len()} (exit {code})")
+    show(issues, 10)
+    print(tail_text(files.read("{work}/pack.err") ?? "", 600))
+    false
+}
+
+// The lines of the pack's runtime*.issues files.
+issue_rows: fn(pack: String) -[FS]> [String] Never! {
+    rows := [String]{}
+    listed: files.list_dir(pack) ?? return rows
+    names := [String]{}
+    loop entry in listed {
+        if entry.name.starts_with("runtime") && entry.name.ends_with(".issues") -> names.push(entry.name.copy())
+    }
+    names.sort()
+    loop name in names {
+        text: files.read(files.join(pack, name)) ?? ""
+        loop line in text.lines() {
+            if line.trim() != "" -> rows.push(line.copy())
+        }
+    }
+    rows
+}
+
+// The rows of a keep-going report: its nonblank lines after the header.
+report_rows: fn(report: String) -[FS]> Int Never! {
+    text: files.read(report) ?? return 0
+    rows := 0
+    first := true
+    loop line in text.lines() {
+        if first {
+            first = false
+            next
+        }
+        if line.trim() != "" -> rows += 1
+    }
+    rows
+}
+
+// A keep-going report (columns named by its header: span, code, phase,
+// message, item) of a compile of `tree`: a `<n> rows {"code": count}` line,
+// then `code<TAB>file:line<TAB>phase: message` for each row, its span
+// mapped to the file of `tree` it names (else the span, else the item).
+census_rows: fn(report: String, tree: String, package_dirs: [String]) -[FS]> [String] Never! {
+    text: files.read(report) ?? return [String]{"no keep-going report at {report}: the compile wrote no census"}
+    header := [String]{}
+    rows := [String]{}
+    codes := [String]{}
+    counts := [Int]{}
+    cached_file := ""
+    cached := [U8]{}
+    loop line in text.lines() {
+        if header.len() == 0 {
+            loop name in line.split("\t") -> header.push(name.copy())
+            next
+        }
+        if line.trim() == "" -> next
+        fields := [String]{}
+        loop value in line.split("\t") -> fields.push(value.copy())
+        code: column(fields, header, "code")
+        span: column(fields, header, "span")
+        place: span_place(tree, package_dirs, span)
+        where := if span != "-" -> span.copy() else -> column(fields, header, "item")
+        if place.file != "" {
+            if place.file != cached_file {
+                cached = files.read_bytes(files.join(tree, place.file)) ?? [U8]{}
+                cached_file = place.file.copy()
+            }
+            where = "{place.file}:{line_at(cached, place.offset)}"
+        }
+        phase: column(fields, header, "phase")
+        detail: clip("{phase}: {column(fields, header, "message")}", 200)
+        rows.push("{code}\t{where}\t{detail}")
+        found := false
+        loop at in 0..<codes.len() {
+            if codes[at] == code {
+                counts[at] = counts[at] + 1
+                found = true
+            }
+        }
+        if !found {
+            codes.push(code.copy())
+            counts.push(1)
+        }
+    }
+    tally := [String]{}
+    loop at in 0..<codes.len() -> tally.push("\"{codes[at]}\":{counts[at]}")
+    out := [String]{"{rows.len()} rows {{{tally.join(",")}}}"}
+    out.extend(rows)
+    out
+}
+
+// The field of `fields` under the header column `name`, "-" when absent.
+column: fn(fields: [String], header: [String], name: String) -> String Never! {
+    loop at in 0..<header.len() {
+        if header[at] == name && at < fields.len() -> return fields[at].copy()
+    }
+    "-"
+}
+
+// The 1-based line of the byte `offset` of `bytes`.
+line_at: fn(bytes: [U8], offset: Int) -> Int Never! {
+    line := 1
+    loop at in 0..<bytes.len() {
+        if at >= offset -> break
+        if Int.from_u8(bytes[at]) == 10 -> line += 1
+    }
+    line
+}
+
+Place: struct {
+    // Relative to the tree; "" when the span names no file of it.
+    file: String
+    offset: Int
+}
+
+// A `path:start..end` span's file of `tree` and start offset. An absolute
+// path maps to its longest suffix that is a file of `tree`; a relative one
+// to the one file it names from the root, Compiler or a package directory.
+span_place: fn(tree: String, package_dirs: [String], span: String) -[FS]> Place Never! {
+    at: span.rpartition(":")
+    if at.sep == "" -> return Place{file: "", offset: 0}
+    range: at.tail.partition("..")
+    if range.sep == "" || !is_digits(range.head) || !is_digits(range.tail) -> return Place{file: "", offset: 0}
+    offset: Int.parse(range.head) ?? return Place{file: "", offset: 0}
+    Place{file: source_file(tree, package_dirs, at.head), offset: offset}
+}
+
+is_digits: fn(text: String) -> Bool Never! {
+    if text == "" -> return false
+    loop byte in text.bytes() {
+        code: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return false
+    }
+    true
+}
+
+source_file: fn(tree: String, package_dirs: [String], path: String) -[FS]> String Never! {
+    if path.starts_with("/") {
+        parts := [String]{}
+        loop part in path.split("/") {
+            if part != "" && part != "." -> parts.push(part.copy())
+        }
+        loop start in 0..<parts.len() {
+            candidate := parts[start].copy()
+            loop at in (start + 1)..<parts.len() -> candidate = "{candidate}/{parts[at]}"
+            if files.is_file(files.join(tree, candidate)) -> return candidate
+        }
+        return ""
+    }
+    bases := [String]{"", "Compiler"}
+    bases.extend(package_dirs.copy())
+    found := [String]{}
+    loop base in bases {
+        candidate: repo_join(base, path)
+        if candidate == "" || found.contains(candidate) -> next
+        if files.is_file(files.join(tree, candidate)) -> found.push(candidate)
+    }
+    if found.len() == 1 -> return found[0].copy()
+    ""
+}
+
+// --- precommit and prescreen ------------------------------------------------
+
+precommit_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
+    worktree: dev_worktree()
+    packages: compiler_packages(worktree) ?? {
+        print("PRECOMMIT: the compiler packages cannot be read: {err.message}")
+        print("PRECOMMIT FAILED")
+        return 1
+    }
+    roots: compiler_input_roots(packages)
+    needed := false
+    loop path in args {
+        if census_input(worktree, path, roots) -> needed = true
+    }
+    if needed && census(args, Passes{build: true, selfcheck: true}) != 0 {
+        print("PRECOMMIT FAILED")
+        return 1
+    }
+    print("PRECOMMIT OK")
+    0
+}
+
+prescreen_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    if args.len() == 0 -> usage()
+    patch: absolute(args[0])
+    earlier := [String]{}
+    loop path in args[1..<args.len()] -> earlier.push(absolute(path))
+    worktree: dev_worktree()
+    if worktree == "" {
+        print("prescreen: no dev worktree (set JET_DEV_WORKTREE or run in the checkout)")
+        return 2
+    }
+    tree: "{scratch_root()}/discovery/prescreen.{sys.pid()}"
+    files.remove_all(tree) ?? ()
+    code: prescreen(worktree, tree, patch, earlier)
+    files.remove_all(tree) ?? ()
+    code
+}
+
+prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    export_tree(worktree, "HEAD", tree, [String]{}) ?? {
+        print("prescreen: HEAD cannot be exported: {err.message}")
+        return 2
+    }
+    // An earlier job that no longer applies is the lander's to report.
+    loop path in earlier -> apply_around_views(tree, path)
+    if !apply_around_views(tree, patch) {
+        print("prescreen: does not apply to HEAD {git(worktree, [String]{"rev-parse", "--short", "HEAD"}).output.trim()}")
+        return 3
+    }
+    touched := [String]{}
+    patches := earlier.copy()
+    patches.push(patch.copy())
+    loop path in patches {
+        loop name in touched_paths(tree, path) {
+            if !touched.contains(name) -> touched.push(name)
+        }
+    }
+    // Unreadable packages count every path as an input.
+    needed := true
+    if compiler_packages(worktree) == .Ok(packages) {
+        roots: compiler_input_roots(packages)
+        needed = false
+        loop name in touched {
+            if package_input(worktree, name, roots) -> needed = true
+        }
+    }
+    if !needed {
+        print("prescreen: clean (no compiler inputs; apply check only)")
+        return 0
+    }
+    seed: seed_dir()
+    code: run_logged(tree, heavy(1200, [String]{"{seed}/jet", "check", "--threads", "10", "Compiler/JetCli"}), compile_env(read_identity(seed), tree, ""), "{tree}/check")
+    rows: error_rows(files.read("{tree}/check.err") ?? "")
+    if code == 0 && rows.len() == 0 {
+        print("prescreen: clean")
+        return 0
+    }
+    print("prescreen: check rc={code} errors={rows.len()}")
+    show(counted(rows), 20)
+    1
+}
+
+// Apply `patch` in `tree`; when it does not apply whole, apply it around the
+// generated views.
+apply_around_views: fn(tree: String, patch: String) -[Exec, Time.Wait]> Bool Never! {
+    if run_in(tree, [String]{"git", "apply", patch}, "").code == 0 -> return true
+    argv := [String]{"git", "apply"}
+    loop view in GENERATED_VIEWS -> argv.push("--exclude={view}")
+    argv.push(patch.copy())
+    run_in(tree, argv, "").code == 0
+}
+
+// Each `Error...` line of a check's output with the location on the line after it.
+error_rows: fn(text: String) -> [String] Never! {
+    lines := [String]{}
+    loop line in text.lines() -> lines.push(line.copy())
+    rows := [String]{}
+    loop at in 0..<lines.len() {
+        if !lines[at].starts_with("Error") -> next
+        words := [String]{}
+        if at + 1 < lines.len() {
+            loop word in lines[at + 1].split(" ") {
+                if word != "" -> words.push(word.copy())
+            }
+        }
+        place: if words.len() > 1 -> words[1].copy() else -> ""
+        rows.push("{lines[at]} {place}")
+    }
+    rows
+}
+
+// Equal rows once each, sorted, after their count.
+counted: fn(rows: [String]) -> [String] Never! {
+    sorted := rows.copy()
+    sorted.sort()
+    out := [String]{}
+    at := 0
+    loop at < sorted.len() {
+        count := 1
+        loop at + count < sorted.len() && sorted[at + count] == sorted[at] -> count += 1
+        out.push("{count} {sorted[at]}")
+        at += count
+    }
+    out
+}
+
+// --- preflight receipts -----------------------------------------------------
+
+receipt_dir: fn() -[Env, FS]> String Never! { "{state_root()}/preflight" }
+
+receipt_path: fn(source_identity: String, dir: String) -> String Never! {
+    "{dir}/{crypto.sha256(source_identity.bytes()).hex()}.json"
+}
+
+// The receipt of a clean census of every pass of the snapshot whose source
+// identity is `source_identity`: COMMIT plus the `named` worktree files, by
+// the seed of `seed_identity`. Written whole (a temporary file renamed).
+write_receipt: fn(source_identity: String, seed_identity: String, commit: String, named: [String], dir: String) -[Env, FS, Time]> String LandError! {
+    files.create_dir_all(dir) ?? return Err(LandError{message: "`{dir}` cannot be created: {err}"})
+    path: receipt_path(source_identity, dir)
+    receipt: Dyn.Object([String: Dyn]{
+        "schema": Dyn.Text(RECEIPT_SCHEMA.copy()),
+        "sourceIdentity": Dyn.Text(source_identity.copy()),
+        "seedIdentity": Dyn.Text(seed_identity.copy()),
+        "commit": Dyn.Text(commit.copy()),
+        "files": Dyn.Array(named.map(name -> Dyn.Text(name.copy()))),
+        "passes": Dyn.Array(RECEIPT_PASSES.map(pass -> Dyn.Text(pass.copy()))),
+        "finished": Dyn.Text("{time.isoformat(time.now_utc())}Z"),
+    })
+    text: json.to_string_pretty(receipt) ?? return Err(LandError{message: "the receipt cannot be encoded: {err}"})
+    temp: "{path}.{sys.pid()}.tmp"
+    files.write(temp, "{text}\n") ?? return Err(LandError{message: "`{temp}` cannot be written: {err}"})
+    files.rename(temp, path) ?? return Err(LandError{message: "`{path}` cannot be written: {err}"})
+    path
+}
+
+Admission: struct {
+    admitted: Bool
+    reason: String
+}
+
+// Is a launch of the compiler of `source_identity` by the seed of
+// `seed_identity` vouched for by a receipt in `dir`?
+gate: fn(source_identity: String, seed_identity: String, dir: String) -[FS]> Admission Never! {
+    path: receipt_path(source_identity, dir)
+    if !files.exists(path) -> return Admission{admitted: false, reason: "no preflight receipt for source identity {source_identity}"}
+    text: files.read(path) ?? return Admission{admitted: false, reason: "receipt {path} cannot be read ({err})"}
+    tree: json.parse(text) ?? return Admission{admitted: false, reason: "receipt {path} is not JSON ({err})"}
+    if text_field(tree, "schema") != RECEIPT_SCHEMA || text_field(tree, "sourceIdentity") != source_identity {
+        return Admission{admitted: false, reason: "receipt {path} is not a {RECEIPT_SCHEMA} receipt for {source_identity}"}
+    }
+    census_seed: text_field(tree, "seedIdentity")
+    if census_seed != seed_identity {
+        return Admission{admitted: false, reason: "the preflight receipt for source identity {source_identity} is from a census by seed {census_seed}, not {seed_identity}"}
+    }
+    count: array_field(tree, "files").len()
+    named: if count > 0 -> " + {count} worktree file(s)" else -> ""
+    Admission{admitted: true, reason: "preflight receipt {path}: census of {short_sha(text_field(tree, "commit"))}{named} by seed {seed_identity}, finished {text_field(tree, "finished")}"}
+}
+
+short_sha: fn(text: String) -> String Never! {
+    if text.count_bytes() <= 10 -> return text.copy()
+    text.slice(0..<10)
+}
+
+// A refused launch: the reason, then the census that would admit it.
+refusal: fn(launcher: String, reason: String, seed_dir: String, commit: String) -> String Never! {
+    at: if commit != "" -> " at {short_sha(commit)}" else -> ""
+    "{launcher}: refused: {reason}.\nRun the collect-all preflight in the dev worktree{at} (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR={seed_dir} jet Tools/agent/Land.jet census"
+}
+
+// The source identity of COMMIT of the checkout `repo`, from an export of its
+// compiler trees.
+commit_source_identity: fn(repo: String, commit: String) -[Exec, Env, FS, Time.Wait]> String LandError! {
+    dir: "{receipt_dir()}/gate-{sys.pid()}"
+    files.remove_all(dir) ?? ()
+    export_tree(repo, commit, dir, IDENTITY_TREES.copy()) ?? {
+        files.remove_all(dir) ?? ()
+        return Err(err)
+    }
+    identity: compiler_source_identity(dir) ?? {
+        files.remove_all(dir) ?? ()
+        return Err(err)
+    }
+    files.remove_all(dir) ?? ()
+    identity
+}
+
+receipt_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
+    if args.len() == 2 && args[0] == "identity" {
+        identity: compiler_source_identity(absolute(args[1])) ?? {
+            term.eprint("receipt: {err.message}")
+            return 2
+        }
+        print(identity)
+        return 0
+    }
+    if !((args.len() == 4 && args[0] == "check") || (args.len() == 5 && args[0] == "commit")) -> usage()
+    launcher: args[1]
+    seed: absolute(args[args.len() - 1])
+    seed_identity: read_identity(seed)
+    if seed_identity == "" {
+        term.eprint("{launcher}: seed {seed} has no IDENTITY")
+        return 2
+    }
+    commit := ""
+    source_identity := ""
+    if args[0] == "check" {
+        tree: absolute(args[2])
+        commit = (files.read("{tree}/.chain-base") ?? "").partition("\n").head.trim()
+        source_identity = compiler_source_identity(tree) ?? {
+            term.eprint("{launcher}: {err.message}")
+            return 2
+        }
+    } else {
+        commit = args[3].copy()
+        source_identity = commit_source_identity(absolute(args[2]), commit) ?? {
+            term.eprint("{launcher}: {err.message}")
+            return 2
+        }
+    }
+    verdict: gate(source_identity, seed_identity, receipt_dir())
+    if !verdict.admitted {
+        term.eprint(refusal(launcher, verdict.reason, seed, commit))
+        return 1
+    }
+    print("{launcher}: admitted by {verdict.reason}")
+    0
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+text_field: fn(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
+    if field(tree, name) == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
 #Test("numstat -z rows give each path, and both sides of a rename") {
     nul: String.from_bytes([U8]{U8{0}}) ?? ""
     fields: nul_fields("1\t2\ta.jet{nul}0\t0\t{nul}old.md{nul}new.md{nul}")
@@ -575,4 +1578,88 @@ stack_applies: fn(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.W
     assert_eq(tagged_seconds("PARETO: 2 seconds", "PARETO:"), None)
     assert_eq(tagged_seconds(" PARETO: 2 s", "PARETO:"), None)
     assert_eq(tagged_seconds("SMALL-WIN: 0.1 s", "PARETO:"), None)
+}
+
+#Test("a package manifest gives its name and its path dependencies") {
+    manifest: "name: \"jet_cli\"\nversion: \"0.0.1\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    jet_env_model: ../../Jetpack/EnvModel,\n    remote: \"1.2\",\n}}\nauthority: {{\n    allow: [Env],\n}}\n"
+    assert_eq(quoted_line(manifest, "name"), "jet_cli")
+    assert_eq(manifest_deps(manifest), [String]{"../JetLexer", "../../Jetpack/EnvModel"})
+    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A, b: ../B }}\n"), [String]{})
+    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A }}\n"), [String]{"./A"})
+    assert_eq(repo_join("Compiler/JetCli", "../../Jetpack/EnvModel"), "Jetpack/EnvModel")
+    assert_eq(repo_join("Compiler", "./JetCli/."), "Compiler/JetCli")
+    assert_eq(repo_join("Compiler", "../../x"), "")
+}
+
+#Test("the source identity hashes every compiler input and skips nested projects") {
+    repo: files.mkdtemp("land-identity") ?? panic("a temporary directory cannot be made: {err}")
+    fixture: [String]{
+        "Compiler/package.jet", "workspace\n",
+        "Compiler/JetCli/package.jet", "name: \"jet_cli\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    remote: \"1.2\",\n}}\n",
+        "Compiler/JetCli/Source/Cli/Registry.jet", "JET_CLI_BINARY: \"jet\"\n",
+        "Compiler/JetLexer/package.jet", "name: \"jet_lexer\"\n",
+        "Compiler/JetLexer/Fixture/package.jet", "name: \"fixture\"\n",
+        "Core/Text.jet", "text: 1\n",
+        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "COMPILER_VERSION: \"0.1.0\"\n",
+    }
+    loop at in 0..<(fixture.len() /% 2) {
+        path: files.join(repo, fixture[2 * at])
+        files.create_dir_all(files.dirname(path)) ?? panic("{path}: {err}")
+        files.write(path, fixture[2 * at + 1]) ?? panic("{path}: {err}")
+    }
+    packages: compiler_packages(repo) ?? panic(err.message)
+    roots: compiler_input_roots(packages)
+    assert_eq(roots, [String]{"Compiler/package.jet", "Compiler/build.jet", "Compiler/JetLexer", "Compiler/JetCli", "Core"})
+    assert(package_input(repo, "Compiler/JetLexer/package.jet", roots))
+    assert(!package_input(repo, "Compiler/JetLexer/Fixture/package.jet", roots))
+    assert(!package_input(repo, "Compiler/JetCli/build/x.jet", roots))
+    assert(!package_input(repo, "Tools/agent/Land.jet", roots))
+    assert(census_input(repo, "Jetpack/Bootstrap/Source/Main.jet", roots))
+    // The same tree's identity from the retired preflight-receipt.mjs.
+    assert_eq(compiler_source_identity(repo) ?? panic(err.message), "jet@0.1.0#279f8e70cba754d961303c99ddc59203a72c4255815cb9c181cfa34779113217")
+    files.remove_all(repo) ?? ()
+}
+
+#Test("a receipt admits only the source identity and the seed its census ran") {
+    dir: files.mkdtemp("land-receipt") ?? panic("a temporary directory cannot be made: {err}")
+    source: "jet@0.1.0#aaaa"
+    seed: "jet@0.1.0#bbbb"
+    assert_eq(gate(source, seed, dir).reason, "no preflight receipt for source identity jet@0.1.0#aaaa")
+    written: write_receipt(source, seed, "0123456789abcdef", [String]{"Compiler/JetCli/Source/Main.jet"}, dir) ?? panic(err.message)
+    assert_eq(written, receipt_path(source, dir))
+    admitted: gate(source, seed, dir)
+    assert(admitted.admitted)
+    assert(admitted.reason.contains(": census of 0123456789 + 1 worktree file(s) by seed jet@0.1.0#bbbb, finished "))
+    other: gate(source, "jet@0.1.0#cccc", dir)
+    assert(!other.admitted)
+    assert_eq(other.reason, "the preflight receipt for source identity jet@0.1.0#aaaa is from a census by seed jet@0.1.0#bbbb, not jet@0.1.0#cccc")
+    assert(!gate("jet@0.1.0#dddd", seed, dir).admitted)
+    files.write(written, "{{") ?? panic("{written}: {err}")
+    assert(gate(source, seed, dir).reason.starts_with("receipt {written} is not JSON ("))
+    files.remove_all(dir) ?? ()
+}
+
+#Test("a refusal names the census that would admit the launch") {
+    assert_eq(refusal("chain.sh", "no preflight receipt for source identity x", "/seeds/a0_032", "0123456789abcdef"), "chain.sh: refused: no preflight receipt for source identity x.\nRun the collect-all preflight in the dev worktree at 0123456789 (name each uncommitted file the launch tree carries after it), then launch again:\n  CENSUS_JET_DIR=/seeds/a0_032 jet Tools/agent/Land.jet census")
+    assert(refusal("release", "r", "/s", "").contains("in the dev worktree (name each"))
+}
+
+#Test("census rows name the file and line of each span") {
+    tree: files.mkdtemp("land-census") ?? panic("a temporary directory cannot be made: {err}")
+    files.create_dir_all("{tree}/Compiler/JetCli/Source") ?? panic("{tree}: {err}")
+    files.write("{tree}/Compiler/JetCli/Source/Main.jet", "a\nb\nc\n") ?? panic("{tree}: {err}")
+    files.write("{tree}/report.tsv", "span\tcode\tphase\tmessage\titem\n/elsewhere/Compiler/JetCli/Source/Main.jet:4..5\tE0109\tsema\tmismatch\tmain\nSource/Main.jet:2..3\tE0109\tsema\tagain\tmain\n-\tE0505\tborrow\tmoved\tf\n") ?? panic("{tree}: {err}")
+    assert_eq(census_rows("{tree}/report.tsv", tree, [String]{"Compiler/JetCli"}), [String]{
+        "3 rows {{\"E0109\":2,\"E0505\":1}}",
+        "E0109\tCompiler/JetCli/Source/Main.jet:3\tsema: mismatch",
+        "E0109\tCompiler/JetCli/Source/Main.jet:2\tsema: again",
+        "E0505\tf\tborrow: moved",
+    })
+    assert_eq(report_rows("{tree}/report.tsv"), 3)
+    files.remove_all(tree) ?? ()
+}
+
+#Test("check errors are counted with the place on the line after them") {
+    rows: error_rows("Error[E0109]: mismatch\n  --> a.jet:3:1\nnote\nError[E0109]: mismatch\n  --> a.jet:3:1\nError[E0505]: moved\n")
+    assert_eq(counted(rows), [String]{"2 Error[E0109]: mismatch a.jet:3:1", "1 Error[E0505]: moved "})
 }

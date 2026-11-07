@@ -17,7 +17,7 @@ A seed is one directory:
 | `IDENTITY` | `jet@<version>#<sha256 of jet>`, the identity the compiler reports and stamps into builds |
 | `SHA256SUMS` | The digest of every file above |
 
-`Tools/agent/release-compiler.mjs` assembles one for every `a0_NNN` release
+`jet run Tools/release/Main.jet -- admit` assembles one for every `a0_NNN` release
 only after the chain below reaches its fixed point with no Rust on `PATH`.
 Its stage-2 compiler becomes the seed of the next release.
 
@@ -138,7 +138,7 @@ it with the previous tag's `s2` as its seed.
    the latest; for an older one, download the same assets from
    `https://github.com/jet-language/jet/releases/download/a0_NNN/` and run the
    same checks, then check out the `a0_NNN` tag and run the chain with `SEED=seed`.
-   `Tools/agent/release-compiler.mjs` publishes every release it admits: it
+   `jet run Tools/release/Main.jet -- admit` publishes every release it admits: it
    tags the commit, then runs `jet run Tools/release/Main.jet -- candidate DIR`,
    which records and signs `CANDIDATE.json` with the key
    `jet registry keygen --registry jet-release` made, and

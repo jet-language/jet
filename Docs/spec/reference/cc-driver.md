@@ -87,6 +87,22 @@ accepted.
 `--fixtures` is an explicit fixture seam for tests. It is not production tool
 acquisition: production uses the toolchain pack.
 
+## The native C link
+
+`jet run`, `jet build` and `jet build --release` compile a program's `c@path`
+sources and `#FFI(c)` inline bodies with the same tools on every tier
+(`Compiler/JetCli/Source/Cli/ForeignLink.jet`). Unless `CC` or `AR` names a
+host tool, those tools are this pack's `bin/clang` and `bin/llvm-ar`, for the
+`x86_64-unknown-linux-gnu` target with the pack's glibc sysroot and clang
+resource directory, so the machine needs no host `cc` or `ar`.
+`JET_CC_PACK_ROOT` names an unpacked pack to use as is; otherwise jet asks the
+`jetpack` engine of its own version for the pack:
+`jet env fetch-toolchain --json` puts it in the Hangar as above and prints
+`{"root": …, "llvm": …, "musl": …, "glibc": …}`. Only a jet with no such
+engine beside it falls back to `cc` and `ar` on `PATH`. A golden test run
+with a jetpack takes the pack once and names it to every row through
+`JET_CC_PACK_ROOT`, so no tier's fresh Hangar unpacks its own copy.
+
 ## Reproducible acquisition checks
 
 A clean-machine check exercises acquisition, reuse, and the offline path with

@@ -40,6 +40,8 @@ ARTIFACT_EXT_GAME_REPLAY: ".jetreplay"
 
 ARTIFACT_EXT_PROOF_REPLAY: ".jetproof-replay"
 
+ArtifactKind: enum { SourceMap Notebook Proof Trace GameReplay ProofReplay }
+
 ARTIFACT_KINDS: [(field_0: ArtifactKind, field_1: String)]{
     (field_0: ArtifactKind.SourceMap, field_1: ARTIFACT_EXT_SOURCE_MAP),
     (field_0: ArtifactKind.Notebook, field_1: ARTIFACT_EXT_NOTEBOOK),
@@ -752,6 +754,9 @@ MEM_ALLOC_RESET: "reset"
 /// Retired allocator-specific terminal verb; the resource protocol is
 /// `close(allocator)` and no rule accepts `free`.
 MEM_ALLOC_FREE: "free"
+
+/// Whether a `core.mem` item needs only its import, or an audited boundary too.
+CoreMemGate: enum { Import Audit }
 
 /// S58: one tier for every current `core.mem` module item. Keep this table
 /// aligned with `core_module_items("core.mem")` in `jet-sema`.

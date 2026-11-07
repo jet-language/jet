@@ -47,22 +47,22 @@ Use the admitted compiler (`jet` on your `PATH`, or `Tools/agent/jet-env jet`):
 jet run Examples/Basics/Hello.jet
 ```
 
-The feature runner exercises every lesson in one pass and records the
+The golden suite exercises every lesson in one pass and records the
 command, result, and output for each:
 
 ```sh
-node Tools/agent/run-feature-examples.mjs
+jet test Compiler --profile golden
 ```
 
-`--tier build` checks the same goldens through `jet build` and the built
-binary (same stdin, arguments and working directory); a compile-time
-diagnostic is compared with its command word spelled `jet run`.
+It runs each golden at every optimization level: `none` is `jet run`, and
+`basic` and `full` check the same golden through `jet build` and the built
+binary (same stdin, arguments and working directory). `--optimize=none`
+narrows a run to the first, `--filter=Basics/` to one area.
 
-Both runners read the central known-failing ledger
-(`tests/known-failing.tsv`) and a `# KNOWN-FAILING` header in an
-example's `.case` the same way. An owned failure reports `known-failing`
-(testkit `KNOWN-FAILING`); an owned example that passes reports
-`unexpected-pass` and fails the run until its row is removed.
+The suite reads the central known-failing ledger (`tests/known-failing.tsv`)
+and a `# KNOWN-FAILING` header in an example's `.case`. An owned failure
+reports `KNOWN-FAILING`; an owned example that passes reports
+`UNEXPECTED-PASS` and fails the run until its row is removed.
 
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
@@ -73,8 +73,8 @@ A lesson is either one source file, `Area/Lesson.jet`, or a project directory,
 `Area/Lesson/` with a `run.jet`. Its expected stdout sits beside it as
 `Area/Lesson.out` in both cases. A directory that holds only a `package.jet` or
 a `workspace.jet` is a package the lessons beside it use, not a lesson. The
-golden suite (`Compiler/JetTestKit/Source/Golden.jet`) and the feature runner
-walk all of `Examples/`, so every lesson needs its golden.
+golden suite (`Compiler/JetTestKit/Source/Golden.jet`) walks all of
+`Examples/`, so every lesson needs its golden.
 
 The native checker compares stdout byte for byte and uses `.out`, `.err.out`,
 and `.stderr.out`; the testkit golden suite also checks `.test.out`. Dedicated
@@ -90,33 +90,27 @@ web, harness, fuzz, and input-specific checks consume the other suffixes:
 | `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
 | `<stem>.test.out` | `jet test` stdout, checked by the testkit golden suite on every tier after the run passes. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
-| `<stem>.ast.out` / `<stem>.mir.out` / `<stem>.lir.out` | `jet emit --ast`/`--mir`/`--lir` stdout, checked by the native feature runner after the run passes. |
 | `<stem>.case` | Steps, environment, and host requirements for a golden that needs more than `jet run`. |
 
 Failing runs compare stdout as well as stderr and the exact exit code. A
 failure's sibling `.out` is authoritative; without one, stdout must be empty.
 Unknown failure contracts and contradictory exit claims in an oracle are
 missing exit proofs, not permission to accept an arbitrary nonzero status.
-These rules apply to the testkit golden suite and the native feature runner
-(`Tools/agent/run-feature-examples.mjs`). Native parity additionally requires
-an executed reference with the same exit and both output streams; an
-emit-only reference does not establish runtime parity.
+These rules apply to the testkit golden suite.
 
 A lesson that needs a host tool, such as a foreign compiler, declares
 `requires: tool:<name>` in its `.case`; the golden is skipped where the tool is
-missing. A lesson that binds a fixed TCP port declares `host-port: N`; both
-runners hold that port's host-wide lock while it runs, so concurrent runs on
+missing. A lesson that binds a fixed TCP port declares `host-port: N`; the
+testkit holds that port's host-wide lock while it runs, so concurrent runs on
 one host take turns instead of failing to bind.
 
 A lesson that reads files by their repository path, such as
 [`Systems/Files/Path.jet`](Systems/Files/Path.jet) walking `Examples/Systems`,
 declares `repo-cwd: <reason>` once, before any steps, in its `.case`. The
 testkit then runs the built program from the root of its staged source copy,
-which keeps the repository layout, instead of from the project directory. The
-checkout is never written, and `file:` assertions stay relative to the project.
-`run-feature-examples.mjs` already runs such an example from the repository
-root, or from a staged copy with the same layout, and ignores the header. Only
-goldens take the header; a `tests/cases` case refuses it.
+which keeps the repository layout, instead of from the project directory.
+The checkout is never written, and `file:` assertions stay relative to the
+project. Only goldens take the header; a `tests/cases` case refuses it.
 
 Examples that depend on environment or process identity should print checked
 relationships instead of raw paths or process IDs. For example,

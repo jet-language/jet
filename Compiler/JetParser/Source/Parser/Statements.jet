@@ -446,6 +446,17 @@ parser_parse_value_lines: fn(state: &JetParserState, depth: Int, prepared_value:
             return ParsedBlock{span: Span{start: open.span.start, end: binding.span.start}, statements: [Stmt]{}, tail: Val(Expr.Unit{span: open.span, id: parser_node_id(state)})}
         }
         if {
+            // A prepared value reads its lines as a callable body (#18): a
+            // collecting loop that ends the block is the block's value.
+            prepared_value && parser_current_kind(state) == TOKEN_KW_LOOP -> {
+                line: parser_parse_tail_loop(state)
+                if line == .Expr(value) {
+                    parser_skip_semicolons(state)
+                    tail = Val(value)
+                    break
+                }
+                statements.push(line)
+            }
             parser_statement_is_keyword(state) || parser_if_table_has_statement_arm(state) || !parser_value_tail_ahead(state) -> statements.push(parser_parse_statement(state))
             else -> {
                 // As in Rust's value blocks: speculate on a tail value (a zero-width

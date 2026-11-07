@@ -7,8 +7,6 @@ import { dirname, join, resolve } from "node:path";
 import { readHistoryDoc } from "../tower/app/store.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { FIXTURE_BINDINGS } from "./core-conformance.mjs";
-
 /*
  * One source-derived Core inventory, compared against every language Jet
  * competes with. Read by the #1398 release gate.
@@ -79,8 +77,9 @@ const EDITOR_COVERAGE_PATHS = [
   "tests/cases/lsp/lsp_signature_help_returns_active_parameter.case",
   "tests/cases/lsp/lsp_hover_returns_signature.case",
 ];
-const CORE_CONFORMANCE_PATH = "Tools/agent/core-conformance.mjs";
+const CORE_CONFORMANCE_PATH = "tests/conformance/fixture-bindings.tsv";
 const CORE_CONFORMANCE_FIXTURE_ROOT = "tests/conformance/corpus";
+const FIXTURE_BINDINGS = fixtureBindings(readFileSync(join(ROOT, CORE_CONFORMANCE_PATH), "utf8"));
 const CORE_CONFORMANCE_FIXTURE_PATHS = Array.from(new Set(
   Array.from(FIXTURE_BINDINGS.values()).flat().map(function (path) {
     return CORE_CONFORMANCE_FIXTURE_ROOT + "/" + path;
@@ -745,6 +744,29 @@ function read(relativePath) {
   const absolute = join(ROOT, relativePath);
   if (!existsSync(absolute)) throw new Error("missing source: " + relativePath);
   return readFileSync(absolute, "utf8");
+}
+// tests/conformance/fixture-bindings.tsv: one `row<TAB>path` line per witness,
+// the path relative to the conformance corpus root.
+function fixtureBindings(source) {
+  const bindings = new Map();
+  for (const [index, raw] of source.split("\n").entries()) {
+    if (raw.trim() === "" || raw.startsWith("#")) continue;
+    const where = CORE_CONFORMANCE_PATH + ":" + (index + 1) + ": ";
+    const fields = raw.split("\t");
+    if (fields.length !== 2 || !fields[0] || !fields[1]) {
+      throw new Error(where + "expected a row id and a fixture path separated by a tab");
+    }
+    const [row, path] = fields;
+    if (path.startsWith("/") || path.includes("\\") || path.split("/").some(function (part) {
+      return !part || part === "." || part === "..";
+    })) {
+      throw new Error(where + "invalid conformance fixture binding path: " + path);
+    }
+    if (!bindings.has(row)) bindings.set(row, []);
+    if (bindings.get(row).includes(path)) throw new Error(where + "duplicate fixture binding path: " + row + " -> " + path);
+    bindings.get(row).push(path);
+  }
+  return bindings;
 }
 function conformanceFixtureBinding(rowId) {
   const relativePaths = FIXTURE_BINDINGS.get(rowId);

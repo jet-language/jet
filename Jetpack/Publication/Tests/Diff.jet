@@ -36,38 +36,38 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
 }
 
 #Test("publication duplicate_legacy_names_match_as_signature_multisets") {
-    old: [PublicAPIItem]{publication_diff_test_function("report", "report: fn()"), publication_diff_test_function("report", "report: fn(x: Int)")}
-    new: [PublicAPIItem]{publication_diff_test_function("report", "report: fn(x: Int)"), publication_diff_test_function("report", "report: fn()")}
+    old: [PublicAPIItem]{publication_diff_test_function("report", "fn report()"), publication_diff_test_function("report", "fn report(x: Int)")}
+    new: [PublicAPIItem]{publication_diff_test_function("report", "fn report(x: Int)"), publication_diff_test_function("report", "fn report()")}
     assert_eq(publication_diff_public_api(old, new).len(), 0)
 }
 #Test("publication api_diff_detects_removed_fn") {
-    old: [PublicAPIItem]{publication_diff_test_function("parse", "parse: fn(raw: String) -> Int")}
+    old: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}
     changes: publication_diff_public_api(old, [PublicAPIItem]{})
     assert_eq(changes.len(), 1)
     assert_eq(changes[0].item_name, "parse")
     assert_eq(changes[0].description, "public fn `parse` was removed\n   | fn parse(raw: String) -> Int\n   | (removed)")
 }
 #Test("publication api_diff_detects_changed_signature") {
-    old: [PublicAPIItem]{publication_diff_test_function("parse", "parse: fn(raw: String) -> Int")}
-    new: [PublicAPIItem]{publication_diff_test_function("parse", "parse: fn(raw: String) -> Float")}
+    old: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}
+    new: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Float")}
     changes: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 1)
     assert_eq(changes[0].description, "public fn `parse` changed signature\n   | was: fn parse(raw: String) -> Int\n   | now: fn parse(raw: String) -> Float")
 }
 #Test("publication api_diff_no_change") {
-    api: [PublicAPIItem]{publication_diff_test_function("greet", "greet: fn(name: String)")}
+    api: [PublicAPIItem]{publication_diff_test_function("greet", "fn greet(name: String)")}
     assert_eq(publication_diff_public_api(api, api).len(), 0)
 }
 #Test("publication api diff empty and added only are nonbreaking") {
     empty: [PublicAPIItem]{}
-    added: [PublicAPIItem]{publication_diff_test_function("extra", "extra: fn()")}
+    added: [PublicAPIItem]{publication_diff_test_function("extra", "fn extra()")}
     assert_eq(publication_diff_public_api(empty, empty).len(), 0)
     assert_eq(publication_diff_public_api(empty, added).len(), 0)
-    more: [PublicAPIItem]{publication_diff_test_function("extra", "extra: fn()"), publication_diff_test_item("struct", "More", "More: struct {{ value: Int }}")}
+    more: [PublicAPIItem]{publication_diff_test_function("extra", "fn extra()"), publication_diff_test_item("struct", "More", "struct More {{ value: Int }}")}
     assert_eq(publication_diff_public_api(added, more).len(), 0)
 }
 #Test("publication api diff duplicate cardinality consumes each new item once") {
-    item: publication_diff_test_function("f", "f: fn()")
+    item: publication_diff_test_function("f", "fn f()")
     pair: [PublicAPIItem]{item, item}
     single: [PublicAPIItem]{item}
     changes: publication_diff_public_api(pair, single)
@@ -155,7 +155,7 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
     assert(errors[1].fix.contains("restore `b`"))
 }
 #Test("publication semver_break_e2601") {
-    changes: publication_diff_public_api([PublicAPIItem]{publication_diff_test_function("parse", "parse: fn(raw: String) -> Int")}, [PublicAPIItem]{})
+    changes: publication_diff_public_api([PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}, [PublicAPIItem]{})
     assert_eq(changes.len(), 1)
     diagnostic: publication_e2601("1.2.0", .Minor, changes[0], 2)
     assert_eq(diagnostic.code, "E2601")
@@ -165,8 +165,8 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
     assert(diagnostic.why.contains("parse"))
 }
 #Test("publication returned_view_source_union_change_feeds_e1218_and_e2601") {
-    old: [PublicAPIItem]{publication_diff_test_function("pick", "pick: fn(left: [Int], right: [Int]) -> View<Int> ; view_source = parameter:0;access:read;path:range")}
-    new: [PublicAPIItem]{publication_diff_test_function("pick", "pick: fn(left: [Int], right: [Int]) -> View<Int> ; view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read")}
+    old: [PublicAPIItem]{publication_diff_test_function("pick", "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = parameter:0;access:read;path:range")}
+    new: [PublicAPIItem]{publication_diff_test_function("pick", "fn pick(left: [Int], right: [Int]) -> View<Int> ; view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read")}
     changes: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 1)
     assert(changes[0].description.contains("parameter:0"))
@@ -177,7 +177,7 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
     assert_eq(publication_e2601("1.1.0", bump, changes[0], 2).code, "E2601")
 }
 #Test("publication e1218_breaking_change_under_minor_bump") {
-    changes: publication_diff_public_api([PublicAPIItem]{publication_diff_test_function("parse", "parse: fn(raw: String) -> Int")}, [PublicAPIItem]{})
+    changes: publication_diff_public_api([PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}, [PublicAPIItem]{})
     assert_eq(changes.len(), 1)
     bump: publication_classify_bump(publication_diff_test_semver("1.0.0"), publication_diff_test_semver("1.1.0"))
     assert_eq(bump, PublicationBumpKind.Minor)
@@ -230,8 +230,8 @@ publication_diff_test_entry: fn(version: String, yanked: Bool) -> PublicationInd
     assert(publication_e2601("é", .Same, change, 0).why.contains("Callers pinned to ^é.0 would"))
 }
 #Test("publication diff treats published capability effect dimension and trait signatures as opaque bytes") {
-    old: [PublicAPIItem]{publication_diff_test_function("deposit", "deposit: fn(a: Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "report: fn() Int -[]>"), publication_diff_test_function("bench.report", "bench.report: fn() -[]>"), publication_diff_test_function("keep", "keep: fn<Q: Quantity<Length, .Linear>>(value: &&Q) Q -[]>"), publication_diff_test_item("trait", "Render", "Render: trait {{ draw: fn(self) -[IO]> Int }}")}
-    new: [PublicAPIItem]{publication_diff_test_function("deposit", "deposit: fn(a: &Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "report: fn() Int -[IO]>"), publication_diff_test_function("bench.report", "bench.report: fn() -[IO]>"), publication_diff_test_function("keep", "keep: fn<Q: Quantity<Time, .Linear>>(value: &&Q) Q -[]>"), publication_diff_test_item("trait", "Render", "Render: trait {{ draw: fn(self) -[GPU]> Int }}")}
+    old: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "fn report() Int -[]>"), publication_diff_test_function("bench.report", "fn bench.report() -[]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Length, .Linear>>(value: &&Q) Q -[]>"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[IO]> Int }}")}
+    new: [PublicAPIItem]{publication_diff_test_function("deposit", "fn deposit(a: &Account, amount: Int) Int -[]>"), publication_diff_test_function("report", "fn report() Int -[IO]>"), publication_diff_test_function("bench.report", "fn bench.report() -[IO]>"), publication_diff_test_function("keep", "fn keep<Q: Quantity<Time, .Linear>>(value: &&Q) Q -[]>"), publication_diff_test_item("trait", "Render", "trait Render {{ draw: fn(self) -[GPU]> Int }}")}
     changes: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 5)
     loop index in 0..<old.len() {
@@ -243,8 +243,8 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     loop change in publication_diff_public_api(old, new) -> change.item_name.copy()
 }
 #Test("publication api diff struct field additions break only an open literal") {
-    open: publication_diff_test_item("struct", "Point", "Point: struct")
-    sealed: publication_diff_test_item("struct", "Point", "Point: struct {{ .. }}")
+    open: publication_diff_test_item("struct", "Point", "struct Point")
+    sealed: publication_diff_test_item("struct", "Point", "struct Point {{ .. }}")
     x: publication_diff_test_item("field", "Point.x", "field Point.x: Int")
     required: publication_diff_test_item("field", "Point.z", "field Point.z: Int")
     defaulted: publication_diff_test_item("field", "Point.z", "field Point.z: Int = _")
@@ -258,15 +258,15 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     assert_eq(publication_diff_test_breaks([open, x], [open]), ["Point.x"])
 }
 #Test("publication api diff enum variant and trait member additions") {
-    shape: publication_diff_test_item("enum", "Shape", "Shape: enum")
+    shape: publication_diff_test_item("enum", "Shape", "enum Shape")
     circle: publication_diff_test_item("variant", "Shape.Circle", "variant Shape.Circle(Float)")
     square: publication_diff_test_item("variant", "Shape.Square", "variant Shape.Square{{side: Float}}")
     assert_eq(publication_diff_test_breaks([shape, circle], [shape, circle, square]), ["Shape.Square"])
     assert_eq(publication_diff_test_breaks([], [shape, circle, square]).len(), 0)
-    draw: publication_diff_test_item("trait", "Draw", "Draw: trait")
+    draw: publication_diff_test_item("trait", "Draw", "trait Draw")
     paint: publication_diff_test_item("require", "Draw.paint", "require Draw.paint(self) Int -[IO]>")
     output: publication_diff_test_item("require", "Draw.Output", "require Draw.Output: type")
-    describe: publication_diff_test_item("fn", "Draw.describe", "Draw.describe: fn(self) String -[]> = _")
+    describe: publication_diff_test_item("fn", "Draw.describe", "fn Draw.describe(self) String -[]> = _")
     assert_eq(publication_diff_test_breaks([draw, paint], [draw, paint, output]), ["Draw.Output"])
     assert_eq(publication_diff_test_breaks([draw, paint], [draw, paint, describe]).len(), 0)
     assert_eq(publication_diff_test_breaks([draw, paint, describe], [draw, paint]), ["Draw.describe"])
@@ -274,11 +274,11 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     assert_eq(publication_diff_test_breaks([draw], [draw, publication_diff_test_item("require", "Draw.inner.k", "require Draw.inner.k: Int")]).len(), 0)
 }
 #Test("publication api diff effect rows may narrow but never widen") {
-    io_net: publication_diff_test_function("fetch", "fetch: fn(url: String) String Never! -[IO, Net]>")
-    io: publication_diff_test_function("fetch", "fetch: fn(url: String) String Never! -[IO]>")
-    pure: publication_diff_test_function("fetch", "fetch: fn(url: String) String Never! -[]>")
-    open: publication_diff_test_function("fetch", "fetch: fn(url: String) String Never! -[*]>")
-    retyped: publication_diff_test_function("fetch", "fetch: fn(url: String) Int Never! -[IO]>")
+    io_net: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[IO, Net]>")
+    io: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[IO]>")
+    pure: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[]>")
+    open: publication_diff_test_function("fetch", "fn fetch(url: String) String Never! -[*]>")
+    retyped: publication_diff_test_function("fetch", "fn fetch(url: String) Int Never! -[IO]>")
     assert_eq(publication_diff_test_breaks([io_net], [io]).len(), 0)
     assert_eq(publication_diff_test_breaks([io_net], [pure]).len(), 0)
     assert_eq(publication_diff_test_breaks([open], [io]).len(), 0)
@@ -286,7 +286,7 @@ publication_diff_test_breaks: fn(old: [PublicAPIItem], new: [PublicAPIItem]) -> 
     assert_eq(publication_diff_test_breaks([io], [open]), ["fetch"])
     assert_eq(publication_diff_test_breaks([io_net], [retyped]), ["fetch"])
     // A defaulted trait method narrows like a fn.
-    assert_eq(publication_diff_test_breaks([publication_diff_test_item("fn", "Draw.m", "Draw.m: fn(self) -[IO]> = _")], [publication_diff_test_item("fn", "Draw.m", "Draw.m: fn(self) -[]> = _")]).len(), 0)
+    assert_eq(publication_diff_test_breaks([publication_diff_test_item("fn", "Draw.m", "fn Draw.m(self) -[IO]> = _")], [publication_diff_test_item("fn", "Draw.m", "fn Draw.m(self) -[]> = _")]).len(), 0)
 }
 #Test("publication api diff distinct range and unit scale changes break") {
     meters: publication_diff_test_item("distinct", "Meters", "distinct Meters: Float in 0.0..1000.0")
@@ -317,7 +317,7 @@ publication_diff_test_may_break: fn(old: String, new: String) -> Bool Never! {
     assert(publication_diff_test_may_break("0.9.9", "1.0.0"))
 }
 #Test("publication api snapshot rows keep each line as its signature") {
-    snapshot: pkg_capability_snapshot_parse("api_version = 4\npackage = geo\npublished_version = 1.0.0\narea: fn(s: Shape) Float Never! -[]>\nfield Point.x: Int\nPoint: struct<T: Ord> {{ .. }}\nvariant Shape.Circle(Float)\nrequire Draw.paint(self) Int -[IO]>\n") ?? panic("snapshot")
+    snapshot: pkg_capability_snapshot_parse("api_version = 4\npackage = geo\npublished_version = 1.0.0\nfn area(s: Shape) Float Never! -[]>\nfield Point.x: Int\nstruct Point<T: Ord> {{ .. }}\nvariant Shape.Circle(Float)\nrequire Draw.paint(self) Int -[IO]>\n") ?? panic("snapshot")
     items: publication_api_snapshot_items(snapshot)
     assert_eq(loop item in items -> "{item.kind}|{item.name}", ["field|Point.x", "fn|area", "require|Draw.paint", "struct|Point", "variant|Shape.Circle"])
     assert_eq(items[0].signature, "field Point.x: Int")

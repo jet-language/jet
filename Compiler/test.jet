@@ -1,12 +1,14 @@
 // The compiler workspace's code suites, run by the test
 // profiles of package.jet: `jet test Compiler --profile packages`, `selfhost`
-// or `perf`. Each runs in its own child, where JET names the jet under test
+// or `perf`. Each runs in its own child, where JET names the jet under test,
+// JET_COMPILER_IDENTITY its identity (that jet sets it when the caller didn't)
 // and JET_TEST_SUITE_ROOT this package's directory; the checkout is its
 // parent. A row is one check; the profile compares the rows with
 // `.jet/test/<profile>/<suite>.rows`.
 use {
     crypto: core.crypto
     files: core.files
+    json: core.encoding.json
     process: core.process
     sys: core.sys
 }
@@ -16,6 +18,24 @@ PACKAGE_JOBS: 4
 
 // The trees whose packages a `packages` run tests, from the checkout.
 PACKAGE_TREES: [String]{"Compiler", "Jetpack"}
+
+// The packages the compiler assembles from their sources instead of building
+// them as packages, so they have no standalone `jet test`: the bootstrap chain
+// links JetRuntime's sources.list into the native runtime library, and the
+// `registries` profile runs its Test registries as assembled standalone files
+// (Tools/agent/CompilerRegistries.jet). The compiler embeds Prelude's sources
+// through the generated registry files; Prelude has no #Test. A `packages` run
+// reports each as a skipped row.
+ASSEMBLED_PACKAGES: [String]{"Compiler/JetRuntime", "Compiler/Prelude"}
+
+// The tests.list sections whose areas have no package.jet: Store, Provider
+// and Recipe (`Engine`, one dependency cycle), Services, Image and CLI. Their
+// claims run as one unit Jetpack/Bootstrap/assemble.mjs assembles. JetOS is
+// frozen and stays out.
+JETPACK_ENGINE_SECTIONS: "Engine,Services,Image,CLI"
+
+// Where the engine unit and the hosted engine are assembled, from the checkout.
+JETPACK_ENGINE_SCRATCH: "Jetpack/Bootstrap/.jet/test"
 
 // What the compiler's deepest recursion needs, as the bootstrap chain gives it.
 BUILD_STACK: 1073741824
@@ -100,10 +120,11 @@ failure_line: fn(text: String) -> String {
 // `tests` suite doesn't run, `<package>: <test>`, from `jet test <package>`.
 // The `tests` suite runs the workspace members; this suite runs everything
 // else: each member's `Tests` package, the tool packages beside the members,
-// and every Jetpack package. A package whose tests didn't run (one that
-// doesn't compile, say) is the failing row `<package>`. Fixture packages are
-// test data, not packages under test. Claims that drive the jet CLI run the
-// jet under test, named by JET_BIN as Jetpack/Bootstrap/check.sh names it.
+// every Jetpack package, and the Jetpack engine areas that have no package
+// (jetpack_engine_rows). A package whose tests didn't run (one that doesn't
+// compile, say) is the failing row `<package>`. Fixture packages are test
+// data, not packages under test; an ASSEMBLED_PACKAGES package is a skipped
+// row. Claims that drive the jet CLI run the jet under test, named by JET_BIN.
 package_suite_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
     members: workspace_members(setup) ?? {
@@ -118,6 +139,7 @@ package_suite_rows: fn(rows: TestRows) {
         }
     }
     packages.sort()
+    loop package in ASSEMBLED_PACKAGES -> rows.skip(package, "assembled by the compiler from its sources, not built as a package")
     specs := [ProcessSpec]{}
     loop package in packages {
         specs.push(jet_command(setup, setup.jet, [String]{"test", package}).env("JET_BIN", setup.jet))
@@ -132,6 +154,121 @@ package_suite_rows: fn(rows: TestRows) {
             .Err(error) -> rows.fail(package, "couldn't run `jet test {package}`: {error}")
         }
     }
+    jetpack_engine_rows(rows, setup)
+}
+
+// The Jetpack engine areas' claims, one row each, `Jetpack/<section>:
+// <claim>`: assemble.mjs joins every implementation file and the claims of
+// JETPACK_ENGINE_SECTIONS into one unit, and `jet test` runs it serially (the
+// claims share process state). JET_BIN names the jet under test; process
+// claims run the engine named by JETPACK_BIN, the caller's, else the hosted
+// engine built here from this checkout. A unit that didn't run to its
+// summary is the failing row `Jetpack engine`.
+jetpack_engine_rows: fn(rows: TestRows, setup: SuiteSetup) {
+    unit: "Jetpack engine"
+    scratch: files.join(setup.checkout, JETPACK_ENGINE_SCRATCH)
+    assembled: jetpack_assemble(setup, scratch, "aot") ?? {
+        rows.fail(unit, err.message)
+        return
+    }
+    claims: jetpack_claims(files.join(scratch, "aot/jetpack.map.json")) ?? {
+        rows.fail(unit, err.message)
+        return
+    }
+    engine := sys.get("JETPACK_BIN") ?? ""
+    if engine == "" {
+        engine = jetpack_hosted(setup, scratch) ?? {
+            rows.fail(unit, err.message)
+            return
+        }
+    }
+    receipt: jet_command(setup, setup.jet, [String]{"test", "src/jetpack.jet", "--serial"}).cwd(files.join(assembled, "project")).env("JET_BIN", setup.jet).env("JETPACK_BIN", engine).run() ?? {
+        rows.fail(unit, "couldn't run `jet test` on the engine unit: {err}")
+        return
+    }
+    results := [String: String]{}
+    summary := false
+    loop line in receipt.output.split("\n") {
+        if line.contains(" passed, ") && line.contains(" failed") -> summary = true
+        at: line.rfind(": ")
+        if at <= 0 -> next
+        results[line.slice(0, at)] = line.slice(at + 2, line.len()).trim()
+    }
+    if !summary {
+        detail: failure_line(receipt.errors)
+        rows.fail(unit, "`jet test` of the engine unit exited {receipt.code}: {if detail == "" -> failure_line(receipt.output) else -> detail}")
+        return
+    }
+    loop claim in claims {
+        id: "Jetpack/{claim.section}: {claim.name}"
+        verdict: results.get(claim.name) ?? ""
+        if {
+            verdict == "" -> rows.fail(id, "`jet test` reported no result for it")
+            verdict == "pass" -> rows.pass(id)
+            verdict.starts_with("skip") -> rows.skip(id, verdict)
+            else -> rows.fail(id, verdict)
+        }
+    }
+}
+
+// One claim of the engine unit and its tests.list section.
+JetpackClaim: struct {
+    name: String
+    section: String
+}
+
+// `node Jetpack/Bootstrap/assemble.mjs <mode>` into `scratch`, keeping only
+// the JETPACK_ENGINE_SECTIONS claims: the mode's directory.
+jetpack_assemble: fn(setup: SuiteSetup, scratch: String, mode: String) -> String Err! {
+    script: files.join(setup.checkout, "Jetpack/Bootstrap/assemble.mjs")
+    ran: process.cmd([String]{"node", script, mode}).cwd(setup.checkout).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `node {script} {mode}`: {err}")
+    if !ran.success -> return Err("`assemble.mjs {mode}` exited {ran.code}: {failure_line(ran.errors)}")
+    Ok(files.join(scratch, mode))
+}
+
+// The hosted engine, `jet build` of every implementation file and
+// Jetpack/run.jet; jet's own build cache makes an unchanged rebuild cheap.
+jetpack_hosted: fn(setup: SuiteSetup, scratch: String) -> String Err! {
+    hosted: jetpack_assemble(setup, scratch, "hosted") ?? return Err(err.message)
+    project: files.join(hosted, "project")
+    built: jet_command(setup, setup.jet, [String]{"build", "src/jetpack.jet"}).cwd(project).run() ?? return Err("couldn't build the hosted engine: {err}")
+    binary: files.join(project, ".jet/build/jetpack")
+    if !built.success || !files.is_file(binary) {
+        detail: failure_line(built.errors)
+        return Err("the hosted engine didn't build (exit {built.code}): {if detail == "" -> failure_line(built.output) else -> detail}")
+    }
+    Ok(binary)
+}
+
+// The unit's claims in order with their sections, from its source map.
+jetpack_claims: fn(path: String) -> [JetpackClaim] Err! {
+    text: files.read(path) ?? return Err("couldn't read `{path}`: {err}")
+    tree: json.parse(text) ?? return Err("`{path}` is not JSON: {err}")
+    names: json_texts(json_field(tree, "tests"))
+    sections: json_texts(json_field(tree, "test_areas"))
+    if names.len() == 0 || names.len() != sections.len() -> return Err("`{path}` lists no claims with their sections")
+    claims := [JetpackClaim]{}
+    loop (index, name) in names -> claims.push(JetpackClaim{name: name.copy(), section: sections[index].copy()})
+    Ok(claims)
+}
+
+json_field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+json_texts: fn(value: Dyn) -> [String] {
+    texts := [String]{}
+    if value == .Array(items) {
+        loop item in items {
+            if item == .Text(text) -> texts.push(text.copy())
+        }
+    }
+    texts
 }
 
 // The member directories of the Compiler workspace, `Compiler/<member>`, from
@@ -154,11 +291,11 @@ workspace_members: fn(setup: SuiteSetup) -> [String] Err! {
 }
 
 // Adds every package directory at or below `relative` (from `checkout`) to
-// `found`, except the workspace root, the `members`, build output, hidden
-// directories and fixtures.
+// `found`, except the workspace root, the `members`, ASSEMBLED_PACKAGES,
+// build output, hidden directories and fixtures.
 package_dirs: fn(checkout: String, relative: String, members: [String], found: &[String]) Err! {
     directory: files.join(checkout, relative)
-    if relative != "Compiler" && !members.contains(relative) && files.is_file(files.join(directory, "package.jet")) {
+    if relative != "Compiler" && !members.contains(relative) && !ASSEMBLED_PACKAGES.contains(relative) && files.is_file(files.join(directory, "package.jet")) {
         found.push(relative.copy())
     }
     listed: files.list_dir(directory) ?? return Err("couldn't list `{relative}`: {err}")

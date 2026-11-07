@@ -134,6 +134,94 @@ store_artifact_footprint: fn(entries: [ArtifactStoredEntry]) -> Int Never! {
     total
 }
 
+// The footprint tally (`footprint` in the store root):
+// `jet.store.v1|footprint|<journal bytes>|<entry bytes>|<checksum>`, the bytes
+// of the store's entries once the journal's first `<journal bytes>` are
+// applied, and the checksum field of the journal line ending there (`-` for
+// none). A capacity check replays only the journal lines after it (a put
+// adds its length, a remove subtracts it) instead of statting every entry.
+// A missing or malformed tally, a journal that no longer holds that line at
+// that offset (compaction rewrote it), or a later line that does not verify
+// costs one scan, which rewrites the tally.
+STORE_ARTIFACT_FOOTPRINT_FILE: "footprint"
+
+// What a replay of the tally learned: the entry bytes and the checksum field
+// of the journal's final line, as of `journal_bytes`.
+ArtifactFootprintTally: struct {
+    journal_bytes: Int
+    entry_bytes: Int
+    checksum: String
+}
+
+store_artifact_footprint_tally_text: fn(tally: ArtifactFootprintTally) -> String Never! {
+    "{STORE_ARTIFACT_VERSION}|footprint|{tally.journal_bytes}|{tally.entry_bytes}|{tally.checksum}\n"
+}
+
+// The checksum field of the journal line ending just before `end` in
+// `window`, a slice of the journal whose byte `end - 1` is that line's
+// newline; None when the window holds no whole line ending there. `whole`
+// when the window starts at the journal's first byte.
+store_artifact_journal_checksum_before: fn(window: [U8], end: Int, whole: Bool) -> String? Never! {
+    if end <= 0 || end > window.len() || Int.from_u8(window[end - 1]) != 10 -> return None
+    start := end - 1
+    loop start > 0 && Int.from_u8(window[start - 1]) != 10 {
+        start -= 1
+    }
+    if start == 0 && !whole -> return None
+    field := end - 1
+    loop field > start && Int.from_u8(window[field - 1]) != 124 {
+        field -= 1
+    }
+    if field == start -> return None
+    text: String.from_bytes(store_artifact_slice(window, field, end - 1)) ?? return None
+    Val(text.trim())
+}
+
+// The checksum field of the final line of a journal of `journal_bytes`.
+store_artifact_journal_final_checksum: fn(journal_path: String, journal_bytes: Int) -[FS]> String? Never! {
+    if journal_bytes == 0 -> return Val("-")
+    window: if journal_bytes < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> journal_bytes else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
+    tail: files.read_at(journal_path, journal_bytes - window, window) ?? return None
+    if tail.len() != window -> return None
+    store_artifact_journal_checksum_before(tail, tail.len(), window == journal_bytes)
+}
+
+// The tally at `tally_path` brought up to the journal's `journal_bytes`; None
+// when it has to be rebuilt by a scan.
+store_artifact_footprint_replay: fn(tally_path: String, journal_path: String, journal_bytes: Int) -[FS]> ArtifactFootprintTally? Never! {
+    text: files.read(tally_path) ?? return None
+    fields: text.trim().split("|").to_list()
+    if fields.len() != 5 || fields[0] != STORE_ARTIFACT_VERSION || fields[1] != "footprint" -> return None
+    offset: store_artifact_parse_count(fields[2]) ?? return None
+    total := store_artifact_parse_count(fields[3]) ?? return None
+    if offset > journal_bytes -> return None
+    // A tally from before the journal's first line holds only while the
+    // journal is empty: a compaction rewrites the journal from its first byte.
+    if offset == 0 {
+        if fields[4] != "-" || journal_bytes > 0 -> return None
+        return Val(ArtifactFootprintTally{journal_bytes, entry_bytes: total, checksum: "-"})
+    }
+    // The window holds the line the tally ends at, then every line after it.
+    before: if offset < STORE_ARTIFACT_JOURNAL_TAIL_WINDOW -> offset else -> STORE_ARTIFACT_JOURNAL_TAIL_WINDOW
+    length: before + journal_bytes - offset
+    window: files.read_at(journal_path, offset - before, length) ?? return None
+    if window.len() != length -> return None
+    found: store_artifact_journal_checksum_before(window, before, offset == before) ?? return None
+    if found != fields[4] -> return None
+    start := before
+    loop index in before..<window.len() {
+        if Int.from_u8(window[index]) != 10 -> next
+        record: store_artifact_parse_journal_line(store_artifact_slice(window, start, index)) ?? return None
+        if record.operation == "put" -> total = store_artifact_saturating_add(total, record.length)
+        if record.operation == "remove" -> total = store_artifact_saturating_sub(total, record.length)
+        start = index + 1
+    }
+    if start != window.len() -> return None
+    checksum: if journal_bytes == offset -> Val(fields[4]) else -> store_artifact_journal_checksum_before(window, window.len(), offset == before)
+    last: checksum ?? return None
+    Val(ArtifactFootprintTally{journal_bytes, entry_bytes: total, checksum: last})
+}
+
 // Multiplication clamped at the largest Int (Rust `saturating_mul` on u64).
 store_artifact_saturating_mul: fn(left: Int, right: Int) -> Int Never! {
     if left != 0 && right > STORE_ARTIFACT_U64_MAX /% left -> return STORE_ARTIFACT_U64_MAX
@@ -795,12 +883,13 @@ ArtifactStore: struct {
         if incoming > limit {
             return Err(ArtifactStoreError.Capacity{path: path, needed_bytes: incoming, available_bytes: available, limit_bytes: limit})
         }
-        footprint: store_artifact_footprint(self.scan_entries())
+        footprint: self.footprint_locked()
+        after := footprint
         if store_artifact_saturating_add(footprint, incoming) > limit {
             // Rust `let _ = self.prune_locked(..)?`: discard the report, never a prune failure.
             _: self.prune_locked(store_artifact_saturating_sub(limit, incoming))
+            after = self.footprint_locked()
         }
-        after: store_artifact_footprint(self.scan_entries())
         disk_needed: store_artifact_saturating_add(store_artifact_saturating_mul(incoming, 2), self.config_value.reserve_bytes())
         disk_ok: if available == {
             .Val(free) -> free >= disk_needed
@@ -809,6 +898,32 @@ ArtifactStore: struct {
         if store_artifact_saturating_add(after, incoming) > limit || !disk_ok {
             return Err(ArtifactStoreError.Capacity{path: path, needed_bytes: incoming, available_bytes: available, limit_bytes: limit})
         }
+    }
+
+    // The bytes of the store's entries, from the footprint tally
+    // (STORE_ARTIFACT_FOOTPRINT_FILE) and the journal lines after it, else
+    // from a scan of every entry; either way the tally moves to the journal's
+    // current end. The tally only caches what a scan recomputes, so it is
+    // written without disk syncs and a failed write only costs a later scan.
+    footprint_locked: fn(self) -[FS, Env, Rand]> Int ArtifactStoreError! {
+        journal_path: files.join(self.root(), "journal")
+        journal_bytes: if files.stat(journal_path) == {
+            .Ok(info) -> info.size
+            .Err(error) -> {
+                if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
+                0
+            }
+        }
+        tally_path: files.join(self.root(), STORE_ARTIFACT_FOOTPRINT_FILE)
+        if store_artifact_footprint_replay(tally_path, journal_path, journal_bytes) == .Val(tally) {
+            store_artifact_replace_unsynced(tally_path, store_artifact_footprint_tally_text(tally).bytes()).drop("a lost tally only costs a later scan")
+            return Ok(tally.entry_bytes)
+        }
+        total: store_artifact_footprint(self.scan_entries())
+        if store_artifact_journal_final_checksum(journal_path, journal_bytes) == .Val(checksum) {
+            store_artifact_replace_unsynced(tally_path, store_artifact_footprint_tally_text(ArtifactFootprintTally{journal_bytes, entry_bytes: total, checksum}).bytes()).drop("a lost tally only costs a later scan")
+        }
+        Ok(total)
     }
 
     limit_with_disk: fn(self, total_bytes: Int?) -[FS]> Int Never! {

@@ -27,6 +27,13 @@ cwd: project
 env-clear: true
 exit: 0
 copy: project/.jet/lock original.lock
+# The authentic fixture seam names the selected project CAS bundle, its tamper
+# lock templates and the runtime replacement marker in these files.
+capture: project_cas_bundle = text file fixture-project-cas-bundle
+capture: promoted_lock_template = text file fixture-promoted-lock-template
+capture: authority_lock_template = text file fixture-authority-lock-template
+capture: bundle_lock_template = text file fixture-bundle-lock-template
+capture: runtime_marker = text file fixture-runtime-marker
 # Original server stops network and selected project CAS bundle moves to saved-bundle (auth fixture seam).
 rename: project/.jet/nix-cas/{cap:project_cas_bundle} project/saved-bundle
 step: jetpack env --env dev --prep --trust --no-color --yes --local-nix-catalog {work}/replacement --offline

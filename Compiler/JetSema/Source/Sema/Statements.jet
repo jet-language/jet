@@ -6888,7 +6888,7 @@ sema_stmt_return_expr_is_carrier: fn(value: Expr, return_type: Type?, environmen
     // A call root propagates its failure so a
     // `T? !E` callee (`T? Never!` included) meets a `T?` slot with its own
     // `T?` success, as Rust `check_return_expr` infers it against the slot.
-    if normalized == .Option(_) && sema_expression_propagating_call(value) && sema_expr_unwrap_tag(known_type) == .Result(ok, _) -> return sema_expr_unwrap_tag(ok) == .Option(_)
+    if normalized == .Option(_) && sema_expression_propagating_call(value, scopes) && sema_expr_unwrap_tag(known_type) == .Result(ok, _) -> return sema_expr_unwrap_tag(ok) == .Option(_)
     false
 }
 // A value `if` that builds the `T !E` carrier on some arm, through nested
@@ -6912,7 +6912,7 @@ sema_stmt_return_if_arms_fit_carrier: fn(value: Expr, return_type: Type?, enviro
         else -> {}
     }
     if sema_stmt_return_expr_is_carrier(value, return_type, environment, scopes) -> return true
-    if !sema_expression_propagating_call(value) -> return false
+    if !sema_expression_propagating_call(value, scopes) -> return false
     known_type: sema_stmt_return_known_type(value, environment, scopes) ?? return false
     required: sema_stmt_return_required_type(return_type)
     // A `T Never!` call has no failure to bring into a fallible carrier, so

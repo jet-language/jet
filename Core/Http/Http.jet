@@ -585,8 +585,8 @@ impl HTTPRouter {
     // route's checked contract (sema sema_call_try_http_router). The route
     // registers on the router's mux, so duplicates, matching and
     // `web.openapi` are the mux's; the handler keeps its `Net`-only type.
-    // Sema passes `at`, the registering call's place, handed on to the mux.
-    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation) Never! -[Net]> {
+    // `at` is the registering call's place, handed on to the mux.
+    __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!, contract: String, at: SourceLocation{$caller}) Never! -[Net]> {
         state: self.__state
         index: __router_handler_count(self.__state)
         self.__mux.__route(method, pattern, (request: HTTPRequest) -> __router_call(state, index, request), contract, at)

@@ -3,7 +3,7 @@
 use {
     jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, diagnostic_from_registry]
-    jet_cli.[jet_cli_report_cwd, jet_cli_reports_status_json]
+    jet_cli.[jet_cli_report_base, jet_cli_report_cwd, jet_cli_reports_status_json]
     cli_sys: core.sys
     cli_files: core.files
     jet_cli_commands.[jet_cli_supply_sbom]
@@ -37,7 +37,7 @@ use {
         cli_files.remove("{project}/.jet/lock") ?? panic("missing lock")
         absent: jet_cli_supply_sbom(project, [String]{}, false, false)
         assert_eq(absent.stdout, "")
-        assert_eq(absent.stderr, "Error [jet.StaleLockFile]: no lockfile found — run `jet fetch` first\n Why: the lockfile must contain the exact dependency graph before a locked or supply-chain command can run\n Fix: run `jet fetch`, then run the command again\nMore: jet-lang.dev/e/E1202\n")
+        assert_eq(absent.stderr, "Error [jet.StaleLockFile]: No lockfile found — run `jet fetch` first\n Why: The lockfile must contain the exact dependency graph before a locked or supply-chain command can run\n Fix: Run `jet fetch`, then run the command again\nMore: jet-lang.dev/e/E1202\n")
         assert_eq(absent.exit_code, JET_DRIVER_EXIT_USER_ERROR)
         cli_files.write("{project}/.jet/lock", "not a lock\n") ?? panic("corrupt lock")
         corrupt: jet_cli_supply_sbom(project, [String]{}, false, false)

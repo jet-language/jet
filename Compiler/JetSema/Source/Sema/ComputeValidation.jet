@@ -162,6 +162,39 @@ sema_compute_forbidden_effects: fn(effects: [String]) -> [String] Never! {
     result
 }
 
+// The effects of `solved` (the target's row, in its order) that the target
+// reaches outside core.compute. A core.compute operation is the compute
+// capability itself: its CPU oracle and the autodiff tape it records on
+// (the tape's lock and invariant stops) add no effect to the function it
+// differentiates.
+sema_compute_autodiff_reach: fn(index: SemaComputeIndex, modules: [SemaGraphModuleResult], function_key: String, solved: [String], work: &SemaComputeValidationWork) -> [String] Never! {
+    reached := [String]{}
+    panics := false
+    visited := [String]{}
+    pending := [String]{function_key.copy()}
+    loop pending.len() > 0 {
+        key: pending.pop() ?? break
+        if visited.contains(key) -> next
+        visited.push(key.copy())
+        position: sema_compute_function_position(index, key, work) ?? {
+            if key == "__jet_panic__" -> panics = true
+            next
+        }
+        function: modules[position.module_index].functions[position.row_index]
+        if function.module_name == "core.compute" -> next
+        effects: if function.effects.maximal -> function.effects.solved else -> function.effects.direct
+        loop effect_name in effects {
+            if !reached.contains(effect_name) -> reached.push(effect_name.copy())
+        }
+        loop edge in function.effects.call_edges -> pending.push(edge.copy())
+    }
+    result := [String]{}
+    loop effect_name in solved {
+        if reached.contains(effect_name) || (panics && sema_effect_root(effect_name) == "Panic") -> result.push(effect_name.copy())
+    }
+    result
+}
+
 sema_compute_panic_only: fn(effects: [String]) -> Bool Never! {
     if effects.len() == 0 -> return false
     loop effect_name in effects {
@@ -201,7 +234,7 @@ sema_compute_validate_autodiff_purity: fn(modules: [SemaGraphModuleResult], work
             loop obligation in function_facts.autodiff_obligations {
                 target_position: sema_compute_function_position(index, obligation.target, work) ?? next
                 target: modules[target_position.module_index].functions[target_position.row_index]
-                forbidden := sema_compute_forbidden_effects(target.effects.solved)
+                forbidden := sema_compute_forbidden_effects(sema_compute_autodiff_reach(index, modules, obligation.target, target.effects.solved, work))
                 panic_only := sema_compute_panic_only(forbidden)
                 if panic_only && sema_compute_panic_sites_are_compute_failures(obligation.target, modules, index, [String]{}, panic_memo, work) {
                     filtered := [String]{}

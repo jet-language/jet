@@ -1,9 +1,21 @@
-// A user function owns the Err spelling; its call is not a deferred arm
-// and keeps ordinary call-root automatic propagation.
-Err: fn(message: String) -> Int Never! { return message.len() }
-first: fn(flag: Bool) -> Int { if flag -> Err("bad") else -> 7 }
-last: fn(flag: Bool) -> Int { if flag -> 7 else -> Err("bad") }
+// A user function that owns the Err spelling is checked in its own package,
+// so the spelling stays the builtin constructor everywhere else in Tests.
+use {
+    jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+    jet_cli.[jet_cli_compile_file]
+    jet_foundation.[DIAGNOSTIC_ERROR]
+}
+
 #Test("err_arm_shadow_fixtures") {
-    print(first(true))
-    print(last(false))
+    file: "Compiler/JetSema/Tests/fixtures/ErrArmShadow.fixture/ErrArmShadow.jet"
+    checked: jet_cli_compile_file(file, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
+            }
+        }
+    }
 }

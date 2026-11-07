@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # release-train.sh SHA: the lander hook of the a0_NNN release train (install beside batch-land.sh).
 # Records SHA as the newest pending dev HEAD and returns at once. One train runs at a time (flock):
-# it gates the newest pending HEAD with release-compiler.mjs, and when landings arrived meanwhile it
+# it gates the newest pending HEAD with `Tools/release/Main.jet -- admit` (run by the current
+# release), and when landings arrived meanwhile it
 # gates the newest of them next; intermediate HEADs are skipped. The gate releases only with at least
 # RELEASE_MIN_GAINS gained rows; a "gains FAIL" just means wait for more landings. A pass writes the
 # next a0_NNN and the commands, and says RELEASE READY on the lander log for Main; nothing is
@@ -26,7 +27,8 @@ while [ -s "$root/pending" ]; do
     head=$(< "$root/pending")
     rm -f "$root/pending"
     out="$root/train-${head:0:12}.log"
-    timeout 43200 node "$dev/Tools/agent/release-compiler.mjs" "$head" --min-gains "${RELEASE_MIN_GAINS:-10}" > "$out" 2>&1
+    seed=$(readlink -f "$JET_SEED")
+    (cd "$dev" && JET_COMPILER_IDENTITY=$(< "$seed/IDENTITY") JET_TOOLCHAIN_ROOT=$dev timeout 43200 "$seed/jet" run Tools/release/Main.jet -- admit "$head" --min-gains "${RELEASE_MIN_GAINS:-10}") > "$out" 2>&1
     rc=$?
     case $rc in
         0) verdict="RELEASE READY $(awk '/^PASS:/{print $2}' "$out") from ${head:0:10}; run the commands in $out" ;;

@@ -168,6 +168,19 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
                 denominator: jet_eval_ir_data(m, p, s, bottom, int_row) ?? return None
                 return Val(TComptimeValue.Struct{type_name: "Fraction", fields: [TComptimeField]{TComptimeField{name: "num_value", value: numerator}, TComptimeField{name: "den_value", value: denominator}}})
             }
+            // A Decimal of a program without core.math is its runtime handle:
+            // the signed exact-Int coefficient@0 and the plain-word scale@8
+            // (RoutePrecise.jet). It reads back as the Core declaration's
+            // fields.
+            if checked == (Type.Named{name: "Decimal"}) && ir_type_def(p, "Decimal") == None {
+                int_row: ir_value_type(m, p, Type.Int) ?? return jet_eval_ir_transport_fail(s, checked)
+                top: jet_eval_ir_member_word(m, s, word, 0, int_row) ?? return None
+                coefficient: jet_eval_ir_int_value(s, top) ?? return None
+                scale: jet_eval_ir_read(s, word + 8, 8) ?? return None
+                magnitude: if coefficient < 0 -> -coefficient else -> coefficient
+                digits: if jet_eval_ir_in_range(magnitude, 64, true) -> TComptimeValue.Int{value: magnitude} else -> TComptimeValue.BigInt{decimal: "{magnitude}"}
+                return Val(TComptimeValue.Struct{type_name: "Decimal", fields: [TComptimeField]{TComptimeField{name: "negative", value: TComptimeValue.Bool{value: coefficient < 0}}, TComptimeField{name: "magnitude", value: digits}, TComptimeField{name: "scale", value: TComptimeValue.Int{value: scale}}}})
+            }
             if ir_default_err(p, checked) -> return jet_eval_ir_err_data(s, p, checked, word)
             return jet_eval_ir_transport_fail(s, checked)
         }

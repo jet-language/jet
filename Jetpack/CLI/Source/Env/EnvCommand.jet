@@ -408,7 +408,8 @@ cli_cmd_env_test: fn(verification: &StoreVerification, cache: &WorkspaceDeclarat
 
 // `jet env fetch-toolchain`: put this jet's C toolchain pack in the Hangar
 // now, so a later `jet cc` works offline. A pack already there is
-// re-verified without touching the network.
+// re-verified without touching the network. `--json` prints the pack root
+// and its versions; jet's native C link (ForeignLink.jet) reads that root.
 cli_cmd_env_fetch_toolchain: fn(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.positional.len() > 1 {
         theme.error_coded("E2102", "`jet env fetch-toolchain` takes no arguments", "unexpected `{parsed.positional[1]}`", "run `jet env fetch-toolchain` on its own")
@@ -421,6 +422,10 @@ cli_cmd_env_fetch_toolchain: fn(verification: &StoreVerification, theme: Theme, 
     tools: provider_cc_pack_ensure(verification, pkg_resolve_roots(), asset, provider_cc_pack_default_sources(), parsed.flags.offline) ?? {
         cli_cc_report_provider_error(err)
         return EXIT_USER_ERROR
+    }
+    if parsed.flags.json {
+        print(cli_json_render(Dyn.Object(["root": Dyn.Text(tools.root), "llvm": Dyn.Text(tools.manifest.llvm), "musl": Dyn.Text(tools.manifest.musl), "glibc": Dyn.Text(tools.manifest.glibc)])))
+        return EXIT_OK
     }
     theme.ok("C toolchain pack for jet is ready: clang {tools.manifest.llvm}, musl {tools.manifest.musl}, glibc {tools.manifest.glibc}")
     theme.detail(tools.root)

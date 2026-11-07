@@ -908,8 +908,9 @@ CORE_RECORD_FIELD_ROWS: [CoreRecordFieldRow]{
     // Core/Compute's private Tensor storage (core-library.md:4307-4309: the
     // registered compute vocabulary owns tensors and their receipts). User
     // code builds and reads tensors only through core.compute, so every
-    // field is core_only. `reason` is the placement reason ("" derives it)
-    // and `transfer` the last transfer receipt ("" when none).
+    // field is core_only. `reason` is the placement reason ("" derives it),
+    // `transfer` the last transfer receipt ("" when none) and `node` the
+    // autodiff tape node that produced it (-1 when untracked).
     CoreRecordFieldRow{owner: "Tensor", field: "shape", ty: Type.List{element: Type.Int}, core_only: true},
     CoreRecordFieldRow{owner: "Tensor", field: "data", ty: Type.List{element: Type.Float}, core_only: true},
     CoreRecordFieldRow{owner: "Tensor", field: "device", ty: Type.String, core_only: true},
@@ -917,6 +918,7 @@ CORE_RECORD_FIELD_ROWS: [CoreRecordFieldRow]{
     CoreRecordFieldRow{owner: "Tensor", field: "requested", ty: Type.String, core_only: true},
     CoreRecordFieldRow{owner: "Tensor", field: "reason", ty: Type.String, core_only: true},
     CoreRecordFieldRow{owner: "Tensor", field: "transfer", ty: Type.String, core_only: true},
+    CoreRecordFieldRow{owner: "Tensor", field: "node", ty: Type.Int, core_only: true},
     // Core/Compute's private device, stream and CSR storage (core-library.md
     // `core.compute`: the registered vocabulary owns them; user code sees
     // opaque values, so every field is core_only).
@@ -1004,7 +1006,7 @@ CORE_RECORD_LITERAL_ROWS: [CoreRecordLiteralRow]{
     CoreRecordLiteralRow{owner: "TextError", fields: [TypeTupleField]{TypeTupleField{name: "message", ty: Type.String}}, core_only: true},
     CoreRecordLiteralRow{owner: "RangeError", fields: [TypeTupleField]{TypeTupleField{name: "reason", ty: Type.String}}, core_only: true},
     CoreRecordLiteralRow{owner: "Expired", fields: [TypeTupleField]{}, core_only: false},
-    CoreRecordLiteralRow{owner: "Tensor", fields: [TypeTupleField]{TypeTupleField{name: "shape", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "data", ty: Type.List{element: Type.Float}}, TypeTupleField{name: "device", ty: Type.String}, TypeTupleField{name: "numeric_profile", ty: Type.String}, TypeTupleField{name: "requested", ty: Type.String}, TypeTupleField{name: "reason", ty: Type.String}, TypeTupleField{name: "transfer", ty: Type.String}}, core_only: true},
+    CoreRecordLiteralRow{owner: "Tensor", fields: [TypeTupleField]{TypeTupleField{name: "shape", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "data", ty: Type.List{element: Type.Float}}, TypeTupleField{name: "device", ty: Type.String}, TypeTupleField{name: "numeric_profile", ty: Type.String}, TypeTupleField{name: "requested", ty: Type.String}, TypeTupleField{name: "reason", ty: Type.String}, TypeTupleField{name: "transfer", ty: Type.String}, TypeTupleField{name: "node", ty: Type.Int}}, core_only: true},
     CoreRecordLiteralRow{owner: "ComputeDevice", fields: [TypeTupleField]{TypeTupleField{name: "name", ty: Type.String}}, core_only: true},
     CoreRecordLiteralRow{owner: "ComputeStream", fields: [TypeTupleField]{TypeTupleField{name: "device", ty: Type.String}}, core_only: true},
     CoreRecordLiteralRow{owner: "SparseTensor", fields: [TypeTupleField]{TypeTupleField{name: "rows", ty: Type.Int}, TypeTupleField{name: "cols", ty: Type.Int}, TypeTupleField{name: "row_ptr", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "col_idx", ty: Type.List{element: Type.Int}}, TypeTupleField{name: "values", ty: Type.List{element: Type.Float}}}, core_only: true},

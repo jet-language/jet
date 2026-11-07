@@ -169,6 +169,18 @@ pkg_integration_package_error: fn(raw: String) -> PackageParseError Never! {
     assert_eq(pm.authority.providers[0].deny, [String]{"openssl-1.0"})
 }
 
+// Record fields inside `authority:` separate as package.jet's own fields do:
+// by newline as well as by comma, so `allow`'s list ends at its `]`.
+#Test("pkg integration manifest_authority_fields_separate_by_newline") {
+    raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{\n    allow: [IO, Mem.Alloc, Browser]\n    needs: [UI.IME, UI.FileDialog]\n    trust: {{\n        default: prompt\n        require: attested\n    }}\n}}\n"
+    pm: PackageFacts.parse(raw, "test") ?? panic("newline-separated authority fields should parse: {err}")
+    assert_eq(pm.authority.allow, Val([String]{"IO", "Mem.Alloc", "Browser"}))
+    assert_eq(pm.authority.needs, [String]{"UI.IME", "UI.FileDialog"})
+    trust: pm.authority.trust ?? panic("expected the trust record")
+    assert_eq(trust.default, Val(TrustDecision.Prompt))
+    assert_eq(trust.require, Val(ProvenanceRequirement.Attested))
+}
+
 // Ported from pkg.rs:2182-2210.
 #Test("pkg integration manifest_parse_authority_trust_block") {
     raw: "{pkg_integration_min_manifest("app", "0.1.0")}\nauthority: {{ trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ postgres: prompt }}, require: attested }} }}\n"
