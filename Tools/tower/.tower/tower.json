@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95836,
+    "rev": 95840,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99055,6 +99055,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "The c5 audit found the same leak in two more carriers: Ok(handle) passed to a Result parameter, and a tuple literal (d: dir, n: 1) passed to a tuple parameter (probe t5 printed closed: false). CoreCliLead-2 is fixing Option, Ok and tuple in one pass in the ir_call_row lend path, and c5 covers all three."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Root (CoreCliLead-2): in ir_call_row, a read argument widened to a union is boxed through ir_union_box, then ir_store_at, then ir_own. That clones a value that has a clone (every borrowed String passed to a union parameter is copied) and moves one that has none (a handle gets closed under its holder), and the box is dropped after the call. Struct fields, ? and returns already own their value through ir_own, matching the non-union paths. The named-fn value adapter (BuildExpr around 6725) has the same widening. Fix: a lent union box (payload bits stored with no owner; after the call only the box is freed), about 80 lines in BuildTypes/BuildExpr, with no new IR representation."
         }
       ],
@@ -99062,20 +99067,20 @@
         {
           "n": 1,
           "text": "Root fix in sema/lowering: a borrowed argument that widens into a union parameter stays a borrow (the union carries a borrowed payload), or is copied when the payload is a plain value. It never moves, so the caller's drop is the only drop. No per-API routing or special case. The other places a borrowed value meets a union (return position, struct fields, optional widening) are checked and fixed in the same pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T18:36:58.214Z"
+          "evidence": "060bbcd0f1: ir lends a borrowed argument to the union or trait box of a read parameter, not moved or copied. A .copy() of a lent box is a retain, handled by a release check plus copy fixup at the box end.",
+          "at": "2026-11-07T19:53:44.730Z"
         },
         {
           "n": 2,
           "text": "A #Test or golden proves it on O0, O1 and O2: a borrowed Directory passed twice to a union-typed parameter stays open for both calls and closes exactly once, and a borrowed heap payload (String in String | Int) passed to a union parameter is neither freed by the callee nor double-freed (run with the memory ledger, 0 leaked and 0 double-dropped).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T18:36:59.238Z"
+          "evidence": "060bbcd0f1 on its s1: cases union_argument_is_lent_not_copied and union_argument_box_is_freed_after_the_call PASS checked-alloc at o0/o1/o2 (filter _argument_: 25 PASS, 1 known-failing #5454 unrelated); ui ownership/lent_union_handle_cannot_outlive_the_call PASS; golden Types 210/210 at o0/o1/o2.",
+          "at": "2026-11-07T19:53:55.048Z"
         },
         {
           "n": 3,
@@ -99089,11 +99094,11 @@
         {
           "n": 4,
           "text": "The same lend applies to ir_trait_box: a borrowed handle boxed into a trait object for a call is lent, not moved (sibling found while fixing #6677), with a row proving a borrowed Directory passed twice to a trait-typed parameter stays open.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T19:01:33.306Z"
+          "evidence": "060bbcd0f1: cases trait_argument_is_lent_not_moved PASS checked-alloc at o0/o1/o2; LaneCheck CHECK OK on BuildTypes, BuildExpr and BuildTraits.",
+          "at": "2026-11-07T19:53:56.329Z"
         },
         {
           "n": 5,
@@ -99111,7 +99116,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T18:36:38.446Z",
-      "updated": "2026-11-07T19:27:23.372Z",
+      "updated": "2026-11-07T19:53:57.471Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -187039,6 +187044,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T19:53:57.471Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fs42sy",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T19:53:56.329Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fs42sy",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-07T19:53:55.048Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fs42sy",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-07T19:53:44.730Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fs42sy",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T19:27:23.372Z",
       "by": "Main",
