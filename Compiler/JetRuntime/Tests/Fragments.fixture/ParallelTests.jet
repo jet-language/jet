@@ -1,15 +1,21 @@
 // Raw joined-walk witnesses: callbacks are Jet, C transports addresses only.
+// Env: length0 calls8 fails16 size24, then one 24-byte slot per chunk at 32
+// (start, end, owner thread). PARALLEL_TEST_ENV holds 193 one-item chunks.
+PARALLEL_TEST_ENV: I64{4664}
+
 parallel_test_require: fn(ok: Bool) {
     if !ok -> jet_rt_unreachable(I64{0}, I64{0})
 }
 
 #Export(c) jet_rt_parallel_fixture_invoke: fn(env: I64, start: I64, end: I64) -> I64 {
     length: sync_load(env)
-    parallel_test_require(start % I64{64} == I64{0} && start < end && end <= length && end - start <= I64{64})
+    size: sync_load(env + I64{24})
+    parallel_test_require(start % size == I64{0} && start < end && end <= length && end - start <= size)
     // The production callback contract gives each chunk exclusive output slots.
-    sync_store(env + I64{32} + start / I64{64} * I64{24}, start)
-    sync_store(env + I64{40} + start / I64{64} * I64{24}, end)
-    sync_store(env + I64{48} + start / I64{64} * I64{24}, sync_load(thread_base() + I64{8}))
+    slot: env + I64{32} + start / size * I64{24}
+    sync_store(slot, start)
+    sync_store(slot + I64{8}, end)
+    sync_store(slot + I64{16}, sync_load(thread_base() + I64{8}))
     _ := sync_add(env + I64{8}, I64{1})
     if (sync_load(env + I64{16}) != I64{0} && (start == I64{0} || start == I64{128})) {
         // Multiple chunk failures must not stop later chunks or choose by time.
@@ -26,22 +32,37 @@ parallel_test_require: fn(ok: Bool) {
 // cache: walk workers allocate and free in their own stack band's arena.
 parallel_test_live: fn(width: I64) -> I64 { alloc_live_blocks(width) }
 
-parallel_test_walk: fn(env: I64, invoke: I64, length: I64, limit: I64, fails: Bool) {
-    thread_zero(env, I64{128})
+// The items per chunk of a limited walk over `workers` workers (#6085):
+// spread evenly, at most 64.
+parallel_test_spread: fn(length: I64, workers: I64) -> I64 {
+    size: (length + workers - I64{1}) / workers
+    if size < (I64{64}) -> size else -> I64{64}
+}
+
+// `size` is the chunk length the walk must cut: 64 unlimited, else the
+// limit's spread.
+parallel_test_walk: fn(env: I64, invoke: I64, length: I64, limit: I64, size: I64, fails: Bool) {
+    thread_zero(env, PARALLEL_TEST_ENV)
     sync_store(env, length)
     sync_store(env + I64{16}, if fails -> I64{1} else -> I64{0})
+    sync_store(env + I64{24}, size)
     parent: scheduler_control_new()
     save: jet_rt_alloc(I64{32}, I64{8})
     scheduler_control_enter(parent, save)
+    // The walk runs inside a task body, the stop domain a joined chunk
+    // failure re-raises into (Parallel.jet parallel_raise); outside one it
+    // is the process edge's.
+    body: scheduler_body_enter()
     jet_rt_native_para_walk(length, limit, env, invoke)
-    chunks: length / I64{64} + (if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1})
+    scheduler_body_leave(body)
+    chunks: length / size + (if (length % size == I64{0}) -> I64{0} else -> I64{1})
     parallel_test_require(sync_load(env + I64{8}) == chunks)
     at := I64{0}
     loop at < chunks {
         start: sync_load(env + I64{32} + at * I64{24})
         end: sync_load(env + I64{40} + at * I64{24})
         remaining: length - start
-        parallel_test_require(start == at * I64{64} && end == start + (if remaining < (I64{64}) -> remaining else -> I64{64}))
+        parallel_test_require(start == at * size && end == start + (if remaining < size -> remaining else -> size))
         if (limit == I64{1} || limit == I64{0}) {
             parallel_test_require(sync_load(env + I64{48} + at * I64{24}) == sync_load(thread_base() + I64{8}))
         }
@@ -60,10 +81,10 @@ parallel_test_walk: fn(env: I64, invoke: I64, length: I64, limit: I64, fails: Bo
 }
 
 #Export(c) jet_rt_parallel_fixture_run: fn(invoke: I64) -> I64 {
-    env: jet_rt_alloc(I64{128}, I64{8})
+    env: jet_rt_alloc(PARALLEL_TEST_ENV, I64{8})
     snapshot: jet_rt_alloc(I64{64}, I64{8})
     // Warm process-lifetime thread registry capacity before measuring owners.
-    parallel_test_walk(env, invoke, I64{193}, I64{-1}, false)
+    parallel_test_walk(env, invoke, I64{193}, I64{-1}, I64{64}, false)
     width := I64{32}
     at := I64{0}
     loop width <= (I64{4096}) {
@@ -71,14 +92,16 @@ parallel_test_walk: fn(env: I64, invoke: I64, length: I64, limit: I64, fails: Bo
         width *= I64{2}
         at += I64{8}
     }
-    parallel_test_walk(env, invoke, I64{0}, I64{1}, false)
-    parallel_test_walk(env, invoke, I64{193}, I64{1}, false)
-    parallel_test_walk(env, invoke, I64{129}, I64{0}, false)
-    parallel_test_walk(env, invoke, I64{193}, I64{-1}, false)
-    parallel_test_walk(env, invoke, I64{193}, I64{-1}, true)
-    parallel_test_walk(env, invoke, I64{193}, I64{1}, true)
+    parallel_test_walk(env, invoke, I64{0}, I64{1}, I64{64}, false)
+    parallel_test_walk(env, invoke, I64{193}, I64{1}, I64{64}, false)
+    parallel_test_walk(env, invoke, I64{129}, I64{0}, I64{64}, false)
+    parallel_test_walk(env, invoke, I64{193}, I64{-1}, I64{64}, false)
+    parallel_test_walk(env, invoke, I64{193}, I64{-1}, I64{64}, true)
+    parallel_test_walk(env, invoke, I64{193}, I64{1}, I64{64}, true)
+    // A limit too wide for a worker count bounds the walk at the available
+    // parallelism, and spreads the items over those workers.
     wide: jet_int_pow(I64{2}, I64{80}, I64{0}, I64{0}, I64{0})
-    parallel_test_walk(env, invoke, I64{193}, wide, false)
+    parallel_test_walk(env, invoke, I64{193}, wide, parallel_test_spread(I64{193}, scheduler_available_parallelism(I64{1})), false)
     jet_rt_int_drop(wide)
     width = I64{32}
     at = I64{0}
@@ -88,6 +111,6 @@ parallel_test_walk: fn(env: I64, invoke: I64, length: I64, limit: I64, fails: Bo
         at += I64{8}
     }
     jet_rt_free(snapshot, I64{64}, I64{8})
-    jet_rt_free(env, I64{128}, I64{8})
+    jet_rt_free(env, PARALLEL_TEST_ENV, I64{8})
     I64{0}
 }

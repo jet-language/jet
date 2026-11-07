@@ -577,10 +577,10 @@ An `atexit` handler belongs to the process, not to its registering thread: it
 survives that thread's exit and runs, once and in registration order, at the
 process exit's handler step. One process queue holds every handler; its lock
 covers append and batch claim only, and each claimed batch runs outside it.
-`Compiler/JetRuntime/Tests/run-scheduler-fixtures.mjs` compiles the actual
+The Scheduler row of `Tools/agent/CompilerRegistries.jet` compiles the actual
 runtime with Jet callback assertions and uses C only to transport callback
-addresses. Its run phase covers one-, two- and eight-worker pools; root panic
-is compared byte-for-byte to a supplied freshly rendered Rust-tier reference.
+addresses. It runs one-, two- and eight-worker pools; root panic is compared
+byte-for-byte to the golden composed from the committed report literals.
 The shared native affinity probe `scheduler_available_parallelism(fallback)`
 does not read the pool override: the worker pool retains its override and
 fallback 4, while joined parallel walking supplies fallback 1.

@@ -84,13 +84,14 @@ that its semantic check passed. In Codegen poll and comptime-budget emission,
 `span := builder.current_span` snapshots the source span before write-access to
 `&builder`; `span:` would retain a builder view across those mutations.
 
-Runtime process-edge fixtures decode the committed Trap/Scheduler report words
-as signed little-endian I64 values through one
-[`report-literals` reader](../../Compiler/JetRuntime/Tests/report-literals.mjs).
-The scheduler fixture writes its complete root-panic golden beside its proof
-receipts, checks exact stderr, exit 70, no signal and no stdout, and does not
-depend on a Rust-tier reference producer. Task-local panics still require
-process survival and empty stderr.
+Runtime process-edge fixtures decode the committed Trap/Scheduler report
+literals (static texts, or signed little-endian I64 word rows) through one
+reader, `trap_literal`/`scheduler_literal` in
+[`CompilerRegistries.jet`](../../Tools/agent/CompilerRegistries.jet).
+The Scheduler registry row composes its complete root-panic golden from them,
+checks exact stderr, exit 70 and no stdout, and does not depend on a
+Rust-tier reference producer. Task-local panics still require process
+survival and empty stderr.
 An aggregate fixture object already contains the full Jet runtime and links
 without a second provider. Standalone C witnesses use `jet_runtime_jet.o`
 exactly once; the startup-bearing `jet_runtime.pack.o` is a program-link input,
