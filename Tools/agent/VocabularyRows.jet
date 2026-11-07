@@ -5,10 +5,11 @@
 // writes the enum declarations to the package's Source/Vocabulary.jet. The
 // package is flat, so every module reads the enums by name; the module that
 // owns a vocabulary keeps its methods (`impl Type { … }`) by hand.
-// A row is four tab-separated columns: the type, its markers (`#Error`, the
-// same on every row of the type, or empty), the variant, and the variant's
-// payload as written (`(name: String)`, or empty). A type's rows are
-// contiguous and in declaration order. Lines starting with `#` are comments.
+// A row is three tab-separated columns: the type, its markers (`#Error`, the
+// same on every row of the type, or empty), and the variant; a variant with a
+// payload adds it as a fourth column, as written (`(name: String)`). A type's
+// rows are contiguous and in declaration order. Lines starting with `#` are
+// comments.
 // Usage: jet Tools/agent/VocabularyRows.jet [--check|--write]
 // --check fails when a Source/Vocabulary.jet differs from its rows; --write
 // rewrites them.
@@ -59,11 +60,11 @@ vocabulary_types: fn(path: String, text: String) -> [VocabularyType] VocabularyR
         if line == "" || line.starts_with("#") -> next
         at: "{path}:{index + 1}"
         columns: line.split("\t").to_list()
-        if columns.len() != 4 -> return Err(rows_fail("{at}: a row has 4 tab-separated columns (type, markers, variant, payload)"))
+        if columns.len() != 3 && columns.len() != 4 -> return Err(rows_fail("{at}: a row has 3 tab-separated columns (type, markers, variant), and a 4th for a payload"))
         type_name: columns[0]
         markers: columns[1]
         variant: columns[2]
-        payload: columns[3]
+        payload: if columns.len() == 4 -> columns[3] else -> ""
         if !TYPE_NAME.is_match(type_name) -> return Err(rows_fail("{at}: `{type_name}` is not a type name"))
         if !TYPE_NAME.is_match(variant) -> return Err(rows_fail("{at}: `{variant}` is not a variant name"))
         if markers != "" {
@@ -71,7 +72,7 @@ vocabulary_types: fn(path: String, text: String) -> [VocabularyType] VocabularyR
                 if !MARKER.is_match(marker) -> return Err(rows_fail("{at}: `{marker}` is not a marker"))
             }
         }
-        if payload != "" && !(payload.starts_with("(") && payload.ends_with(")")) -> return Err(rows_fail("{at}: the payload `{payload}` is not a parenthesized field list"))
+        if columns.len() == 4 && !(payload.starts_with("(") && payload.ends_with(")")) -> return Err(rows_fail("{at}: the payload `{payload}` is not a parenthesized field list"))
         if types.len() > 0 && types[types.len() - 1].name == type_name {
             last := types[types.len() - 1]
             if last.markers != markers -> return Err(rows_fail("{at}: `{type_name}` has different markers on different rows"))
@@ -164,20 +165,21 @@ vocabulary_rows_error: fn(text: String) -> String Never! {
 }
 
 #Test("vocabulary rows render contiguous enums and reject malformed rows") {
-    rows: "# comment\nPhase\t\tReady\t\nPhase\t\tPaused\t\nFault\t#Error\tTimeout\t(after_ms: Int)\n"
+    rows: "# comment\nPhase\t\tReady\nPhase\t\tPaused\nFault\t#Error\tTimeout\t(after_ms: Int)\n"
     types: vocabulary_types("t.tsv", rows) ?? panic("the rows did not parse: {err.message}")
     assert_eq(types.len(), 2)
     rendered: render_vocabulary("t.tsv", types)
     assert(rendered.starts_with(GENERATED_BY))
     assert(rendered.contains("\nPhase: enum {{\n    Ready\n    Paused\n}}\n"))
     assert(rendered.contains("\n#Error\nFault: enum {{\n    Timeout(after_ms: Int)\n}}\n"))
-    assert(vocabulary_rows_error("Phase\tReady\t\n").contains("4 tab-separated columns"))
-    assert(vocabulary_rows_error("phase\t\tReady\t\n").contains("not a type name"))
-    assert(vocabulary_rows_error("Phase\t\tReady\t\nPhase\t\tReady\t\n").contains("declared twice"))
-    assert(vocabulary_rows_error("Phase\t\tReady\t\nFault\t\tTimeout\t\nPhase\t\tPaused\t\n").contains("not contiguous"))
-    assert(vocabulary_rows_error("Fault\t#Error\tTimeout\t\nFault\t\tCrash\t\n").contains("different markers"))
-    assert(vocabulary_rows_error("Fault\tError\tTimeout\t\n").contains("not a marker"))
+    assert(vocabulary_rows_error("Phase\tReady\n").contains("3 tab-separated columns"))
+    assert(vocabulary_rows_error("phase\t\tReady\n").contains("not a type name"))
+    assert(vocabulary_rows_error("Phase\t\tReady\nPhase\t\tReady\n").contains("declared twice"))
+    assert(vocabulary_rows_error("Phase\t\tReady\nFault\t\tTimeout\nPhase\t\tPaused\n").contains("not contiguous"))
+    assert(vocabulary_rows_error("Fault\t#Error\tTimeout\nFault\t\tCrash\n").contains("different markers"))
+    assert(vocabulary_rows_error("Fault\tError\tTimeout\n").contains("not a marker"))
     assert(vocabulary_rows_error("Fault\t\tTimeout\tafter_ms: Int\n").contains("parenthesized"))
+    assert(vocabulary_rows_error("Fault\t\tTimeout\t\n").contains("parenthesized"))
     assert(vocabulary_rows_error("# only a comment\n").contains("declares no vocabulary"))
 }
 
