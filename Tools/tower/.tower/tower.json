@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6643,
-    "rev": 95329,
+    "rev": 95333,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75220,11 +75220,11 @@
         {
           "n": 1,
           "text": "The ballot is answered and its check or generator runs in CI.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-29T12:54:06.766Z"
+          "evidence": "f41a466281 (MechD-3) fixes grammar.js for `package: {…}` and the nameless fn in marker templates. All 941 examples parse, and tree-sitter test passes 21/21. The new guard tests/guards/grammar.jet tree_sitter_parses_every_example_without_error_or_missing_nodes runs D-EDITOR-GRAMMAR1=A (tree-sitter parse over every Examples/**/*.jet; it fails on any ERROR or MISSING node). Main ran it with a0_031 on dev at or after f41a466281: pass. Against the old parser.c it fails and lists 210 rejects. The guard is the gate, since hosted CI runs only the coverage ratchet.",
+          "at": "2026-11-07T03:54:55.297Z"
         }
       ],
       "refs": [],
@@ -75233,8 +75233,8 @@
       "parentId": "c0xiig3k",
       "needsAcceptance": false,
       "created": "2026-10-29T12:54:06.767Z",
-      "updated": "2026-10-31T00:44:16.116Z",
-      "updatedBy": "owner"
+      "updated": "2026-11-07T03:54:55.297Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c05gn07n",
@@ -90984,11 +90984,11 @@
         {
           "n": 4,
           "text": "Owner 2026-11-04 (a): every valid, proven latest compiler is published as a GitHub release, with its binary, IDENTITY and checksums as assets, by the same step that admits it. The bootstrap doc fetches the latest release with one command, and the fresh-clone proof uses that fetch, not a local copy. Shares the release path with #5950.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T16:48:28.735Z"
+          "evidence": "a0_031 (aaa6331fc0) was published by the release step that admitted it ('admitted: tag a0_031 is on origin and published as its GitHub release'). The release carries jet, IDENTITY, SHA256SUMS, jet-a0_031-linux-x64.tar.gz with its .sha256, the cc archive, the cc pack and CANDIDATE.json with its signature. Fresh-clone proof $JET_SCRATCH_ROOT/lanes/Main/fresh031.sh, run under env -i with an empty HOME, no JET_* variables and no jet on PATH, follows Docs/spec/contributing/bootstrap.md lines 40-54 verbatim. The one curl line fetched releases/latest; content_digest matched; the Ed25519 signature verified against Tools/release/jet-release.pub.pem; the archive and SHA256SUMS checks passed. It cloned --branch a0_031 and ran seed jet build Compiler. ReuseSeedRuntime matched 483 runtime inputs. jet test --profile ui tests/ui/list_expected_type_mismatch.jet passed 1, and jet run Examples/Basics/Hello.jet printed hello, world. rc=0 (fresh031.log).",
+          "at": "2026-11-07T03:58:51.887Z"
         },
         {
           "n": 5,
@@ -91179,7 +91179,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T16:33:50.383Z",
-      "updated": "2026-11-07T02:48:38.072Z",
+      "updated": "2026-11-07T03:58:51.887Z",
       "updatedBy": "Main",
       "criteriaLastN": 24
     },
@@ -92706,7 +92706,7 @@
     {
       "id": "c07pwu5t",
       "num": 6588,
-      "title": "An effect row with a unit-fallible signature does not parse",
+      "title": "E0003 fix text for an effect row before a unit-fallible rail does not teach the ratified order",
       "body": "Found by JetpackEngine on dev 7de2280131: fn build(b: Build) -[Exec, FS]> BuildError! fails with E0003 'unit-fallible signature has no ->'. An effect row and a unit-fallible failure rail should compose as they do with a result type. Parser work: wait until the name: value declaration cutover (#6586) lands, since that rewrites declaration parsing.",
       "kind": "bug",
       "track": "sidequest",
@@ -92724,12 +92724,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "`build: fn(b: Build) -[Exec, FS]> BuildError!` parses and checks: an effect row composes with a unit-fallible rail as it does with a result type, proven by a ui or golden row.",
+          "text": "The ratified spelling (D-FAIL-UNIT1=A: the error contract precedes the optional effect arrow, `build: fn(b: Build) BuildError! -[Exec, FS]> { }`) checks and runs, and writing the effect row first (`-[Exec, FS]> BuildError!`) gives E0003 whose fix text shows the ratified order `E! -[FX]>`, with a UI snapshot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T03:30:35.131Z"
+          "at": "2026-11-07T03:56:04.216Z"
         }
       ],
       "refs": [],
@@ -92740,7 +92740,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T02:33:27.897Z",
-      "updated": "2026-11-07T03:30:35.131Z",
+      "updated": "2026-11-07T03:56:05.986Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -184729,6 +184729,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T03:58:51.887Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0rdxo6y",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-07T03:56:05.986Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07pwu5t",
+      "note": "title"
+    },
+    {
+      "at": "2026-11-07T03:56:04.216Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c07pwu5t",
+      "note": "#1: The old row asked for a second spelling. D-FAIL-UNIT1=A (syntax-decisions.md:8504-8506) fixes the order, and the ratified form already checks on a0_029 (MechD-3). The defect is the misleading E0003 fix text.; was: `build: fn(b: Build) -[Exec, FS]> BuildError!` parses and checks: an effect row composes with a unit-fallible rail as it does with a result type, proven by a ui or golden row."
+    },
+    {
+      "at": "2026-11-07T03:54:55.297Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08oghuo",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T03:48:57.373Z",
       "by": "Main",
