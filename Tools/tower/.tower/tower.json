@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6677,
-    "rev": 95816,
+    "rev": 95817,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39739,11 +39739,11 @@
         {
           "n": 14,
           "text": "Memory safety (I1): socket_addr(\"[zz]\", 80) in safe Jet returns Err(NetError) instead of crashing with SIGSEGV in resolve_socket_addrs (Core Net.jet:173). Found 11-07 by tests/cases/corelib_net/net_http_service_policy_tests_pass (known-failing under this card). Root fix, plus a #Test with malformed bracketed hosts (\"[zz]\", \"[\", \"[::1\", \"[]\") on o0, o1 and o2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T16:36:01.921Z"
+          "evidence": "d7d2b1e1f8 adds a bare-key __ResolveError IR_RUNTIME_HANDLES row. Before it, the resolver's Err record was copied as a Jet-layout shell and string_clone got a NULL message (SIGSEGV). Rows at o0, o1 and o2: hosts nosuch.invalid, zz and [zz] give the 'resolve socket address' NetError, and '[', '[::1' and '[]' give the socket_addr NetError. jet test passes at all three levels with no fault. tests/cases/corelib_net/net_http_service_policy_tests_pass: 7/8 at o0/o1/o2, with only c15 left (KF narrowed). LaneCheck RuntimeHandles.jet CHECK OK, and RuntimeGenerators --check is current.",
+          "at": "2026-11-07T17:09:29.927Z"
         },
         {
           "n": 15,
@@ -39770,7 +39770,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.727Z",
-      "updated": "2026-11-07T16:36:03.014Z",
+      "updated": "2026-11-07T17:09:29.927Z",
       "updatedBy": "Main",
       "goals": [],
       "criteriaLastN": 15
@@ -186852,6 +186852,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T17:09:29.927Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0692z4s",
+      "note": "#14"
+    },
     {
       "at": "2026-11-07T17:01:23.663Z",
       "by": "Main",
