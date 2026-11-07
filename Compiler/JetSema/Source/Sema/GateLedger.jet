@@ -1,7 +1,7 @@
 // One compile-time read model for source and policy gates.
 // Adapted from origin/port/compiler GateLedger.jet and current Rust writers.
 use {
-    jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, NameLedger, StructureFact, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
+    jet_foundation.[GateLedger, GateEntry, GateDiagnostic, GateOperation, GateKind, GateSet, MARKER_ALLOW, MARKER_SCRUB, NameLedger, StructureFact, Program, Item, Func, Expr, Stmt, Span, CallArg, DeriveBodyItem, Marker, RuleSite, PolicyKey, PolicyValue, policy_key_name, policy_gate_forbidding, gate_kind_policy_key, gate_source_entry, gate_ledger_push, gate_ledger_sort, ast_visit_expr, ast_visit_statement]
     jet_foundation.[Diagnostic, Type, StrPart, ast_program, diagnostic_registry_row]
     jet_lexer.[Token]
     jet_parser.[jfmt_format_program_with_tokens]
@@ -42,7 +42,7 @@ sema_gate_ledger_collect: fn(modules: [SemaGateModule], names: NameLedger, gates
         sema_gate_statements(row.source, row.program.script_body, ledger, context)
         sema_gate_items(row.source, row.program.items, ledger, context)
         loop application in row.program.rule_facts {
-            if application.marker.name != "Allow" -> next
+            if application.marker.name != MARKER_ALLOW -> next
             reason_expr: sema_gate_marker_expr(application.marker, 1)
             reason: if sema_gate_literal_text(reason_expr) == .Val(literal) -> Val(literal) else -> reason_expr.map((expression) -> sema_gate_expression_text(expression))
             detail: if sema_gate_marker_expr(application.marker, 0) == .Val(value) -> sema_gate_expression_text(value) else -> "None"
@@ -221,7 +221,7 @@ sema_gate_function: fn(source: String, function: Func, ledger: &GateLedger, cont
     if function.scrub_tag == .Val(scrubbed) {
         span := function.name_span
         loop marker in function.markers {
-            if marker.name == "Scrub" {
+            if marker.name == MARKER_SCRUB {
                 span = marker.span
                 break
             }

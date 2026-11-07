@@ -29,6 +29,15 @@ use {
         Item,
         KernelMarker,
         KernelMode,
+        MARKER_COMMUTATIVE,
+        MARKER_FFI,
+        MARKER_INLINE,
+        MARKER_MUST_USE,
+        MARKER_PUBLISHED_SCHEMA,
+        MARKER_ROOT,
+        MARKER_SINGLE_USE,
+        MARKER_STATIC,
+        MARKER_TARGET,
         Marker,
         MarkerCallArg,
         NamedSpan,
@@ -843,7 +852,7 @@ parser_parse_param: fn(state: &JetParserState, zone: ParamZone) -> Param {
     root := false
     if parser_current_kind(state) == TOKEN_HASH {
         marker: parser_parse_marker(state)
-        root = marker.name == "Root"
+        root = marker.name == MARKER_ROOT
         // An unregistered name applies to the parameter site, where sema
         // reports it from the shared applied-rule vocabulary (E0927).
         if !marker_registered(marker.name) {
@@ -1213,7 +1222,7 @@ parser_marker_is_c_guest_import: fn(marker: Marker) -> Bool Never! {
 // `#FFI` and `#Import(c)` decide how a function's body is read (as foreign
 // source, or as the C symbol), so they are written above it.
 parser_marker_shapes_body: fn(marker: Marker) -> Bool Never! {
-    marker.name == "FFI" || parser_marker_is_c_guest_import(marker)
+    marker.name == MARKER_FFI || parser_marker_is_c_guest_import(marker)
 }
 
 // A body-shaping line inside that body comes too late to shape it and is
@@ -2228,7 +2237,7 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
     operator_marker := parser_operator_marker(above)
     loop parser_current_kind(state) == TOKEN_HASH {
         marker: parser_parse_marker(state)
-        if marker.name == "Commutative" -> operator_marker = Val(OperatorMarker.Commutative)
+        if marker.name == MARKER_COMMUTATIVE -> operator_marker = Val(OperatorMarker.Commutative)
     }
     using: parser_current(state)
     if using.kind == TOKEN_IDENT && parser_value(state, using) == "using" {
@@ -2282,7 +2291,7 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
 // `#Commutative` written after the trait does.
 parser_operator_marker: fn(markers: [Marker]) -> OperatorMarker? Never! {
     loop marker in markers {
-        if marker.name == "Commutative" && !marker.negated -> return Val(OperatorMarker.Commutative)
+        if marker.name == MARKER_COMMUTATIVE && !marker.negated -> return Val(OperatorMarker.Commutative)
     }
     None
 }
@@ -2347,11 +2356,11 @@ parser_parse_const: fn(state: &JetParserState, modifiers: ParsedItemModifiers) -
     marker_index := 0
     loop marker_index < modifiers.markers.len() {
         marker: modifiers.markers[marker_index]
-        if marker.name == "Static" {
+        if marker.name == MARKER_STATIC {
             attrs.push(ConstAttr.ForceStatic)
             rust_kind = RustConstKind.Static
         }
-        if marker.name == "Inline" -> attrs.push(ConstAttr.ForceInline)
+        if marker.name == MARKER_INLINE -> attrs.push(ConstAttr.ForceInline)
         marker_index += 1
     }
     result := ast_const(binding_name, name_token.span, parser_cover(modifiers.start_span, terminator_span), parsed_value.expr)
@@ -2480,15 +2489,15 @@ parser_apply_type_markers: fn(value: &StructDef, markers: [Marker]) Never! {
     index := 0
     loop index < markers.len() {
         marker: markers[index]
-        if marker.name == "SingleUse" {
+        if marker.name == MARKER_SINGLE_USE {
             value.is_single_use = true
             value.single_use_span = Val(marker.span)
         }
-        if marker.name == "MustUse" {
+        if marker.name == MARKER_MUST_USE {
             value.is_must_use = true
             value.must_use_span = Val(marker.span)
         }
-        if marker.name == "PublishedSchema" {
+        if marker.name == MARKER_PUBLISHED_SCHEMA {
             value.is_published_schema = true
             value.published_schema_span = Val(marker.span)
         }
@@ -2736,7 +2745,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     operator_marker := parser_operator_marker(modifiers.markers)
     loop parser_current_kind(state) == TOKEN_HASH && !parser_aborting(state) {
         marker: parser_parse_marker(state)
-        if marker.name == "Commutative" -> operator_marker = Val(OperatorMarker.Commutative)
+        if marker.name == MARKER_COMMUTATIVE -> operator_marker = Val(OperatorMarker.Commutative)
     }
     // S62: `impl Type.Trait using field_name` delegates the trait to a field.
     using: parser_current(state)
@@ -2793,7 +2802,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
 // among its markers, spelled as sema reads it (`linux`, `macos`, `windows`).
 parser_impl_os_target: fn(markers: [Marker]) -> String? {
     loop marker in markers {
-        if marker.name != "Target" || marker.args.len() != 1 -> next
+        if marker.name != MARKER_TARGET || marker.args.len() != 1 -> next
         if marker.args[0] == .Expr(value) {
             if parser_marker_target_path(value) == .Val(path) {
                 if path.starts_with("OS.") && target_os_named(path.slice(3, path.len())) == .Val(os) -> return Val(target_os_key(os))

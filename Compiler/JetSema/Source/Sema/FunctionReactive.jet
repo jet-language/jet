@@ -4,6 +4,8 @@
 use jet_foundation.[
     Binding,
     Expr,
+    MARKER_LOCAL,
+    MARKER_SHARED,
     Symbol,
     Type,
     type_name,
@@ -49,8 +51,8 @@ sema_function_reactive_record_binding: fn(context: &SemaCheckContext, binding: B
     is_local := false
     is_shared := false
     loop marker in binding.markers {
-        if marker.name == "Local" -> is_local = true
-        if marker.name == "Shared" -> is_shared = true
+        if marker.name == MARKER_LOCAL -> is_local = true
+        if marker.name == MARKER_SHARED -> is_shared = true
     }
     if is_local -> sema_function_reactive_append_unique(context.reactive_local_keys, symbol.id.key)
     if is_shared -> sema_function_reactive_append_unique(context.reactive_shared_keys, symbol.id.key)

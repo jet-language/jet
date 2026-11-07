@@ -22,6 +22,7 @@ use {
         InlineAsmContract,
         Item,
         LayoutFacts,
+        MARKER_MEMO,
         Marker,
         NamedSpan,
         OperatorMarker,
@@ -2199,7 +2200,7 @@ sema_checked_usable_alignment: fn(alignment: Int, target_mode: Bool) -> Int Neve
 sema_checked_validate_field_policy: fn(definition: StructDef, diagnostics: &[Diagnostic]) {
     loop field_index in 0..<definition.fields.len() {
         loop marker in definition.fields[field_index].serde_markers {
-            if marker.name != "Memo" -> next
+            if marker.name != MARKER_MEMO -> next
             if definition.fields[field_index].computed == None || marker.args.len() != 0 {
                 diagnostics.push(sema_error("E0382", marker.span, "`#Memo` cannot mark `{definition.fields[field_index].name}`.", "A stored computed result needs a formula and its dependency set; field `#Memo` does not take cache arguments.", "Write `#Memo` before `{definition.fields[field_index].name}: T -> expr` without arguments."))
             }

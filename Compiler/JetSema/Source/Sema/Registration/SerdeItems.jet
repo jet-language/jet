@@ -35,6 +35,8 @@ use jet_foundation.[
     IndexKind,
     Item,
     LValue,
+    MARKER_RENAME,
+    MARKER_RENAME_ALL,
     Marker,
     MigrationDecl,
     NamedSpan,
@@ -1011,7 +1013,7 @@ sema_serde_items_enum_tag: fn(markers: [Marker]) -> String? Never! {
 // Rust `serde_rename_all_style`: the identifier argument of `#RenameAll`.
 sema_serde_items_rename_all_style: fn(markers: [Marker]) -> String? Never! {
     loop marker in markers {
-        if marker.name != "RenameAll" -> next
+        if marker.name != MARKER_RENAME_ALL -> next
         if marker.args.len() == 0 -> return None
         if marker.args[0] == .Expr(argument) {
             if argument == .Ident(name, _, _) -> return Val(name)
@@ -1025,7 +1027,7 @@ sema_serde_items_rename_all_style: fn(markers: [Marker]) -> String? Never! {
 // first), else the container's casing of the variant name.
 sema_serde_items_variant_key: fn(variant: Variant, style: String?) -> String Never! {
     loop marker in variant.serde_markers {
-        if marker.name != "Rename" -> next
+        if marker.name != MARKER_RENAME -> next
         if sema_checked_marker_text_label(marker, "json") == .Val(label) -> return label
         if sema_serde_items_static_string(marker) == .Val(text) -> return text
         break

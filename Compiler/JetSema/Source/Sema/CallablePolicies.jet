@@ -1,6 +1,6 @@
 // Checked package settings become ordinary wrapper
 // functions and the existing TFnValueKind.Policy carrier. No backend policy.
-use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
+use jet_foundation.[AccessConvention, Call, Diagnostic, Expr, Func, Item, MARKER_ALLOW, MARKER_HTML, MARKER_NO_PRELUDE, MARKER_POLICY, MARKER_TARGET, NamedSpan, Param, ParamZone, Program, RuleSite, Span, SymbolID, SymbolKind, TCapture, Type, UserPolicyDecl, ast_func, ast_visit_statement, symbol_id]
 
 sema_policy_builtin: fn(name: String) -> Bool Never! {
     name == "cache" || name == "retry" || name == "trace" || name == "registration" || name == "route"
@@ -20,7 +20,7 @@ sema_policy_wrapper_function: fn(func: Func) -> Bool Never! {
 sema_policy_calls: fn(function: Func) -> [Call] Never! {
     calls := [Call]{}
     loop marker in function.markers {
-        if marker.name != "Policy" -> next
+        if marker.name != MARKER_POLICY -> next
         loop argument in marker.args {
             if argument == .Expr(value) && value == .Call(call, _) && !sema_policy_builtin(call.name) -> calls.push(call.copy())
         }
@@ -240,20 +240,20 @@ sema_policy_unsupported_applications: fn(program: Program) -> [AppliedRuleApplic
     unsupported := [AppliedRuleApplication]{}
     loop application in program.applied_rules {
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "Allow" -> unsupported.push(application.copy())
+        if application.marker.name != MARKER_ALLOW -> unsupported.push(application.copy())
     }
     loop application in program.rule_facts {
         // A file `#Target`, `#NoPrelude` or `#HTML(page)` is lowered by the
         // parser into the Program's target fields, its no_prelude flag or its
         // html_path (the web output's companion page), which are checked on
         // their own.
-        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == "Target" || application.marker.name == "NoPrelude" || application.marker.name == "HTML") -> next
+        if application.site == .Val(site) && site == RuleSite.File && (application.marker.name == MARKER_TARGET || application.marker.name == MARKER_NO_PRELUDE || application.marker.name == MARKER_HTML) -> next
         // An error conversion's markers stay its impl's markers after the
         // conversion became its routine (sema_error_conversion_items), and are
         // checked as every impl's markers are.
         if application.site == .Val(site) && site == RuleSite.Impl -> next
         if sema_policy_statement_form(application) -> next
-        if application.marker.name != "Allow" -> unsupported.push(application.copy())
+        if application.marker.name != MARKER_ALLOW -> unsupported.push(application.copy())
     }
     unsupported
 }

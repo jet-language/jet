@@ -12,6 +12,7 @@ use jet_foundation.[
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
     Expr,
+    MARKER_POLICY,
     Marker,
     PolicyDeclaration,
     PolicyKey,
@@ -37,7 +38,7 @@ sema_string_view_copies_declaration: fn(declaration: PolicyDeclaration) -> Bool 
 }
 
 sema_string_view_copies_marker: fn(marker: Marker) -> Bool Never! {
-    if marker.name != "Policy" -> return false
+    if marker.name != MARKER_POLICY -> return false
     loop (index, label) in marker.arg_labels {
         written: label ?? next
         if written.name != "copies" || index >= marker.args.len() -> next

@@ -15,6 +15,8 @@ use {
         FencedStatement,
         Func,
         Item,
+        MARKER_HTML,
+        MARKER_NO_PRELUDE,
         Marker,
         PolicyDeclaration,
         Program,
@@ -1569,7 +1571,7 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
     has_ordered_file_rules: ordered_file_rules.len() > 0
     ordered_file_rules_precede_imports := false
     loop marker in ordered_file_rules {
-        if marker.name == "NoPrelude" -> ordered_file_rules_precede_imports = true
+        if marker.name == MARKER_NO_PRELUDE -> ordered_file_rules_precede_imports = true
     }
     web_default: (prog.default_target ?? "") == "web"
     file_rule_count := 0
@@ -1636,7 +1638,7 @@ jfmt_format_program_with_tokens: fn(prog: Program, src: String, source_toks: [To
         // A page named by an expression (`#HTML(PAGE)`) keeps its written
         // argument; only a literal page is the canonical `Path{…}` above.
         loop application in prog.rule_facts {
-            if application.target == None && application.marker.name == "HTML" {
+            if application.target == None && application.marker.name == MARKER_HTML {
                 if !first -> jfmt_blank_line_between_items(f)
                 first = false
                 jfmt_fmt_marker_group(f, [Marker]{application.marker}, "#", true)

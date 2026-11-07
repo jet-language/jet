@@ -15,6 +15,7 @@ use jet_foundation.[
     InternalTag,
     Item,
     LValue,
+    MARKER_SCALAR,
     RuntimeLayer,
     Param,
     Span,
@@ -666,7 +667,7 @@ sema_core_collect_params: fn(params: [Param], imports: [SemaCoreImport], registe
 
 sema_core_collect_func_signature: fn(function: Func, imports: [SemaCoreImport], registered: [String:Bool], used: &[String], spans: &[SemaCoreUsageSpan], callbacks: &[String]) {
     loop marker in function.markers {
-        if marker.name == "Scalar" -> sema_core_note_usage(used, spans, "core.math::__mathtypes__", Val(function.name_span))
+        if marker.name == MARKER_SCALAR -> sema_core_note_usage(used, spans, "core.math::__mathtypes__", Val(function.name_span))
     }
     sema_core_collect_params(function.params, imports, registered, used, spans, callbacks)
     if function.return_type != None -> sema_core_collect_type(function.return_type ?? Type.Named{name: "Unit"}, registered, used, spans, function.return_type_span)

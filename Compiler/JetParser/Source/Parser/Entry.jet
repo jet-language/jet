@@ -11,6 +11,10 @@ use {
         FencedStatement,
         ImportDecl,
         Item,
+        MARKER_HTML,
+        MARKER_NO_PRELUDE,
+        MARKER_POLICY,
+        MARKER_TARGET,
         Marker,
         Name,
         ParseResult,
@@ -335,7 +339,7 @@ parser_chunk_bounds: fn(tokens: [Token], tables: TokenTables, source: [U8], thre
 // The name ids of the file rules (parser_chunk_bounds).
 parser_chunk_file_rules: fn(tables: TokenTables) -> [Int] Never! {
     file_rules := [Int]{}
-    file_rule_names: [String]{"NoPrelude", "HTML", "Target", "Policy"}
+    file_rule_names: [String]{MARKER_NO_PRELUDE, MARKER_HTML, MARKER_TARGET, MARKER_POLICY}
     loop rule in file_rule_names {
         if name_find(tables.names, rule) == .Val(name) -> file_rules.push(name_index(name))
     }

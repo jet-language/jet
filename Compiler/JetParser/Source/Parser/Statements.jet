@@ -14,6 +14,10 @@ use {
         Expr,
         ForKind,
         LValue,
+        MARKER_ARITHMETIC,
+        MARKER_FX,
+        MARKER_TRANSACT,
+        MARKER_UNSAFE,
         Marker,
         MarkerCallArg,
         NamedSpan,
@@ -2000,7 +2004,7 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         return statement
     }
     saved_tail_depth: state.callable_tail_depth
-    value_tail: marker.name == "Unsafe" && state.callable_tail_value && state.callable_tail_depth == state.block_depth
+    value_tail: marker.name == MARKER_UNSAFE && state.callable_tail_value && state.callable_tail_depth == state.block_depth
     if value_tail -> state.callable_tail_depth = state.block_depth + 1
     body: parser_parse_body_block(state, value_tail)
     state.callable_tail_depth = saved_tail_depth
@@ -2010,13 +2014,13 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
     // see it like any other applied rule. A bare `#Transact { … }` binds no
     // handle and records no application (Rust `at_transact_stmt`, @
     // 6083377777).
-    if marker.name != "Transact" || args.len() > 0 {
+    if marker.name != MARKER_TRANSACT || args.len() > 0 {
         // copy: the application row and the statement built below each keep the marker.
         application := marker.copy()
         // Rust `#FX(name: Effects…)`: `name:` binds the scoped Authority handle,
         // not a rule parameter, so the application row carries the effects
         // unlabeled.
-        if marker.name == "FX" -> application.arg_labels = (loop _ in marker.arg_labels -> CallLabel?{None})
+        if marker.name == MARKER_FX -> application.arg_labels = (loop _ in marker.arg_labels -> CallLabel?{None})
         state.statement_rules.push(AppliedRuleApplication{marker: application, target: Val(span), site: Val(RuleSite.Block)})
     }
     if marker.name == {
@@ -2084,7 +2088,7 @@ parser_parse_marked_statement: fn(state: &JetParserState) -> Stmt {
         else -> {
             block_args: loop arg in args -> arg.expr
             args_span: if args.len() > 0 -> Val(marker_span) else -> None
-            text_block: marker.name != "Arithmetic"
+            text_block: marker.name != MARKER_ARITHMETIC
             Stmt.ScopeMember{name: marker.name, name_span: marker.name_span, args: block_args, args_span: args_span, body: body.statements, dsl: text_block, dot_span: if text_block -> hash.span else -> marker_span, span: span}
         }
     }

@@ -12,6 +12,7 @@
 // grants.
 use jet_foundation.[
     EFFECT_VOCABULARY_ROOTS,
+    MARKER_MEMO,
     authority_grantable_roots,
     authority_is_deny_only,
     BodyCallArg,
@@ -289,7 +290,7 @@ sema_effect_source_from_function: fn(func: Func, module_identity: String) -> Sem
 sema_effect_memo_span: fn(func: Func) -> Span? Never! {
     if func.is_comptime -> return None
     loop marker in func.markers {
-        if marker.name == "Memo" -> return Val(marker.span)
+        if marker.name == MARKER_MEMO -> return Val(marker.span)
     }
     None
 }

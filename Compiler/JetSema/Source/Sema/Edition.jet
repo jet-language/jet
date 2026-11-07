@@ -1,7 +1,7 @@
 // Lifecycle is a projection of resolved name/call sites. Adapted
 // deprecation_from_markers. Payloads belong to written markers or the checked
 // Core registry, never a name table.
-use jet_foundation.[CoreMarkerApplication, Diagnostic, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, diagnostic_with_edit, symbol_kind_name, type_identity_equal]
+use jet_foundation.[CoreMarkerApplication, Diagnostic, MARKER_DEPRECATED, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, diagnostic_with_edit, symbol_kind_name, type_identity_equal]
 
 SemaLifecycleResult: struct {
     diagnostics: [Diagnostic]
@@ -35,7 +35,7 @@ sema_lifecycle_marker_string: fn(marker: Marker, label: String, positional: Int)
 
 sema_lifecycle_marker: fn(markers: [Marker], name: String) -> CoreMarkerApplication? {
     loop marker in markers {
-        if marker.name != "Deprecated" -> next
+        if marker.name != MARKER_DEPRECATED -> next
         since: sema_lifecycle_marker_string(marker, "since", 0) ?? return None
         replacement: sema_lifecycle_marker_string(marker, "use", 1) ?? return None
         return Val(CoreMarkerApplication{member: name, since: since, replacement: replacement, removed_in: sema_lifecycle_marker_string(marker, "removed_in", 2)})

@@ -11,6 +11,7 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     Func,
+    MARKER_DEV_PANEL,
     Span,
     StrPart,
     StructDef,
@@ -107,7 +108,7 @@ sema_call_devtools_panel_for_field: fn(environment: SemaScopeEnvironment, progra
 
 sema_call_devtools_marks_panel: fn(function: Func) -> Bool Never! {
     loop marker in function.markers {
-        if marker.name == "DevPanel" -> return true
+        if marker.name == MARKER_DEV_PANEL -> return true
     }
     false
 }
@@ -141,7 +142,7 @@ sema_check_devtools_panel: fn(func: Func, environment: SemaScopeEnvironment, pro
     marker_valid := true
     marker_count := 0
     loop marker in func.markers {
-        if marker.name != "DevPanel" -> next
+        if marker.name != MARKER_DEV_PANEL -> next
         if marker_count == 0 {
             marker_span = Val(marker.span)
             marker_valid = !marker.negated && marker.args.len() == 0

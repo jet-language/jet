@@ -13,6 +13,10 @@ use jet_foundation.[
     JobMetadata,
     JobScope,
     JobSkip,
+    MARKER_EVERY,
+    MARKER_JOB,
+    MARKER_MUST_USE,
+    MARKER_SINGLE_USE,
     Marker,
     MaturityTag,
     MetaAttr,
@@ -68,11 +72,11 @@ parser_apply_enum_type_markers: fn(value: &EnumDef, markers: [Marker]) Never! {
     value.derives = derives
     value.auto_derive_default = true
     loop marker in markers {
-        if marker.name == "SingleUse" {
+        if marker.name == MARKER_SINGLE_USE {
             value.is_single_use = true
             value.single_use_span = Val(marker.span)
         }
-        if marker.name == "MustUse" {
+        if marker.name == MARKER_MUST_USE {
             value.is_must_use = true
             value.must_use_span = Val(marker.span)
         }
@@ -744,14 +748,14 @@ parser_every_marker_from_marker: fn(state: &JetParserState, marker: Marker) -> E
 parser_project_function_job_markers: fn(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
     valid := true
     loop marker in markers {
-        if marker.name == "Job" {
+        if marker.name == MARKER_JOB {
             function.is_job = true
             function.job_span = Val(marker.span)
             diagnostics_before := state.diagnostics.len()
             function.job_metadata = parser_job_metadata_from_marker(state, marker)
             if state.diagnostics.len() != diagnostics_before -> valid = false
         }
-        if marker.name == "Every" {
+        if marker.name == MARKER_EVERY {
             diagnostics_before := state.diagnostics.len()
             function.every = parser_every_marker_from_marker(state, marker)
             if state.diagnostics.len() != diagnostics_before -> valid = false

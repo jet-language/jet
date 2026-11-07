@@ -28,6 +28,9 @@ use jet_foundation.[
     ImportDecl,
     Item,
     ItemTemplateLoop,
+    MARKER_FLATTEN,
+    MARKER_SKIP,
+    MARKER_UNTAGGED,
     Marker,
     MarkerCallArg,
     MarkerDecl,
@@ -442,7 +445,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
                     }
                     untagged := false
                     loop marker in def.serde_markers {
-                        if marker.name == "Untagged" -> untagged = true
+                        if marker.name == MARKER_UNTAGGED -> untagged = true
                     }
                     shapes := [SerdeWireShape]{}
                     if !untagged {
@@ -2012,7 +2015,7 @@ jfmt_fmt_type_body_member: fn(f: &JetFmt, member: JetFmtMember, body: JetFmtType
         jfmt_emit_leading(f, field.name_span.start)
         skipped := false
         loop marker in field.serde_markers {
-            if marker.name == "Skip" || marker.name == "Flatten" -> skipped = true
+            if marker.name == MARKER_SKIP || marker.name == MARKER_FLATTEN -> skipped = true
         }
         jfmt_fmt_field(f, field, derives_decode && !skipped)
     } else if member.kind == JFMT_MEMBER_CLI_BINDING {

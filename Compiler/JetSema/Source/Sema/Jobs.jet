@@ -11,6 +11,7 @@ use {
         Func,
         Item,
         JobScope,
+        MARKER_DOC,
         Param,
         Span,
         SymbolKind,
@@ -153,7 +154,7 @@ sema_job_default_text: fn(expression: Expr) -> String? {
 
 sema_job_doc: fn(function: Func) -> String? {
     loop marker in function.markers {
-        if marker.name != "Doc" -> next
+        if marker.name != MARKER_DOC -> next
         if marker.args.len() == 0 -> return None
         if marker.args[0] == {
             .Expr(expression) -> if expression == {

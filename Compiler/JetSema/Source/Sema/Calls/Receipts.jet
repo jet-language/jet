@@ -10,6 +10,8 @@ use jet_foundation.[
     Diagnostic,
     Expr,
     FunctionDefaultRef,
+    MARKER_CODABLE,
+    MARKER_RECEIPT,
     Marker,
     Span,
     StructDef,
@@ -25,14 +27,14 @@ use jet_foundation.[
 // The record's live `#Receipt` marker.
 sema_receipt_marker: fn(definition: StructDef) -> Marker? Never! {
     loop marker in definition.type_markers {
-        if marker.name == "Receipt" && !marker.negated -> return Val(marker)
+        if marker.name == MARKER_RECEIPT && !marker.negated -> return Val(marker)
     }
     None
 }
 
 sema_receipt_codable: fn(definition: StructDef) -> Bool Never! {
     loop marker in definition.type_markers {
-        if marker.name == "Codable" && !marker.negated -> return true
+        if marker.name == MARKER_CODABLE && !marker.negated -> return true
     }
     false
 }

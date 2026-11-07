@@ -23,6 +23,10 @@ use jet_foundation.[
     BodyIfCond,
     BodyPattern,
     BodyTree,
+    MARKER_DEBUG_ONLY,
+    MARKER_META,
+    MARKER_OFF,
+    MARKER_TRACK,
     NodeKind,
     body_each_if_cond_child,
     body_each_node_kind_child,
@@ -4678,7 +4682,7 @@ sema_stmt_declare_unchecked_binding: fn(binding: Binding, environment: SemaScope
 
 sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
     loop marker in binding.markers {
-        if marker.name == "Meta" && !marker.negated && sema_marker_rules_check_rule_signature(marker, environment, program, scopes, state, tail_store, context, diagnostics) -> sema_marker_rules_check_local_meta(marker, diagnostics)
+        if marker.name == MARKER_META && !marker.negated && sema_marker_rules_check_rule_signature(marker, environment, program, scopes, state, tail_store, context, diagnostics) -> sema_marker_rules_check_local_meta(marker, diagnostics)
     }
     if binding.name == "err" -> diagnostics.push(sema_err_shadow_lint(binding.name_span))
     if sema_ownership_report_lending_view_escape(binding.init, "be stored in a binding", scopes, context, diagnostics) -> return None
@@ -5037,7 +5041,7 @@ sema_stmt_uninit_fixed_over_take: fn(receiver: Expr, method: String, args: [Call
 // and declaration site (Rust `check_binding`); the marker stays on the AST.
 sema_stmt_track_origin: fn(binding: Binding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) Never! {
     tracked: loop marker in binding.markers {
-        if marker.name == "Track" && !marker.negated -> break true
+        if marker.name == MARKER_TRACK && !marker.negated -> break true
     } ?? false
     if !tracked || binding.name.len() == 0 || binding.name == "_" -> return
     index: sema_scope_resolve_index(scopes, binding.name) ?? return
@@ -5413,7 +5417,7 @@ sema_stmt_transaction_collect_roots: fn(statements: [Stmt], roots: &[String]) Ne
             | .Live(body, _)
             | .AssumeDet(_, _, body, _) -> sema_stmt_transaction_collect_roots(body, roots)
             .Switched(marker, body, _) -> {
-                if marker.name != "Off" -> sema_stmt_transaction_collect_roots(body, roots)
+                if marker.name != MARKER_OFF -> sema_stmt_transaction_collect_roots(body, roots)
             }
             .For(_, _, _, _, body, _, _, _, _) -> sema_stmt_transaction_collect_roots(body, roots)
             .CountedLoop(_, _, _, body, _, _, _) -> sema_stmt_transaction_collect_roots(body, roots)
@@ -8861,21 +8865,21 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
         }
         .Switched(marker, body, span) -> {
             if {
-                marker.name == "Off" || marker.name == "DebugOnly" -> {
+                marker.name == MARKER_OFF || marker.name == MARKER_DEBUG_ONLY -> {
                     erased_scope_mark: sema_scope_mark(scopes)
                     erased_state := sema_ownership_state_snapshot(state)
                     erased_mark: sema_check_context_mark(context)
                     checked: sema_check_statements(body, return_type, environment, program, scopes, erased_state, tail_store, context, diagnostics, loop_depth)
                     erased_reasons := [String]{}
                     loop reason_index in erased_mark.incomplete_reasons..<context.incomplete_reasons.len() -> erased_reasons.push(context.incomplete_reasons[reason_index])
-                    if marker.name == "DebugOnly" -> sema_check_context_rollback_keep_expr_ids(context, erased_mark) else -> sema_check_context_rollback(context, erased_mark)
+                    if marker.name == MARKER_DEBUG_ONLY -> sema_check_context_rollback_keep_expr_ids(context, erased_mark) else -> sema_check_context_rollback(context, erased_mark)
                     sema_scope_rollback(scopes, erased_scope_mark)
                     if {
                         !checked.complete -> {
                             complete = false
                             loop reason in erased_reasons -> sema_check_unsupported(context, reason)
                         }
-                        marker.name == "DebugOnly" -> {
+                        marker.name == MARKER_DEBUG_ONLY -> {
                             output.push(TStmt.DebugOnly{body: checked.value, span: span})
                         }
                     }

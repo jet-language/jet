@@ -17,6 +17,14 @@ use {
         ConstDef,
         DeclID,
         DeclTable,
+        MARKER_CLI,
+        MARKER_DEPRECATED,
+        MARKER_DOC,
+        MARKER_ENV,
+        MARKER_FLATTEN,
+        MARKER_RENAME_ALL,
+        MARKER_SHORT,
+        MARKER_SKIP,
         decl_id_index,
         decl_table_add,
         decl_table_find,
@@ -3136,7 +3144,7 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 loop binding in definition.cli_bindings -> diagnostics.push(sema_registration_e1345(binding.name, binding.name_span, "a callable member is only valid inside a `#CLI` program struct"))
                 loop field in definition.fields {
                     loop marker in field.serde_markers {
-                        if marker.name == "Short" || marker.name == "Env" -> diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
+                        if marker.name == MARKER_SHORT || marker.name == MARKER_ENV -> diagnostics.push(sema_registration_e1319(marker.name, field.name, "`#Short` and `#Env` describe generated command inputs, but this struct is not `#CLI`.", "remove the marker, or mark the command-input struct `#CLI`", marker.name_span))
                     }
                 }
                 next
@@ -3166,7 +3174,7 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 if kind == SemaRegistrationCLIFieldKind.Flag {
                     env_marker: sema_registration_cli_marker(field.serde_markers, "Env")
                     if env_marker == .Val(marker) && sema_registration_cli_marker_string(marker) != None {
-                        diagnostics.push(sema_registration_e1319("Env", field.name, "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.", "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", marker.name_span))
+                        diagnostics.push(sema_registration_e1319(MARKER_ENV, field.name, "a `Bool` command field is a presence flag, while `#Env` lowers to a value option.", "remove `#Env`, or use it on an `Int`, `Float`, `String`, `Path`, or optional value field", marker.name_span))
                     }
                 }
             }
@@ -3198,7 +3206,7 @@ sema_registration_cli_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 sema_registration_cli_command_word(unicode.lower(binding.name), binding.name_span, seen_flags, seen_commands, diagnostics)
                 foreign_marker := false
                 loop marker in binding.markers {
-                    if marker.name != "Doc" -> foreign_marker = true
+                    if marker.name != MARKER_DOC -> foreign_marker = true
                 }
                 if foreign_marker -> diagnostics.push(sema_registration_e1345(binding.name, binding.name_span, "a callable member accepts `#Doc`, but field-only CLI markers do not apply to bindings"))
                 target: sema_registration_cli_binding_target(items, binding.target) ?? {
@@ -3368,7 +3376,7 @@ sema_registration_e1345: fn(name: String, span: Span, why: String) -> Diagnostic
 // Rust `validate_cli_items` standard-pack test: `#CLI(Standard)`.
 sema_registration_cli_standard: fn(markers: [Marker]) -> Bool Never! {
     loop marker in markers {
-        if marker.name != "CLI" -> next
+        if marker.name != MARKER_CLI -> next
         loop argument in marker.args {
             if argument == .Expr(value) && value == .Ident(name, _, _) && name == "Standard" -> return true
         }
@@ -3422,8 +3430,8 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
                 skip := false
                 flatten := false
                 loop marker in field.serde_markers {
-                    if marker.name == "Skip" -> skip = true
-                    if marker.name == "Flatten" -> flatten = true
+                    if marker.name == MARKER_SKIP -> skip = true
+                    if marker.name == MARKER_FLATTEN -> flatten = true
                 }
                 if flatten && !sema_registration_serde_struct_named(field.ty) {
                     diagnostics.push(sema_error("E2408", field.name_span, "`#[Flatten]` on `{field.name}` needs a struct-typed field", "flatten splices another struct's keys into this object, so the field must be a `#[Codable]` struct — not a primitive, list, or map", "give `{field.name}` a `#[Codable]` struct type, or drop `#[Flatten]`"))
@@ -3460,7 +3468,7 @@ sema_registration_serde_items: fn(items: [Item], diagnostics: &[Diagnostic]) {
 // that is not a name or text is the marker signature's problem (E0930).
 sema_registration_serde_rename_all: fn(markers: [Marker], diagnostics: &[Diagnostic]) {
     loop marker in markers {
-        if marker.name != "RenameAll" -> next
+        if marker.name != MARKER_RENAME_ALL -> next
         style: sema_checked_marker_text(marker) ?? next
         if sema_checked_wire_style_valid(Val(style)) -> next
         span := marker.span
@@ -3537,7 +3545,7 @@ sema_registration_deprecated_methods: fn(methods: [Func], diagnostics: &[Diagnos
 sema_registration_deprecated_markers: fn(markers: [Marker], is_public: Bool, diagnostics: &[Diagnostic]) {
     if is_public -> return
     loop marker in markers {
-        if marker.name == "Deprecated" -> diagnostics.push(sema_error("E0932", marker.span, "`#Deprecated` requires a public item", "the lifecycle marker retires stable public declarations; an item inside a `priv module` is not part of the public surface", "move the item out of its `priv module`, or remove `#Deprecated`"))
+        if marker.name == MARKER_DEPRECATED -> diagnostics.push(sema_error("E0932", marker.span, "`#Deprecated` requires a public item", "the lifecycle marker retires stable public declarations; an item inside a `priv module` is not part of the public surface", "move the item out of its `priv module`, or remove `#Deprecated`"))
     }
 }
 

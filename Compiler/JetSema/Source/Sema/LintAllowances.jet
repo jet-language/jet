@@ -8,6 +8,7 @@ use jet_foundation.[
     Diagnostic,
     Func,
     Item,
+    MARKER_ALLOW,
     Marker,
     Program,
     RuleSite,
@@ -28,7 +29,7 @@ SemaLintAllowance: struct {
 // The lint type path an `#Allow` marker names (`jet.UnusedParameter`), if it
 // is one.
 sema_lint_allowance_name: fn(marker: Marker) -> String? Never! {
-    if marker.name != "Allow" || marker.negated || marker.args.len() == 0 -> return None
+    if marker.name != MARKER_ALLOW || marker.negated || marker.args.len() == 0 -> return None
     if marker.args[0] == .Expr(expr) {
         if expr == .Field(base, member, _, _) {
             if base == .Ident(package, _, _) -> return Val("{package}.{member}")

@@ -5,6 +5,8 @@ use jet_foundation.[
     BodyExpr,
     BodyTree,
     FnBody,
+    MARKER_CLI,
+    MARKER_SCALAR,
     NodeKind,
     TBuiltinOp,
     jet_ring_core_module_layer,
@@ -2231,7 +2233,7 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     // record no loop proof (LoopFacts.jet).
     scalar := false
     loop marker in func.markers {
-        if marker.name == "Scalar" -> scalar = true
+        if marker.name == MARKER_SCALAR -> scalar = true
     }
     built := TFunc{
         name: func.name,
@@ -7298,7 +7300,7 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
 // field from its compile-time default value.
 sema_comptime_struct_bakes_defaults: fn(derives: [NamedSpan]) -> Bool Never! {
     loop marker in derives {
-        if owned_trait_codec_marker(marker.name) || marker.name == "CLI" -> return true
+        if owned_trait_codec_marker(marker.name) || marker.name == MARKER_CLI -> return true
     }
     false
 }

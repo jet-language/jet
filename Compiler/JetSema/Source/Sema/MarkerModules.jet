@@ -3,7 +3,7 @@
 // spelling of its import alias and module path (`use core.http.server as
 // server` gives `#Server.Get`); a lowercase library part is E0087.
 use {
-    jet_foundation.[Diagnostic, Func, Item, MARKER_SOURCE, Marker, MarkerDecl, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, diagnostic_with_edit, foundation_core_argument_menus, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
+    jet_foundation.[Diagnostic, Func, Item, MARKER_ALLOW, MARKER_FX, MARKER_SOURCE, Marker, MarkerDecl, Program, RuleSite, Span, TAppliedRule, TAppliedRuleArgumentMenu, TextEdit, diagnostic_with_edit, foundation_core_argument_menus, owned_trait, owned_trait_auto_derive_marker, sema_casing_marker_qualifier]
     jet_parser.[parse_generated_source]
 }
 
@@ -573,13 +573,13 @@ sema_marker_module_check_builtin_sites: fn(catalog: SemaScopeMembersMarkerRegist
         site: application.site ?? next
         // A lint allowance is placed by its own check
         // (sema_marker_rules_validate_allow), not by its registry row.
-        if application.marker.name == "Allow" -> next
+        if application.marker.name == MARKER_ALLOW -> next
         index: sema_marker_rules_builtin_index(catalog, application.marker) ?? next
         key: sema_marker_rules_application_key(application)
         if reported.get(key) != None -> next
         reported[key] = true
         if sema_marker_rules_fact_allows(catalog.applied_rules[index], application, applications) -> next
-        if application.marker.name == "FX" && (site == RuleSite.Function || site == RuleSite.Method) {
+        if application.marker.name == MARKER_FX && (site == RuleSite.Function || site == RuleSite.Method) {
             diagnostics.push(sema_error("E0355", application.marker.span, "`#FX` cannot attach to a function", "`#FX(…)` caps a block or a module; a function states its limit in its effect row", "write the limit in the function's row, such as `show: fn() -[IO]> {{ … }}`, or put `#FX(…)` on a block inside it"))
             next
         }

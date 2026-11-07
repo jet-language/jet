@@ -25,6 +25,7 @@ use {
         ImageLit,
         ImportDecl,
         Item,
+        MARKER_FX,
         Marker,
         ModuleAliasDef,
         ModuleArg,
@@ -364,7 +365,7 @@ parser_parse_code_module_after_name: fn(state: &JetParserState, modifiers: Parse
 parser_module_apply_cap: fn(state: &JetParserState, item: &&Item) -> Item {
     if item == .CodeModule(definition) {
         loop marker in definition.markers {
-            if marker.name != "FX" -> next
+            if marker.name != MARKER_FX -> next
             cap: parser_module_fx_cap(state, marker, definition.name) ?? return item.move()
             updated := definition
             updated.cap = Val(cap)

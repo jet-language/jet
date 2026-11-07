@@ -13,6 +13,7 @@ use jet_foundation.[
     Func,
     FunctionCallMetadata,
     FunctionDefaultRef,
+    MARKER_POLICY,
     ParamZone,
     StrPart,
     SymbolID,
@@ -111,7 +112,7 @@ sema_callable_policy_argument_text: fn(expr: Expr) -> String Never! {
 sema_callable_policies: fn(func: Func) -> CallablePolicyChain Never! {
     policies := [CallablePolicy]{}
     loop marker in func.markers {
-        if marker.name == "Policy" {
+        if marker.name == MARKER_POLICY {
             loop argument in marker.args {
                 if argument == .Expr(value) {
                     if value == .Call(call, _) {
