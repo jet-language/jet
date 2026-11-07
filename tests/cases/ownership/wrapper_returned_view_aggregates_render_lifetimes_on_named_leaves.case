@@ -1,4 +1,8 @@
-# tests/ownership.rs::wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves: the original's literal expectations; Jet does not meet them yet (assert not satisfied, tests/known-failing.tsv).
+# tests/ownership.rs::wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves, migrated to the implicit-copy
+# ownership model (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet): `-[]> Window String!` names String as its
+# failure domain, which is not an Error type, so the check stops there.
 fixture: wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves/input
 step: jet check run.jet
-exit: 0 # tests/ownership.rs:4657 expect
+exit: nonzero # tests/ownership.rs:4657
+stderr: ~ "[jet.FailureDomainNotErrorType]" # the registered diagnostic
+stderr: ~ "Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract." # and its fix

@@ -1,8 +1,15 @@
-# tests/ownership.rs::builtin_and_composite_receivers_use_the_call_access_frame: the original's literal expectations; Jet does not meet them yet (assert not satisfied, tests/known-failing.tsv).
+# tests/ownership.rs::builtin_and_composite_receivers_use_the_call_access_frame, migrated to the implicit-copy ownership
+# model (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet). o1 passes the written place twice and is rejected. In o2
+# the list literal `[value]` copies the Int before `both` takes its write access, so the call is legal.
 fixture: builtin_and_composite_receivers_use_the_call_access_frame/input
 step: jet check o1/run.jet
 exit: nonzero # tests/ownership.rs:1267 expect_err
 stderr: ~ "[jet.UseWhileWriteActive]" # tests/ownership.rs:1268 assert!
+stderr: ~ "Fix: Pass `values` only once, or copy first with `values.copy()`" # the diagnostic's fix
 step: jet check o2/run.jet
-exit: nonzero # tests/ownership.rs:1278 expect_err
-stderr: ~ "[jet.UseWhileWriteActive]" # tests/ownership.rs:1279 assert!
+exit: 0
+stdout: = ""
+stderr: !~ "[jet." # no diagnostic
+step: jet run o2/run.jet
+exit: 0
+stdout: = ""

@@ -1,8 +1,13 @@
-# tests/ownership.rs::named_write_window_calls_keep_alias_and_read_view_checks: the original's literal expectations; Jet does not meet them yet (assert not satisfied, tests/known-failing.tsv).
+# tests/ownership.rs::named_write_window_calls_keep_alias_and_read_view_checks, migrated to the implicit-copy ownership
+# model (Compiler/JetSema/Source/Sema/Ownership/CopySites.jet). o1 reads `value` beside its named write window, which sema
+# rejects as a read during that window. o2 passes the read-only binding `read` to a write parameter, which sema rejects as
+# an edit through a binding without write access.
 fixture: named_write_window_calls_keep_alias_and_read_view_checks/input
 step: jet check o1/run.jet
 exit: nonzero # tests/ownership.rs:3063 expect_err
-stderr: ~ "[jet.UseWhileWriteActive]" # tests/ownership.rs:3064 assert!
+stderr: ~ "[jet.ReadDuringWriteWindow]" # the registered diagnostic
+stderr: ~ "Fix: Read or edit through `window` instead of `value`" # and its fix
 step: jet check o2/run.jet
 exit: nonzero # tests/ownership.rs:3080 expect_err
-stderr: ~ "[jet.OwnerMovedWhileViewed]" # tests/ownership.rs:3081 assert!
+stderr: ~ "[jet.FieldWriteWithoutMarker]" # the registered diagnostic
+stderr: ~ "Fix: Take a write window from a mutable owner instead" # and its fix
