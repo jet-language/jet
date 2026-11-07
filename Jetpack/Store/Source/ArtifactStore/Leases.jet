@@ -253,10 +253,12 @@ store_artifact_read_journal: fn(path: String) -[FS]> ArtifactJournalState Artifa
     Ok(state)
 }
 
-// One verified journal record (Rust `(operation, key, sequence)`).
+// One verified journal record (Rust `(operation, key, sequence)`), with the
+// entry length it names.
 ArtifactJournalRecord: struct {
     operation: String
     key: ArtifactEntryKey
+    length: Int
     sequence: Int
 }
 
@@ -270,11 +272,11 @@ store_artifact_parse_journal_line: fn(line: [U8]) -> ArtifactJournalRecord? Neve
     if fields.len() != 7 || fields[0] != STORE_ARTIFACT_VERSION -> return None
     // The checksum covers everything before it, trailing separator included.
     if pkg_sha256_hex(store_artifact_slice(line, 0, end - fields[6].bytes().len())) != fields[6] -> return None
-    store_artifact_parse_count(fields[4]) ?? return None
+    length: store_artifact_parse_count(fields[4]) ?? return None
     sequence: store_artifact_parse_count(fields[5]) ?? return None
     key: ArtifactEntryKey.parse_wire(fields[2], fields[3]) ?? return None
     if fields[1] != "put" && fields[1] != "touch" && fields[1] != "remove" -> return None
-    Val(ArtifactJournalRecord{operation: fields[1], key, sequence})
+    Val(ArtifactJournalRecord{operation: fields[1], key, length, sequence})
 }
 
 // Bytes read from the journal's end to find its final line. A line is one

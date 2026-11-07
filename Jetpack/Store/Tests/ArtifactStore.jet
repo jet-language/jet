@@ -205,6 +205,52 @@ store_artifact_test_host_limit: fn(store: ArtifactStore) -[FS]> Int? Never! {
     store_artifact_test_cleanup(root)
 }
 
+// The store's footprint as a capacity check reads it, under the store lock.
+store_artifact_test_tallied: fn(store: ArtifactStore) -[FS, Env, Time, Rand]> Int {
+    lock: store.acquire_lock() ?? panic("tally lock")
+    defer close(lock)
+    store.footprint_locked() ?? panic("footprint")
+}
+
+#Test("artifact store footprint tally follows the journal and is rebuilt when stale") {
+    root: store_artifact_test_root("tally")
+    store: store_artifact_test_store(root, 1024)
+    _: store.publish_blob("1111".bytes()) ?? panic("first")
+    _: store.publish_blob("22222".bytes()) ?? panic("second")
+    _: store.publish_blob("333333".bytes()) ?? panic("third")
+    tally: files.join(root, STORE_ARTIFACT_FOOTPRINT_FILE)
+    assert(files.is_file(tally))
+    assert_eq(store_artifact_test_tallied(store), 15)
+    assert_eq(store_artifact_test_tallied(store), 15)
+    // The prune compacts the journal under the tally.
+    report: store.prune_to(6) ?? panic("prune")
+    assert_eq(report.after_bytes, 6)
+    assert_eq(store_artifact_test_tallied(store), 6)
+    _: store.publish_blob("7777777".bytes()) ?? panic("fourth")
+    assert_eq(store_artifact_test_tallied(store), 13)
+    files.write(tally, "{STORE_ARTIFACT_VERSION}|footprint|0|999|-\n") ?? panic("stale tally")
+    assert_eq(store_artifact_test_tallied(store), 13)
+    files.write(tally, "not a tally") ?? panic("malformed tally")
+    assert_eq(store_artifact_test_tallied(store), 13)
+    assert_eq((store.status() ?? panic("status")).footprint_bytes, 13)
+    store_artifact_test_cleanup(root)
+}
+
+#Test("artifact store capacity prunes from the footprint tally") {
+    root: store_artifact_test_root("tally-cap")
+    store: store_artifact_test_store(root, 12)
+    first: store.publish_blob("1111".bytes()) ?? panic("first")
+    second: store.publish_blob("2222".bytes()) ?? panic("second")
+    third: store.publish_blob("3333".bytes()) ?? panic("third")
+    fourth: store.publish_blob("4444".bytes()) ?? panic("fourth")
+    assert(store_artifact_test_blob(store, first) == None)
+    assert(store_artifact_test_blob(store, second) != None)
+    assert(store_artifact_test_blob(store, third) != None)
+    assert(store_artifact_test_blob(store, fourth) != None)
+    assert_eq(store_artifact_test_tallied(store), 12)
+    store_artifact_test_cleanup(root)
+}
+
 #Test("artifact store live lease pins blob and stale lease is reclaimed") {
     root: store_artifact_test_root("lease")
     store: store_artifact_test_store(root, 1024)
