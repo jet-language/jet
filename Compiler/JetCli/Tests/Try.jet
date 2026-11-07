@@ -69,9 +69,7 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
         }
     }
 }
-// Known failing: #5454 owns this port. With `use tools: core.devtools` the
-// retained checked projection reports a broken loaded-module bijection.
-#Test("try", expected_fail: true) {
+#Test("try") {
     try_service_ownership(try_service_request([JetDriverCoreSource]{}), 1)
     try_service_ownership(try_service_request([JetDriverCoreSource]{
         {module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, text: jet_driver_core_text("")},
@@ -82,14 +80,14 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     plan: JetCLITryPlan{name: "Sample", entry: path, action: JetCLITryAction.Edits{edits: [JetCLITryEdit]{JetCLITryEdit{path: path, edit: TextEdit{span: Span{start: 11, end: 12}, new_text: "2"}}}}}
     verdict: JetCLITryVerdict{diagnostics: [Diagnostic]{}, claims_rechecked: 2, claims_reused: 5}
     receipt: jet_cli_try_receipt(plan.name, changes, verdict)
-    assert(receipt == "try-ea90da779060")
+    assert(receipt == "try-addc2faecf86")
     plain: jet_cli_try_output(plan, verdict, receipt, false, false, "run: fn() {{ 2 }}\n")
-    assert(plain.stdout == "try `Sample`: verdict clean\n  claims re-checked: 2 · claims reused: 5\n  receipt: try-ea90da779060\n  rolled back (default): working tree is byte-identical\n")
+    assert(plain.stdout == "try `Sample`: verdict clean\n  claims re-checked: 2 · claims reused: 5\n  receipt: try-addc2faecf86\n  rolled back (default): working tree is byte-identical\n")
     assert(plain.stderr == "" && plain.exit_code == JET_DRIVER_EXIT_OK)
     kept: jet_cli_try_output(plan, verdict, receipt, true, false, "run: fn() {{ 2 }}\n")
-    assert(kept.stdout == "try `Sample`: verdict clean\n  claims re-checked: 2 · claims reused: 5\n  receipt: try-ea90da779060\n  kept: working tree now contains the staged bytes\n")
+    assert(kept.stdout == "try `Sample`: verdict clean\n  claims re-checked: 2 · claims reused: 5\n  receipt: try-addc2faecf86\n  kept: working tree now contains the staged bytes\n")
     json: jet_cli_try_output(plan, verdict, receipt, false, true, "run: fn() {{ 2 }}\n")
-    assert(json.stdout == "{{\"schema\":\"jet.status/v1\",\"action\":\"try\",\"ok\":true,\"reports\":[],\"name\":\"Sample\",\"kept\":false,\"claims_rechecked\":2,\"claims_reused\":5,\"receipt_id\":\"try-ea90da779060\"}}\n")
+    assert(json.stdout == "{{\"schema\":\"jet.status/v1\",\"action\":\"try\",\"ok\":true,\"reports\":[],\"name\":\"Sample\",\"kept\":false,\"claims_rechecked\":2,\"claims_reused\":5,\"receipt_id\":\"try-addc2faecf86\"}}\n")
     assert(json.stderr == "" && json.exit_code == JET_DRIVER_EXIT_OK)
 
     assert((jet_cli_try_counter_delta(4, 9) ?? panic("actual monotonic delta")) == 5)
@@ -124,7 +122,7 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     cli_files.create_dir_all(root) ?? panic("try fixture root")
     entry: "{root}/run.jet"
     plan_file: "{root}/edit.json"
-    original: "unchanged: fn() -> Int {{ 7 }}\nchanged: fn() -> Int {{ 1 }}\nrun: fn() {{\n    unchanged()\n    changed()\n}}\n"
+    original: "unchanged: fn() -> Int {{ 7 }}\nchanged: fn() -> Int {{ 1 }}\nrun: fn() {{\n    print(unchanged())\n    print(changed())\n}}\n"
     cli_files.write(entry, original) ?? panic("try original")
     at: original.find("{{ 1 }}")
     if at < 0 -> panic("fixture edit")
@@ -150,7 +148,8 @@ try_service_ownership: fn(request: &&JetDriverCompileRequest, expected_source_ro
     renamed: jet_cli_try_stage(rename, baseline) ?? panic("same-graph rename")
     rename_ops: jet_cli_try_semantic_ops(rename, baseline) ?? panic("same-graph rename operations")
     assert(renamed.len() == 1 && renamed[0].before == original.bytes())
-    assert(renamed[0].after == original.replace("changed", "renamed").bytes())
+    // A rename edits the symbol `changed`, never the `changed` inside `unchanged`.
+    assert(renamed[0].after == "unchanged: fn() -> Int {{ 7 }}\nrenamed: fn() -> Int {{ 1 }}\nrun: fn() {{\n    print(unchanged())\n    print(renamed())\n}}\n".bytes())
     assert(rename_ops.len() == 1 && rename_ops[0].kind == "rename" && rename_ops[0].targets.len() >= 1)
     cli_files.write(entry, original.replace("changed", "intruder")) ?? panic("ownership witness mutation")
     same_rename: jet_cli_try_stage(rename, baseline) ?? panic("retained source, not reread")
