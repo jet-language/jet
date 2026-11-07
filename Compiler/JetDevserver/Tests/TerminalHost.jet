@@ -1,80 +1,108 @@
-use {
-    jet_devserver.TerminalHost.[JET_DEVTOOLS_PROTOCOL, TerminalAction, TerminalFactValue, TerminalHost, TerminalHostAccess, TerminalHostCapabilities, TerminalHostConfig, TerminalHostEvent, TerminalHostFact, TerminalViewport, strip_ansi]
-    jet_devserver.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsPanelId]
-    jet_devserver.Devtools.catalog.[descriptors]
-    jet_devserver.Session.[DevtoolsProjection, DevtoolsSelectionFact, DevtoolsStatusFact, DevtoolsCommandCapabilities]
-    jet_foundation.Devtools.[JetDevtoolsLifecycleState]
+terminal_test_event: fn(sequence: Int, panel_id: JetDevtoolsPanelId, kind: String, entity: String) -> TerminalHostEvent {
+    TerminalHostEvent{
+        protocol: JET_DEVTOOLS_PROTOCOL, session_id: "session", revision: "revision-a", sequence: sequence, observed_at: sequence * 10,
+        source: "src/main.jet", kind: kind, entity: entity, panel_id: panel_id, facts: [TerminalHostFact]{TerminalHostFact.redacted("value")},
+    }
+}
+terminal_test_panel_ids: fn() -> [Int: JetDevtoolsPanelId] {
+    ids := [Int: JetDevtoolsPanelId]{}
+    ids[1] = JetDevtoolsPanelId.Build
+    ids
+}
+terminal_test_projection: fn() -> DevtoolsProjection {
+    envelope := JetDevtoolsEnvelope.new("session", 0)
+    envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", `{"accepted":true}`, Val(`{"output":"ok"}`)) ?? panic("devtools event"))
+    DevtoolsProjection{
+        protocol: JET_DEVTOOLS_PROTOCOL, session_id: "session", source_id: Val("src/main.jet"),
+        build_id: Val("build-42"), revision: "revision-a", world_id: Val("world-7"), sequence: 1, observed_at: 1234,
+        panels: envelope.events(), selection: Val(DevtoolsSelectionFact{panel_id: "build", item_key: "event:revision-a:1:Build:build"}),
+        status: DevtoolsStatusFact{
+            state: JetDevtoolsLifecycleState.Ready, diagnostic_code: Val("E0001"), diagnostic: Val("diagnostic"),
+            accepted_revision: Val("revision-a"), last_good_revision: Val("revision-a"), run_target: Val("native"), run_output: Val("ok"), test_state: Val("passed"),
+        },
+        command_capabilities: DevtoolsCommandCapabilities{project_rebuild: false, project_rebuild_reason: Val("terminal host test projection has no rebuild executor")},
+        command_receipts: [JetDevtoolsCommandReceipt]{}, reset: true, truncation: false,
+    }
+}
+// Visible characters: every byte that does not continue a UTF-8 sequence.
+terminal_test_columns: fn(text: String) -> Int {
+    count := 0
+    loop byte in text.bytes() {
+        if byte < 128 || byte >= 192 -> count += 1
+    }
+    count
+}
+terminal_test_has_escape: fn(text: String) -> Bool {
+    loop byte in text.bytes() {
+        if byte == TERMINAL_ESC -> return true
+    }
+    false
+}
+terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
+    if operation == {
+        .Insert(id, _) -> id
+        .Remove(id) -> id
+        .Replace(id, _) -> id
+    }
 }
 
-event: fn(sequence: U64, panel_id: JetDevtoolsPanelId, kind: String, entity: String) -> TerminalHostEvent {
-    TerminalHostEvent.new(panel_id, "session", "revision-a", sequence, sequence * 10, "src/main.jet", kind.to_string(), entity.to_string(), [TerminalHostFact.redacted("value")])
-}
-panel_ids: fn() -> [U64:JetDevtoolsPanelId] { [1: JetDevtoolsPanelId.Build] }
-projection: fn() -> DevtoolsProjection {
-    envelope := JetDevtoolsEnvelope.new("session", 0)
-    envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", "{{\"accepted\":true}}", .Val("{{\"output\":\"ok\"}}")).unwrap())
-    DevtoolsProjection{protocol: JET_DEVTOOLS_PROTOCOL.to_string(), session_id: "session", source_id: .Val("src/main.jet"),
-        build_id: .Val("build-42"), revision: "revision-a", world_id: .Val("world-7"), sequence: 1, observed_at: 1234,
-        panels: envelope.events().cloned().collect(), selection: .Val(DevtoolsSelectionFact{panel_id: "build", item_key: "event:revision-a:1:Build:build"}),
-        status: DevtoolsStatusFact{state: .Ready, diagnostic_code: .Val("E0001"), diagnostic: .Val("diagnostic"),
-            accepted_revision: .Val("revision-a"), last_good_revision: .Val("revision-a"), run_target: .Val("native"), run_output: .Val("ok"), test_state: .Val("passed")},
-        command_capabilities: DevtoolsCommandCapabilities{project_rebuild: false, project_rebuild_reason: .Val("terminal host test projection has no rebuild executor")},
-        command_receipts: [], reset: true, truncation: false}
-}
 #Test("sync_projection_preserves_canonical_identity_and_status") {
-    capabilities: TerminalHostCapabilities.new(false, false, true, 32, true, false, TerminalHostAccess.new(true, false, true))
+    capabilities: TerminalHostCapabilities.new(false, false, true, 32, true, false, TerminalHostAccess{local: true, release: false, read_only: true})
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
-    frame: host.sync_projection(projection(), panel_ids()).unwrap()
+    frame: host.sync_projection(terminal_test_projection(), terminal_test_panel_ids()) ?? panic("projection syncs")
     assert_eq(frame.session_id, "session")
-    assert_eq(frame.source_id.as_ref(), .Val("src/main.jet"))
-    assert_eq(frame.build_id.as_ref(), .Val("build-42"))
-    assert_eq(frame.world_id.as_ref(), .Val("world-7"))
+    assert_eq(frame.source_id, Val("src/main.jet"))
+    assert_eq(frame.build_id, Val("build-42"))
+    assert_eq(frame.world_id, Val("world-7"))
     assert_eq(frame.revision, "revision-a")
-    assert_eq(frame.cursor, .Val(1))
-    assert_eq(frame.observed_at, .Val(1234))
-    assert_eq(frame.status.as_ref().map((status) -> status.state), .Val(JetDevtoolsLifecycleState.Ready))
-    event: host.events().next().unwrap()
+    assert_eq(frame.cursor, Val(1))
+    assert_eq(frame.observed_at, Val(1234))
+    status: frame.status ?? panic("projected status")
+    assert_eq(status.state, JetDevtoolsLifecycleState.Ready)
+    assert(host.events.len() > 0)
+    event: host.events[0]
     assert_eq(event.observed_at, 1200)
-    assert_eq(event.facts[0].value, .Val(TerminalFactValue.Text("{{\"accepted\":true}}")))
-    assert_eq(host.focus().item_key.as_ref(), .Val("event:revision-a:1:Build:build"))
-    assert(host.handle_key(.Character('r')) == TerminalAction.Ignored)
-    assert(frame.lines.iter().all((line) -> strip_ansi(line).chars().count() <= 32))
+    assert_eq(event.facts[0].value, Val(TerminalFactValue.Text(value: `{"accepted":true}`)))
+    assert_eq(host.focus.item_key, Val("event:revision-a:1:Build:build"))
+    assert_eq(host.handle_key(TerminalKey.Character(text: "r")), TerminalAction.Ignored)
+    loop line in frame.lines -> assert(terminal_test_columns(terminal_strip_ansi(line)) <= 32)
 }
 #Test("quiet_suppresses_text_without_dropping_typed_tree") {
     capabilities: TerminalHostCapabilities.new(false, false, true, 20, false, true, TerminalHostAccess.interactive())
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
-    frame: host.sync_projection(projection(), panel_ids()).unwrap()
-    assert(frame.lines.is_empty())
+    frame: host.sync_projection(terminal_test_projection(), terminal_test_panel_ids()) ?? panic("projection syncs")
+    assert_eq(frame.lines.len(), 0)
     assert_eq(frame.tree.panel_count, descriptors().len())
 }
 #Test("same_facts_keep_nodes_stable_across_capabilities") {
     plain := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
     color := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
-    plain.append_event(event(1, .Build, "Build", "build")).unwrap()
-    color.append_event(event(1, .Build, "Build", "build")).unwrap()
-    plain_frame: plain.render(); color_frame: color.render()
+    plain.append_event(terminal_test_event(1, JetDevtoolsPanelId.Build, "Build", "build")) ?? panic("plain event")
+    color.append_event(terminal_test_event(1, JetDevtoolsPanelId.Build, "Build", "build")) ?? panic("color event")
+    plain_frame: plain.render()
+    color_frame: color.render()
     assert_eq(plain_frame.tree, color_frame.tree)
-    assert(!plain_frame.text().contains(Char{27}))
-    assert(color_frame.text().contains(Char{27}))
+    assert(!terminal_test_has_escape(plain_frame.text()))
+    assert(terminal_test_has_escape(color_frame.text()))
     assert(color_frame.diff(plain_frame).metadata_changed)
 }
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
-    host := TerminalHost.default()
-    host.append_event(event(1, .Tests, "Tests", "fails")).unwrap()
-    assert_eq(host.handle_key(.Enter), TerminalAction.Inspect{panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"})
-    assert_eq(host.handle_key(.Escape), TerminalAction.ReturnToPanel)
-    assert(host.focus().item_key.is_none())
+    host := TerminalHost.new(TerminalHostConfig.standard())
+    host.append_event(terminal_test_event(1, JetDevtoolsPanelId.Tests, "Tests", "fails")) ?? panic("event")
+    assert_eq(host.handle_key(TerminalKey.Enter), TerminalAction.Inspect(panel_id: "tests", item_key: "event:revision-a:1:Tests:fails"))
+    assert_eq(host.handle_key(TerminalKey.Escape), TerminalAction.ReturnToPanel)
+    assert(host.focus.item_key == None)
 }
 #Test("diff_operations_are_ordered_and_bounded") {
-    host := TerminalHost.default()
-    host.append_event(event(1, .Build, "Build", "one")).unwrap()
+    host := TerminalHost.new(TerminalHostConfig.standard())
+    host.append_event(terminal_test_event(1, JetDevtoolsPanelId.Build, "Build", "one")) ?? panic("first event")
     first: host.render()
-    host.append_event(event(2, .Jobs, "Jobs", "two")).unwrap()
-    second: host.render(); diff: second.diff(first)
+    host.append_event(terminal_test_event(2, JetDevtoolsPanelId.Jobs, "Jobs", "two")) ?? panic("second event")
+    second: host.render()
+    diff: second.diff(first)
     assert(!diff.is_empty())
-    ids: diff.operations.iter().map((operation) -> if operation == {
-        .Insert{id, ..} | .Remove{id} | .Replace{id, ..} -> id
-    }).collect()
-    assert(ids.windows(2).all((pair) -> pair[0] <= pair[1]))
+    loop index in 1..<diff.operations.len() {
+        assert(terminal_test_diff_id(diff.operations[index - 1]) <= terminal_test_diff_id(diff.operations[index]))
+    }
     assert(second.tree.node_count <= second.tree.node_limit)
 }
