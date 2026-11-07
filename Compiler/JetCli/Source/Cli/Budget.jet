@@ -1,19 +1,18 @@
 // `jet budget check`: check the project entry, collect its performance budget
-// specs, and write the canonical budget report under `.jet/perf/reports`. The
-// report is verified by the budget engine's own verifier before it is
-// published, and a published report is never rewritten. Measuring a budget
-// needs its provider; a provider this `jet` has not built refuses with E2104
-// before any artifact is written. `jet budget update` is refused the same way.
+// specs, measure each applicable one (BudgetMeasure.jet), and write the
+// canonical budget report under `.jet/perf/reports`. The report is verified
+// by the budget engine's own verifier before it is published, and a
+// published report is never rewritten. A budget whose provider this `jet`
+// has not built, or that compares against a named baseline's history, which
+// this `jet` can't read yet, refuses with E2104 before any artifact is
+// written. `jet budget update` is refused the same way.
 use {
     budget_crypto: core.crypto
     cli_files: core.files
     cli_sys: core.sys
     cli_time: core.time
-    jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
-    jet_foundation.[
-        CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, canonical_json_bytes,
-        diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id, perf_verify_budget_report,
-    ]
+    jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_budget_projection, jet_driver_present_diagnostics]
+    jet_foundation.[CORE_SOURCE_OWNED_ROWS, CanonicalJSON, CanonicalJSONField, Diagnostic, diagnostic_from_registry, diagnostic_render_all, perf_report_object_new, perf_stable_id]
     jet_sema.[BudgetAxis, BudgetSpec, sema_budget_ascii_lower, sema_budget_baseline_name, sema_budget_provider_kind]
     jet_pkg_model.[COMPILER_VERSION]
 }
@@ -131,19 +130,21 @@ jet_cli_budget_run: fn(options: JetCLIBudgetOptions, root: String, entry: String
             diagnostics: jet_driver_present_diagnostics(projection.compile.diagnostics, snapshot, projection.compile.generated_source_files)
             if jet_cli_errors(diagnostics).len() > 0 -> return jet_cli_budget_compiler_failure(options, entry, diagnostics, color)
             if projection.compile.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
-            loop spec in projection.budget_specs {
-                if !jet_cli_budget_applies(spec, profile) -> next
-                kind: sema_budget_provider_kind(spec.provider)
-                return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
+            active := [JetDriverBudgetSpec]{}
+            loop row in projection.budget_specs {
+                if jet_cli_budget_applies(row.spec, profile) -> active.push(row.copy()) // copy: the projection keeps its specs.
             }
             sources := [JetCLIBudgetSource]{}
             prefix: jet_cli_entry_join(root, "")
             loop held in snapshot.roots {
+                // The measured members are the program modules; a manifest is
+                // not one (Rust `subject` reads `bundle.modules`).
                 loop file in held.files {
+                    if !file.path.ends_with(".jet") || jet_cli_fmt_is_package_manifest_file(file.path) || jet_cli_fmt_is_typed_package_source(file.source, file.path) -> next
                     sources.push(JetCLIBudgetSource{path: file.path.removeprefix(prefix), sha256: budget_crypto.sha256(file.source.bytes()).hex()})
                 }
             }
-            return jet_cli_budget_check(options, root, entry, sources, measured_start, profile, color)
+            return jet_cli_budget_check(options, root, entry, active, projection.budget_facts, sources, measured_start, profile, color)
         }
     }
 }
@@ -173,65 +174,28 @@ jet_cli_budget_axis_applies: fn(axis: BudgetAxis, current: String, title: String
     true
 }
 
-// The report of a check with no applicable budget: no measurement, a pass
-// summary, published immutably. `profile` is the measured compile's.
-jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
+// Rust `build_report` and `emit_check` over the applicable specs `active`:
+// the toolchain identity first, then the refusal of what this `jet` can't
+// measure, then the report, published immutably. `profile` is the measured
+// compile's.
+jet_cli_budget_check: fn(options: JetCLIBudgetOptions, root: String, entry: String, active: [JetDriverBudgetSpec], facts: JetDriverBudgetFacts, sources: [JetCLIBudgetSource], measured_start: String, profile: String, color: Bool) -> JetDriverVerbOutput {
+    ordered := active
+    ordered = loop fresh in ordered -> fresh
+    ordered.sort_by((left: JetDriverBudgetSpec, right: JetDriverBudgetSpec) -> left.spec.name <=> right.spec.name)
+    loop row in ordered {
+        if !JET_CLI_BUDGET_PROVIDERS.contains(sema_budget_provider_kind(row.spec.provider)) -> return jet_cli_budget_tool_failure(options, "provider `{row.spec.provider}` for budget `{row.spec.name}` has no command-owned measurement implementation", color)
+    }
     toolchain: jet_cli_budget_toolchain(entry) ?? return jet_cli_budget_tool_failure(options, err.message, color)
-    subject: jet_cli_budget_subject(root, sources, measured_start, jet_cli_rfc3339(cli_time.unix_ns()), profile)
-    evidence_id: perf_stable_id(perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array([CanonicalJSON]{})},
-        CanonicalJSONField{key: "subject", value: subject.copy()},
-        CanonicalJSONField{key: "toolchain", value: toolchain.copy()},
-    }))
-    content: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "evidence_id", value: CanonicalJSON.String(evidence_id)},
-        CanonicalJSONField{key: "measurements", value: CanonicalJSON.Array([CanonicalJSON]{})},
-        CanonicalJSONField{key: "privacy", value: jet_cli_budget_privacy()},
-        CanonicalJSONField{key: "subject", value: subject},
-        CanonicalJSONField{key: "summary", value: perf_report_object_new([CanonicalJSONField]{
-            CanonicalJSONField{key: "fail", value: CanonicalJSON.Integer("0")},
-            CanonicalJSONField{key: "outcome", value: CanonicalJSON.String("pass")},
-            CanonicalJSONField{key: "pass", value: CanonicalJSON.Integer("0")},
-            CanonicalJSONField{key: "warn", value: CanonicalJSON.Integer("0")},
-        })},
-        CanonicalJSONField{key: "toolchain", value: toolchain},
-    })
-    report_id: perf_stable_id(content)
-    report: perf_report_object_new([CanonicalJSONField]{
-        CanonicalJSONField{key: "content", value: content},
-        CanonicalJSONField{key: "report_id", value: CanonicalJSON.String(report_id.copy())},
-        CanonicalJSONField{key: "schema", value: CanonicalJSON.String("jet.budget-report")},
-        CanonicalJSONField{key: "version", value: CanonicalJSON.Integer("1")},
-    })
-    bytes: canonical_json_bytes(report)
-    _: perf_verify_budget_report(bytes) ?? return jet_cli_budget_tool_failure(options, err.message, color)
-    report_path: ".jet/perf/reports/{report_id}.json"
+    loop row in ordered {
+        kind: sema_budget_provider_kind(row.spec.provider)
+        if kind != "CompilerFacts" -> return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: its `{kind}` provider is not built", jet_cli_why("E2104"), "remove the budget or measure it with a `jet` that has the `{kind}` provider", color, JET_DRIVER_EXIT_USAGE)
+        if row.spec.comparison_fact.baseline == .Val(baseline) -> return jet_cli_report_output("", "E2104", "`jet budget` can't measure budget `{row.spec.name}` yet: it compares against baseline `{baseline}`, and baseline history is not built", jet_cli_why("E2104"), "compare the budget with `Absolute`, or measure it with a `jet` that has baseline history", color, JET_DRIVER_EXIT_USAGE)
+    }
+    built: jet_cli_budget_build(root, ordered, facts, toolchain, sources, measured_start, profile) ?? return jet_cli_budget_tool_failure(options, err.message, color)
+    report_path: ".jet/perf/reports/{built.report_id}.json"
     held: JetCLIRootedDirectory.open(root, [String]{".jet", "perf", "reports"}, true) ?? return jet_cli_budget_tool_failure(options, "report write refused: {err.message}", color)
-    created: held.publish_immutable("{report_id}.json", bytes, None, JET_CLI_BUDGET_REPORT_LIMIT) ?? return jet_cli_budget_tool_failure(options, "report write refused: {err.message}", color)
-    if options.json {
-        budget: jet_cli_status_object([JetCLIStatusField]{
-            jet_cli_status_field("applied", jet_cli_status_bool(false)),
-            jet_cli_status_field("diagnostics", jet_cli_status_array([JetCLIStatusValue]{})),
-            jet_cli_status_field("exit_code", jet_cli_status_int(0)),
-            jet_cli_status_field("failure_kind", JetCLIStatusValue.Null),
-            jet_cli_status_field("plan", JetCLIStatusValue.Null),
-            jet_cli_status_field("report", jet_cli_budget_status_value(report)),
-            jet_cli_status_field("report_path", jet_cli_status_text(report_path)),
-            jet_cli_status_field("results", jet_cli_status_array([JetCLIStatusValue]{})),
-        })
-        return JetDriverVerbOutput{stdout: "{jet_cli_status_render(options.command, true, [JetCLIStatusField]{jet_cli_status_field("budget", budget)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
-    }
-    stderr := ""
-    if options.verbose {
-        mark: if created -> "+" else -> "~"
-        reuse: if created -> "" else -> " (verified reuse)"
-        stderr = "{mark} report {report_id} {report_path}{reuse}\n"
-    }
-    if !options.quiet {
-        short: String.from_bytes(report_id.bytes().slice(0, 12)) ?? report_id
-        stderr = "{stderr}budgets: 0 budgets passed · report {short}\n"
-    }
-    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+    created: held.publish_immutable("{built.report_id}.json", built.bytes, None, JET_CLI_BUDGET_REPORT_LIMIT) ?? return jet_cli_budget_tool_failure(options, "report write refused: {err.message}", color)
+    jet_cli_budget_emit(options, built, report_path, created)
 }
 
 // Rust `subject`: the measured member sources, sorted, the profile, and the target.
@@ -243,7 +207,7 @@ jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured
         CanonicalJSONField{key: "path", value: CanonicalJSON.String(source.path.copy())},
         CanonicalJSONField{key: "sha256", value: CanonicalJSON.String(source.sha256.copy())},
     })
-    target_id: if jet_cli_root_manifest(root) == .Val(manifest) -> manifest.name.copy() else -> "package"
+    target_id: jet_cli_budget_package(root)
     perf_report_object_new([CanonicalJSONField]{
         CanonicalJSONField{key: "artifact", value: CanonicalJSON.Null},
         CanonicalJSONField{key: "measured_end", value: CanonicalJSON.String(measured_end)},
@@ -260,7 +224,7 @@ jet_cli_budget_subject: fn(root: String, sources: [JetCLIBudgetSource], measured
 // runtime pack it links and the Core sources it compiles, and their digest.
 jet_cli_budget_toolchain: fn(entry: String) -> CanonicalJSON JetCLIBudgetFailure! {
     executable: cli_sys.executable()
-    compiler_bytes: cli_files.read_bytes(executable) ?? return Err(jet_cli_budget_failure("cannot hash running compiler executable `{executable}`: {jet_cli_io_error_text(err)}"))
+    compiler_bytes: cli_files.read_bytes(executable) ?? return Err(jet_cli_budget_failure("jet cannot hash running compiler executable `{executable}`: {jet_cli_io_error_text(err)}"))
     runner: jet_cli_runtime_key(jet_cli_runtime_dir()) ?? return Err(jet_cli_budget_failure("cannot identify the runtime pack beside the running compiler"))
     stdlib: jet_cli_budget_stdlib_id(entry) ?? return Err(jet_cli_budget_failure("cannot hash the Core sources of this toolchain"))
     fields: [CanonicalJSONField]{
