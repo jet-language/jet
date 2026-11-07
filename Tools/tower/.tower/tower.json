@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95863,
+    "rev": 95865,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69967,6 +69967,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "G1 sweep census (a0_034, dev cbff90f674, JET_KEEP_GOING=1 jet check over every Compiler/*/Tests/*.fixture/package.jet). c73 remaining: JetCli GateProjection 7, RustForeign 3, RustForeignFixtures 11; JetDriver RustForeignFixtures 11; JetIR TaskCarrierFixtures 10; JetParser ContractFixtures 95; JetRuntime Fragments 5173 (no runtime dependency); JetBackend NativeInlineC 1 and JetCli RunKeep 1 (E2105, no default entry). JetSema half clean (06ecde21f8); JetBackend Fragments clean. c3 remaining: Tools/agent chain/chain.sh, chain/build-slot.sh, clean-nix-tmp.sh(+test.mjs), gen-runtime-fault-report.mjs, gen-text-debug-tables.mjs, jet-state.mjs(+test.mjs), lexical-ledger.mjs; gate callers Admit.jet:686,:1538, Land.jet:2216,:2297, Suite.jet (bash slot), CloseoutGate.jet:73 and TowerHygiene.jet:210 (node), CompilerRegistries.jet:1347 node lane with 7 .mjs runners (JetRuntime 5, JetBackend 2), JetCanvas 2 test .mjs, JetTestKit .sh fixtures. Tools/ci and Tools/testkit: no non-Jet files. roots.sh/roots.mjs stay (root definitions). Fix lists sent to PortsLead-2 (c73 all, c3 chain/release/generators/canvas) and TestSystemLead-2 (c3 runners, registries, tower gates, testkit shells)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3 chain port: the build is independent of the checkout path, so chain.sh's mount namespace (unshare -r -m, bind of the tree to a canonical root) is dropped in the port and no bind-mount API is needed. Proof (PortsLead-2, dev 3e4998fcca exported to two paths of different lengths, seed a0_033, no namespace): s1 jet identical (sha256 42555fc3...), pack1 identical (dirhash 89e8d414..., diff -rq 0 files), s2 built by each tree's own s1 identical warm and cold with empty caches (sha256 4fe7deb7...), and 0 occurrences of the scratch path in any of them."
         },
         {
@@ -71196,7 +71201,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T19:55:56.687Z",
+      "updated": "2026-11-07T21:16:28.238Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -90595,6 +90600,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "a0_034: minimal repro of the faulting pattern (a [SnapshotFile] with FileReader? handles passed by value to a loop, then twice through '&executables[i].file == .Val(input)' seek+read) prints names 3 / bytes 12 / again 12 on O0, O1 and O2: no fault, handles stay open. The Engine-unit claim still needs its jetpack env run."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Likely root: #6677. The faulting statement compares '&executables[index].file == .Val(input)': it widens the borrowed FileReader into an Option union, and before 060bbcd0f1 and 8ac163916e the widened value was moved and dropped, which closes the caller's handle (the 'corrupt after' bisect). Re-run the claim with a0_034, the first seed carrying both fixes, before any other work on this card."
         },
         {
@@ -90627,7 +90637,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T10:39:48.294Z",
-      "updated": "2026-11-07T20:54:55.771Z",
+      "updated": "2026-11-07T21:16:29.961Z",
       "updatedBy": "Main"
     },
     {
@@ -186863,6 +186873,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T21:16:29.961Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0a2monf",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T21:16:28.238Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T21:09:02.193Z",
       "by": "Main",
