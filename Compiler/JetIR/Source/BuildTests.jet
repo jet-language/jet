@@ -47,8 +47,9 @@ IROutputCheck: struct { name: String, key: String }
 
 // The harness `jet test` runs: `tests` in run order, then (unfiltered) each
 // of `checks`. `serial` streams each test's record before spawning the next;
-// otherwise every test is spawned before any is joined.
-IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool }
+// otherwise every test is spawned before any is joined. `stock`
+// (`--show-default`) never calls the package's `test: fn`.
+IRTestHarness: struct { tests: [IRTestCase], checks: [IROutputCheck], serial: Bool, stock: Bool{false} }
 
 // Builds `harness` and every function it reaches, keeping `checks`
 // (ir_bounds_mode).
@@ -76,7 +77,7 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
         check_ids.push(id)
     }
     if failures.len() > 0 -> return IRBuildResult{program: m, failures: failures}
-    override: ir_test_override(m, p)
+    override: if harness.stock -> -1 else -> ir_test_override(m, p)
     built: ir_build_queue(m, p, failures, 0)
     m.entry = ir_test_main(m, p, harness, bodies, check_ids, override, failures)
     // The functions the harness's renders reached (a Printable impl).
@@ -86,11 +87,18 @@ ir_build_tests: fn(functions: &&[FnBody], decls: DeclTable, type_defs: &&[TTypeD
 }
 
 // The package's `test: fn(t: Test)`, when it has one: the project's test
-// entry, called with the suite before the harness runs the discovered tests.
-// -1 when there is none.
+// entry, called with the suite before the harness runs the discovered tests,
+// unless the harness is the stock one. -1 when there is none.
 ir_test_override: fn(m: &IRModule, p: IRProgram) -> Int Never! {
-    key := ""
-    loop function in p.functions {
+    key: ir_test_override_key(p.functions)
+    if key == "" -> return -1
+    ir_function_id(m, p, key, [Type]{}) ?? -1
+}
+
+// The key of the package's `test: fn(t: Test)` among `functions`, "" when
+// there is none; `jet test` announces the override it runs.
+ir_test_override_key: fn(functions: [FnBody]) -> String Never! {
+    loop function in functions {
         if function.name != "test" || function.params.len() != 1 || function.generic_params.len() > 0 || function.module_name.starts_with("core") -> next
         top_level: if function.kind == {
             .TopLevel -> true
@@ -99,11 +107,9 @@ ir_test_override: fn(m: &IRModule, p: IRProgram) -> Int Never! {
         if !top_level -> next
         name: ir_nominal_name(ir_untag(function.params[0].ty)) ?? next
         if ir_short_name(name) != "Test" -> next
-        key = function.key.copy()
-        break
+        return function.key.copy()
     }
-    if key == "" -> return -1
-    ir_function_id(m, p, key, [Type]{}) ?? -1
+    ""
 }
 
 // A generated harness function: `name`, keyed and symbolled after the
