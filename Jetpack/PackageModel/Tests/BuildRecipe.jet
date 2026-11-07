@@ -84,6 +84,52 @@ pkg_test_staged_error: fn(action: StagedPlanAction, fragment: BuildPlanFragment)
     assert(pkg_test_staged_error(action, windows_escape).message().contains("slash-separated"))
 }
 
+// Port of tests/jetpack_engine.rs:9592-9650 at the model seam; hosted staged
+// execution refuses before its callback (Recipe/Tests/EngineStagedPlan.jet).
+#Test("staged validation rejects undeclared tool effect platform and escaping output") {
+    action: pkg_test_staged_action("linux-x86_64")
+    other_tool := pkg_test_staged_fragment("linux-x86_64")
+    other_tool.actions[0].tool = "other-tool"
+    assert(pkg_test_staged_error(action, other_tool).message().contains("undeclared tool `other-tool`"))
+
+    other_effect := pkg_test_staged_fragment("linux-x86_64")
+    other_effect.actions[0].effects = [BuildEffect]{BuildEffect.FS}
+    assert(pkg_test_staged_error(action, other_effect).message().contains("undeclared effect `fs`"))
+
+    other_platform: pkg_test_staged_fragment("other-platform")
+    assert(pkg_test_staged_error(action, other_platform).message().contains("not declared platform"))
+
+    escaping := pkg_test_staged_fragment("linux-x86_64")
+    escaping.actions[0].outputs = [String]{"../escape"}
+    assert(pkg_test_staged_error(action, escaping).message().contains("output `../escape`"))
+}
+
+// Port of tests/jetpack_engine.rs:9439-9449 and 9487-9509 at the model seam.
+#Test("staged lock and identity ignore authority declaration order") {
+    platform: "linux-x86_64"
+    action: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", "sha256-input")}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform: platform})
+    fragment := pkg_test_staged_fragment(platform)
+    fragment.actions[0].args = [String]{"--stable"}
+    fragment.actions[0].env = [String: String]{"STAGED_INPUT": "manifest"}
+    fragment.actions[0].effects = [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}
+
+    identity: pkg_test_staged_identity(action, fragment)
+    assert_eq(identity, pkg_test_staged_identity(action, fragment))
+    digest: action.fragment_digest(fragment) ?? panic("staged fragment digest should validate")
+    assert_eq(digest, action.fragment_digest(fragment) ?? panic("staged fragment digest should validate"))
+    staged_lock: action.lock(fragment) ?? panic("staged lock should validate")
+    assert_eq(staged_lock.inputs[0].digest, "sha256-input")
+    text: staged_lock.render()
+    assert(text.contains("tool=planner\n"))
+    assert(text.contains("effect=exec\n"))
+    assert(text.contains("platform={platform}\n"))
+
+    reordered: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", "sha256-input")}, PlanAuthority{tools: [String]{"planner-alt", "planner"}, effects: [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}, platform: platform})
+    assert_eq(identity, pkg_test_staged_identity(reordered, fragment))
+    reordered_lock: reordered.lock(fragment) ?? panic("staged lock should validate")
+    assert_eq(text, reordered_lock.render())
+}
+
 #Test("hook identity binds provider source") {
     recipe: BuildRecipe{steps: [BuildStep]{BuildStep.InstallTree{src: ".", dest: "."}}}
     local_id: recipe.build_identity_for_source("tool", "./vendor/tool", "sha256-source", "linux-x86_64")
