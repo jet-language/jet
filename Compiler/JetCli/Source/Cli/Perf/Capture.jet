@@ -1,6 +1,6 @@
 // One Jet provider for perf consumers. The command layer provisions/awaits the
 // producer and supplies observation ticks; no synthetic samples or durations.
-use jet_foundation.[TraceSkeleton, TraceToolchain, TraceHardware, CapturePolicy, TraceSample, TraceAllocation, TraceBrowser, TraceGameFrame, TraceGameDrawEvent, TraceTask, TraceLock, TraceIO, TraceNative, TraceSpan, TraceReceiptSection, SourceIdentity, TraceSourceMap, TraceProfile, JetSymbolRef, capture_policy_default_exclusions, trace_profile_unsupported, trace_io_kind_for_wait, build_skeleton_bytes, verify_jettrace]
+use jet_foundation.[TraceSkeleton, TraceToolchain, TraceHardware, CapturePolicy, TraceSample, TraceAllocation, TraceBrowser, TraceGameFrame, TraceGameDrawEvent, TraceTask, TraceLock, TraceIO, TraceNative, TraceSpan, TraceReceiptSection, SourceIdentity, TraceSourceMap, TraceProfile, JetSymbolRef, TRACE_IO_ROW_LIMIT, capture_policy_default_exclusions, trace_profile_unsupported, trace_io_kind_for_wait, trace_source_map_jet_with_source, build_skeleton_bytes, verify_jettrace]
 
 JetCLIPerfObservation: struct { at_ns: U64, live: JetCLIPerfLive }
 JetCLIPerfCapture: struct {
@@ -56,9 +56,44 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         if observations.len() > 1 -> capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
     }
     if capture.spans.len() == 0 -> capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
-    // Instantaneous blocked facts, not invented syscall duration intervals.
-    loop observed_task in latest.live.tasks {
-        if task_indexes.has_key(observed_task.id) && observed_task.state == "blocked" && trace_io_kind_for_wait(observed_task.wait) == .Val(kind) -> capture.io.push(TraceIO{start_ns: latest.at_ns, end_ns: latest.at_ns, kind: kind, task_id: U64{task_indexes[observed_task.id] + 1}, wait: observed_task.wait, symbol: symbol})
+    // `IOTimeline`: a real I/O wait is a span from the first observation that
+    // shows its task blocked on it to the first that no longer does; one still
+    // open at the last observation ends there. No duration is invented
+    // between polls.
+    open := [TraceIO]{}
+    loop observed in observations {
+        still := [TraceIO]{}
+        loop span in open {
+            blocked := false
+            loop observed_task in observed.live.tasks {
+                if observed_task.state == "blocked" && observed_task.wait == span.wait && task_indexes.has_key(observed_task.id) && (U64{task_indexes[observed_task.id] + 1}) == span.task_id -> blocked = true
+            }
+            end: if blocked -> span.end_ns else -> observed.at_ns
+            moved: TraceIO{start_ns: span.start_ns, end_ns: end, kind: span.kind, task_id: span.task_id, wait: span.wait, symbol: symbol}
+            if blocked -> still.push(moved) else -> capture.io.push(moved)
+        }
+        open = still
+        loop observed_task in observed.live.tasks {
+            if !task_indexes.has_key(observed_task.id) || observed_task.state != "blocked" -> next
+            kind: trace_io_kind_for_wait(observed_task.wait) ?? next
+            task_id: U64{task_indexes[observed_task.id] + 1}
+            known := false
+            loop span in open { if span.task_id == task_id && span.wait == observed_task.wait -> known = true }
+            if known -> next
+            if (U64{open.len() + capture.io.len()}) >= TRACE_IO_ROW_LIMIT {
+                capture.policy.io_rows_truncated = true
+                next
+            }
+            open.push(TraceIO{start_ns: observed.at_ns, end_ns: observed.at_ns, kind: kind, task_id: task_id, wait: observed_task.wait, symbol: symbol})
+        }
+    }
+    loop span in open -> capture.io.push(TraceIO{start_ns: span.start_ns, end_ns: latest.at_ns, kind: span.kind, task_id: span.task_id, wait: span.wait, symbol: symbol})
+    // A run's exit publication ends every task it observed.
+    if latest.live.runtime.exit {
+        loop index in 0..<capture.tasks.len() {
+            capture.tasks[index].state = "done"
+            capture.tasks[index].wait = ""
+        }
     }
     loop channel in latest.live.channels {
         if channel.send_waiters == (U64{0}) && channel.recv_waiters == (U64{0}) -> next
@@ -83,14 +118,19 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
     }
 }
+// A run that published no observation still records its source identity and
+// map, with no samples and no run window (`capture_from_source` with no
+// snapshot).
 jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
-    if observations.len() == 0 -> return Err(jet_cli_read_error("source sampling requires a live runtime snapshot"))
     if observations.len() > 4096 -> return Err(jet_cli_read_error("source sampling exceeds its observation bound"))
     source: jet_cli_perf_source(path, text)
     cpu_samples := U64{0}
     loop observed in observations { if observed.live.runtime.cpu_ns != None -> cpu_samples += U64{1} }
     profile: jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
     capture := jet_cli_perf_capture_new(profile, [SourceIdentity]{source.identity})
+    // copy: the run symbol below keeps the path; the source map owns its own.
+    capture.source_maps.push(trace_source_map_jet_with_source(path.copy(), text) ?? return Err(jet_cli_read_error(err.message)))
+    if observations.len() == 0 -> return Ok(capture)
     jet_cli_perf_window(capture.profile, observations[observations.len() - 1].live.runtime)
     if source.run_span != None -> jet_cli_perf_capture_observations(capture, observations, JetSymbolRef{path: path, name: "run"}, target)
     Ok(capture)

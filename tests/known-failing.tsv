@@ -396,12 +396,8 @@ tests/cases/fact_reads/typed_fact_fixture_is_accepted_by_comptime_repl_and_web.n
 tests/cases/ffi_javascript/javascript_sidecar_binds_runs_and_rejects_dynamic_types.case	#6366	`jet run`: `use <name>: js.<lib>` is E1002 (`js` is reserved); the compiler resolves no generated `.jet/bindings/js/` module
 tests/cases/ffi_python/python_sidecar_binds_runs_and_launders_failure.case	#6366	`jet run`: `use <name>: py.<lib>` is E1002 (`py` is reserved); the compiler resolves no generated `.jet/bindings/py/` module
 tests/cases/first_hour/first_hour_cli_journey.case	#4944	`jet add` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_base/perf_run_accepts_base_surface_and_writes_jettrace_before_driver.case	#6418	`jet perf` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_browser/perf_capture_rejects_unknown_allowlist_field.case	#6418	`jet perf` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_browser/perf_run_records_capture_allowlist_and_source_maps.case	#6418	`jet perf` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_capture_run/perf_run_short_program_has_repeatable_source_attribution.case	#6418	`jet perf` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_io/perf_run_keeps_completed_socket_echo_io_span.case	#6418	`jet perf` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_views/perf_attach_view_compare_export_share_one_jettrace_truth.case	#6418	`jet perf` is not built yet (E2104)
+tests/cases/jet_perf_trace_parts_capture_run/perf_run_short_program_has_repeatable_source_attribution.case	#6418	`short.jet` links no task, channel, live value or event, so its runtime installs no observation writer (JetRuntime ObserveLive.jet `jet_rt_observe_start_init`) and publishes no run window; `jet perf run` records profile `no_samples` and window `unavailable` where the row expects two captured rows and an `exit` window
+tests/cases/jet_perf_trace_parts_io/perf_run_keeps_completed_socket_echo_io_span.case	#6418	the program uses Net, so the step needs `--allow=Net` under the application authority default (E1803); with it, the runtime names the accept wait `network wait` (I/O kind `network`, not `tcp`/`tcp accept`), and `jet run` runs the observed program in a child process that it reaps before `jet perf run` can read its exit publication, so the tasks stay `blocked`
 tests/cases/jetpack_dispatch/jet_run_without_nix_compatibility_output_reports_e1272.case	#6418	`jet run --no-color` is not built yet (E2104)
 tests/cases/lib_use/unrealized_library_points_at_build_when_preparation_is_refused.case	#6418	E0983 is retired until the driver has a realized-library root in the hangar; `jet run --no-prepare` reports E0603 for the unrealized library
 tests/cases/library_outputs/component_build_load_and_foreign_call_are_one_surface.case	#6418	`jet build --target=sandbox` is not built yet (E2104)
@@ -411,7 +407,6 @@ tests/cases/library_outputs/locked_named_library_build_selects_the_requested_out
 tests/cases/lsp/lsp_bench_reports_deterministic_cache_and_memory.case	#6418	`jet self lsp` is not built yet (E2104)
 tests/cases/lsp/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.case	#6418	`jet self lsp` is not built yet (E2104)
 tests/cases/lsp/lsp_budget_reports_projects_canonical_report_without_measuring.case	#6418	`jet budget` is not built yet (E2104)
-tests/cases/machine_output/every_json_report_door_uses_the_one_machine_envelope.case	#6418	`jet perf view` rejects the committed `.jet/perf/1787269028-687eeec2.jettrace` fixture ("Content has missing or unknown keys", E2102): it predates the current content schema (no `game_frames`, `game_draw_events`, `profile` or `receipt_sections`) and needs regenerating with `jet perf run`, which is not built yet (E2104)
 tests/cases/notebook/headless_protocol_interrupt_stdin_debug_perf_and_clients.case	#6418	`jet notebook` is not built yet (E2104)
 tests/cases/notebook/jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss.case	#6418	`jet notebook` is not built yet (E2104)
 tests/cases/notebook/notebook_cli_headless_journey_uses_production_session.case	#6418	`jet notebook` is not built yet (E2104)

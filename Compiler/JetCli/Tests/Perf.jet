@@ -72,12 +72,12 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     assert_eq(bounded.rows[1].sample_count, U64{4096})
     assert_eq(bounded.rows[1].sample_weight, U64{4096})
 }
-#Test("perf capture keeps observed IO, locks and allocations causal") {
+#Test("perf capture keeps observed IO spans, locks and allocations causal") {
     live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
     capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, "x86_64-unknown-linux-gnu") ?? panic(err.message)
     assert_eq(capture.io.len(), 1)
-    assert_eq(capture.io[0].start_ns, U64{20})
+    assert_eq(capture.io[0].start_ns, U64{10})
     assert_eq(capture.io[0].end_ns, U64{20})
     assert_eq(capture.locks.len(), 1)
     assert_eq(capture.allocations[0].bytes, U64{64})
@@ -88,6 +88,13 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
     bytes: jet_cli_perf_capture_bytes(capture, "run", [String]{"app.jet"}, toolchain, hardware) ?? panic(err.message)
     _: verify_jettrace(bytes) ?? panic(err.message)
+}
+#Test("perf capture without observations keeps the source and records no samples") {
+    capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, "x86_64-unknown-linux-gnu") ?? panic(err.message)
+    assert_eq(capture.source_maps.len(), 1)
+    assert_eq(capture.profile.status, "no_samples")
+    assert_eq(capture.profile.window_status, "unavailable")
+    assert_eq(capture.tasks.len(), 0)
 }
 #Test("perf observations refuse mixed process revisions") {
     live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))

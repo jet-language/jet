@@ -1,6 +1,7 @@
-// `jet perf view|compare|export` (CmdPerf.rs `run`, `view`, `compare`): every
-// reader verifies the one `.jettrace` artifact before it projects anything, and
-// none of them measures or rewrites it. Export's projections are Export.jet.
+// `jet perf run|test|view|compare|export` (CmdPerf.rs `run`, `view`,
+// `compare`): every reader verifies the one `.jettrace` artifact before it
+// projects anything, and none of them measures or rewrites it. Export's
+// projections are Export.jet; the run/test session is Session.jet.
 use {
     cli_files: core.files
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
@@ -16,15 +17,21 @@ JET_CLI_PERF_FIX: "correct the named flag, or run `jet help` to see the flags"
 
 // `jet perf <action> …`: `argv` starts at `perf`. The front door answers the
 // group's help and refuses an unknown or unbuilt action before this runs.
-jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     action: argv[1]
     rest := [String]{}
     help := false
-    // `--quiet` silences only status lines, and the readers print none; the
-    // front door already read the output flags.
+    quiet := false
+    passthrough := false
+    // The front door already read the output flags; words after `--` are the
+    // program's, never perf's.
     loop word in jet_cli_tail(argv, 2) {
-        if jet_cli_is_help_flag(word) -> help = true
-        if word == "--quiet" || word == "--color" || word == "--no-color" || word.starts_with("--color=") -> next
+        if !passthrough {
+            if word == "--" -> passthrough = true
+            if jet_cli_is_help_flag(word) -> help = true
+            if word == "--quiet" -> quiet = true
+            if word == "--quiet" || word == "--color" || word == "--no-color" || word.starts_with("--color=") -> next
+        }
         rest.push(word)
     }
     if help && jet_cli_nested_command("perf", action) == .Val(found) {
@@ -32,10 +39,12 @@ jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env]> JetDriverVerbOutput Ne
         return JetDriverVerbOutput{stdout: "jet perf {spec.name} — {spec.summary}\nusage: {spec.usage}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if action == {
+        "run" | "test" -> jet_cli_perf_session(action, rest, quiet, color)
+        "attach" -> jet_cli_perf_attach(rest, quiet, color)
         "view" -> jet_cli_perf_view(rest, color)
         "compare" -> jet_cli_perf_compare(rest, color)
         "export" -> jet_cli_perf_export(rest, color)
-        else -> jet_cli_not_ported_output("perf {action}", color)
+        else -> jet_cli_perf_error("unknown `jet perf` action `{action}`", "run `jet perf --help` to see its actions", color)
     }
 }
 
@@ -58,7 +67,10 @@ jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
     extension: artifact_extension()
     if !path.ends_with(extension) -> return Err(jettrace_error("trace path must end with {extension}"))
     bytes: cli_files.read_bytes(path) ?? return Err(jettrace_error("cannot read {path}: {jet_cli_io_error_text(err)}"))
-    verify_jettrace(bytes)
+    // The report names the file: a verification failure alone does not say
+    // which trace it rejected.
+    trace: verify_jettrace(bytes) ?? return Err(jettrace_error("`{path}` is not a valid trace: {err.message}"))
+    Ok(trace)
 }
 
 // `view`: text, `--json` or `--html`, with `--frames=jet|all`.
