@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95875,
+    "rev": 95888,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47527,6 +47527,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "dev eb47eb7277 (Main, G3): Core/Time/Time.jet strftime now formats %S (zero-padded seconds), %p (AM/PM) and %z (+0000, UTC). Before this they printed literally, a defect in the existing API, so no ballot was needed. tests/conformance/corpus/core/time/strftime.jet asserts the three, and its unsupported-directive row now covers only %Q %n %t. Seed a0_034 jet test of the corpus file: 7/7. CoreSourceRows and CoreCoverage --check OK. The O0/O1/O2 parity rerun is queued for the dev s1 batch."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Owner cut the agent count to 2. CoreCliLead-2 stopped before landing c8. Unlanded: the DataTree->Dyn rename, staged as a one-phase cutover by Rename.jet in $JET_SCRATCH_ROOT/lanes/CoreCliLead (b8/rename; dry run on ff0d89ebc2: 66 files edited, 28 moved, plus a text rule for run-native-codec-file-leaves.mjs:95's DATA_TREE_${kind}). The seed knows none of the renamed names. Re-run Rename.jet on the current HEAD to land it."
         },
         {
@@ -47670,7 +47675,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-07T20:37:45.482Z",
+      "updated": "2026-11-07T22:27:38.677Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -64009,6 +64014,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c5 probe on seed a0_034 (dev c639365c56), 2026-11-07. The script $JET_SCRATCH_ROOT/lanes/Main/burn/e1/basics.jet has no package block and no flags. It reads process.args() and term.stdin().read_line(), checks time.unix_ns() and calls random.int(1, 6). jet run refuses it with E1803 'Application authority is undecided for Rand, Time'. Args and stdin are free today; Time and Rand are not. The ratified D-AUTH-DEFAULT1 = A (every effect allowed by default) closes this through build card #6614, whose c1 adversarial review gates the build. c5 stays open until #6614 lands. c18 and c19 met (jet new scaffold runs; pkg case b38cac6737 PASS)."
+        },
+        {
           "at": "2026-11-04",
           "by": "Main",
           "text": "#6563 c1 precut audit re-added 4 criteria from archived #2229, #2259: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
@@ -64181,20 +64191,20 @@
         {
           "n": 18,
           "text": "(was #2229 c1) Fresh jet new scaffold runs with jet run out of the box: generated project carries the required authority block and the first-hour flow completes without E1803 [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:57.371Z"
+          "evidence": "Probe on seed a0_034 (dev c639365c56), 2026-11-07: jet new hello then jet run prints 'hello, world' with no E1803, and jet test gives 1 passed, 0 failed. The scaffold prints only and needs no authority block. Case tests/cases/pkg/cli_beginner_onboarding_ordered_workflow_uses_real_binary.case runs the same flow and PASSES.",
+          "at": "2026-11-07T22:20:29.040Z"
         },
         {
           "n": 19,
           "text": "(was #2229 c2) A test covers the scaffold-then-run flow so the beginner path cannot silently regress [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:48:58.056Z"
+          "evidence": "tests/cases/pkg/cli_beginner_onboarding_ordered_workflow_uses_real_binary.case (landed b38cac6737, at dev d405d4cb6c): jet new hello, jet run (exit 0, stdout = hello-world.out), jet check, jet test, jet run run.jet, then E0621 recovery. PASS on seed a0_034 via jet test Compiler --profile cases --filter cli_beginner_onboarding_ordered_workflow_uses_real_binary (2026-11-07).",
+          "at": "2026-11-07T22:20:40.564Z"
         },
         {
           "n": 20,
@@ -64229,7 +64239,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-07T03:47:33.181Z",
+      "updated": "2026-11-07T22:26:33.401Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -69972,6 +69982,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "Finding from the c73 census (warnings, not errors): L0601 SoftPublicUse in fixture packages names clipped identifiers at impossible spans. FrozenFixtures.jet has 43 lines but the warning names _comptime_bod at 44:1. GateProjection.jet gets _wr, _theme_ and _RUNTIME_PACK_OUTPU at blank line 26:1 and inside a string at 17:177. sema_check_soft_public_uses (JetSema CheckProgram.jet:5302) reads each reference's leaf from graph.modules[caller].source, which here is longer than the file the diagnostic renders against, so the leaf is sliced from other bytes. The root (which source that row holds for a test-fixture package) is not yet found. Repro: seed jet check in Compiler/JetSema/Tests/FrozenFixtures.fixture."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3 items 9-11 landed in dev 86fb5e5b12 (PortsLead-2). Deleted chain.sh, build-slot.sh, clean-nix-tmp.sh and clean-nix-tmp.test.mjs; ported to Tools/agent/Chain.jet (TREE LEVEL, export, seed-published, slot, inroot). Callers migrated: Admit.jet (JET_RELEASE_CHAIN removed), Land.jet, the Suite.jet hint, flake.nix, AGENTS.md and the script-census rows. Proof on a0_034: jet check clean on Chain/Admit/Land/Suite/release Main. jet test: Chain.jet 6/6, release Tests.jet 32/32, Land.jet 16/16. Dry runs s1/full/check succeed. --check-gate with no receipt and a tree under r14 are both refused (rc 2). s1 stage key fc81d252164ed760 matches between chain.sh and Chain.jet. Leftover: Jetpack ComposeEnv.jet:213 JET_NIX_TMP_CLEANED is dead; it goes in PortsLead-2's Jetpack commit."
         },
         {
@@ -71196,11 +71211,11 @@
         {
           "n": 73,
           "text": "Every registry fixture package passes jet check: at 7a7466e8c8 these fail on missing use or dependency rows (failed-row counts): JetBackend Fragments 4; JetCli GateProjection 7, RustForeign 3, RustForeignFixtures 11; JetDriver RustForeignFixtures 11; JetIR TaskCarrierFixtures 10; JetParser ContractFixtures 95; JetSema BurnDown 10, Frozen 29, GateLedger 39, ReturnDiagnostic 28, TypedGoal 10, UnsafeObligations 23, ViewFieldProvenance 50, WebHostDiagnostic 9. Each is fixed (deps or use rows), or its fixture is deleted where its subject is retired (Rust-era).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T19:08:46.893Z"
+          "evidence": "Census at dev eb47eb7277 (Main, 2026-11-07, seed a0_034, keep-going): a git export of the commit, with jet check run in each of the 21 Compiler/*/Tests/*.fixture packages (JET_KEEP_GOING_REPORT per fixture). All 20 package-form fixtures give rc=0 rows=0: JetBackend Fragments, LinkIndexes, LinkPackRoots, LinkRuntime, NativeInlineC; JetCli GateProjection, RunKeep, RustForeign; JetDriver RustForeignFixtures; JetIR TaskCarrierFixtures; JetParser ContractFixtures; JetSema BurnDown, Frozen, GateLedger, ReturnDiagnostic, TypedGoal, UnsafeObligations, ViewFieldProvenance, WebHostDiagnostic. That covers every package the criterion named at 7a7466e8c8 (340 failing rows). JetRuntime Fragments.fixture compiles only inside the runtime unit. Its designated check, jet Tools/agent/CompilerPackages.jet runtime-unit OUT --check, exits 0: 406 unit sources including all 60 fragment files, 0 errors. Scripts: $JET_SCRATCH_ROOT/lanes/Main/burn/c73/one.sh.",
+          "at": "2026-11-07T22:34:18.508Z"
         }
       ],
       "refs": [
@@ -71216,7 +71231,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T22:07:53.811Z",
+      "updated": "2026-11-07T22:34:19.632Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -73295,6 +73310,16 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "Spreading receipt for 9177db37e4, same compiler (seed-built from d405d4cb6c). Probe $JET_SCRATCH_ROOT/lanes/Main/burn/para/para16.jet: 16 items of a 20M-step LCG kernel; under the old 64-item chunks all 16 ran on one worker. Built with jet build --release: ser wall 0.430 s (cpu 0.44 s); para_map wall 0.042 s (cpu 0.50 s), 10.2x. jet run (O0): ser 1.139 s, par 0.068 s. Every mode prints total 6472. c2 (ScriptBench w11) waits on the ScriptBench rebuild."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "dev 9177db37e4 (Main): an unlimited para_map, para_filter or para_partition now passes PARA_EVERY_WORKER (1073741824) instead of -1 (BuildParallel.jet). The runtime caps it at the available parallelism, so chunks are the items spread over the pool, at most 64, and a short list of costly items reaches every worker. para_fold keeps -1 and its 64-item chunks (merge-tree contract). Compile-time code keeps cap 1, so the same value. The Parallel.jet comment and core-library.md core.tasks were updated; 4df47ce6da has the c5 paragraph. Proof is queued for the dev s1 batch: the 16-item probe at $JET_SCRATCH_ROOT/lanes/Main/burn/para/para.jet should show the parallel run well under the serial one, with every result 508760, plus goldens Concurrency/Parallel and ParallelIter."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "Finding for c2 (Main 2026-11-07): an unlimited para_map over fewer than 64 items is one chunk, so it runs on the caller thread (Parallel.jet:22-26 keeps 64 items per chunk when limit < 0). 16 items of a 20M-step kernel: built binary par (map+fold) real 0.893 s, user 0.992 s = serial x2. para_fold's 64-item grouping is its contract (BuildParallel.jet:570-573), but para_map, para_filter and para_partition could spread a short list over the pool the way the limited path does (parallel_chunk_size). w11 passes limit: 32, so it already takes the spreading path."
         },
         {
@@ -73369,11 +73394,11 @@
         {
           "n": 5,
           "text": "(was #3672 c4) `jet test Compiler --profile golden concurrency/parallel_iter` passes, and the core.tasks section of Docs/spec/reference/core-library.md names worker-thread para_* on O0, O1 and O2 and its behavior in compile-time code (which runs natively at O0).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T02:55:13.316Z"
+          "evidence": "Compiler built by the seed from dev d405d4cb6c, which contains 9177db37e4 and 4df47ce6da (plus the unrelated table-it sema patch now landing). jet test Compiler --profile golden --filter Concurrency/Parallel: PASS 15, FAIL 0. Examples/Concurrency/Parallel/ParallelIter.jet passes on o0, o1 and o2, as do Pipeline, ParallelScan, ParallelScanExpert and BoundedWorkers. Docs/spec/reference/core-library.md core.tasks (4df47ce6da, 9177db37e4) says para_* run on worker threads on O0, O1 and O2, and that compile-time code runs them natively at O0 with one worker. Compile-time probe $JET_SCRATCH_ROOT/lanes/Main/burn/para/ct.jet prints [2, 4, 6, 8, 10], 15 and true on O0, O1 and O2.",
+          "at": "2026-11-07T22:36:56.616Z"
         }
       ],
       "refs": [
@@ -73387,7 +73412,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:20.042Z",
-      "updated": "2026-11-07T21:54:59.436Z",
+      "updated": "2026-11-07T22:36:57.647Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -73558,20 +73583,20 @@
         {
           "n": 8,
           "text": "(was #2864 c2) Element assignment on lists and maps does not copy the collection when the value is uniquely owned, on O0, O1 and O2 and in compile-time code (which runs natively at O0); outputs unchanged [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:25.211Z"
+          "evidence": "dev d405d4cb6c (Main) adds tests/cases/ownership/unique_element_and_nested_place_writes_do_not_copy.case. It makes 2,000,000 list element, map entry, nested list and nested String-keyed map place stores at run time and 200,000 of each in a comptime block, on jet run O0, O1, O2 and the built binary, each under a 60 s step timeout. A per-store copy would be quadratic (about 2M copies of a 16 MB list). Every tier prints the same three lines: 5999997 1999871 1999999 1999999 / 599997 199679 199999 199999 / 3 3 -1 5 -5. The last line shows row copies, grid snapshots and map copies taken before a write keep their values. Run on a0_034: jet test Compiler --profile cases --filter unique_element_and_nested_place_writes gives PASS 1/1 in 16 s, and O0/O1/O2 each finish in about 0.3 s.",
+          "at": "2026-11-07T22:08:23.374Z"
         },
         {
           "n": 9,
           "text": "(was #2864 c3) Nested list/map place writes preserve D-MEM1 copy-on-write: uniquely owned collections mutate without a per-store full copy, while shared views and aliases retain isolation and produce the documented unchanged outputs across O0, O1 and O2 parity fixtures [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:47:26.025Z"
+          "evidence": "dev d405d4cb6c (Main) adds tests/cases/ownership/unique_element_and_nested_place_writes_do_not_copy.case. It makes 2,000,000 list element, map entry, nested list and nested String-keyed map place stores at run time and 200,000 of each in a comptime block, on jet run O0, O1, O2 and the built binary, each under a 60 s step timeout. A per-store copy would be quadratic (about 2M copies of a 16 MB list). Every tier prints the same three lines: 5999997 1999871 1999999 1999999 / 599997 199679 199999 199999 / 3 3 -1 5 -5. The last line shows row copies, grid snapshots and map copies taken before a write keep their values. Run on a0_034: jet test Compiler --profile cases --filter unique_element_and_nested_place_writes gives PASS 1/1 in 16 s, and O0/O1/O2 each finish in about 0.3 s.",
+          "at": "2026-11-07T22:08:24.395Z"
         },
         {
           "n": 10,
@@ -73593,7 +73618,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T22:33:24.863Z",
-      "updated": "2026-11-07T22:01:25.241Z",
+      "updated": "2026-11-07T22:08:24.395Z",
       "updatedBy": "Main",
       "goals": [
         "G4"
@@ -91417,11 +91442,11 @@
         {
           "n": 1,
           "text": "Precondition, a wrong-meaning bug found by the pipes study: inside a bindingless loop body, a subject table over a computed value (if .age * 2 == { … }) must give its arms its own subject as it, not the loop item. Fixed with a golden on o0, o1 and o2 before any pipe work starts.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T19:36:09.026Z"
+          "evidence": "dev 8405a508b0 (Main). A value table over a subject that is not a plain name or a place now binds that subject to it in a frame of its own: a generated grouping from parser_expression_form_parse_dispatch_table, hoisted by sema even with one arm. Its binding is pushed into that frame (as the statement form's is), so a nested table's it shadows the enclosing one. A bindingless loop body's table therefore reads its own subject, not the loop item. Examples/Basics/ValueDispatch.jet has the loop case (loop people -> if .age /% 10 == { 3 -> \"in the 30s\" ... }) and a top-level age_band. Its golden matches on O0, O1 and O2 with a compiler the seed built from the patch (jet run --optimize=none|basic|full, cmp against ValueDispatch.out). Precommit census of the landed tree: check, build and runtime pack OK, compiler self-check rc=0 rows=0. The first attempt's 7 self-check rows (nested tables reading the outer it) are fixed by the frame-scoped binding. Nested probe $JET_SCRATCH_ROOT/lanes/Main/burn/it/nest.jet prints b1 s1 / b7 inner err 7 / outer err -1 on O0 and O2.",
+          "at": "2026-11-07T22:37:37.050Z"
         },
         {
           "n": 2,
@@ -91471,7 +91496,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T19:36:01.124Z",
-      "updated": "2026-11-07T02:55:15.106Z",
+      "updated": "2026-11-07T22:37:37.051Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -94001,7 +94026,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Census (c1 first half), Main 2026-11-07, dev eb47eb7277 on seed a0_034. Method: jet help for all 49 commands and every action of the group commands (117 help pages), parsing each flag a usage line or flag row lists. A flag counts as homed when its long name is a JET_BUILD_OPTIONS row (Compiler/JetFoundation/Source/Registry/BuildOptions.jet, 7 rows) and its command reads that table (build, run, dev). Result: 429 command-flag rows over 76 commands and actions. 21 are homed: build, run and dev each have 7 (backtrace, bounds, inline, libs, optimize, os, small). The other 408 rows (157 distinct flags) have none. The most common homeless flags are --json x52, --color x44, --quiet x44, --live x8, --verbose x7, --profile x6, --set x6, -p x6, --gate x5, --release x5, --target x5, --threads x5, --trace x5, --dry-run x5 and --allow x4. Rows per command: test 57, build 34, run 32, dev 26, inspect 26, new 17, cc 16, c++ 16, jobs 15, check 12, fmt 11, self 11, budget 9; registry has 7, including publish --force and --no-sign. Flags with a neighbouring but non-flag-keyed home (--allow/--deny to package authority, --target to package targets, --profile to build profiles) count as homeless, because none goes through one flag-to-setting mechanism. The census is regenerated on demand by $JET_SCRATCH_ROOT/lanes/Main/burn/flags/{collect.sh,census.mjs} (scratch; the porting home is the CLI registry, not a committed table). Next: the ballot on where non-build command settings live, then one shared mechanism."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -94021,7 +94052,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T09:29:13.427Z",
-      "updated": "2026-11-06T09:29:18.344Z",
+      "updated": "2026-11-07T22:32:16.970Z",
       "updatedBy": "Main"
     },
     {
@@ -186909,6 +186940,97 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T22:37:37.051Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c09umw0r",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T22:36:57.647Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:36:56.616Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c02a1ynr",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-07T22:34:19.632Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:34:18.508Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0pgowhn",
+      "note": "#73"
+    },
+    {
+      "at": "2026-11-07T22:32:16.970Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c015yc5v",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:27:38.677Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07rizte",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:26:33.401Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:20:40.564Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wi8ere",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-07T22:20:29.040Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wi8ere",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-07T22:18:56.661Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c02a1ynr",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T22:08:24.395Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a0gmpl",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-07T22:08:23.374Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a0gmpl",
+      "note": "#8"
+    },
     {
       "at": "2026-11-07T22:07:53.811Z",
       "by": "Main",
