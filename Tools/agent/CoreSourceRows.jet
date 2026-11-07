@@ -23,10 +23,19 @@
 // CLI's `jet inspect structure core` rows, and the
 // JET_CORE_OWNER_ANNOTATION_SUFFIXES tail of CoreEnumPayloadRows.jet, whose
 // rows above it are authored.
-// Usage (from the repository root): jet Tools/agent/CoreSourceRows.jet [--check]
+// The same checks gate Core.jet's source modules (every owned member and
+// type is defined by its source, no owned wrapper leaves its dispatcher row
+// dead), its public dispatcher rows, its encoding format rows, its core.mem
+// exports and the effect roots the build and policy tables name, and the
+// collection-operation tables of Docs/spec/reference/core-library.md are
+// projected from Compiler/JetFoundation/Source/Collections.jet.
+// Usage (from the repository root): jet Tools/agent/CoreSourceRows.jet
+// [--check|--facts]; `--facts` prints the Core module facts JSON the
+// surface ledger (Tools/agent/CoreSurfaceLedger.jet) reads.
 use {
     crypto: core.crypto
     files: core.files
+    json: core.encoding.json
     process: core.process
     regex: core.regex
     term: core.term
@@ -61,7 +70,8 @@ rows_fail: fn(message: String) -> CoreRowsError Never! {
 }
 
 // One CORE_SOURCE_OWNED_ROWS row before its type exports are looked up.
-// `owned_types` are a Core.jet row's source-owned nominals.
+// `owned_types` are a Core.jet row's source-owned nominals; `line` is its
+// Core.jet line (0 for a part or a runtime unit).
 CoreSourceRow: struct {
     module_name: String
     alias: String
@@ -71,6 +81,7 @@ CoreSourceRow: struct {
     owned_types: [String]
     impl_types: [String]
     runtime: Bool
+    line: Int
 }
 
 EffectRow: struct {
@@ -1118,11 +1129,13 @@ CoreType: struct {
     from_module: String
 }
 
+// One `module` line; `line` is its Core.jet line.
 CoreModule: struct {
     name: String
     members: [String]
     types: [CoreType]
     dependencies: [String]
+    line: Int
 }
 
 CoreBootstrap: struct {
@@ -1130,13 +1143,24 @@ CoreBootstrap: struct {
     dependencies: [String]
 }
 
-// One `dispatcher_row`: its kind, its DSL module ("" for `-`) and member, and
-// its evaluated record.
+// One `dispatcher_row`: its kind, its DSL module ("" for `-`) and member,
+// its expression (without a trailing comma), its Core.jet line and its
+// evaluated record.
 DispatcherRow: struct {
     kind: String
     module_name: String
     member: String
+    expression: String
+    line: Int
     record: CallRecord
+}
+
+// One `format_row <Variant> <module> <Label>` line.
+FormatRow: struct {
+    variant: String
+    module_name: String
+    label: String
+    line: Int
 }
 
 // Everything Core.jet declares, in declaration order, with every `from()`
@@ -1148,6 +1172,7 @@ CoreDeclarations: struct {
     root_types: [String]
     namespace_only: [String]
     dispatcher_rows: [DispatcherRow]
+    format_rows: [FormatRow]
 }
 
 // `Name`, `Name: plain`, `Name: crypto_nominal`, `Name: plain(A|B)`,
@@ -1184,7 +1209,7 @@ core_type: fn(raw: String, context: String) -> CoreType CoreRowsError! {
     Ok(CoreType{name: name.copy(), kind: kind, variants: variants, generic_arity: arity, from_module: from_module})
 }
 
-core_module: fn(name: String, exports: String, types_body: String, dependencies: String, context: String) -> CoreModule CoreRowsError! {
+core_module: fn(name: String, exports: String, types_body: String, dependencies: String, number: Int, context: String) -> CoreModule CoreRowsError! {
     members: core_names(exports, context) ?? return Err(err)
     seen := [String]{}
     loop member in members {
@@ -1199,7 +1224,7 @@ core_module: fn(name: String, exports: String, types_body: String, dependencies:
         seen_types.push(leaf.name.copy())
         types.push(leaf)
     }
-    Ok(CoreModule{name: name, members: members, types: types, dependencies: core_paths(dependencies, context) ?? return Err(err)})
+    Ok(CoreModule{name: name, members: members, types: types, dependencies: core_paths(dependencies, context) ?? return Err(err), line: number})
 }
 
 // `leaf` of module `module_name` with a `from(core.x)` reference replaced by
@@ -1249,7 +1274,7 @@ dispatcher_row: fn(kind: String, written_module: String, member: String, written
         emitted: if record.module_name == "" -> "-" else -> record.module_name.copy()
         return Err(rows_fail("dispatcher row identity disagrees with emitted adapter at line {number}: DSL {shown}.{member} vs {record.constructor} {emitted}.{record.member}"))
     }
-    Ok(DispatcherRow{kind: kind.copy(), module_name: module_name, member: member.copy(), record: record})
+    Ok(DispatcherRow{kind: kind.copy(), module_name: module_name, member: member.copy(), expression: expression, line: number, record: record})
 }
 
 module_named: fn(modules: [CoreModule], name: String) -> CoreModule? Never! {
@@ -1267,7 +1292,7 @@ position_of: fn(values: [String], value: String) -> Int Never! {
 }
 
 // What is wrong with the declarations as a whole, or "".
-declarations_problem: fn(declared: CoreDeclarations, format_modules: [String]) -> String Never! {
+declarations_problem: fn(declared: CoreDeclarations) -> String Never! {
     if declared.bootstraps.len() == 0 -> return "{CORE_PATH} has no bootstrap declarations"
     steps: loop step in declared.bootstraps -> step.name
     loop (position, step) in declared.bootstraps {
@@ -1290,8 +1315,8 @@ declarations_problem: fn(declared: CoreDeclarations, format_modules: [String]) -
             if !module_names.contains(dependency) -> return "Core module `{entry.name}` depends on missing module `{dependency}`"
         }
     }
-    loop format_module in format_modules {
-        if !module_names.contains(format_module) -> return "encoding format row names missing Core module `{format_module}`"
+    loop format in declared.format_rows {
+        if !module_names.contains(format.module_name) -> return "encoding format row names missing Core module `{format.module_name}`"
     }
     loop row in declared.dispatcher_rows {
         if row.kind == "receiver" -> next
@@ -1315,7 +1340,8 @@ declarations_problem: fn(declared: CoreDeclarations, format_modules: [String]) -
     ""
 }
 
-core_declarations: fn(source: String, constants: [String: String]) -[FS]> CoreDeclarations CoreRowsError! {
+// `runtime` is the runtime-unit rows, the units an owned wrapper may call.
+core_declarations: fn(source: String, constants: [String: String], runtime: [CoreSourceRow]) -[FS]> CoreDeclarations CoreRowsError! {
     rows := [CoreSourceRow]{}
     modules := [CoreModule]{}
     bootstraps := [CoreBootstrap]{}
@@ -1323,9 +1349,7 @@ core_declarations: fn(source: String, constants: [String: String]) -[FS]> CoreDe
     namespace_only := [String]{}
     dispatchers := [DispatcherRow]{}
     dispatcher_keys := [String: Int]{}
-    format_variants := [String]{}
-    format_labels := [String]{}
-    format_modules := [String]{}
+    formats := [FormatRow]{}
     lines: source.split("\n").to_list()
     loop index in 0..<lines.len() {
         line: core_line(lines[index])
@@ -1349,15 +1373,13 @@ core_declarations: fn(source: String, constants: [String: String]) -[FS]> CoreDe
             next
         }
         if FORMAT_ROW.match(line) == .Val(found) {
-            variant: found.group(1) ?? ""
-            format_module: found.group(2) ?? ""
-            label: found.group(3) ?? ""
-            if format_variants.contains(variant) -> return Err(rows_fail("duplicate Core encoding format variant `{variant}` at line {number}"))
-            if format_labels.contains(label) -> return Err(rows_fail("duplicate Core encoding format label `{label}` at line {number}"))
-            if format_modules.contains(format_module) -> return Err(rows_fail("duplicate Core encoding format module `{format_module}` at line {number}"))
-            format_variants.push(variant)
-            format_labels.push(label)
-            format_modules.push(format_module)
+            format: FormatRow{variant: found.group(1) ?? "", module_name: found.group(2) ?? "", label: found.group(3) ?? "", line: number}
+            loop seen in formats {
+                if seen.variant == format.variant -> return Err(rows_fail("duplicate Core encoding format variant `{format.variant}` at line {number}"))
+                if seen.label == format.label -> return Err(rows_fail("duplicate Core encoding format label `{format.label}` at line {number}"))
+                if seen.module_name == format.module_name -> return Err(rows_fail("duplicate Core encoding format module `{format.module_name}` at line {number}"))
+            }
+            formats.push(format)
             next
         }
         if DISPATCHER_ROW.match(line) == .Val(found) {
@@ -1381,6 +1403,7 @@ core_declarations: fn(source: String, constants: [String: String]) -[FS]> CoreDe
                 // Owner-only impl admission never exports a type.
                 impl_types: core_names(found.group(6) ?? "", context) ?? return Err(err),
                 runtime: false,
+                line: number,
             }
             loop seen in rows {
                 if seen.module_name == row.module_name -> return Err(rows_fail("duplicate Core source module `{row.module_name}` at line {number}"))
@@ -1391,7 +1414,7 @@ core_declarations: fn(source: String, constants: [String: String]) -[FS]> CoreDe
             next
         }
         if MODULE_ROW.match(line) == .Val(found) {
-            declared: core_module(found.group(1) ?? "", found.group(2) ?? "", found.group(3) ?? "", found.group(4) ?? "", context) ?? return Err(err)
+            declared: core_module(found.group(1) ?? "", found.group(2) ?? "", found.group(3) ?? "", found.group(4) ?? "", number, context) ?? return Err(err)
             if module_named(modules, declared.name) != None -> return Err(rows_fail("duplicate Core module `{declared.name}` at line {number}"))
             modules.push(declared)
             next
@@ -1403,12 +1426,619 @@ core_declarations: fn(source: String, constants: [String: String]) -[FS]> CoreDe
     loop entry in modules {
         types := [CoreType]{}
         loop leaf in entry.types -> types.push(resolve_type(modules, entry.name, leaf, [String]{}) ?? return Err(err))
-        resolved.push(CoreModule{name: entry.name.copy(), members: entry.members.copy(), types: types, dependencies: entry.dependencies.copy()})
+        resolved.push(CoreModule{name: entry.name.copy(), members: entry.members.copy(), types: types, dependencies: entry.dependencies.copy(), line: entry.line})
     }
-    declarations: CoreDeclarations{source_rows: rows, modules: resolved, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, dispatcher_rows: dispatchers}
-    problem: declarations_problem(declarations, format_modules)
+    declarations: CoreDeclarations{source_rows: rows, modules: resolved, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, dispatcher_rows: dispatchers, format_rows: formats}
+    problem: declarations_problem(declarations)
     if problem != "" -> return Err(rows_fail(problem))
+    source_problem: owned_source_problem(declarations, runtime) ?? return Err(err)
+    if source_problem != "" -> return Err(rows_fail(source_problem))
+    public_problem: public_dispatcher_problem(declarations, constants) ?? return Err(err)
+    if public_problem != "" -> return Err(rows_fail(public_problem))
     Ok(declarations)
+}
+
+// ---- Core source checks ---------------------------------------------------
+// Every owned member's target is a function its source defines and every
+// owned type a column-0 declaration there; the format rows repeat the
+// EncodingFormat enum; and an owned wrapper that calls a runtime unit
+// instead of its provider leaves its dispatcher row dead.
+
+ENCODING_PATH: "Core/Encoding/Encoding.jet"
+OWNED_FN: Regex{"^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\(\x22(?:[^\x22\\]|\\.)*\x22\))?\s+)*(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*): fn(?:[^A-Za-z0-9_]|$)"}
+// A wrapper's declaration line; a retired `pub` spelling is not one.
+WRAPPER_FN: Regex{"^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\(\x22(?:[^\x22\\]|\\.)*\x22\))?\s+)*([A-Za-z_][A-Za-z0-9_]*): fn(?:[^A-Za-z0-9_]|$)"}
+// A type is `Name: struct …`, an alias `Name: Type` or `Name<T>: Type<T>`;
+// any other column-0 declaration matches too, which only widens this
+// existence check.
+OWNED_TYPE: Regex{"^(?:pub\s+)?([A-Za-z_][A-Za-z0-9_]*)(?:<[^>]*>)?:(?:[^=]|$)"}
+TOP_DECLARATION: Regex{"^(?:(?:pub\s+|priv\s+)?[A-Za-z_][A-Za-z0-9_.]*(?:<[^>]*>)?:(?:[^=]|$)|impl(?:[^A-Za-z0-9_]|$)|#)"}
+USE_LINE: Regex{"^use\s+(?:([A-Za-z_][A-Za-z0-9_]*):\s*)?([A-Za-z_][A-Za-z0-9_.]*)(?:\.\[([^\]]*)\])?\s*$"}
+USE_ENTRY: Regex{"^\s*(?:([A-Za-z_][A-Za-z0-9_]*):\s*)?([A-Za-z_][A-Za-z0-9_.]*)(?:\.\[([^\]]*)\])?\s*$"}
+
+// One name an owned wrapper may call a runtime unit through: `alias.` for a
+// unit import, `name(` for an imported unit member.
+RuntimeLocal: struct {
+    local: String
+    unit: String
+}
+
+// The lines of `text`, a `\r\n` ending read as `\n`.
+source_lines: fn(text: String) -> [String] Never! {
+    loop line in text.split("\n") -> if line.ends_with("\r") -> byte_slice(line, 0, byte_len(line) - 1) else -> line.copy()
+}
+
+// `local` occurs in `body` after a byte that does not continue a name.
+calls_local: fn(body: String, local: String) -> Bool Never! {
+    bytes: body.bytes()
+    start := 0
+    loop {
+        found: byte_tail(body, start).find(local)
+        if found < 0 -> return false
+        at: start + found
+        if at == 0 -> return true
+        before: Int.from_u8(bytes[at - 1])
+        if !is_word_byte(before) && before != 46 -> return true
+        start = at + 1
+    }
+}
+
+// The locals one `use` target binds when it names a runtime unit.
+runtime_locals: fn(alias: String, target: String, items: String?, units: [String]) -> [RuntimeLocal] Never! {
+    out := [RuntimeLocal]{}
+    if items == .Val(list) {
+        if !units.contains(target) -> return out
+        loop item in names(list) {
+            parts: loop part in item.split(" as ") -> part.trim()
+            name: if parts.len() > 1 -> parts[1] else -> parts[0]
+            out.push(RuntimeLocal{local: "{name}(", unit: target.copy()})
+        }
+        return out
+    }
+    if units.contains(target) {
+        segments: target.split(".").to_list()
+        name: if alias != "" -> alias.copy() else -> segments[segments.len() - 1]
+        out.push(RuntimeLocal{local: "{name}.", unit: target.copy()})
+        return out
+    }
+    segments: target.split(".").to_list()
+    if segments.len() < 2 -> return out
+    unit: segments[0..<segments.len() - 1].join(".")
+    if !units.contains(unit) -> return out
+    name: if alias != "" -> alias.copy() else -> segments[segments.len() - 1]
+    out.push(RuntimeLocal{local: "{name}(", unit: unit})
+    out
+}
+
+// The runtime unit the owned wrapper `member: fn` of `source` calls instead
+// of its `module_name.member` provider, or "" when it calls none.
+owned_wrapper_unit: fn(source: String, module_name: String, member: String, units: [String]) -> String Never! {
+    lines: source_lines(source)
+    start := -1
+    loop (index, line) in lines {
+        if WRAPPER_FN.match(line) == .Val(found) && (found.group(1) ?? "") == member {
+            start = index
+            break
+        }
+    }
+    if start < 0 -> return ""
+    end := start + 1
+    loop end < lines.len() && TOP_DECLARATION.match(lines[end]) == None -> end += 1
+    body: lines[start..<end].join("\n")
+    if body.contains("{module_name}.{member}(") -> return ""
+    locals := [RuntimeLocal]{}
+    in_block := false
+    loop line in lines {
+        if in_block {
+            if line.trim() == "}}" {
+                in_block = false
+                next
+            }
+            if USE_ENTRY.match(core_line(line)) == .Val(found) {
+                loop entry in runtime_locals(found.group(1) ?? "", found.group(2) ?? "", found.group(3), units) -> locals.push(entry)
+            }
+            next
+        }
+        if line.trim() == "use {{" {
+            in_block = true
+            next
+        }
+        if USE_LINE.match(core_line(line)) == .Val(found) {
+            loop entry in runtime_locals(found.group(1) ?? "", found.group(2) ?? "", found.group(3), units) -> locals.push(entry)
+        }
+    }
+    loop entry in locals {
+        if calls_local(body, entry.local) -> return entry.unit.copy()
+    }
+    ""
+}
+
+// The first group of every line of `text` that `pattern` matches.
+line_names: fn(text: String, pattern: Regex) -> [String] Never! {
+    out := [String]{}
+    loop line in source_lines(text) {
+        if pattern.match(line) == .Val(found) -> out.push(found.group(1) ?? "")
+    }
+    out
+}
+
+// What is wrong with the sources the declarations name, or "".
+owned_source_problem: fn(declared: CoreDeclarations, runtime: [CoreSourceRow]) -[FS]> String CoreRowsError! {
+    targets := [String: String]{}
+    loop row in declared.dispatcher_rows {
+        if row.kind == "receiver" || row.record.constructor != "CoreCallRecord::source_owned" -> next
+        targets["{row.module_name}.{row.record.member}"] = row.record.source_target ?? row.record.member
+    }
+    sources := [String: String]{}
+    loop row in declared.source_rows {
+        text: read_source(row.path) ?? return Err(err)
+        functions: line_names(text, OWNED_FN)
+        loop member in row.members {
+            target: targets.get("{row.module_name}.{member}") ?? member
+            if !functions.contains(target) -> return Ok("Core source module does not define owned member `{row.module_name}.{member}` target `{target}` at line {row.line}")
+        }
+        types: line_names(text, OWNED_TYPE)
+        loop leaf in row.owned_types {
+            if !types.contains(leaf) -> return Ok("Core source module does not declare owned type `{row.module_name}.{leaf}` at line {row.line}")
+        }
+        sources[row.module_name] = text
+    }
+    if declared.format_rows.len() > 0 {
+        encoding: read_source(ENCODING_PATH) ?? return Err(err)
+        head: "EncodingFormat: enum {{\n"
+        open: if encoding.starts_with(head) -> 0 else -> encoding.find("\n{head}")
+        if open < 0 -> return Ok("{ENCODING_PATH} declares no EncodingFormat enum")
+        body_start: if open == 0 -> byte_len(head) else -> open + 1 + byte_len(head)
+        close: byte_tail(encoding, body_start).find("\n}}")
+        if close < 0 -> return Ok("{ENCODING_PATH} declares no EncodingFormat enum")
+        cases := [String]{}
+        loop line in byte_slice(encoding, body_start, body_start + close).split("\n") {
+            trimmed: line.trim()
+            if trimmed != "" -> cases.push(trimmed)
+        }
+        variants: loop format in declared.format_rows -> format.variant
+        if cases.join(" ") != variants.join(" ") -> return Ok("EncodingFormat cases ({cases.join(" ")}) differ from the format_row lines in {CORE_PATH} ({variants.join(" ")}); edit the rows, then make the enum repeat them in order")
+        loop format in declared.format_rows {
+            if !encoding.contains(".{format.variant} -> \"{format.label}\"") -> return Ok("EncodingFormat.as_str does not label .{format.variant} as \"{format.label}\" like its format_row at {CORE_PATH} line {format.line}")
+        }
+    }
+    // Cutover end state: once an owned wrapper calls a runtime unit instead
+    // of its `core.<module>.<member>` provider, the dispatcher row (and the
+    // Rust symbol it names) is dead and must go in the same change.
+    units: loop row in runtime -> row.module_name
+    loop row in declared.dispatcher_rows {
+        if row.kind == "receiver" -> next
+        loop owner in declared.source_rows {
+            if owner.module_name != row.module_name || !owner.members.contains(row.member) -> next
+            unit: owned_wrapper_unit(sources.get(owner.module_name) ?? "", owner.module_name, row.member, units)
+            if unit != "" -> return Ok("dispatcher row `{row.module_name}.{row.member}` (Core.jet line {row.line}) is dead: its owned wrapper `{row.member}: fn` in {owner.path} (owns at Core.jet line {owner.line}) calls runtime unit `{unit}` instead of the provider; delete the row and the Rust symbol it names")
+            break
+        }
+    }
+    Ok("")
+}
+
+// ---- Public dispatcher rows -----------------------------------------------
+// Every CoreCallRecord constructor and web-call adapter of a dispatcher row
+// is accountable to the module inventory that feeds the surface ledger;
+// otherwise a stale adapter spelling can become user-visible without a
+// source declaration.
+
+CONSTRUCTOR_HEAD: "CoreCallRecord::new"
+WEB_CALL: Regex{"(?:^|[^A-Za-z0-9_])sema_web_call\s*\(\s*\x22([^\x22\\]*)\x22\s*,\s*\x22([^\x22\\]*)\x22"}
+
+PublicRow: struct {
+    module_name: String
+    member: String
+    line: Int
+}
+
+// The byte offsets of `CoreCallRecord::new(` and
+// `CoreCallRecord::new_with_coverage(` in `expression`.
+constructor_offsets: fn(expression: String) -> [Int] Never! {
+    bytes: expression.bytes()
+    out := [Int]{}
+    start := 0
+    loop {
+        found: byte_tail(expression, start).find(CONSTRUCTOR_HEAD)
+        if found < 0 -> return out
+        at: start + found
+        start = at + 1
+        if at > 0 && is_word_byte(Int.from_u8(bytes[at - 1])) -> next
+        rest := byte_tail(expression, at + byte_len(CONSTRUCTOR_HEAD))
+        if rest.starts_with("_with_coverage") -> rest = byte_tail(rest, byte_len("_with_coverage"))
+        if rest.trim().starts_with("(") -> out.push(at)
+    }
+}
+
+// A public member: a Core name, or a `\0`-prefixed compiler-private path.
+is_public_member: fn(member: String) -> Bool Never! {
+    if is_name(member, "!?") -> return true
+    bytes: member.bytes()
+    if bytes.len() > 0 && Int.from_u8(bytes[0]) == 0 -> return is_name(byte_tail(member, 1), ".")
+    member.starts_with("\\0") && is_name(byte_tail(member, 2), ".")
+}
+
+register_public: fn(rows: [PublicRow], module_name: String, member: String, line: Int) -> String Never! {
+    if !is_name(module_name, ".") || !is_public_member(member) -> return "malformed CoreCall dispatcher row at Core.jet line {line}: invalid module/member"
+    loop seen in rows {
+        if seen.module_name == module_name && seen.member == member -> return "duplicate public dispatcher row `{module_name}.{member}` at Core.jet lines {seen.line} and {line}"
+    }
+    ""
+}
+
+// What is wrong with the public dispatcher rows, or "".
+public_dispatcher_problem: fn(declared: CoreDeclarations, constants: [String: String]) -> String CoreRowsError! {
+    rows := [PublicRow]{}
+    loop row in declared.dispatcher_rows {
+        context: "Core.jet line {row.line}"
+        loop offset in constructor_offsets(row.expression) {
+            call: read_rust_call(row.expression, offset, context) ?? return Err(err)
+            if call.args.len() < 2 -> return Ok("malformed CoreCall dispatcher row at Core.jet line {row.line}: invalid module/member")
+            module_name: rust_string(call.args[0], context, constants) ?? return Err(err)
+            member: rust_string(call.args[1], context, constants) ?? return Err(err)
+            problem: register_public(rows, module_name, member, row.line)
+            if problem != "" -> return Ok(problem)
+            rows.push(PublicRow{module_name: module_name, member: member, line: row.line})
+        }
+    }
+    loop row in declared.dispatcher_rows {
+        loop found in WEB_CALL.matches(row.expression) {
+            module_name: found.group(1) ?? ""
+            member: found.group(2) ?? ""
+            problem: register_public(rows, module_name, member, row.line)
+            if problem != "" -> return Ok(problem)
+            rows.push(PublicRow{module_name: module_name, member: member, line: row.line})
+        }
+    }
+    if rows.len() == 0 -> return Ok("CoreCall dispatcher table has no public rows")
+    adapter_keys := [String]{}
+    loop row in declared.dispatcher_rows {
+        if row.kind == "adapter" -> adapter_keys.push("{row.module_name}.{dispatcher_member(row.member, constants)}")
+    }
+    unknown_modules := [String]{}
+    undeclared := [String]{}
+    loop row in rows {
+        key: "{row.module_name}.{row.member}"
+        if adapter_keys.contains(key) -> next
+        if module_named(declared.modules, row.module_name) == .Val(owner) {
+            if !owner.members.contains(row.member) -> undeclared.push(key)
+        } else {
+            unknown_modules.push(key)
+        }
+    }
+    if unknown_modules.len() > 0 -> return Ok("public dispatcher row names a non-ledger module: {unknown_modules.join(", ")}")
+    if undeclared.len() > 0 -> return Ok("public dispatcher row is not declared by Core.jet: {undeclared.join(", ")}")
+    Ok("")
+}
+
+// ---- Effect, task and core.mem checks -------------------------------------
+
+CORE_SURFACE_PATH: "Compiler/JetFoundation/Data/Syntax/CoreSurface.jet"
+CORE_MEM_ANCHOR: "CORE_MEM_GATE_TIERS: "
+QUOTED_ITEM: Regex{"\x22([^\x22\\]*(?:\\.[^\x22\\]*)*)\x22"}
+// Build authority intentionally remains the existing ten-effect projection.
+// FFI, Browser, and Secret are runtime authority roots, not build grants.
+BUILD_EFFECTS: [String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU"}
+// The deny-only roots: declared with the rest of the vocabulary, refused by
+// a policy but never granted.
+DENY_ONLY_ROOTS: [String]{"Mem", "Panic"}
+IRREVERSIBLE_ROOTS: [String]{"Net", "FS", "Exec", "FFI"}
+
+// What is wrong with the effect roots the build and policy tables name, or "".
+effect_roots_problem: fn(rows: [EffectRow]) -> String Never! {
+    roots := [String]{}
+    irreversible := [String]{}
+    loop row in rows {
+        if row.name.contains(".") -> next
+        roots.push(row.name)
+        if row.irreversible -> irreversible.push(row.name)
+    }
+    loop root in DENY_ONLY_ROOTS {
+        if !roots.contains(root) -> return "{EFFECTS_PATH}: deny-only root {root} is not declared"
+    }
+    loop root in BUILD_EFFECTS {
+        if !roots.contains(root) -> return "{EFFECTS_PATH}: build effect {root} has no declared root"
+    }
+    if irreversible.len() != IRREVERSIBLE_ROOTS.len() -> return "{EFFECTS_PATH}: the irreversible effect types must be Net, FS, Exec, and FFI"
+    loop root in irreversible {
+        if !IRREVERSIBLE_ROOTS.contains(root) -> return "{EFFECTS_PATH}: the irreversible effect types must be Net, FS, Exec, and FFI"
+    }
+    ""
+}
+
+// What is wrong with the Core module names other tables rely on, or "".
+core_names_problem: fn(declared: CoreDeclarations) -> String Never! {
+    if module_named(declared.modules, "core.tasks") == None -> return "{CORE_PATH}: missing canonical core.tasks module"
+    if module_named(declared.modules, "core.task") != None -> return "{CORE_PATH}: retired core.task alias is still declared"
+    ""
+}
+
+// The `{ … }` body of the Jet list literal declared at `anchor`.
+jet_list_body: fn(source: String, anchor: String, path: String) -> String CoreRowsError! {
+    start: source.find(anchor)
+    if start < 0 -> return Err(rows_fail("{path} has no `{anchor}`"))
+    found: byte_tail(source, start).find("{{")
+    if found < 0 -> return Err(rows_fail("{path}: `{anchor}` has no list body"))
+    open: start + found
+    bytes: source.bytes()
+    depth := 0
+    quoted := false
+    escaped := false
+    loop index in open..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if quoted {
+            if {
+                escaped -> escaped = false
+                code == 92 -> escaped = true
+                code == 34 -> quoted = false
+                else -> {}
+            }
+            next
+        }
+        if code == 34 {
+            quoted = true
+            next
+        }
+        if code == 123 -> depth += 1
+        if code == 125 {
+            depth -= 1
+            if depth == 0 -> return Ok(byte_slice(source, open + 1, index))
+        }
+    }
+    Err(rows_fail("{path}: unterminated `{anchor}` list"))
+}
+
+// `[A-Z][A-Z0-9_]*`: a Syntax constant's spelling.
+is_constant_name: fn(name: String) -> Bool Never! {
+    bytes: name.bytes()
+    if bytes.len() == 0 || !is_upper_byte(Int.from_u8(bytes[0])) -> return false
+    loop byte in bytes {
+        code: Int.from_u8(byte)
+        if !is_upper_byte(code) && !is_digit_byte(code) && code != 95 -> return false
+    }
+    true
+}
+
+// A list body's quoted strings and the values of the Syntax constants it
+// names, each once, sorted.
+resolve_items: fn(body: String, constants: [String: String]) -> [String] Never! {
+    out := [String]{}
+    loop found in QUOTED_ITEM.matches(body) {
+        value: (found.group(1) ?? "").replace("\\\"", "\"")
+        if !out.contains(value) -> out.push(value)
+    }
+    bytes: body.bytes()
+    start := -1
+    loop index in 0..<bytes.len() + 1 {
+        word: index < bytes.len() && is_word_byte(Int.from_u8(bytes[index]))
+        if word {
+            if start < 0 -> start = index
+            next
+        }
+        if start < 0 -> next
+        name: byte_slice(body, start, index)
+        start = -1
+        if !is_constant_name(name) -> next
+        if constants.get(name) == .Val(value) && !out.contains(value) -> out.push(value.copy())
+    }
+    out.sort()
+    out
+}
+
+// What is wrong with core.mem's exports, or "": they are exactly the named
+// items of the syntax registry's core.mem gate-tier map.
+core_mem_problem: fn(declared: CoreDeclarations, constants: [String: String]) -[FS]> String CoreRowsError! {
+    source: read_source(CORE_SURFACE_PATH) ?? return Err(err)
+    tiers: resolve_items(jet_list_body(source, CORE_MEM_ANCHOR, CORE_SURFACE_PATH) ?? return Err(err), constants)
+    owner: module_named(declared.modules, "core.mem") ?? return Ok("Core.jet declares no core.mem module")
+    members := owner.members.copy()
+    members.sort()
+    if members.join("\n") == tiers.join("\n") -> return Ok("")
+    missing := [String]{}
+    loop name in tiers {
+        if !members.contains(name) -> missing.push(name)
+    }
+    extra := [String]{}
+    loop name in members {
+        if !tiers.contains(name) -> extra.push(name)
+    }
+    Ok("Core.jet core.mem exports drift from CORE_MEM_GATE_TIERS: missing={missing.join(",")} extra={extra.join(",")}")
+}
+
+// ---- Collection operations ------------------------------------------------
+// D-ONE-OPERATIONS1=A: the collection operation rows are authored once in
+// Jet (one law or operation literal per line inside the marked tables of
+// Collections.jet); the Core reference tables are their projection. The Jet
+// compiler type-checks the rows; this projection checks only table-level
+// laws (unique receiver/method keys and known laws).
+
+OPERATIONS_SOURCE_PATH: "Compiler/JetFoundation/Source/Collections.jet"
+OPERATIONS_DOC_PATH: "Docs/spec/reference/core-library.md"
+OPERATIONS_BEGIN: "<!-- BEGIN GENERATED COLLECTION OPERATIONS -->"
+OPERATIONS_END: "<!-- END GENERATED COLLECTION OPERATIONS -->"
+LAW_ROW: Regex{"^(?:CollectionLawFacts)?\{{law: CollectionLaw\.([A-Za-z0-9_]+), timing: \x22([^\x22]*)\x22, result: \x22([^\x22]*)\x22, callbacks: \x22([^\x22]*)\x22, stop: \x22([^\x22]*)\x22, failure: \x22([^\x22]*)\x22, buffering: \x22([^\x22]*)\x22\}},?$"}
+OPERATION_ROW: Regex{"^(?:CollectionOperationRow)?\{{receivers: CollectionReceivers\.([A-Za-z0-9_]+), name: \x22([A-Za-z0-9_]+)\x22, minimum_arity: ([0-9]+), maximum_arity: ([0-9]+), access: CollectionAccess\.([A-Za-z0-9_]+), args: \[CollectionArg\]\{{([^}}]*)\}}, result: CollectionResult\.([A-Za-z0-9_]+), op: (.+), law: CollectionLaw\.([A-Za-z0-9_]+), empty: \x22([^\x22]*)\x22, status: CollectionStatus\.([A-Za-z0-9_]+)(?:, stores: true)?\}},?$"}
+
+CollectionLawRow: struct {
+    law: String
+    cells: [String]
+}
+
+CollectionOperation: struct {
+    receivers: String
+    name: String
+    minimum: Int
+    args: [String]
+    access: String
+    law: String
+    empty: String
+    status: String
+}
+
+receiver_text: fn(name: String) -> String Never! {
+    if name == {
+        "List" -> "`[T]`"
+        "Iter" -> "`Iter<T>`"
+        "View" -> "`View<T>`"
+        "Sequence" -> "`[T]`, `Iter<T>`"
+        "Map" -> "`[K:V]`"
+        "Set" -> "`Set<T>`"
+        "Rank" -> "`Rank<T>`"
+        "Bits" -> "`Bits`"
+        "Tally" -> "`Tally<T>`"
+        "Cache" -> "`Cache<K,V>`"
+        "Queue" -> "`Queue<T>`"
+        "PriorityQueue" -> "`PriorityQueue<T>`"
+        else -> ""
+    }
+}
+
+access_text: fn(name: String) -> String Never! {
+    if name == {
+        "Read" -> "borrows"
+        "Write" -> "exclusive, in place"
+        "Move" -> "consumes"
+        "Sequence" -> "borrows a list; consumes an iterator"
+        else -> ""
+    }
+}
+
+arg_text: fn(name: String) -> String Never! {
+    if name == {
+        "Element" -> "item"
+        "Key" -> "key"
+        "Value" -> "value"
+        "Integer" -> "Int"
+        "Text" -> "String"
+        "IntegerList" -> "[Int]"
+        "DisjointFn" -> "(ViewMut<item>, ViewMut<item>) -> T"
+        "RemoveBy" -> "RemoveBy"
+        "ElementList" -> "[item]"
+        "KeyList" -> "[key]"
+        "SameKind" -> "same kind"
+        "Entries" -> "map"
+        "Seed" -> "seed"
+        "ItemFn" -> "(item) -> T"
+        "ItemPredicate" -> "(item) -> Bool"
+        "PairPredicate" -> "(item, item) -> Bool"
+        "Accumulator" -> "(acc, item) -> acc"
+        "Comparator" -> "(item) -> key or (a, b) -> Ordering"
+        "SortKey" -> "(item) -> key"
+        "EntryFn" -> "(key, value) -> T"
+        "EntryPredicate" -> "(key, value) -> Bool"
+        "EntryAccumulator" -> "(acc, key, value) -> acc"
+        "EntryFlatMap" -> "(key, value) -> map"
+        "EntryMerge" -> "(key, old, new) -> value"
+        else -> ""
+    }
+}
+
+status_text: fn(name: String) -> String Never! {
+    if name == {
+        "Current" -> "current"
+        "SourceOnly" -> "source-only"
+        "Proposed" -> "proposed"
+        else -> ""
+    }
+}
+
+// The row lines between the `// BEGIN <table>` and `// END <table>` markers.
+marked_lines: fn(source: String, table: String) -> [String] CoreRowsError! {
+    begin: "// BEGIN {table}"
+    end: "// END {table}"
+    start: source.find(begin)
+    finish: if start < 0 -> -1 else -> byte_tail(source, start).find(end)
+    if start < 0 || finish < 0 -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: generated section markers are missing or out of order"))
+    out := [String]{}
+    loop line in byte_slice(source, start, start + finish).split("\n") {
+        row: line.trim()
+        if row.starts_with("{{") || row.starts_with("Collection") -> out.push(row)
+    }
+    if out.len() == 0 -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: `{table}` has no rows"))
+    Ok(out)
+}
+
+// The collection-operation reference tables of core-library.md.
+render_operation_tables: fn(source: String) -> String CoreRowsError! {
+    laws := [CollectionLawRow]{}
+    loop line in marked_lines(source, "COLLECTION LAWS") ?? return Err(err) {
+        found: LAW_ROW.match(line) ?? return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: unreadable law row: {line}"))
+        law: found.group(1) ?? ""
+        loop seen in laws {
+            if seen.law == law -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: duplicate law {law}"))
+        }
+        cells: loop group in 2..<8 -> found.group(group) ?? ""
+        laws.push(CollectionLawRow{law: law, cells: cells})
+    }
+    operations := [CollectionOperation]{}
+    keys := [String]{}
+    loop line in marked_lines(source, "COLLECTION OPERATIONS") ?? return Err(err) {
+        found: OPERATION_ROW.match(line) ?? return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: unreadable operation row: {line}"))
+        receivers: found.group(1) ?? ""
+        name: found.group(2) ?? ""
+        law: found.group(9) ?? ""
+        status: found.group(11) ?? ""
+        if status_text(status) == "" -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {receivers}.{name} has unknown status {status}"))
+        if receiver_text(receivers) == "" -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {receivers}.{name} has unknown receivers {receivers}"))
+        access: found.group(5) ?? ""
+        if access_text(access) == "" -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {receivers}.{name} has unknown access {access}"))
+        known := false
+        loop seen in laws {
+            if seen.law == law -> known = true
+        }
+        if !known -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {receivers}.{name} names unknown law {law}"))
+        families: if receivers == "Sequence" -> [String]{"List", "Iter"} else -> [String]{receivers}
+        loop family in families {
+            key: "{family}.{name}"
+            if keys.contains(key) -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: {key} has more than one operation row"))
+            keys.push(key)
+        }
+        args := [String]{}
+        loop arg in names(found.group(6) ?? "") {
+            shape: if arg.starts_with("CollectionArg.") -> byte_tail(arg, byte_len("CollectionArg.")) else -> arg.copy()
+            if arg_text(shape) == "" -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: unknown argument shape {shape}"))
+            args.push(shape)
+        }
+        minimum: Int.parse(found.group(3) ?? "") ?? 0
+        operations.push(CollectionOperation{receivers: receivers, name: name, minimum: minimum, args: args, access: access, law: law, empty: found.group(10) ?? "", status: status})
+    }
+    loop facts in laws {
+        used := false
+        loop row in operations {
+            if row.law == facts.law -> used = true
+        }
+        if !used -> return Err(rows_fail("{OPERATIONS_SOURCE_PATH}: law {facts.law} has no operation row"))
+    }
+    lines := [String]{
+        OPERATIONS_BEGIN,
+        "<!-- Source: {OPERATIONS_SOURCE_PATH}; regenerate with jet Tools/agent/CoreSourceRows.jet -->",
+        "",
+        "| Law | Timing | Result | Callbacks | Stop item | Failure channel | Buffering |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    }
+    loop facts in laws -> lines.push("| {facts.law} | {facts.cells.join(" | ")} |")
+    lines.push("")
+    lines.push("| Receiver | Operation | Receiver ownership | Law | Empty result | Status |")
+    lines.push("| --- | --- | --- | --- | --- | --- |")
+    loop row in operations {
+        // Reserved embedded-Core seams are not public operations.
+        if row.name.starts_with("__") -> next
+        shown: loop (index, arg) in row.args -> if index < row.minimum -> arg_text(arg) else -> "[{arg_text(arg)}]"
+        lines.push("| {receiver_text(row.receivers)} | `{row.name}({shown.join(", ")})` | {access_text(row.access)} | {row.law} | {row.empty} | {status_text(row.status)} |")
+    }
+    lines.push("")
+    lines.push(OPERATIONS_END)
+    Ok(lines.join("\n"))
+}
+
+// core-library.md with its one generated section replaced by `section`.
+replace_operation_section: fn(doc: String, section: String) -> String CoreRowsError! {
+    if doc.split(OPERATIONS_BEGIN).to_list().len() != 2 || doc.split(OPERATIONS_END).to_list().len() != 2 -> return Err(rows_fail("{OPERATIONS_DOC_PATH}: expected exactly one generated section ({OPERATIONS_BEGIN}, {OPERATIONS_END})"))
+    start: doc.find(OPERATIONS_BEGIN)
+    finish: doc.find(OPERATIONS_END)
+    if finish < start -> return Err(rows_fail("{OPERATIONS_DOC_PATH}: generated section markers are out of order"))
+    Ok("{byte_slice(doc, 0, start)}{section}{byte_tail(doc, finish + byte_len(OPERATIONS_END))}")
 }
 
 // The compiler-private parts, in CoreSourceParts.tsv order.
@@ -1423,7 +2053,7 @@ source_parts: fn(source: String) -> [CoreSourceRow] CoreRowsError! {
         loop seen in rows {
             if seen.module_name == fields[0] -> return Err(rows_fail("{PARTS_PATH}:{index + 1}: duplicate source part {fields[0]}"))
         }
-        rows.push(CoreSourceRow{module_name: fields[0], alias: fields[3], path: fields[2], owner: fields[1], members: names(fields[4]), owned_types: [String]{}, impl_types: names(fields[5]), runtime: false})
+        rows.push(CoreSourceRow{module_name: fields[0], alias: fields[3], path: fields[2], owner: fields[1], members: names(fields[4]), owned_types: [String]{}, impl_types: names(fields[5]), runtime: false, line: 0})
     }
     if rows.len() == 0 -> return Err(rows_fail("{PARTS_PATH} declares no source parts"))
     Ok(rows)
@@ -1502,7 +2132,7 @@ walk_runtime: fn(directory: String, segments: [String]) -[FS]> [CoreSourceRow] C
         loop segment in module_segments {
             if !is_unit_segment(segment) -> return Err(rows_fail("runtime unit path segment `{segment}` is not a lowercase identifier: {path}"))
         }
-        rows.push(CoreSourceRow{module_name: "core.{module_segments.join(".")}", alias: "__core_{module_segments.join("_")}", path: path, owner: "", members: [String]{}, owned_types: [String]{}, impl_types: [String]{}, runtime: true})
+        rows.push(CoreSourceRow{module_name: "core.{module_segments.join(".")}", alias: "__core_{module_segments.join("_")}", path: path, owner: "", members: [String]{}, owned_types: [String]{}, impl_types: [String]{}, runtime: true, line: 0})
     }
     Ok(rows)
 }
@@ -1734,6 +2364,7 @@ CoreSourceViews: struct {
     rows: Int
     effects: Int
     source_hash: String
+    declarations: CoreDeclarations
 }
 
 render_owned_row: fn(row: CoreSourceRow, type_exports: [String]) -> String Never! {
@@ -2046,8 +2677,15 @@ read_core_source_views: fn() -[FS]> CoreSourceViews CoreRowsError! {
     root_names: effect_names(declared, false)
     core: core_effect_text(raw_core, root_names) ?? return Err(err)
     constants: syntax_constants() ?? return Err(err)
-    declarations: core_declarations(core, constants) ?? return Err(err)
     runtime: runtime_units() ?? return Err(err)
+    declarations: core_declarations(core, constants, runtime) ?? return Err(err)
+    effect_problem: effect_roots_problem(declared)
+    if effect_problem != "" -> return Err(rows_fail(effect_problem))
+    names_problem: core_names_problem(declarations)
+    if names_problem != "" -> return Err(rows_fail(names_problem))
+    mem_problem: core_mem_problem(declarations, constants) ?? return Err(err)
+    if mem_problem != "" -> return Err(rows_fail(mem_problem))
+    operations_doc: replace_operation_section(read_source(OPERATIONS_DOC_PATH) ?? return Err(err), render_operation_tables(read_source(OPERATIONS_SOURCE_PATH) ?? return Err(err)) ?? return Err(err)) ?? return Err(err)
     rows := declarations.source_rows.copy()
     loop row in source_parts(parts) ?? return Err(err) -> rows.push(row)
     loop row in runtime -> rows.push(row.copy())
@@ -2080,8 +2718,9 @@ read_core_source_views: fn() -[FS]> CoreSourceViews CoreRowsError! {
         GeneratedFile{path: ENUM_ROWS_PATH, text: render_enum_rows(core_hash, declarations) ?? return Err(err)},
         GeneratedFile{path: STRUCTURE_ROWS_PATH, text: render_structure_rows(core_hash, declarations)},
         GeneratedFile{path: ENUM_PAYLOAD_ROWS_PATH, text: render_enum_payload_rows(payload, rows) ?? return Err(err)},
+        GeneratedFile{path: OPERATIONS_DOC_PATH, text: operations_doc},
     }
-    Ok(CoreSourceViews{files: outputs, rows: rows.len(), effects: declared.len(), source_hash: source_hash})
+    Ok(CoreSourceViews{files: outputs, rows: rows.len(), effects: declared.len(), source_hash: source_hash, declarations: declarations})
 }
 
 // The file's text, or "" when it does not exist.
@@ -2090,12 +2729,41 @@ current_text: fn(path: String) -[FS]> String CoreRowsError! {
     read_source(path)
 }
 
+// The Core module facts the surface ledger reads, one object per `module`
+// line in Core.jet order, every `from()` type resolved.
+core_facts: fn(declarations: CoreDeclarations) -> String CoreRowsError! {
+    modules := [Dyn]{}
+    loop entry in declarations.modules {
+        types := [Dyn]{}
+        loop leaf in entry.types {
+            item := Dyn.object()
+            item["name"] = Dyn.Text(leaf.name.copy())
+            item["kind"] = Dyn.Text(leaf.kind.copy())
+            item["variants"] = Dyn.Array(loop variant in leaf.variants -> Dyn.Text(variant.copy()))
+            item["genericArity"] = if leaf.generic_arity > 0 -> Dyn.Int(leaf.generic_arity) else -> Dyn.Null
+            types.push(item)
+        }
+        fact := Dyn.object()
+        fact["module"] = Dyn.Text(entry.name.copy())
+        fact["rawModules"] = Dyn.Array([Dyn]{Dyn.Text("{entry.name} (Prelude/Core.jet)")})
+        fact["members"] = Dyn.Array(loop member in entry.members -> Dyn.Text(member.copy()))
+        fact["sourceLine"] = Dyn.Int(entry.line)
+        fact["types"] = Dyn.Array(types)
+        fact["dependencies"] = Dyn.Array(loop dependency in entry.dependencies -> Dyn.Text(dependency.copy()))
+        modules.push(fact)
+    }
+    json.to_string(Dyn.Array(modules)) ?? return Err(rows_fail("the Core module facts cannot be encoded: {err}"))
+}
+
+// No flag writes every view; `--check` refuses a stale one; `--facts` prints
+// the Core module facts after the same checks.
 core_source_rows_main: fn(args: [String]) -[FS]> String CoreRowsError! {
-    check: args.len() == 1 && args[0] == "--check"
-    if args.len() > 1 || (args.len() == 1 && !check) -> return Err(rows_fail("usage: jet Tools/agent/CoreSourceRows.jet [--check]"))
+    mode: if args.len() == 1 -> args[0] else -> ""
+    if args.len() > 1 || (args.len() == 1 && mode != "--check" && mode != "--facts") -> return Err(rows_fail("usage: jet Tools/agent/CoreSourceRows.jet [--check|--facts]"))
     views: read_core_source_views() ?? return Err(err)
+    if mode == "--facts" -> return core_facts(views.declarations)
     summary: "{views.rows} rows, {views.effects} effects, source {views.source_hash}"
-    if check {
+    if mode == "--check" {
         loop output in views.files {
             if (current_text(output.path) ?? return Err(err)) != output.text -> return Err(rows_fail("{output.path} is stale; run jet Tools/agent/CoreSourceRows.jet"))
         }
@@ -2164,8 +2832,8 @@ call_record_error: fn(expression: String) -> String Never! {
 }
 
 // The error text dispatcher_row reports for one row, or "".
-dispatcher_row_error: fn(written_module: String, member: String, expression: String) -> String Never! {
-    if dispatcher_row("plain", written_module, member, expression, 7, [String: String]{}) == {
+dispatcher_row_error: fn(kind: String, written_module: String, member: String, expression: String, constants: [String: String]) -> String Never! {
+    if dispatcher_row(kind, written_module, member, expression, 7, constants) == {
         .Ok(_) -> ""
         .Err(error) -> error.message
     }
@@ -2183,7 +2851,135 @@ dispatcher_row_error: fn(written_module: String, member: String, expression: Str
     assert(call_record_error("CoreCallRecord::new(\"core.mem\", \"volatile_read\", \"std::ptr::read_volatile\", false, &[false])").contains("names a retired Rust route"))
     assert(call_record_error("CoreCallRecord::new(\"core.net\", \"ip\", \"jet_net_ip\", true)").contains("expected 5 arguments"))
     assert(call_record_error("CoreCallRecord::new(\"core.net\", \"ip\", \"jet_net_ip\", true, &[true]).with_pure_route(CoreCallPureRoute::Gone)").contains("unsupported CoreCallPureRoute"))
-    assert(dispatcher_row_error("core.net", "ipv6", "CoreCallRecord::new(\"core.net\", \"ipv6\", \"jet_net_ipv6\", true, &[true]),") == "")
-    assert(dispatcher_row_error("core.net", "ipv4", "CoreCallRecord::new(\"core.net\", \"ipv6\", \"jet_net_ipv6\", true, &[true]),").contains("identity disagrees with emitted adapter at line 7: DSL core.net.ipv4 vs CoreCallRecord::new core.net.ipv6"))
+    assert(dispatcher_row_error("plain", "core.net", "ipv6", "CoreCallRecord::new(\"core.net\", \"ipv6\", \"jet_net_ipv6\", true, &[true]),", none) == "")
+    assert(dispatcher_row_error("plain", "core.net", "ipv4", "CoreCallRecord::new(\"core.net\", \"ipv6\", \"jet_net_ipv6\", true, &[true]),", none).contains("identity disagrees with emitted adapter at line 7: DSL core.net.ipv4 vs CoreCallRecord::new core.net.ipv6"))
     assert_eq(decode_rust_string("a\\u{{e9}}\\x41\\n", "fixture") ?? panic("the Rust escapes were refused"), "aéA\n")
+}
+
+#Test("an owned wrapper that calls a runtime unit instead of its provider is found") {
+    units: [String]{"core.text.runtime.copy"}
+    import_unit: "use kernel: core.text.runtime.copy\n"
+    assert_eq(owned_wrapper_unit("{import_unit}copy: fn() -> Int {{ kernel.copy() }}\n", "core.text", "copy", units), "core.text.runtime.copy")
+    // A declaration attribute does not hide the wrapper.
+    assert_eq(owned_wrapper_unit("{import_unit}#Unsafe(\"validated carrier\") copy: fn() -> Int {{ kernel.copy() }}\n", "core.text", "copy", units), "core.text.runtime.copy")
+    // A unit member alias names the same unit, in a `use` line or block.
+    assert_eq(owned_wrapper_unit("use raw_copy: core.text.runtime.copy.copy\ncopy: fn() -> Int {{ raw_copy() }}\n", "core.text", "copy", units), "core.text.runtime.copy")
+    assert_eq(owned_wrapper_unit("use {{\n    raw_copy: core.text.runtime.copy.copy\n    unicode: core.text\n}}\ncopy: fn() -> Int {{ raw_copy() }}\n", "core.text", "copy", units), "core.text.runtime.copy")
+    // A compiler-owned provider call is not a runtime cutover.
+    assert_eq(owned_wrapper_unit("{import_unit}copy: fn() -> Int {{ core.text.copy() }}\n", "core.text", "copy", units), "")
+    // The next declaration is outside the wrapper body.
+    assert_eq(owned_wrapper_unit("{import_unit}copy: fn() -> Int {{ 0 }}\ninternal: module {{\n    helper: fn() -> Int {{ kernel.copy() }}\n}}\n", "core.text", "copy", units), "")
+    // The retired `pub` spelling does not declare the wrapper.
+    assert_eq(owned_wrapper_unit("{import_unit}pub copy: fn() -> Int {{ kernel.copy() }}\n", "core.text", "copy", units), "")
+    // A longer name ending in the local is not a call through it.
+    assert_eq(owned_wrapper_unit("{import_unit}copy: fn() -> Int {{ my_kernel.copy() }}\n", "core.text", "copy", units), "")
+}
+
+// Core.jet `source`'s declarations against the sources on disk.
+fixture_declarations: fn(source: String) -[FS]> CoreDeclarations CoreRowsError! {
+    constants: syntax_constants() ?? return Err(err)
+    runtime: runtime_units() ?? return Err(err)
+    core_declarations(source, constants, runtime)
+}
+
+// The error text core_declarations reports for `source`, or "".
+declarations_error: fn(source: String) -[FS]> String Never! {
+    if fixture_declarations(source) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+type_in: fn(declared: CoreDeclarations, module_name: String, name: String) -> CoreType Never! {
+    owner: module_named(declared.modules, module_name) ?? panic("Core.jet declares no {module_name}")
+    loop leaf in owner.types {
+        if leaf.name == name -> return leaf.copy()
+    }
+    panic("{module_name} exports no type {name}")
+}
+
+#Test("Core type references resolve to their defining type and refuse a missing or cyclic target") {
+    source: files.read(CORE_PATH) ?? panic("{CORE_PATH} did not read")
+    declared: fixture_declarations(source) ?? panic("Core.jet was refused: {err.message}")
+    plot_types: [String]{"Aggregate", "Backend", "Channel", "FacetKind", "FilterOp", "Interaction", "LegendPosition", "Mark", "ScaleKind", "Support"}
+    loop name in plot_types {
+        owner: type_in(declared, "core.data.plot", "JetDataPlot{name}")
+        reexport: type_in(declared, "core.data", "JetDataPlot{name}")
+        assert_eq(reexport.variants, owner.variants)
+        assert(reexport.generic_arity == owner.generic_arity && reexport.kind == owner.kind)
+    }
+    defining: "JetDataPlotAggregate:plain(Sum|Mean|Count|Min|Max)"
+    changed: source.replace(defining, "JetDataPlotAggregate:plain(None|Count|Sum|Mean|Min|Max)")
+    assert(changed != source)
+    reordered: fixture_declarations(changed) ?? panic("the reordered variants were refused: {err.message}")
+    assert_eq(type_in(reordered, "core.data", "JetDataPlotAggregate").variants, [String]{"None", "Count", "Sum", "Mean", "Min", "Max"})
+    assert(declarations_error(source.replace("JetDataPlotAggregate:from(core.data.plot)", "JetDataPlotAggregate:from(core.missing)")).contains("unknown Core type reference `core.missing.JetDataPlotAggregate`"))
+    assert(declarations_error(source.replace(defining, "JetDataPlotAggregate:from(core.data)")).contains("cyclic Core type reference"))
+    // A private nominal is owned by its source module without joining the
+    // module's public types, and still needs its exact source declaration.
+    loop row in declared.source_rows {
+        if row.module_name == "core.time" -> assert(row.owned_types.contains("ExpiringValue"))
+    }
+    assert(!(module_named(declared.modules, "core.time") ?? panic("no core.time")).types.any(leaf -> leaf.name == "ExpiringValue"))
+    hidden: source.replace("TimeError, ExpiringValue }}", "TimeError, MissingPrivateType }}")
+    assert(hidden != source)
+    assert(declarations_error(hidden).contains("does not declare owned type `core.time.MissingPrivateType`"))
+    assert(declarations_error(source.replace("format_row ETF core.encoding.eetf ETF\n", "")).contains("differ from the format_row lines"))
+}
+
+#Test("public dispatcher rows, effect roots, core.mem items and operation tables are checked") {
+    declared := fixture_declarations(files.read(CORE_PATH) ?? panic("{CORE_PATH} did not read")) ?? panic("Core.jet was refused: {err.message}")
+    syntax: syntax_constants() ?? panic("the Syntax constants did not read: {err.message}")
+    assert_eq(public_dispatcher_problem(declared, syntax) ?? panic("the dispatcher rows were refused: {err.message}"), "")
+    stray := declared.dispatcher_rows[0].copy()
+    stray.kind = "receiver"
+    stray.expression = "CoreCallRecord::new(\"core.nowhere\", \"probe\", \"jet_nowhere_probe\", true, &[true])"
+    stray.line = 9001
+    declared.dispatcher_rows.push(stray.copy())
+    assert_eq(public_dispatcher_problem(declared, syntax) ?? panic("the stray row was refused: {err.message}"), "public dispatcher row names a non-ledger module: core.nowhere.probe")
+    declared.dispatcher_rows.push(stray)
+    duplicate: public_dispatcher_problem(declared, syntax) ?? panic("the duplicate row was refused: {err.message}")
+    assert_eq(duplicate, "duplicate public dispatcher row `core.nowhere.probe` at Core.jet lines 9001 and 9001")
+    assert_eq(constructor_offsets("CoreCallRecord::new_with_coverage (a), MyCoreCallRecord::new(b), CoreCallRecord::newer(c)"), [Int]{0})
+    roots := [EffectRow]{}
+    root_names: [String]{"Mem", "Panic", "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI"}
+    loop name in root_names {
+        roots.push(EffectRow{name: name, irreversible: name == "Net" || name == "FS" || name == "Exec" || name == "FFI"})
+    }
+    assert_eq(effect_roots_problem(roots), "")
+    roots.push(EffectRow{name: "Secret", irreversible: true})
+    assert(effect_roots_problem(roots).contains("must be Net, FS, Exec, and FFI"))
+    assert(effect_roots_problem(roots[1..<roots.len()]).contains("deny-only root Mem is not declared"))
+    constants: [String: String]{"TYPE_PTR": "Ptr", "MEM_COPY": "copy"}
+    body: jet_list_body("X: 1\nTIERS: [Row]{{\n    (name: TYPE_PTR, note: \"a {{ brace\"),\n    (name: Syntax::MEM_COPY),\n    (name: \"zero\"),\n}}\n", "TIERS: ", "fixture") ?? panic("the list body was refused: {err.message}")
+    assert_eq(resolve_items(body, constants), [String]{"Ptr", "a {{ brace", "copy", "zero"})
+    assert(jet_list_body("TIERS: [Row]{{\n", "TIERS: ", "fixture") == .Err(_))
+    law: "    {{law: CollectionLaw.Visit, timing: \"eager\", result: \"r\", callbacks: \"c\", stop: \"s\", failure: \"f\", buffering: \"b\"}},"
+    operation: "    {{receivers: CollectionReceivers.List, name: \"map\", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{{CollectionArg.ItemFn}}, result: CollectionResult.Mapped, op: CollectionOp.SeqMap, law: CollectionLaw.Visit, empty: \"empty list\", status: CollectionStatus.Current}},"
+    tables: render_operation_tables("// BEGIN COLLECTION LAWS\nLAWS: {{\n{law}\n}}\n// END COLLECTION LAWS\n// BEGIN COLLECTION OPERATIONS\nOPS: {{\n{operation}\n}}\n// END COLLECTION OPERATIONS\n") ?? panic("the operation tables were refused: {err.message}")
+    assert(tables.contains("| Visit | eager | r | c | s | f | b |\n") && tables.contains("| `[T]` | `map((item) -> T)` | borrows | Visit | empty list | current |\n"))
+    assert(render_operation_tables("// BEGIN COLLECTION LAWS\n{law}\n// END COLLECTION LAWS\n// BEGIN COLLECTION OPERATIONS\n{operation.replace("Visit", "Gone")}\n// END COLLECTION OPERATIONS\n") == .Err(_))
+    assert(render_operation_tables("// BEGIN COLLECTION LAWS\n// END COLLECTION LAWS\n// BEGIN COLLECTION OPERATIONS\n{operation}\n// END COLLECTION OPERATIONS\n") == .Err(_))
+}
+
+#Test("dispatcher rows refuse an unowned source-owned row or a mismatched adapter and accept every constructor form") {
+    declared := fixture_declarations(files.read(CORE_PATH) ?? panic("{CORE_PATH} did not read")) ?? panic("Core.jet was refused: {err.message}")
+    syntax: syntax_constants() ?? panic("the Syntax constants did not read: {err.message}")
+    unowned: dispatcher_row("plain", "core.fake", "call", "CoreCallRecord::source_owned(\"core.fake\", \"call\", &[])", 9001, syntax) ?? panic("the source-owned row was refused: {err.message}")
+    declared.dispatcher_rows.push(unowned)
+    assert_eq(declarations_problem(declared), "source-owned dispatcher row has no owning source_module: core.fake.call")
+    assert(dispatcher_row_error("adapter", "core.web", "form", "sema_web_call(\"core.db\", \"form\", \"jet_web_forms_typed\", &[])", syntax).contains("dispatcher row identity disagrees with emitted adapter at line 7"))
+    assert(dispatcher_row_error("plain", "core.jobs", "queue", "CoreCallRecord::new(\"core.db\", \"queue\", \"jet_job_queue_default\", true, &[])", syntax).contains("dispatcher row identity disagrees with emitted adapter at line 7"))
+    accepted: [(kind: String, module_name: String, member: String, expression: String)]{
+        (kind: "plain", module_name: "core.jobs", member: "queue", expression: "CoreCallRecord::new(\"core.jobs\", \"queue\", \"jet_job_queue_default\", true, &[])"),
+        (kind: "plain", module_name: "core.jobs", member: "covered", expression: "CoreCallRecord::new_with_coverage(\"core.jobs\", \"covered\", \"jet_job_queue_default\", true, &[], CoreCallCoverage::from_bits(CoreCallCoverage::SEMA))"),
+        (kind: "adapter", module_name: "core.web", member: "form", expression: "sema_web_call(\"core.web\", \"form\", \"jet_web_forms_typed\", &[])"),
+        (kind: "receiver", module_name: "-", member: "METHOD_RECEIPT_ATTACH", expression: "CoreCallRecord::receiver_with_symbol(&[INTERNAL_RECEIPT_HANDLE], METHOD_RECEIPT_ATTACH, \"jet_receipt_attach\", true, &[])"),
+        (kind: "receiver", module_name: "-", member: "collect", expression: "CoreCallRecord::receiver_with_symbol(&[\"Query\"], \"collect\", \"\", true, &[true]).with_source_owned().with_source_target(\"core.data.__query_collect\")"),
+    }
+    loop row in accepted -> assert_eq(dispatcher_row_error(row.kind, row.module_name, row.member, row.expression, syntax), "")
+    targeted: call_record("CoreCallRecord::source_owned(\"core.fake\", \"call\", &[false]).with_source_target(\"__checked_call\")", "target fixture", syntax) ?? panic("the targeted row was refused: {err.message}")
+    assert(targeted.module_name == "core.fake" && targeted.member == "call" && (targeted.source_target ?? "") == "__checked_call")
+    ordinary: call_record("CoreCallRecord::source_owned(\"core.fake\", \"call\", &[false])", "ordinary fixture", syntax) ?? panic("the ordinary row was refused: {err.message}")
+    assert(ordinary.member == "call" && ordinary.source_target == None)
 }

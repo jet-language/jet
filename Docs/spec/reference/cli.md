@@ -610,7 +610,7 @@ Core sources built into it ([`Core/EmbeddedSources.jet`](../../../Core/EmbeddedS
 see [Environment variables](environment.md)); the Core row table and the canonical effect source are generated
 into [`CoreSources.jet`](../../../Compiler/JetCli/Source/Cli/CoreSources.jet)
 by `jet Tools/agent/CoreSourceRows.jet`, which
-`node Tools/agent/check-core-surface-ledger.mjs --write` runs and `--check`
+`jet Tools/agent/CoreSurfaceLedger.jet --write` runs and `--check`
 holds current.
 
 Source snapshots enumerate held no-follow directories and read each source or

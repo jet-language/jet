@@ -201,7 +201,7 @@ prelude_source: fn(relative: String) -> Bool Never! {
 prelude_generator: fn(name: String, jet: String) -> [String] Never! {
     if name == {
         "Core.jet" | "CoreSourceParts.tsv" | "Effects.jet" | "CoreCallExtensions.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
-        "CoreSurfaceInventory.jet" -> [String]{"node", "Tools/agent/check-core-surface-ledger.mjs", "--check"}
+        "CoreSurfaceInventory.jet" -> [String]{jet, "Tools/agent/CoreSurfaceLedger.jet", "--check"}
         "Diagnostics.jet" -> [String]{jet, "Tools/agent/DiagnosticRows.jet", "--check"}
         "Traits.jet" | "core/prelude.jet" -> [String]{jet, "Tools/agent/OwnedTraitRows.jet", "--check"}
         "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Tools/agent/PreludeSources.jet", "--check"}
@@ -908,7 +908,7 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/core/prelude.jet"))
     assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Web/Core/Time.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
     assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/agent/CoreSourceRows.jet", "--check"})
-    assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"node", "Tools/agent/check-core-surface-ledger.mjs", "--check"})
+    assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"/j", "Tools/agent/CoreSurfaceLedger.jet", "--check"})
     assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")
     assert_eq(prelude_generator("core/prelude.jet", "/j")[1], "Tools/agent/OwnedTraitRows.jet")
     assert_eq(prelude_generator("Units.jet", "/j")[1], "Tools/agent/PreludeSources.jet")

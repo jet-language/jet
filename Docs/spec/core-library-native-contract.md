@@ -8,8 +8,8 @@ capabilities and effects are exposed, and what evidence makes an export
 complete. The declaration registry is
 [`Core.jet`](../../Compiler/Prelude/Core.jet); Jet source bodies
 are under [`Core/`](../../Core/). Generated call and module views are derived
-from those inputs by the [Core table generator](../../Tools/agent/gen-core-tables.mjs).
-The [surface ledger](../../tests/core_surface_ledger.rs) checks selected
+from those inputs by the [Core table generator](../../Tools/agent/CoreSourceRows.jet).
+The [surface ledger](../../Tools/agent/CoreSurfaceLedger.jet) checks selected
 identity rows; runnable provider examples live under
 [`Examples/`](../../Examples/).
 

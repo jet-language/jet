@@ -22,7 +22,7 @@ use {
 
 TOOL: "/Tools/ci/CompiledWorkloads.jet"
 CORPUS: "tests/compiled_workloads"
-CORE_CHECKER: "Tools/agent/check-core-surface-ledger.mjs"
+CORE_CHECKER: "Tools/agent/CoreSurfaceLedger.jet"
 TOWER_CLI: "Tools/tower/tower.mjs"
 // Owners are checked against this tree's own board. Without TOWER_DATA, Tower
 // follows a linked worktree to the main checkout's live board.
@@ -606,7 +606,8 @@ static_contract: fn(root: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Contrac
     loop name in names {
         if !files.is_file("{root}/{CORPUS}/{name}") -> return Err(problem("missing frozen contract: {CORPUS}/{name}"))
     }
-    checked: process.cmd([String]{"node", "{root}/{CORE_CHECKER}", "--check"}).cwd(root).run() ?? return Err(problem("Core competitor ledger drifted"))
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    checked: process.cmd([String]{jet, "{root}/{CORE_CHECKER}", "--check"}).cwd(root).run() ?? return Err(problem("Core competitor ledger drifted"))
     if checked.errors != "" -> term.eprint(checked.errors.trim_end())
     if checked.code != 0 || checked.signal != None -> return Err(problem("Core competitor ledger drifted"))
     manifest: read_contract_file(root, "manifest.tsv")
