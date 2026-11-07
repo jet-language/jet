@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95758,
+    "rev": 95759,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -92780,6 +92780,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T03:30:38.456Z"
+        },
+        {
+          "n": 2,
+          "text": "A generated module whose template names a top-level comptime constant of the entry resolves it when a target lists the module's path. Repro (seed a0_033 and an s1 at 6f191d8098 + bbbdd8528e behave the same): run.jet holds TOKENS: comptime { 3 }; a build: fn(b: Build) with b.generate(\"facts\") { tooling_facts: fn() -> String { \"tokens={TOKENS}\" } } and app: b.add_executable(\"app\", [\"run.jet\", \"other.jet\", \".jet/generated/run/facts.jet\"], []), then b.default(app); and run: fn() { print(\"tokens={TOKENS}\") }. other.jet holds helper: fn() -> Int { 1 }. jet build run.jet fails with E0107 'Nothing named TOKENS exists here' at a wrong span (run.jet:1:42). With the target [\"run.jet\"] it prints tokens=3, because build_plan_selected_generated compiles a generated module only when a selected target lists its path. Once compiled, its template expands under an empty comptime scope (PortsLead-2, 11-07). A case pins it: build passes and prints tokens=3, and the generated module is compiled.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T14:00:54.987Z"
         }
       ],
       "refs": [],
@@ -92790,9 +92799,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T03:02:51.022Z",
-      "updated": "2026-11-07T03:30:38.456Z",
+      "updated": "2026-11-07T14:00:54.987Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c0jn1coj",
@@ -186175,6 +186184,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T14:00:54.987Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c06l2xid",
+      "note": "#2 A generated module whose template names a top-level comptime"
+    },
     {
       "at": "2026-11-07T13:09:22.751Z",
       "by": "Main",
