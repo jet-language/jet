@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6679,
-    "rev": 95844,
+    "rev": 95848,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47584,29 +47584,29 @@
         {
           "n": 1,
           "text": "[#4362] Exact Int: CBOR major-type-0 2^63 decodes, and equal 2^128+1 trees compare equal, with no new numeric variant.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:09.182Z"
+          "evidence": "2ce486d9bf + 4eb607de2d: CBOR ints exact to 2^64-1/-2^64; tags 2 and 3 decode to an exact Dyn.Int with no new numeric variant, and a wide Int encodes as a bignum. Golden Examples/Data/Dyn/ExactInt at o0/o1/o2: 2^128+1 decodes, two separate decodes compare equal, equals Dyn.Int(2^128+1), tag 3 and to_bytes round-trip covered. golden Data/ 321/321, cases cbor 22 PASS (3 known-failing #6317, #5454).",
+          "at": "2026-11-07T20:26:56.642Z"
         },
         {
           "n": 2,
           "text": "[#4452] D-DATATREE-BYTES1=A: a public Bytes case with its CBOR and text-format laws. Every projection and exhaustive match migrates.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:10.621Z"
+          "evidence": "At 4eb607de2d every exhaustive Dyn match with a DateTime arm also has Bytes (Core/Data/Data.jet:3350,3681; Cbor.jet:195; Csv.jet:350; Eetf.jet:563; Encoding.jet:373; Json.jet:730,822,901,1363; Stream.jet:1726; Toml.jet:745; Yaml.jet:453; Review.jet:840; StatusRead.jet:61; TestCompare.jet:148; ErrorReport.jet:240); sema refuses a non-exhaustive match, so they compiling is the proof. Golden Examples/Data/Dyn/BytesDateTime and DecodeBytes pass at o0/o1/o2 (golden Data/ 321/321).",
+          "at": "2026-11-07T20:27:11.195Z"
         },
         {
           "n": 3,
           "text": "[#4456] D-DATATREE-ORDER1=A: objects keep insertion order with ordered equality and constructors. Language Map order is unchanged.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T18:44:11.308Z"
+          "evidence": "2ce486d9bf: golden Examples/Data/Dyn/ObjectOrder at o0/o1/o2 asserts parsed == built (true), built == flipped (false), equal_unordered, and order kept by Dyn.Object, Dyn.object() and index write.",
+          "at": "2026-11-07T20:27:12.272Z"
         },
         {
           "n": 4,
@@ -47643,6 +47643,15 @@
           "verifiedBy": null,
           "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): the decode tests (DecodeBytes golden on o0/o1/o2, encoding_parity cases) pass and the ui snapshot suite has 0 FAIL.",
           "at": "2026-11-07T16:59:33.798Z"
+        },
+        {
+          "n": 8,
+          "text": "The DataTree spelling is gone: every data_tree_*/DATA_TREE_*/DataTree name in the runtime, RuntimeGenerators, Backend, IR, LSP, Devserver, rows, known-failing lines and Docs/spec becomes its Dyn name in one cutover (Rename.jet), with no alias. Docs/audits, research, proposals and Tools/tower stay untouched. jet check of the compiler and the touched rows pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T20:27:13.291Z"
         }
       ],
       "refs": [],
@@ -47656,11 +47665,12 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-02T18:52:06.045Z",
-      "updated": "2026-11-07T16:59:33.798Z",
+      "updated": "2026-11-07T20:27:13.291Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 8
     },
     {
       "id": "c011piog",
@@ -186790,6 +186800,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T20:27:13.291Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c07rizte",
+      "note": "#8 The DataTree spelling is gone: every data_tree_*/DATA_TREE_*"
+    },
+    {
+      "at": "2026-11-07T20:27:12.272Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-07T20:27:11.195Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-07T20:26:56.642Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c07rizte",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T20:19:33.143Z",
       "by": "Main",
