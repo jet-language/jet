@@ -27,6 +27,8 @@ use {
     sql_kernel: core.db.sql
     time: core.time
     core.time.[DateTime]
+    quantile_select.[finite_quantile, select_rank]
+    rank_order.[rank_select_prototype, rank_select_range, rank_test_before, rank_test_refusing, rank_test_text_before, rank_test_values]
 }
 arrow: module
 
@@ -2047,29 +2049,6 @@ quantile: fn(values: [Float], q: Float) -> Float DataError! {
     finite_quantile(values, q)
 }
 
-// The interpolated quantile of nonempty, finite values within max_sort_rows.
-finite_quantile: fn(values: [Float], q: Float) -> Float DataError! {
-    work := [Float]{}
-    loop value in values -> work.push(value)
-    pos := q * Float{work.len() - 1}
-    lo := Int.from_float(pos) ?? panic("quantile position must be finite")
-    hi := lo
-    if (Float{lo}) < pos -> hi = lo + 1
-    if hi >= work.len() -> hi = work.len() - 1
-    low: select_rank(work, 0, work.len(), lo)
-    if lo == hi -> return Ok(normalize_zero(low))
-    // Selection leaves every value after rank `lo` at or above it, so the
-    // next rank is their minimum.
-    high := work[hi]
-    loop index in hi..<work.len() {
-        if work[index] < high -> high = work[index]
-    }
-    frac := pos - Float{lo}
-    result := low * (Float{1.0} - frac) + high * frac
-    if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
-    Ok(normalize_zero(result))
-}
-
 rolling_mean: fn(values: [Float], window: Int) -> [Float] DataError! {
     if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     limits := DataLimits.safe()
@@ -2670,78 +2649,105 @@ snapshot_from_rows: fn<T>(rows: [T]) -> DataSnapshot<[T]> Never! {
     }
 }
 
-// Rank selection over values[lo..<hi]: the value at index `rank` of their
-// sorted order, in worst-case linear time (the pivot is the median of the
-// medians of five). Callers pass finite values, where `<` is a total order up
-// to -0.0 and 0.0, which the callers normalize. On return every value after
-// `rank` in the range is at or above the answer.
-select_rank: fn(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
-    start := lo
-    end := hi
-    loop {
-        if end - start <= 5 {
-            sort_float_range(values, start, end)
-            return values[rank]
+// Quantile selection: the worker behind quantile, median and describe, not
+// part of the data surface.
+priv quantile_select: module {
+    // The interpolated quantile of nonempty, finite values within max_sort_rows.
+    finite_quantile: fn(values: [Float], q: Float) -> Float DataError! {
+        work := [Float]{}
+        loop value in values -> work.push(value)
+        pos := q * Float{work.len() - 1}
+        lo := Int.from_float(pos) ?? panic("quantile position must be finite")
+        hi := lo
+        if (Float{lo}) < pos -> hi = lo + 1
+        if hi >= work.len() -> hi = work.len() - 1
+        low: select_rank(work, 0, work.len(), lo)
+        if lo == hi -> return Ok(normalize_zero(low))
+        // Selection leaves every value after rank `lo` at or above it, so the
+        // next rank is their minimum.
+        high := work[hi]
+        loop index in hi..<work.len() {
+            if work[index] < high -> high = work[index]
         }
-        pivot: median_of_medians(values, start, end)
-        // [start, less) < pivot, [less, more) == pivot, [more, end) > pivot.
-        less := start
-        index := start
-        more := end
-        loop index < more {
-            value: values[index]
-            if value < pivot {
-                values[index] = values[less]
-                values[less] = value
-                less = less + 1
-                index = index + 1
-            } else if pivot < value {
-                more = more - 1
-                values[index] = values[more]
-                values[more] = value
+        frac := pos - Float{lo}
+        result := low * (Float{1.0} - frac) + high * frac
+        if nonfinite(result) -> return Err(data_error(DataErrorKind.Overflow, "finite overflow while interpolating quantile", "quantile"))
+        Ok(normalize_zero(result))
+    }
+
+    // Rank selection over values[lo..<hi]: the value at index `rank` of their
+    // sorted order, in worst-case linear time (the pivot is the median of the
+    // medians of five). Callers pass finite values, where `<` is a total order up
+    // to -0.0 and 0.0, which the callers normalize. On return every value after
+    // `rank` in the range is at or above the answer.
+    select_rank: fn(values: &[Float], lo: Int, hi: Int, rank: Int) -> Float Never! {
+        start := lo
+        end := hi
+        loop {
+            if end - start <= 5 {
+                sort_float_range(values, start, end)
+                return values[rank]
+            }
+            pivot: median_of_medians(values, start, end)
+            // [start, less) < pivot, [less, more) == pivot, [more, end) > pivot.
+            less := start
+            index := start
+            more := end
+            loop index < more {
+                value: values[index]
+                if value < pivot {
+                    values[index] = values[less]
+                    values[less] = value
+                    less = less + 1
+                    index = index + 1
+                } else if pivot < value {
+                    more = more - 1
+                    values[index] = values[more]
+                    values[more] = value
+                } else {
+                    index = index + 1
+                }
+            }
+            if rank < less {
+                end = less
+            } else if rank >= more {
+                start = more
             } else {
-                index = index + 1
+                return pivot
             }
         }
-        if rank < less {
-            end = less
-        } else if rank >= more {
-            start = more
-        } else {
-            return pivot
+    }
+
+    // Gathers the median of each group of five at the front of the range and
+    // selects the median of those medians.
+    median_of_medians: fn(values: &[Float], lo: Int, hi: Int) -> Float Never! {
+        count := 0
+        start := lo
+        loop start < hi {
+            end := start + 5
+            if end > hi -> end = hi
+            sort_float_range(values, start, end)
+            middle: start + (end - start - 1) /% 2
+            median: values[middle]
+            values[middle] = values[lo + count]
+            values[lo + count] = median
+            count = count + 1
+            start = end
         }
+        select_rank(values, lo, lo + count, lo + (count - 1) /% 2)
     }
-}
 
-// Gathers the median of each group of five at the front of the range and
-// selects the median of those medians.
-median_of_medians: fn(values: &[Float], lo: Int, hi: Int) -> Float Never! {
-    count := 0
-    start := lo
-    loop start < hi {
-        end := start + 5
-        if end > hi -> end = hi
-        sort_float_range(values, start, end)
-        middle: start + (end - start - 1) /% 2
-        median: values[middle]
-        values[middle] = values[lo + count]
-        values[lo + count] = median
-        count = count + 1
-        start = end
-    }
-    select_rank(values, lo, lo + count, lo + (count - 1) /% 2)
-}
-
-// Insertion sort of a range of at most five values.
-sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
-    loop i in lo + 1..<hi {
-        j := i
-        loop j > lo {
-            if !(values[j] < values[j - 1]) -> break
-            current: values[j]
-            values[j] = values[j - 1]
-            values[j - 1] = current
-            j = j - 1
+    // Insertion sort of a range of at most five values.
+    sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
+        loop i in lo + 1..<hi {
+            j := i
+            loop j > lo {
+                if !(values[j] < values[j - 1]) -> break
+                current: values[j]
+                values[j] = values[j - 1]
+                values[j - 1] = current
+                j = j - 1
+            }
         }
     }
 }
@@ -2772,123 +2778,126 @@ sort_float_range: fn(values: &[Float], lo: Int, hi: Int) Never! {
 }
 
 // rank_select_prototype (#3018): the private worst-case-linear selection with a
-// caller comparator. It permutes a list of input indices only, so `before`
-// reads every value where it lies (borrowed, never copied or moved) and the
-// input is unchanged. `before(a, b)` is a strict weak order. The first
-// comparator error stops the selection and returns unchanged: no comparison
-// follows it. The answer is the input index of the value at `rank` of the
-// order (0 <= rank < len).
-rank_select_prototype: fn<T, E>(values: View<T>, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
-    if rank < 0 || rank >= values.len() -> panic("rank {rank} is outside 0..<{values.len()}")
-    order := [Int]{}
-    loop index in 0..<values.len() -> order.push(index)
-    rank_select_range<T, E>(values, order, 0, order.len(), rank, before)
-}
+// caller comparator, and the fixtures its #Test drives it with.
+priv rank_order: module {
+    // It permutes a list of input indices only, so `before` reads every value
+    // where it lies (borrowed, never copied or moved) and the input is
+    // unchanged. `before(a, b)` is a strict weak order. The first comparator
+    // error stops the selection and returns unchanged: no comparison follows
+    // it. The answer is the input index of the value at `rank` of the order
+    // (0 <= rank < len).
+    rank_select_prototype: fn<T, E>(values: View<T>, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+        if rank < 0 || rank >= values.len() -> panic("rank {rank} is outside 0..<{values.len()}")
+        order := [Int]{}
+        loop index in 0..<values.len() -> order.push(index)
+        rank_select_range<T, E>(values, order, 0, order.len(), rank, before)
+    }
 
-// Selects over order[lo..<hi]. On return the indices before `rank` in the
-// range name values that are not after the answer, and the indices after it
-// name values that are not before it (the partition law).
-rank_select_range: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
-    start := lo
-    end := hi
-    loop {
-        if end - start <= 5 {
-            rank_sort_small<T, E>(values, order, start, end, before)
-            return order[rank]
-        }
-        pivot: rank_pivot<T, E>(values, order, start, end, before)
-        // [start, less) before pivot, [less, more) equivalent, [more, end) after.
-        less := start
-        index := start
-        more := end
-        loop index < more {
-            current: order[index]
-            if {
-                before(values[current], values[pivot]) -> {
-                    order[index] = order[less]
-                    order[less] = current
-                    less = less + 1
-                    index = index + 1
-                }
-                before(values[pivot], values[current]) -> {
-                    more = more - 1
-                    order[index] = order[more]
-                    order[more] = current
-                }
-                else -> {
-                    index = index + 1
-                }
-            }
-        }
-        if {
-            rank < less -> {
-                end = less
-            }
-            rank >= more -> {
-                start = more
-            }
-            else -> {
+    // Selects over order[lo..<hi]. On return the indices before `rank` in the
+    // range name values that are not after the answer, and the indices after it
+    // name values that are not before it (the partition law).
+    rank_select_range: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, rank: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+        start := lo
+        end := hi
+        loop {
+            if end - start <= 5 {
+                rank_sort_small<T, E>(values, order, start, end, before)
                 return order[rank]
             }
+            pivot: rank_pivot<T, E>(values, order, start, end, before)
+            // [start, less) before pivot, [less, more) equivalent, [more, end) after.
+            less := start
+            index := start
+            more := end
+            loop index < more {
+                current: order[index]
+                if {
+                    before(values[current], values[pivot]) -> {
+                        order[index] = order[less]
+                        order[less] = current
+                        less = less + 1
+                        index = index + 1
+                    }
+                    before(values[pivot], values[current]) -> {
+                        more = more - 1
+                        order[index] = order[more]
+                        order[more] = current
+                    }
+                    else -> {
+                        index = index + 1
+                    }
+                }
+            }
+            if {
+                rank < less -> {
+                    end = less
+                }
+                rank >= more -> {
+                    start = more
+                }
+                else -> {
+                    return order[rank]
+                }
+            }
         }
     }
-}
 
-// Gathers the median of each group of five at the front of the range and
-// answers the input index of the median of those medians.
-rank_pivot: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) -> Int E! {
-    count := 0
-    start := lo
-    loop start < hi {
-        end := start + 5
-        if end > hi -> end = hi
-        rank_sort_small<T, E>(values, order, start, end, before)
-        middle: start + (end - start - 1) /% 2
-        median: order[middle]
-        order[middle] = order[lo + count]
-        order[lo + count] = median
-        count = count + 1
-        start = end
+    // Gathers the median of each group of five at the front of the range and
+    // answers the input index of the median of those medians.
+    rank_pivot: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) -> Int E! {
+        count := 0
+        start := lo
+        loop start < hi {
+            end := start + 5
+            if end > hi -> end = hi
+            rank_sort_small<T, E>(values, order, start, end, before)
+            middle: start + (end - start - 1) /% 2
+            median: order[middle]
+            order[middle] = order[lo + count]
+            order[lo + count] = median
+            count = count + 1
+            start = end
+        }
+        rank_select_range<T, E>(values, order, lo, lo + count, lo + (count - 1) /% 2, before)
     }
-    rank_select_range<T, E>(values, order, lo, lo + count, lo + (count - 1) /% 2, before)
-}
 
-// Insertion sort of at most five indices by their values.
-rank_sort_small: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) E! {
-    loop i in lo + 1..<hi {
-        j := i
-        loop j > lo {
-            if !before(values[order[j]], values[order[j - 1]]) -> break
-            current: order[j]
-            order[j] = order[j - 1]
-            order[j - 1] = current
-            j = j - 1
+    // Insertion sort of at most five indices by their values.
+    rank_sort_small: fn<T, E>(values: View<T>, order: &[Int], lo: Int, hi: Int, before: fn(T, T) -> Bool E!) E! {
+        loop i in lo + 1..<hi {
+            j := i
+            loop j > lo {
+                if !before(values[order[j]], values[order[j - 1]]) -> break
+                current: order[j]
+                order[j] = order[j - 1]
+                order[j - 1] = current
+                j = j - 1
+            }
         }
     }
-}
 
-rank_test_values: fn(count: Int, seed: Int) -> [Int] Never! {
-    out := [Int]{}
-    state := seed
-    loop index in 0..<count {
-        state = (state * 1103515245 + 12345 + index) %% 2147483648
-        out.push(state %% 97)
+    rank_test_values: fn(count: Int, seed: Int) -> [Int] Never! {
+        out := [Int]{}
+        state := seed
+        loop index in 0..<count {
+            state = (state * 1103515245 + 12345 + index) %% 2147483648
+            out.push(state %% 97)
+        }
+        out
     }
-    out
-}
 
-rank_test_before: fn(a: Int, b: Int, calls: &Int) -> Bool Never! {
-    calls += 1
-    a < b
-}
+    rank_test_before: fn(a: Int, b: Int, calls: &Int) -> Bool Never! {
+        calls += 1
+        a < b
+    }
 
-rank_test_refusing: fn(a: Int, b: Int, calls: &Int, stop: Int) -> Bool DataError! {
-    calls += 1
-    if calls == stop -> return Err(data_error(DataErrorKind.InvalidArgument, "comparison {stop} refused", "rank_select"))
-    Ok(a < b)
-}
+    rank_test_refusing: fn(a: Int, b: Int, calls: &Int, stop: Int) -> Bool DataError! {
+        calls += 1
+        if calls == stop -> return Err(data_error(DataErrorKind.InvalidArgument, "comparison {stop} refused", "rank_select"))
+        Ok(a < b)
+    }
 
-rank_test_text_before: fn(a: String, b: String) -> Bool Never! { text_compare(a, b) < 0 }
+    rank_test_text_before: fn(a: String, b: String) -> Bool Never! { text_compare(a, b) < 0 }
+}
 
 #Test("rank_select_prototype") {
     // Boundaries and every rank of short, sorted, reversed, equal and mixed inputs.
