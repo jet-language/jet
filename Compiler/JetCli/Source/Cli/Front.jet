@@ -1396,7 +1396,7 @@ jet_cli_build_args_refused: fn(file: String, color: Bool) -> JetCLIPlan Never! {
 // refused until its port lands, never ignored; an unregistered one was
 // already refused by E2102, or is ignored by the `jet <file>` shorthand as
 // the Rust host ignores it.
-JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate"}
+JET_CLI_RUN_PORTED_FLAGS: [String]{"--release", "--profile", "--verbose", "-v", "--quiet", "--json", "--color", "--no-color", "--threads", "--trace", "--allow", "--allow-all", "-A", "--deny", "-p", "--show-default", "--no-prepare", "--set", "--gate"}
 
 // `jet run [<file>]` under its build options (jet_cli_build_options); `watch`
 // makes it `jet dev`.
@@ -1978,6 +1978,7 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
     color := false
     loop argument in owned {
         if argument == "--color" -> color = true
+        if argument == "--no-color" -> color = false
         if argument.starts_with("--color=") {
             value: argument.slice(8..<argument.len())
             if value == {

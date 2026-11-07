@@ -63,7 +63,7 @@ jet_cli_doctor_run: fn(online: Bool, cross_target: String?) -[FS, Env, Exec, Tim
     out.push(jet_cli_doctor_cache_dir("ffi cache", jet_cli_doctor_ffi_cache_dir()))
     out.push(jet_cli_doctor_cache_dir("package store", pkg_source_store_dir()))
     out.push(jet_cli_doctor_check_path())
-    out.push(jet_cli_doctor_ok("lsp", "language server", "built in (`{JET_CLI_BINARY} lsp`)"))
+    out.push(jet_cli_doctor_check_lsp())
     if online {
         out.push(jet_cli_doctor_check_registry())
     } else {
@@ -101,6 +101,27 @@ jet_cli_doctor_check_native_linker: fn() -[FS, Env, Exec, Time.Wait]> JetCLIDoct
         return jet_cli_doctor_ok("toolchain", "native linker (cc)", doctor_process.which("cc") ?? "found")
     }
     jet_cli_doctor_problem("toolchain", "native linker (cc)", "not found on PATH", "run from `nix develop`, or install a C toolchain that provides `cc` (`gcc`/`clang`; on Debian/Ubuntu: `build-essential`, on Arch: `base-devel`)", false)
+}
+
+// The language server row: start `jet self lsp`, send it `initialize` and read
+// its answer. A server that refuses because it is not built yet is a note
+// naming the card that owns its port.
+jet_cli_doctor_check_lsp: fn() -[Env, Exec, Time.Wait]> JetCLIDoctorCheck Never! {
+    label: "language server"
+    command: "`{JET_CLI_BINARY} self lsp`"
+    fix: "run {command} and read the error it reports"
+    body: "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{{\"processId\":null,\"rootUri\":null,\"capabilities\":{{}}}}}}"
+    spec: doctor_process.cmd([String]{doctor_sys.executable(), "self", "lsp"}).env("NO_COLOR", "1").stdin(.Stream).stdout(.Capture).stderr(.Capture).timeout(10s)
+    child := spec.spawn() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not start: {err}", fix, false)
+    child.stdin.write("Content-Length: {body.count_bytes()}\r\n\r\n{body}".bytes()).drop("a server that stopped reading reports why on stderr")
+    child.stdin.close()
+    receipt: child.wait() ?? return jet_cli_doctor_problem("lsp", label, "{command} did not finish: {err}", fix, false)
+    if receipt.output.contains("\"capabilities\"") -> return jet_cli_doctor_ok("lsp", label, "{command} answered `initialize`")
+    if receipt.errors.contains("E2104") {
+        if jet_cli_form_card("self lsp") == .Val(card) -> return jet_cli_doctor_note("lsp", label, "{command} is not built yet (card #{card})")
+    }
+    if receipt.timed_out -> return jet_cli_doctor_problem("lsp", label, "{command} did not answer `initialize` within 10 seconds", fix, false)
+    jet_cli_doctor_problem("lsp", label, "{command} did not answer `initialize` (exit {receipt.code})", fix, false)
 }
 
 jet_cli_doctor_artifact_store: fn() -[FS, Env, Exec, Time, Rand]> JetCLIDoctorCheck Never! {
