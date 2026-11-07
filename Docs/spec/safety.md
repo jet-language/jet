@@ -214,7 +214,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1338,
+  "total": 1340,
   "counts": {
     "Compiler": 679,
     "Core": 186,
@@ -222,7 +222,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 35,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 414
+    "tests": 416
   },
   "regions": [
     {
@@ -9138,6 +9138,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/run/Comptime/ForeignBranchNotTaken.jet",
+      "line": 11,
+      "column": 1,
+      "reason": "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs"
+    },
+    {
+      "package": "tests",
+      "file": "tests/run/Comptime/ForeignBranchNotTaken.jet",
+      "line": 23,
+      "column": 9,
+      "reason": "call the audited register-only assembly contract"
+    },
+    {
+      "package": "tests",
       "file": "tests/run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet",
       "line": 16,
       "column": 5,
@@ -9605,8 +9619,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 414 |
-| **total** | **1338** |
+| tests | 416 |
+| **total** | **1340** |
 
 ### Regions
 
@@ -10885,6 +10899,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/fuzz/sema/differential/ex_crypto_crypto_migration.jet | 28:5 | "AES-256-GCM protocol interoperability" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_lowlevel.jet | 10:5 | "`cell` is live on this stack frame and the pointer never escapes" |
 | tests | tests/fuzz/sema/valid/ex_lowlevel_pointer_cast_deref.jet | 11:5 | "flag is live on this stack frame and the pointer never escapes" |
+| tests | tests/run/Comptime/ForeignBranchNotTaken.jet | 11:1 | "the operands are scalar registers and the early-written r10 clobber does not overlap live inputs" |
+| tests | tests/run/Comptime/ForeignBranchNotTaken.jet | 23:9 | "call the audited register-only assembly contract" |
 | tests | tests/run/CoreCryptoFoundations/CryptoAeadTamperingIsRejectedAcrossTiers.jet | 16:5 | "fixed AEAD tamper vector" |
 | tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 104:5 | "known-answer check reads the RFC 7748 shared secret" |
 | tests | tests/run/CoreCryptoFoundations/PrimitiveMatrix.jet | 166:5 | "expert known-answer vectors need raw key bytes" |

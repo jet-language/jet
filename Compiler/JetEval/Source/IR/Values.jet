@@ -6,7 +6,8 @@
 // integer as an Int.
 use {
     jet_foundation.[DeclTable, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeKeyField, TComptimeMapEntry, TComptimeReport, TComptimeValue, TConstantDef, TImplDef, TTypeDef, Type, compiler_threads_single, checked_comptime_integer_key, name_rows_value, type_name, FnBody]
-    jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_fixed_shape, ir_host_value_row, ir_list_stride, ir_map_row_hashed, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_static_map_order, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+    jet_ir.[IRBuildFailure, IRMember, IRModule, IRProgram, IR_OPTION_INT_NONE, ir_build_roots_in, ir_declared_field_type, ir_default_err, ir_default_err_drift, ir_enum_def, ir_fixed_shape, ir_foreign_index, ir_host_value_row, ir_list_stride, ir_map_row_hashed, ir_map_shape, ir_option_inline, ir_program_bind, ir_program_new, ir_program_put_constant, ir_row_args, ir_static_map_order, ir_struct_members, ir_tuple_members, ir_type_args, ir_type_def, ir_untag, ir_value_type, ir_variant_members]
+    jet_sema.[SemaCheckedForeignFunction]
     jet_backend.[ERR_BYTES, ERR_CAUSE, ERR_CODE, ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_MESSAGE]
 }
 
@@ -41,28 +42,32 @@ JetEvalIRComptime: struct {
 // out by, `decls` the run's declaration table their direct calls name. A
 // comptime value reads no source text (a `#Todo` stop carries the line the
 // checker gave it) and links no C closure, so the build has no source files
-// and no foreign functions.
+// and its `foreign` rows (the foreign functions the checked closure reaches)
+// lower to a stop (ir_foreign_comptime_stop).
 // `comptime_values` when the roots compute compile-time values (not a build
 // invocation): ambient reads with no system call are refused while building
 // (IRProgram.comptime_values); otherwise the roots are a build invocation
 // (IRProgram.invocation).
-jet_eval_ir_comptime_build: fn(functions: &&[FnBody], decls: DeclTable, item_keys: [String], type_defs: &&[TTypeDef], impls: &&[TImplDef], constants: &&[TConstantDef], comptime_values: Bool) -> JetEvalIRComptime {
+jet_eval_ir_comptime_build: fn(functions: &&[FnBody], decls: DeclTable, item_keys: [String], type_defs: &&[TTypeDef], impls: &&[TImplDef], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], comptime_values: Bool) -> JetEvalIRComptime {
     program := ir_program_new(functions, decls, type_defs, impls, [String:String]{}, constants)
     program.comptime_values = comptime_values
     program.invocation = !comptime_values
+    ir_foreign_index(program, foreign, decls)
     jet_eval_ir_comptime_roots(shared [IRProgram]{}, program, item_keys)
 }
 
 // Builds `functions` from the roots `item_keys` over the declared program
 // `declared` holds (ir_program_declared, its one row), which holds it again
-// after, bound to them: one program serves a run's every batch. `landed`
-// (rows of compile-time values landed since its last build) take over its
-// constant rows first, each key once (`taken`: the keys taken over).
-jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: &&[FnBody], decls: DeclTable, item_keys: [String], landed: &&[TConstantDef], taken: &[String:Bool]) -> JetEvalIRComptime {
+// after, bound to them and to their `foreign` rows: one program serves a
+// run's every batch. `landed` (rows of compile-time values landed since its
+// last build) take over its constant rows first, each key once (`taken`:
+// the keys taken over).
+jet_eval_ir_comptime_build_over: fn(declared: Shared<[IRProgram]>, functions: &&[FnBody], decls: DeclTable, item_keys: [String], landed: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], taken: &[String:Bool]) -> JetEvalIRComptime {
     program := jet_eval_ir_program_take(declared)
     program.comptime_values = true
     loop definition in landed.move() -> ir_program_put_constant(program, definition, taken)
     ir_program_bind(program, functions, decls)
+    ir_foreign_index(program, foreign, decls)
     jet_eval_ir_comptime_roots(declared, program, item_keys)
 }
 

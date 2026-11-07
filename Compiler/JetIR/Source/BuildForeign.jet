@@ -21,8 +21,11 @@ IRForeignHandle: struct {
 
 // Indexes the checked foreign functions by the function key their calls
 // name (the first row of a key), and by DeclID row over `decls`; and each C
-// handle type they name, with its close.
+// handle type they name, with its close. The rows replace any a previous
+// build over the same declared program indexed (ir_program_bind).
 ir_foreign_index: fn(p: &IRProgram, foreign: &&[SemaCheckedForeignFunction], decls: DeclTable) Never! {
+    p.foreign = [String:SemaCheckedForeignFunction]{}
+    p.foreign_rows = [SemaCheckedForeignFunction]{}
     p.decl_foreign = (loop _ in 0..<decls.rows.len() -> -1)
     loop row in foreign -> ir_foreign_handle_note(p, row)
     loop row in foreign.move() {
@@ -119,6 +122,21 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
     ir_intern_type(m, identity, ir_owned_layout(IRTypeKind.Pointer, bare, symbol, ""))
 }
 
+// A foreign call in compile-time code or a build invocation stops the
+// evaluation: those builds link no foreign code (jet_eval_ir_comptime_build),
+// and their checked closure reaches a foreign function through branches a
+// run may never take.
+ir_foreign_comptime_stop: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction) -> Int Never! {
+    string_row: ir_string_row(m)
+    text: ir_temp(m, b, string_row)
+    ir_emit(b.f, IROp.ConstText, text, ir_intern_text(m, "compile-time code cannot call the foreign (`#FFI`) function `{foreign.name}`"), -1, -1, b.line)
+    null: ir_word_const(m, b, 0)
+    report: ir_line_report(p, b)
+    ir_stop(m, p, b, 2, text, null, null, report)
+    returned: foreign.return_type ?? return -1
+    ir_unreachable_value(m, p, b, returned)
+}
+
 // A call of the foreign function `foreign`: a direct C function (C language
 // and ABI, no callback or undo adapter) whose arguments cross as C scalars,
 // an exact Int as its I64 (jet_int_owned_to_i64), a String as a packed
@@ -133,6 +151,7 @@ ir_foreign_handle_row: fn(m: &IRModule, p: IRProgram, ty: Type, handle: IRForeig
 // elements, as many as its written length parameter holds, copied into a new
 // List (the array stays the C library's).
 ir_foreign_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, foreign: SemaCheckedForeignFunction, args: [BodyCallArg], span: Span) -> Int Never! {
+    if p.comptime_values || p.invocation -> return ir_foreign_comptime_stop(m, p, b, foreign)
     if foreign.language == "asm" -> return ir_asm_call(m, p, b, foreign, args, span)
     if foreign.language.starts_with("rust:") -> return ir_rust_foreign_call(m, p, b, foreign, args, span)
     if foreign.language != "c" || foreign.abi != "C" || foreign.callback_key != None || foreign.undo_function_key != None || foreign.symbol == "" {
