@@ -128,7 +128,7 @@ tests/cases/ownership/builtin_and_composite_receivers_use_the_call_access_frame.
 tests/cases/ownership/builtin_mut_receiver_uses_two_phase_reservation.case	#5454	o4 `clock.advance(clock.now())` checks clean: sema reports no UseWhileWriteActive when a mutating builtin receiver is read in its own argument
 tests/cases/ownership/edit_disjoint_callback_views_reject_every_retaining_boundary.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/enum_pattern_payload_keeps_its_original_owner_live.case	#5454	assert not satisfied: original expect_err not satisfied
-tests/cases/ownership/move_non_clonable_is_hard_error.case	#5454	assert not satisfied: original assert! not satisfied: [false]
+tests/cases/ownership/move_non_clonable_is_hard_error.case	#5454	`jet check run.jet` reports E0119 (no type `NoClone`) instead of MissingMoveMarker: the fixture never declares `NoClone` and passes a String to it
 tests/cases/ownership/mutable_view_extraction_retires_the_source_aggregate.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/named_write_window_calls_keep_alias_and_read_view_checks.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/ownership/open_dynamic_trait_view_dispatch_is_rejected.case	#5454	assert not satisfied: original assert! not satisfied: [false]
@@ -150,7 +150,6 @@ tests/cases/language_features/json_nested_variant_matching.case	#5454	verify-int
 tests/cases/language_features/nested_callable_containers_keep_required_public_labels.case	#5454	assert not satisfied: original assert! not satisfied: [false]
 tests/cases/language_features/range_type_runtime_try_and_spelled_arithmetic_gate.case	#5454	verify-intent: ref build failed: E2417 Explicit failure domain `String (text)` is not an Error type
 tests/cases/patterns_and_fields/dyn_map_iteration_display_matches_every_tier.case	#5454	verify-intent: ref build failed: E0112 `Dyn` can't be shown with :Debug yet
-tests/cases/unit_family/imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal.case	#5454	verify-intent: ref build failed: E0360 No `*` operator is defined for `Complex`
 tests/cases/unit_family/physical_unit_codable_round_trips_as_its_concrete_type.case	#5454	verify-intent: ref build failed: E0904 Cannot resolve bound `Encode` for `T`
 tests/cases/web_build/embedded_devserver_rejects_windows_absolute_static_paths.case	#5454	assert not satisfied: original expect not satisfied
 tests/cases/corelib_parts_encoding_surface/random_and_time_output_pins_with_seed_and_epoch.case	#5454	seed 42 draws 5 / 0.05534409481976055 and time.now() prints a DateTime record; the original expects 9 / 0.05534409481976061 / 1700000000000
@@ -176,7 +175,7 @@ tests/cases/taskgroup_params/taskgroup_cannot_escape_in_a_closure.case	#5454	`je
 tests/cases/comptime_core_pure_parity/public_transcript_covers_bag_methods_exactly.case	#5454	E0506 `Tally<TallyToken>` is not valid — `TallyToken` is not hashable
 tests/cases/comptime_core_pure_parity/public_transcript_covers_bits_methods_exactly.case	#5454	E0956 The comptime evaluator can't build this item's code yet: bits_view [function:main.bits_view]: runtime route JetBitSet::new
 tests/cases/comptime_core_pure_parity/public_transcript_covers_civil_and_measurement_value_methods_exactly.case	#5454	E0003 A nested comptime-reachable function has no unique registered module owner
-tests/cases/comptime_core_pure_parity/public_transcript_covers_linalg_overflow_and_expect_exactly.case	#5454	E0003 A nested comptime-reachable function has no unique registered module owner
+tests/cases/comptime_core_pure_parity/public_transcript_covers_linalg_overflow_and_expect_exactly.case	#5454	`jet run main.jet` E0102: no `expect` function exists for `expect_view`'s `expect("ok")`
 tests/cases/comptime_core_pure_parity/public_transcript_covers_rank_methods_exactly.case	#5454	E0956 The comptime evaluator can't build this item's code yet: rank_view [function:main.rank_view]: set builtin std::collections::BTreeSet::clear
 tests/cases/comptime_core_pure_parity/public_transcript_covers_remaining_core_pure_families.case	#5454	E2404 `saturating_sub_ns` fails with `Err`, which can't propagate into `time.TimeError` here
 tests/cases/comptime_core_pure_parity/public_transcript_covers_set_methods_exactly.case	#5454	E0956 The comptime evaluator can't build this item's code yet: set_view [function:main.set_view]: set builtin std::collections::HashSet::clear
@@ -212,7 +211,6 @@ tests/cases/core_net_tls/tcp_stream_and_listener_reject_public_fields_and_forged
 tests/cases/core_runtime_units/grouped_format_is_source_owned_without_a_dispatcher_row.case	#5454	E2104 The Jet backend can't build `main.jet` yet:\nrun [function:main.run]: runtime route jet_fmt_grouped: the Jet runtime cd29502ac2a852641408d60f1723eaba4b17b773175240573a3b7226908e9e4e exports no `jet_fmt_grouped`
 tests/cases/core_shared_sites/browser_refuses_direct_environment_api_with_spanless_diagnostic.case	#5454	FAIL: exit 0; expected nonzero
 tests/cases/core_testing_history/core_testing_histories_callback_failure_becomes_unavailable_across_i9_tiers.case	#5454	prints `unsupported` / "core.testing.histories command type `Dyn` has no checked enum schema": the Dyn schema strategy (HistorySchemaStrategy for Dyn commands) is not ported to Core
-tests/cases/corelib_parts_http_data/checked_sql_query_keeps_ordered_scalar_bindings.case	#5454	E2402 This implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists
 tests/cases/cross/e3301_fs_read_in_freestanding.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
 tests/cases/cross/e3301_http_in_freestanding.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
 tests/cases/cross/e3301_tasks_in_freestanding.case	#5454	E2104 `jet build --target=wasm.no-os` is not built yet
@@ -242,7 +240,7 @@ tests/cases/browser_bidi/native_bidi_rejects_hostile_frames_profiles_and_timeout
 tests/cases/browser_bidi/native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run.case	#5454	FAIL: `jet run browser_bidi_dev.jet` exits 1 (expected 0): Error [E0102]: `Browser` has no method `abilities`
 tests/cases/browser_bidi/native_bidi_semantic_locators_actions_and_waits.case	#5454	FAIL: `jet build browser_bidi_locators.jet` exits 1 (expected 0): Error [E0102]: `Browser` has no method `context`
 tests/cases/browser_bidi/native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent.case	#5454	FAIL: `jet build browser_bidi_tab_frame.jet` exits 1 (expected 0): Error [E0102]: `Browser` has no method `context`
-tests/cases/corelib_parts_encoding_streams/process_spec_and_csv_reader_runtime_compiles_and_reads.case	#5454	FAIL: `jet build run.jet` exits 1 (expected 0): Error [E0302]: `.cmd` only works on a declared struct or tuple field
+tests/cases/corelib_parts_encoding_streams/process_spec_and_csv_reader_runtime_compiles_and_reads.case	#5454	`jet build run.jet` E0302: the ProcessSpec handle has no `cmd` field or argv reader for `spec.cmd.len()`
 tests/cases/corelib_parts_system/json_decode_preserves_scalar_strings.case	#5454	`json.decode` still coerces numeric and boolean strings (Core/Encoding/Json.jet `decode` → `coerce_tree`), so a's `"8080"` arrives as `.Int` and prints nothing; 8bcfbeb87d moved these assertions to strict Dyn decode
 tests/cases/dev_parts_routine/aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders.case	#5454	FAIL: `jet build aggregate_trait_returns.jet` exits 1 (expected 0): Error [E2417]: Explicit failure domain `String (text)` is not an Error type
 tests/cases/dev_parts_routine/body_only_edit_is_type_stable.case	#5454	REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output
