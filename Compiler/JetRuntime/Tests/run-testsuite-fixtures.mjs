@@ -3,8 +3,9 @@
 // callbacks are lowered together; the C witness only transports code pointers.
 // Aggregate fixture.o supplies the Jet-only runtime; link platform libs only.
 import { nativeCCompiler } from '../../../Tools/packaging/native-c-compiler.mjs';
+import { faultReportObject } from '../../../Tools/packaging/fault-report-object.mjs';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, runNativeLibrary } from '../../JetBackend/Tests/jet-front.mjs';
@@ -19,10 +20,10 @@ function command(bin, args, options = {}) {
   return result;
 }
 if (mode === 'assemble') {
-  command(toolJet(), [join(root, 'Tools/agent/CompilerPackages.jet'), '--root', root, 'runtime-unit', dir, '--test', 'Test']);
+  command(toolJet(), [join(root, 'Tools/agent/CompilerPackages.jet'), '--root', root, 'runtime-unit', dir, '--test', 'TestSuite']);
   mkdirSync(join(dir, 'Source'), { recursive: true });
   const unit = readFileSync(join(dir, 'unit.jet'), 'utf8');
-  writeFileSync(join(dir, 'Source/Fixture.jet'), unit);
+  renameSync(join(dir, 'unit.jet'), join(dir, 'Source/Fixture.jet'));
   // The runtime's own exports and the fixture's, as run-residue-fixtures.mjs
   // derives them from the same assembled sources.
   const names = [...unit.matchAll(/^#Export\(c\)\s+(\w+): fn\(/gm)].map(match => match[1]);
@@ -45,7 +46,10 @@ if (mode === 'assemble') {
   }
   writeFileSync(join(out, 'disassembly.txt'), command('objdump', ['-dr', object]).stdout);
 } else if (mode === 'link') {
-  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/test-suite-fixture.c'), join(dir, 'fixture.o'),
+  // The Jet linker writes jet_rt_fault_report into an image; this platform
+  // link takes it from the shared report source.
+  const faultReport = faultReportObject(mkdtempSync(join(out, 'fault-report-')));
+  command(nativeCCompiler, [join(root, 'Compiler/JetRuntime/Tests/test-suite-fixture.c'), join(dir, 'fixture.o'), faultReport,
     '-lpthread', '-ldl', '-lm', '-o', join(out, 'test-suite-fixture')]);
 } else {
   const result = spawnSync(join(out, 'test-suite-fixture'), [], { encoding: 'utf8', timeout: 300000 });
