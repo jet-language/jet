@@ -6,11 +6,11 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { seedDir } from "../../../Tools/agent/roots.mjs";
+import { toolJet } from "../../../Tools/agent/roots.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-// The fixture unit of ENTRY... (Tools/agent/CompilerPackages.jet unit, run by the seed).
-const compilerFixtureUnit = (...entries) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unit", ...entries], { maxBuffer: 1 << 30 }).toString("utf8");
+// The fixture unit of ENTRY... (Tools/agent/CompilerPackages.jet unit, run by roots.mjs toolJet).
+const compilerFixtureUnit = (...entries) => execFileSync(toolJet(), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unit", ...entries], { maxBuffer: 1 << 30 }).toString("utf8");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]");
 // The marker structs are the raw text of jet_foundation's MARKER_SOURCE.

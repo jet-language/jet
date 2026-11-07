@@ -8,12 +8,12 @@ import { execFileSync } from "node:child_process";
 import { copyFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { seedDir } from "../../../Tools/agent/roots.mjs";
+import { toolJet } from "../../../Tools/agent/roots.mjs";
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
 if (!out) throw new Error("usage: run-gate-fixtures.mjs OUTDIR");
-// Tools/agent/CompilerPackages.jet, run by the seed.
-const compilerPackages = (...args) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, ...args], { maxBuffer: 1 << 30 }).toString("utf8");
+// Tools/agent/CompilerPackages.jet, run by roots.mjs toolJet.
+const compilerPackages = (...args) => execFileSync(toolJet(), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, ...args], { maxBuffer: 1 << 30 }).toString("utf8");
 const rows = text => text.split("\n").filter(Boolean).map(row => row.split("\t"));
 // A fixture is part of the unit's namespace: its compiler package imports blank as production's do.
 const packageImport = new RegExp(`^use (?:${rows(compilerPackages("packages")).map(([name]) => name).join("|")})\\.(?:\\[[^\\]]*\\]|[A-Za-z_][A-Za-z0-9_]*[ \\t]*$)`, "gm");

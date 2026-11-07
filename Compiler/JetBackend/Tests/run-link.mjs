@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { seedDir } from "../../../Tools/agent/roots.mjs";
+import { toolJet } from "../../../Tools/agent/roots.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const outDir = process.argv[2];
@@ -42,8 +42,8 @@ function item(path, head) {
 }
 
 // Each file's text with its `use { … }` blocks as one `use` line per row
-// (Tools/agent/CompilerPackages.jet unblock, run by the seed).
-const unblocked = (paths) => execFileSync(join(seedDir(), "jet"), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unblock", ...paths], { maxBuffer: 1 << 30 }).toString("utf8").split("\0").slice(0, paths.length);
+// (Tools/agent/CompilerPackages.jet unblock, run by roots.mjs toolJet).
+const unblocked = (paths) => execFileSync(toolJet(), [join(repo, "Tools/agent/CompilerPackages.jet"), "--root", repo, "unblock", ...paths], { maxBuffer: 1 << 30 }).toString("utf8").split("\0").slice(0, paths.length);
 
 // Units are single-package: drop `use jet_*` items; `use core.*` items are
 // collected for the head of the unit.

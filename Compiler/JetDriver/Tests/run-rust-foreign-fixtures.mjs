@@ -10,12 +10,12 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { seedDir } from '../../../Tools/agent/roots.mjs';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const out = process.argv[2];
 if (!out) throw new Error('usage: run-rust-foreign-fixtures.mjs <outdir>');
-// Tools/agent/CompilerPackages.jet, run by the seed.
-const compilerPackages = (...args) => execFileSync(resolve(seedDir(), 'jet'), [resolve(repo, 'Tools/agent/CompilerPackages.jet'), '--root', repo, ...args], { maxBuffer: 1 << 30 }).toString('utf8');
+// Tools/agent/CompilerPackages.jet, run by roots.mjs toolJet.
+const compilerPackages = (...args) => execFileSync(toolJet(), [resolve(repo, 'Tools/agent/CompilerPackages.jet'), '--root', repo, ...args], { maxBuffer: 1 << 30 }).toString('utf8');
 const environmentFixture = process.argv.includes('--host-env');
 const host = process.argv.includes('--host') || process.argv.includes('--host-full') || environmentFixture;
 // Declarations of the Foundation package and the CLI's Rust foreign host.

@@ -9,7 +9,7 @@
 // `--help` prints the options; README.md explains the lanes.
 
 import fs from 'node:fs';
-import { scratchRoot, seedDir } from '../../agent/roots.mjs';
+import { scratchRoot, toolJet } from '../../agent/roots.mjs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -184,8 +184,8 @@ function prepareBench(id, dir) {
   };
 }
 
-// Tools/agent/CompilerPackages.jet of this checkout over `tree`, run by the seed: its output rows.
-const compilerPackages = (tree, ...args) => execFileSync(path.join(seedDir(), 'jet'), [path.join(REPO, 'Tools/agent/CompilerPackages.jet'), '--root', tree, ...args], { maxBuffer: 1 << 30 }).toString('utf8').split('\n').filter(Boolean);
+// Tools/agent/CompilerPackages.jet of this checkout over `tree`, run by roots.mjs toolJet: its output rows.
+const compilerPackages = (tree, ...args) => execFileSync(toolJet(), [path.join(REPO, 'Tools/agent/CompilerPackages.jet'), '--root', tree, ...args], { maxBuffer: 1 << 30 }).toString('utf8').split('\n').filter(Boolean);
 
 // The compiler in package form: the workspace files and every compiler package
 // of --source-tree, copied at their repository paths; the sample runs

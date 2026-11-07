@@ -218,10 +218,11 @@ JetpackClaim: struct {
 }
 
 // `node Jetpack/Bootstrap/assemble.mjs <mode>` into `scratch`, keeping only
-// the JETPACK_ENGINE_SECTIONS claims: the mode's directory.
+// the JETPACK_ENGINE_SECTIONS claims: the mode's directory. The jet under test
+// (JET_BIN) runs the assembler's Jet tool.
 jetpack_assemble: fn(setup: SuiteSetup, scratch: String, mode: String) -> String Err! {
     script: files.join(setup.checkout, "Jetpack/Bootstrap/assemble.mjs")
-    ran: process.cmd([String]{"node", script, mode}).cwd(setup.checkout).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `node {script} {mode}`: {err}")
+    ran: process.cmd([String]{"node", script, mode}).cwd(setup.checkout).env("JET_BIN", setup.jet).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `node {script} {mode}`: {err}")
     if !ran.success -> return Err("`assemble.mjs {mode}` exited {ran.code}: {failure_line(ran.errors)}")
     Ok(files.join(scratch, mode))
 }

@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { seedDir } from "../roots.mjs";
+import { toolJet } from "../roots.mjs";
 
 const [cmd, ...args] = process.argv.slice(2);
 const SKIPPED = new Set(["target", "build", "node_modules", "bin"]);
@@ -44,9 +44,9 @@ function contentHash(root, files, domain) {
   return h.digest("hex");
 }
 
-// Tools/agent/CompilerPackages.jet of `tree`, run by the seed: its output rows.
+// Tools/agent/CompilerPackages.jet of `tree`, run by roots.mjs toolJet: its output rows.
 function compilerPackages(tree, ...args) {
-  return execFileSync(join(seedDir(), "jet"), [join(tree, "Tools/agent/CompilerPackages.jet"), "--root", tree, ...args], { maxBuffer: 1 << 28 }).toString("utf8").split("\n").filter(Boolean);
+  return execFileSync(toolJet(), [join(tree, "Tools/agent/CompilerPackages.jet"), "--root", tree, ...args], { maxBuffer: 1 << 28 }).toString("utf8").split("\n").filter(Boolean);
 }
 
 // The build stage reads the compiler's source identity inputs (workspace files, every package `jet build Compiler`

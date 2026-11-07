@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readdir, readFile, realpath, stat, writeFile, mkdir, rm, copyFile } from "node:fs/promises";
-import { seedDir, stateRoot } from "../../Tools/agent/roots.mjs";
+import { stateRoot, toolJet } from "../../Tools/agent/roots.mjs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compilerSliceDrift } from "./compiler-slice.mjs";
@@ -360,10 +360,10 @@ function blankRepeatedCoreMembers(importText, module, members) {
   ).join("");
   return importText.slice(0, importText.indexOf("[") + 1) + rewritten + "]";
 }
-// Each text with its `use { … }` blocks as one `use` line per row (Tools/agent/CompilerPackages.jet unblock, run by the seed).
+// Each text with its `use { … }` blocks as one `use` line per row (Tools/agent/CompilerPackages.jet unblock, run by roots.mjs toolJet).
 function unblockUses(texts) {
   const framed = texts.map((text) => `${text}\0`).join("");
-  return execFileSync(join(seedDir(), "jet"), [join(repoRoot, "Tools/agent/CompilerPackages.jet"), "unblock", "-"], { input: framed, maxBuffer: 1 << 30 }).toString("utf8").split("\0").slice(0, texts.length);
+  return execFileSync(toolJet(), [join(repoRoot, "Tools/agent/CompilerPackages.jet"), "unblock", "-"], { input: framed, maxBuffer: 1 << 30 }).toString("utf8").split("\0").slice(0, texts.length);
 }
 function blankPackageImports(text) {
   return text.replace(PACKAGE_IMPORT, blank)
