@@ -177,6 +177,9 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if locked {
         if pkg_lock_record_generated_inputs(root, generated_inputs, true, BuildStamp.default()) == .Err(error) -> return jet_cli_lock_refusal(error, color)
     }
+    shadowed: jet_cli_generated_shadow(root, generated, color)
+    // copy: `shadowed` is a payload view of the check's result.
+    if shadowed == .Val(refusal) -> return refusal.copy()
     if build_options_value(selected_options, "write_generated") == "on" {
         loop source_file in generated {
             path: jet_cli_entry_join(root, source_file.path)
@@ -242,6 +245,35 @@ jet_cli_generated_lock_inputs: fn(generated: [BuildSessionGeneratedModule]) -> [
     inputs := [ComptimeInput]{}
     loop source_file in generated -> inputs.push(ComptimeInput{path: source_file.path.copy(), hash: "sha256:{pkg_sha256_hex(source_file.source.bytes())}"})
     inputs
+}
+
+// E3510 for the first generated module whose managed `.jet/generated/` path
+// already holds something Jet didn't write there: a symlink on the way, a
+// non-file, or a file whose bytes are neither this build's source nor the
+// `[[comptime_inputs]]` hash the lock recorded for that path. Generation is
+// additive, so a hand-written file is never overwritten or shadowed.
+jet_cli_generated_shadow: fn(root: String, generated: [BuildSessionGeneratedModule], color: Bool) -[FS]> JetDriverVerbOutput? Never! {
+    recorded: if pkg_lock_load(root) == .Val(lock) -> lock.comptime_inputs.copy() else -> [ComptimeInput]{}
+    loop source_file in generated {
+        path: jet_cli_entry_join(root, source_file.path)
+        prefix := root.copy()
+        linked: loop part in source_file.path.split("/") {
+            prefix = jet_cli_entry_join(prefix, part)
+            if build_files.is_symlink(prefix) -> break true
+        } ?? false
+        if !linked && !build_files.exists(path) -> next
+        if !linked && build_files.is_file(path) {
+            on_disk: build_files.read(path) ?? ""
+            if on_disk == source_file.source -> next
+            digest: "sha256:{pkg_sha256_hex(on_disk.bytes())}"
+            managed: loop input in recorded {
+                if input.path == source_file.path && input.hash == digest -> break true
+            } ?? false
+            if managed -> next
+        }
+        return Val(jet_cli_report_output("", "E3510", "`b.generate(\"{source_file.name}\")` would shadow the module at `{source_file.path}`", "generation is additive: what you wrote is always what compiles", "rename the generated module, or delete the hand-written one", color, JET_DRIVER_EXIT_USER_ERROR))
+    }
+    None
 }
 
 // `jet build` of a workspace index builds its members before its own plan,
