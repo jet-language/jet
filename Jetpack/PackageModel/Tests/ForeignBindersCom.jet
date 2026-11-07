@@ -4,6 +4,7 @@ use {
         BinderHostOS, COM_DISCOVERY_C, ComTypeLibraryInput, ForeignBindError, pkg_com_bind,
         pkg_com_parse_schema, pkg_com_project, pkg_com_render_c, pkg_com_render_jet,
     ]
+    jet_testkit.[kit_require_tool]
     files: core.files
     process: core.process
 }
@@ -69,19 +70,9 @@ COM_TEST_OFFICE_METADATA: comptime { "LIB\tOffice Fixture\t{{00000000-0000-0000-
 
 #Test("com generated windows sources cross compile with winegcc") {
     if BinderHostOS.current() == BinderHostOS.Windows -> return
-    probe: if process.cmd([String]{"winegcc", "--version"}).stdout(.Capture).stderr(.Capture).run() == {
-        .Ok(receipt) -> receipt
-        .Err(error) -> {
-            if error == {
-                .NotFound(_) -> {
-                    print("note: skipping generated_windows_sources_cross_compile_with_winegcc (winegcc is not installed)")
-                    return
-                }
-                else -> panic("winegcc probe failed: {error}")
-            }
-        }
-    }
-    if !probe.success -> panic("winegcc --version failed: {probe.errors}")
+    winegcc: kit_require_tool("winegcc") ?? return
+    // winegcc compiles through the host gcc: without it, winegcc itself fails.
+    _: kit_require_tool("gcc") ?? return
     metadata: "LIB\tOffice Fixture\t{{00000000-0000-0000-0000-000000000001}}\nCLASS\t{{00000000-0000-0000-0000-000000000002}}\tApplication\nMETHOD\tApplication\tTitle\t1\t2\ttext\n"
     schema: pkg_com_parse_schema(metadata.bytes()) ?? panic("the fixture schema parses")
     scratch: files.temp_dir("jet-com-cross") ?? panic("scratch directory")
@@ -91,7 +82,7 @@ COM_TEST_OFFICE_METADATA: comptime { "LIB\tOffice Fixture\t{{00000000-0000-0000-
     files.write(runtime, pkg_com_render_c("office", schema)) ?? panic("write runtime")
     sources: [(source: String, object: String)]{(source: inspector, object: "inspect.o"), (source: runtime, object: "runtime.o")}
     loop entry in sources {
-        receipt: process.cmd([String]{"winegcc", "-std=gnu11", "-c", entry.source, "-o", files.join(scratch.path, entry.object)}).stdout(.Capture).stderr(.Capture).run() ?? panic("winegcc runs")
+        receipt: process.cmd([String]{winegcc.copy(), "-std=gnu11", "-c", entry.source, "-o", files.join(scratch.path, entry.object)}).stdout(.Capture).stderr(.Capture).run() ?? panic("winegcc runs")
         if !receipt.success -> panic("winegcc failed for {entry.source}: {receipt.errors}")
     }
 }
