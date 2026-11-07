@@ -232,9 +232,12 @@ jet_cli_c_bind_header_path: fn(root: String, header: String) -> String Never! {
 // The compiler's cache refresh over the sources of the program `entry_path`
 // heads (jet_cli_c_bind_inputs): each header import whose
 // `.jet/bindings/c/<lib>.jet` is missing, or whose `.hash` does not match the
-// header bytes, is bound again before the caches are read. An unreadable
-// header or a failed bind is E3208 and leaves the old files as they were; an
-// up-to-date cache is never rewritten.
+// header bytes, is bound again before the caches are read. A library the
+// program also overlays with `#Import c.<lib>: module` is always bound again:
+// the overlay is a bind input the `.hash` (header bytes only) does not cover.
+// An unreadable header, a failed bind, or a bind that leaves an opaque handle
+// unresolved is E3208 and leaves the old files as they were; an up-to-date
+// cache of a library with no overlay is never rewritten.
 jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAuthorizedSourceFile], color: Bool) -[FS, Env, Time]> JetDriverVerbOutput? Never! {
     inputs: jet_cli_c_bind_inputs(files, entry_path, cli_files.is_file(jet_cli_authority_path(root, "package.jet")))
     loop request in inputs.headers {
@@ -243,7 +246,7 @@ jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAu
             return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), jet_cli_c_bind_unreadable("{err}"), jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
         overlay: inputs.overlays.get(request.lib) ?? HandleOverlay.empty()
-        if jet_cli_c_bind_current(root, request.lib, header_text) {
+        if !inputs.overlays.has_key(request.lib) && jet_cli_c_bind_current(root, request.lib, header_text) {
             if jet_cli_c_bind_stale(root, request.lib) == .Val(changed) {
                 return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "{changed} changed after the binding was generated.", "regenerate the binding: run `jet inspect bind {request.header} --pkg {request.lib}`.", color, JET_DRIVER_EXIT_USER_ERROR))
             }
@@ -251,6 +254,11 @@ jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAu
         }
         bound: pkg_cbind_bind_files(header_text, request.lib, overlay) ?? {
             return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "{err.message}.", jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
+        }
+        if bound.handle_skipped.len() > 0 {
+            details := [String]{}
+            loop entry in bound.handle_skipped -> details.push("`{entry.typedef_name}`: {entry.reason}")
+            return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), "opaque handle bindings were unresolved: {details.join("; ")}.", jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
         held: JetCLIRootedDirectory.open(root, JET_CLI_C_BINDINGS_PARTS, true) ?? return Val(jet_cli_c_bind_write_refused(request.header, request.lib, err.message, color))
         provenance: jet_cli_c_bind_provenance(root, held.path, request.lib, request.lib, header_path, header_text, bound) ?? {

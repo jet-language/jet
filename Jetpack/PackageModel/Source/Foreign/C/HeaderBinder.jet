@@ -94,6 +94,9 @@ CBindFiles: struct {
     // Function names bound, and prototypes skipped with their reason.
     bound: [String]
     skipped: [(name: String, reason: String)]
+    // Opaque typedefs withheld because their ownership was not resolvable;
+    // the compiler's refresh refuses a bind that has any.
+    handle_skipped: [(reason: String, typedef_name: String)]
     // What the `<lib>.provenance` record adds (pkg_cbind_provenance): the
     // handle facts' stable keys (sorted, unique), the link closure's stable
     // key, and the boundary row the cache stamps.
@@ -112,7 +115,7 @@ pkg_cbind_bind_files: fn(header_src: String, lib: String, overlay: HandleOverlay
     closure_key: closure.stable_key()
     handle_keys: loop fact in pkg_cffi_sorted_facts(facts) -> fact.stable_key()
     metadata: if facts.len() == 0 && result.link_closure.transitive.len() == 0 -> None else -> Val(pkg_cffi_render_binding_metadata(result.link_closure.primary, facts, closure))
-    Ok(CBindFiles{cache: result.source, metadata: metadata, hash: pkg_cbind_compute_bind_hash(header_src, ""), bound: result.bound, skipped: result.skipped, handle_keys: handle_keys, link_closure: closure_key, boundary: result.boundary})
+    Ok(CBindFiles{cache: result.source, metadata: metadata, hash: pkg_cbind_compute_bind_hash(header_src, ""), bound: result.bound, skipped: result.skipped, handle_skipped: result.handle_skipped, handle_keys: handle_keys, link_closure: closure_key, boundary: result.boundary})
 }
 
 // The binder schema a C binding's identity and provenance name.
