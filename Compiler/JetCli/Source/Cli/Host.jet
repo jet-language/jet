@@ -1412,12 +1412,14 @@ jet_cli_present_shown: fn(result: JetDriverCompileResult, snapshot: JetDriverAut
 
 // `jet build <file>`: compile through the Jet compiler, report its problems
 // (under `json`, one failed `diagnostics` status on stderr), check the
-// application authority, then write the executable, or under `os: web` the
-// web build (jet_cli_build_web). `sbom` (`--sbom`) also writes the SPDX
+// application authority, then write the executable (restored from the
+// machine-wide store when unchanged, jet_cli_build_stored), or under `os: web`
+// the web build (jet_cli_build_web). `sbom` (`--sbom`) also writes the SPDX
 // document next to the executable (jet_cli_build_sbom). A human build ends
 // with the one-line effect summary on stderr, which `quiet` leaves out; under
 // `json` the same projection is the one `build.effects` status on stdout.
-jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+// `verbose` adds the store's `[build]` lines.
+jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool, options: BuildOptions, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool, result: JetDriverCompileResult, inputs: &&JetDriverLoweringInputs?, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time, Rand]> JetDriverVerbOutput Never! {
     // Only the errors are presented (jet_cli_present_shown).
     if result.trace_sink == .Val(sink) -> sink.begin("cli.diagnostics", "", -1, -1)
     errors: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
@@ -1431,12 +1433,14 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(jet_cli_effect_projection(authority))}\n"
     stripped_jobs: if json || quiet -> "" else -> jet_cli_release_job_summary(inputs, options)
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    log := ""
     if build_options_value(options, "os") == "web" {
         built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
     } else {
-        if jet_cli_build_binary(file, name, "build", color, options, result, inputs, snapshot) == {
+        if jet_cli_build_stored(file, name, color, options, result, inputs, snapshot, verbose) == {
             .Failed(failure) -> return failure
-            .Image(_, path) -> {
+            .Written(path, lines) -> {
+                log = lines
                 if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
             }
         }
@@ -1445,7 +1449,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         if json {
             built.stdout = jet_cli_build_effects_json(authority)
         } else {
-            built.stderr = "{summary}{built.stderr}"
+            built.stderr = "{log}{summary}{built.stderr}"
             built.stdout = "{stripped_jobs}{built.stdout}"
         }
     }
@@ -1495,13 +1499,13 @@ jet_cli_compile_target: fn(file: String, name: String, source: String, generated
             compiled := jet_cli_compile_executable(JetCLIPrepared.Prepared{request: with_generated.move(), snapshot: snapshot}, None, options, None, trace_sink, color)
             if compiled.move() == {
                 .Refused(refusal) -> refusal
-                .Checked(result, inputs, checked_snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, false, false, result, inputs, checked_snapshot)
+                .Checked(result, inputs, checked_snapshot) -> jet_cli_build_result(file, name, source, color, options, invocation, false, false, false, false, result, inputs, checked_snapshot)
             }
         }
     }
 }
 
-jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, json: Bool, sbom: Bool, quiet: Bool, verbose: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     members: jet_cli_build_workspace_members(file, color, options, threads, false, trace_sink)
     if members.exit_code != JET_DRIVER_EXIT_OK -> return members
     // A workspace index without its own `run: fn` is built once its members are.
@@ -1510,7 +1514,7 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
     compiled := jet_cli_compile_executable_file(file, None, color, threads, options, trace_sink)
     if compiled.move() == {
         .Refused(refusal) -> output = refusal
-        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, quiet, result, inputs, snapshot))
+        .Checked(result, inputs, snapshot) -> jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, quiet, verbose, result, inputs, snapshot))
     }
     // Reached only by a refusal: a value-returning verb never ends in its
     // Never exit call.
@@ -3143,7 +3147,7 @@ jet_cli_write_output: fn(output: JetDriverVerbOutput) {
 // The plans whose compile `--trace` and JET_TRACE_FILE trace.
 jet_cli_plan_compiles: fn(plan: JetCLIPlan) -> Bool Never! {
     if plan == {
-        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
+        .Check(_, _, _, _, _, _, _, _, _, _, _) | .CheckWorkspace(_, _, _, _, _, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .Test(_, _, _, _, _, _) | .Emit(_, _, _, _, _, _) -> true
         else -> false
     }
 }
@@ -3174,9 +3178,9 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
             jet_cli_write_notice(notice)
             output = jet_cli_check_workspace(files, sources, color, quiet, threads, json, settings, profile, trace_sink)
         }
-        .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet) -> {
+        .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet, verbose) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, trace_sink)
+            output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)
         }
         .BuildPackage(file, color, options, build_args, threads, invocation, notice, locked) -> {
             jet_cli_write_notice(notice)

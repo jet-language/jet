@@ -2064,6 +2064,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         }
         if func.params[param_index].variadic -> parameter_ty = Type.List{element: parameter_ty}
         parameter_ty = sema_function_resolve_declared(updated, program, parameter_ty, module_identity, generic_params)
+        // A `group: Group` parameter is the caller's live group: a `task` in
+        // this body spawns into it, and the caller's `task.group` joins it.
+        if parameter_ty == (Type.Named{name: "Group"}) -> sema_taskgroup_push_parameter(context, func.params[param_index].name)
         // E0502: a map in a declared parameter type needs a key-eligible key.
         if !(param_index == 0 && func.params[param_index].name == "self") && !sema_type_check_declared_map_keys(updated, program, parameter_ty, func.params[param_index].ty_span, diagnostics) -> complete = false
         default_expr := TExpr?{None}
@@ -2155,6 +2158,12 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
         resolved_return := declared_return
         resolved_return = sema_function_resolve_declared(updated, program, declared_return, module_identity, generic_params)
         if !sema_type_check_declared_map_keys(updated, program, resolved_return, func.return_type_span ?? func.name_span, diagnostics) -> complete = false
+        // E1110: a group is call-stack-only spawn authority that flows down
+        // through a direct parameter; a returned group would outlive the
+        // block that joins it.
+        if sema_stmt_contains_taskgroup(resolved_return) {
+            diagnostics.push(sema_error("E1110", func.return_type_span ?? func.name_span, "`Group` cannot be returned", "a task group is call-stack-only spawn authority; a returned group would outlive the block that joins it", "pass `group: Group` down to the helper that spawns instead of returning it"))
+        }
     }
     // `check_kernel_marker`: the declaration and worker-boundary obligations of
     // `#Kernel(.parallel)` (E1102); its effect and body obligations wait for
@@ -2191,6 +2200,9 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
     // Imported Core bodies and generated functions have no user source to fix.
     if returns_value && !func.compiler_generated && !updated.module_identity.starts_with("<corelib>/") -> sema_stmt_value_block_tail_lints(func.body, diagnostics)
     statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
+    // The caller's group joins every task this body spawned into a `Group`
+    // parameter, so those handles owe no `join` here.
+    sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
     context.lost_tail_span = None
     context.value_tail_span = None
     loop site in state.share_found -> share_found.push(site)

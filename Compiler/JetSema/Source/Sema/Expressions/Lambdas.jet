@@ -1832,6 +1832,13 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         // (`files.DirEntry` is core.files' DirEntry), so the lowered lambda
         // takes the resolved type.
         parameter_type: if parameter.ty != None -> sema_expr_expected_type(written_type, environment, program) else -> written_type
+        // A task group reaches code only as a direct fn or method parameter
+        // (E1110 for the other positions); a lambda has no `Group` type to
+        // name, so its written `(group: Group)` is an unknown type.
+        if parameter.ty != None && sema_stmt_contains_taskgroup(parameter_type) {
+            diagnostics.push(sema_error("E0119", parameter.ty_span ?? parameter.name_span, "a lambda parameter can't have type `{sema_type_show(parameter_type)}`", "`Group` is a type only a direct function or method parameter can name; a lambda could carry the group past the block that joins it", "move the work into a function that takes `group: Group` and call it directly"))
+            return None
+        }
         // A written `(item: Item)` and an expected `module::Item` (resolved
         // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {

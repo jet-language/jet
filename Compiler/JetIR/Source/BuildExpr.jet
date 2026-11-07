@@ -6786,6 +6786,7 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
         }
         .Struct(_, fields) -> {
             if ir_default_err(p, ty) -> return ir_comptime_default_err(m, p, b, ty, row, fields, span)
+            if m.types[row].kind == .Pointer && ir_untag(ty) == (Type.Named{name: "Fraction"}) -> return ir_comptime_fraction_handle(m, p, b, ty, fields, span)
             return ir_comptime_struct(m, p, b, ty, row, fields, span)
         }
         .Map(entries) -> return ir_comptime_map(m, p, b, ty, row, entries, span)
@@ -6809,6 +6810,25 @@ ir_comptime: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: TCom
         }
         else -> return ir_fail_slot(b, span, "constant value {ir_comptime_name(value)}")
     }
+}
+
+// A Fraction constant of a program without core.math, whose Fraction is the
+// runtime handle: its Core fields (num_value, den_value) through the
+// `from_parts` route, as `Int / Int` builds one.
+ir_comptime_fraction_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fields: [TComptimeField], span: Span) -> Int Never! {
+    parts := [Int]{}
+    names: [String]{"num_value", "den_value"}
+    loop name in names {
+        found := TComptimeValue?{None}
+        loop field in fields {
+            if field.name == name -> found = Val(field.value.copy())
+        }
+        value: found ?? return ir_fail_slot(b, span, "Fraction constant without its {name}")
+        slot: ir_comptime(m, p, b, Type.Int, value, span)
+        if ir_failed(b) -> return -1
+        parts.push(slot)
+    }
+    ir_precise_route(m, p, b, ty, "Fraction", "from_parts", parts, span)
 }
 
 // A Map constant: an empty header, then each entry set in order through

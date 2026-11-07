@@ -530,7 +530,7 @@ sema_return_value_mismatch: fn(function: String, want: Type, got: Type, span: Sp
 }
 
 // The leaf of a canonical Core nominal declared by `module_name`
-// (`core.crypto`) in `source` (`Core/crypto/crypto.jet`), in either identity
+// (`core.crypto`) in `source` (`Core/Crypto/Crypto.jet`), in either identity
 // spelling the registration graph gives it.
 sema_core_canonical_leaf: fn(name: String, module_name: String, source: String) -> String? {
     parts: name.split("::").to_list()
@@ -544,13 +544,13 @@ sema_core_canonical_leaf: fn(name: String, module_name: String, source: String) 
 }
 
 sema_core_crypto_leaf: fn(name: String) -> String? {
-    sema_core_canonical_leaf(name, "core.crypto", "Core/crypto/crypto.jet")
+    sema_core_canonical_leaf(name, "core.crypto", "Core/Crypto/Crypto.jet")
 }
 
 // The one closed secret-lifetime wrapper, by its bare name or its canonical
 // source identity.
 sema_is_expiring_secret_name: fn(name: String) -> Bool Never! {
-    name == "ExpiringSecret" || sema_core_canonical_leaf(name, "core.crypto.vault", "Core/crypto/vault.jet") == (Val("ExpiringSecret"))
+    name == "ExpiringSecret" || sema_core_canonical_leaf(name, "core.crypto.vault", "Core/Crypto/Vault.jet") == (Val("ExpiringSecret"))
 }
 
 // The read loan `ExpiringSecret.with` lends its callback: `T` under the

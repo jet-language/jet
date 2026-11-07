@@ -4056,6 +4056,9 @@ sema_expr_check_expiring_secret_with: fn(receiver: Expr, receiver_value: TExpr, 
         _ := sema_check_expression(args[0].expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return None
     }
+    // Reading the expiry observes the secret's injected clock, a `Time`
+    // read: a pure body refuses it (E3403).
+    if !sema_time_record_intrinsic(Type.Named{name: "Unit"}, "Time", "ExpiringSecret.with", method_span, environment, program, scopes, context, diagnostics) -> return None
     loan_expected: Type.Fn{params: [Type]{sema_expiring_secret_loan_type(secret_type)}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     loan_reports := [Diagnostic]{}
     scope_mark: sema_scope_mark(scopes)
@@ -5327,6 +5330,13 @@ sema_expr_check_copy: fn(value: Expr, span: Span, expected: Type?, environment: 
     // Clock reads ambient time (E3403 `Clock copy` in a pure body).
     if sema_copy_observable_clock(checked.ty, environment, program, context.generic_params) {
         _ := sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Clock copy", span, [EffectRowEntry]{EffectRowEntry{name: "Time", span: span}}, diagnostics)
+    }
+    // A Manual clock owns its timeline, so its semantic copy is a fork
+    // (Clock.__fork) that ticks on its own, never a second handle on the
+    // shared state. Core's Clock declares the fork itself.
+    if sema_call_is_clock_type(checked.ty) && !sema_module_is_core_source(environment.module_identity) {
+        fork := Expr.MethodCall{receiver: value.copy(), method: "__fork", method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
+        return sema_check_expression(fork, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     window_copy: sema_call_compute_window_copy(checked, span, expected, environment, program, diagnostics)
     if window_copy.handled -> return window_copy.value

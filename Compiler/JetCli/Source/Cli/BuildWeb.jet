@@ -2,8 +2,8 @@
 // partition of the checked program (JetWeb Build.jet), linked against the
 // runtime partition packaged beside jet, and the host files that load the
 // two, written to the output directory (jet_cli_output_dir_path): app.wasm,
-// rt.wasm, web.manifest.json, app.js and jet_dom_runtime.js. `node app.js`
-// runs the program; a page imports app.js and calls `jet_main`.
+// rt.wasm, web.manifest.json, app.js, jet_dom_runtime.js and index.html.
+// `node app.js` runs the program, and so does index.html, the default page.
 use {
     cli_files: core.files
     jet_driver.[
@@ -17,7 +17,7 @@ use {
         jet_driver_ice_record,
     ]
     jet_foundation.[BuildOptions, cli_schema_embed_wasm_record]
-    jet_web.[web_app_js, web_dom_runtime_js, web_program]
+    jet_web.[web_app_js, web_dom_runtime_js, web_index_html, web_program]
 }
 
 // The runtime partition and its receipt in the runtime key's directory
@@ -63,6 +63,7 @@ jet_cli_build_web: fn(file: String, color: Bool, options: BuildOptions, result: 
     if jet_cli_web_write_text(file, color, "{build_dir}/web.manifest.json", web.manifest) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/app.js", web_app_js()) == .Val(failure) -> return failure
     if jet_cli_web_write_text(file, color, "{build_dir}/jet_dom_runtime.js", web_dom_runtime_js()) == .Val(failure) -> return failure
+    if jet_cli_web_write_text(file, color, "{build_dir}/index.html", web_index_html()) == .Val(failure) -> return failure
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 

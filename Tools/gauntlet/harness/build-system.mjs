@@ -11,7 +11,7 @@
 // usage: node Tools/gauntlet/harness/build-system.mjs --jet JET [--work-dir DIR]
 //          [--receipt FILE] [--samples N] [--warmups N]
 // The caller's environment reaches `jet` unchanged (JET_TOOLCHAIN_ROOT and
-// friends); JET_CACHE_DIR is set to a directory under the work dir.
+// friends); JET_STORE_DIR points the machine-wide store at a directory under the work dir.
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
@@ -99,13 +99,13 @@ class Workspace {
     this.project = path.join(this.workDir, "project");
     this.jetDir = path.join(this.project, "jet");
     this.nixDir = path.join(this.project, "nix");
-    this.jetCache = path.join(this.workDir, "jet-cache");
+    this.jetStore = path.join(this.workDir, "jet-store");
     this.nixStore = `local?root=${path.join(this.workDir, "nix-root")}`;
     this.nixStoreRoot = path.join(this.workDir, "nix-root");
     this.nixCache = `file://${path.join(this.workDir, "nix-cache")}`;
     this.flake = `path:${this.nixDir}#packages.${SYSTEM}.default`;
     this.jet = path.resolve(jet);
-    this.jetEnv = { ...process.env, JET_CACHE_DIR: this.jetCache };
+    this.jetEnv = { ...process.env, JET_STORE_DIR: this.jetStore };
     this.expected = fs.readFileSync(EXPECTED, "utf8");
     this.nixOut = null;
     this.edits = 0;
@@ -121,7 +121,7 @@ class Workspace {
   // one validated build by each peer.
   async setUp() {
     await fsp.rm(this.workDir, { recursive: true, force: true });
-    await fsp.mkdir(this.jetCache, { recursive: true });
+    await fsp.mkdir(this.jetStore, { recursive: true });
     writeProject(this.project);
     const lock = JSON.parse(fs.readFileSync(path.join(this.nixDir, "flake.lock"), "utf8"));
     const { owner, repo, rev } = lock.nodes.nixpkgs.locked;
@@ -161,8 +161,8 @@ class Workspace {
     if (cellId === "cold_cache" && peer === "jet") await fsp.rm(path.join(this.jetDir, ".jet"), { recursive: true, force: true });
     if (cellId === "scratch" && peer === "jet") {
       await fsp.rm(path.join(this.jetDir, ".jet"), { recursive: true, force: true });
-      await fsp.rm(this.jetCache, { recursive: true, force: true });
-      await fsp.mkdir(this.jetCache, { recursive: true });
+      await fsp.rm(this.jetStore, { recursive: true, force: true });
+      await fsp.mkdir(this.jetStore, { recursive: true });
     }
     if (cellId === "cold_cache" && peer === "nix") {
       // The substituter holds the current build; the private store does not.

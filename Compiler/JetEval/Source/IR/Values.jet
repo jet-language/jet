@@ -156,6 +156,18 @@ jet_eval_ir_data: fn(m: &IRModule, p: IRProgram, s: &JetEvalIRState, word: Int, 
                 args: ir_row_args(m, row)
                 return jet_eval_ir_enum_data(m, p, s, definition, args, discriminant, word, true)
             }
+            // A Fraction of a program without core.math is its runtime
+            // handle: two exact-Int words, numerator@0 and denominator@8
+            // (JetRuntime RoutePrecise.jet). It reads back as the Core
+            // declaration's fields, the value a core.math program lays out.
+            if checked == (Type.Named{name: "Fraction"}) && ir_type_def(p, "Fraction") == None {
+                int_row: ir_value_type(m, p, Type.Int) ?? return jet_eval_ir_transport_fail(s, checked)
+                top: jet_eval_ir_member_word(m, s, word, 0, int_row) ?? return None
+                bottom: jet_eval_ir_member_word(m, s, word, 8, int_row) ?? return None
+                numerator: jet_eval_ir_data(m, p, s, top, int_row) ?? return None
+                denominator: jet_eval_ir_data(m, p, s, bottom, int_row) ?? return None
+                return Val(TComptimeValue.Struct{type_name: "Fraction", fields: [TComptimeField]{TComptimeField{name: "num_value", value: numerator}, TComptimeField{name: "den_value", value: denominator}}})
+            }
             if ir_default_err(p, checked) -> return jet_eval_ir_err_data(s, p, checked, word)
             return jet_eval_ir_transport_fail(s, checked)
         }
