@@ -9,7 +9,8 @@
 use mem: core.mem
 
 run: fn() {
-    fixed: mem.Fixed.new(size: 32)
+    // One Int payload plus its 32-byte reverse-drop record.
+    fixed: mem.Fixed.new(size: 40)
     fixed.try_alloc(7) ? value -> {
         assert(value == 7, "firmware allocation")
     } ! _error -> {
