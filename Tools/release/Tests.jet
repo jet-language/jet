@@ -762,6 +762,15 @@ row_ids: fn(rows: [SuiteRow]) -> [String] Never! {
     assert_eq(row_ids(result.untracked), [String]{"b.jet", "c.jet"})
 }
 
+#Test("an untracked timeout the candidate passes on its retry is flaky whatever the release did; a retried failure stays untracked") {
+    before: [SuiteRow]{kit_row("a.jet", "o0", "TIMEOUT"), kit_row("b.jet", "o0", "FAIL"), kit_row("c.jet", "o0", "TIMEOUT"), kit_row("d.jet", "o0", "TIMEOUT")}
+    after: [SuiteRow]{kit_row("a.jet", "o0", "TIMEOUT"), kit_row("b.jet", "o0", "TIMEOUT"), kit_row("c.jet", "o0", "FAIL"), kit_row("d.jet", "o0", "TIMEOUT")}
+    retry: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS"), kit_row("c.jet", "o0", "PASS"), kit_row("d.jet", "o0", "TIMEOUT")}
+    result: compare_suites(before, after, retry, [Disposition]{})
+    assert_eq(row_ids(result.flaky), [String]{"a.jet", "b.jet"})
+    assert_eq(row_ids(result.untracked), [String]{"c.jet", "d.jet"})
+}
+
 #Test("a dispositioned lost row is tracked by its card, not untracked") {
     before: [SuiteRow]{kit_row("a.jet", "o0", "PASS"), kit_row("b.jet", "o0", "PASS")}
     after: [SuiteRow]{kit_row("a.jet", "o0", "FAIL"), kit_row("b.jet", "o0", "FAIL")}

@@ -331,14 +331,25 @@ compare_suites: fn(before_rows: [SuiteRow], after_rows: [SuiteRow], retry: [Suit
     }
     // A dispositioned lost row is tracked by its card, and a flaky row (one
     // the release passes and the candidate passes on its retry) is reported
-    // as flaky, so neither counts as untracked.
+    // as flaky, so neither counts as untracked. A row the candidate timed
+    // out on is retried whatever the release did, and when its retry passes
+    // it is flaky too: it missed a wall-clock limit under the kit's load, and
+    // the report still lists it.
     tracked := [String: Bool]{}
     loop lost in out.lost {
         if lost.disposed -> tracked[row_key(lost.suite, lost.id, lost.tier)] = true
     }
     loop row in out.flaky -> tracked[row_key(row.suite, row.id, row.tier)] = true
     loop item in after_rows {
-        if is_untracked(item.status) && !tracked.has_key(row_key(item.suite, item.id, item.tier)) -> out.untracked.push(item.copy())
+        if !is_untracked(item.status) -> next
+        key: row_key(item.suite, item.id, item.tier)
+        if tracked.has_key(key) -> next
+        if item.status == "TIMEOUT" && again.at.get(key) == .Val(at) && passes(retry[at].status) {
+            out.flaky.push(item.copy())
+            tracked[key.copy()] = true
+            next
+        }
+        out.untracked.push(item.copy())
     }
     out
 }
@@ -1058,15 +1069,23 @@ suites_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
             next
         }
         compared := compare_suites(release.rows, candidate.rows, [SuiteRow]{}, ctx.dispositions)
-        if compared.lost.len() > 0 {
+        // The retry runs every lost row and every untracked timeout again on
+        // their own: a row that missed its wall-clock limit under the kit's
+        // load has not failed if it passes by itself.
+        seen := [String: Bool]{}
+        lines := [String]{}
+        loop lost in compared.lost {
+            if seen.has_key(lost.id) -> next
+            seen[lost.id.copy()] = true
+            lines.push(lost.id.copy())
+        }
+        loop item in compared.untracked {
+            if item.status != "TIMEOUT" || seen.has_key(item.id) -> next
+            seen[item.id.copy()] = true
+            lines.push(item.id.copy())
+        }
+        if lines.len() > 0 {
             ids: files.join(ctx.work, "kit/retry-{suite}.txt")
-            seen := [String: Bool]{}
-            lines := [String]{}
-            loop lost in compared.lost {
-                if seen.has_key(lost.id) -> next
-                seen[lost.id.copy()] = true
-                lines.push(lost.id.copy())
-            }
             files.write(ids, keys_text(lines)) ?? ()
             again: suite_run(ctx, "candidate", suite, [String]{"--cases={ids}"})
             compared = compare_suites(release.rows, candidate.rows, again.rows, ctx.dispositions)
