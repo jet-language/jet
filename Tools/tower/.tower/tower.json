@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95784,
+    "rev": 95789,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39262,6 +39262,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T16:03:39.274Z"
+        },
+        {
+          "n": 13,
+          "text": "Free space: Core reports a filesystem's available bytes and used percent for a path (statvfs) on every tier. chain.sh's store choice (40 GB free) and clean-nix-tmp's /tmp warning use it instead of df.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:17:46.853Z"
         }
       ],
       "refs": [
@@ -39278,10 +39287,10 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-07T16:03:39.274Z",
+      "updated": "2026-11-07T16:17:46.853Z",
       "updatedBy": "Main",
       "goals": [],
-      "criteriaLastN": 12
+      "criteriaLastN": 13
     },
     {
       "id": "c0ufrhm0",
@@ -39425,6 +39434,42 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T16:03:38.366Z"
+        },
+        {
+          "n": 10,
+          "text": "CPU affinity: a ProcessSpec can pin the child to a CPU set, applied before exec, on every tier. The taskset -c calls in the chain stages, build-slot, publish-base and Land.jet run_heavy use it instead.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:17:42.981Z"
+        },
+        {
+          "n": 11,
+          "text": "Per-child usage: a ProcessReceipt reports that one child's peak RSS and its user and system CPU time (wait4 rusage), on every tier. sys.usage(.Children) is a running maximum over all waited children, so it can't attribute a peak to one stage. The time -v and time -f %M wrappers in chain stage rows and the slot ledger read the receipt instead.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:17:43.942Z"
+        },
+        {
+          "n": 12,
+          "text": "I/O priority and cgroup placement: a ProcessSpec can set the child's I/O priority class (idle included) and place the child in its own cgroup v2 scope with memory.high, memory.max, memory.swap.max and an oomd kill policy, refusing clearly where cgroups are unavailable. build-slot.sh's ionice -c3 and systemd-run scope, and publish-base's detached golden worker unit, use it instead.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:17:44.871Z"
+        },
+        {
+          "n": 13,
+          "text": "Isolation mappings: isolate() can map the caller's uid and gid 1:1 as well as to 0, and bind-mount SRC onto DST before exec. chain.sh inroot (the canonical build root the compiler embeds) replaces unshare -r -m, mount --bind and unshare --map-user with it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:17:45.840Z"
         }
       ],
       "refs": [
@@ -39442,12 +39487,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-07T16:03:38.366Z",
+      "updated": "2026-11-07T16:17:45.840Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 9
+      "criteriaLastN": 13
     },
     {
       "id": "c0692z4s",
@@ -186323,6 +186368,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T16:17:46.853Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#13 Free space: Core reports a filesystem's available bytes and "
+    },
+    {
+      "at": "2026-11-07T16:17:45.841Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#13 Isolation mappings: isolate() can map the caller's uid and g"
+    },
+    {
+      "at": "2026-11-07T16:17:44.872Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#12 I/O priority and cgroup placement: a ProcessSpec can set the"
+    },
+    {
+      "at": "2026-11-07T16:17:43.942Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#11 Per-child usage: a ProcessReceipt reports that one child's p"
+    },
+    {
+      "at": "2026-11-07T16:17:42.981Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#10 CPU affinity: a ProcessSpec can pin the child to a CPU set, "
+    },
     {
       "at": "2026-11-07T16:14:34.426Z",
       "by": "Main",
