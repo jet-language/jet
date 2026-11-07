@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6677,
-    "rev": 95820,
+    "nextNum": 6678,
+    "rev": 95824,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -99000,6 +99000,63 @@
       "updated": "2026-11-07T17:38:45.051Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
+    },
+    {
+      "id": "c0fs42sy",
+      "num": 6677,
+      "title": "A borrowed argument widened into a union parameter is moved and dropped by the callee (I1)",
+      "body": "Found by CoreCliLead-2 on an s1 seeded from B2 phase 1 (dev ee7e360461 + phase 1): passing a borrowed resource handle to a parameter of union type (handle: FileReader | FileWriter | Directory) gives the callee an owned union value that drops the payload on return. That closes the caller's handle: spec.keep_open(directory, at: Val(300)) succeeds, and a second keep_open(directory, ...) returns IOError.Closed. A borrowed argument must stay borrowed when it widens into a union (or be copied when the payload is a value type). It must never move, because the caller still owns it and drops it again. With a heap payload this is a double drop.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Root fix in sema/lowering: a borrowed argument that widens into a union parameter stays a borrow (the union carries a borrowed payload), or is copied when the payload is a plain value. It never moves, so the caller's drop is the only drop. No per-API routing or special case. The other places a borrowed value meets a union (return position, struct fields, optional widening) are checked and fixed in the same pass.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T18:36:58.214Z"
+        },
+        {
+          "n": 2,
+          "text": "A #Test or golden proves it on O0, O1 and O2: a borrowed Directory passed twice to a union-typed parameter stays open for both calls and closes exactly once, and a borrowed heap payload (String in String | Int) passed to a union parameter is neither freed by the callee nor double-freed (run with the memory ledger, 0 leaked and 0 double-dropped).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T18:36:59.238Z"
+        },
+        {
+          "n": 3,
+          "text": "ProcessSpec.keep_open uses one Core body over the approved union parameter, with no JetSema routing by probed handle type and no per-type core.files.__keep_open_{reader,writer,directory} bodies.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T18:37:00.294Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T18:36:38.446Z",
+      "updated": "2026-11-07T18:37:00.294Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3
     }
   ],
   "decisions": [
@@ -186868,6 +186925,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T18:37:00.294Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fs42sy",
+      "note": "#3 ProcessSpec.keep_open uses one Core body over the approved u"
+    },
+    {
+      "at": "2026-11-07T18:36:59.238Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fs42sy",
+      "note": "#2 A #Test or golden proves it on O0, O1 and O2: a borrowed Dir"
+    },
+    {
+      "at": "2026-11-07T18:36:58.214Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0fs42sy",
+      "note": "#1 Root fix in sema/lowering: a borrowed argument that widens i"
+    },
+    {
+      "at": "2026-11-07T18:36:38.447Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0fs42sy",
+      "note": "A borrowed argument widened into a union parameter is moved and dropped by the callee (I1)"
+    },
     {
       "at": "2026-11-07T18:23:09.433Z",
       "by": "Main",
