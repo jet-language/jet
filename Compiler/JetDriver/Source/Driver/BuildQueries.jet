@@ -7,7 +7,7 @@ use {
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
     jet_sema.[SemaGraphResult, SemaSourceOrigin]
     jet_build_session.[
-        BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_graph,
+        BuildSessionGeneratedModule, BuildSessionPlan, BuildSessionPolicy, build_plan_graph, build_plan_selection,
         build_plan_selected_generated, build_session_abort, build_session_append_unique,
         build_session_compiler_node, build_session_finish, build_session_new, build_session_set_args,
     ]
@@ -296,8 +296,14 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     // copy: the request gets temporary generated-module rows for the checked recompile, popped
     // right after; `generated` stays whole for the response.
     loop generated_row in generated -> request.generated_modules.push(generated_row.copy())
+    // The selected targets' listed sources join the bundle as each target's
+    // compile loads them (jet_cli_compile_target).
+    targets: build_plan_selection(plan)
+    loop target in targets.executables { loop listed in target.sources -> build_session_append_unique(request.target_sources, listed) }
+    loop target in targets.libraries { loop listed in target.sources -> build_session_append_unique(request.target_sources, listed) }
     checked: jet_driver_compile_selection(request, JetDriverCompileMode.Doc, None, None, false, true)
     loop request.generated_modules.len() > original_generated_count -> _: request.generated_modules.pop()
+    request.target_sources = [String]{}
     if selected_outputs -> request.build_output_names = [String]{}
     loop error in checked.diagnostics -> errors.push(error)
     if !checked.complete || checked.internal_problem != None || jet_driver_has_errors(errors) -> return jet_driver_build_query_empty(request, errors, false, checked.internal_problem.move())

@@ -1483,11 +1483,12 @@ jet_cli_build_sbom: fn(file: String, name: String, source: String, binary: Strin
     JetDriverVerbOutput{stdout: if quiet -> "" else -> "sbom: {path}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// One build target of a package build: compile `file`, with the modules the
-// package's `build: fn` generated (`generated`) loaded beside its sources,
-// into .jet/build/`name` and return, so the package build continues with its
-// next target.
-jet_cli_compile_target: fn(file: String, name: String, source: String, generated: [JetDriverGeneratedModule], color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
+// One build target of a package build: compile `file`, with the other
+// sources the target lists (`sources`) and the modules the package's
+// `build: fn` generated (`generated`) loaded beside its sources, into
+// .jet/build/`name` and return, so the package build continues with its next
+// target.
+jet_cli_compile_target: fn(file: String, name: String, source: String, sources: [String], generated: [JetDriverGeneratedModule], color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Program)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
@@ -1496,6 +1497,7 @@ jet_cli_compile_target: fn(file: String, name: String, source: String, generated
         .Prepared(request, snapshot) -> {
             with_generated := request
             with_generated.generated_modules = generated
+            with_generated.target_sources = sources
             compiled := jet_cli_compile_executable(JetCLIPrepared.Prepared{request: with_generated.move(), snapshot: snapshot}, None, options, None, trace_sink, color)
             if compiled.move() == {
                 .Refused(refusal) -> refusal

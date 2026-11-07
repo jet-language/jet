@@ -285,6 +285,11 @@ JetDriverCompileRequest: struct {
     build_output_names: [String]{[String]{}}
     capture_cost_report: Bool{false}
     generated_modules: [JetDriverGeneratedModule]{[JetDriverGeneratedModule]{}}
+    // The package-relative sources the build targets being compiled list
+    // (`b.add_executable("app", ["main.jet", "helper.jet"])`): in a package
+    // without a manifest each joins the entry's namespace, as the modules its
+    // `build: fn` generates do (jet_driver_build_source_catalog).
+    target_sources: [String]{[String]{}}
     // Raw transports remain distinct from ordinary comptime IO.
     build_inputs: JetDriverSharedBuildInputs?{None}
     build_http_inputs: JetDriverSharedBuildHTTPInputs?{None}

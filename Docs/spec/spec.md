@@ -5008,6 +5008,14 @@ canonical graph to scheduling, caching, execution, queries, and LSP.
 A `jet build` that runs no `build: fn`, such as `jet build main.jet -- a`,
 refuses the words with E2104 instead of dropping them.
 
+A target's sources are package-relative paths, and the first is its entry.
+Every source a target lists is part of it: the others share the entry's
+namespace, as the modules `b.generate` produces do, so
+`b.add_executable("app", ["main.jet", "helper.jet"], [])` lets `main.jet` call
+what `helper.jet` declares by name. Before any action runs or the lock is
+written, `jet build` refuses a selected target that lists a source which is
+neither a file nor a generated module (E2105).
+
 ```jet
 build: fn(b: Build) -[Exec, FS]> {
     #Impure("run declared toolchain probe and action") {

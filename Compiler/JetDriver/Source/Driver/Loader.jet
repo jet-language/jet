@@ -1689,19 +1689,20 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
     }
     // Handwritten code uses what its `build: fn` generates by name (spec
     // "Programmable builds"): in a package without a manifest, the entry file
-    // joins the namespace of the modules generated for its package.
+    // joins the namespace of the modules generated for its package, and so
+    // does every other source a build target lists beside it.
     entry_generates: loop generated in request.generated_modules {
         if generated.package_identity == entry_package_identity -> break true
     } ?? false
-    if entry_generates {
+    root_row: entry_root_index ?? -1
+    if (entry_generates || request.target_sources.len() > 0) && root_row >= 0 && packages[root_row].manifest_path == None {
         loop index in 0..<source_units.len() {
-            if source_units[index].path != entry_display || source_units[index].root_identity != snapshot.entry_root_identity || source_units[index].in_namespace -> next
-            root_row: entry_root_index ?? -1
-            if root_row >= 0 && packages[root_row].manifest_path == None {
-                unit := source_units[index]
-                unit.in_namespace = true
-                source_units[index] = unit
-            }
+            if source_units[index].root_identity != snapshot.entry_root_identity || source_units[index].in_namespace -> next
+            listed: source_units[index].source_origin == SemaSourceOrigin.Snapshot && request.target_sources.contains(source_units[index].relative_path)
+            if source_units[index].path != entry_display && !listed -> next
+            unit := source_units[index]
+            unit.in_namespace = true
+            source_units[index] = unit
         }
     }
     JetDriverSourceCatalogResult{
