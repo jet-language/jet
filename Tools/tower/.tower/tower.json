@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6674,
-    "rev": 95708,
+    "nextNum": 6675,
+    "rev": 95713,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -98355,11 +98355,11 @@
         {
           "n": 2,
           "text": "LaneCheck checks a touched Compiler/JetRuntime file in its assembled mode: an untouched runtime file gives CHECK OK on dev, and a seeded error gives CHECK FAILED.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T10:28:26.472Z"
+          "evidence": "8e5de05f9e: Tools/agent/LaneCheck.jet checks a Compiler/JetRuntime path as the unit assembled from sources.list, in Jet with no node step, and maps errors back to source lines. Clean: LaneCheck Compiler/JetRuntime/Source/Alloc.jet gives CHECK OK (rc 0); the shared Compiler/JetBackend/Source/OS/Linux.jet gives CHECK OK in both its package and the unit. Seeded: a ReturnTypeMismatch appended to Alloc.jet gives CHECK FAILED, 1 error in 1 file, at Compiler/JetRuntime/Source/Alloc.jet:1851:5 (rc 1). jet test Tools/agent/LaneCheck.jet: 3 passed.",
+          "at": "2026-11-07T10:53:51.175Z"
         },
         {
           "n": 3,
@@ -98379,7 +98379,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:28:04.053Z",
-      "updated": "2026-11-07T10:39:36.564Z",
+      "updated": "2026-11-07T10:53:51.175Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -98442,7 +98442,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98455,11 +98455,11 @@
         {
           "n": 1,
           "text": "A write pin of any non-scalar (handle-row) place binds as an address alias, so assignment and compound assignment through it reach the owner on o0, o1 and o2. numeric_singleton_splits_match_resident_jit_and_aot_without_fallback prints 5.75/6.75 and passes, and its KF line is removed. A golden or case covers &list[i] writes for Decimal, String and a struct element.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T10:38:05.604Z"
+          "evidence": "704276a947: ir_bind_pin binds a write pin of any non-scalar place held in storage (list or map element, a field of one or of a local, pool slot, shared guard) as an address alias, with no per-type special case. BuildTypes gains the precise +, - and * that Decimal compound updates need. New case core_and_closures/write_pins_of_handle_elements_write_in_place covers Decimal, String, an enum box, Int?, a struct element and &people[0].name, 200 rewrites each, on O0, O1 and O2: PASS. I1: reads through read pins load unowned temps, and writes drop the old value before storing. numeric_singleton_splits_match_resident_jit_and_aot_without_fallback loses its KF line. MechD-3 lane run over 187 cases (core_and_closures, collections_and_methods, memory_semantics, core_files_opaque_handles, ownership): 0 FAIL. Confirm in the next Main batch.",
+          "at": "2026-11-07T10:49:39.303Z"
         }
       ],
       "refs": [],
@@ -98470,9 +98470,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:37:56.047Z",
-      "updated": "2026-11-07T10:38:05.604Z",
+      "updated": "2026-11-07T10:49:41.063Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T10:49:41.063Z"
     },
     {
       "id": "c0qclgcg",
@@ -98512,6 +98513,47 @@
       "needsAcceptance": false,
       "created": "2026-11-07T10:46:06.219Z",
       "updated": "2026-11-07T10:46:14.154Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c00emhw5",
+      "num": 6674,
+      "title": "Inline module bodies with their own imports of non-Core modules are not lowered",
+      "body": "Found by MechD-3 (#6651 c1 group E). An inline module body with its own import of a non-Core module (use rules: second) is never lowered: sema_inline_module_lowerable refuses foreign imports, so the program hits a totality fault ('inline module inner is not lowered') and exit 101. #6651 gives it a registered E2104 citing this card. Lowering it means lifting the inner import under a rewritten alias through bodies and marker paths. Case: tests/cases/marker_groups_modules/nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed.case.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An inline module's own import of a non-Core module lowers on O0, O1 and O2: nested_import_aliases_bind_groups_locally_and_do_not_fall_through_when_shadowed passes (aliases bind locally; a shadowed alias does not fall through), its E2104 and KF line are removed, and an example with a golden shows an inline module importing a sibling module.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:54:41.621Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G6"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:54:34.017Z",
+      "updated": "2026-11-07T10:54:41.621Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -186260,6 +186302,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T10:54:41.621Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c00emhw5",
+      "note": "#1 An inline module's own import of a non-Core module lowers on"
+    },
+    {
+      "at": "2026-11-07T10:54:34.017Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c00emhw5",
+      "note": "Inline module bodies with their own imports of non-Core modules are not lowered"
+    },
+    {
+      "at": "2026-11-07T10:53:51.175Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lb1p4p",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-07T10:49:41.063Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jstfps",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T10:49:39.303Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jstfps",
+      "note": "#1"
+    },
     {
       "at": "2026-11-07T10:46:14.154Z",
       "by": "Main",
