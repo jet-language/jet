@@ -7,10 +7,11 @@
 //   node Tools/agent/gen-core-tables.mjs --check
 //   node Tools/agent/gen-core-tables.mjs --write
 //
-// Core module and dispatcher rendering is shared with
-// check-core-surface-ledger.mjs. This file checks the effect declarations and
-// owns the collection-operation reference projection; it must not grow a
-// second Core parser or renderer.
+// Core module and dispatcher checks are shared with
+// check-core-surface-ledger.mjs, and Tools/agent/CoreSourceRows.jet renders
+// the Core views. This file checks the effect declarations and owns the
+// collection-operation reference projection; it must not grow a second Core
+// parser or renderer.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -247,7 +248,7 @@ function check() {
   const core = ensureCoreNames();
   validatePublicDispatcher(core, publicDispatcherRows(core));
   checkOperationContract();
-  validateGeneratedViews(read(CORE_SOURCE_PATH), core);
+  validateGeneratedViews();
   process.stdout.write("open tables: generated views are current\n");
 }
 

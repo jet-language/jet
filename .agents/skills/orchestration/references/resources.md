@@ -113,9 +113,10 @@ the hold into the runnable queue. A worktree check can consume uncommitted
 hash refreshes that the export omits; commit the canonical generated outputs
 and re-export rather than bypassing the build-script stale-table guard.
 Core catalog changes also require the canonical structure registry and Core
-row projections. Regenerate them with `gen-core-tables --write` (the structure
-registry is edited directly); the enum payload and record rows
-(`CoreEnumPayloadRows.jet`, `CoreRecordRows.jet`) are authored by hand.
+row projections. Regenerate them with `jet Tools/agent/CoreSourceRows.jet`,
+which `gen-core-tables --write` runs (the structure registry is edited
+directly); `CoreRecordRows.jet` and the `CORE_ENUM_PAYLOAD_ROWS` of
+`CoreEnumPayloadRows.jet` are authored by hand.
 Refreshing the surface ledger alone does not keep the assembled compiler's
 catalog or source hashes current.
 Before releasing a producer, pin every live compiler target and read-only

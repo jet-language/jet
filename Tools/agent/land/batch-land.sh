@@ -36,7 +36,7 @@ files_of() { git apply --numstat -z "$1" 2>/dev/null | node -e '
   for(const m of fs.readFileSync(process.argv[1],"utf8").matchAll(/^rename from (.*)$/gm))out.push(unq(m[1]));
   for(const f of new Set(out.filter(Boolean)))process.stdout.write(f+"\n")' "$1"; }
 applied=() ; all=() ; pfiles=() ; declare -A broken=()
-GEN="Compiler/JetCli/Source/Cli/CoreSources.jet Compiler/JetFoundation/Source/Registry/CoreCallRows.jet Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet"
+GEN="Compiler/JetCli/Source/Cli/CoreSources.jet Compiler/JetCli/Source/Cli/CoreStructureRows.jet Compiler/JetFoundation/Source/Registry/CoreCallRows.jet Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet Compiler/JetFoundation/Source/Registry/EffectVocabulary.jet"
 GENX=$(for f in $GEN; do printf -- "--exclude=%s " "$f"; done); rowregen=0
 while IFS=$'\t' read -r lane msg patch; do
   [ -z "$lane" ] && continue; case "$lane" in \#*) continue;; esac
