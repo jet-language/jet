@@ -1,0 +1,22 @@
+// An `ID<T>` is a plain slot index and generation (D-POOLID-API1=A), so ids
+// compare with `==` and `!=` whatever `T` is. A live id equals itself and its
+// copy, and differs from another entry's id; once its entry is removed the
+// stale id still differs from the id the next `add` hands out.
+Player: struct {
+    name: String
+}
+
+run: fn() {
+    world := Pool<Player>.new()
+    kai: world.add(Player{name: "Kai"})
+    rem: world.add(Player{name: "Rem"})
+    kept: kai.copy()
+    print(kai == kai)
+    print(kai == kept)
+    print(kai != rem)
+    world.remove(kai).drop("only the stale id matters here")
+    ash: world.add(Player{name: "Ash"})
+    print(kept == ash)
+    print(kept != ash)
+    print(world[ash].name)
+}
