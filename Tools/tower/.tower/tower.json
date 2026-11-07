@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6675,
-    "rev": 95777,
+    "rev": 95782,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -39244,6 +39244,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-04T23:46:55.398Z"
+        },
+        {
+          "n": 12,
+          "text": "Byte paths: Core can create, list, open and remove a file whose name is arbitrary bytes, such as invalid UTF-8, on every tier, and lists it back byte-exact. The invalid-UTF-8 basename fixture in tests/cases/core_files_foundations creates its file through Core, and its sh step is deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:03:39.274Z"
         }
       ],
       "refs": [
@@ -39260,9 +39269,10 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:24.292Z",
-      "updated": "2026-11-07T03:47:03.292Z",
+      "updated": "2026-11-07T16:03:39.274Z",
       "updatedBy": "Main",
-      "goals": []
+      "goals": [],
+      "criteriaLastN": 12
     },
     {
       "id": "c0ufrhm0",
@@ -39379,6 +39389,33 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-01T10:52:22.341Z"
+        },
+        {
+          "n": 7,
+          "text": "Merged output: a ProcessSpec can send the child's stdout and stderr into one stream in write order, on every tier (O0, O1, O2), with a golden example. Every gate or case that merged them with sh 2>&1 uses it instead, including terminal_parity's _merged step.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:03:36.651Z"
+        },
+        {
+          "n": 8,
+          "text": "Descriptor passing: keep_open hands any open descriptor to the child at a chosen slot on every tier. Tools/ci/CompiledWorkloadPeerLauncher.jet passes the seccomp filter to bwrap --seccomp 3 through it, and its fd-3 sh wrapper is deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:03:37.499Z"
+        },
+        {
+          "n": 9,
+          "text": "Isolation: Core can run a child in new Linux namespaces (user, mount, net) and exec in place, on every tier, refusing clearly on hosts without them. Compiler/JetTestKit's no-nix.sh and KIT_NETNS_RAISE sh are replaced by it and deleted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T16:03:38.366Z"
         }
       ],
       "refs": [
@@ -39396,11 +39433,12 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-09-28T00:06:25.012Z",
-      "updated": "2026-11-07T10:00:26.391Z",
+      "updated": "2026-11-07T16:03:38.366Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
-      ]
+      ],
+      "criteriaLastN": 9
     },
     {
       "id": "c0692z4s",
@@ -69814,6 +69852,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "Owner ruling (11-07, durable; Docs/spec/philosophy.md priority 6, acec3d1a06): a capability Core lacks is a gap in Jet to close in Core, never a reason to fall back to sh, C or another language. Revised c3 scope: missing-capability exclusions are void. Each one becomes Core work on its owning card: merged stdout+stderr, descriptor passing via keep_open, namespace isolation (#3594), byte paths (#3593). Main's earlier #Import(c) libc ruling is withdrawn. The only excluded spawns left are those where the other program is itself the subject under test: perl for jet inspect bind perl, node running Jet's js and wasm output, the peer-language programs a perf cell compares against, and bwrap when the sandbox itself is under test. The browser_bidi mock server (node) moves to Jet, and any Core gap it hits goes on its owning card."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c3 scope ruling (Main, 11-07, on TestSystemLead-2's census of dev bd42ba0383 at $JET_SCRATCH_ROOT/lanes/TestSystemLead/census/CENSUS.md). In scope: dead non-Jet scripts no gate reaches (98 files, 9,306 lines: delete); the CompilerRegistries runner closure (16 runners, 29 modules, about 2,530 lines, Tools/packaging included); prebuild-runtime.mjs and its callers; systemd-run in Land.jet, LaneCheck.jet and cache/Lanes.jet (ported onto Core process limits, no new API); the Tools/agent land/ and chain/ shell layer, roots.sh and clean-nix-tmp.sh; the Tools/agent .test.mjs; Jetpack/Bootstrap/assemble.mjs; case sh glue (146 sh steps, 151 step-N.sh, env PATH= and bash -c steps, 5 perl rows, NoNix no-nix.sh, CompiledWorkloadPeerLauncher sh). Excluded: node running Jet's js/wasm output and the browser harnesses; reference adapters and spawns that are the behavior under test; Tools/agent/jet-env as the bootstrap; the Tower CLI reads (#6311). Owners: TestSystemLead-2 (Tools/agent, runners, packaging), PortsLead-2 (Jetpack/Bootstrap), CoreCliLead-2 (tests/cases glue and JetTestKit)."
         },
         {
@@ -70994,7 +71037,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T14:38:12.407Z",
+      "updated": "2026-11-07T16:03:40.158Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -186266,6 +186309,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T16:03:40.158Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T16:03:39.274Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0iiv9ft",
+      "note": "#12 Byte paths: Core can create, list, open and remove a file wh"
+    },
+    {
+      "at": "2026-11-07T16:03:38.366Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#9 Isolation: Core can run a child in new Linux namespaces (use"
+    },
+    {
+      "at": "2026-11-07T16:03:37.500Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#8 Descriptor passing: keep_open hands any open descriptor to t"
+    },
+    {
+      "at": "2026-11-07T16:03:36.651Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ufrhm0",
+      "note": "#7 Merged output: a ProcessSpec can send the child's stdout and"
+    },
     {
       "at": "2026-11-07T15:15:07.033Z",
       "by": "Main",
