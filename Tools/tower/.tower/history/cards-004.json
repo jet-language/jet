@@ -84005,6 +84005,53 @@
       "completedAt": "2026-11-04T10:29:28.061Z",
       "questions": [],
       "retiredAt": "2026-11-07T10:32:35.035Z"
+    },
+    {
+      "id": "c0y97gu6",
+      "num": 6426,
+      "title": "Shared store broker socket fails when the Jetpack root path is long",
+      "body": "The non-admin shared store puts its broker socket at <private Jetpack root>/shared-store/broker.sock (Jetpack SharedStoreInstall.jet:49-50). The root is the user JETPACK_ROOT or its default, so any root longer than about 80 bytes makes unix_listen/unix_connect fail with \"path must be shorter than SUN_LEN\" (sockaddr_un holds 108 bytes). Only the admin layout (/run/jet/shared-store.sock) is short by construction. Found by ToolsJet-2 2026-10-31 when the store broker claims failed under a deep TMPDIR; the claims now use a short per-test dir, which hides but does not fix this.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "UiGreen-1 2026-11-01 (Engine --tests run for #6441): 13 of 14 broker claims pass; the 14th fails on a 108-byte sun_path from the nested TMPDIR. With a short TMPDIR, bind returns 0 and claims 200-203 pass. Same root as this card."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "With JETPACK_ROOT set to a 200-byte path, the non-admin shared store broker listens and a client connects (claim in the store broker tests), on Linux and macOS; the socket location or bind method is documented where the store layout is specified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main-33 (7c67280960). Linux: Compiler/JetRuntime/Source/HostSockets.jet net_unix_long_alias binds/connects a 108+ byte path through an O_PATH directory fd as /proc/self/fd/<fd>/<name>; NetUnixConnect no longer pre-refuses. New claim 'store broker listens and a client connects under a 200-byte Jetpack root' (Jetpack/Store/Tests/Broker.jet) passes: jet test src/jetpack.jet on the assembled Engine unit -> 1 passed, 0 failed. Probe at O0/O1/O2: 58-byte and 227-byte paths listen+connect+ping and the socket exists at its full path; a 90-byte name still gets the SUN_LEN refusal; a missing directory reports ENOENT. Documented in Docs/spec/reference/jetpack-epoch5.md (broker socket location and bind method). cases --filter unix: only the c26-baseline FAIL and two known-failing rows. lane-check Compiler: CHECK OK.",
+          "at": "2026-11-04T10:43:34.778Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T08:00:20.242Z",
+      "updated": "2026-11-04T10:43:36.018Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-04T10:43:36.018Z",
+      "questions": [],
+      "retiredAt": "2026-11-07T10:44:07.989Z"
     }
   ]
 }

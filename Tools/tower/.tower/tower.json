@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6673,
-    "rev": 95700,
+    "nextNum": 6674,
+    "rev": 95708,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -83178,6 +83178,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "n3 slice 2 landed in 98863f491f (CoreCliLead-2): jet budget update (plan first; --yes or a confirmed TTY prompt applies) and Cli/BudgetStore.jet (manifest verify by content hash and audited CAS chain, eligibility, locked CAS apply). The 2 json cases are migrated to jet.status/v1 and jet.report/v3; v3 expresses null-on-failure with null file, line, col and span. 4 KF lines dropped. Lane s1 cases: PASS 12, FAIL 0, UNEXPECTED-PASS 0 (4 new rows plus 8 slice-1 regression rows). Known simplifications: update writes no receipt record, and one baselines lock dir covers both the global and the per-name lock (coarser, still correct). Next: workload preflight, then BuildArtifact, Bench and ServiceProbe."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "n3 slice 1 landed in f32e474d5d (CoreCliLead-2): jet budget check measures from CompilerFacts (new Compiler/JetCli/Source/Cli/BudgetMeasure.jet). Default-tier lane run: 8 PASS (the 7 cli_parts_budget proving rows plus the compile-time guard row), 2 KNOWN-FAILING, 0 unexpected pass; the other 13 budget rows have 0 FAIL and 4 REFUSED by the budget-verify seam (#6317). The lsp budget row moves to #6386. Ruling: the 2 json rows asserting the Rust-era moment/status envelope migrate to jet.status/v1 and jet.report/v3 (greenfield). Next: slice 2, jet budget update."
         },
         {
@@ -84454,7 +84459,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-07T10:20:08.383Z",
+      "updated": "2026-11-07T10:44:07.844Z",
       "updatedBy": "Main",
       "criteriaLastN": 143
     },
@@ -85735,51 +85740,6 @@
       "updated": "2026-11-07T02:57:39.701Z",
       "updatedBy": "Main",
       "criteriaLastN": 22
-    },
-    {
-      "id": "c0y97gu6",
-      "num": 6426,
-      "title": "Shared store broker socket fails when the Jetpack root path is long",
-      "body": "The non-admin shared store puts its broker socket at <private Jetpack root>/shared-store/broker.sock (Jetpack SharedStoreInstall.jet:49-50). The root is the user JETPACK_ROOT or its default, so any root longer than about 80 bytes makes unix_listen/unix_connect fail with \"path must be shorter than SUN_LEN\" (sockaddr_un holds 108 bytes). Only the admin layout (/run/jet/shared-store.sock) is short by construction. Found by ToolsJet-2 2026-10-31 when the store broker claims failed under a deep TMPDIR; the claims now use a short per-test dir, which hides but does not fix this.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "UiGreen-1 2026-11-01 (Engine --tests run for #6441): 13 of 14 broker claims pass; the 14th fails on a 108-byte sun_path from the nested TMPDIR. With a short TMPDIR, bind returns 0 and claims 200-203 pass. Same root as this card."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "With JETPACK_ROOT set to a 200-byte path, the non-admin shared store broker listens and a client connects (claim in the store broker tests), on Linux and macOS; the socket location or bind method is documented where the store layout is specified.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main-33 (7c67280960). Linux: Compiler/JetRuntime/Source/HostSockets.jet net_unix_long_alias binds/connects a 108+ byte path through an O_PATH directory fd as /proc/self/fd/<fd>/<name>; NetUnixConnect no longer pre-refuses. New claim 'store broker listens and a client connects under a 200-byte Jetpack root' (Jetpack/Store/Tests/Broker.jet) passes: jet test src/jetpack.jet on the assembled Engine unit -> 1 passed, 0 failed. Probe at O0/O1/O2: 58-byte and 227-byte paths listen+connect+ping and the socket exists at its full path; a 90-byte name still gets the SUN_LEN refusal; a missing directory reports ENOENT. Documented in Docs/spec/reference/jetpack-epoch5.md (broker socket location and bind method). cases --filter unix: only the c26-baseline FAIL and two known-failing rows. lane-check Compiler: CHECK OK.",
-          "at": "2026-11-04T10:43:34.778Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "goals": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-31T08:00:20.242Z",
-      "updated": "2026-11-04T10:43:36.018Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-04T10:43:36.018Z"
     },
     {
       "id": "c0m0ims7",
@@ -97056,7 +97016,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "8583f858a0 made files.exists follow a final link, and core_files_metadata_predicates_follow_links_and_keep_errors_false passes in vb13. Still missing for c1: a doc comment on Core/Files/Files.jet exists and lexists stating the rule, a lexists assertion on the broken link (true), and an O2 (--release) step; the case covers only jet run and jet build. Queued to PortsLead-2 after #6664."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -97076,7 +97042,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T05:00:25.991Z",
-      "updated": "2026-11-07T05:00:26.854Z",
+      "updated": "2026-11-07T10:39:04.769Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     },
@@ -98197,7 +98163,26 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "node --test Tools/gauntlet/harness/measurement-manifest.test.mjs passes 26/26: the manifest encodes the AGENTS.md two-stage gate (peer floor Jet/peer < 1.00 for every matched peer with Rust judged like every other peer; machine ceiling Jet/ceiling <= 1.00 in cycles and bytes, with a named asm-parity reference per required cell), and the test's AGENTS.md check reads the current paragraph.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:39:03.216Z"
+        },
+        {
+          "n": 2,
+          "text": "Tools/gauntlet/harness/integrated-gate.mjs is called by the perf gate that a release or milestone runs, or is deleted with its test if another gate covers the same checks; either way the integrated conformance check reaches a live caller.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:39:03.985Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -98206,8 +98191,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T09:38:47.431Z",
-      "updated": "2026-11-07T09:38:47.431Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-07T10:39:03.985Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2
     },
     {
       "id": "c09qdr1z",
@@ -98349,7 +98335,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Ruling on c1: option B. The compiler gains a check mode that checks Compiler/Prelude files as generated prelude source (lex_generated plus the same unit context the compiler embeds them in), and LaneCheck uses it once a seed has it. Until then LaneCheck reports a touched Prelude file as unchecked ('needs a seed with the prelude check mode'), never as CHECK OK. The row-DSL inputs (Core.jet, CoreSurfaceInventory.jet, CoreSourceParts.tsv) are checked by their generator --check, which is their real consumer. No baseline-diff gate. c3 added for the duplicated raw-string copies."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -98368,6 +98360,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-07T10:28:26.472Z"
+        },
+        {
+          "n": 3,
+          "text": "Each Compiler/Prelude file the compiler embeds has one source: the compiler reads the Prelude file itself at build (or generates the embedded copy with a freshness check), not a hand-kept raw-string copy (today PreludeMarkers.jet MARKER_SOURCE, Registration/PreludeDerives.jet, PreludeUnits.jet and JET_CLI_EFFECT_SOURCE duplicate Markers, Derives, Units and Effects byte for byte).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:39:35.644Z"
         }
       ],
       "refs": [],
@@ -98378,9 +98379,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T10:28:04.053Z",
-      "updated": "2026-11-07T10:28:26.472Z",
+      "updated": "2026-11-07T10:39:36.564Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 3
     },
     {
       "id": "c02188uw",
@@ -98470,6 +98471,47 @@
       "needsAcceptance": false,
       "created": "2026-11-07T10:37:56.047Z",
       "updated": "2026-11-07T10:38:05.604Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0qclgcg",
+      "num": 6673,
+      "title": "Lander precommit does not run the unsafe ratchet check: Core edits that shift #Unsafe lines land with Docs/spec/safety.md stale",
+      "body": "Found by PortsLead-2: 53edc3789a (Core/Data/Data.jet) and 64631225ff (Core/Crypto/Crypto.jet) moved 16 audited #Unsafe regions, and the lander precommit (jet Tools/agent/Land.jet precommit) admitted both with the unsafe ratchet in Docs/spec/safety.md stale. PortsLead-2's next #6664 commit refreshes it (UnsafeRatchet.jet --update, 1342 regions, a line-number-only diff). The precommit must run UnsafeRatchet.jet --check whenever a commit touches a file with #Unsafe regions, or always if that's cheap, and it must run CoreCoverage.jet --check when Core changes, so neither ratchet can go red on dev unnoticed. Check whether the old node precommit ran these and the Land.jet port dropped them (a #6035 c68 regression).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet Tools/agent/Land.jet precommit refuses a patch that leaves UnsafeRatchet.jet --check or CoreCoverage.jet --check red: a seeded patch that shifts an #Unsafe line without refreshing safety.md is refused, and so is one that adds an untested public Core function; the same patch with the refresh or a test is admitted.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T10:46:14.154Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T10:46:06.219Z",
+      "updated": "2026-11-07T10:46:14.154Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
     }
@@ -186218,6 +186260,62 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T10:46:14.154Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0qclgcg",
+      "note": "#1 jet Tools/agent/Land.jet precommit refuses a patch that leav"
+    },
+    {
+      "at": "2026-11-07T10:46:06.219Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0qclgcg",
+      "note": "Lander precommit does not run the unsafe ratchet check: Core edits that shift #Unsafe lines land with Docs/spec/safety.md stale"
+    },
+    {
+      "at": "2026-11-07T10:44:07.844Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:39:36.564Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lb1p4p",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:39:35.644Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0lb1p4p",
+      "note": "#3 Each Compiler/Prelude file the compiler embeds has one sourc"
+    },
+    {
+      "at": "2026-11-07T10:39:04.769Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0swo1p3",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-07T10:39:03.985Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0c6kaqk",
+      "note": "#2 Tools/gauntlet/harness/integrated-gate.mjs is called by the "
+    },
+    {
+      "at": "2026-11-07T10:39:03.217Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0c6kaqk",
+      "note": "#1 node --test Tools/gauntlet/harness/measurement-manifest.test"
+    },
     {
       "at": "2026-11-07T10:38:05.604Z",
       "by": "Main",
