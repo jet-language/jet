@@ -43,7 +43,7 @@ use process: core.process
 subject: fn(mode: String, path: String) -> ProcessReceipt {
     if mode != "aot" {
         argv := [String]{"{jet}", "run"}
-        argv.push(path)
+        argv.push(path.copy())
         return process.cmd(argv).run() ?? panic("run subject")
     }
     // Compile happens INSIDE the runner task. `jet build` places the artifact beside the
