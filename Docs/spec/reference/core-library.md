@@ -5233,6 +5233,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.encoding.binary`
 - `core.encoding.cbor`
 - `core.encoding.csv`
+- `core.encoding.eetf`
 - `core.encoding.hex`
 - `core.encoding.ini`
 - `core.encoding.json`

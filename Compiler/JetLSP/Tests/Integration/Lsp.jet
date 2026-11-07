@@ -250,7 +250,7 @@ transcript_parser: module {
         pos: json.find(needle)
         after := json[pos + needle.len()..<json.len()].trim_start() // #4303
         after := after.strip_prefix(':')?.trim_start() // #4303
-        after := after.strip_prefix('"')? // #4303
+        after := after.strip_prefix('"') ?? return None // #4303
         end := 0usize
         bytes: after.as_bytes()
         loop {

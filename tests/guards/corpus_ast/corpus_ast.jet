@@ -1916,7 +1916,7 @@ policy_ast_test_cli_recipe_inventory: fn() PolicyError! {
     expert_selectors: [String]{"file:Examples/Systems/CLI/ArgsSpec.jet", "file:Examples/Systems/CLI/ArgsAudit.jet", "file:Examples/Systems/CLI/CLIArgs.jet", "file:Examples/Systems/Files/Watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
     loop selector in expert_selectors {
         found := false
-        expected: if selector.contains("args_spec.jet") || selector.contains("args_audit.jet") -> "builder-cli" else -> "raw-cli"
+        expected: if selector.contains("ArgsSpec.jet") || selector.contains("ArgsAudit.jet") -> "builder-cli" else -> "raw-cli"
         loop row in manifest.sources {
             if row.selector == selector { found = true
                 assert(row.profile == expected, "CLI boundary drifted: {selector}")

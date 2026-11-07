@@ -16,8 +16,20 @@ use {
 // The packages a `packages` run tests at once.
 PACKAGE_JOBS: 4
 
-// The trees whose packages a `packages` run tests, from the checkout.
-PACKAGE_TREES: [String]{"Compiler", "Jetpack"}
+// The trees whose packages a `packages` run tests, from the checkout:
+// tests/guards holds the repository guard packages (the top package,
+// corpus_ast and dyn_surface).
+PACKAGE_TREES: [String]{"Compiler", "Jetpack", "tests/guards"}
+
+// The trees the row COVERAGE_ROW lists #Tests in: PACKAGE_TREES and all of
+// tests/, less TEST_INPUT_TREES.
+COVERAGE_TREES: [String]{"Compiler", "Jetpack", "tests"}
+
+// The trees under tests/ whose .jet files are another suite's inputs (case
+// and agent-workload sources, UI and CLI diagnostic snapshots, goldens,
+// conformance witnesses, fuzz corpora): a #Test there is input text, not a
+// test some package owes a run.
+TEST_INPUT_TREES: [String]{"tests/agent_workloads", "tests/cases", "tests/cli", "tests/conformance", "tests/fuzz", "tests/run", "tests/ui", "tests/ui_lint"}
 
 // The packages the compiler assembles from their sources instead of building
 // them as packages, so they have no standalone `jet test`: the bootstrap chain
@@ -120,13 +132,14 @@ failure_line: fn(text: String) -> String {
 // `tests` suite doesn't run, `<package>: <test>`, from `jet test <package>`.
 // The `tests` suite runs the workspace members; this suite runs everything
 // else: each member's `Tests` package, the tool packages beside the members,
-// every Jetpack package, and the Jetpack engine areas that have no package
-// (jetpack_engine_rows). A package whose tests didn't run (one that doesn't
-// compile, say) is the failing row `<package>`. Fixture packages are test
-// data, not packages under test; an ASSEMBLED_PACKAGES package is a skipped
-// row. The row `#Test coverage` (test_coverage_rows) proves no tracked #Test
-// is left unrun. Claims that drive the jet CLI run the jet under test, named
-// by JET_BIN.
+// every Jetpack package, the tests/guards packages, and the Jetpack engine
+// areas that have no package (jetpack_engine_rows). A package whose tests
+// didn't run (one that doesn't compile, say) is the failing row `<package>`.
+// Fixture packages are test data, not packages under test; an
+// ASSEMBLED_PACKAGES package is a skipped row. The row `#Test coverage`
+// (test_coverage_rows) proves no tracked #Test under COVERAGE_TREES is left
+// unrun. Claims that drive the jet CLI run the jet under test, named by
+// JET_BIN.
 package_suite_rows: fn(rows: TestRows) {
     setup: suite_setup(rows) ?? return
     members: workspace_members(setup) ?? {
@@ -146,7 +159,7 @@ package_suite_rows: fn(rows: TestRows) {
     listing := ""
     if test_sources(setup) == {
         .Ok(found) -> { sources = found }
-        .Err(error) -> { listing = error.message.copy() } // copy: the result is dropped
+        .Err(error) -> { listing = "{error}" }
     }
     // A script (a `#!` file) is no package's source: `jet test <script>` runs
     // its #Tests, a run of its own beside the packages.
@@ -412,7 +425,7 @@ FROZEN_TREES: [String]{"Jetpack/JetOS"}
 
 COVERAGE_ROW: "#Test coverage"
 
-// A .jet file under PACKAGE_TREES that declares #Tests: its path
+// A git-tracked .jet file under COVERAGE_TREES that declares #Tests: its path
 // from the checkout, their names, and whether it is a script (a `#!` file),
 // whose #Tests only `jet test <script>` runs.
 TestSource: struct {
@@ -421,14 +434,15 @@ TestSource: struct {
     script: Bool
 }
 
-// Every TestSource outside test data. The trees are walked, not asked of
-// git: batches and releases run from an export with no repository.
+// Every TestSource outside test data and TEST_INPUT_TREES.
 test_sources: fn(setup: SuiteSetup) -> [TestSource] Err! {
-    paths := [String]{}
-    loop tree in PACKAGE_TREES -> jet_sources(setup.checkout, tree, paths) ?? return Err(err.message)
-    paths.sort()
+    argv := [String]{"git", "ls-files", "--"}
+    loop tree in COVERAGE_TREES -> argv.push(tree.copy())
+    listed: process.cmd(argv).cwd(setup.checkout).output_limit(67108864).run() ?? return Err("couldn't run `git ls-files`: {err}")
+    if !listed.success -> return Err("`git ls-files` exited {listed.code}: {failure_line(listed.errors)}")
     sources := [TestSource]{}
-    loop path in paths {
+    loop path in listed.output.split("\n") {
+        if !path.ends_with(".jet") || test_data_path(path) || test_input_path(path) -> next
         text: files.read(files.join(setup.checkout, path)) ?? return Err("couldn't read `{path}`: {err}")
         names: test_names(text)
         if names.len() > 0 -> sources.push(TestSource{path: path.copy(), names: names, script: text.starts_with("#!")})
@@ -436,15 +450,12 @@ test_sources: fn(setup: SuiteSetup) -> [TestSource] Err! {
     Ok(sources)
 }
 
-// Adds every .jet file at or below `relative` (from `checkout`) to `found`,
-// outside the directories test_data_dir skips.
-jet_sources: fn(checkout: String, relative: String, found: &[String]) Err! {
-    listed: files.list_dir(files.join(checkout, relative)) ?? return Err("couldn't list `{relative}`: {err}")
-    loop entry in listed {
-        path: "{relative}/{entry.name}"
-        if entry.is_dir && !test_data_dir(entry.name) -> jet_sources(checkout, path, found) ?? return Err(err.message)
-        if !entry.is_dir && entry.name.ends_with(".jet") -> found.push(path)
+// Whether a checkout path lies in a TEST_INPUT_TREES tree.
+test_input_path: fn(path: String) -> Bool {
+    loop tree in TEST_INPUT_TREES {
+        if path.starts_with("{tree}/") -> return true
     }
+    false
 }
 
 // What the packages suite ran: the names each run (a package or a script)
@@ -501,6 +512,15 @@ test_coverage_rows: fn(rows: TestRows, setup: SuiteSetup, members: [String], sou
         if count > 0 -> rows.skip(tree, "owner-frozen: no gate runs its {count} #Test files")
     }
     if problems.len() == 0 -> rows.pass(COVERAGE_ROW) else -> rows.fail(COVERAGE_ROW, "{problems.len()} #Tests no suite runs: {problems.join("; ")}")
+}
+
+// Whether a checkout path lies in test data: a directory test_data_dir skips.
+test_data_path: fn(path: String) -> Bool {
+    parts: path.split("/").to_list()
+    loop (index, part) in parts {
+        if index + 1 < parts.len() && test_data_dir(part) -> return true
+    }
+    false
 }
 
 // The FROZEN_TREES entry holding a checkout path, else "".

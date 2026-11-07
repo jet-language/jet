@@ -180,10 +180,11 @@ s6_retirement_reviewed_parses: fn(source: String) -> Bool {
 }
 
 // Documentation quotes types (`Int?`) and contracts (`-> Int IOError!`) on
-// their own, so a snippet gets a parse as statements, as a type, as a
-// signature tail and as a signature.
+// their own, and the Core coverage ratchet stores signatures without `fn`
+// (`(value: String) -> [U8]?`), so a snippet gets a parse as statements, as a
+// type, as a signature tail, as a signature and as a parameter list.
 s6_retirement_reviewed_snippet_current: fn(source: String) -> Bool {
-    shapes: [String]{source, "probe: fn() {{\n{source}\n}}", "alias Probe: {source}", "probe: fn() {source} {{}}", "probe: fn() -> {source} {{}}", "{source} {{}}"}
+    shapes: [String]{source, "probe: fn() {{\n{source}\n}}", "alias Probe: {source}", "probe: fn() {source} {{}}", "probe: fn() -> {source} {{}}", "{source} {{}}", "probe: fn{source} {{}}"}
     loop shape in shapes {
         if s6_retirement_reviewed_parses(shape) -> return true
     }

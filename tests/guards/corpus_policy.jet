@@ -419,7 +419,18 @@ policy_apply_exceptions: fn(manifest: PolicyManifest, path: String, candidates: 
         loop candidate in candidates { if candidate.rule == exception.rule && candidate.site == exception.site -> actual += 1 }
         if ("{actual}") != exception.expected -> errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
     }
-    if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
+    // A stale exception usually means the site moved: name every unexcepted
+    // occurrence of the file with it, so one run shows each current site.
+    if errors.len() > 0 {
+        loop candidate in candidates {
+            excepted := false
+            loop exception in manifest.exceptions {
+                if exception.rule == candidate.rule && exception.selector == ("file:{path}") && exception.site == candidate.site -> excepted = true
+            }
+            if !excepted -> errors.push("file={path}; rule={candidate.rule}; site={candidate.site}; why=occurrence has no unique exception; replacement=add one exact exception")
+        }
+        return Err(PolicyError{message: errors.join("\n")})
+    }
     remaining := [PolicyOccurrence]{}
     consumed := [String: Int]{}
     loop candidate in candidates {

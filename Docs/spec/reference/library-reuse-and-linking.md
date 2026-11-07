@@ -181,7 +181,7 @@ a warning.
 | **D-LIB-EXPORT1=C** | `Library` emits native static/shared output, a C header, and generated bindings for each named language. |
 | **D-LIB-DYNTRUST1=A** | A loaded library declares effects; the host grants a set at the load site; anything more is refused before mapping. |
 | **D-LIB-NAME1=A** | `Library` is the ratified output field, not a new output kind; loadable files use `.jetlib`. |
-| **D-LIB-CALLGRANT1=A** | `library.load("./mods/f16.jetlib", grant: { read: ["./mods"] })?` keeps the grant at the load site; loaded exports are typed members such as `library.on_tick(dt)`. |
+| **D-LIB-CALLGRANT1=A** | `library.load("./mods/f16.jetlib", grant: { read: ["./mods"] })` keeps the grant at the load site; loaded exports are typed members such as `library.on_tick(dt)`. |
 
 The implementation and its tests are authoritative for artifact names and
 backend-specific files. This page defines the compatibility and trust rules,
