@@ -1694,23 +1694,8 @@ impl ZonedDateTime.Decode {
                 value: civil_dyn_datetime(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected RFC 3339 date-time with a minute-aligned offset"}})
                 Ok(value)
             }
-            else -> Err([FieldError]{FieldError{path: "", reason: "expected ZonedDateTime, found {civil_dyn_kind(tree)}"}})
+            else -> Err([FieldError]{FieldError{path: "", reason: "expected ZonedDateTime, found {core.encoding.__dyn_kind(tree)}"}})
         }
-    }
-}
-// The decode diagnostic's name for a Dyn variant (dyn_kind).
-civil_dyn_kind: fn(tree: Dyn) -> String Never! {
-    if tree == {
-        .Null -> "Null"
-        .Bool(_) -> "Bool"
-        .Int(_) -> "Int"
-        .Float(_) -> "Float"
-        .Number(_) -> "number"
-        .Text(_) -> "Text"
-        .Bytes(_) -> "Bytes"
-        .DateTime(_) -> "DateTime"
-        .Array(_) -> "a list"
-        .Object(_) -> "an object"
     }
 }
 // The decimal value of the ASCII digits raw[start..<end], None past a non-digit.
@@ -1995,4 +1980,14 @@ impl Instant {
     assert(watch.start_ns <= later)
     assert(elapsed(watch).ns >= 0)
     assert(watch.elapsed_millis() >= 0)
+}
+
+#Test("a ZonedDateTime decode failure names the Dyn kind") {
+    trees: [(tree: Dyn, kind: String)]{(tree: Dyn.Null, kind: "Null"), (tree: Dyn.Int(1), kind: "Int"), (tree: Dyn.Bytes([U8]{1}), kind: "Bytes"), (tree: Dyn.object(), kind: "an object")}
+    loop entry in trees {
+        if ZonedDateTime.decode(entry.tree) == {
+            .Err(errors) -> assert_eq(errors[0].reason, "expected ZonedDateTime, found {entry.kind}")
+            .Ok(_) -> assert(false)
+        }
+    }
 }

@@ -198,24 +198,9 @@ codec_trimmed_is: fn(text: I64, literal: I64) -> Bool {
     true
 }
 
-// A borrowed static text.
-codec_kind: fn(tree: I64) -> I64 {
-    kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
-    if (kind == DATA_TREE_NULL) -> return rt_static_text("Null")
-    if (kind == DATA_TREE_BOOL) -> return rt_static_text("Bool")
-    if (kind == DATA_TREE_INT) -> return rt_static_text("Int")
-    if (kind == DATA_TREE_FLOAT) -> return rt_static_text("Float")
-    if (kind == DATA_TREE_NUMBER) -> return rt_static_text("number")
-    if (kind == DATA_TREE_TEXT) -> return rt_static_text("Text")
-    if (kind == DATA_TREE_BYTE_LIST) -> return rt_static_text("Bytes")
-    if (kind == DATA_TREE_DATETIME) -> return rt_static_text("DateTime")
-    if (kind == DATA_TREE_ARRAY) -> return rt_static_text("a list")
-    if (kind == DATA_TREE_OBJECT) -> return rt_static_text("an object")
-    rt_static_text("value")
-}
-
 // `{prefix}{found}`: a Text leaf is `text {:?}` (Rust str Debug), a Number
-// leaf `number {lexeme}` when `lexeme`, anything else its dyn_kind. Owned.
+// leaf `number {lexeme}` when `lexeme`, anything else its dyn_kind
+// (data_tree_kind_name). Owned.
 codec_found: fn(prefix: I64, tree: I64, lexeme: Bool) -> I64 {
     kind: data_tree_word(wrapping(tree + DATA_TREE_TAG))
     payload: data_tree_word(wrapping(tree + DATA_TREE_PAYLOAD))
@@ -228,7 +213,7 @@ codec_found: fn(prefix: I64, tree: I64, lexeme: Bool) -> I64 {
         jet_rt_string_builder_push(target, rt_static_text("number "))
         jet_rt_string_builder_push(target, payload)
     } else {
-        jet_rt_string_builder_push(target, codec_kind(tree))
+        jet_rt_string_builder_push(target, data_tree_kind_name(kind))
     }
     jet_rt_string_builder_finish(target)
 }

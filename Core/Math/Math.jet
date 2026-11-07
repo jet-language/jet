@@ -1110,24 +1110,14 @@ impl Decimal.Decode {
         if tree == {
             .Number(lexeme) -> __decimal_decoded(lexeme)
             .Int(value) -> __decimal_decoded("{value}")
-            .Null -> __decimal_rejected("Null")
-            .Bool(_) -> __decimal_rejected("Bool")
-            .Float(_) -> __decimal_rejected("Float")
             .Text(text) -> __decimal_decoded(text)
-            .Bytes(_) -> __decimal_rejected("Bytes")
-            .DateTime(_) -> __decimal_rejected("DateTime")
-            .Array(_) -> __decimal_rejected("a list")
-            .Object(_) -> __decimal_rejected("an object")
+            else -> Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {core.encoding.__dyn_kind(tree)}"}})
         }
     }
 }
 __decimal_decoded: fn(text: String) -> Decimal [FieldError]! {
     value: __decimal_parse(text) ?? return Err([FieldError]{FieldError{path: "", reason: "expected Decimal: invalid Decimal string"}})
     Ok(value)
-}
-// The decode failure for a Dyn value of `kind` (dyn_kind vocabulary).
-__decimal_rejected: fn(kind: String) -> Decimal [FieldError]! {
-    Err([FieldError]{FieldError{path: "", reason: "expected Decimal, found {kind}"}})
 }
 impl Decimal.Add {
     add: fn(self, rhs: Decimal) -> Decimal Never! { __decimal_add(self, rhs) }
@@ -1590,6 +1580,16 @@ __decimal_round: fn(value: Decimal) -> Decimal Never! {
     assert(__decimal_equal(decoded, price))
     assert_eq(decoded.scale, 2)
     assert(Decimal.decode(Dyn.Text("1.2.3")) == .Err(_))
+}
+
+#Test("a Decimal decode failure names the Dyn kind") {
+    trees: [(tree: Dyn, kind: String)]{(tree: Dyn.Null, kind: "Null"), (tree: Dyn.Float(1.5), kind: "Float"), (tree: Dyn.Bytes([U8]{1}), kind: "Bytes"), (tree: Dyn.Array([Dyn]{}), kind: "a list")}
+    loop entry in trees {
+        if Decimal.decode(entry.tree) == {
+            .Err(errors) -> assert_eq(errors[0].reason, "expected Decimal, found {entry.kind}")
+            .Ok(_) -> assert(false)
+        }
+    }
 }
 
 __decimal_from_fraction: fn(value: Fraction) -> Decimal Never! {

@@ -656,6 +656,7 @@ function jet_dyn_kind(tree) {
     case "Number": return "number";
     case "Text": return "Text";
     case "Bytes": return "Bytes";
+    case "DateTime": return "DateTime";
     case "Array": return "a list";
     case "Object": return "an object";
     default: return "value";
