@@ -304,12 +304,12 @@ sync_pair_insert: fn(items: [SyncPair], item: SyncPair) -> [SyncPair]? {
         if existing.first == item.first && existing.second == item.second -> return None
         later: if existing.first == item.first -> existing.second > item.second else -> existing.first > item.first
         if !placed && later {
-            out.push(item)
+            out.push(item.copy())
             placed = true
         }
-        out.push(existing)
+        out.push(existing.copy())
     }
-    if !placed -> out.push(item)
+    if !placed -> out.push(item.copy())
     Val(out)
 }
 
