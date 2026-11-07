@@ -79,7 +79,8 @@
 //
 // `receipt` reads preflight receipts ($JET_STATE_ROOT/preflight/<sha256 of
 // the source identity>.json). `identity` prints TREE's compiler source
-// identity; `check` admits a launch of TREE by the seed SEED_DIR, and
+// identity (Tools/agent/CompilerPackages.jet identity); `check` admits a
+// launch of TREE by the seed SEED_DIR, and
 // `commit` one of COMMIT of the checkout REPO (from an export of it). Each
 // prints `LAUNCHER: admitted by ...` (exit 0) or the refusal, which names the
 // census to run (exit 1); exit 2 is a setup failure.
@@ -97,13 +98,6 @@ SPEED_LANES: [String]{"O0Speed", "RustOut"}
 COMPILER_PREFIXES: [String]{"Compiler/", "Core/", "Jetpack/"}
 IDENTITY_KEYS: [String]{"user.name", "user.email"}
 JOB_FILES: [String]{".patch", ".msg"}
-// The compiler in package form: its entry package, the workspace files
-// `jet build Compiler` reads beside the packages, and the walk's exclusions.
-ENTRY_PACKAGE: "Compiler/JetCli"
-WORKSPACE_FILES: [String]{"Compiler/package.jet", "Compiler/build.jet"}
-SKIPPED_NAMES: [String]{"target", "build", "node_modules", "bin"}
-PROJECT_MARKERS: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
-SOURCE_DOMAIN: "jet.compiler-source.v2"
 // The preflight receipt: its schema, the census passes it vouches for, and
 // the trees an export needs for the source identity.
 RECEIPT_SCHEMA: "jet.preflight-receipt.v1"
@@ -657,117 +651,44 @@ stack_applies: fn(worktree: String, bases: [String]) -[Exec, Env, FS, IO, Time.W
 }
 
 // --- the compiler in package form -------------------------------------------
-// The packages `jet build Compiler` compiles (Compiler/JetCli and every
-// package its package.jet path dependencies reach) and the files that make up
-// the compiler's source identity. Membership follows the driver's source walk
-// (JetCli Request.jet `jet_cli_walk_held_sources`): every file under the
-// package directory, recursively, except dot names, the skipped build names,
-// symlinks, and directories that are projects of their own.
+// Tools/agent/CompilerPackages.jet is the one compiler package model: the
+// packages `jet build Compiler` compiles, the compiler's inputs and its source
+// identity. Land runs the dev worktree's copy of it on a tree with the seed.
 
-Package: struct {
-    name: String
-    // Repo-relative.
-    directory: String
-}
-
-is_project: fn(directory: String) -[FS]> Bool Never! {
-    loop marker in PROJECT_MARKERS {
-        if files.exists(files.join(directory, marker)) -> return true
+// The nonblank lines CompilerPackages.jet prints for `args` on `tree`.
+compiler_packages_run: fn(tree: String, args: [String]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
+    argv := [String]{"{seed_dir()}/jet", files.join(dev_worktree(), "Tools/agent/CompilerPackages.jet"), "--root", tree}
+    argv.extend(args.copy()) // copy: the caller keeps its arguments
+    ran: run_in(tree, argv, "")
+    if ran.code != 0 -> return Err(LandError{message: "Tools/agent/CompilerPackages.jet {args[0]} on {tree} failed: {first_line(ran)}"})
+    lines := [String]{}
+    loop line in ran.output.lines() {
+        if line != "" -> lines.push(line.copy())
     }
-    false
+    lines
 }
 
-// Every file of the package tree at the repo-relative `directory`, of any
-// extension, repo-relative: the driver's walk before its `.jet` filter.
-package_tree: fn(repo: String, directory: String) -[FS]> [String] LandError! {
-    found := [String]{}
-    walk_tree(repo, directory, found) ?? return Err(err)
-    found
+// The compiler's source identity of `tree`: `<binary>@<version>#<sha256>`.
+compiler_source_identity: fn(tree: String) -[Exec, Env, FS, Time.Wait]> String LandError! {
+    rows: compiler_packages_run(tree, [String]{"identity"}) ?? return Err(err)
+    if rows.len() != 1 -> return Err(LandError{message: "Tools/agent/CompilerPackages.jet identity on {tree} printed {rows.len()} lines"})
+    rows[0].copy()
 }
 
-walk_tree: fn(repo: String, directory: String, found: &[String]) LandError! -[FS]> {
-    listed: files.list_dir(files.join(repo, directory)) ?? return Err(LandError{message: "`{directory}` cannot be listed: {err}"})
-    names := [String]{}
-    loop entry in listed -> names.push(entry.name.copy())
-    names.sort()
-    loop name in names {
-        if name.starts_with(".") || SKIPPED_NAMES.contains(name) -> next
-        child: "{directory}/{name}"
-        path: files.join(repo, child)
-        if files.is_symlink(path) -> next
-        if files.is_dir(path) {
-            if !is_project(path) -> walk_tree(repo, child, found) ?? return Err(err)
-            next
-        }
-        if files.is_file(path) -> found.push(child)
-    }
-    Ok(())
+// The repo-relative directories of the compiler's packages in `tree`.
+compiler_package_dirs: fn(tree: String) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
+    rows: compiler_packages_run(tree, [String]{"packages"}) ?? return Err(err)
+    dirs := [String]{}
+    loop row in rows -> dirs.push(row.partition("\t").tail.copy())
+    dirs
 }
 
-// The value of the first `KEY: "VALUE"` line of `text`, "" when there is none.
-quoted_line: fn(text: String, key: String) -> String Never! {
-    loop line in text.lines() {
-        if !line.starts_with("{key}:") -> next
-        rest: line.removeprefix("{key}:").trim()
-        if !rest.starts_with("\"") -> next
-        value: rest.removeprefix("\"").partition("\"")
-        if value.sep != "" && value.head != "" -> return value.head.copy()
-    }
-    ""
-}
-
-// The relative paths of a package.jet's `deps: { ... }` block: each row
-// `name: ./Dir` or `name: ../Dir` (a registry version is no path).
-manifest_deps: fn(text: String) -> [String] Never! {
-    rows := [String]{}
-    inside := false
-    closed := false
-    loop line in text.lines() {
-        current := line.copy()
-        if !inside {
-            if !line.starts_with("deps:") -> next
-            rest: line.removeprefix("deps:").trim()
-            if !rest.starts_with("{{") -> next
-            inside = true
-            current = rest.removeprefix("{{")
-        }
-        cut: current.partition("}}")
-        rows.push(cut.head.copy())
-        if cut.sep != "" {
-            closed = true
-            break
-        }
-    }
-    paths := [String]{}
-    if !closed -> return paths
-    loop row in rows {
-        path: dep_path(row)
-        if path != "" -> paths.push(path)
-    }
-    paths
-}
-
-// The path of one `deps` row, "" when the row names no path.
-dep_path: fn(row: String) -> String Never! {
-    line: row.trim()
-    entry: if line.ends_with(",") -> line.removesuffix(",").trim() else -> line.copy()
-    parts: entry.partition(":")
-    if parts.sep == "" || !is_word(parts.head) -> return ""
-    value: parts.tail.trim()
-    if value == "." || value == ".." -> return value.copy()
-    if !value.starts_with("./") && !value.starts_with("../") -> return ""
-    if value.contains(",") || value.contains(" ") || value.contains("\t") -> return ""
-    value.copy()
-}
-
-is_word: fn(text: String) -> Bool Never! {
-    if text == "" -> return false
-    loop byte in text.bytes() {
-        code: Int.from_u8(byte)
-        word: (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
-        if !word -> return false
-    }
-    true
+// The repo-relative `paths` that are compiler inputs of `tree`.
+compiler_input_paths: fn(tree: String, paths: [String]) -[Exec, Env, FS, Time.Wait]> [String] LandError! {
+    if paths.len() == 0 -> return Ok([String]{})
+    args := [String]{"select"}
+    args.extend(paths.copy()) // copy: the caller keeps its paths
+    compiler_packages_run(tree, args)
 }
 
 // The relative `path` from the repo-relative `directory`, normalized; ""
@@ -786,130 +707,12 @@ repo_join: fn(directory: String, path: String) -> String Never! {
     parts.join("/")
 }
 
-// The compiler's packages in dependency order (a package after the ones it
-// depends on), from Compiler/JetCli through package.jet path dependencies.
-compiler_packages: fn(repo: String) -[FS]> [Package] LandError! {
-    packages := [Package]{}
-    visiting := [String]{}
-    visit_package(repo, ENTRY_PACKAGE, packages, visiting) ?? return Err(err)
-    packages
-}
-
-visit_package: fn(repo: String, directory: String, packages: &[Package], visiting: &[String]) LandError! -[FS]> {
-    manifest: files.read(files.join(repo, "{directory}/package.jet")) ?? return Err(LandError{message: "{directory}/package.jet cannot be read: {err}"})
-    name: quoted_line(manifest, "name")
-    if name == "" -> return Err(LandError{message: "{directory}/package.jet names no package"})
-    loop known in packages {
-        if known.name == name -> return Ok(())
-    }
-    if visiting.contains(name) -> return Err(LandError{message: "package dependency cycle through {name}"})
-    visiting.push(name.copy())
-    loop path in manifest_deps(manifest) {
-        target: repo_join(directory, path)
-        if target == "" -> return Err(LandError{message: "{directory}/package.jet names a dependency outside the repository: {path}"})
-        visit_package(repo, target, packages, visiting) ?? return Err(err)
-    }
-    packages.push(Package{name: name.copy(), directory: directory.copy()})
-    Ok(())
-}
-
-// The roots of the compiler's inputs: the workspace files, every package
-// directory, and Core (the tree JET_TOOLCHAIN_ROOT serves to the compile).
-compiler_input_roots: fn(packages: [Package]) -> [String] Never! {
-    roots := WORKSPACE_FILES.copy()
-    loop found in packages -> roots.push(found.directory.copy())
-    roots.push("Core")
-    roots
-}
-
-// Every file under the roots, repo-relative, deduplicated and byte-sorted.
-compiler_inputs: fn(repo: String, roots: [String]) -[FS]> [String] LandError! {
-    found := [String]{}
-    loop path in roots {
-        whole: files.join(repo, path)
-        if !files.exists(whole) -> next
-        if files.is_file(whole) {
-            found.push(path.copy())
-            next
-        }
-        found.extend(package_tree(repo, path) ?? return Err(err))
-    }
-    found.sort()
-    unique := [String]{}
-    loop path in found {
-        if unique.len() > 0 && unique[unique.len() - 1] == path -> next
-        unique.push(path.copy())
-    }
-    unique
-}
-
-push_u64: fn(out: &[U8], value: Int) {
-    digits := [U8]{}
-    rest := value
-    loop _ in 0..<8 {
-        digits.push(U8.from_int(rest % 256) ?? U8{0})
-        rest /%= 256
-    }
-    loop at in 0..<8 -> out.push(digits[7 - at])
-}
-
-// The compiler's source identity of `repo`:
-// `<binary>@<version>#<sha256>` over the domain, a NUL, then each input in
-// byte order as its path and its bytes, each after its 8-byte big-endian length.
-compiler_source_identity: fn(repo: String) -[FS]> String LandError! {
-    packages: compiler_packages(repo) ?? return Err(err)
-    inputs: compiler_inputs(repo, compiler_input_roots(packages)) ?? return Err(err)
-    message := [U8]{}
-    message.extend(SOURCE_DOMAIN.bytes())
-    message.push(U8{0})
-    loop path in inputs {
-        bytes: files.read_bytes(files.join(repo, path)) ?? return Err(LandError{message: "`{path}` cannot be read: {err}"})
-        key: path.bytes()
-        push_u64(message, key.len())
-        message.extend(key)
-        push_u64(message, bytes.len())
-        message.extend(bytes)
-    }
-    registry: "Compiler/JetCli/Source/Cli/Registry.jet"
-    manifest: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
-    binary: quoted_line(files.read(files.join(repo, registry)) ?? "", "JET_CLI_BINARY")
-    version: quoted_line(files.read(files.join(repo, manifest)) ?? "", "COMPILER_VERSION")
-    if binary == "" -> return Err(LandError{message: "{registry} declares no JET_CLI_BINARY"})
-    if version == "" -> return Err(LandError{message: "{manifest} declares no COMPILER_VERSION"})
-    "{binary}@{version}#{crypto.sha256(message).hex()}"
-}
-
-// Is `path` (repo-relative) a compiler input under `roots`: a root, or a file
-// the walk of one reaches?
-package_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool Never! {
-    loop input in roots {
-        if path == input -> return true
-        if !path.starts_with("{input}/") -> next
-        parts := [String]{}
-        loop part in path.removeprefix("{input}/").split("/") -> parts.push(part.copy())
-        skipped := false
-        loop part in parts {
-            if part.starts_with(".") || SKIPPED_NAMES.contains(part) -> skipped = true
-        }
-        if skipped -> next
-        directory := files.join(repo, input)
-        project := false
-        loop at in 0..<(parts.len() - 1) {
-            directory = files.join(directory, parts[at])
-            if is_project(directory) -> project = true
-        }
-        if !project -> return true
-    }
-    false
-}
-
-// Does a commit touching `path` need the census: a compiler input, or a
-// runtime, backend, Core or Jetpack source or a sources.list?
-census_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool Never! {
+// Does a commit touching `path` need the census beyond the compiler inputs:
+// a runtime, backend, Core or Jetpack source or a sources.list?
+census_source: fn(path: String) -> Bool Never! {
     if path.starts_with("Compiler/JetRuntime/Source/") || path.starts_with("Compiler/JetBackend/Source/") || path.starts_with("Core/") -> return true
     if path == "Compiler/JetRuntime/sources.list" || path.ends_with("/sources.list") -> return true
-    if path.starts_with("Jetpack/") && path.removeprefix("Jetpack/").contains("/Source/") -> return true
-    package_input(repo, path, roots)
+    path.starts_with("Jetpack/") && path.removeprefix("Jetpack/").contains("/Source/")
 }
 
 // --- heavy passes -----------------------------------------------------------
@@ -1082,10 +885,7 @@ census: fn(named: [String], passes: Passes) -[Exec, Env, FS, IO, Time, Time.Wait
         print("SOURCE IDENTITY FAILED: {err.message}")
         return 2
     }
-    package_dirs := [String]{}
-    if compiler_packages(snap) == .Ok(found) {
-        loop entry in found -> package_dirs.push(entry.directory.copy())
-    }
+    package_dirs: compiler_package_dirs(snap) ?? [String]{}
     seed_jet: "{compiler_dir}/jet"
     check_report: "{out}/check-keep-going.tsv"
     checked: run_logged(snap, heavy(0, [String]{seed_jet, "check", "--threads", "12", "Compiler/JetCli"}), compile_env(identity, snap, check_report), "{out}/check")
@@ -1320,15 +1120,14 @@ source_file: fn(tree: String, package_dirs: [String], path: String) -[FS]> Strin
 
 precommit_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Never! {
     worktree: dev_worktree()
-    packages: compiler_packages(worktree) ?? {
+    inputs: compiler_input_paths(worktree, args) ?? {
         print("PRECOMMIT: the compiler packages cannot be read: {err.message}")
         print("PRECOMMIT FAILED")
         return 1
     }
-    roots: compiler_input_roots(packages)
-    needed := false
+    needed := inputs.len() > 0
     loop path in args {
-        if census_input(worktree, path, roots) -> needed = true
+        if census_source(path) -> needed = true
     }
     census_failed: needed && census(args, Passes{build: true, selfcheck: true}) != 0
     ratchets_failed: ratchets(worktree) != 0
@@ -1425,13 +1224,7 @@ prescreen: fn(worktree: String, tree: String, patch: String, earlier: [String]) 
     }
     // Unreadable packages count every path as an input.
     needed := true
-    if compiler_packages(worktree) == .Ok(packages) {
-        roots: compiler_input_roots(packages)
-        needed = false
-        loop name in touched {
-            if package_input(worktree, name, roots) -> needed = true
-        }
-    }
+    if compiler_input_paths(worktree, touched) == .Ok(inputs) -> needed = inputs.len() > 0
     if !needed {
         print("prescreen: clean (no compiler inputs; apply check only)")
         return 0
@@ -1659,44 +1452,20 @@ array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
     assert_eq(tagged_seconds("SMALL-WIN: 0.1 s", "PARETO:"), None)
 }
 
-#Test("a package manifest gives its name and its path dependencies") {
-    manifest: "name: \"jet_cli\"\nversion: \"0.0.1\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    jet_env_model: ../../Jetpack/EnvModel,\n    remote: \"1.2\",\n}}\nauthority: {{\n    allow: [Env],\n}}\n"
-    assert_eq(quoted_line(manifest, "name"), "jet_cli")
-    assert_eq(manifest_deps(manifest), [String]{"../JetLexer", "../../Jetpack/EnvModel"})
-    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A, b: ../B }}\n"), [String]{})
-    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A }}\n"), [String]{"./A"})
+#Test("a source path joins a package directory inside the repository") {
     assert_eq(repo_join("Compiler/JetCli", "../../Jetpack/EnvModel"), "Jetpack/EnvModel")
     assert_eq(repo_join("Compiler", "./JetCli/."), "Compiler/JetCli")
     assert_eq(repo_join("Compiler", "../../x"), "")
 }
 
-#Test("the source identity hashes every compiler input and skips nested projects") {
-    repo: files.mkdtemp("land-identity") ?? panic("a temporary directory cannot be made: {err}")
-    fixture: [String]{
-        "Compiler/package.jet", "workspace\n",
-        "Compiler/JetCli/package.jet", "name: \"jet_cli\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    remote: \"1.2\",\n}}\n",
-        "Compiler/JetCli/Source/Cli/Registry.jet", "JET_CLI_BINARY: \"jet\"\n",
-        "Compiler/JetLexer/package.jet", "name: \"jet_lexer\"\n",
-        "Compiler/JetLexer/Fixture/package.jet", "name: \"fixture\"\n",
-        "Core/Text.jet", "text: 1\n",
-        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "COMPILER_VERSION: \"0.1.0\"\n",
-    }
-    loop at in 0..<(fixture.len() /% 2) {
-        path: files.join(repo, fixture[2 * at])
-        files.create_dir_all(files.dirname(path)) ?? panic("{path}: {err}")
-        files.write(path, fixture[2 * at + 1]) ?? panic("{path}: {err}")
-    }
-    packages: compiler_packages(repo) ?? panic(err.message)
-    roots: compiler_input_roots(packages)
-    assert_eq(roots, [String]{"Compiler/package.jet", "Compiler/build.jet", "Compiler/JetLexer", "Compiler/JetCli", "Core"})
-    assert(package_input(repo, "Compiler/JetLexer/package.jet", roots))
-    assert(!package_input(repo, "Compiler/JetLexer/Fixture/package.jet", roots))
-    assert(!package_input(repo, "Compiler/JetCli/build/x.jet", roots))
-    assert(!package_input(repo, "Tools/agent/Land.jet", roots))
-    assert(census_input(repo, "Jetpack/Bootstrap/Source/Main.jet", roots))
-    // The same tree's identity from the retired preflight-receipt.mjs.
-    assert_eq(compiler_source_identity(repo) ?? panic(err.message), "jet@0.1.0#279f8e70cba754d961303c99ddc59203a72c4255815cb9c181cfa34779113217")
-    files.remove_all(repo) ?? ()
+#Test("runtime, backend, Core and Jetpack sources and sources.list need the census") {
+    assert(census_source("Jetpack/Bootstrap/Source/Main.jet"))
+    assert(census_source("Compiler/JetRuntime/Source/Trap.jet"))
+    assert(census_source("Compiler/JetBackend/Source/X64/Emit.jet"))
+    assert(census_source("Core/Text/Text.jet"))
+    assert(census_source("Compiler/JetRuntime/sources.list"))
+    assert(!census_source("Jetpack/README.md"))
+    assert(!census_source("Tools/agent/Land.jet"))
 }
 
 #Test("a receipt admits only the source identity and the seed its census ran") {

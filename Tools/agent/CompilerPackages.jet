@@ -9,6 +9,7 @@
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] roots
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] inputs
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] identity
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit [ENTRY]...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit-inputs [ENTRY]...
@@ -35,8 +36,11 @@
 // files, so data a package reads at compile time counts), and every file
 // under Core except dot names. `select` prints the FILEs that are compiler
 // inputs, in argument order; a FILE need not exist (a deleted member is
-// still an input path), and it is judged with the walk's exclusions. The
-// source identity itself is `jet Tools/agent/Land.jet receipt identity TREE`.
+// still an input path), and it is judged with the walk's exclusions.
+// `identity` prints the compiler's source identity,
+// `<binary>@<version>#<sha256>`: the sha256 is over the domain, a NUL, then
+// each input in byte order as its path and its bytes, each after its 8-byte
+// big-endian length.
 //
 // `unblock` writes each FILE's text with every `use { … }` block rewritten as
 // one `use` line per row, keeping every line and byte offset, each text
@@ -58,6 +62,7 @@
 //
 // Exit: 0 done; 1 a refused tree, printed; 2 usage.
 use {
+    crypto: core.crypto
     files: core.files
     process: core.process
     term: core.term
@@ -69,6 +74,7 @@ WORKSPACE_FILES: [String]{"Compiler/package.jet", "Compiler/build.jet"}
 SKIPPED_NAMES: [String]{"target", "build", "node_modules", "bin"}
 PROJECT_MARKERS: [String]{"package.jet", "pkg.jet", "workspace.jet", ".jet/lock"}
 RESERVED_SOURCE_NAMES: [String]{"package.jet", "pkg.jet", "env.jet", "config.jet", "workspace.jet"}
+SOURCE_DOMAIN: "jet.compiler-source.v2"
 
 #Error
 PackagesError: struct {
@@ -112,6 +118,7 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("usage: jet Tools/agent/CompilerPackages.jet [--root DIR] packages|sources [ENTRY]")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] roots|inputs")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] identity")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
     process.exit(2)
@@ -141,6 +148,10 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
             loop path in args {
                 if is_compiler_input(root, path, roots) -> print(path)
             }
+        }
+        "identity" -> {
+            no_arguments(args)
+            print(compiler_source_identity(root))
         }
         "unblock" -> {
             texts := [String]{}
@@ -411,6 +422,41 @@ is_compiler_input: fn(repo: String, path: String, roots: [String]) -[FS]> Bool N
         if !project -> return true
     }
     false
+}
+
+push_u64: fn(out: &[U8], value: Int) {
+    digits := [U8]{}
+    rest := value
+    loop _ in 0..<8 {
+        digits.push(U8.from_int(rest % 256) ?? U8{0})
+        rest /%= 256
+    }
+    loop at in 0..<8 -> out.push(digits[7 - at])
+}
+
+// The compiler's source identity of `repo`:
+// `<binary>@<version>#<sha256>` over the domain, a NUL, then each input in
+// byte order as its path and its bytes, each after its 8-byte big-endian length.
+compiler_source_identity: fn(repo: String) -[FS]> String PackagesError! {
+    inputs: compiler_inputs(repo, compiler_input_roots(compiler_packages(repo, ENTRY_PACKAGE)))
+    message := [U8]{}
+    message.extend(SOURCE_DOMAIN.bytes())
+    message.push(U8{0})
+    loop path in inputs {
+        bytes: files.read_bytes(files.join(repo, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+        key: path.bytes()
+        push_u64(message, key.len())
+        message.extend(key)
+        push_u64(message, bytes.len())
+        message.extend(bytes)
+    }
+    registry: "Compiler/JetCli/Source/Cli/Registry.jet"
+    manifest: "Jetpack/PackageModel/Source/Manifest/Manifest.jet"
+    binary: quoted_line(files.read(files.join(repo, registry)) ?? "", "JET_CLI_BINARY")
+    version: quoted_line(files.read(files.join(repo, manifest)) ?? "", "COMPILER_VERSION")
+    if binary == "" -> return Err(PackagesError{message: "{registry} declares no JET_CLI_BINARY"})
+    if version == "" -> return Err(PackagesError{message: "{manifest} declares no COMPILER_VERSION"})
+    "{binary}@{version}#{crypto.sha256(message).hex()}"
 }
 
 // --- fixture units ----------------------------------------------------------
@@ -868,8 +914,39 @@ unblock_uses: fn(text: String) -> String Never! {
     manifest: "name: \"jet_cli\"\nversion: \"0.0.1\"\ndeps: {{\n    jet_sema: ../JetSema,\n    shared: ../../Jetpack/Shared,\n    remote: \"1.2\",\n}}\n"
     assert_eq(quoted_line(manifest, "name"), "jet_cli")
     assert_eq(manifest_deps(manifest).join(","), "../JetSema,../../Jetpack/Shared")
+    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A, b: ../B }}\n").join(","), "")
+    assert_eq(manifest_deps("name: \"x\"\ndeps: {{ a: ./A }}\n").join(","), "./A")
     assert_eq(normalize_join("Compiler/JetCli", "../../Jetpack/Shared"), "Jetpack/Shared")
+    assert_eq(normalize_join("Compiler", "./JetCli/."), "Compiler/JetCli")
     assert_eq(normalize_join("Compiler", "../../x"), "")
+}
+
+#Test("the source identity hashes every compiler input and skips nested projects") {
+    repo: files.mkdtemp("packages-identity") ?? panic("a temporary directory cannot be made: {err}")
+    fixture: [String]{
+        "Compiler/package.jet", "workspace\n",
+        "Compiler/JetCli/package.jet", "name: \"jet_cli\"\ndeps: {{\n    jet_lexer: ../JetLexer,\n    remote: \"1.2\",\n}}\n",
+        "Compiler/JetCli/Source/Cli/Registry.jet", "JET_CLI_BINARY: \"jet\"\n",
+        "Compiler/JetLexer/package.jet", "name: \"jet_lexer\"\n",
+        "Compiler/JetLexer/Fixture/package.jet", "name: \"fixture\"\n",
+        "Core/Text.jet", "text: 1\n",
+        "Jetpack/PackageModel/Source/Manifest/Manifest.jet", "COMPILER_VERSION: \"0.1.0\"\n",
+    }
+    loop at in 0..<(fixture.len() /% 2) {
+        path: files.join(repo, fixture[2 * at])
+        files.create_dir_all(files.dirname(path)) ?? panic("{path}: {err}")
+        files.write(path, fixture[2 * at + 1]) ?? panic("{path}: {err}")
+    }
+    packages: compiler_packages(repo, ENTRY_PACKAGE) ?? panic(err.message)
+    roots: compiler_input_roots(packages)
+    assert_eq(roots.join(","), "Compiler/package.jet,Compiler/build.jet,Compiler/JetLexer,Compiler/JetCli,Core")
+    assert(is_compiler_input(repo, "Compiler/JetLexer/package.jet", roots))
+    assert(!is_compiler_input(repo, "Compiler/JetLexer/Fixture/package.jet", roots))
+    assert(!is_compiler_input(repo, "Compiler/JetCli/build/x.jet", roots))
+    assert(!is_compiler_input(repo, "Tools/agent/Land.jet", roots))
+    // The same tree's identity from the retired preflight-receipt.mjs.
+    assert_eq(compiler_source_identity(repo) ?? panic(err.message), "jet@0.1.0#279f8e70cba754d961303c99ddc59203a72c4255815cb9c181cfa34779113217")
+    files.remove_all(repo) ?? ()
 }
 
 #Test("comptime inputs are whole-word embed calls of plain literals") {
