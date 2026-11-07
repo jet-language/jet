@@ -116,6 +116,11 @@ JetCLIPlan: enum {
     // `entry` is the command function the program starts at (`dev: fn` for a
     // `jet dev` that selected one); None starts at the package's own entry.
     Run(file: String, source: String, color: Bool, options: BuildOptions, verbose: Bool, json: Bool, threads: Int?, program_args: [String], invocation: JetCLIInvocationAuthority?, notice: String, watch: Bool, entry: String?)
+    // `jet dev` of a browser program (jet_cli_dev_web_selected): build it as
+    // `jet build --target web` does under `options`, serve the build
+    // directory on 127.0.0.1:`port` (0: the listener picks one), and rebuild
+    // on every change (Host.jet jet_cli_dev_web_loop).
+    DevWeb(file: String, source: String, color: Bool, options: BuildOptions, threads: Int?, invocation: JetCLIInvocationAuthority?, notice: String, port: Int)
     // `jet jobs`: list the `#Job fn`s of `file`, the entry a bare `jet run`
     // resolves (Jobs.jet); `json` prints the `jobs` status, `notice` is
     // resolution's stderr.
@@ -1066,7 +1071,9 @@ jet_cli_profile_name: fn(jet_argv: [String]) -> String Never! {
 // build adds its `build: fn` layer between the two (jet_cli_build_package). A
 // profile `package.jet` declares replaces the stock profile of that name:
 // `release` is `optimize: full, debug_info: split`, `debug` the stock values.
-jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, source: String, color: Bool, quiet: Bool) -[FS, Env]> JetCLIBuildOptions Never! {
+// `os_web` builds for the browser, as `--target web` does (the web preview of
+// `jet dev`).
+jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, source: String, color: Bool, quiet: Bool, os_web: Bool{false}) -[FS, Env]> JetCLIBuildOptions Never! {
     written := [BuildOptionChoice]{}
     flags := [BuildOptionChoice]{}
     settings := [BuildSettingOverride]{}
@@ -1119,14 +1126,18 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
         }
     }
     loop flag in flags -> written.push(flag)
-    // `jet build --target web` is the web build (BuildWeb.jet): its OS is web.
-    if command == "build" && jet_cli_target_flag(jet_argv) == .Named(target) {
-        if target == "web" {
-            loop flag in flags {
-                if flag.name == "os" && flag.value != "web" -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{flag.written}` and `--target web` disagree", jet_cli_why("E2104"), "pass one of them", color, JET_DRIVER_EXIT_USAGE)}
-            }
-            written.push(BuildOptionChoice{name: "os", value: "web", layer: BuildOptionLayer.Flag, written: "--target web", site: "", pinned: false})
+    // `jet build --target web` is the web build (BuildWeb.jet), and so is the
+    // web preview of `jet dev`: its OS is web.
+    web := os_web
+    if jet_cli_target_flag(jet_argv) == .Named(target) {
+        if target == "web" -> web = true
+    }
+    if command == "build" && web {
+        written_as: if os_web -> "the web preview of `jet dev`" else -> "--target web"
+        loop flag in flags {
+            if flag.name == "os" && flag.value != "web" -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{flag.written}` and {written_as} disagree", jet_cli_why("E2104"), "pass one of them", color, JET_DRIVER_EXIT_USAGE)}
         }
+        written.push(BuildOptionChoice{name: "os", value: "web", layer: BuildOptionLayer.Flag, written: written_as.copy(), site: "", pinned: false})
     }
     if build_options_resolve(command, profile, written) == {
         .Refused(code, what, fix) -> return JetCLIBuildOptions.Refused{plan: jet_cli_fail(code, what, jet_cli_why(code), fix, color, JET_DRIVER_EXIT_USAGE)}
@@ -1227,6 +1238,12 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
             if jet_cli_build_options(jet_argv, command, file, source, color, quiet) == {
                 .Refused(refusal) -> return refusal
                 .Selected(options, notes) -> return JetCLIPlan.Run{file: file.move(), source: source.move(), color: color, options: options.move(), verbose: verbose, json: json, threads: threads, program_args: program_args.move(), invocation: invocation.move(), notice: "{notice}{notes}", watch: watch, entry: entry.move()}
+            }
+        }
+        .DevWeb(file, source, color, _, threads, invocation, notice, port) -> {
+            if jet_cli_build_options(jet_argv, "build", file, source, color, quiet, os_web: true) == {
+                .Refused(refusal) -> return refusal
+                .Selected(options, notes) -> return JetCLIPlan.DevWeb{file: file.move(), source: source.move(), color: color, options: options.move(), threads: threads, invocation: invocation.move(), notice: "{notice}{notes}", port: port}
             }
         }
         else -> {}
@@ -1488,6 +1505,11 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
     entry: jet_cli_check(jet_argv, args, command, color, quiet, threads, false)
     if entry == {
         .Check(file, source, _, _, _, _, notice, _, _, _, _) -> {
+            // `jet dev` of a browser program serves its web build.
+            if watch && jet_cli_dev_web_selected(jet_argv, source) {
+                port: jet_cli_dev_web_port(jet_argv) ?? return jet_cli_fail("E2104", "`--port` needs a TCP port number from 0 to 65535", jet_cli_why("E2104"), "write `--port=8080`, or leave it out to let the preview listener choose a port", color, JET_DRIVER_EXIT_USAGE)
+                return JetCLIPlan.DevWeb{file: file, source: source, color: color, options: build_options_stock("build"), threads: threads, invocation: invocation, notice: notice, port: port}
+            }
             // A web-targeted program builds browser artifacts; only an
             // explicit `--target` asks for a native run of it. A full-stack
             // App entry is a server, and `jet run` serves it.
@@ -1502,6 +1524,33 @@ jet_cli_run_entry: fn(jet_argv: [String], args: [String], passthrough: [String]?
         else -> {}
     }
     entry
+}
+
+// Whether `jet dev` serves the program's web build: a `#Target(Web)`
+// program, or a `--port`, the application preview listener
+// (canvas-protocol.md). A full-stack App entry is a server, and `jet dev`
+// runs it natively.
+jet_cli_dev_web_selected: fn(jet_argv: [String], source: String) -> Bool Never! {
+    if jet_cli_declares_web_app(source) -> return false
+    jet_cli_declares_web_target(source) || jet_cli_dev_web_port_word(jet_argv) != None
+}
+
+// The `--port=N` word of a `jet dev` before its program's `--`, if any.
+jet_cli_dev_web_port_word: fn(jet_argv: [String]) -> String? Never! {
+    loop argument in jet_argv {
+        if argument == "--" -> break
+        if argument.starts_with("--port=") -> return Val(argument.removeprefix("--port="))
+    }
+    None
+}
+
+// The preview listener's port: `--port=N`, else 0 (the listener picks one);
+// None for a word that isn't a TCP port number.
+jet_cli_dev_web_port: fn(jet_argv: [String]) -> Int? Never! {
+    word: jet_cli_dev_web_port_word(jet_argv) ?? return Val(0)
+    port: Int.parse(word) ?? return None
+    if port < 0 || port > 65535 || "{port}" != word -> return None
+    Val(port)
 }
 
 jet_cli_test_option_error: fn(what: String, color: Bool) -> JetCLIPlan Never! {

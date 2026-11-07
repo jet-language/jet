@@ -31,8 +31,16 @@ jet build --target web Examples/Basics/Hello.jet
 node Examples/Basics/.jet/build/app.js
 ```
 
-`jet run`, `jet dev` and `jet test` run Linux x86-64 images only and refuse
-`os: web`; a package's `build: fn` targets refuse it too. Under node the host
+`jet run` and `jet test` run Linux x86-64 images only and refuse `os: web`; a
+package's `build: fn` targets refuse it too. `jet dev` of a `#Target(Web)`
+program, or with `--port=N` (the application preview listener), makes this
+web build and serves its directory on `127.0.0.1:N` (without `--port`, a port
+the listener picks), printing `App preview: http://127.0.0.1:N/` on stdout;
+`/` is `index.html`, and `GET /__jet_dev_version` answers the revision of the
+last good build, a `__jet_dev_version` file each good build writes beside it.
+Every change to the package's sources rebuilds it; a failed rebuild prints its
+report and keeps the last good build served. A full-stack
+`App` entry is a server, and `jet dev` runs it natively. Under node the host
 file system is the program's; a page has none, so file calls fail with
 ENOSYS. The host runs one thread: a program that starts a `task` stops with
 E3001 (`tasks are not available on the web target yet`).

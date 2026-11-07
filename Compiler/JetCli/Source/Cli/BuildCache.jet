@@ -10,7 +10,7 @@ use {
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileResult, JetDriverLoweringInputs, JetDriverVerbOutput]
     jet_foundation.[BuildOptions, CORE_SOURCE_OWNED_ROWS, build_options_key, sha256_hex, sha256_hex_bytes]
     jet_pkg_model.[COMPILER_VERSION]
-    jetpack_artifact_store.[ArtifactStore]
+    jetpack_artifact_store.[ArtifactRestore, ArtifactStore]
 }
 
 // A built `jet build` executable: its path and the lines its build reports
@@ -18,14 +18,6 @@ use {
 JetCLIStoredBuild: enum {
     Written(path: String, log: String)
     Failed(output: JetDriverVerbOutput)
-}
-
-// What the store held for a build key.
-JetCLIStoredRestore: enum {
-    Hit
-    Missing
-    Corrupt
-    Unavailable(reason: String)
 }
 
 // `jet build`'s executable `name`, restored from the store when a build of
@@ -57,13 +49,17 @@ jet_cli_build_stored: fn(file: String, name: String, color: Bool, options: Build
     if store == .Val(opened) {
         if jet_cli_build_dir(build_dir, color) == .Val(refused) -> return JetCLIStoredBuild.Failed{output: refused}
         if jet_cli_build_restore(opened, key, binary, snapshot.roots[0].canonical_path) == {
-            .Hit -> {
-                if verbose -> log = "{log}[build] cache hit -> reused cached binary\n"
-                return JetCLIStoredBuild.Written{path: binary, log: log}
+            .Ok(restored) -> {
+                if restored == {
+                    .Hit(_, _) -> {
+                        if verbose -> log = "{log}[build] cache hit -> reused cached binary\n"
+                        return JetCLIStoredBuild.Written{path: binary, log: log}
+                    }
+                    .Corrupt -> log = "{log}note: removed a corrupt cached binary of `{name}` from the store; rebuilding it\n"
+                    .Missing -> {}
+                }
             }
-            .Corrupt -> log = "{log}note: removed a corrupt cached binary of `{name}` from the store; rebuilding it\n"
-            .Missing -> {}
-            .Unavailable(reason) -> {
+            .Err(reason) -> {
                 if verbose -> log = "{log}[build] cache off -> {reason}\n"
             }
         }
@@ -84,45 +80,37 @@ jet_cli_build_side_key: fn(key: String, side: String) -> String Never! {
 
 // Restore the executable of `key` to `binary`, with its side debug file and
 // its copy in the symbol store of the package at `root`. A side entry the
-// store no longer holds makes the whole build a miss.
-jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, root: String) -[FS, Env, Exec, Time, Rand]> JetCLIStoredRestore Never! {
+// store no longer holds makes the whole build a miss; the error is why the
+// store couldn't be read or the restored files written.
+jet_cli_build_restore: fn(store: ArtifactStore, key: String, binary: String, root: String) -[FS, Env, Exec, Time, Rand]> ArtifactRestore Err! {
     id := ""
     debug := [U8]{}
     sides: [String]{"build-id", "debug"}
     loop side in sides {
-        if store.lookup_artifact(jet_cli_build_side_key(key, side)) == {
-            .Ok(found) -> {
-                if found == {
-                    .Hit(artifact) -> {
-                        bytes: cli_files.read_bytes(artifact.path) ?? return JetCLIStoredRestore.Missing
-                        if side == "debug" -> debug = bytes else -> id = String.from_bytes(bytes) ?? return JetCLIStoredRestore.Corrupt
-                    }
-                    .Corrupt -> return JetCLIStoredRestore.Corrupt
-                    .Missing -> return JetCLIStoredRestore.Missing
-                }
+        found: store.lookup_artifact(jet_cli_build_side_key(key, side)) ?? return Err(err.message())
+        if found == {
+            .Hit(artifact) -> {
+                bytes: cli_files.read_bytes(artifact.path) ?? return Ok(ArtifactRestore.Missing)
+                if side == "debug" -> debug = bytes else -> id = String.from_bytes(bytes) ?? return Ok(ArtifactRestore.Corrupt)
             }
-            .Err(error) -> return JetCLIStoredRestore.Unavailable{reason: error.message()}
+            .Corrupt -> return Ok(ArtifactRestore.Corrupt)
+            .Missing -> return Ok(ArtifactRestore.Missing)
         }
     }
-    if store.restore_file(key, binary) == {
-        .Ok(restored) -> {
-            if restored == {
-                .Hit(_, _) -> {}
-                .Corrupt -> return JetCLIStoredRestore.Corrupt
-                .Missing -> return JetCLIStoredRestore.Missing
-            }
-        }
-        .Err(error) -> return JetCLIStoredRestore.Unavailable{reason: error.message()}
+    restored: store.restore_file(key, binary) ?? return Err(err.message())
+    if restored == {
+        .Hit(_, _) -> {}
+        else -> return Ok(restored)
     }
     if debug.len() > 0 {
-        cli_files.write_bytes("{binary}.debug", debug) ?? return JetCLIStoredRestore.Unavailable{reason: "couldn't write {binary}.debug: {err}"}
+        cli_files.write_bytes("{binary}.debug", debug) ?? return Err("couldn't write {binary}.debug: {err}")
     }
     if id != "" {
         dir: "{root}/.jet/symbols/.build-id/{id.slice(0, 2)}"
-        cli_files.create_dir_all(dir) ?? return JetCLIStoredRestore.Unavailable{reason: "couldn't create the symbol store {dir}: {err}"}
-        cli_files.write_bytes("{dir}/{id.slice(2, id.len())}.debug", debug) ?? return JetCLIStoredRestore.Unavailable{reason: "couldn't write the symbol store {dir}: {err}"}
+        cli_files.create_dir_all(dir) ?? return Err("couldn't create the symbol store {dir}: {err}")
+        cli_files.write_bytes("{dir}/{id.slice(2, id.len())}.debug", debug) ?? return Err("couldn't write the symbol store {dir}: {err}")
     }
-    JetCLIStoredRestore.Hit
+    Ok(restored)
 }
 
 // Store the built executable at `path` under `key`, its side entries first,
