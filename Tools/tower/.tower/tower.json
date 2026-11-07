@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6666,
-    "rev": 95666,
+    "nextNum": 6669,
+    "rev": 95675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -69770,6 +69770,11 @@
         {
           "at": "2026-11-07",
           "by": "Main",
+          "text": "21400fc471: Tools/gauntlet's integrated gate reads .jet/hardening-manifest.json (schema, unique ids, denominator, zero rows neither covered nor excluded; 5/5 tests); Tools/perf/corelib_parity.py deleted (no live caller). Next: the RuntimeGenerators cutover (--check is current on dev)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
           "text": "c68 group 3 landed in 57468656ec: core-conformance.mjs is deleted; Tools/hardening is the one conformance checker. FIXTURE_BINDINGS moved to tests/conformance/fixture-bindings.tsv, and the 3 stale special-routes.tsv lines are fixed, so hardening --write exits 0 (4236 rows). Left over: Tools/gauntlet's integrated gate still reads .jet/core-conformance-check.txt, which nothing produces now (follow-up with TestSystemLead-2). The full corelib_parity.py run is red from its stale Python regex parser, about 3000 false unimplemented members."
         },
         {
@@ -70920,7 +70925,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T17:15:48.068Z",
-      "updated": "2026-11-07T09:28:03.078Z",
+      "updated": "2026-11-07T09:38:45.826Z",
       "updatedBy": "Main",
       "goals": [
         "G1"
@@ -98120,7 +98125,7 @@
       "track": "epoch",
       "epoch": "e4",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -98133,11 +98138,11 @@
         {
           "n": 1,
           "text": "On a PATH with no cc, ar or ld, a released jet builds Examples/Interop/FFI/InlineC.jet and NativeC/run.jet and they pass at o0, o1 and o2, and ice_regressions/b12_c_module_import_keeps_plain_c_return passes (or every row that truly needs a host tool declares requires: tool:X and reports SKIP-HOST).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T08:34:02.742Z"
+          "evidence": "7e5c38d01a: ForeignLink resolves the C step as CC/AR if set, else JET_CC_PACK_ROOT, else the engine's env fetch-toolchain --json root (clang, llvm-ar, lld, compiler-rt), else host cc. The testkit fetches the pack once per golden run. PortsLead-2 run, s1 from seed a0_032 under env -i with no cc, ar or rust on PATH: Examples/Interop/FFI/InlineC.jet and NativeC/run.jet PASS on o0, o1 and o2, and cases ice_regressions/b12_c_module_import_keeps_plain_c_return PASS. LaneCheck CHECK OK (Kit.jet, ForeignLink.jet); JETPACK HOSTED OK. The fresh-clone c65 run on a0_033 confirms it.",
+          "at": "2026-11-07T09:38:58.262Z"
         }
       ],
       "refs": [],
@@ -98148,9 +98153,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:33:50.199Z",
-      "updated": "2026-11-07T08:34:02.742Z",
+      "updated": "2026-11-07T09:39:00.169Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-07T09:39:00.169Z"
     },
     {
       "id": "c0kbej10",
@@ -98274,11 +98280,11 @@
         {
           "n": 2,
           "text": "Every case file REFUSED for a grammar error (argv-only environment tokens, missing ':', invalid stream or JSON assertion, undefined capture token, unguarded conditional modifier) is corrected to the current case grammar and its row passes or is known-failing under an owning card.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-07T09:13:24.006Z"
+          "evidence": "091eb17840: 15 grammar-refused case files corrected to the current case grammar. MechD-3 cases run over them: PASS 4, KNOWN-FAILING 4 (shell_on_fail under #3590; script_to_system, forms_table and reference_loop under #6665), SKIP-HOST 4 (no browser), REFUSED 3 (all fixture seams, counted under c1), grammar refusals 0.",
+          "at": "2026-11-07T09:39:01.511Z"
         },
         {
           "n": 3,
@@ -98298,9 +98304,121 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T09:13:07.024Z",
-      "updated": "2026-11-07T09:26:26.260Z",
+      "updated": "2026-11-07T09:39:01.511Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0c6kaqk",
+      "num": 6666,
+      "title": "Gauntlet measurement-manifest test red: the AGENTS.md machine-ceiling paragraph check fails",
+      "body": "TestSystemLead-2 (21400fc471 follow-up): node --test Tools/gauntlet/harness/measurement-manifest.test.mjs passes 25/26. The one red test checks the AGENTS.md machine-ceiling paragraph against the manifest policy, and it was red before 21400fc471. The performance gate's manifest must encode the AGENTS.md two-stage policy (peer floor and machine ceiling), so either the manifest or its encoding check is stale. Separately, Tools/gauntlet/harness/integrated-gate.mjs has no caller besides its own test, so a gate that should be wired isn't.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G11"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T09:38:47.431Z",
+      "updated": "2026-11-07T09:38:47.431Z",
+      "updatedBy": "Main"
+    },
+    {
+      "id": "c09qdr1z",
+      "num": 6667,
+      "title": "Codemod refuses editable roots outside Examples/ or tests/ui/ (agent_workloads corpus root examples)",
+      "body": "Compiler Codemod.jet:395 accepts editable roots only beneath Examples/ or tests/ui/, so a user project's own examples/ root is refused with E2105 'Editable root examples must be beneath Examples/ or tests/ui/'. Case agent_workloads/equivalent_adapters_complete_declared_tasks runs repository_semantic_edit.jet over a corpus whose root is examples and panics. A codemod over a user repository must accept that repository's roots; the checkout-specific roots look like repo tooling leaking into the product.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "jet codemod (and the repository_semantic_edit workload) accepts any editable root inside the target repository; case agent_workloads/equivalent_adapters_complete_declared_tasks passes and its known-failing line is removed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T09:39:32.250Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G5"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T09:39:22.111Z",
+      "updated": "2026-11-07T09:39:32.250Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0r85c0z",
+      "num": 6668,
+      "title": "Generated build-entry module import refused: use producer is E0603 not present in its authorized package root",
+      "body": "Case build_entry/enum_dependency_change_invalidates_compiler_package_chain: the setup.jet that the build entry generates imports use producer, and the loader refuses it with E0603 'not present in its authorized package root'. The case expects the generated dependency chain to resolve and to be invalidated when the enum changes.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Case build_entry/enum_dependency_change_invalidates_compiler_package_chain passes: the generated use producer resolves inside the build entry's package root, and the enum change invalidates the dependent compiler package chain. Its known-failing line is removed.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T09:39:33.324Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T09:39:23.169Z",
+      "updated": "2026-11-07T09:39:33.324Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -186204,6 +186322,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T09:39:33.324Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0r85c0z",
+      "note": "#1 Case build_entry/enum_dependency_change_invalidates_compiler"
+    },
+    {
+      "at": "2026-11-07T09:39:32.250Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09qdr1z",
+      "note": "#1 jet codemod (and the repository_semantic_edit workload) acce"
+    },
+    {
+      "at": "2026-11-07T09:39:23.169Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0r85c0z",
+      "note": "Generated build-entry module import refused: use producer is E0603 not present in its authorized package root"
+    },
+    {
+      "at": "2026-11-07T09:39:22.111Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c09qdr1z",
+      "note": "Codemod refuses editable roots outside Examples/ or tests/ui/ (agent_workloads corpus root examples)"
+    },
+    {
+      "at": "2026-11-07T09:39:01.511Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0onvbda",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-07T09:39:00.169Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0z3litn",
+      "note": "phase"
+    },
+    {
+      "at": "2026-11-07T09:38:58.262Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0z3litn",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-07T09:38:47.431Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0c6kaqk",
+      "note": "Gauntlet measurement-manifest test red: the AGENTS.md machine-ceiling paragraph check fails"
+    },
+    {
+      "at": "2026-11-07T09:38:45.826Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0pgowhn",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-07T09:34:09.537Z",
       "by": "Main",
