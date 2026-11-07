@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6639,
-    "rev": 94800,
+    "rev": 94825,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29915,22 +29915,13 @@
           "at": "2026-09-12T14:30:16.660Z"
         },
         {
-          "n": 4,
-          "text": "retain one TaskFailure owner.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:16.660Z"
-        },
-        {
           "n": 5,
-          "text": "A task body `Err(e)` of domain type E reaches the joiner as E, not `TaskFailure.Panicked`, and `Core/tasks/tasks.jet` declares the single `TaskFailure` enum used by sema and host. Proof: Examples/features/concurrency/task_domain_error.jet passes `JET_GOLDEN_FILTER=concurrency/task_domain_error Tools/agent/jet-env cargo test --test golden examples_compile_and_run`, and `jet run` and `jet run --interpret` diff empty against the golden.",
+          "text": "A task body `Err(e)` of domain type E reaches the joiner as E, not `TaskFailure.Panicked`, and Core declares the single `TaskFailure` enum used by sema and the runtime. Proof: the concurrency task_domain_error golden passes on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:09:05.525Z"
+          "at": "2026-11-07T03:07:21.066Z"
         },
         {
           "n": 6,
@@ -29970,12 +29961,12 @@
         },
         {
           "n": 10,
-          "text": "[#3180]  • Capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation, shown by observed transitions. • Join, shield and detach obligations. Evaluator and host-bridge gaps are recorded honestly. • Golden `concurrency/conformance_capsule`.",
+          "text": "[#3180] • Capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation, shown by observed transitions. • Join, shield and detach obligations. • Golden `concurrency/conformance_capsule` on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T18:28:36.456Z"
+          "at": "2026-11-07T03:07:21.966Z"
         },
         {
           "n": 11,
@@ -30024,12 +30015,12 @@
         },
         {
           "n": 16,
-          "text": "(was #3226) AOT/default/interpreter results use one semantic law; browser process execution is explicitly inapplicable, not faked.",
+          "text": "(was #3226) O0, O1 and O2 results use one semantic law; browser process execution is explicitly inapplicable, not faked.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:29:11.261Z"
+          "at": "2026-11-07T03:07:22.964Z"
         },
         {
           "n": 17,
@@ -30096,12 +30087,12 @@
         },
         {
           "n": 24,
-          "text": "(was #3345) Goldens Examples/features/streams/stream_readiness.jet, stream_cancel_on_break.jet and stream_failure_adapters.jet print identical output on AOT, `jet run` and `jet run --interpret`. Proof: `JET_GOLDEN_FILTER=streams/stream_ cargo test --test golden examples_compile_and_run` passes, and `Tools/agent/jet-env target/debug/jet run --interpret` on each file matches its golden.",
+          "text": "(was #3345) The stream_readiness, stream_cancel_on_break and stream_failure_adapters goldens print identical output on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:29:19.867Z"
+          "at": "2026-11-07T03:07:23.909Z"
         },
         {
           "n": 25,
@@ -30294,12 +30285,12 @@
         },
         {
           "n": 46,
-          "text": "(was #3000) `Tools/agent/jet-env cargo test --test effects -- db_crash_reopen_` passes: every reachable write and sync boundary of a two-transaction workload is crashed under the stated model (including dropped and reordered unsynced writes), each reopen shows whole-or-absent transactions with `PRAGMA integrity_check` = ok, and a seeded failing schedule replays and reduces.",
+          "text": "(was #3000) A Jet test, db_crash_reopen, crashes every reachable write and sync boundary of a two-transaction workload under the stated model (including dropped and reordered unsynced writes); each reopen shows whole-or-absent transactions with `PRAGMA integrity_check` = ok, and a seeded failing schedule replays and reduces.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:29:46.356Z"
+          "at": "2026-11-07T03:07:24.747Z"
         },
         {
           "n": 47,
@@ -30384,12 +30375,12 @@
         },
         {
           "n": 56,
-          "text": "(was #3244) The cell table on this card cites passing runs of `Tools/agent/jet-env cargo test --test target_machines -- selected_target_machine no_os_machine_rejects_dev_and_jit_explicitly mcu_firmware_build_writes_elf_map_audit_and_size_budget target_provider_fact_matrix_covers_present_missing_and_malformed`, and each uncovered job has its own ballot.",
+          "text": "(was #3244) Jet tests cover what the retired target_machines tests checked (selected target machine, no-OS machine rejects dev explicitly, MCU firmware build writes ELF, map, audit and size budget, target provider fact matrix covers present, missing and malformed), and each uncovered job has its own ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:37:49.133Z"
+          "at": "2026-11-07T03:07:25.969Z"
         },
         {
           "n": 57,
@@ -30402,12 +30393,12 @@
         },
         {
           "n": 58,
-          "text": "(was #4910) Matching integrated focused lane CHECK OK and all three actual jet-codegen io_error_ units pass with exact named nonzero-test receipts; a negative collect-all regression proves later independent cases run after a failure and aggregate nonzero remains.",
+          "text": "(was #4910) The io_error unit tests pass, and a negative collect-all regression proves later independent cases run after a failure and the aggregate result stays nonzero.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:37:54.195Z"
+          "at": "2026-11-07T03:07:26.908Z"
         },
         {
           "n": 59,
@@ -30420,12 +30411,12 @@
         },
         {
           "n": 60,
-          "text": "(was #4910) Fresh generated decoder/context/free-once behavior is exercised on each applicable runtime tier with genuine artifacts/providers and one canonical meaning; source text assertions and Rust-only check receipts do not establish native runtime or Rust-removal completion.",
+          "text": "(was #4910) Fresh generated decoder, context and free-once behavior is exercised on O0, O1 and O2 with genuine artifacts and providers and one canonical meaning; source text assertions do not count.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-31T01:37:57.174Z"
+          "at": "2026-11-07T03:07:27.744Z"
         },
         {
           "n": 61,
@@ -30491,31 +30482,22 @@
           "at": "2026-11-04T19:06:48.291Z"
         },
         {
-          "n": 68,
-          "text": "(was #102) Structured concurrency / nursery scope + cancellation + deadlines [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:13.253Z"
-        },
-        {
           "n": 69,
-          "text": "(was #1337 c1) examples/features/concurrency/bounded_workers.jet exists, uses tasks.channel<T>(capacity: N), and demonstrates both backpressure (send blocks at capacity) and at-most-N concurrent workers [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1337 c1) A bounded_workers example uses tasks.channel<T>(capacity: N) and demonstrates both backpressure (send blocks at capacity) and at most N concurrent workers.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:13.880Z"
+          "at": "2026-11-07T03:07:29.458Z"
         },
         {
           "n": 70,
-          "text": "(was #1337 c2) Golden output passes on default jet run and jet run --release (I9 tier parity) [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #1337 c2) Its golden output passes on O0, O1 and O2 (I9).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:14.507Z"
+          "at": "2026-11-07T03:07:30.301Z"
         },
         {
           "n": 71,
@@ -30527,76 +30509,22 @@
           "at": "2026-11-04T23:43:15.103Z"
         },
         {
-          "n": 72,
-          "text": "(was #1747 c1) The deadline clock, budget and E3003 raise live in one Prelude file included by both AOT emission and jet_codegen::scheduler [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:15.729Z"
-        },
-        {
-          "n": 73,
-          "text": "(was #1747 c2) The scheduler panic boundary lives in one Prelude file included by both [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:16.389Z"
-        },
-        {
-          "n": 74,
-          "text": "(was #1747 c3) SchedulerHost.rs keeps only marshalling; no re-typed prelude bodies remain [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:16.996Z"
-        },
-        {
           "n": 75,
-          "text": "(was #2787 c1) Source-complete: root cancellation, signal handling, request deadlines, listener drain, and ProcessStdin close are implemented through shared Prelude semantics with AOT/JIT/interpreter adapters. Scripted signal/deadline/CLI goldens and snapshots are deferred to #2919 [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #2787 c1) Root cancellation, signal handling, request deadlines, listener drain and ProcessStdin close are implemented through shared Prelude semantics, with scripted signal, deadline and CLI goldens and snapshots on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:17.618Z"
-        },
-        {
-          "n": 76,
-          "text": "(was #3365 c1) Per-source order is retained; cross-source order is explicitly readiness-driven, not falsely deterministic [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:18.237Z"
-        },
-        {
-          "n": 77,
-          "text": "(was #3365 c2) Owned source end/drop/error closes only the specified sources and does not leak producers [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:18.855Z"
-        },
-        {
-          "n": 78,
-          "text": "(was #3365 c3) Keyed input preserves source identity using ordinary Map/tuple values; fairness and bounded in-flight state are stated [precut audit: no dev test, golden, case or snapshot proves this today]",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-04T23:43:19.766Z"
+          "at": "2026-11-07T03:07:33.632Z"
         },
         {
           "n": 79,
-          "text": "(was #3443 c1) Concurrency-service task-group expansion produces unique MIR function identities and the bounded workload reaches its exact expected behavior without the duplicate-function ICE [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3443 c1) Concurrency-service task-group expansion produces unique IR function identities, and the bounded workload reaches its exact expected behavior without the duplicate-function ICE.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:20.434Z"
+          "at": "2026-11-07T03:07:37.078Z"
         },
         {
           "n": 80,
@@ -30609,21 +30537,21 @@
         },
         {
           "n": 81,
-          "text": "(was #3989 c1) Every blocking function in core.tasks declares the same waiting leaf that core_calls.rs infers for it [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3989 c1) Every blocking function in core.tasks declares its waiting leaf (Time.Wait), and sema infers the same leaf for it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:21.782Z"
+          "at": "2026-11-07T03:07:37.904Z"
         },
         {
           "n": 82,
-          "text": "(was #3989 c2) A block granted only `Time.Wait` can call `tasks.recv`, and existing task examples pass unchanged on AOT and jet run [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "text": "(was #3989 c2) A block granted only `Time.Wait` can call `tasks.recv`, and the existing task examples pass unchanged on O0, O1 and O2.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-04T23:43:22.430Z"
+          "at": "2026-11-07T03:07:38.789Z"
         }
       ],
       "refs": [
@@ -30645,7 +30573,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-07T03:07:18.801Z",
+      "updated": "2026-11-07T03:07:38.789Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -40526,21 +40454,12 @@
         },
         {
           "n": 2,
-          "text": "F1 is fixed at the root: generic code cannot move a thread-confined value across a task boundary; a UI snapshot and AOT plus default jet run proofs exist.",
+          "text": "F1 is fixed at the root: generic code cannot move a thread-confined value across a task boundary; a UI snapshot and cases on O0, O1 and O2 prove it.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-28T00:47:00.771Z"
-        },
-        {
-          "n": 3,
-          "text": "F2: a differential oracle (programs sema accepts must compile under rustc) runs in the #217 soundness campaign, and each disagreement is carded.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-28T00:47:01.331Z"
+          "at": "2026-11-07T03:07:39.650Z"
         },
         {
           "n": 4,
@@ -40553,12 +40472,12 @@
         },
         {
           "n": 5,
-          "text": "F1 regression: `JET_UI_FILTER=tests/ui/generic_task_sendability cargo test --test diagnostic_snapshots ui_snapshots` passes with E1102 on the generic `spawn_with(c)` (spawn_with takes `&&`) program, `~/.cache/jet-luna/safe-jet.sh run` on it exits with the same diagnostic (no output `1`), and `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.",
+          "text": "F1 regression: the tests/ui/generic_task_sendability UI snapshot reports E1102 on the generic `spawn_with(c)` program (spawn_with takes `&&`), and `jet run` on it exits with the same diagnostic (no output `1`).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:20:46.524Z"
+          "at": "2026-11-07T03:07:41.309Z"
         },
         {
           "n": 6,
@@ -40587,11 +40506,12 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-09-28T00:46:54.243Z",
-      "updated": "2026-11-06T17:56:47.463Z",
+      "updated": "2026-11-07T03:07:41.309Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
-      ]
+      ],
+      "criteriaLastN": 6
     },
     {
       "id": "c07xffyh",
@@ -184649,6 +184569,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-07T03:07:41.309Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#5: The proof named cargo and a deleted bootstrap script.; was: F1 regression: `JET_UI_FILTER=tests/ui/generic_task_sendability cargo test --test diagnostic_snapshots ui_snapshots` passes with E1102 on the generic `spawn_with(c)` (spawn_with takes `&&`) program, `"
+    },
+    {
+      "at": "2026-11-07T03:07:40.469Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0tgtjtu",
+      "note": "#3: OBE: the F2 oracle compared sema with rustc, which is no longer a backend.; was [open]: F2: a differential oracle (programs sema accepts must compile under rustc) runs in the #217 soundness campaign, and each disagreement is carded."
+    },
+    {
+      "at": "2026-11-07T03:07:39.650Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0tgtjtu",
+      "note": "#2: The tiers are O0, O1 and O2.; was: F1 is fixed at the root: generic code cannot move a thread-confined value across a task boundary; a UI snapshot and AOT plus default jet run proofs exist."
+    },
+    {
+      "at": "2026-11-07T03:07:38.789Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#82: The tiers are O0, O1 and O2.; was: (was #3989 c2) A block granted only `Time.Wait` can call `tasks.recv`, and existing task examples pass unchanged on AOT and jet run [precut audit: no dev test, golden, case or snapshot proves this tod"
+    },
+    {
+      "at": "2026-11-07T03:07:37.904Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#81: core_calls.rs is deleted with Rust.; was: (was #3989 c1) Every blocking function in core.tasks declares the same waiting leaf that core_calls.rs infers for it [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:37.078Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#79: MIR is retired; the one IR carries the identities.; was: (was #3443 c1) Concurrency-service task-group expansion produces unique MIR function identities and the bounded workload reaches its exact expected behavior without the duplicate-function ICE [precut "
+    },
+    {
+      "at": "2026-11-07T03:07:36.248Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#78: Duplicate of c27 ([#3365] keyed sources keep identity; fairness and the in-flight bound are stated).; was [open]: (was #3365 c3) Keyed input preserves source identity using ordinary Map/tuple values; fairness and bounded in-flight state are stated [precut audit: no dev test, golden, case or snapshot proves this t"
+    },
+    {
+      "at": "2026-11-07T03:07:35.382Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#77: Duplicate of c27 ([#3365] owned end, drop and error close only the named sources).; was [open]: (was #3365 c2) Owned source end/drop/error closes only the specified sources and does not leak producers [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:34.498Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#76: Duplicate of c27 ([#3365] per-source order, with the merge_ready golden).; was [open]: (was #3365 c1) Per-source order is retained; cross-source order is explicitly readiness-driven, not falsely deterministic [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:33.632Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#75: There are no JIT or interpreter adapters, and #2919 no longer exists.; was: (was #2787 c1) Source-complete: root cancellation, signal handling, request deadlines, listener drain, and ProcessStdin close are implemented through shared Prelude semantics with AOT/JIT/interpreter "
+    },
+    {
+      "at": "2026-11-07T03:07:32.817Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#74: OBE: SchedulerHost.rs is deleted with Rust.; was [open]: (was #1747 c3) SchedulerHost.rs keeps only marshalling; no re-typed prelude bodies remain [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:31.940Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#73: OBE: jet_codegen is deleted with Rust; one shared runtime is invariant I9.; was [open]: (was #1747 c2) The scheduler panic boundary lives in one Prelude file included by both [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:31.105Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#72: OBE: jet_codegen::scheduler is deleted with Rust; one shared runtime is invariant I9.; was [open]: (was #1747 c1) The deadline clock, budget and E3003 raise live in one Prelude file included by both AOT emission and jet_codegen::scheduler [precut audit: no dev test, golden, case or snapshot proves "
+    },
+    {
+      "at": "2026-11-07T03:07:30.301Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#70: The tiers are O0, O1 and O2.; was: (was #1337 c2) Golden output passes on default jet run and jet run --release (I9 tier parity) [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:29.459Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#69: examples/features moved in the Examples cutover.; was: (was #1337 c1) examples/features/concurrency/bounded_workers.jet exists, uses tasks.channel<T>(capacity: N), and demonstrates both backpressure (send blocks at capacity) and at-most-N concurrent worke"
+    },
+    {
+      "at": "2026-11-07T03:07:28.593Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#68: OBE: a bare pointer (\"structured concurrency / nursery scope\") that this card's c2, c7, c51 and c52 already state as testable rows.; was [open]: (was #102) Structured concurrency / nursery scope + cancellation + deadlines [precut audit: no dev test, golden, case or snapshot proves this today]"
+    },
+    {
+      "at": "2026-11-07T03:07:27.744Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#60: Rust is removed; the Rust-receipt clause is OBE.; was: (was #4910) Fresh generated decoder/context/free-once behavior is exercised on each applicable runtime tier with genuine artifacts/providers and one canonical meaning; source text assertions and Rust-"
+    },
+    {
+      "at": "2026-11-07T03:07:26.908Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#58: jet-codegen is deleted; lane CHECK OK is landing hygiene.; was: (was #4910) Matching integrated focused lane CHECK OK and all three actual jet-codegen io_error_ units pass with exact named nonzero-test receipts; a negative collect-all regression proves later indep"
+    },
+    {
+      "at": "2026-11-07T03:07:25.969Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#56: The proof named a cargo test; JIT is retired.; was: (was #3244) The cell table on this card cites passing runs of `Tools/agent/jet-env cargo test --test target_machines -- selected_target_machine no_os_machine_rejects_dev_and_jit_explicitly mcu_firmwar"
+    },
+    {
+      "at": "2026-11-07T03:07:24.747Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#46: The proof named a cargo test; it is now a Jet test.; was: (was #3000) `Tools/agent/jet-env cargo test --test effects -- db_crash_reopen_` passes: every reachable write and sync boundary of a two-transaction workload is crashed under the stated model (includi"
+    },
+    {
+      "at": "2026-11-07T03:07:23.909Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#24: The proof named cargo and --interpret; the tiers are O0, O1 and O2.; was: (was #3345) Goldens Examples/features/streams/stream_readiness.jet, stream_cancel_on_break.jet and stream_failure_adapters.jet print identical output on AOT, `jet run` and `jet run --interpret`. Proof"
+    },
+    {
+      "at": "2026-11-07T03:07:22.965Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#16: There is no interpreter tier; the tiers are O0, O1 and O2.; was: (was #3226) AOT/default/interpreter results use one semantic law; browser process execution is explicitly inapplicable, not faked."
+    },
+    {
+      "at": "2026-11-07T03:07:21.966Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#10: There is no evaluator; host-bridge gaps are recorded on cards, not in the row.; was: [#3180]  • Capacity-one backpressure, the two-worker limit, first-failure identity and sibling cancellation, shown by observed transitions. • Join, shield and detach obligations. Evaluator and host-br"
+    },
+    {
+      "at": "2026-11-07T03:07:21.066Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06l1r0z",
+      "note": "#5: The proof named cargo and --interpret; the tiers are O0, O1 and O2.; was: A task body `Err(e)` of domain type E reaches the joiner as E, not `TaskFailure.Panicked`, and `Core/tasks/tasks.jet` declares the single `TaskFailure` enum used by sema and host. Proof: Examples/feat"
+    },
+    {
+      "at": "2026-11-07T03:07:20.191Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c06l1r0z",
+      "note": "#4: Duplicate of c5, which requires the single TaskFailure enum.; was [open]: retain one TaskFailure owner."
+    },
+    {
       "at": "2026-11-07T03:07:18.801Z",
       "by": "Main",
       "action": "card.criteria-remove",
@@ -188105,713 +188200,6 @@
       "action": "card.criteria-remove",
       "ref": "c0hn7w1n",
       "note": "#51: Moved to #6386 c110 (G5, developer tools) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #662 c2) Classifier follows #613 current syntax and handles comments, strings, incremental edits, and qualified names without broad skip heuristics [precut audit: failing on 9c7ddf1359: C:lsp/lsp"
-    },
-    {
-      "at": "2026-11-07T02:28:48.692Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozzmvc",
-      "note": "#110 (moved from #6418 c51) (was #662 c2) Classifier follows #613"
-    },
-    {
-      "at": "2026-11-07T02:28:47.835Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#50: Moved to #6386 c109 (G5, developer tools) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #662 c1) Retired local `view`/`.view` spellings emit no semantic identifier/method token; valid public View<T>/ViewMut<T> contract types remain type tokens [precut audit: failing on 9c7ddf1359: C"
-    },
-    {
-      "at": "2026-11-07T02:28:47.025Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozzmvc",
-      "note": "#109 (moved from #6418 c50) (was #662 c1) Retired local `view`/`."
-    },
-    {
-      "at": "2026-11-07T02:28:46.204Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#34: Moved to #6386 c108 (G5, developer tools) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #6195) (from #6250 `jet self lsp` is E2104: the Jet language server doesn't run) lane-check CHECK OK; golden/ui/cases compare loses 0 rows"
-    },
-    {
-      "at": "2026-11-07T02:28:45.307Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozzmvc",
-      "note": "#108 (moved from #6418 c34) (was #6195) (from #6250 `jet self lsp"
-    },
-    {
-      "at": "2026-11-07T02:28:44.119Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#33: Moved to #6386 c107 (G5, developer tools) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #6195) (from #6250 `jet self lsp` is E2104: the Jet language server doesn't run) The VS Code and Zed extensions connect to it in a smoke test"
-    },
-    {
-      "at": "2026-11-07T02:28:42.916Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozzmvc",
-      "note": "#107 (moved from #6418 c33) (was #6195) (from #6250 `jet self lsp"
-    },
-    {
-      "at": "2026-11-07T02:28:42.104Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#32: Moved to #6386 c106 (G5, developer tools) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #6195) (from #6250 `jet self lsp` is E2104: the Jet language server doesn't run) `jet self lsp` starts and answers initialize, hover, definition, diagnostics and semantic tokens in the integratio"
-    },
-    {
-      "at": "2026-11-07T02:28:41.247Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0ozzmvc",
-      "note": "#106 (moved from #6418 c32) (was #6195) (from #6250 `jet self lsp"
-    },
-    {
-      "at": "2026-11-07T02:28:40.371Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0rqi33c",
-      "note": "#9: Moved to #6632 c88 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #3690) [retarget] Provider leaves are either Jet source via ratified F4/F5 facilities or listed as owner-approved remaining Rust with the vetted engine named."
-    },
-    {
-      "at": "2026-11-07T02:28:39.498Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#88 (moved from #4717 c9) (was #3690) [retarget] Provider leaves"
-    },
-    {
-      "at": "2026-11-07T02:28:38.701Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c081c9o8",
-      "note": "#51: Moved to #6632 c87 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #3614 c3, #3615 c3, #3623 c3, #3627 c3, #3628 c3, #3632 c3, #3635 c3, #3637 c3, #3640 c3, #3641 c3, #3643 c3, #3646 c3, #3648 c3, #3649 c3, #3651 c3, #3652 c3, #3653 c3, #3626 c3) Idiom and bound"
-    },
-    {
-      "at": "2026-11-07T02:28:37.856Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#87 (moved from #6419 c51) (was #3614 c3, #3615 c3, #3623 c3, #3"
-    },
-    {
-      "at": "2026-11-07T02:28:36.987Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c081c9o8",
-      "note": "#40: Moved to #6632 c86 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #2189 c8) The --prep flag on env and on use materializes the closure and exits without entering, and a following entry performs no download [precut audit: failing on 9c7ddf1359: C:jetpack_tool/us"
-    },
-    {
-      "at": "2026-11-07T02:28:36.163Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#86 (moved from #6419 c40) (was #2189 c8) The --prep flag on env"
-    },
-    {
-      "at": "2026-11-07T02:28:35.348Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c081c9o8",
-      "note": "#39: Moved to #6632 c85 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #2189 c5) jetpack tool run is removed and its help, tests and docs no longer mention it [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_execs_inside_and_outside_project_without"
-    },
-    {
-      "at": "2026-11-07T02:28:34.468Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#85 (moved from #6419 c39) (was #2189 c5) jetpack tool run is re"
-    },
-    {
-      "at": "2026-11-07T02:28:33.541Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c081c9o8",
-      "note": "#38: Moved to #6632 c84 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #2189 c2) jetpack env -- <cmd> runs in the project env and exits with the command's status [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_execs_inside_and_outside_project_with"
-    },
-    {
-      "at": "2026-11-07T02:28:32.619Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#84 (moved from #6419 c38) (was #2189 c2) jetpack env -- <cmd> r"
-    },
-    {
-      "at": "2026-11-07T02:28:31.808Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c081c9o8",
-      "note": "#37: Moved to #6632 c83 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #2189 c1) jetpack env with no argument enters the default env module, and jetpack env <name> enters that module positionally [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_exe"
-    },
-    {
-      "at": "2026-11-07T02:28:30.908Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#83 (moved from #6419 c37) (was #2189 c1) jetpack env with no ar"
-    },
-    {
-      "at": "2026-11-07T02:28:30.009Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#140: Moved to #6632 c82 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: Publication #Tests over the Jet public-API producer (c137) port tests/pkg.rs v2_snapshot_upgrade_matches_duplicate_inline_leaves (pkg.rs:6136), public_effect_metadata_preserves_symbolic_rows (pkg.rs:6"
-    },
-    {
-      "at": "2026-11-07T02:28:29.098Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#82 (moved from #6418 c140) Publication #Tests over the Jet publ"
-    },
-    {
-      "at": "2026-11-07T02:28:28.140Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#137: Moved to #6632 c81 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: jet publish has a Jet public-API producer (PublicAPIItem from the checked package, structs included); a Jetpack/Publication #Test proves #CLI struct Config { port: Int{3000}; required: Int } freezes a"
-    },
-    {
-      "at": "2026-11-07T02:28:27.235Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#81 (moved from #6418 c137) jet publish has a Jet public-API pro"
-    },
-    {
-      "at": "2026-11-07T02:28:26.303Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#135: Moved to #6632 c80 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: jet fetch and jet fetch --locked are built; tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case passes (stale or missing provider artifact fails E1256 and writes no lock; a "
-    },
-    {
-      "at": "2026-11-07T02:28:25.287Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#80 (moved from #6418 c135) jet fetch and jet fetch --locked are"
-    },
-    {
-      "at": "2026-11-07T02:28:24.283Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#119: Moved to #6632 c79 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #2797 c2) All named library consumer paths use canonical APIs, including closed stdin and ignore-aware walk; referenced Core/compiler execution gates remain #2919 [precut audit: failing on 9c7ddf"
-    },
-    {
-      "at": "2026-11-07T02:28:23.433Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#79 (moved from #6418 c119) (was #2797 c2) All named library con"
-    },
-    {
-      "at": "2026-11-07T02:28:22.594Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#118: Moved to #6632 c78 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #2797 c1) The CLI battery and typed executable consumer are complete in source; execution/build/install/golden proof remains #2919 [precut audit: failing on 9c7ddf1359: C:jetpack_tasks/top_level_"
-    },
-    {
-      "at": "2026-11-07T02:28:21.721Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#78 (moved from #6418 c118) (was #2797 c1) The CLI battery and t"
-    },
-    {
-      "at": "2026-11-07T02:28:20.555Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#94: Moved to #6632 c77 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: (was #1610 c2) The two physical-unit signature tests pass: physical_unit_api_freeze_and_semver_share_one_canonical_signature, physical_unit_trait_methods_use_canonical_dimensions [precut audit: failin"
-    },
-    {
-      "at": "2026-11-07T02:28:19.722Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#77 (moved from #6418 c94) (was #1610 c2) The two physical-unit "
-    },
-    {
-      "at": "2026-11-07T02:28:18.887Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#17: Moved to #6632 c76 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: CLI dispatch: retired routes teach their real spelling (D-ONCE-RETIRE1=C: serve, bench, store, gc, lock), `jet hangar` and the other engine verbs dispatch to jetpack (D-JPK-DISPATCH1), and external `j"
-    },
-    {
-      "at": "2026-11-07T02:28:18.069Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#76 (moved from #6418 c17) CLI dispatch: retired routes teach th"
-    },
-    {
-      "at": "2026-11-07T02:28:17.253Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0hn7w1n",
-      "note": "#7: Moved to #6632 c75 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: jet publish and registry keygen are built; every cases row that reported E2104 for it passes on the default tier."
-    },
-    {
-      "at": "2026-11-07T02:28:16.450Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#75 (moved from #6418 c7) jet publish and registry keygen are bu"
-    },
-    {
-      "at": "2026-11-07T02:28:15.645Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0h06654",
-      "note": "#62: Moved to #6632 c74 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: pkg-cli-typed-defaults: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::cli_typed_default_is_not_frozen_as_positional)"
-    },
-    {
-      "at": "2026-11-07T02:28:14.842Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#74 (moved from #6096 c62) pkg-cli-typed-defaults: 1 deleted Rus"
-    },
-    {
-      "at": "2026-11-07T02:28:14.022Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0h06654",
-      "note": "#32: Moved to #6632 c73 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: jetpack-engine-staged-plan: 2 deleted Rust tests have a Jet test covering the same behavior (tests/jetpack_engine.rs::staged_plan_action_production_path_is_deterministic_and_complete, tests/jetpack_en"
-    },
-    {
-      "at": "2026-11-07T02:28:13.223Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#73 (moved from #6096 c32) jetpack-engine-staged-plan: 2 deleted"
-    },
-    {
-      "at": "2026-11-07T02:28:12.403Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0h06654",
-      "note": "#24: Moved to #6632 c72 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: pkg-api-freeze: 3 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::physical_unit_api_freeze_and_semver_share_one_canonical_signature, tests/pkg.rs::soft_public_names_are_no"
-    },
-    {
-      "at": "2026-11-07T02:28:11.571Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#72 (moved from #6096 c24) pkg-api-freeze: 3 deleted Rust tests "
-    },
-    {
-      "at": "2026-11-07T02:28:10.734Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0h06654",
-      "note": "#23: Moved to #6632 c71 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: jetpack-engine-remote-scheduler: 3 deleted Rust tests have a Jet test covering the same behavior (tests/jetpack_engine.rs::remote_scheduler_selects_capabilities_then_fails_over_in_order, tests/jetpack"
-    },
-    {
-      "at": "2026-11-07T02:28:09.892Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#71 (moved from #6096 c23) jetpack-engine-remote-scheduler: 3 de"
-    },
-    {
-      "at": "2026-11-07T02:28:09.076Z",
-      "by": "Main",
-      "action": "card.criteria-remove",
-      "ref": "c0h06654",
-      "note": "#13: Moved to #6632 c70 (G7, package management) at the owner's direction on 2026-11-06: devserver work belongs to the dev-tools goal and package/Jetpack work to package management, not G1/G2.; was [open]: pkg-snapshot-metadata: 5 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::v2_snapshot_upgrade_matches_duplicate_inline_leaves, tests/pkg.rs::public_effect_metadata_preserve"
-    },
-    {
-      "at": "2026-11-07T02:28:08.248Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#70 (moved from #6096 c13) pkg-snapshot-metadata: 5 deleted Rust"
-    },
-    {
-      "at": "2026-11-07T02:21:26.379Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0zy8wm1",
-      "note": "#1 A runtime test tracks an allocation and cycles cached sizes;"
-    },
-    {
-      "at": "2026-11-07T02:21:25.580Z",
-      "by": "Main",
-      "action": "card.add",
-      "ref": "c0zy8wm1",
-      "note": "Alloc cache gating disagrees between alloc and free (Alloc.jet:1012 vs :1056)"
-    },
-    {
-      "at": "2026-11-07T02:18:53.142Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#186"
-    },
-    {
-      "at": "2026-11-07T02:18:52.152Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#69 (moved from #3590 c186) (was #3508 c9) [retarget] An Example"
-    },
-    {
-      "at": "2026-11-07T02:18:51.120Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#185"
-    },
-    {
-      "at": "2026-11-07T02:18:50.100Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#68 (moved from #3590 c185) (was #3508 c8) [retarget] Equivalent"
-    },
-    {
-      "at": "2026-11-07T02:18:49.092Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#184"
-    },
-    {
-      "at": "2026-11-07T02:18:48.094Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#67 (moved from #3590 c184) (was #3508 c7) [retarget] Plan fragm"
-    },
-    {
-      "at": "2026-11-07T02:18:47.075Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#183"
-    },
-    {
-      "at": "2026-11-07T02:18:45.789Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#66 (moved from #3590 c183) (was #3508 c6) [retarget] Import-onl"
-    },
-    {
-      "at": "2026-11-07T02:18:44.828Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#182"
-    },
-    {
-      "at": "2026-11-07T02:18:43.895Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#65 (moved from #3590 c182) (was #3508 c5) [retarget] Explicit A"
-    },
-    {
-      "at": "2026-11-07T02:18:42.890Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#181"
-    },
-    {
-      "at": "2026-11-07T02:18:41.895Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#64 (moved from #3590 c181) (was #3508 c4) Equivalent shared-pre"
-    },
-    {
-      "at": "2026-11-07T02:18:40.909Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#180"
-    },
-    {
-      "at": "2026-11-07T02:18:39.916Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#63 (moved from #3590 c180) (was #3508 c3) Plan fragments and ge"
-    },
-    {
-      "at": "2026-11-07T02:18:38.909Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#179"
-    },
-    {
-      "at": "2026-11-07T02:18:37.991Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#62 (moved from #3590 c179) (was #3508 c2) Import-only and ordin"
-    },
-    {
-      "at": "2026-11-07T02:18:37.021Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#178"
-    },
-    {
-      "at": "2026-11-07T02:18:36.045Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#61 (moved from #3590 c178) (was #3508 c1) Explicit AOT includes"
-    },
-    {
-      "at": "2026-11-07T02:18:35.086Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#177"
-    },
-    {
-      "at": "2026-11-07T02:18:34.120Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#60 (moved from #3590 c177) (was #2978 c1) Nix garbage collectio"
-    },
-    {
-      "at": "2026-11-07T02:18:33.133Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#176"
-    },
-    {
-      "at": "2026-11-07T02:18:32.191Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#59 (moved from #3590 c176) (was #2945 c1) Implementation-only c"
-    },
-    {
-      "at": "2026-11-07T02:18:31.209Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#174"
-    },
-    {
-      "at": "2026-11-07T02:18:30.159Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#58 (moved from #3590 c174) (was #2371 c3) The Jetpack ledger re"
-    },
-    {
-      "at": "2026-11-07T02:18:29.098Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#173"
-    },
-    {
-      "at": "2026-11-07T02:18:27.854Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#57 (moved from #3590 c173) (was #2371 c2) A cache-behavior regr"
-    },
-    {
-      "at": "2026-11-07T02:18:26.782Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#172"
-    },
-    {
-      "at": "2026-11-07T02:18:25.619Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#56 (moved from #3590 c172) (was #2371 c1) A comment-only packag"
-    },
-    {
-      "at": "2026-11-07T02:18:24.587Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#152"
-    },
-    {
-      "at": "2026-11-07T02:18:23.519Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#55 (moved from #3590 c152) (was #2330 c1) Three consecutive unc"
-    },
-    {
-      "at": "2026-11-07T02:18:22.221Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#151"
-    },
-    {
-      "at": "2026-11-07T02:18:21.091Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#54 (moved from #3590 c151) (was #2232 c2) The E1355/E1340 dead-"
-    },
-    {
-      "at": "2026-11-07T02:18:19.702Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#150"
-    },
-    {
-      "at": "2026-11-07T02:18:18.760Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#53 (moved from #3590 c150) (was #2232 c1) jetpack env --prep -y"
-    },
-    {
-      "at": "2026-11-07T02:18:17.806Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#133"
-    },
-    {
-      "at": "2026-11-07T02:18:16.856Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#52 (moved from #3590 c133) (was #2193 c11) Drift detection adds"
-    },
-    {
-      "at": "2026-11-07T02:18:15.932Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#132"
-    },
-    {
-      "at": "2026-11-07T02:18:14.999Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#51 (moved from #3590 c132) (was #2193 c4) shim overhead on a no"
-    },
-    {
-      "at": "2026-11-07T02:18:14.059Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#126"
-    },
-    {
-      "at": "2026-11-07T02:18:13.102Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#50 (moved from #3590 c126) (was #2188 c4) all 185 measured occu"
-    },
-    {
-      "at": "2026-11-07T02:18:12.164Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#123"
-    },
-    {
-      "at": "2026-11-07T02:18:11.234Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#49 (moved from #3590 c123) (was #1779 c7) New verbs are registe"
-    },
-    {
-      "at": "2026-11-07T02:18:10.251Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#122"
-    },
-    {
-      "at": "2026-11-07T02:18:09.181Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#48 (moved from #3590 c122) (was #1779 c5) Per-secret metadata ("
-    },
-    {
-      "at": "2026-11-07T02:18:08.247Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#121"
-    },
-    {
-      "at": "2026-11-07T02:18:07.234Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#47 (moved from #3590 c121) (was #1779 c4) Composed secrets: par"
-    },
-    {
-      "at": "2026-11-07T02:18:06.294Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#120"
-    },
-    {
-      "at": "2026-11-07T02:18:05.352Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#46 (moved from #3590 c120) (was #1083 c2, #1085 c2, #1090 c2) S"
-    },
-    {
-      "at": "2026-11-07T02:18:04.408Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#118"
-    },
-    {
-      "at": "2026-11-07T02:18:03.450Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#45 (moved from #3590 c118) (was #1048 c1) Every behavior named "
-    },
-    {
-      "at": "2026-11-07T02:18:02.470Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#117"
-    },
-    {
-      "at": "2026-11-07T02:18:01.506Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c00tcdfc",
-      "note": "#44 (moved from #3590 c117) (was #1047 c1) Every behavior named "
     }
   ],
   "nextNum": 368,
