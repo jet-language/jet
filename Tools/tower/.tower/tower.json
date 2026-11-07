@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6656,
-    "rev": 95525,
+    "nextNum": 6659,
+    "rev": 95534,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97568,12 +97568,21 @@
       "criteria": [
         {
           "n": 1,
-          "text": "Case cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs PASS (no exit 101) and cli_parts_surface/cost_cli_rejects_incomplete_reachable_projection PASS (the incomplete projection is a registered diagnostic with a UI snapshot).",
+          "text": "No exit 101 from the cost surface: `jet lint --cost` and `jet explain --cost` are unbuilt forms in the CLI forms model (registered E2101/E2104 naming this card), so cases cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs and cost_cli_rejects_incomplete_reachable_projection report KNOWN-FAILING #6652, never ERROR, in a release kit.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-07T06:51:04.815Z"
+          "at": "2026-11-07T06:58:02.980Z"
+        },
+        {
+          "n": 2,
+          "text": "The cost producer is ported: cost facts and the loop-depth collector over BodyTree feed jet lint --cost and jet check; an incomplete reachable projection is E2104 with a UI snapshot; jet explain --cost and the L2510 view-into-owned-slot lint are built; both cost cases PASS on a release kit.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:58:03.916Z"
         }
       ],
       "refs": [],
@@ -97584,9 +97593,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:52.522Z",
-      "updated": "2026-11-07T06:51:04.815Z",
+      "updated": "2026-11-07T06:58:03.916Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 2
     },
     {
       "id": "c0ngdap0",
@@ -97688,7 +97697,17 @@
       "blockedBy": [],
       "assignee": null,
       "log": [],
-      "criteria": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Cases web_build/web_two_hop_journey_matches_all_execution_tiers and web_edge_preserves_one_error_wire_across_js_and_wasm PASS with one expected error report (the native form) on native, JS and Wasm tiers; the web host renders the runtime's report and holds no report formatting of its own.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:54:46.772Z"
+        }
+      ],
       "refs": [],
       "tags": [],
       "goals": [
@@ -97697,8 +97716,132 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:54:40.968Z",
-      "updated": "2026-11-07T06:54:40.968Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-07T06:54:46.772Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0drland",
+      "num": 6656,
+      "title": "Cases kit captures stdout as strict UTF-8 text, so byte-exact rows ERROR and their known-failing lines never apply",
+      "body": "From #6651 (MechD-3). tests/cases/terminal/stdout_write_bytes_is_byte_exact_and_ordered_with_print reports ERROR, not FAIL: the cases kit captures stdout as text and the runtime decodes text captures as strict UTF-8 (Compiler/JetRuntime/Source/ProcessExecutionReceipt.jet:321-355). The runtime already passes streamed bytes through undecoded; the kit should capture stdout/stderr as bytes and compare bytes (text predicates decode explicitly).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "In a release kit, case terminal/stdout_write_bytes_is_byte_exact_and_ordered_with_print reports PASS (or KNOWN-FAILING under its existing line), never ERROR; the cases kit captures child stdout/stderr as bytes and no case that wrote non-UTF-8 bytes ERRORs on decoding.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:58:31.620Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:58:17.442Z",
+      "updated": "2026-11-07T06:58:31.620Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c023hw48",
+      "num": 6657,
+      "title": "E3510 GeneratedModuleShadows is registered but never emitted",
+      "body": "From #6638 c3 (MechD-3, ffff735682). tests/ui/build_generated_collision pins E0603 because nothing emits E3510 GeneratedModuleShadows. Either the generated-module collision reports E3510 (and the snapshot moves to it) or E3510 leaves the registry (I4: every registered code has an emitter and a snapshot).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "tests/ui/build_generated_collision snapshots E3510 GeneratedModuleShadows from the generated-module collision (or E3510 is removed from the registry with no remaining reference); diagnostics_snapshots guard PASS.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:58:32.508Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:58:18.913Z",
+      "updated": "2026-11-07T06:58:32.508Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0o6f5xn",
+      "num": 6658,
+      "title": "Native ELF writer emits no .text section header, so objdump -d shows nothing",
+      "body": "From #6651 (MechD-3, row simd_witness/default_and_scalar_float_witnesses_print_identical_values_on_every_tier, KF #6414). objdump -d prints nothing for a jet-built binary because the native ELF writer emits no section headers for code; tools that disassemble or symbolize by section (objdump, perf annotate, gdb disassemble) see no .text.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "objdump -d on a jet-built hello binary lists a .text section with disassembly of main; a case pins it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:58:33.383Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G3"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:58:20.248Z",
+      "updated": "2026-11-07T06:58:33.383Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -185602,6 +185745,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T06:58:33.383Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0o6f5xn",
+      "note": "#1 objdump -d on a jet-built hello binary lists a .text section"
+    },
+    {
+      "at": "2026-11-07T06:58:32.508Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c023hw48",
+      "note": "#1 tests/ui/build_generated_collision snapshots E3510 Generated"
+    },
+    {
+      "at": "2026-11-07T06:58:31.620Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0drland",
+      "note": "#1 In a release kit, case terminal/stdout_write_bytes_is_byte_e"
+    },
+    {
+      "at": "2026-11-07T06:58:20.248Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0o6f5xn",
+      "note": "Native ELF writer emits no .text section header, so objdump -d shows nothing"
+    },
+    {
+      "at": "2026-11-07T06:58:18.913Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c023hw48",
+      "note": "E3510 GeneratedModuleShadows is registered but never emitted"
+    },
+    {
+      "at": "2026-11-07T06:58:17.442Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0drland",
+      "note": "Cases kit captures stdout as strict UTF-8 text, so byte-exact rows ERROR and their known-failing lines never apply"
+    },
+    {
+      "at": "2026-11-07T06:58:03.916Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0zlsxzv",
+      "note": "#2 The cost producer is ported: cost facts and the loop-depth c"
+    },
+    {
+      "at": "2026-11-07T06:58:02.980Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0zlsxzv",
+      "note": "#1: The native compiler has no cost producer; G1 needs the ICE gone, the port is c2; was: Case cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs PASS (no exit 101) and cli_parts_surface/cost_cli_rejects_incomplete_reachable_projection PASS (the incomplete projection is"
+    },
+    {
+      "at": "2026-11-07T06:54:46.772Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0xoy1gg",
+      "note": "#1 Cases web_build/web_two_hop_journey_matches_all_execution_ti"
+    },
     {
       "at": "2026-11-07T06:54:40.968Z",
       "by": "Main",
