@@ -98,26 +98,26 @@ tests/cases/authority/authority_process_macos_seatbelt_runs_and_denies_host_read
 tests/cases/authority/authority_process_windows_plan_and_receipt_share_policy_digest.case	#5454	verify-intent: ref build failed: E1004 `core.process` has no item `workspace`
 tests/cases/authority_receipts/authority_process_refuses_live_output_before_spawn_on_all_hosted_tiers.case	#5454	verify-intent: ref build failed: E1004 `core.process` has no item `workspace`
 tests/cases/authority_receipts/authority_process_refuses_terminal_audit_bypass_on_all_hosted_tiers.case	#5454	verify-intent: ref build failed: E1004 `core.process` has no item `workspace`
-tests/cases/cffi/ffi_capability_boundary_is_safe_for_qualified_c_calls.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/cffi/foreign_js_import_uses_generated_binding_cache_for_symbols.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
-tests/cases/cffi/foreign_js_inline_member_list_uses_the_same_binding_cache.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
-tests/cases/cffi/foreign_js_inline_pub_member_list_reexports_the_namespace.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
-tests/cases/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary.case	#5454	assert not satisfied: original assert! not satisfied: [false]
+tests/cases/cffi/ffi_capability_boundary_is_safe_for_qualified_c_calls.case	#5454	`jet check --verbose run.jet` accepts the program ("no problems"); the original requires FfiBoundaryTypeNotAllowed
+tests/cases/cffi/foreign_js_import_uses_generated_binding_cache_for_symbols.case	#5454	E1002 ReservedRootShadowed: `js` is reserved for first-party or foreign packages, so the generated .jet/bindings/js cache is never consulted
+tests/cases/cffi/foreign_js_inline_member_list_uses_the_same_binding_cache.case	#5454	E1002 ReservedRootShadowed: `js` is reserved for first-party or foreign packages, so the generated .jet/bindings/js cache is never consulted
+tests/cases/cffi/foreign_js_inline_pub_member_list_reexports_the_namespace.case	#5454	E1002 ReservedRootShadowed: `js` is reserved for first-party or foreign packages, so the generated .jet/bindings/js cache is never consulted
+tests/cases/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary.case	#5454	`jet check --verbose run.jet` accepts the program ("no problems"); the original requires InvalidEnumDiscriminant
 tests/cases/compute_extended/curried_autodiff_shapes_share_the_prelude_handle.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.value_and_gradient/jvp/vjp (autodiff runtime tape waits on ballot)
 tests/cases/compute_extended/f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient/jvp (autodiff runtime tape waits on ballot)
 tests/cases/compute_parity/named_gradient_composes_into_second_derivative.case	#5454	verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient (autodiff runtime tape waits on ballot)
 tests/cases/core_set_foundations/core_set_order_ownership_and_algebra_match_across_tiers.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/core_set_foundations/core_set_order_ownership_and_algebra_match_across_tiers.jet` yet:\nfrom_li
 tests/cases/core_set_foundations/core_set_public_carrier_keeps_backend_order_on_all_tiers.case	#5454	ref build failed: E2104 The Jet backend can't build `tests/run/core_set_foundations/core_set_public_carrier_keeps_backend_order_on_all_tiers.jet` yet:\nrun [f
 tests/cases/devtools/devtools_bless_rejects_unknown_target.case	#5454	`jet self devtools bless … --dry-run` exits 2 with E2104 "`jet devtools` is not built yet"
-tests/cases/dsl_blocks/boundary_typed_heads_validate_and_compile.case	#5454	assert not satisfied: original expect not satisfied
-tests/cases/dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw.case	#5454	assert not satisfied: original expect not satisfied
-tests/cases/effect_roots/retired_flat_ffi_spellings_are_rejected_by_the_compiler.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/encoding_edition/edition_2027_cbor_decode_emits_l2001_and_2028_removes_it.case	#5454	assert not satisfied: original assert! not satisfied: [false]
-tests/cases/encoding_edition/edition_2027_cbor_encode_emits_l2001.case	#5454	assert not satisfied: original assert! not satisfied: [false]
+tests/cases/dsl_blocks/boundary_typed_heads_validate_and_compile.case	#5454	E0003 "Expected a name after the field-access operator, found `{`": the typed DSL block heads do not parse
+tests/cases/dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw.case	#5454	E0003 "Expected a name after the field-access operator, found `{`": the typed text-form heads do not parse
+tests/cases/effect_roots/retired_flat_ffi_spellings_are_rejected_by_the_compiler.case	#5454	`run: fn() :[Go]> {}` stops in the parser with E0003 (return type uses `:`) and MissingFunctionBody; the original requires UnknownType for each retired root
+tests/cases/encoding_edition/edition_2027_cbor_decode_emits_l2001_and_2028_removes_it.case	#5454	E2001 EditionTooNew: this compiler supports edition 2026 only, so the 2027/2028 manifests never reach L2001
+tests/cases/encoding_edition/edition_2027_cbor_encode_emits_l2001.case	#5454	E2001 EditionTooNew: this compiler supports edition 2026 only, so the 2027 manifest never reaches L2001
 tests/cases/event_hooks/decision_hook_lifetime_order_once_mutation_and_reentrancy.case	#5454	verify-intent: ref build failed: E0102 `DecisionHook` has no method `on`
 tests/cases/exact_division/comptime_division_keeps_the_same_exact_value_as_runtime.case	#5454	verify-intent: ref build failed: E0956 evaluation does not implement `ambient route is unavailable to the canonical host adapter`
 tests/cases/fact_reads/nominal_layout_intrinsic_in_comptime_helper_agrees_on_tiers.case	#5454	verify-intent: ref build failed: E0391 `comptime { … }` is used as a value in a form this compiler does not support yet
-tests/cases/generics/generic_codec_bounds_follow_structural_codec_contracts.case	#5454	assert not satisfied: original unwrap_or_else not satisfied
+tests/cases/generics/generic_codec_bounds_follow_structural_codec_contracts.case	#5454	E0904 UninferableTypeArgument: no trait named `Encode` is in scope for the bound on `T`
 tests/cases/http_client_law/public_client_allow_http_downgrade_method_typechecks.case	#5454	E2104 `HTTPClient.new` is not built yet: the configured HTTP client runtime waits on #3665
 tests/cases/http_client_law/public_client_retries_method_typechecks.case	#5454	E2104 `HTTPClient.new` is not built yet: the configured HTTP client runtime waits on #3665
 tests/cases/math_display_parity/measured_unit_scale_produces_measured_conversion.case	#5454	ref build failed: ICE: semantic body rechecking did not return a complete resolved package graph
@@ -151,7 +151,7 @@ tests/cases/language_features/nested_callable_containers_keep_required_public_la
 tests/cases/language_features/range_type_runtime_try_and_spelled_arithmetic_gate.case	#5454	verify-intent: ref build failed: E2417 Explicit failure domain `String (text)` is not an Error type
 tests/cases/patterns_and_fields/dyn_map_iteration_display_matches_every_tier.case	#5454	verify-intent: ref build failed: E0112 `Dyn` can't be shown with :Debug yet
 tests/cases/unit_family/physical_unit_codable_round_trips_as_its_concrete_type.case	#5454	verify-intent: ref build failed: E0904 Cannot resolve bound `Encode` for `T`
-tests/cases/web_build/embedded_devserver_rejects_windows_absolute_static_paths.case	#5454	assert not satisfied: original expect not satisfied
+tests/cases/web_build/embedded_devserver_rejects_windows_absolute_static_paths.case	#5454	E0102: `DevServer` has no `port` or `serve` method
 tests/cases/corelib_parts_encoding_surface/random_and_time_output_pins_with_seed_and_epoch.case	#5454	seed 42 draws 5 / 0.05534409481976055 and time.now() prints a DateTime record; the original expects 9 / 0.05534409481976061 / 1700000000000
 tests/cases/corelib_parts_encoding_surface/random_distribution_surface_is_deterministic.case	#5454	rng(99).bool() prints false where the original expects true: the second SplitMix64 word from state 99 (081ab918879d69a4) has low bit 0, so Jet's seeded stream differs from the deleted runtime's (same divergence as random_and_time_output_pins_with_seed_and_epoch)
 tests/cases/corelib_parts_encoding_surface/nondeterministic_core_matrix_matches_all_execution_tiers.case	#5454	jet check reports E0107 (fold) and E0956 (impure) where the original expects E3403; jet build rejects the matrix source (E0112 weighted_pick wants [Float], the weights literal is [Decimal])
@@ -293,7 +293,7 @@ tests/cases/library_outputs/guest_import_rejects_invalid_signature_and_duplicate
 tests/cases/library_outputs/library_rejects_colliding_c_symbols_before_codegen.case	#5454	E2104 `jet build --lib` is not built yet (#4833)
 tests/cases/library_outputs/locked_library_compile_requires_the_lock_stamp.case	#5454	E2104 `jet build --locked` is not built yet (#4833)
 tests/cases/outcome_carrier/the_middle_states_read_off_the_same_carrier.case	#5454	E2417 Explicit failure domain `ImportErr` is not an Error type (#5554)
-tests/cases/shared_transaction/shared_plain_access_repl_uses_the_same_value_surface.case	#5454	E2104 `jet repl` is not built yet (#4891)
+tests/cases/shared_transaction/shared_plain_access_repl_uses_the_same_value_surface.case	#5454	`jet repl` reports E0915: `Shared<Counter>` has no Display, so `cell` is never bound and `cell.value += 1` is E0107
 tests/cases/task_control_tiers/sema_resolves_direct_nested_task_control_bindings.case	#5454	E1110 `workers` is a `Group` and cannot escape in a task (#5557)
 tests/cases/ui_fixes/liveness_fix_removes_only_literal_locals_and_empty_private_functions.case	#5454	`jet fix` renames the literal-only local to `_pure_local` instead of removing it; `empty_private` is public by default, so it is kept
 tests/cases/ui_fixes/shared_busy_wait_fix_rewrites_empty_plain_field_loop.case	#5454	`jet fix` leaves the shared_busy_wait rewrite for review instead of applying it (no changes made)
