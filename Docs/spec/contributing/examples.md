@@ -165,7 +165,10 @@ counts them beside its processes, and the entry's peak (its claim below)
 includes them. `JET_TEST_STATE_DIR` (default `$JET_SCRATCH_ROOT/testkit/state`,
 else `jet/testkit/state` in the user cache; disk-backed, never `/tmp` or the
 checkout) outlives runs: `history/<suite>.tsv` keeps each entry's last wall
-time and peak, and `ffi/` is the FFI cache every run shares.
+time and peak, and `ffi/` is the FFI cache that runs staged on disk share. A
+run staged in memory keeps its own FFI cache beside its rows and drops it with
+them: a cold helper realizes there in about a second, while a shared on-disk
+cache under host I/O load charged its first row over a minute.
 Selected entries run in one `task.group`. Measured entries start longest
 first, after every unmeasured one. An entry starts once fewer than `--jobs N`
 run and its claim fits in the memory budget beside the running ones'; the

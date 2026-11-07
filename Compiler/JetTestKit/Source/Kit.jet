@@ -778,9 +778,10 @@ kit_scratch_root: fn() -> String? {
     kit_disk_root()
 }
 
-// The disk directory for what outlives a run (the history and the FFI cache):
-// <JET_SCRATCH_ROOT>/testkit, else Jet's user cache (<XDG_CACHE_HOME>/jet/testkit,
-// else ~/.cache/jet/testkit). None when not even HOME is set.
+// The disk directory for what outlives a run (the history, and the FFI cache
+// of a run staged on disk): <JET_SCRATCH_ROOT>/testkit, else Jet's user cache
+// (<XDG_CACHE_HOME>/jet/testkit, else ~/.cache/jet/testkit). None when not
+// even HOME is set.
 kit_disk_root: fn() -> String? {
     if sys.get("JET_SCRATCH_ROOT") == .Val(root) -> return Val(files.join(root, "testkit"))
     if sys.get("XDG_CACHE_HOME") == .Val(cache) -> return Val(files.join(cache, "jet/testkit"))
@@ -819,13 +820,21 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     jetpack: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? return kit_execution_refused("ERROR\tselection\t\tjetpack: {err}")
     base: if options.scratch != "" -> options.scratch else -> kit_scratch_root() ?? return kit_execution_refused("ERROR\tselection\t\tscratch: set HOME or pass --scratch")
     canonical: kit_execute_scratch_dir(base, root) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
-    // What outlives a run: each suite's measurements and the FFI cache.
+    // What outlives a run: each suite's measurements, and the FFI cache when
+    // the rows stage on disk.
     state_base: sys.get("JET_TEST_STATE_DIR") ?? files.join(kit_disk_root() ?? return kit_execution_refused("ERROR\tselection\t\tstate: set JET_TEST_STATE_DIR, JET_SCRATCH_ROOT or HOME"), "state")
     state: kit_execute_disk_dir(state_base, root) ?? return kit_execution_refused("ERROR\tselection\t\tstate: {err}")
     run_scratch: files.join(canonical, "testkit-{process.current_pid()}-{selected_suites.join("-")}")
     if files.exists(run_scratch) -> return kit_execution_refused("ERROR\tselection\t\tscratch already exists: {run_scratch}")
     files.create_dir_all(run_scratch) ?? return kit_execution_refused("ERROR\tselection\t\tscratch: {err}")
-    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: files.join(state, "ffi"), scratch_memory: kit_exec_memory_backed(canonical)}
+    // A run staged in memory keeps its FFI cache there too, for that run only:
+    // a cold Rust helper realizes in about a second in memory, but takes over
+    // a minute in a shared on-disk cache under host I/O load (#6648), and a
+    // helper that fails its signature check is never cached, so warming the
+    // disk cache ahead of the rows could not spare those rows.
+    scratch_memory: kit_exec_memory_backed(canonical)
+    ffi_cache: if scratch_memory -> "" else -> files.join(state, "ffi")
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 0, resident_limit: kit_resident_guard(), ffi_cache: ffi_cache, scratch_memory: scratch_memory}
     if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, run_scratch, entries.any(item -> item.suite == "ui" && item.entry.mode.ends_with("project")), options.ui_corpora)
     version_run: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
     if version_run.code == 0 && kit_exec_process_failure(version_run) == None {

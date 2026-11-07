@@ -2187,8 +2187,9 @@ suite pass.
 
 Testkit runs each case's commands directly, as the case wrote them; no
 wrapper or outer process trace stands between a row and the `jet` under test.
-The FFI helper cache is the kit state's `ffi` directory unless a case sets its
-own `JET_FFI_CACHE_DIR`, which is passed through verbatim.
+The FFI helper cache is the run's own `ffi` directory when the rows stage in
+memory, else the kit state's `ffi` directory, unless a case sets its own
+`JET_FFI_CACHE_DIR`, which is passed through verbatim.
 The missing-Cargo fixture always runs with a case-local PATH containing no
 Cargo or rustup shim and a cleared case-private foreign cache. Installed tools
 or a warmed helper cannot turn its E0703 contract into a skipped observation.
