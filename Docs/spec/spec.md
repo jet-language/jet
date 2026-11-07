@@ -4412,7 +4412,7 @@ overlay containing rule N's output.
   "name": "ReportV2",
   "project": "..",
   "roots": [
-    {"path":"Examples/report.jet","validate":"clean"},
+    {"path":"Examples/Tooling","validate":"clean"},
     {"path":"tests/ui/report_type.jet","validate":"fixture"}
   ],
   "rules": [

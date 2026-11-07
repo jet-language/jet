@@ -191,7 +191,7 @@ impl HTTPMux {
     // the route when it renders, so registration parses no JSON.
     __route: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
         parsed: __route_parse(pattern)
-        if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
+        if parsed.problem != "" -> core.rt.__coded_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.")
         __mux_register(self, method, pattern, parsed.segments, __handler(handler), contract)
     }
 
@@ -199,7 +199,7 @@ impl HTTPMux {
     // (`"pattern":""`) gets its path inputs from the pattern registered.
     __route_dynamic: fn(self, method: String, pattern: String, handler: &&fn(HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError!, contract: String) Never! -[Net]> {
         parsed: __route_parse(pattern)
-        if parsed.problem != "" -> panic("E2805: invalid HTTP route `{pattern}`: {parsed.problem}")
+        if parsed.problem != "" -> core.rt.__coded_stop("E2805", "Invalid HTTP route `{pattern}`: {parsed.problem}.")
         checked: __route_contract(method, pattern, parsed.segments, contract)
         __mux_register(self, method, pattern, parsed.segments, __handler(handler), checked)
     }
@@ -214,7 +214,7 @@ impl HTTPMux {
 __mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [__HTTPSegment], handler: HTTPHandler, contract: String) Never! {
     shape: __route_shape(segments)
     loop existing in __mux_routes(mux) {
-        if existing.method == method && __route_shape(existing.segments) == shape -> panic("E2804: duplicate route `{method} {pattern}`")
+        if existing.method == method && __route_shape(existing.segments) == shape -> core.rt.__coded_stop("E2804", "Two routes both match `{method} {pattern}`.")
     }
     guard := mux.__state.guard_edit()
     guard.value.routes.push(__HTTPRoute{method: method, pattern: pattern, segments: segments, handler: handler, contract: contract})
@@ -954,27 +954,28 @@ __route_complete_contract: fn(method: String, pattern: String, segments: [__HTTP
 // jet_http_require_route_contract, for a mux route: its responses may be empty
 // at registration; `web.openapi` refuses that later.
 __route_require_contract: fn(method: String, pattern: String, contract: String) Never! {
-    route: "route `{method} {pattern}`"
-    parsed: json_codec.parse(contract) ?? panic("E2805: {route} has an invalid checked endpoint contract")
+    // E2805 in the registry row's words (core.rt.__coded_stop adds its Why/Fix).
+    invalid: "Invalid HTTP route `{pattern}`: its checked `{method}` endpoint contract"
+    parsed: json_codec.parse(contract) ?? core.rt.__coded_stop("E2805", "{invalid} is not valid JSON.")
     fields: if parsed == {
         .Object(members) -> members
-        else -> panic("E2805: {route} has a non-object endpoint contract")
+        else -> core.rt.__coded_stop("E2805", "{invalid} is not an object.")
     }
     names: [String]{"method", "pattern", "path", "operation_id", "summary", "parameters", "request_body", "responses", "security", "provenance"}
     loop field in names {
-        if __contract_kind(fields, field) == "" -> panic("E2805: {route} has an incomplete endpoint contract")
+        if __contract_kind(fields, field) == "" -> core.rt.__coded_stop("E2805", "{invalid} has no `{field}`.")
     }
-    if (__contract_text(fields, "method") ?? "") != method || (__contract_text(fields, "pattern") ?? "") != pattern -> panic("E2805: {route} does not match its endpoint contract")
-    if __contract_kind(fields, "responses") != "array" -> panic("E2805: {route} has invalid endpoint responses")
-    if __contract_kind(fields, "parameters") != "array" -> panic("E2805: {route} has invalid endpoint parameters")
-    if __contract_kind(fields, "security") != "array" -> panic("E2805: {route} has invalid endpoint security policy")
-    body: __contract_member(fields, "request_body") ?? panic("E2805: {route} has an invalid endpoint request body")
+    if (__contract_text(fields, "method") ?? "") != method || (__contract_text(fields, "pattern") ?? "") != pattern -> core.rt.__coded_stop("E2805", "{invalid} names another route.")
+    if __contract_kind(fields, "responses") != "array" -> core.rt.__coded_stop("E2805", "{invalid} has invalid responses.")
+    if __contract_kind(fields, "parameters") != "array" -> core.rt.__coded_stop("E2805", "{invalid} has invalid parameters.")
+    if __contract_kind(fields, "security") != "array" -> core.rt.__coded_stop("E2805", "{invalid} has an invalid security policy.")
+    body: __contract_member(fields, "request_body") ?? core.rt.__coded_stop("E2805", "{invalid} has an invalid request body.")
     valid: if body == {
         .Null -> true
         .Object(members) -> __contract_kind(members, "required") == "bool" && (__contract_text(members, "content_type") ?? "") != "" && __contract_kind(members, "schema") == "object"
         else -> false
     }
-    if !valid -> panic("E2805: {route} has an invalid endpoint request body")
+    if !valid -> core.rt.__coded_stop("E2805", "{invalid} has an invalid request body.")
 }
 
 // The JSON kind of member `name`; "" when it is absent.

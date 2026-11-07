@@ -14,13 +14,35 @@ DC_EXCLUDED_CODES: [String]{"E0061", "E0277", "E0425", "E0000", "E0019"}
 // owning card (tests/diagnostics_coverage.rs:2005-2055). Rows the registry
 // marks `retired` stay explainable without an emitter and are not listed.
 DC_SPEC_AHEAD_OF_IMPL: [(code: String, reason: String)]{
-    (code: "E2403", reason: "staged #1542"), (code: "E2410", reason: "staged #1830"), (code: "E2412", reason: "staged #1830"),
-    (code: "E2701", reason: "staged #1495"), (code: "E2801", reason: "staged #17"),
+    (code: "E2403", reason: "staged #1542"),
+    (code: "E2801", reason: "staged #17"),
     (code: "E2802", reason: "staged #17"), (code: "E2803", reason: "staged #17"),
     (code: "E2902", reason: "staged #1530"), (code: "E2940", reason: "staged #240"),
     (code: "E0342", reason: "staged #1606"), (code: "E1109", reason: "staged #1220"),
     (code: "E0859", reason: "staged #521"), (code: "E2407", reason: "staged #1330"),
     (code: "E3626", reason: "staged #521"),
+    // Rows whose check is not built yet, on the card that builds it.
+    (code: "E0345", reason: "staged #3520"), (code: "E0916", reason: "staged #3520"),
+    (code: "E0982", reason: "staged #6040"), (code: "E1241", reason: "staged #6145"),
+    (code: "E1243", reason: "staged #322"), (code: "E1254", reason: "staged #6386"),
+    (code: "E1278", reason: "staged #6604"), (code: "E1279", reason: "staged #6604"),
+    (code: "E1280", reason: "staged #6604"), (code: "E1281", reason: "staged #6604"),
+    (code: "E1282", reason: "staged #6604"), (code: "E1283", reason: "staged #6604"),
+    (code: "E1284", reason: "staged #6604"), (code: "E1285", reason: "staged #6604"),
+    (code: "E1286", reason: "staged #6604"), (code: "E1287", reason: "staged #6604"),
+    (code: "E1288", reason: "staged #6604"), (code: "E1289", reason: "staged #4842"),
+    (code: "E1290", reason: "staged #6604"), (code: "E1291", reason: "staged #4842"),
+    (code: "E1316", reason: "staged #3590"), (code: "E1356", reason: "staged #4614"),
+    (code: "E1402", reason: "staged #6516"), (code: "E1413", reason: "staged #6386"),
+    (code: "E1414", reason: "staged #6386"), (code: "E1802", reason: "staged #4720"),
+    (code: "E2210", reason: "staged #6625"), (code: "E2473", reason: "staged #3709"),
+    (code: "E3002", reason: "staged #3838"), (code: "E3014", reason: "staged #6366"),
+    (code: "E3306", reason: "staged #6129"), (code: "E3310", reason: "staged #6129"),
+    (code: "E3311", reason: "staged #6129"), (code: "E3312", reason: "staged #6129"),
+    (code: "E3313", reason: "staged #6518"), (code: "E3314", reason: "staged #6129"),
+    (code: "E3404", reason: "staged #5007"), (code: "E3501", reason: "staged #5069"),
+    (code: "E3510", reason: "staged #4276"), (code: "L0525", reason: "staged #6006"),
+    (code: "L0526", reason: "staged #6006"), (code: "L0527", reason: "staged #6006"),
 }
 
 // The generated registry rows and their Prelude source list every code by
@@ -81,7 +103,9 @@ dc_is_code: fn(code: String) -> Bool {
 }
 
 // tests/diagnostics_coverage.rs:324-355: a code standing alone between quotes
-// or between brackets.
+// or between brackets. Core library errors also open their message text with
+// the code (`"E2416: invalid .env line {line}"`), so a quoted code followed by
+// `: ` emits it too.
 dc_extract_codes: fn(text: String, codes: &[String]) {
     bytes: text.bytes()
     loop (index, byte) in bytes {
@@ -93,7 +117,8 @@ dc_extract_codes: fn(text: String, codes: &[String]) {
             if !(c >= (U8{65}) && c <= (U8{90})) && !(c >= (U8{48}) && c <= (U8{57})) && c != (U8{45}) -> break
             end += 1
         }
-        if end > index + 1 && end < bytes.len() && bytes[end] == close {
+        coded_text: byte == (U8{34}) && end + 1 < bytes.len() && bytes[end] == (U8{58}) && bytes[end + 1] == (U8{32})
+        if end > index + 1 && end < bytes.len() && (bytes[end] == close || coded_text) {
             code: dc_slice(text, index + 1, end)
             if dc_is_code(code) -> dc_add(codes, code)
         }
@@ -230,7 +255,6 @@ dc_report_codes: fn(text: String) -> [String] {
 // reserved nor retired in the registry and that no source emits is listed
 // with a `staged #<card>` reason, and a listed code that is now emitted must
 // leave the list.
-// Known failing: #6187 (registered codes no Jet source emits).
 #Test("registered_unimplemented_codes_are_expected") {
     loop row in DC_SPEC_AHEAD_OF_IMPL {
         valid: row.reason.starts_with("staged #") && row.reason.count_bytes() > 8 && dc_slice(row.reason, 8, row.reason.count_bytes()).bytes().all(byte -> byte >= (U8{48}) && byte <= (U8{57}))
@@ -323,7 +347,6 @@ dc_raw_code_panic: fn(line: String) -> Bool {
 // tests/diagnostics_coverage.rs:1636: the runtime library reports Jet error
 // codes through Jet-owned report helpers, never a raw panic carrying the code.
 // The Rust gate scanned the Rust Prelude; its replacement is Jet source.
-// Known failing: #6187 (Core/Http/Server.jet raises panic("E2805: ...")).
 #Test("runtime_user_error_codes_use_jet_panic_voice") {
     paths := [String]{}
     dc_walk("Compiler/Prelude", paths)

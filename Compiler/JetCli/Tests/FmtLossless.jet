@@ -450,11 +450,13 @@ fl_canonicalize_static_generic_calls: fn(tokens: [FmtTok]) -> [FmtTok] {
     out
 }
 
+// External-method sugar `Type.method: fn(...) {...}` is the method inside
+// `impl Type { method: fn(...) {...} }`.
 fl_canonicalize_external_methods: fn(tokens: [FmtTok]) -> [FmtTok] {
     out := [FmtTok]{}
     index := 0
     loop index < tokens.len() {
-        if tokens[index].kind == TOKEN_KW_FN && fl_kind(tokens, index + 1) == TOKEN_IDENT && fl_kind(tokens, index + 2) == TOKEN_DOT && fl_kind(tokens, index + 3) == TOKEN_IDENT && fl_kind(tokens, index + 4) == TOKEN_LPAREN {
+        if tokens[index].kind == TOKEN_IDENT && fl_kind(tokens, index + 1) == TOKEN_DOT && fl_kind(tokens, index + 2) == TOKEN_IDENT && fl_kind(tokens, index + 3) == TOKEN_COLON && fl_kind(tokens, index + 4) == TOKEN_KW_FN {
             body_open := -1
             loop cursor in index + 4..<tokens.len() {
                 if tokens[cursor].kind == TOKEN_LBRACE {
@@ -466,11 +468,9 @@ fl_canonicalize_external_methods: fn(tokens: [FmtTok]) -> [FmtTok] {
                 body_close: fl_matching(tokens, body_open, TOKEN_LBRACE, TOKEN_RBRACE)
                 if body_close >= 0 {
                     out.push(fl_synthetic(TOKEN_KW_IMPL, "impl"))
-                    out.push(tokens[index + 1])
-                    out.push(fl_synthetic(TOKEN_LBRACE, "{{"))
                     out.push(tokens[index])
-                    out.push(tokens[index + 3])
-                    loop body in index + 4..<body_close + 1 -> out.push(tokens[body])
+                    out.push(fl_synthetic(TOKEN_LBRACE, "{{"))
+                    loop body in index + 2..<body_close + 1 -> out.push(tokens[body])
                     out.push(fl_synthetic(TOKEN_RBRACE, "}}"))
                     index = body_close + 1
                     next
@@ -487,11 +487,9 @@ fl_canonicalize_external_methods: fn(tokens: [FmtTok]) -> [FmtTok] {
                 // on; wrap that exact method span in the same impl shape.
                 if method_end >= 0 {
                     out.push(fl_synthetic(TOKEN_KW_IMPL, "impl"))
-                    out.push(tokens[index + 1])
-                    out.push(fl_synthetic(TOKEN_LBRACE, "{{"))
                     out.push(tokens[index])
-                    out.push(tokens[index + 3])
-                    loop body in index + 4..<method_end -> out.push(tokens[body])
+                    out.push(fl_synthetic(TOKEN_LBRACE, "{{"))
+                    loop body in index + 2..<method_end -> out.push(tokens[body])
                     out.push(fl_synthetic(TOKEN_RBRACE, "}}"))
                     index = method_end
                     next
