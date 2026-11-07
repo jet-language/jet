@@ -120,7 +120,7 @@ jetpack_build() { # SHA TREE TMP : inside a slot; TREE is an export of SHA
   mkdir -p "$tmp"
   (cd "$t" && JETPACK_WORKER=$worker JET=$d/jet JET_COMPILER_IDENTITY=$(<"$d/IDENTITY") JET_TOOLCHAIN_ROOT=$t TMPDIR=$tmp \
     systemd-run --user --scope -q --expand-environment=no -p MemoryMax=16G -p MemorySwapMax=0 timeout 6000 \
-    prlimit --core=0 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} bash Jetpack/Bootstrap/check.sh --hosted) > "$d/jetpack.log" 2>&1
+    prlimit --core=0 -- ${SLOT_CPUS:+taskset -c "$SLOT_CPUS"} "$d/jet" Jetpack/Bootstrap/Check.jet --hosted) > "$d/jetpack.log" 2>&1
   rc=$?
   bin=$(ls -dt "$JET_STATE_ROOT"/jetpack-bootstrap/$worker-*/hosted/project/.jet/build/jetpack 2>/dev/null | awk 'NR==1')
   if [ $rc -ne 0 ] || [ ! -x "$bin" ]; then echo "rc=$rc bin=${bin:-none}; see jetpack.log" > "$d/jetpack.failed"; say "jetpack ${sha:0:10}: FAILED rc=$rc"; return 1; fi

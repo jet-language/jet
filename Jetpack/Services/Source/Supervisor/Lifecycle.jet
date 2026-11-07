@@ -232,7 +232,10 @@ services_service_spec: fn(env: &ShellEnv, plan: DevServicePlan, resolved: &Servi
     names: envmodel_sorted_keys_of(service_env)
     argv := [String]{}
     if authority == .LinuxSystemdUser(unit) {
-        argv.extend([String]{"systemd-run", "--user", "--scope", "--collect", "--quiet", "--property=Delegate=yes", "--property=KillMode=control-group", "--unit={unit}", "--working-directory={resolved.data_dir}"})
+        // systemd-run expands `$NAME` and `${NAME}` in the command it runs,
+        // so the service's own argv (and the log redirect's `$1`) would be
+        // rewritten, an unknown name to "". The command passes through as is.
+        argv.extend([String]{"systemd-run", "--user", "--scope", "--collect", "--quiet", "--expand-environment=no", "--property=Delegate=yes", "--property=KillMode=control-group", "--unit={unit}", "--working-directory={resolved.data_dir}"})
         loop name in names -> argv.push("--setenv={name}={service_env[name]}")
         argv.push("--")
     }

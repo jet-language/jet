@@ -76,7 +76,7 @@ regression_seeds: fn() -> [RegressionSeed] Never! {
         RegressionSeed{
             surface: "regression:indexed-place",
             seed: "regression-indexed-place-001",
-            source: "run: fn() {{\n    outer := [[1, 2], [3]]\n    &outer[0].push(9)\n    print(outer)\n}}\n",
+            source: "run: fn() {{\n    outer := [[1, 2], [3]]\n    outer[0].push(9)\n    print(outer)\n}}\n",
             stdin: "",
             expected: "[[1, 2, 9], [3]]\n",
             broken: "[[1, 2], [3]]\n",
@@ -118,17 +118,29 @@ regression_tiers: fn() -> [String] Never! {
     [String]{AOT_RELEASE, JET_RUN}
 }
 
-// The shell command of a tier. `$JET` names the compiler, as everywhere in
-// the repo; a replay without it uses `jet` from PATH. The `check` stage is
+// The steps of a tier, each an argv: JET_SLOT is the compiler, SOURCE_SLOT
+// the source's file name and STEM_SLOT that name without `.jet`. A tier runs
+// its steps in order and stops at the first that fails. The `check` stage is
 // not a tier: it says whether the compiler admits the source at all.
-tier_command: fn(tier: String) -> String Never! {
-    if tier == CHECK_STAGE -> return "\"${{JET:-jet}}\" check {SOURCE_SLOT}"
-    if tier == AOT_RELEASE -> return "\"${{JET:-jet}}\" build {SOURCE_SLOT} --release --quiet --output-dir={SOURCE_SLOT}.out && {SOURCE_SLOT}.out/\"$(basename {SOURCE_SLOT} .jet)\""
-    "\"${{JET:-jet}}\" run {SOURCE_SLOT}"
+JET_SLOT: "{{jet}}"
+STEM_SLOT: "{{stem}}"
+tier_steps: fn(tier: String) -> [[String]] Never! {
+    if tier == CHECK_STAGE -> return [[String]]{[String]{JET_SLOT, "check", SOURCE_SLOT}}
+    if tier == AOT_RELEASE -> return [[String]]{[String]{JET_SLOT, "build", SOURCE_SLOT, "--release", "--quiet", "--output-dir={SOURCE_SLOT}.out"}, [String]{"{SOURCE_SLOT}.out/{STEM_SLOT}"}}
+    [[String]]{[String]{JET_SLOT, "run", SOURCE_SLOT}}
 }
 
-shell_quoted: fn(word: String) -> String Never! {
-    "'{word.replace("'", "'\\''")}'"
+// A tier's steps as the shell command a repro bundle records, for a person
+// to replay. `$JET` names the compiler, as everywhere in the repo; a replay
+// without it uses `jet` from PATH.
+tier_command: fn(tier: String) -> String Never! {
+    shown := [String]{}
+    loop step in tier_steps(tier) {
+        words := [String]{}
+        loop word in step -> words.push(word.replace(JET_SLOT, "\"${{JET:-jet}}\"").replace(STEM_SLOT, "\"$(basename {SOURCE_SLOT} .jet)\""))
+        shown.push(words.join(" "))
+    }
+    shown.join(" && ")
 }
 
 seed_dyn: fn(seed: RegressionSeed) -> Dyn Never! {
@@ -158,36 +170,44 @@ failed_run: fn(run: TierRun, message: String) -> TierRun Never! {
     out
 }
 
-// Runs one tier of the source at `path`, feeding it `stdin` through the
-// child's pipe and closing it. An empty `stdin` leaves the pipe closed. The
-// command runs in the source's directory and names it by its file name, so
-// no scratch path reaches the compiler's output.
+// Runs one tier of the source at `path`, step by step, feeding `stdin` to
+// the last step through the child's pipe and closing it. An empty `stdin`
+// leaves the pipe closed. Each step runs in the source's directory and names
+// it by its file name, so no scratch path reaches the compiler's output; the
+// steps' output is joined in order.
 run_tier: fn(jet: String, tier: String, path: String, stdin: String) -[Exec, Time.Wait]> TierRun Never! {
-    command: tier_command(tier)
-    run: TierRun{tier: tier.copy(), command: command.copy(), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
-    spec: process.cmd([String]{"sh", "-c", command.replace(SOURCE_SLOT, shell_quoted(files.basename(path)))}).cwd(files.dirname(path)).env("JET", jet).timeout(time.Duration{ns: TIER_TIMEOUT_NS})
-    receipt: if {
-        stdin == "" -> spec.run() ?? return failed_run(run, "sh did not start: {err}")
-        else -> {
-            child: spec.stdin(.Stream).spawn() ?? return failed_run(run, "sh did not start: {err}")
-            undelivered := ""
-            if child.stdin.write_all(stdin.bytes()) == {
-                .Ok(_) -> {}
-                .Err(failure) -> undelivered = "stdin was not delivered: {failure}"
+    out := TierRun{tier: tier.copy(), command: tier_command(tier), stdout: "", stderr: "", exit: None, signal: None, timeout: false}
+    name: files.basename(path)
+    stem: name.removesuffix(".jet")
+    steps: tier_steps(tier)
+    loop at in 0..<steps.len() {
+        argv := [String]{}
+        loop word in steps[at] -> argv.push(word.replace(JET_SLOT, jet).replace(SOURCE_SLOT, name).replace(STEM_SLOT, stem))
+        spec: process.cmd(argv).cwd(files.dirname(path)).env("JET", jet).timeout(time.Duration{ns: TIER_TIMEOUT_NS})
+        receipt: if {
+            stdin == "" || at + 1 < steps.len() -> spec.run() ?? return failed_run(out, "{argv[0]} did not start: {err}")
+            else -> {
+                child: spec.stdin(.Stream).spawn() ?? return failed_run(out, "{argv[0]} did not start: {err}")
+                undelivered := ""
+                if child.stdin.write_all(stdin.bytes()) == {
+                    .Ok(_) -> {}
+                    .Err(failure) -> undelivered = "stdin was not delivered: {failure}"
+                }
+                child.stdin.close()
+                finished: child.wait() ?? return failed_run(out, "{argv[0]} did not finish: {err}")
+                if undelivered != "" -> return failed_run(out, undelivered)
+                finished
             }
-            child.stdin.close()
-            finished: child.wait() ?? return failed_run(run, "sh did not finish: {err}")
-            if undelivered != "" -> return failed_run(run, undelivered)
-            finished
         }
+        out.stdout = "{out.stdout}{receipt.output}"
+        out.stderr = "{out.stderr}{receipt.errors}"
+        out.timeout = receipt.timed_out
+        signal: receipt.signal
+        if signal == .Val(number) -> out.signal = Val("{number}")
+        if receipt.timed_out || out.signal != None -> return out
+        out.exit = Val(receipt.code)
+        if receipt.code != 0 -> return out
     }
-    out := run.copy()
-    out.stdout = receipt.output.copy()
-    out.stderr = receipt.errors.copy()
-    out.timeout = receipt.timed_out
-    signal: receipt.signal
-    if signal == .Val(number) -> out.signal = Val("{number}")
-    if !receipt.timed_out && out.signal == None -> out.exit = Val(receipt.code)
     out
 }
 
@@ -282,13 +302,12 @@ seed_finding: fn(seed: RegressionSeed, runs: [TierRun], identity: RunIdentity, m
 }
 
 // The compiler the tiers run: $JET, else `jet` on PATH.
-compiler_path: fn() -[Env, Exec, Time.Wait]> String Err! {
+compiler_path: fn() -[Env, FS]> String Err! {
     named: sys.get("JET") ?? ""
     if named != "" -> return Ok(named)
-    found: process.cmd([String]{"sh", "-c", "command -v jet"}).run() ?? return Err("cannot look for jet on PATH: {err}")
-    path: found.output.trim()
-    if found.code != 0 || path == "" -> return Err("no compiler: set JET or put jet on PATH")
-    Ok(path.copy())
+    found: process.which("jet")
+    if found == .Val(path) -> return Ok(path.copy())
+    Err("no compiler: set JET or put jet on PATH")
 }
 
 binary_digest: fn(path: String) -[FS]> String Err! {

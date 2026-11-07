@@ -14,8 +14,26 @@ use {
 STACK: [String]{"prlimit", "--core=0", "--stack=1073741824:1073741824", "--"}
 MUSL_DEFAULT: "/nix/store/wrng0xbxmz3m7slj6k14vip516wvkjdi-musl-static-x86_64-unknown-linux-musl-1.2.5/lib"
 // norust: drop every PATH directory holding cargo, rustc or rustup, refuse if
-// one stays reachable, then run the command.
+// one stays reachable, then run the command. The shell form is for a command
+// behind `Tools/agent/jet-env`, which sets PATH itself; a direct run takes
+// `norust_var()` instead and starts no shell.
 NORUST: "kept=; IFS=: read -r -a dirs <<< \"$PATH\"; for d in \"${{dirs[@]}}\"; do s=; for b in cargo rustc rustup; do [ -x \"$d/$b\" ] && s=1; done; [ -n \"$s\" ] || kept=\"$kept${{kept:+:}}$d\"; done; export PATH=\"$kept\"; for b in cargo rustc rustup; do if command -v \"$b\" >/dev/null 2>&1; then echo \"norust: REFUSE $b still on PATH\" >&2; exit 2; fi; done; exec \"$@\""
+RUST_TOOLS: [String]{"cargo", "rustc", "rustup"}
+
+// This process's PATH without every directory that holds cargo, rustc or
+// rustup, as the child's PATH: no Rust tool stays reachable through it.
+norust_var: fn() -[Env, FS]> Var Never! {
+    kept := [String]{}
+    loop dir in (sys.get("PATH") ?? "").split(":") {
+        holds := false
+        loop tool in RUST_TOOLS {
+            if files.is_file(files.join(dir, tool)) -> holds = true
+        }
+        if !holds -> kept.push(dir.copy())
+    }
+    set_var("PATH", kept.join(":"))
+}
+
 // Docs/spec/reference/cc-driver.md: `jet-cc` runs `jet cc`, `jet-cxx` and
 // `jet-c++` run `jet c++`. They are hard links of `jet` (a real binary, not a
 // wrapper); the CLI reads argv[0] (JetCli Host.jet `jet_cli_alias_args`).

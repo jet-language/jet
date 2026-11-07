@@ -31,7 +31,7 @@
 // with this checkout as the toolchain root; a runtime unit as itself, which
 // the compiler admits as that Core row. A Core path with no row fails.
 // Every mode first runs the personal-information guard (#6564 c5),
-// Jetpack/Bootstrap's assembly check, which refuses an unlisted Jetpack source
+// Jetpack/Bootstrap/Assemble.jet's check mode, which refuses an unlisted Jetpack source
 // or a drifted compiler slice, the unsafe-region ratchet in --check mode
 // (#6605), which refuses any #Unsafe region Docs/spec/safety.md does not
 // record, and any recorded row the checkout no longer has, and the vocabulary
@@ -94,7 +94,8 @@ run: fn() {
         print("CHECK FAILED — personal or machine information in the checkout (see above)")
         process.exit(1)
     }
-    assembly: process.cmd([String]{"node", "Jetpack/Bootstrap/assemble.mjs", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("node Jetpack/Bootstrap/assemble.mjs could not start: {err}")
+    jet: env_or("JET", process.which("jet") ?? "jet")
+    assembly: process.cmd([String]{jet, "Jetpack/Bootstrap/Assemble.jet", "check"}).cwd(repo).env("JETPACK_WORKER", "lanecheck").run() ?? return assembly_refused("{jet} could not run Jetpack/Bootstrap/Assemble.jet: {err}")
     if assembly.code != 0 || assembly.signal != None -> return assembly_refused(process.combined_output(assembly).trim_end())
     unsafe_ratchet(repo)
     vocabulary_rows(repo)

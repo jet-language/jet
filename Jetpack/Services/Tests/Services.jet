@@ -583,6 +583,44 @@ services_test_has_pair: fn(command: [String], first: String, second: String) -> 
     assert_eq(files.read(stderr_path) ?? panic("read stderr log"), "err")
 }
 
+// systemd-run expands `$NAME` and `${NAME}` in the command it runs unless
+// told not to. The fake records the argv it receives; the service's run args
+// must arrive byte for byte, behind `--expand-environment=no`.
+#Test("a service arg with a dollar brace name reaches the fake systemd-run unchanged") {
+    if !sys.is_linux() -> return
+    dir: services_test_scratch("systemd-argv")
+    bin: files.join(dir, "bin")
+    files.create_dir_all(bin) ?? panic("create fake systemd bin")
+    fake: files.join(bin, "systemd-run")
+    files.write(fake, "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/../systemd-run.argv\"\n") ?? panic("write fake systemd-run")
+    files.set_mode(fake, 0o755) ?? panic("chmod fake systemd-run")
+    run: [String]{"sh", "-c", "printf '%s|' \"$@\"", "sh", "${{X}}", "$5 price"}
+    plan: DevServicePlan{name: "fixture", enable: true, run: Val(run.copy())}
+    resolved := services_resolve(dir, plan) ?? panic("resolve fixture")
+    files.create_dir_all(resolved.data_dir) ?? panic("create service data dir")
+    env := services_test_env()
+    env.bin_dirs = [String]{bin}
+    authority: ServiceAuthority.LinuxSystemdUser{unit: "jetpack-test-fixture"}
+    spec: services_service_spec(env, plan, resolved, authority, resolved.ports.copy(), [String]{}) ?? panic("service spec")
+    receipt: spec.stdout(.Capture).stderr(.Capture).run() ?? panic("run the fake systemd-run")
+    assert(receipt.success, "the fake systemd-run must succeed")
+    args: services_lines(files.read(files.join(dir, "systemd-run.argv")) ?? panic("read the recorded argv"))
+    separator := -1
+    no_expand := false
+    loop index in 0..<args.len() {
+        if separator < 0 {
+            if args[index] == "--" -> separator = index
+            if args[index] == "--expand-environment=no" -> no_expand = true
+        }
+    }
+    assert(separator >= 0, "systemd-run gets `--` before the command: {args.join(" ")}")
+    assert(no_expand, "systemd-run must not expand the service command: {args.join(" ")}")
+    command := [String]{}
+    loop index in (separator + 1)..<args.len() -> command.push(args[index])
+    expected: services_log_redirect_argv(services_stdout_path(resolved.dir), services_stderr_path(resolved.dir), run) ?? panic("redirect argv")
+    assert_eq(command, expected)
+}
+
 #Test("windows guardian authority fails closed without Core containment") {
     error: (services_attach_authority(ServiceAuthority.WindowsGuardianJobObject{guardian: "Local\\Jetpack-test"}) ? value -> panic("expected a services error") ! failure -> failure.message)
     assert_eq(error, SERVICES_GUARDIAN_UNAVAILABLE)

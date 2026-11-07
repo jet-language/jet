@@ -42,7 +42,7 @@ ASSEMBLED_PACKAGES: [String]{"Compiler/JetRuntime", "Compiler/Prelude"}
 
 // The tests.list sections whose areas have no package.jet: Store, Provider
 // and Recipe (`Engine`, one dependency cycle), Services, Image and CLI. Their
-// claims run as one unit Jetpack/Bootstrap/assemble.mjs assembles. JetOS is
+// claims run as one unit Jetpack/Bootstrap/Assemble.jet assembles. JetOS is
 // frozen and stays out.
 JETPACK_ENGINE_SECTIONS: "Engine,Services,Image,CLI"
 
@@ -200,7 +200,7 @@ package_suite_rows: fn(rows: TestRows) {
 }
 
 // The Jetpack engine areas' claims, one row each, `Jetpack/<section>:
-// <claim>`: assemble.mjs joins every implementation file and the claims of
+// <claim>`: Assemble.jet joins every implementation file and the claims of
 // JETPACK_ENGINE_SECTIONS into one unit, and `jet test` runs it serially (the
 // claims share process state). JET_BIN names the jet under test; process
 // claims run the engine named by JETPACK_BIN, the caller's, else the hosted
@@ -272,13 +272,13 @@ JetpackClaim: struct {
     section: String
 }
 
-// `node Jetpack/Bootstrap/assemble.mjs <mode>` into `scratch`, keeping only
+// `jet Jetpack/Bootstrap/Assemble.jet <mode>` into `scratch`, keeping only
 // the JETPACK_ENGINE_SECTIONS claims: the mode's directory. The jet under test
-// (JET_BIN) runs the assembler's Jet tool.
+// (JET_BIN) runs the assembler and its Jet tool.
 jetpack_assemble: fn(setup: SuiteSetup, scratch: String, mode: String) -> String Err! {
-    script: files.join(setup.checkout, "Jetpack/Bootstrap/assemble.mjs")
-    ran: process.cmd([String]{"node", script, mode}).cwd(setup.checkout).env("JET_BIN", setup.jet).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `node {script} {mode}`: {err}")
-    if !ran.success -> return Err("`assemble.mjs {mode}` exited {ran.code}: {failure_line(ran.errors)}")
+    script: files.join(setup.checkout, "Jetpack/Bootstrap/Assemble.jet")
+    ran: jet_command(setup, setup.jet, [String]{script, mode}).env("JET_BIN", setup.jet).env("JETPACK_BOOTSTRAP_SCRATCH", scratch).env("JETPACK_BOOTSTRAP_TEST_AREAS", JETPACK_ENGINE_SECTIONS).env_remove("JETPACK_BOOTSTRAP_SOURCE_ROOT").env_remove("JETPACK_BOOTSTRAP_AREAS").env_remove("JETPACK_BOOTSTRAP_OWN_AREA").run() ?? return Err("couldn't run `{setup.jet} {script} {mode}`: {err}")
+    if !ran.success -> return Err("`Assemble.jet {mode}` exited {ran.code}: {failure_line(ran.errors)}")
     Ok(files.join(scratch, mode))
 }
 

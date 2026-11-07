@@ -16,9 +16,9 @@
 //   cc-pack   Tools/agent/cc-pack.nix builds this host's C toolchain pack from pinned sources
 //             (the only place Nix runs); its SHA-256 and size must equal CC_PACK_ASSETS in
 //             Jetpack/Provider/Source/Toolchain/CcToolchainPack.jet, the hash jet embeds.
-//   jetpack   Jetpack/Bootstrap/check.sh (keep-going) with s2 on COMMIT must show no failure
+//   jetpack   Jetpack/Bootstrap/Check.jet (keep-going) with s2 on COMMIT must show no failure
 //             row the current release showed (recorded when it was cut, else rerun on its own
-//             tree), and must finish if the release's census did; `check.sh --hosted` builds
+//             tree), and must finish if the release's census did; `Check.jet --hosted` builds
 //             the jetpack engine that ships beside jet.
 //   suites    the golden, ui and cases test profiles (`jet test Compiler --profile <suite>`,
 //             run by s2 with `--compiler` naming the current release, then s2) on COMMIT's
@@ -821,16 +821,16 @@ jetpack_census: fn(ctx: &Ctx, side: String, jet: String, identity: String, root:
     clear_scratch(worker)
     vars: with_vars(ctx.vars, [Var]{set_var("JET_KEEP_GOING", "1"), set_var("JET_COMPILER_IDENTITY", identity), set_var("JET_TOOLCHAIN_ROOT", root), set_var("JETPACK_WORKER", worker), set_var("JET", jet)})
     log: files.join(ctx.work, "logs/jetpack-{side}.log")
-    result: run_logged(joined(STACK, [String]{"bash", "Jetpack/Bootstrap/check.sh"}), root, vars, log, 3600)
+    result: run_logged(joined(STACK, [String]{jet.copy(), "Jetpack/Bootstrap/Check.jet"}), root, vars, log, 3600)
     scratch: bootstrap_scratch(worker)
     errors: first_existing(scratch, "check-errors.txt")
     receipt: first_existing(scratch, "check.receipt")
-    // check.sh writes the receipt's `exit:` line last: without it the census
+    // Check.jet writes the receipt's `exit:` line last: without it the census
     // is partial.
     finished: !result.timed_out && receipt != "" && has_exit_line(read_text(receipt) ?? "")
     keys: if finished && errors != "" -> jetpack_keys(read_text(errors) ?? "") else -> [String]{}
     clear_scratch(worker)
-    if !finished -> return Census{finished: false, keys: [String]{}, detail: "check.sh did not finish (rc={result.rc}{if result.timed_out -> ", timed out" else -> ""}): {tail_of(log, 8)}"}
+    if !finished -> return Census{finished: false, keys: [String]{}, detail: "Check.jet did not finish (rc={result.rc}{if result.timed_out -> ", timed out" else -> ""}): {tail_of(log, 8)}"}
     Census{finished: true, keys: keys, detail: "rc={result.rc}, {keys.len()} rows, {result.wall}s"}
 }
 
@@ -916,9 +916,9 @@ jetpack_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
 hosted_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     worker: "release-hosted-{sys.pid()}"
     clear_scratch(worker)
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet)})
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JETPACK_WORKER", worker), set_var("JET", ctx.candidate.jet), norust_var()})
     log: files.join(ctx.work, "logs/jetpack-hosted.log")
-    result: run_logged(joined(STACK, [String]{"bash", "-c", NORUST, "norust", "bash", "Jetpack/Bootstrap/check.sh", "--hosted"}), ctx.tree, vars, log, 3 * 3600)
+    result: run_logged(joined(STACK, [String]{ctx.candidate.jet.copy(), "Jetpack/Bootstrap/Check.jet", "--hosted"}), ctx.tree, vars, log, 3 * 3600)
     receipt: first_existing(bootstrap_scratch(worker), "hosted.receipt")
     text: if receipt != "" -> read_text(receipt) ?? "" else -> ""
     binary: line_value(text, "hosted-binary: ")
@@ -939,10 +939,10 @@ hosted_stage: fn(ctx: &Ctx) Never! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     clear_scratch(worker)
     if ok {
         engine_sha: sha256_file(ctx.candidate.jetpack.copy())
-        row(ctx, "jetpack-engine", "PASS", "check.sh --hosted built jetpack with s2 without Rust ({short(engine_sha, 16)}, {result.wall}s)")
+        row(ctx, "jetpack-engine", "PASS", "Check.jet --hosted built jetpack with s2 without Rust ({short(engine_sha, 16)}, {result.wall}s)")
         return
     }
-    why: "check.sh --hosted rc={result.rc}{if result.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 8)}"
+    why: "Check.jet --hosted rc={result.rc}{if result.timed_out -> " (timed out)" else -> ""}: {tail_of(log, 8)}"
     // Losing the engine the current release ships is a regression; a release
     // that never had one only notes it.
     if ctx.release.jetpack != "" {

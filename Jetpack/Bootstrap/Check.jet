@@ -1,0 +1,1009 @@
+#!/usr/bin/env jet
+// Jetpack bootstrap proof: assemble the explicit Jetpack Jet unit
+// (Jetpack/Bootstrap/Assemble.jet) and run the repository's supported `jet`
+// commands on it. JET names the admitted native jet compiler; every stage,
+// this script included, runs on it:
+//
+//   JET=<native jet> $JET Jetpack/Bootstrap/Check.jet              # jet check, one unit of every area
+//   JETPACK_WORKER=<name> ... Check.jet --area PackageModel             # one area + its declared deps
+//   ... Check.jet --area PackageModel --deps-from-head                  # the deps as HEAD has them
+//   ... Check.jet --each                                                # every area as its own unit
+//   JETPACK_WORKER=<name> ... Check.jet --areas Foundation,PackageModel # an explicit section list
+//   ... Check.jet --syntax [selection]                                  # the parser only
+//   ... Check.jet --hosted                                              # native `jetpack` engine binary
+//
+// Jetpack/Bootstrap/areas.list declares which areas each area may use. An area's
+// unit holds only itself and that closure, so code cannot reach an undeclared
+// area, and another writer's unfinished area cannot break an unrelated proof.
+// JETPACK_WORKER gives each concurrent writer its own scratch directory.
+//
+// `--hosted` assembles every implementation file plus Jetpack/run.jet
+// (`Assemble.jet hosted`) and builds the standalone engine with `jet build`;
+// the receipt records the binary's path and sha256.
+//
+// The claims run in `jet test Compiler --profile packages`: each area with a
+// package.jet as that package, the engine areas without one as a unit
+// Assemble.jet assembles (Compiler/test.jet, jetpack_engine_rows).
+//
+// Every jet command runs in its own cgroup scope (systemd-run) with a hard
+// memory cap and no swap, under a wall-clock timeout; this script runs again
+// inside the scope (`--scoped`) to time the command and read the scope's peak
+// memory. Full type checks take one of a few shared slots. Assembled units,
+// logs and receipts stay under $JET_STATE_ROOT/jetpack-bootstrap
+// (Tools/agent/roots.sh), never /tmp. The receipt is
+// <scratch>/check.receipt (hosted.receipt for --hosted); its last line is
+// `exit: N`. check-errors.txt maps `jet check` errors back to source files.
+//
+// Environment:
+//   JET                       the admitted native jet compiler (required)
+//   JET_COMPILER_IDENTITY     default: the first line of IDENTITY beside $JET
+//   JET_TOOLCHAIN_ROOT        default: this checkout (it must hold Core/)
+//   JETPACK_BOOTSTRAP_SOURCE_ROOT  the tree to assemble (default: this checkout)
+//   JETPACK_WORKER            the scratch directory's writer name (default lead)
+//   JETPACK_CHECK_MEM, JETPACK_CHECK_SECS    `jet check` cap (6G, 1200)
+//   JETPACK_HOSTED_MEM, JETPACK_HOSTED_SECS  `jet build` cap (20G, 5400)
+//   JETPACK_CHECK_SLOTS       machine-wide type-check slots (2)
+//   JETPACK_MIN_FREE_MB       MemAvailable floor before a capped run (16000)
+//   JETPACK_EACH_PARALLEL     --each areas at once (4)
+//
+// Exit: 0 proved; 1 failed; 64 usage; 69 no admitted compiler; 75 memory
+// stayed below the floor; otherwise the failing stage's status.
+use {
+    crypto: core.crypto
+    files: core.files
+    json: core.encoding.json
+    core.encoding.[EncodingError, EncodingLimits]
+    process: core.process
+    regex: core.regex
+    sys: core.sys
+    term: core.term
+    time: core.time
+}
+
+SELF: "Jetpack/Bootstrap/Check.jet"
+ASSEMBLER: "Jetpack/Bootstrap/Assemble.jet"
+USAGE: "usage: jet Jetpack/Bootstrap/Check.jet [--syntax | --hosted] [--area Area [--deps-from-head] | --areas Area,Area | --each]"
+OUTPUT_LIMIT: 1073741824
+
+run: fn() {
+    args: process.args()
+    if args.len() > 0 && args[0] == "--scoped" -> process.exit(scoped(args))
+    repo: repo_root()
+    options: parse_options(args)
+    if options.hosted && (options.areas != "" || options.own != "" || options.each || options.syntax) -> fail(64, "--hosted builds the whole engine; it takes no area selection, --each or --syntax")
+    jet: admitted_jet()
+    state: "{state_root()}/jetpack-bootstrap"
+    if options.each -> process.exit(each_area(repo, state, jet))
+    process.exit(prove(repo, state, jet, options))
+}
+
+// `jetpack-bootstrap: {message}` on stderr, then exit `code`.
+fail: fn(code: Int, message: String) -> Never {
+    term.eprint("jetpack-bootstrap: {message}")
+    process.exit(code)
+}
+
+// The checkout that holds this script.
+repo_root: fn() -> String {
+    cwd: files.cwd() ?? "."
+    script: resolve_path(cwd, sys.executable())
+    if !script.ends_with("/{SELF}") -> fail(64, "run {SELF} of a checkout with jet (this is {script})")
+    script.removesuffix("/{SELF}")
+}
+
+// The state root of Tools/agent/roots.sh.
+state_root: fn() -> String {
+    given: process.env_get("JET_STATE_ROOT") ?? ""
+    if given != "" -> return given
+    cache: process.env_get("XDG_CACHE_HOME") ?? ""
+    if cache != "" -> return files.join(cache, "jet-dev")
+    files.join(files.join(process.env_get("HOME") ?? "", ".cache"), "jet-dev")
+}
+
+// --- options -------------------------------------------------------------------
+
+Options: struct {
+    // --areas as given, or empty.
+    areas: String
+    // The --area being proved, or empty.
+    own: String
+    // --area came after --areas: the area's closure is the selection.
+    closure: Bool
+    each: Bool
+    deps_from_head: Bool
+    syntax: Bool
+    hosted: Bool
+}
+
+parse_options: fn(args: [String]) -> Options {
+    options := Options{areas: "", own: "", closure: false, each: false, deps_from_head: false, syntax: false, hosted: false}
+    at := 0
+    loop at < args.len() {
+        word: args[at]
+        if {
+            word == "--syntax" -> options.syntax = true
+            word == "--hosted" -> options.hosted = true
+            word == "--each" -> options.each = true
+            word == "--deps-from-head" -> options.deps_from_head = true
+            word == "--areas" -> {
+                at += 1
+                if at >= args.len() || args[at] == "" -> fail(64, "--areas needs a comma-separated list")
+                options.areas = args[at].copy() // copy: the arguments stay whole
+                options.closure = false
+            }
+            word.starts_with("--areas=") -> {
+                options.areas = word.removeprefix("--areas=")
+                options.closure = false
+            }
+            word == "--area" -> {
+                at += 1
+                if at >= args.len() || args[at] == "" -> fail(64, "--area needs an area name")
+                options.own = args[at].copy() // copy: the arguments stay whole
+                options.closure = true
+            }
+            word.starts_with("--area=") -> {
+                options.own = word.removeprefix("--area=")
+                options.closure = true
+            }
+            else -> {
+                term.eprint(USAGE)
+                process.exit(64)
+            }
+        }
+        at += 1
+    }
+    options
+}
+
+// $JET: an executable file, else exit 69.
+admitted_jet: fn() -> String {
+    jet: process.env_get("JET") ?? ""
+    if jet == "" || !executable(jet) -> fail(69, "JET must name the admitted native jet compiler")
+    jet
+}
+
+executable: fn(path: String) -> Bool {
+    info: files.stat(path) ?? return false
+    // Any of the owner, group or other execute bits.
+    info.is_file && ((info.mode /% 64) % 2 == 1 || (info.mode /% 8) % 2 == 1 || info.mode % 2 == 1)
+}
+
+// --- the proof -----------------------------------------------------------------
+
+// The environment every child of one proof runs with.
+Child: struct {
+    names: [String]
+    values: [String]
+    unset: [String]
+}
+
+Proof: struct {
+    repo: String
+    jet: String
+    scratch: String
+    receipt: String
+    child: Child
+}
+
+prove: fn(repo: String, state: String, jet: String, options: Options) -> Int {
+    worker: process.env_get("JETPACK_WORKER") ?? ""
+    worker_name: if worker == "" -> "lead" else -> worker
+    if !plain_name(worker_name) -> fail(64, "JETPACK_WORKER must be a plain name")
+    selection: if options.closure -> area_closure(repo, jet, options.own) else -> options.areas.copy() // copy: the options stay whole
+    areas: sorted_areas(selection)
+    identity_set: process.env_get("JET_COMPILER_IDENTITY") ?? ""
+    identity: if identity_set != "" -> identity_set else -> identity_beside(jet)
+    toolchain_set: process.env_get("JET_TOOLCHAIN_ROOT") ?? ""
+    if toolchain_set == "" && !files.is_dir("{repo}/Core") -> fail(69, "JET_TOOLCHAIN_ROOT is unset and {repo} has no Core/ tree")
+    toolchain: if toolchain_set != "" -> toolchain_set else -> repo.copy() // copy: the proof keeps the checkout
+    if options.deps_from_head && options.own == "" -> fail(64, "--deps-from-head needs --area")
+    given_root: process.env_get("JETPACK_BOOTSTRAP_SOURCE_ROOT") ?? ""
+    source_root: if given_root != "" -> given_root else -> repo.copy() // copy: the proof keeps the checkout
+    absolute_root: resolve_path(files.cwd() ?? ".", source_root)
+    if !files.is_dir(absolute_root) -> fail(1, "{source_root} is not a directory")
+    scratch: "{state}/{worker_name}-{root_tag(absolute_root, areas, options.own, if options.deps_from_head -> "1" else -> "0")}"
+    child := Child{names: [String]{}, values: [String]{}, unset: [String]{}}
+    set(child, "JETPACK_BOOTSTRAP_SOURCE_ROOT", source_root)
+    set(child, "JETPACK_BOOTSTRAP_SCRATCH", scratch)
+    set(child, "JETPACK_WORKER", worker_name)
+    set_or_unset(child, "JETPACK_BOOTSTRAP_AREAS", areas)
+    set_or_unset(child, "JETPACK_BOOTSTRAP_OWN_AREA", options.own)
+    set_or_unset(child, "JETPACK_BOOTSTRAP_DEPS_FROM_HEAD", if options.deps_from_head -> "1" else -> "")
+    set(child, "JET_COMPILER_IDENTITY", identity)
+    set(child, "JET_TOOLCHAIN_ROOT", toolchain)
+    files.create_dir_all(scratch) ?? fail(1, "cannot create {scratch}: {err}")
+    files.create_dir_all("{state}/slots") ?? fail(1, "cannot create {state}/slots: {err}")
+    receipt: "{scratch}/{if options.hosted -> "hosted" else -> "check"}.receipt"
+    proof: Proof{repo: repo, jet: jet, scratch: scratch, receipt: receipt, child: child}
+    head: receipt_head(proof, worker_name, areas, options, source_root)
+    files.write(receipt, head) ?? fail(1, "cannot write {receipt}: {err}")
+    if options.hosted -> return prove_hosted(proof)
+    assembled: inherit(assembler(proof, [String]{"check"}))
+    if assembled != 0 -> return assembled
+    unit_record(proof, "check")
+    if options.syntax -> return prove_syntax(proof)
+    prove_check(proof, state)
+}
+
+set: fn(child: &Child, name: String, value: String) {
+    child.names.push(name.copy()) // copy: the names are literals
+    child.values.push(value.copy()) // copy: the proof keeps the value
+}
+
+set_or_unset: fn(child: &Child, name: String, value: String) {
+    if value == "" -> child.unset.push(name.copy()) else -> set(child, name, value) // copy: the names are literals
+}
+
+// The first line of the IDENTITY file beside `jet`, else exit 69.
+identity_beside: fn(jet: String) -> String {
+    path: "{files.dirname(jet)}/IDENTITY"
+    text: files.read(path) ?? ""
+    line: text.partition("\n").head
+    if line == "" -> fail(69, "JET_COMPILER_IDENTITY is unset and {path} is missing or empty")
+    line
+}
+
+// The comma-joined closure `Assemble.jet areas closure` answers for `area`.
+area_closure: fn(repo: String, jet: String, area: String) -> String {
+    ran: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "areas", "closure", area}).cwd(repo).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
+    if ran.errors != "" -> term.eprint(ran.errors.removesuffix("\n"))
+    if status_of(ran) != 0 -> process.exit(status_of(ran))
+    ran.output.trim()
+}
+
+receipt_head: fn(proof: Proof, worker: String, areas: String, options: Options, source_root: String) -> String {
+    selection := ""
+    if {
+        options.own != "" -> selection = " --area {options.own}{if options.deps_from_head -> " --deps-from-head" else -> ""}"
+        areas != "" -> selection = " --areas {areas}"
+        else -> ()
+    }
+    head_text: git_head(source_root)
+    modified: files.stat(proof.jet) ?? fail(1, "cannot stat {proof.jet}: {err}")
+    lines := [String]{}
+    lines.push("entry-command: JETPACK_WORKER={worker} JET={proof.jet} {proof.jet} {SELF}{if options.hosted -> " --hosted" else -> ""}{selection}")
+    lines.push("worker: {worker}")
+    lines.push("areas: {if areas == "" -> "all" else -> areas}")
+    lines.push("proved-area: {if options.own == "" -> "all selected" else -> options.own}")
+    lines.push("input-source-root: {source_root}")
+    lines.push("source-head: {head_text}")
+    lines.push("jet-binary: {proof.jet}")
+    lines.push("jet-binary-mtime: {modified.modified.format_rfc3339()}")
+    lines.push("jet-binary-sha256: {file_sha256(proof.jet)}")
+    lines.push("sources-list-sha256: {file_sha256("{source_root}/Jetpack/Bootstrap/sources.list")}")
+    lines.push("tests-list-sha256: {file_sha256("{source_root}/Jetpack/Bootstrap/tests.list")}")
+    "{lines.join("\n")}\n"
+}
+
+file_sha256: fn(path: String) -> String {
+    bytes: files.read_bytes(path) ?? fail(1, "cannot read {path}: {err}")
+    crypto.sha256(bytes).hex()
+}
+
+note: fn(proof: Proof, text: String) {
+    files.append_all(proof.receipt, text) ?? fail(1, "cannot write {proof.receipt}: {err}")
+}
+
+unit_record: fn(proof: Proof, mode: String) {
+    note(proof, "{mode}-unit-sha256: {file_sha256("{proof.scratch}/{mode}/project/src/jetpack.jet")}\n{mode}-source-map: {proof.scratch}/{mode}/jetpack.map.json\n")
+}
+
+// `argv` with the proof's environment, in `cwd`.
+child_spec: fn(child: Child, argv: [String], cwd: String) -> ProcessSpec {
+    spec := process.cmd(argv).cwd(cwd).output_limit(OUTPUT_LIMIT)
+    loop at in 0..<child.names.len() -> spec = spec.env(child.names[at], child.values[at])
+    loop name in child.unset -> spec = spec.env_remove(name)
+    spec
+}
+
+// Assemble.jet with `words`, in the checkout.
+assembler: fn(proof: Proof, words: [String]) -> ProcessSpec {
+    argv := [String]{proof.jet, "{proof.repo}/{ASSEMBLER}"}
+    argv.extend(words.copy()) // copy: the words are the caller's
+    child_spec(proof.child, argv, proof.repo)
+}
+
+// The source tree's HEAD commit, or `unknown`.
+git_head: fn(root: String) -> String {
+    ran: process.cmd([String]{"git", "-C", root, "rev-parse", "HEAD"}).run() ?? return "unknown"
+    if ran.success -> ran.output.trim() else -> "unknown"
+}
+
+// `spec` with this terminal's output; its exit status.
+inherit: fn(spec: ProcessSpec) -> Int {
+    ran: spec.stdout(.Inherit).stderr(.Inherit).run() ?? fail(1, "a child of the proof could not start: {err}")
+    status_of(ran)
+}
+
+status_of: fn(ran: ProcessReceipt) -> Int {
+    if ran.timed_out -> return 124
+    if ran.signal == .Val(number) -> return 128 + number
+    ran.code
+}
+
+prove_hosted: fn(proof: Proof) -> Int {
+    assembled: inherit(assembler(proof, [String]{"hosted"}))
+    if assembled != 0 -> return assembled
+    unit_record(proof, "hosted")
+    binary: "{proof.scratch}/hosted/project/.jet/build/jetpack"
+    memory: process.env_get("JETPACK_HOSTED_MEM") ?? "20G"
+    secs: int_or(process.env_get("JETPACK_HOSTED_SECS") ?? "", 5400)
+    status: bounded(proof, "hosted", memory, secs, "{proof.scratch}/hosted/project", [String]{proof.jet, "build", "src/jetpack.jet"})
+    errors: locate_file("{proof.scratch}/hosted/jetpack.map.json", "{proof.scratch}/hosted.log")
+    files.write("{proof.scratch}/hosted-errors.txt", errors) ?? fail(1, "cannot write {proof.scratch}/hosted-errors.txt: {err}")
+    overall: if status == 0 && executable(binary) -> 0 else -> 1
+    if {
+        overall == 0 -> note(proof, "hosted-binary: {binary}\nhosted-binary-sha256: {file_sha256(binary)}\n")
+        else -> {
+            print("--- errors by source file ({proof.scratch}/hosted-errors.txt)")
+            loop line in errors_section(errors) -> print(line)
+        }
+    }
+    note(proof, "exit: {overall}\n")
+    print("jetpack-bootstrap receipt: {proof.receipt}")
+    if overall == 0 -> print("JETPACK HOSTED OK {binary}")
+    overall
+}
+
+// Grammar only: the admitted compiler's own parser (`jet inspect compiler
+// parse`). Any non-zero status (crash, cap kill) leaves no verdict and fails.
+prove_syntax: fn(proof: Proof) -> Int {
+    argv: [String]{"systemd-run", "--user", "--scope", "--quiet", "--expand-environment=no", "-p", "MemoryMax=3G", "-p", "MemorySwapMax=0", proof.jet, "inspect", "compiler", "parse", "src/jetpack.jet"}
+    parse_json: "{proof.scratch}/syntax.parse.json"
+    parse_err: "{proof.scratch}/syntax.parse.err"
+    log: "{proof.scratch}/syntax.log"
+    probe := ""
+    probe_status := 0
+    results: process.run_all([ProcessSpec]{child_spec(proof.child, argv, "{proof.scratch}/check/project")}, 1) ?? fail(1, "the parser could not run: {err}")
+    if results[0] == {
+        .Ok(ran) -> {
+            probe_status = status_of(ran)
+            probe = ran.output.copy() // copy: the receipt is dropped
+            files.write(parse_err, ran.errors) ?? fail(1, "cannot write {parse_err}: {err}")
+        }
+        .Err(error) -> {
+            probe_status = 127
+            files.write(parse_err, "{error}\n") ?? fail(1, "cannot write {parse_err}: {err}")
+        }
+    }
+    files.write(parse_json, probe) ?? fail(1, "cannot write {parse_json}: {err}")
+    map_path: "{proof.scratch}/check/jetpack.map.json"
+    known_path: "{proof.repo}/Jetpack/Bootstrap/known-syntax-defects.list"
+    report: if probe_status != 0 -> "jetpack-bootstrap: parser failed with status {probe_status} (3G cap or crash); no verdict ({parse_err})\n" else -> locate_syntax_file(map_path, probe, known_path)
+    print(report.removesuffix("\n"))
+    files.write(log, report) ?? fail(1, "cannot write {log}: {err}")
+    overall: if report.split("\n").to_list().contains("total errors: 0") -> 0 else -> 1
+    note(proof, "syntax-log: {log}\nexit: {overall}\n")
+    if overall == 0 -> print("JETPACK SYNTAX OK")
+    overall
+}
+
+prove_check: fn(proof: Proof, state: String) -> Int {
+    memory: process.env_get("JETPACK_CHECK_MEM") ?? "6G"
+    secs: int_or(process.env_get("JETPACK_CHECK_SECS") ?? "", 1200)
+    held := check_slot(state)
+    status: bounded(proof, "check", memory, secs, "{proof.scratch}/check/project", [String]{proof.jet, "check", "src/jetpack.jet"})
+    held.clear()
+    // Per-file error summary mapped back to source paths (advisory type check).
+    errors: locate_file("{proof.scratch}/check/jetpack.map.json", "{proof.scratch}/check.log")
+    files.write("{proof.scratch}/check-errors.txt", errors) ?? fail(1, "cannot write {proof.scratch}/check-errors.txt: {err}")
+    overall: if status == 0 -> 0 else -> 1
+    if overall != 0 {
+        print("--- errors by source file ({proof.scratch}/check-errors.txt)")
+        loop line in errors_section(errors) -> print(line)
+    }
+    note(proof, "exit: {overall}\n")
+    print("jetpack-bootstrap receipt: {proof.receipt}")
+    if overall == 0 -> print("JETPACK CHECK OK")
+    overall
+}
+
+// A machine-wide type-check slot (JETPACK_CHECK_SLOTS, default 2): many
+// parallel writers must not run many multi-GB checks at once. With every slot
+// taken, wait on the shared wait lock, then look again.
+check_slot: fn(state: String) -> [FileLock] {
+    slots: int_or(process.env_get("JETPACK_CHECK_SLOTS") ?? "", 2)
+    held := [FileLock]{}
+    loop held.len() == 0 {
+        loop slot in 1..<slots + 1 {
+            lock: files.try_lock("{state}/slots/check-{slot}") ?? next
+            held.push(lock)
+            break
+        }
+        if held.len() > 0 -> break
+        waiting := [FileLock]{}
+        waiting.push(files.lock("{state}/slots/check-wait") ?? fail(1, "cannot lock {state}/slots/check-wait: {err}"))
+        time.sleep(5s)
+        waiting.clear()
+    }
+    held
+}
+
+mem_available_mb: fn() -> Int {
+    text: files.read("/proc/meminfo") ?? return 0
+    loop line in text.lines() {
+        if line.starts_with("MemAvailable:") -> return int_or(line.removeprefix("MemAvailable:").trim().partition(" ").head, 0) /% 1024
+    }
+    0
+}
+
+wait_for_memory: fn() {
+    floor: int_or(process.env_get("JETPACK_MIN_FREE_MB") ?? "", 16000)
+    waited := 0
+    loop mem_available_mb() < floor {
+        if waited >= 600 -> fail(75, "MemAvailable stayed below {floor} MiB for 10 minutes; refusing to start")
+        time.sleep(10s)
+        waited += 10
+    }
+}
+
+// One capped cgroup scope for `argv` in `workdir`: the command output goes to
+// <scratch>/<label>.log and is printed; the receipt records the command, its
+// exit status, the scope's peak memory and the log. RuntimeMaxSec makes
+// systemd end the scope even if this process dies, so a killed caller never
+// orphans an unbounded compiler; the log is written from inside the scope.
+bounded: fn(proof: Proof, label: String, memory: String, secs: Int, workdir: String, argv: [String]) -> Int {
+    log: "{proof.scratch}/{label}.log"
+    wait_for_memory()
+    quoted := [String]{}
+    loop word in argv -> quoted.push(shell_quote(word))
+    note(proof, "{label}-command: {quoted.join(" ")}\n")
+    files.write(log, "") ?? fail(1, "cannot write {log}: {err}")
+    scope := [String]{"systemd-run", "--user", "--scope", "--quiet", "--expand-environment=no", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0", "-p", "RuntimeMaxSec={secs + 30}"}
+    scope.extend([String]{proof.jet, "{proof.repo}/{SELF}", "--scoped", log, "{secs}", workdir, "--"})
+    scope.extend(argv.copy()) // copy: the receipt line keeps the words
+    status: inherit(child_spec(proof.child, scope, proof.repo))
+    text: files.read(log) ?? ""
+    peak := ""
+    kept := [String]{}
+    loop line in text.split("\n") {
+        if line.starts_with("peak_bytes=") -> peak = line.removeprefix("peak_bytes=") else -> kept.push(line.copy()) // copy: the log text is dropped
+    }
+    if kept.len() > 0 && kept[kept.len() - 1] == "" -> _ := kept.pop()
+    note(proof, "{label}-exit: {status}\n{label}-peak-bytes: {if peak == "" -> "unknown" else -> peak}\n{label}-log: {log}\n")
+    loop line in kept -> print(line)
+    // The kernel ends the whole scope on a cgroup OOM, so no peak line is written.
+    if (status == 143 || status == 137) && peak == "" {
+        note(proof, "{label}-killed: memory cap MemoryMax={memory} reached (cgroup OOM; the machine is unaffected)\n")
+        term.eprint("jetpack-bootstrap: {label} was killed at its MemoryMax={memory} cap (cgroup OOM, contained); the unit is too large to type-check under this cap (#3661)")
+    }
+    status
+}
+
+// Inside the scope: `--scoped LOG SECS WORKDIR -- ARGV...` runs ARGV in
+// WORKDIR under a SECS timeout, writes its output and then
+// `peak_bytes=<the scope's memory.peak>` to LOG, and exits with its status
+// (124 on the timeout, 128 + the signal on a signal).
+scoped: fn(args: [String]) -> Int {
+    if args.len() < 6 || args[4] != "--" {
+        term.eprint("usage: jet {SELF} --scoped LOG SECS WORKDIR -- ARGV...")
+        return 64
+    }
+    log: args[1]
+    secs: int_or(args[2], 0)
+    argv: args[5..<args.len()]
+    spec: process.cmd(argv).cwd(args[3]).timeout(time.duration_seconds(secs)).output_limit(OUTPUT_LIMIT)
+    results: process.run_all([ProcessSpec]{spec}, 1) ?? return start_failed(log, argv[0], "{err}")
+    status := 0
+    if results[0] == {
+        .Ok(ran) -> {
+            status = status_of(ran)
+            files.write(log, "{ran.output}{ran.errors}") ?? term.eprint("jetpack-bootstrap: cannot write {log}: {err}")
+        }
+        .Err(error) -> return start_failed(log, argv[0], "{error}")
+    }
+    files.append_all(log, "peak_bytes={scope_peak()}\n") ?? term.eprint("jetpack-bootstrap: cannot write {log}: {err}")
+    status
+}
+
+start_failed: fn(log: String, program: String, error: String) -> Int {
+    files.write(log, "jetpack-bootstrap: {program} could not start: {error}\npeak_bytes={scope_peak()}\n") ?? term.eprint("jetpack-bootstrap: cannot write {log}: {err}")
+    127
+}
+
+// This process's cgroup's memory.peak, or `unknown`.
+scope_peak: fn() -> String {
+    cgroup: files.read("/proc/self/cgroup") ?? return "unknown"
+    fields: cgroup.partition("\n").head.split(":").to_list()
+    if fields.len() < 3 -> return "unknown"
+    peak: files.read("/sys/fs/cgroup{fields[2]}/memory.peak") ?? return "unknown"
+    peak.trim()
+}
+
+// --- every area ------------------------------------------------------------------
+
+// One unit per populated area, JETPACK_EACH_PARALLEL at a time; each child
+// caps its own memory and writes <state>/<worker>-each-<area>.log.
+each_area: fn(repo: String, state: String, jet: String) -> Int {
+    parallel: int_or(process.env_get("JETPACK_EACH_PARALLEL") ?? "", 4)
+    worker: process.env_get("JETPACK_WORKER") ?? ""
+    base: if worker == "" -> "lead" else -> worker
+    files.create_dir_all(state) ?? fail(1, "cannot create {state}: {err}")
+    listed: process.cmd([String]{jet, "{repo}/{ASSEMBLER}", "areas", "populated"}).cwd(repo).output_limit(OUTPUT_LIMIT).run() ?? fail(1, "{jet} could not run {ASSEMBLER}: {err}")
+    if status_of(listed) != 0 {
+        term.eprint(listed.errors.removesuffix("\n"))
+        return status_of(listed)
+    }
+    areas := [String]{}
+    loop line in listed.output.split("\n") {
+        if line.trim() != "" -> areas.push(line.trim())
+    }
+    specs := [ProcessSpec]{}
+    loop area in areas -> specs.push(process.cmd([String]{jet, "{repo}/{SELF}", "--area", area}).cwd(repo).env("JETPACK_WORKER", "{base}-each-{area}").output_limit(OUTPUT_LIMIT))
+    results: process.run_all(specs, if parallel < 1 -> 1 else -> parallel) ?? fail(1, "the areas could not run: {err}")
+    rows := [String]{}
+    loop at in 0..<areas.len() {
+        log: "{state}/{base}-each-{areas[at]}.log"
+        status := 0
+        if results[at] == {
+            .Ok(ran) -> {
+                status = status_of(ran)
+                files.write(log, "{ran.output}{ran.errors}") ?? fail(1, "cannot write {log}: {err}")
+            }
+            .Err(error) -> {
+                status = 127
+                files.write(log, "jetpack-bootstrap: {jet} could not start: {error}\n") ?? fail(1, "cannot write {log}: {err}")
+            }
+        }
+        rows.push("{areas[at]} {status}")
+    }
+    ordered: sorted(rows)
+    summary: "{state}/{base}-each.summary"
+    files.write(summary, if ordered.len() == 0 -> "" else -> "{ordered.join("\n")}\n") ?? fail(1, "cannot write {summary}: {err}")
+    failed := 0
+    loop row in ordered {
+        split: row.rpartition(" ")
+        verdict: if split.tail == "0" -> "OK" else -> "FAILED exit {split.tail}"
+        print("area {pad_right(split.head, 14)} {verdict} (log {state}/{base}-each-{split.head}.log)")
+        if split.tail != "0" -> failed = 1
+    }
+    if failed == 0 -> print("JETPACK EACH OK")
+    failed
+}
+
+// --- locate: errors mapped back to source files -----------------------------------
+
+// A Jetpack/Compiler file's generated line span in the unit.
+FileSpan: struct {
+    path: String
+    start: Int
+    end: Int
+}
+
+// A source file's generated byte span and its line starts.
+Segment: struct {
+    path: String
+    start: Int
+    end: Int
+    line_starts: [Int]
+}
+
+Place: struct {
+    path: String
+    line: Int
+    column: Int
+}
+
+Located: struct {
+    place: Place
+    code: String
+    message: String
+}
+
+// `locate_check` of the files at `map_path` and `log_path`; empty when either
+// cannot be read (the summary is advisory).
+locate_file: fn(map_path: String, log_path: String) -> String {
+    map_text: files.read(map_path) ?? return ""
+    map: parse_whole(map_text) ?? return ""
+    log: files.read(log_path) ?? return ""
+    locate_check(map, log)
+}
+
+locate_syntax_file: fn(map_path: String, probe: String, known_path: String) -> String {
+    map_text: files.read(map_path) ?? return "jetpack-bootstrap: cannot read {map_path}: {err}\n"
+    map: parse_whole(map_text) ?? return "jetpack-bootstrap: {map_path} is not JSON: {err}\n"
+    parsed: parse_whole(probe) ?? return "jetpack-bootstrap: the parser's output is not JSON: {err}\n"
+    locate_syntax(map, parsed, known_defects(files.read(known_path) ?? ""))
+}
+
+// JSON with the safe limits but no byte ceiling: the unit's map and the
+// parser's output for the whole unit run past the safe 16 MiB.
+parse_whole: fn(text: String) -> Dyn EncodingError! {
+    limits := EncodingLimits.safe()
+    limits.max_item_bytes = if text.count_bytes() > 0 -> text.count_bytes() else -> 1
+    json.parse_with_limits(text, limits)
+}
+
+// `jet check` errors (`Error [NAME]: message`, then `--> path:line:col`
+// within three lines), mapped through the unit's files. NAME is what the
+// diagnostic renderer prints (diagnostic_display_name): a registry name such
+// as `jet.UnknownType`, else the raw code.
+locate_check: fn(map: Dyn, log: String) -> String {
+    spans: file_spans(map)
+    head: regex.compile("^Error \\[([^\\]]+)\\]: (.*)$") ?? panic("error pattern: {err}")
+    arrow: regex.compile("-->\\s+(\\S+?):(\\d+):(\\d+)") ?? panic("location pattern: {err}")
+    lines: log.split("\n").to_list()
+    found := [Located]{}
+    loop index in 0..<lines.len() {
+        error: head.match(lines[index]) ?? next
+        stop: if index + 4 < lines.len() -> index + 4 else -> lines.len()
+        loop following in index + 1..<stop {
+            at: arrow.match(lines[following]) ?? next
+            path: at.group(1) ?? ""
+            line: int_or(at.group(2) ?? "", 0)
+            column: int_or(at.group(3) ?? "", 0)
+            place: if path == "src/jetpack.jet" -> from_line(spans, line, column) ?? Place{path: "(generated)", line: line, column: 0} else -> Place{path: path, line: line, column: column}
+            found.push(Located{place: place, code: error.group(1) ?? "", message: error.group(2) ?? ""})
+            break
+        }
+    }
+    render(found, [String]{})
+}
+
+// `jet inspect compiler parse` JSON: compiler.value.diagnostics with byte
+// spans, mapped through the unit's source segments. Lines a filed compiler
+// defect blocks (`known`) are listed apart, not counted.
+locate_syntax: fn(map: Dyn, parsed: Dyn, known: [String: String]) -> String {
+    segments: source_segments(map)
+    found := [Located]{}
+    hits := [String]{}
+    diagnostics: field(field(field(parsed, "compiler"), "value"), "diagnostics")
+    if diagnostics == .Array(rows) {
+        loop row in rows {
+            if field(row, "severity") != .Text("error") -> next
+            start: dyn_int(field(field(row, "span"), "start")) ?? next
+            place: from_byte(segments, start) ?? Place{path: "(generated)", line: 0, column: 0}
+            key: "{place.path}:{place.line}"
+            if known.get(key) == .Val(card) {
+                hits.push("{key} {card}")
+                next
+            }
+            code: if field(row, "code") == .Text(text) -> text.copy() else -> "" // copy: the row is borrowed
+            message: if field(row, "message") == .Text(text) -> text.copy() else -> "" // copy: the row is borrowed
+            found.push(Located{place: place, code: code, message: message})
+        }
+    }
+    render(found, hits)
+}
+
+// `path:line:col: CODE message` per error, the per-file counts (most first,
+// ties in first-seen order), the known defects, then `total errors: N`.
+render: fn(found: [Located], hits: [String]) -> String {
+    out := [String]{}
+    paths := [String]{}
+    counts := [Int]{}
+    loop error in found {
+        out.push("{error.place.path}:{error.place.line}:{error.place.column}: {error.code} {error.message}")
+        seen := false
+        loop at in 0..<paths.len() {
+            if paths[at] == error.place.path {
+                counts[at] = counts[at] + 1
+                seen = true
+                break
+            }
+        }
+        if !seen {
+            paths.push(error.place.path.copy()) // copy: the error keeps its path
+            counts.push(1)
+        }
+    }
+    if paths.len() > 0 {
+        out.push("errors per file:")
+        // A stable selection: the first-seen file of the highest remaining count.
+        taken := [Bool]{}
+        loop _ in paths -> taken.push(false)
+        loop _ in paths {
+            best := -1
+            loop at in 0..<paths.len() {
+                if !taken[at] && (best < 0 || counts[at] > counts[best]) -> best = at
+            }
+            taken[best] = true
+            out.push("  {pad_left("{counts[best]}", 5)}  {paths[best]}")
+        }
+    }
+    if hits.len() > 0 -> out.push("known compiler defects (known-syntax-defects.list; not failures): {hits.len()}\n  {hits.join("\n  ")}")
+    out.push("total errors: {found.len()}")
+    "{out.join("\n")}\n"
+}
+
+// known-syntax-defects.list: `path:line  #card ...` per blocked line.
+known_defects: fn(text: String) -> [String: String] {
+    entry: regex.compile("^(\\S+:\\d+)\\s+(#\\d+)") ?? panic("defect pattern: {err}")
+    known := [String: String]{}
+    loop raw in text.split("\n") {
+        found: entry.match(raw.trim()) ?? next
+        known[found.group(1) ?? ""] = found.group(2) ?? ""
+    }
+    known
+}
+
+// The source file and line of the unit's generated `line`.
+from_line: fn(spans: [FileSpan], line: Int, column: Int) -> Place? {
+    loop span in spans {
+        if line < span.start || line > span.end -> next
+        return Val(Place{path: span.path.copy(), line: line - span.start + 1, column: column}) // copy: the spans stay whole
+    }
+    None
+}
+
+// The source file, line and column of the unit's generated `byte`.
+from_byte: fn(segments: [Segment], byte: Int) -> Place? {
+    loop segment in segments {
+        if byte < segment.start || byte >= segment.end || segment.line_starts.len() == 0 -> next
+        local: byte - segment.start
+        line := 0
+        loop line + 1 < segment.line_starts.len() && segment.line_starts[line + 1] <= local -> line += 1
+        return Val(Place{path: segment.path.copy(), line: line + 1, column: local - segment.line_starts[line] + 1}) // copy: the segments stay whole
+    }
+    None
+}
+
+file_spans: fn(map: Dyn) -> [FileSpan] {
+    out := [FileSpan]{}
+    if field(map, "files") == .Array(items) {
+        loop item in items {
+            path: if field(item, "path") == .Text(text) -> text.copy() else -> "" // copy: the map is dropped
+            out.push(FileSpan{path: path, start: dyn_int(field(item, "generated_start_line")) ?? 0, end: dyn_int(field(item, "generated_end_line")) ?? -1})
+        }
+    }
+    out
+}
+
+source_segments: fn(map: Dyn) -> [Segment] {
+    out := [Segment]{}
+    if field(map, "source_segments") == .Array(items) {
+        loop item in items {
+            path: if field(item, "source_file") == .Text(text) -> text.copy() else -> "" // copy: the map is dropped
+            generated: field(item, "generated")
+            starts := [Int]{}
+            if field(item, "line_starts") == .Array(values) {
+                loop value in values -> starts.push(dyn_int(value) ?? 0)
+            }
+            out.push(Segment{path: path, start: dyn_int(field(generated, "start")) ?? 0, end: dyn_int(field(generated, "end")) ?? 0, line_starts: starts})
+        }
+    }
+    out
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy() // copy: the tree is borrowed
+        }
+    }
+    Dyn.Null
+}
+
+dyn_int: fn(value: Dyn) -> Int? {
+    if value == {
+        .Int(number) -> Val(number)
+        .Number(lexeme) -> Val(Int.parse(lexeme) ?? return None)
+        else -> None
+    }
+}
+
+// The `errors per file:` line and the 200 lines after it.
+errors_section: fn(text: String) -> [String] {
+    lines: text.removesuffix("\n").split("\n").to_list()
+    start := -1
+    loop at in 0..<lines.len() {
+        if lines[at] == "errors per file:" {
+            start = at
+            break
+        }
+    }
+    if start < 0 -> return [String]{}
+    lines[start..<(if start + 201 < lines.len() -> start + 201 else -> lines.len())]
+}
+
+// --- small helpers -------------------------------------------------------------
+
+// The scratch tag: sha256 of the absolute source root, the sorted selection
+// (`*`: all), the proved area and the HEAD-deps flag (`1` or `0`),
+// NUL-separated.
+root_tag: fn(source_root: String, areas: String, own: String, head_flag: String) -> String {
+    input := [U8]{}
+    input.extend(source_root.bytes())
+    input.push(U8{0})
+    input.extend((if areas == "" -> "*" else -> areas).bytes())
+    input.push(U8{0})
+    input.extend(own.bytes())
+    input.push(U8{0})
+    input.extend(head_flag.bytes())
+    crypto.sha256(input).hex().slice(0, 10)
+}
+
+// `text` split at commas, each part trimmed, empty parts dropped, sorted.
+sorted_areas: fn(text: String) -> String {
+    parts := [String]{}
+    loop part in text.split(",") {
+        name: part.trim()
+        if name != "" -> parts.push(name)
+    }
+    sorted(parts).join(",")
+}
+
+sorted: fn(items: [String]) -> [String] {
+    out := items.copy()
+    out.sort_by((left: String, right: String) -> compare_bytes(left.bytes(), right.bytes()))
+    out
+}
+
+compare_bytes: fn(left: [U8], right: [U8]) -> Ordering {
+    at := 0
+    loop at < left.len() && at < right.len() {
+        if left[at] != right[at] -> return if left[at] < right[at] -> Ordering.Less else -> Ordering.Greater
+        at += 1
+    }
+    if {
+        left.len() < right.len() -> Ordering.Less
+        left.len() > right.len() -> Ordering.Greater
+        else -> Ordering.Equal
+    }
+}
+
+// One shell word for the receipt: bare when every byte is safe, else quoted.
+shell_quote: fn(word: String) -> String {
+    if word == "" -> return "''"
+    safe := true
+    loop b in word.bytes() {
+        code: Int.from_u8(b)
+        letter: (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57)
+        if !letter && !"_-./=:,+@%".bytes().contains(b) -> safe = false
+    }
+    if safe -> word.copy() else -> "'{word.replace("'", "'\\''")}'"
+}
+
+plain_name: fn(name: String) -> Bool {
+    if name == "" -> return false
+    loop b in name.bytes() {
+        code: Int.from_u8(b)
+        if !((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code == 95 || code == 45) -> return false
+    }
+    true
+}
+
+int_or: fn(text: String, fallback: Int) -> Int {
+    if text == "" -> return fallback
+    value := 0
+    loop b in text.bytes() {
+        code: Int.from_u8(b)
+        if code < 48 || code > 57 -> return fallback
+        value = value * 10 + code - 48
+    }
+    value
+}
+
+pad_left: fn(text: String, width: Int) -> String {
+    out := ""
+    loop _ in text.len()..<width -> out = "{out} "
+    "{out}{text}"
+}
+
+pad_right: fn(text: String, width: Int) -> String {
+    out := text.copy()
+    loop _ in text.len()..<width -> out = "{out} "
+    out
+}
+
+// `path` against `base`: an absolute `path` stands alone; `.` and `..` resolve.
+resolve_path: fn(base: String, path: String) -> String {
+    whole: if path.starts_with("/") -> path else -> "{base}/{path}"
+    parts := [String]{}
+    loop part in whole.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." {
+            if parts.len() > 0 -> _ := parts.pop()
+            next
+        }
+        parts.push(part.copy()) // copy: the path text is dropped
+    }
+    "/{parts.join("/")}"
+}
+
+// --- tests ---------------------------------------------------------------------
+
+#Test("the scratch tag hashes the root, selection, proved area and HEAD flag like check.sh did") {
+    // `printf '%s\0%s\0%s\0%s' … | sha256sum | cut -c1-10`
+    assert_eq(root_tag("/src", "Foundation,PackageModel", "PackageModel", "1"), "b08c422974")
+    assert_eq(root_tag("/src", "", "", "0"), "9f3318e043")
+}
+
+#Test("an area selection is trimmed, emptied parts dropped and sorted") {
+    assert_eq(sorted_areas(" PackageModel, Foundation,,Compiler hash "), "Compiler hash,Foundation,PackageModel")
+    assert_eq(sorted_areas(""), "")
+}
+
+#Test("receipt words are bare when safe and single-quoted otherwise") {
+    assert_eq(shell_quote("/opt/jet/bin/jet"), "/opt/jet/bin/jet")
+    assert_eq(shell_quote("src/jetpack.jet"), "src/jetpack.jet")
+    assert_eq(shell_quote("a b"), "'a b'")
+    assert_eq(shell_quote("it's"), "'it'\\''s'")
+    assert_eq(shell_quote(""), "''")
+}
+
+#Test("options keep the last selection and the proved area") {
+    given: parse_options([String]{"--area", "PackageModel", "--areas", "Foundation", "--deps-from-head"})
+    assert_eq(given.own, "PackageModel")
+    assert_eq(given.areas, "Foundation")
+    assert(!given.closure && given.deps_from_head)
+    later: parse_options([String]{"--areas=Foundation", "--area=CLI", "--syntax"})
+    assert(later.closure && later.syntax && !later.hosted)
+    assert_eq(later.own, "CLI")
+}
+
+CHECK_MAP: "{{\"files\": [{{\"path\": \"Jetpack/A.jet\", \"generated_start_line\": 10, \"generated_end_line\": 20}}], \"source_segments\": [{{\"source_file\": \"Jetpack/B.jet\", \"generated\": {{\"start\": 100, \"end\": 200}}, \"line_starts\": [0, 10, 25]}}]}}"
+
+// `jet check` logs as the compiler renders them, kept as fixtures beside this
+// script: the report text is the compiler's, not this script's.
+CHECK_FIXTURES: "Jetpack/Bootstrap/Fixtures"
+
+check_fixture: fn(name: String) -[FS]> String Never! {
+    text: files.read(files.join(CHECK_FIXTURES, name)) ?? panic("{name}: {err}")
+    text.removesuffix("\n")
+}
+
+#Test("check errors map through the unit's files; the location path is the shortest") {
+    map: json.parse(CHECK_MAP) ?? panic("{err}")
+    log: check_fixture("check-errors.log")
+    want: [String]{
+        "Jetpack/A.jet:3:5: E0107 Nothing named `x` exists here",
+        "Jetpack/Foo.jet:3:4: E0119 bad",
+        "Jetpack/A.jet:3:5: jet.UnknownName a registry name",
+        "(generated):99:0: E0001 past the map",
+        "Jetpack/Foo.jet:5:1: E0120 again",
+        "a:1:2: E0002 lazy",
+        "errors per file:",
+        "      2  Jetpack/A.jet",
+        "      2  Jetpack/Foo.jet",
+        "      1  (generated)",
+        "      1  a",
+        "total errors: 6",
+    }
+    assert_eq(locate_check(map, log), "{want.join("\n")}\n")
+    assert_eq(locate_check(map, ""), "total errors: 0\n")
+}
+
+#Test("a rendered `jet check` error counts once; warnings and its snippet do not") {
+    map: json.parse(CHECK_MAP) ?? panic("{err}")
+    log: check_fixture("check-rendered.log")
+    want: [String]{
+        "Jetpack/A.jet:5:19: jet.UnknownType There's no type called `PolicyValue`",
+        "errors per file:",
+        "      1  Jetpack/A.jet",
+        "total errors: 1",
+    }
+    assert_eq(locate_check(map, log), "{want.join("\n")}\n")
+}
+
+#Test("syntax errors map byte spans through the source segments; known defects are apart") {
+    map: json.parse(CHECK_MAP) ?? panic("{err}")
+    probe: json.parse("{{\"compiler\": {{\"value\": {{\"diagnostics\": [{{\"severity\": \"error\", \"code\": \"E0201\", \"message\": \"m1\", \"span\": {{\"start\": 130}}}}, {{\"severity\": \"warning\", \"code\": \"W1\", \"message\": \"w\", \"span\": {{\"start\": 130}}}}, {{\"severity\": \"error\", \"code\": \"E0202\", \"message\": \"known\", \"span\": {{\"start\": 112}}}}, {{\"severity\": \"error\", \"code\": \"E0203\", \"message\": \"far\", \"span\": {{\"start\": 5}}}}, {{\"severity\": \"error\", \"code\": \"E0204\", \"message\": \"no span\"}}]}}}}}}") ?? panic("{err}")
+    known: known_defects("# a comment\n  Jetpack/B.jet:2   #1234 parser defect\nJetpack/B.jet:9 no card\n")
+    assert_eq(known.len(), 1)
+    want: [String]{
+        "Jetpack/B.jet:3:6: E0201 m1",
+        "(generated):0:0: E0203 far",
+        "errors per file:",
+        "      1  Jetpack/B.jet",
+        "      1  (generated)",
+        "known compiler defects (known-syntax-defects.list; not failures): 1",
+        "  Jetpack/B.jet:2 #1234",
+        "total errors: 2",
+    }
+    assert_eq(locate_syntax(map, probe, known), "{want.join("\n")}\n")
+}
+
+#Test("the printed summary is the per-file section") {
+    text: "x:1:1: E1 a\nerrors per file:\n      1  x\ntotal errors: 1\n"
+    assert_eq(errors_section(text).join("|"), "errors per file:|      1  x|total errors: 1")
+    assert_eq(errors_section("total errors: 0\n").len(), 0)
+}
+
+#Test("padding and plain names") {
+    assert_eq(pad_left("7", 5), "    7")
+    assert_eq(pad_left("123456", 5), "123456")
+    assert_eq(pad_right("CLI", 6), "CLI   ")
+    assert(plain_name("lead-each_CLI2"))
+    assert(!plain_name("a/b") && !plain_name(""))
+}
