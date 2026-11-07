@@ -2272,10 +2272,12 @@ the calling process (Linux `PR_SET_PDEATHSIG`, `SIGKILL`), except a
 A receipt reports what the child used, read from the kernel when the child is
 reaped (`wait4`'s `rusage`). `peak_memory_bytes` is the peak resident memory of
 the largest single process: the child or one descendant it waited for
-(`ru_maxrss`), never the sum of the tree. `user_cpu_ns` and `system_cpu_ns` are
-the CPU time of the child and every descendant it waited for. A pipeline
-receipt takes the largest step's peak and sums the steps' CPU time. All three
-are `None` when no usage was taken, such as a host without `wait4` usage.
+(`ru_maxrss`), never the sum of the tree, except under `.memory_scope`, where it
+is the scope's peak: all its processes together. `user_cpu_ns` and
+`system_cpu_ns` are the CPU time of the child and every descendant it waited
+for. A pipeline receipt takes the largest step's peak and sums the steps' CPU
+time. All three are `None` when no usage was taken, such as a host without
+`wait4` usage.
 
 #### Building a process policy
 
@@ -2325,6 +2327,33 @@ set`); nothing starts. A set the kernel refuses, such as one with no CPU
 online or allowed to the caller, fails the launch with the kernel's error.
 `Examples/Systems/Process/ProcessAffinity.jet` is the golden.
 
+`.io_priority(level: Int)` runs the child in the best-effort I/O scheduling
+class at `level` 0 (first) through 7 (last), and `.io_idle()` in the idle
+class, which gets the disk only when no other process wants it; the later of
+the two calls wins. The child sets the class on itself before it executes the
+program, and its descendants inherit it. The receipt and plan limits carry
+`io-priority=idle` or `io-priority=best-effort:4` only when the spec sets a
+class. A level outside 0..7 is `IOError.InvalidInput` (`io_priority level 8
+is outside 0..7`); nothing starts.
+`Examples/Systems/Process/ProcessIOPriority.jet` is the golden.
+
+`.memory_scope(bytes: Int)` runs the child and every process it starts in a
+memory scope of their own (a cgroup v2 cgroup on Linux), capped at `bytes`
+together, with no swap: going over the cap kills every process in the scope,
+and never the parent. The scope is made next to the parent's own cgroup, so
+that cgroup's parent must be writable and offer the memory controller, as a
+systemd user session's `app.slice` does; a host without one fails the launch
+with the kernel's error on the path it could not make or write
+(`PermissionDenied`, `NotFound`). A Jet program inside a scope that asks for a
+memory scope of its own gets one inside it, under the outer cap. When the
+child is reaped, the receipt's `peak_memory_bytes` is the scope's peak, every
+process still in the scope is killed, and the scope is removed; a child never
+reaped ends its scope with its last handle. The receipt and plan limits carry
+`memory-scope=<bytes>` only when the spec sets a scope. A cap below 1 byte is
+`IOError.InvalidInput` (`memory_scope needs a cap of at least 1 byte`), as is
+a detached spec (`a detached process outlives its handle, and a memory_scope
+ends with it`); nothing starts.
+`Examples/Systems/Process/ProcessMemoryScope.jet` is the golden.
 #### Authority and output boundaries
 
 An authority is explicit at the process boundary. `Authority.from_rights` can

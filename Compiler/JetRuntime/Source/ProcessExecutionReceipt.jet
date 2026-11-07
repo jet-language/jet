@@ -141,12 +141,23 @@ process_execution_policy_digest: fn(spec: I64) -> I64 {
     process_execution_material_field(text, rt_static_text("stderr"), process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
     process_execution_material_field(text, rt_static_text("detached"), if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) == I64{0}) -> rt_static_text("false") else -> rt_static_text("true"))
     process_execution_material_field(text, rt_static_text("terminal"), if (fd_word(spec, PROCESS_SPEC_TERMINAL) == I64{0}) -> rt_static_text("none") else -> rt_static_text("requested"))
-    // Only a spec that pins CPUs adds the field, so every other digest stays.
+    // Only a spec that pins CPUs, sets an I/O priority or asks for a memory
+    // scope adds those fields, so every other digest stays.
     cpus: fd_word(spec, PROCESS_SPEC_CPU_AFFINITY)
     if (cpus != I64{0}) {
         affinity: process_execution_affinity_text(cpus)
         process_execution_material_field(text, rt_static_text("cpu-affinity"), affinity)
         jet_rt_string_drop(affinity)
+    }
+    io_priority: process_execution_io_priority_text(spec)
+    if (io_priority != I64{0}) {
+        process_execution_material_field(text, rt_static_text("io-priority"), io_priority)
+        jet_rt_string_drop(io_priority)
+    }
+    if (fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE) != I64{0}) {
+        scope: process_execution_decimal(fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE_BYTES))
+        process_execution_material_field(text, rt_static_text("memory-scope"), scope)
+        jet_rt_string_drop(scope)
     }
     material: jet_rt_string_builder_finish(text)
     digest: process_execution_hash(material)
@@ -180,6 +191,22 @@ process_execution_limits: fn(spec: I64) -> I64 {
         process_text_list_push(list, entry)
         jet_rt_string_drop(entry)
         jet_rt_string_drop(affinity)
+    }
+    // `io-priority=idle` or `io-priority=best-effort:N`, only when set.
+    io_priority: process_execution_io_priority_text(spec)
+    if (io_priority != I64{0}) {
+        entry: scheduler_text_concat(rt_static_text("io-priority="), io_priority)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(entry)
+        jet_rt_string_drop(io_priority)
+    }
+    // `memory-scope=<bytes>`, only when the spec asks for one.
+    if (fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE) != I64{0}) {
+        scope: process_execution_decimal(fd_word(spec, PROCESS_SPEC_MEMORY_SCOPE_BYTES))
+        entry: scheduler_text_concat(rt_static_text("memory-scope="), scope)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(entry)
+        jet_rt_string_drop(scope)
     }
     list
 }
@@ -340,9 +367,10 @@ process_receipt_build: fn(spec: I64, pid: I64, code: I64, success: Bool, signal:
     receipt
 }
 // A reap's rusage on the receipt: peak_memory_bytes from ru_maxrss (KiB, the
-// largest single process), user_cpu_ns and system_cpu_ns of the child and the
-// descendants it waited for. A negative word (not reaped here) leaves all
-// three absent.
+// largest single process) or, under a memory_scope, the scope's memory.peak
+// (all its processes together, rounded up to KiB); user_cpu_ns and
+// system_cpu_ns of the child and the descendants it waited for. A negative
+// word (not reaped here) leaves all three absent.
 process_receipt_usage: fn(receipt: I64, peak_kib: I64, user_ns: I64, system_ns: I64) {
     if (peak_kib < I64{0} || user_ns < I64{0} || system_ns < I64{0}) -> return
     fd_put(receipt, I64{144}, jet_int_owned_from_i64(peak_kib * I64{1024}))

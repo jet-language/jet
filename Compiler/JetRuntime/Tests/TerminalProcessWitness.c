@@ -32,11 +32,11 @@ extern void jet_rt_world_drop(int64_t);
 extern void *fixture_terminal_process_child(int64_t);
 extern int64_t fixture_terminal_process_refs(void *);
 #else
-// Test-only mechanical construction of the documented native Child96 owner.
+// Test-only mechanical construction of the documented native Child104 owner.
 // It owns a genuine kernel PTY/pipe; every operation and release uses the pack.
 static void *fixture_terminal_process_child(int64_t master) {
-    int64_t *child=jet_rt_alloc(96,8);
-    memset(child,0,96);
+    int64_t *child=jet_rt_alloc(104,8);
+    memset(child,0,104);
     child[4]=-1; child[5]=-1; child[6]=-1; child[7]=master; child[8]=1; child[9]=-1; child[10]=-1; child[11]=-1;
     return child;
 }

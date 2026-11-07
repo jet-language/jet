@@ -1,4 +1,4 @@
-// Spec152 is a native private value carrier, not Rust or HostSpawn Spec232.
+// Spec184 is a native private value carrier, not Rust or HostSpawn Spec256.
 // CAbiRoutes builders BORROW parent/inputs and return an independent clone.
 // DataABI owns offsets; TextDebug and UiCarriersBasic own nested codecs.
 process_raw_box: fn(value: I64) -> I64 {
@@ -173,6 +173,10 @@ process_spec_clone: fn(value: I64, directories: Bool) -> I64 {
     if (encoding_word(wrapping(a + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) != (encoding_word(wrapping(b + PROCESS_SPEC_DETACHED)).bit_and(I64{255})) -> return false
     if encoding_word(wrapping(a + PROCESS_SPEC_PARENT_DEATH)) != encoding_word(wrapping(b + PROCESS_SPEC_PARENT_DEATH)) -> return false
     if !process_word_list_eq(encoding_word(wrapping(a + PROCESS_SPEC_CPU_AFFINITY)), encoding_word(wrapping(b + PROCESS_SPEC_CPU_AFFINITY))) -> return false
+    if encoding_word(wrapping(a + PROCESS_SPEC_IO_PRIORITY)) != encoding_word(wrapping(b + PROCESS_SPEC_IO_PRIORITY)) -> return false
+    if encoding_word(wrapping(a + PROCESS_SPEC_IO_PRIORITY_LEVEL)) != encoding_word(wrapping(b + PROCESS_SPEC_IO_PRIORITY_LEVEL)) -> return false
+    if encoding_word(wrapping(a + PROCESS_SPEC_MEMORY_SCOPE)) != encoding_word(wrapping(b + PROCESS_SPEC_MEMORY_SCOPE)) -> return false
+    if encoding_word(wrapping(a + PROCESS_SPEC_MEMORY_SCOPE_BYTES)) != encoding_word(wrapping(b + PROCESS_SPEC_MEMORY_SCOPE_BYTES)) -> return false
     left: encoding_word(wrapping(a + PROCESS_SPEC_TERMINAL))
     right: encoding_word(wrapping(b + PROCESS_SPEC_TERMINAL))
     if (left == I64{0} || right == I64{0}) {
@@ -355,6 +359,33 @@ process_int_saturated: fn(value: I64) -> I64 {
     }
     encoding_store(wrapping(cpus + DATA_SEQUENCE_LENGTH), count)
     encoding_store(wrapping(result + PROCESS_SPEC_CPU_AFFINITY), cpus)
+    result
+}
+// `.io_priority(level)`: the best-effort I/O class at `level`, set with
+// ioprio_set in the child before exec. Both words are plain, so clone copies
+// them; launch refuses a level outside 0..PROCESS_IO_PRIORITY_LEVELS-1
+// (process_execution_io_priority_refusal).
+#Export(c) jet_process_spec_io_priority: fn(value: I64, level: I64) -> I64 {
+    result: value
+    encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY), PROCESS_IO_PRIORITY_BEST_EFFORT)
+    encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY_LEVEL), process_int_saturated(level))
+    result
+}
+// `.io_idle()`: the idle I/O class, which gets the disk only when no other
+// process wants it. It replaces any `.io_priority(level)`, and that replaces it.
+#Export(c) jet_process_spec_io_idle: fn(value: I64) -> I64 {
+    result: value
+    encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY), PROCESS_IO_PRIORITY_IDLE)
+    encoding_store(wrapping(result + PROCESS_SPEC_IO_PRIORITY_LEVEL), I64{0})
+    result
+}
+// `.memory_scope(bytes)`: the child and its descendants run in a cgroup v2
+// scope capped at `bytes` (ProcessScope.jet). Both words are plain, so clone
+// copies them; launch refuses a cap below 1.
+#Export(c) jet_process_spec_memory_scope: fn(value: I64, bytes: I64) -> I64 {
+    result: value
+    encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_SCOPE), I64{1})
+    encoding_store(wrapping(result + PROCESS_SPEC_MEMORY_SCOPE_BYTES), process_int_saturated(bytes))
     result
 }
 process_spec_mode: fn(value: I64, mode: I64, field: I64) -> I64 {

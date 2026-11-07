@@ -56,6 +56,8 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [ProcessAffinity](Process/ProcessAffinity.jet) — `.cpu_affinity(cpus)` runs the child only on the listed CPUs.
 - [ProcessBuilder](Process/ProcessBuilder.jet)
 - [ProcessExitCleanup](Process/ProcessExitCleanup.jet) — Explicit process termination runs the one cleanup boundary.
+- [ProcessIOPriority](Process/ProcessIOPriority.jet) — `.io_idle()` and `.io_priority(level)` run the child in the idle or a best-effort I/O class.
+- [ProcessMemoryScope](Process/ProcessMemoryScope.jet) — `.memory_scope(bytes)` caps the child and everything it starts together, and ends them at the reap.
 - [ProcessPassDirectory](Process/ProcessPassDirectory.jet)
 - [ProcessRunAll](Process/ProcessRunAll.jet) — process.run_all runs a list of specs through a bounded worker pool.
 - [ProcessStdinClose](Process/ProcessStdinClose.jet) — A spawned child owns an explicit closeable stdin pipe.
