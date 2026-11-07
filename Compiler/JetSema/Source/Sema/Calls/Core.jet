@@ -377,7 +377,7 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
         if sema_registration_direct_symbol(graph.modules[module_index], member) != None {
             diagnostics.push(sema_error("E0605", span, "`{shown}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use `{shown}` from inside its module, or remove `priv` from its module or field"))
         } else {
-            diagnostics.push(sema_call_import_member_unknown(shown, alias_span))
+            diagnostics.push(sema_call_import_member_unknown(graph.modules[module_index].module_name, shown, alias_span))
         }
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return failed
@@ -396,7 +396,7 @@ sema_call_try_source_module_call: fn(alias: String, alias_span: Span, member: St
         direct = Val(foreign)
     }
     target: direct ?? {
-        diagnostics.push(sema_call_import_member_unknown(shown, span))
+        diagnostics.push(sema_call_import_member_unknown(graph.modules[module_index].module_name, shown, span))
         loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, scopes, state, tail_store, context, diagnostics)
         return failed
     }
@@ -457,7 +457,14 @@ sema_call_export_foreign_target: fn(graph: SemaRegistrationGraph, export: SemaRe
     None
 }
 
-sema_call_import_member_unknown: fn(member: String, span: Span) -> Diagnostic {
+// The report for a member the imported module does not export: E0102, or
+// E3217 for a C library module (`__c_<lib>`), whose members come only from
+// its binding cache and its `#Import c.<lib>: module` overlay.
+sema_call_import_member_unknown: fn(module_name: String, member: String, span: Span) -> Diagnostic {
+    if module_name.starts_with("__c_") {
+        lib: module_name.slice(4, module_name.len())
+        return sema_error("E3217", span, "C library `{lib}` has no binding named `{member}`.", "Neither the binding cache `.jet/bindings/c/{lib}.jet` nor an `#Import c.{lib}: module` overlay declares `{member}`; without a cache the library binds nothing.", "Import the header by path (`use name: \"<dir>/{lib}.h\"`) so the compiler binds it, refresh the cache with `jet inspect bind <header.h> --pkg {lib}`, or declare `{member}` in `#Import c.{lib}: module`.")
+    }
     sema_error("E0102", span, "nothing named `{member}` exists in this import", "only functions and types outside a `priv module` of the other file are reachable here", "check the spelling, or move the item out of its `priv module`")
 }
 

@@ -243,7 +243,7 @@ jet_cli_c_bind_refresh: fn(root: String, entry_path: String, files: [JetDriverAu
     loop request in inputs.headers {
         header_path: jet_cli_c_bind_header_path(root, request.header)
         header_text: cli_files.read(header_path) ?? {
-            return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), jet_cli_c_bind_unreadable("{err}"), jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
+            return Val(jet_cli_report_output("", "E3208", jet_cli_c_bind_what(request.header), jet_cli_c_bind_unreadable(jet_cli_io_error_text(err)), jet_cli_c_bind_fix(request.lib), color, JET_DRIVER_EXIT_USER_ERROR))
         }
         overlay: inputs.overlays.get(request.lib) ?? HandleOverlay.empty()
         if !inputs.overlays.has_key(request.lib) && jet_cli_c_bind_current(root, request.lib, header_text) {
@@ -327,7 +327,7 @@ jet_cli_c_header_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIP
     }
     library: lib ?? jet_driver_foreign_library_from_header(header) ?? return jet_cli_c_bind_argument_error("cannot name the C library of `{header}`; pass --pkg <lib>", color)
     if !jet_driver_foreign_valid_library(library) -> return jet_cli_c_bind_argument_error("`{library}` is not a C library name", color)
-    header_text: cli_files.read(header) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), jet_cli_c_bind_unreadable("{err}"), jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
+    header_text: cli_files.read(header) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), jet_cli_c_bind_unreadable(jet_cli_io_error_text(err)), jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)
     overlays := [String: HandleOverlay]{}
     if overlay_path == .Val(path) {
         overlay_text: cli_files.read(path) ?? return jet_cli_fail("E3208", jet_cli_c_bind_what(header), "the overlay `{path}` could not be read ({err}).", jet_cli_c_bind_fix(library), color, JET_DRIVER_EXIT_USER_ERROR)

@@ -6531,6 +6531,23 @@ InvalidForeignBoundaryEvidence: struct {
     }
 }
 
+CBindingMemberMissing: struct {
+    lib: String
+    member: String
+
+    impl Diagnostic {
+        code: "E3217"
+        stage: [.Sema]
+        meaning: "A C library module has no binding for the named member"
+        detail: true
+        no_fix: .Behavior
+        fix_next: "Generate the library's binding from its header, or declare the member in an `#Import c.<lib>: module` overlay."
+        what: fn(self) -> String { "C library `{self.lib}` has no binding named `{self.member}`." }
+        why: fn(self) -> String { "Neither the binding cache `.jet/bindings/c/{self.lib}.jet` nor an `#Import c.{self.lib}: module` overlay declares `{self.member}`; without a cache the library binds nothing." }
+        fix: fn(self) -> String { "Import the header by path (`use name: \"<dir>/{self.lib}.h\"`) so the compiler binds it, refresh the cache with `jet inspect bind <header.h> --pkg {self.lib}`, or declare `{self.member}` in `#Import c.{self.lib}: module`." }
+    }
+}
+
 UnsupportedForeignLanguage: struct {
     impl Diagnostic {
         code: "E3220"
