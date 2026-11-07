@@ -1796,14 +1796,16 @@ sema_expression_condition_binds: fn(condition: Expr) -> Bool Never! {
 }
 
 // (#3974): the place a pattern subject windows when it is a
-// `&place` write window, or the hoisted switch local bound to one.
+// `&place` write window, or the hoisted switch local bound to one: a
+// `__jet_switch_subject_N`, or a value table's generated `it` (the rebound
+// subject's node is AST_NODE_GENERATED; a written `it` never is).
 sema_expression_window_source: fn(subject: Expr, scopes: SemaScopeTable) -> Expr? {
     return if subject == {
         .Paren(inner, _, _) -> sema_expression_window_source(inner, scopes)
         // copy: `value` is a payload of read parameter `subject`, which keeps the original; the Val carrier owns this one
         .Place(value, access, _, _) -> if access == PlaceAccess.Write -> Val(value.copy()) else -> None
-        .Ident(name, _, _) -> {
-            if !name.starts_with("__jet_switch_subject_") -> return None
+        .Ident(name, _, node) -> {
+            if !name.starts_with("__jet_switch_subject_") && !(name == "it" && node == AST_NODE_GENERATED) -> return None
             index: sema_scope_resolve_index(scopes, name) ?? return None
             if scopes.bindings[index].access == AccessConvention.Write -> Val(subject) else -> None
         }
