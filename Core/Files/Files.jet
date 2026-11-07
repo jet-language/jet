@@ -563,6 +563,29 @@ process_directory: fn(spec: ProcessSpec, directory: Directory, child_fd: Int, as
     }
 }
 
+#Test("the reader and writer descriptor rows name the open descriptor and flush the writer first") {
+    if sys.name() == "linux" {
+        root: mktemp("descriptor-rows-test")
+        input_path: join(root, "input.txt")
+        output_path: join(root, "output.txt")
+        write(input_path, "input\n") ?? panic("input")
+        reader: open(input_path) ?? panic("open reader")
+        writer := create(output_path) ?? panic("create writer")
+        writer.write_line("buffered") ?? panic("buffer a line")
+        reader_fd: core.files.__reader_fd(reader) ?? panic("reader descriptor: {err}")
+        writer_fd: core.files.__writer_fd(writer) ?? panic("writer descriptor: {err}")
+        assert(reader_fd >= 3 && writer_fd >= 3 && reader_fd != writer_fd)
+        // The kernel's link is the canonical path, which a symlinked TMPDIR changes.
+        assert((read_link("/proc/self/fd/{reader_fd}") ?? panic("reader link")).ends_with("/input.txt"))
+        assert((read_link("/proc/self/fd/{writer_fd}") ?? panic("writer link")).ends_with("/output.txt"))
+        assert(read(output_path) == .Ok("buffered\n"))
+        assert(core.files.__reader_fd(reader) == .Ok(reader_fd))
+        close(reader)
+        close(writer)
+        remove_all(root) ?? panic("cleanup")
+    }
+}
+
 
 impl Directory.Close {
     close: fn(&&self) {

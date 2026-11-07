@@ -203,6 +203,26 @@ files_writer_flush: fn(writer: I64) -> I64 {
     jet_std_file_reader_stat(writer, output, length, error)
 }
 
+// The open file's descriptor number, a borrowed fact for
+// ProcessSpec.keep_open; a closed file is EBADF. The Core caller keeps the
+// file alive until the process leaf duplicates the descriptor.
+#Export(c) jet_std_file_reader_fd_raw: fn(reader: I64, ok: I64, error: I64) -> I64 {
+    number: jet_fd_number_raw(reader)
+    if (number < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, fd_word(reader, I64{24}), I64{9}, error)
+    rt_text_store(ok, jet_int_owned_from_i64(number))
+    I64{1}
+}
+
+// A writer's buffered bytes are flushed first, so the child's writes land
+// after everything this process wrote before handing the file over.
+#Export(c) jet_std_file_writer_fd_raw: fn(writer: I64, ok: I64, error: I64) -> I64 {
+    path: files_writer_path(writer)
+    if (jet_fd_number_raw(writer) < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, I64{9}, error)
+    failure: files_writer_flush(writer)
+    if (failure != I64{0}) -> return files_writer_failure(HOST_IO_OP_FLUSH, path, failure, error)
+    jet_std_file_reader_fd_raw(writer, ok, error)
+}
+
 // Rust `{:#o}` of an i64: the 64-bit two's complement octal digits.
 files_push_octal: fn(target: I64, value: I64) {
     rt_text_push_word(target, I64{28464}, I64{2}) // "0o"
