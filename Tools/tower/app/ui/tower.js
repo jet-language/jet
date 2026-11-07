@@ -1504,13 +1504,37 @@ function renderDetail(c) {
   const cb = $('#m-criteria', m);
   if (!(c.criteria || []).length) cb.appendChild(el(`<p class="prose">No exit criteria yet.</p>`));
   for (const it of (c.criteria || [])) {
-    cb.appendChild(el(`<div class="critrow">
+    const row = el(`<div class="critrow">
         <div class="critrow__head"><span class="critrow__n">#${esc(it.n)}</span>
-          <span class="critrow__badge critrow__badge--${safeCriterionStatus(it.status)}">${esc(safeCriterionStatus(it.status))}</span></div>
+          <span class="critrow__badge critrow__badge--${safeCriterionStatus(it.status)}">${esc(safeCriterionStatus(it.status))}</span>
+          <span style="margin-left:auto"><button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
+          <button class="btn btn--ghost btn--sm" data-crit-remove>Remove</button></span></div>
         <div class="critrow__text">${esc(it.text)}</div>
         ${it.evidence ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
         ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
-      </div>`));
+      </div>`);
+    // Editing a met row reopens it on the server: its evidence proved the old wording.
+    const text = $('.critrow__text', row);
+    const editBtn = $('[data-crit-edit]', row);
+    editBtn.addEventListener('click', async () => {
+      if (text.isContentEditable) {
+        const next = text.innerText.trim();
+        text.contentEditable = 'false';
+        editBtn.textContent = 'Edit';
+        if (next && next !== it.text)
+          await api('card/criteria-edit', { id, n: it.n, text: next, reason: 'edited by the owner in the Tower UI', by: 'owner' });
+        else text.textContent = it.text;
+        return;
+      }
+      text.contentEditable = 'plaintext-only';
+      editBtn.textContent = 'Save';
+      text.focus();
+    });
+    $('[data-crit-remove]', row).addEventListener('click', async () => {
+      if (!confirm(`Remove criterion #${it.n}?\n\n${it.text}`)) return;
+      await api('card/criteria-remove', { id, n: it.n, reason: 'removed by the owner in the Tower UI', by: 'owner' });
+    });
+    cb.appendChild(row);
   }
   const critAdd = el(`<div class="qadd"><input data-keep="crit-add" placeholder="Add exit criterion…"><button class="btn btn--red btn--sm">Add</button></div>`);
   const postCrit = async () => { const i = $('input', critAdd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('card/criteria-add', { id, text: t, by: 'owner' }); };

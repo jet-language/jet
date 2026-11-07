@@ -2038,13 +2038,71 @@ export function addCriterion(s, ref, text, by) {
   const c = mustCard(s, ref);
   if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
   c.criteria ||= [];
-  const n = (c.criteria.length ? Math.max(...c.criteria.map(i => i.n)) : 0) + 1;
+  const n = nextCriterionNumber(c);
   const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
   c.criteria.push(item);
   invalidateCardMilestone(s, c);
   touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}` });
   return { ...item, cardId: c.id, cardNum: c.num };
+}
+
+// Criterion numbers are never reused: a removed row's number stays retired, so
+// evidence, logs and briefs that cite `cN` keep pointing at one criterion.
+function nextCriterionNumber(holder) {
+  const highest = Math.max(0, holder.criteriaLastN || 0, ...(holder.criteria || []).map(i => i.n));
+  holder.criteriaLastN = highest + 1;
+  return highest + 1;
+}
+
+function needsReason(verb, reason) {
+  if (!reason || !String(reason).trim()) fail('E_INVALID', `${verb} needs --reason <text>`);
+  return String(reason).trim();
+}
+
+// Rewording a criterion changes what it asks for, so a met or verified row
+// reopens: its evidence proved the old wording, not the new one.
+function rewordCriterion(item, text) {
+  const next = String(text ?? '').trim();
+  if (!next) fail('E_INVALID', 'criterion needs text');
+  if (next === item.text) fail('E_INVALID', `criterion #${item.n} already has that text`);
+  const before = item.text;
+  const reopened = item.status !== 'open';
+  item.text = next;
+  if (reopened) {
+    item.status = 'open';
+    item.metBy = null;
+    item.verifiedBy = null;
+    item.evidence = '';
+    delete item.closure;
+  }
+  item.at = now();
+  return { before, reopened };
+}
+
+export function editCriterion(s, ref, n, { text, reason, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'edit needs --by <agent>');
+  const why = needsReason('edit', reason);
+  const { before, reopened } = rewordCriterion(item, text);
+  invalidateCardMilestone(s, c);
+  touchCard(c, by);
+  logEvent(s, { by, action: 'card.criteria-edit', ref: c.id, note: `#${item.n}: ${why}${reopened ? ' (reopened)' : ''}; was: ${before.slice(0, 200)}` });
+  return { ...item, reopened, cardId: c.id, cardNum: c.num };
+}
+
+export function removeCriterion(s, ref, n, { reason, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'remove needs --by <agent>');
+  const why = needsReason('remove', reason);
+  c.criteriaLastN = Math.max(c.criteriaLastN || 0, ...c.criteria.map(i => i.n));
+  c.criteria = c.criteria.filter(i => i !== item);
+  invalidateCardMilestone(s, c);
+  touchCard(c, by);
+  logEvent(s, { by, action: 'card.criteria-remove', ref: c.id, note: `#${item.n}: ${why}; was [${item.status}]: ${item.text.slice(0, 200)}` });
+  return { ...item, removed: true, cardId: c.id, cardNum: c.num };
 }
 
 function mustCriterion(c, n) {
@@ -3390,7 +3448,7 @@ export function addMilestoneCriterion(s, id, text, by) {
   const m = mustMilestone(s, id);
   if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
   m.criteria ||= [];
-  const n = (m.criteria.length ? Math.max(...m.criteria.map(i => i.n)) : 0) + 1;
+  const n = nextCriterionNumber(m);
   const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
   m.criteria.push(item);
   clearMilestoneVerification(m);
@@ -3444,6 +3502,31 @@ export function reopenMilestoneCriterion(s, id, n, { reason, by } = {}) {
   syncMilestone(s, m.id);
   logEvent(s, { by, action: 'milestone.criteria-reopen', ref: m.id, note: `#${item.n}: ${String(reason).trim()}` });
   return { ...item, milestoneId: m.id };
+}
+
+export function editMilestoneCriterion(s, id, n, { text, reason, by } = {}) {
+  const m = mustMilestone(s, id);
+  const item = mustMilestoneCriterion(m, n);
+  if (!by) fail('E_INVALID', 'edit needs --by <agent>');
+  const why = needsReason('edit', reason);
+  const { before, reopened } = rewordCriterion(item, text);
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
+  logEvent(s, { by, action: 'milestone.criteria-edit', ref: m.id, note: `#${item.n}: ${why}${reopened ? ' (reopened)' : ''}; was: ${before.slice(0, 200)}` });
+  return { ...item, reopened, milestoneId: m.id };
+}
+
+export function removeMilestoneCriterion(s, id, n, { reason, by } = {}) {
+  const m = mustMilestone(s, id);
+  const item = mustMilestoneCriterion(m, n);
+  if (!by) fail('E_INVALID', 'remove needs --by <agent>');
+  const why = needsReason('remove', reason);
+  m.criteriaLastN = Math.max(m.criteriaLastN || 0, ...m.criteria.map(i => i.n));
+  m.criteria = m.criteria.filter(i => i !== item);
+  clearMilestoneVerification(m);
+  syncMilestone(s, m.id);
+  logEvent(s, { by, action: 'milestone.criteria-remove', ref: m.id, note: `#${item.n}: ${why}; was [${item.status}]: ${item.text.slice(0, 200)}` });
+  return { ...item, removed: true, milestoneId: m.id };
 }
 
 export function beginMilestoneCloseout(s, id, { sourceCommit, by } = {}, historyCards = []) {
