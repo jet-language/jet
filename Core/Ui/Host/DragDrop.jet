@@ -1,6 +1,7 @@
 use {
     core: core
     core.ui.host.[UIGrantedPath, UIHostError, UINodeID]
+    internal.[drag_failure, drag_operation, drag_phase]
 }
 
 // core.ui.host.drag_drop — typed file/text drop events.
@@ -58,22 +59,25 @@ poll: fn() -[IO]> UIDragEvent? UIHostError! {
     Ok(Val(UIDragEvent{target: UINodeID{value: fields[0].copy()}, phase: phase, operation: operation, items: items}))
 }
 
-drag_phase: fn(event: String) -> UIDragPhase UIHostError! {
-    if event == "dragenter" -> return Ok(UIDragPhase.Enter)
-    if event == "dragover" -> return Ok(UIDragPhase.Over)
-    if event == "drop" -> return Ok(UIDragPhase.Drop)
-    if event == "dragleave" -> return Ok(UIDragPhase.Leave)
-    Err(drag_failure("unknown drag/drop event `{event}`"))
-}
+// How a provider record's fields read: not part of the drag/drop surface.
+priv internal: module {
+    drag_phase: fn(event: String) -> UIDragPhase UIHostError! {
+        if event == "dragenter" -> return Ok(UIDragPhase.Enter)
+        if event == "dragover" -> return Ok(UIDragPhase.Over)
+        if event == "drop" -> return Ok(UIDragPhase.Drop)
+        if event == "dragleave" -> return Ok(UIDragPhase.Leave)
+        Err(drag_failure("unknown drag/drop event `{event}`"))
+    }
 
-drag_operation: fn(drop_effect: String) -> UIDragOperation? UIHostError! {
-    if drop_effect == "none" -> return Ok(None)
-    if drop_effect == "copy" -> return Ok(Val(UIDragOperation.Copy))
-    if drop_effect == "move" -> return Ok(Val(UIDragOperation.Move))
-    if drop_effect == "link" -> return Ok(Val(UIDragOperation.Link))
-    Err(drag_failure("unknown drag/drop operation `{drop_effect}`"))
-}
+    drag_operation: fn(drop_effect: String) -> UIDragOperation? UIHostError! {
+        if drop_effect == "none" -> return Ok(None)
+        if drop_effect == "copy" -> return Ok(Val(UIDragOperation.Copy))
+        if drop_effect == "move" -> return Ok(Val(UIDragOperation.Move))
+        if drop_effect == "link" -> return Ok(Val(UIDragOperation.Link))
+        Err(drag_failure("unknown drag/drop operation `{drop_effect}`"))
+    }
 
-drag_failure: fn(message: String) -> UIHostError Never! {
-    UIHostError.HostFailure{service: "DragDrop", message: message}
+    drag_failure: fn(message: String) -> UIHostError Never! {
+        UIHostError.HostFailure{service: "DragDrop", message: message}
+    }
 }

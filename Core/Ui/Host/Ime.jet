@@ -1,6 +1,7 @@
 use {
     core: core
     core.ui.host.[UIHostError, UINodeID, UITextRange]
+    internal.[ime_failure, ime_offset, ime_phase]
 }
 
 // core.ui.host.ime — typed input-method editor events.
@@ -50,20 +51,23 @@ poll: fn() -[IO]> UIIMEEvent? UIHostError! {
     Ok(Val(UIIMEEvent{target: target, phase: phase, composition: Val(UIIMEComposition{text: text, selection: selection, marked: marked})}))
 }
 
-ime_phase: fn(event: String, empty: Bool) -> UIIMEPhase UIHostError! {
-    if event == "compositionstart" -> return Ok(UIIMEPhase.Start)
-    if event == "compositionupdate" -> return Ok(UIIMEPhase.Update)
-    if event == "compositionend" && empty -> return Ok(UIIMEPhase.Cancel)
-    if event == "compositionend" -> return Ok(UIIMEPhase.Commit)
-    Err(ime_failure("unknown IME event `{event}`"))
-}
+// How a provider record's fields read: not part of the IME surface.
+priv internal: module {
+    ime_phase: fn(event: String, empty: Bool) -> UIIMEPhase UIHostError! {
+        if event == "compositionstart" -> return Ok(UIIMEPhase.Start)
+        if event == "compositionupdate" -> return Ok(UIIMEPhase.Update)
+        if event == "compositionend" && empty -> return Ok(UIIMEPhase.Cancel)
+        if event == "compositionend" -> return Ok(UIIMEPhase.Commit)
+        Err(ime_failure("unknown IME event `{event}`"))
+    }
 
-ime_offset: fn(text: String) -> Int UIHostError! {
-    offset: Int.parse(text) ?? return Err(ime_failure("IME offset `{text}` is not a number"))
-    if offset < 0 -> return Err(ime_failure("IME offset `{text}` is negative"))
-    Ok(offset)
-}
+    ime_offset: fn(text: String) -> Int UIHostError! {
+        offset: Int.parse(text) ?? return Err(ime_failure("IME offset `{text}` is not a number"))
+        if offset < 0 -> return Err(ime_failure("IME offset `{text}` is negative"))
+        Ok(offset)
+    }
 
-ime_failure: fn(message: String) -> UIHostError Never! {
-    UIHostError.HostFailure{service: "IME", message: message}
+    ime_failure: fn(message: String) -> UIHostError Never! {
+        UIHostError.HostFailure{service: "IME", message: message}
+    }
 }
