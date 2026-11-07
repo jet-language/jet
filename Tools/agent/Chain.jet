@@ -1,7 +1,29 @@
 #!/usr/bin/env jet
-// Checks Tools/agent/chain/chain.sh runs on the compilers it builds.
+// The hashing, change classification, store and binary checks of
+// Tools/agent/chain/chain.sh, run by the seed.
 //
+//   jet Tools/agent/Chain.jet diff TREE BASE REPO
+//   jet Tools/agent/Chain.jet plan TREE DIFF.json
+//   jet Tools/agent/Chain.jet inputs TREE
+//   jet Tools/agent/Chain.jet dirhash DIR
+//   jet Tools/agent/Chain.jet packhash DIR
+//   jet Tools/agent/Chain.jet evict STORE CAP_GB
 //   jet Tools/agent/Chain.jet trapscan ELF
+//
+// `diff` prints JSON {base, changed: [{path, status, sha}], digest}: TREE
+// against git commit BASE of the checkout REPO. `plan` prints JSON {level,
+// reasons, members}: the --auto level and the check members of a `diff`.
+// `inputs` prints "BUILD PACK NBUILD NPACK": the content hashes and counts of
+// the tree files a build stage and a pack stage read. `dirhash` prints the
+// content hash of a directory (a runtime pack): every file's relative path and
+// bytes. `packhash` prints the digest two runtime packs compare by: every
+// file, as `dirhash` reads it, except that each provenance.json (at the pack
+// root and in its content-key directory) counts as its canonical JSON without
+// compilerSha256 and recipeSha256, which name the compiler that built the pack.
+// `evict` removes the least recently used entries of a stage store until it
+// is under CAP_GB. Every content hash is SHA-256 over a domain string and a
+// NUL, then per file in byte order: u64 big-endian path length, path, u64
+// big-endian length, bytes; a symlink counts as "symlink:" and its target.
 //
 // `trapscan` lists the functions of a built jet that carry a keep-going
 // `todo` trap (#5662): `lea "todo"(%rip)` .. `mov $4,%rsi; call
@@ -10,21 +32,654 @@
 // nothing. Exit 1 when any is found, 2 when the binary has no symbol table or
 // no jet_rt_unreachable.
 use {
+    crypto: core.crypto
     files: core.files
+    json: core.encoding.json
     process: core.process
     term: core.term
 }
 
 run: fn() {
     args: process.args()
-    if args.len() != 2 || args[0] != "trapscan" -> usage()
-    process.exit(trapscan(args[1]))
+    if args.len() == 0 -> usage()
+    verb: args[0]
+    if verb == "trapscan" && args.len() == 2 -> process.exit(trapscan(args[1]))
+    if verb == "diff" && args.len() == 4 {
+        print(render_diff(diff(absolute(args[1]), args[2], args[3])))
+        process.exit(0)
+    }
+    if verb == "plan" && args.len() == 3 {
+        print(render_plan(plan(absolute(args[1]), args[2])))
+        process.exit(0)
+    }
+    if verb == "inputs" && args.len() == 2 {
+        tree: absolute(args[1])
+        inputs: stage_inputs(tree)
+        print("{content_hash(tree, inputs.build, "chain-build-inputs-v1")} {content_hash(tree, inputs.pack, "chain-pack-inputs-v1")} {inputs.build.len()} {inputs.pack.len()}")
+        process.exit(0)
+    }
+    if verb == "dirhash" && args.len() == 2 {
+        print(dirhash(absolute(args[1])))
+        process.exit(0)
+    }
+    if verb == "packhash" && args.len() == 2 {
+        print(packhash(absolute(args[1])))
+        process.exit(0)
+    }
+    if verb == "evict" && args.len() == 3 -> process.exit(evict(args[1], args[2]))
+    usage()
 }
 
 usage: fn() -[Exec, IO]> Never {
-    term.eprint("usage: jet Tools/agent/Chain.jet trapscan ELF")
+    term.eprint("usage: jet Tools/agent/Chain.jet diff TREE BASE REPO")
+    term.eprint("       jet Tools/agent/Chain.jet plan TREE DIFF.json")
+    term.eprint("       jet Tools/agent/Chain.jet inputs TREE")
+    term.eprint("       jet Tools/agent/Chain.jet dirhash DIR")
+    term.eprint("       jet Tools/agent/Chain.jet packhash DIR")
+    term.eprint("       jet Tools/agent/Chain.jet evict STORE CAP_GB")
+    term.eprint("       jet Tools/agent/Chain.jet trapscan ELF")
     process.exit(64)
 }
+
+fail: fn(message: String) -[Exec, IO]> Never {
+    term.eprint("Chain.jet: {message}")
+    process.exit(1)
+}
+
+absolute: fn(path: String) -[Env, Exec, FS, IO]> String Never! {
+    if path.starts_with("/") -> return path.copy()
+    files.join(files.cwd() ?? fail("no current directory: {err}"), path)
+}
+
+// --- content hashes ---------------------------------------------------------
+
+// Directory names a tree walk skips (build outputs), beside dot names.
+SKIPPED: ["target", "build", "node_modules", "bin"]
+
+lstat: fn(path: String) -[Exec, FS, IO]> files.Stat Never! { files.stat(path) ?? fail("cannot stat `{path}`: {err}") }
+
+list: fn(path: String) -[Exec, FS, IO]> [files.DirEntry] Never! { files.list_dir(path) ?? fail("cannot list `{path}`: {err}") }
+
+// Every file under `dir` (relative to `root`), skipping dot names and build
+// output names, appended to `out`; `dir` itself when it is not a directory,
+// nothing when it does not exist.
+walk_into: fn(root: String, dir: String, out: &[String]) -[Exec, FS, IO]> {
+    if !files.exists(files.join(root, dir)) -> return
+    if !lstat(files.join(root, dir)).is_dir {
+        out.push(dir.copy())
+        return
+    }
+    pending := [String]{dir.copy()}
+    at := 0
+    loop at < pending.len() {
+        rel: pending[at].copy()
+        at += 1
+        loop entry in list(files.join(root, rel)) {
+            if entry.name.starts_with(".") || SKIPPED.contains(entry.name) -> next
+            child: "{rel}/{entry.name}"
+            if lstat(files.join(root, child)).is_dir -> pending.push(child) else -> out.push(child)
+        }
+    }
+}
+
+// `paths` sorted in byte order without repeats.
+unique: fn(paths: [String]) -> [String] Never! {
+    sorted := paths.copy()
+    sorted.sort()
+    out := [String]{}
+    loop path in sorted {
+        if out.len() > 0 && out[out.len() - 1] == path -> next
+        out.push(path.copy())
+    }
+    out
+}
+
+be64: fn(value: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop _ in 0..<8 -> out.push(U8{0})
+    rest := value
+    loop k in 0..<8 {
+        out[7 - k] = U8.from_int(rest % 256) ?? U8{0}
+        rest = rest /% 256
+    }
+    out
+}
+
+// The bytes a content hash reads for `path`: a symlink's target text after
+// `link_prefix`, else the file's bytes.
+entry_bytes: fn(path: String, link_prefix: String) -[Exec, FS, IO]> [U8] Never! {
+    if lstat(path).is_symlink -> return "{link_prefix}{files.read_link(path) ?? fail("cannot read link `{path}`: {err}")}".bytes()
+    files.read_bytes(path) ?? fail("cannot read `{path}`: {err}")
+}
+
+// SHA-256 over `domain`, a NUL, then per path (sorted, unique): u64 path
+// length, path, u64 length, bytes.
+content_hash: fn(root: String, paths: [String], domain: String) -[Exec, FS, IO]> String Never! {
+    hasher := crypto.new()
+    head := domain.bytes()
+    head.push(U8{0})
+    hasher.update(head)
+    loop path in unique(paths) {
+        bytes: entry_bytes(files.join(root, path), "symlink:")
+        hasher.update(be64(path.count_bytes()))
+        hasher.update(path.bytes())
+        hasher.update(be64(bytes.len()))
+        hasher.update(bytes)
+    }
+    hasher.digest()
+}
+
+// Every file under `dir` (relative to it), dot names included.
+all_files: fn(dir: String) -[Exec, FS, IO]> [String] Never! {
+    found := [String]{}
+    pending := [String]{""}
+    at := 0
+    loop at < pending.len() {
+        rel: pending[at].copy()
+        at += 1
+        loop entry in list(if rel == "" -> dir.copy() else -> files.join(dir, rel)) {
+            child: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
+            if lstat(files.join(dir, child)).is_dir -> pending.push(child) else -> found.push(child)
+        }
+    }
+    found
+}
+
+dirhash: fn(dir: String) -[Exec, FS, IO]> String Never! { content_hash(dir, all_files(dir), "chain-dirhash-v1") }
+
+// --- pack comparison --------------------------------------------------------
+
+// The provenance.json fields that name the compiler which built a runtime
+// pack: s1 and s2 differ, so pack1 and pack2 differ in them even when every
+// object and archive is the same.
+BUILDER_FIELDS: ["compilerSha256", "recipeSha256"]
+
+PackFile: struct {
+    path: String
+    bytes: [U8]
+}
+
+// A pack's provenance.json: at its root or in its content-key directory.
+provenance_path: fn(path: String) -> Bool Never! {
+    path == "provenance.json" || path.partition("/").tail == "provenance.json"
+}
+
+// A provenance.json as packs compare it: canonical JSON of the object
+// without BUILDER_FIELDS; None when it is not a JSON object.
+comparable_provenance: fn(bytes: [U8]) -> [U8]? Never! {
+    tree: json.parse(String.from_bytes_lossy(bytes)) ?? return None
+    if tree == .Object(entries) {
+        kept := [String: Dyn]{}
+        loop entry in entries {
+            if !BUILDER_FIELDS.contains(entry.key) -> kept[entry.key.copy()] = entry.value.copy()
+        }
+        text: json.canonical(Dyn.Object(kept)) ?? return None
+        return Val(text.bytes())
+    }
+    None
+}
+
+// The digest packs compare by: every file framed as a content hash frames
+// it, each provenance.json as `comparable_provenance`; None when one is not a
+// JSON object.
+pack_digest: fn(pack: [PackFile]) -> String? Never! {
+    sorted := pack.copy()
+    sorted.sort_by((left: PackFile, right: PackFile) -> {
+        if left.path < right.path -> return Ordering.Less
+        if left.path > right.path -> return Ordering.Greater
+        Ordering.Equal
+    })
+    hasher := crypto.new()
+    head := "chain-pack-compare-v1".bytes()
+    head.push(U8{0})
+    hasher.update(head)
+    loop file in sorted {
+        bytes: if provenance_path(file.path) -> comparable_provenance(file.bytes) ?? return None else -> file.bytes.copy()
+        hasher.update(be64(file.path.count_bytes()))
+        hasher.update(file.path.bytes())
+        hasher.update(be64(bytes.len()))
+        hasher.update(bytes)
+    }
+    Val(hasher.digest())
+}
+
+// The pack-comparison digest of the runtime pack DIR.
+packhash: fn(dir: String) -[Exec, FS, IO]> String Never! {
+    pack := [PackFile]{}
+    loop path in all_files(dir) -> pack.push(PackFile{path: path.copy(), bytes: entry_bytes(files.join(dir, path), "symlink:")})
+    pack_digest(pack) ?? fail("a provenance.json of `{dir}` is not a JSON object")
+}
+
+// --- stage inputs -----------------------------------------------------------
+
+// The dev tool roots' `jet` that runs repository tools: JET_BIN, else the seed.
+tool_jet: fn() -[Env]> String Never! {
+    bin: process.env_get("JET_BIN") ?? ""
+    if bin != "" -> return bin
+    seed: process.env_get("JET_SEED") ?? ""
+    if seed != "" -> return "{seed}/jet"
+    seeds: process.env_get("JET_SEEDS") ?? ""
+    if seeds != "" -> return "{seeds}/current/jet"
+    data: process.env_get("XDG_DATA_HOME") ?? ""
+    if data != "" -> return "{data}/jet-seeds/current/jet"
+    "{process.env_get("HOME") ?? ""}/.local/share/jet-seeds/current/jet"
+}
+
+// The output rows of Tools/agent/CompilerPackages.jet of `tree`.
+compiler_packages: fn(tree: String, args: [String]) -[Env, Exec, FS, IO, Time.Wait]> [String] Never! {
+    argv := [String]{tool_jet(), files.join(tree, "Tools/agent/CompilerPackages.jet"), "--root", tree.copy()}
+    argv.extend(args.copy())
+    receipt: process.cmd(argv).output_limit(268435456).run() ?? fail("{argv[0]}: {err}")
+    if receipt.errors.trim() != "" -> term.eprint(receipt.errors.trim())
+    if !receipt.success -> fail("Tools/agent/CompilerPackages.jet {args[0]} failed (exit {receipt.code})")
+    rows := [String]{}
+    loop row in receipt.output.split("\n") {
+        if row != "" -> rows.push(row.copy())
+    }
+    rows
+}
+
+Inputs: struct {
+    build: [String]
+    pack: [String]
+}
+
+// The build stage reads the compiler's source identity inputs (workspace
+// files, every package `jet build Compiler` compiles, Core) plus the Prelude
+// and runtime trees the toolchain root serves and the dev-shell definition;
+// the pack stage reads those plus the packaging recipe
+// (Tools/packaging/PrebuildRuntime.jet and the Tools/agent/CompilerPackages.jet
+// it assembles the runtime unit with) and every runtime source sources.list
+// names. Both sorted and unique.
+stage_inputs: fn(tree: String) -[Env, Exec, FS, IO, Time.Wait]> Inputs Never! {
+    build := compiler_packages(tree, [String]{"inputs"})
+    loop extra in ([String]{"Compiler/Prelude", "Compiler/JetRuntime", "env.jet", "flake.nix", "flake.lock"}) -> walk_into(tree, extra, build)
+    pack := build.copy()
+    loop recipe in ([String]{"Tools/packaging/PrebuildRuntime.jet", "Tools/agent/CompilerPackages.jet"}) {
+        if files.exists(files.join(tree, recipe)) -> pack.push(recipe.copy())
+    }
+    sources: files.join(tree, "Compiler/JetRuntime/sources.list")
+    if files.exists(sources) {
+        text: files.read(sources) ?? fail("cannot read `{sources}`: {err}")
+        loop line in text.split("\n") {
+            row: line.trim()
+            if row == "" || row.starts_with("#") -> next
+            if files.exists(files.join(tree, row)) -> pack.push(row.copy())
+        }
+    }
+    Inputs{build: unique(build), pack: unique(pack)}
+}
+
+// --- diff -------------------------------------------------------------------
+
+Change: struct {
+    path: String
+    status: String
+    sha: String
+}
+
+Diff: struct {
+    base: String
+    changed: [Change]
+    digest: String
+}
+
+// Git's blob id: sha1 of `blob <length>\0<bytes>`.
+blob_hash: fn(bytes: [U8]) -> String Never! {
+    framed := "blob {bytes.len()}".bytes()
+    framed.push(U8{0})
+    framed.extend(bytes.copy())
+    crypto.sha1(framed)
+}
+
+// The NUL-separated fields of `bytes`, empty ones dropped.
+nul_fields: fn(bytes: [U8]) -> [String] Never! {
+    out := [String]{}
+    start := 0
+    loop at in 0..<bytes.len() {
+        if Int.from_u8(bytes[at]) != 0 -> next
+        if at > start -> out.push(String.from_bytes_lossy(bytes.slice(start, at)))
+        start = at + 1
+    }
+    if bytes.len() > start -> out.push(String.from_bytes_lossy(bytes.slice(start, bytes.len())))
+    out
+}
+
+// TREE against git commit BASE of REPO: added (A), modified (M) and deleted
+// (D) files, by git blob id. Directories the base does not have are skipped
+// when they are dot or build-output names (chain outputs, .jet caches,
+// keep-going reports), and so is an untracked dot file (.chain-base, a lock),
+// so only source changes count.
+diff: fn(tree: String, base: String, repo: String) -[Env, Exec, FS, IO, Time.Wait]> Diff Never! {
+    listed: process.cmd([String]{"git", "-C", repo.copy(), "ls-tree", "-r", "-z", "--full-tree", base.copy()}).output_limit(268435456).run() ?? fail("git: {err}")
+    if !listed.success -> fail("git ls-tree {base} in {repo} failed: {listed.errors.trim()}")
+    base_sha := [String: String]{}
+    base_paths := [String]{}
+    prefixes := [String: Bool]{}
+    loop row in nul_fields(listed.output.bytes()) {
+        split: row.partition("\t")
+        meta: split.head.split(" ").to_list()
+        if meta.len() < 3 || meta[1] != "blob" -> next
+        path: split.tail.copy()
+        base_sha[path.copy()] = meta[2].copy()
+        base_paths.push(path.copy())
+        prefix := path.copy()
+        loop prefix.contains("/") {
+            prefix = prefix.rpartition("/").head.copy()
+            prefixes[prefix.copy()] = true
+        }
+    }
+    seen := [String: Bool]{}
+    changed := [Change]{}
+    pending := [String]{""}
+    at := 0
+    loop at < pending.len() {
+        rel: pending[at].copy()
+        at += 1
+        loop entry in list(if rel == "" -> tree.copy() else -> files.join(tree, rel)) {
+            child: if rel == "" -> entry.name.copy() else -> "{rel}/{entry.name}"
+            dot: entry.name.starts_with(".")
+            if lstat(files.join(tree, child)).is_dir {
+                if !prefixes.has_key(child) && (dot || SKIPPED.contains(entry.name)) -> next
+                pending.push(child)
+                next
+            }
+            known: base_sha.get(child) ?? ""
+            tracked: base_sha.has_key(child)
+            if !tracked && dot -> next
+            seen[child.copy()] = true
+            sha: blob_hash(entry_bytes(files.join(tree, child), ""))
+            if !tracked {
+                changed.push(Change{path: child.copy(), status: "A", sha: sha})
+            } else if known != sha {
+                changed.push(Change{path: child.copy(), status: "M", sha: sha})
+            }
+        }
+    }
+    loop path in base_paths {
+        if !seen.has_key(path) -> changed.push(Change{path: path.copy(), status: "D", sha: ""})
+    }
+    changed.sort_by((left: Change, right: Change) -> {
+        if left.path < right.path -> return Ordering.Less
+        if left.path > right.path -> return Ordering.Greater
+        Ordering.Equal
+    })
+    hasher := crypto.new()
+    head := "chain-diff-v1".bytes()
+    head.push(U8{0})
+    head.extend(base.bytes())
+    head.push(U8{0})
+    hasher.update(head)
+    loop change in changed -> hasher.update("{change.status} {change.path} {change.sha}\n".bytes())
+    Diff{base: base.copy(), changed: changed, digest: hasher.digest()}
+}
+
+render_diff: fn(diff: Diff) -> String Never! {
+    rows := [String]{}
+    loop change in diff.changed -> rows.push("{{\"path\":{json_text(change.path)},\"status\":{json_text(change.status)},\"sha\":{json_text(change.sha)}}}")
+    "{{\"base\":{json_text(diff.base)},\"changed\":[{rows.join(",")}],\"digest\":{json_text(diff.digest)}}}"
+}
+
+// `text` as a JSON string, escaped as JavaScript's JSON.stringify does.
+json_text: fn(text: String) -> String Never! {
+    out := [U8]{U8{34}}
+    loop letter in text.bytes() {
+        code: Int.from_u8(letter)
+        if code == 34 || code == 92 {
+            out.push(U8{92})
+            out.push(letter)
+        } else if code < 32 {
+            high: code /% 16
+            low: code % 16
+            escape: if code == 8 -> "\\b" else if code == 9 -> "\\t" else if code == 10 -> "\\n" else if code == 12 -> "\\f" else if code == 13 -> "\\r" else -> "\\u00{HEX.slice(high..<high + 1)}{HEX.slice(low..<low + 1)}"
+            out.extend(escape.bytes())
+        } else {
+            out.push(letter)
+        }
+    }
+    out.push(U8{34})
+    String.from_bytes_lossy(out)
+}
+
+HEX: "0123456789abcdef"
+
+// --- plan -------------------------------------------------------------------
+
+// --auto classes, judged per changed path; the chain level is the highest
+// class any path needs.
+//   full : the code generator and what it links or evaluates: JetIR,
+//          JetBackend, JetEval (compile-time evaluation), JetRuntime, Prelude,
+//          Bootstrap, the Compiler workspace files, the runtime pack recipe
+//          (Tools/packaging), the dev shell (flake.nix/flake.lock), and any
+//          compiler source whose file name names comptime, lowering, linking,
+//          native objects, emission, the scheduler or threads.
+//   s1   : the rest of the compiler front end `jet build Compiler` compiles
+//          (JetFoundation, JetLexer, JetParser, JetSema, JetBuildSession,
+//          JetDriver, JetCli and the Jetpack packages it reaches) and root
+//          env.jet.
+//   check: Tests/tests, Examples, Tools, Docs, Core library sources, packages
+//          the compiler does not build (JetLSP, JetRepl, ...), and anything no
+//          chain stage reads.
+FULL_DIRS: ["Compiler/JetIR/", "Compiler/JetBackend/", "Compiler/JetEval/", "Compiler/JetRuntime/", "Compiler/Prelude/", "Compiler/Bootstrap/", "Tools/packaging/"]
+FULL_FILES: ["Compiler/package.jet", "Compiler/build.jet", "flake.nix", "flake.lock"]
+FULL_NAMES: ["comptime", "lower", "link", "native", "emit", "codegen", "object", "sched", "thread", "parallel"]
+
+Plan: struct {
+    level: String
+    reasons: [String]
+    members: [String]
+}
+
+Class: struct {
+    level: String
+    reason: String
+}
+
+rank: fn(level: String) -> Int Never! { if level == "full" -> 2 else if level == "s1" -> 1 else -> 0 }
+
+// The class of the changed `path`; `read` holds the paths a build stage reads.
+classify: fn(path: String, read: [String: Bool]) -> Class Never! {
+    parts: path.split("/").to_list()
+    if path == "Tools/packaging/PrebuildRuntime.jet" -> return Class{level: "full", reason: "runtime pack producer"}
+    if parts.contains("Tests") || parts.contains("tests") -> return Class{level: "check", reason: "tests"}
+    if FULL_FILES.contains(path) -> return Class{level: "full", reason: if path.starts_with("flake") -> "dev shell definition" else -> "Compiler workspace file"}
+    loop dir in FULL_DIRS {
+        if path.starts_with(dir) -> return Class{level: "full", reason: "{dir.slice(0..<dir.count_bytes() - 1)} (code generation, runtime or runtime pack)"}
+    }
+    if parts[0] == "Core" -> return Class{level: "check", reason: "Core library source"}
+    if parts[0] == "Examples" || parts[0] == "Docs" || parts[0] == "Tools" -> return Class{level: "check", reason: parts[0].copy()}
+    if read.has_key(path) {
+        name: parts[parts.len() - 1].lower()
+        loop word in FULL_NAMES {
+            if name.contains(word) -> return Class{level: "full", reason: "compiler source named for comptime/lowering/linking/emission/scheduler/threads"}
+        }
+        area: if parts.len() > 1 -> "{parts[0]}/{parts[1]}" else -> parts[0].copy()
+        return Class{level: "s1", reason: "compiler front end ({area})"}
+    }
+    if path == "env.jet" -> return Class{level: "s1", reason: "toolchain env.jet"}
+    Class{level: "check", reason: "not read by any chain stage"}
+}
+
+// The package a changed file belongs to: its nearest directory with a
+// package.jet, "" when none has one.
+owner_package: fn(tree: String, path: String) -[FS]> String Never! {
+    dir := path.copy()
+    loop dir.contains("/") {
+        dir = dir.rpartition("/").head.copy()
+        if files.exists(files.join(tree, "{dir}/package.jet")) -> return dir.copy()
+    }
+    ""
+}
+
+// The --auto level of a `diff` (DIFF.json), why, and the packages `check`
+// checks.
+plan: fn(tree: String, diff_path: String) -[Env, Exec, FS, IO, Time.Wait]> Plan Never! {
+    text: files.read(diff_path) ?? fail("cannot read `{diff_path}`: {err}")
+    parsed: json.parse(text) ?? fail("`{diff_path}` is not JSON: {err}")
+    paths := [String]{}
+    loop change in array_field(parsed, "changed") -> paths.push(text_field(change, "path"))
+    inputs: stage_inputs(tree)
+    read := [String: Bool]{}
+    loop path in inputs.build -> read[path.copy()] = true
+    selector := [String]{"select"}
+    selector.extend(paths.copy())
+    loop path in compiler_packages(tree, selector) -> read[path.copy()] = true
+    compiler_dirs := [String: Bool]{}
+    loop row in compiler_packages(tree, [String]{"packages"}) {
+        fields: row.split("\t").to_list()
+        if fields.len() > 1 -> compiler_dirs[fields[1].copy()] = true
+    }
+    level := "check"
+    keys := [String]{}
+    grouped := [[String]]{}
+    members := [String]{}
+    loop path in paths {
+        class: classify(path, read)
+        if rank(class.level) > rank(level) -> level = class.level.copy()
+        key: "{class.level}: {class.reason}"
+        slot := keys.len()
+        loop index in 0..<keys.len() {
+            if keys[index] == key {
+                slot = index
+                break
+            }
+        }
+        if slot == keys.len() {
+            keys.push(key)
+            grouped.push([String]{})
+        }
+        grouped[slot].push(path.copy())
+        if !path.ends_with(".jet") -> next
+        // A compiler package (or Core, which every compiler package reads) is
+        // checked through Compiler/JetCli, whose check covers every package it
+        // depends on; other packages are checked themselves.
+        owner := if path.starts_with("Core/") -> "Compiler/JetCli" else -> owner_package(tree, path)
+        if compiler_dirs.has_key(owner) -> owner = "Compiler/JetCli"
+        if owner != "" && !members.contains(owner) -> members.push(owner.copy())
+    }
+    reasons := [String]{}
+    loop wanted in ([Int]{2, 1, 0}) {
+        loop index in 0..<keys.len() {
+            key: keys[index]
+            if rank(key.partition(":").head) != wanted -> next
+            named: grouped[index]
+            shown := [String]{}
+            loop place in 0..<named.len() {
+                if place < 4 -> shown.push(named[place].copy())
+            }
+            plural: if named.len() == 1 -> "" else -> "s"
+            more: if named.len() > 4 -> " ..." else -> ""
+            reasons.push("{key} ({named.len()} file{plural}: {shown.join(" ")}{more})")
+        }
+    }
+    if paths.len() == 0 -> reasons.push("no changes against the base: check (nothing to check)")
+    members.sort()
+    Plan{level: level, reasons: reasons, members: members}
+}
+
+render_plan: fn(plan: Plan) -> String Never! {
+    reasons := [String]{}
+    loop reason in plan.reasons -> reasons.push(json_text(reason))
+    members := [String]{}
+    loop member in plan.members -> members.push(json_text(member))
+    "{{\"level\":{json_text(plan.level)},\"reasons\":[{reasons.join(",")}],\"members\":[{members.join(",")}]}}"
+}
+
+field: fn(tree: Dyn, name: String) -> Dyn Never! {
+    if tree == .Object(entries) {
+        loop entry in entries {
+            if entry.key == name -> return entry.value.copy()
+        }
+    }
+    Dyn.Null
+}
+
+text_field: fn(tree: Dyn, name: String) -> String Never! {
+    if field(tree, name) == .Text(value) -> return value.copy()
+    ""
+}
+
+array_field: fn(tree: Dyn, name: String) -> [Dyn] Never! {
+    if field(tree, name) == .Array(items) -> return items.copy()
+    [Dyn]{}
+}
+
+// --- store ------------------------------------------------------------------
+
+StoreEntry: struct {
+    name: String
+    dir: String
+    bytes: Int
+    used: Int
+}
+
+GIB: 1073741824
+
+stage_key: fn(name: String) -> Bool Never! {
+    if name.count_bytes() != 64 -> return false
+    loop letter in name.bytes() {
+        code: Int.from_u8(letter)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+// The `bytes=N` row of a store entry's meta, 0 when it has none.
+meta_bytes: fn(meta: String) -> Int Never! {
+    loop line in meta.split("\n") {
+        if line.starts_with("bytes=") -> return Int.parse(line.slice(6..<line.count_bytes())) ?? 0
+    }
+    0
+}
+
+// Remove the least recently used entries of STORE (by the mtime of each
+// entry's .used, else of the entry) until its entries' meta `bytes` total is
+// at most CAP_GB; entries without a readable meta are not counted.
+evict: fn(store: String, cap_text: String) -[Exec, FS, IO]> Int Never! {
+    cap_gb: Float.parse(cap_text) ?? {
+        term.eprint("Chain.jet evict: CAP_GB `{cap_text}` is not a number")
+        return 64
+    }
+    if cap_gb < 0.0 {
+        term.eprint("Chain.jet evict: CAP_GB `{cap_text}` is negative")
+        return 64
+    }
+    cap: cap_gb * Float.from_int(GIB)
+    entries := [StoreEntry]{}
+    loop item in list(store) {
+        if !stage_key(item.name) -> next
+        dir: files.join(store, item.name)
+        meta: files.read(files.join(dir, "meta")) ?? next
+        used: files.getmtime(files.join(dir, ".used")) ?? files.getmtime(dir) ?? 0
+        entries.push(StoreEntry{name: item.name.copy(), dir: dir, bytes: meta_bytes(meta), used: used})
+    }
+    total := 0
+    loop entry in entries -> total += entry.bytes
+    entries.sort_by((left: StoreEntry, right: StoreEntry) -> {
+        if left.used < right.used -> return Ordering.Less
+        if left.used > right.used -> return Ordering.Greater
+        Ordering.Equal
+    })
+    gone := [String]{}
+    loop entry in entries {
+        if Float.from_int(total) <= cap -> break
+        files.remove_all(entry.dir) ?? ()
+        total -= entry.bytes
+        gone.push(entry.name.slice(0..<16))
+    }
+    named: if gone.len() > 0 -> ": {gone.join(" ")}" else -> ""
+    print("store {hundredths(total)} GB of {cap_text} GB; evicted {gone.len()}{named}")
+    0
+}
+
+// `bytes` in GiB with two decimals, rounded half up.
+hundredths: fn(bytes: Int) -> String Never! {
+    scaled: (bytes * 200 + GIB) /% (2 * GIB)
+    cents: scaled % 100
+    "{scaled /% 100}.{if cents < 10 -> "0" else -> ""}{cents}"
+}
+
+// --- trapscan ---------------------------------------------------------------
 
 trapscan: fn(path: String) -[FS, IO]> Int Never! {
     bytes: files.read_bytes(path) ?? {
@@ -232,4 +887,57 @@ put_text: fn(b: &[U8], at: Int, text: String) {
     assert_eq(trap_owners(image), Val([String]{}))
     image[519] = U8{74}
     assert_eq(trap_owners(image), None)
+}
+
+#Test("a content hash frames each path and its bytes") {
+    assert_eq(be64(258), [U8]{U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{0}, U8{1}, U8{2}})
+    assert_eq(unique([String]{"b", "a/b", "a", "b"}), [String]{"a", "a/b", "b"})
+}
+
+#Test("JSON strings escape as JSON.stringify does") {
+    control: String.from_bytes_lossy([U8]{U8{1}})
+    assert_eq(json_text("a\"b\\c\nd{control}é"), "\"a\\\"b\\\\c\\nd\\u0001é\"")
+}
+
+#Test("the --auto class of a changed path") {
+    read := [String: Bool]{}
+    read["Compiler/JetSema/Source/Check.jet"] = true
+    read["Compiler/JetSema/Source/Lowering.jet"] = true
+    assert_eq(classify("Compiler/JetIR/Source/Ir.jet", read).level, "full")
+    assert_eq(classify("Compiler/JetSema/Source/Check.jet", read).reason, "compiler front end (Compiler/JetSema)")
+    assert_eq(classify("Compiler/JetSema/Source/Lowering.jet", read).level, "full")
+    assert_eq(classify("Compiler/JetSema/Tests/Check.jet", read).reason, "tests")
+    assert_eq(classify("Core/Text/Text.jet", read).level, "check")
+    assert_eq(classify("env.jet", read).level, "s1")
+    assert_eq(classify("README.md", read).reason, "not read by any chain stage")
+}
+
+#Test("store sizes print in GiB with two decimals") {
+    assert_eq(hundredths(0), "0.00")
+    assert_eq(hundredths(GIB * 3 /% 2), "1.50")
+    assert_eq(hundredths(GIB * 20 + GIB /% 20), "20.05")
+}
+
+// A two-level runtime pack whose provenance names `compiler` and `recipe`,
+// whose other provenance field is `object`, and whose object holds `byte`.
+sample_pack: fn(compiler: String, recipe: String, object: String, byte: Int) -> [PackFile] Never! {
+    provenance: "{{\"backend\":\"jet-native\",\"compilerSha256\":\"{compiler}\",\"objectSha256\":\"{object}\",\"recipeSha256\":\"{recipe}\"}}"
+    key: "f2a10ea90b64b2a5df415c5912d5a42da5d3cda2c0cd122c0e42117dea596b33"
+    [PackFile]{
+        PackFile{path: "provenance.json", bytes: provenance.bytes()},
+        PackFile{path: "native.key", bytes: "{key}\n".bytes()},
+        PackFile{path: "{key}/provenance.json", bytes: provenance.bytes()},
+        PackFile{path: "{key}/jet_runtime.pack.o", bytes: [U8]{U8{127}, U8{69}, U8.from_int(byte) ?? U8{0}}},
+    }
+}
+
+#Test("runtime packs compare without the compiler that built them") {
+    pack1: pack_digest(sample_pack("s1", "r1", "o", 7))
+    assert(pack1 != None)
+    assert_eq(pack_digest(sample_pack("s2", "r2", "o", 7)), pack1)
+    assert(pack_digest(sample_pack("s1", "r1", "o", 8)) != pack1)
+    assert(pack_digest(sample_pack("s1", "r1", "other", 7)) != pack1)
+    broken := sample_pack("s1", "r1", "o", 7)
+    broken[0] = PackFile{path: "provenance.json", bytes: "[1]".bytes()}
+    assert_eq(pack_digest(broken), None)
 }

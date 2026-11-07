@@ -18,7 +18,7 @@
 #       `verdict`), REPORT.md, s1/ s2/ s3/ t1/ (jet [+ jet.o], jet-runtime/ beside it), logs/, keys/.
 #
 # Stage reuse: each stage's key is sha256 over its builder compiler's bytes, the content hash of the runtime pack
-# beside the builder, the content hash of exactly the tree inputs the stage reads (chain-lib.mjs `inputs`), the
+# beside the builder, the content hash of exactly the tree inputs the stage reads (Chain.jet `inputs`), the
 # identity, flags and env that reach the output, and the canonical build root. A store entry
 # ($JET_SCRATCH_ROOT/stagestore/<key>/, or $JET_RUN_ROOT/stagestore when the scratch root is short of space; LRU,
 # capped) is copied instead of rebuilding and the stage reads REUSED. Entries are built in a temp dir and
@@ -35,7 +35,6 @@ ulimit -c 0
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$HERE/../roots.sh"
 SELF=$HERE/chain.sh
-LIB=$HERE/chain-lib.mjs
 SLOT=$HERE/build-slot.sh
 # bash -c "$NORUST" norust CMD...: run CMD with every PATH directory that holds cargo, rustc or rustup
 # removed (jet-env keeps rustc for user `extern rust`/RustBridge builds; the compiler chain must not need
@@ -146,7 +145,7 @@ store_put() { # KEY KIND SRC_DIR ; meta lines on stdin
   find "$tmp" -type f -exec chmod a-w {} +
   touch "$tmp/.used"
   mv -T "$tmp" "$STORE/$k" 2>/dev/null || rm -rf "$tmp"
-  ( flock 8; node "$LIB" evict "$STORE" "$CAP" > "$LOGS/evict.log" 2>&1 ) 8>"$STORE/.evict.lock"
+  ( flock 8; tool Chain.jet evict "$STORE" "$CAP" > "$LOGS/evict.log" 2>&1 ) 8>"$STORE/.evict.lock"
 }
 
 # Stage results: one TSV row each (stage status rc wall_s peak_rss_mb sha256 key note).
@@ -224,7 +223,7 @@ pack_stage() {
     if [ "$MODE" != dry ]; then
       rm -rf "$cd/jet-runtime"
       copy_dir "$e/jet-runtime" "$cd/jet-runtime"
-      [ "$(node "$LIB" dirhash "$cd/jet-runtime")" = "${PK[$n]}" ] || { rm -rf "$cd/jet-runtime"; e=; }
+      [ "$(tool Chain.jet dirhash "$cd/jet-runtime")" = "${PK[$n]}" ] || { rm -rf "$cd/jet-runtime"; e=; }
     fi
     if [ -n "$e" ]; then
       touch "$e/.used" 2>/dev/null
@@ -246,7 +245,7 @@ pack_stage() {
     rec "$n" FAILED "$rc" "$w" "$r" - "$k" "no pack; $(errhead "$LOGS/$n.err")"
     say "$n FAILED rc=$rc (logs $LOGS/$n.err)"; return 1
   fi
-  PK[$n]=$(node "$LIB" dirhash "$cd/jet-runtime")
+  PK[$n]=$(tool Chain.jet dirhash "$cd/jet-runtime")
   local nk; nk=$(awk 'NR==1' "$cd/jet-runtime/native.key")
   printf '%s\n' "stage=$n" "kind=pack" "packhash=${PK[$n]}" "native_key=$nk" "wall_s=$w" "rss_mb=$r" "lane=$(lane_of)" "tree=$TREE" "${mat[@]}" | store_put "$k" pack "$cd"
   rec "$n" BUILT 0 "$w" "$r" "${PK[$n]}" "$k" "native.key ${nk:0:16}; stored"
@@ -313,8 +312,8 @@ chain() {
 started=$(now)
 DIGEST=-; MEMBERS=(); REASONS=(); NCHANGED="not computed (explicit level)"
 if [ -n "$AUTO" ] || [ "$LEVEL" = check ]; then
-  node "$LIB" diff "$TREE" "$BASE" "$REPO" > "$OUT/diff.json" || { echo "chain.sh: diff against ${BASE:0:10} failed"; exit 2; }
-  node "$LIB" plan "$TREE" "$OUT/diff.json" > "$OUT/plan.json" || { echo "chain.sh: classification failed"; exit 2; }
+  tool Chain.jet diff "$TREE" "$BASE" "$REPO" > "$OUT/diff.json" || { echo "chain.sh: diff against ${BASE:0:10} failed"; exit 2; }
+  tool Chain.jet plan "$TREE" "$OUT/diff.json" > "$OUT/plan.json" || { echo "chain.sh: classification failed"; exit 2; }
   DIGEST=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).digest)' "$OUT/diff.json")
   NCHANGED=$(node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1])).changed; console.log(c.length + " file(s)" + (c.length ? ": " + c.slice(0,6).map(x=>x.status+" "+x.path).join(", ") + (c.length>6?", ...":"") : ""))' "$OUT/diff.json")
   mapfile -t MEMBERS < <(node -e 'for (const m of JSON.parse(require("fs").readFileSync(process.argv[1])).members) console.log(m)' "$OUT/plan.json")
@@ -338,8 +337,8 @@ if [ -n "$GATE" ] || [ -z "$DRY$INNER" ]; then
   esac
   [ -n "$GATE" ] && exit 0
 fi
-SEED_SHA=$(sha "$SEED/jet"); SEED_PK=$(node "$LIB" dirhash "$SEED/jet-runtime")
-if [ "$LEVEL" != check ]; then read -r BIN PIN _ <<< "$(node "$LIB" inputs "$TREE")"; else BIN=-; PIN=-; fi
+SEED_SHA=$(sha "$SEED/jet"); SEED_PK=$(tool Chain.jet dirhash "$SEED/jet-runtime")
+if [ "$LEVEL" != check ]; then read -r BIN PIN _ <<< "$(tool Chain.jet inputs "$TREE")"; else BIN=-; PIN=-; fi
 
 report() { # VERDICT_STATUS VERDICT_RC NOTE SLOTNOTE
   local total; total=$(since "$started")
@@ -381,8 +380,11 @@ finish() { # SLOTNOTE -> exit code
       if same_build t1 s3; then rec threads1 SAME 0 0 0 "${SHA[t1]}" - "cmp t1 (--threads 1) s3"; note="$note; t1 (--threads 1) == s3"
       else rec threads1 DIFFERENT 1 0 0 "${SHA[t1]}" - "cmp t1 (--threads 1) s3"; v=THREADS_DIFFER; vrc=1; note="$note; t1 ${SHA[t1]:0:16} != s3"; fi
     fi
-    local p1 p2; p1=$(awk -F'\t' '$1=="pack1"{print $6}' "$RES"); p2=$(awk -F'\t' '$1=="pack2"{print $6}' "$RES")
-    note="$note; pack1 $([ "$p1" = "$p2" ] && echo "==" || echo "!=") pack2 bytes"
+    # Compared without the provenance fields that name the building compiler (s1 for pack1, s2 for pack2).
+    local p1 p2
+    if p1=$(tool Chain.jet packhash "$OUT/s1/jet-runtime") && p2=$(tool Chain.jet packhash "$OUT/s2/jet-runtime"); then
+      note="$note; pack1 $([ "$p1" = "$p2" ] && echo "==" || echo "!=") pack2 bytes (provenance without compilerSha256, recipeSha256)"
+    else note="$note; pack1 and pack2 not compared (packhash failed)"; fi
   fi
   report "$v" "$vrc" "$note" "$1"
   return $vrc
@@ -407,12 +409,12 @@ seed_published() {
   fi
   if [ -f "$SEEDPUB/jet-runtime/provenance.json" ] && [ -d "$R14/census/runtime/out" ] \
      && node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1])).compilerSha256 === process.argv[2] ? 0 : 1)' "$SEEDPUB/jet-runtime/provenance.json" "$cs" \
-     && [ "$(node "$LIB" dirhash "$SEEDPUB/jet-runtime")" = "$(node "$LIB" dirhash "$R14/census/runtime/out")" ]; then
+     && [ "$(tool Chain.jet dirhash "$SEEDPUB/jet-runtime")" = "$(tool Chain.jet dirhash "$R14/census/runtime/out")" ]; then
     pack_mat "$cs" "$CID"; k=$(key "${MAT[@]}")
     if [ -d "$STORE/$k" ]; then said+=("pack1 ${k:0:16} already stored")
     else
       cp -a "$SEEDPUB/jet-runtime" "$OUT/s1/jet-runtime"; nk=$(awk 'NR==1' "$OUT/s1/jet-runtime/native.key")
-      printf '%s\n' "stage=pack1" "kind=pack" "packhash=$(node "$LIB" dirhash "$OUT/s1/jet-runtime")" "native_key=$nk" "wall_s=-" "rss_mb=-" "lane=lander census" "tree=$ROOT" "${MAT[@]}" | store_put "$k" pack "$OUT/s1"
+      printf '%s\n' "stage=pack1" "kind=pack" "packhash=$(tool Chain.jet dirhash "$OUT/s1/jet-runtime")" "native_key=$nk" "wall_s=-" "rss_mb=-" "lane=lander census" "tree=$ROOT" "${MAT[@]}" | store_put "$k" pack "$OUT/s1"
       said+=("pack1 ${k:0:16} stored")
     fi
   else said+=("pack1 not stored (pack is not the census pack of this compiler)"); fi
