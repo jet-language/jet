@@ -1,5 +1,6 @@
 // jet-debug: exact closed, payload-free event projection. Every transport
 // renders the decoded records through this validator.
+use jet_foundation.[JetLiveEvent]
 
 jet_cli_live_event_minimum: fn(value: Int, key: String, bound: Int) -> Int JetCLIReadError! {
     if value < bound {
@@ -12,7 +13,7 @@ jet_cli_live_event_closed: fn(value: String, key: String, allowed: [String]) Jet
     if !allowed.contains(value) -> return Err(jet_cli_read_error("runtime event observation has unknown `{key}` value"))
     return
 }
-jet_cli_live_event_render: fn(events: [JetCLILiveEvent]) -> String JetCLIReadError! {
+jet_cli_live_event_render: fn(events: [JetLiveEvent]) -> String JetCLIReadError! {
     if events.len() > 256 -> return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
     previous := 0
     lines := [String]{}

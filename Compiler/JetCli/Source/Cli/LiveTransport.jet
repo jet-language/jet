@@ -4,6 +4,7 @@ use {
     live_time: core.time
     cli_files: core.files
     cli_sys: core.sys
+    jet_foundation.[JetLiveSnapshot, jet_live_bind, jet_live_decode]
 }
 
 jet_cli_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetCLIReadError! {
@@ -18,12 +19,12 @@ jet_cli_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetCLIReadError
     }
     Ok(String.from_bytes(bytes) ?? return Err(jet_cli_read_error("cannot verify process {pid} identity")))
 }
-jet_cli_live_read: fn(pid: Int) -[FS, Env, Time]> JetCLILiveSnapshot JetCLIReadError! {
+jet_cli_live_read: fn(pid: Int) -[FS, Env, Time]> JetLiveSnapshot JetCLIReadError! {
     jet_cli_live_read_at(pid, jet_cli_entry_join(cli_sys.temp_dir(), "jet-observe-{pid}.json"))
 }
 // Explicit path is the private transport boundary (also used by filesystem
 // witnesses); command callers always select the runtime's canonical path.
-jet_cli_live_read_at: fn(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSnapshot JetCLIReadError! {
+jet_cli_live_read_at: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetCLIReadError! {
     if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be greater than zero and fit u32"))
     entry: cli_files.stat(path) ?? return Err(jet_cli_read_error("no live Jet runtime is observable at process {pid}"))
     if !entry.is_file || entry.is_symlink -> return Err(jet_cli_read_error("live runtime snapshot is not a regular file"))
@@ -42,12 +43,14 @@ jet_cli_live_read_at: fn(pid: Int, path: String) -[FS, Env, Time]> JetCLILiveSna
         loop byte in chunk -> bytes.push(byte)
         if bytes.len() > 1048576 -> return Err(jet_cli_read_error("live runtime snapshot exceeds the 1 MiB safety limit"))
     }
-    parsed := jet_cli_live_decode(bytes) ?? return Err(jet_cli_read_error("live runtime snapshot has an invalid or unsafe schema: {err.message}"))
+    parsed := jet_live_decode(bytes) ?? return Err(jet_cli_read_error("live runtime snapshot has an invalid or unsafe schema: {err.message}"))
     if parsed.pid != pid -> return Err(jet_cli_read_error("live runtime snapshot does not belong to process {pid}"))
     parsed.events = Val(jet_cli_live_event_render(parsed.event_records) ?? return Err(jet_cli_read_error("live runtime event observations are invalid: {err.message}")))
     now: jet_cli_table_max(0, live_time.unix_ns() /% 1000000)
     if now > parsed.captured_ms && now - parsed.captured_ms > 2000 -> return Err(jet_cli_read_error("process {pid} is not publishing a live runtime snapshot"))
     platform: cli_sys.name()
-    if platform == "linux" || platform == "android" -> jet_cli_live_bind(parsed, jet_cli_live_process_stat(pid))
+    if platform == "linux" || platform == "android" {
+        jet_live_bind(parsed, jet_cli_live_process_stat(pid)) ?? return Err(jet_cli_read_error(err.message))
+    }
     Ok(parsed)
 }

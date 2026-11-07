@@ -8,7 +8,7 @@ use {
     perf_json: core.encoding.json
     perf_text: core.text
     core.encoding.[Dyn]
-    jet_foundation.[foundation_json_integer]
+    jet_foundation.[JetLiveSnapshot, foundation_json_integer, jet_live_bind, jet_live_decode]
 }
 
 JetCLIPerfRuntimeWindow: struct { elapsed_ns: U64, cpu_ns: U64?, exit: Bool }
@@ -107,7 +107,7 @@ jet_cli_perf_process_start: fn(pid: Int) -[FS.Read, Time.Wait]> String JetCLIRea
 }
 // The perf view of the shared, validated snapshot. Live values are validated
 // by the codec but deliberately not retained here.
-jet_cli_perf_live_from: fn(live: JetCLILiveSnapshot) -> JetCLIPerfLive Never! {
+jet_cli_perf_live_from: fn(live: JetLiveSnapshot) -> JetCLIPerfLive Never! {
     tasks: loop row in live.tasks -> JetCLIPerfTask{id: U64{row.id}, parent: U64{row.parent}, state: row.state.copy(), wait: row.wait.copy(), cancelled: row.cancelled}
     channels: loop channel in live.channels -> JetCLIPerfChannel{id: U64{channel.id}, depth: U64{channel.depth}, capacity: if channel.capacity == .Val(capacity) -> Val(U64{capacity}) else -> None, send_waiters: U64{channel.send_waiters}, recv_waiters: U64{channel.recv_waiters}, closed: channel.closed}
     cpu_ns: if live.runtime.cpu_ns == .Val(cpu) -> Val(U64{cpu}) else -> None
@@ -117,9 +117,9 @@ jet_cli_perf_live_read: fn(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfLive JetCL
     stat: jet_cli_perf_process_stat(pid)
     path: perf_files.join(perf_sys.temp_dir(), "jet-observe-{pid}.json")
     bytes: jet_cli_perf_read_private(path, 1048576)
-    live := jet_cli_live_decode(bytes)
+    live := jet_live_decode(bytes) ?? return Err(jet_cli_read_error(err.message))
     if live.pid != pid -> return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
-    jet_cli_live_bind(live, stat)
+    jet_live_bind(live, stat) ?? return Err(jet_cli_read_error(err.message))
     // The process must still be the one the snapshot was bound to.
     if jet_cli_perf_process_start(pid) != live.start_id -> return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
     now: perf_time.unix_ns() /% 1000000

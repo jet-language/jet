@@ -1,11 +1,10 @@
 // Full-unit pure witnesses for the authoritative LiveInspect/EventObservation
 // consumer contract over the runtime's raw snapshot records. Transport
 // witnesses are separate real-filesystem fixtures.
-use jet_cli.[
-    JetCLILiveChannel, JetCLILiveEvent, JetCLILiveRuntime, JetCLILiveSnapshot,
-    JetCLILiveTask, JetCLILiveValue, jet_cli_live_bind, jet_cli_live_decode,
-    jet_cli_live_event_render, jet_cli_live_json_report, jet_cli_live_text,
-]
+use {
+    jet_cli.[jet_cli_live_event_render, jet_cli_live_json_report, jet_cli_live_text]
+    jet_foundation.[JetLiveChannel, JetLiveEvent, JetLiveRuntime, JetLiveSnapshot, JetLiveTask, JetLiveValue, jet_live_bind, jet_live_decode]
+}
 
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
 // words; a text is its byte length (-1 when absent) and its bytes.
@@ -29,7 +28,7 @@ live_inspect_state: fn(state: String) -> Int Never! {
     if state == "blocked" -> return 2
     3
 }
-live_inspect_bytes: fn(snapshot: JetCLILiveSnapshot) -> [U8] Never! {
+live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
     out := [U8]{}
     live_inspect_word(out, 3550338754064696650)
     live_inspect_word(out, 1)
@@ -107,33 +106,33 @@ live_inspect_bytes: fn(snapshot: JetCLILiveSnapshot) -> [U8] Never! {
     live_inspect_word(out, 0)
     out
 }
-live_inspect_event: fn(sequence: Int) -> JetCLILiveEvent Never! {
-    JetCLILiveEvent{sequence: sequence, source: "AsyncEvent", event_id: 2, owner_id: 3, subscription_id: 4, dispatch_id: 5, lifecycle: "HandlerFailed", queued: -1, blocked: 0, running: 1, capacity: 8, overflow: "DropNewest", priority: -17, failure: "Handler", terminal: "None"}
+live_inspect_event: fn(sequence: Int) -> JetLiveEvent Never! {
+    JetLiveEvent{sequence: sequence, source: "AsyncEvent", event_id: 2, owner_id: 3, subscription_id: 4, dispatch_id: 5, lifecycle: "HandlerFailed", queued: -1, blocked: 0, running: 1, capacity: 8, overflow: "DropNewest", priority: -17, failure: "Handler", terminal: "None"}
 }
-live_inspect_value: fn(value_id: String, type_identity: String, disposition: String, rendered: String?) -> JetCLILiveValue Never! {
-    JetCLILiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: "", rendered_value: rendered}
+live_inspect_value: fn(value_id: String, type_identity: String, disposition: String, rendered: String?) -> JetLiveValue Never! {
+    JetLiveValue{value_id: value_id, type_identity: type_identity, disposition: disposition, reason: "", rendered_value: rendered}
 }
-live_inspect_fixture: fn() -> JetCLILiveSnapshot Never! {
+live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
     resources := [String:Int]{}
     resources["arenas"] = 1
     resources["arena_allocations"] = 2
     resources["arena_bytes"] = 64
     resources["workers"] = 1
     resources["queued"] = 0
-    JetCLILiveSnapshot{
+    JetLiveSnapshot{
         protocol: "jet.live.v1", session_id: "session", source_id: "app.jet", build_id: "build-1",
         revision: "rev-1", world_id: "world-1", pid: 42, start_id: "", captured_ms: 1,
-        values: [JetCLILiveValue]{live_inspect_value("app::counter", "Int", "kept", Val("7"))},
-        tasks: [JetCLILiveTask]{JetCLILiveTask{id: 2, parent: 1, state: "blocked", wait: "channel send", deadline_ms: Val(480), cancelled: false}},
-        channels: [JetCLILiveChannel]{JetCLILiveChannel{id: 1, depth: 4, capacity: Val(4), send_waiters: 1, recv_waiters: 0, closed: false}},
+        values: [JetLiveValue]{live_inspect_value("app::counter", "Int", "kept", Val("7"))},
+        tasks: [JetLiveTask]{JetLiveTask{id: 2, parent: 1, state: "blocked", wait: "channel send", deadline_ms: Val(480), cancelled: false}},
+        channels: [JetLiveChannel]{JetLiveChannel{id: 1, depth: 4, capacity: Val(4), send_waiters: 1, recv_waiters: 0, closed: false}},
         effects: [String:Int]{}, resources: resources,
-        runtime: JetCLILiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false},
-        event_records: [JetCLILiveEvent]{live_inspect_event(1)}, events: None,
+        runtime: JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false},
+        event_records: [JetLiveEvent]{live_inspect_event(1)}, events: None,
         boot_ns: U64{20000000000}, start_ticks: U64{3}, clock_hz: 100,
     }
 }
 live_inspect_rejected: fn(bytes: [U8], message: String) Never! {
-    if jet_cli_live_decode(bytes) == {
+    if jet_live_decode(bytes) == {
         .Err(error) -> assert(error.message.contains(message))
         .Ok(snapshot) -> {
             if jet_cli_live_event_render(snapshot.event_records) == {
@@ -143,8 +142,8 @@ live_inspect_rejected: fn(bytes: [U8], message: String) Never! {
         }
     }
 }
-live_inspect_decoded: fn(snapshot: JetCLILiveSnapshot) -> JetCLILiveSnapshot Never! {
-    jet_cli_live_decode(live_inspect_bytes(snapshot)) ?? panic(err.message)
+live_inspect_decoded: fn(snapshot: JetLiveSnapshot) -> JetLiveSnapshot Never! {
+    jet_live_decode(live_inspect_bytes(snapshot)) ?? panic(err.message)
 }
 live_inspect_stat: fn(start: String, user: String, system: String) -> String Never! {
     fields := [String]{"S"}
@@ -155,7 +154,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
 #Test("live_inspect") {
     snapshot: live_inspect_decoded(live_inspect_fixture())
     assert(snapshot.values[0].rendered_value == Val("7"))
-    assert(snapshot.runtime == JetCLILiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false})
+    assert(snapshot.runtime == JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false})
     assert((jet_cli_live_event_render(snapshot.event_records) ?? panic(err.message)) == "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None")
     expected: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\ntask tree\n  task 2     parent 1     blocked  wait=channel send deadline=480 cancelled=false\n\nchannels\n  channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\neffects: compute=0 waiting=1 channel=1 time=0 io=0\nresources: workers=1 running=0 queued=0 cancelled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nvalues\n  app::counter type=Int kept value=7\n\nevents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
     assert(jet_cli_live_text(snapshot) == expected)
@@ -167,16 +166,16 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     }
     // The view derives order and counters from the records.
     derived := live_inspect_fixture()
-    derived.tasks = [JetCLILiveTask]{
-        JetCLILiveTask{id: 9, parent: 1, state: "blocked", wait: "time sleep", deadline_ms: None, cancelled: true},
-        JetCLILiveTask{id: 3, parent: 1, state: "blocked", wait: "net tcp receive", deadline_ms: None, cancelled: false},
-        JetCLILiveTask{id: 5, parent: 1, state: "blocked", wait: "io read", deadline_ms: None, cancelled: false},
-        JetCLILiveTask{id: 1, parent: 0, state: "running", wait: "", deadline_ms: None, cancelled: false},
-        JetCLILiveTask{id: 4, parent: 1, state: "paused", wait: "network", deadline_ms: None, cancelled: false},
+    derived.tasks = [JetLiveTask]{
+        JetLiveTask{id: 9, parent: 1, state: "blocked", wait: "time sleep", deadline_ms: None, cancelled: true},
+        JetLiveTask{id: 3, parent: 1, state: "blocked", wait: "net tcp receive", deadline_ms: None, cancelled: false},
+        JetLiveTask{id: 5, parent: 1, state: "blocked", wait: "io read", deadline_ms: None, cancelled: false},
+        JetLiveTask{id: 1, parent: 0, state: "running", wait: "", deadline_ms: None, cancelled: false},
+        JetLiveTask{id: 4, parent: 1, state: "paused", wait: "network", deadline_ms: None, cancelled: false},
     }
-    derived.channels = [JetCLILiveChannel]{
-        JetCLILiveChannel{id: 7, depth: 0, capacity: None, send_waiters: 0, recv_waiters: 0, closed: true},
-        JetCLILiveChannel{id: 2, depth: 1, capacity: Val(2), send_waiters: 0, recv_waiters: 0, closed: false},
+    derived.channels = [JetLiveChannel]{
+        JetLiveChannel{id: 7, depth: 0, capacity: None, send_waiters: 0, recv_waiters: 0, closed: true},
+        JetLiveChannel{id: 2, depth: 1, capacity: Val(2), send_waiters: 0, recv_waiters: 0, closed: false},
     }
     view: live_inspect_decoded(derived)
     assert(view.tasks.map(row -> row.id) == [Int]{1, 3, 4, 5, 9})
@@ -186,7 +185,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(view.resources.get("running") == Val(1) && view.resources.get("cancelled") == Val(1))
     assert(jet_cli_live_text(view).contains("channel 7     depth 0/∞ blocked send=0 recv=0 closed=true"))
     many_channels := live_inspect_fixture()
-    many_channels.channels = loop index in 0..<4097 -> JetCLILiveChannel{id: 4097 - index, depth: 0, capacity: None, send_waiters: 0, recv_waiters: 0, closed: false}
+    many_channels.channels = loop index in 0..<4097 -> JetLiveChannel{id: 4097 - index, depth: 0, capacity: None, send_waiters: 0, recv_waiters: 0, closed: false}
     bounded: live_inspect_decoded(many_channels)
     assert(bounded.channels.len() == 4096 && bounded.channels[0].id == 1 && bounded.channels[4095].id == 4096)
     // Unicode Cc controls show as one space each; the runtime records the text.
@@ -195,30 +194,30 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(live_inspect_decoded(controls).world_id == "w 1 x ")
     // Absence is kept where the view keeps it.
     absent := live_inspect_fixture()
-    absent.values = [JetCLILiveValue]{live_inspect_value("app::counter", "Int", "kept", None)}
+    absent.values = [JetLiveValue]{live_inspect_value("app::counter", "Int", "kept", None)}
     absent.tasks[0].deadline_ms = None
-    absent.event_records = [JetCLILiveEvent]{}
+    absent.event_records = [JetLiveEvent]{}
     absent_view: live_inspect_decoded(absent)
     assert(absent_view.values[0].rendered_value == None && absent_view.tasks[0].deadline_ms == None)
     assert(jet_cli_live_text(absent_view).contains("\nevents\n  (no runtime event observations)\n"))
     // Unsigned words above Int's range saturate; signed words keep their sign.
     wide := live_inspect_bytes(live_inspect_fixture())
     loop index in 88..<96 -> wide[index] = U8{255}
-    assert((jet_cli_live_decode(wide) ?? panic(err.message)).resources.get("arena_bytes") == Val(9223372036854775807))
+    assert((jet_live_decode(wide) ?? panic(err.message)).resources.get("arena_bytes") == Val(9223372036854775807))
     // The process facts: start time binds the snapshot, CPU is since the run start.
     bound := live_inspect_decoded(live_inspect_fixture())
-    jet_cli_live_bind(bound, live_inspect_stat("1234", "5", "2")) ?? panic(err.message)
+    jet_live_bind(bound, live_inspect_stat("1234", "5", "2")) ?? panic(err.message)
     assert(bound.start_id == "1234" && bound.runtime.cpu_ns == Val(40000000))
     unbound := live_inspect_decoded(live_inspect_fixture())
-    if jet_cli_live_bind(unbound, live_inspect_stat("2001", "5", "2")) == {
+    if jet_live_bind(unbound, live_inspect_stat("2001", "5", "2")) == {
         .Err(error) -> assert(error.message.contains("does not belong to process 42"))
         .Ok(_) -> panic("bound a later process to the snapshot")
     }
     no_cpu := live_inspect_decoded(live_inspect_fixture())
-    jet_cli_live_bind(no_cpu, live_inspect_stat("1234", "18446744073", "1")) ?? panic(err.message)
+    jet_live_bind(no_cpu, live_inspect_stat("1234", "18446744073", "1")) ?? panic(err.message)
     assert(no_cpu.runtime.cpu_ns == None)
     truncated_stat := live_inspect_decoded(live_inspect_fixture())
-    if jet_cli_live_bind(truncated_stat, "42 (name) S 1 2\n") == {
+    if jet_live_bind(truncated_stat, "42 (name) S 1 2\n") == {
         .Err(error) -> assert(error.message.contains("truncated"))
         .Ok(_) -> panic("accepted a truncated stat")
     }
@@ -242,7 +241,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     live_inspect_word(repeated_section, 0)
     live_inspect_rejected(repeated_section, "repeats a section")
     invented := live_inspect_fixture()
-    invented.values = [JetCLILiveValue]{live_inspect_value("app::counter", "Int", "invented", Val("7"))}
+    invented.values = [JetLiveValue]{live_inspect_value("app::counter", "Int", "invented", Val("7"))}
     live_inspect_rejected(live_inspect_bytes(invented), "unsupported disposition")
     many_values := live_inspect_fixture()
     many_values.values = loop _ in 0..<4096 -> live_inspect_value("app::counter", "Int", "kept", Val("7"))
@@ -250,10 +249,10 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     many_values.values.push(live_inspect_value("app::counter", "Int", "kept", Val("7")))
     live_inspect_rejected(live_inspect_bytes(many_values), "too many values")
     many_tasks := live_inspect_fixture()
-    many_tasks.tasks = loop index in 0..<4097 -> JetCLILiveTask{id: index, parent: 0, state: "queued", wait: "", deadline_ms: None, cancelled: false}
+    many_tasks.tasks = loop index in 0..<4097 -> JetLiveTask{id: index, parent: 0, state: "queued", wait: "", deadline_ms: None, cancelled: false}
     live_inspect_rejected(live_inspect_bytes(many_tasks), "too many tasks")
     mixed := live_inspect_fixture()
-    mixed.values = [JetCLILiveValue]{live_inspect_value("app::counter", "Int", "kept", Val("7")), live_inspect_value("app::counter", "Int", "kept", Val("7")), live_inspect_value("b", "Bool", "reset", None)}
+    mixed.values = [JetLiveValue]{live_inspect_value("app::counter", "Int", "kept", Val("7")), live_inspect_value("app::counter", "Int", "kept", Val("7")), live_inspect_value("b", "Bool", "reset", None)}
     assert(jet_cli_live_json_report(live_inspect_decoded(mixed), "shapes").contains("\"shapes\":[{{\"type_identity\":\"Bool\",\"value_ids\":[\"b\"]}},{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\",\"app::counter\"]}}]"))
     // EventObservation's closed projection.
     event := live_inspect_fixture()
@@ -262,7 +261,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     event.event_records[0] = live_inspect_event(1)
     event.event_records[0].source = "Payload"
     live_inspect_rejected(live_inspect_bytes(event), "unknown `source`")
-    event.event_records = [JetCLILiveEvent]{live_inspect_event(1), live_inspect_event(1)}
+    event.event_records = [JetLiveEvent]{live_inspect_event(1), live_inspect_event(1)}
     live_inspect_rejected(live_inspect_bytes(event), "not strictly increasing")
     event.event_records = loop sequence in 1..<258 -> live_inspect_event(sequence)
     live_inspect_rejected(live_inspect_bytes(event), "256-record limit")
