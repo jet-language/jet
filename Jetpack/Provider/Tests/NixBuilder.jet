@@ -20,6 +20,12 @@ provider_test_nix_source: fn(label: String) -[FS]> String {
     files.tmpdir("jet-native-nix-builder-source-{label}-") ?? panic("scratch source")
 }
 
+// The builds run in the native sandbox, bubblewrap on Linux: false once the
+// claim reports SKIP-HOST for an absent `bwrap`, so the claim ends there.
+provider_test_require_sandbox: fn() -[FS, Env]> Bool {
+    !sys.is_linux() || kit_require_tool("bwrap") != None
+}
+
 provider_test_fixed_evaluation: fn() -> NixNativeDerivation {
     hash: pkg_sha256_hex("hi\n".bytes())
     nix_evaluate_derivation("builtins.derivationStrict {{ name = \"native-hello\"; system = \"x86_64-linux\"; builder = \"/bin/sh\"; args = [ \"-c\" \"echo hi > $out\" ]; outputHashAlgo = \"sha256\"; outputHashMode = \"flat\"; outputHash = \"{hash}\"; }}", "x86_64-linux") ?? panic("fixed derivation")
@@ -31,6 +37,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
 }
 
 #Test("provider native derivation build enters hangar with receipt") {
+    if !provider_test_require_sandbox() -> return
     verification := StoreVerification.new()
     evaluation: provider_test_fixed_evaluation()
     roots: provider_test_nix_roots("admit")
@@ -58,6 +65,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
 }
 
 #Test("provider native receipt contract is independent of source route") {
+    if !provider_test_require_sandbox() -> return
     verification := StoreVerification.new()
     evaluation: provider_test_fixed_evaluation()
     roots: provider_test_nix_roots("receipt-route")
@@ -88,6 +96,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
 }
 
 #Test("provider native derivation rebuild reuses the same content identity") {
+    if !provider_test_require_sandbox() -> return
     verification := StoreVerification.new()
     evaluation: provider_test_fixed_evaluation()
     source: provider_test_nix_source("repro")
@@ -108,6 +117,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
 // The Rust claim reads tests/fixtures/nix-compat/native-builder-flake.nix; the
 // same flake is written into a scratch project here.
 #Test("provider native repository derivation builds without nix realization") {
+    if !provider_test_require_sandbox() -> return
     verification := StoreVerification.new()
     project: provider_test_nix_source("repository-project")
     flake: files.join(project, "native-builder-flake.nix")
@@ -123,6 +133,7 @@ provider_test_native_entry: fn(verification: &StoreVerification, roots: HangarRo
 }
 
 #Test("provider failed native derivation uses registered build diagnostic") {
+    if !provider_test_require_sandbox() -> return
     evaluation: nix_evaluate_derivation(`builtins.derivationStrict { name = "native-fail"; system = "x86_64-linux"; builder = "/bin/sh"; args = [ "-c" "exit 7" ]; }`, "x86_64-linux") ?? panic("failing derivation")
     roots: provider_test_nix_roots("failure")
     source: provider_test_nix_source("failure")

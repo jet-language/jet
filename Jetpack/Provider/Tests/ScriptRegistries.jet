@@ -28,8 +28,13 @@ provider_script_test_run: fn(argv: [String]) Never! -[Exec, Time.Wait]> {
     assert(receipt.success, "`{argv.join(" ")}` failed: {receipt.errors}")
 }
 
-provider_script_test_require_tools: fn(tools: [String]) Never! -[FS, Env]> {
-    loop tool in tools -> assert(files.which(tool) != None, "the dev shell must provision {tool}")
+// False once the claim reports SKIP-HOST for the first absent tool, so the
+// claim ends there.
+provider_script_test_require_tools: fn(tools: [String]) -[FS, Env]> Bool Never! {
+    loop tool in tools {
+        if kit_require_tool(tool) == None -> return false
+    }
+    true
 }
 
 provider_script_test_require_zip: fn() Never! -[Exec, Time.Wait]> {
@@ -228,7 +233,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 }
 
 #Test("script registry hostile archives reject runtime native extensions") {
-    provider_script_test_require_tools([String]{"tar", "gzip", "php"})
+    if !provider_script_test_require_tools([String]{"tar", "gzip", "php"}) -> return
     provider_script_test_require_zip()
     base: files.tmpdir("jet-script-native-") ?? panic("claim a directory")
 
@@ -253,7 +258,7 @@ provider_script_test_cpan_refusal: fn(artifact: RegistryArtifact, out: String, s
 }
 
 #Test("script registry checksum valid sparse archive is rejected before extraction") {
-    provider_script_test_require_tools([String]{"tar", "truncate"})
+    if !provider_script_test_require_tools([String]{"tar", "truncate"}) -> return
     base: files.tmpdir("jet-script-budget-") ?? panic("claim a directory")
 
     source: files.join(base, "source/Bad-1.0/lib")
