@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { nativePackHash, readNativeRuntimePack } from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import { fileObject } from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
 import { runNativeLibrary, runtimeLifecycleList } from '../../JetBackend/Tests/jet-front.mjs';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, compiler, runtime, ...extra] = process.argv.slice(2);
 const test = extra.length === 2 && extra[0] === '--test' ? extra[1] : null;
@@ -47,7 +48,7 @@ for (const row of archives) {
 }
 if (test) {
   const unit = join(out, 'unit');
-  command('assemble-fixture', process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), unit, '--assemble-only', '--test', test]);
+  command('assemble-fixture', toolJet(), [join(root, 'Tools/agent/CompilerPackages.jet'), '--root', root, 'runtime-unit', unit, '--test', test]);
   const file = join(unit, 'unit.jet'), text = readFileSync(file, 'utf8'), prefix = join(unit, 'fixture');
   const lifecycle = join(unit, 'lifecycle.list');
   writeFileSync(lifecycle, runtimeLifecycleList(text));

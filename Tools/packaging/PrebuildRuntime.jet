@@ -361,43 +361,12 @@ publish_platform: fn(tool: Toolchain) {
     }
 }
 
-// The runtime unit: every manifest source with its `use { … }` blocks as one
-// `use` line per row (Tools/agent/CompilerPackages.jet unblock), the distinct
-// `core.` imports first, each source's other imports dropped.
-assemble_runtime: fn(tool: Toolchain, paths: [String], library: String) {
+// The runtime unit and its package.jet in `library`
+// (Tools/agent/CompilerPackages.jet runtime-unit).
+assemble_runtime: fn(tool: Toolchain, library: String) {
     runner: process.env_get_or("JET", "jet")
-    argv := [String]{runner, files.join(tool.repo, "Tools/agent/CompilerPackages.jet"), "--root", tool.repo.copy(), "unblock"}
-    loop path in paths -> argv.push(path.copy())
-    nul: String.from_bytes([U8]{U8{0}}) ?? ""
-    unblocked: output_of(process.cmd(argv).cwd(tool.repo), "CompilerPackages.jet unblock").split(nul).to_list()
-    if unblocked.len() < paths.len() -> fail("CompilerPackages.jet unblock returned {unblocked.len()} texts for {paths.len()} sources")
-    core: Regex{"^use (?:\w+: )?core\."}
-    uses := [String]{}
-    bodies := [String]{}
-    loop index in 0..<paths.len() {
-        importing := false
-        kept := [String]{}
-        loop line in unblocked[index].split("\n") {
-            if line.starts_with("use ") {
-                if re.is_match(core, line) && !uses.contains(line) -> uses.push(line.copy())
-                importing = line.contains("[") && !line.contains("]")
-                next
-            }
-            if importing {
-                if line.contains("]") -> importing = false
-                next
-            }
-            kept.push(line.copy())
-        }
-        bodies.push("// [unit source: {paths[index]}]\n{kept.join("\n")}")
-    }
-    files.create_dir_all(library) ?? fail("cannot create `{library}`: {err}")
-    unit := uses.copy()
-    unit.push("")
-    unit.extend(bodies)
-    files.write(files.join(library, "unit.jet"), unit.join("\n")) ?? fail("cannot write the runtime unit: {err}")
-    package: files.read(files.join(tool.repo, RUNTIME_PACKAGE)) ?? fail("cannot read `{RUNTIME_PACKAGE}`: {err}")
-    files.write(files.join(library, "package.jet"), package) ?? fail("cannot write the runtime package: {err}")
+    argv: [String]{runner, files.join(tool.repo, "Tools/agent/CompilerPackages.jet"), "--root", tool.repo.copy(), "runtime-unit", library.copy()}
+    _ := output_of(process.cmd(argv).cwd(tool.repo), "CompilerPackages.jet runtime-unit")
 }
 
 // Each vendored library's compile jobs; objects are written under `work`.
@@ -539,16 +508,16 @@ run: fn() {
     loop path in platform -> no_rust(path)
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
     work: files.mkdtemp("jet-runtime-pack") ?? fail("cannot create a work directory: {err}")
-    code: build(tool, work, sources, source, backend, lifecycle, platform_rows, compiler_sha256, vendor_sha256, recipe)
+    code: build(tool, work, source, backend, lifecycle, platform_rows, compiler_sha256, vendor_sha256, recipe)
     files.remove_all(work) ?? ()
     if code != 0 -> process.exit(code)
 }
 
 // Build the pack in `work` and publish it in `tool.out`; 0, else 1 after
 // every failure is reported.
-build: fn(tool: Toolchain, work: String, sources: [String], source: Inventory, backend: Inventory, lifecycle: Inventory, platform_rows: [(path: String, sha256: String)], compiler_sha256: String, vendor_sha256: String, recipe: String) -> Int {
+build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, lifecycle: Inventory, platform_rows: [(path: String, sha256: String)], compiler_sha256: String, vendor_sha256: String, recipe: String) -> Int {
     library: files.join(work, "library")
-    assemble_runtime(tool, sources, library)
+    assemble_runtime(tool, library)
     prefix: files.join(work, "jet_runtime_jet")
     pack: files.join(work, "jet_runtime.pack.o")
     // The pack prelinked at the run base, which `jet run` binds programs to.

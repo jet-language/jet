@@ -6,6 +6,7 @@ import { appendFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } fr
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, runNativeLibrary, runtimeLifecycleList } from '../../JetBackend/Tests/jet-front.mjs';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['--assemble', '--lower', '--run'].includes(mode) || process.argv.length !== 4) {
@@ -19,7 +20,7 @@ function run(bin, args, options = {}) {
     return result;
 }
 if (mode === '--assemble') {
-    run(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), out, '--assemble-only', '--test', 'Collections']);
+    run(toolJet(), [join(repo, 'Tools/agent/CompilerPackages.jet'), '--root', repo, 'runtime-unit', out, '--test', 'Collections']);
     renameSync(join(out, 'unit.jet'), join(out, 'Source/Fixture.jet'));
     // Instrument only this fixture's iterator body. The wrappers delegate the
     // real free/policy call exactly once, then stop via the real budget rail.

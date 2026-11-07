@@ -8,6 +8,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, runNativeLibrary } from '../../JetBackend/Tests/jet-front.mjs';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['assemble', 'lower', 'audit', 'link', 'run'].includes(mode)) throw Error('usage: run-testsuite-fixtures.mjs OUT assemble|lower|audit|link|run');
@@ -18,7 +19,7 @@ function command(bin, args, options = {}) {
   return result;
 }
 if (mode === 'assemble') {
-  command(process.execPath, [join(root, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), dir, '--assemble-only', '--test', 'Test']);
+  command(toolJet(), [join(root, 'Tools/agent/CompilerPackages.jet'), '--root', root, 'runtime-unit', dir, '--test', 'Test']);
   mkdirSync(join(dir, 'Source'), { recursive: true });
   const unit = readFileSync(join(dir, 'unit.jet'), 'utf8');
   writeFileSync(join(dir, 'Source/Fixture.jet'), unit);

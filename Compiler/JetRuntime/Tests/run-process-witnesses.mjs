@@ -10,6 +10,7 @@ import {fileURLToPath} from 'node:url';
 import {readNativeRuntimePack,nativePackHash} from '../../../Tools/packaging/runtime-pack-cache.mjs';
 import {fileObject} from '../../../Tools/packaging/publish-native-runtime-pack.mjs';
 import {runNativeLibrary,runtimeLifecycleList} from '../../JetBackend/Tests/jet-front.mjs';
+import {toolJet} from '../../../Tools/agent/roots.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../../..');
 const [output,jet,runtimeDirectory,...extra]=process.argv.slice(2);
 const test=extra.length===2&&extra[0]==='--test'?extra[1]:null;
@@ -38,7 +39,7 @@ let pack,objectHandle;
 const compilerHandle=fileObject(nativeJet);
 if(test){
  const unit=join(out,'unit'),prefix=join(unit,'fixture');
- command(process.execPath,[join(root,'Compiler/JetRuntime/Tests/check-runtime.mjs'),unit,'--assemble-only','--test',test],'assemble-fixture');
+ command(toolJet(),[join(root,'Tools/agent/CompilerPackages.jet'),'--root',root,'runtime-unit',unit,'--test',test],'assemble-fixture');
  const file=join(unit,'unit.jet'),lifecycle=join(unit,'lifecycle.list');
  writeFileSync(lifecycle,runtimeLifecycleList(readFileSync(file,'utf8')));
  const lowered=runNativeLibrary({jet:nativeJet,file,prefix,lifecycle,env:{...process.env,JET_TOOLCHAIN_ROOT:root,JET_STORE_DIR:join(out,'store')}});

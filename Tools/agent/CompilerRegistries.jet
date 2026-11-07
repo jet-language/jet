@@ -675,7 +675,7 @@ specification: fn(id: String) -> Spec? Never! {
             else -> None
         }
         if plain == .Val(table) {
-            found := spec("plain", name, "{RT}check-runtime.mjs")
+            found := spec("plain", name, "Tools/agent/CompilerPackages.jet")
             found.call = table.call.copy()
             found.expected = table.expected.copy()
             return Val(found)
@@ -947,6 +947,15 @@ node: fn(lane: &Lane, runner: String, args: [String]) -[Env, Exec, FS, IO, Time,
     execute(lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
 }
 
+// A repository Jet tool, run by the jet running this script (jet_cli).
+jet_tool: fn(lane: &Lane, script: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Problem! {
+    argv := [String]{"{lane.repo}/{script}"}
+    loop arg in args -> argv.push(arg.copy())
+    binary: jet_cli()
+    cwd: lane.out.copy()
+    execute(lane, binary, argv, cwd, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+}
+
 exact: fn(ran: Ran, stdout: String, stderr: String) Problem! {
     if ran.stdout == stdout && ran.stderr == stderr -> return Ok(())
     shown: json.dumps(Dyn.Object([String: Dyn]{"stdout": Dyn.Text(ran.stdout.copy()), "stderr": Dyn.Text(ran.stderr.copy()), "expectedStdout": Dyn.Text(stdout.copy()), "expectedStderr": Dyn.Text(stderr.copy())})) ?? ""
@@ -1135,7 +1144,7 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         raw: "{out}/raw"
         native: "{out}/native"
         files.create_dir_all("{native}/Source") ?? return Err(problem("`{native}/Source` cannot be created: {err}"))
-        node(lane, found.runner, [String]{raw, "--assemble-only", "--test", found.name}) ?? return Err(err)
+        jet_tool(lane, found.runner, [String]{"--root", repo, "runtime-unit", raw, "--test", found.name}) ?? return Err(err)
         unit: files.read("{raw}/unit.jet") ?? return Err(problem("`{raw}/unit.jet` cannot be read: {err}"))
         call: found.call ?? return Err(problem("plain transport {found.name} names no entry"))
         fixture: "{native}/Source/Fixture.jet"

@@ -9,6 +9,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { candidateJetc0, runNativeLibrary, runtimeLifecycleList } from '../../JetBackend/Tests/jet-front.mjs';
+import { toolJet } from '../../../Tools/agent/roots.mjs';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const [output, mode] = process.argv.slice(2);
 if (!output || !['--assemble', '--lower', '--global', '--initializer', '--allocator'].includes(mode)) {
@@ -29,7 +30,7 @@ if (mode === '--assemble') {
     const globalUnit = global.slice(0, entry) + '\n' + read('Compiler/JetRuntime/Tests/Fragments.fixture/FloatAbi.jet');
     writeFileSync(join(out, 'global/Source/Fixture.jet'), globalUnit);
     writeFileSync(join(out, 'global/lifecycle.list'), runtimeLifecycleList(globalUnit));
-    execFileSync(process.execPath, [join(repo, 'Compiler/JetRuntime/Tests/check-runtime.mjs'), join(out, 'init'), '--assemble-only', '--test', 'Alloc'], { stdio: 'inherit' });
+    execFileSync(toolJet(), [join(repo, 'Tools/agent/CompilerPackages.jet'), '--root', repo, 'runtime-unit', join(out, 'init'), '--test', 'Alloc'], { stdio: 'inherit' });
     let unit = readFileSync(join(out, 'init/unit.jet'), 'utf8');
     const testHead = 'alloc_tests: fn() {\n';
     if (unit.split(testHead).length !== 2) throw Error('allocator witness must have one test entry');

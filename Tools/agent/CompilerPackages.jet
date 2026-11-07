@@ -11,6 +11,7 @@
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] identity
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-
+//   jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit [ENTRY]...
 //   jet Tools/agent/CompilerPackages.jet [--root DIR] unit-inputs [ENTRY]...
 //
@@ -46,6 +47,15 @@
 // one `use` line per row, keeping every line and byte offset, each text
 // followed by a NUL byte. With `-` it reads the texts from stdin instead,
 // each followed by a NUL byte, and writes them back the same way.
+//
+// `runtime-unit` writes the runtime's one-namespace unit, OUT/unit.jet, and
+// its OUT/package.jet, then prints OUT/unit.jet (OUT is used as given): each
+// Compiler/JetRuntime/sources.list source, unblocked, after a
+// `// [unit source: PATH]` line, its Core `use` lines dropped and gathered
+// once each, in first-seen order, at the head of the unit, and its other
+// `use` lines dropped. `--test NAME` appends the fragment
+// Compiler/JetRuntime/Tests/Fragments.fixture/NAMETests.jet and writes a test
+// package of the driver's one edition instead of the runtime's package.jet.
 //
 // `unit` writes one namespace of the member files of the packages at the
 // ENTRYs and of every package they depend on, for focused fixtures that
@@ -120,6 +130,7 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] select FILE...")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] identity")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unblock FILE...|-")
+    term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] runtime-unit OUT [--test NAME]")
     term.eprint("       jet Tools/agent/CompilerPackages.jet [--root DIR] unit|unit-inputs [ENTRY]...")
     process.exit(2)
 }
@@ -167,6 +178,7 @@ command: fn(root: String, name: String, args: [String]) PackagesError! -[Env, Ex
                 out.write_bytes(bytes) ?? return Err(PackagesError{message: "stdout: {err}"})
             }
         }
+        "runtime-unit" -> print(runtime_unit(root, args) ?? return Err(err))
         "unit" -> out.write(compiler_fixture_unit(root, entries(args))) ?? return Err(PackagesError{message: "stdout: {err}"})
         "unit-inputs" -> {
             loop input in compiler_fixture_inputs(root, entries(args)) -> print("{input.path}\t{input.text}")
@@ -183,6 +195,86 @@ framed_texts: fn(input: String) -> [String] PackagesError! {
     texts := input.split(nul).to_list()
     _ := texts.pop()
     texts
+}
+
+RUNTIME_SOURCES: "Compiler/JetRuntime/sources.list"
+RUNTIME_PACKAGE: "Compiler/JetRuntime/package.jet"
+RUNTIME_FRAGMENTS: "Compiler/JetRuntime/Tests/Fragments.fixture"
+DRIVER_LOADER: "Compiler/JetDriver/Source/Driver/Loader.jet"
+
+// `runtime-unit OUT [--test NAME]`: writes OUT/unit.jet and OUT/package.jet
+// and returns OUT/unit.jet.
+runtime_unit: fn(root: String, args: [String]) -[Exec, FS, IO]> String PackagesError! {
+    if args.len() != 1 && !(args.len() == 3 && args[1] == "--test" && is_type_name(args[2])) -> usage()
+    out: args[0]
+    listed: files.read(files.join(root, RUNTIME_SOURCES)) ?? return Err(PackagesError{message: "`{RUNTIME_SOURCES}` cannot be read: {err}"})
+    paths := [String]{}
+    loop row in listed.split("\n") {
+        line: row.trim()
+        if line == "" || line.starts_with("#") -> next
+        if paths.contains(line) -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists `{line}` twice"})
+        paths.push(line.copy())
+    }
+    if paths.len() == 0 -> return Err(PackagesError{message: "`{RUNTIME_SOURCES}` lists no source"})
+    if args.len() == 3 -> paths.push("{RUNTIME_FRAGMENTS}/{args[2]}Tests.jet")
+    uses := [String]{}
+    bodies := [String]{}
+    loop path in paths {
+        text: files.read(files.join(root, path)) ?? return Err(PackagesError{message: "`{path}` cannot be read: {err}"})
+        importing := false
+        kept := [String]{}
+        loop line in unblock_uses(text).split("\n") {
+            if line.starts_with("use ") {
+                if is_core_use(line) && !uses.contains(line) -> uses.push(line.copy())
+                importing = line.contains("[") && !line.contains("]")
+                next
+            }
+            if importing {
+                if line.contains("]") -> importing = false
+                next
+            }
+            kept.push(line.copy())
+        }
+        bodies.push("// [unit source: {path}]\n{kept.join("\n")}")
+    }
+    package := ""
+    if args.len() == 3 {
+        // A test unit takes the one language edition the driver accepts.
+        loader: files.read(files.join(root, DRIVER_LOADER)) ?? return Err(PackagesError{message: "`{DRIVER_LOADER}` cannot be read: {err}"})
+        edition := ""
+        loop line in loader.split("\n") {
+            value: line.removeprefix("JET_DRIVER_EDITION: \"")
+            if value.len() < line.len() && value.len() > 1 && value.ends_with("\"") && !value.removesuffix("\"").contains("\"") {
+                edition = value.removesuffix("\"")
+                break
+            }
+        }
+        if edition == "" -> return Err(PackagesError{message: "JET_DRIVER_EDITION is not found in `{DRIVER_LOADER}`"})
+        package = "name: \"jet_runtime_tests\"\nversion: \"0.0.1\"\nedition: \"{edition}\"\n"
+    } else {
+        package = files.read(files.join(root, RUNTIME_PACKAGE)) ?? return Err(PackagesError{message: "`{RUNTIME_PACKAGE}` cannot be read: {err}"})
+    }
+    files.create_dir_all(out) ?? return Err(PackagesError{message: "`{out}` cannot be created: {err}"})
+    unit := uses.copy()
+    unit.push("")
+    unit.extend(bodies)
+    unit_path: files.join(out, "unit.jet")
+    files.write(unit_path, unit.join("\n")) ?? return Err(PackagesError{message: "`{unit_path}` cannot be written: {err}"})
+    files.write(files.join(out, "package.jet"), package) ?? return Err(PackagesError{message: "`{out}/package.jet` cannot be written: {err}"})
+    Ok(unit_path)
+}
+
+// `^[A-Z][A-Za-z0-9]*$`.
+is_type_name: fn(text: String) -> Bool Never! {
+    raw: text.bytes()
+    if raw.len() == 0 -> return false
+    first: Int.from_u8(raw[0])
+    if first < 65 || first > 90 -> return false
+    loop byte in raw {
+        code: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return false
+    }
+    true
 }
 
 one_entry: fn(args: [String]) -[Exec, IO]> String Never! {
@@ -750,7 +842,10 @@ member_imports: fn(whole: String, path: String, members: String, seen: &[String:
 }
 
 // A single-line Core import: `use core.x` or `use alias: core.x`, with no `[`.
-is_core_import_line: fn(line: String) -> Bool Never! {
+is_core_import_line: fn(line: String) -> Bool Never! { is_core_use(line) && !line.contains("[") }
+
+// A `use core.x` or `use alias: core.x` line, member list or not.
+is_core_use: fn(line: String) -> Bool Never! {
     raw: line.bytes()
     if !starts_at(raw, 0, "use ") -> return false
     at := 4
@@ -758,8 +853,7 @@ is_core_import_line: fn(line: String) -> Bool Never! {
     if alias > 4 && starts_at(raw, alias, ": ") && starts_at(raw, alias + 2, "core.") {
         at = alias + 2
     }
-    if !starts_at(raw, at, "core.") -> return false
-    !line.contains("[")
+    starts_at(raw, at, "core.")
 }
 
 // A Core import line repeated from an earlier file (or line) is blanked.
@@ -876,6 +970,19 @@ unblock_uses: fn(text: String) -> String Never! {
         }
     }
     lines.join("\n")
+}
+
+#Test("runtime-unit accepts only type-shaped test names and Core uses") {
+    assert(is_type_name("Alloc"))
+    assert(is_type_name("Fmt2"))
+    assert(!is_type_name("lower"))
+    assert(!is_type_name(""))
+    assert(!is_type_name("Bad-Name"))
+    assert(is_core_use("use core.files"))
+    assert(is_core_use("use fs: core.files"))
+    assert(is_core_use("use core.text.[Text, Rune]"))
+    assert(!is_core_use("use jet_lexer.[lex]"))
+    assert(!is_core_use("pub use core.sys"))
 }
 
 #Test("unblock_uses keeps every offset and leaves pub blocks") {
