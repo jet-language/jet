@@ -67,7 +67,7 @@
 ] @keyword
 
 ; keyword.ownership: uninit
-; keyword.other: $build $package $phase $program @SOURCE @TYPES comptime it self shared
+; keyword.other: $build $caller $here $package $phase $program @SOURCE @TYPES comptime it self shared
 [
   "self"
 ] @keyword

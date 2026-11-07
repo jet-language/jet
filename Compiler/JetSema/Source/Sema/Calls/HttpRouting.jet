@@ -1140,11 +1140,16 @@ sema_call_try_http_router: fn(receiver: Expr, receiver_value: TExpr, method: Str
         // A run-time mux pattern's contract is completed from that pattern
         // when it registers.
         contract_value: sema_tree_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: contract}}}, span)
+        // The registering call's place, the mux's `at: SourceLocation`, so a
+        // refused route names the user's line.
+        location_ty: sema_call_resolved_type(Type.Named{name: "SourceLocation"}, environment, program)
+        location: sema_check_expression(sema_site_location_expr("", environment, program, scopes, span), Val(location_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         route_args := [TCallArg]{
             sema_call_http_static_tree_arg(verb, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
             sema_call_http_static_tree_arg(path_value, updated_args[0]),
             sema_call_http_static_tree_arg(callback, updated_args[1]),
             sema_call_http_static_tree_arg(contract_value, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
+            sema_call_http_static_tree_arg(location, sema_call_http_core_synthetic_arg(updated_args[0].expr, span)),
         }
         target: if dynamic -> "__route_dynamic" else -> "__route"
         return sema_call_http_mux_source_call(receiver_value, target, route_args, span, expected, environment, program, scopes, context, diagnostics)

@@ -1300,9 +1300,10 @@ parser_constant_name: fn(name: String) -> Bool Never! {
     has_upper
 }
 
-// The subjectless compiler fact roots.
+// The subjectless compiler fact roots; `$here` and `$caller` are source
+// locations, and sema decides where `$caller` is legal.
 parser_fact_root: fn(name: String) -> Bool Never! {
-    name == "$build" || name == "$package" || name == "$phase" || name == "$program"
+    name == "$build" || name == "$package" || name == "$phase" || name == "$program" || name == "$here" || name == "$caller"
 }
 
 // Rust `Parser::unknown_fact_root` a `$`
@@ -1316,7 +1317,7 @@ parser_report_unknown_fact_root: fn(state: &JetParserState, name: String, span: 
         parser_add_error(state, span, "`$NAME` is an environment read for config surfaces only", "Jet reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
         return
     }
-    parser_add_error(state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+    parser_add_error(state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase`, `$program`, `$here` and `$caller`, and `$` members of a type, function or value such as `T.$layout`", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
 }
 
 // After `#Static` / `#Inline`, a constant binding `NAME: …` is a declaration.

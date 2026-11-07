@@ -2076,7 +2076,10 @@ sema_function_check_pass: fn(func: Func, owner_id: SymbolID, function_kind: TFun
             default_context.arena = context.arena.move()
             // Checked on the live ownership state inside a fork and rolled back.
             default_fork: sema_ownership_fork(state)
-            checked_default: sema_check_expression(func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}, Val(parameter_ty), updated, program, scopes, state, tail_store, default_context, diagnostics)
+            // A `$caller` default checks as the location literal each call gets.
+            declared_default: func.params[param_index].default ?? Expr.Unit{span: func.params[param_index].name_span, id: AST_NODE_GENERATED}
+            caller_default: if declared_default == .Ident(_, caller_span, _) && sema_site_is_caller(declared_default) -> Val(sema_site_location_expr("", updated, program, scopes, caller_span)) else -> Expr?{None}
+            checked_default: sema_check_expression(caller_default ?? declared_default, Val(parameter_ty), updated, program, scopes, state, tail_store, default_context, diagnostics)
             context.arena = default_context.arena.move()
             default_context.arena = BodyFlat{tree: body_tree_new(), arena: body_tree_new(), into_arena: true}
             sema_ownership_fork_rollback(state, default_fork)

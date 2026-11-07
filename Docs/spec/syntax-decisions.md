@@ -44,6 +44,8 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `$package` | package fact root: `$package.name`, `.version` |
 | `$phase` | total evaluation-site phase fact |
 | `$program` | authorized checked-program fact root |
+| `$here` | the `SourceLocation` (file, line, column, function) where it is written |
+| `$caller` | the `SourceLocation` of the call, legal only as a parameter default `at: SourceLocation{$caller}` or inside an #Expand macro |
 | `@SOURCE` | lexical source-snapshot metadata query (no ratified `$` root yet) |
 | `@TYPES` | retained runtime type-catalog query (no ratified `$` root yet) |
 | `compiler.generate` | explicit shared-preparation publication of Generated items |
@@ -2385,7 +2387,8 @@ jobs above.
 sigil assignment superseded by D-VERDICT-732-1)*: every typed rule uses the
 single `#Rule` mechanism. Non-rule `#` constructs remain unchanged: effect sets
 `#(FS)`, fixed lists
-`[T#N]`, package selectors `pkg#1.2.3`, and the compile-time value `#Caller()`.
+`[T#N]` and package selectors `pkg#1.2.3`. The caller-location value this entry
+once spelled `#Caller()` is the fact root `$caller` (D-JAI-SITE1=A).
 Later rulings assign `$name` to known-value splice (D-NAME-SPLICE1=B), `<: … :>`
 to statement expansion (D-FENCE2=A), and `T.$layout` to the compiler-known
 layout projection (D-COMPILER-NS1=A); the `@` and older `$` spellings are retired.
@@ -3666,6 +3669,18 @@ publication. Advanced providers require `metaprogramming: unrestricted` in the
 approved root package and explicit target registration from root preparation.
 Import alone grants no provider or session. This opt-in does not grant host
 permissions.
+
+**D-JAI-SITE1=A — Code-site facts** *(ratified 2026-10-17, card #5010)*: two
+subjectless fact roots give a `SourceLocation` record (core.prelude: `file`,
+`line`, `column`, `function`; it displays as `file:line:column`). `$here` is
+the place where it is written. `$caller` is the place of the call, and it is
+legal only as a parameter default or inside an `#Expand` macro:
+`check: fn(ok: Bool, msg: String, at: SourceLocation{$caller})`. Each call
+that leaves `at` out passes its own place; a wrapper forwards the place by
+declaring the same default and passing `at` on. `$caller` anywhere else is
+E2427, which names the two legal places. Like every location, both never fail.
+Option A's member facts `x.$known` and `call.$callee` are ratified and not yet
+built.
 
 
 ### Low-level tier

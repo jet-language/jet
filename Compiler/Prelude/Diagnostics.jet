@@ -11707,6 +11707,16 @@ FunctionValueNotNever: struct {
     }
 }
 
+CallerSiteMisplaced: struct {
+    impl Diagnostic {
+        code: "E2427"
+        detail: true
+        what: fn(self) -> String { "`$caller` is legal only as a parameter default or inside an #Expand macro." }
+        why: fn(self) -> String { "`$caller` is the place of the call that left the parameter out; anywhere else there is no call to name." }
+        fix: fn(self) -> String { "Declare a parameter `at: SourceLocation{{$caller}}` and read `at`, or write `$here` for this line." }
+    }
+}
+
 InferredNeverReturn: struct {
     function: String
 

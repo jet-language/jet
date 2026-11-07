@@ -121,7 +121,7 @@ MARKER_TRACK: "Track"
 /// The compiler-fact sigil. A fact is a
 /// `$` member of the thing it describes (`T.$layout`, `f.$effects`,
 /// `value.$origin`); subjectless facts use the roots `$build`, `$package`,
-/// `$phase` and `$program`. Fact declarations mark compiler metadata the
+/// `$phase`, `$program`, `$here` and `$caller`. Fact declarations mark compiler metadata the
 /// same way (`$holds:`). Inside a
 /// derive or marker template the same mark splices a template binding
 /// (`$method: fn`, `self.$field`, `.$left`). The mark
@@ -129,7 +129,7 @@ MARKER_TRACK: "Track"
 /// surfaces read the same token as a `$NAME` environment read
 COMPTIME_MARK: "$"
 
-/// The four subjectless fact roots.
+/// The six subjectless fact roots.
 FACT_ROOT_BUILD: "$build"
 
 FACT_ROOT_PACKAGE: "$package"
@@ -137,6 +137,15 @@ FACT_ROOT_PACKAGE: "$package"
 FACT_ROOT_PHASE: "$phase"
 
 FACT_ROOT_PROGRAM: "$program"
+
+/// The `SourceLocation` (file, line, column, function) where `$here` is
+/// written.
+FACT_ROOT_HERE: "$here"
+
+/// The `SourceLocation` of the call. Legal only as a parameter
+/// default (`at: SourceLocation{$caller}`) or inside an #Expand macro; a
+/// wrapper forwards it by declaring the same default and passing `at`.
+FACT_ROOT_CALLER: "$caller"
 
 /// (ratified 2026-07-09): statement switch-off attribute.
 /// `#Off <stmt>` parses and type-checks the statement, then emits no code.

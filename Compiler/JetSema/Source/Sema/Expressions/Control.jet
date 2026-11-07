@@ -10,6 +10,7 @@ use jet_foundation.[
     DiagnosticFixApplicability,
     DiagnosticFixSafety,
     Expr,
+    ExprField,
     Func,
     Lambda,
     LambdaBody,
@@ -20,6 +21,7 @@ use jet_foundation.[
     Pattern,
     PlaceAccess,
     Span,
+    StrPart,
     Stmt,
     Symbol,
     SymbolID,
@@ -81,6 +83,26 @@ sema_expression_panic_location: fn(environment: SemaScopeEnvironment, program: S
     }
     function: scopes.location_function ?? environment.function_name
     TPanicLoc{file: file, source_line: "", line: line, column: column, caret: span.end - span.start, function: function, locals: [TPanicLocal]{}}
+}
+
+// The `SourceLocation` literal of `span`: `$here` at the place it
+// is written, and a `$caller` parameter default at each call that leaves the
+// parameter out. `type_name` "" is the inferred form, typed by the parameter.
+sema_site_location_expr: fn(type_name: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, span: Span) -> Expr Never! {
+    location: sema_expression_panic_location(environment, program, scopes, span)
+    fields: [ExprField]{
+        ExprField{name: "file", name_span: span, value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: location.file}}, span: span, id: AST_NODE_GENERATED}},
+        ExprField{name: "line", name_span: span, value: Expr.Int{value: location.line, span: span, width: None, raw: None, id: AST_NODE_GENERATED}},
+        ExprField{name: "column", name_span: span, value: Expr.Int{value: location.column, span: span, width: None, raw: None, id: AST_NODE_GENERATED}},
+        ExprField{name: "function", name_span: span, value: Expr.Str{parts: [StrPart]{StrPart.Lit{text: location.function}}, span: span, id: AST_NODE_GENERATED}},
+    }
+    Expr.StructLit{type_name: type_name, type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: type_name == "", span: span, id: AST_NODE_GENERATED}
+}
+
+// A parameter default that names the call site.
+sema_site_is_caller: fn(expr: Expr) -> Bool Never! {
+    if expr == .Ident(name, _, _) -> return name == "$caller"
+    false
 }
 
 // The `assert`/`assert_eq`/`panic` report's safe locals (Rust safe_locals_snapshot):
