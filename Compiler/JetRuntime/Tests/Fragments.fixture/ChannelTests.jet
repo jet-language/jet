@@ -31,6 +31,8 @@ channel_fixture_check: fn(ok: Bool) {
 
 // A real stopped callback: out is deliberately untouched and the current
 // task's delivered rail is published, just as an emitted task-body stop does.
+// A panic publishes only inside a stop domain, so its callers run as a task
+// body (scheduler_body_enter) under their bare control.
 #Export(c) jet_rt_channel_fixture_stop: fn(_env: I64, _input: I64, _output: I64) -> I64 {
     reason: channel_text(I64{4})
     record: scheduler_stop_new(I64{5}, reason)
@@ -48,6 +50,7 @@ channel_fixture_check: fn(ok: Bool) {
     sync_store(endpoints + I64{16}, I64{42})
     jet_rt_native_sender_send(tx, endpoints + I64{16}, meta)
     scheduler_control_enter(control, save)
+    body: scheduler_body_enter()
     scheduler_control_cancel(control)
     channel_fixture_check(!channel_iter_pull(rx, endpoints + I64{16}))
     channel_fixture_check(sync_load(endpoints + I64{16}) == I64{42})
@@ -77,6 +80,7 @@ channel_fixture_check: fn(ok: Bool) {
     channel_fixture_check(jet_scheduler_native_status() == I64{5})
     scheduler_control_discard_stop(control)
     jet_rt_native_shared_drop(shared)
+    scheduler_body_leave(body)
     scheduler_control_leave(save)
     scheduler_control_drop(control)
     jet_rt_native_sender_drop(tx)
@@ -91,6 +95,7 @@ channel_fixture_check: fn(ok: Bool) {
     shared: jet_rt_native_shared_new(storage, meta, I64{0})
     control: scheduler_control_new()
     scheduler_control_enter(control, storage + I64{8})
+    body: scheduler_body_enter()
     guard: jet_rt_native_shared_guard_edit(shared)
     channel_fixture_check(guard == shared)
     channel_fixture_check(sync_load(jet_rt_native_shared_edit_guard_read(guard)) == I64{17})
@@ -118,6 +123,7 @@ channel_fixture_check: fn(ok: Bool) {
     channel_fixture_check(sync_load(jet_rt_native_shared_read_guard_deref(final_read)) == I64{17})
     jet_rt_native_shared_read_guard_drop(final_read)
     jet_rt_native_shared_drop(shared)
+    scheduler_body_leave(body)
     scheduler_control_leave(storage + I64{8})
     scheduler_control_drop(control)
     jet_rt_free(storage, I64{40}, I64{8})

@@ -34,6 +34,8 @@ extern void jet_rt_control_enter(W,W), jet_rt_control_leave(W), jet_rt_control_d
 extern void jet_rt_scheduler_control_cancel(W), jet_rt_scheduler_control_drop(W);
 extern uint8_t jet_rt_control_publish_stop(W,W,W,W,W,W,W,W);
 extern W jet_rt_sync_fixture_condition_count(W), jet_rt_sync_fixture_gate_depth(void);
+extern W jet_rt_sync_fixture_body_enter(void);
+extern void jet_rt_sync_fixture_body_leave(W);
 extern void jet_rt_sync_fixture_condition_fifo(W), jet_rt_sync_fixture_set_revision(W,W);
 extern W jet_rt_sync_fixture_cell_word(W,W);
 extern W jet_rt_string_data(W), jet_rt_string_byte_len(W), jet_rt_string_from_static(W,W);
@@ -122,7 +124,7 @@ static void gate_stm(void) {
 // The compiler's uncommitted Stm drop calls rollback, not commit. A second
 // attached thread must acquire the root gate and see no abandoned publication.
 static void dropped_root_stm(void) {
-    W value=40,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta);
+    W value=40,out=0,cell=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word);
     W state=jet_rt_native_stm_begin();
     jet_rt_native_shared_edit_txn(cell,state,999,(W)set_word,(W)&out);
     Gate g={.cell=cell,.expected=40}; pthread_t worker; assert(!pthread_create(&worker,NULL,gate_worker,&g));
@@ -137,6 +139,7 @@ static void dropped_root_stm(void) {
 }
 static void rejected_stm(void) {
     W save[4],control=jet_rt_control_new(); jet_rt_control_enter(control,(W)save);
+    W body=jet_rt_sync_fixture_body_enter();
     W value=1,out=0,a=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word),b=jet_rt_native_shared_new((W)&value,&word_meta,(W)release_word);
     unsigned before_drop=atomic_load(&drops);
     W state=jet_rt_native_stm_begin();
@@ -159,6 +162,7 @@ static void rejected_stm(void) {
     clean_cell(a,1); assert(jet_rt_sync_fixture_gate_depth()==0);
     W guard=jet_rt_native_shared_guard_read(a); jet_rt_native_shared_read_guard_drop(guard);
     jet_rt_native_shared_drop(a); jet_rt_native_shared_drop(b);
+    jet_rt_sync_fixture_body_leave(body);
     jet_rt_control_leave((W)save); jet_rt_scheduler_control_drop(control);
     puts("STM prepare rejection/no publication/drop/revision stop ok");
 }
@@ -168,6 +172,7 @@ static W ready_word(W env,W input,W output) { (void)env; *(uint8_t *)output=*(W 
 static W stale_ready(W env,W input,W output) { (void)input; unsigned *calls=(unsigned *)env; *(uint8_t *)output=++*calls==2; return 0; }
 static void *condition_waiter(void *argument) {
     jet_rt_thread_attach(); Wait *w=argument; W save[4]; jet_rt_control_enter(w->control,(W)save);
+    W body=jet_rt_sync_fixture_body_enter();
     W token=jet_rt_native_shared_guard_edit(w->cell),failure=0;
     W result=jet_rt_native_shared_guard_wait((W)&token,1,w->condition,0,(W)ready_word,(W)&failure);
     if (w->cancel) {
@@ -187,7 +192,7 @@ static void *condition_waiter(void *argument) {
         assert(result==0 && jet_rt_control_status(w->control)==0 && token==w->cell);
         jet_rt_native_shared_edit_guard_drop(token);
     }
-    atomic_store(&w->done,1); jet_rt_control_leave((W)save); jet_rt_thread_detach(); return NULL;
+    atomic_store(&w->done,1); jet_rt_sync_fixture_body_leave(body); jet_rt_control_leave((W)save); jet_rt_thread_detach(); return NULL;
 }
 static void *physical_condition_waiter(void *argument) {
     jet_rt_thread_attach();

@@ -59,6 +59,14 @@ FOUR_MODES: [String]{"assemble", "lower", "link", "run"}
 // this order, and the C hosts that link against the same object.
 WORLD_SENTRY: [String]{"World", "Sentry", "TestScope", "AllocationPolicy"}
 WORLD_SENTRY_LINKED: [String]{"LogicalEnvironmentTests", "LinkNativeTests"}
+// The strict C flags of a committed C host; the channel host keeps the
+// internal fixture exports and the optimizer its races were measured under.
+STRICT_CFLAGS: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror"}
+// The Shared weak host links against the Shared publication object.
+PUBLICATION_LINKED: "shared-weak-fixture"
+WEAK_EXPECTED: "Shared weak no resurrection/payload once/last weak frees Cell96 ok\nShared weak upgrade versus final strong drop 256 races ok\nShared physical clean/dirty/abort/resume/alias once/logical versus pin lifetime ok\n"
+// The lines the channel host prints, one per witness, in any order.
+CHANNEL_LINES: [String]{"queue/close/owners ok", "select source-order/probe/timers ok", "shared concurrent edits/drop ok", "select wake handoff parity ok", "reservations/stopped output/permit cleanup ok", "shared concurrent readers/writer priority ok", "shared guards concurrent readers/writer exclusion/priority ok", "shared guard retain/drop/read-only commit/overflow stop ok"}
 
 #Error
 Problem: struct {
@@ -123,8 +131,9 @@ Kit: struct {
 
 // How a native registry is driven: the runner under Compiler/*/Tests and the
 // verdict that admits it. `blocked` names a registry without a transport.
-// `fragments` names the fragments a plain transport's unit composes; `calls`
-// the runs of a committed Jet runner.
+// `fragments` names the fragments a plain transport's unit composes and
+// `cflags` the flags its C host compiles with; `calls` the runs of a
+// committed Jet runner.
 Spec: struct {
     kind: String
     name: String
@@ -137,6 +146,7 @@ Spec: struct {
     expected_file: String
     blocked: String
     fragments: [String]
+    cflags: [String]
     calls: [RunnerCall]
 }
 
@@ -672,11 +682,51 @@ strip_imports: fn(text: String) -[Exec, IO]> String Never! {
 // --- transports ---------------------------------------------------------------
 
 spec: fn(kind: String, name: String, runner: String) -> Spec Never! {
-    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, calls: [RunnerCall]{}}
+    Spec{kind: kind, name: name, runner: runner, modes: [String]{}, crypto: false, call: None, expected: "", witness: "", expected_file: "", blocked: "", fragments: [String]{}, cflags: STRICT_CFLAGS.copy(), calls: [RunnerCall]{}}
 }
 
 runner_call: fn(mode: String, witness: String, expected: String) -> RunnerCall Never! {
     RunnerCall{mode: mode, witness: if witness == "" -> "" else -> "{RT}{witness}.c", expected: "{expected}\n"}
+}
+
+// The fragments a plain transport's unit composes, in order: the Shared
+// transaction, condition and observe witnesses build on the channel one.
+plain_fragments: fn(name: String) -> [String] Never! {
+    if WORLD_SENTRY.contains(name) -> return WORLD_SENTRY.copy()
+    if name == {
+        "Stm" -> [String]{"Channel", "Stm"}
+        "Sync" -> [String]{"Channel", "Stm", "Sync"}
+        "Observe" -> [String]{"Channel", "Stm", "Sync", "Observe"}
+        "SharedPublication" -> [String]{"Channel", "SharedPublication"}
+        else -> [String]{name.copy()}
+    }
+}
+
+// The flags a plain transport's C host compiles with: the sync host selects
+// its condition and observe witnesses by define.
+plain_cflags: fn(name: String) -> [String] Never! {
+    flags := STRICT_CFLAGS.copy()
+    if name == {
+        "Channel" -> return [String]{"-O2", "-DJET_CHANNEL_INTERNAL"}
+        "Sync" -> flags.push("-DJET_CONDITION_FIXTURE")
+        "Observe" -> flags.extend([String]{"-DJET_CONDITION_FIXTURE", "-DJET_OBSERVE_FIXTURE"})
+        else -> {}
+    }
+    flags
+}
+
+// The exact stdout of the sync host: its STM lines, then the condition and
+// observe lines its defines select.
+sync_expected: fn(name: String) -> String Never! {
+    lines := [String]{
+        "STM nested commit transfer/rollback/clone parity ok",
+        "STM two-thread body gate serialization ok",
+        "STM prepare rejection/no publication/drop/revision stop ok",
+        "STM dropped uncommitted root releases second-thread gate ok",
+    }
+    if name != "Stm" -> lines.push("Condition FIFO/drain/pending/wait/cancel/unheld access+drop ok")
+    if name == "Observe" -> lines.push("Observe empty/parked exact report/owned once ok")
+    "{lines.join("\n")}\n"
 }
 
 // The committed Jet runners under Compiler/JetRuntime/Tests and their runs.
@@ -730,6 +780,9 @@ specification: fn(id: String) -> Spec? Never! {
             "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
             "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
             "World" | "Sentry" | "TestScope" | "AllocationPolicy" -> Val((call: None, witness: "{RT}world-sentry-fixture.c", expected: ""))
+            "Channel" -> Val((call: None, witness: "{RT}channel-fixture.c", expected: ""))
+            "Stm" | "Sync" | "Observe" -> Val((call: None, witness: "{RT}sync-fixture.c", expected: sync_expected(name)))
+            "SharedPublication" -> Val((call: None, witness: "{RT}shared-publication-fixture.c", expected: "Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n"))
             else -> None
         }
         if plain == .Val(table) {
@@ -737,7 +790,8 @@ specification: fn(id: String) -> Spec? Never! {
             found.call = table.call.copy()
             found.witness = table.witness.copy()
             found.expected = table.expected.copy()
-            found.fragments = if WORLD_SENTRY.contains(name) -> WORLD_SENTRY.copy() else -> [String]{name.copy()}
+            found.fragments = plain_fragments(name)
+            found.cflags = plain_cflags(name)
             return Val(found)
         }
         if ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves"}).contains(name) -> return Val(spec("codec-fixture", name, "{RT}run-native-codec-file-leaves.mjs"))
@@ -748,11 +802,6 @@ specification: fn(id: String) -> Spec? Never! {
             return Val(found)
         }
         suite: if name == {
-            "Channel" -> Val((runner: "run-channel-fixtures.mjs", modes: FOUR_MODES.copy()))
-            "Stm" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-stm", "lower", "link-stm", "run-stm"}))
-            "Sync" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-sync", "lower", "link-sync", "run-sync"}))
-            "Observe" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-observe", "lower", "link-observe", "run-observe"}))
-            "SharedPublication" -> Val((runner: "run-channel-fixtures.mjs", modes: [String]{"assemble-publication", "lower", "link-publication", "run-publication"}))
             "SharedThread" -> Val((runner: "run-thread-fixtures.mjs", modes: [String]{"assemble", "lower", "shared-link", "shared-run"}))
             "CollectionsStop" -> Val((runner: "run-collections-stop.mjs", modes: [String]{"--assemble", "--lower", "--run"}))
             else -> None
@@ -818,6 +867,7 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         if found.kind == "plain" {
             entries["call"] = if found.call == .Val(call) -> Dyn.Text(call.copy()) else -> Dyn.Null
             entries["fragments"] = texts(found.fragments)
+            entries["cflags"] = texts(found.cflags)
         }
         entries["runner"] = Dyn.Text(found.runner.copy())
         if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
@@ -860,6 +910,7 @@ prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: St
     if found.fragments == WORLD_SENTRY {
         loop name in WORLD_SENTRY_LINKED -> sources.push("{RT}{name}.c")
     }
+    if found.kind == "plain" && found.name == "SharedPublication" -> sources.push("{RT}{PUBLICATION_LINKED}.c")
     loop call in found.calls {
         if call.witness != "" && !sources.contains(call.witness) -> sources.push(call.witness.copy())
     }
@@ -897,7 +948,7 @@ prepare_transport: fn(repo: String, registry: Registry, out: String, adapter: St
 // lifecycle list and, for crypto, the exports list.
 suite_library: fn(found: Spec, out: String) -> (file: String, prefix: String, lifecycle: String, exports: String) Never! {
     if found.name == "SharedThread" -> return (file: "{out}/shared/Source/Fixture.jet", prefix: "{out}/shared/fixture", lifecycle: "{out}/shared/lifecycle.list", exports: "")
-    folder: if found.name == "CollectionsStop" -> out.copy() else -> "{out}/{if found.runner.ends_with("run-channel-fixtures.mjs") -> "fixture" else -> "unit"}"
+    folder: if found.name == "CollectionsStop" -> out.copy() else -> "{out}/unit"
     (file: "{folder}/Source/Fixture.jet", prefix: "{folder}/fixture", lifecycle: "{folder}/lifecycle.list", exports: if found.crypto -> "{folder}/exports.list" else -> "")
 }
 
@@ -1168,8 +1219,13 @@ library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String, export
 // The runtime imports jet_rt_fault_report, which Jet's linker writes into each
 // image; this platform link assembles it from the shared report source.
 link: fn(lane: &Lane, source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    link_with(lane, STRICT_CFLAGS, source, object, binary)
+}
+
+link_with: fn(lane: &Lane, cflags: [String], source: String, object: String, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
     report_object: fault_report(lane) ?? return Err(err)
-    args: [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary}
+    args := cflags.copy()
+    args.extend([String]{source, object, report_object, "-lpthread", "-ldl", "-lm", "-o", binary})
     execute(lane, env_or("CC", "cc"), args, lane.out.copy(), [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
     Ok(())
 }
@@ -1360,9 +1416,11 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
             files.write(driver, PLAIN_DRIVER) ?? return Err(problem("`{driver}` cannot be written: {err}"))
         }
         binary: "{native}/driver"
-        link(lane, driver, "{native}/fixture.o", binary) ?? return Err(err)
+        link_with(lane, found.cflags, driver, "{native}/fixture.o", binary) ?? return Err(err)
         if found.name == "Scheduler" -> return scheduler_verdict(lane, binary)
         if found.fragments == WORLD_SENTRY -> return world_sentry_verdict(lane, binary, "{native}/fixture.o")
+        if found.name == "Channel" -> return channel_verdict(lane, binary)
+        if found.name == "SharedPublication" -> return publication_verdict(lane, binary, "{native}/fixture.o", found.expected)
         ran: execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(ran, found.expected, "")
     }
@@ -1461,6 +1519,52 @@ world_sentry_verdict: fn(lane: &Lane, binary: String, object: String) Problem! -
     }
     if texts.len() == 2 && texts[0] != texts[1] -> failures.push("the returned and stopped ledgers differ")
     if failures.len() > 0 -> return Err(problem("world/sentry verdict: {failures.join("; ")}"))
+    Ok(())
+}
+
+// The channel host runs its queue, select, reservation and Shared witnesses
+// silently on stderr, printing each witness's line; a select on closed or
+// empty channels with no ready arm is a scheduler stop, which spec S36
+// delivers as E3001 with exit 70: no output, and a report naming the panic.
+channel_verdict: fn(lane: &Lane, binary: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    failures := [String]{}
+    if execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) == {
+        .Err(failed) -> failures.push("witnesses: {failed.message}")
+        .Ok(ran) -> {
+            if ran.stderr != "" -> failures.push("witnesses: stderr {json.dumps(Dyn.Text(ran.stderr.copy())) ?? ""} is not empty")
+            printed: ran.stdout.split("\n").to_list()
+            loop line in CHANNEL_LINES {
+                if !printed.contains(line) -> failures.push("witnesses: stdout lacks `{line}`")
+            }
+        }
+    }
+    stops: [[String]]{[String]{"select-closed", "select closed"}, [String]{"select-empty", "select: no arms registered"}}
+    loop stop in stops {
+        mode: stop[0].copy()
+        if execute(lane, binary, [String]{mode.copy()}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) == {
+            .Err(failed) -> failures.push("{mode}: {failed.message}")
+            .Ok(ran) -> {
+                if ran.stdout != "" -> failures.push("{mode}: stdout {json.dumps(Dyn.Text(ran.stdout.copy())) ?? ""} is not empty")
+                if !ran.stderr.starts_with("Stop [E3001]: `panic: {stop[1]}`") -> failures.push("{mode}: stderr does not open with the E3001 `panic: {stop[1]}` report")
+            }
+        }
+    }
+    if failures.len() > 0 -> return Err(problem("channel verdict: {failures.join("; ")}"))
+    Ok(())
+}
+
+// The Shared publication host prints its World and Process race lines; the
+// Shared weak host, linked against the same object, its three lines.
+publication_verdict: fn(lane: &Lane, binary: String, object: String, expected: String) Problem! -[Env, Exec, FS, IO, Time, Time.Wait]> {
+    out: lane.out.copy()
+    failures := step_failures("publication", execute(lane, binary, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), expected, "")
+    host: "{out}/native/{PUBLICATION_LINKED}"
+    if link(lane, "{lane.repo}/{RT}{PUBLICATION_LINKED}.c", object, host) == {
+        .Err(failed) -> failures.push("{PUBLICATION_LINKED} link: {failed.message}")
+        .Ok(_) -> failures.extend(step_failures(PUBLICATION_LINKED, execute(lane, host, [String]{}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS), WEAK_EXPECTED, ""))
+    }
+    if failures.len() > 0 -> return Err(problem("Shared publication verdict: {failures.join("; ")}"))
     Ok(())
 }
 
@@ -2180,7 +2284,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
 
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
-    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
+    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy", "Channel", "Stm", "Sync", "Observe", "SharedPublication"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
@@ -2199,22 +2303,43 @@ fragment_registry: fn(name: String) -> Registry Never! {
         }
         host: if name == {
             "TestSuite" -> "Compiler/JetRuntime/Tests/test-suite-fixture.c"
-            "Parallel" | "Scheduler" -> "Compiler/JetRuntime/Tests/{name.lower()}-fixture.c"
+            "Parallel" | "Scheduler" | "Channel" -> "Compiler/JetRuntime/Tests/{name.lower()}-fixture.c"
+            "Stm" | "Sync" | "Observe" -> "Compiler/JetRuntime/Tests/sync-fixture.c"
+            "SharedPublication" -> "Compiler/JetRuntime/Tests/shared-publication-fixture.c"
             else -> "Compiler/JetRuntime/Tests/world-sentry-fixture.c"
         }
         assert(field(transport, "call") == Dyn.Null)
         assert_eq(text_field(transport, "witness"), host)
-        assert_eq(text_field(transport, "expected"), if name == "TestSuite" -> "test suite: ok\n" else -> "")
+        expected: if name == {
+            "TestSuite" -> "test suite: ok\n"
+            "Stm" | "Sync" | "Observe" -> sync_expected(name)
+            "SharedPublication" -> "Shared World race/loser once/register once/reset owner only ok\nShared Process race/loser once/no World registration ok\n"
+            else -> ""
+        }
+        assert_eq(text_field(transport, "expected"), expected)
         sources: array_field(entry, "sources")
         assert(sources.contains(Dyn.Text(host)))
-        if WORLD_SENTRY.contains(name) {
-            // Every composed fragment and every linked host pins the row.
-            assert(field(transport, "fragments") == texts(WORLD_SENTRY))
-            loop fragment in WORLD_SENTRY -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/Fragments.fixture/{fragment}Tests.jet")))
-            loop linked in WORLD_SENTRY_LINKED -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{linked}.c")))
-        } else {
-            assert(field(transport, "fragments") == texts([String]{name.copy()}))
+        // Every composed fragment and every linked host pins the row.
+        fragments: if name == {
+            "Stm" -> [String]{"Channel", "Stm"}
+            "Sync" -> [String]{"Channel", "Stm", "Sync"}
+            "Observe" -> [String]{"Channel", "Stm", "Sync", "Observe"}
+            "SharedPublication" -> [String]{"Channel", "SharedPublication"}
+            else -> if WORLD_SENTRY.contains(name) -> WORLD_SENTRY.copy() else -> [String]{name.copy()}
         }
+        assert(field(transport, "fragments") == texts(fragments))
+        loop fragment in fragments -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/Fragments.fixture/{fragment}Tests.jet")))
+        if WORLD_SENTRY.contains(name) {
+            loop linked in WORLD_SENTRY_LINKED -> assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{linked}.c")))
+        }
+        assert_eq(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/shared-weak-fixture.c")), name == "SharedPublication")
+        cflags: if name == {
+            "Channel" -> [String]{"-O2", "-DJET_CHANNEL_INTERNAL"}
+            "Sync" -> [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-DJET_CONDITION_FIXTURE"}
+            "Observe" -> [String]{"-std=c11", "-Wall", "-Wextra", "-Werror", "-DJET_CONDITION_FIXTURE", "-DJET_OBSERVE_FIXTURE"}
+            else -> [String]{"-std=c11", "-Wall", "-Wextra", "-Werror"}
+        }
+        assert(field(transport, "cflags") == texts(cflags))
     }
 }
 
