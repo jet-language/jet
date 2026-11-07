@@ -4,8 +4,9 @@ use {
     sys: core.sys
 }
 
-// The launcher owns mount syscalls and inherited loader fd 9; all process
-// policy, environment, input, receipts and assertions still belong to Steps.
+// The launcher (Assets/no_nix.jet) runs the host mount tools and passes the
+// loader's directory at fd 9; all process policy, environment, input, receipts
+// and assertions still belong to Steps.
 kit_no_nix_helper: fn(name: String) -> String? {
     loop directory in ["/run/current-system/sw/bin", "/usr/bin", "/bin"] {
         path: files.join(directory, name)
@@ -28,13 +29,14 @@ kit_no_nix_matches: fn(bytes: [U8], offset: Int, marker: [U8]) -> Bool {
     true
 }
 
-// Match the original harness's NUL-terminated Nix ld-linux interpreter slot.
-// Leave non-Nix and static ELF images alone; a patch never grows the image.
+// Match the original harness's NUL-terminated Nix ld-linux interpreter slot
+// and point it at the same loader in the directory the launcher passes at
+// fd 9. Leave non-Nix and static ELF images alone; a patch never grows the image.
 kit_no_nix_patch_bytes: fn(source: [U8]) -> [U8]? {
     if source.len() < 4 || !kit_no_nix_matches(source, 0, [U8]{127, 69, 76, 70}) -> return None
     marker: "/nix/store/".bytes()
     loader: "ld-linux".bytes()
-    replacement: "/proc/self/fd/9".bytes()
+    prefix: "/proc/self/fd/9/".bytes()
     offset := 0
     loop offset + marker.len() <= source.len() {
         if !kit_no_nix_matches(source, offset, marker) {
@@ -48,6 +50,12 @@ kit_no_nix_patch_bytes: fn(source: [U8]) -> [U8]? {
             if i + loader.len() <= end && kit_no_nix_matches(source, i, loader) -> found = true
         }
         if found {
+            name := offset
+            loop i in offset..<end {
+                if source[i] == (U8{47}) -> name = i + 1
+            }
+            replacement := prefix
+            loop i in name..<end -> replacement.push(source[i])
             if replacement.len() >= end - offset -> return None
             result := source
             loop i in offset..<end -> result[i] = U8{0}
@@ -72,9 +80,34 @@ kit_no_nix_patch: fn(source: String, destination: String) -> String Err! {
     }
 }
 
+// Build the launcher once per bootstrap directory, from a copy of its package
+// so parallel cases never share one build output. The build runs with the
+// kit's environment, not the step's (an `env-clear` step has no HOME).
+kit_no_nix_launcher: fn(env: KitEnv, bootstrap: String) -> String Err! {
+    directory: files.join(bootstrap, "launcher")
+    output: files.join(directory, "bin")
+    launcher: files.join(output, "no_nix")
+    if files.is_file(launcher) -> return Ok(launcher)
+    files.create_dir_all(directory) ?? return Err("no-nix launcher directory: {err}")
+    source: files.join(env.root, "Compiler/JetTestKit/Assets")
+    loop name in ["package.jet", "no_nix.jet"] {
+        files.copy(files.join(source, name), files.join(directory, name)) ?? return Err("no-nix launcher copy of {name}: {err}")
+    }
+    build := env
+    build.env_clear = false
+    build.memory_limit = 0
+    build.timeout = 600s
+    result: kit_exec_invoke(build, [env.jet, "build", files.join(directory, "no_nix.jet"), "--output-dir={output}"], directory, bootstrap, "")
+    if result.code != 0 || kit_exec_process_failure(result) != None || !files.is_file(launcher) {
+        return Err("no-nix launcher build failed (exit {result.code}): {result.error} {result.stderr}")
+    }
+    Ok(launcher)
+}
+
 kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: String) -> [String] Err! {
     helpers := [String]{}
-    loop name in ["unshare", "mount", "umount", "sh", "mkdir", "ldd", "readlink", "sort", "ln", "true"] {
+    // `sh` is staged as the namespace's /bin/sh for the subject; the launcher never runs it.
+    loop name in ["unshare", "mount", "umount", "sh", "ldd", "true"] {
         helper: kit_no_nix_helper(name) ?? return Err("no-nix required namespace helper not installed: {name}")
         helpers.push(helper)
     }
@@ -94,11 +127,10 @@ kit_no_nix_argv: fn(env: KitEnv, argv: [String], scratch: String, network: Strin
     loop binary in [env.jet, env.jetpack] {
         if binary != "" && !kit_expect_named(subjects, binary) -> subjects.push(binary)
     }
-    asset: files.join(env.root, "Compiler/JetTestKit/Assets/no-nix.sh")
-    result := [String]{helpers[3], asset, "--outer", bootstrap, helpers[0], "--user", "--map-root-user", "--mount", "--propagation", "private"}
+    launcher: kit_no_nix_launcher(env, bootstrap) ?? return Err(err)
+    result := [String]{launcher, "--outer", bootstrap, helpers[0], "--user", "--map-root-user", "--mount", "--propagation", "private"}
     if network == "disabled" -> result.push("--net")
-    result.push(helpers[3])
-    result.push(asset)
+    result.push(launcher.copy())
     result.push(bootstrap.copy())
     loop helper in helpers -> result.push(helper)
     loop image in images -> result.push(image)
@@ -125,9 +157,9 @@ kit_no_nix_failure: fn(step: KitStep, run: KitRun) -> KitVerdict? {
 // own, so the fixed port it binds is free whatever the host holds: a user
 // namespace that maps the caller to root holds a fresh network namespace,
 // whose loopback `ip` raises before the program starts. The `sh` that raises
-// it and then becomes the program is a named exclusion from the no-shell rule,
-// as Assets/no-nix.sh is: Core has no unshare or exec leaf, so no Jet process
-// can enter the namespace, raise its loopback and then run the program in it.
+// it and then becomes the program is a named exclusion from the no-shell rule:
+// Core has no unshare or exec leaf, so no Jet process can enter the namespace,
+// raise its loopback and then become the program in it.
 KIT_NETNS_RAISE: "ip=\"$1\"; shift; \"$ip\" link set lo up || exit 125; exec \"$@\""
 
 // unshare, sh and ip, or why this host has no private network namespace.

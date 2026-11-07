@@ -211,9 +211,9 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1342,
+  "total": 1343,
   "counts": {
-    "Compiler": 679,
+    "Compiler": 680,
     "Core": 186,
     "Docs": 8,
     "Examples": 35,
@@ -4942,6 +4942,13 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "Compiler",
+      "file": "Compiler/JetTestKit/Assets/no_nix.jet",
+      "line": 49,
+      "column": 9,
+      "reason": "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)"
+    },
+    {
+      "package": "Compiler",
       "file": "Compiler/JetTestKit/Source/Exec.jet",
       "line": 422,
       "column": 5,
@@ -9624,14 +9631,14 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 
 | crate/package | regions |
 | --- | ---: |
-| Compiler | 679 |
+| Compiler | 680 |
 | Core | 186 |
 | Docs | 8 |
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
 | tests | 418 |
-| **total** | **1342** |
+| **total** | **1343** |
 
 ### Regions
 
@@ -10311,6 +10318,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Compiler | Compiler/JetSema/Tests/ScalarGlobalFixtures.jet | 21:5 | "single-threaded test: plain module writes of each scalar type" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 10:5 | "no raw operations in this regression" |
 | Compiler | Compiler/JetSema/Tests/XmlCheckerRootsFixtures.jet | 11:9 | "nested tail retains its value grammar" |
+| Compiler | Compiler/JetTestKit/Assets/no_nix.jet | 49:9 | "the no-nix launcher passes its subject's status 101 through unchanged; process.exit would report it as 1 (S36)" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 422:5 | "the testkit stops its own step child at the resident-memory guard" |
 | Compiler | Compiler/JetTestKit/Source/Exec.jet | 608:9 | "the testkit stops a process its own case left running in the case scratch" |
 | Compiler | Compiler/JetTestKit/Source/StepsControl.jet | 133:5 | "kill(pid, 0) observes the case-owned child without sending a signal" |

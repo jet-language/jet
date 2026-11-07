@@ -22,18 +22,26 @@ use {
     files.remove_all(root) ?? panic("remove no-nix grammar scratch")
 }
 
+// The launcher's package, copied into a scratch checkout the kit builds it from.
+no_nix_test_assets: fn(root: String) {
+    assets: files.join(files.cwd() ?? panic("cwd"), "Compiler/JetTestKit/Assets")
+    loop name in ["package.jet", "no_nix.jet"] {
+        kit_exec_copy_file(files.join(assets, name), files.join(root, "Compiler/JetTestKit/Assets/{name}"))
+    }
+}
+
 #Test("no-nix launcher reexec preserves argv stdin environment cwd and both network modes") {
     if kit_no_nix_required() != None -> return
     root: cases_test_root("no-nix-reexec")
-    asset: files.join(files.cwd() ?? panic("cwd"), "Compiler/JetTestKit/Assets/no-nix.sh")
-    kit_exec_copy_file(asset, files.join(root, "Compiler/JetTestKit/Assets/no-nix.sh"))
+    no_nix_test_assets(root)
     kit_exec_write(files.join(root, "tests/cases/group/input.stdin"), "two words\n")
     kit_exec_write(files.join(root, "tests/cases/group/expected.out"), "two words|value|argument with spaces\n")
     pid: process.current_pid()
     loop name in ["enabled", "disabled"] {
         relation: if name == "enabled" -> "test" else -> "! test"
         cases_test_source(root, name, "env: CASE_VALUE=value\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/net/dev -ef /proc/{pid}/net/dev; read line; echo \"$line|$CASE_VALUE|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
-        context: cases_test_context(root, files.join(root, "scratch-{name}"))
+        context := cases_test_context(root, files.join(root, "scratch-{name}"))
+        context.env.jet = cases_test_real_jet("to build the no-nix launcher")
         outcome: kit_cases_run(cases_test_entry(name), context)[0]
         assert_eq(outcome.verdict.status, "PASS")
         assert_eq(outcome.run.code, 0)
@@ -46,7 +54,9 @@ use {
     root: cases_test_root("no-nix-elf")
     cases_test_source(root, "image", "step: jetpack env\nisolate: no-nix network=disabled\n")
     plan: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("image").path)) ?? panic("read image case"))
-    context: cases_test_context(root, root)
+    context := cases_test_context(root, root)
+    context.env.jet = cases_test_real_jet("to build the no-nix launcher")
+    no_nix_test_assets(root)
     step: plan.steps[0]
     argv: kit_no_nix_argv(context.env, [context.env.jetpack, "env"], root, step.isolate_network) ?? panic("{err}")
     assert(kit_expect_named(argv, "--user"))
@@ -69,7 +79,8 @@ use {
     patched: files.read_bytes(destination) ?? panic("read patched ELF")
     assert_eq(patched.len(), bytes.len())
     assert_eq((files.stat(destination) ?? panic("stat patch")).mode % 512, 0o751)
-    assert(kit_no_nix_matches(patched, interpreter_offset, "/proc/self/fd/9".bytes()))
+    assert(kit_no_nix_matches(patched, interpreter_offset, "/proc/self/fd/9/ld-linux-x86-64.so.2".bytes()))
+    assert_eq(patched[interpreter_offset + "/proc/self/fd/9/ld-linux-x86-64.so.2".bytes().len()], U8{0})
     files.remove_all(root) ?? panic("remove no-nix ELF scratch")
 }
 
