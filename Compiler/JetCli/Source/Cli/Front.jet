@@ -194,6 +194,8 @@ JetCLIPlan: enum {
     // `jet inspect bind <language> …` (ForeignBind.jet): `run_<language>_bind`
     // for the words after the language.
     ForeignBind(binder: JetCLIForeignBinder, args: [String], color: Bool)
+    // `jet perf view|compare|export …` (Perf/Command.jet): `argv` starts at `perf`.
+    Perf(argv: [String], color: Bool)
     // `jet inspect semindex <file>`: the host checks the absolute `file` and
     // prints its semantic index.
     Semindex(file: String, color: Bool, json: Bool)
@@ -2134,8 +2136,9 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
             }
         }
     }
-    // `jet perf` lists its family; no action of it runs yet.
+    // `jet perf` lists its family; a built action runs (Perf/Command.jet).
     if argv[0] == "perf" {
+        if argv.len() > 1 && jet_cli_nested_command("perf", argv[1]) != None && jet_cli_form_ported("perf {argv[1]}") -> return JetCLIPlan.Perf{argv: argv, color: color}
         form: if argv.len() > 1 && jet_cli_form_card("perf {argv[1]}") != None -> "perf {argv[1]}" else -> "perf"
         return jet_cli_not_ported(form, color)
     }
