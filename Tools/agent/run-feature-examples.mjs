@@ -21,7 +21,7 @@ const FEATURES = join(ROOT, "Examples");
 const JET = process.env.JET;
 const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR ?? scratchRoot();
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
-const KNOWN_FAILING_LEDGER = join(ROOT, "Tools/testkit/known-failing.tsv");
+const KNOWN_FAILING_LEDGER = join(ROOT, "tests/known-failing.tsv");
 
 export function usage() {
   return [
@@ -614,7 +614,7 @@ export function classifyRun(run, expected, tier = "run") {
   return { status: "passed", detail: "" };
 }
 
-// The rows of the central known-failing ledger (Tools/testkit/known-failing.tsv),
+// The rows of the central known-failing ledger (tests/known-failing.tsv),
 // read as testkit Cases.jet `kit_known_ledger` reads them: tab-separated
 // `ID card reason`, blank, `#` and malformed lines ignored.
 export function parseKnownLedger(text) {

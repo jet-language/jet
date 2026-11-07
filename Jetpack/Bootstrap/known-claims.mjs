@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Classify one tier's Jetpack claim results against the testkit's
-// known-failing ledger (Tools/testkit/known-failing.tsv). Jetpack claim rows
+// known-failing ledger (tests/known-failing.tsv). Jetpack claim rows
 // use the ID `jetpack-claim:<Area>/<claim name>`, then the card and the reason,
 // tab-separated; the testkit matches IDs against case paths, so it never
 // selects these rows.
@@ -99,7 +99,7 @@ export function classify(mode, map, text, ledgerText) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [mode, mapPath, resultsPath, ledgerArg] = process.argv.slice(2);
   if (!["run", "aot"].includes(mode) || !mapPath || !resultsPath) fail("usage: known-claims.mjs run|aot <map.json> <results> [ledger]");
-  const ledgerPath = ledgerArg ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../Tools/testkit/known-failing.tsv");
+  const ledgerPath = ledgerArg ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../tests/known-failing.tsv");
   let verdict;
   try {
     verdict = classify(mode, JSON.parse(readFileSync(mapPath, "utf8")), readFileSync(resultsPath, "utf8"), readFileSync(ledgerPath, "utf8"));

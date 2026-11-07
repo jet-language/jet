@@ -337,7 +337,7 @@ if (( with_tests == 1 && overall == 0 )); then
   # once and every segment runs it, so a failing claim costs one restart, not
   # one recompile (#6293).
   # Both tiers' claim results are classified by known-claims.mjs against the
-  # `jetpack-claim:<Area>/<claim>` rows of Tools/testkit/known-failing.tsv: a
+  # `jetpack-claim:<Area>/<claim>` rows of tests/known-failing.tsv: a
   # listed failure is KNOWN-FAILING, a listed pass is UNEXPECTED-PASS (fails).
   expected="$(node -e 'console.log(require(process.argv[1]).tests.length)' "$scratch/run/jetpack.map.json")"
   from=0 label=run run_failed=0 run_passed=0 run_complete=1

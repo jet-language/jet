@@ -59,7 +59,7 @@ binary (same stdin, arguments and working directory); a compile-time
 diagnostic is compared with its command word spelled `jet run`.
 
 Both runners read the central known-failing ledger
-(`Tools/testkit/known-failing.tsv`) and a `# KNOWN-FAILING` header in an
+(`tests/known-failing.tsv`) and a `# KNOWN-FAILING` header in an
 example's `.case` the same way. An owned failure reports `known-failing`
 (testkit `KNOWN-FAILING`); an owned example that passes reports
 `unexpected-pass` and fails the run until its row is removed.
