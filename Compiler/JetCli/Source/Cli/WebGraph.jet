@@ -5,7 +5,7 @@
 use {
     jet_driver.[JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK]
     jet_foundation.[AppRouteRoot, CallArg, Expr, Field, Func, Item, Span, StructDef, Type, UnOp, WebPartitionMarker]
-    jet_foundation.[app_entry_run_fn, app_route_file_address, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, sha256_bytes, sha256_hex, type_name]
+    jet_foundation.[app_entry_run_fn, app_route_file_address, ast_visit_body, diagnostic_column_at, diagnostic_line_at, failure_contract_of_function, owned_trait_codec_marker, sha256_bytes, sha256_hex, type_name]
     jet_sema.[sema_app_canonical_route_path, sema_app_route_parts, sema_app_route_static_parts, sema_app_routes_overlap]
     jet_semindex.[semindex_function_key, semindex_sorted_unique]
 }
@@ -384,8 +384,12 @@ jet_cli_web_struct: fn(modules: [JetDriverDocModule], name: String) -> StructDef
     None
 }
 
+// A codec derive: a codec trait or a family of them (OWNED_TRAITS).
 jet_cli_web_has_serde_derive: fn(derives: [String]) -> Bool {
-    derives.contains("Codable") || derives.contains("Encode") || derives.contains("Decode")
+    loop name in derives {
+        if owned_trait_codec_marker(name) -> return true
+    }
+    false
 }
 
 jet_cli_web_collect_serializable: fn(items: [Item], out: &[String]) {

@@ -3,7 +3,7 @@
 // module build keeps going and reports every failure (collect-all).
 
 use {
-    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value]
+    jet_foundation.[CompilerThreads, DeclID, DeclTable, decl_table_find, Span, Type, TypeTable, TypeTupleField, BodyCallArg, TConstantDef, NodeKind, TExprType, TFailureCarrier, FnBody, TFuncKind, TGenericParam, TImplDef, BodyLambda, TLocal, TTryConvert, TTypeDef, TVisibility, compiler_threads_failure_text, type_carrier_identity, BodyNode, BodyTree, StmtKind, body_node, body_stmt, body_type, body_type_id, type_table_find, type_table_intern, NameRows, name_rows, name_rows_get_text, name_rows_set, name_rows_set_first, name_rows_value, OWNED_TRAITS, owned_trait_arithmetic, owned_trait_operator_hook]
     jet_sema.[SemaCheckedForeignFunction, sema_inference_type_mentions_param, sema_instance_type, sema_instance_types]
 }
 
@@ -673,8 +673,10 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     // A generic `T: Add` body's `+` (ir_operator_impl) runs the
     // instantiation's hook for its own right-hand type: a method of the
     // owner's operator-trait implementation, local trait or Core's.
-    loop hook in ([String]{"add", "sub", "mul", "div"}) {
-        trait_short: if hook == "add" -> "Add" else if hook == "sub" -> "Sub" else if hook == "mul" -> "Mul" else -> "Div"
+    loop operator_trait in OWNED_TRAITS {
+        if !owned_trait_arithmetic(operator_trait.name) -> next
+        trait_short: operator_trait.name
+        hook: owned_trait_operator_hook(trait_short) ?? next
         loop index in (p.trait_methods.get("{trait_short}|{hook}") ?? [Int]{}) {
             if owned[index].params.len() != 1 -> next
             if owned[index].kind == {
