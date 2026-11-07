@@ -6034,7 +6034,10 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     // the chain check's frame off every other expression level.
     if sema_expr_is_bare_member_chain(expr) {
         bare_member: sema_expr_check_bare_member_chain(expr, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        if bare_member.handled -> return sema_check_expression_recorded(expr, bare_member.value, context)
+        if bare_member.handled {
+            if bare_member.value == None -> sema_expr_mark_failed_call_reads(expr, scopes, state)
+            return sema_check_expression_recorded(expr, bare_member.value, context)
+        }
     }
     if !sema_enter_source_nesting(context, expr_span(expr), diagnostics) -> return None
     // A call root auto-propagates its Result carrier
@@ -6060,11 +6063,30 @@ sema_check_expression: fn(expr: Expr, expected: Type?, environment: SemaScopeEnv
     }
     // The checked value moves out and back: binding it while `checked` was
     // still returned copied the whole checked tree at every level.
-    value := checked ?? return None
+    value := checked ?? {
+        sema_expr_mark_failed_call_reads(expr, scopes, state)
+        return None
+    }
     if sema_core_type_uses_default_int(value.ty) -> context.exact_int_reachable = true
     sema_cell_guard_check_construct(expr, value.ty, diagnostics)
     sema_check_record_expr_id(expr, value, context)
     Val(value.move())
+}
+
+// A call that fails to check (an unresolved callee or member) still reads
+// the names in its arguments, so they are no unused bindings whose `_name`
+// rename `jet fix` would apply to a binding the call uses.
+sema_expr_mark_failed_call_reads: fn(expr: Expr, scopes: SemaScopeTable, state: &SemaOwnershipState) {
+    names := [String]{}
+    if expr == {
+        .Call(call, _) -> loop argument in call.args -> sema_function_memory_collect_expr_idents(argument.expr, names)
+        .MethodCall(_, _, _, _, _, args, _) | .OptMethodCall(_, _, _, _, args, _, _) | .CallValue(_, args, _, _) -> loop argument in args -> sema_function_memory_collect_expr_idents(argument.expr, names)
+        else -> return
+    }
+    loop name in names {
+        index: sema_scope_resolve_index(scopes, name) ?? next
+        state.used_keys[scopes.bindings[index].symbol.id.key] = true
+    }
 }
 
 // An expression form checked outside the common exit (a ranged view
