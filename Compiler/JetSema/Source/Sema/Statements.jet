@@ -1019,8 +1019,13 @@ sema_stmt_check_unit_if: fn(expr: Expr, return_type: Type?, environment: SemaSco
             // A dispatch table binds a call subject once before the chain
             // that tests it, exactly like the value form.
             if sema_expression_if_dispatch_subject(condition, else_value) == .Val(subject) {
-                binding: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
-                table := sema_stmt_check_unit_if_parts(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth)
+                // A value table's `it` lives in the table's own scope.
+                table_it: sema_expression_if_subject_is_table_it(subject)
+                if table_it -> sema_scope_enter(scopes, state, "if.it@{span.start}")
+                bound: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, state, tail_store, context, diagnostics)
+                table := if bound != None -> sema_stmt_check_unit_if_parts(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, return_type, environment, program, scopes, state, tail_store, context, diagnostics, loop_depth) else -> SemaStatementResult{value: [TStmt]{}, complete: false}
+                if table_it -> sema_single_use_leave_scope(scopes, state, diagnostics)
+                binding: bound ?? return SemaStatementResult{value: [TStmt]{}, complete: false}
                 if !table.complete -> return table
                 statements := [TStmt]{binding}
                 loop statement in table.value -> statements.push(statement)

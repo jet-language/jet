@@ -3,6 +3,7 @@
 // driver state and the source scans live in Formatter.jet.
 use {
     jet_foundation.[
+        AST_NODE_GENERATED,
         BinMatchPart,
         BinOp,
         ByteTextPart,
@@ -1670,8 +1671,13 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
         }
         // The mark is part of the name.
         .ComptimeName(name, _, _, _) -> jfmt_write(f, name)
-        // Author-written grouping parens are re-emitted.
-        .Paren(inner, _, _) -> {
+        // Author-written grouping parens are re-emitted; the generated one
+        // around a value table's subject prints the subject as written.
+        .Paren(inner, _, node) -> {
+            if node == AST_NODE_GENERATED {
+                jfmt_fmt_expr(f, inner, prec)
+                return
+            }
             jfmt_write(f, "(")
             jfmt_fmt_expr(f, inner, JFMT_PREC_OR_FALLBACK)
             jfmt_write(f, ")")

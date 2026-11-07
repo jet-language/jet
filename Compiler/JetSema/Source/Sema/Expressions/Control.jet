@@ -1598,6 +1598,8 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
 sema_expression_if_dispatch_subject: fn(condition: Expr, else_value: Expr) -> Expr? {
     subject: sema_expression_if_condition_subject(condition) ?? return None
     if sema_expression_if_subject_is_place(subject) -> return None
+    // A value table names its subject `it` however many arms it has.
+    if sema_expression_if_subject_is_table_it(subject) -> return Val(subject)
     next := else_value
     loop {
         if next == {
@@ -1715,7 +1717,15 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
     // The hoisted local reads its subject's place in place when the subject
     // does, so the arms' payload bindings do too.
     in_place: !window && sema_expression_source_reads_in_place(subject, scopes)
-    _ := sema_scope_declare_local(scopes, symbol, window, if window -> AccessConvention.Write else -> AccessConvention.Read, bounds, false)
+    access: if window -> AccessConvention.Write else -> AccessConvention.Read
+    // A value table's `it` lives in the table's own frame and shadows an
+    // enclosing table's `it`, as the statement form's does; any other hoisted
+    // local has a unique name and declares normally.
+    if sema_expression_if_subject_is_table_it(subject) {
+        sema_scope_push_binding(scopes, SemaScopeBinding{frame: scopes.current, symbol: symbol, mutable: window, access: access, integer_bounds: bounds, string_view: false, compiler_builtin: false})
+    } else {
+        _ := sema_scope_declare_local(scopes, symbol, window, access, bounds, false)
+    }
     if in_place -> sema_scope_mark_place_alias(scopes, name)
     sema_ownership_declare_binding(state, symbol, false)
     // The arms' payload sources are rooted at this local; the subject it
@@ -1729,7 +1739,16 @@ sema_expression_if_bind_subject: fn(subject: Expr, condition: Expr, else_value: 
 }
 
 sema_expression_if_subject_local_name: fn(subject: Expr) -> String {
+    if sema_expression_if_subject_is_table_it(subject) -> return "it"
     "__jet_switch_subject_{expr_span(subject).start}"
+}
+
+// The parser's generated grouping over a value table's subject that is not a
+// plain name (parser_expression_form_parse_dispatch_table): its arms read the
+// subject as `it`, in a scope of the table's own that shadows any outer `it`.
+sema_expression_if_subject_is_table_it: fn(subject: Expr) -> Bool {
+    if subject == .Paren(_, _, node) -> return node == AST_NODE_GENERATED
+    false
 }
 
 // A pattern binding a checked condition introduces into its success branch.
@@ -2206,9 +2225,14 @@ sema_expression_if_rebound_chain: fn(subject: Expr, else_value: Expr) -> Expr {
 }
 
 sema_expression_if_hoisted: fn(subject: Expr, condition: Expr, then_body: [Stmt], then_value: Expr, else_body: [Stmt], else_value: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    binding: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    table: sema_expression_if(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, expected, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    Val(sema_tree_node(table.ty, TExprKind.InlineBlock{body: [TStmt]{binding, TStmt.ExprStmt{value: table, span: span}}}, span))
+    table_it: sema_expression_if_subject_is_table_it(subject)
+    if table_it -> sema_scope_enter(scopes, state, "if.it@{span.start}")
+    binding: sema_expression_if_bind_subject(subject, condition, else_value, environment, program, scopes, state, tail_store, context, diagnostics)
+    checked: if binding != None -> sema_expression_if(sema_expression_if_rebound_condition(subject, condition), then_body, then_value, else_body, sema_expression_if_rebound_chain(subject, else_value), span, expected, environment, program, scopes, state, tail_store, context, diagnostics) else -> None
+    if table_it -> sema_single_use_leave_scope(scopes, state, diagnostics)
+    binding_stmt: binding ?? return None
+    table: checked ?? return None
+    Val(sema_tree_node(table.ty, TExprKind.InlineBlock{body: [TStmt]{binding_stmt, TStmt.ExprStmt{value: table, span: span}}}, span))
 }
 
 // A multi-arm table (`if x == { None -> a  Val(v) -> b }`) reads as an `if`

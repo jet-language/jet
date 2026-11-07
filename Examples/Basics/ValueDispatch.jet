@@ -2,8 +2,8 @@
 // `if subject == { arm -> body }`: the `==` marker enters value dispatch, a
 // bare-value arm compares against the subject, the first matching arm runs, and
 // `else ->` catches the rest.
-// The backend lowers value-equality chains to a native Rust match (jump
-// tables where profitable), so this is never slower than if/else.
+// The backend lowers value-equality chains to jump tables where profitable,
+// so this is never slower than if/else.
 // `|` alternates values in an arm head.
 // `"sat" | "sun"` means `day == "sat" || day == "sun"`.
 day_type: fn(day: String) -> String {
@@ -12,6 +12,21 @@ day_type: fn(day: String) -> String {
         "mon" | "tue" | "wed" | "thu" | "fri" -> "weekday"
         else -> "not a day"
     }
+}
+
+// When the subject is not a plain name, the arms read its value, computed
+// once, as `it`.
+age_band: fn(age: Int) -> String {
+    if age /% 10 == {
+        0 -> "under ten"
+        1 -> "a teen"
+        else -> "in the {it}0s"
+    }
+}
+
+Person: struct {
+    name: String
+    age: Int
 }
 
 run: fn() {
@@ -25,9 +40,19 @@ run: fn() {
     print(day_type("sun"))
     print(day_type("wed"))
     print(day_type("pizza"))
+    print(age_band(34))
+    // In a bindingless loop the item is `it`; a table inside it still gives
+    // its arms its own subject as `it`.
+    people: [Person]{Person{name: "ann", age: 34}, Person{name: "bo", age: 7}}
+    print(loop people -> if .age /% 10 == {
+        0 -> "under ten"
+        else -> "in the {it}0s"
+    })
 }
 // --- expected output --------------------------------------------------
 // client error
 // weekend
 // weekday
 // not a day
+// in the 30s
+// [in the 30s, under ten]
