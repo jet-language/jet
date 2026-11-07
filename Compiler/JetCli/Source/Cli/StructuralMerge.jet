@@ -6,10 +6,11 @@ use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[Diagnostic, sha256_hex]
     jet_parser.[jet_format_source]
+    jet_semindex.[SemDefinitionFact, semindex_doc_text]
 }
 
 JetCLIStructUnit: struct {
-    fact: JetCLISemDefinitionFact
+    fact: SemDefinitionFact
     source: String
     leading: String
 }
@@ -93,16 +94,16 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 if fact.span.start < 0 || fact.span.start > fact.span.end || fact.span.end > source.bytes().len() {
                     return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug")}
                 }
-                units.push(JetCLIStructUnit{fact: fact, source: jet_cli_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
+                units.push(JetCLIStructUnit{fact: fact, source: semindex_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
             }
             units.sort_by((left: JetCLIStructUnit, right: JetCLIStructUnit) -> left.fact.span.start <=> right.fact.span.start)
             cursor := 0
             loop row in 0..<units.len() {
-                units[row].leading = if cursor <= units[row].fact.span.start -> jet_cli_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
+                units[row].leading = if cursor <= units[row].fact.span.start -> semindex_doc_text(source.bytes(), cursor, units[row].fact.span.start) else -> ""
                 cursor = units[row].fact.span.end
             }
             hash: sha256_hex(source)
-            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: jet_cli_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash)}}
+            return JetCLIStructLoaded.Document{document: JetCLIStructDocument{path: absolute, units: units, suffix: semindex_doc_text(source.bytes(), cursor, source.bytes().len()), source_hash: hash, operations: jet_cli_sem_ops_for_file(path, hash)}}
         }
     }
 }
@@ -255,7 +256,7 @@ jet_cli_struct_ident_scalar: fn(bytes: [U8], offset: Int, previous: Bool) -> Boo
     }
     end := start + 1
     loop end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) <= 191 -> end += 1
-    scalar: jet_cli_doc_text(bytes, start, end)
+    scalar: semindex_doc_text(bytes, start, end)
     scalar == "_" || cli_struct_text.is_alphabetic(scalar) || cli_struct_text.is_numeric(scalar)
 }
 
@@ -265,10 +266,10 @@ jet_cli_struct_rename_source: fn(source: String, from: String, to: String) -> St
     loop start in 0..<bytes.len() {
         end: start + width
         if end > bytes.len() -> break
-        if jet_cli_doc_text(bytes, start, end) != from -> next
+        if semindex_doc_text(bytes, start, end) != from -> next
         if start > 0 && jet_cli_struct_ident_scalar(bytes, start, true) -> next
         if end < bytes.len() && jet_cli_struct_ident_scalar(bytes, end, false) -> next
-        return Val("{jet_cli_doc_text(bytes, 0, start)}{to}{jet_cli_doc_text(bytes, end, bytes.len())}")
+        return Val("{semindex_doc_text(bytes, 0, start)}{to}{semindex_doc_text(bytes, end, bytes.len())}")
     }
     None
 }

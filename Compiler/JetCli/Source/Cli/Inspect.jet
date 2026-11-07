@@ -53,6 +53,7 @@ use {
     jet_parser.[
         parse_source,
     ]
+    jet_semindex.[SemCall, SemRef]
     jetpack_artifact_store.[ArtifactStore]
 }
 
@@ -1596,7 +1597,7 @@ jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompil
         }
     }
     found: definition_module != None
-    references := [JetCLISemRef]{}
+    references := [SemRef]{}
     loop reference in index.references {
         if reference.name == symbol -> references.push(reference)
     }
@@ -1754,7 +1755,7 @@ jet_cli_impact_edges_value: fn(edges: [JetCLIImpactEdge]) -> JetCLIStatusValue N
 
 // jet-impact `transitive_callers` (`upstream`) / `transitive_callees`: a
 // breadth-first walk from `symbol`, each (caller, callee) edge once.
-jet_cli_impact_walk: fn(calls: [JetCLISemCall], symbol: String, depth_limit: Int, upstream: Bool) -> [JetCLIImpactEdge] Never! {
+jet_cli_impact_walk: fn(calls: [SemCall], symbol: String, depth_limit: Int, upstream: Bool) -> [JetCLIImpactEdge] Never! {
     out := [JetCLIImpactEdge]{}
     seen := [String]{}
     frontier := [String]{symbol}

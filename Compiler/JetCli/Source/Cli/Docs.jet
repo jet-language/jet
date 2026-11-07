@@ -1,7 +1,7 @@
 // The documentation projection of the Jet-hosted `jet doc` (jet-semindex
 // `build_doc_graph`, `DocGraph::to_status_envelope`, `to_markdown`, `to_html`).
 // The callable failure and nominal trait-contract facts it reads are the shared
-// semantic index's (SemIndexBuild.jet `jet_cli_build_semindex`), exactly reads
+// semantic index's (jet_semindex SemIndex/Build.jet `semindex_build`), exactly reads
 // `SemIndex`. The command checks a bundle, builds the index once, asks this
 // module for a projection, and chooses an output format; it does not walk the
 // AST a second time. The items are the checked modules' items as sema settled
@@ -17,6 +17,19 @@ use {
         Marker,
         Span,
         type_name,
+    ]
+    jet_semindex.[
+        SemCallable,
+        SemDef,
+        SemDocComment,
+        SemEffectProjection,
+        SemIndex,
+        SemTraitContract,
+        semindex_doc_lines,
+        semindex_doc_strip_prefix,
+        semindex_doc_text,
+        semindex_failure_contract_name,
+        semindex_failure_source_name,
     ]
 }
 
@@ -88,50 +101,16 @@ JetCLIDocTest: struct {
 JetCLIDocGraph: struct {
     schema_version: Int
     root: String
-    effect_projection: JetCLIAuthority
+    effect_projection: SemEffectProjection
     modules: [JetCLIDocModule]
     items: [JetCLIDocItem]
     impls: [JetCLIDocImpl]
     doctests: [JetCLIDocTest]
 }
 
-// The text of `bytes[start..<end]`, or "" when the range is empty.
-jet_cli_doc_text: fn(bytes: [U8], start: Int, end: Int) -> String Never! {
-    if start >= end -> return ""
-    String.from_bytes(bytes[start..end - 1]) ?? ""
-}
-
 jet_cli_doc_is_space: fn(byte: U8) -> Bool Never! {
     code: Int.from_u8(byte)
     code == 32 || (code >= 9 && code <= 13)
-}
-
-// Rust `str::lines`: split on `\n`, drop one trailing `\r` per line, and no
-// final empty line after a trailing newline.
-jet_cli_doc_lines: fn(text: String) -> [String] Never! {
-    bytes: text.bytes()
-    lines := [String]{}
-    start := 0
-    loop index in 0..<bytes.len() {
-        if bytes[index] != (U8{10}) -> next
-        end := index
-        if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
-        lines.push(jet_cli_doc_text(bytes, start, end))
-        start = index + 1
-    }
-    if start < bytes.len() {
-        end := bytes.len()
-        if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
-        lines.push(jet_cli_doc_text(bytes, start, end))
-    }
-    lines
-}
-
-// `line.strip_prefix(prefix)`.
-jet_cli_doc_strip_prefix: fn(line: String, prefix: String) -> String? Never! {
-    if !line.starts_with(prefix) -> return None
-    bytes: line.bytes()
-    Val(jet_cli_doc_text(bytes, prefix.bytes().len(), bytes.len()))
 }
 
 // Rust `split_whitespace().join(" ")`.
@@ -141,13 +120,13 @@ jet_cli_doc_collapse_whitespace: fn(text: String) -> String Never! {
     start := -1
     loop index in 0..<bytes.len() {
         if jet_cli_doc_is_space(bytes[index]) {
-            if start >= 0 -> words.push(jet_cli_doc_text(bytes, start, index))
+            if start >= 0 -> words.push(semindex_doc_text(bytes, start, index))
             start = -1
         } else if start < 0 {
             start = index
         }
     }
-    if start >= 0 -> words.push(jet_cli_doc_text(bytes, start, bytes.len()))
+    if start >= 0 -> words.push(semindex_doc_text(bytes, start, bytes.len()))
     words.join(" ")
 }
 
@@ -193,32 +172,32 @@ jet_cli_doc_declaration_text: fn(source: String, span: Span) -> String Never! {
             break
         }
     }
-    jet_cli_doc_collapse_whitespace(jet_cli_doc_text(bytes, start, end))
+    jet_cli_doc_collapse_whitespace(semindex_doc_text(bytes, start, end))
 }
 
 // `source_docs`: the `///` block directly above the declaration line, as its
 // first summary line and its `Example:` lines.
-jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> JetCLIDocComment Never! {
+jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> SemDocComment Never! {
     bytes: source.bytes()
     prefix_end: jet_cli_doc_min(def_start, bytes.len())
     before_end := -1
     loop index in 0..<prefix_end {
         if bytes[index] == (U8{10}) -> before_end = index
     }
-    before: if before_end < 0 -> "" else -> jet_cli_doc_text(bytes, 0, before_end)
-    lines: jet_cli_doc_lines(before)
+    before: if before_end < 0 -> "" else -> semindex_doc_text(bytes, 0, before_end)
+    lines: semindex_doc_lines(before)
     collected := [String]{}
     position := lines.len() - 1
     loop position >= 0 {
-        doc: jet_cli_doc_strip_prefix(lines[position].trim(), "///") ?? break
+        doc: semindex_doc_strip_prefix(lines[position].trim(), "///") ?? break
         collected.push(doc.trim())
         position -= 1
     }
-    comment := JetCLIDocComment{summary: "", examples: [String]{}}
+    comment := SemDocComment{summary: "", examples: [String]{}}
     position = collected.len() - 1
     loop position >= 0 {
         line: collected[position]
-        if jet_cli_doc_strip_prefix(line, "Example:") == .Val(example) {
+        if semindex_doc_strip_prefix(line, "Example:") == .Val(example) {
             comment.examples.push(example.trim())
         } else if comment.summary == "" && line != "" && !line.starts_with("```") {
             comment.summary = line
@@ -228,17 +207,12 @@ jet_cli_doc_source_docs: fn(source: String, def_start: Int) -> JetCLIDocComment 
     comment
 }
 
-JetCLIDocComment: struct {
-    summary: String
-    examples: [String]
-}
-
 // `leading_summary`: the first summary line of the file's leading `///` block.
 jet_cli_doc_leading_summary: fn(source: String) -> String Never! {
     summary := ""
-    loop raw in jet_cli_doc_lines(source) {
+    loop raw in semindex_doc_lines(source) {
         line: raw.trim()
-        doc: jet_cli_doc_strip_prefix(line, "///") ?? {
+        doc: semindex_doc_strip_prefix(line, "///") ?? {
             if line != "" -> break
             next
         }
@@ -270,7 +244,7 @@ jet_cli_doc_module_name: fn(path: String, alias: String) -> String Never! {
         if bytes[index] == (U8{46}) -> dot = index
     }
     if dot <= 0 -> return file
-    jet_cli_doc_text(bytes, 0, dot)
+    semindex_doc_text(bytes, 0, dot)
 }
 
 jet_cli_doc_qualified: fn(parent: String, name: String) -> String Never! {
@@ -433,12 +407,12 @@ jet_cli_doc_collect_items: fn(items: [Item], unit: JetCLIDocUnit, parent: String
 
 // `definition_belongs_to_doc_item`: semindex definitions keep the checked
 // module path, documentation names its stable project path.
-jet_cli_doc_belongs: fn(definition: JetCLISemDef, item: JetCLIDocItem) -> Bool Never! {
+jet_cli_doc_belongs: fn(definition: SemDef, item: JetCLIDocItem) -> Bool Never! {
     jet_cli_doc_stable_path(definition.module_path) == item.module_path && item.source.start <= definition.def_span.start && definition.def_span.end <= item.source.end
 }
 
 // The first semindex function definition that documents `item`.
-jet_cli_doc_callable_for: fn(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemCallable? Never! {
+jet_cli_doc_callable_for: fn(index: SemIndex, item: JetCLIDocItem) -> SemCallable? Never! {
     loop definition in index.definitions {
         if definition.def.name != item.name || !jet_cli_doc_belongs(definition.def, item) -> next
         if definition.def.kind == .Function(callable) -> return Val(callable)
@@ -448,7 +422,7 @@ jet_cli_doc_callable_for: fn(index: JetCLISemIndex, item: JetCLIDocItem) -> JetC
 
 // The trait contracts of the first semindex distinct nominal definition that
 // documents `item`, each rendered on its own line.
-jet_cli_doc_nominal_contracts: fn(index: JetCLISemIndex, item: JetCLIDocItem) -> String? Never! {
+jet_cli_doc_nominal_contracts: fn(index: SemIndex, item: JetCLIDocItem) -> String? Never! {
     loop definition in index.definitions {
         if definition.def.name != item.name || definition.nominal_base == None || !jet_cli_doc_belongs(definition.def, item) -> next
         rendered := ""
@@ -458,7 +432,7 @@ jet_cli_doc_nominal_contracts: fn(index: JetCLISemIndex, item: JetCLIDocItem) ->
     None
 }
 
-jet_cli_doc_trait_contract: fn(contract: JetCLISemTraitContract) -> String Never! {
+jet_cli_doc_trait_contract: fn(contract: SemTraitContract) -> String Never! {
     lines := [String]{"implements {contract.trait_name}"}
     loop entry in contract.associated_types {
         if entry.ty == .Val(ty) {
@@ -479,13 +453,13 @@ jet_cli_doc_module_position: fn(modules: [JetDriverDocModule], path: String) -> 
     None
 }
 
-jet_cli_doc_enrich: fn(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
+jet_cli_doc_enrich: fn(items: &[JetCLIDocItem], index: SemIndex) Never! {
     loop item_index in 0..<items.len() {
         if items[item_index].kind == "function" {
             callable: jet_cli_doc_callable_for(index, items[item_index]) ?? next
             if !callable.signature_facts_available -> next
-            failure: jet_cli_sem_failure_contract_name(callable)
-            source: jet_cli_sem_failure_source_name(callable)
+            failure: semindex_failure_contract_name(callable)
+            source: semindex_failure_source_name(callable)
             signature := "{items[item_index].signature}\nfailure: unavailable"
             if failure == .Val(failure_name) {
                 if source == .Val(source_name) -> signature = "{items[item_index].signature}\nfailure: {failure_name} ({source_name})"
@@ -506,7 +480,7 @@ jet_cli_doc_fence_is_jet: fn(fence: String) -> Bool Never! {
     loop start < bytes.len() && bytes[start] == (U8{96}) {
         start += 1
     }
-    language: jet_cli_doc_text(bytes, start, bytes.len()).trim()
+    language: semindex_doc_text(bytes, start, bytes.len()).trim()
     language == "" || jet_cli_ascii_lower(language) == "jet"
 }
 
@@ -555,9 +529,9 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
     loop index in 0..<source_bytes.len() {
         if source_bytes[index] == (U8{10}) -> line_starts.push(index + 1)
     }
-    loop (index, raw_line) in jet_cli_doc_lines(unit.source) {
+    loop (index, raw_line) in semindex_doc_lines(unit.source) {
         line_number: index + 1
-        doc_text: jet_cli_doc_strip_prefix(raw_line.trim(), "///") ?? {
+        doc_text: semindex_doc_strip_prefix(raw_line.trim(), "///") ?? {
             if in_fence {
                 in_fence = false
                 setup = [String]{}
@@ -592,8 +566,8 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
         if jet_cli_doc_expect_marker(doc_line) == .Val(marker) {
             bytes: doc_line.bytes()
             expectations.push(JetCLIDocExpectation{
-                expression: jet_cli_doc_text(bytes, 0, marker).trim(),
-                expected: jet_cli_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
+                expression: semindex_doc_text(bytes, 0, marker).trim(),
+                expected: semindex_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
                 line: line_number,
             })
         } else if doc_line != "" {
@@ -725,7 +699,7 @@ jet_cli_doc_sort_tests: fn(values: &[JetCLIDocTest]) Never! {
 // `build_doc_graph`: the projection of the checked modules, enriched from the
 // semantic index of the same checked program (whose effect projection is the
 // application authority).
-jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: JetCLISemIndex) -> JetCLIDocGraph {
+jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: SemIndex) -> JetCLIDocGraph {
     protocol_names := [String]{}
     loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, protocol_names)
     graph := JetCLIDocGraph{

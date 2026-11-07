@@ -5,6 +5,7 @@ use {
     cli_sem_json: core.encoding.json
     jet_driver.[JetDriverCompileMode]
     core.encoding.[Dyn]
+    jet_semindex.[SemDefinitionFact]
 }
 
 JetCLISemOpTarget: struct {
@@ -144,7 +145,7 @@ jet_cli_sem_op_value: fn(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
 
 // semantic_rename_ops: only the tool's checked before/after snapshots can
 // record rename intent; ordinary review never infers a receipt.
-jet_cli_semantic_rename_ops: fn(before: [JetCLISemDefinitionFact], after: [JetCLISemDefinitionFact]) -> [JetCLISemOp] Never! {
+jet_cli_semantic_rename_ops: fn(before: [SemDefinitionFact], after: [SemDefinitionFact]) -> [JetCLISemOp] Never! {
     used := [Int]{}
     operations := [JetCLISemOp]{}
     loop (old_index, old) in before {
@@ -171,7 +172,7 @@ jet_cli_semantic_rename_ops: fn(before: [JetCLISemDefinitionFact], after: [JetCL
 
 // A refused/invalid structural check has no rename authority. Rust's fix
 // receipt then records the exact changed byte region instead.
-jet_cli_fix_definition_facts: fn(file: String, source: String) -> [JetCLISemDefinitionFact]? {
+jet_cli_fix_definition_facts: fn(file: String, source: String) -> [SemDefinitionFact]? {
     compiled: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(source), None) ?? return None
     if compiled == {
         .Refused(_) -> return None

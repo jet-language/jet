@@ -1,6 +1,9 @@
 // Conservative checked call-graph advice. This is inspection evidence, not an
 // invariant or an automatic refactor.
-use jet_foundation.[Span, type_name]
+use {
+    jet_foundation.[Span, type_name]
+    jet_semindex.[SemDef, SemIndex, SemRef, semindex_callable]
+}
 
 JetCLIArchitectureCall: struct {
     caller_key: String
@@ -36,14 +39,14 @@ JetCLIArchitectureInspection: struct {
     check: JetCLIStatusValue?
 }
 
-jet_cli_architecture_key: fn(definition: JetCLISemDef) -> String Never! {
+jet_cli_architecture_key: fn(definition: SemDef) -> String Never! {
     "{definition.module_path}:{definition.def_span.start}..{definition.def_span.end}"
 }
 
-jet_cli_architecture_calls: fn(index: JetCLISemIndex) -> [JetCLIArchitectureCall] Never! {
+jet_cli_architecture_calls: fn(index: SemIndex) -> [JetCLIArchitectureCall] Never! {
     calls := [JetCLIArchitectureCall]{}
     loop edge in index.calls {
-        caller := JetCLISemDef?{None}
+        caller := SemDef?{None}
         short: edge.caller.split("::").to_list()
         loop row in index.definitions {
             definition: row.def
@@ -53,7 +56,7 @@ jet_cli_architecture_calls: fn(index: JetCLISemIndex) -> [JetCLIArchitectureCall
             }
         }
         from: caller ?? next
-        reference := JetCLISemRef?{None}
+        reference := SemRef?{None}
         loop candidate in index.references {
             if candidate.module_path != edge.module_path || candidate.target == None || candidate.span.start > edge.span.end || edge.span.start > candidate.span.end -> next
             if reference == .Val(best) {
@@ -63,7 +66,7 @@ jet_cli_architecture_calls: fn(index: JetCLISemIndex) -> [JetCLIArchitectureCall
         }
         selected: reference ?? next
         target: selected.target ?? next
-        callee := JetCLISemDef?{None}
+        callee := SemDef?{None}
         loop row in index.definitions {
             definition: row.def
             if definition.module_path == target.module_path && definition.def_span == target.def_span {
@@ -72,7 +75,7 @@ jet_cli_architecture_calls: fn(index: JetCLISemIndex) -> [JetCLIArchitectureCall
             }
         }
         to: callee ?? next
-        callable: jet_cli_sem_callable(to) ?? next
+        callable: semindex_callable(to) ?? next
         result: if callable.return_type == .Val(ty) -> Val(type_name(ty)) else -> String?{None}
         calls.push(JetCLIArchitectureCall{caller_key: jet_cli_architecture_key(from), caller_name: from.qualified_name, caller_module: from.module_path, caller_span: from.def_span, callee_key: jet_cli_architecture_key(to), callee_name: to.qualified_name, callee_module: to.module_path, callee_span: to.def_span, callee_return: result, call_span: edge.span})
     }
@@ -88,7 +91,7 @@ jet_cli_architecture_unique: fn(values: &[String]) Never! {
     values = unique
 }
 
-jet_cli_architecture_row: fn(index: JetCLISemIndex, kind: String, subject: String, calls: [JetCLIArchitectureCall], note: String) -> JetCLIArchitectureRow Never! {
+jet_cli_architecture_row: fn(index: SemIndex, kind: String, subject: String, calls: [JetCLIArchitectureCall], note: String) -> JetCLIArchitectureRow Never! {
     evidence := [JetCLIArchitectureEvidence]{}
     evidence_keys := [String]{}
     boundaries := [String]{}
@@ -119,7 +122,7 @@ jet_cli_architecture_row: fn(index: JetCLISemIndex, kind: String, subject: Strin
     JetCLIArchitectureRow{kind: kind, subject: subject, scope: if cross_module -> "cross-module" else -> "same-module", evidence: evidence, boundaries: boundaries, uncertainty: [String]{note, "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"}}
 }
 
-jet_cli_architecture_rows: fn(index: JetCLISemIndex) -> [JetCLIArchitectureRow] Never! {
+jet_cli_architecture_rows: fn(index: SemIndex) -> [JetCLIArchitectureRow] Never! {
     calls: jet_cli_architecture_calls(index)
     callee_keys := [String]{}
     caller_keys := [String]{}

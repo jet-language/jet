@@ -22,25 +22,25 @@ use jet_foundation.[
 ]
 
 // `SCHEMA_VERSION`: bump when the exported fact shape changes incompatibly.
-JET_CLI_SEMINDEX_SCHEMA_VERSION: 20
+SEMINDEX_SCHEMA_VERSION: 20
 
 // `CallableFactUnavailable`: the typed reason a checked projection cannot
 // supply a later metadata value.
-JetCLISemUnavailable: struct {
+SemUnavailable: struct {
     required_stage: String
     reason: String
 }
 
 // `CallableDefaultFact`: a source-text projection of a declared default; its
 // prepared value is unavailable.
-JetCLISemDefault: struct {
+SemDefault: struct {
     source_text: String
     source: Span
 }
 
 // One public call slot (`CallableParameterFact` plus the `SymKind::Function`
 // parallel rows it is assembled from).
-JetCLISemParam: struct {
+SemParam: struct {
     name: String
     ty: Type
     source: Span
@@ -48,34 +48,34 @@ JetCLISemParam: struct {
     zone: ParamZone
     variadic: Bool
     access: AccessConvention
-    default: JetCLISemDefault?
+    default: SemDefault?
 }
 
 // `failure_contract` is `None` exactly when `failure_unavailable` explains why
 // (`CallableFactAvailability`); the same holds for `generic_parameters`.
-JetCLISemCallable: struct {
-    params: [JetCLISemParam]
+SemCallable: struct {
+    params: [SemParam]
     signature_facts_available: Bool
     return_type: Type?
     failure_contract: FailureContract?
-    failure_unavailable: JetCLISemUnavailable?
+    failure_unavailable: SemUnavailable?
     foreign_boundary: Bool
     effects: [EffectRowEntry]?
     effect_via: NamedSpan?
     policies: [CallablePolicy]
     generic_parameters: [String]?
-    generic_unavailable: JetCLISemUnavailable?
+    generic_unavailable: SemUnavailable?
 }
 
-JetCLISemField: struct {
+SemField: struct {
     name: String
     ty: Type
 }
 
-JetCLISemKind: enum {
+SemKind: enum {
     Module
-    Function(callable: JetCLISemCallable)
-    Struct(fields: [JetCLISemField], derives: [String])
+    Function(callable: SemCallable)
+    Struct(fields: [SemField], derives: [String])
     Enum(variants: [String], derives: [String])
     Trait
     Tag
@@ -89,38 +89,38 @@ JetCLISemKind: enum {
 
 // `qualified_name` is the canonical display path the walk records with the
 // definition.
-JetCLISemDef: struct {
+SemDef: struct {
     identity: String
     name: String
     qualified_name: String
     def_span: Span
     module_path: String
-    kind: JetCLISemKind
+    kind: SemKind
 }
 
-JetCLISemAnchor: struct {
+SemAnchor: struct {
     module_path: String
     kind: String
     def_span: Span
     semantic_identity: String?
 }
 
-JetCLISemCompilerFact: struct {
+SemCompilerFact: struct {
     name: String
     kind: String
     type_name: String
 }
 
-JetCLISemRef: struct {
+SemRef: struct {
     name: String
     span: Span
     module_path: String
     scope_identity: String?
-    target: JetCLISemAnchor?
-    fact: JetCLISemCompilerFact?
+    target: SemAnchor?
+    fact: SemCompilerFact?
 }
 
-JetCLISemCall: struct {
+SemCall: struct {
     caller: String
     callee: String
     module_path: String
@@ -130,7 +130,7 @@ JetCLISemCall: struct {
 // `kind` is `field`, `variant`, or `method`; `origin` is `type_body`,
 // `inherent_impl`, `trait_impl`, or `trait_requirement`, with `origin_trait`
 // naming the trait of the last two.
-JetCLISemMember: struct {
+SemMember: struct {
     owner: String
     name: String
     identity: String
@@ -142,22 +142,22 @@ JetCLISemMember: struct {
     span: Span
 }
 
-JetCLISemEffectProvenance: struct {
+SemEffectProvenance: struct {
     effect_name: String
     call_path: [String]
     spans: [Span]
 }
 
-JetCLISemEffect: struct {
+SemEffect: struct {
     function: String
     direct: [String]
     callees: [String]
     inferred: [String]
     maximal: Bool
-    provenance: [JetCLISemEffectProvenance]
+    provenance: [SemEffectProvenance]
 }
 
-JetCLISemArithmetic: struct {
+SemArithmetic: struct {
     operation: String
     policy: String
     module_path: String
@@ -166,7 +166,7 @@ JetCLISemArithmetic: struct {
 }
 
 // `slot_kind` is `scalar` or `list`.
-JetCLISemNode: struct {
+SemNode: struct {
     id: Int
     parent: Int?
     slot: String
@@ -178,7 +178,7 @@ JetCLISemNode: struct {
     span: Span
 }
 
-JetCLISemSlotBoundary: struct {
+SemSlotBoundary: struct {
     parent: Int
     slot: String
     module_path: String
@@ -186,7 +186,7 @@ JetCLISemSlotBoundary: struct {
 }
 
 // `kind` is the stable `BypassKind::as_str` word.
-JetCLISemBypass: struct {
+SemBypass: struct {
     kind: String
     site: String
     detail: String
@@ -194,7 +194,7 @@ JetCLISemBypass: struct {
     span: Span
 }
 
-JetCLISemDefinitionFact: struct {
+SemDefinitionFact: struct {
     stable_id: String
     signature_id: String
     content_id: String
@@ -206,25 +206,25 @@ JetCLISemDefinitionFact: struct {
 }
 
 // An associated type with no `ty` is a requirement (`type Item`).
-JetCLISemAssociatedType: struct {
+SemAssociatedType: struct {
     name: String
     ty: String?
 }
 
-JetCLISemTraitContract: struct {
+SemTraitContract: struct {
     trait_name: String
-    associated_types: [JetCLISemAssociatedType]
+    associated_types: [SemAssociatedType]
     methods: [String]
 }
 
-JetCLISemInstanceApplication: struct {
+SemInstanceApplication: struct {
     name: String
     module_path: String
     semantic_identity: String
     span: Span
 }
 
-JetCLISemInstance: struct {
+SemInstance: struct {
     name: String
     module_path: String
     fingerprint: String
@@ -234,11 +234,11 @@ JetCLISemInstance: struct {
     arguments: [String]
     argument_values: [String]
     argument_provenance: [[String]]
-    applications: [JetCLISemInstanceApplication]
+    applications: [SemInstanceApplication]
     exported_members: [String]
 }
 
-JetCLISemOutputEntry: struct {
+SemOutputEntry: struct {
     identity: String
     name: String
     module_path: String
@@ -252,80 +252,90 @@ JetCLISemOutputEntry: struct {
     effects: [String]
 }
 
-JetCLISemOutput: struct {
+SemOutput: struct {
     binding: String
     kind: String
     name: String
     module_path: String
     span: Span
-    entry: JetCLISemOutputEntry
+    entry: SemOutputEntry
 }
 
-JetCLISemStateNode: struct {
+SemStateNode: struct {
     name: String
     terminal: Bool
     reachable: Bool?
     span: Span
 }
 
-JetCLISemStateTransition: struct {
+SemStateTransition: struct {
     operation: String
     from: String?
     to: String
 }
 
-JetCLISemStateGraph: struct {
+SemStateGraph: struct {
     owner: String
     module_path: String
-    states: [JetCLISemStateNode]
-    transitions: [JetCLISemStateTransition]
+    states: [SemStateNode]
+    transitions: [SemStateTransition]
 }
 
 // One converted definition: the walk's record plus the per-definition facts
 // `convert_defs` attaches.
-JetCLISemDefinition: struct {
-    def: JetCLISemDef
+SemDefinition: struct {
+    def: SemDef
     view_provenance: ViewProvenanceMap?
     derives: [String]
     nominal_base: String?
-    trait_contracts: [JetCLISemTraitContract]
+    trait_contracts: [SemTraitContract]
+}
+
+// The application-boundary effect roles of one checked program: what it
+// requires, what its policy grants and denies, and the policy's name, each a
+// sorted set. The caller that knows the program's authority supplies it.
+SemEffectProjection: struct {
+    required: [String]
+    granted: [String]
+    denied: [String]
+    authority: String
 }
 
 // `SemIndex`: the versioned index over one checked program. Its effect
 // projection is the application authority of the same checked program `jet
 // build` authorizes.
-JetCLISemIndex: struct {
-    definitions: [JetCLISemDefinition]
-    definition_facts: [JetCLISemDefinitionFact]
+SemIndex: struct {
+    definitions: [SemDefinition]
+    definition_facts: [SemDefinitionFact]
     derivations: [DerivationRecord]
-    instances: [JetCLISemInstance]
-    outputs: [JetCLISemOutput]
-    state_graphs: [JetCLISemStateGraph]
-    effect_projection: JetCLIAuthority
-    references: [JetCLISemRef]
-    calls: [JetCLISemCall]
-    effects: [JetCLISemEffect]
-    arithmetic: [JetCLISemArithmetic]
-    members: [JetCLISemMember]
-    nodes: [JetCLISemNode]
-    slot_boundaries: [JetCLISemSlotBoundary]
-    bypasses: [JetCLISemBypass]
+    instances: [SemInstance]
+    outputs: [SemOutput]
+    state_graphs: [SemStateGraph]
+    effect_projection: SemEffectProjection
+    references: [SemRef]
+    calls: [SemCall]
+    effects: [SemEffect]
+    arithmetic: [SemArithmetic]
+    members: [SemMember]
+    nodes: [SemNode]
+    slot_boundaries: [SemSlotBoundary]
+    bypasses: [SemBypass]
 }
 
 // `CallableSignatureFact::failure_contract_name`.
-jet_cli_sem_failure_contract_name: fn(callable: JetCLISemCallable) -> String? Never! {
+semindex_failure_contract_name: fn(callable: SemCallable) -> String? Never! {
     contract: callable.failure_contract ?? return None
     Val(type_name(failure_contract_shown_type(contract)))
 }
 
 // `CallableSignatureFact::failure_source_name`.
-jet_cli_sem_failure_source_name: fn(callable: JetCLISemCallable) -> String? Never! {
+semindex_failure_source_name: fn(callable: SemCallable) -> String? Never! {
     contract: callable.failure_contract ?? return None
     Val(failure_contract_source(contract))
 }
 
 // `CallableParameterFact::access_name`.
-jet_cli_sem_access_name: fn(access: AccessConvention) -> String Never! {
+semindex_access_name: fn(access: AccessConvention) -> String Never! {
     if access == {
         .Read -> "read"
         .Write -> "write"
@@ -334,7 +344,7 @@ jet_cli_sem_access_name: fn(access: AccessConvention) -> String Never! {
 }
 
 // `CallableParameterFact::zone_name`.
-jet_cli_sem_zone_name: fn(zone: ParamZone) -> String Never! {
+semindex_zone_name: fn(zone: ParamZone) -> String Never! {
     if zone == {
         .PositionalOnly -> "positional_only"
         .Either -> "either"
@@ -343,7 +353,7 @@ jet_cli_sem_zone_name: fn(zone: ParamZone) -> String Never! {
 }
 
 // The callable a definition carries, when it is a function.
-jet_cli_sem_callable: fn(definition: JetCLISemDef) -> JetCLISemCallable? Never! {
+semindex_callable: fn(definition: SemDef) -> SemCallable? Never! {
     // copy: `callable` is a payload of read parameter `definition`, which keeps the original; the Val carrier owns this one
     if definition.kind == .Function(callable) -> return Val(callable.copy())
     None

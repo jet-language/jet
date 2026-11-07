@@ -12,6 +12,7 @@
 // reach.
 use {
     jet_foundation.[BodyTree, DeclTable, FnBody, Span, SymbolID, TIndexProof, TLocal, Type, body_node, body_stmt, body_type]
+    jet_semindex.[semindex_doc_text]
 }
 
 // One obligation: its kind, the function it is in (and a call's callee), the
@@ -235,7 +236,7 @@ jet_cli_solver_body: fn(function: FnBody) -> [Int] Never! {
 
 jet_cli_solver_text: fn(source: String, span: Span) -> String Never! {
     if span.start < 0 || span.start > span.end || span.end > source.bytes().len() -> return ""
-    jet_cli_doc_text(source.bytes(), span.start, span.end)
+    semindex_doc_text(source.bytes(), span.start, span.end)
 }
 
 // --- fixed_index_bounds ------------------------------------------------------

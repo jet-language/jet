@@ -14,6 +14,7 @@ use {
     ]
     jet_eval.[JetCompilerServicesParseFacts, JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
     cli_files: core.files
+    jet_semindex.[SemIndex]
 }
 
 JetCLITryObject: struct {
@@ -30,7 +31,7 @@ JetCLITryVerdict: struct { diagnostics: [Diagnostic], claims_rechecked: Int, cla
 JetCLITryFileEdits: struct { path: String, edits: [TextEdit] }
 JetCLITryChecked: struct {
     checked: JetDriverCompilerCheckResult
-    index: JetCLISemIndex?
+    index: SemIndex?
     sources: [String:String]
     entry_source: String
 }
@@ -197,7 +198,7 @@ jet_cli_try_stage_files: fn(groups: [JetCLITryFileEdits], sources: &[String:Stri
     }
     Ok(changes)
 }
-jet_cli_try_index: fn(entry: String, baseline: &JetCLITryChecked) -> JetCLISemIndex JetCLITryError! {
+jet_cli_try_index: fn(entry: String, baseline: &JetCLITryChecked) -> SemIndex JetCLITryError! {
     if baseline.index == .Val(index) -> return Ok(index)
     if jet_cli_errors(baseline.checked.diagnostics).len() > 0 {
         return Err(JetCLITryError.Output{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(entry, baseline.entry_source, baseline.checked.diagnostics, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}})
@@ -273,7 +274,7 @@ jet_cli_try_check: fn(queries: &JetDriverCompilerQueries, entry: String, disk: B
                 jet_driver_compiler_queries_check_text(queries, parsed, request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
             }
             if checked.internal_problem == .Val(problem) -> return Err(jet_cli_try_ice("query", problem))
-            index := JetCLISemIndex?{None}
+            index := SemIndex?{None}
             if disk && checked.complete {
                 if checked.product == {
                     .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile)) }

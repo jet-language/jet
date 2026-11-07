@@ -24,6 +24,7 @@ use {
     jet_sema.[
         sema_effect_builtin_leaf_unknown,
     ]
+    jet_semindex.[SemEffectProjection]
 }
 
 JET_CLI_APPLICATION_DEFAULT: "application default"
@@ -141,6 +142,12 @@ jet_cli_application_authority: fn(result: JetDriverCompileResult, invocation: Je
     authority := jet_cli_policy_authority(result.entry_effects, result.authority_policy)
     jet_cli_with_invocation(authority, invocation)
     authority
+}
+
+// The semantic index's effect roles of `authority`: the program's sets
+// without this invocation's `--deny` rows, which only name the refusal.
+jet_cli_effect_projection: fn(authority: JetCLIAuthority) -> SemEffectProjection Never! {
+    SemEffectProjection{required: authority.required.copy(), granted: authority.granted.copy(), denied: authority.denied.copy(), authority: authority.authority.copy()}
 }
 
 // The authority of a program that requires `required` under its package

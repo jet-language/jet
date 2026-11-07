@@ -772,7 +772,7 @@ packages live under `Jetpack/`.
 | `JetDriver` | front-end orchestration and compile outputs; depends on `Jetpack/PackageModel` (never Jetpack's engine) for manifest/lock/FFI preparation | front-end and interpreter-boundary diagnostics |
 | `JetBuildSession` | build sessions over the driver | no new diagnostics |
 | `JetQueries` | demand cache for incremental inputs and derived query values | no |
-| `JetSemIndex` | stable semantic index over checked programs for tooling | no new diagnostics |
+| `JetSemIndex` | the one stable semantic index over checked programs (`semindex_build`) and its symbol catalog (`semindex_build_symbols`), read by `JetCli`'s inspect, docs, codemod and review commands and by tooling | no new diagnostics |
 | `JetImpact` | blast-radius reports over `JetSemIndex` | no |
 | `JetRepl` | interactive shell and notebook over `JetDriver`, `JetSemIndex`, and leaf policy | no new diagnostics |
 | `JetDebug` | source debugger and DAP over `JetDriver` plus leaf JSON/exit policy | debugger diagnostics only |

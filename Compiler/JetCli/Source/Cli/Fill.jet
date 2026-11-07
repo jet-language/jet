@@ -4,6 +4,7 @@ use {
     cli_files: core.files
     jet_driver.[JetDriverAuthorizedSourceSnapshot, JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
     jet_foundation.[BodyTree, FnBody, Func, Item, Span, TTypedGoal, body_each_expr_child, body_each_stmt_child, body_node, diagnostic_line_at, diagnostic_render_all, type_name]
+    jet_semindex.[SemEffect, semindex_doc_text]
 }
 
 JetCLIFillFunction: struct {
@@ -80,7 +81,7 @@ jet_cli_fill_function_name: fn(function: FnBody) -> String Never! {
 // deny-only rows (`Panic`, `Mem`), which no positive ceiling has to list
 // (spec.md "`Panic` and `Mem` are deny-only rows"); the hole's own `#Todo`
 // panic is one of them.
-jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [JetCLISemEffect]) -> String Never! {
+jet_cli_fill_effects: fn(function: FnBody, alias: String, facts: [SemEffect]) -> String Never! {
     local: jet_cli_fill_function_name(function).replace(".", "::")
     keys: [String]{"{alias}::{local}", local, function.name}
     loop key in keys {
@@ -102,7 +103,7 @@ jet_cli_fill_candidate_checks: fn(file: String, source: String, goal: JetCLIFill
         return false
     }
     bytes: source.bytes()
-    replacement: "{jet_cli_doc_text(bytes, 0, goal.span.start)}{candidate}{jet_cli_doc_text(bytes, goal.span.end, bytes.len())}"
+    replacement: "{semindex_doc_text(bytes, 0, goal.span.start)}{candidate}{semindex_doc_text(bytes, goal.span.end, bytes.len())}"
     compiled: jet_cli_compile_entry(file, false, None, JetDriverCompileMode.Doc, Val(replacement), None) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
     if compiled == {
         .Refused(_) -> return false

@@ -2,7 +2,7 @@
 // rows, walked against the selected application authority by the one canonical
 // walker (jet-foundation `RightsRow::walk`), with the semantic index's effect
 // provenance for each refusal. The facts are the checked program's own: the
-// Doc-mode modules the semantic index reads (SemIndexBuild.jet summaries and
+// Doc-mode modules the semantic index reads (jet_semindex SemIndex/Build.jet summaries and
 // witnesses) and the entry's application authority.
 use {
     cli_files: core.files
@@ -22,6 +22,7 @@ use {
         Item,
         Span,
     ]
+    jet_semindex.[semindex_module_alias, semindex_summaries, semindex_summary, semindex_witness]
 }
 
 JetCLIRightsProvenance: struct {
@@ -311,10 +312,10 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     views := [JetCLICallableView]{}
     loop doc_module in modules {
         if !project && !jet_cli_rights_selected(doc_module, target) -> next
-        jet_cli_rights_collect(doc_module.items, jet_cli_sem_module_alias(doc_module), "", doc_module.path, views)
+        jet_cli_rights_collect(doc_module.items, semindex_module_alias(doc_module), "", doc_module.path, views)
     }
     callables: jet_cli_rights_sorted(views)
-    summaries: jet_cli_sem_summaries(modules)
+    summaries: semindex_summaries(modules)
     application: jet_cli_rights_authority(result)
     scope_chain: [JetCLIScopeFrame]{JetCLIScopeFrame{scope: "package", name: application.authority, grants: jet_cli_rights_normalize(application.granted), provenance: JetCLIRightsProvenance{source: application.authority, reason: "selected application authority"}}}
     scope_name: if project -> "project" else -> "explicit-file"
@@ -329,7 +330,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
     values := [JetCLIStatusValue]{}
     loop view in callables {
         declared: jet_cli_rights_declared(view)
-        summary: jet_cli_sem_summary(summaries, view.key)
+        summary: semindex_summary(summaries, view.key)
         inferred_effects := [String]{}
         direct := [String]{}
         callees := [String]{}
@@ -351,7 +352,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
         call_chain := [String]{view.key}
         if summary == .Val(found) {
             loop effect_name in found.solved {
-                witness: jet_cli_sem_witness(view.key, effect_name, summaries, [String]{}, modules) ?? next
+                witness: semindex_witness(view.key, effect_name, summaries, [String]{}, modules) ?? next
                 if witness.path.len() > 0 -> call_chain = witness.path
                 break
             }
@@ -368,7 +369,7 @@ jet_cli_inspect_rights: fn(result: JetDriverCompileResult, project: Bool, target
             spans := [JetCLIStatusValue]{}
             if summary == .Val(found) {
                 if found.solved.contains(denial.right) {
-                    if jet_cli_sem_witness(view.key, denial.right, summaries, [String]{}, modules) == .Val(witness) {
+                    if semindex_witness(view.key, denial.right, summaries, [String]{}, modules) == .Val(witness) {
                         loop span in witness.spans -> spans.push(jet_cli_rights_span_value(view.source, span.start, span.end))
                     }
                 }

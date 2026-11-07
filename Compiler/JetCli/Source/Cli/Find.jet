@@ -1,6 +1,6 @@
 // `jet find`: search the checked semantic symbols by type shape, effect,
 // input/output example, or text. The query is parsed here; the host checks the
-// entry (when there is one) and searches its symbols (SemIndexSymbols.jet),
+// entry (when there is one) and searches its symbols (jet_semindex SemIndex/Symbols.jet),
 // else the language catalog alone.
 use {
     cli_files: core.files
@@ -17,6 +17,15 @@ use {
     jet_foundation.[
         diagnostic_render_all,
         Effect,
+    ]
+    jet_semindex.[
+        SemEffect,
+        SemSymbol,
+        SemSymbolKind,
+        semindex_build_symbols,
+        semindex_doc_text,
+        semindex_language_symbols,
+        semindex_symbol_index,
     ]
 }
 
@@ -44,7 +53,7 @@ jet_cli_find_usage: fn(what: String, fix: String, color: Bool) -> JetCLIPlan Nev
 
 // The text of `text` with every byte of `bytes[start..<end]`.
 jet_cli_find_text: fn(text: String, start: Int, end: Int) -> String Never! {
-    jet_cli_doc_text(text.bytes(), start, end)
+    semindex_doc_text(text.bytes(), start, end)
 }
 
 // Rust `str::split_once`.
@@ -103,11 +112,11 @@ jet_cli_find_split_top: fn(input: String, separator: Int) -> [String] Never! {
             else -> {}
         }
         if code == separator && depth == 0 && square == 0 && angle == 0 {
-            parts.push(jet_cli_doc_text(bytes, start, index).trim())
+            parts.push(semindex_doc_text(bytes, start, index).trim())
             start = index + 1
         }
     }
-    parts.push(jet_cli_doc_text(bytes, start, bytes.len()).trim())
+    parts.push(semindex_doc_text(bytes, start, bytes.len()).trim())
     parts
 }
 
@@ -245,7 +254,7 @@ jet_cli_find_type_leaf: fn(ty: String) -> String Never! {
         code: Int.from_u8(bytes[index])
         if code == 46 || code == 58 -> start = index + 1
     }
-    jet_cli_doc_text(bytes, start, bytes.len())
+    semindex_doc_text(bytes, start, bytes.len())
 }
 
 jet_cli_find_names_equal: fn(left: String, right: String) -> Bool Never! {
@@ -303,7 +312,7 @@ jet_cli_find_shape_matches: fn(wanted: JetCLIFindShape, candidate: JetCLIFindSha
 }
 
 // `effect_fact`: the effect summary of a source symbol.
-jet_cli_find_effect_fact: fn(symbol: JetCLISymbol, effects: [JetCLISemEffect]) -> JetCLISemEffect? Never! {
+jet_cli_find_effect_fact: fn(symbol: SemSymbol, effects: [SemEffect]) -> SemEffect? Never! {
     if symbol.provenance == .Builtin(_) -> return None
     key: if symbol.owner == .Val(owner) -> "{owner}::{symbol.name}" else -> symbol.name
     loop fact in effects {
@@ -331,7 +340,7 @@ jet_cli_find_effect_covers: fn(wanted: String, actual: String) -> Bool Never! {
     actual == wanted || actual.starts_with("{wanted}.") || wanted.starts_with("{actual}.") || jet_cli_find_root(actual) == jet_cli_find_root(wanted)
 }
 
-jet_cli_find_effect_matches: fn(wanted: String, fact: JetCLISemEffect) -> Bool Never! {
+jet_cli_find_effect_matches: fn(wanted: String, fact: SemEffect) -> Bool Never! {
     if fact.maximal -> return true
     loop actual in fact.inferred {
         if jet_cli_find_effect_covers(wanted, actual) -> return true
@@ -339,7 +348,7 @@ jet_cli_find_effect_matches: fn(wanted: String, fact: JetCLISemEffect) -> Bool N
     false
 }
 
-jet_cli_find_effect_reason: fn(wanted: String, fact: JetCLISemEffect) -> String Never! {
+jet_cli_find_effect_reason: fn(wanted: String, fact: SemEffect) -> String Never! {
     if fact.maximal -> return "holds {wanted} through an open effect set"
     actual: fact.inferred.join(", ")
     loop proof in fact.provenance {
@@ -348,14 +357,14 @@ jet_cli_find_effect_reason: fn(wanted: String, fact: JetCLISemEffect) -> String 
     "holds {wanted} (inferred: {actual})"
 }
 
-jet_cli_find_is_pure: fn(symbol: JetCLISymbol, effects: [JetCLISemEffect]) -> Bool Never! {
+jet_cli_find_is_pure: fn(symbol: SemSymbol, effects: [SemEffect]) -> Bool Never! {
     fact: jet_cli_find_effect_fact(symbol, effects) ?? return true
     !fact.maximal && fact.inferred.len() == 0
 }
 
 // `text_matches`: every query term longer than one byte appears in the symbol's
 // names, summary, or examples (ASCII-insensitive).
-jet_cli_find_text_matches: fn(symbol: JetCLISymbol, query: String) -> Bool Never! {
+jet_cli_find_text_matches: fn(symbol: SemSymbol, query: String) -> Bool Never! {
     haystack: jet_cli_ascii_lower("{symbol.name} {symbol.qualified_name} {symbol.summary} {symbol.examples.join(" ")}")
     loop term in jet_cli_find_words(query) {
         if term.bytes().len() <= 1 -> next
@@ -365,10 +374,10 @@ jet_cli_find_text_matches: fn(symbol: JetCLISymbol, query: String) -> Bool Never
 }
 
 // `find_matches`: function and member symbols, sorted by name, then signature.
-jet_cli_find_matches: fn(symbols: [JetCLISymbol], effects: [JetCLISemEffect], mode: JetCLIFindMode) -> [JetCLIFindMatch] Never! {
+jet_cli_find_matches: fn(symbols: [SemSymbol], effects: [SemEffect], mode: JetCLIFindMode) -> [JetCLIFindMatch] Never! {
     matches := [JetCLIFindMatch]{}
     loop symbol in symbols {
-        if symbol.kind != JetCLISymbolKind.Function && symbol.kind != JetCLISymbolKind.Member -> next
+        if symbol.kind != SemSymbolKind.Function && symbol.kind != SemSymbolKind.Member -> next
         why := ""
         if mode == {
             .Signature(shape) -> {
@@ -516,7 +525,7 @@ jet_cli_find: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan
 // search its symbols, or search the language catalog when there is none. Check
 // errors are `render_check_failure`'s.
 jet_cli_compile_find: fn(file: String?, query: String, mode: JetCLIFindMode, json: Bool) -> JetDriverVerbOutput {
-    path: file ?? return JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(jet_cli_symbol_index(jet_cli_language_symbols()), [JetCLISemEffect]{}, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    path: file ?? return JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(semindex_symbol_index(semindex_language_symbols()), [SemEffect]{}, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_file(path, false, None, JetDriverCompileMode.Doc)
     if compiled == {
@@ -535,6 +544,6 @@ jet_cli_find_result: fn(file: String, query: String, mode: JetCLIFindMode, json:
     }
     if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
     index: jet_cli_checked_semindex(result)
-    symbols: jet_cli_build_symbols(index, result.doc_modules)
+    symbols: semindex_build_symbols(index, result.doc_modules)
     JetDriverVerbOutput{stdout: jet_cli_find_render(mode, query, jet_cli_find_matches(symbols, index.effects, mode), json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

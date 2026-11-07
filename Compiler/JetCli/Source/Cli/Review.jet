@@ -1,6 +1,6 @@
 // `jet review base.jet head.jet` joins what changed in checked meaning
-// (semantic operations aligned over jet_cli's one semantic index,
-// SemIndexBuild.jet, plus recorded codemod receipts), in authority (each side's
+// (semantic operations aligned over the one semantic index, jet_semindex
+// SemIndex/Build.jet, plus recorded codemod receipts), in authority (each side's
 // gate ledger with the package/lock writers, GateProjection.jet) and in proof
 // receipts. `--diagnostics` compares the checker diagnostics of the two sides
 // by occurrence identity instead.
@@ -16,6 +16,7 @@ use {
         Diagnostic, DiagnosticCause, DiagnosticMoment, DiagnosticOrigin, GateLedger, gate_kind_name, gate_ledger_sort,
         diagnostic_from_registry, diagnostic_render_all, sha256_hex, DIAGNOSTIC_ERROR,
     ]
+    jet_semindex.[SemDefinitionFact, SemEffect, SemIndex]
 }
 
 // `kind` and `alignment` hold the stable names (`added`, `matched`...).
@@ -61,7 +62,7 @@ JetCLIReviewSide: struct {
     path: String
     inputs: [JetCLIReviewInput]
     closure: String
-    index: JetCLISemIndex
+    index: SemIndex
     authority: [JetCLIReviewFact]
     source_hash: String
     semantic_ops: [JetCLISemOp]
@@ -342,7 +343,7 @@ jet_cli_review_side: fn(path: String, result: JetDriverCompileResult) -> JetCLIR
 
 // `fact_keys`: (kind, stable id), (kind, compiler identity) and (kind,
 // signature, module) as length-prefixed text, so no two keys collide.
-jet_cli_review_fact_key: fn(fact: JetCLISemDefinitionFact, stage: Int) -> String Never! {
+jet_cli_review_fact_key: fn(fact: SemDefinitionFact, stage: Int) -> String Never! {
     if stage == 0 -> return jet_cli_review_key(fact.kind, fact.stable_id, None)
     if stage == 1 -> return jet_cli_review_key(fact.kind, fact.human_identity, None)
     jet_cli_review_key(fact.kind, fact.signature_id, Val(fact.module_path.copy()))
@@ -355,7 +356,7 @@ jet_cli_review_key: fn(kind: String, value: String, module_path: String?) -> Str
 
 // `pair_by_key`: pair the facts not yet matched whose stage key is unique on
 // both sides and whose names agree.
-jet_cli_review_pair: fn(before: [JetCLISemDefinitionFact], after: [JetCLISemDefinitionFact], matched_before: &[Int:Bool], matched_after: &[Int:Bool], stage: Int, pairs: &[JetCLIReviewPair]) Never! {
+jet_cli_review_pair: fn(before: [SemDefinitionFact], after: [SemDefinitionFact], matched_before: &[Int:Bool], matched_after: &[Int:Bool], stage: Int, pairs: &[JetCLIReviewPair]) Never! {
     old_first := [String:Int]{}
     old_count := [String:Int]{}
     new_first := [String:Int]{}
@@ -387,7 +388,7 @@ jet_cli_review_pair: fn(before: [JetCLISemDefinitionFact], after: [JetCLISemDefi
 
 // Each fact counts once per key, even when its stable and identity keys
 // coincide.
-jet_cli_review_key_counts: fn(facts: [JetCLISemDefinitionFact]) -> [String:Int] Never! {
+jet_cli_review_key_counts: fn(facts: [SemDefinitionFact]) -> [String:Int] Never! {
     counts := [String:Int]{}
     loop fact in facts {
         keys: [String]{jet_cli_review_fact_key(fact, 0), jet_cli_review_fact_key(fact, 1), jet_cli_review_fact_key(fact, 2)}
@@ -400,7 +401,7 @@ jet_cli_review_key_counts: fn(facts: [JetCLISemDefinitionFact]) -> [String:Int] 
     counts
 }
 
-jet_cli_review_unmatched_alignment: fn(fact: JetCLISemDefinitionFact, before: [String:Int], after: [String:Int], before_side: Bool) -> String Never! {
+jet_cli_review_unmatched_alignment: fn(fact: SemDefinitionFact, before: [String:Int], after: [String:Int], before_side: Bool) -> String Never! {
     loop stage in 0..<3 {
         key: jet_cli_review_fact_key(fact, stage)
         old_count: before.get(key) ?? 0
@@ -412,7 +413,7 @@ jet_cli_review_unmatched_alignment: fn(fact: JetCLISemDefinitionFact, before: [S
 
 // `compiler_identity`: a fact's first derivation claim when nonempty, else
 // its display identity. The first derivation per subject, built once.
-jet_cli_review_claims: fn(index: JetCLISemIndex) -> [String:String] Never! {
+jet_cli_review_claims: fn(index: SemIndex) -> [String:String] Never! {
     claims := [String:String]{}
     loop record in index.derivations {
         if claims.has_key(record.subject) -> next
@@ -421,7 +422,7 @@ jet_cli_review_claims: fn(index: JetCLISemIndex) -> [String:String] Never! {
     claims
 }
 
-jet_cli_review_identity: fn(claims: [String:String], fact: JetCLISemDefinitionFact) -> String Never! {
+jet_cli_review_identity: fn(claims: [String:String], fact: SemDefinitionFact) -> String Never! {
     if claims.get(fact.stable_id) == .Val(claim) {
         if claim != "" -> return claim.copy()
     }
@@ -445,7 +446,7 @@ jet_cli_review_matched: fn(kind: String, stable_id: String, before_identity: Str
 // `review_semantic_ops`: progressively pair unique keys (names must agree),
 // then report moves, signature or body changes, unmatched facts and effect
 // changes.
-jet_cli_review_checked_ops: fn(before: JetCLISemIndex, after: JetCLISemIndex) -> [JetCLIReviewOp] Never! {
+jet_cli_review_checked_ops: fn(before: SemIndex, after: SemIndex) -> [JetCLIReviewOp] Never! {
     old_defs: before.definition_facts
     new_defs: after.definition_facts
     old_claims: jet_cli_review_claims(before)
@@ -487,7 +488,7 @@ jet_cli_review_checked_ops: fn(before: JetCLISemIndex, after: JetCLISemIndex) ->
 }
 
 // `append_effect_operations`: the last row of a repeated function wins.
-jet_cli_review_effect_ops: fn(operations: &[JetCLIReviewOp], before: [JetCLISemEffect], after: [JetCLISemEffect]) Never! {
+jet_cli_review_effect_ops: fn(operations: &[JetCLIReviewOp], before: [SemEffect], after: [SemEffect]) Never! {
     old_by_function := [String:Int]{}
     new_by_function := [String:Int]{}
     functions := [String]{}
@@ -510,7 +511,7 @@ jet_cli_review_effect_ops: fn(operations: &[JetCLIReviewOp], before: [JetCLISemE
     }
 }
 
-jet_cli_review_effect_shape: fn(row: JetCLISemEffect) -> String Never! {
+jet_cli_review_effect_shape: fn(row: SemEffect) -> String Never! {
     maximal: if row.maximal -> "true" else -> "false"
     "direct={jet_cli_review_sorted_join(row.direct)};inferred={jet_cli_review_sorted_join(row.inferred)};callees={jet_cli_review_sorted_join(row.callees)};maximal={maximal}"
 }
@@ -570,11 +571,11 @@ jet_cli_review_sort: fn(operations: &[JetCLIReviewOp], include_alignment: Bool) 
 
 // `rename_candidates`: a nonempty target identity selects by identity; only
 // an empty one falls back to the stable-id and module anchors.
-jet_cli_review_identity_matches: fn(fact: JetCLISemDefinitionFact, requested: String) -> Bool Never! {
+jet_cli_review_identity_matches: fn(fact: SemDefinitionFact, requested: String) -> Bool Never! {
     requested == fact.human_identity || requested == fact.name || fact.human_identity.ends_with("::{requested}")
 }
 
-jet_cli_review_candidates: fn(facts: [JetCLISemDefinitionFact], receipt: JetCLISemOp, requested: String?, before_side: Bool) -> [Int] Never! {
+jet_cli_review_candidates: fn(facts: [SemDefinitionFact], receipt: JetCLISemOp, requested: String?, before_side: Bool) -> [Int] Never! {
     candidates := [Int]{}
     loop (index, fact) in facts {
         if receipt.targets.len() > 0 {
@@ -604,7 +605,7 @@ jet_cli_review_op_key: fn(operation: JetCLIReviewOp) -> String Never! {
 // `review_semantic_ops_with_receipts`: recorded rename/move receipts align
 // what the checked facts alone cannot; only the first target is used, and
 // from/to are the fallback only without a target.
-jet_cli_review_meaning: fn(before: JetCLISemIndex, after: JetCLISemIndex, receipts: [JetCLISemOp]) -> [JetCLIReviewOp] Never! {
+jet_cli_review_meaning: fn(before: SemIndex, after: SemIndex, receipts: [JetCLISemOp]) -> [JetCLIReviewOp] Never! {
     operations := jet_cli_review_checked_ops(before, after)
     old_defs: before.definition_facts
     new_defs: after.definition_facts
@@ -712,7 +713,7 @@ jet_cli_review_effect_list: fn(list: String) -> [String] Never! {
 // `authority_facts`: one fact per gate row key and per checked effect row.
 // Detail clauses split into granted/denied sets; an `authority:` clause drops
 // its writer's source path so another checkout is not a change.
-jet_cli_review_authority: fn(ledger: GateLedger, index: JetCLISemIndex) -> [JetCLIReviewFact] Never! {
+jet_cli_review_authority: fn(ledger: GateLedger, index: SemIndex) -> [JetCLIReviewFact] Never! {
     facts := [JetCLIReviewFact]{}
     slots := [String:Int]{}
     loop entry in ledger.rows {

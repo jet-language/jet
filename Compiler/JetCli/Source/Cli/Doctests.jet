@@ -18,6 +18,7 @@ use {
         diagnostic_registry_row,
         diagnostic_render_all,
     ]
+    jet_semindex.[semindex_doc_text]
 }
 
 JET_CLI_DOCTEST_OPEN: "\tjet-doctest\t"
@@ -173,7 +174,7 @@ jet_cli_doctest_rewrite: fn(source: String, rewrites: [JetCLIDocExpectation]) ->
         raw: lines[index]
         marker: jet_cli_doc_expect_marker(raw) ?? next
         ending: if raw.ends_with("\r") -> "\r" else -> ""
-        lines[index] = "{jet_cli_doc_text(raw.bytes(), 0, marker)}{JET_CLI_DOC_EXPECT_MARKER} {rewrite.expected}{ending}"
+        lines[index] = "{semindex_doc_text(raw.bytes(), 0, marker)}{JET_CLI_DOC_EXPECT_MARKER} {rewrite.expected}{ending}"
     }
     lines.join("\n")
 }

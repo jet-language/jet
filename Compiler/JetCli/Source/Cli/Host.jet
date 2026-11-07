@@ -1417,7 +1417,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     }
     authority: jet_cli_traced_authority(source, invocation, result)
     if jet_cli_authority_report(file, source, color, false, "build", authority) == .Val(refusal) -> return refusal
-    summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(authority)}\n"
+    summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(jet_cli_effect_projection(authority))}\n"
     stripped_jobs: if json || quiet -> "" else -> jet_cli_release_job_summary(inputs, options)
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     if build_options_value(options, "os") == "web" {

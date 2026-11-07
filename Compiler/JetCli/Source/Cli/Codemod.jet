@@ -1,6 +1,6 @@
 // `jet inspect codemod`: version-1 renames, version-2 batch plans (symbol
-// renames and typed AST rewrites over jet_cli's one semantic index,
-// SemIndexBuild.jet), and replay-log undo. The destination checks are, run
+// renames and typed AST rewrites over the one semantic index, jet_semindex
+// SemIndex/Build.jet), and replay-log undo. The destination checks are, run
 // before the held transaction (SourceTransaction.jet) publishes anything. Every
 // refusal is one E2105 report after whatever the plan already printed.
 use {
@@ -20,6 +20,16 @@ use {
     jet_foundation.[Diagnostic, Span, TextEdit, diagnostic_render_all, foundation_json_quote, name_mangle]
     jet_lexer.[lex, lex_generated, TOKEN_IDENT]
     jet_parser.[parse_generated_source]
+    jet_semindex.[
+        SemAnchor,
+        SemDef,
+        SemDefinitionFact,
+        SemIndex,
+        SemKind,
+        SemNode,
+        semindex_build,
+        semindex_definition_kind,
+    ]
 }
 
 // One invocation's output so far: stdout lines, the stderr warning printed
@@ -105,7 +115,7 @@ JetCLICodemodPlan: struct {
 
 // One unit's index; `physical` maps each module path to its real file.
 JetCLICodemodIndexed: struct {
-    index: JetCLISemIndex
+    index: SemIndex
     physical: [String: String]
 }
 
@@ -778,7 +788,7 @@ jet_cli_codemod_next_is_colon: fn(atoms: [JetCLICodemodAtom], index: Int) -> Boo
 // ---- typed trees ----
 
 // Rust typed_tree over every node of one module, built once as an arena.
-jet_cli_codemod_forest: fn(nodes: [JetCLISemNode], source: String) -> JetCLICodemodForest JetCLIReadError! {
+jet_cli_codemod_forest: fn(nodes: [SemNode], source: String) -> JetCLICodemodForest JetCLIReadError! {
     positions := [Int: Int]{}
     loop index in 0..<nodes.len() -> positions[nodes[index].id] = index
     direct := [[Int]]{}
@@ -877,7 +887,7 @@ jet_cli_codemod_parse_pattern: fn(atoms: [JetCLICodemodAtom], class: String) -> 
     parsed: parse_generated_source(wrapped.bytes())
     if parsed.diagnostics.len() > 0 -> return Err(jet_cli_codemod_error("AST pattern produced parser teaching diagnostics"))
     pattern_module := JetDriverDocModule{path: "<codemod-pattern>", physical_path: "<codemod-pattern>", alias: "pattern", source: wrapped.copy(), items: parsed.program.items.copy(), block_spans: parsed.program.block_spans.copy(), imports: parsed.program.imports.copy()}
-    index: jet_cli_build_semindex([JetDriverDocModule]{pattern_module}, jet_cli_policy_authority([String]{}, None))
+    index: semindex_build([JetDriverDocModule]{pattern_module}, jet_cli_effect_projection(jet_cli_policy_authority([String]{}, None)))
     root := -1
     width := -1
     loop position in 0..<index.nodes.len() {
@@ -992,7 +1002,7 @@ jet_cli_codemod_find_matches: fn(atoms: [JetCLICodemodAtom], source: String, cla
     // Nodes the compiler synthesized past the file's bytes (generated
     // declarations) have no editable source text.
     limit: source.bytes().len()
-    nodes := [JetCLISemNode]{}
+    nodes := [SemNode]{}
     loop node in indexed.index.nodes {
         if node.module_path == module_path && node.span.end <= limit -> nodes.push(node.copy())
     }
@@ -1328,19 +1338,19 @@ jet_cli_codemod_dedup_apply: fn(id: String, edits: JetCLICodemodEdits, files: &J
     Ok(count)
 }
 
-jet_cli_codemod_kind_matches: fn(kind: JetCLISemKind, want: String) -> Bool Never! {
-    name: jet_cli_sem_definition_kind(kind)
+jet_cli_codemod_kind_matches: fn(kind: SemKind, want: String) -> Bool Never! {
+    name: semindex_definition_kind(kind)
     name != "variant" && name == want
 }
 
 // Rust definition_anchor.
-jet_cli_codemod_anchor: fn(def: JetCLISemDef) -> JetCLISemAnchor Never! {
-    name: jet_cli_sem_definition_kind(def.kind)
-    JetCLISemAnchor{module_path: def.module_path.copy(), kind: if name == "variant" -> "enum_variant" else -> name, def_span: def.def_span, semantic_identity: Val(def.identity.copy())}
+jet_cli_codemod_anchor: fn(def: SemDef) -> SemAnchor Never! {
+    name: semindex_definition_kind(def.kind)
+    SemAnchor{module_path: def.module_path.copy(), kind: if name == "variant" -> "enum_variant" else -> name, def_span: def.def_span, semantic_identity: Val(def.identity.copy())}
 }
 
 // Rust anchors_match_definition.
-jet_cli_codemod_anchor_selected: fn(selected: [JetCLISemAnchor], candidate: JetCLISemAnchor) -> Bool Never! {
+jet_cli_codemod_anchor_selected: fn(selected: [SemAnchor], candidate: SemAnchor) -> Bool Never! {
     loop anchor in selected {
         if anchor.semantic_identity == .Val(left) {
             if candidate.semantic_identity == .Val(right) {
@@ -1353,12 +1363,12 @@ jet_cli_codemod_anchor_selected: fn(selected: [JetCLISemAnchor], candidate: JetC
     false
 }
 
-jet_cli_codemod_same_anchor: fn(left: JetCLISemAnchor, right: JetCLISemAnchor) -> Bool Never! {
+jet_cli_codemod_same_anchor: fn(left: SemAnchor, right: SemAnchor) -> Bool Never! {
     left.module_path == right.module_path && left.kind == right.kind && left.def_span.start == right.def_span.start && left.def_span.end == right.def_span.end && left.semantic_identity == right.semantic_identity
 }
 
 // Rust definition_fact.
-jet_cli_codemod_definition_fact: fn(index: JetCLISemIndex, def: JetCLISemDef) -> JetCLISemDefinitionFact? Never! {
+jet_cli_codemod_definition_fact: fn(index: SemIndex, def: SemDef) -> SemDefinitionFact? Never! {
     loop fact in index.definition_facts {
         if fact.module_path == def.module_path && fact.span.start <= def.def_span.start && def.def_span.end <= fact.span.end -> return Val(fact.copy())
     }
@@ -1366,12 +1376,12 @@ jet_cli_codemod_definition_fact: fn(index: JetCLISemIndex, def: JetCLISemDef) ->
 }
 
 // Rust renamed_identity.
-jet_cli_codemod_renamed_identity: fn(fact: JetCLISemDefinitionFact, to: String) -> String Never! {
+jet_cli_codemod_renamed_identity: fn(fact: SemDefinitionFact, to: String) -> String Never! {
     if fact.human_identity.ends_with(fact.name) -> return "{fact.human_identity.slice(0, fact.human_identity.len() - fact.name.len())}{to}"
     "{fact.module_path}::{to}"
 }
 
-jet_cli_codemod_target: fn(fact: JetCLISemDefinitionFact, to: String) -> JetCLISemOpTarget Never! {
+jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTarget Never! {
     JetCLISemOpTarget{stable_id: fact.stable_id.copy(), before: fact.human_identity.copy(), after: jet_cli_codemod_renamed_identity(fact, to), kind: fact.kind.copy(), module_path: fact.module_path.copy()}
 }
 
@@ -1381,7 +1391,7 @@ jet_cli_codemod_unit_entries: fn(units: [JetCLICodemodUnit]) -> [String] Never! 
 
 // Rust apply_rule `Rule::Rename`.
 jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) -> Int JetCLIReadError! {
-    anchors := [JetCLISemAnchor]{}
+    anchors := [SemAnchor]{}
     targets := [JetCLISemOpTarget]{}
     loop unit in units {
         indexed: jet_cli_codemod_index_unit(unit.entry, plan.files, plan.inputs, run)
