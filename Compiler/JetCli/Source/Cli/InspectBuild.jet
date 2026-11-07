@@ -167,9 +167,16 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
         return jet_cli_build_failed("`jet build` writes a web build of one entry file, not of a package's `build: fn` targets", jet_cli_why("E2105"), "build the entry file with `jet build --target web <file>`", color)
     }
     root: jet_cli_parent(build_files.realpath(file) ?? file) ?? "."
+    graph: execution ?? return jet_cli_ice("the completed build query has no plan")
     // Every source a selected target declares exists before any action runs or
-    // the lock is written, so a missing one leaves neither behind.
-    missing: jet_cli_build_missing_sources(root, selected, generated)
+    // the lock is written, so a missing one leaves neither behind. A source a
+    // build action declares as its output is the action's to produce: the
+    // target's compile reads it after the graph runs.
+    produced := [String]{}
+    loop action in graph.actions {
+        loop output in action.outputs -> produced.push(output.copy())
+    }
+    missing: jet_cli_build_missing_sources(root, selected, generated, produced)
     if missing.len() > 0 {
         return jet_cli_build_failed("{if missing.len() == 1 -> "a build target source doesn't" else -> "{missing.len()} build target sources don't"} exist: {missing.join(", ")}", jet_cli_why("E2105"), "create the file, or remove it from the target's sources in `build: fn`", color)
     }
@@ -188,7 +195,6 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
             build_files.write(path, source_file.source) ?? return jet_cli_build_failed("couldn't write the generated source `{path}`: {err}", jet_cli_why("E2105"), "make `{directory}` writable, or build with `--write-generated=off`", color)
         }
     }
-    graph: execution ?? return jet_cli_ice("the completed build query has no plan")
     // copy: `failed` is a payload view of the execution's result.
     if jet_cli_build_execute(graph, root, policy, invocation, member, color) == .Val(failed) -> return failed.copy()
     loop executable in selected.executables {
@@ -221,17 +227,18 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
 }
 
 // The sources the selected targets declare that are neither a file under
-// `root` nor a module `build: fn` generated, each as "`path` of `target`".
-jet_cli_build_missing_sources: fn(root: String, selected: BuildPlanSelection, generated: [BuildSessionGeneratedModule]) -[FS]> [String] Never! {
+// `root`, a module `build: fn` generated, nor an output a build action
+// produces (`produced`), each as "`path` of `target`".
+jet_cli_build_missing_sources: fn(root: String, selected: BuildPlanSelection, generated: [BuildSessionGeneratedModule], produced: [String]) -[FS]> [String] Never! {
     missing := [String]{}
-    loop target in selected.executables -> jet_cli_build_missing_target_sources(root, target, generated, missing)
-    loop target in selected.libraries -> jet_cli_build_missing_target_sources(root, target, generated, missing)
+    loop target in selected.executables -> jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
+    loop target in selected.libraries -> jet_cli_build_missing_target_sources(root, target, generated, produced, missing)
     missing
 }
 
-jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutable, generated: [BuildSessionGeneratedModule], missing: &[String]) Never! -[FS]> {
+jet_cli_build_missing_target_sources: fn(root: String, target: BuildPlanExecutable, generated: [BuildSessionGeneratedModule], produced: [String], missing: &[String]) Never! -[FS]> {
     loop source in target.sources {
-        if build_files.exists(jet_cli_entry_join(root, source)) -> next
+        if produced.contains(source) || build_files.exists(jet_cli_entry_join(root, source)) -> next
         made: loop made_module in generated {
             if made_module.path == source -> break true
         } ?? false

@@ -5014,7 +5014,9 @@ namespace, as the modules `b.generate` produces do, so
 `b.add_executable("app", ["main.jet", "helper.jet"], [])` lets `main.jet` call
 what `helper.jet` declares by name. Before any action runs or the lock is
 written, `jet build` refuses a selected target that lists a source which is
-neither a file nor a generated module (E2105).
+neither a file, a generated module, nor an output a build action declares
+(E2105). An action's output is the action's to produce: the target compiles
+it after the graph runs.
 
 ```jet
 build: fn(b: Build) -[Exec, FS]> {
