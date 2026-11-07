@@ -45,8 +45,9 @@ run: fn() IOError! {
     }
     // This process's first CPU, so the run works under any outer affinity.
     first: Int.parse((allowed_cpus().split(",").to_list().get(0) ?? "").split("-").to_list().get(0) ?? "") ?? 0
+    given: "{first}"
     receipt: process.run_spec(process.cmd([exe, "cpus"]).cpu_affinity([first, first]).stdout(.Capture))
-    print("child runs only on the CPU it was given: {receipt.output.trim() == "{first}"}")
+    print("child runs only on the CPU it was given: {receipt.output.trim() == given}")
     print("receipt names the set: {receipt.limits.contains("cpu-affinity={first}")}")
     refuse(exe, [])
     refuse(exe, [-1])
