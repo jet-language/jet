@@ -38,12 +38,14 @@ strftime_utf8_datetime: fn() -> DateTime Never! {
 #Test("strftime keeps all existing ASCII directives and microsecond precision") {
     dt: strftime_utf8_datetime()
     assert_eq(time_format.strftime("%A|%a|%b|%B|%c|%d|%f|%H|%I|%j|%m|%M|%U|%W|%w|%y|%Y|%Z|%%", dt), "Thursday|Thu|Feb|February|Thu Feb 29 13:04:05 2024|29|123456|13|01|060|02|04|08|09|4|24|2024|UTC|%")
+    assert_eq(time_format.strftime("%H:%M:%S %p %z", dt), "13:04:05 PM +0000")
+    assert_eq(time_format.strftime("%I:%M:%S %p", time_format.datetime(2024, 2, 29, 0, 7, 9)), "12:07:09 AM")
     assert_eq(time_format.strftime("%f", time_format.datetime(2024, 2, 29, 0, 0, 0)), "000000")
 }
 
 #Test("strftime keeps unsupported ASCII and trailing-percent behavior") {
     dt: strftime_utf8_datetime()
-    assert_eq(time_format.strftime("start %Q %S %z %n %t end%", dt), "start %Q %S %z %n %t end%")
+    assert_eq(time_format.strftime("start %Q %n %t end%", dt), "start %Q %n %t end%")
     assert_eq(time_format.strftime("%", dt), "%")
     assert_eq(time_format.strftime("%%%", dt), "%%")
     assert_eq(time_format.strftime("ASCII %Y-%m-%d %H:%M", dt), "ASCII 2024-02-29 13:04")

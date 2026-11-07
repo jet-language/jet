@@ -376,6 +376,10 @@ strftime: fn(format: String, dt: DateTime) -> String Never! {
             106 -> pad2(day_of_year, 3)
             109 -> pad2(date.month(), 2)
             77 -> pad2(dt.minute(), 2)
+            83 -> pad2(dt.second(), 2)
+            112 -> if dt.hour() < 12 -> "AM" else -> "PM"
+            // A DateTime is UTC, as %Z says.
+            122 -> "+0000"
             // #4458: C/POSIX week numbers. Days before the year's first Sunday
             // (%U) or Monday (%W) are week 00; day is Sunday=0 weekday.
             85 -> pad2((day_of_year + 6 - day) /% 7, 2)
