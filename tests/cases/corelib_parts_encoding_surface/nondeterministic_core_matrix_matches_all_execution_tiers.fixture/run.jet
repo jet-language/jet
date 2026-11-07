@@ -12,7 +12,7 @@ shuffle_unit: fn() -[Rand]> {
     return random.shuffle(values)
 }
 
-run: fn() -[Rand, Time]> {
+run: fn() -[IO, Rand, Time]> {
     random.seed(31)
     print(random.int(1, 6))
     print(random.float() >= 0.0)
@@ -21,7 +21,7 @@ run: fn() -[Rand, Time]> {
     print(random.normal(0.0, 1.0) == random.normal(0.0, 1.0))
     print(random.exponential(2.0) >= 0.0)
     items := ["red", "green", "blue"]
-    weights := [0.0, 1.0, 0.0]
+    weights := [Float]{0.0, 1.0, 0.0}
     print(random.pick(items) ?? "none")
     print(random.weighted_pick(items, weights) ?? "none")
     sample_items := [1, 2, 3]
@@ -33,7 +33,8 @@ run: fn() -[Rand, Time]> {
     print(shuffle_items[1])
     print(shuffle_items[2])
     shuffle_unit()
-    print(random.split(9).float() >= 0.0)
+    split_rng := random.split(9)
+    print(split_rng.float() >= 0.0)
     print(random.bytes(4).len())
 
     rng := random.rng(99)
@@ -66,7 +67,7 @@ run: fn() -[Rand, Time]> {
     twin_child := twin.split()
     print(child.int(1, 100) == twin_child.int(1, 100))
 
-    print(time.now() >= 0)
+    print(time.now().to_timestamp() >= 0)
     print(time.now_utc().to_timestamp() > 0)
     print(time.today().to_string().len() > 0)
     print(time.instant().elapsed_millis() >= 0)
