@@ -39,8 +39,8 @@ link those bodies.
 
 Internal runtime C symbols use the acronym-aware snake projection of
 `runtime_abi_atom` (`Compiler/JetIR/Source/RuntimeRoutes.jet`), which Lower
-applies; `Tools/agent/gen-runtime-host-carriers.mjs` emits its host carrier
-exports with the same projection. For example, the `HTTPClient` symbol atom is
+applies; `Tools/agent/RuntimeGenerators.jet` emits the host carrier exports
+with the same projection. For example, the `HTTPClient` symbol atom is
 `http_client`. Runtime type names, declaration keys, variant identities and
 layout metadata remain nominal: only the ABI symbol atoms are projected.
 Providers, generated adapters and compiler callers use one spelling, with
@@ -67,10 +67,6 @@ starting with the resolver's first family, staggers attempts by 250ms, and
 accelerates the next launch after failure. Losing descriptors are dropped on
 success, cancellation, or deadline; native C witnesses link the actual composed
 runtime rather than mock socket providers.
-`Compiler/JetRuntime/Tests/run-native-tcp-routes.mjs OUT STAGE2_JET RC_RUNTIME_DIR`
-consumes the first RC pack's admitted standalone object without rebuilding the
-runtime. It compiles the C witness fresh, binds the U8 stride to the pack's
-source identity, and records admission, compile, native link, and run receipts.
 
 The native [Duration constructor](../../Compiler/JetRuntime/Source/Duration.jet)
 borrows the exact-Int input, checks narrowing and nanosecond scaling without a
@@ -104,8 +100,7 @@ A C witness that counts allocations or frees installs observers with
 that links the runtime object runs on the checked heap, which calls them for
 every block it hands out or takes back, the runtime's own included. A
 link-time `--wrap=jet_rt_free` does not see those: the runtime object binds its
-internal calls section-relative. `run-alloc-observer-witness.mjs` is the
-negative control: its leak mode keeps one buffer and must fail.
+internal calls section-relative.
 Native scan proofs run the `scan.cases` programs with the native CLI against
 their goldens and require the fresh Jet object/pack. Saved reference and
 evaluator TSVs are optional, explicitly named `--frozen-reference` and

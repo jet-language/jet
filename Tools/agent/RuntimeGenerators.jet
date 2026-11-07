@@ -119,6 +119,10 @@ runtime_generators_main: fn(args: [String]) -[FS, IO]> String GeneratorError! {
         .Ok(text) -> outputs.push(GeneratedFile{path: HOST_ERRORS_TARGET_PATH, text: text})
         .Err(error) -> problems.push(error.message)
     }
+    if read_host_carriers() == {
+        .Ok(text) -> outputs.push(GeneratedFile{path: HOST_CARRIERS_TARGET_PATH, text: text})
+        .Err(error) -> problems.push(error.message)
+    }
     if read_dyn_kinds() == {
         .Ok(generated) -> {
             loop file in generated -> outputs.push(file)
@@ -2581,6 +2585,210 @@ read_host_errors: fn() -[FS]> String GeneratorError! {
     text: render_host_errors(plain) ?? panic("rows did not render: {err.message}")
     assert(text.contains("rt_static_text(\"No error information\\n\\nNo such file\\n\")"))
     assert(text.contains("errno <= I64{{2}}"))
+}
+
+// The host C carriers: their tags are the checked Core registry's
+// declaration-order ordinals, not an independent runtime enum, and the host
+// refusals and names are heap-free literals.
+
+HOST_CARRIER_ROWS_PATH: "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet"
+HOST_CARRIERS_TARGET_PATH: "Compiler/JetRuntime/Source/HostEnums.jet"
+
+// One carrier table: the constant prefix and its Core enum's variants.
+HostCarrierTable: struct {
+    prefix: String
+    values: [String]
+}
+
+// The variants of Core enum `name` in declaration order. A missing or
+// repeated variant is a broken registry.
+enum_variants: fn(rows: String, name: String) -> [String] GeneratorError! {
+    values: quoted_after(rows, "CoreEnumPayloadRow{{enum_name: \"{name}\", variant: \"")
+    if values.len() == 0 -> return Err(generator_fail("missing/duplicate {name} enum rows"))
+    loop at in 1..<values.len() {
+        loop before in 0..<at {
+            if values[before] == values[at] -> return Err(generator_fail("missing/duplicate {name} enum rows"))
+        }
+    }
+    Ok(values)
+}
+
+// `InvalidInput` as `INVALID_INPUT`: an underscore between a lowercase and
+// an uppercase letter, then every letter uppercase.
+constant_case: fn(name: String) -> String Never! {
+    bytes: name.bytes()
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        lower: code >= 97 && code <= 122
+        if code >= 65 && code <= 90 && index > 0 {
+            previous: Int.from_u8(bytes[index - 1])
+            if previous >= 97 && previous <= 122 -> out.push(U8{95})
+        }
+        out.push(U8{if lower -> code - 32 else -> code})
+    }
+    String.from_bytes(out) ?? panic("constant name {name} is not ASCII")
+}
+
+// The runtime ABI atom of `name`, as Compiler/JetIR/Source/RuntimeRoutes.jet
+// runtime_abi_atom projects it for Lower: `HTTPClient` is `http_client`.
+runtime_abi_atom: fn(name: String) -> String Never! {
+    bytes: name.bytes()
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        code: Int.from_u8(bytes[index])
+        if code == 46 || code == 95 {
+            if out.len() > 0 && out[out.len() - 1] != (U8{95}) -> out.push(U8{95})
+            next
+        }
+        upper: code >= 65 && code <= 90
+        if upper && index > 0 && out.len() > 0 && out[out.len() - 1] != (U8{95}) {
+            previous: Int.from_u8(bytes[index - 1])
+            next_code: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            previous_upper: previous >= 65 && previous <= 90
+            next_lower: next_code >= 97 && next_code <= 122
+            if !previous_upper || next_lower -> out.push(U8{95})
+        }
+        out.push(U8{if upper -> code + 32 else -> code})
+    }
+    if out.len() > 0 && out[out.len() - 1] == (U8{95}) {
+        _: out.pop() ?? panic("a nonempty runtime ABI atom failed to pop")
+    }
+    String.from_bytes(out) ?? panic("runtime ABI atom {name} is not ASCII")
+}
+
+// Registered E3001 stops: the writes are heap-free, and Root owns the
+// captured full report through the trap_header / trap_footer boundary.
+host_refusals: fn() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "host_arguments_refused", text: "host arguments unavailable; call jet_rt_host_arguments before env or argv access"},
+        MessageLiteral{name: "host_environment_index_refused", text: "startup environment index out of range"},
+        MessageLiteral{name: "host_argument_index_refused", text: "startup argument index out of range"},
+        MessageLiteral{name: "host_record_index_refused", text: "record variant index out of range"},
+        MessageLiteral{name: "host_sigpipe_refused", text: "failed to initialize SIGPIPE handling"},
+    }
+}
+
+// Host names and texts, each built as one runtime String.
+host_texts: fn() -> [MessageLiteral] Never! {
+    [MessageLiteral]{
+        MessageLiteral{name: "host_stdout_name", text: "stdout"},
+        MessageLiteral{name: "host_stderr_name", text: "stderr"},
+        MessageLiteral{name: "host_write_zero_text", text: "failed to write whole buffer"},
+        MessageLiteral{name: "host_resolver_prefix", text: "failed to lookup address information: "},
+        MessageLiteral{name: "host_resolver_nul", text: "file name contained an unexpected NUL byte"},
+        MessageLiteral{name: "host_net_wait_kind", text: "network wait"},
+    }
+}
+
+render_host_carriers: fn(rows: String) -> String GeneratorError! {
+    kinds: enum_variants(rows, "IOError") ?? return Err(err)
+    tables := [HostCarrierTable]{HostCarrierTable{prefix: "HOST_IO_KIND", values: kinds}}
+    problems := [String]{}
+    names: [String]{"IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode"}
+    prefixes: [String]{"HOST_IO_OP", "HOST_PROCESS_LIMIT", "HOST_PROCESS_STREAM", "HOST_TERMINAL_MODE"}
+    loop at in 0..<names.len() {
+        if enum_variants(rows, names[at]) == {
+            .Ok(values) -> tables.push(HostCarrierTable{prefix: prefixes[at], values: values})
+            .Err(error) -> problems.push(error.message)
+        }
+    }
+    if problems.len() > 0 -> return Err(generator_fail(problems.join("\n")))
+    lines := [String]{
+        "// Generated by Tools/agent/RuntimeGenerators.jet from {HOST_CARRIER_ROWS_PATH}.",
+        "// C carrier tags are Core ordinals, not an independent runtime enum.",
+        "// Refusals use the shared trap boundary: Root captures the full registered report.",
+    }
+    loop table in tables {
+        loop index in 0..<table.values.len() -> lines.push("{table.prefix}_{constant_case(table.values[index])}: I64{{{index}}}")
+        lines.push("{table.prefix}_COUNT: I64{{{table.values.len()}}}")
+    }
+    loop refusal in host_refusals() {
+        lines.push("")
+        lines.push("{refusal.name}: fn() {{")
+        lines.push("    jet_rt_stdout_flush()")
+        lines.push("    trap_header(I64{{0}})")
+        if static_text_worthy(refusal.text) {
+            literal: static_text(refusal.text) ?? return Err(err)
+            lines.push("    trap_write_static({literal})")
+        } else {
+            loop word in text_words(refusal.text) -> lines.push("    trap_write_word(I64{{{word.value}}}, I64{{{word.count}}})")
+        }
+        lines.push("    trap_msg_prelude_end()")
+        lines.push("    trap_footer(I64{{0}})")
+        lines.push("}}")
+    }
+    loop text in host_texts() {
+        lines.push("")
+        lines.push("{text.name}: fn() -> I64 {{")
+        lines.push("    text: jet_rt_string_builder_new()")
+        if static_text_worthy(text.text) {
+            literal: static_text(text.text) ?? return Err(err)
+            lines.push("    jet_rt_string_builder_push(text, {literal})")
+        } else {
+            loop word in text_words(text.text) -> lines.push("    rt_text_push_word(text, I64{{{word.value}}}, I64{{{word.count}}})")
+        }
+        lines.push("    jet_rt_string_builder_finish(text)")
+        lines.push("}}")
+    }
+    loop kind in kinds {
+        if kind == "ResourceLimit" -> next
+        constant: "HOST_IO_KIND_{constant_case(kind)}"
+        atom: runtime_abi_atom(kind)
+        lines.push("")
+        lines.push("#Export(c) jet_rt_record_get_io_error_{atom}: fn(error: I64) -> I64 {{ host_error_context(error, {constant}) }}")
+        lines.push("#Export(c) jet_rt_record_new_io_error_{atom}: fn(context: I64) -> I64 {{ host_error_with_context(context, {constant}) }}")
+    }
+    Ok("{lines.join("\n")}\n")
+}
+
+read_host_carriers: fn() -[FS]> String GeneratorError! {
+    rows: files.read(HOST_CARRIER_ROWS_PATH) ?? return Err(generator_fail("cannot read {HOST_CARRIER_ROWS_PATH}: {err}"))
+    render_host_carriers(rows)
+}
+
+HOST_CARRIER_FIXTURE: "CoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"InvalidInput\"\nCoreEnumPayloadRow{{enum_name: \"IOError\", variant: \"ResourceLimit\"\nCoreEnumPayloadRow{{enum_name: \"IOOperation\", variant: \"Read\"\nCoreEnumPayloadRow{{enum_name: \"ProcessResourceLimit\", variant: \"CpuTime\"\nCoreEnumPayloadRow{{enum_name: \"ProcessStreamMode\", variant: \"Inherit\"\nCoreEnumPayloadRow{{enum_name: \"TerminalMode\", variant: \"Raw\"\nCoreEnumPayloadRow{{enum_name: \"TerminalModeX\", variant: \"Cooked\"\n"
+
+#Test("host carrier tags are the registry's declaration order, one declaration per helper") {
+    text: render_host_carriers(HOST_CARRIER_FIXTURE) ?? panic("carriers did not render: {err.message}")
+    assert(text.starts_with("// Generated by Tools/agent/RuntimeGenerators.jet from {HOST_CARRIER_ROWS_PATH}.\n"))
+    assert(text.contains("\nHOST_IO_KIND_INVALID_INPUT: I64{{0}}\nHOST_IO_KIND_RESOURCE_LIMIT: I64{{1}}\nHOST_IO_KIND_COUNT: I64{{2}}\n"))
+    assert(text.contains("\nHOST_PROCESS_LIMIT_CPU_TIME: I64{{0}}\nHOST_PROCESS_LIMIT_COUNT: I64{{1}}\n"))
+    assert(text.contains("\nHOST_TERMINAL_MODE_RAW: I64{{0}}\nHOST_TERMINAL_MODE_COUNT: I64{{1}}\n"))
+    assert(text.contains("#Export(c) jet_rt_record_get_io_error_invalid_input: fn(error: I64) -> I64 {{ host_error_context(error, HOST_IO_KIND_INVALID_INPUT) }}"))
+    assert(!text.contains("io_error_resource_limit"))
+    assert(text.contains("    trap_write_static(rt_static_text(\"record variant index out of range\"))"))
+    assert(text.contains("host_stdout_name: fn() -> I64 {{\n    text: jet_rt_string_builder_new()\n    rt_text_push_word(text, I64{{128047728850035}}, I64{{6}})\n"))
+    seen := [String]{}
+    loop line in text.split("\n") {
+        if !line.contains(": fn(") || line.starts_with("#") || line.starts_with(" ") -> next
+        name: line.partition(":").head.copy()
+        loop earlier in seen -> assert(earlier != name)
+        seen.push(name)
+    }
+    assert_eq(seen.len(), 11)
+}
+
+#Test("a missing or repeated host carrier variant fails the whole table") {
+    missing: HOST_CARRIER_FIXTURE.replace("\"TerminalMode\", variant: \"Raw\"", "\"Other\", variant: \"Raw\"")
+    if render_host_carriers(missing) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "missing/duplicate TerminalMode enum rows")
+    }
+    repeated: HOST_CARRIER_FIXTURE.replace("variant: \"ResourceLimit\"", "variant: \"InvalidInput\"")
+    if render_host_carriers(repeated) == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "missing/duplicate IOError enum rows")
+    }
+    assert_eq(constant_case("PermissionDenied"), "PERMISSION_DENIED")
+    assert_eq(runtime_abi_atom("HTTPClient"), "http_client")
+    assert_eq(runtime_abi_atom("TimedOut"), "timed_out")
+}
+
+#Test("the checked-in host carriers are the registry's projection") {
+    expected: read_host_carriers() ?? panic("carriers did not render: {err.message}")
+    found: files.read(HOST_CARRIERS_TARGET_PATH) ?? panic("{HOST_CARRIERS_TARGET_PATH} did not read: {err}")
+    assert_eq(found, expected)
 }
 
 // The decode diagnostic's name for each Dyn variant. The arms of Core's
