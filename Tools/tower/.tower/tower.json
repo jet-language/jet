@@ -2,8 +2,8 @@
   "meta": {
     "version": 4,
     "project": "Jet",
-    "nextNum": 6652,
-    "rev": 95518,
+    "nextNum": 6655,
+    "rev": 95524,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -97546,6 +97546,129 @@
       "updated": "2026-11-07T06:30:07.274Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
+    },
+    {
+      "id": "c0zlsxzv",
+      "num": 6652,
+      "title": "jet lint --cost: an incomplete reachable cost projection ICEs or is accepted",
+      "body": "From #6651 (a0_032 gate kit, dev 34290833a9). cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs: `jet lint --cost cost_rows.jet` exits 101 with 'cost.project unlowered: -: the checked projection did not complete' (I2). cli_parts_surface/cost_cli_rejects_incomplete_reachable_projection: `jet check` exits 0 on tests/cli/cost_incomplete_generic.jet, but an incomplete reachable cost projection must be rejected with a registered diagnostic.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Case cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs PASS (no exit 101) and cli_parts_surface/cost_cli_rejects_incomplete_reachable_projection PASS (the incomplete projection is a registered diagnostic with a UI snapshot).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:51:04.815Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:50:52.522Z",
+      "updated": "2026-11-07T06:51:04.815Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0ngdap0",
+      "num": 6653,
+      "title": "jetpack image: coded errors render Why:/Fix: without the canonical one-space indent",
+      "body": "From #6651. tests/cases/image/environment_image_requires_explicit_service_selection fails on a snapshot mismatch: Jetpack Theme.error_coded (Jetpack/CLI/Source/Commands/ImageCommand.jet:107) renders Why:/Fix: lines without the one-space indent that the canonical diagnostic renderer and the snapshot image_service_projection_e1336.txt use. One renderer should own the layout.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Case tests/cases/image/environment_image_requires_explicit_service_selection PASS: jetpack coded errors use the canonical diagnostic layout (one renderer), no snapshot rewritten to the drifted layout.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:51:05.870Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G7"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:50:53.964Z",
+      "updated": "2026-11-07T06:51:05.870Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
+    },
+    {
+      "id": "c0b85u2y",
+      "num": 6654,
+      "title": "CompiledWorkloads self_check needs a git checkout, so it fails in release exports and lane trees",
+      "body": "From #6651. tests/cases/compiled_workloads/compiled_workload_gate_self_check fails in the release gate's exported tree because Tools/ci/CompiledWorkloads.jet self_check runs `git rev-parse HEAD` in the root. The self-check must not depend on git metadata (or must take the commit from the tree's SOURCE/receipt), so it passes in an exported tree.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "planning",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Case tests/cases/compiled_workloads/compiled_workload_gate_self_check PASS in a release kit (exported tree with no .git).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-07T06:51:06.776Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "goals": [
+        "G1"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T06:50:55.401Z",
+      "updated": "2026-11-07T06:51:06.776Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1
     }
   ],
   "decisions": [
@@ -185449,6 +185572,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-07T06:51:06.776Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0b85u2y",
+      "note": "#1 Case tests/cases/compiled_workloads/compiled_workload_gate_s"
+    },
+    {
+      "at": "2026-11-07T06:51:05.870Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ngdap0",
+      "note": "#1 Case tests/cases/image/environment_image_requires_explicit_s"
+    },
+    {
+      "at": "2026-11-07T06:51:04.815Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0zlsxzv",
+      "note": "#1 Case cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_o"
+    },
+    {
+      "at": "2026-11-07T06:50:55.401Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0b85u2y",
+      "note": "CompiledWorkloads self_check needs a git checkout, so it fails in release exports and lane trees"
+    },
+    {
+      "at": "2026-11-07T06:50:53.964Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0ngdap0",
+      "note": "jetpack image: coded errors render Why:/Fix: without the canonical one-space indent"
+    },
+    {
+      "at": "2026-11-07T06:50:52.522Z",
+      "by": "Main",
+      "action": "card.add",
+      "ref": "c0zlsxzv",
+      "note": "jet lint --cost: an incomplete reachable cost projection ICEs or is accepted"
+    },
     {
       "at": "2026-11-07T06:30:07.274Z",
       "by": "Main",
