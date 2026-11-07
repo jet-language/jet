@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6638,
-    "rev": 94600,
+    "rev": 94625,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -29327,33 +29327,6 @@
           "at": "2026-09-22T16:28:25.396Z"
         },
         {
-          "n": 5,
-          "text": "Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:11:42.570Z"
-        },
-        {
-          "n": 6,
-          "text": "No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:11:42.570Z"
-        },
-        {
-          "n": 7,
-          "text": "The original criteria remain satisfied and #3509 consumers use the same canonical checked source and result/error model.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-21T21:02:44.057Z"
-        },
-        {
           "n": 8,
           "text": "[retarget] Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, and genuinely source-free diagnostics carry no origin.",
           "status": "open",
@@ -29373,12 +29346,12 @@
         },
         {
           "n": 10,
-          "text": "[retarget] The typed CompilerDiagnostic value (JetEval/JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged.",
+          "text": "[retarget] The typed CompilerDiagnostic value (JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T01:35:00.315Z"
+          "at": "2026-11-07T02:56:50.670Z"
         },
         {
           "n": 11,
@@ -29408,33 +29381,6 @@
           "at": "2026-09-29T01:35:02.085Z"
         },
         {
-          "n": 14,
-          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`cargo test --test compiler_api diagnostic_origin_identifies_imported_snapshot` passes: a two-file project (main imports helper; both contain one error) checked through `core.compiler` yields CompilerDiagnostic values whose `origin.path` and `origin.source_digest` name the file each diagnostic came from (sha256 of that snapshot), an in-memory pathless source has `origin.path == None` with a digest, and a source-free diagnostic has `origin == None`.\"",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:17:24.075Z"
-        },
-        {
-          "n": 15,
-          "text": "[retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementation; no new Rust test and no Rust compiler change. Replaces the Rust-compiler proof: \"`cargo test --test report diagnostic_origin_in_report_json` passes: `jet check --json` on the same project emits each report line with the originating file, never the entry path for the helper's error.\"",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-29T02:17:24.665Z"
-        },
-        {
-          "n": 16,
-          "text": "[#4086] Restore #3202 c2–c5 as split: each source-bound diagnostic names its checked snapshot, and pathless input has a digest. No diagnostic inherits the entry path. One versioned cutover covers typed, CLI and host values. The digest is computed once per snapshot.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-04T17:24:24.416Z"
-        },
-        {
           "n": 17,
           "text": "[#4089] Equivalent Jet-side two-file, pathless and source-free witnesses pass through the public API and report.",
           "status": "open",
@@ -29454,12 +29400,12 @@
         },
         {
           "n": 19,
-          "text": "[#3199] Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations. Values match exactly across the typed result and CLI JSON; the Rust facade comparison retargets to the Jet facade. A semantic-error result keeps diagnostics and an absent index, with no fallback faking complete facts. A new public record member goes to a ballot.",
+          "text": "[#3199] Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations. Values match exactly across the typed result and CLI JSON. A semantic-error result keeps diagnostics and an absent index, with no fallback faking complete facts. A new public record member goes to a ballot.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-10-04T17:24:27.377Z"
+          "at": "2026-11-07T02:56:55.291Z"
         },
         {
           "n": 20,
@@ -29498,7 +29444,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-07T02:56:45.936Z",
+      "updated": "2026-11-07T02:56:55.291Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "goals": [
@@ -30799,42 +30745,6 @@
       ],
       "criteria": [
         {
-          "n": 1,
-          "text": "Command names/options/examples/defaults agree with parsing and help.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:20.532Z"
-        },
-        {
-          "n": 2,
-          "text": "deterministic output and escaping.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:20.532Z"
-        },
-        {
-          "n": 3,
-          "text": "malformed/foreign embedded metadata fails safely.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:20.532Z"
-        },
-        {
-          "n": 4,
-          "text": "source program is not executed to extract docs.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:30:20.532Z"
-        },
-        {
           "n": 5,
           "text": "Compare the complete shared command fixture with parse/help and generated Markdown.",
           "status": "open",
@@ -30871,33 +30781,6 @@
           "at": "2026-09-12T14:30:20.532Z"
         },
         {
-          "n": 9,
-          "text": "Command hierarchy/options/examples and references agree with metadata.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:24.636Z"
-        },
-        {
-          "n": 10,
-          "text": "deterministic reproducible headers and correct escaping.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:24.636Z"
-        },
-        {
-          "n": 11,
-          "text": "bounded output, no target execution, no second parser.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:24.636Z"
-        },
-        {
           "n": 12,
           "text": "Compare command/default/visibility data against the same parse/help fixture.",
           "status": "open",
@@ -30932,42 +30815,6 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-09-12T14:31:24.636Z"
-        },
-        {
-          "n": 16,
-          "text": "Establish the concrete documentation consumer.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:25.981Z"
-        },
-        {
-          "n": 17,
-          "text": "compare projection from existing checked command schema/document representation.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:25.981Z"
-        },
-        {
-          "n": 18,
-          "text": "gate new stock output or dependency separately.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:25.981Z"
-        },
-        {
-          "n": 19,
-          "text": "no duplicate command model.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:25.981Z"
         },
         {
           "n": 20,
@@ -31015,24 +30862,6 @@
           "at": "2026-09-12T14:31:27.299Z"
         },
         {
-          "n": 25,
-          "text": "do not confuse a private embedded schema with a public export.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:27.299Z"
-        },
-        {
-          "n": 26,
-          "text": "ballot any new command/API/format rather than duplicating metadata.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-12T14:31:27.299Z"
-        },
-        {
           "n": 27,
           "text": "Round-trip emitted YAML through an independent reader and validate exact version1 fields.",
           "status": "open",
@@ -31070,12 +30899,12 @@
         },
         {
           "n": 31,
-          "text": "`jet test Compiler --profile golden cli/args_reference` passes and `cargo test --test cli_surface -- args_reference_consumers` validates man, ReST, Markdown and YAML output with real consumers.",
+          "text": "`jet test Compiler --profile golden cli/args_reference` passes, and a Jet test validates the man, ReST, Markdown and YAML output with real consumers (man, a ReST parser, a CommonMark renderer and an independent YAML reader).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:07:15.731Z"
+          "at": "2026-11-07T02:57:08.220Z"
         },
         {
           "n": 32,
@@ -31126,12 +30955,13 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:20.532Z",
-      "updated": "2026-11-06T18:38:23.285Z",
+      "updated": "2026-11-07T02:57:08.220Z",
       "updatedBy": "Main",
       "workOrder": 141,
       "goals": [
         "G5"
-      ]
+      ],
+      "criteriaLastN": 33
     },
     {
       "id": "c0uyfbge",
@@ -42131,31 +41961,13 @@
           "at": "2026-09-28T17:48:29.940Z"
         },
         {
-          "n": 4,
-          "text": "All UI snapshots are re-blessed and the diagnostics format and UI test suites pass.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-28T17:48:29.940Z"
-        },
-        {
-          "n": 5,
-          "text": "Every implementing lane was an `opus-worker` (Claude Opus 5.5) lane; the card log lists the lanes and their CHECK OK receipts.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-09-28T17:48:29.940Z"
-        },
-        {
           "n": 6,
-          "text": "`cargo test --test diagnostics_format every_active_diagnostic_reads_in_plain_words` passes: over every active row of `jet_foundation::Registry::diagnostic_rows()` it finds 0 Why fields matching `The registered .* rule applies here`, 0 decision IDs (`D-[A-Z0-9-]+`, `S[0-9]+`) in what/why/fix, and 0 rows whose What equals Meaning; the test's failure message prints the offending codes, and `node Compiler/Bootstrap/generate-diagnostic-rows.mjs` refuses to generate from a row that breaks the same rules.",
+          "text": "A Jet test over every active diagnostic registry row finds 0 Why fields matching `The registered .* rule applies here`, 0 decision IDs (`D-[A-Z0-9-]+`, `S[0-9]+`) in what/why/fix, and 0 rows whose What equals Meaning; its failure message prints the offending codes.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-09-29T02:17:28.602Z"
+          "at": "2026-11-07T02:57:10.774Z"
         },
         {
           "n": 7,
@@ -42821,11 +42633,12 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-06T17:56:21.103Z",
+      "updated": "2026-11-07T02:57:10.774Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
-      ]
+      ],
+      "criteriaLastN": 78
     },
     {
       "id": "c0jxsy7l",
@@ -185577,6 +185390,181 @@
   ],
   "events": [
     {
+      "at": "2026-11-07T02:57:10.774Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0o8f1p4",
+      "note": "#6: The proof named cargo and the deleted Rust registry and Bootstrap generator; it now names a Jet test.; was: `cargo test --test diagnostics_format every_active_diagnostic_reads_in_plain_words` passes: over every active row of `jet_foundation::Registry::diagnostic_rows()` it finds 0 Why fields matching `The r"
+    },
+    {
+      "at": "2026-11-07T02:57:09.932Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0o8f1p4",
+      "note": "#5: OBE: a staffing rule about which model ran each lane, not an acceptance condition.; was [open]: Every implementing lane was an `opus-worker` (Claude Opus 5.5) lane; the card log lists the lanes and their CHECK OK receipts."
+    },
+    {
+      "at": "2026-11-07T02:57:09.073Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0o8f1p4",
+      "note": "#4: OBE: landing hygiene (\"snapshots re-blessed, suites pass\"); each row names its own snapshot.; was [open]: All UI snapshots are re-blessed and the diagnostics format and UI test suites pass."
+    },
+    {
+      "at": "2026-11-07T02:57:08.220Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0ym70o1",
+      "note": "#31: The proof named cargo; it now names a Jet test.; was: `jet test Compiler --profile golden cli/args_reference` passes and `cargo test --test cli_surface -- args_reference_consumers` validates man, ReST, Markdown and YAML output with real consumers."
+    },
+    {
+      "at": "2026-11-07T02:57:07.278Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#26: Duplicate of the AGENTS.md owner-gate rule (new command, API or format needs a ballot); not an acceptance condition.; was [open]: ballot any new command/API/format rather than duplicating metadata."
+    },
+    {
+      "at": "2026-11-07T02:57:06.312Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#25: OBE: a caution with no testable condition; c28 and c29 state what the YAML output may expose.; was [open]: do not confuse a private embedded schema with a public export."
+    },
+    {
+      "at": "2026-11-07T02:57:05.427Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#19: Duplicate of c8 (one schema/formatter owner, no duplicate command model).; was [open]: no duplicate command model."
+    },
+    {
+      "at": "2026-11-07T02:57:04.554Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#18: Duplicate of the AGENTS.md owner-gate rule (new output or dependency needs a ballot); not an acceptance condition.; was [open]: gate new stock output or dependency separately."
+    },
+    {
+      "at": "2026-11-07T02:57:03.583Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#17: Duplicate of c20 (projection from the same checked command model).; was [open]: compare projection from existing checked command schema/document representation."
+    },
+    {
+      "at": "2026-11-07T02:57:02.725Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#16: OBE: process note (\"establish the consumer\"); c13, c22 and c27 name the real consumer per format.; was [open]: Establish the concrete documentation consumer."
+    },
+    {
+      "at": "2026-11-07T02:57:01.879Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#11: Duplicate of c14 and c15 (man output caps, no target execution).; was [open]: bounded output, no target execution, no second parser."
+    },
+    {
+      "at": "2026-11-07T02:57:00.991Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#10: Duplicate of c13 and c14 (man escaping and deterministic headers).; was [open]: deterministic reproducible headers and correct escaping."
+    },
+    {
+      "at": "2026-11-07T02:57:00.069Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#9: Duplicate of c12 (man command data compared against the parse/help fixture).; was [open]: Command hierarchy/options/examples and references agree with metadata."
+    },
+    {
+      "at": "2026-11-07T02:56:59.130Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#4: Duplicate of c15 and c23 (no target execution).; was [open]: source program is not executed to extract docs."
+    },
+    {
+      "at": "2026-11-07T02:56:58.235Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#3: Duplicate of c30 (malformed metadata gives structured errors).; was [open]: malformed/foreign embedded metadata fails safely."
+    },
+    {
+      "at": "2026-11-07T02:56:57.201Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#2: Duplicate of the per-format determinism and escaping rows c6, c7, c13, c14, c21, c22 and c24.; was [open]: deterministic output and escaping."
+    },
+    {
+      "at": "2026-11-07T02:56:56.206Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0ym70o1",
+      "note": "#1: Duplicate of the per-format comparisons c5, c12, c20 and c24 against the shared parse/help fixture.; was [open]: Command names/options/examples/defaults agree with parsing and help."
+    },
+    {
+      "at": "2026-11-07T02:56:55.291Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#19: The Rust facade it compared against is deleted.; was: [#3199] Typed consumers read definitions, references, calls, effects, state_graphs, fact_registry and derivations. Values match exactly across the typed result and CLI JSON; the Rust facade comparison"
+    },
+    {
+      "at": "2026-11-07T02:56:54.384Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#16: Duplicate of c8-c11, which already restore c2-c5 as split rows.; was [open]: [#4086] Restore #3202 c2–c5 as split: each source-bound diagnostic names its checked snapshot, and pathless input has a digest. No diagnostic inherits the entry path. One versioned cutover covers type"
+    },
+    {
+      "at": "2026-11-07T02:56:53.386Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#15: Duplicate of c17 (the equivalent Jet-side witnesses), which replaces the deleted Rust proofs.; was [open]: [retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementat"
+    },
+    {
+      "at": "2026-11-07T02:56:52.320Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#14: Duplicate of c17 (the equivalent Jet-side two-file, pathless and source-free witnesses), which replaces the deleted Rust proofs.; was [open]: [retarget] Jet-side proof (Rust freeze 2026-10-01): the behavior the replaced Rust test checks holds on the Jet compiler or the Jet-hosted tool, shown by an equivalent test against the Jet implementat"
+    },
+    {
+      "at": "2026-11-07T02:56:50.670Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0dktg7a",
+      "note": "#10: JetEval is retired (no interpreter tier).; was: [retarget] The typed CompilerDiagnostic value (JetEval/JetSema), the host DiagnosticCodec and the CLI/LSP report cut over together to one versioned shape; package-model schemas are unchanged."
+    },
+    {
+      "at": "2026-11-07T02:56:49.653Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#7: Duplicate of c13, its retarget.; was [open]: The original criteria remain satisfied and #3509 consumers use the same canonical checked source and result/error model."
+    },
+    {
+      "at": "2026-11-07T02:56:48.454Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#6: Duplicate of c12, its retarget.; was [open]: No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced."
+    },
+    {
+      "at": "2026-11-07T02:56:47.341Z",
+      "by": "Main",
+      "action": "card.criteria-remove",
+      "ref": "c0dktg7a",
+      "note": "#5: Duplicate of c11, its retarget (digest once per snapshot).; was [open]: Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text."
+    },
+    {
       "at": "2026-11-07T02:56:45.936Z",
       "by": "Main",
       "action": "card.criteria-remove",
@@ -189047,713 +189035,6 @@
       "action": "card.criteria-reopen",
       "ref": "c0hn7w1n",
       "note": "#125: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:36.802Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0hn7w1n",
-      "note": "#124: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:35.928Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0hn7w1n",
-      "note": "#120: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:35.007Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0hn7w1n",
-      "note": "#119: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:34.014Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0hn7w1n",
-      "note": "#118: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:32.712Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0hn7w1n",
-      "note": "#94: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:30.501Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#88"
-    },
-    {
-      "at": "2026-11-07T02:08:29.584Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#85"
-    },
-    {
-      "at": "2026-11-07T02:08:28.673Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#79"
-    },
-    {
-      "at": "2026-11-07T02:08:27.752Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#78"
-    },
-    {
-      "at": "2026-11-07T02:08:26.767Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#64"
-    },
-    {
-      "at": "2026-11-07T02:08:25.861Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#63"
-    },
-    {
-      "at": "2026-11-07T02:08:24.941Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#52"
-    },
-    {
-      "at": "2026-11-07T02:08:23.851Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#49"
-    },
-    {
-      "at": "2026-11-07T02:08:22.561Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#48"
-    },
-    {
-      "at": "2026-11-07T02:08:21.529Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#43"
-    },
-    {
-      "at": "2026-11-07T02:08:20.579Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#38"
-    },
-    {
-      "at": "2026-11-07T02:08:19.560Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#86: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:18.519Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#83: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:17.443Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#77: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:16.416Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#76: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:15.303Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#62: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:14.343Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#61: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:13.330Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#50: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:12.194Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#47: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:11.087Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#40: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:09.957Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#37: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:08:08.889Z",
-      "by": "Main",
-      "action": "card.criteria-reopen",
-      "ref": "c0h18kyi",
-      "note": "#36: Met by mistake: the 2026-11-06 audit script used list position, not the criterion number; the evidence belongs to another criterion."
-    },
-    {
-      "at": "2026-11-07T02:07:13.867Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n1stxi",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-07T02:07:04.475Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6586",
-      "note": "Card #6586: rule on 1 proposed criterion cut"
-    },
-    {
-      "at": "2026-11-07T02:07:02.984Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6582",
-      "note": "Card #6582: rule on 1 proposed criterion cut"
-    },
-    {
-      "at": "2026-11-07T02:07:01.885Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6564",
-      "note": "Card #6564: rule on 1 proposed criterion cut"
-    },
-    {
-      "at": "2026-11-07T02:07:00.791Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6425",
-      "note": "Card #6425: rule on 1 proposed criterion cut"
-    },
-    {
-      "at": "2026-11-07T02:06:59.781Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6419",
-      "note": "Card #6419: rule on 3 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:58.791Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6418",
-      "note": "Card #6418: rule on 37 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:57.835Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6206",
-      "note": "Card #6206: rule on 7 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:56.863Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6151",
-      "note": "Card #6151: rule on 2 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:55.889Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6111",
-      "note": "Card #6111: rule on 3 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:54.881Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6096",
-      "note": "Card #6096: rule on 1 proposed criterion cut"
-    },
-    {
-      "at": "2026-11-07T02:06:53.853Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-6035",
-      "note": "Card #6035: rule on 1 proposed criterion cut"
-    },
-    {
-      "at": "2026-11-07T02:06:52.830Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-5454",
-      "note": "Card #5454: rule on 25 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:51.855Z",
-      "by": "Main",
-      "action": "decision.delete",
-      "ref": "D-CUT-3955",
-      "note": "Card #3955: rule on 3 proposed criteria cuts"
-    },
-    {
-      "at": "2026-11-07T02:06:19.814Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T02:04:54.734Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0gaxqxg",
-      "note": "#6 The JetRuntime/Tests plain transport (CompilerRegistries.jet"
-    },
-    {
-      "at": "2026-11-07T02:04:40.973Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c081c9o8",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-07T02:03:37.330Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#195"
-    },
-    {
-      "at": "2026-11-07T02:03:36.424Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#171"
-    },
-    {
-      "at": "2026-11-07T02:03:35.428Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#170"
-    },
-    {
-      "at": "2026-11-07T02:03:34.461Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#169"
-    },
-    {
-      "at": "2026-11-07T02:03:33.538Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#153"
-    },
-    {
-      "at": "2026-11-07T02:03:32.603Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#138"
-    },
-    {
-      "at": "2026-11-07T02:03:31.652Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#137"
-    },
-    {
-      "at": "2026-11-07T02:03:30.683Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#131"
-    },
-    {
-      "at": "2026-11-07T02:03:29.493Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#130"
-    },
-    {
-      "at": "2026-11-07T02:03:28.498Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#111"
-    },
-    {
-      "at": "2026-11-07T02:03:27.293Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#104"
-    },
-    {
-      "at": "2026-11-07T02:03:26.348Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#95"
-    },
-    {
-      "at": "2026-11-07T02:03:25.410Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#82"
-    },
-    {
-      "at": "2026-11-07T02:03:24.484Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#81"
-    },
-    {
-      "at": "2026-11-07T02:03:23.573Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uwol3w",
-      "note": "#80"
-    },
-    {
-      "at": "2026-11-07T02:03:22.600Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#130"
-    },
-    {
-      "at": "2026-11-07T02:03:21.539Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#129"
-    },
-    {
-      "at": "2026-11-07T02:03:20.591Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#128"
-    },
-    {
-      "at": "2026-11-07T02:03:19.527Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#127"
-    },
-    {
-      "at": "2026-11-07T02:03:18.423Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#126"
-    },
-    {
-      "at": "2026-11-07T02:03:17.265Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#125"
-    },
-    {
-      "at": "2026-11-07T02:03:16.180Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#124"
-    },
-    {
-      "at": "2026-11-07T02:03:15.015Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#123"
-    },
-    {
-      "at": "2026-11-07T02:03:13.804Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#120"
-    },
-    {
-      "at": "2026-11-07T02:03:12.581Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#119"
-    },
-    {
-      "at": "2026-11-07T02:03:11.274Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#118"
-    },
-    {
-      "at": "2026-11-07T02:03:10.198Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#94"
-    },
-    {
-      "at": "2026-11-07T02:03:09.048Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#74"
-    },
-    {
-      "at": "2026-11-07T02:03:07.865Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#73"
-    },
-    {
-      "at": "2026-11-07T02:03:06.757Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#72"
-    },
-    {
-      "at": "2026-11-07T02:03:05.610Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#71"
-    },
-    {
-      "at": "2026-11-07T02:03:04.437Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0hn7w1n",
-      "note": "#70"
-    },
-    {
-      "at": "2026-11-07T02:03:03.340Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0pgowhn",
-      "note": "#21"
-    },
-    {
-      "at": "2026-11-07T02:03:02.248Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#86"
-    },
-    {
-      "at": "2026-11-07T02:03:01.136Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#83"
-    },
-    {
-      "at": "2026-11-07T02:02:59.476Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#77"
-    },
-    {
-      "at": "2026-11-07T02:02:58.387Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#76"
-    },
-    {
-      "at": "2026-11-07T02:02:57.382Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#62"
-    },
-    {
-      "at": "2026-11-07T02:02:56.201Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#61"
-    },
-    {
-      "at": "2026-11-07T02:02:55.139Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#50"
-    },
-    {
-      "at": "2026-11-07T02:02:54.122Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#47"
-    },
-    {
-      "at": "2026-11-07T02:02:53.076Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#46"
-    },
-    {
-      "at": "2026-11-07T02:02:51.930Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#44"
-    },
-    {
-      "at": "2026-11-07T02:02:50.980Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#42"
-    },
-    {
-      "at": "2026-11-07T02:02:50.099Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#41"
-    },
-    {
-      "at": "2026-11-07T02:02:49.216Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#40"
-    },
-    {
-      "at": "2026-11-07T02:02:48.255Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#39"
-    },
-    {
-      "at": "2026-11-07T02:02:47.412Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#37"
-    },
-    {
-      "at": "2026-11-07T02:02:46.541Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0h18kyi",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-07T01:59:09.403Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0h06654",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T01:52:21.373Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ozzmvc",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-07T01:52:15.726Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tltpjp",
-      "note": "#7 jet_cli's package tests pass: canonical_rewrite_rules_are_ex"
-    },
-    {
-      "at": "2026-11-07T01:50:41.456Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tltpjp",
-      "note": "#6 truthfulness.jet s3_guard_docs_examples passes: no doc refer"
-    },
-    {
-      "at": "2026-11-07T01:50:40.331Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tltpjp",
-      "note": "#5 syntax_reconciliation.jet s2_syntax_live_surface_has_no_reti"
-    },
-    {
-      "at": "2026-11-07T01:50:39.081Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tltpjp",
-      "note": "#4 diagnostics_coverage.jet marker_name_literals_stay_in_the_re"
-    },
-    {
-      "at": "2026-11-07T01:50:38.059Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tltpjp",
-      "note": "#3 diagnostics_coverage.jet runtime_user_error_codes_use_jet_pa"
-    },
-    {
-      "at": "2026-11-07T01:50:37.007Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0tltpjp",
-      "note": "#2 diagnostics_coverage.jet registered_unimplemented_codes_are_"
     }
   ],
   "nextNum": 368,
