@@ -725,6 +725,7 @@ specification: fn(id: String) -> Spec? Never! {
             "Unicode" -> Val((call: Val("unicode_tests"), witness: "", expected: ""))
             "Secret" -> Val((call: Val("secret_tests"), witness: "", expected: "secret tests: ok\n"))
             "FilesWalk" -> Val((call: Val("files_walk_tests"), witness: "", expected: ""))
+            "HostParallelism" -> Val((call: Val("host_parallelism_tests"), witness: "", expected: ""))
             "TestSuite" -> Val((call: None, witness: "{RT}test-suite-fixture.c", expected: "test suite: ok\n"))
             "Parallel" -> Val((call: None, witness: "{RT}parallel-fixture.c", expected: ""))
             "Scheduler" -> Val((call: None, witness: "{RT}scheduler-fixture.c", expected: ""))
@@ -744,12 +745,6 @@ specification: fn(id: String) -> Spec? Never! {
             found := spec("process-fixture", name, "{RT}run-process-witnesses.mjs")
             found.witness = "{RT}{name}Witness.c"
             found.expected_file = "{RT}{name}Witness.stdout"
-            return Val(found)
-        }
-        if name == "HostParallelism" {
-            found := spec("native-suite", name, "{RT}run-host-parallelism-fixtures.mjs")
-            found.witness = "{RT}{name}Witness.c"
-            found.modes = [String]{"assemble", "lower", "audit", "link", "run"}
             return Val(found)
         }
         suite: if name == {
@@ -827,7 +822,6 @@ spec_dyn: fn(found: Spec, runner_sha256: String) -> Dyn Never! {
         entries["runner"] = Dyn.Text(found.runner.copy())
         if found.witness != "" -> entries["witness"] = Dyn.Text(found.witness.copy())
         if found.expected_file != "" -> entries["expectedFile"] = Dyn.Text(found.expected_file.copy())
-        if found.kind == "native-suite" -> entries["modes"] = texts(found.modes)
         if found.kind == "runner" {
             entries["calls"] = Dyn.Array(found.calls.map(call -> Dyn.Object([String: Dyn]{"mode": Dyn.Text(call.mode.copy()), "witness": Dyn.Text(call.witness.copy()), "expected": Dyn.Text(call.expected.copy())})))
         }
@@ -1316,16 +1310,6 @@ drive: fn(lane: &Lane, found: Spec) Problem! -[Env, Exec, FS, IO, Time, Time.Wai
         ok: int_field(result, "status") == Val(0) && text_field(result, "test") == found.name
         if found.kind == "codec-fixture" && !(ok && field(result, "stdout") == .Text("") && field(result, "stderr") == .Text("")) -> return Err(problem("named native codec/file fixture receipt differs"))
         if found.kind == "process-fixture" && !(ok && text_field(result, "witness") == "{found.name}Witness") -> return Err(problem("named native process fixture receipt differs"))
-        return Ok(())
-    }
-    if found.kind == "native-suite" {
-        loop mode in found.modes {
-            execute(lane, node_bin, [String]{"{repo}/{found.runner}", out, mode}, out, [Setting]{Setting{name: "JET_FRONT_JETC0", value: staged.copy()}}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-        }
-        result: read_json("{out}/run.receipt.json") ?? return Err(err)
-        if int_field(result, "status") != Val(0) || truthy(field(result, "signal")) || truthy(field(result, "error")) || field(result, "stdout") != .Text("") || field(result, "stderr") != .Text("") {
-            return Err(problem("native files/host fixture receipt differs"))
-        }
         return Ok(())
     }
     if found.kind == "suite" {
@@ -2176,7 +2160,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
     }
 }
 
-#Test("codec, process and native-suite transports drive the selected real fixture") {
+#Test("codec and process transports drive the selected real fixture") {
     repo: test_repo()
     loop name in ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
@@ -2192,24 +2176,23 @@ fragment_registry: fn(name: String) -> Registry Never! {
             assert(sources.contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.stdout")))
         }
     }
-    loop name in ([String]{"HostParallelism"}) {
-        entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
-        assert_eq(text_field(field(entry, "transport"), "type"), "native-suite")
-        assert(array_field(entry, "sources").contains(Dyn.Text("Compiler/JetRuntime/Tests/{name}Witness.c")))
-        found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
-        assert_eq(found.modes, [String]{"assemble", "lower", "audit", "link", "run"})
-    }
 }
 
 #Test("a plain transport runs its generated entry driver or its committed C host") {
     repo: test_repo()
-    loop name in ([String]{"Alloc", "FilesWalk", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
+    loop name in ([String]{"Alloc", "FilesWalk", "HostParallelism", "TestSuite", "Parallel", "Scheduler", "World", "Sentry", "TestScope", "AllocationPolicy"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         transport: field(entry, "transport")
         assert_eq(text_field(transport, "type"), "plain")
         assert_eq(text_field(transport, "runner"), "Tools/agent/CompilerPackages.jet")
-        if name == "Alloc" || name == "FilesWalk" {
-            assert_eq(text_field(transport, "call"), if name == "Alloc" -> "alloc_tests" else -> "files_walk_tests")
+        call: if name == {
+            "Alloc" -> "alloc_tests"
+            "FilesWalk" -> "files_walk_tests"
+            "HostParallelism" -> "host_parallelism_tests"
+            else -> ""
+        }
+        if call != "" {
+            assert_eq(text_field(transport, "call"), call)
             assert(field(transport, "witness") == Dyn.Null)
             assert(field(transport, "fragments") == texts([String]{name.copy()}))
             next
