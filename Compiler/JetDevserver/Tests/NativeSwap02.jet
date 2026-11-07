@@ -1,89 +1,103 @@
-use {
-    jet_devserver.NativeSwap.[NativeSwapBlockingFact, NativeSwapCapability, NativeSwapConnectionHandle, NativeSwapExecutable, NativeSwapListenerHandle, NativeSwapPhase, NativeSwapPlan, NativeSwapQuiescence, NativeSwapRelocationFacts, NativeSwapRevision, NativeSwapSourceIdentity, NativeSwapState]
+use jet_foundation.[HotSwapDecision, HotSwapCompatibility]
 
-    jet_foundation.HotSwap.[HotSwapDecision, HotSwapCompatibility]
+NativeSwapTestFixture: struct {
+    source: NativeSwapSourceIdentity
+    executable: NativeSwapExecutable
+    listener: NativeSwapListenerHandle
+    connection: NativeSwapConnectionHandle
+}
+native_swap_test_fixture: fn() -> NativeSwapTestFixture {
+    source: NativeSwapSourceIdentity.new("server.jet") ?? panic("source identity")
+    revision: NativeSwapRevision.new("code-1", "data-1") ?? panic("revision")
+    NativeSwapTestFixture{
+        source: source,
+        executable: NativeSwapExecutable.new(source, revision, U64{1}) ?? panic("executable"),
+        listener: NativeSwapListenerHandle.compatible("http", source, U64{1}) ?? panic("listener"),
+        connection: NativeSwapConnectionHandle.compatible("conn-7", "http", source, U64{1}) ?? panic("connection"),
+    }
+}
+native_swap_test_state: fn(fixture: NativeSwapTestFixture) -> NativeSwapState {
+    NativeSwapState.new(fixture.executable, [NativeSwapListenerHandle]{fixture.listener}, [NativeSwapConnectionHandle]{fixture.connection}) ?? panic("state")
+}
+native_swap_test_decision: fn() -> HotSwapDecision {
+    HotSwapDecision{
+        module_ref: "server.jet", compatibility: HotSwapCompatibility.Compatible, changed: [String]{},
+        changed_functions: [String]{"server.jet::fn:main"}, state: [], schema_migrations: [], rechecked_items: [], change_facts: [],
+    }
+}
+native_swap_test_plan: fn(source: NativeSwapSourceIdentity, executable: NativeSwapExecutable, listener: NativeSwapListenerHandle, connection: NativeSwapConnectionHandle) -> NativeSwapPlan {
+    revision: NativeSwapRevision.new("code-2", "data-1") ?? panic("next revision")
+    next: NativeSwapExecutable.new(source, revision, U64{2}) ?? panic("next executable")
+    plan: NativeSwapPlan.new(source, executable, next, NativeSwapCapability.resident(), native_swap_test_decision()) ?? panic("plan")
+    plan.preserve_listener(listener).preserve_connection(connection)
+}
+native_swap_test_rejection: fn(state: &NativeSwapState, plan: NativeSwapPlan) -> NativeSwapError {
+    if state.pause(plan) == .Err(error) -> return error
+    panic("expected the native swap to reject the plan")
 }
 
-fixture: fn() -> (NativeSwapSourceIdentity, NativeSwapExecutable, NativeSwapListenerHandle, NativeSwapConnectionHandle) {
-    source: NativeSwapSourceIdentity.new("server.jet").unwrap()
-    revision: NativeSwapRevision.new("code-1", "data-1").unwrap()
-    executable: NativeSwapExecutable.new(source.copy(), revision, 1).unwrap()
-    listener: NativeSwapListenerHandle.compatible("http", source.copy(), 1).unwrap()
-    connection: NativeSwapConnectionHandle.compatible("conn-7", "http", source.copy(), 1).unwrap()
-    (_0: source.move(), _1: executable.move(), _2: listener.move(), _3: connection.move())
-}
-compatible_decision: fn() -> HotSwapDecision {
-    HotSwapDecision { module_ref: "server.jet", compatibility: .Compatible, changed: [],
-        changed_functions: ["server.jet::fn:main"], state: [], schema_migrations: [], rechecked_items: [], change_facts: [] }
-}
-compatible_plan: fn(source: NativeSwapSourceIdentity, executable: NativeSwapExecutable, listener: NativeSwapListenerHandle, connection: NativeSwapConnectionHandle) -> NativeSwapPlan {
-    next: NativeSwapExecutable.new(source.copy(), NativeSwapRevision.new("code-2", "data-1").unwrap(), 2).unwrap()
-    NativeSwapPlan.new(source, executable, next, NativeSwapCapability.resident(), compatible_decision()).unwrap()
-        .preserve_listener(listener).preserve_connection(connection)
-}
 #Test("compatible_swap_keeps_only_explicit_compatible_handles") {
-    (source, executable, listener, connection): fixture()
-    other_listener: NativeSwapListenerHandle.compatible("metrics", source.copy(), 1).unwrap()
-    state := NativeSwapState.new(executable.copy(), [listener.copy(), other_listener.move()], [connection.copy()]).unwrap()
-    plan: compatible_plan(source, executable, listener, connection)
-    state.pause(plan).unwrap()
-    state.apply(plan).unwrap()
-    receipt: state.commit().unwrap()
+    fixture: native_swap_test_fixture()
+    other_listener: NativeSwapListenerHandle.compatible("metrics", fixture.source, U64{1}) ?? panic("other listener")
+    state := NativeSwapState.new(fixture.executable, [NativeSwapListenerHandle]{fixture.listener, other_listener}, [NativeSwapConnectionHandle]{fixture.connection}) ?? panic("state")
+    plan: native_swap_test_plan(fixture.source, fixture.executable, fixture.listener, fixture.connection)
+    state.pause(plan) ?? panic("pause")
+    state.apply(plan) ?? panic("apply")
+    receipt: state.commit() ?? panic("commit")
     assert(receipt.committed())
-    assert_eq(state.generation(), 2)
+    assert_eq(state.generation(), U64{2})
     assert_eq(state.listener_count(), 1)
     assert_eq(state.connection_count(), 1)
-    assert_eq(receipt.preserved_listeners, ["http"])
-    assert_eq(receipt.reset_listeners, ["metrics"])
-    assert_eq(receipt.preserved_connections, ["conn-7"])
+    assert_eq(receipt.preserved_listeners, [String]{"http"})
+    assert_eq(receipt.reset_listeners, [String]{"metrics"})
+    assert_eq(receipt.preserved_connections, [String]{"conn-7"})
 }
 #Test("incompatible_plan_is_rejected_before_pause_mutates_state") {
-    (source, executable, listener, connection): fixture()
-    state := NativeSwapState.new(executable.copy(), [listener.copy()], [connection.copy()]).unwrap()
-    plan: compatible_plan(source, executable.copy(), listener, connection).mark_layout_changed(["Order"])
-    before: state.copy()
-    error: state.pause(plan).unwrap_err()
+    fixture: native_swap_test_fixture()
+    state := native_swap_test_state(fixture)
+    plan: native_swap_test_plan(fixture.source, fixture.executable, fixture.listener, fixture.connection).mark_layout_changed([String]{"Order"})
+    before: state
+    error: native_swap_test_rejection(state, plan)
     assert_eq(error.blocking_fact(), NativeSwapBlockingFact.LayoutChanged)
     assert_eq(state, before)
     assert(error.render().contains("source=server.jet"))
     assert(error.render().contains("blocking_fact=layout_changed"))
 }
 #Test("rollback_restores_prior_executable_and_handles") {
-    (source, executable, listener, connection): fixture()
-    state := NativeSwapState.new(executable.copy(), [listener.copy()], [connection.copy()]).unwrap()
-    plan: compatible_plan(source, executable.copy(), listener, connection)
-    state.pause(plan).unwrap()
-    state.apply(plan).unwrap()
-    assert_eq(state.generation(), 2)
-    receipt: state.rollback().unwrap()
+    fixture: native_swap_test_fixture()
+    state := native_swap_test_state(fixture)
+    plan: native_swap_test_plan(fixture.source, fixture.executable, fixture.listener, fixture.connection)
+    state.pause(plan) ?? panic("pause")
+    state.apply(plan) ?? panic("apply")
+    assert_eq(state.generation(), U64{2})
+    receipt: state.rollback() ?? panic("rollback")
     assert(receipt.rolled_back())
-    assert_eq(state.executable(), executable)
+    assert_eq(state.executable, fixture.executable)
     assert_eq(state.listener_count(), 1)
     assert_eq(state.connection_count(), 1)
-    assert_eq(state.phase(), NativeSwapPhase.Ready)
+    assert_eq(state.phase, NativeSwapPhase.Ready)
 }
 #Test("quiescence_and_strategy_failures_name_exact_facts") {
-    (source, executable, listener, connection): fixture()
-    state := NativeSwapState.new(executable.copy(), [listener.copy()], [connection.copy()]).unwrap()
-    plan: compatible_plan(source.copy(), executable, listener, connection).with_quiescence(NativeSwapQuiescence.pending(2))
-    error: state.pause(plan).unwrap_err()
-    assert_eq(error.blocking_fact(), NativeSwapBlockingFact.QuiescenceRequired)
-    assert_eq(error.source_id(), "server.jet")
-    executable: state.executable().copy()
-    listener: state.listener("http").unwrap().copy()
-    connection: state.connection("conn-7").unwrap().copy()
-    plan: compatible_plan(source, executable, listener, connection).with_relocation(NativeSwapRelocationFacts.new(.Reject))
-    error: state.pause(plan).unwrap_err()
-    assert_eq(error.blocking_fact(), NativeSwapBlockingFact.RelocationUnsupported)
+    fixture: native_swap_test_fixture()
+    state := native_swap_test_state(fixture)
+    pending: native_swap_test_plan(fixture.source, fixture.executable, fixture.listener, fixture.connection).with_quiescence(NativeSwapQuiescence.pending(U64{2}))
+    quiescence: native_swap_test_rejection(state, pending)
+    assert_eq(quiescence.blocking_fact(), NativeSwapBlockingFact.QuiescenceRequired)
+    assert_eq(quiescence.source_id(), "server.jet")
+    listener: state.listener("http") ?? panic("resident listener")
+    connection: state.connection("conn-7") ?? panic("resident connection")
+    rejecting: native_swap_test_plan(fixture.source, state.executable, listener, connection).with_relocation(NativeSwapRelocationFacts.new(NativeSwapRelocationStrategy.Reject))
+    relocation: native_swap_test_rejection(state, rejecting)
+    assert_eq(relocation.blocking_fact(), NativeSwapBlockingFact.RelocationUnsupported)
 }
 #Test("receipt_order_and_explanation_are_deterministic") {
-    (source, executable, listener, connection): fixture()
-    state := NativeSwapState.new(executable.copy(), [listener.copy()], [connection.copy()]).unwrap()
-    plan: compatible_plan(source, executable, listener, connection)
-    assert_eq(state.explain_reload(plan).blocking_fact, NativeSwapBlockingFact.None)
-    state.pause(plan).unwrap()
-    state.apply(plan).unwrap()
-    receipt: state.commit().unwrap()
+    fixture: native_swap_test_fixture()
+    state := native_swap_test_state(fixture)
+    plan: native_swap_test_plan(fixture.source, fixture.executable, fixture.listener, fixture.connection)
+    assert_eq(state.explain_reload(plan).blocking_fact, NativeSwapBlockingFact.Unblocked)
+    state.pause(plan) ?? panic("pause")
+    state.apply(plan) ?? panic("apply")
+    receipt: state.commit() ?? panic("commit")
     rendered: receipt.render()
     assert(rendered.contains("outcome=committed"))
     assert(rendered.contains("preserved_listeners=[http]"))
