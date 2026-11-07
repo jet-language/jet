@@ -61,10 +61,16 @@
 // `precommit` runs the census for a commit touching FILE... when one of them
 // is a compiler input (or a runtime, backend, Core or Jetpack source or a
 // sources.list), with every pass, then, for every commit, the repository
-// ratchets `--check` in the worktree with the seed (RATCHETS: the unsafe-region
-// baseline in Docs/spec/safety.md, the Core coverage list and the compiler's
-// copies of the Prelude sources). Every pass runs
-// and reports its rows; it prints PRECOMMIT OK or PRECOMMIT FAILED.
+// ratchets `--check` in the worktree with the seed, RATCHET_JOBS at once
+// (RATCHETS: the unsafe-region baseline in Docs/spec/safety.md, the Core
+// coverage list, and every generator with committed output: the compiler's
+// copies of the Prelude sources, the diagnostic, Core source, owned-trait,
+// vocabulary and lexer-keyword rows, the collation table and the runtime
+// tables). Every pass runs and reports its rows; it prints PRECOMMIT OK or
+// PRECOMMIT FAILED.
+//
+// `ratchets` prints RATCHETS, one tool per line, for a lander that runs them
+// itself.
 //
 // `prescreen` is the lander's admission check of one job: PATCH, after the
 // EARLIER_PATCHes already admitted, applied to an export of HEAD, then the
@@ -112,8 +118,21 @@ GENERATED_VIEWS: [String]{"Compiler/JetCli/Source/Cli/CoreSources.jet", "Compile
 HEAVY_MEMORY: "32G"
 HEAVY_CPUS: "16-27"
 HEAVY_STACK: "--stack=1073741824:1073741824"
-// The ratchets every commit keeps, each run as `jet TOOL --check`.
-RATCHETS: [String]{"Tools/agent/UnsafeRatchet.jet", "Tools/agent/CoreCoverage.jet", "Tools/agent/PreludeSources.jet"}
+// The ratchets every commit keeps, each run as `jet TOOL --check`, and how
+// many run at once.
+RATCHETS: [String]{
+    "Tools/agent/UnsafeRatchet.jet",
+    "Tools/agent/CoreCoverage.jet",
+    "Tools/agent/PreludeSources.jet",
+    "Tools/agent/DiagnosticRows.jet",
+    "Tools/agent/CoreSourceRows.jet",
+    "Tools/agent/OwnedTraitRows.jet",
+    "Tools/agent/VocabularyRows.jet",
+    "Tools/agent/LexerKeywordRows.jet",
+    "Tools/agent/CollationTable.jet",
+    "Tools/agent/RuntimeGenerators.jet",
+}
+RATCHET_JOBS: 5
 
 run: fn() {
     args: process.args()
@@ -127,6 +146,7 @@ run: fn() {
         "queue" -> queue_main(rest)
         "census" -> census_main(rest)
         "precommit" -> precommit_main(rest)
+        "ratchets" -> ratchets_main(rest)
         "prescreen" -> prescreen_main(rest)
         "receipt" -> receipt_main(rest)
         else -> usage()
@@ -139,6 +159,7 @@ usage: fn() -[Exec, IO]> Never {
     term.eprint("       jet Tools/agent/Land.jet queue LANE BASE...")
     term.eprint("       jet Tools/agent/Land.jet census [FILE]...")
     term.eprint("       jet Tools/agent/Land.jet precommit FILE...")
+    term.eprint("       jet Tools/agent/Land.jet ratchets")
     term.eprint("       jet Tools/agent/Land.jet prescreen PATCH [EARLIER_PATCH]...")
     term.eprint("       jet Tools/agent/Land.jet receipt identity TREE")
     term.eprint("       jet Tools/agent/Land.jet receipt check LAUNCHER TREE SEED_DIR")
@@ -827,7 +848,7 @@ push_u64: fn(out: &[U8], value: Int) {
     rest := value
     loop _ in 0..<8 {
         digits.push(U8.from_int(rest % 256) ?? U8{0})
-        rest = rest /% 256
+        rest /%= 256
     }
     loop at in 0..<8 -> out.push(digits[7 - at])
 }
@@ -1319,16 +1340,32 @@ precommit_main: fn(args: [String]) -[Exec, Env, FS, IO, Time, Time.Wait]> Int Ne
     0
 }
 
-// Each of RATCHETS `--check`ed in `worktree` with the seed; the number that
-// failed. A failure prints the tool's output.
+// `ratchets`: RATCHETS, one per line.
+ratchets_main: fn(args: [String]) -[Exec, IO]> Int Never! {
+    if args.len() != 0 -> usage()
+    loop tool in RATCHETS -> print(tool)
+    0
+}
+
+// Each of RATCHETS `--check`ed in `worktree` with the seed, RATCHET_JOBS at
+// once; the number that failed. A failure prints the tool's output.
 ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     compiler_dir: seed_dir()
     identity: read_identity(compiler_dir)
-    failed := 0
+    specs := [ProcessSpec]{}
     loop tool in RATCHETS {
         spec := process.cmd([String]{"{compiler_dir}/jet", tool, "--check"}).cwd(worktree).env("JET_TOOLCHAIN_ROOT", worktree).output_limit(268435456)
         if identity != "" -> spec = spec.env("JET_COMPILER_IDENTITY", identity)
-        receipt: spec.run() ?? {
+        specs.push(spec)
+    }
+    results: process.run_all(specs, RATCHET_JOBS) ?? {
+        print("PRECOMMIT: the ratchets cannot start: {err}")
+        return RATCHETS.len()
+    }
+    failed := 0
+    loop index in 0..<RATCHETS.len() {
+        tool: RATCHETS[index]
+        receipt: results[index] ?? {
             print("PRECOMMIT: {tool} cannot start: {err}")
             failed += 1
             next
@@ -1338,11 +1375,13 @@ ratchets: fn(worktree: String) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
             next
         }
         failed += 1
-        lines := [String]{}
-        loop line in process.combined_output(receipt).trim_end().split("\n") -> lines.push(line.copy())
+        output := [String]{}
+        loop line in process.combined_output(receipt).trim_end().split("\n") -> output.push(line.copy())
         // The verdict is at the end (CoreCoverage prints its module table first).
-        tail: if lines.len() > 40 -> lines.len() - 40 else -> 0
-        show(lines[tail..<lines.len()], 40)
+        tail: if output.len() > 40 -> output.len() - 40 else -> 0
+        lines := [String]{}
+        loop at in tail..<output.len() -> lines.push(output[at].copy())
+        show(lines, 40)
         print("PRECOMMIT: {tool} --check failed (exit {receipt.code})")
     }
     failed
@@ -1554,18 +1593,21 @@ receipt_main: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
     }
     commit := ""
     source_identity := ""
-    if args[0] == "check" {
-        tree: absolute(args[2])
-        commit = (files.read("{tree}/.chain-base") ?? "").partition("\n").head.trim()
-        source_identity = compiler_source_identity(tree) ?? {
-            term.eprint("{launcher}: {err.message}")
-            return 2
+    if {
+        args[0] == "check" -> {
+            tree: absolute(args[2])
+            commit = (files.read("{tree}/.chain-base") ?? "").partition("\n").head.trim()
+            source_identity = compiler_source_identity(tree) ?? {
+                term.eprint("{launcher}: {err.message}")
+                return 2
+            }
         }
-    } else {
-        commit = args[3].copy()
-        source_identity = commit_source_identity(absolute(args[2]), commit) ?? {
-            term.eprint("{launcher}: {err.message}")
-            return 2
+        else -> {
+            commit = args[3].copy()
+            source_identity = commit_source_identity(absolute(args[2]), commit) ?? {
+                term.eprint("{launcher}: {err.message}")
+                return 2
+            }
         }
     }
     verdict: gate(source_identity, seed_identity, receipt_dir())

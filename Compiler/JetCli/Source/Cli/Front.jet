@@ -89,6 +89,10 @@ JetCLIPlan: enum {
     // member no other member depends on (Host.jet `jet_cli_check_workspace`),
     // each compiled under the `--set` writers and the `--profile`.
     CheckWorkspace(files: [String], sources: [String], color: Bool, quiet: Bool, threads: Int?, notice: String, json: Bool, settings: [BuildSettingOverride], profile: String)
+    // `jet check --prelude <file>`: one Compiler/Prelude source and its bytes,
+    // checked as the compiler embeds it (Host.jet
+    // `jet_cli_compile_prelude_check`).
+    CheckPrelude(file: String, source: String, color: Bool, quiet: Bool, threads: Int?, json: Bool)
     // `jet build <file>`: the entry and its bytes; `options` are the build
     // options it compiles under (jet_cli_build_options: stock, profile, flags);
     // `invocation` holds the `--allow`/`--deny` rows; `json` reports its
@@ -958,6 +962,15 @@ jet_cli_read_entry: fn(file: String, command: String, color: Bool, quiet: Bool, 
         return jet_cli_report_done(notice, "E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), fix, color, JET_DRIVER_EXIT_USER_ERROR)
     }
     JetCLIPlan.Check{file: file, source: source, color: color, quiet: quiet, threads: threads, project: project, notice: notice, json: json, verbose: verbose, settings: [BuildSettingOverride]{}, profile: ""}
+}
+
+// `jet check --prelude <file>`: the one Compiler/Prelude source it names. A
+// missing or second file is E2104; an unreadable one E2105.
+jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    if args.len() != 2 -> return jet_cli_fail("E2104", "`jet check --prelude` checks one Compiler/Prelude `.jet` file", jet_cli_why("E2104"), "run `jet check --prelude Compiler/Prelude/<name>.jet`", color, JET_DRIVER_EXIT_USAGE)
+    file: args[1]
+    source: cli_files.read(file) ?? return jet_cli_fail("E2105", "can't securely read the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color, JET_DRIVER_EXIT_USER_ERROR)
+    JetCLIPlan.CheckPrelude{file: file, source: source, color: color, quiet: quiet, threads: threads, json: json}
 }
 
 // `jet check` under its `--set name=value` writers (jet_cli_setting_flags)
@@ -2295,7 +2308,10 @@ jet_cli_plan: fn(raw: [String]) -[FS, Env, Time, Exec, IO, FFI.C, FFI.Asm, Net]>
         "explain" -> return jet_cli_explain(jet_argv, args, color, json, threads)
         "crash" -> return jet_cli_crash(args, color)
         "debug" -> return jet_cli_debug(jet_argv, args, color)
-        "check" -> return jet_cli_check_settled(jet_argv, args, color, quiet, threads, json)
+        "check" -> {
+            if jet_argv.contains("--prelude") -> return jet_cli_check_prelude(args, color, quiet, threads, json)
+            return jet_cli_check_settled(jet_argv, args, color, quiet, threads, json)
+        }
         "build" -> {
             if jet_argv.contains("--locked") -> return jet_cli_locked_build(raw, jet_argv, args, passthrough, color, quiet, threads, json)
             return jet_cli_build(jet_argv, args, passthrough, color, quiet, threads, json)

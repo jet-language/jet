@@ -11,8 +11,8 @@ use {
     cli_time: core.time
     jet_driver.[JetDriverBudgetFacts, JetDriverBudgetSpec, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     jet_foundation.[
-        CanonicalJSON, CanonicalJSONField, PerfComparison, PerfDirection, PerfEnforcement, PerfEvidence, PerfLimitDirection,
-        PerfPercentile, PerfPolicyOutcome, PerfRational, canonical_json_bytes, diagnostic_registry_row,
+        CanonicalJSON, CanonicalJSONField, Diagnostic, DIAGNOSTIC_ERROR, DIAGNOSTIC_LINT, PerfComparison, PerfDirection, PerfEnforcement, PerfEvidence, PerfLimitDirection,
+        PerfPercentile, PerfPolicyOutcome, PerfRational, Span, canonical_json_bytes, diagnostic_render,
         perf_budget_context_key, perf_evaluate, perf_rational_integer, perf_rational_new, perf_rational_to_json,
         perf_report_object_new, perf_stable_id, perf_trend, perf_verify_budget_report,
     ]
@@ -39,11 +39,14 @@ JetCLIBudgetMeasured: struct {
     enforcement: PerfEnforcement
 }
 
-// One evaluated budget, as the result rows and diagnostics show it.
+// One evaluated budget, as the result rows and diagnostics show it: `source`
+// is the root-relative path of the file its spec is written in, `path` that
+// file.
 JetCLIBudgetResult: struct {
     id: String
     name: String
     source: String
+    path: String
     line: Int
     column: Int
     metric: CanonicalJSON
@@ -124,6 +127,7 @@ jet_cli_budget_build: fn(root: String, ordered: [JetDriverBudgetSpec], facts: Je
             id: "{spec.role}:{spec.name}",
             name: spec.name.copy(), // copy: the measured row keeps its spec.
             source: row.source.copy(), // copy: the measured row keeps its source.
+            path: row.located.source_path.copy(), // copy: the measured row keeps its spec's location.
             line: row.located.line,
             column: row.located.column,
             metric: row.metric.copy(), // copy: the measured row keeps its metric.
@@ -488,6 +492,38 @@ jet_cli_budget_count: fn(count: Int, one: String, many: String) -> String Never!
     "{count} {if count == 1 -> one else -> many}"
 }
 
+// The report of a result that did not pass: its Diagnostic (a Warn result's
+// a lint), drawn at its spec's line and column in the file it is written in.
+jet_cli_budget_report: fn(row: JetCLIBudgetResult, code: String, message: String, fix: String) -> String {
+    diagnostic := Diagnostic{severity: if row.outcome == PerfPolicyOutcome.Warn -> DIAGNOSTIC_LINT else -> DIAGNOSTIC_ERROR, code: code, what: message, why: row.reason.copy(), fix: fix} // copy: the result row keeps its reason.
+    text: cli_files.read(row.path) ?? ""
+    if text != "" {
+        start: jet_cli_budget_offset(text, row.line, row.column)
+        diagnostic.span = Val(Span{start: start, end: if start < text.count_bytes() -> start + 1 else -> start})
+    }
+    diagnostic_render(diagnostic, row.source, text, false)
+}
+
+// The byte offset of 1-based `line` and `column` in `text`, the column in
+// scalars as the diagnostic renderer counts it; the end of the line (or of
+// `text`) when it is shorter.
+jet_cli_budget_offset: fn(text: String, line: Int, column: Int) -> Int Never! {
+    bytes: text.bytes()
+    index := 0
+    at_line := 1
+    loop at_line < line && index < bytes.len() {
+        if bytes[index] == (U8{10}) -> at_line += 1
+        index += 1
+    }
+    at_column := 1
+    loop at_column < column && index < bytes.len() && bytes[index] != (U8{10}) {
+        index += 1
+        loop index < bytes.len() && bytes[index] >= (U8{128}) && bytes[index] < (U8{192}) -> index += 1
+        at_column += 1
+    }
+    index
+}
+
 // The `check` projection: the status envelope under `--json`; otherwise each
 // result that did not pass as a diagnostic (and a GitHub annotation when
 // asked for), the verbose rows, and the one-line summary. Exit 1 when a
@@ -512,9 +548,7 @@ jet_cli_budget_emit: fn(options: JetCLIBudgetOptions, built: JetCLIBudgetBuilt, 
     loop row in built.results {
         if row.outcome != PerfPolicyOutcome.Pass {
             parts: jet_cli_budget_diagnostic(row)
-            severity: if row.outcome == PerfPolicyOutcome.Warn -> "Warning" else -> "Error"
-            name: if diagnostic_registry_row(parts.code) == .Val(entry) -> entry.name.copy() else -> parts.code.copy() // copy: the registry keeps its row.
-            stderr = "{stderr}{severity} [{name}]: {parts.message}\n --> {row.source}:{row.line}:{row.column}\n Why: {row.reason}\n Fix: {parts.fix}\nMore: jet-lang.dev/e/{parts.code}\n"
+            stderr = "{stderr}{jet_cli_budget_report(row, parts.code, parts.message, parts.fix)}"
             if annotate {
                 level: if row.outcome == PerfPolicyOutcome.Warn -> "warning" else -> "error"
                 message: jet_cli_budget_annotation_text("{parts.message}\nWhy: {row.reason}\nFix: {parts.fix}")

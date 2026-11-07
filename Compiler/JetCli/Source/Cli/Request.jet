@@ -1370,8 +1370,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // Compile `prepared` (`jet_cli_compile_overlays`). `input_log`, when given,
 // records every comptime input file the compile reads (`embed_file`,
 // `embed_bytes`, `find`); `settings` are the `--set` writers; a non-empty
-// `profile` is the selected `--profile`.
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}) -> JetCLICompiled {
+// `profile` is the selected `--profile`; `prelude` checks the entry as a
+// Compiler/Prelude source (`jet check --prelude`).
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -1381,6 +1382,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.comptime_input_log = input_log.copy()
             selected.setting_overrides = settings
             if profile != "" -> selected.profile = profile
+            selected.prelude_entry = prelude
             library_prefix: cli_sys.get("JET_FRONT_LIBRARY_OBJECT_OUTPUT")
             // copy: a three-field row; the request moves into the compiler below.
             compiler_threads: selected.compiler_threads.copy()
@@ -1467,8 +1469,9 @@ jet_cli_snapshot_file_count: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> 
 // The authorized request `jet_cli_compile_overlays` compiles, without
 // compiling it: load-only queries (schema, source explain, gates) run the
 // driver's source query over exactly the sources a compile would see.
-jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode) -> JetCLIPrepared {
-    if jet_cli_prepare_snapshot(anchor, entry, overlays, color) == {
+// `alone` holds the entry by itself, as jet_cli_prepare_snapshot says.
+jet_cli_prepare_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, alone: Bool{false}) -> JetCLIPrepared {
+    if jet_cli_prepare_snapshot(anchor, entry, overlays, color, alone) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
         .Held(snapshot) -> jet_cli_prepare_request(snapshot, color, threads, mode, false)
     }
@@ -1503,11 +1506,13 @@ jet_cli_entry_is_script: fn(entry_path: String, overlays: [JetCLIOverlay]) -[FS,
 
 // The authorized source snapshot `jet_cli_prepare_overlays` compiles. A script
 // is a standalone program wherever it lives: its snapshot is the script alone,
-// rooted at its own directory, never the package around it.
-jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool) -> JetCLISnapshotted {
+// rooted at its own directory, never the package around it. So is an `alone`
+// entry (`jet check --prelude`: the compiler embeds each Prelude source by
+// itself, never with its directory's other files).
+jet_cli_prepare_snapshot: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, alone: Bool{false}) -> JetCLISnapshotted {
     anchor_path: cli_files.realpath(anchor) ?? return jet_cli_snapshot_refused("can't securely read the file `{anchor}`", "check the spelling, or run jet from the folder that contains it", color)
     entry_path: jet_cli_overlay_path(entry)
-    script: jet_cli_entry_is_script(entry_path, overlays)
+    script: alone || jet_cli_entry_is_script(entry_path, overlays)
     root: if script -> jet_cli_parent(entry_path) ?? "/" else -> jet_cli_source_root(anchor_path)
     root_stat: cli_files.stat(root) ?? return jet_cli_snapshot_refused("can't securely read the source root `{root}`", "check that the directory exists and is readable", color)
     files := [JetDriverAuthorizedSourceFile]{}

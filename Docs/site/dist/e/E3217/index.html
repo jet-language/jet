@@ -36,7 +36,16 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Import the header by path (`use name: &quot;&lt;dir&gt;/{lib}.h&quot;`) so the compiler binds it, refresh the cache with `jet inspect bind &lt;header.h&gt; --pkg {lib}`, or declare `{member}` in `#Import c.{lib}: module`.</p>
 <h2>Worked example</h2>
-<p>No UI snapshot currently mentions this code.</p>
+<p>First UI snapshot mentioning <code>E3217</code>: <code>tests/ui/cffi_e3217_missing_binding_member.stderr</code>.</p>
+<pre class="diag">Error [jet.CBindingMemberMissing]: C library `c` has no binding named `strlen`.
+  --&gt; tests/ui/cffi_e3217_missing_binding_member.jet:4:11
+    |
+  4 |     print(libc.strlen(&quot;hello&quot;))
+    |           ^^^^
+ Why: Neither the binding cache `.jet/bindings/c/c.jet` nor an `#Import c.c: module` overlay declares `strlen`; without a cache the library binds nothing.
+ Fix: Import the header by path (`use name: &quot;&lt;dir&gt;/c.h&quot;`) so the compiler binds it, refresh the cache with `jet inspect bind &lt;header.h&gt; --pkg c`, or declare `strlen` in `#Import c.c: module`.
+More: jet-lang.dev/e/E3217
+</pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>
 </main>

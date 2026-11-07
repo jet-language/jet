@@ -15,6 +15,16 @@
 // diagnostic located at the listed source line it came from. A shared source
 // the list also names (Compiler/JetBackend/Source/OS/*.jet) is checked in its
 // own package and in the assembled unit.
+// A Compiler/Prelude source is checked as the compiler embeds it (#6670 c1).
+// First the generator check that holds the compiler's copies of it equal to
+// it: CoreSourceRows.jet for Core.jet, CoreSourceParts.tsv, Effects.jet and
+// CoreCallExtensions.jet, the Core surface ledger for CoreSurfaceInventory.jet,
+// DiagnosticRows.jet for Diagnostics.jet, OwnedTraitRows.jet for Traits.jet
+// and core/prelude.jet, and PreludeSources.jet for Markers.jet, Derives.jet,
+// Errors.jet and Units.jet. Then every Prelude Jet file the compiler embeds
+// gets `jet check --prelude`: all but the inputs only a generator reads
+// (Core.jet, CoreSurfaceInventory.jet and the readers' core/prelude.jet); a
+// jet without that mode prints PRELUDE UNCHECKED and never CHECK OK.
 // Every mode first runs the personal-information guard (#6564 c5),
 // Jetpack/Bootstrap's assembly check, which refuses an unlisted Jetpack source
 // or a drifted compiler slice, the unsafe-region ratchet in --check mode
@@ -91,7 +101,7 @@ run: fn() {
     process.exit(compiler_check(repo, args))
 }
 
-assembly_refused: fn(output: String) -[Exec, IO]> () {
+assembly_refused: fn(output: String) -[Exec, IO]> Never {
     print(output)
     print("CHECK FAILED — the Jetpack assembly check refused the sources (unlisted file or compiler-slice drift, see above)")
     process.exit(1)
@@ -170,6 +180,74 @@ runtime_generators: fn(repo: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
     1
 }
 
+// --- Compiler/Prelude -------------------------------------------------------
+
+PRELUDE_TREE: "Compiler/Prelude"
+// The inputs only a generator reads (row DSLs and the readers' prelude): its
+// check is their whole check.
+PRELUDE_GENERATOR_INPUTS: [String]{"Core.jet", "CoreSourceParts.tsv", "CoreSurfaceInventory.jet", "core/prelude.jet"}
+PRELUDE_UNCHECKED: "PRELUDE UNCHECKED: needs a seed with the prelude check mode"
+
+// Whether `relative` is a Prelude source LaneCheck checks as embedded: a
+// `.jet` or `.tsv` file under Compiler/Prelude other than its package.jet.
+prelude_source: fn(relative: String) -> Bool Never! {
+    if !relative.starts_with("{PRELUDE_TREE}/") || relative.removeprefix("{PRELUDE_TREE}/") == "package.jet" -> return false
+    relative.ends_with(".jet") || relative.ends_with(".tsv")
+}
+
+// The command whose `--check` holds the compiler's copies of Prelude file
+// `name` (its path under Compiler/Prelude) equal to it, run with `jet`; empty
+// when no generator reads the file.
+prelude_generator: fn(name: String, jet: String) -> [String] Never! {
+    if name == {
+        "Core.jet" | "CoreSourceParts.tsv" | "Effects.jet" | "CoreCallExtensions.jet" -> [String]{jet, "Tools/agent/CoreSourceRows.jet", "--check"}
+        "CoreSurfaceInventory.jet" -> [String]{"node", "Tools/agent/check-core-surface-ledger.mjs", "--check"}
+        "Diagnostics.jet" -> [String]{jet, "Tools/agent/DiagnosticRows.jet", "--check"}
+        "Traits.jet" | "core/prelude.jet" -> [String]{jet, "Tools/agent/OwnedTraitRows.jet", "--check"}
+        "Markers.jet" | "Derives.jet" | "Errors.jet" | "Units.jet" -> [String]{jet, "Tools/agent/PreludeSources.jet", "--check"}
+        else -> [String]{}
+    }
+}
+
+// Whether `jet` has `jet check --prelude`: given no file, that mode alone
+// refuses with its own usage line.
+prelude_mode: fn(repo: String, jet: String) -[Exec, Time.Wait]> Bool Never! {
+    receipt: process.cmd([String]{jet, "check", "--prelude"}).cwd(repo).env("NO_COLOR", "1").run() ?? return false
+    process.combined_output(receipt).contains("`jet check --prelude` checks one Compiler/Prelude")
+}
+
+// A Prelude source (`relative`, at `target`): its generator check, then, for
+// a Prelude Jet file the compiler embeds (no generator-only input), `jet check
+// --prelude`. None when that file needs the mode and `jet` has none.
+prelude_check: fn(repo: String, jet: String, relative: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran? Never! {
+    name: relative.removeprefix("{PRELUDE_TREE}/")
+    generator: prelude_generator(name, jet)
+    text := ""
+    generated := 0
+    if generator.len() > 0 {
+        command: generator.join(" ")
+        receipt: process.cmd(generator).cwd(repo).env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).output_limit(268435456).run() ?? return Val(Ran{code: 127, text: "error: {relative}: `{command}` could not start: {err}\n"})
+        output: process.combined_output(receipt)
+        text = output
+        if receipt.code != 0 || receipt.signal != None {
+            generated = 1
+            text = "{output}\nerror: {relative}: `{command}` failed: a compiler copy of it differs (see above)\n"
+        }
+    }
+    if !name.ends_with(".jet") || PRELUDE_GENERATOR_INPUTS.contains(name) -> return Val(Ran{code: generated, text: text})
+    // A generator failure is reported beside the prelude check, not instead of it.
+    if !prelude_mode(repo, jet) {
+        if generated != 0 -> return Val(Ran{code: generated, text: text})
+        return None
+    }
+    checked: run_check(repo, jet, [String]{"check", "--prelude", target}, scratch)
+    code := checked.code
+    if generated != 0 {
+        code = generated
+    }
+    Val(Ran{code: code, text: "{text}{checked.text}"})
+}
+
 // --- compiler check ---------------------------------------------------------
 
 compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
@@ -222,7 +300,16 @@ compiler_check: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time
     relative: if target.starts_with("{root}/") -> target.removeprefix("{root}/") else -> ""
     runtime_owned: relative == RUNTIME_TREE || relative.starts_with("{RUNTIME_TREE}/")
     runtime_shared: !runtime_owned && relative != "" && runtime_sources(repo).paths.contains(relative)
-    ran := if runtime_owned -> runtime_check(repo, jet, scratch) else -> run_check(repo, jet, target, scratch)
+    ran := Ran{code: 0, text: ""}
+    if {
+        runtime_owned -> ran = runtime_check(repo, jet, scratch)
+        prelude_source(relative) -> ran = prelude_check(repo, jet, relative, target, scratch) ?? {
+            held.clear()
+            print(PRELUDE_UNCHECKED)
+            return 1
+        }
+        else -> ran = run_check(repo, jet, [String]{"check", target}, scratch)
+    }
     if runtime_shared {
         assembled: runtime_check(repo, jet, scratch)
         ran = Ran{code: if ran.code != 0 -> ran.code else -> assembled.code, text: "{ran.text}{assembled.text}"}
@@ -259,7 +346,8 @@ mem_available_mb: fn() -[FS]> Int Never! {
     0
 }
 
-run_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
+// `jet` with `command` (`check TARGET` or `check --prelude TARGET`).
+run_check: fn(repo: String, jet: String, command: [String], scratch: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Ran Never! {
     floor_mb: int_or(env_or("JET_MIN_FREE_MB", "8000"), 8000)
     loop _ in 0..<90 {
         available: mem_available_mb()
@@ -269,7 +357,8 @@ run_check: fn(repo: String, jet: String, target: String, scratch: String) -[Env,
     }
     memory: env_or("JET_CHECK_MEM", "20G")
     argv := if memory == "off" -> [String]{} else -> [String]{"systemd-run", "--user", "--scope", "-q", "-p", "MemoryMax={memory}", "-p", "MemorySwapMax=0"}
-    argv.extend([String]{jet, "check", target})
+    argv.push(jet.copy())
+    argv.extend(command.copy())
     spec: process.cmd(argv).cwd(repo).env("JET_KEEP_GOING", "1").env("TMPDIR", scratch).env("TMP", scratch).env("TEMP", scratch)
         .env("JET_TOOLCHAIN_ROOT", env_or("JET_TOOLCHAIN_ROOT", repo)).timeout(1800s).output_limit(1073741824)
     results: process.run_all([ProcessSpec]{spec}, 1) ?? return Ran{code: 127, text: "lane-check: {argv[0]} could not start: {err}\n"}
@@ -492,7 +581,7 @@ runtime_check: fn(repo: String, jet: String, scratch: String) -[Env, Exec, FS, I
     path: "{dir}/unit.jet"
     files.write(path, unit.text) ?? return Ran{code: 1, text: "lane-check: cannot write {path}: {err}\n"}
     term.eprint("lane-check: assembled runtime unit: {path}")
-    ran: run_check(repo, jet, path, scratch)
+    ran: run_check(repo, jet, [String]{"check", path}, scratch)
     Ran{code: ran.code, text: runtime_locations(ran.text, path, unit.lines)}
 }
 
@@ -745,9 +834,14 @@ personal_info_guard: fn(dir: String) -[Env, Exec, FS, IO, Time.Wait]> Int Never!
         shown += 1
         line := first_hit(dir, file, path_args, [String]{})
         if line == "" -> line = first_hit(dir, file, word_args, [String]{"-i"})
-        term.eprint("  {if line.len() > 200 -> line[0..<200] else -> line}")
+        term.eprint("  {hit_text(line)}")
     }
     65
+}
+
+// A hit line as the guard shows it: its first 200 bytes.
+hit_text: fn(line: String) -> String Never! {
+    if line.len() > 200 -> line[0..<200] else -> line.copy()
 }
 
 first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec, Time.Wait]> String Never! {
@@ -808,4 +902,16 @@ first_hit: fn(dir: String, file: String, args: [String], flags: [String]) -[Exec
     assert(core_use("use core.files") && core_use("use cf: core.files") && !core_use("use jet_backend.x") && !core_use("use a b: core.x"))
     moved: runtime_locations("Error [jet.UnknownFunction]: no\n  --> /s/unit.jet:10:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n", "/s/unit.jet", unit.lines)
     assert_eq(moved, "Error [jet.UnknownFunction]: no\n  --> R/Text.jet:3:5 here\n  --> other.jet:9:5\n  --> /s/unit.jet:1:1\n")
+}
+
+#Test("a Prelude source is routed to its generator check and the prelude mode") {
+    assert(prelude_source("Compiler/Prelude/Traits.jet") && prelude_source("Compiler/Prelude/CoreSourceParts.tsv") && prelude_source("Compiler/Prelude/core/prelude.jet"))
+    assert(!prelude_source("Compiler/Prelude/package.jet") && !prelude_source("Compiler/Prelude/Web/Core/Time.js") && !prelude_source("Compiler/Prelude") && !prelude_source("Compiler/JetCli/Source/Cli/Front.jet"))
+    assert_eq(prelude_generator("Effects.jet", "/j"), [String]{"/j", "Tools/agent/CoreSourceRows.jet", "--check"})
+    assert_eq(prelude_generator("CoreSurfaceInventory.jet", "/j"), [String]{"node", "Tools/agent/check-core-surface-ledger.mjs", "--check"})
+    assert_eq(prelude_generator("Diagnostics.jet", "/j")[1], "Tools/agent/DiagnosticRows.jet")
+    assert_eq(prelude_generator("core/prelude.jet", "/j")[1], "Tools/agent/OwnedTraitRows.jet")
+    assert_eq(prelude_generator("Units.jet", "/j")[1], "Tools/agent/PreludeSources.jet")
+    assert_eq(prelude_generator("Facts.jet", "/j").len(), 0)
+    assert(PRELUDE_GENERATOR_INPUTS.contains("core/prelude.jet") && PRELUDE_GENERATOR_INPUTS.contains("Core.jet") && !PRELUDE_GENERATOR_INPUTS.contains("Traits.jet"))
 }
