@@ -115,13 +115,16 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     // observation, however short it was.
     if parsed.source != None -> jet_cli_perf_session_observe(observed, pid, U64.from_int(started.elapsed().ns) ?? U64{0})
     receipt: child.wait() ?? return jet_cli_perf_error("cannot wait for `jet {action}`: {err}", JET_CLI_PERF_FIX, color)
+    // The session's wall, spawn to exit, on the observations' clock: every
+    // observed span ends inside it.
+    wall: U64.from_int(started.elapsed().ns) ?? U64{0}
     observations: if observed.program.len() > 0 -> observed.program.move() else if observed.restarted -> observed.root.move() else -> [JetCLIPerfObservation]{}
     reason: if parsed.source == None -> "source sampling requires a source capture" else -> "source sampling requires a readable `.jet` source"
     capture := jet_cli_perf_capture_new(trace_profile_unsupported(reason), [SourceIdentity]{})
     if parsed.source == .Val(source) {
         // A missing or unreadable source still gets a schema-valid skeleton.
         if perf_files.read(source) == .Ok(text) {
-            if jet_cli_perf_capture_source(source, text, observations, jet_cli_perf_session_target()) == .Ok(captured) -> capture = captured
+            if jet_cli_perf_capture_source(source, text, observations, jet_cli_perf_session_target(), Val(wall)) == .Ok(captured) -> capture = captured
         }
     }
     capture.policy.allowlist = parsed.allowlist.move()
@@ -216,7 +219,7 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     } else if source == .Val(path) {
         if live_error == .Val(message) -> return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
-        capture = jet_cli_perf_capture_source(path, text, observations, target) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        capture = jet_cli_perf_capture_source(path, text, observations, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     }

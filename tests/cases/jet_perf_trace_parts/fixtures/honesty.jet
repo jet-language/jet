@@ -11,7 +11,7 @@ s6_decimal_compare: fn(a: String, b: String) -> Int {
     right: b.bytes()
     if left.len() < right.len() -> return -1
     if left.len() > right.len() -> return 1
-    loop i in 0..left.len() {
+    loop i in 0..<left.len() {
         if left[i] < right[i] -> return -1
         if left[i] > right[i] -> return 1
     }
@@ -117,7 +117,8 @@ s6_honest_capture: fn() {
         assert(native.contains("\"task_id\":null"))
         assert(native.contains("\"reason\":\"process CPU timing is unavailable on target {target}\""))
     }
-    assert(text.contains("\"native_row_limit\":1"))
+    // The schema's limit (JetTrace TRACE_NATIVE_ROW_LIMIT); the original's `:1` predated it.
+    assert(text.contains("\"native_row_limit\":4096"))
     assert(text.contains("\"native_rows_truncated\":false"))
     // assert_honest_spans: retain unavailable nulls and full captured span-to-task linkage.
     spans: s6_array(text, "\"spans\":[", "],\"tasks\"")

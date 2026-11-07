@@ -5,7 +5,8 @@ fixture: perf_run_captures_wall_and_alloc_into_jettrace.fixture
 mkdir: honesty
 copy: {root}/tests/cases/jet_perf_trace_parts/fixtures/honesty.jet honesty/honesty.jet
 write: session.jet session.jet.txt
-step: jet perf run session.jet --out run-capture.jettrace
+# The program listens and connects, so it runs under `--allow=Net` (application authority, E1803).
+step: jet perf run session.jet --allow=Net --out run-capture.jettrace
 exit: 0
 stderr: ~ "trace:" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:79 contains predicate
 file: run-capture.jettrace is-file

@@ -12,9 +12,10 @@
 // already holds does not. A run with no baseline records one and keeps its
 // own exit status, as `-u` does; a sharded run never records one, and
 // compares only the rows its shard holds. The corpus suites (golden, ui and
-// cases corpora) run in this process through the testkit pool, their
-// accepted failures held in the profile's `baseline` ledger. `results`
-// writes every run's rows as one document.
+// cases corpora) run in this process through the testkit pool. The profile's
+// `baseline` ledger holds the accepted failures of both the corpus rows and
+// the code-suite rows (a row ID, a card, a reason). `results` writes every
+// run's rows as one document.
 use {
     cli_files: core.files
     cli_sys: core.sys
@@ -39,7 +40,7 @@ use {
         test_settings_time_limit_ms,
     ]
     jet_pkg_model.[ComposeError, PackageFacts, TEST_CODE_SUITES_FILE, TEST_SUITE_TESTS, pkg_test_code_suites]
-    jet_testkit.[KitCaseResult, kit_exec_defaults, kit_execute_suites, kit_expect_bless_error]
+    jet_testkit.[KitCaseResult, kit_exec_defaults, kit_execute_suites, kit_expect_bless_error, kit_known_load]
 }
 
 // Set in each child of a profile run to the profile's name: a child never
@@ -70,10 +71,20 @@ JetCLITestProfileRun: struct {
     suite: String{""}
 }
 
-// A code suite's rows and the `id: detail` line of each failing row.
+// A code suite's rows, the `id: detail` line of each row that fails the run,
+// and each row's `results` verdict.
 JetCLITestCodeRows: struct {
     rows: [String]
     failures: [String]
+    verdicts: [JetCLITestCodeVerdict]
+}
+
+// One code-suite row as `results` reports it: PASS, FAIL, UNSUPPORTED, or,
+// for a row the profile's ledger holds, KNOWN-FAILING or UNEXPECTED-PASS.
+JetCLITestCodeVerdict: struct {
+    id: String
+    status: String
+    detail: String
 }
 
 // How a run's rows moved against its baseline, one line per test.
@@ -171,7 +182,7 @@ jet_cli_test_profile_plan: fn(jet_argv: [String], positionals: [String], show_de
 jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool) -> JetDriverVerbOutput {
     if !quiet -> jet_cli_write_notice(jet_cli_test_settings_notice(settings))
     results := [KitCaseResult]{}
-    output := if runs.len() > 0 -> jet_cli_test_profile_runs(profile, root, settings, runs, update, quiet, results) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    output := if runs.len() > 0 -> jet_cli_test_profile_runs(profile, root, settings, runs, update, quiet, jet_cli_test_profile_known(profile, root), results) else -> JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     corpus: jet_cli_test_profile_corpus(profile, root, settings, update, results)
     if corpus.exit_code > output.exit_code -> output.exit_code = corpus.exit_code
     output.stderr = "{output.stderr}{corpus.stderr}"
@@ -186,6 +197,18 @@ jet_cli_test_profile: fn(profile: String, root: String, settings: [TestSetting],
         }
     }
     output
+}
+
+// The rows the profile's `baseline` ledger accepts as failing
+// (kit_known_load), for its code-suite rows; none when it names no ledger.
+// The plan has already refused a `baseline` that isn't a file.
+jet_cli_test_profile_known: fn(profile: String, root: String) -> [String: String] {
+    manifest: jet_cli_rooted_join(root, JET_CLI_PACKAGE_FILE)
+    source: cli_files.read(manifest) ?? return [String: String]{}
+    facts: PackageFacts.parse_uncomposed(source, manifest) ?? return [String: String]{}
+    chosen: facts.test_profile(profile) ?? return [String: String]{}
+    ledger: chosen.baseline ?? return [String: String]{}
+    kit_known_load(jet_cli_rooted_join(root, ledger))
 }
 
 // A profile's corpus suites through the testkit pool (jet_testkit
@@ -301,7 +324,7 @@ jet_cli_test_common_dir: fn(a: String, b: String) -> String Never! {
 // them. A failing row fails the run whatever the baseline holds: the baseline
 // only names what moved, and a lost row fails the run too. The summary goes
 // to stderr after every run's own output.
-jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, results: &[KitCaseResult]) -> JetDriverVerbOutput {
+jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSetting], runs: [JetCLITestProfileRun], update: Bool, quiet: Bool, known: [String: String], results: &[KitCaseResult]) -> JetDriverVerbOutput {
     scratch: cli_files.temp_dir("jet-test-profile") ?? return JetDriverVerbOutput{stdout: "", stderr: "jet test: profile `{profile}`: couldn't create a scratch directory: {err}\n", exit_code: JET_DRIVER_EXIT_USER_ERROR}
     executable: test_settings_get(settings, "compiler") ?? cli_sys.executable()
     inherited: test_settings_lines(jet_cli_test_child_settings(settings))
@@ -340,13 +363,24 @@ jet_cli_test_profile_runs: fn(profile: String, root: String, settings: [TestSett
             // A suite that wrote no row leaves no file: it has no rows.
             text: cli_files.read(jet_cli_rooted_join(scratch.path, "{index}.rows")) ?? ""
             stopped: if child.code == JET_DRIVER_EXIT_OK -> String?{None} else -> Val(jet_cli_test_stop_reason(child.errors, child.code))
-            code: jet_cli_test_code_rows(text, stopped)
+            code: jet_cli_test_code_rows(text, stopped, known)
             rows = code.rows.copy() // copy: the failure lines stay with `code`.
             status = if code.failures.len() > 0 -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_OK
             if !quiet {
-                loop line in code.failures -> summary = "{summary}{site}: failed {line}\n"
+                loop verdict in code.verdicts {
+                    label: if verdict.status == {
+                        "FAIL" -> "failed"
+                        "UNEXPECTED-PASS" -> "unexpected-pass"
+                        "KNOWN-FAILING" -> "known-failing"
+                        else -> ""
+                    }
+                    if label != "" -> summary = "{summary}{site}: {label} {verdict.id}: {verdict.detail}\n"
+                }
             }
-            loop row in code.rows -> results.push(KitCaseResult{suite: run.suite.copy(), case: jet_cli_test_row_name(row), tier: "-", status: jet_cli_test_code_status(jet_cli_test_row_state(row)), detail: "", exit: 0}) // copy: each row names its suite.
+            loop verdict in code.verdicts {
+                // copy: `code` keeps its verdicts; each result names its suite and row.
+                results.push(KitCaseResult{suite: run.suite.copy(), case: verdict.id.copy(), tier: "-", status: verdict.status.copy(), detail: verdict.detail.copy(), exit: 0})
+            }
         } else {
             // An exit that isn't a test verdict (an internal error) stands.
             if child.code != JET_DRIVER_EXIT_OK && child.code != JET_DRIVER_EXIT_USER_ERROR && child.code > exit_code -> exit_code = child.code
@@ -445,10 +479,13 @@ jet_cli_test_stop_reason: fn(errors: String, code: Int) -> String Never! {
 }
 
 // A code suite's rows from its TestRows lines (`id<TAB>state<TAB>detail`):
-// `id<TAB>state` profile rows, sorted, and the `id: detail` line of each
-// failing row in report order. A repeated id fails as `duplicate row id`; a
-// child that `stopped` before it finished adds the failing row `stopped`.
-jet_cli_test_code_rows: fn(text: String, stopped: String?) -> JetCLITestCodeRows Never! {
+// `id<TAB>state` profile rows, sorted, the `id: detail` line of each row that
+// fails the run, in report order, and each row's verdict, sorted by id. A
+// repeated id fails as `duplicate row id`; a child that `stopped` before it
+// finished adds the failing row `stopped`. A row the `accepted` ledger
+// (kit_known_load) holds is accepted as failing: it is KNOWN-FAILING when it
+// fails and fails the run as UNEXPECTED-PASS when it passes, as a corpus row is.
+jet_cli_test_code_rows: fn(text: String, stopped: String?, accepted: [String: String]) -> JetCLITestCodeRows Never! {
     ids := [String]{}
     states := [String]{}
     details := [String]{}
@@ -479,12 +516,27 @@ jet_cli_test_code_rows: fn(text: String, stopped: String?) -> JetCLITestCodeRows
     }
     rows := [String]{}
     failures := [String]{}
+    verdicts := [JetCLITestCodeVerdict]{}
     loop (at, id) in ids {
         rows.push("{id}\t{states[at]}")
-        if states[at] == JET_CLI_TEST_ROW_FAILED -> failures.push("{id}: {details[at]}")
+        status := jet_cli_test_code_status(states[at])
+        // copy: the row keeps its detail; the verdict owns its own.
+        detail := details[at].copy()
+        owner: accepted.get(id) ?? ""
+        if owner != "" && status == "FAIL" {
+            status = "KNOWN-FAILING"
+            detail = "{owner}: {detail}"
+        } else if owner != "" && status == "PASS" {
+            status = "UNEXPECTED-PASS"
+            detail = "{owner}: remove stale known-failing annotation"
+        }
+        if status == "FAIL" || status == "UNEXPECTED-PASS" -> failures.push("{id}: {detail}")
+        // copy: the row keeps its id; the verdict owns its own.
+        verdicts.push(JetCLITestCodeVerdict{id: id.copy(), status: status, detail: detail})
     }
     rows.sort()
-    JetCLITestCodeRows{rows: rows, failures: failures}
+    verdicts.sort_by((left: JetCLITestCodeVerdict, right: JetCLITestCodeVerdict) -> left.id <=> right.id)
+    JetCLITestCodeRows{rows: rows, failures: failures, verdicts: verdicts}
 }
 
 // A code suite's child's report (Host.jet jet_cli_compile_test): the rows
@@ -496,9 +548,10 @@ jet_cli_test_code_suite_summary: fn() -[FS, Env]> String Never! {
     jet_cli_test_code_rows_summary(suite, text)
 }
 
-// `suite `<name>`: N rows, P passed, F failed` for TestRows lines `text`.
+// `suite `<name>`: N rows, P passed, F failed` for TestRows lines `text`; the
+// child knows no ledger, so its counts are the rows' own.
 jet_cli_test_code_rows_summary: fn(suite: String, text: String) -> String Never! {
-    code: jet_cli_test_code_rows(text, None)
+    code: jet_cli_test_code_rows(text, None, [String: String]{})
     passed: code.rows.filter(row -> jet_cli_test_row_state(row) == JET_CLI_TEST_ROW_PASSED).len()
     plural: if code.rows.len() == 1 -> "" else -> "s"
     "suite `{suite}`: {code.rows.len()} row{plural}, {passed} passed, {code.failures.len()} failed\n"
@@ -607,12 +660,21 @@ jet_cli_test_rows_report: fn(site: String, shown: String, count: Int, diff: JetC
 }
 
 #Test("code suite rows sort, a repeated id fails, and a stopped suite adds a failing row") {
-    code: jet_cli_test_code_rows("size b\tfailed\tgrew 9%\nsize a\tpassed\t\nodd\tskipped\tno data\nsize a\tpassed\t\n", Val("panic: out of disk"))
+    code: jet_cli_test_code_rows("size b\tfailed\tgrew 9%\nsize a\tpassed\t\nodd\tskipped\tno data\nsize a\tpassed\t\n", Val("panic: out of disk"), [String: String]{})
     assert_eq(code.rows, [String]{"odd\tskipped", "size a\tfailed", "size b\tfailed", "stopped\tfailed"})
     assert_eq(code.failures, [String]{"size b: grew 9%", "size a: duplicate row id", "stopped: panic: out of disk"})
-    assert_eq(jet_cli_test_code_rows("", None).rows.len(), 0)
+    assert_eq(jet_cli_test_code_rows("", None, [String: String]{}).rows.len(), 0)
     assert_eq(jet_cli_test_code_rows_summary("perf", "size a\tpassed\t\nsize b\tfailed\tgrew 9%\nodd\tskipped\tno data\n"), "suite `perf`: 3 rows, 1 passed, 1 failed\n")
     assert_eq(jet_cli_test_code_rows_summary("perf", ""), "suite `perf`: 0 rows, 0 passed, 0 failed\n")
     assert_eq(jet_cli_test_stop_reason("building\npanic: no disk\n", 101), "panic: no disk")
     assert_eq(jet_cli_test_stop_reason("", 3), "exit code 3")
+}
+
+#Test("a code suite row the ledger holds is known-failing, and fails the run once it passes") {
+    known: [String: String]{"slow": "#1 over budget", "fixed": "#2 was broken"}
+    code: jet_cli_test_code_rows("slow\tfailed\t6.0x\nfixed\tpassed\t\nnew\tfailed\tboom\n", None, known)
+    assert_eq(code.rows, [String]{"fixed\tpassed", "new\tfailed", "slow\tfailed"})
+    assert_eq(code.failures, [String]{"fixed: #2 was broken: remove stale known-failing annotation", "new: boom"})
+    assert_eq((loop verdict in code.verdicts -> "{verdict.id} {verdict.status}"), [String]{"fixed UNEXPECTED-PASS", "new FAIL", "slow KNOWN-FAILING"})
+    assert_eq(code.verdicts[2].detail, "#1 over budget: 6.0x")
 }

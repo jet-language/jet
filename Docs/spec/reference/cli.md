@@ -814,9 +814,12 @@ gets `JET`, the path of the `jet` running the profile, and
 are compared with `.jet/test/<profile>/<suite>.rows` as a run's are, and each
 failing row's detail is printed. A repeated id fails as `duplicate row id`, and
 a suite that panics or exits non-zero adds the failing row `stopped` with its
-panic message. A profile naming a suite that neither `suites:` nor `test.jet`
-declares, or a name both declare, is a `package.jet` error (E1215) that
-`jet check` reports too.
+panic message. When the profile names a `baseline:` ledger, a failing code-suite
+row whose id it lists is KNOWN-FAILING with the ledger's card and reason and
+doesn't fail the profile, and a listed row that passes fails it as
+UNEXPECTED-PASS until its ledger row is removed. A profile naming a suite that
+neither `suites:` nor `test.jet` declares, or a name both declare, is a
+`package.jet` error (E1215) that `jet check` reports too.
 A corpus suite (`suites: { ui: TestSuite{ ui_corpus: "../tests/ui" } }`,
 or `golden_corpus:` / `cases_corpus:`, a directory relative to `package.jet`)
 fails with E2105 when the directory is missing; otherwise the profile's corpus

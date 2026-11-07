@@ -1,4 +1,4 @@
-# repo-relative case or golden example ID	card	reason
+# repo-relative case or golden example ID, or a code-suite row ID	card	reason
 tests/ui/cffi_enum_boundaries/cffi_enum_out_of_range_discriminant_stays_at_the_checked_boundary	#6425	check not ported: E0035
 tests/ui/comptime_int_pow_negative	#6425	check not ported: E3010
 tests/ui/comptime_io_rejected	#4926	E3410 names the effect class (`opening a file`), not the call `core.files.read()` (#4926 C4)
@@ -394,8 +394,11 @@ tests/cases/fact_reads/typed_fact_fixture_is_accepted_by_comptime_repl_and_web.n
 tests/cases/ffi_javascript/javascript_sidecar_binds_runs_and_rejects_dynamic_types.case	#6366	`jet run`: `use <name>: js.<lib>` is E1002 (`js` is reserved); the compiler resolves no generated `.jet/bindings/js/` module
 tests/cases/ffi_python/python_sidecar_binds_runs_and_launders_failure.case	#6366	`jet run`: `use <name>: py.<lib>` is E1002 (`py` is reserved); the compiler resolves no generated `.jet/bindings/py/` module
 tests/cases/first_hour/first_hour_cli_journey.case	#4944	`jet add` is not built yet (E2104)
-tests/cases/jet_perf_trace_parts_capture_run/perf_run_short_program_has_repeatable_source_attribution.case	#6418	`short.jet` links no task, channel, live value or event, so its runtime installs no observation writer (JetRuntime ObserveLive.jet `jet_rt_observe_start_init`) and publishes no run window; `jet perf run` records profile `no_samples` and window `unavailable` where the row expects two captured rows and an `exit` window
-tests/cases/jet_perf_trace_parts_io/perf_run_keeps_completed_socket_echo_io_span.case	#6418	the program uses Net, so the step needs `--allow=Net` under the application authority default (E1803); with it, the runtime names the accept wait `network wait` (I/O kind `network`, not `tcp`/`tcp accept`), and `jet run` runs the observed program in a child process that it reaps before `jet perf run` can read its exit publication, so the tasks stay `blocked`
+tests/cases/jet_perf_trace_parts_browser/perf_attach_drives_real_devserver_browser_lifecycle.case	#6650	`jet dev app.jet --target=web` is refused as not built (E2104; the form's registry card is #6386): the web devserver it runs is Compiler/JetDevserver, which doesn't compile, so client/browser_client.jet's GET / never answers within 30s
+tests/cases/jet_perf_trace_parts_capture_attach/perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe.case	#6660	readiness/observe_ready.jet never sees a live snapshot: the built program runs under `JET_OBSERVE=1` alone, and the runtime starts its observation writer only when the five `JET_DEVTOOLS_RELAY_*` identity fields are set too (JetRuntime ObserveLive.jet `jet_rt_observe_runtime_start_from_env`), so `jet inspect types --live <pid>` reports E2105 "No live Jet runtime is observable"; with the relay fields set, the runtime renders the accept wait as `wait=network wait`, not `wait=tcp accept deadline=`
+tests/cases/jet_perf_trace_parts_capture_run/perf_run_captures_wall_and_alloc_into_jettrace.case	#6660	honesty/honesty.jet: the runtime names the accept wait `network wait` (I/O kind `network`), where the row expects kind `tcp` and wait `tcp accept`
+tests/cases/jet_perf_trace_parts_capture_run/perf_run_short_program_has_repeatable_source_attribution.case	#6660	`short.jet` links no task, channel, live value or event, so its runtime installs no observation writer (JetRuntime ObserveLive.jet `jet_rt_observe_start_init`) and publishes no run window; `jet perf run` records profile `no_samples` and window `unavailable` where the row expects two captured rows and an `exit` window
+tests/cases/jet_perf_trace_parts_io/perf_run_keeps_completed_socket_echo_io_span.case	#6660	the runtime names the accept wait `network wait` (I/O kind `network`, not `tcp`/`tcp accept`), and `jet run` runs the observed program in a child process that it reaps before `jet perf run` can read its exit publication, so the tasks stay `blocked`
 tests/cases/jetpack_dispatch/jet_run_without_nix_compatibility_output_reports_e1272.case	#6418	`jet run --no-color` is not built yet (E2104)
 tests/cases/lib_use/unrealized_library_points_at_build_when_preparation_is_refused.case	#6418	E0983 is retired until the driver has a realized-library root in the hangar; `jet run --no-prepare` reports E0603 for the unrealized library
 tests/cases/library_outputs/component_build_load_and_foreign_call_are_one_surface.case	#6418	`jet build --target=sandbox` is not built yet (E2104)
@@ -938,3 +941,35 @@ tests/cases/pin/pinning_fixed_and_arena_storage_keeps_edits_in_caller_owned_plac
 tests/cases/pin/pinning_fixed_and_arena_storage_keeps_edits_in_caller_owned_places.native.case	#6634	UnknownField at fixture.jet:13: `.hops` only works on a declared struct or tuple field
 tests/cases/source_import/javascript_import_does_not_rewrite_foreign_names_inside_strings.case	#6069	the JavaScript source import produces a program with no `run` function (MissingRunFunction)
 tests/cases/source_import/python_source_import_matches_python_oracle_fixed_corpus.case	#6069	the Python source import of the fixed corpus differs from the corpus.jet.bytes oracle snapshot
+Compiler/JetBackend/Tests	#6649	`jet test Compiler/JetBackend/Tests` can't start: the package has no run.jet entry and no #Test (its checks are the .mjs runners and TestNativeOutputDiagnostic.jet's `run`)
+Compiler/JetCanvas/Tests: canvas_html_base_is_opaque_not_url_normalized	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_html_default_bootstrap_evaluates_before_versioned_app	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_html_dynamic_base_retains_trailing_slash	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_html_empty_path_mode_does_not_enable_query_routes	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_html_hostile_base_uses_json_escaping_in_both_positions	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_html_marker_in_base_is_not_recursively_replaced	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_html_query_bootstrap_evaluates_all_route_overrides	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetCanvas/Tests: canvas_javascript_assets_are_independently_syntax_checked_and_ordered	#6649	needs node: the canvas bootstrap runs the scenario harness under Node, which the release environment lacks
+Compiler/JetDebug/Tests: a_session_pauses_steps_and_reads_the_native_image	#6649	needs lldb: the native debug session starts LLDB, which the release environment lacks
+Compiler/JetDevserver	#6650	`jet test Compiler/JetDevserver` fails to compile: the package is Rust transliterated into Jet syntax (std.sync/net/io, `.unwrap()`, `?`); first error: unterminated `"""` string (Source/BrowserWebAdapter.jet:467:10, `PAGE_JS: """`)
+Compiler/JetDevserver/Tests	#6650	`jet test Compiler/JetDevserver/Tests` fails to compile: the tests are Rust transliterated into Jet syntax, and the package they test (Compiler/JetDevserver) doesn't compile; first error: Expected `name:` before this tuple member
+Compiler/JetImpact	#6649	`jet test Compiler/JetImpact` fails to compile: PathDependencyEscape: path dependency `jet_env_model` escapes its parent package
+Compiler/JetLSP	#6650	`jet test Compiler/JetLSP` fails to compile: the package is Rust transliterated into Jet syntax and depends on Compiler/JetDevserver, which doesn't compile; first error: `core.files.runtime.kernel_path_components` is private to Core (Source/LSP/Bench.jet:8:21)
+Compiler/JetLSP/Tests	#6650	`jet test Compiler/JetLSP/Tests` fails to compile: the tests are Rust transliterated into Jet syntax, and the packages they test (Compiler/JetLSP, Compiler/JetDevserver) don't compile; first error: Expected `->` after an `if` arm value
+Compiler/JetRuntime	#6649	`jet test Compiler/JetRuntime` fails to compile: UnknownFunction: nothing named `os_store_i64` exists here
+Compiler/Prelude	#6649	`jet test Compiler/Prelude` fails to compile: ReservedDunderName: `__live_arg` is reserved for Jet
+Jetpack/Integrations/Tests: cpp bind emits canonical descriptor effect and provenance	#6662	needs cc: the C++ binder test compiles with clang++, which the release environment lacks
+Jetpack/Integrations/Tests: generated cargo manifest builds when nested in workspace	#6649	needs cargo: the test builds the generated manifest with `cargo build --offline`, which the release environment lacks
+Jetpack/Publication/Tests: publication api snapshot rows keep each line as its signature	#6649	`pkg_capability_snapshot_parse` refuses the snapshot whose rows are written as signatures (`area: fn(s: Shape) Float Never! -[]>`), so the test panics `snapshot`
+Jetpack/Publication/Tests: publication api_diff_detects_changed_signature	#6649	the change description renders the signature as `parse: fn(raw: String) -> Int`; the test expects `fn parse(raw: String) -> Int`
+Jetpack/Publication/Tests: publication api_diff_detects_removed_fn	#6649	the change description renders the signature as `parse: fn(raw: String) -> Int`; the test expects `fn parse(raw: String) -> Int`
+phase P1+P2 read + lex + intern + parse	#6527	the self-compile is over the 225K budget: 9,679 against 1,600 (6.0x)
+phase P3 collect / register / resolve	#6527	the self-compile is over the 225K budget: 5,310 against 1,800 (3.0x)
+phase P4 comptime: one check + evaluation	#6527	the self-compile is over the 225K budget: 4,789 against 1,000 (4.8x)
+phase P5a+P5b sema bodies + ownership (one pass; P5b is not traced apart)	#6527	the self-compile is over the 225K budget: 58,553 against 13,200 (4.4x)
+phase P5c effect tracking	#6527	the self-compile is over the 225K budget: 2,244 against 1,200 (1.9x)
+phase P6 other whole-program finalize	#6527	the self-compile is over the 225K budget: 8,076 against 400 (20.2x)
+phase P8 IR build	#6527	the self-compile is over the 225K budget: 16,892 against 9,000 (1.9x)
+phase P9 IR O1 passes + IR consistency check (ir.lint, once, over the module x64 selection reads)	#6527	the self-compile is over the 225K budget: 84,182 against 7,000 (12.0x)
+phase P10 x64 selection, register allocation, encode	#6527	the self-compile is over the 225K budget: 17,293 against 7,000 (2.5x)
+phase total work sum	#6527	the self-compile is over the 225K budget: 213,029 against 54,400 (3.9x)

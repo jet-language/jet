@@ -11,7 +11,10 @@ JetCLIPerfCapture: struct {
 jet_cli_perf_capture_new: fn(profile: TraceProfile, sources: [SourceIdentity]) -> JetCLIPerfCapture Never! {
     JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions()}
 }
-jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations: [JetCLIPerfObservation], symbol: JetSymbolRef, target: String) JetCLIReadError! {
+// `wall_ns` is the session's wall time on the observations' clock (`jet perf
+// run`: spawn to exit); None (an attach) takes the runtime's own elapsed time,
+// the attached process's age.
+jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations: [JetCLIPerfObservation], symbol: JetSymbolRef, target: String, wall_ns: U64?) JetCLIReadError! {
     if observations.len() == 0 -> return Err(jet_cli_read_error("perf capture requires a real runtime observation"))
     if observations.len() > 4096 -> return Err(jet_cli_read_error("perf observation collection exceeds 4096 rows"))
     first: observations[0]
@@ -109,7 +112,9 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
     }
     window: latest.live.runtime
     jet_cli_perf_window(capture.profile, window)
-    capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
+    wall: wall_ns ?? window.elapsed_ns
+    // An honest wall: none when zero, never an invented minimum.
+    if wall > (U64{0}) -> capture.samples.push(TraceSample{domain: "wall", duration_ns: wall, symbol: symbol})
     if window.cpu_ns == .Val(cpu) {
         capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
         if root != None -> capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
@@ -120,8 +125,8 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
 }
 // A run that published no observation still records its source identity and
 // map, with no samples and no run window (`capture_from_source` with no
-// snapshot).
-jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
+// snapshot). `wall_ns` is jet_cli_perf_capture_observations'.
+jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCLIPerfObservation], target: String, wall_ns: U64?) -> JetCLIPerfCapture JetCLIReadError! {
     if observations.len() > 4096 -> return Err(jet_cli_read_error("source sampling exceeds its observation bound"))
     source: jet_cli_perf_source(path, text)
     cpu_samples := U64{0}
@@ -132,7 +137,7 @@ jet_cli_perf_capture_source: fn(path: String, text: String, observations: [JetCL
     capture.source_maps.push(trace_source_map_jet_with_source(path.copy(), text) ?? return Err(jet_cli_read_error(err.message)))
     if observations.len() == 0 -> return Ok(capture)
     jet_cli_perf_window(capture.profile, observations[observations.len() - 1].live.runtime)
-    if source.run_span != None -> jet_cli_perf_capture_observations(capture, observations, JetSymbolRef{path: path, name: "run"}, target)
+    if source.run_span != None -> jet_cli_perf_capture_observations(capture, observations, JetSymbolRef{path: path, name: "run"}, target, wall_ns)
     Ok(capture)
 }
 jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
@@ -148,7 +153,7 @@ jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetC
             }
         }
         checked: symbol ?? return Err(jet_cli_read_error("browser runtime facts require a compiler-provided symbol"))
-        jet_cli_perf_capture_observations(capture, observations, checked, target)
+        jet_cli_perf_capture_observations(capture, observations, checked, target, None)
     }
     Ok(capture)
 }
