@@ -63,19 +63,15 @@ JetCLIInspectBPlan: enum {
     // `run_env` for the config surface `file` (its bytes are `source`;
     // `base_dir` is the directory its values resolve against).
     Env(file: String, source: String, base_dir: String, color: Bool, json: Bool)
-    // `run_<language>_bind` for the words after `inspect bind <language>`
-    // (ForeignBind.jet).
-    Bind(binder: JetCLIForeignBinder, args: [String], color: Bool)
 }
 
-// Config-surface evaluation and Dart's compute check reach the compiler
-// driver, whose host adapter makes dynamic calls with no effect bound, so this
-// stays unannotated like the other compiling host verbs.
+// Config-surface evaluation reaches the compiler driver, whose host adapter
+// makes dynamic calls with no effect bound, so this stays unannotated like the
+// other compiling host verbs.
 jet_cli_inspect_b_host: fn(plan: JetCLIInspectBPlan) -> JetDriverVerbOutput {
     if plan == {
         .Engine(engine, verb, argv) -> jet_cli_engine_dispatch(engine, verb, argv)
         .Env(file, source, base_dir, color, json) -> jet_cli_inspect_env_host(file, source, base_dir, color, json)
-        .Bind(binder, args, color) -> jet_cli_foreign_bind(binder, args, color)
     }
 }
 
@@ -964,7 +960,7 @@ jet_cli_bind: fn(args: [String], color: Bool) -[FS, Env, Time]> JetCLIPlan Never
         }
     }
     if jet_cli_bind_plan_args(args) -> return jet_cli_not_ported("inspect bind <name>", color)
-    if args.len() > 0 && jet_cli_foreign_binder(args[0]) == .Val(binder) -> return JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Bind{binder: binder, args: jet_cli_tail(args, 1), color: color}}
+    if args.len() > 0 && jet_cli_foreign_binder(args[0]) == .Val(binder) -> return JetCLIPlan.ForeignBind{binder: binder, args: jet_cli_tail(args, 1), color: color}
     if args.len() > 0 && args[0].ends_with(".h") -> return jet_cli_c_header_bind(args, color)
     if args.len() > 0 && !jet_cli_is_help_flag(args[0]) -> return jet_cli_not_ported("inspect bind <name>", color)
     usage: "usage: {JET_CLI_BINARY} inspect bind <header.h> [--pkg <lib>] [--overlay <path>] [--link <lib>] [-o <out.jet>]\n       {JET_CLI_BINARY} inspect bind <json|csv|sql|xml|proto> <input> [--type <Type>] [-o <output>]\n\nGenerate a C binding cache from a header (S59). The output is\na `#Bindgen c.<lib>.__bindgen__: module` file, by default written\nto .jet/bindings/c/<lib>.jet. The compiler also runs this\nautomatically on a cache miss; `jet inspect bind` is the manual refresh.\n"

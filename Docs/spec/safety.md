@@ -214,7 +214,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 <!-- unsafe-ratchet:data
 {
   "schema": 1,
-  "total": 1340,
+  "total": 1342,
   "counts": {
     "Compiler": 679,
     "Core": 186,
@@ -222,7 +222,7 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     "Examples": 35,
     "Jetpack": 9,
     "Tools": 7,
-    "tests": 416
+    "tests": 418
   },
   "regions": [
     {
@@ -7192,6 +7192,20 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
     },
     {
       "package": "tests",
+      "file": "tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "this address is intentionally outside the board MMIO region"
+    },
+    {
+      "package": "tests",
+      "file": "tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet",
+      "line": 4,
+      "column": 5,
+      "reason": "timer register is mapped by board.sensor_v1"
+    },
+    {
+      "package": "tests",
       "file": "tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet",
       "line": 1,
       "column": 1,
@@ -9619,8 +9633,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | Examples | 35 |
 | Jetpack | 9 |
 | Tools | 7 |
-| tests | 416 |
-| **total** | **1340** |
+| tests | 418 |
+| **total** | **1342** |
 
 ### Regions
 
@@ -10621,6 +10635,8 @@ crypto calls may use safe, source-owned Core Jet bodies while sema still require
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 13:1 | "voids a freshly-acquired lock whose resource is already gone" |
 | tests | tests/cases/single_use/drop_inside_unsafe_fn_satisfies_single_use.fixture/source-1.jet | 19:5 | "calling the audited voider" |
 | tests | tests/cases/single_use/reuse_after_drop_is_e0121.fixture/source-1.jet | 15:5 | "done with it" |
+| tests | tests/cases/target_machines/fixtures/selected_target_machine_rejects_direct_mmio_outside_region/main.jet | 4:5 | "this address is intentionally outside the board MMIO region" |
+| tests | tests/cases/target_machines/fixtures/selected_target_machine_validates_direct_mmio_accesses/main.jet | 4:5 | "timer register is mapped by board.sensor_v1" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 1:1 | "the cell is live on this frame" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 9:5 | "call the gated reader" |
 | tests | tests/cases/unsafe_and_runtime/every_unsafe_region_kind_enters_its_own_sentry_scope.fixture/regions.jet | 15:5 | "test region calls the gated reader" |
