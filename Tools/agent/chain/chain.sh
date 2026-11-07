@@ -37,7 +37,10 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SELF=$HERE/chain.sh
 LIB=$HERE/chain-lib.mjs
 SLOT=$HERE/build-slot.sh
-NR=$HERE/norust.sh
+# bash -c "$NORUST" norust CMD...: run CMD with every PATH directory that holds cargo, rustc or rustup
+# removed (jet-env keeps rustc for user `extern rust`/RustBridge builds; the compiler chain must not need
+# it). Refuses if any of them stays reachable. Tools/release/Seed.jet NORUST is the same filter.
+NORUST='kept=; IFS=: read -r -a dirs <<< "$PATH"; for d in "${dirs[@]}"; do s=; for b in cargo rustc rustup; do [ -x "$d/$b" ] && s=1; done; if [ -n "$s" ]; then echo "norust: dropped PATH entry $d" >&2; else kept="$kept${kept:+:}$d"; fi; done; export PATH="$kept"; for b in cargo rustc rustup; do if command -v "$b" >/dev/null 2>&1; then echo "norust: REFUSE $b still on PATH" >&2; exit 2; fi; done; exec "$@"'
 TOOLS=$(cd "$HERE/../../.." && pwd)
 # tool FILE ARG...: the Jet tool Tools/agent/FILE of this checkout, run by the seed.
 tool() { (cd "$TOOLS" && JET_COMPILER_IDENTITY=$CID JET_TOOLCHAIN_ROOT=$TOOLS "$SEED/jet" "Tools/agent/$1" "${@:2}"); }
@@ -184,7 +187,7 @@ build_stage() {
   rm -rf "$TREE/Compiler/JetCli/.jet/build" "$OUT/$n"; mkdir -p "$OUT/$n"
   JET_COMPILER_IDENTITY=$id JET_TOOLCHAIN_ROOT=$ROOT JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$LOGS/$n-keep-going.tsv" TMPDIR=$WORK/tmp \
     inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 3600 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash "$NR" "$bd/jet" build --threads "$th" Compiler > "$LOGS/$n.out" 2> "$LOGS/$n.err"
+    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash -c "$NORUST" norust "$bd/jet" build --threads "$th" Compiler > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? rows; rows=$(awk 'NR>1' "$LOGS/$n-keep-going.tsv" 2>/dev/null | wc -l)
   local w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
   local b=$TREE/Compiler/JetCli/.jet/build/jet
@@ -237,7 +240,7 @@ pack_stage() {
   # the runtime's vendored C with a host C toolchain, which only jet-env supplies until jet does.
   JET_COMPILER_IDENTITY=$CID JET=$SEED/jet JET_TOOLCHAIN_ROOT=$ROOT TMPDIR=$WORK/tmp \
     inroot systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1800 \
-    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash "$NR" "$SEED/jet" "$ROOT/Tools/packaging/PrebuildRuntime.jet" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" --identity "$id" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
+    prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" "$ROOT/Tools/agent/jet-env" bash -c "$NORUST" norust "$SEED/jet" "$ROOT/Tools/packaging/PrebuildRuntime.jet" "$cd/jet" "$cd/jet-runtime" --repo "$ROOT" --identity "$id" > "$LOGS/$n.out" 2> "$LOGS/$n.err"
   local rc=$? w r; read -r w r <<< "$(timefile "$LOGS/$n.time")"
   if [ "$rc" != 0 ] || [ ! -f "$cd/jet-runtime/native.key" ]; then
     rec "$n" FAILED "$rc" "$w" "$r" - "$k" "no pack; $(errhead "$LOGS/$n.err")"
@@ -271,7 +274,7 @@ check_stage() {
     say "check $m with $(basename "$SEED")"
     (cd "$TREE" && JET_COMPILER_IDENTITY=$CID JET_TOOLCHAIN_ROOT=$TREE JET_KEEP_GOING=1 JET_KEEP_GOING_REPORT="$LOGS/$n-keep-going.tsv" TMPDIR=$WORK/tmp \
       systemd-run --user --scope -q -p MemoryMax="$MEM" -p MemorySwapMax=0 env time -v -o "$LOGS/$n.time" timeout 1200 \
-      prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash "$NR" "$SEED/jet" check --threads 12 "$m" > "$LOGS/$n.out" 2> "$LOGS/$n.err")
+      prlimit --core=0 --stack=1073741824:1073741824 -- "${CPUSET[@]}" bash -c "$NORUST" norust "$SEED/jet" check --threads 12 "$m" > "$LOGS/$n.out" 2> "$LOGS/$n.err")
     rc=$?; rows=$(awk 'NR>1' "$LOGS/$n-keep-going.tsv" 2>/dev/null | wc -l)
     read -r w r <<< "$(timefile "$LOGS/$n.time")"
     [ "$rc" -ge 124 ] && transient=1
