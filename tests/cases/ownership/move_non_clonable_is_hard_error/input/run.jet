@@ -1,9 +1,16 @@
 
+NoClone: struct {
+    name: String
+}
+
 consume: fn(item: &&NoClone) {
     print(0)
 }
 
+forward: fn(item: NoClone) {
+    consume(item)
+}
+
 run: fn() {
-msg: "hi"
-    consume(msg)
+    forward(NoClone{ name: "hi" })
 }
